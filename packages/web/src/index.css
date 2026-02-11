@@ -49,3 +49,27 @@
 ::-webkit-scrollbar-thumb:hover {
   background: hsl(0 0% 35%);
 }
+
+/* Panel resize handles */
+.panel-resize-handle {
+  width: 1px;
+  background: hsl(0 0% 18%);
+  transition: background 150ms, width 150ms;
+  position: relative;
+}
+
+.panel-resize-handle::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -3px;
+  right: -3px;
+}
+
+.panel-resize-handle[data-separator="hover"],
+.panel-resize-handle[data-separator="active"] {
+  width: 3px;
+  background: hsl(var(--primary));
+  cursor: col-resize;
+}

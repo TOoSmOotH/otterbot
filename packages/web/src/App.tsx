@@ -9,6 +9,7 @@ import { MessageStream } from "./components/stream/MessageStream";
 import { SettingsPanel } from "./components/settings/SettingsPanel";
 import { LoginScreen } from "./components/auth/LoginScreen";
 import { SetupWizard } from "./components/setup/SetupWizard";
+import { Group, Panel, Separator, useDefaultLayout } from "react-resizable-panels";
 import { disconnectSocket } from "./lib/socket";
 
 export default function App() {
@@ -99,27 +100,61 @@ function MainApp() {
       </header>
 
       {/* Three-panel layout */}
-      <main className="flex-1 flex overflow-hidden">
-        {/* Left: CEO Chat */}
-        <div className="w-[320px] min-w-[280px] border-r border-border flex flex-col">
-          <CeoChat />
-        </div>
-
-        {/* Center: Agent Graph */}
-        <div className="flex-1 min-w-[300px] border-r border-border">
-          <AgentGraph />
-        </div>
-
-        {/* Right: Message Stream */}
-        <div className="w-[360px] min-w-[280px] relative">
-          <MessageStream />
-        </div>
+      <main className="flex-1 overflow-hidden">
+        <ResizableLayout />
       </main>
 
-      {/* Settings modal */}
+      {/* Settings modal - rendered outside the resizable layout */}
       {settingsOpen && (
         <SettingsPanel onClose={() => setSettingsOpen(false)} />
       )}
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Resizable three-panel layout
+// ---------------------------------------------------------------------------
+
+const PANEL_IDS = ["chat", "graph", "stream"];
+
+function ResizableLayout() {
+  const { defaultLayout, onLayoutChanged } = useDefaultLayout({
+    id: "smoothbot-layout",
+    storage: localStorage,
+    panelIds: PANEL_IDS,
+  });
+
+  return (
+    <Group
+      orientation="horizontal"
+      defaultLayout={defaultLayout ?? { chat: 20, graph: 50, stream: 30 }}
+      onLayoutChanged={onLayoutChanged}
+    >
+      {/* Left: CEO Chat */}
+      <Panel id="chat" minSize="15%" maxSize="40%">
+        <div className="h-full flex flex-col">
+          <CeoChat />
+        </div>
+      </Panel>
+
+      <Separator className="panel-resize-handle" />
+
+      {/* Center: Agent Graph */}
+      <Panel id="graph" minSize="20%">
+        <div className="h-full">
+          <AgentGraph />
+        </div>
+      </Panel>
+
+      <Separator className="panel-resize-handle" />
+
+      {/* Right: Message Stream */}
+      <Panel id="stream" minSize="15%" maxSize="40%">
+        <div className="h-full relative">
+          <MessageStream />
+        </div>
+      </Panel>
+    </Group>
   );
 }
