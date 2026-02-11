@@ -1,0 +1,11 @@
+services:
+  smoothbot:
+    build:
+      target: deps
+    command: pnpm dev
+    volumes:
+      - .:/app
+      - /app/node_modules
+      - ${SMOOTHBOT_DATA_DIR:-./docker/smoothbot}:/smoothbot
+    environment:
+      - NODE_ENV=development

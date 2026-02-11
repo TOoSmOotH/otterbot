@@ -1,0 +1,14 @@
+node_modules
+dist
+.git
+.env
+.env.local
+*.db
+*.db-journal
+data/
+logs/
+coverage/
+test-results/
+playwright-report/
+.vscode
+.idea

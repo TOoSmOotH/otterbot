@@ -1,0 +1,38 @@
+{
+  "name": "smoothbot",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Open-source multi-agent AI orchestration system",
+  "license": "MIT",
+  "author": "Mike Reeves",
+  "scripts": {
+    "build": "pnpm -r build",
+    "dev": "pnpm --filter @smoothbot/server dev & pnpm --filter @smoothbot/web dev",
+    "dev:server": "pnpm --filter @smoothbot/server dev",
+    "dev:web": "pnpm --filter @smoothbot/web dev",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "pnpm --filter @smoothbot/web test:e2e",
+    "lint": "pnpm -r lint",
+    "docker:build": "docker compose build",
+    "docker:up": "docker compose up -d",
+    "docker:down": "docker compose down",
+    "docker:dev": "docker compose -f docker-compose.yml -f docker-compose.dev.yml up",
+    "db:push": "pnpm --filter @smoothbot/server db:push",
+    "db:seed": "pnpm --filter @smoothbot/server db:seed"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.3",
+    "vitest": "^3.0.5"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "better-sqlite3",
+      "esbuild"
+    ]
+  },
+  "engines": {
+    "node": ">=20",
+    "pnpm": ">=9"
+  }
+}
