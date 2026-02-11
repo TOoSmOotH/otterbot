@@ -34,6 +34,7 @@ import {
   setActiveSearchProvider,
   testSearchProvider,
 } from "../settings/settings.js";
+import { getConfiguredSearchProvider } from "../tools/search/providers.js";
 
 export interface COODependencies {
   bus: MessageBus;
@@ -203,6 +204,37 @@ export class COO extends BaseAgent {
         }),
         execute: async (args) => {
           return this.manageSearch(args);
+        },
+      }),
+      web_search: tool({
+        description:
+          "Search the web for information. Returns relevant results for the query.",
+        parameters: z.object({
+          query: z.string().describe("The search query"),
+          maxResults: z
+            .number()
+            .int()
+            .min(1)
+            .max(20)
+            .optional()
+            .describe("Maximum number of results to return (default 5, max 20)"),
+        }),
+        execute: async ({ query, maxResults }) => {
+          const provider = getConfiguredSearchProvider();
+          if (!provider) {
+            return "No search provider configured. Use the manage_search tool to configure one first.";
+          }
+          try {
+            const response = await provider.search(query, maxResults ?? 5);
+            if (response.results.length === 0) {
+              return `No results found for "${query}".`;
+            }
+            return response.results
+              .map((r, i) => `${i + 1}. **${r.title}**\n   ${r.url}\n   ${r.snippet}`)
+              .join("\n\n");
+          } catch (err) {
+            return `Search error: ${err instanceof Error ? err.message : String(err)}`;
+          }
         },
       }),
       manage_packages: tool({
