@@ -20,8 +20,10 @@ RUN pnpm build
 FROM base AS production
 RUN apt-get update && apt-get install -y --no-install-recommends tini && rm -rf /var/lib/apt/lists/*
 
-# Create non-root user
-RUN groupadd -r smoothbot && useradd -r -g smoothbot -m smoothbot
+# Create non-root user with configurable UID/GID
+ARG SMOOTHBOT_UID=1000
+ARG SMOOTHBOT_GID=1000
+RUN groupadd -g ${SMOOTHBOT_GID} smoothbot && useradd -u ${SMOOTHBOT_UID} -g smoothbot -m smoothbot
 
 WORKDIR /app
 COPY --from=build /app/package.json /app/pnpm-workspace.yaml ./
@@ -41,6 +43,9 @@ RUN mkdir -p /smoothbot/config /smoothbot/data /smoothbot/projects /smoothbot/lo
 # Entrypoint script
 COPY --chmod=755 <<'EOF' /app/entrypoint.sh
 #!/bin/sh
+# Ensure data directories exist (they may be empty bind mounts)
+mkdir -p /smoothbot/config /smoothbot/data /smoothbot/projects /smoothbot/logs
+
 # Run bootstrap if it exists
 if [ -f /smoothbot/config/bootstrap.sh ]; then
   echo "Running bootstrap script..."
