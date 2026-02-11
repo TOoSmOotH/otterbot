@@ -18,6 +18,9 @@ export interface ClientToServerEvents {
     data: { content: string },
     callback?: (ack: { messageId: string }) => void,
   ) => void;
+  "ceo:new-chat": (
+    callback?: (ack: { ok: boolean }) => void,
+  ) => void;
   "registry:list": (
     callback: (entries: RegistryEntry[]) => void,
   ) => void;

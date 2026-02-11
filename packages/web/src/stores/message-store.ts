@@ -17,6 +17,7 @@ interface MessageState {
   appendCooStream: (token: string, messageId: string) => void;
   setAgentFilter: (agentId: string | null) => void;
   loadHistory: (messages: BusMessage[]) => void;
+  clearChat: () => void;
 }
 
 export const useMessageStore = create<MessageState>((set) => ({
@@ -80,5 +81,12 @@ export const useMessageStore = create<MessageState>((set) => ({
           (m.fromAgentId === null || m.fromAgentId === "coo") &&
           (m.toAgentId === null || m.toAgentId === "coo"),
       ),
+    }),
+
+  clearChat: () =>
+    set({
+      chatMessages: [],
+      streamingContent: "",
+      streamingMessageId: null,
     }),
 }));

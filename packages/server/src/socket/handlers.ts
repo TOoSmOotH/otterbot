@@ -47,6 +47,14 @@ export function setupSocketHandlers(
       }
     });
 
+    // CEO starts a new chat (reset COO conversation)
+    socket.on("ceo:new-chat", (callback) => {
+      coo.resetConversation();
+      if (callback) {
+        callback({ ok: true });
+      }
+    });
+
     // Request registry entries
     socket.on("registry:list", (callback) => {
       const entries = registry.list();

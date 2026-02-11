@@ -181,6 +181,13 @@ export abstract class BaseAgent {
     };
   }
 
+  /** Reset conversation history to just the system prompt */
+  resetConversation() {
+    this.conversationHistory = [
+      { role: "system", content: this.systemPrompt },
+    ];
+  }
+
   /** Clean up this agent */
   destroy() {
     this.bus.unsubscribe(this.id);
