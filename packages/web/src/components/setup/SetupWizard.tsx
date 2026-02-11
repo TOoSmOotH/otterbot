@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useAuthStore } from "../../stores/auth-store";
 
 const SUGGESTED_MODELS: Record<string, string[]> = {
@@ -30,9 +30,57 @@ export function SetupWizard() {
   const [passphrase, setPassphrase] = useState("");
   const [confirmPassphrase, setConfirmPassphrase] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [fetchedModels, setFetchedModels] = useState<string[]>([]);
+  const [fetchingModels, setFetchingModels] = useState(false);
+  const probeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const probeModels = useCallback(async (prov: string, key: string, url: string) => {
+    const needsKey = NEEDS_API_KEY.has(prov);
+    const needsUrl = NEEDS_BASE_URL.has(prov);
+
+    // Don't probe if required credentials are missing
+    if (needsKey && !key) return;
+    if (needsUrl && !url) return;
+
+    setFetchingModels(true);
+    try {
+      const res = await fetch("/api/setup/probe-models", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ provider: prov, apiKey: key || undefined, baseUrl: url || undefined }),
+      });
+      if (res.ok) {
+        const data = (await res.json()) as { models: string[] };
+        setFetchedModels(data.models);
+        // Auto-select first fetched model if no model is currently set
+        if (data.models.length > 0) {
+          setModel((prev) => prev || data.models[0]);
+        }
+      }
+    } catch {
+      // Silently fail — hardcoded suggestions remain
+    } finally {
+      setFetchingModels(false);
+    }
+  }, []);
+
+  // Debounced model probing when credentials change
+  useEffect(() => {
+    if (!provider) return;
+
+    if (probeTimerRef.current) clearTimeout(probeTimerRef.current);
+    probeTimerRef.current = setTimeout(() => {
+      probeModels(provider, apiKey, baseUrl);
+    }, 600);
+
+    return () => {
+      if (probeTimerRef.current) clearTimeout(probeTimerRef.current);
+    };
+  }, [provider, apiKey, baseUrl, probeModels]);
 
   const handleSelectProvider = (id: string) => {
     setProvider(id);
+    setFetchedModels([]);
     // Set default model from suggestions
     const suggestions = SUGGESTED_MODELS[id];
     if (suggestions && suggestions.length > 0) {
@@ -191,23 +239,32 @@ export function SetupWizard() {
                     placeholder="Model name"
                     className="w-full px-3 py-2 bg-background border border-input rounded-md text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
                   />
-                  {SUGGESTED_MODELS[provider]?.length > 0 && (
-                    <div className="flex gap-1.5 mt-1.5 flex-wrap">
-                      {SUGGESTED_MODELS[provider].map((m) => (
-                        <button
-                          key={m}
-                          onClick={() => setModel(m)}
-                          className={`text-xs px-2 py-0.5 rounded border transition-colors ${
-                            model === m
-                              ? "border-primary text-primary"
-                              : "border-border text-muted-foreground hover:text-foreground"
-                          }`}
-                        >
-                          {m}
-                        </button>
-                      ))}
-                    </div>
-                  )}
+                  {(() => {
+                    const suggested = SUGGESTED_MODELS[provider] ?? [];
+                    const merged = [...new Set([...suggested, ...fetchedModels])];
+                    return merged.length > 0 || fetchingModels ? (
+                      <div className="flex gap-1.5 mt-1.5 flex-wrap items-center">
+                        {merged.map((m) => (
+                          <button
+                            key={m}
+                            onClick={() => setModel(m)}
+                            className={`text-xs px-2 py-0.5 rounded border transition-colors ${
+                              model === m
+                                ? "border-primary text-primary"
+                                : "border-border text-muted-foreground hover:text-foreground"
+                            }`}
+                          >
+                            {m}
+                          </button>
+                        ))}
+                        {fetchingModels && (
+                          <span className="text-xs text-muted-foreground">
+                            Loading models...
+                          </span>
+                        )}
+                      </div>
+                    ) : null;
+                  })()}
                 </div>
               )}
 

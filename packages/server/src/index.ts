@@ -50,6 +50,7 @@ import {
   updateTierDefaults,
   testProvider,
   fetchModels,
+  fetchModelsWithCredentials,
   getSearchSettings,
   updateSearchProviderConfig,
   setActiveSearchProvider,
@@ -163,6 +164,18 @@ async function main() {
       setupComplete: isSetupComplete(),
       providers: getAvailableProviders(),
     };
+  });
+
+  app.post<{
+    Body: { provider: string; apiKey?: string; baseUrl?: string };
+  }>("/api/setup/probe-models", async (req, reply) => {
+    const { provider, apiKey, baseUrl } = req.body;
+    if (!provider) {
+      reply.code(400);
+      return { error: "provider is required" };
+    }
+    const models = await fetchModelsWithCredentials(provider, apiKey, baseUrl);
+    return { models };
   });
 
   app.post<{

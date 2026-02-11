@@ -249,6 +249,83 @@ export async function testProvider(
 // Fetch models from provider API
 // ---------------------------------------------------------------------------
 
+export async function fetchModelsWithCredentials(
+  providerId: string,
+  apiKey?: string,
+  baseUrl?: string,
+): Promise<string[]> {
+  try {
+    switch (providerId) {
+      case "anthropic": {
+        if (!apiKey) return FALLBACK_MODELS.anthropic ?? [];
+        const res = await fetch("https://api.anthropic.com/v1/models", {
+          headers: {
+            "x-api-key": apiKey,
+            "anthropic-version": "2023-06-01",
+          },
+          signal: AbortSignal.timeout(10_000),
+        });
+        if (!res.ok) return FALLBACK_MODELS.anthropic ?? [];
+        const data = (await res.json()) as {
+          data?: Array<{ id: string }>;
+        };
+        return data.data?.map((m) => m.id) ?? FALLBACK_MODELS.anthropic ?? [];
+      }
+
+      case "openai": {
+        if (!apiKey) return FALLBACK_MODELS.openai ?? [];
+        const effectiveBase = baseUrl ?? "https://api.openai.com";
+        const res = await fetch(`${effectiveBase}/v1/models`, {
+          headers: { Authorization: `Bearer ${apiKey}` },
+          signal: AbortSignal.timeout(10_000),
+        });
+        if (!res.ok) return FALLBACK_MODELS.openai ?? [];
+        const data = (await res.json()) as {
+          data?: Array<{ id: string }>;
+        };
+        return data.data?.map((m) => m.id).sort() ?? FALLBACK_MODELS.openai ?? [];
+      }
+
+      case "ollama": {
+        const effectiveBase = baseUrl ?? "http://localhost:11434/api";
+        const tagsUrl = effectiveBase.endsWith("/api")
+          ? `${effectiveBase}/tags`
+          : `${effectiveBase}/api/tags`;
+        const res = await fetch(tagsUrl, {
+          signal: AbortSignal.timeout(10_000),
+        });
+        if (!res.ok) return FALLBACK_MODELS.ollama ?? [];
+        const data = (await res.json()) as {
+          models?: Array<{ name: string }>;
+        };
+        return (
+          data.models?.map((m) => m.name) ?? FALLBACK_MODELS.ollama ?? []
+        );
+      }
+
+      case "openai-compatible": {
+        if (!baseUrl) return [];
+        const headers: Record<string, string> = {};
+        if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
+        const res = await fetch(`${baseUrl}/v1/models`, {
+          headers,
+          signal: AbortSignal.timeout(10_000),
+        });
+        if (!res.ok) return [];
+        const data = (await res.json()) as {
+          data?: Array<{ id: string }>;
+        };
+        return data.data?.map((m) => m.id).sort() ?? [];
+      }
+
+      default:
+        return FALLBACK_MODELS[providerId] ?? [];
+    }
+  } catch {
+    return FALLBACK_MODELS[providerId] ?? [];
+  }
+}
+
 export async function fetchModels(providerId: string): Promise<string[]> {
   try {
     switch (providerId) {
