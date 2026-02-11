@@ -193,20 +193,31 @@ export abstract class BaseAgent {
 
   private persistAgent(options: AgentOptions) {
     const db = getDb();
+    const values = {
+      id: this.id,
+      registryEntryId: this.registryEntryId,
+      role: this.role,
+      parentId: this.parentId,
+      status: this.status,
+      model: this.llmConfig.model,
+      provider: this.llmConfig.provider,
+      baseUrl: this.llmConfig.baseUrl,
+      systemPrompt: this.systemPrompt,
+      projectId: this.projectId,
+      workspacePath: options.workspacePath ?? null,
+      createdAt: new Date().toISOString(),
+    };
     db.insert(schema.agents)
-      .values({
-        id: this.id,
-        registryEntryId: this.registryEntryId,
-        role: this.role,
-        parentId: this.parentId,
-        status: this.status,
-        model: this.llmConfig.model,
-        provider: this.llmConfig.provider,
-        baseUrl: this.llmConfig.baseUrl,
-        systemPrompt: this.systemPrompt,
-        projectId: this.projectId,
-        workspacePath: options.workspacePath ?? null,
-        createdAt: new Date().toISOString(),
+      .values(values)
+      .onConflictDoUpdate({
+        target: schema.agents.id,
+        set: {
+          status: values.status,
+          model: values.model,
+          provider: values.provider,
+          baseUrl: values.baseUrl,
+          systemPrompt: values.systemPrompt,
+        },
       })
       .run();
   }
