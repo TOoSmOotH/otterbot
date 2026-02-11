@@ -200,6 +200,7 @@ export class TeamLead extends BaseAgent {
       provider: entry.defaultProvider,
       systemPrompt: entry.systemPrompt,
       workspacePath,
+      toolNames: (entry.tools as string[]) ?? [],
     });
 
     this.workers.set(worker.id, worker);

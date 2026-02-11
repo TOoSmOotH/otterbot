@@ -18,6 +18,7 @@ import { MessageBus } from "./bus/message-bus.js";
 import { WorkspaceManager } from "./workspace/workspace.js";
 import { Registry } from "./registry/registry.js";
 import { COO } from "./agents/coo.js";
+import { closeBrowser } from "./tools/browser-pool.js";
 import {
   setupSocketHandlers,
   emitAgentSpawned,
@@ -439,6 +440,14 @@ async function main() {
 
   await app.listen({ port, host });
   console.log(`Smoothbot server listening on http://${host}:${port}`);
+
+  // Graceful shutdown — close Playwright browser if running
+  const shutdown = async () => {
+    await closeBrowser();
+    process.exit(0);
+  };
+  process.on("SIGTERM", shutdown);
+  process.on("SIGINT", shutdown);
 }
 
 main().catch((err) => {

@@ -1,11 +1,11 @@
 import {
   AgentRole,
-  AgentStatus,
   MessageType,
   type BusMessage,
 } from "@smoothbot/shared";
 import { BaseAgent, type AgentOptions } from "./agent.js";
 import type { MessageBus } from "../bus/message-bus.js";
+import { createTools } from "../tools/tool-factory.js";
 
 export interface WorkerDependencies {
   bus: MessageBus;
@@ -16,9 +16,13 @@ export interface WorkerDependencies {
   provider: string;
   systemPrompt: string;
   workspacePath: string | null;
+  toolNames: string[];
 }
 
 export class Worker extends BaseAgent {
+  private toolNames: string[];
+  private workspacePath: string | null;
+
   constructor(deps: WorkerDependencies) {
     const options: AgentOptions = {
       role: AgentRole.Worker,
@@ -31,12 +35,27 @@ export class Worker extends BaseAgent {
       workspacePath: deps.workspacePath,
     };
     super(options, deps.bus);
+    this.toolNames = deps.toolNames;
+    this.workspacePath = deps.workspacePath;
   }
 
   handleMessage(message: BusMessage): void {
     if (message.type === MessageType.Directive) {
       this.handleTask(message);
     }
+  }
+
+  protected getTools(): Record<string, unknown> {
+    if (!this.workspacePath || !this.projectId || this.toolNames.length === 0) {
+      return {};
+    }
+
+    return createTools(this.toolNames, {
+      workspacePath: this.workspacePath,
+      projectId: this.projectId,
+      agentId: this.id,
+      role: AgentRole.Worker,
+    });
   }
 
   private async handleTask(message: BusMessage) {

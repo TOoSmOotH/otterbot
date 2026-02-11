@@ -102,7 +102,7 @@ export async function stream(
     model,
     messages,
     temperature: config.temperature,
-    ...(tools ? { tools: tools as any } : {}),
+    ...(tools ? { tools: tools as any, maxSteps: 5 } : {}),
   });
   return result;
 }

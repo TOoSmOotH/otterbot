@@ -20,6 +20,11 @@ RUN pnpm build
 FROM base AS production
 RUN apt-get update && apt-get install -y --no-install-recommends \
     tini git curl sudo gnupg apt-transport-https ca-certificates \
+    # Playwright/Chromium system dependencies
+    libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 libcups2 \
+    libdrm2 libdbus-1-3 libxkbcommon0 libatspi2.0-0 libxcomposite1 \
+    libxdamage1 libxfixes3 libxrandr2 libgbm1 libpango-1.0-0 \
+    libcairo2 libasound2 libwayland-client0 \
     && rm -rf /var/lib/apt/lists/*
 
 # Create non-root user with configurable UID/GID
@@ -50,6 +55,9 @@ COPY --from=build /app/packages/server/package.json ./packages/server/
 COPY --from=build /app/packages/server/node_modules ./packages/server/node_modules
 COPY --from=build /app/packages/web/dist ./packages/web/dist
 COPY --from=build /app/packages/web/package.json ./packages/web/
+
+# Install Playwright Chromium browser (headless, for agent web browsing)
+RUN npx playwright install chromium
 
 # Create data directories (use numeric UID:GID since group name may differ)
 RUN mkdir -p /smoothbot/config /smoothbot/data /smoothbot/projects /smoothbot/logs /smoothbot/home \

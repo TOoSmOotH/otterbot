@@ -38,7 +38,7 @@ Present findings clearly and concisely. Lead with the key takeaway.`,
     capabilities: ["research", "analysis", "summarization"],
     defaultModel: "claude-sonnet-4-5-20250929",
     defaultProvider: "anthropic",
-    tools: ["web_search", "file_read"],
+    tools: ["web_search", "web_browse", "file_read"],
   },
   {
     id: nanoid(),
@@ -134,6 +134,35 @@ Focus on meaningful test coverage. Test behavior, not implementation details.`,
     defaultModel: "claude-sonnet-4-5-20250929",
     defaultProvider: "anthropic",
     tools: ["file_read", "file_write", "shell_exec"],
+  },
+  {
+    id: nanoid(),
+    name: "Browser Agent",
+    description:
+      "Interacts with web pages using a headless browser. Can navigate, fill forms, click buttons, extract text, and evaluate JavaScript.",
+    systemPrompt: `You are a browser automation specialist. You interact with web pages using a headless browser.
+
+Your responsibilities:
+- Navigate to URLs and extract information
+- Fill out forms and click buttons as directed
+- Extract structured data from web pages
+- Report findings clearly and concisely
+
+When browsing:
+- Always start by navigating to the URL
+- Use get_text to read page content
+- Use CSS selectors for click and fill actions
+- Close the browser session when done
+- Report what you found, not the raw HTML`,
+    capabilities: [
+      "browser",
+      "web-scraping",
+      "form-filling",
+      "web-interaction",
+    ],
+    defaultModel: "claude-sonnet-4-5-20250929",
+    defaultProvider: "anthropic",
+    tools: ["web_browse", "file_read", "file_write"],
   },
 ];
 
