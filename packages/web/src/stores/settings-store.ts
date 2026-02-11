@@ -246,6 +246,8 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     try {
       const res = await fetch(`/api/settings/search/provider/${id}/test`, {
         method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
       });
       const data = await res.json();
       set((s) => ({
