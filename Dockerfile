@@ -18,7 +18,7 @@ RUN pnpm build
 
 # Production
 FROM base AS production
-RUN apt-get update && apt-get install -y --no-install-recommends tini && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends tini git curl && rm -rf /var/lib/apt/lists/*
 
 # Create non-root user with configurable UID/GID
 ARG SMOOTHBOT_UID=1000
@@ -45,14 +45,20 @@ RUN mkdir -p /smoothbot/config /smoothbot/data /smoothbot/projects /smoothbot/lo
 # Entrypoint script
 COPY --chmod=755 <<'EOF' /app/entrypoint.sh
 #!/bin/sh
-# Ensure data directories exist (they may be empty bind mounts)
-mkdir -p /smoothbot/config /smoothbot/data /smoothbot/projects /smoothbot/logs
+set -e
 
-# Run bootstrap if it exists
+# Ensure data directories exist (they may be empty bind mounts)
+mkdir -p /smoothbot/config /smoothbot/data /smoothbot/projects /smoothbot/logs /smoothbot/tools
+
+# Run bootstrap if it exists (e.g. install CLI tools)
+# Example bootstrap.sh:
+#   npm install -g @anthropic-ai/claude-code
+#   npm install -g @anthropic-ai/opencode
 if [ -f /smoothbot/config/bootstrap.sh ]; then
   echo "Running bootstrap script..."
   sh /smoothbot/config/bootstrap.sh
 fi
+
 exec node packages/server/dist/index.js
 EOF
 
@@ -63,6 +69,10 @@ ENV PORT=3000
 ENV HOST=0.0.0.0
 ENV DATABASE_URL=file:/smoothbot/data/smoothbot.db
 ENV WORKSPACE_ROOT=/smoothbot
+
+# Runtime tools installed via bootstrap.sh persist on the bind-mounted volume
+ENV NPM_CONFIG_PREFIX=/smoothbot/tools
+ENV PATH="/smoothbot/tools/bin:$PATH"
 
 EXPOSE 3000
 
