@@ -14,3 +14,12 @@ services:
       - SMOOTHBOT_UID=${SMOOTHBOT_UID:-1000}
       - SMOOTHBOT_GID=${SMOOTHBOT_GID:-1000}
     restart: unless-stopped
+
+  searxng:
+    image: searxng/searxng:latest
+    profiles: [search]
+    ports:
+      - "8080:8080"
+    volumes:
+      - ${SMOOTHBOT_DATA_DIR:-./docker/smoothbot}/searxng:/etc/searxng
+    restart: unless-stopped

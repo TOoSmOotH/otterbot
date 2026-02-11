@@ -18,6 +18,7 @@
     "docker:up": "docker compose up -d",
     "docker:down": "docker compose down",
     "docker:dev": "docker compose -f docker-compose.yml -f docker-compose.dev.yml up",
+    "docker:up:search": "docker compose --profile search up -d",
     "db:push": "pnpm --filter @smoothbot/server db:push",
     "db:seed": "pnpm --filter @smoothbot/server db:seed"
   },

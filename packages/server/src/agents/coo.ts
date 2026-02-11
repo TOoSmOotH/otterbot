@@ -29,6 +29,10 @@ import {
   getSettings,
   updateTierDefaults,
   testProvider,
+  getSearchSettings,
+  updateSearchProviderConfig,
+  setActiveSearchProvider,
+  testSearchProvider,
 } from "../settings/settings.js";
 
 export interface COODependencies {
@@ -169,6 +173,36 @@ export class COO extends BaseAgent {
         }),
         execute: async (args) => {
           return this.manageModels(args);
+        },
+      }),
+      manage_search: tool({
+        description:
+          "Manage web search providers. List configured providers, set the active provider, " +
+          "configure API keys or base URLs, and test provider connections.",
+        parameters: z.object({
+          action: z
+            .enum([
+              "list_providers",
+              "set_active",
+              "configure",
+              "test",
+            ])
+            .describe("Action to perform"),
+          provider: z
+            .string()
+            .optional()
+            .describe("Search provider ID: searxng, brave, or tavily"),
+          api_key: z
+            .string()
+            .optional()
+            .describe("API key (for brave or tavily)"),
+          base_url: z
+            .string()
+            .optional()
+            .describe("Base URL (for searxng)"),
+        }),
+        execute: async (args) => {
+          return this.manageSearch(args);
         },
       }),
       manage_packages: tool({
@@ -356,6 +390,70 @@ export class COO extends BaseAgent {
           return `Provider "${provider}" is working. Latency: ${result.latencyMs}ms.`;
         }
         return `Provider "${provider}" test failed: ${result.error}`;
+      }
+
+      default:
+        return `Unknown action: ${action}`;
+    }
+  }
+
+  private async manageSearch(args: {
+    action: string;
+    provider?: string;
+    api_key?: string;
+    base_url?: string;
+  }): Promise<string> {
+    const { action, provider, api_key, base_url } = args;
+
+    switch (action) {
+      case "list_providers": {
+        const settings = getSearchSettings();
+        const active = settings.activeProvider;
+        const lines = settings.providers.map((p) => {
+          const configured =
+            (p.apiKeySet || !p.needsApiKey) && (!!p.baseUrl || !p.needsBaseUrl);
+          const status = configured ? "configured" : "not configured";
+          const activeLabel = p.id === active ? " **(active)**" : "";
+          const url = p.baseUrl ? ` (${p.baseUrl})` : "";
+          return `- **${p.name}** (${p.id}): ${status}${url}${activeLabel}`;
+        });
+        const header = active
+          ? `Active search provider: **${active}**`
+          : "No active search provider set.";
+        return `${header}\n\n**Search providers:**\n${lines.join("\n")}`;
+      }
+
+      case "set_active": {
+        if (!provider) {
+          return "Error: provider is required for set_active.";
+        }
+        setActiveSearchProvider(provider);
+        return `Active search provider set to "${provider}".`;
+      }
+
+      case "configure": {
+        if (!provider) {
+          return "Error: provider is required for configure.";
+        }
+        const data: { apiKey?: string; baseUrl?: string } = {};
+        if (api_key) data.apiKey = api_key;
+        if (base_url) data.baseUrl = base_url;
+        if (!data.apiKey && !data.baseUrl) {
+          return "Error: at least one of api_key or base_url must be provided.";
+        }
+        updateSearchProviderConfig(provider, data);
+        return `Search provider "${provider}" configuration updated.`;
+      }
+
+      case "test": {
+        if (!provider) {
+          return "Error: provider is required for test.";
+        }
+        const result = await testSearchProvider(provider);
+        if (result.ok) {
+          return `Search provider "${provider}" is working. Latency: ${result.latencyMs}ms.`;
+        }
+        return `Search provider "${provider}" test failed: ${result.error}`;
       }
 
       default:

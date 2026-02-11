@@ -14,6 +14,7 @@ describe("MessageBus", () => {
     tmpDir = mkdtempSync(join(tmpdir(), "smoothbot-bus-test-"));
     resetDb();
     process.env.DATABASE_URL = `file:${join(tmpDir, "test.db")}`;
+    process.env.SMOOTHBOT_DB_KEY = "test-key";
     migrateDb();
     bus = new MessageBus();
   });
@@ -21,6 +22,7 @@ describe("MessageBus", () => {
   afterEach(() => {
     resetDb();
     delete process.env.DATABASE_URL;
+    delete process.env.SMOOTHBOT_DB_KEY;
     rmSync(tmpDir, { recursive: true, force: true });
   });
 

@@ -4,13 +4,15 @@ import { useSettingsStore } from "../../stores/settings-store";
 import { ProvidersTab } from "./ProvidersTab";
 import { ModelsTab } from "./ModelsTab";
 import { AgentTemplatesTab } from "./AgentTemplatesTab";
+import { SearchTab } from "./SearchTab";
 
-type Tab = "providers" | "models" | "templates";
+type Tab = "providers" | "models" | "templates" | "search";
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "providers", label: "Providers" },
   { id: "models", label: "Models" },
   { id: "templates", label: "Agent Templates" },
+  { id: "search", label: "Search" },
 ];
 
 export function SettingsPanel({ onClose }: { onClose: () => void }) {
@@ -68,6 +70,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
               {activeTab === "providers" && <ProvidersTab />}
               {activeTab === "models" && <ModelsTab />}
               {activeTab === "templates" && <AgentTemplatesTab />}
+              {activeTab === "search" && <SearchTab />}
             </>
           )}
         </div>

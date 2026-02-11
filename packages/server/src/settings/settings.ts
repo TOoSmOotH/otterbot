@@ -11,6 +11,7 @@ import {
 } from "../auth/auth.js";
 import { resolveModel, type LLMConfig } from "../llm/adapter.js";
 import { generateText } from "ai";
+import { getConfiguredSearchProvider } from "../tools/search/providers.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -67,6 +68,34 @@ const FALLBACK_MODELS: Record<string, string[]> = {
   openai: ["gpt-4o", "gpt-4o-mini", "gpt-4.1", "gpt-4.1-mini", "o3-mini"],
   ollama: ["llama3.1", "mistral", "codellama", "qwen2.5-coder"],
   "openai-compatible": [],
+};
+
+// ---------------------------------------------------------------------------
+// Search provider metadata
+// ---------------------------------------------------------------------------
+
+export interface SearchProviderConfig {
+  id: string;
+  name: string;
+  needsApiKey: boolean;
+  needsBaseUrl: boolean;
+  apiKey?: string;   // masked
+  apiKeySet: boolean;
+  baseUrl?: string;
+}
+
+export interface SearchSettingsResponse {
+  activeProvider: string | null;
+  providers: SearchProviderConfig[];
+}
+
+const SEARCH_PROVIDER_META: Record<
+  string,
+  { name: string; needsApiKey: boolean; needsBaseUrl: boolean }
+> = {
+  searxng: { name: "SearXNG", needsApiKey: false, needsBaseUrl: true },
+  brave:   { name: "Brave Search", needsApiKey: true, needsBaseUrl: false },
+  tavily:  { name: "Tavily", needsApiKey: true, needsBaseUrl: false },
 };
 
 // ---------------------------------------------------------------------------
@@ -299,5 +328,99 @@ export async function fetchModels(providerId: string): Promise<string[]> {
   } catch {
     // Network error, timeout, etc. — return fallback list
     return FALLBACK_MODELS[providerId] ?? [];
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Search settings
+// ---------------------------------------------------------------------------
+
+export function getSearchSettings(): SearchSettingsResponse {
+  const activeProvider = getConfig("search:active_provider") ?? null;
+
+  const providers = Object.entries(SEARCH_PROVIDER_META).map(
+    ([id, meta]) => {
+      const rawKey = getConfig(`search:${id}:api_key`);
+      const baseUrl = getConfig(`search:${id}:base_url`);
+
+      return {
+        id,
+        name: meta.name,
+        needsApiKey: meta.needsApiKey,
+        needsBaseUrl: meta.needsBaseUrl,
+        apiKey: maskApiKey(rawKey),
+        apiKeySet: !!rawKey,
+        baseUrl: baseUrl || undefined,
+      } satisfies SearchProviderConfig;
+    },
+  );
+
+  return { activeProvider, providers };
+}
+
+export function updateSearchProviderConfig(
+  providerId: string,
+  data: { apiKey?: string; baseUrl?: string },
+): void {
+  if (data.apiKey !== undefined) {
+    if (data.apiKey === "") {
+      deleteConfig(`search:${providerId}:api_key`);
+    } else {
+      setConfig(`search:${providerId}:api_key`, data.apiKey);
+    }
+  }
+  if (data.baseUrl !== undefined) {
+    if (data.baseUrl === "") {
+      deleteConfig(`search:${providerId}:base_url`);
+    } else {
+      setConfig(`search:${providerId}:base_url`, data.baseUrl);
+    }
+  }
+}
+
+export function setActiveSearchProvider(providerId: string | null): void {
+  if (!providerId) {
+    deleteConfig("search:active_provider");
+  } else {
+    setConfig("search:active_provider", providerId);
+  }
+}
+
+export async function testSearchProvider(
+  providerId: string,
+): Promise<TestResult> {
+  const start = Date.now();
+
+  // Temporarily set active provider so factory picks it up
+  const previousActive = getConfig("search:active_provider");
+  setConfig("search:active_provider", providerId);
+
+  try {
+    const provider = getConfiguredSearchProvider();
+    if (!provider) {
+      return {
+        ok: false,
+        error: `Provider "${providerId}" is not configured (missing credentials).`,
+      };
+    }
+
+    const response = await provider.search("test", 1);
+    // Any non-error response counts as success
+    return {
+      ok: true,
+      latencyMs: Date.now() - start,
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "Unknown error",
+    };
+  } finally {
+    // Restore previous active provider
+    if (previousActive) {
+      setConfig("search:active_provider", previousActive);
+    } else {
+      deleteConfig("search:active_provider");
+    }
   }
 }

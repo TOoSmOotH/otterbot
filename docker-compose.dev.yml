@@ -13,3 +13,8 @@ services:
       - SMOOTHBOT_DB_KEY=${SMOOTHBOT_DB_KEY}
       - SMOOTHBOT_UID=${SMOOTHBOT_UID:-1000}
       - SMOOTHBOT_GID=${SMOOTHBOT_GID:-1000}
+
+  searxng:
+    profiles: [search]
+    ports:
+      - "8080:8080"

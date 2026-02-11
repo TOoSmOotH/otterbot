@@ -50,6 +50,10 @@ import {
   updateTierDefaults,
   testProvider,
   fetchModels,
+  getSearchSettings,
+  updateSearchProviderConfig,
+  setActiveSearchProvider,
+  testSearchProvider,
   type TierDefaults,
 } from "./settings/settings.js";
 
@@ -470,6 +474,35 @@ async function main() {
   }>("/api/settings/models/:providerId", async (req) => {
     const models = await fetchModels(req.params.providerId);
     return { models };
+  });
+
+  // =========================================================================
+  // Search settings routes
+  // =========================================================================
+
+  app.get("/api/settings/search", async () => {
+    return getSearchSettings();
+  });
+
+  app.put<{
+    Params: { providerId: string };
+    Body: { apiKey?: string; baseUrl?: string };
+  }>("/api/settings/search/provider/:providerId", async (req) => {
+    updateSearchProviderConfig(req.params.providerId, req.body);
+    return { ok: true };
+  });
+
+  app.put<{
+    Body: { providerId: string | null };
+  }>("/api/settings/search/active", async (req) => {
+    setActiveSearchProvider(req.body.providerId);
+    return { ok: true };
+  });
+
+  app.post<{
+    Params: { providerId: string };
+  }>("/api/settings/search/provider/:providerId/test", async (req) => {
+    return testSearchProvider(req.params.providerId);
   });
 
   // SPA fallback for client-side routing

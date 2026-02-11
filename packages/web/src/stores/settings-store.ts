@@ -26,6 +26,16 @@ export interface TestResult {
   testing: boolean;
 }
 
+export interface SearchProviderConfig {
+  id: string;
+  name: string;
+  needsApiKey: boolean;
+  needsBaseUrl: boolean;
+  apiKey?: string;
+  apiKeySet: boolean;
+  baseUrl?: string;
+}
+
 interface SettingsState {
   providers: ProviderConfig[];
   defaults: TierDefaults;
@@ -33,6 +43,11 @@ interface SettingsState {
   loading: boolean;
   error: string | null;
   testResults: Record<string, TestResult>;
+
+  // Search
+  searchProviders: SearchProviderConfig[];
+  activeSearchProvider: string | null;
+  searchTestResults: Record<string, TestResult>;
 
   loadSettings: () => Promise<void>;
   updateProvider: (
@@ -42,6 +57,15 @@ interface SettingsState {
   updateDefaults: (data: Partial<TierDefaults>) => Promise<void>;
   testProvider: (id: string, model?: string) => Promise<void>;
   fetchModels: (providerId: string) => Promise<void>;
+
+  // Search actions
+  loadSearchSettings: () => Promise<void>;
+  updateSearchProvider: (
+    id: string,
+    data: { apiKey?: string; baseUrl?: string },
+  ) => Promise<void>;
+  setActiveSearchProvider: (id: string | null) => Promise<void>;
+  testSearchProvider: (id: string) => Promise<void>;
 }
 
 // ---------------------------------------------------------------------------
@@ -59,6 +83,9 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   loading: false,
   error: null,
   testResults: {},
+  searchProviders: [],
+  activeSearchProvider: null,
+  searchTestResults: {},
 
   loadSettings: async () => {
     set({ loading: true, error: null });
@@ -158,6 +185,86 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       }));
     } catch {
       // Silently fail — user can still type model names manually
+    }
+  },
+
+  loadSearchSettings: async () => {
+    try {
+      const res = await fetch("/api/settings/search");
+      if (!res.ok) return;
+      const data = await res.json();
+      set({
+        searchProviders: data.providers,
+        activeSearchProvider: data.activeProvider,
+      });
+    } catch {
+      // Silently fail
+    }
+  },
+
+  updateSearchProvider: async (id, data) => {
+    set({ error: null });
+    try {
+      const res = await fetch(`/api/settings/search/provider/${id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) throw new Error("Failed to update search provider");
+      await get().loadSearchSettings();
+    } catch (err) {
+      set({
+        error: err instanceof Error ? err.message : "Unknown error",
+      });
+    }
+  },
+
+  setActiveSearchProvider: async (id) => {
+    set({ error: null });
+    try {
+      const res = await fetch("/api/settings/search/active", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ providerId: id }),
+      });
+      if (!res.ok) throw new Error("Failed to set active search provider");
+      await get().loadSearchSettings();
+    } catch (err) {
+      set({
+        error: err instanceof Error ? err.message : "Unknown error",
+      });
+    }
+  },
+
+  testSearchProvider: async (id) => {
+    set((s) => ({
+      searchTestResults: {
+        ...s.searchTestResults,
+        [id]: { ok: false, testing: true },
+      },
+    }));
+    try {
+      const res = await fetch(`/api/settings/search/provider/${id}/test`, {
+        method: "POST",
+      });
+      const data = await res.json();
+      set((s) => ({
+        searchTestResults: {
+          ...s.searchTestResults,
+          [id]: { ok: data.ok, error: data.error, testing: false },
+        },
+      }));
+    } catch (err) {
+      set((s) => ({
+        searchTestResults: {
+          ...s.searchTestResults,
+          [id]: {
+            ok: false,
+            error: err instanceof Error ? err.message : "Unknown error",
+            testing: false,
+          },
+        },
+      }));
     }
   },
 }));
