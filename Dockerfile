@@ -1,4 +1,4 @@
-FROM node:22-slim AS base
+FROM node:22 AS base
 
 RUN corepack enable && corepack prepare pnpm@latest --activate
 WORKDIR /app
@@ -23,6 +23,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends tini git curl &
 # Create non-root user with configurable UID/GID
 ARG SMOOTHBOT_UID=1000
 ARG SMOOTHBOT_GID=1000
+ENV SMOOTHBOT_UID=${SMOOTHBOT_UID}
+ENV SMOOTHBOT_GID=${SMOOTHBOT_GID}
 RUN (getent group ${SMOOTHBOT_GID} || groupadd -g ${SMOOTHBOT_GID} smoothbot) \
     && useradd -u ${SMOOTHBOT_UID} -g ${SMOOTHBOT_GID} -m smoothbot 2>/dev/null \
     || useradd -u ${SMOOTHBOT_UID} -g ${SMOOTHBOT_GID} -m -o smoothbot
@@ -39,36 +41,75 @@ COPY --from=build /app/packages/web/dist ./packages/web/dist
 COPY --from=build /app/packages/web/package.json ./packages/web/
 
 # Create data directories (use numeric UID:GID since group name may differ)
-RUN mkdir -p /smoothbot/config /smoothbot/data /smoothbot/projects /smoothbot/logs \
+RUN mkdir -p /smoothbot/config /smoothbot/data /smoothbot/projects /smoothbot/logs /smoothbot/home \
     && chown -R ${SMOOTHBOT_UID}:${SMOOTHBOT_GID} /smoothbot /app
 
-# Entrypoint script
+# Entrypoint script — runs as root, drops to smoothbot user via setpriv
 COPY --chmod=755 <<'EOF' /app/entrypoint.sh
 #!/bin/sh
 set -e
 
-# Ensure data directories exist (they may be empty bind mounts)
-mkdir -p /smoothbot/config /smoothbot/data /smoothbot/projects /smoothbot/logs /smoothbot/tools
+PUID="${SMOOTHBOT_UID:-1000}"
+PGID="${SMOOTHBOT_GID:-1000}"
 
-# Run bootstrap if it exists (e.g. install CLI tools)
-# Example bootstrap.sh:
-#   npm install -g @anthropic-ai/claude-code
-#   npm install -g @anthropic-ai/opencode
+# Ensure data directories exist (they may be empty bind mounts)
+mkdir -p /smoothbot/config /smoothbot/data /smoothbot/home/.ssh \
+         /smoothbot/logs /smoothbot/projects /smoothbot/tools
+
+# Fix ownership
+chown -R "${PUID}:${PGID}" /smoothbot
+
+# Strict SSH permissions
+chmod 700 /smoothbot/home/.ssh
+find /smoothbot/home/.ssh -type f -exec chmod 600 {} + 2>/dev/null || true
+
+# ── Install packages from manifest ──────────────────────────────────
+# The COO agent (or user) writes /smoothbot/config/packages.json with
+# the structure: { "apt": [{"name":"..."}], "npm": [{"name":"...","version":"..."}] }
+MANIFEST="/smoothbot/config/packages.json"
+if [ -f "$MANIFEST" ]; then
+  # Install apt packages
+  APT_PKGS=$(node -e "
+    const m = JSON.parse(require('fs').readFileSync('$MANIFEST','utf-8'));
+    if (m.apt && m.apt.length) console.log(m.apt.map(p=>p.name).join(' '));
+  " 2>/dev/null || true)
+  if [ -n "$APT_PKGS" ]; then
+    echo "[smoothbot] Installing apt packages: $APT_PKGS"
+    apt-get update && apt-get install -y --no-install-recommends $APT_PKGS
+  fi
+
+  # Install npm packages (globally — persists on bind mount via NPM_CONFIG_PREFIX)
+  NPM_PKGS=$(node -e "
+    const m = JSON.parse(require('fs').readFileSync('$MANIFEST','utf-8'));
+    if (m.npm && m.npm.length) console.log(m.npm.map(p => p.version ? p.name+'@'+p.version : p.name).join(' '));
+  " 2>/dev/null || true)
+  if [ -n "$NPM_PKGS" ]; then
+    echo "[smoothbot] Installing npm packages: $NPM_PKGS"
+    npm install -g $NPM_PKGS
+  fi
+fi
+
+# ── Run custom bootstrap script ─────────────────────────────────────
+# For anything not covered by packages.json (custom setup, config, etc.)
 if [ -f /smoothbot/config/bootstrap.sh ]; then
-  echo "Running bootstrap script..."
+  echo "[smoothbot] Running bootstrap script..."
   sh /smoothbot/config/bootstrap.sh
 fi
 
-exec node packages/server/dist/index.js
-EOF
+# Clean up apt cache
+rm -rf /var/lib/apt/lists/*
 
-USER ${SMOOTHBOT_UID}
+# Drop privileges and start the app
+exec setpriv --reuid="${PUID}" --regid="${PGID}" --init-groups \
+  node packages/server/dist/index.js
+EOF
 
 ENV NODE_ENV=production
 ENV PORT=3000
 ENV HOST=0.0.0.0
 ENV DATABASE_URL=file:/smoothbot/data/smoothbot.db
 ENV WORKSPACE_ROOT=/smoothbot
+ENV HOME=/smoothbot/home
 
 # Runtime tools installed via bootstrap.sh persist on the bind-mounted volume
 ENV NPM_CONFIG_PREFIX=/smoothbot/tools

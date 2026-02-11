@@ -16,6 +16,13 @@ import type { MessageBus } from "../bus/message-bus.js";
 import type { WorkspaceManager } from "../workspace/workspace.js";
 import { eq } from "drizzle-orm";
 import { getConfig } from "../auth/auth.js";
+import {
+  addAptPackage,
+  removeAptPackage,
+  addNpmPackage,
+  removeNpmPackage,
+  listPackages,
+} from "../packages/packages.js";
 
 export interface COODependencies {
   bus: MessageBus;
@@ -128,6 +135,31 @@ export class COO extends BaseAgent {
           return this.getProjectStatus(projectId);
         },
       }),
+      manage_packages: tool({
+        description:
+          "Manage system packages that are installed in the Docker container. " +
+          "Supports both OS-level (apt) and npm global packages. " +
+          "Changes take effect on the next container restart. " +
+          "npm packages persist across restarts; apt packages are reinstalled each start.",
+        parameters: z.object({
+          action: z
+            .enum(["add_apt", "remove_apt", "add_npm", "remove_npm", "list"])
+            .describe(
+              "Action to perform: add/remove an apt or npm package, or list all packages",
+            ),
+          package_name: z
+            .string()
+            .optional()
+            .describe("Package name (required for add/remove actions)"),
+          version: z
+            .string()
+            .optional()
+            .describe("Version specifier for npm packages (e.g. 'latest', '^1.0.0')"),
+        }),
+        execute: async ({ action, package_name, version }) => {
+          return this.managePackages(action, package_name, version);
+        },
+      }),
     };
   }
 
@@ -208,6 +240,68 @@ export class COO extends BaseAgent {
     return projects
       .map((p) => `- "${p.name}" (${p.id}): ${p.status}`)
       .join("\n");
+  }
+
+  private managePackages(
+    action: string,
+    packageName?: string,
+    version?: string,
+  ): string {
+    if (action === "list") {
+      const manifest = listPackages();
+      if (manifest.apt.length === 0 && manifest.npm.length === 0) {
+        return "No packages configured. Use add_apt or add_npm to add packages.";
+      }
+      const lines: string[] = [];
+      if (manifest.apt.length > 0) {
+        lines.push("**APT packages:**");
+        for (const p of manifest.apt) {
+          lines.push(`- ${p.name} (added by ${p.addedBy ?? "unknown"})`);
+        }
+      }
+      if (manifest.npm.length > 0) {
+        lines.push("**NPM packages:**");
+        for (const p of manifest.npm) {
+          const ver = p.version ? `@${p.version}` : "";
+          lines.push(`- ${p.name}${ver} (added by ${p.addedBy ?? "unknown"})`);
+        }
+      }
+      lines.push("\nNote: Changes take effect on next container restart.");
+      return lines.join("\n");
+    }
+
+    if (!packageName) {
+      return "Error: package_name is required for add/remove actions.";
+    }
+
+    switch (action) {
+      case "add_apt": {
+        const added = addAptPackage(packageName, "coo");
+        return added
+          ? `Added apt package "${packageName}" to manifest. Will be installed on next container restart.`
+          : `Apt package "${packageName}" is already in the manifest.`;
+      }
+      case "remove_apt": {
+        const removed = removeAptPackage(packageName);
+        return removed
+          ? `Removed apt package "${packageName}" from manifest.`
+          : `Apt package "${packageName}" was not found in the manifest.`;
+      }
+      case "add_npm": {
+        const added = addNpmPackage(packageName, version, "coo");
+        return added
+          ? `Added npm package "${packageName}"${version ? `@${version}` : ""} to manifest. Will be installed on next container restart.`
+          : `Npm package "${packageName}" is already in the manifest.`;
+      }
+      case "remove_npm": {
+        const removed = removeNpmPackage(packageName);
+        return removed
+          ? `Removed npm package "${packageName}" from manifest.`
+          : `Npm package "${packageName}" was not found in the manifest.`;
+      }
+      default:
+        return `Unknown action: ${action}`;
+    }
   }
 
   getTeamLeads(): Map<string, TeamLead> {

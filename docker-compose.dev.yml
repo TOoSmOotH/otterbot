@@ -9,4 +9,7 @@ services:
       - ${SMOOTHBOT_DATA_DIR:-./docker/smoothbot}:/smoothbot
     environment:
       - NODE_ENV=development
+      - HOME=/smoothbot/home
       - SMOOTHBOT_DB_KEY=${SMOOTHBOT_DB_KEY}
+      - SMOOTHBOT_UID=${SMOOTHBOT_UID:-1000}
+      - SMOOTHBOT_GID=${SMOOTHBOT_GID:-1000}

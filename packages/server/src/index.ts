@@ -34,6 +34,13 @@ import {
   validateSession,
   destroySession,
 } from "./auth/auth.js";
+import {
+  listPackages,
+  addAptPackage,
+  removeAptPackage,
+  addNpmPackage,
+  removeNpmPackage,
+} from "./packages/packages.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -322,6 +329,51 @@ async function main() {
       agentId: req.query.agentId,
       limit: req.query.limit ? parseInt(req.query.limit) : undefined,
     });
+  });
+
+  // Package manifest endpoints
+  app.get("/api/packages", async () => {
+    return listPackages();
+  });
+
+  app.post<{
+    Body: { type: "apt" | "npm"; name: string; version?: string };
+  }>("/api/packages", async (req, reply) => {
+    const { type, name, version } = req.body;
+    if (!type || !name) {
+      reply.code(400);
+      return { error: "type and name are required" };
+    }
+    let added: boolean;
+    if (type === "apt") {
+      added = addAptPackage(name, "user");
+    } else if (type === "npm") {
+      added = addNpmPackage(name, version, "user");
+    } else {
+      reply.code(400);
+      return { error: 'type must be "apt" or "npm"' };
+    }
+    return { ok: true, added };
+  });
+
+  app.delete<{
+    Body: { type: "apt" | "npm"; name: string };
+  }>("/api/packages", async (req, reply) => {
+    const { type, name } = req.body;
+    if (!type || !name) {
+      reply.code(400);
+      return { error: "type and name are required" };
+    }
+    let removed: boolean;
+    if (type === "apt") {
+      removed = removeAptPackage(name);
+    } else if (type === "npm") {
+      removed = removeNpmPackage(name);
+    } else {
+      reply.code(400);
+      return { error: 'type must be "apt" or "npm"' };
+    }
+    return { ok: true, removed };
   });
 
   // Agent list endpoint
