@@ -59,6 +59,14 @@ export const registryEntries = sqliteTable("registry_entries", {
     .$defaultFn(() => new Date().toISOString()),
 });
 
+export const config = sqliteTable("config", {
+  key: text("key").primaryKey(),
+  value: text("value").notNull(),
+  updatedAt: text("updated_at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+});
+
 export const projects = sqliteTable("projects", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),

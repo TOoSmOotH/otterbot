@@ -11,9 +11,5 @@ services:
     volumes:
       - ${SMOOTHBOT_DATA_DIR:-./docker/smoothbot}:/smoothbot
     environment:
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
-      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
-      - OPENAI_COMPATIBLE_BASE_URL=${OPENAI_COMPATIBLE_BASE_URL:-}
-      - OPENAI_COMPATIBLE_API_KEY=${OPENAI_COMPATIBLE_API_KEY:-}
-      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      - SMOOTHBOT_DB_KEY=${SMOOTHBOT_DB_KEY}
     restart: unless-stopped

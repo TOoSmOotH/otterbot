@@ -3,6 +3,7 @@ import { createOpenAI } from "@ai-sdk/openai";
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import { createOllama } from "ollama-ai-provider";
 import { streamText, generateText, type LanguageModel } from "ai";
+import { getConfig } from "../auth/auth.js";
 
 export interface LLMConfig {
   provider: string;
@@ -17,15 +18,19 @@ export function resolveModel(config: LLMConfig): LanguageModel {
   switch (config.provider) {
     case "anthropic": {
       const anthropic = createAnthropic({
-        apiKey: config.apiKey ?? process.env.ANTHROPIC_API_KEY,
+        apiKey:
+          config.apiKey ?? getConfig("provider:anthropic:api_key") ?? "",
       });
       return anthropic(config.model);
     }
 
     case "openai": {
+      const baseUrl =
+        config.baseUrl ?? getConfig("provider:openai:base_url");
       const openai = createOpenAI({
-        apiKey: config.apiKey ?? process.env.OPENAI_API_KEY,
-        ...(config.baseUrl ? { baseURL: config.baseUrl } : {}),
+        apiKey:
+          config.apiKey ?? getConfig("provider:openai:api_key") ?? "",
+        ...(baseUrl ? { baseURL: baseUrl } : {}),
       });
       return openai(config.model);
     }
@@ -34,24 +39,28 @@ export function resolveModel(config: LLMConfig): LanguageModel {
       const ollama = createOllama({
         baseURL:
           config.baseUrl ??
-          process.env.OLLAMA_BASE_URL ??
+          getConfig("provider:ollama:base_url") ??
           "http://localhost:11434/api",
       });
       return ollama(config.model);
     }
 
     case "openai-compatible": {
-      if (!config.baseUrl && !process.env.OPENAI_COMPATIBLE_BASE_URL) {
+      const baseUrl =
+        config.baseUrl ??
+        getConfig("provider:openai-compatible:base_url");
+      if (!baseUrl) {
         throw new Error(
-          "openai-compatible provider requires a baseUrl or OPENAI_COMPATIBLE_BASE_URL env var",
+          "openai-compatible provider requires a baseUrl configured in settings",
         );
       }
       const compatible = createOpenAICompatible({
         name: "openai-compatible",
-        baseURL:
-          config.baseUrl ?? process.env.OPENAI_COMPATIBLE_BASE_URL!,
+        baseURL: baseUrl,
         apiKey:
-          config.apiKey ?? process.env.OPENAI_COMPATIBLE_API_KEY ?? "",
+          config.apiKey ??
+          getConfig("provider:openai-compatible:api_key") ??
+          "",
       });
       return compatible(config.model);
     }

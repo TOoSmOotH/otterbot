@@ -1,4 +1,4 @@
-import Database from "better-sqlite3";
+import Database from "better-sqlite3-multiple-ciphers";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { sql } from "drizzle-orm";
 import * as schema from "./schema.js";
@@ -17,6 +17,16 @@ export function getDb() {
     const dbPath = resolve(getDbPath());
     mkdirSync(dirname(dbPath), { recursive: true });
     const sqlite = new Database(dbPath);
+
+    // Encrypt the database
+    const dbKey = process.env.SMOOTHBOT_DB_KEY;
+    if (!dbKey) {
+      throw new Error(
+        "SMOOTHBOT_DB_KEY environment variable is required. Set it in your .env file.",
+      );
+    }
+    sqlite.pragma(`key='${dbKey}'`);
+
     sqlite.pragma("journal_mode = WAL");
     sqlite.pragma("foreign_keys = ON");
     _db = drizzle(sqlite, { schema });
@@ -73,6 +83,12 @@ export function migrateDb() {
     description TEXT NOT NULL DEFAULT '',
     status TEXT NOT NULL DEFAULT 'active',
     created_at TEXT NOT NULL
+  )`);
+
+  db.run(sql`CREATE TABLE IF NOT EXISTS config (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL,
+    updated_at TEXT NOT NULL
   )`);
 }
 

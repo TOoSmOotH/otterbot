@@ -9,3 +9,4 @@ services:
       - ${SMOOTHBOT_DATA_DIR:-./docker/smoothbot}:/smoothbot
     environment:
       - NODE_ENV=development
+      - SMOOTHBOT_DB_KEY=${SMOOTHBOT_DB_KEY}

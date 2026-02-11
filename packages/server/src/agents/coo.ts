@@ -15,6 +15,7 @@ import { getDb, schema } from "../db/index.js";
 import type { MessageBus } from "../bus/message-bus.js";
 import type { WorkspaceManager } from "../workspace/workspace.js";
 import { eq } from "drizzle-orm";
+import { getConfig } from "../auth/auth.js";
 
 export interface COODependencies {
   bus: MessageBus;
@@ -35,8 +36,8 @@ export class COO extends BaseAgent {
       role: AgentRole.COO,
       parentId: null,
       projectId: null,
-      model: process.env.COO_MODEL ?? "claude-sonnet-4-5-20250929",
-      provider: process.env.COO_PROVIDER ?? "anthropic",
+      model: getConfig("coo_model") ?? "claude-sonnet-4-5-20250929",
+      provider: getConfig("coo_provider") ?? "anthropic",
       systemPrompt: COO_SYSTEM_PROMPT,
     };
     super(options, deps.bus);

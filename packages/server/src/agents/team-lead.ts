@@ -13,6 +13,7 @@ import { getDb, schema } from "../db/index.js";
 import type { MessageBus } from "../bus/message-bus.js";
 import type { WorkspaceManager } from "../workspace/workspace.js";
 import { eq } from "drizzle-orm";
+import { getConfig } from "../auth/auth.js";
 
 const TEAM_LEAD_PROMPT = `You are a Team Lead in Smoothbot. You report to the COO and manage a team of worker agents.
 
@@ -54,8 +55,14 @@ export class TeamLead extends BaseAgent {
       role: AgentRole.TeamLead,
       parentId: deps.parentId,
       projectId: deps.projectId,
-      model: process.env.TEAM_LEAD_MODEL ?? "claude-sonnet-4-5-20250929",
-      provider: process.env.TEAM_LEAD_PROVIDER ?? "anthropic",
+      model:
+        getConfig("team_lead_model") ??
+        getConfig("coo_model") ??
+        "claude-sonnet-4-5-20250929",
+      provider:
+        getConfig("team_lead_provider") ??
+        getConfig("coo_provider") ??
+        "anthropic",
       systemPrompt: TEAM_LEAD_PROMPT,
     };
     super(options, deps.bus);
