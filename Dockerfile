@@ -38,9 +38,9 @@ COPY --from=build /app/packages/server/node_modules ./packages/server/node_modul
 COPY --from=build /app/packages/web/dist ./packages/web/dist
 COPY --from=build /app/packages/web/package.json ./packages/web/
 
-# Create data directories
+# Create data directories (use numeric UID:GID since group name may differ)
 RUN mkdir -p /smoothbot/config /smoothbot/data /smoothbot/projects /smoothbot/logs \
-    && chown -R smoothbot:smoothbot /smoothbot /app
+    && chown -R ${SMOOTHBOT_UID}:${SMOOTHBOT_GID} /smoothbot /app
 
 # Entrypoint script
 COPY --chmod=755 <<'EOF' /app/entrypoint.sh
@@ -56,7 +56,7 @@ fi
 exec node packages/server/dist/index.js
 EOF
 
-USER smoothbot
+USER ${SMOOTHBOT_UID}
 
 ENV NODE_ENV=production
 ENV PORT=3000
