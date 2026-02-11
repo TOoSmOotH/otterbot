@@ -80,6 +80,11 @@ export function setConfig(key: string, value: string): void {
     .run();
 }
 
+export function deleteConfig(key: string): void {
+  const db = getDb();
+  db.delete(schema.config).where(eq(schema.config.key, key)).run();
+}
+
 // ---------------------------------------------------------------------------
 // Setup status
 // ---------------------------------------------------------------------------

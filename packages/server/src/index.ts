@@ -44,6 +44,14 @@ import {
   installRepo,
   uninstallRepo,
 } from "./packages/packages.js";
+import {
+  getSettings,
+  updateProviderConfig,
+  updateTierDefaults,
+  testProvider,
+  fetchModels,
+  type TierDefaults,
+} from "./settings/settings.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -425,6 +433,43 @@ async function main() {
     const { getDb, schema } = await import("./db/index.js");
     const db = getDb();
     return db.select().from(schema.agents).all();
+  });
+
+  // =========================================================================
+  // Settings routes
+  // =========================================================================
+
+  app.get("/api/settings", async () => {
+    return getSettings();
+  });
+
+  app.put<{
+    Params: { providerId: string };
+    Body: { apiKey?: string; baseUrl?: string };
+  }>("/api/settings/provider/:providerId", async (req) => {
+    updateProviderConfig(req.params.providerId, req.body);
+    return { ok: true };
+  });
+
+  app.put<{
+    Body: Partial<TierDefaults>;
+  }>("/api/settings/defaults", async (req) => {
+    updateTierDefaults(req.body);
+    return { ok: true };
+  });
+
+  app.post<{
+    Params: { providerId: string };
+    Body: { model?: string };
+  }>("/api/settings/provider/:providerId/test", async (req) => {
+    return testProvider(req.params.providerId, req.body.model);
+  });
+
+  app.get<{
+    Params: { providerId: string };
+  }>("/api/settings/models/:providerId", async (req) => {
+    const models = await fetchModels(req.params.providerId);
+    return { models };
   });
 
   // SPA fallback for client-side routing

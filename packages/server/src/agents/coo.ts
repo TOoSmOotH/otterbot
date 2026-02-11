@@ -25,6 +25,11 @@ import {
   installRepo,
   uninstallRepo,
 } from "../packages/packages.js";
+import {
+  getSettings,
+  updateTierDefaults,
+  testProvider,
+} from "../settings/settings.js";
 
 export interface COODependencies {
   bus: MessageBus;
@@ -135,6 +140,35 @@ export class COO extends BaseAgent {
         }),
         execute: async ({ projectId }) => {
           return this.getProjectStatus(projectId);
+        },
+      }),
+      manage_models: tool({
+        description:
+          "Manage LLM providers and model defaults. List configured providers, view/change default models per agent tier (COO, Team Lead, Worker), and test provider connections.",
+        parameters: z.object({
+          action: z
+            .enum([
+              "list_providers",
+              "get_defaults",
+              "set_default",
+              "test_provider",
+            ])
+            .describe("Action to perform"),
+          tier: z
+            .enum(["coo", "teamLead", "worker"])
+            .optional()
+            .describe("Agent tier (required for set_default)"),
+          provider: z
+            .string()
+            .optional()
+            .describe("Provider ID (required for set_default and test_provider)"),
+          model: z
+            .string()
+            .optional()
+            .describe("Model ID (required for set_default, optional for test_provider)"),
+        }),
+        execute: async (args) => {
+          return this.manageModels(args);
         },
       }),
       manage_packages: tool({
@@ -265,6 +299,68 @@ export class COO extends BaseAgent {
     return projects
       .map((p) => `- "${p.name}" (${p.id}): ${p.status}`)
       .join("\n");
+  }
+
+  private async manageModels(args: {
+    action: string;
+    tier?: string;
+    provider?: string;
+    model?: string;
+  }): Promise<string> {
+    const { action, tier, provider, model } = args;
+
+    switch (action) {
+      case "list_providers": {
+        const settings = getSettings();
+        const lines = settings.providers.map((p) => {
+          const status = p.apiKeySet || !p.needsApiKey ? "configured" : "not configured";
+          const url = p.baseUrl ? ` (${p.baseUrl})` : "";
+          return `- **${p.name}** (${p.id}): ${status}${url}`;
+        });
+        return `**Configured providers:**\n${lines.join("\n")}`;
+      }
+
+      case "get_defaults": {
+        const settings = getSettings();
+        const d = settings.defaults;
+        return [
+          "**Current model defaults:**",
+          `- **COO**: ${d.coo.provider} / ${d.coo.model}`,
+          `- **Team Lead**: ${d.teamLead.provider} / ${d.teamLead.model}`,
+          `- **Worker**: ${d.worker.provider} / ${d.worker.model}`,
+        ].join("\n");
+      }
+
+      case "set_default": {
+        if (!tier || !provider || !model) {
+          return "Error: tier, provider, and model are all required for set_default.";
+        }
+        const tierMap: Record<string, "coo" | "teamLead" | "worker"> = {
+          coo: "coo",
+          teamLead: "teamLead",
+          worker: "worker",
+        };
+        const tierKey = tierMap[tier];
+        if (!tierKey) return `Error: unknown tier "${tier}".`;
+
+        updateTierDefaults({ [tierKey]: { provider, model } });
+        return `Updated ${tier} default to ${provider} / ${model}.`;
+      }
+
+      case "test_provider": {
+        if (!provider) {
+          return "Error: provider is required for test_provider.";
+        }
+        const result = await testProvider(provider, model);
+        if (result.ok) {
+          return `Provider "${provider}" is working. Latency: ${result.latencyMs}ms.`;
+        }
+        return `Provider "${provider}" test failed: ${result.error}`;
+      }
+
+      default:
+        return `Unknown action: ${action}`;
+    }
   }
 
   private managePackages(args: {

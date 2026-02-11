@@ -6,7 +6,7 @@ import { useAuthStore } from "./stores/auth-store";
 import { CeoChat } from "./components/chat/CeoChat";
 import { AgentGraph } from "./components/graph/AgentGraph";
 import { MessageStream } from "./components/stream/MessageStream";
-import { RegistryPanel } from "./components/registry/RegistryPanel";
+import { SettingsPanel } from "./components/settings/SettingsPanel";
 import { LoginScreen } from "./components/auth/LoginScreen";
 import { SetupWizard } from "./components/setup/SetupWizard";
 import { disconnectSocket } from "./lib/socket";
@@ -116,9 +116,9 @@ function MainApp() {
         </div>
       </main>
 
-      {/* Settings / Registry modal */}
+      {/* Settings modal */}
       {settingsOpen && (
-        <RegistryPanel onClose={() => setSettingsOpen(false)} />
+        <SettingsPanel onClose={() => setSettingsOpen(false)} />
       )}
     </div>
   );
