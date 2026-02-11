@@ -1,4 +1,5 @@
 import { nanoid } from "nanoid";
+import { eq } from "drizzle-orm";
 import { getDb, schema } from "../db/index.js";
 import type { BusMessage, MessageType } from "@smoothbot/shared";
 
@@ -38,6 +39,7 @@ export class MessageBus {
     content: string;
     metadata?: Record<string, unknown>;
     projectId?: string;
+    conversationId?: string;
   }): BusMessage {
     const message: BusMessage = {
       id: nanoid(),
@@ -47,6 +49,7 @@ export class MessageBus {
       content: params.content,
       metadata: params.metadata ?? {},
       projectId: params.projectId,
+      conversationId: params.conversationId,
       timestamp: new Date().toISOString(),
     };
 
@@ -107,6 +110,18 @@ export class MessageBus {
     return filtered;
   }
 
+  /** Get messages for a specific conversation, ordered by timestamp */
+  getConversationMessages(conversationId: string): BusMessage[] {
+    const db = getDb();
+    const results = db
+      .select()
+      .from(schema.messages)
+      .where(eq(schema.messages.conversationId, conversationId))
+      .orderBy(schema.messages.timestamp)
+      .all();
+    return results as unknown as BusMessage[];
+  }
+
   private persist(message: BusMessage): void {
     const db = getDb();
     db.insert(schema.messages)
@@ -118,6 +133,7 @@ export class MessageBus {
         content: message.content,
         metadata: message.metadata,
         projectId: message.projectId,
+        conversationId: message.conversationId,
         timestamp: message.timestamp,
       })
       .run();

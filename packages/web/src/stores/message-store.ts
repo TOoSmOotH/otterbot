@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { BusMessage } from "@smoothbot/shared";
+import type { BusMessage, Conversation } from "@smoothbot/shared";
 
 interface MessageState {
   /** All bus messages (for the stream panel) */
@@ -11,6 +11,9 @@ interface MessageState {
   streamingMessageId: string | null;
   /** Filter for stream panel */
   agentFilter: string | null;
+  /** Conversation tracking */
+  currentConversationId: string | null;
+  conversations: Conversation[];
 
   addMessage: (message: BusMessage) => void;
   setCooResponse: (message: BusMessage) => void;
@@ -18,6 +21,10 @@ interface MessageState {
   setAgentFilter: (agentId: string | null) => void;
   loadHistory: (messages: BusMessage[]) => void;
   clearChat: () => void;
+  setCurrentConversation: (id: string | null) => void;
+  setConversations: (conversations: Conversation[]) => void;
+  addConversation: (conversation: Conversation) => void;
+  loadConversationMessages: (messages: BusMessage[]) => void;
 }
 
 export const useMessageStore = create<MessageState>((set) => ({
@@ -26,6 +33,8 @@ export const useMessageStore = create<MessageState>((set) => ({
   streamingContent: "",
   streamingMessageId: null,
   agentFilter: null,
+  currentConversationId: null,
+  conversations: [],
 
   addMessage: (message) =>
     set((state) => {
@@ -55,11 +64,11 @@ export const useMessageStore = create<MessageState>((set) => ({
       };
     }),
 
-  setCooResponse: (message) =>
-    set((state) => ({
+  setCooResponse: (_message) =>
+    set({
       streamingContent: "",
       streamingMessageId: null,
-    })),
+    }),
 
   appendCooStream: (token, messageId) =>
     set((state) => ({
@@ -86,6 +95,30 @@ export const useMessageStore = create<MessageState>((set) => ({
   clearChat: () =>
     set({
       chatMessages: [],
+      streamingContent: "",
+      streamingMessageId: null,
+      currentConversationId: null,
+    }),
+
+  setCurrentConversation: (id) =>
+    set({ currentConversationId: id }),
+
+  setConversations: (conversations) =>
+    set({ conversations }),
+
+  addConversation: (conversation) =>
+    set((state) => ({
+      conversations: [conversation, ...state.conversations],
+    })),
+
+  loadConversationMessages: (messages) =>
+    set({
+      chatMessages: messages.filter(
+        (m) =>
+          m.type === "chat" &&
+          (m.fromAgentId === null || m.fromAgentId === "coo") &&
+          (m.toAgentId === null || m.toAgentId === "coo"),
+      ),
       streamingContent: "",
       streamingMessageId: null,
     }),

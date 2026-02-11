@@ -17,5 +17,13 @@ export interface BusMessage {
   content: string;
   metadata: Record<string, unknown>;
   projectId?: string;
+  conversationId?: string;
   timestamp: string;
+}
+
+export interface Conversation {
+  id: string;
+  title: string;
+  createdAt: string;
+  updatedAt: string;
 }

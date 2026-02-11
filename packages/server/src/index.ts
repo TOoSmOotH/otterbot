@@ -359,6 +359,18 @@ async function main() {
     });
   });
 
+  // Conversations endpoint
+  app.get("/api/conversations", async () => {
+    const { getDb, schema } = await import("./db/index.js");
+    const { desc } = await import("drizzle-orm");
+    const db = getDb();
+    return db
+      .select()
+      .from(schema.conversations)
+      .orderBy(desc(schema.conversations.updatedAt))
+      .all();
+  });
+
   // Package manifest endpoints
   app.get("/api/packages", async () => {
     return listPackages();

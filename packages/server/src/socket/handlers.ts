@@ -3,8 +3,9 @@ import type {
   ServerToClientEvents,
   ClientToServerEvents,
 } from "@smoothbot/shared";
-import { MessageType, type Agent, type BusMessage } from "@smoothbot/shared";
-import { eq } from "drizzle-orm";
+import { MessageType, type Agent, type BusMessage, type Conversation } from "@smoothbot/shared";
+import { nanoid } from "nanoid";
+import { eq, desc } from "drizzle-orm";
 import type { MessageBus } from "../bus/message-bus.js";
 import type { COO } from "../agents/coo.js";
 import type { Registry } from "../registry/registry.js";
@@ -35,15 +36,41 @@ export function setupSocketHandlers(
 
     // CEO sends a message to the COO
     socket.on("ceo:message", (data, callback) => {
+      const db = getDb();
+      let conversationId = data.conversationId ?? coo.getCurrentConversationId();
+
+      // Lazy conversation creation: first message creates the conversation
+      if (!conversationId) {
+        conversationId = nanoid();
+        const now = new Date().toISOString();
+        const title = data.content.slice(0, 80);
+        const conversation: Conversation = {
+          id: conversationId,
+          title,
+          createdAt: now,
+          updatedAt: now,
+        };
+        db.insert(schema.conversations).values(conversation).run();
+        coo.startNewConversation(conversationId);
+        io.emit("conversation:created", conversation);
+      } else {
+        // Update the conversation's updatedAt
+        db.update(schema.conversations)
+          .set({ updatedAt: new Date().toISOString() })
+          .where(eq(schema.conversations.id, conversationId))
+          .run();
+      }
+
       const message = bus.send({
         fromAgentId: null, // CEO
         toAgentId: "coo",
         type: MessageType.Chat,
         content: data.content,
+        conversationId,
       });
 
       if (callback) {
-        callback({ messageId: message.id });
+        callback({ messageId: message.id, conversationId });
       }
     });
 
@@ -53,6 +80,24 @@ export function setupSocketHandlers(
       if (callback) {
         callback({ ok: true });
       }
+    });
+
+    // List all conversations
+    socket.on("ceo:list-conversations", (callback) => {
+      const db = getDb();
+      const conversations = db
+        .select()
+        .from(schema.conversations)
+        .orderBy(desc(schema.conversations.updatedAt))
+        .all();
+      callback(conversations as Conversation[]);
+    });
+
+    // Load a specific conversation
+    socket.on("ceo:load-conversation", (data, callback) => {
+      const messages = bus.getConversationMessages(data.conversationId);
+      coo.loadConversation(data.conversationId, messages);
+      callback({ messages });
     });
 
     // Request registry entries

@@ -48,6 +48,7 @@ export class COO extends BaseAgent {
   private workspace: WorkspaceManager;
   private onAgentSpawned?: (agent: BaseAgent) => void;
   private onStream?: (token: string, messageId: string) => void;
+  private currentConversationId: string | null = null;
 
   constructor(deps: COODependencies) {
     const options: AgentOptions = {
@@ -76,6 +77,11 @@ export class COO extends BaseAgent {
   }
 
   private async handleCeoMessage(message: BusMessage) {
+    // Track conversation from inbound message
+    if (message.conversationId) {
+      this.currentConversationId = message.conversationId;
+    }
+
     const response = await this.think(
       message.content,
       (token, messageId) => {
@@ -86,7 +92,13 @@ export class COO extends BaseAgent {
     );
 
     // Send the response back through the bus (to CEO / null)
-    this.sendMessage(null, MessageType.Chat, response);
+    this.sendMessage(
+      null,
+      MessageType.Chat,
+      response,
+      undefined,
+      this.currentConversationId ?? undefined,
+    );
   }
 
   private async handleTeamLeadReport(message: BusMessage) {
@@ -607,6 +619,35 @@ export class COO extends BaseAgent {
       default:
         return `Unknown action: ${action}`;
     }
+  }
+
+  /** Load a previous conversation by replaying persisted messages */
+  loadConversation(conversationId: string, messages: BusMessage[]) {
+    this.currentConversationId = conversationId;
+    this.conversationHistory = [
+      { role: "system", content: this.systemPrompt },
+    ];
+    for (const msg of messages) {
+      if (msg.type !== "chat") continue;
+      if (msg.fromAgentId === null) {
+        // CEO message
+        this.conversationHistory.push({ role: "user", content: msg.content });
+      } else if (msg.fromAgentId === "coo") {
+        // COO message
+        this.conversationHistory.push({ role: "assistant", content: msg.content });
+      }
+    }
+  }
+
+  /** Start a new conversation (sets ID, resets history) */
+  startNewConversation(conversationId: string) {
+    this.currentConversationId = conversationId;
+    this.resetConversation();
+  }
+
+  /** Get the current conversation ID */
+  getCurrentConversationId(): string | null {
+    return this.currentConversationId;
   }
 
   getTeamLeads(): Map<string, TeamLead> {

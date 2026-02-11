@@ -34,7 +34,19 @@ export const messages = sqliteTable("messages", {
     .$type<Record<string, unknown>>()
     .default({}),
   projectId: text("project_id"),
+  conversationId: text("conversation_id"),
   timestamp: text("timestamp")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+});
+
+export const conversations = sqliteTable("conversations", {
+  id: text("id").primaryKey(),
+  title: text("title").notNull(),
+  createdAt: text("created_at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+  updatedAt: text("updated_at")
     .notNull()
     .$defaultFn(() => new Date().toISOString()),
 });

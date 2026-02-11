@@ -62,8 +62,23 @@ export function migrateDb() {
     content TEXT NOT NULL,
     metadata TEXT DEFAULT '{}',
     project_id TEXT,
+    conversation_id TEXT,
     timestamp TEXT NOT NULL
   )`);
+
+  db.run(sql`CREATE TABLE IF NOT EXISTS conversations (
+    id TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  )`);
+
+  // Idempotent migration: add conversation_id to existing messages table
+  try {
+    db.run(sql`ALTER TABLE messages ADD COLUMN conversation_id TEXT`);
+  } catch {
+    // Column already exists — ignore
+  }
 
   db.run(sql`CREATE TABLE IF NOT EXISTS registry_entries (
     id TEXT PRIMARY KEY,

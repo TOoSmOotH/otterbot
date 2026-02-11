@@ -51,6 +51,7 @@ export default function App() {
 function MainApp() {
   const socket = useSocket();
   const loadHistory = useMessageStore((s) => s.loadHistory);
+  const setConversations = useMessageStore((s) => s.setConversations);
   const loadAgents = useAgentStore((s) => s.loadAgents);
   const logout = useAuthStore((s) => s.logout);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -65,6 +66,11 @@ function MainApp() {
     fetch("/api/agents")
       .then((r) => r.json())
       .then(loadAgents)
+      .catch(console.error);
+
+    fetch("/api/conversations")
+      .then((r) => r.json())
+      .then(setConversations)
       .catch(console.error);
   }, []);
 

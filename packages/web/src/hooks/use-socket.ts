@@ -8,6 +8,7 @@ export function useSocket() {
   const addMessage = useMessageStore((s) => s.addMessage);
   const setCooResponse = useMessageStore((s) => s.setCooResponse);
   const appendCooStream = useMessageStore((s) => s.appendCooStream);
+  const addConversation = useMessageStore((s) => s.addConversation);
   const addAgent = useAgentStore((s) => s.addAgent);
   const updateAgentStatus = useAgentStore((s) => s.updateAgentStatus);
   const removeAgent = useAgentStore((s) => s.removeAgent);
@@ -30,6 +31,10 @@ export function useSocket() {
       appendCooStream(token, messageId);
     });
 
+    socket.on("conversation:created", (conversation) => {
+      addConversation(conversation);
+    });
+
     socket.on("agent:spawned", (agent) => {
       addAgent(agent);
     });
@@ -46,6 +51,7 @@ export function useSocket() {
       socket.off("bus:message");
       socket.off("coo:response");
       socket.off("coo:stream");
+      socket.off("conversation:created");
       socket.off("agent:spawned");
       socket.off("agent:status");
       socket.off("agent:destroyed");

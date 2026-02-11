@@ -89,6 +89,7 @@ export abstract class BaseAgent {
     type: MessageType,
     content: string,
     metadata?: Record<string, unknown>,
+    conversationId?: string,
   ): BusMessage {
     return this.bus.send({
       fromAgentId: this.id,
@@ -97,6 +98,7 @@ export abstract class BaseAgent {
       content,
       metadata,
       projectId: this.projectId ?? undefined,
+      conversationId,
     });
   }
 
