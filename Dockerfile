@@ -18,7 +18,9 @@ RUN pnpm build
 
 # Production
 FROM base AS production
-RUN apt-get update && apt-get install -y --no-install-recommends tini git curl && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    tini git curl sudo gnupg apt-transport-https ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
 
 # Create non-root user with configurable UID/GID
 ARG SMOOTHBOT_UID=1000
@@ -28,6 +30,15 @@ ENV SMOOTHBOT_GID=${SMOOTHBOT_GID}
 RUN (getent group ${SMOOTHBOT_GID} || groupadd -g ${SMOOTHBOT_GID} smoothbot) \
     && useradd -u ${SMOOTHBOT_UID} -g ${SMOOTHBOT_GID} -m smoothbot 2>/dev/null \
     || useradd -u ${SMOOTHBOT_UID} -g ${SMOOTHBOT_GID} -m -o smoothbot
+
+# Allow smoothbot user to manage packages and repos without a password
+# - apt-get: install/remove packages
+# - npm: global installs
+# - tee: write repo source files to /etc/apt/sources.list.d/
+# - gpg: import repository signing keys
+# - install: create directories for keyrings (used by apt key management)
+RUN echo "smoothbot ALL=(root) NOPASSWD: /usr/bin/apt-get, /usr/local/bin/npm, /usr/bin/tee, /usr/bin/gpg, /usr/bin/install" > /etc/sudoers.d/smoothbot \
+    && chmod 0440 /etc/sudoers.d/smoothbot
 
 WORKDIR /app
 COPY --from=build /app/package.json /app/pnpm-workspace.yaml ./
@@ -65,9 +76,30 @@ find /smoothbot/home/.ssh -type f -exec chmod 600 {} + 2>/dev/null || true
 
 # ── Install packages from manifest ──────────────────────────────────
 # The COO agent (or user) writes /smoothbot/config/packages.json with
-# the structure: { "apt": [{"name":"..."}], "npm": [{"name":"...","version":"..."}] }
+# { "repos": [...], "apt": [{"name":"..."}], "npm": [{"name":"...","version":"..."}] }
 MANIFEST="/smoothbot/config/packages.json"
 if [ -f "$MANIFEST" ]; then
+  # Restore apt repositories (GPG keys + source lists)
+  node -e "
+    const m = JSON.parse(require('fs').readFileSync('$MANIFEST','utf-8'));
+    if (m.repos && m.repos.length) {
+      for (const r of m.repos) {
+        console.log(JSON.stringify(r));
+      }
+    }
+  " 2>/dev/null | while IFS= read -r repo; do
+    REPO_NAME=$(echo "$repo" | node -e "process.stdout.write(JSON.parse(require('fs').readFileSync('/dev/stdin','utf-8')).name)")
+    REPO_KEY_URL=$(echo "$repo" | node -e "process.stdout.write(JSON.parse(require('fs').readFileSync('/dev/stdin','utf-8')).keyUrl)")
+    REPO_KEY_PATH=$(echo "$repo" | node -e "process.stdout.write(JSON.parse(require('fs').readFileSync('/dev/stdin','utf-8')).keyPath)")
+    REPO_SOURCE=$(echo "$repo" | node -e "process.stdout.write(JSON.parse(require('fs').readFileSync('/dev/stdin','utf-8')).source)")
+    if [ ! -f "/etc/apt/sources.list.d/${REPO_NAME}.list" ]; then
+      echo "[smoothbot] Adding repo: $REPO_NAME"
+      install -m 0755 -d /etc/apt/keyrings
+      curl -fsSL "$REPO_KEY_URL" | gpg --dearmor -o "$REPO_KEY_PATH" 2>/dev/null || true
+      echo "$REPO_SOURCE" > "/etc/apt/sources.list.d/${REPO_NAME}.list"
+    fi
+  done
+
   # Install apt packages
   APT_PKGS=$(node -e "
     const m = JSON.parse(require('fs').readFileSync('$MANIFEST','utf-8'));

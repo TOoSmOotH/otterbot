@@ -17,11 +17,13 @@ import type { WorkspaceManager } from "../workspace/workspace.js";
 import { eq } from "drizzle-orm";
 import { getConfig } from "../auth/auth.js";
 import {
-  addAptPackage,
-  removeAptPackage,
-  addNpmPackage,
-  removeNpmPackage,
   listPackages,
+  installAptPackage,
+  uninstallAptPackage,
+  installNpmPackage,
+  uninstallNpmPackage,
+  installRepo,
+  uninstallRepo,
 } from "../packages/packages.js";
 
 export interface COODependencies {
@@ -137,27 +139,50 @@ export class COO extends BaseAgent {
       }),
       manage_packages: tool({
         description:
-          "Manage system packages that are installed in the Docker container. " +
-          "Supports both OS-level (apt) and npm global packages. " +
-          "Changes take effect on the next container restart. " +
-          "npm packages persist across restarts; apt packages are reinstalled each start.",
+          "Manage system packages and apt repositories in the Docker container. " +
+          "Supports OS-level (apt) packages, npm global packages, and apt repository sources. " +
+          "Everything is installed immediately (no restart needed) and saved to the manifest " +
+          "so it persists across container restarts.",
         parameters: z.object({
           action: z
-            .enum(["add_apt", "remove_apt", "add_npm", "remove_npm", "list"])
+            .enum([
+              "add_apt", "remove_apt",
+              "add_npm", "remove_npm",
+              "add_repo", "remove_repo",
+              "list",
+            ])
             .describe(
-              "Action to perform: add/remove an apt or npm package, or list all packages",
+              "Action to perform. add_repo requires repo_name, repo_source, repo_key_url, and repo_key_path.",
             ),
           package_name: z
             .string()
             .optional()
-            .describe("Package name (required for add/remove actions)"),
+            .describe("Package name (required for apt/npm add/remove actions)"),
           version: z
             .string()
             .optional()
             .describe("Version specifier for npm packages (e.g. 'latest', '^1.0.0')"),
+          repo_name: z
+            .string()
+            .optional()
+            .describe("Short repo identifier, e.g. 'nodesource' or 'docker' (required for repo actions)"),
+          repo_source: z
+            .string()
+            .optional()
+            .describe(
+              "Full deb source line, e.g. 'deb [signed-by=/etc/apt/keyrings/example.gpg] https://example.com/apt stable main'",
+            ),
+          repo_key_url: z
+            .string()
+            .optional()
+            .describe("URL to the GPG signing key, e.g. 'https://example.com/gpg-key.asc'"),
+          repo_key_path: z
+            .string()
+            .optional()
+            .describe("Path to store the dearmored key, e.g. '/etc/apt/keyrings/example.gpg'"),
         }),
-        execute: async ({ action, package_name, version }) => {
-          return this.managePackages(action, package_name, version);
+        execute: async (args) => {
+          return this.managePackages(args);
         },
       }),
     };
@@ -242,17 +267,29 @@ export class COO extends BaseAgent {
       .join("\n");
   }
 
-  private managePackages(
-    action: string,
-    packageName?: string,
-    version?: string,
-  ): string {
+  private managePackages(args: {
+    action: string;
+    package_name?: string;
+    version?: string;
+    repo_name?: string;
+    repo_source?: string;
+    repo_key_url?: string;
+    repo_key_path?: string;
+  }): string {
+    const { action, package_name: packageName, version } = args;
+
     if (action === "list") {
       const manifest = listPackages();
-      if (manifest.apt.length === 0 && manifest.npm.length === 0) {
-        return "No packages configured. Use add_apt or add_npm to add packages.";
+      if (manifest.apt.length === 0 && manifest.npm.length === 0 && manifest.repos.length === 0) {
+        return "No packages or repos configured.";
       }
       const lines: string[] = [];
+      if (manifest.repos.length > 0) {
+        lines.push("**APT repositories:**");
+        for (const r of manifest.repos) {
+          lines.push(`- ${r.name}: ${r.source}`);
+        }
+      }
       if (manifest.apt.length > 0) {
         lines.push("**APT packages:**");
         for (const p of manifest.apt) {
@@ -266,38 +303,80 @@ export class COO extends BaseAgent {
           lines.push(`- ${p.name}${ver} (added by ${p.addedBy ?? "unknown"})`);
         }
       }
-      lines.push("\nNote: Changes take effect on next container restart.");
       return lines.join("\n");
     }
 
+    // Repo actions
+    if (action === "add_repo") {
+      const { repo_name, repo_source, repo_key_url, repo_key_path } = args;
+      if (!repo_name || !repo_source || !repo_key_url || !repo_key_path) {
+        return "Error: repo_name, repo_source, repo_key_url, and repo_key_path are all required for add_repo.";
+      }
+      const result = installRepo({
+        name: repo_name,
+        source: repo_source,
+        keyUrl: repo_key_url,
+        keyPath: repo_key_path,
+        addedBy: "coo",
+      });
+      if (!result.success) {
+        return `Failed to add repo "${repo_name}": ${result.error}`;
+      }
+      return result.alreadyInManifest
+        ? `Repo "${repo_name}" was already configured.`
+        : `Added repo "${repo_name}" and updated apt cache.`;
+    }
+
+    if (action === "remove_repo") {
+      const { repo_name } = args;
+      if (!repo_name) {
+        return "Error: repo_name is required for remove_repo.";
+      }
+      const result = uninstallRepo(repo_name);
+      if (!result.success) {
+        return `Failed to remove repo "${repo_name}": ${result.error}`;
+      }
+      return `Removed repo "${repo_name}".`;
+    }
+
+    // Package actions
     if (!packageName) {
-      return "Error: package_name is required for add/remove actions.";
+      return "Error: package_name is required for add/remove package actions.";
     }
 
     switch (action) {
       case "add_apt": {
-        const added = addAptPackage(packageName, "coo");
-        return added
-          ? `Added apt package "${packageName}" to manifest. Will be installed on next container restart.`
-          : `Apt package "${packageName}" is already in the manifest.`;
+        const result = installAptPackage(packageName, "coo");
+        if (!result.success) {
+          return `Failed to install apt package "${packageName}": ${result.error}`;
+        }
+        return result.alreadyInManifest
+          ? `Apt package "${packageName}" was already in the manifest and is installed.`
+          : `Installed apt package "${packageName}" and added to manifest.`;
       }
       case "remove_apt": {
-        const removed = removeAptPackage(packageName);
-        return removed
-          ? `Removed apt package "${packageName}" from manifest.`
-          : `Apt package "${packageName}" was not found in the manifest.`;
+        const result = uninstallAptPackage(packageName);
+        if (!result.success) {
+          return `Failed to remove apt package "${packageName}": ${result.error}`;
+        }
+        return `Removed apt package "${packageName}".`;
       }
       case "add_npm": {
-        const added = addNpmPackage(packageName, version, "coo");
-        return added
-          ? `Added npm package "${packageName}"${version ? `@${version}` : ""} to manifest. Will be installed on next container restart.`
-          : `Npm package "${packageName}" is already in the manifest.`;
+        const result = installNpmPackage(packageName, version, "coo");
+        if (!result.success) {
+          return `Failed to install npm package "${packageName}": ${result.error}`;
+        }
+        const ver = version ? `@${version}` : "";
+        return result.alreadyInManifest
+          ? `Npm package "${packageName}${ver}" was already in the manifest and is installed.`
+          : `Installed npm package "${packageName}${ver}" and added to manifest.`;
       }
       case "remove_npm": {
-        const removed = removeNpmPackage(packageName);
-        return removed
-          ? `Removed npm package "${packageName}" from manifest.`
-          : `Npm package "${packageName}" was not found in the manifest.`;
+        const result = uninstallNpmPackage(packageName);
+        if (!result.success) {
+          return `Failed to remove npm package "${packageName}": ${result.error}`;
+        }
+        return `Removed npm package "${packageName}".`;
       }
       default:
         return `Unknown action: ${action}`;

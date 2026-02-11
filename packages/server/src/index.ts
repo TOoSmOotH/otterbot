@@ -36,10 +36,12 @@ import {
 } from "./auth/auth.js";
 import {
   listPackages,
-  addAptPackage,
-  removeAptPackage,
-  addNpmPackage,
-  removeNpmPackage,
+  installAptPackage,
+  uninstallAptPackage,
+  installNpmPackage,
+  uninstallNpmPackage,
+  installRepo,
+  uninstallRepo,
 } from "./packages/packages.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -337,43 +339,84 @@ async function main() {
   });
 
   app.post<{
-    Body: { type: "apt" | "npm"; name: string; version?: string };
+    Body: {
+      type: "apt" | "npm" | "repo";
+      name: string;
+      version?: string;
+      source?: string;
+      keyUrl?: string;
+      keyPath?: string;
+    };
   }>("/api/packages", async (req, reply) => {
-    const { type, name, version } = req.body;
+    const { type, name, version, source, keyUrl, keyPath } = req.body;
     if (!type || !name) {
       reply.code(400);
       return { error: "type and name are required" };
     }
-    let added: boolean;
     if (type === "apt") {
-      added = addAptPackage(name, "user");
+      const result = installAptPackage(name, "user");
+      if (!result.success) {
+        reply.code(500);
+        return { error: result.error };
+      }
+      return { ok: true, installed: true, alreadyInManifest: result.alreadyInManifest };
     } else if (type === "npm") {
-      added = addNpmPackage(name, version, "user");
+      const result = installNpmPackage(name, version, "user");
+      if (!result.success) {
+        reply.code(500);
+        return { error: result.error };
+      }
+      return { ok: true, installed: true, alreadyInManifest: result.alreadyInManifest };
+    } else if (type === "repo") {
+      if (!source || !keyUrl || !keyPath) {
+        reply.code(400);
+        return { error: "source, keyUrl, and keyPath are required for repo type" };
+      }
+      const result = installRepo({ name, source, keyUrl, keyPath, addedBy: "user" });
+      if (!result.success) {
+        reply.code(500);
+        return { error: result.error };
+      }
+      return { ok: true, installed: true, alreadyInManifest: result.alreadyInManifest };
     } else {
       reply.code(400);
-      return { error: 'type must be "apt" or "npm"' };
+      return { error: 'type must be "apt", "npm", or "repo"' };
     }
-    return { ok: true, added };
   });
 
   app.delete<{
-    Body: { type: "apt" | "npm"; name: string };
+    Body: { type: "apt" | "npm" | "repo"; name: string };
   }>("/api/packages", async (req, reply) => {
     const { type, name } = req.body;
     if (!type || !name) {
       reply.code(400);
       return { error: "type and name are required" };
     }
-    let removed: boolean;
     if (type === "apt") {
-      removed = removeAptPackage(name);
+      const result = uninstallAptPackage(name);
+      if (!result.success) {
+        reply.code(500);
+        return { error: result.error };
+      }
+      return { ok: true, removed: true };
     } else if (type === "npm") {
-      removed = removeNpmPackage(name);
+      const result = uninstallNpmPackage(name);
+      if (!result.success) {
+        reply.code(500);
+        return { error: result.error };
+      }
+      return { ok: true, removed: true };
+    } else if (type === "repo") {
+      const result = uninstallRepo(name);
+      if (!result.success) {
+        reply.code(500);
+        return { error: result.error };
+      }
+      return { ok: true, removed: true };
     } else {
       reply.code(400);
-      return { error: 'type must be "apt" or "npm"' };
+      return { error: 'type must be "apt", "npm", or "repo"' };
     }
-    return { ok: true, removed };
   });
 
   // Agent list endpoint
