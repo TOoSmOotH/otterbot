@@ -23,7 +23,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends tini && rm -rf 
 # Create non-root user with configurable UID/GID
 ARG SMOOTHBOT_UID=1000
 ARG SMOOTHBOT_GID=1000
-RUN groupadd -g ${SMOOTHBOT_GID} smoothbot && useradd -u ${SMOOTHBOT_UID} -g smoothbot -m smoothbot
+RUN (getent group ${SMOOTHBOT_GID} || groupadd -g ${SMOOTHBOT_GID} smoothbot) \
+    && useradd -u ${SMOOTHBOT_UID} -g ${SMOOTHBOT_GID} -m smoothbot 2>/dev/null \
+    || useradd -u ${SMOOTHBOT_UID} -g ${SMOOTHBOT_GID} -m -o smoothbot
 
 WORKDIR /app
 COPY --from=build /app/package.json /app/pnpm-workspace.yaml ./
