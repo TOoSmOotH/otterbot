@@ -57,7 +57,7 @@ COPY --from=build /app/packages/web/dist ./packages/web/dist
 COPY --from=build /app/packages/web/package.json ./packages/web/
 
 # Install Playwright Chromium browser (headless, for agent web browsing)
-RUN npx playwright install chromium
+RUN node packages/server/node_modules/playwright/cli.js install chromium
 
 # Create data directories (use numeric UID:GID since group name may differ)
 RUN mkdir -p /smoothbot/config /smoothbot/data /smoothbot/projects /smoothbot/logs /smoothbot/home \
