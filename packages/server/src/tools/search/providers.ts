@@ -45,7 +45,12 @@ class SearXNGProvider implements SearchProvider {
       signal: AbortSignal.timeout(15_000),
     });
     if (!res.ok) {
-      throw new Error(`SearXNG returned ${res.status}: ${res.statusText}`);
+      let detail = res.statusText;
+      try {
+        const body = await res.text();
+        if (body) detail = body.slice(0, 200);
+      } catch {}
+      throw new Error(`SearXNG returned ${res.status}: ${detail}`);
     }
 
     const data = (await res.json()) as {
@@ -80,12 +85,18 @@ class BraveSearchProvider implements SearchProvider {
     const res = await fetch(url.toString(), {
       headers: {
         Accept: "application/json",
+        "Accept-Encoding": "gzip",
         "X-Subscription-Token": this.apiKey,
       },
       signal: AbortSignal.timeout(15_000),
     });
     if (!res.ok) {
-      throw new Error(`Brave Search returned ${res.status}: ${res.statusText}`);
+      let detail = res.statusText;
+      try {
+        const body = await res.text();
+        if (body) detail = body.slice(0, 200);
+      } catch {}
+      throw new Error(`Brave Search returned ${res.status}: ${detail}`);
     }
 
     const data = (await res.json()) as {
@@ -130,7 +141,12 @@ class TavilyProvider implements SearchProvider {
       signal: AbortSignal.timeout(15_000),
     });
     if (!res.ok) {
-      throw new Error(`Tavily returned ${res.status}: ${res.statusText}`);
+      let detail = res.statusText;
+      try {
+        const body = await res.text();
+        if (body) detail = body.slice(0, 200);
+      } catch {}
+      throw new Error(`Tavily returned ${res.status}: ${detail}`);
     }
 
     const data = (await res.json()) as {
