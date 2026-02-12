@@ -20,10 +20,19 @@ export const useModelPackStore = create<ModelPackState>((set, get) => ({
     set({ loading: true });
     try {
       const res = await fetch("/api/model-packs");
+      if (!res.ok) {
+        console.error("[model-pack-store] fetch failed:", res.status, res.statusText);
+        return;
+      }
       const data = await res.json();
+      if (!Array.isArray(data)) {
+        console.error("[model-pack-store] unexpected response:", data);
+        return;
+      }
+      console.log("[model-pack-store] loaded", data.length, "packs");
       set({ packs: data, loaded: true });
-    } catch {
-      // silently fail
+    } catch (err) {
+      console.error("[model-pack-store] error:", err);
     } finally {
       set({ loading: false });
     }

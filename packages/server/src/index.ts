@@ -306,7 +306,9 @@ async function main() {
   // --- Model Packs (public for setup wizard) ---
 
   app.get("/api/model-packs", async () => {
-    return discoverModelPacks(assetsRoot);
+    const packs = discoverModelPacks(assetsRoot);
+    console.log(`GET /api/model-packs → ${packs.length} packs found`);
+    return packs;
   });
 
   app.post<{
