@@ -5,14 +5,16 @@ import { ProvidersTab } from "./ProvidersTab";
 import { ModelsTab } from "./ModelsTab";
 import { AgentTemplatesTab } from "./AgentTemplatesTab";
 import { SearchTab } from "./SearchTab";
+import { SpeechTab } from "./SpeechTab";
 
-type Tab = "providers" | "models" | "templates" | "search";
+type Tab = "providers" | "models" | "templates" | "search" | "speech";
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "providers", label: "Providers" },
   { id: "models", label: "Models" },
   { id: "templates", label: "Agent Templates" },
   { id: "search", label: "Search" },
+  { id: "speech", label: "Speech" },
 ];
 
 export function SettingsPanel({ onClose }: { onClose: () => void }) {
@@ -71,6 +73,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
               {activeTab === "models" && <ModelsTab />}
               {activeTab === "templates" && <AgentTemplatesTab />}
               {activeTab === "search" && <SearchTab />}
+              {activeTab === "speech" && <SpeechTab />}
             </>
           )}
         </div>

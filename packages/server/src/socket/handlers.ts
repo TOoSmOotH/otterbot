@@ -11,6 +11,8 @@ import type { COO } from "../agents/coo.js";
 import type { Registry } from "../registry/registry.js";
 import type { BaseAgent } from "../agents/agent.js";
 import { getDb, schema } from "../db/index.js";
+import { isTTSEnabled, getConfiguredTTSProvider } from "../tts/tts.js";
+import { getConfig } from "../auth/auth.js";
 
 type TypedSocket = Socket<ClientToServerEvents, ServerToClientEvents>;
 type TypedServer = Server<ClientToServerEvents, ServerToClientEvents>;
@@ -22,12 +24,35 @@ export function setupSocketHandlers(
   registry: Registry,
 ) {
   // Broadcast all bus messages to connected clients
-  bus.onBroadcast((message: BusMessage) => {
+  bus.onBroadcast(async (message: BusMessage) => {
     io.emit("bus:message", message);
 
     // If the message is from COO to CEO (null), also emit as coo:response
     if (message.fromAgentId === "coo" && message.toAgentId === null) {
       io.emit("coo:response", message);
+
+      // TTS: synthesize and emit audio (best-effort, never blocks text)
+      try {
+        if (isTTSEnabled()) {
+          const provider = getConfiguredTTSProvider();
+          if (provider && message.content) {
+            const voice = getConfig("tts:voice") ?? "af_heart";
+            const speed = parseFloat(getConfig("tts:speed") ?? "1");
+            const { audio, contentType } = await provider.synthesize(
+              message.content,
+              voice,
+              speed,
+            );
+            io.emit("coo:audio", {
+              messageId: message.id,
+              audio: audio.toString("base64"),
+              contentType,
+            });
+          }
+        }
+      } catch (err) {
+        console.error("TTS synthesis failed:", err);
+      }
     }
   });
 

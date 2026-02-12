@@ -12,6 +12,7 @@ import {
 import { resolveModel, type LLMConfig } from "../llm/adapter.js";
 import { generateText } from "ai";
 import { getConfiguredSearchProvider } from "../tools/search/providers.js";
+import { getConfiguredTTSProvider } from "../tts/tts.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -498,6 +499,168 @@ export async function testSearchProvider(
       setConfig("search:active_provider", previousActive);
     } else {
       deleteConfig("search:active_provider");
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// TTS settings
+// ---------------------------------------------------------------------------
+
+export interface TTSProviderConfig {
+  id: string;
+  name: string;
+  needsApiKey: boolean;
+  needsBaseUrl: boolean;
+  apiKey?: string;
+  apiKeySet: boolean;
+  baseUrl?: string;
+  voices: string[];
+}
+
+export interface TTSSettingsResponse {
+  enabled: boolean;
+  activeProvider: string | null;
+  voice: string;
+  speed: number;
+  providers: TTSProviderConfig[];
+}
+
+const TTS_PROVIDER_META: Record<
+  string,
+  { name: string; needsApiKey: boolean; needsBaseUrl: boolean }
+> = {
+  kokoro: { name: "Kokoro", needsApiKey: false, needsBaseUrl: false },
+  "openai-compatible": {
+    name: "OpenAI-compatible",
+    needsApiKey: true,
+    needsBaseUrl: true,
+  },
+};
+
+const TTS_VOICES: Record<string, string[]> = {
+  kokoro: [
+    "af_heart",
+    "af_bella",
+    "af_nicole",
+    "af_aoede",
+    "af_kore",
+    "af_sarah",
+    "af_sky",
+    "am_adam",
+    "am_michael",
+    "am_echo",
+    "am_eric",
+    "am_liam",
+    "am_onyx",
+  ],
+  "openai-compatible": [
+    "alloy",
+    "echo",
+    "fable",
+    "onyx",
+    "nova",
+    "shimmer",
+  ],
+};
+
+export function getTTSSettings(): TTSSettingsResponse {
+  const enabled = getConfig("tts:enabled") === "true";
+  const activeProvider = getConfig("tts:active_provider") ?? null;
+  const voice = getConfig("tts:voice") ?? "af_heart";
+  const speed = parseFloat(getConfig("tts:speed") ?? "1");
+
+  const providers = Object.entries(TTS_PROVIDER_META).map(([id, meta]) => {
+    const rawKey = getConfig(`tts:${id}:api_key`);
+    const baseUrl = getConfig(`tts:${id}:base_url`);
+
+    return {
+      id,
+      name: meta.name,
+      needsApiKey: meta.needsApiKey,
+      needsBaseUrl: meta.needsBaseUrl,
+      apiKey: maskApiKey(rawKey),
+      apiKeySet: !!rawKey,
+      baseUrl: baseUrl || undefined,
+      voices: TTS_VOICES[id] ?? [],
+    } satisfies TTSProviderConfig;
+  });
+
+  return { enabled, activeProvider, voice, speed, providers };
+}
+
+export function updateTTSProviderConfig(
+  providerId: string,
+  data: { apiKey?: string; baseUrl?: string },
+): void {
+  if (data.apiKey !== undefined) {
+    if (data.apiKey === "") {
+      deleteConfig(`tts:${providerId}:api_key`);
+    } else {
+      setConfig(`tts:${providerId}:api_key`, data.apiKey);
+    }
+  }
+  if (data.baseUrl !== undefined) {
+    if (data.baseUrl === "") {
+      deleteConfig(`tts:${providerId}:base_url`);
+    } else {
+      setConfig(`tts:${providerId}:base_url`, data.baseUrl);
+    }
+  }
+}
+
+export function setActiveTTSProvider(providerId: string | null): void {
+  if (!providerId) {
+    deleteConfig("tts:active_provider");
+  } else {
+    setConfig("tts:active_provider", providerId);
+  }
+}
+
+export function setTTSEnabled(enabled: boolean): void {
+  setConfig("tts:enabled", enabled ? "true" : "false");
+}
+
+export function setTTSVoice(voice: string): void {
+  setConfig("tts:voice", voice);
+}
+
+export function setTTSSpeed(speed: number): void {
+  setConfig("tts:speed", String(speed));
+}
+
+export async function testTTSProvider(
+  providerId: string,
+): Promise<TestResult> {
+  const start = Date.now();
+
+  // Temporarily set active provider so factory picks it up
+  const previousActive = getConfig("tts:active_provider");
+  setConfig("tts:active_provider", providerId);
+
+  try {
+    const provider = getConfiguredTTSProvider();
+    if (!provider) {
+      return {
+        ok: false,
+        error: `Provider "${providerId}" is not configured.`,
+      };
+    }
+
+    const voice = getConfig("tts:voice") ?? "af_heart";
+    const speed = parseFloat(getConfig("tts:speed") ?? "1");
+    await provider.synthesize("Hello, this is a test.", voice, speed);
+    return { ok: true, latencyMs: Date.now() - start };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "Unknown error",
+    };
+  } finally {
+    if (previousActive) {
+      setConfig("tts:active_provider", previousActive);
+    } else {
+      deleteConfig("tts:active_provider");
     }
   }
 }

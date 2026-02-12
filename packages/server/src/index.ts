@@ -56,6 +56,13 @@ import {
   updateSearchProviderConfig,
   setActiveSearchProvider,
   testSearchProvider,
+  getTTSSettings,
+  updateTTSProviderConfig,
+  setActiveTTSProvider,
+  setTTSEnabled,
+  setTTSVoice,
+  setTTSSpeed,
+  testTTSProvider,
   type TierDefaults,
 } from "./settings/settings.js";
 
@@ -217,6 +224,7 @@ async function main() {
       userAvatar?: string;
       userBio?: string;
       userTimezone: string;
+      ttsVoice?: string;
     };
   }>("/api/setup/complete", async (req, reply) => {
     if (isSetupComplete()) {
@@ -224,7 +232,7 @@ async function main() {
       return { error: "Setup already completed" };
     }
 
-    const { passphrase, provider, model, apiKey, baseUrl, userName, userAvatar, userBio, userTimezone } = req.body;
+    const { passphrase, provider, model, apiKey, baseUrl, userName, userAvatar, userBio, userTimezone, ttsVoice } = req.body;
 
     if (!passphrase || passphrase.length < 8) {
       reply.code(400);
@@ -264,6 +272,13 @@ async function main() {
     }
     if (userBio) {
       setConfig("user_bio", userBio.trim());
+    }
+
+    // Store TTS preference
+    if (ttsVoice) {
+      setConfig("tts:enabled", "true");
+      setConfig("tts:active_provider", "kokoro");
+      setConfig("tts:voice", ttsVoice);
     }
 
     // Create session
@@ -610,6 +625,56 @@ async function main() {
     Params: { providerId: string };
   }>("/api/settings/search/provider/:providerId/test", async (req) => {
     return testSearchProvider(req.params.providerId);
+  });
+
+  // =========================================================================
+  // TTS settings routes
+  // =========================================================================
+
+  app.get("/api/settings/tts", async () => {
+    return getTTSSettings();
+  });
+
+  app.put<{
+    Body: { enabled: boolean };
+  }>("/api/settings/tts/enabled", async (req) => {
+    setTTSEnabled(req.body.enabled);
+    return { ok: true };
+  });
+
+  app.put<{
+    Body: { providerId: string | null };
+  }>("/api/settings/tts/active", async (req) => {
+    setActiveTTSProvider(req.body.providerId);
+    return { ok: true };
+  });
+
+  app.put<{
+    Body: { voice: string };
+  }>("/api/settings/tts/voice", async (req) => {
+    setTTSVoice(req.body.voice);
+    return { ok: true };
+  });
+
+  app.put<{
+    Body: { speed: number };
+  }>("/api/settings/tts/speed", async (req) => {
+    setTTSSpeed(req.body.speed);
+    return { ok: true };
+  });
+
+  app.put<{
+    Params: { providerId: string };
+    Body: { apiKey?: string; baseUrl?: string };
+  }>("/api/settings/tts/provider/:providerId", async (req) => {
+    updateTTSProviderConfig(req.params.providerId, req.body);
+    return { ok: true };
+  });
+
+  app.post<{
+    Params: { providerId: string };
+  }>("/api/settings/tts/provider/:providerId/test", async (req) => {
+    return testTTSProvider(req.params.providerId);
   });
 
   // SPA fallback for client-side routing

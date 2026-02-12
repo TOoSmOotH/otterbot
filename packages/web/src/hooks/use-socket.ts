@@ -31,6 +31,23 @@ export function useSocket() {
       appendCooStream(token, messageId);
     });
 
+    socket.on("coo:audio", ({ audio, contentType }) => {
+      // Only play if speaker is toggled on
+      if (localStorage.getItem("smoothbot:speaker") !== "true") return;
+      try {
+        const bytes = atob(audio);
+        const arr = new Uint8Array(bytes.length);
+        for (let i = 0; i < bytes.length; i++) arr[i] = bytes.charCodeAt(i);
+        const blob = new Blob([arr], { type: contentType });
+        const url = URL.createObjectURL(blob);
+        const player = new Audio(url);
+        player.addEventListener("ended", () => URL.revokeObjectURL(url));
+        player.play().catch(() => URL.revokeObjectURL(url));
+      } catch {
+        // Best-effort audio playback
+      }
+    });
+
     socket.on("conversation:created", (conversation) => {
       addConversation(conversation);
     });
@@ -51,6 +68,7 @@ export function useSocket() {
       socket.off("bus:message");
       socket.off("coo:response");
       socket.off("coo:stream");
+      socket.off("coo:audio");
       socket.off("conversation:created");
       socket.off("agent:spawned");
       socket.off("agent:status");

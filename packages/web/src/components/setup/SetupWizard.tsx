@@ -74,6 +74,10 @@ export function SetupWizard() {
   const [draggingOver, setDraggingOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Step 4: Voice
+  const [ttsVoice, setTtsVoice] = useState<string | null>(null);
+  const [previewingVoice, setPreviewingVoice] = useState(false);
+
   const probeModels = useCallback(async (prov: string, key: string, url: string) => {
     const needsKey = NEEDS_API_KEY.has(prov);
     const needsUrl = NEEDS_BASE_URL.has(prov);
@@ -183,7 +187,7 @@ export function SetupWizard() {
     }
   };
 
-  const handleComplete = async () => {
+  const handleNextToVoice = () => {
     if (!displayName.trim()) {
       setError("Display name is required");
       return;
@@ -192,7 +196,11 @@ export function SetupWizard() {
       setError("Timezone is required");
       return;
     }
+    setError(null);
+    setStep(4);
+  };
 
+  const handleComplete = async () => {
     setSubmitting(true);
     await completeSetup({
       passphrase,
@@ -204,8 +212,40 @@ export function SetupWizard() {
       userAvatar: avatar || undefined,
       userBio: bio.trim() || undefined,
       userTimezone: timezone,
+      ttsVoice: ttsVoice || undefined,
     });
     setSubmitting(false);
+  };
+
+  const handlePreviewVoice = async (voice: string) => {
+    setPreviewingVoice(true);
+    try {
+      // Temporarily set the voice so the test uses it
+      await fetch("/api/settings/tts/voice", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ voice }),
+      });
+      const res = await fetch("/api/settings/tts/provider/kokoro/test", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      // The test endpoint just checks connectivity — for preview we need
+      // the actual audio. Use a different approach: synthesize directly.
+      // Since the test endpoint doesn't return audio, we'll just show
+      // the test result for now and play audio once connected.
+      if (res.ok) {
+        const data = await res.json();
+        if (!data.ok) {
+          setError(data.error ?? "Preview failed");
+        }
+      }
+    } catch {
+      setError("Failed to preview voice");
+    } finally {
+      setPreviewingVoice(false);
+    }
   };
 
   return (
@@ -239,6 +279,12 @@ export function SetupWizard() {
             />
             <div
               className={`w-2 h-2 rounded-full ${step >= 3 ? "bg-primary" : "bg-muted"}`}
+            />
+            <div
+              className={`w-8 h-px ${step >= 4 ? "bg-primary" : "bg-muted"}`}
+            />
+            <div
+              className={`w-2 h-2 rounded-full ${step >= 4 ? "bg-primary" : "bg-muted"}`}
             />
           </div>
 
@@ -572,13 +618,117 @@ export function SetupWizard() {
                   Back
                 </button>
                 <button
-                  onClick={handleComplete}
-                  disabled={!displayName.trim() || !timezone || submitting}
+                  onClick={handleNextToVoice}
+                  disabled={!displayName.trim() || !timezone}
                   className="flex-1 px-4 py-2 bg-primary text-primary-foreground text-sm font-medium rounded-md hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                 >
-                  {submitting ? "Setting up..." : "Complete Setup"}
+                  Next
                 </button>
               </div>
+            </div>
+          )}
+
+          {step === 4 && (
+            <div className="space-y-4">
+              <h2 className="text-sm font-medium">
+                4. Choose a voice for your assistant
+              </h2>
+              <p className="text-xs text-muted-foreground">
+                Your assistant can speak its responses aloud. Pick a voice, or
+                skip to use text only.
+              </p>
+
+              {/* Voice grid */}
+              <div>
+                <p className="text-[10px] text-muted-foreground uppercase tracking-wider mb-2">
+                  Female voices
+                </p>
+                <div className="grid grid-cols-3 gap-1.5 mb-3">
+                  {[
+                    "af_heart",
+                    "af_bella",
+                    "af_nicole",
+                    "af_aoede",
+                    "af_kore",
+                    "af_sarah",
+                    "af_sky",
+                  ].map((v) => (
+                    <button
+                      key={v}
+                      onClick={() => setTtsVoice(v)}
+                      className={`px-2 py-1.5 rounded-md border text-xs transition-colors ${
+                        ttsVoice === v
+                          ? "border-primary bg-primary/10 text-foreground"
+                          : "border-border text-muted-foreground hover:border-muted-foreground hover:text-foreground"
+                      }`}
+                    >
+                      {v.replace("af_", "")}
+                    </button>
+                  ))}
+                </div>
+
+                <p className="text-[10px] text-muted-foreground uppercase tracking-wider mb-2">
+                  Male voices
+                </p>
+                <div className="grid grid-cols-3 gap-1.5">
+                  {[
+                    "am_adam",
+                    "am_michael",
+                    "am_echo",
+                    "am_eric",
+                    "am_liam",
+                    "am_onyx",
+                  ].map((v) => (
+                    <button
+                      key={v}
+                      onClick={() => setTtsVoice(v)}
+                      className={`px-2 py-1.5 rounded-md border text-xs transition-colors ${
+                        ttsVoice === v
+                          ? "border-primary bg-primary/10 text-foreground"
+                          : "border-border text-muted-foreground hover:border-muted-foreground hover:text-foreground"
+                      }`}
+                    >
+                      {v.replace("am_", "")}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {error && <p className="text-sm text-destructive">{error}</p>}
+
+              <div className="flex gap-2">
+                <button
+                  onClick={() => {
+                    setStep(3);
+                    setError(null);
+                  }}
+                  className="px-4 py-2 bg-secondary text-secondary-foreground text-sm font-medium rounded-md hover:bg-secondary/80 transition-colors"
+                >
+                  Back
+                </button>
+                <button
+                  onClick={handleComplete}
+                  disabled={submitting}
+                  className="flex-1 px-4 py-2 bg-primary text-primary-foreground text-sm font-medium rounded-md hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                  {submitting
+                    ? "Setting up..."
+                    : ttsVoice
+                      ? "Complete Setup"
+                      : "Complete Setup"}
+                </button>
+              </div>
+
+              <button
+                onClick={() => {
+                  setTtsVoice(null);
+                  handleComplete();
+                }}
+                disabled={submitting}
+                className="w-full text-xs text-muted-foreground hover:text-foreground transition-colors"
+              >
+                Skip — text only
+              </button>
             </div>
           )}
         </div>

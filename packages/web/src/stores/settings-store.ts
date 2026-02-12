@@ -36,6 +36,17 @@ export interface SearchProviderConfig {
   baseUrl?: string;
 }
 
+export interface TTSProviderConfig {
+  id: string;
+  name: string;
+  needsApiKey: boolean;
+  needsBaseUrl: boolean;
+  apiKey?: string;
+  apiKeySet: boolean;
+  baseUrl?: string;
+  voices: string[];
+}
+
 interface SettingsState {
   providers: ProviderConfig[];
   defaults: TierDefaults;
@@ -48,6 +59,14 @@ interface SettingsState {
   searchProviders: SearchProviderConfig[];
   activeSearchProvider: string | null;
   searchTestResults: Record<string, TestResult>;
+
+  // TTS
+  ttsEnabled: boolean;
+  ttsProviders: TTSProviderConfig[];
+  activeTTSProvider: string | null;
+  ttsVoice: string;
+  ttsSpeed: number;
+  ttsTestResults: Record<string, TestResult>;
 
   loadSettings: () => Promise<void>;
   updateProvider: (
@@ -66,6 +85,18 @@ interface SettingsState {
   ) => Promise<void>;
   setActiveSearchProvider: (id: string | null) => Promise<void>;
   testSearchProvider: (id: string) => Promise<void>;
+
+  // TTS actions
+  loadTTSSettings: () => Promise<void>;
+  setTTSEnabled: (enabled: boolean) => Promise<void>;
+  setActiveTTSProvider: (id: string | null) => Promise<void>;
+  setTTSVoice: (voice: string) => Promise<void>;
+  setTTSSpeed: (speed: number) => Promise<void>;
+  updateTTSProvider: (
+    id: string,
+    data: { apiKey?: string; baseUrl?: string },
+  ) => Promise<void>;
+  testTTSProvider: (id: string) => Promise<void>;
 }
 
 // ---------------------------------------------------------------------------
@@ -86,6 +117,12 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   searchProviders: [],
   activeSearchProvider: null,
   searchTestResults: {},
+  ttsEnabled: false,
+  ttsProviders: [],
+  activeTTSProvider: null,
+  ttsVoice: "af_heart",
+  ttsSpeed: 1,
+  ttsTestResults: {},
 
   loadSettings: async () => {
     set({ loading: true, error: null });
@@ -260,6 +297,132 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       set((s) => ({
         searchTestResults: {
           ...s.searchTestResults,
+          [id]: {
+            ok: false,
+            error: err instanceof Error ? err.message : "Unknown error",
+            testing: false,
+          },
+        },
+      }));
+    }
+  },
+
+  loadTTSSettings: async () => {
+    try {
+      const res = await fetch("/api/settings/tts");
+      if (!res.ok) return;
+      const data = await res.json();
+      set({
+        ttsEnabled: data.enabled,
+        ttsProviders: data.providers,
+        activeTTSProvider: data.activeProvider,
+        ttsVoice: data.voice,
+        ttsSpeed: data.speed,
+      });
+    } catch {
+      // Silently fail
+    }
+  },
+
+  setTTSEnabled: async (enabled) => {
+    set({ error: null });
+    try {
+      const res = await fetch("/api/settings/tts/enabled", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled }),
+      });
+      if (!res.ok) throw new Error("Failed to update TTS enabled state");
+      await get().loadTTSSettings();
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "Unknown error" });
+    }
+  },
+
+  setActiveTTSProvider: async (id) => {
+    set({ error: null });
+    try {
+      const res = await fetch("/api/settings/tts/active", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ providerId: id }),
+      });
+      if (!res.ok) throw new Error("Failed to set active TTS provider");
+      await get().loadTTSSettings();
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "Unknown error" });
+    }
+  },
+
+  setTTSVoice: async (voice) => {
+    set({ error: null });
+    try {
+      const res = await fetch("/api/settings/tts/voice", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ voice }),
+      });
+      if (!res.ok) throw new Error("Failed to set TTS voice");
+      await get().loadTTSSettings();
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "Unknown error" });
+    }
+  },
+
+  setTTSSpeed: async (speed) => {
+    set({ error: null });
+    try {
+      const res = await fetch("/api/settings/tts/speed", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ speed }),
+      });
+      if (!res.ok) throw new Error("Failed to set TTS speed");
+      await get().loadTTSSettings();
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "Unknown error" });
+    }
+  },
+
+  updateTTSProvider: async (id, data) => {
+    set({ error: null });
+    try {
+      const res = await fetch(`/api/settings/tts/provider/${id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) throw new Error("Failed to update TTS provider");
+      await get().loadTTSSettings();
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "Unknown error" });
+    }
+  },
+
+  testTTSProvider: async (id) => {
+    set((s) => ({
+      ttsTestResults: {
+        ...s.ttsTestResults,
+        [id]: { ok: false, testing: true },
+      },
+    }));
+    try {
+      const res = await fetch(`/api/settings/tts/provider/${id}/test`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      const data = await res.json();
+      set((s) => ({
+        ttsTestResults: {
+          ...s.ttsTestResults,
+          [id]: { ok: data.ok, error: data.error, testing: false },
+        },
+      }));
+    } catch (err) {
+      set((s) => ({
+        ttsTestResults: {
+          ...s.ttsTestResults,
           [id]: {
             ok: false,
             error: err instanceof Error ? err.message : "Unknown error",
