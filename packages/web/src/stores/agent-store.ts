@@ -24,7 +24,12 @@ export const useAgentStore = create<AgentState>((set) => ({
       const agent = state.agents.get(agentId);
       if (!agent) return state;
       const next = new Map(state.agents);
-      next.set(agentId, { ...agent, status });
+      if (status === "done") {
+        // Remove finished agents entirely so the graph drops them immediately
+        next.delete(agentId);
+      } else {
+        next.set(agentId, { ...agent, status });
+      }
       return { agents: next };
     }),
 
