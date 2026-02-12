@@ -20,6 +20,10 @@ interface AuthState {
     model: string;
     apiKey?: string;
     baseUrl?: string;
+    userName: string;
+    userAvatar?: string;
+    userBio?: string;
+    userTimezone: string;
   }) => Promise<boolean>;
   logout: () => Promise<void>;
   setError: (error: string | null) => void;

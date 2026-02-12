@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useAuthStore } from "../../stores/auth-store";
+import { DEFAULT_AVATARS } from "./default-avatars";
 
 const SUGGESTED_MODELS: Record<string, string[]> = {
   anthropic: ["claude-sonnet-4-5-20250929", "claude-haiku-4-20250414"],
@@ -19,6 +20,35 @@ const PROVIDER_DESCRIPTIONS: Record<string, string> = {
 const NEEDS_API_KEY = new Set(["anthropic", "openai", "openai-compatible"]);
 const NEEDS_BASE_URL = new Set(["ollama", "openai-compatible"]);
 
+const IANA_TIMEZONES = Intl.supportedValuesOf("timeZone");
+
+function resizeImage(file: File, maxSize: number): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      const canvas = document.createElement("canvas");
+      canvas.width = maxSize;
+      canvas.height = maxSize;
+      const ctx = canvas.getContext("2d")!;
+
+      // Cover-crop: scale and center
+      const scale = Math.max(maxSize / img.width, maxSize / img.height);
+      const w = img.width * scale;
+      const h = img.height * scale;
+      ctx.drawImage(img, (maxSize - w) / 2, (maxSize - h) / 2, w, h);
+
+      resolve(canvas.toDataURL("image/jpeg", 0.85));
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error("Failed to load image"));
+    };
+    img.src = url;
+  });
+}
+
 export function SetupWizard() {
   const { providers, completeSetup, error, setError } = useAuthStore();
 
@@ -33,6 +63,16 @@ export function SetupWizard() {
   const [fetchedModels, setFetchedModels] = useState<string[]>([]);
   const [fetchingModels, setFetchingModels] = useState(false);
   const probeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Step 3: Profile
+  const [displayName, setDisplayName] = useState("");
+  const [avatar, setAvatar] = useState<string | null>(null);
+  const [bio, setBio] = useState("");
+  const [timezone, setTimezone] = useState(
+    () => Intl.DateTimeFormat().resolvedOptions().timeZone,
+  );
+  const [draggingOver, setDraggingOver] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const probeModels = useCallback(async (prov: string, key: string, url: string) => {
     const needsKey = NEEDS_API_KEY.has(prov);
@@ -116,13 +156,40 @@ export function SetupWizard() {
     setStep(2);
   };
 
-  const handleComplete = async () => {
+  const handleNextToProfile = () => {
     if (passphrase.length < 8) {
       setError("Passphrase must be at least 8 characters");
       return;
     }
     if (passphrase !== confirmPassphrase) {
       setError("Passphrases do not match");
+      return;
+    }
+    setError(null);
+    setStep(3);
+  };
+
+  const handleAvatarChange = async (file: File) => {
+    if (!file.type.startsWith("image/")) {
+      setError("Please upload an image file");
+      return;
+    }
+    try {
+      const dataUrl = await resizeImage(file, 256);
+      setAvatar(dataUrl);
+      setError(null);
+    } catch {
+      setError("Failed to process image");
+    }
+  };
+
+  const handleComplete = async () => {
+    if (!displayName.trim()) {
+      setError("Display name is required");
+      return;
+    }
+    if (!timezone) {
+      setError("Timezone is required");
       return;
     }
 
@@ -133,6 +200,10 @@ export function SetupWizard() {
       model,
       apiKey: apiKey || undefined,
       baseUrl: baseUrl || undefined,
+      userName: displayName.trim(),
+      userAvatar: avatar || undefined,
+      userBio: bio.trim() || undefined,
+      userTimezone: timezone,
     });
     setSubmitting(false);
   };
@@ -162,6 +233,12 @@ export function SetupWizard() {
             />
             <div
               className={`w-2 h-2 rounded-full ${step >= 2 ? "bg-primary" : "bg-muted"}`}
+            />
+            <div
+              className={`w-8 h-px ${step >= 3 ? "bg-primary" : "bg-muted"}`}
+            />
+            <div
+              className={`w-2 h-2 rounded-full ${step >= 3 ? "bg-primary" : "bg-muted"}`}
             />
           </div>
 
@@ -313,7 +390,7 @@ export function SetupWizard() {
                   value={confirmPassphrase}
                   onChange={(e) => setConfirmPassphrase(e.target.value)}
                   onKeyDown={(e) => {
-                    if (e.key === "Enter") handleComplete();
+                    if (e.key === "Enter") handleNextToProfile();
                   }}
                   placeholder="Confirm your passphrase"
                   className="w-full px-3 py-2 bg-background border border-input rounded-md text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
@@ -333,10 +410,170 @@ export function SetupWizard() {
                   Back
                 </button>
                 <button
+                  onClick={handleNextToProfile}
+                  disabled={!passphrase || !confirmPassphrase}
+                  className="flex-1 px-4 py-2 bg-primary text-primary-foreground text-sm font-medium rounded-md hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                  Next
+                </button>
+              </div>
+            </div>
+          )}
+
+          {step === 3 && (
+            <div className="space-y-4">
+              <h2 className="text-sm font-medium">
+                3. Tell the team about yourself
+              </h2>
+              <p className="text-xs text-muted-foreground">
+                Your AI agents will use this to personalize their interactions
+                with you.
+              </p>
+
+              {/* Avatar upload */}
+              <div className="flex justify-center">
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) handleAvatarChange(file);
+                  }}
+                />
+                <div
+                  onClick={() => fileInputRef.current?.click()}
+                  onDragOver={(e) => {
+                    e.preventDefault();
+                    setDraggingOver(true);
+                  }}
+                  onDragLeave={() => setDraggingOver(false)}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    setDraggingOver(false);
+                    const file = e.dataTransfer.files[0];
+                    if (file) handleAvatarChange(file);
+                  }}
+                  className={`relative w-20 h-20 rounded-full border-2 border-dashed flex items-center justify-center cursor-pointer transition-colors ${
+                    draggingOver
+                      ? "border-primary bg-primary/10"
+                      : avatar
+                        ? "border-transparent"
+                        : "border-border hover:border-muted-foreground"
+                  }`}
+                >
+                  {avatar ? (
+                    <img
+                      src={avatar}
+                      alt="Avatar preview"
+                      className="w-20 h-20 rounded-full object-cover"
+                    />
+                  ) : (
+                    <span className="text-muted-foreground text-xs text-center leading-tight">
+                      Photo
+                    </span>
+                  )}
+                </div>
+              </div>
+              {avatar && (
+                <div className="flex justify-center">
+                  <button
+                    onClick={() => setAvatar(null)}
+                    className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+                  >
+                    Remove photo
+                  </button>
+                </div>
+              )}
+
+              {/* Default avatar picker */}
+              {!avatar && (
+                <div>
+                  <p className="text-xs text-muted-foreground text-center mb-2">
+                    Or pick one
+                  </p>
+                  <div className="flex justify-center gap-2 flex-wrap">
+                    {DEFAULT_AVATARS.map((a) => (
+                      <button
+                        key={a.id}
+                        onClick={() => setAvatar(a.url)}
+                        title={a.label}
+                        className="w-9 h-9 rounded-full overflow-hidden border-2 border-transparent hover:border-primary transition-colors focus:outline-none focus:ring-2 focus:ring-ring"
+                      >
+                        <img
+                          src={a.url}
+                          alt={a.label}
+                          className="w-full h-full"
+                        />
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Display name */}
+              <div>
+                <label className="block text-sm text-muted-foreground mb-1.5">
+                  Display Name <span className="text-destructive">*</span>
+                </label>
+                <input
+                  type="text"
+                  value={displayName}
+                  onChange={(e) => setDisplayName(e.target.value)}
+                  placeholder="How should your agents address you?"
+                  autoFocus
+                  className="w-full px-3 py-2 bg-background border border-input rounded-md text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                />
+              </div>
+
+              {/* Bio */}
+              <div>
+                <label className="block text-sm text-muted-foreground mb-1.5">
+                  Short Bio
+                </label>
+                <textarea
+                  value={bio}
+                  onChange={(e) => setBio(e.target.value)}
+                  placeholder="A sentence or two for agent context (optional)"
+                  rows={2}
+                  className="w-full px-3 py-2 bg-background border border-input rounded-md text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring resize-none"
+                />
+              </div>
+
+              {/* Timezone */}
+              <div>
+                <label className="block text-sm text-muted-foreground mb-1.5">
+                  Timezone <span className="text-destructive">*</span>
+                </label>
+                <select
+                  value={timezone}
+                  onChange={(e) => setTimezone(e.target.value)}
+                  className="w-full px-3 py-2 bg-background border border-input rounded-md text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                >
+                  {IANA_TIMEZONES.map((tz) => (
+                    <option key={tz} value={tz}>
+                      {tz.replace(/_/g, " ")}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {error && <p className="text-sm text-destructive">{error}</p>}
+
+              <div className="flex gap-2">
+                <button
+                  onClick={() => {
+                    setStep(2);
+                    setError(null);
+                  }}
+                  className="px-4 py-2 bg-secondary text-secondary-foreground text-sm font-medium rounded-md hover:bg-secondary/80 transition-colors"
+                >
+                  Back
+                </button>
+                <button
                   onClick={handleComplete}
-                  disabled={
-                    !passphrase || !confirmPassphrase || submitting
-                  }
+                  disabled={!displayName.trim() || !timezone || submitting}
                   className="flex-1 px-4 py-2 bg-primary text-primary-foreground text-sm font-medium rounded-md hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                 >
                   {submitting ? "Setting up..." : "Complete Setup"}

@@ -54,6 +54,19 @@ export class COO extends BaseAgent {
   constructor(deps: COODependencies) {
     const registry = new Registry();
     const cooEntry = registry.get("builtin-coo");
+    let systemPrompt = cooEntry?.systemPrompt ?? COO_SYSTEM_PROMPT;
+
+    // Inject user profile into system prompt if available
+    const userName = getConfig("user_name");
+    if (userName) {
+      const userTimezone = getConfig("user_timezone");
+      const userBio = getConfig("user_bio");
+      const lines = [`## About Your CEO`, `- Name: ${userName}`];
+      if (userTimezone) lines.push(`- Timezone: ${userTimezone}`);
+      if (userBio) lines.push(`- Bio: ${userBio}`);
+      systemPrompt = lines.join("\n") + "\n\n" + systemPrompt;
+    }
+
     const options: AgentOptions = {
       id: "coo",
       role: AgentRole.COO,
@@ -61,7 +74,7 @@ export class COO extends BaseAgent {
       projectId: null,
       model: getConfig("coo_model") ?? "claude-sonnet-4-5-20250929",
       provider: getConfig("coo_provider") ?? "anthropic",
-      systemPrompt: cooEntry?.systemPrompt ?? COO_SYSTEM_PROMPT,
+      systemPrompt,
     };
     super(options, deps.bus);
     this.workspace = deps.workspace;

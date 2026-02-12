@@ -185,6 +185,10 @@ async function main() {
       model: string;
       apiKey?: string;
       baseUrl?: string;
+      userName: string;
+      userAvatar?: string;
+      userBio?: string;
+      userTimezone: string;
     };
   }>("/api/setup/complete", async (req, reply) => {
     if (isSetupComplete()) {
@@ -192,7 +196,7 @@ async function main() {
       return { error: "Setup already completed" };
     }
 
-    const { passphrase, provider, model, apiKey, baseUrl } = req.body;
+    const { passphrase, provider, model, apiKey, baseUrl, userName, userAvatar, userBio, userTimezone } = req.body;
 
     if (!passphrase || passphrase.length < 8) {
       reply.code(400);
@@ -201,6 +205,14 @@ async function main() {
     if (!provider || !model) {
       reply.code(400);
       return { error: "Provider and model are required" };
+    }
+    if (!userName || !userName.trim()) {
+      reply.code(400);
+      return { error: "Display name is required" };
+    }
+    if (!userTimezone) {
+      reply.code(400);
+      return { error: "Timezone is required" };
     }
 
     // Store config
@@ -214,6 +226,16 @@ async function main() {
     }
     if (baseUrl) {
       setConfig(`provider:${provider}:base_url`, baseUrl);
+    }
+
+    // Store user profile
+    setConfig("user_name", userName.trim());
+    setConfig("user_timezone", userTimezone);
+    if (userAvatar) {
+      setConfig("user_avatar", userAvatar);
+    }
+    if (userBio) {
+      setConfig("user_bio", userBio.trim());
     }
 
     // Create session
