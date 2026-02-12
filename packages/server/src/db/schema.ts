@@ -15,6 +15,7 @@ export const agents = sqliteTable("agents", {
   baseUrl: text("base_url"),
   temperature: integer("temperature"),
   systemPrompt: text("system_prompt"),
+  modelPackId: text("model_pack_id"),
   projectId: text("project_id"),
   workspacePath: text("workspace_path"),
   createdAt: text("created_at")
@@ -71,6 +72,7 @@ export const registryEntries = sqliteTable("registry_entries", {
   role: text("role", { enum: ["coo", "team_lead", "worker"] })
     .notNull()
     .default("worker"),
+  modelPackId: text("model_pack_id"),
   clonedFromId: text("cloned_from_id"),
   createdAt: text("created_at")
     .notNull()

@@ -9,6 +9,7 @@ export interface RegistryEntry {
   tools: string[];
   builtIn: boolean;
   role: "coo" | "team_lead" | "worker";
+  modelPackId: string | null;
   clonedFromId: string | null;
   createdAt: string;
 }
@@ -23,6 +24,7 @@ export interface RegistryEntryCreate {
   tools: string[];
   role?: "coo" | "team_lead" | "worker";
   clonedFromId?: string | null;
+  modelPackId?: string | null;
 }
 
 export interface RegistryEntryUpdate {
@@ -33,6 +35,7 @@ export interface RegistryEntryUpdate {
   defaultModel?: string;
   defaultProvider?: string;
   tools?: string[];
+  modelPackId?: string | null;
 }
 
 export interface Project {

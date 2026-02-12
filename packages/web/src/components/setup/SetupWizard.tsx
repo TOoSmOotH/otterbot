@@ -1,5 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useAuthStore } from "../../stores/auth-store";
+import { useModelPackStore } from "../../stores/model-pack-store";
+import { CharacterSelect } from "../character-select/CharacterSelect";
 import { DEFAULT_AVATARS } from "./default-avatars";
 
 const SUGGESTED_MODELS: Record<string, string[]> = {
@@ -74,7 +76,12 @@ export function SetupWizard() {
   const [draggingOver, setDraggingOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Step 4: Voice
+  // Step 4: Character
+  const [characterPackId, setCharacterPackId] = useState<string | null>(null);
+  const modelPacks = useModelPackStore((s) => s.packs);
+  const loadPacks = useModelPackStore((s) => s.loadPacks);
+
+  // Step 5: Voice
   const [ttsVoice, setTtsVoice] = useState<string | null>(null);
   const [previewingVoice, setPreviewingVoice] = useState(false);
 
@@ -187,7 +194,7 @@ export function SetupWizard() {
     }
   };
 
-  const handleNextToVoice = () => {
+  const handleNextToCharacter = () => {
     if (!displayName.trim()) {
       setError("Display name is required");
       return;
@@ -197,7 +204,13 @@ export function SetupWizard() {
       return;
     }
     setError(null);
+    loadPacks();
     setStep(4);
+  };
+
+  const handleNextToVoice = () => {
+    setError(null);
+    setStep(5);
   };
 
   const handleComplete = async () => {
@@ -213,6 +226,7 @@ export function SetupWizard() {
       userBio: bio.trim() || undefined,
       userTimezone: timezone,
       ttsVoice: ttsVoice || undefined,
+      userModelPackId: characterPackId || undefined,
     });
     setSubmitting(false);
   };
@@ -276,27 +290,14 @@ export function SetupWizard() {
 
           {/* Step indicator */}
           <div className="flex items-center justify-center gap-2 mb-6">
-            <div
-              className={`w-2 h-2 rounded-full ${step >= 1 ? "bg-primary" : "bg-muted"}`}
-            />
-            <div
-              className={`w-8 h-px ${step >= 2 ? "bg-primary" : "bg-muted"}`}
-            />
-            <div
-              className={`w-2 h-2 rounded-full ${step >= 2 ? "bg-primary" : "bg-muted"}`}
-            />
-            <div
-              className={`w-8 h-px ${step >= 3 ? "bg-primary" : "bg-muted"}`}
-            />
-            <div
-              className={`w-2 h-2 rounded-full ${step >= 3 ? "bg-primary" : "bg-muted"}`}
-            />
-            <div
-              className={`w-8 h-px ${step >= 4 ? "bg-primary" : "bg-muted"}`}
-            />
-            <div
-              className={`w-2 h-2 rounded-full ${step >= 4 ? "bg-primary" : "bg-muted"}`}
-            />
+            {[1, 2, 3, 4, 5].map((s, i) => (
+              <div key={s} className="flex items-center gap-2">
+                {i > 0 && (
+                  <div className={`w-6 h-px ${step >= s ? "bg-primary" : "bg-muted"}`} />
+                )}
+                <div className={`w-2 h-2 rounded-full ${step >= s ? "bg-primary" : "bg-muted"}`} />
+              </div>
+            ))}
           </div>
 
           {step === 1 && (
@@ -629,7 +630,7 @@ export function SetupWizard() {
                   Back
                 </button>
                 <button
-                  onClick={handleNextToVoice}
+                  onClick={handleNextToCharacter}
                   disabled={!displayName.trim() || !timezone}
                   className="flex-1 px-4 py-2 bg-primary text-primary-foreground text-sm font-medium rounded-md hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                 >
@@ -642,7 +643,44 @@ export function SetupWizard() {
           {step === 4 && (
             <div className="space-y-4">
               <h2 className="text-sm font-medium">
-                4. Choose a voice for your assistant
+                4. Choose your character
+              </h2>
+              <p className="text-xs text-muted-foreground">
+                Pick a 3D character for the Live View. You can change this later in Settings.
+              </p>
+
+              <CharacterSelect
+                packs={modelPacks}
+                selected={characterPackId}
+                onSelect={setCharacterPackId}
+              />
+
+              {error && <p className="text-sm text-destructive">{error}</p>}
+
+              <div className="flex gap-2">
+                <button
+                  onClick={() => {
+                    setStep(3);
+                    setError(null);
+                  }}
+                  className="px-4 py-2 bg-secondary text-secondary-foreground text-sm font-medium rounded-md hover:bg-secondary/80 transition-colors"
+                >
+                  Back
+                </button>
+                <button
+                  onClick={handleNextToVoice}
+                  className="flex-1 px-4 py-2 bg-primary text-primary-foreground text-sm font-medium rounded-md hover:bg-primary/90 transition-colors"
+                >
+                  Next
+                </button>
+              </div>
+            </div>
+          )}
+
+          {step === 5 && (
+            <div className="space-y-4">
+              <h2 className="text-sm font-medium">
+                5. Choose a voice for your assistant
               </h2>
               <p className="text-xs text-muted-foreground">
                 Your assistant can speak its responses aloud. Pick a voice, or
@@ -761,7 +799,7 @@ export function SetupWizard() {
               <div className="flex gap-2">
                 <button
                   onClick={() => {
-                    setStep(3);
+                    setStep(4);
                     setError(null);
                   }}
                   className="px-4 py-2 bg-secondary text-secondary-foreground text-sm font-medium rounded-md hover:bg-secondary/80 transition-colors"

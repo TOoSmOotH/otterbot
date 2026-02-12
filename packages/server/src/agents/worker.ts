@@ -13,6 +13,7 @@ export interface WorkerDependencies {
   projectId: string | null;
   parentId: string;
   registryEntryId: string;
+  modelPackId?: string | null;
   model: string;
   provider: string;
   systemPrompt: string;
@@ -31,6 +32,7 @@ export class Worker extends BaseAgent {
       parentId: deps.parentId,
       projectId: deps.projectId,
       registryEntryId: deps.registryEntryId,
+      modelPackId: deps.modelPackId,
       model: deps.model,
       provider: deps.provider,
       systemPrompt: deps.systemPrompt,

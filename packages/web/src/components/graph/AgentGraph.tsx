@@ -112,20 +112,24 @@ function getRoleLabel(agent: Agent): string {
 
 export function AgentGraph({
   userProfile,
+  onToggleView,
 }: {
   userProfile?: { name: string | null; avatar: string | null };
+  onToggleView?: () => void;
 }) {
   return (
     <ReactFlowProvider>
-      <AgentGraphInner userProfile={userProfile} />
+      <AgentGraphInner userProfile={userProfile} onToggleView={onToggleView} />
     </ReactFlowProvider>
   );
 }
 
 function AgentGraphInner({
   userProfile,
+  onToggleView,
 }: {
   userProfile?: { name: string | null; avatar: string | null };
+  onToggleView?: () => void;
 }) {
   const agents = useAgentStore((s) => s.agents);
   const { nodes: layoutNodes, edges: layoutEdges } = useMemo(
@@ -149,9 +153,24 @@ function AgentGraphInner({
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-border">
         <h2 className="text-sm font-semibold tracking-tight">Agent Graph</h2>
-        <span className="text-[10px] text-muted-foreground">
-          {agents.size} agents
-        </span>
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] text-muted-foreground">
+            {agents.size} agents
+          </span>
+          {onToggleView && (
+            <button
+              onClick={onToggleView}
+              title="Switch to Live View"
+              className="text-muted-foreground hover:text-foreground transition-colors p-1 rounded hover:bg-secondary"
+            >
+              <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
+                <polyline points="3.27 6.96 12 12.01 20.73 6.96" />
+                <line x1="12" y1="22.08" x2="12" y2="12" />
+              </svg>
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Graph */}

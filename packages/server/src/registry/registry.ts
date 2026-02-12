@@ -37,6 +37,7 @@ export class Registry {
       tools: data.tools,
       builtIn: false,
       role: data.role ?? "worker" as const,
+      modelPackId: data.modelPackId ?? null,
       clonedFromId: data.clonedFromId ?? null,
       createdAt: new Date().toISOString(),
     };
@@ -58,6 +59,7 @@ export class Registry {
     if (data.defaultModel !== undefined) updates.defaultModel = data.defaultModel;
     if (data.defaultProvider !== undefined) updates.defaultProvider = data.defaultProvider;
     if (data.tools !== undefined) updates.tools = data.tools;
+    if (data.modelPackId !== undefined) updates.modelPackId = data.modelPackId;
 
     if (Object.keys(updates).length > 0) {
       db.update(schema.registryEntries)
@@ -96,6 +98,7 @@ export class Registry {
       tools: [...source.tools],
       role: source.role,
       clonedFromId: source.id,
+      modelPackId: source.modelPackId,
     });
   }
 
@@ -120,6 +123,7 @@ export class Registry {
       tools: row.tools as string[],
       builtIn: row.builtIn ?? false,
       role: row.role ?? "worker",
+      modelPackId: row.modelPackId ?? null,
       clonedFromId: row.clonedFromId ?? null,
       createdAt: row.createdAt,
     };

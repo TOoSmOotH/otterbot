@@ -103,6 +103,20 @@ export async function migrateDb() {
     created_at TEXT NOT NULL
   )`);
 
+  // Idempotent migration: add model_pack_id to registry_entries
+  try {
+    db.run(sql`ALTER TABLE registry_entries ADD COLUMN model_pack_id TEXT`);
+  } catch {
+    // Column already exists — ignore
+  }
+
+  // Idempotent migration: add model_pack_id to agents
+  try {
+    db.run(sql`ALTER TABLE agents ADD COLUMN model_pack_id TEXT`);
+  } catch {
+    // Column already exists — ignore
+  }
+
   db.run(sql`CREATE TABLE IF NOT EXISTS projects (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,

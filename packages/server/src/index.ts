@@ -43,6 +43,7 @@ import {
   validateSession,
   destroySession,
 } from "./auth/auth.js";
+import { discoverModelPacks } from "./models3d/model-packs.js";
 import {
   listPackages,
   installAptPackage,
@@ -86,7 +87,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 // Public API path whitelist (no auth required)
 // ---------------------------------------------------------------------------
 
-const PUBLIC_PATHS = ["/api/setup/", "/api/auth/"];
+const PUBLIC_PATHS = ["/api/setup/", "/api/auth/", "/api/model-packs"];
 
 // ---------------------------------------------------------------------------
 // Cookie helper for Socket.IO (parse raw Cookie header)
@@ -162,6 +163,16 @@ async function main() {
     await app.register(fastifyStatic, {
       root: webDistPath,
       prefix: "/",
+    });
+  }
+
+  // Serve 3D assets (model packs)
+  const assetsRoot = resolve(__dirname, "../../../assets");
+  if (existsSync(assetsRoot)) {
+    await app.register(fastifyStatic, {
+      root: assetsRoot,
+      prefix: "/assets/3d/",
+      decorateReply: false,
     });
   }
 
@@ -291,6 +302,12 @@ async function main() {
     }
   });
 
+  // --- Model Packs (public for setup wizard) ---
+
+  app.get("/api/model-packs", async () => {
+    return discoverModelPacks();
+  });
+
   app.post<{
     Body: {
       passphrase: string;
@@ -303,6 +320,7 @@ async function main() {
       userBio?: string;
       userTimezone: string;
       ttsVoice?: string;
+      userModelPackId?: string;
     };
   }>("/api/setup/complete", async (req, reply) => {
     if (isSetupComplete()) {
@@ -310,7 +328,7 @@ async function main() {
       return { error: "Setup already completed" };
     }
 
-    const { passphrase, provider, model, apiKey, baseUrl, userName, userAvatar, userBio, userTimezone, ttsVoice } = req.body;
+    const { passphrase, provider, model, apiKey, baseUrl, userName, userAvatar, userBio, userTimezone, ttsVoice, userModelPackId } = req.body;
 
     if (!passphrase || passphrase.length < 8) {
       reply.code(400);
@@ -357,6 +375,11 @@ async function main() {
       setConfig("tts:enabled", "true");
       setConfig("tts:active_provider", "kokoro");
       setConfig("tts:voice", ttsVoice);
+    }
+
+    // Store 3D model pack preference
+    if (userModelPackId) {
+      setConfig("user_model_pack_id", userModelPackId);
     }
 
     // Create session
@@ -629,7 +652,19 @@ async function main() {
       avatar: getConfig("user_avatar") ?? null,
       bio: getConfig("user_bio") ?? null,
       timezone: getConfig("user_timezone") ?? null,
+      modelPackId: getConfig("user_model_pack_id") ?? null,
     };
+  });
+
+  app.put<{
+    Body: { modelPackId: string | null };
+  }>("/api/profile/model-pack", async (req) => {
+    if (req.body.modelPackId) {
+      setConfig("user_model_pack_id", req.body.modelPackId);
+    } else {
+      deleteConfig("user_model_pack_id");
+    }
+    return { ok: true };
   });
 
   // Agent list endpoint (only active agents, not stale "done" ones)

@@ -25,6 +25,7 @@ interface AuthState {
     userBio?: string;
     userTimezone: string;
     ttsVoice?: string;
+    userModelPackId?: string;
   }) => Promise<boolean>;
   logout: () => Promise<void>;
   setError: (error: string | null) => void;

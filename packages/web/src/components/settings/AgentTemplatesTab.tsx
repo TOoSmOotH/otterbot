@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { cn } from "../../lib/utils";
 import { useSettingsStore } from "../../stores/settings-store";
+import { useModelPackStore } from "../../stores/model-pack-store";
 import type { RegistryEntry } from "@smoothbot/shared";
 
 export function AgentTemplatesTab() {
@@ -15,12 +16,16 @@ export function AgentTemplatesTab() {
     defaultModel: "",
     defaultProvider: "anthropic",
     tools: "",
+    modelPackId: null as string | null,
   });
 
   const providers = useSettingsStore((s) => s.providers);
+  const modelPacks = useModelPackStore((s) => s.packs);
+  const loadPacks = useModelPackStore((s) => s.loadPacks);
 
   useEffect(() => {
     loadEntries();
+    loadPacks();
   }, []);
 
   const loadEntries = async () => {
@@ -48,6 +53,7 @@ export function AgentTemplatesTab() {
       defaultModel: entry.defaultModel,
       defaultProvider: entry.defaultProvider,
       tools: entry.tools.join(", "),
+      modelPackId: entry.modelPackId ?? null,
     });
     setEditing(false);
   };
@@ -69,6 +75,7 @@ export function AgentTemplatesTab() {
         .split(",")
         .map((s) => s.trim())
         .filter(Boolean),
+      modelPackId: form.modelPackId,
     };
 
     await fetch(`/api/registry/${selected.id}`, {
@@ -321,6 +328,32 @@ export function AgentTemplatesTab() {
                 )}
               </Field>
             </div>
+
+            {/* 3D Character */}
+            <Field label="3D Character" editing={editing}>
+              {editing ? (
+                <select
+                  value={form.modelPackId ?? ""}
+                  onChange={(e) =>
+                    setForm({ ...form, modelPackId: e.target.value || null })
+                  }
+                  className="w-full bg-secondary rounded-md px-3 py-1.5 text-sm outline-none focus:ring-1 ring-primary"
+                >
+                  <option value="">None</option>
+                  {modelPacks.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <p className="text-xs font-mono bg-secondary inline-block px-2 py-0.5 rounded">
+                  {form.modelPackId
+                    ? modelPacks.find((p) => p.id === form.modelPackId)?.name ?? form.modelPackId
+                    : "None"}
+                </p>
+              )}
+            </Field>
 
             {/* Capabilities */}
             <Field label="Capabilities (comma-separated)" editing={editing}>

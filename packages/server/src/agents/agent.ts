@@ -18,6 +18,7 @@ export interface AgentOptions {
   parentId: string | null;
   projectId: string | null;
   registryEntryId?: string | null;
+  modelPackId?: string | null;
   model: string;
   provider: string;
   baseUrl?: string;
@@ -33,6 +34,7 @@ export abstract class BaseAgent {
   readonly parentId: string | null;
   readonly projectId: string | null;
   readonly registryEntryId: string | null;
+  readonly modelPackId: string | null;
   protected bus: MessageBus;
   protected status: AgentStatus = AgentStatus.Idle;
   protected conversationHistory: ChatMessage[] = [];
@@ -46,6 +48,7 @@ export abstract class BaseAgent {
     this.parentId = options.parentId;
     this.projectId = options.projectId;
     this.registryEntryId = options.registryEntryId ?? null;
+    this.modelPackId = options.modelPackId ?? null;
     this.bus = bus;
     this.systemPrompt = options.systemPrompt;
 
@@ -205,6 +208,7 @@ export abstract class BaseAgent {
       baseUrl: this.llmConfig.baseUrl,
       temperature: this.llmConfig.temperature,
       systemPrompt: this.systemPrompt,
+      modelPackId: this.modelPackId,
       projectId: this.projectId,
       workspacePath: null,
       createdAt: new Date().toISOString(),
@@ -242,6 +246,7 @@ export abstract class BaseAgent {
       provider: this.llmConfig.provider,
       baseUrl: this.llmConfig.baseUrl,
       systemPrompt: this.systemPrompt,
+      modelPackId: this.modelPackId,
       projectId: this.projectId,
       workspacePath: options.workspacePath ?? null,
       createdAt: new Date().toISOString(),

@@ -5,6 +5,7 @@ import { useAgentStore } from "./stores/agent-store";
 import { useAuthStore } from "./stores/auth-store";
 import { CeoChat } from "./components/chat/CeoChat";
 import { AgentGraph } from "./components/graph/AgentGraph";
+import { LiveView } from "./components/live-view/LiveView";
 import { MessageStream } from "./components/stream/MessageStream";
 import { SettingsPanel } from "./components/settings/SettingsPanel";
 import { LoginScreen } from "./components/auth/LoginScreen";
@@ -51,7 +52,10 @@ export default function App() {
 interface UserProfile {
   name: string | null;
   avatar: string | null;
+  modelPackId?: string | null;
 }
+
+type CenterView = "graph" | "live3d";
 
 function MainApp() {
   const socket = useSocket();
@@ -135,7 +139,8 @@ function MainApp() {
 
 const PANEL_IDS = ["chat", "graph", "stream"];
 
-function ResizableLayout({ userProfile }: { userProfile?: UserProfile }) {
+function ResizableLayout({ userProfile }: { userProfile?: UserProfile; }) {
+  const [centerView, setCenterView] = useState<CenterView>("graph");
   const { defaultLayout, onLayoutChanged } = useDefaultLayout({
     id: "smoothbot-layout",
     storage: localStorage,
@@ -157,10 +162,14 @@ function ResizableLayout({ userProfile }: { userProfile?: UserProfile }) {
 
       <Separator className="panel-resize-handle" />
 
-      {/* Center: Agent Graph */}
+      {/* Center: Agent Graph / Live View */}
       <Panel id="graph" minSize="20%">
         <div className="h-full">
-          <AgentGraph userProfile={userProfile} />
+          {centerView === "graph" ? (
+            <AgentGraph userProfile={userProfile} onToggleView={() => setCenterView("live3d")} />
+          ) : (
+            <LiveView userProfile={userProfile} onToggleView={() => setCenterView("graph")} />
+          )}
         </div>
       </Panel>
 

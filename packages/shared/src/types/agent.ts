@@ -24,6 +24,7 @@ export interface Agent {
   temperature?: number;
   systemPrompt?: string;
   projectId: string | null;
+  modelPackId: string | null;
   workspacePath: string | null;
   createdAt: string;
 }
@@ -38,4 +39,5 @@ export interface AgentSpawnOptions {
   baseUrl?: string;
   temperature?: number;
   systemPrompt?: string;
+  modelPackId?: string;
 }
