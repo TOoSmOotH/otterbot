@@ -64,6 +64,7 @@ COPY --from=build /app/packages/server/package.json ./packages/server/
 COPY --from=build /app/packages/server/node_modules ./packages/server/node_modules
 COPY --from=build /app/packages/web/dist ./packages/web/dist
 COPY --from=build /app/packages/web/package.json ./packages/web/
+COPY --from=build /app/assets ./assets
 
 # Install Playwright Chromium browser (headless, for agent web browsing)
 RUN node packages/server/node_modules/playwright/cli.js install chromium
