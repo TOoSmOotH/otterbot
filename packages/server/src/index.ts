@@ -168,6 +168,7 @@ async function main() {
 
   // Serve 3D assets (model packs)
   const assetsRoot = resolve(__dirname, "../../../assets");
+  console.log(`3D assets root: ${assetsRoot} (exists: ${existsSync(assetsRoot)})`);
   if (existsSync(assetsRoot)) {
     await app.register(fastifyStatic, {
       root: assetsRoot,
@@ -305,7 +306,7 @@ async function main() {
   // --- Model Packs (public for setup wizard) ---
 
   app.get("/api/model-packs", async () => {
-    return discoverModelPacks();
+    return discoverModelPacks(assetsRoot);
   });
 
   app.post<{

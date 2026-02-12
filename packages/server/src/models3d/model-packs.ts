@@ -1,20 +1,17 @@
 import { readdirSync, existsSync } from "node:fs";
-import { resolve, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
+import { resolve } from "node:path";
 import type { ModelPack } from "@smoothbot/shared";
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const ASSETS_ROOT = resolve(__dirname, "../../../../assets/workers");
-
-export function discoverModelPacks(): ModelPack[] {
-  if (!existsSync(ASSETS_ROOT)) return [];
+export function discoverModelPacks(assetsRoot: string): ModelPack[] {
+  const workersDir = resolve(assetsRoot, "workers");
+  if (!existsSync(workersDir)) return [];
 
   const packs: ModelPack[] = [];
 
-  for (const dir of readdirSync(ASSETS_ROOT, { withFileTypes: true })) {
+  for (const dir of readdirSync(workersDir, { withFileTypes: true })) {
     if (!dir.isDirectory()) continue;
 
-    const packDir = resolve(ASSETS_ROOT, dir.name);
+    const packDir = resolve(workersDir, dir.name);
     const characterDir = resolve(packDir, "characters");
     const animDir = resolve(packDir, "Animations/gltf/Rig_Medium");
 
