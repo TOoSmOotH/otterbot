@@ -1,4 +1,4 @@
-import { useMemo, useCallback } from "react";
+import { useMemo, useEffect } from "react";
 import {
   ReactFlow,
   Background,
@@ -6,6 +6,8 @@ import {
   type Edge,
   useNodesState,
   useEdgesState,
+  useReactFlow,
+  ReactFlowProvider,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { useAgentStore } from "../../stores/agent-store";
@@ -108,11 +110,34 @@ export function AgentGraph({
 }: {
   userProfile?: { name: string | null; avatar: string | null };
 }) {
+  return (
+    <ReactFlowProvider>
+      <AgentGraphInner userProfile={userProfile} />
+    </ReactFlowProvider>
+  );
+}
+
+function AgentGraphInner({
+  userProfile,
+}: {
+  userProfile?: { name: string | null; avatar: string | null };
+}) {
   const agents = useAgentStore((s) => s.agents);
-  const { nodes: initialNodes, edges: initialEdges } = useMemo(
+  const { nodes: layoutNodes, edges: layoutEdges } = useMemo(
     () => buildLayout(agents, userProfile),
     [agents, userProfile],
   );
+
+  const [nodes, setNodes, onNodesChange] = useNodesState(layoutNodes);
+  const [edges, setEdges, onEdgesChange] = useEdgesState(layoutEdges);
+  const { fitView } = useReactFlow();
+
+  useEffect(() => {
+    setNodes(layoutNodes);
+    setEdges(layoutEdges);
+    // Re-fit the view after nodes change so all agents are visible
+    requestAnimationFrame(() => fitView());
+  }, [layoutNodes, layoutEdges, setNodes, setEdges, fitView]);
 
   return (
     <div className="flex flex-col h-full">
@@ -127,8 +152,10 @@ export function AgentGraph({
       {/* Graph */}
       <div className="flex-1">
         <ReactFlow
-          nodes={initialNodes}
-          edges={initialEdges}
+          nodes={nodes}
+          edges={edges}
+          onNodesChange={onNodesChange}
+          onEdgesChange={onEdgesChange}
           nodeTypes={nodeTypes}
           fitView
           proOptions={{ hideAttribution: true }}
