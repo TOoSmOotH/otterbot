@@ -1,6 +1,6 @@
 import {
   AgentRole,
-  type AgentStatus,
+  AgentStatus,
   MessageType,
   type BusMessage,
 } from "@smoothbot/shared";
@@ -81,5 +81,8 @@ export class Worker extends BaseAgent {
     if (this.parentId) {
       this.sendMessage(this.parentId, MessageType.Report, response);
     }
+
+    // Worker is a one-shot agent — mark as done after completing the task
+    this.setStatus(AgentStatus.Done);
   }
 }
