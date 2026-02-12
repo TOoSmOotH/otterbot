@@ -14,7 +14,10 @@ import type { Agent } from "@smoothbot/shared";
 
 const nodeTypes = { agent: AgentNode };
 
-function buildLayout(agents: Map<string, Agent>): {
+function buildLayout(
+  agents: Map<string, Agent>,
+  userProfile?: { name: string | null; avatar: string | null },
+): {
   nodes: Node[];
   edges: Edge[];
 } {
@@ -22,11 +25,17 @@ function buildLayout(agents: Map<string, Agent>): {
   const edges: Edge[] = [];
 
   // Always show CEO node at the top
+  const ceoLabel = userProfile?.name ? `${userProfile.name} (CEO)` : "CEO (You)";
   nodes.push({
     id: "ceo",
     type: "agent",
     position: { x: 300, y: 0 },
-    data: { label: "CEO (You)", role: "ceo", status: "idle" },
+    data: {
+      label: ceoLabel,
+      role: "ceo",
+      status: "idle",
+      avatarUrl: userProfile?.avatar ?? undefined,
+    },
   });
 
   // Group agents by parent for hierarchical layout
@@ -94,11 +103,15 @@ function getRoleLabel(agent: Agent): string {
   return `Worker ${agent.id.slice(0, 6)}`;
 }
 
-export function AgentGraph() {
+export function AgentGraph({
+  userProfile,
+}: {
+  userProfile?: { name: string | null; avatar: string | null };
+}) {
   const agents = useAgentStore((s) => s.agents);
   const { nodes: initialNodes, edges: initialEdges } = useMemo(
-    () => buildLayout(agents),
-    [agents],
+    () => buildLayout(agents, userProfile),
+    [agents, userProfile],
   );
 
   return (

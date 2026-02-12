@@ -48,6 +48,11 @@ export default function App() {
 // Main application (only rendered after authentication)
 // ---------------------------------------------------------------------------
 
+interface UserProfile {
+  name: string | null;
+  avatar: string | null;
+}
+
 function MainApp() {
   const socket = useSocket();
   const loadHistory = useMessageStore((s) => s.loadHistory);
@@ -55,6 +60,7 @@ function MainApp() {
   const loadAgents = useAgentStore((s) => s.loadAgents);
   const logout = useAuthStore((s) => s.logout);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [userProfile, setUserProfile] = useState<UserProfile | undefined>();
 
   // Load initial data
   useEffect(() => {
@@ -71,6 +77,11 @@ function MainApp() {
     fetch("/api/conversations")
       .then((r) => r.json())
       .then(setConversations)
+      .catch(console.error);
+
+    fetch("/api/profile")
+      .then((r) => r.json())
+      .then(setUserProfile)
       .catch(console.error);
   }, []);
 
@@ -107,7 +118,7 @@ function MainApp() {
 
       {/* Three-panel layout */}
       <main className="flex-1 overflow-hidden">
-        <ResizableLayout />
+        <ResizableLayout userProfile={userProfile} />
       </main>
 
       {/* Settings modal - rendered outside the resizable layout */}
@@ -124,7 +135,7 @@ function MainApp() {
 
 const PANEL_IDS = ["chat", "graph", "stream"];
 
-function ResizableLayout() {
+function ResizableLayout({ userProfile }: { userProfile?: UserProfile }) {
   const { defaultLayout, onLayoutChanged } = useDefaultLayout({
     id: "smoothbot-layout",
     storage: localStorage,
@@ -149,7 +160,7 @@ function ResizableLayout() {
       {/* Center: Agent Graph */}
       <Panel id="graph" minSize="20%">
         <div className="h-full">
-          <AgentGraph />
+          <AgentGraph userProfile={userProfile} />
         </div>
       </Panel>
 

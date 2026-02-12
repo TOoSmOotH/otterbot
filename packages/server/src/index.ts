@@ -501,6 +501,16 @@ async function main() {
     }
   });
 
+  // User profile endpoint
+  app.get("/api/profile", async () => {
+    return {
+      name: getConfig("user_name") ?? null,
+      avatar: getConfig("user_avatar") ?? null,
+      bio: getConfig("user_bio") ?? null,
+      timezone: getConfig("user_timezone") ?? null,
+    };
+  });
+
   // Agent list endpoint
   app.get("/api/agents", async () => {
     const { getDb, schema } = await import("./db/index.js");

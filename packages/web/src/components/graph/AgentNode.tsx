@@ -7,6 +7,7 @@ interface AgentNodeData {
   label: string;
   role: string;
   status: AgentStatus;
+  avatarUrl?: string;
   [key: string]: unknown;
 }
 
@@ -27,6 +28,7 @@ const STATUS_DOT: Record<string, string> = {
 };
 
 const ROLE_ICONS: Record<string, string> = {
+  ceo: "U",
   coo: "C",
   team_lead: "TL",
   worker: "W",
@@ -35,7 +37,7 @@ const ROLE_ICONS: Record<string, string> = {
 export const AgentNode = memo(function AgentNode({
   data,
 }: NodeProps & { data: AgentNodeData }) {
-  const { label, role, status } = data;
+  const { label, role, status, avatarUrl } = data;
 
   return (
     <div
@@ -51,18 +53,28 @@ export const AgentNode = memo(function AgentNode({
       />
 
       <div className="flex items-center gap-2">
-        <div
-          className={cn(
-            "w-6 h-6 rounded-md flex items-center justify-center text-[10px] font-bold",
-            role === "coo"
-              ? "bg-violet-500/30 text-violet-300"
-              : role === "team_lead"
-                ? "bg-amber-500/30 text-amber-300"
-                : "bg-cyan-500/30 text-cyan-300",
-          )}
-        >
-          {ROLE_ICONS[role] ?? "?"}
-        </div>
+        {avatarUrl ? (
+          <img
+            src={avatarUrl}
+            alt={label}
+            className="w-6 h-6 rounded-md object-cover"
+          />
+        ) : (
+          <div
+            className={cn(
+              "w-6 h-6 rounded-md flex items-center justify-center text-[10px] font-bold",
+              role === "ceo"
+                ? "bg-primary/30 text-primary"
+                : role === "coo"
+                  ? "bg-violet-500/30 text-violet-300"
+                  : role === "team_lead"
+                    ? "bg-amber-500/30 text-amber-300"
+                    : "bg-cyan-500/30 text-cyan-300",
+            )}
+          >
+            {ROLE_ICONS[role] ?? "?"}
+          </div>
+        )}
         <div className="flex flex-col">
           <span className="text-xs font-medium leading-none">{label}</span>
           <span className="text-[10px] text-muted-foreground capitalize">
