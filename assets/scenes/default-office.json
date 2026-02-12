@@ -1,0 +1,77 @@
+{
+  "id": "default-office",
+  "name": "Office",
+  "props": [
+    { "asset": "kaykit-prototype-bits/Floor", "position": [-6, -0.5, -2], "receiveShadow": true },
+    { "asset": "kaykit-prototype-bits/Floor", "position": [-2, -0.5, -2], "receiveShadow": true },
+    { "asset": "kaykit-prototype-bits/Floor", "position": [2, -0.5, -2], "receiveShadow": true },
+    { "asset": "kaykit-prototype-bits/Floor", "position": [6, -0.5, -2], "receiveShadow": true },
+    { "asset": "kaykit-prototype-bits/Floor", "position": [-6, -0.5, -6], "receiveShadow": true },
+    { "asset": "kaykit-prototype-bits/Floor", "position": [-2, -0.5, -6], "receiveShadow": true },
+    { "asset": "kaykit-prototype-bits/Floor", "position": [2, -0.5, -6], "receiveShadow": true },
+    { "asset": "kaykit-prototype-bits/Floor", "position": [6, -0.5, -6], "receiveShadow": true },
+    { "asset": "kaykit-prototype-bits/Floor", "position": [-6, -0.5, -10], "receiveShadow": true },
+    { "asset": "kaykit-prototype-bits/Floor", "position": [-2, -0.5, -10], "receiveShadow": true },
+    { "asset": "kaykit-prototype-bits/Floor", "position": [2, -0.5, -10], "receiveShadow": true },
+    { "asset": "kaykit-prototype-bits/Floor", "position": [6, -0.5, -10], "receiveShadow": true },
+
+    { "asset": "kaykit-prototype-bits/Wall", "position": [-6, -0.5, -12], "castShadow": true },
+    { "asset": "kaykit-prototype-bits/Wall", "position": [-2, -0.5, -12], "castShadow": true },
+    { "asset": "kaykit-prototype-bits/Wall_Window_Open", "position": [2, -0.5, -12], "castShadow": true },
+    { "asset": "kaykit-prototype-bits/Wall", "position": [6, -0.5, -12], "castShadow": true },
+
+    { "asset": "kaykit-prototype-bits/Wall_Window_Open", "position": [-6, -0.5, 0], "rotation": [0, 3.14159, 0], "castShadow": true },
+    { "asset": "kaykit-prototype-bits/Wall_Doorway", "position": [-2, -0.5, 0], "rotation": [0, 3.14159, 0], "castShadow": true },
+    { "asset": "kaykit-prototype-bits/Wall", "position": [2, -0.5, 0], "rotation": [0, 3.14159, 0], "castShadow": true },
+    { "asset": "kaykit-prototype-bits/Wall_Window_Open", "position": [6, -0.5, 0], "rotation": [0, 3.14159, 0], "castShadow": true },
+
+    { "asset": "kaykit-prototype-bits/Wall", "position": [-8, -0.5, -2], "rotation": [0, 1.5708, 0], "castShadow": true },
+    { "asset": "kaykit-prototype-bits/Wall_Window_Open", "position": [-8, -0.5, -6], "rotation": [0, 1.5708, 0], "castShadow": true },
+    { "asset": "kaykit-prototype-bits/Wall", "position": [-8, -0.5, -10], "rotation": [0, 1.5708, 0], "castShadow": true },
+
+    { "asset": "kaykit-prototype-bits/Wall", "position": [8, -0.5, -2], "rotation": [0, -1.5708, 0], "castShadow": true },
+    { "asset": "kaykit-prototype-bits/Wall_Window_Open", "position": [8, -0.5, -6], "rotation": [0, -1.5708, 0], "castShadow": true },
+    { "asset": "kaykit-prototype-bits/Wall", "position": [8, -0.5, -10], "rotation": [0, -1.5708, 0], "castShadow": true },
+
+    { "asset": "kaykit-prototype-bits/Pillar_A", "position": [-8, -0.5, 0], "castShadow": true },
+    { "asset": "kaykit-prototype-bits/Pillar_A", "position": [8, -0.5, 0], "castShadow": true },
+    { "asset": "kaykit-prototype-bits/Pillar_A", "position": [-8, -0.5, -12], "castShadow": true },
+    { "asset": "kaykit-prototype-bits/Pillar_A", "position": [8, -0.5, -12], "castShadow": true },
+
+    { "asset": "kaykit-prototype-bits/Pallet_Large", "position": [-5, 0, -2], "scale": [0.5, 1.6, 0.3], "castShadow": true, "receiveShadow": true },
+    { "asset": "kaykit-prototype-bits/Pallet_Large", "position": [-5, 0, -5], "scale": [0.5, 1.6, 0.3], "castShadow": true, "receiveShadow": true },
+    { "asset": "kaykit-prototype-bits/Pallet_Large", "position": [3, 0, -5], "scale": [0.5, 1.6, 0.3], "castShadow": true, "receiveShadow": true },
+    { "asset": "kaykit-prototype-bits/Pallet_Large", "position": [-5, 0, -9], "scale": [0.5, 1.6, 0.3], "castShadow": true, "receiveShadow": true },
+    { "asset": "kaykit-prototype-bits/Pallet_Large", "position": [0, 0, -9], "scale": [0.5, 1.6, 0.3], "castShadow": true, "receiveShadow": true },
+    { "asset": "kaykit-prototype-bits/Pallet_Large", "position": [5, 0, -9], "scale": [0.5, 1.6, 0.3], "castShadow": true, "receiveShadow": true },
+
+    { "asset": "kaykit-prototype-bits/Barrel_A", "position": [6.5, 0.5, -0.8], "castShadow": true },
+    { "asset": "kaykit-prototype-bits/Box_A", "position": [6.8, 0, -1.5], "scale": 2, "castShadow": true },
+    { "asset": "kaykit-prototype-bits/Barrel_B", "position": [-7, 0.5, -11], "castShadow": true },
+    { "asset": "kaykit-prototype-bits/Box_B", "position": [-6.5, 0, -11.2], "scale": 2, "castShadow": true },
+    { "asset": "kaykit-prototype-bits/Box_C", "position": [7, 0, -10.5], "scale": 2, "castShadow": true }
+  ],
+  "lighting": {
+    "ambientIntensity": 0.5,
+    "directionalPosition": [4, 12, 2],
+    "directionalIntensity": 1.2
+  },
+  "camera": {
+    "position": [0, 10, 8],
+    "target": [0, 0, -5]
+  },
+  "agentPositions": {
+    "ceo": { "position": [-5, 0, -1], "rotation": 3.14159 },
+    "coo": [{ "position": [-5, 0, -4], "rotation": 3.14159 }],
+    "teamLead": [
+      { "position": [3, 0, -4], "rotation": 3.14159 },
+      { "position": [0, 0, -4], "rotation": 3.14159 }
+    ],
+    "worker": [
+      { "position": [-5, 0, -8], "rotation": 3.14159 },
+      { "position": [0, 0, -8], "rotation": 3.14159 },
+      { "position": [5, 0, -8], "rotation": 3.14159 },
+      { "position": [5, 0, -4], "rotation": 3.14159 }
+    ]
+  }
+}

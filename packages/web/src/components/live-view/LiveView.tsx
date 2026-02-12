@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { Canvas } from "@react-three/fiber";
 import { useModelPackStore } from "../../stores/model-pack-store";
+import { useEnvironmentStore } from "../../stores/environment-store";
 import { LiveViewScene } from "./LiveViewScene";
 
 interface LiveViewProps {
@@ -10,10 +11,12 @@ interface LiveViewProps {
 
 export function LiveView({ userProfile, onToggleView }: LiveViewProps) {
   const loadPacks = useModelPackStore((s) => s.loadPacks);
+  const loadEnvironment = useEnvironmentStore((s) => s.loadEnvironment);
 
   useEffect(() => {
     loadPacks();
-  }, [loadPacks]);
+    loadEnvironment();
+  }, [loadPacks, loadEnvironment]);
 
   return (
     <div className="flex flex-col h-full">

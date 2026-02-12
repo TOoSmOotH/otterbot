@@ -13,6 +13,7 @@ interface AgentCharacterProps {
   role: string;
   status: string;
   gearConfig?: GearConfig | null;
+  rotationY?: number;
 }
 
 const STATUS_COLORS: Record<string, string> = {
@@ -23,9 +24,9 @@ const STATUS_COLORS: Record<string, string> = {
   error: "#ef4444",
 };
 
-export function AgentCharacter({ pack, position, label, role, status, gearConfig }: AgentCharacterProps) {
+export function AgentCharacter({ pack, position, label, role, status, gearConfig, rotationY = 0 }: AgentCharacterProps) {
   return (
-    <group position={position}>
+    <group position={position} rotation={[0, rotationY, 0]}>
       <Suspense fallback={<FallbackMesh role={role} />}>
         <CharacterModel pack={pack} status={status} gearConfig={gearConfig} />
       </Suspense>

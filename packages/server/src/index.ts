@@ -44,6 +44,8 @@ import {
   destroySession,
 } from "./auth/auth.js";
 import { discoverModelPacks } from "./models3d/model-packs.js";
+import { discoverEnvironmentPacks } from "./models3d/environment-packs.js";
+import { discoverSceneConfigs } from "./models3d/scene-configs.js";
 import {
   listPackages,
   installAptPackage,
@@ -87,7 +89,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 // Public API path whitelist (no auth required)
 // ---------------------------------------------------------------------------
 
-const PUBLIC_PATHS = ["/api/setup/", "/api/auth/", "/api/model-packs"];
+const PUBLIC_PATHS = ["/api/setup/", "/api/auth/", "/api/model-packs", "/api/environment-packs", "/api/scenes"];
 
 // ---------------------------------------------------------------------------
 // Cookie helper for Socket.IO (parse raw Cookie header)
@@ -309,6 +311,18 @@ async function main() {
     const packs = discoverModelPacks(assetsRoot);
     console.log(`GET /api/model-packs → ${packs.length} packs found`);
     return packs;
+  });
+
+  app.get("/api/environment-packs", async () => {
+    const packs = discoverEnvironmentPacks(assetsRoot);
+    console.log(`GET /api/environment-packs → ${packs.length} packs found`);
+    return packs;
+  });
+
+  app.get("/api/scenes", async () => {
+    const configs = discoverSceneConfigs(assetsRoot);
+    console.log(`GET /api/scenes → ${configs.length} scenes found`);
+    return configs;
   });
 
   app.post<{

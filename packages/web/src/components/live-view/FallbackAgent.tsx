@@ -9,6 +9,7 @@ interface FallbackAgentProps {
   label: string;
   role: string;
   status: string;
+  rotationY?: number;
 }
 
 const ROLE_COLORS: Record<string, string> = {
@@ -26,7 +27,7 @@ const STATUS_COLORS: Record<string, string> = {
   error: "#ef4444",
 };
 
-export function FallbackAgent({ position, label, role, status }: FallbackAgentProps) {
+export function FallbackAgent({ position, label, role, status, rotationY = 0 }: FallbackAgentProps) {
   const meshRef = useRef<Mesh>(null);
   const color = ROLE_COLORS[role] ?? ROLE_COLORS.worker;
 
@@ -48,7 +49,7 @@ export function FallbackAgent({ position, label, role, status }: FallbackAgentPr
   });
 
   return (
-    <group position={position}>
+    <group position={position} rotation={[0, rotationY, 0]}>
       {/* Capsule body */}
       <mesh ref={meshRef} position={[0, 0.75, 0]} castShadow>
         <capsuleGeometry args={[0.3, 0.8, 8, 16]} />
