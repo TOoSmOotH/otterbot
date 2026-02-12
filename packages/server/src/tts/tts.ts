@@ -138,10 +138,9 @@ export function stripMarkdown(text: string): string {
       .replace(/~~(.+?)~~/g, "$1")
       // Horizontal rules
       .replace(/^[-*_]{3,}\s*$/gm, "")
-      // Unordered list markers
-      .replace(/^\s*[-*+]\s+/gm, "")
-      // Ordered list markers
-      .replace(/^\s*\d+\.\s+/gm, "")
+      // List items: strip marker and append comma so TTS pauses between items
+      .replace(/^\s*[-*+]\s+(.+)$/gm, "$1,")
+      .replace(/^\s*\d+\.\s+(.+)$/gm, "$1,")
       // Blockquotes
       .replace(/^\s*>\s?/gm, "")
       // HTML tags
