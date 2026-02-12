@@ -4,6 +4,7 @@ import { useSettingsStore } from "../../stores/settings-store";
 import { useSpeechToText } from "../../hooks/use-speech-to-text";
 import { getSocket } from "../../lib/socket";
 import { cn } from "../../lib/utils";
+import { MarkdownContent } from "./MarkdownContent";
 
 function formatRelativeTime(dateStr: string): string {
   const now = Date.now();
@@ -305,7 +306,7 @@ export function CeoChat() {
                         : "bg-secondary text-secondary-foreground",
                     )}
                   >
-                    {msg.content}
+                    {isCeo ? msg.content : <MarkdownContent content={msg.content} />}
                   </div>
                   {thinking && <ThinkingDisclosure thinking={thinking} />}
                   <p
@@ -362,7 +363,7 @@ export function CeoChat() {
             {streamingContent && (
               <div className="max-w-[85%] mr-auto">
                 <div className="bg-secondary text-secondary-foreground rounded-xl px-3.5 py-2.5 text-sm leading-relaxed">
-                  {streamingContent}
+                  <MarkdownContent content={streamingContent} />
                   <span className="inline-block w-1.5 h-4 bg-muted-foreground/50 ml-0.5 animate-pulse" />
                 </div>
               </div>
