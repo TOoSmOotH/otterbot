@@ -668,15 +668,26 @@ export function SetupWizard() {
                       key={v}
                       onClick={() => handlePreviewVoice(v)}
                       disabled={previewingVoice}
-                      className={`px-2 py-1.5 rounded-md border text-xs transition-colors disabled:opacity-50 ${
+                      className={`relative px-2 py-1.5 rounded-md border text-xs transition-colors ${
+                        previewingVoice && ttsVoice !== v
+                          ? "opacity-40 cursor-not-allowed"
+                          : ""
+                      } ${
                         ttsVoice === v
                           ? "border-primary bg-primary/10 text-foreground"
                           : "border-border text-muted-foreground hover:border-muted-foreground hover:text-foreground"
                       }`}
                     >
-                      {v.replace("af_", "")}
+                      <span className={previewingVoice && ttsVoice === v ? "opacity-0" : ""}>
+                        {v.replace("af_", "")}
+                      </span>
                       {previewingVoice && ttsVoice === v && (
-                        <span className="ml-1 inline-block animate-pulse">...</span>
+                        <span className="absolute inset-0 flex items-center justify-center">
+                          <svg className="animate-spin h-3.5 w-3.5 text-primary" viewBox="0 0 24 24" fill="none">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                          </svg>
+                        </span>
                       )}
                     </button>
                   ))}
@@ -698,25 +709,50 @@ export function SetupWizard() {
                       key={v}
                       onClick={() => handlePreviewVoice(v)}
                       disabled={previewingVoice}
-                      className={`px-2 py-1.5 rounded-md border text-xs transition-colors disabled:opacity-50 ${
+                      className={`relative px-2 py-1.5 rounded-md border text-xs transition-colors ${
+                        previewingVoice && ttsVoice !== v
+                          ? "opacity-40 cursor-not-allowed"
+                          : ""
+                      } ${
                         ttsVoice === v
                           ? "border-primary bg-primary/10 text-foreground"
                           : "border-border text-muted-foreground hover:border-muted-foreground hover:text-foreground"
                       }`}
                     >
-                      {v.replace("am_", "")}
+                      <span className={previewingVoice && ttsVoice === v ? "opacity-0" : ""}>
+                        {v.replace("am_", "")}
+                      </span>
                       {previewingVoice && ttsVoice === v && (
-                        <span className="ml-1 inline-block animate-pulse">...</span>
+                        <span className="absolute inset-0 flex items-center justify-center">
+                          <svg className="animate-spin h-3.5 w-3.5 text-primary" viewBox="0 0 24 24" fill="none">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                          </svg>
+                        </span>
                       )}
                     </button>
                   ))}
                 </div>
               </div>
 
-              <p className="text-[10px] text-muted-foreground">
-                Click a voice to hear a preview. First preview may take a
-                moment while the model downloads.
-              </p>
+              {/* Loading status bar */}
+              {previewingVoice && (
+                <div className="flex items-center gap-2 text-xs text-muted-foreground bg-secondary rounded-md px-3 py-2">
+                  <svg className="animate-spin h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="none">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                  </svg>
+                  <span>
+                    Generating preview... First time may take 30–60s while the voice model downloads.
+                  </span>
+                </div>
+              )}
+
+              {!previewingVoice && (
+                <p className="text-[10px] text-muted-foreground">
+                  Click a voice to hear a preview.
+                </p>
+              )}
 
               {error && <p className="text-sm text-destructive">{error}</p>}
 
