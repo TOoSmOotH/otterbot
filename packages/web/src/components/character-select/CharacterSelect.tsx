@@ -154,8 +154,12 @@ function CharacterPreview({ url, idleAnimUrl }: { url: string; idleAnimUrl: stri
     const mixer = new THREE.AnimationMixer(clone);
     mixerRef.current = mixer;
 
-    // Play first idle clip, skipping T-Pose
-    const clip = animations.find((a) => a.name !== "T-Pose") ?? animations[0];
+    // Play an idle clip
+    const clip =
+      animations.find((a) => a.name === "Idle_A") ??
+      animations.find((a) => /idle/i.test(a.name)) ??
+      animations.find((a) => a.name !== "T-Pose") ??
+      animations[0];
     if (clip) {
       mixer.clipAction(clip).play();
     }
