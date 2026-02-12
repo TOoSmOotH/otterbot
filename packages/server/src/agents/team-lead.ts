@@ -24,6 +24,7 @@ export interface TeamLeadDependencies {
   projectId: string;
   parentId: string;
   onAgentSpawned?: (agent: BaseAgent) => void;
+  onStatusChange?: (agentId: string, status: AgentStatus) => void;
 }
 
 export class TeamLead extends BaseAgent {
@@ -47,6 +48,7 @@ export class TeamLead extends BaseAgent {
         getConfig("coo_provider") ??
         "anthropic",
       systemPrompt: tlEntry?.systemPrompt ?? TEAM_LEAD_PROMPT,
+      onStatusChange: deps.onStatusChange,
     };
     super(options, deps.bus);
     this.workspace = deps.workspace;
@@ -262,6 +264,7 @@ export class TeamLead extends BaseAgent {
       systemPrompt: entry.systemPrompt,
       workspacePath,
       toolNames: (entry.tools as string[]) ?? [],
+      onStatusChange: this.onStatusChange,
     });
 
     this.workers.set(worker.id, worker);

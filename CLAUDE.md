@@ -18,6 +18,33 @@ The project draws inspiration from OpenClaw's gateway-centric architecture:
 - Skills/tools provide the agent's capabilities (calendar, email, browser automation, etc.)
 - Configuration is file-based and local to the user's machine
 
+## Environment
+
+`pnpm` is not on the default PATH. Always invoke it via `npx pnpm` (e.g. `npx pnpm test`, `npx pnpm build`, `npx pnpm dev`).
+
+## Development Commands
+
+```bash
+# Run all tests (vitest, from repo root)
+npx pnpm test
+
+# Run tests in watch mode
+npx pnpm test:watch
+
+# Type-check individual packages (no emit)
+npx tsc --noEmit -p packages/server/tsconfig.json
+npx tsc --noEmit -p packages/web/tsconfig.json
+npx tsc --noEmit -p packages/shared/tsconfig.json
+
+# Build all packages
+npx pnpm build
+
+# Dev mode (server + web)
+npx pnpm dev
+```
+
+**Note:** `packages/server` has a pre-existing type error in `src/tts/tts.ts` for the `kokoro-js` module — this is expected and can be ignored when type-checking.
+
 ## License
 
 MIT — Copyright 2026 Mike Reeves

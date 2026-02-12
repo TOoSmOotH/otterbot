@@ -40,9 +40,14 @@ function buildLayout(
     },
   });
 
+  // Filter out "done" agents (defense-in-depth, API already filters)
+  const activeAgents = Array.from(agents.values()).filter(
+    (a) => a.status !== "done",
+  );
+
   // Group agents by parent for hierarchical layout
   const byParent = new Map<string | null, Agent[]>();
-  for (const agent of agents.values()) {
+  for (const agent of activeAgents) {
     const parentId = agent.parentId;
     if (!byParent.has(parentId)) {
       byParent.set(parentId, []);
@@ -59,13 +64,13 @@ function buildLayout(
 
   // Count agents per level for horizontal spacing
   const levelCounts: Record<string, number> = { coo: 0, team_lead: 0, worker: 0 };
-  for (const agent of agents.values()) {
+  for (const agent of activeAgents) {
     levelCounts[agent.role] = (levelCounts[agent.role] || 0) + 1;
   }
 
   const levelIndex: Record<string, number> = { coo: 0, team_lead: 0, worker: 0 };
 
-  for (const agent of agents.values()) {
+  for (const agent of activeAgents) {
     const count = levelCounts[agent.role] || 1;
     const idx = levelIndex[agent.role]++;
     const totalWidth = count * 180;

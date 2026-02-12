@@ -24,6 +24,7 @@ import { getConfiguredTTSProvider } from "./tts/tts.js";
 import {
   setupSocketHandlers,
   emitAgentSpawned,
+  emitAgentStatus,
   emitCooStream,
 } from "./socket/handlers.js";
 import {
@@ -118,6 +119,17 @@ function ensureSelfSignedCert(dataDir: string): { key: Buffer; cert: Buffer } {
 async function main() {
   // Initialize database
   await migrateDb();
+
+  // Mark stale agents from previous runs as "done"
+  {
+    const { getDb, schema } = await import("./db/index.js");
+    const { ne } = await import("drizzle-orm");
+    const db = getDb();
+    db.update(schema.agents)
+      .set({ status: "done" })
+      .where(ne(schema.agents.status, "done"))
+      .run();
+  }
   console.log("Database initialized.");
 
   // Core services
@@ -176,10 +188,14 @@ async function main() {
       onAgentSpawned: (agent) => {
         emitAgentSpawned(io, agent);
       },
+      onStatusChange: (agentId, status) => {
+        emitAgentStatus(io, agentId, status);
+      },
       onStream: (token, messageId) => {
         emitCooStream(io, token, messageId);
       },
     });
+    emitAgentSpawned(io, coo);
     setupSocketHandlers(io, bus, coo, registry);
     console.log("COO agent started.");
   }
@@ -598,11 +614,12 @@ async function main() {
     };
   });
 
-  // Agent list endpoint
+  // Agent list endpoint (only active agents, not stale "done" ones)
   app.get("/api/agents", async () => {
     const { getDb, schema } = await import("./db/index.js");
+    const { ne } = await import("drizzle-orm");
     const db = getDb();
-    return db.select().from(schema.agents).all();
+    return db.select().from(schema.agents).where(ne(schema.agents.status, "done")).all();
   });
 
   // =========================================================================

@@ -120,6 +120,8 @@ export class MessageBus {
       }, timeoutMs);
 
       this.correlationHandlers.set(correlationId, (reply) => {
+        // Ignore the outgoing request — only resolve on the actual reply
+        if (reply.fromAgentId === params.fromAgentId) return;
         clearTimeout(timer);
         this.correlationHandlers.delete(correlationId);
         resolve(reply);

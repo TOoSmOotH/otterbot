@@ -13,10 +13,10 @@ interface AgentNodeData {
 
 const STATUS_COLORS: Record<string, string> = {
   idle: "border-zinc-600 bg-zinc-800",
-  thinking: "border-blue-500 bg-blue-500/10",
-  acting: "border-emerald-500 bg-emerald-500/10",
+  thinking: "border-blue-500 bg-blue-500/10 shadow-[0_0_12px_rgba(59,130,246,0.3)]",
+  acting: "border-emerald-500 bg-emerald-500/10 shadow-[0_0_12px_rgba(16,185,129,0.3)]",
   done: "border-zinc-600 bg-zinc-800/50",
-  error: "border-red-500 bg-red-500/10",
+  error: "border-red-500 bg-red-500/10 shadow-[0_0_12px_rgba(239,68,68,0.3)]",
 };
 
 const STATUS_DOT: Record<string, string> = {
@@ -25,6 +25,14 @@ const STATUS_DOT: Record<string, string> = {
   acting: "bg-emerald-500 animate-pulse",
   done: "bg-zinc-600",
   error: "bg-red-500",
+};
+
+const STATUS_LABEL: Record<string, { text: string; className: string } | null> = {
+  idle: null,
+  thinking: { text: "Thinking...", className: "text-blue-400" },
+  acting: { text: "Executing tool...", className: "text-emerald-400" },
+  done: null,
+  error: { text: "Error", className: "text-red-400" },
 };
 
 const ROLE_ICONS: Record<string, string> = {
@@ -38,6 +46,7 @@ export const AgentNode = memo(function AgentNode({
   data,
 }: NodeProps & { data: AgentNodeData }) {
   const { label, role, status, avatarUrl } = data;
+  const statusLabel = STATUS_LABEL[status] ?? null;
 
   return (
     <div
@@ -88,6 +97,12 @@ export const AgentNode = memo(function AgentNode({
           )}
         />
       </div>
+
+      {statusLabel && (
+        <div className={cn("text-[10px] mt-1 text-center animate-pulse", statusLabel.className)}>
+          {statusLabel.text}
+        </div>
+      )}
 
       <Handle
         type="source"

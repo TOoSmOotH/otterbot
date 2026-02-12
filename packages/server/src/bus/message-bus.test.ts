@@ -133,6 +133,46 @@ describe("MessageBus", () => {
     });
   });
 
+  describe("request", () => {
+    it("resolves with the reply, not the outgoing message", async () => {
+      // Simulate a target agent that replies when it receives a message
+      bus.subscribe("team-lead", (msg) => {
+        bus.send({
+          fromAgentId: "team-lead",
+          toAgentId: msg.fromAgentId,
+          type: MessageType.StatusResponse,
+          content: "All tasks on track",
+          correlationId: msg.correlationId,
+        });
+      });
+
+      const reply = await bus.request({
+        fromAgentId: "coo",
+        toAgentId: "team-lead",
+        type: MessageType.StatusRequest,
+        content: "status",
+      });
+
+      expect(reply).not.toBeNull();
+      expect(reply!.fromAgentId).toBe("team-lead");
+      expect(reply!.content).toBe("All tasks on track");
+    });
+
+    it("resolves null on timeout", async () => {
+      const reply = await bus.request(
+        {
+          fromAgentId: "coo",
+          toAgentId: "team-lead",
+          type: MessageType.StatusRequest,
+          content: "status",
+        },
+        50, // 50ms timeout
+      );
+
+      expect(reply).toBeNull();
+    });
+  });
+
   describe("getHistory", () => {
     it("returns all messages", () => {
       bus.send({ fromAgentId: "a", toAgentId: "b", type: MessageType.Chat, content: "1" });

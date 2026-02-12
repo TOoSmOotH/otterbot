@@ -41,6 +41,7 @@ export interface COODependencies {
   bus: MessageBus;
   workspace: WorkspaceManager;
   onAgentSpawned?: (agent: BaseAgent) => void;
+  onStatusChange?: (agentId: string, status: AgentStatus) => void;
   onStream?: (token: string, messageId: string) => void;
 }
 
@@ -75,6 +76,7 @@ export class COO extends BaseAgent {
       model: getConfig("coo_model") ?? "claude-sonnet-4-5-20250929",
       provider: getConfig("coo_provider") ?? "anthropic",
       systemPrompt,
+      onStatusChange: deps.onStatusChange,
     };
     super(options, deps.bus);
     this.workspace = deps.workspace;
@@ -345,6 +347,7 @@ export class COO extends BaseAgent {
       projectId,
       parentId: this.id,
       onAgentSpawned: this.onAgentSpawned,
+      onStatusChange: this.onStatusChange,
     });
 
     this.teamLeads.set(projectId, teamLead);

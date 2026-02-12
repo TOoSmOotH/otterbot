@@ -1,5 +1,6 @@
 import {
   AgentRole,
+  type AgentStatus,
   MessageType,
   type BusMessage,
 } from "@smoothbot/shared";
@@ -17,6 +18,7 @@ export interface WorkerDependencies {
   systemPrompt: string;
   workspacePath: string | null;
   toolNames: string[];
+  onStatusChange?: (agentId: string, status: AgentStatus) => void;
 }
 
 export class Worker extends BaseAgent {
@@ -33,6 +35,7 @@ export class Worker extends BaseAgent {
       provider: deps.provider,
       systemPrompt: deps.systemPrompt,
       workspacePath: deps.workspacePath,
+      onStatusChange: deps.onStatusChange,
     };
     super(options, deps.bus);
     this.toolNames = deps.toolNames;

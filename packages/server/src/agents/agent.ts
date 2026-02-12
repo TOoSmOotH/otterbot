@@ -24,6 +24,7 @@ export interface AgentOptions {
   temperature?: number;
   systemPrompt: string;
   workspacePath?: string | null;
+  onStatusChange?: (agentId: string, status: AgentStatus) => void;
 }
 
 export abstract class BaseAgent {
@@ -37,6 +38,7 @@ export abstract class BaseAgent {
   protected conversationHistory: ChatMessage[] = [];
   protected llmConfig: LLMConfig;
   protected systemPrompt: string;
+  protected onStatusChange?: (agentId: string, status: AgentStatus) => void;
 
   constructor(options: AgentOptions, bus: MessageBus) {
     this.id = options.id ?? nanoid();
@@ -47,6 +49,7 @@ export abstract class BaseAgent {
     this.bus = bus;
     this.systemPrompt = options.systemPrompt;
 
+    this.onStatusChange = options.onStatusChange;
     this.llmConfig = {
       provider: options.provider,
       model: options.model,
@@ -81,6 +84,7 @@ export abstract class BaseAgent {
       .set({ status })
       .where(eq(schema.agents.id, this.id))
       .run();
+    this.onStatusChange?.(this.id, status);
   }
 
   /** Get a human-readable status summary (override in subclasses) */
@@ -200,11 +204,13 @@ export abstract class BaseAgent {
   /** Clean up this agent */
   destroy() {
     this.bus.unsubscribe(this.id);
+    this.status = AgentStatus.Done;
     const db = getDb();
     db.update(schema.agents)
       .set({ status: "done" })
       .where(eq(schema.agents.id, this.id))
       .run();
+    this.onStatusChange?.(this.id, AgentStatus.Done);
   }
 
   private persistAgent(options: AgentOptions) {
