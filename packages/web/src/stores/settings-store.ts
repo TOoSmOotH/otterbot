@@ -47,6 +47,16 @@ export interface TTSProviderConfig {
   voices: string[];
 }
 
+export interface STTProviderConfig {
+  id: string;
+  name: string;
+  needsApiKey: boolean;
+  needsBaseUrl: boolean;
+  apiKey?: string;
+  apiKeySet: boolean;
+  baseUrl?: string;
+}
+
 interface SettingsState {
   providers: ProviderConfig[];
   defaults: TierDefaults;
@@ -67,6 +77,14 @@ interface SettingsState {
   ttsVoice: string;
   ttsSpeed: number;
   ttsTestResults: Record<string, TestResult>;
+
+  // STT
+  sttEnabled: boolean;
+  sttProviders: STTProviderConfig[];
+  activeSTTProvider: string | null;
+  sttLanguage: string;
+  sttModelId: string;
+  sttTestResults: Record<string, TestResult>;
 
   loadSettings: () => Promise<void>;
   updateProvider: (
@@ -97,6 +115,18 @@ interface SettingsState {
     data: { apiKey?: string; baseUrl?: string },
   ) => Promise<void>;
   testTTSProvider: (id: string) => Promise<void>;
+
+  // STT actions
+  loadSTTSettings: () => Promise<void>;
+  setSTTEnabled: (enabled: boolean) => Promise<void>;
+  setActiveSTTProvider: (id: string | null) => Promise<void>;
+  setSTTLanguage: (language: string) => Promise<void>;
+  setSTTModel: (modelId: string) => Promise<void>;
+  updateSTTProvider: (
+    id: string,
+    data: { apiKey?: string; baseUrl?: string },
+  ) => Promise<void>;
+  testSTTProvider: (id: string) => Promise<void>;
 }
 
 // ---------------------------------------------------------------------------
@@ -123,6 +153,12 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   ttsVoice: "af_heart",
   ttsSpeed: 1,
   ttsTestResults: {},
+  sttEnabled: false,
+  sttProviders: [],
+  activeSTTProvider: null,
+  sttLanguage: "",
+  sttModelId: "onnx-community/whisper-base",
+  sttTestResults: {},
 
   loadSettings: async () => {
     set({ loading: true, error: null });
@@ -423,6 +459,134 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       set((s) => ({
         ttsTestResults: {
           ...s.ttsTestResults,
+          [id]: {
+            ok: false,
+            error: err instanceof Error ? err.message : "Unknown error",
+            testing: false,
+          },
+        },
+      }));
+    }
+  },
+
+  // STT actions
+
+  loadSTTSettings: async () => {
+    try {
+      const res = await fetch("/api/settings/stt");
+      if (!res.ok) return;
+      const data = await res.json();
+      set({
+        sttEnabled: data.enabled,
+        sttProviders: data.providers,
+        activeSTTProvider: data.activeProvider,
+        sttLanguage: data.language,
+        sttModelId: data.modelId,
+      });
+    } catch {
+      // Silently fail
+    }
+  },
+
+  setSTTEnabled: async (enabled) => {
+    set({ error: null });
+    try {
+      const res = await fetch("/api/settings/stt/enabled", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled }),
+      });
+      if (!res.ok) throw new Error("Failed to update STT enabled state");
+      await get().loadSTTSettings();
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "Unknown error" });
+    }
+  },
+
+  setActiveSTTProvider: async (id) => {
+    set({ error: null });
+    try {
+      const res = await fetch("/api/settings/stt/active", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ providerId: id }),
+      });
+      if (!res.ok) throw new Error("Failed to set active STT provider");
+      await get().loadSTTSettings();
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "Unknown error" });
+    }
+  },
+
+  setSTTLanguage: async (language) => {
+    set({ error: null });
+    try {
+      const res = await fetch("/api/settings/stt/language", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ language }),
+      });
+      if (!res.ok) throw new Error("Failed to set STT language");
+      await get().loadSTTSettings();
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "Unknown error" });
+    }
+  },
+
+  setSTTModel: async (modelId) => {
+    set({ error: null });
+    try {
+      const res = await fetch("/api/settings/stt/model", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ modelId }),
+      });
+      if (!res.ok) throw new Error("Failed to set STT model");
+      await get().loadSTTSettings();
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "Unknown error" });
+    }
+  },
+
+  updateSTTProvider: async (id, data) => {
+    set({ error: null });
+    try {
+      const res = await fetch(`/api/settings/stt/provider/${id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) throw new Error("Failed to update STT provider");
+      await get().loadSTTSettings();
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "Unknown error" });
+    }
+  },
+
+  testSTTProvider: async (id) => {
+    set((s) => ({
+      sttTestResults: {
+        ...s.sttTestResults,
+        [id]: { ok: false, testing: true },
+      },
+    }));
+    try {
+      const res = await fetch(`/api/settings/stt/provider/${id}/test`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      const data = await res.json();
+      set((s) => ({
+        sttTestResults: {
+          ...s.sttTestResults,
+          [id]: { ok: data.ok, error: data.error, testing: false },
+        },
+      }));
+    } catch (err) {
+      set((s) => ({
+        sttTestResults: {
+          ...s.sttTestResults,
           [id]: {
             ok: false,
             error: err instanceof Error ? err.message : "Unknown error",

@@ -33,7 +33,6 @@ export function CeoChat() {
   const loadConversationMessages = useMessageStore((s) => s.loadConversationMessages);
 
   const [speechError, setSpeechError] = useState<string | null>(null);
-  const interimRef = useRef("");
   const [speakerOn, setSpeakerOn] = useState(() => {
     return localStorage.getItem("smoothbot:speaker") === "true";
   });
@@ -45,28 +44,12 @@ export function CeoChat() {
     el.style.height = Math.min(el.scrollHeight, 200) + "px";
   }, []);
 
-  const { isListening, isSupported, error: sttError, setError: setSttError, startListening, stopListening } =
+  const { isListening, isTranscribing, isSupported, error: sttError, setError: setSttError, startListening, stopListening } =
     useSpeechToText({
       onTranscript: (finalText) => {
         setInput((prev) => {
-          // Remove interim portion and append final text
-          const withoutInterim = interimRef.current
-            ? prev.slice(0, prev.length - interimRef.current.length)
-            : prev;
-          interimRef.current = "";
-          const separator = withoutInterim && !withoutInterim.endsWith(" ") ? " " : "";
-          return withoutInterim + separator + finalText;
-        });
-        setTimeout(resizeTextarea, 0);
-      },
-      onInterim: (partialText) => {
-        setInput((prev) => {
-          const withoutOldInterim = interimRef.current
-            ? prev.slice(0, prev.length - interimRef.current.length)
-            : prev;
-          const separator = withoutOldInterim && !withoutOldInterim.endsWith(" ") ? " " : "";
-          interimRef.current = separator + partialText;
-          return withoutOldInterim + interimRef.current;
+          const separator = prev && !prev.endsWith(" ") ? " " : "";
+          return prev + separator + finalText;
         });
         setTimeout(resizeTextarea, 0);
       },
@@ -85,8 +68,6 @@ export function CeoChat() {
   const toggleListening = useCallback(() => {
     if (isListening) {
       stopListening();
-      // Commit any remaining interim text as final
-      interimRef.current = "";
     } else {
       startListening();
     }
@@ -324,29 +305,61 @@ export function CeoChat() {
               {isSupported && (
                 <button
                   onClick={toggleListening}
-                  title={isListening ? "Stop recording" : "Start recording"}
+                  disabled={isTranscribing}
+                  title={
+                    isTranscribing
+                      ? "Transcribing..."
+                      : isListening
+                        ? "Stop recording"
+                        : "Start recording"
+                  }
                   className={cn(
                     "shrink-0 w-7 h-7 rounded-lg flex items-center justify-center transition-colors",
-                    isListening
-                      ? "bg-red-500/90 text-white animate-pulse"
-                      : "text-muted-foreground hover:text-foreground hover:bg-secondary",
+                    isTranscribing
+                      ? "bg-amber-500/90 text-white"
+                      : isListening
+                        ? "bg-red-500/90 text-white animate-pulse"
+                        : "text-muted-foreground hover:text-foreground hover:bg-secondary",
+                    isTranscribing && "cursor-not-allowed",
                   )}
                 >
-                  <svg
-                    width="14"
-                    height="14"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  >
-                    <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
-                    <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
-                    <line x1="12" y1="19" x2="12" y2="23" />
-                    <line x1="8" y1="23" x2="16" y2="23" />
-                  </svg>
+                  {isTranscribing ? (
+                    <svg
+                      className="animate-spin h-3.5 w-3.5"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                    >
+                      <circle
+                        className="opacity-25"
+                        cx="12"
+                        cy="12"
+                        r="10"
+                        stroke="currentColor"
+                        strokeWidth="4"
+                      />
+                      <path
+                        className="opacity-75"
+                        fill="currentColor"
+                        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+                      />
+                    </svg>
+                  ) : (
+                    <svg
+                      width="14"
+                      height="14"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
+                      <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                      <line x1="12" y1="19" x2="12" y2="23" />
+                      <line x1="8" y1="23" x2="16" y2="23" />
+                    </svg>
+                  )}
                 </button>
               )}
               <button

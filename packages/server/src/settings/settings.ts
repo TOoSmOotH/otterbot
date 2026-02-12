@@ -13,6 +13,7 @@ import { resolveModel, type LLMConfig } from "../llm/adapter.js";
 import { generateText } from "ai";
 import { getConfiguredSearchProvider } from "../tools/search/providers.js";
 import { getConfiguredTTSProvider } from "../tts/tts.js";
+import { getConfiguredSTTProvider } from "../stt/stt.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -672,6 +673,178 @@ export async function testTTSProvider(
       setConfig("tts:active_provider", previousActive);
     } else {
       deleteConfig("tts:active_provider");
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// STT settings
+// ---------------------------------------------------------------------------
+
+export interface STTProviderConfig {
+  id: string;
+  name: string;
+  needsApiKey: boolean;
+  needsBaseUrl: boolean;
+  apiKey?: string;
+  apiKeySet: boolean;
+  baseUrl?: string;
+}
+
+export interface STTSettingsResponse {
+  enabled: boolean;
+  activeProvider: string | null;
+  language: string;
+  modelId: string;
+  providers: STTProviderConfig[];
+}
+
+const STT_PROVIDER_META: Record<
+  string,
+  { name: string; needsApiKey: boolean; needsBaseUrl: boolean }
+> = {
+  "whisper-local": {
+    name: "Whisper (Local)",
+    needsApiKey: false,
+    needsBaseUrl: false,
+  },
+  "openai-compatible": {
+    name: "OpenAI-compatible",
+    needsApiKey: true,
+    needsBaseUrl: true,
+  },
+};
+
+export const WHISPER_MODELS = [
+  { id: "onnx-community/whisper-tiny.en", label: "tiny.en (~75MB, English only)" },
+  { id: "onnx-community/whisper-base", label: "base (~150MB, multilingual)" },
+  { id: "onnx-community/whisper-base.en", label: "base.en (~150MB, English only)" },
+  { id: "onnx-community/whisper-small", label: "small (~500MB, multilingual)" },
+  { id: "onnx-community/whisper-small.en", label: "small.en (~500MB, English only)" },
+];
+
+export function getSTTSettings(): STTSettingsResponse {
+  const enabled = getConfig("stt:enabled") === "true";
+  const activeProvider = getConfig("stt:active_provider") ?? null;
+  const language = getConfig("stt:language") ?? "";
+  const modelId =
+    getConfig("stt:whisper:model_id") ?? "onnx-community/whisper-base";
+
+  const providers = Object.entries(STT_PROVIDER_META).map(([id, meta]) => {
+    const rawKey = getConfig(`stt:${id}:api_key`);
+    const baseUrl = getConfig(`stt:${id}:base_url`);
+
+    return {
+      id,
+      name: meta.name,
+      needsApiKey: meta.needsApiKey,
+      needsBaseUrl: meta.needsBaseUrl,
+      apiKey: maskApiKey(rawKey),
+      apiKeySet: !!rawKey,
+      baseUrl: baseUrl || undefined,
+    } satisfies STTProviderConfig;
+  });
+
+  return { enabled, activeProvider, language, modelId, providers };
+}
+
+export function setSTTEnabled(enabled: boolean): void {
+  setConfig("stt:enabled", enabled ? "true" : "false");
+}
+
+export function setActiveSTTProvider(providerId: string | null): void {
+  if (!providerId) {
+    deleteConfig("stt:active_provider");
+  } else {
+    setConfig("stt:active_provider", providerId);
+  }
+}
+
+export function setSTTLanguage(language: string): void {
+  if (!language) {
+    deleteConfig("stt:language");
+  } else {
+    setConfig("stt:language", language);
+  }
+}
+
+export function setSTTModel(modelId: string): void {
+  setConfig("stt:whisper:model_id", modelId);
+}
+
+export function updateSTTProviderConfig(
+  providerId: string,
+  data: { apiKey?: string; baseUrl?: string },
+): void {
+  if (data.apiKey !== undefined) {
+    if (data.apiKey === "") {
+      deleteConfig(`stt:${providerId}:api_key`);
+    } else {
+      setConfig(`stt:${providerId}:api_key`, data.apiKey);
+    }
+  }
+  if (data.baseUrl !== undefined) {
+    if (data.baseUrl === "") {
+      deleteConfig(`stt:${providerId}:base_url`);
+    } else {
+      setConfig(`stt:${providerId}:base_url`, data.baseUrl);
+    }
+  }
+}
+
+export async function testSTTProvider(
+  providerId: string,
+): Promise<TestResult> {
+  const start = Date.now();
+
+  const previousActive = getConfig("stt:active_provider");
+  setConfig("stt:active_provider", providerId);
+
+  try {
+    const provider = getConfiguredSTTProvider();
+    if (!provider) {
+      return {
+        ok: false,
+        error: `Provider "${providerId}" is not configured.`,
+      };
+    }
+
+    // Generate a short silent audio buffer for testing
+    // 16kHz, 1 second of silence as WAV
+    const sampleRate = 16000;
+    const numSamples = sampleRate; // 1 second
+    const headerSize = 44;
+    const dataSize = numSamples * 2; // 16-bit PCM
+    const wav = Buffer.alloc(headerSize + dataSize);
+
+    // WAV header
+    wav.write("RIFF", 0);
+    wav.writeUInt32LE(36 + dataSize, 4);
+    wav.write("WAVE", 8);
+    wav.write("fmt ", 12);
+    wav.writeUInt32LE(16, 16); // chunk size
+    wav.writeUInt16LE(1, 20); // PCM
+    wav.writeUInt16LE(1, 22); // mono
+    wav.writeUInt32LE(sampleRate, 24);
+    wav.writeUInt32LE(sampleRate * 2, 28); // byte rate
+    wav.writeUInt16LE(2, 32); // block align
+    wav.writeUInt16LE(16, 34); // bits per sample
+    wav.write("data", 36);
+    wav.writeUInt32LE(dataSize, 40);
+    // samples are all zeros (silence)
+
+    await provider.transcribe(wav);
+    return { ok: true, latencyMs: Date.now() - start };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "Unknown error",
+    };
+  } finally {
+    if (previousActive) {
+      setConfig("stt:active_provider", previousActive);
+    } else {
+      deleteConfig("stt:active_provider");
     }
   }
 }

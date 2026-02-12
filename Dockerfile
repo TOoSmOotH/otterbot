@@ -19,7 +19,7 @@ RUN pnpm build
 # Production
 FROM base AS production
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    tini git curl sudo gnupg apt-transport-https ca-certificates \
+    tini git curl sudo gnupg apt-transport-https ca-certificates ffmpeg \
     # Playwright/Chromium system dependencies
     libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 libcups2 \
     libdrm2 libdbus-1-3 libxkbcommon0 libatspi2.0-0 libxcomposite1 \

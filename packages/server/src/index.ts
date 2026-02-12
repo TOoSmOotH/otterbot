@@ -3,6 +3,7 @@ import Fastify from "fastify";
 import cors from "@fastify/cors";
 import fastifyCookie from "@fastify/cookie";
 import fastifyStatic from "@fastify/static";
+import multipart from "@fastify/multipart";
 import { Server } from "socket.io";
 import { resolve, dirname, join } from "node:path";
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
@@ -21,6 +22,7 @@ import { Registry } from "./registry/registry.js";
 import { COO } from "./agents/coo.js";
 import { closeBrowser } from "./tools/browser-pool.js";
 import { getConfiguredTTSProvider } from "./tts/tts.js";
+import { getConfiguredSTTProvider } from "./stt/stt.js";
 import {
   setupSocketHandlers,
   emitAgentSpawned,
@@ -66,6 +68,13 @@ import {
   setTTSVoice,
   setTTSSpeed,
   testTTSProvider,
+  getSTTSettings,
+  setSTTEnabled,
+  setActiveSTTProvider,
+  setSTTLanguage,
+  setSTTModel,
+  updateSTTProviderConfig,
+  testSTTProvider,
   type TierDefaults,
 } from "./settings/settings.js";
 
@@ -143,6 +152,7 @@ async function main() {
   const app = Fastify({ logger: false, https: { key: tls.key, cert: tls.cert } });
   await app.register(cors, { origin: true, credentials: true });
   await app.register(fastifyCookie);
+  await app.register(multipart, { limits: { fileSize: 50 * 1024 * 1024 } });
 
   // Serve static web build if it exists
   const webDistPath = resolve(__dirname, "../../web/dist");
@@ -767,6 +777,87 @@ async function main() {
       reply.code(500);
       return {
         error: err instanceof Error ? err.message : "TTS synthesis failed",
+      };
+    }
+  });
+
+  // =========================================================================
+  // STT settings routes
+  // =========================================================================
+
+  app.get("/api/settings/stt", async () => {
+    return getSTTSettings();
+  });
+
+  app.put<{
+    Body: { enabled: boolean };
+  }>("/api/settings/stt/enabled", async (req) => {
+    setSTTEnabled(req.body.enabled);
+    return { ok: true };
+  });
+
+  app.put<{
+    Body: { providerId: string | null };
+  }>("/api/settings/stt/active", async (req) => {
+    setActiveSTTProvider(req.body.providerId);
+    return { ok: true };
+  });
+
+  app.put<{
+    Body: { language: string };
+  }>("/api/settings/stt/language", async (req) => {
+    setSTTLanguage(req.body.language);
+    return { ok: true };
+  });
+
+  app.put<{
+    Body: { modelId: string };
+  }>("/api/settings/stt/model", async (req) => {
+    setSTTModel(req.body.modelId);
+    return { ok: true };
+  });
+
+  app.put<{
+    Params: { providerId: string };
+    Body: { apiKey?: string; baseUrl?: string };
+  }>("/api/settings/stt/provider/:providerId", async (req) => {
+    updateSTTProviderConfig(req.params.providerId, req.body);
+    return { ok: true };
+  });
+
+  app.post<{
+    Params: { providerId: string };
+  }>("/api/settings/stt/provider/:providerId/test", async (req) => {
+    return testSTTProvider(req.params.providerId);
+  });
+
+  // =========================================================================
+  // STT transcription route
+  // =========================================================================
+
+  app.post("/api/stt/transcribe", async (req, reply) => {
+    const provider = getConfiguredSTTProvider();
+    if (!provider) {
+      reply.code(400);
+      return { error: "No STT provider configured" };
+    }
+
+    const file = await req.file();
+    if (!file) {
+      reply.code(400);
+      return { error: "No audio file provided" };
+    }
+
+    const buffer = await file.toBuffer();
+    const language = getConfig("stt:language") || undefined;
+
+    try {
+      const result = await provider.transcribe(buffer, { language });
+      return { text: result.text };
+    } catch (err) {
+      reply.code(500);
+      return {
+        error: err instanceof Error ? err.message : "Transcription failed",
       };
     }
   });

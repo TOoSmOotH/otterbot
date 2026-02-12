@@ -7,41 +7,26 @@ interface UseSpeechToTextOptions {
 
 const isSupported =
   typeof window !== "undefined" &&
-  ("SpeechRecognition" in window || "webkitSpeechRecognition" in window);
-
-function errorMessage(error: string): string {
-  switch (error) {
-    case "not-allowed":
-      return "Microphone access denied. Click the lock icon in your address bar to allow it.";
-    case "no-speech":
-      return "No speech detected. Try again.";
-    case "network":
-      return "Network error during speech recognition.";
-    case "audio-capture":
-      return "No microphone found.";
-    case "aborted":
-      return "";
-    default:
-      return "Speech recognition error. Try again.";
-  }
-}
+  !!navigator.mediaDevices?.getUserMedia;
 
 export function useSpeechToText({
   onTranscript,
-  onInterim,
 }: UseSpeechToTextOptions) {
   const [isListening, setIsListening] = useState(false);
+  const [isTranscribing, setIsTranscribing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const recognitionRef = useRef<SpeechRecognition | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
   const onTranscriptRef = useRef(onTranscript);
-  const onInterimRef = useRef(onInterim);
 
   onTranscriptRef.current = onTranscript;
-  onInterimRef.current = onInterim;
 
   useEffect(() => {
     return () => {
-      recognitionRef.current?.abort();
+      // Cleanup on unmount
+      mediaRecorderRef.current?.stop();
+      streamRef.current?.getTracks().forEach((t) => t.stop());
     };
   }, []);
 
@@ -49,74 +34,93 @@ export function useSpeechToText({
     if (!isSupported) return;
 
     setError(null);
+    chunksRef.current = [];
 
-    // Explicitly request mic permission via getUserMedia first.
-    // This triggers Chrome's permission prompt and makes the mic setting
-    // appear in site settings. Without this, SpeechRecognition.start()
-    // may silently fail or not prompt the user.
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      // Stop the stream immediately — we only needed it to trigger the prompt.
-      stream.getTracks().forEach((t) => t.stop());
+      streamRef.current = stream;
+
+      const recorder = new MediaRecorder(stream);
+      mediaRecorderRef.current = recorder;
+
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) {
+          chunksRef.current.push(e.data);
+        }
+      };
+
+      recorder.onstop = async () => {
+        // Stop all tracks to release mic
+        stream.getTracks().forEach((t) => t.stop());
+        streamRef.current = null;
+
+        const blob = new Blob(chunksRef.current, { type: recorder.mimeType });
+        chunksRef.current = [];
+
+        if (blob.size === 0) {
+          setIsTranscribing(false);
+          return;
+        }
+
+        setIsTranscribing(true);
+
+        try {
+          const formData = new FormData();
+          formData.append("audio", blob, "audio.webm");
+
+          const res = await fetch("/api/stt/transcribe", {
+            method: "POST",
+            body: formData,
+          });
+
+          if (!res.ok) {
+            const data = await res.json().catch(() => ({}));
+            throw new Error(data.error || `Transcription failed (${res.status})`);
+          }
+
+          const data = await res.json();
+          if (data.text) {
+            onTranscriptRef.current(data.text);
+          }
+        } catch (err) {
+          setError(
+            err instanceof Error ? err.message : "Transcription failed",
+          );
+        } finally {
+          setIsTranscribing(false);
+        }
+      };
+
+      recorder.start();
+      setIsListening(true);
     } catch (err) {
       if (err instanceof DOMException && err.name === "NotAllowedError") {
-        setError("Microphone access denied. Click the lock icon in your address bar to allow it.");
+        setError(
+          "Microphone access denied. Click the lock icon in your address bar to allow it.",
+        );
       } else if (err instanceof DOMException && err.name === "NotFoundError") {
         setError("No microphone found.");
       } else {
         setError("Could not access microphone.");
       }
-      return;
     }
-
-    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-    const recognition = new SR();
-    recognition.continuous = true;
-    recognition.interimResults = true;
-    recognition.lang = navigator.language || "en-US";
-    recognitionRef.current = recognition;
-
-    recognition.onstart = () => {
-      setIsListening(true);
-    };
-
-    recognition.onresult = (event: SpeechRecognitionEvent) => {
-      let interim = "";
-      let final = "";
-
-      for (let i = event.resultIndex; i < event.results.length; i++) {
-        const result = event.results[i];
-        if (result.isFinal) {
-          final += result[0].transcript;
-        } else {
-          interim += result[0].transcript;
-        }
-      }
-
-      if (final) {
-        onTranscriptRef.current(final);
-      }
-      if (interim) {
-        onInterimRef.current?.(interim);
-      }
-    };
-
-    recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
-      const msg = errorMessage(event.error);
-      if (msg) setError(msg);
-      setIsListening(false);
-    };
-
-    recognition.onend = () => {
-      setIsListening(false);
-    };
-
-    recognition.start();
   }, []);
 
   const stopListening = useCallback(() => {
-    recognitionRef.current?.stop();
+    const recorder = mediaRecorderRef.current;
+    if (recorder && recorder.state !== "inactive") {
+      recorder.stop();
+    }
+    setIsListening(false);
   }, []);
 
-  return { isListening, isSupported, error, setError, startListening, stopListening };
+  return {
+    isListening,
+    isTranscribing,
+    isSupported,
+    error,
+    setError,
+    startListening,
+    stopListening,
+  };
 }
