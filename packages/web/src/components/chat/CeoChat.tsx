@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useCallback, type KeyboardEvent } from "react";
 import { useMessageStore } from "../../stores/message-store";
+import { useSpeechToText } from "../../hooks/use-speech-to-text";
 import { getSocket } from "../../lib/socket";
 import { cn } from "../../lib/utils";
 
@@ -30,6 +31,63 @@ export function CeoChat() {
   const setCurrentConversation = useMessageStore((s) => s.setCurrentConversation);
   const conversations = useMessageStore((s) => s.conversations);
   const loadConversationMessages = useMessageStore((s) => s.loadConversationMessages);
+
+  const [speechError, setSpeechError] = useState<string | null>(null);
+  const interimRef = useRef("");
+
+  const resizeTextarea = useCallback(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = Math.min(el.scrollHeight, 200) + "px";
+  }, []);
+
+  const { isListening, isSupported, error: sttError, setError: setSttError, startListening, stopListening } =
+    useSpeechToText({
+      onTranscript: (finalText) => {
+        setInput((prev) => {
+          // Remove interim portion and append final text
+          const withoutInterim = interimRef.current
+            ? prev.slice(0, prev.length - interimRef.current.length)
+            : prev;
+          interimRef.current = "";
+          const separator = withoutInterim && !withoutInterim.endsWith(" ") ? " " : "";
+          return withoutInterim + separator + finalText;
+        });
+        setTimeout(resizeTextarea, 0);
+      },
+      onInterim: (partialText) => {
+        setInput((prev) => {
+          const withoutOldInterim = interimRef.current
+            ? prev.slice(0, prev.length - interimRef.current.length)
+            : prev;
+          const separator = withoutOldInterim && !withoutOldInterim.endsWith(" ") ? " " : "";
+          interimRef.current = separator + partialText;
+          return withoutOldInterim + interimRef.current;
+        });
+        setTimeout(resizeTextarea, 0);
+      },
+    });
+
+  // Sync speech-to-text errors to local state with auto-dismiss
+  useEffect(() => {
+    if (sttError) {
+      setSpeechError(sttError);
+      setSttError(null);
+      const timer = setTimeout(() => setSpeechError(null), 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [sttError, setSttError]);
+
+  const toggleListening = useCallback(() => {
+    if (isListening) {
+      stopListening();
+      // Commit any remaining interim text as final
+      interimRef.current = "";
+    } else {
+      startListening();
+    }
+  }, [isListening, startListening, stopListening]);
 
   const isStreaming = !!streamingContent;
 
@@ -87,10 +145,7 @@ export function CeoChat() {
 
   const handleInput = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     setInput(e.target.value);
-    // Auto-resize
-    const el = e.target;
-    el.style.height = "auto";
-    el.style.height = Math.min(el.scrollHeight, 200) + "px";
+    resizeTextarea();
   };
 
   return (
@@ -255,6 +310,34 @@ export function CeoChat() {
                 rows={1}
                 className="flex-1 bg-transparent text-sm resize-none outline-none placeholder:text-muted-foreground max-h-[200px]"
               />
+              {isSupported && (
+                <button
+                  onClick={toggleListening}
+                  title={isListening ? "Stop recording" : "Start recording"}
+                  className={cn(
+                    "shrink-0 w-7 h-7 rounded-lg flex items-center justify-center transition-colors",
+                    isListening
+                      ? "bg-red-500/90 text-white animate-pulse"
+                      : "text-muted-foreground hover:text-foreground hover:bg-secondary",
+                  )}
+                >
+                  <svg
+                    width="14"
+                    height="14"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
+                    <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                    <line x1="12" y1="19" x2="12" y2="23" />
+                    <line x1="8" y1="23" x2="16" y2="23" />
+                  </svg>
+                </button>
+              )}
               <button
                 onClick={sendMessage}
                 disabled={!input.trim()}
@@ -280,6 +363,9 @@ export function CeoChat() {
                 </svg>
               </button>
             </div>
+            {speechError && (
+              <p className="text-xs text-destructive mt-1.5 px-1">{speechError}</p>
+            )}
           </div>
         </>
       )}
