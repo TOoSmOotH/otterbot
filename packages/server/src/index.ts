@@ -20,6 +20,7 @@ import { WorkspaceManager } from "./workspace/workspace.js";
 import { Registry } from "./registry/registry.js";
 import { COO } from "./agents/coo.js";
 import { closeBrowser } from "./tools/browser-pool.js";
+import { getConfiguredTTSProvider } from "./tts/tts.js";
 import {
   setupSocketHandlers,
   emitAgentSpawned,
@@ -32,6 +33,7 @@ import {
   verifyPassphrase,
   getConfig,
   setConfig,
+  deleteConfig,
   createSession,
   validateSession,
   destroySession,
@@ -211,6 +213,48 @@ async function main() {
     }
     const models = await fetchModelsWithCredentials(provider, apiKey, baseUrl);
     return { models };
+  });
+
+  app.post<{
+    Body: { voice: string };
+  }>("/api/setup/tts-preview", async (req, reply) => {
+    const { voice } = req.body;
+    if (!voice) {
+      reply.code(400);
+      return { error: "voice is required" };
+    }
+
+    // Temporarily configure Kokoro as the active provider for synthesis
+    const previousActive = getConfig("tts:active_provider");
+    setConfig("tts:active_provider", "kokoro");
+
+    try {
+      const provider = getConfiguredTTSProvider();
+      if (!provider) {
+        reply.code(500);
+        return { error: "TTS provider unavailable" };
+      }
+
+      const { audio, contentType } = await provider.synthesize(
+        "Hello from your AI assistant.",
+        voice,
+        1,
+      );
+
+      reply.header("Content-Type", contentType);
+      return reply.send(audio);
+    } catch (err) {
+      reply.code(500);
+      return {
+        error: err instanceof Error ? err.message : "TTS synthesis failed",
+      };
+    } finally {
+      if (previousActive) {
+        setConfig("tts:active_provider", previousActive);
+      } else {
+        deleteConfig("tts:active_provider");
+      }
+    }
   });
 
   app.post<{

@@ -217,30 +217,41 @@ export function SetupWizard() {
     setSubmitting(false);
   };
 
+  const previewAudioRef = useRef<HTMLAudioElement | null>(null);
+
   const handlePreviewVoice = async (voice: string) => {
+    // Stop any currently playing preview
+    if (previewAudioRef.current) {
+      previewAudioRef.current.pause();
+      previewAudioRef.current = null;
+    }
+
+    setTtsVoice(voice);
     setPreviewingVoice(true);
+    setError(null);
+
     try {
-      // Temporarily set the voice so the test uses it
-      await fetch("/api/settings/tts/voice", {
-        method: "PUT",
+      const res = await fetch("/api/setup/tts-preview", {
+        method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ voice }),
       });
-      const res = await fetch("/api/settings/tts/provider/kokoro/test", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({}),
-      });
-      // The test endpoint just checks connectivity — for preview we need
-      // the actual audio. Use a different approach: synthesize directly.
-      // Since the test endpoint doesn't return audio, we'll just show
-      // the test result for now and play audio once connected.
-      if (res.ok) {
-        const data = await res.json();
-        if (!data.ok) {
-          setError(data.error ?? "Preview failed");
-        }
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setError(data.error ?? "Preview failed");
+        return;
       }
+
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const audio = new Audio(url);
+      previewAudioRef.current = audio;
+      audio.addEventListener("ended", () => {
+        URL.revokeObjectURL(url);
+        previewAudioRef.current = null;
+      });
+      await audio.play();
     } catch {
       setError("Failed to preview voice");
     } finally {
@@ -655,14 +666,18 @@ export function SetupWizard() {
                   ].map((v) => (
                     <button
                       key={v}
-                      onClick={() => setTtsVoice(v)}
-                      className={`px-2 py-1.5 rounded-md border text-xs transition-colors ${
+                      onClick={() => handlePreviewVoice(v)}
+                      disabled={previewingVoice}
+                      className={`px-2 py-1.5 rounded-md border text-xs transition-colors disabled:opacity-50 ${
                         ttsVoice === v
                           ? "border-primary bg-primary/10 text-foreground"
                           : "border-border text-muted-foreground hover:border-muted-foreground hover:text-foreground"
                       }`}
                     >
                       {v.replace("af_", "")}
+                      {previewingVoice && ttsVoice === v && (
+                        <span className="ml-1 inline-block animate-pulse">...</span>
+                      )}
                     </button>
                   ))}
                 </div>
@@ -681,18 +696,27 @@ export function SetupWizard() {
                   ].map((v) => (
                     <button
                       key={v}
-                      onClick={() => setTtsVoice(v)}
-                      className={`px-2 py-1.5 rounded-md border text-xs transition-colors ${
+                      onClick={() => handlePreviewVoice(v)}
+                      disabled={previewingVoice}
+                      className={`px-2 py-1.5 rounded-md border text-xs transition-colors disabled:opacity-50 ${
                         ttsVoice === v
                           ? "border-primary bg-primary/10 text-foreground"
                           : "border-border text-muted-foreground hover:border-muted-foreground hover:text-foreground"
                       }`}
                     >
                       {v.replace("am_", "")}
+                      {previewingVoice && ttsVoice === v && (
+                        <span className="ml-1 inline-block animate-pulse">...</span>
+                      )}
                     </button>
                   ))}
                 </div>
               </div>
+
+              <p className="text-[10px] text-muted-foreground">
+                Click a voice to hear a preview. First preview may take a
+                moment while the model downloads.
+              </p>
 
               {error && <p className="text-sm text-destructive">{error}</p>}
 
