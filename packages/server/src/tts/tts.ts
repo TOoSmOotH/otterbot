@@ -122,8 +122,8 @@ class OpenAICompatibleProvider implements TTSProvider {
 export function stripMarkdown(text: string): string {
   return (
     text
-      // Code blocks (``` ... ```)
-      .replace(/```[\s\S]*?```/g, "")
+      // Fenced code/diagram blocks (```mermaid, ~~~mermaid, etc.)
+      .replace(/(`{3,}|~{3,})[a-z]*\n[\s\S]*?\1/g, "")
       // Inline code (`...`)
       .replace(/`([^`]+)`/g, "$1")
       // Images ![alt](url)
