@@ -10,12 +10,12 @@ describe("MessageBus", () => {
   let tmpDir: string;
   let bus: MessageBus;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     tmpDir = mkdtempSync(join(tmpdir(), "smoothbot-bus-test-"));
     resetDb();
     process.env.DATABASE_URL = `file:${join(tmpDir, "test.db")}`;
     process.env.SMOOTHBOT_DB_KEY = "test-key";
-    migrateDb();
+    await migrateDb();
     bus = new MessageBus();
   });
 

@@ -12,6 +12,7 @@ import { BaseAgent, type AgentOptions } from "./agent.js";
 import { COO_SYSTEM_PROMPT } from "./prompts/coo.js";
 import { TeamLead } from "./team-lead.js";
 import { getDb, schema } from "../db/index.js";
+import { Registry } from "../registry/registry.js";
 import type { MessageBus } from "../bus/message-bus.js";
 import type { WorkspaceManager } from "../workspace/workspace.js";
 import { eq } from "drizzle-orm";
@@ -51,6 +52,8 @@ export class COO extends BaseAgent {
   private currentConversationId: string | null = null;
 
   constructor(deps: COODependencies) {
+    const registry = new Registry();
+    const cooEntry = registry.get("builtin-coo");
     const options: AgentOptions = {
       id: "coo",
       role: AgentRole.COO,
@@ -58,7 +61,7 @@ export class COO extends BaseAgent {
       projectId: null,
       model: getConfig("coo_model") ?? "claude-sonnet-4-5-20250929",
       provider: getConfig("coo_provider") ?? "anthropic",
-      systemPrompt: COO_SYSTEM_PROMPT,
+      systemPrompt: cooEntry?.systemPrompt ?? COO_SYSTEM_PROMPT,
     };
     super(options, deps.bus);
     this.workspace = deps.workspace;

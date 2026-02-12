@@ -82,7 +82,7 @@ function parseCookies(header: string | undefined): Record<string, string> {
 
 async function main() {
   // Initialize database
-  migrateDb();
+  await migrateDb();
   console.log("Database initialized.");
 
   // Core services
@@ -324,14 +324,31 @@ async function main() {
     },
   );
 
-  app.patch<{ Params: { id: string }; Body: RegistryEntryUpdate }>(
-    "/api/registry/:id",
+  app.post<{ Params: { id: string } }>(
+    "/api/registry/:id/clone",
     async (req, reply) => {
-      const entry = registry.update(req.params.id, req.body);
-      if (!entry) {
+      const cloned = registry.clone(req.params.id);
+      if (!cloned) {
         reply.code(404);
         return { error: "Not found" };
       }
+      return cloned;
+    },
+  );
+
+  app.patch<{ Params: { id: string }; Body: RegistryEntryUpdate }>(
+    "/api/registry/:id",
+    async (req, reply) => {
+      const existing = registry.get(req.params.id);
+      if (!existing) {
+        reply.code(404);
+        return { error: "Not found" };
+      }
+      if (existing.builtIn) {
+        reply.code(403);
+        return { error: "Built-in templates cannot be modified. Clone it first." };
+      }
+      const entry = registry.update(req.params.id, req.body);
       return entry;
     },
   );
@@ -339,11 +356,16 @@ async function main() {
   app.delete<{ Params: { id: string } }>(
     "/api/registry/:id",
     async (req, reply) => {
-      const deleted = registry.delete(req.params.id);
-      if (!deleted) {
+      const existing = registry.get(req.params.id);
+      if (!existing) {
         reply.code(404);
         return { error: "Not found" };
       }
+      if (existing.builtIn) {
+        reply.code(403);
+        return { error: "Built-in templates cannot be deleted" };
+      }
+      registry.delete(req.params.id);
       return { ok: true };
     },
   );

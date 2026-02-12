@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { cn } from "../../lib/utils";
 import { useSettingsStore } from "../../stores/settings-store";
 import type { RegistryEntry } from "@smoothbot/shared";
@@ -28,6 +28,15 @@ export function AgentTemplatesTab() {
     const data = await res.json();
     setEntries(data);
   };
+
+  const grouped = useMemo(() => {
+    const core = entries.filter(
+      (e) => e.builtIn && (e.role === "coo" || e.role === "team_lead"),
+    );
+    const workers = entries.filter((e) => e.builtIn && e.role === "worker");
+    const custom = entries.filter((e) => !e.builtIn);
+    return { core, workers, custom };
+  }, [entries]);
 
   const selectEntry = (entry: RegistryEntry) => {
     setSelected(entry);
@@ -94,12 +103,27 @@ export function AgentTemplatesTab() {
     setEditing(true);
   };
 
+  const cloneEntry = async (id: string) => {
+    const res = await fetch(`/api/registry/${id}/clone`, { method: "POST" });
+    if (!res.ok) return;
+    const cloned = await res.json();
+    await loadEntries();
+    selectEntry(cloned);
+    setEditing(true);
+  };
+
   const deleteEntry = async () => {
     if (!selected) return;
     await fetch(`/api/registry/${selected.id}`, { method: "DELETE" });
     setSelected(null);
     await loadEntries();
   };
+
+  const clonedFromName = useMemo(() => {
+    if (!selected?.clonedFromId) return null;
+    const source = entries.find((e) => e.id === selected.clonedFromId);
+    return source?.name ?? null;
+  }, [selected, entries]);
 
   return (
     <div className="flex flex-1 overflow-hidden" style={{ minHeight: "400px" }}>
@@ -110,26 +134,48 @@ export function AgentTemplatesTab() {
             onClick={addEntry}
             className="w-full text-xs text-center py-1.5 rounded-md border border-dashed border-border hover:border-primary/50 hover:text-primary transition-colors"
           >
-            + Add Agent Template
+            + New Custom Template
           </button>
         </div>
-        {entries.map((entry) => (
-          <button
-            key={entry.id}
-            onClick={() => selectEntry(entry)}
-            className={cn(
-              "w-full text-left px-3 py-2 text-sm transition-colors",
-              selected?.id === entry.id
-                ? "bg-secondary text-foreground"
-                : "hover:bg-secondary/50 text-muted-foreground",
-            )}
-          >
-            <div className="font-medium text-xs">{entry.name}</div>
-            <div className="text-[10px] text-muted-foreground truncate">
-              {entry.capabilities.join(", ")}
-            </div>
-          </button>
-        ))}
+
+        {grouped.core.length > 0 && (
+          <SidebarGroup label="Core">
+            {grouped.core.map((entry) => (
+              <SidebarItem
+                key={entry.id}
+                entry={entry}
+                selected={selected?.id === entry.id}
+                onClick={() => selectEntry(entry)}
+              />
+            ))}
+          </SidebarGroup>
+        )}
+
+        {grouped.workers.length > 0 && (
+          <SidebarGroup label="Workers">
+            {grouped.workers.map((entry) => (
+              <SidebarItem
+                key={entry.id}
+                entry={entry}
+                selected={selected?.id === entry.id}
+                onClick={() => selectEntry(entry)}
+              />
+            ))}
+          </SidebarGroup>
+        )}
+
+        {grouped.custom.length > 0 && (
+          <SidebarGroup label="Custom">
+            {grouped.custom.map((entry) => (
+              <SidebarItem
+                key={entry.id}
+                entry={entry}
+                selected={selected?.id === entry.id}
+                onClick={() => selectEntry(entry)}
+              />
+            ))}
+          </SidebarGroup>
+        )}
       </div>
 
       {/* Right: Detail/Edit */}
@@ -141,7 +187,14 @@ export function AgentTemplatesTab() {
         ) : (
           <div className="space-y-4">
             <div className="flex items-center justify-between">
-              <h3 className="text-sm font-semibold">{form.name}</h3>
+              <div className="flex items-center gap-2">
+                <h3 className="text-sm font-semibold">{form.name}</h3>
+                {selected.builtIn && (
+                  <span className="text-[9px] uppercase tracking-wider text-muted-foreground bg-secondary px-1.5 py-0.5 rounded">
+                    Built-in
+                  </span>
+                )}
+              </div>
               <div className="flex gap-2">
                 {editing ? (
                   <>
@@ -161,6 +214,13 @@ export function AgentTemplatesTab() {
                       Cancel
                     </button>
                   </>
+                ) : selected.builtIn ? (
+                  <button
+                    onClick={() => cloneEntry(selected.id)}
+                    className="text-xs bg-secondary text-foreground px-3 py-1 rounded-md hover:bg-secondary/80"
+                  >
+                    Clone
+                  </button>
                 ) : (
                   <>
                     <button
@@ -168,6 +228,12 @@ export function AgentTemplatesTab() {
                       className="text-xs bg-secondary text-foreground px-3 py-1 rounded-md hover:bg-secondary/80"
                     >
                       Edit
+                    </button>
+                    <button
+                      onClick={() => cloneEntry(selected.id)}
+                      className="text-xs bg-secondary text-foreground px-3 py-1 rounded-md hover:bg-secondary/80"
+                    >
+                      Clone
                     </button>
                     <button
                       onClick={deleteEntry}
@@ -179,6 +245,12 @@ export function AgentTemplatesTab() {
                 )}
               </div>
             </div>
+
+            {clonedFromName && (
+              <p className="text-[10px] text-muted-foreground">
+                Cloned from: {clonedFromName}
+              </p>
+            )}
 
             {/* Name */}
             <Field label="Name" editing={editing}>
@@ -323,6 +395,66 @@ export function AgentTemplatesTab() {
         )}
       </div>
     </div>
+  );
+}
+
+function SidebarGroup({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div>
+      <div className="px-3 py-1.5 text-[9px] uppercase tracking-wider text-muted-foreground font-medium">
+        {label}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function SidebarItem({
+  entry,
+  selected,
+  onClick,
+}: {
+  entry: RegistryEntry;
+  selected: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={cn(
+        "w-full text-left px-3 py-2 text-sm transition-colors",
+        selected
+          ? "bg-secondary text-foreground"
+          : "hover:bg-secondary/50 text-muted-foreground",
+      )}
+    >
+      <div className="flex items-center gap-1.5">
+        {entry.builtIn && (
+          <svg
+            className="w-3 h-3 text-muted-foreground/50 shrink-0"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <rect width="18" height="11" x="3" y="11" rx="2" ry="2" />
+            <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+          </svg>
+        )}
+        <span className="font-medium text-xs truncate">{entry.name}</span>
+      </div>
+      <div className="text-[10px] text-muted-foreground truncate">
+        {entry.capabilities.join(", ")}
+      </div>
+    </button>
   );
 }
 

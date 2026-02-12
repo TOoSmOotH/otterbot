@@ -7,6 +7,9 @@ export interface RegistryEntry {
   defaultModel: string;
   defaultProvider: string;
   tools: string[];
+  builtIn: boolean;
+  role: "coo" | "team_lead" | "worker";
+  clonedFromId: string | null;
   createdAt: string;
 }
 
@@ -18,6 +21,8 @@ export interface RegistryEntryCreate {
   defaultModel: string;
   defaultProvider: string;
   tools: string[];
+  role?: "coo" | "team_lead" | "worker";
+  clonedFromId?: string | null;
 }
 
 export interface RegistryEntryUpdate {

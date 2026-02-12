@@ -66,6 +66,11 @@ export const registryEntries = sqliteTable("registry_entries", {
     .$type<string[]>()
     .notNull()
     .default([]),
+  builtIn: integer("built_in", { mode: "boolean" }).notNull().default(false),
+  role: text("role", { enum: ["coo", "team_lead", "worker"] })
+    .notNull()
+    .default("worker"),
+  clonedFromId: text("cloned_from_id"),
   createdAt: text("created_at")
     .notNull()
     .$defaultFn(() => new Date().toISOString()),

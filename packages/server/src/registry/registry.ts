@@ -35,6 +35,9 @@ export class Registry {
       defaultModel: data.defaultModel,
       defaultProvider: data.defaultProvider,
       tools: data.tools,
+      builtIn: false,
+      role: data.role ?? "worker" as const,
+      clonedFromId: data.clonedFromId ?? null,
       createdAt: new Date().toISOString(),
     };
     db.insert(schema.registryEntries).values(entry).run();
@@ -45,6 +48,7 @@ export class Registry {
     const db = getDb();
     const existing = this.get(id);
     if (!existing) return null;
+    if (existing.builtIn) return null;
 
     const updates: Record<string, unknown> = {};
     if (data.name !== undefined) updates.name = data.name;
@@ -67,11 +71,32 @@ export class Registry {
 
   delete(id: string): boolean {
     const db = getDb();
+    const existing = this.get(id);
+    if (!existing) return false;
+    if (existing.builtIn) return false;
+
     const result = db
       .delete(schema.registryEntries)
       .where(eq(schema.registryEntries.id, id))
       .run();
     return result.changes > 0;
+  }
+
+  clone(id: string): RegistryEntry | null {
+    const source = this.get(id);
+    if (!source) return null;
+
+    return this.create({
+      name: `${source.name} (Custom)`,
+      description: source.description,
+      systemPrompt: source.systemPrompt,
+      capabilities: [...source.capabilities],
+      defaultModel: source.defaultModel,
+      defaultProvider: source.defaultProvider,
+      tools: [...source.tools],
+      role: source.role,
+      clonedFromId: source.id,
+    });
   }
 
   search(capability: string): RegistryEntry[] {
@@ -93,6 +118,9 @@ export class Registry {
       defaultModel: row.defaultModel,
       defaultProvider: row.defaultProvider,
       tools: row.tools as string[],
+      builtIn: row.builtIn ?? false,
+      role: row.role ?? "worker",
+      clonedFromId: row.clonedFromId ?? null,
       createdAt: row.createdAt,
     };
   }

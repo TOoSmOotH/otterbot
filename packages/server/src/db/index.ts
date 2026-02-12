@@ -35,7 +35,7 @@ export function getDb() {
 }
 
 /** Create all tables if they don't exist */
-export function migrateDb() {
+export async function migrateDb() {
   const db = getDb();
 
   db.run(sql`CREATE TABLE IF NOT EXISTS agents (
@@ -89,6 +89,9 @@ export function migrateDb() {
     default_model TEXT NOT NULL,
     default_provider TEXT NOT NULL,
     tools TEXT NOT NULL DEFAULT '[]',
+    built_in INTEGER NOT NULL DEFAULT 0,
+    role TEXT NOT NULL DEFAULT 'worker',
+    cloned_from_id TEXT,
     created_at TEXT NOT NULL
   )`);
 
@@ -105,6 +108,10 @@ export function migrateDb() {
     value TEXT NOT NULL,
     updated_at TEXT NOT NULL
   )`);
+
+  // Seed built-in registry entries on every startup (dynamic import to avoid circular dep)
+  const { seedBuiltIns } = await import("./seed.js");
+  seedBuiltIns();
 }
 
 /** Reset the DB singleton (for testing) */

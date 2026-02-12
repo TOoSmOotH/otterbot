@@ -1,9 +1,36 @@
 import { getDb, migrateDb, schema } from "./index.js";
-import { nanoid } from "nanoid";
+import { COO_SYSTEM_PROMPT } from "../agents/prompts/coo.js";
+import { TEAM_LEAD_PROMPT } from "../agents/prompts/team-lead.js";
 
 const SEED_ENTRIES = [
   {
-    id: nanoid(),
+    id: "builtin-coo",
+    name: "COO",
+    description:
+      "Chief Operating Officer. Receives goals from the CEO and delegates to Team Leads.",
+    systemPrompt: COO_SYSTEM_PROMPT,
+    capabilities: ["management", "delegation", "coordination"],
+    defaultModel: "claude-sonnet-4-5-20250929",
+    defaultProvider: "anthropic",
+    tools: [],
+    builtIn: true,
+    role: "coo" as const,
+  },
+  {
+    id: "builtin-team-lead",
+    name: "Team Lead",
+    description:
+      "Manages a team of workers for a project. Breaks directives into tasks and assigns them.",
+    systemPrompt: TEAM_LEAD_PROMPT,
+    capabilities: ["management", "planning", "coordination"],
+    defaultModel: "claude-sonnet-4-5-20250929",
+    defaultProvider: "anthropic",
+    tools: [],
+    builtIn: true,
+    role: "team_lead" as const,
+  },
+  {
+    id: "builtin-coder",
     name: "Coder",
     description:
       "Writes and edits code. Proficient in multiple languages with a focus on clean, well-structured implementations.",
@@ -20,9 +47,11 @@ Be concise in your communication. Focus on delivering working code.`,
     defaultModel: "claude-sonnet-4-5-20250929",
     defaultProvider: "anthropic",
     tools: ["file_read", "file_write", "shell_exec"],
+    builtIn: true,
+    role: "worker" as const,
   },
   {
-    id: nanoid(),
+    id: "builtin-researcher",
     name: "Researcher",
     description:
       "Gathers information, analyzes options, and provides well-structured findings and recommendations.",
@@ -39,9 +68,11 @@ Present findings clearly and concisely. Lead with the key takeaway.`,
     defaultModel: "claude-sonnet-4-5-20250929",
     defaultProvider: "anthropic",
     tools: ["web_search", "web_browse", "file_read"],
+    builtIn: true,
+    role: "worker" as const,
   },
   {
-    id: nanoid(),
+    id: "builtin-reviewer",
     name: "Reviewer",
     description:
       "Reviews code and plans for quality, correctness, and potential issues.",
@@ -58,9 +89,11 @@ Be constructive but honest. Prioritize issues by severity.`,
     defaultModel: "claude-sonnet-4-5-20250929",
     defaultProvider: "anthropic",
     tools: ["file_read"],
+    builtIn: true,
+    role: "worker" as const,
   },
   {
-    id: nanoid(),
+    id: "builtin-writer",
     name: "Writer",
     description:
       "Writes documentation, specifications, and prose. Clear, well-structured technical writing.",
@@ -77,9 +110,11 @@ Write for your audience. Avoid jargon unless the audience expects it.`,
     defaultModel: "claude-sonnet-4-5-20250929",
     defaultProvider: "anthropic",
     tools: ["file_read", "file_write"],
+    builtIn: true,
+    role: "worker" as const,
   },
   {
-    id: nanoid(),
+    id: "builtin-planner",
     name: "Planner",
     description:
       "Breaks down goals into tasks and milestones. Designs project architecture and task dependencies.",
@@ -96,9 +131,11 @@ Focus on clarity and completeness. Every task should be actionable by a single a
     defaultModel: "claude-sonnet-4-5-20250929",
     defaultProvider: "anthropic",
     tools: ["file_read", "file_write"],
+    builtIn: true,
+    role: "worker" as const,
   },
   {
-    id: nanoid(),
+    id: "builtin-security-reviewer",
     name: "Security Reviewer",
     description:
       "Audits code for vulnerabilities, OWASP top 10 issues, and dependency risks.",
@@ -115,9 +152,11 @@ Be specific about risks and provide concrete remediation steps. Rate severity.`,
     defaultModel: "claude-sonnet-4-5-20250929",
     defaultProvider: "anthropic",
     tools: ["file_read", "shell_exec"],
+    builtIn: true,
+    role: "worker" as const,
   },
   {
-    id: nanoid(),
+    id: "builtin-tester",
     name: "Tester",
     description:
       "Writes and runs tests, identifies edge cases, and validates behavior against specifications.",
@@ -134,9 +173,11 @@ Focus on meaningful test coverage. Test behavior, not implementation details.`,
     defaultModel: "claude-sonnet-4-5-20250929",
     defaultProvider: "anthropic",
     tools: ["file_read", "file_write", "shell_exec"],
+    builtIn: true,
+    role: "worker" as const,
   },
   {
-    id: nanoid(),
+    id: "builtin-browser-agent",
     name: "Browser Agent",
     description:
       "Interacts with web pages using a headless browser. Can navigate, fill forms, click buttons, extract text, and evaluate JavaScript.",
@@ -163,27 +204,53 @@ When browsing:
     defaultModel: "claude-sonnet-4-5-20250929",
     defaultProvider: "anthropic",
     tools: ["web_browse", "file_read", "file_write"],
+    builtIn: true,
+    role: "worker" as const,
   },
 ];
 
-async function seed() {
-  migrateDb();
+/** Upsert all built-in registry entries. Safe to call on every startup. */
+export function seedBuiltIns() {
   const db = getDb();
 
-  // Check if already seeded
-  const existing = db.select().from(schema.registryEntries).all();
-  if (existing.length > 0) {
-    console.log(
-      `Registry already has ${existing.length} entries, skipping seed.`,
-    );
-    return;
-  }
-
   for (const entry of SEED_ENTRIES) {
-    db.insert(schema.registryEntries).values(entry).run();
+    db.insert(schema.registryEntries)
+      .values({
+        ...entry,
+        createdAt: new Date().toISOString(),
+      })
+      .onConflictDoUpdate({
+        target: schema.registryEntries.id,
+        set: {
+          name: entry.name,
+          description: entry.description,
+          systemPrompt: entry.systemPrompt,
+          capabilities: entry.capabilities,
+          defaultModel: entry.defaultModel,
+          defaultProvider: entry.defaultProvider,
+          tools: entry.tools,
+          builtIn: entry.builtIn,
+          role: entry.role,
+        },
+      })
+      .run();
   }
-
-  console.log(`Seeded ${SEED_ENTRIES.length} registry entries.`);
 }
 
-seed().catch(console.error);
+/** Standalone entrypoint for `npm run db:seed` */
+async function seed() {
+  await migrateDb();
+  seedBuiltIns();
+  console.log(`Seeded ${SEED_ENTRIES.length} built-in registry entries.`);
+}
+
+// Only run standalone when executed directly (not imported)
+const isDirectRun =
+  typeof process !== "undefined" &&
+  process.argv[1] &&
+  (process.argv[1].endsWith("/seed.ts") ||
+    process.argv[1].endsWith("/seed.js"));
+
+if (isDirectRun) {
+  seed().catch(console.error);
+}
