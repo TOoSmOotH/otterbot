@@ -95,6 +95,15 @@ function MainApp() {
     loadPacks();
   }, []);
 
+  const handleSettingsClose = () => {
+    setSettingsOpen(false);
+    // Re-fetch profile in case settings changed it (e.g. model pack, gear config)
+    fetch("/api/profile")
+      .then((r) => r.json())
+      .then(setUserProfile)
+      .catch(console.error);
+  };
+
   const handleLogout = () => {
     disconnectSocket();
     logout();
@@ -133,7 +142,7 @@ function MainApp() {
 
       {/* Settings modal - rendered outside the resizable layout */}
       {settingsOpen && (
-        <SettingsPanel onClose={() => setSettingsOpen(false)} />
+        <SettingsPanel onClose={handleSettingsClose} />
       )}
     </div>
   );
