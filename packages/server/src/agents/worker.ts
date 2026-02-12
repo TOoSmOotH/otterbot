@@ -75,11 +75,11 @@ export class Worker extends BaseAgent {
   }
 
   private async handleTask(message: BusMessage) {
-    const response = await this.think(message.content);
+    const { text } = await this.think(message.content);
 
     // Report results back to Team Lead
     if (this.parentId) {
-      this.sendMessage(this.parentId, MessageType.Report, response);
+      this.sendMessage(this.parentId, MessageType.Report, text);
     }
 
     // Worker is a one-shot agent — mark as done after completing the task

@@ -28,6 +28,8 @@ import {
   emitAgentSpawned,
   emitAgentStatus,
   emitCooStream,
+  emitCooThinking,
+  emitCooThinkingEnd,
 } from "./socket/handlers.js";
 import {
   isSetupComplete,
@@ -203,6 +205,12 @@ async function main() {
       },
       onStream: (token, messageId) => {
         emitCooStream(io, token, messageId);
+      },
+      onThinking: (token, messageId) => {
+        emitCooThinking(io, token, messageId);
+      },
+      onThinkingEnd: (messageId) => {
+        emitCooThinkingEnd(io, messageId);
       },
     });
     emitAgentSpawned(io, coo);

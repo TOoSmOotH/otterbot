@@ -1,5 +1,6 @@
-import { useState, useRef, useEffect, useCallback, type KeyboardEvent } from "react";
+import { useState, useRef, useEffect, useCallback, type KeyboardEvent, type FC } from "react";
 import { useMessageStore } from "../../stores/message-store";
+import { useSettingsStore } from "../../stores/settings-store";
 import { useSpeechToText } from "../../hooks/use-speech-to-text";
 import { getSocket } from "../../lib/socket";
 import { cn } from "../../lib/utils";
@@ -18,6 +19,38 @@ function formatRelativeTime(dateStr: string): string {
   return new Date(dateStr).toLocaleDateString();
 }
 
+const ThinkingDisclosure: FC<{ thinking: string }> = ({ thinking }) => {
+  const [expanded, setExpanded] = useState(false);
+  return (
+    <div className="mt-1">
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="text-[11px] text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1"
+      >
+        <svg
+          width="10"
+          height="10"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          className={cn("transition-transform", expanded && "rotate-90")}
+        >
+          <polyline points="9 18 15 12 9 6" />
+        </svg>
+        {expanded ? "Hide thinking" : "View thinking"}
+      </button>
+      {expanded && (
+        <pre className="mt-1.5 text-[11px] text-muted-foreground bg-muted/50 rounded-lg px-3 py-2 whitespace-pre-wrap max-h-[200px] overflow-y-auto">
+          {thinking}
+        </pre>
+      )}
+    </div>
+  );
+};
+
 export function CeoChat() {
   const [input, setInput] = useState("");
   const [showHistory, setShowHistory] = useState(false);
@@ -26,13 +59,19 @@ export function CeoChat() {
   const chatMessages = useMessageStore((s) => s.chatMessages);
   const streamingContent = useMessageStore((s) => s.streamingContent);
   const streamingMessageId = useMessageStore((s) => s.streamingMessageId);
+  const thinkingContent = useMessageStore((s) => s.thinkingContent);
+  const isThinking = useMessageStore((s) => s.isThinking);
   const clearChat = useMessageStore((s) => s.clearChat);
   const currentConversationId = useMessageStore((s) => s.currentConversationId);
   const setCurrentConversation = useMessageStore((s) => s.setCurrentConversation);
   const conversations = useMessageStore((s) => s.conversations);
   const loadConversationMessages = useMessageStore((s) => s.loadConversationMessages);
 
+  const sttEnabled = useSettingsStore((s) => s.sttEnabled);
+  const activeSTTProvider = useSettingsStore((s) => s.activeSTTProvider);
+
   const [speechError, setSpeechError] = useState<string | null>(null);
+  const [interimText, setInterimText] = useState("");
   const [speakerOn, setSpeakerOn] = useState(() => {
     return localStorage.getItem("smoothbot:speaker") === "true";
   });
@@ -46,12 +85,17 @@ export function CeoChat() {
 
   const { isListening, isTranscribing, isSupported, error: sttError, setError: setSttError, startListening, stopListening } =
     useSpeechToText({
+      provider: sttEnabled ? activeSTTProvider : null,
       onTranscript: (finalText) => {
         setInput((prev) => {
           const separator = prev && !prev.endsWith(" ") ? " " : "";
           return prev + separator + finalText;
         });
+        setInterimText("");
         setTimeout(resizeTextarea, 0);
+      },
+      onInterim: (partialText) => {
+        setInterimText(partialText);
       },
     });
 
@@ -85,7 +129,7 @@ export function CeoChat() {
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [chatMessages, streamingContent]);
+  }, [chatMessages, streamingContent, thinkingContent]);
 
   const sendMessage = () => {
     const content = input.trim();
@@ -244,6 +288,7 @@ export function CeoChat() {
 
             {chatMessages.map((msg) => {
               const isCeo = msg.fromAgentId === null;
+              const thinking = msg.metadata?.thinking as string | undefined;
               return (
                 <div
                   key={msg.id}
@@ -262,6 +307,7 @@ export function CeoChat() {
                   >
                     {msg.content}
                   </div>
+                  {thinking && <ThinkingDisclosure thinking={thinking} />}
                   <p
                     className={cn(
                       "text-[10px] text-muted-foreground mt-1 px-1",
@@ -276,6 +322,41 @@ export function CeoChat() {
                 </div>
               );
             })}
+
+            {/* Thinking indicator */}
+            {isThinking && !streamingContent && (
+              <div className="max-w-[85%] mr-auto">
+                <div className="bg-secondary/60 border border-border/50 text-secondary-foreground rounded-xl px-3.5 py-2.5 text-sm leading-relaxed">
+                  <div className="flex items-center gap-2 text-muted-foreground mb-1.5">
+                    <svg
+                      className="animate-spin h-3.5 w-3.5"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                    >
+                      <circle
+                        className="opacity-25"
+                        cx="12"
+                        cy="12"
+                        r="10"
+                        stroke="currentColor"
+                        strokeWidth="4"
+                      />
+                      <path
+                        className="opacity-75"
+                        fill="currentColor"
+                        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+                      />
+                    </svg>
+                    <span className="text-xs font-medium">Thinking...</span>
+                  </div>
+                  {thinkingContent && (
+                    <pre className="text-[11px] text-muted-foreground whitespace-pre-wrap max-h-[120px] overflow-y-auto">
+                      {thinkingContent}
+                    </pre>
+                  )}
+                </div>
+              </div>
+            )}
 
             {/* Streaming indicator */}
             {streamingContent && (
@@ -422,6 +503,9 @@ export function CeoChat() {
                 </svg>
               </button>
             </div>
+            {interimText && (
+              <p className="text-xs text-muted-foreground mt-1.5 px-1 italic">{interimText}</p>
+            )}
             {speechError && (
               <p className="text-xs text-destructive mt-1.5 px-1">{speechError}</p>
             )}

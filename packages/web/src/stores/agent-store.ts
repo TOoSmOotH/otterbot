@@ -3,6 +3,8 @@ import type { Agent, AgentStatus } from "@smoothbot/shared";
 
 interface AgentState {
   agents: Map<string, Agent>;
+  /** IDs of agents removed via socket events — prevents stale API data re-adding them */
+  _removedIds: Set<string>;
   addAgent: (agent: Agent) => void;
   updateAgentStatus: (agentId: string, status: AgentStatus) => void;
   removeAgent: (agentId: string) => void;
@@ -11,9 +13,11 @@ interface AgentState {
 
 export const useAgentStore = create<AgentState>((set) => ({
   agents: new Map(),
+  _removedIds: new Set(),
 
   addAgent: (agent) =>
     set((state) => {
+      if (state._removedIds.has(agent.id)) return state;
       const next = new Map(state.agents);
       next.set(agent.id, agent);
       return { agents: next };
@@ -25,11 +29,12 @@ export const useAgentStore = create<AgentState>((set) => ({
       if (!agent) return state;
       const next = new Map(state.agents);
       if (status === "done") {
-        // Remove finished agents entirely so the graph drops them immediately
         next.delete(agentId);
-      } else {
-        next.set(agentId, { ...agent, status });
+        const removed = new Set(state._removedIds);
+        removed.add(agentId);
+        return { agents: next, _removedIds: removed };
       }
+      next.set(agentId, { ...agent, status });
       return { agents: next };
     }),
 
@@ -37,11 +42,17 @@ export const useAgentStore = create<AgentState>((set) => ({
     set((state) => {
       const next = new Map(state.agents);
       next.delete(agentId);
-      return { agents: next };
+      const removed = new Set(state._removedIds);
+      removed.add(agentId);
+      return { agents: next, _removedIds: removed };
     }),
 
   loadAgents: (agents) =>
-    set({
-      agents: new Map(agents.map((a) => [a.id, a])),
-    }),
+    set((state) => ({
+      agents: new Map(
+        agents
+          .filter((a) => a.status !== "done" && !state._removedIds.has(a.id))
+          .map((a) => [a.id, a]),
+      ),
+    })),
 }));

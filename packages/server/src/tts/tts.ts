@@ -116,6 +116,43 @@ class OpenAICompatibleProvider implements TTSProvider {
 }
 
 // ---------------------------------------------------------------------------
+// Markdown stripping — remove formatting so TTS reads clean prose
+// ---------------------------------------------------------------------------
+
+export function stripMarkdown(text: string): string {
+  return (
+    text
+      // Code blocks (``` ... ```)
+      .replace(/```[\s\S]*?```/g, "")
+      // Inline code (`...`)
+      .replace(/`([^`]+)`/g, "$1")
+      // Images ![alt](url)
+      .replace(/!\[([^\]]*)\]\([^)]+\)/g, "$1")
+      // Links [text](url)
+      .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+      // Headings (# ... ######)
+      .replace(/^#{1,6}\s+/gm, "")
+      // Bold/italic (*** ** * ___ __ _)
+      .replace(/(\*{1,3}|_{1,3})(.+?)\1/g, "$2")
+      // Strikethrough ~~text~~
+      .replace(/~~(.+?)~~/g, "$1")
+      // Horizontal rules
+      .replace(/^[-*_]{3,}\s*$/gm, "")
+      // Unordered list markers
+      .replace(/^\s*[-*+]\s+/gm, "")
+      // Ordered list markers
+      .replace(/^\s*\d+\.\s+/gm, "")
+      // Blockquotes
+      .replace(/^\s*>\s?/gm, "")
+      // HTML tags
+      .replace(/<[^>]+>/g, "")
+      // Collapse multiple blank lines
+      .replace(/\n{3,}/g, "\n\n")
+      .trim()
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Factory
 // ---------------------------------------------------------------------------
 

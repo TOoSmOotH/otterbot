@@ -11,7 +11,7 @@ import type { COO } from "../agents/coo.js";
 import type { Registry } from "../registry/registry.js";
 import type { BaseAgent } from "../agents/agent.js";
 import { getDb, schema } from "../db/index.js";
-import { isTTSEnabled, getConfiguredTTSProvider } from "../tts/tts.js";
+import { isTTSEnabled, getConfiguredTTSProvider, stripMarkdown } from "../tts/tts.js";
 import { getConfig } from "../auth/auth.js";
 
 type TypedSocket = Socket<ClientToServerEvents, ServerToClientEvents>;
@@ -35,11 +35,14 @@ export function setupSocketHandlers(
       try {
         if (isTTSEnabled()) {
           const provider = getConfiguredTTSProvider();
-          if (provider && message.content) {
+          const plainText = message.content
+            ? stripMarkdown(message.content)
+            : "";
+          if (provider && plainText) {
             const voice = getConfig("tts:voice") ?? "af_heart";
             const speed = parseFloat(getConfig("tts:speed") ?? "1");
             const { audio, contentType } = await provider.synthesize(
-              message.content,
+              plainText,
               voice,
               speed,
             );
@@ -174,4 +177,16 @@ export function emitCooStream(
   messageId: string,
 ) {
   io.emit("coo:stream", { token, messageId });
+}
+
+export function emitCooThinking(
+  io: TypedServer,
+  token: string,
+  messageId: string,
+) {
+  io.emit("coo:thinking", { token, messageId });
+}
+
+export function emitCooThinkingEnd(io: TypedServer, messageId: string) {
+  io.emit("coo:thinking-end", { messageId });
 }

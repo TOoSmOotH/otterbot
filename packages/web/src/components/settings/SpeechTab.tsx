@@ -346,8 +346,9 @@ function STTProviderCard({
 
           {!provider.needsApiKey && !provider.needsBaseUrl && (
             <p className="text-xs text-muted-foreground">
-              No configuration needed. Model downloads automatically on first
-              use.
+              {provider.id === "browser"
+                ? "Uses your browser's built-in speech recognition. Works in Chrome and Edge. Not supported in Firefox."
+                : "No configuration needed. Model downloads automatically on first use."}
             </p>
           )}
 
@@ -361,13 +362,15 @@ function STTProviderCard({
                 {saving ? "Saving..." : "Save"}
               </button>
             )}
-            <button
-              onClick={handleTest}
-              disabled={testResult?.testing}
-              className="text-xs bg-secondary text-foreground px-3 py-1.5 rounded-md hover:bg-secondary/80 disabled:opacity-50"
-            >
-              {testResult?.testing ? "Testing..." : "Test"}
-            </button>
+            {provider.id !== "browser" && (
+              <button
+                onClick={handleTest}
+                disabled={testResult?.testing}
+                className="text-xs bg-secondary text-foreground px-3 py-1.5 rounded-md hover:bg-secondary/80 disabled:opacity-50"
+              >
+                {testResult?.testing ? "Testing..." : "Test"}
+              </button>
+            )}
 
             {testResult && !testResult.testing && (
               <span

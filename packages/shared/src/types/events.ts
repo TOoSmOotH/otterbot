@@ -10,6 +10,8 @@ export interface ServerToClientEvents {
   "bus:message": (message: BusMessage) => void;
   "coo:response": (message: BusMessage) => void;
   "coo:stream": (data: { token: string; messageId: string }) => void;
+  "coo:thinking": (data: { token: string; messageId: string }) => void;
+  "coo:thinking-end": (data: { messageId: string }) => void;
   "coo:audio": (data: { messageId: string; audio: string; contentType: string }) => void;
   "conversation:created": (conversation: Conversation) => void;
 }

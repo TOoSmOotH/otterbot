@@ -43,6 +43,8 @@ export interface COODependencies {
   onAgentSpawned?: (agent: BaseAgent) => void;
   onStatusChange?: (agentId: string, status: AgentStatus) => void;
   onStream?: (token: string, messageId: string) => void;
+  onThinking?: (token: string, messageId: string) => void;
+  onThinkingEnd?: (messageId: string) => void;
 }
 
 export class COO extends BaseAgent {
@@ -50,6 +52,8 @@ export class COO extends BaseAgent {
   private workspace: WorkspaceManager;
   private onAgentSpawned?: (agent: BaseAgent) => void;
   private onStream?: (token: string, messageId: string) => void;
+  private onThinking?: (token: string, messageId: string) => void;
+  private onThinkingEnd?: (messageId: string) => void;
   private currentConversationId: string | null = null;
 
   constructor(deps: COODependencies) {
@@ -82,6 +86,8 @@ export class COO extends BaseAgent {
     this.workspace = deps.workspace;
     this.onAgentSpawned = deps.onAgentSpawned;
     this.onStream = deps.onStream;
+    this.onThinking = deps.onThinking;
+    this.onThinkingEnd = deps.onThinkingEnd;
   }
 
   async handleMessage(message: BusMessage): Promise<void> {
@@ -100,12 +106,16 @@ export class COO extends BaseAgent {
       this.currentConversationId = message.conversationId;
     }
 
-    const response = await this.think(
+    const { text, thinking } = await this.think(
       message.content,
       (token, messageId) => {
-        if (this.onStream) {
-          this.onStream(token, messageId);
-        }
+        this.onStream?.(token, messageId);
+      },
+      (token, messageId) => {
+        this.onThinking?.(token, messageId);
+      },
+      (messageId) => {
+        this.onThinkingEnd?.(messageId);
       },
     );
 
@@ -113,8 +123,8 @@ export class COO extends BaseAgent {
     this.sendMessage(
       null,
       MessageType.Chat,
-      response,
-      undefined,
+      text,
+      thinking ? { thinking } : undefined,
       this.currentConversationId ?? undefined,
     );
   }
@@ -125,18 +135,27 @@ export class COO extends BaseAgent {
     // Add to conversation so COO remembers context
     this.conversationHistory.push({ role: "user", content: summary });
     // COO may decide to relay to CEO or take action
-    const response = await this.think(
+    const { text, thinking } = await this.think(
       summary,
       (token, messageId) => {
-        if (this.onStream) {
-          this.onStream(token, messageId);
-        }
+        this.onStream?.(token, messageId);
+      },
+      (token, messageId) => {
+        this.onThinking?.(token, messageId);
+      },
+      (messageId) => {
+        this.onThinkingEnd?.(messageId);
       },
     );
 
     // If the report is significant, relay to CEO
-    if (response.trim()) {
-      this.sendMessage(null, MessageType.Chat, response);
+    if (text.trim()) {
+      this.sendMessage(
+        null,
+        MessageType.Chat,
+        text,
+        thinking ? { thinking } : undefined,
+      );
     }
   }
 

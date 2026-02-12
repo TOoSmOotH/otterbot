@@ -11,6 +11,13 @@ export interface LLMConfig {
   baseUrl?: string;
   apiKey?: string;
   temperature?: number;
+  thinkingBudget?: number;
+}
+
+/** Returns true for Anthropic models that support extended thinking */
+export function isThinkingModel(config: LLMConfig): boolean {
+  if (config.provider !== "anthropic") return false;
+  return /^claude-(sonnet-4-5|opus-4)/.test(config.model);
 }
 
 /** Resolve a Vercel AI SDK language model from agent config */
@@ -98,11 +105,24 @@ export async function stream(
   tools?: Record<string, unknown>,
 ) {
   const model = resolveModel(config);
+  const thinking = isThinkingModel(config);
   const result = streamText({
     model,
     messages,
     temperature: config.temperature,
     ...(tools ? { tools: tools as any, maxSteps: 5 } : {}),
+    ...(thinking
+      ? {
+          providerOptions: {
+            anthropic: {
+              thinking: {
+                type: "enabled",
+                budgetTokens: config.thinkingBudget ?? 10_000,
+              },
+            },
+          },
+        }
+      : {}),
   });
   return result;
 }

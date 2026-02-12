@@ -9,6 +9,10 @@ interface MessageState {
   /** Current streaming token buffer */
   streamingContent: string;
   streamingMessageId: string | null;
+  /** Thinking state */
+  thinkingContent: string;
+  thinkingMessageId: string | null;
+  isThinking: boolean;
   /** Filter for stream panel */
   agentFilter: string | null;
   /** Conversation tracking */
@@ -18,6 +22,8 @@ interface MessageState {
   addMessage: (message: BusMessage) => void;
   setCooResponse: (message: BusMessage) => void;
   appendCooStream: (token: string, messageId: string) => void;
+  appendCooThinking: (token: string, messageId: string) => void;
+  endCooThinking: (messageId: string) => void;
   setAgentFilter: (agentId: string | null) => void;
   loadHistory: (messages: BusMessage[]) => void;
   clearChat: () => void;
@@ -32,6 +38,9 @@ export const useMessageStore = create<MessageState>((set) => ({
   chatMessages: [],
   streamingContent: "",
   streamingMessageId: null,
+  thinkingContent: "",
+  thinkingMessageId: null,
+  isThinking: false,
   agentFilter: null,
   currentConversationId: null,
   conversations: [],
@@ -59,7 +68,13 @@ export const useMessageStore = create<MessageState>((set) => ({
         messages: newMessages,
         chatMessages: newChat,
         ...(clearStream
-          ? { streamingContent: "", streamingMessageId: null }
+          ? {
+              streamingContent: "",
+              streamingMessageId: null,
+              thinkingContent: "",
+              thinkingMessageId: null,
+              isThinking: false,
+            }
           : {}),
       };
     }),
@@ -68,6 +83,9 @@ export const useMessageStore = create<MessageState>((set) => ({
     set({
       streamingContent: "",
       streamingMessageId: null,
+      thinkingContent: "",
+      thinkingMessageId: null,
+      isThinking: false,
     }),
 
   appendCooStream: (token, messageId) =>
@@ -78,6 +96,21 @@ export const useMessageStore = create<MessageState>((set) => ({
           : token,
       streamingMessageId: messageId,
     })),
+
+  appendCooThinking: (token, messageId) =>
+    set((state) => ({
+      thinkingContent:
+        state.thinkingMessageId === messageId
+          ? state.thinkingContent + token
+          : token,
+      thinkingMessageId: messageId,
+      isThinking: true,
+    })),
+
+  endCooThinking: (_messageId) =>
+    set({
+      isThinking: false,
+    }),
 
   setAgentFilter: (agentId) => set({ agentFilter: agentId }),
 
@@ -97,6 +130,9 @@ export const useMessageStore = create<MessageState>((set) => ({
       chatMessages: [],
       streamingContent: "",
       streamingMessageId: null,
+      thinkingContent: "",
+      thinkingMessageId: null,
+      isThinking: false,
       currentConversationId: null,
     }),
 
@@ -121,5 +157,8 @@ export const useMessageStore = create<MessageState>((set) => ({
       ),
       streamingContent: "",
       streamingMessageId: null,
+      thinkingContent: "",
+      thinkingMessageId: null,
+      isThinking: false,
     }),
 }));

@@ -66,21 +66,21 @@ export class TeamLead extends BaseAgent {
   }
 
   private async handleDirective(message: BusMessage) {
-    const response = await this.think(message.content);
+    const { text } = await this.think(message.content);
 
     // Report plan/progress back to COO
     if (this.parentId) {
-      this.sendMessage(this.parentId, MessageType.Report, response);
+      this.sendMessage(this.parentId, MessageType.Report, text);
     }
   }
 
   private async handleWorkerReport(message: BusMessage) {
     const summary = `[Worker ${message.fromAgentId} report]: ${message.content}`;
-    const response = await this.think(summary);
+    const { text } = await this.think(summary);
 
     // Relay significant updates to COO
-    if (this.parentId && response.trim()) {
-      this.sendMessage(this.parentId, MessageType.Report, response);
+    if (this.parentId && text.trim()) {
+      this.sendMessage(this.parentId, MessageType.Report, text);
     }
   }
 

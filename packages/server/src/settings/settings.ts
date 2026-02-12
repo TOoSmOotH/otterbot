@@ -713,6 +713,11 @@ const STT_PROVIDER_META: Record<
     needsApiKey: true,
     needsBaseUrl: true,
   },
+  browser: {
+    name: "Browser (Chrome/Edge)",
+    needsApiKey: false,
+    needsBaseUrl: false,
+  },
 };
 
 export const WHISPER_MODELS = [

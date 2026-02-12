@@ -117,7 +117,9 @@ export abstract class BaseAgent {
   protected async think(
     userMessage: string,
     onToken?: (token: string, messageId: string) => void,
-  ): Promise<string> {
+    onReasoning?: (token: string, messageId: string) => void,
+    onReasoningEnd?: (messageId: string) => void,
+  ): Promise<{ text: string; thinking: string | undefined }> {
     this.conversationHistory.push({ role: "user", content: userMessage });
     this.setStatus(AgentStatus.Thinking);
 
@@ -132,12 +134,27 @@ export abstract class BaseAgent {
 
       const messageId = nanoid();
       let fullResponse = "";
+      let reasoning = "";
+      let wasReasoning = false;
 
-      for await (const chunk of result.textStream) {
-        fullResponse += chunk;
-        if (onToken) {
-          onToken(chunk, messageId);
+      for await (const part of result.fullStream) {
+        if (part.type === "reasoning") {
+          reasoning += part.textDelta;
+          wasReasoning = true;
+          onReasoning?.(part.textDelta, messageId);
+        } else if (part.type === "text-delta") {
+          if (wasReasoning) {
+            wasReasoning = false;
+            onReasoningEnd?.(messageId);
+          }
+          fullResponse += part.textDelta;
+          onToken?.(part.textDelta, messageId);
         }
+      }
+
+      // If reasoning ended but no text-delta followed, still fire end
+      if (wasReasoning) {
+        onReasoningEnd?.(messageId);
       }
 
       // Check for tool calls (await the promise)
@@ -157,13 +174,13 @@ export abstract class BaseAgent {
         content: fullResponse,
       });
       this.setStatus(AgentStatus.Idle);
-      return fullResponse;
+      return { text: fullResponse, thinking: reasoning || undefined };
     } catch (error) {
       this.setStatus(AgentStatus.Error);
       const errMsg =
         error instanceof Error ? error.message : "Unknown LLM error";
       console.error(`Agent ${this.id} LLM error:`, errMsg);
-      return `Error: ${errMsg}`;
+      return { text: `Error: ${errMsg}`, thinking: undefined };
     }
   }
 

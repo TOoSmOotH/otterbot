@@ -8,6 +8,8 @@ export function useSocket() {
   const addMessage = useMessageStore((s) => s.addMessage);
   const setCooResponse = useMessageStore((s) => s.setCooResponse);
   const appendCooStream = useMessageStore((s) => s.appendCooStream);
+  const appendCooThinking = useMessageStore((s) => s.appendCooThinking);
+  const endCooThinking = useMessageStore((s) => s.endCooThinking);
   const addConversation = useMessageStore((s) => s.addConversation);
   const addAgent = useAgentStore((s) => s.addAgent);
   const updateAgentStatus = useAgentStore((s) => s.updateAgentStatus);
@@ -29,6 +31,14 @@ export function useSocket() {
 
     socket.on("coo:stream", ({ token, messageId }) => {
       appendCooStream(token, messageId);
+    });
+
+    socket.on("coo:thinking", ({ token, messageId }) => {
+      appendCooThinking(token, messageId);
+    });
+
+    socket.on("coo:thinking-end", ({ messageId }) => {
+      endCooThinking(messageId);
     });
 
     socket.on("coo:audio", ({ audio, contentType }) => {
@@ -68,6 +78,8 @@ export function useSocket() {
       socket.off("bus:message");
       socket.off("coo:response");
       socket.off("coo:stream");
+      socket.off("coo:thinking");
+      socket.off("coo:thinking-end");
       socket.off("coo:audio");
       socket.off("conversation:created");
       socket.off("agent:spawned");
