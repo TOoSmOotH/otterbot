@@ -4,8 +4,9 @@ import cors from "@fastify/cors";
 import fastifyCookie from "@fastify/cookie";
 import fastifyStatic from "@fastify/static";
 import { Server } from "socket.io";
-import { resolve, dirname } from "node:path";
-import { existsSync } from "node:fs";
+import { resolve, dirname, join } from "node:path";
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { execSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import type {
   ServerToClientEvents,
@@ -80,6 +81,31 @@ function parseCookies(header: string | undefined): Record<string, string> {
   );
 }
 
+// ---------------------------------------------------------------------------
+// Self-signed TLS certificate for HTTPS
+// ---------------------------------------------------------------------------
+
+function ensureSelfSignedCert(dataDir: string): { key: Buffer; cert: Buffer } {
+  const certDir = join(dataDir, "certs");
+  const keyPath = join(certDir, "selfsigned.key");
+  const certPath = join(certDir, "selfsigned.crt");
+
+  if (!existsSync(keyPath) || !existsSync(certPath)) {
+    mkdirSync(certDir, { recursive: true });
+    console.log("Generating self-signed TLS certificate...");
+    execSync(
+      `openssl req -x509 -newkey rsa:2048 -keyout ${keyPath} -out ${certPath} ` +
+        `-days 365 -nodes -subj "/CN=smoothbot"`,
+      { stdio: "pipe" },
+    );
+  }
+
+  return {
+    key: readFileSync(keyPath),
+    cert: readFileSync(certPath),
+  };
+}
+
 async function main() {
   // Initialize database
   await migrateDb();
@@ -90,8 +116,10 @@ async function main() {
   const workspace = new WorkspaceManager();
   const registry = new Registry();
 
-  // Create Fastify server
-  const app = Fastify({ logger: false });
+  // Create Fastify server with HTTPS (required for mic/getUserMedia from remote hosts)
+  const dataDir = process.env.WORKSPACE_ROOT ?? resolve(__dirname, "../../../docker/smoothbot");
+  const tls = ensureSelfSignedCert(join(dataDir, "data"));
+  const app = Fastify({ logger: false, https: { key: tls.key, cert: tls.cert } });
   await app.register(cors, { origin: true, credentials: true });
   await app.register(fastifyCookie);
 
@@ -596,7 +624,7 @@ async function main() {
   const host = process.env.HOST ?? "0.0.0.0";
 
   await app.listen({ port, host });
-  console.log(`Smoothbot server listening on http://${host}:${port}`);
+  console.log(`Smoothbot server listening on https://${host}:${port}`);
 
   // Graceful shutdown — close Playwright browser if running
   const shutdown = async () => {
