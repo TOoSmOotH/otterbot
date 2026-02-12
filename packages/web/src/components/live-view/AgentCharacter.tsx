@@ -2,8 +2,9 @@ import { Suspense, useMemo, useRef, useEffect } from "react";
 import { useFrame } from "@react-three/fiber";
 import { useGLTF, Html, Sparkles } from "@react-three/drei";
 import { clone as skeletonClone } from "three/examples/jsm/utils/SkeletonUtils.js";
-import type { ModelPack } from "@smoothbot/shared";
+import type { ModelPack, GearConfig } from "@smoothbot/shared";
 import * as THREE from "three";
+import { applyGearConfig } from "../../lib/gear-utils";
 
 interface AgentCharacterProps {
   pack: ModelPack;
@@ -11,6 +12,7 @@ interface AgentCharacterProps {
   label: string;
   role: string;
   status: string;
+  gearConfig?: GearConfig | null;
 }
 
 const STATUS_COLORS: Record<string, string> = {
@@ -21,11 +23,11 @@ const STATUS_COLORS: Record<string, string> = {
   error: "#ef4444",
 };
 
-export function AgentCharacter({ pack, position, label, role, status }: AgentCharacterProps) {
+export function AgentCharacter({ pack, position, label, role, status, gearConfig }: AgentCharacterProps) {
   return (
     <group position={position}>
       <Suspense fallback={<FallbackMesh role={role} />}>
-        <CharacterModel pack={pack} status={status} />
+        <CharacterModel pack={pack} status={status} gearConfig={gearConfig} />
       </Suspense>
 
       {/* Status ring on ground */}
@@ -73,13 +75,18 @@ export function AgentCharacter({ pack, position, label, role, status }: AgentCha
   );
 }
 
-function CharacterModel({ pack, status }: { pack: ModelPack; status: string }) {
+function CharacterModel({ pack, status, gearConfig }: { pack: ModelPack; status: string; gearConfig?: GearConfig | null }) {
   const { scene } = useGLTF(pack.characterUrl);
   const { animations: idleAnims } = useGLTF(pack.animations.idle);
   const { animations: actionAnims } = useGLTF(pack.animations.action);
 
   // Properly clone the scene with skeleton bindings intact
   const clone = useMemo(() => skeletonClone(scene), [scene]);
+
+  // Apply gear visibility after cloning
+  useEffect(() => {
+    applyGearConfig(clone, gearConfig);
+  }, [clone, gearConfig]);
 
   // Collect all animation clips, filtering out T-Pose
   const clips = useMemo(() => {

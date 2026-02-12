@@ -1,8 +1,9 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { cn } from "../../lib/utils";
 import { useSettingsStore } from "../../stores/settings-store";
 import { useModelPackStore } from "../../stores/model-pack-store";
-import type { RegistryEntry } from "@smoothbot/shared";
+import type { RegistryEntry, GearConfig } from "@smoothbot/shared";
+import { CharacterSelect } from "../character-select/CharacterSelect";
 
 export function AgentTemplatesTab() {
   const [entries, setEntries] = useState<RegistryEntry[]>([]);
@@ -17,6 +18,7 @@ export function AgentTemplatesTab() {
     defaultProvider: "anthropic",
     tools: "",
     modelPackId: null as string | null,
+    gearConfig: null as GearConfig | null,
   });
 
   const providers = useSettingsStore((s) => s.providers);
@@ -54,6 +56,7 @@ export function AgentTemplatesTab() {
       defaultProvider: entry.defaultProvider,
       tools: entry.tools.join(", "),
       modelPackId: entry.modelPackId ?? null,
+      gearConfig: entry.gearConfig ?? null,
     });
     setEditing(false);
   };
@@ -76,6 +79,7 @@ export function AgentTemplatesTab() {
         .map((s) => s.trim())
         .filter(Boolean),
       modelPackId: form.modelPackId,
+      gearConfig: form.gearConfig,
     };
 
     await fetch(`/api/registry/${selected.id}`, {
@@ -332,20 +336,15 @@ export function AgentTemplatesTab() {
             {/* 3D Character */}
             <Field label="3D Character" editing={editing}>
               {editing ? (
-                <select
-                  value={form.modelPackId ?? ""}
-                  onChange={(e) =>
-                    setForm({ ...form, modelPackId: e.target.value || null })
-                  }
-                  className="w-full bg-secondary rounded-md px-3 py-1.5 text-sm outline-none focus:ring-1 ring-primary"
-                >
-                  <option value="">None</option>
-                  {modelPacks.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.name}
-                    </option>
-                  ))}
-                </select>
+                <>
+                  <CharacterSelect
+                    packs={modelPacks}
+                    selected={form.modelPackId}
+                    onSelect={(id) => setForm({ ...form, modelPackId: id, gearConfig: null })}
+                    gearConfig={form.gearConfig}
+                    onGearConfigChange={(gc) => setForm({ ...form, gearConfig: gc })}
+                  />
+                </>
               ) : (
                 <p className="text-xs font-mono bg-secondary inline-block px-2 py-0.5 rounded">
                   {form.modelPackId

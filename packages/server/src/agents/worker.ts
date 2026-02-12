@@ -1,4 +1,5 @@
 import {
+  type GearConfig,
   AgentRole,
   AgentStatus,
   MessageType,
@@ -14,6 +15,7 @@ export interface WorkerDependencies {
   parentId: string;
   registryEntryId: string;
   modelPackId?: string | null;
+  gearConfig?: GearConfig | null;
   model: string;
   provider: string;
   systemPrompt: string;
@@ -33,6 +35,7 @@ export class Worker extends BaseAgent {
       projectId: deps.projectId,
       registryEntryId: deps.registryEntryId,
       modelPackId: deps.modelPackId,
+      gearConfig: deps.gearConfig,
       model: deps.model,
       provider: deps.provider,
       systemPrompt: deps.systemPrompt,

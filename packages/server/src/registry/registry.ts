@@ -38,6 +38,7 @@ export class Registry {
       builtIn: false,
       role: data.role ?? "worker" as const,
       modelPackId: data.modelPackId ?? null,
+      gearConfig: data.gearConfig ? JSON.stringify(data.gearConfig) : null,
       clonedFromId: data.clonedFromId ?? null,
       createdAt: new Date().toISOString(),
     };
@@ -60,6 +61,7 @@ export class Registry {
     if (data.defaultProvider !== undefined) updates.defaultProvider = data.defaultProvider;
     if (data.tools !== undefined) updates.tools = data.tools;
     if (data.modelPackId !== undefined) updates.modelPackId = data.modelPackId;
+    if (data.gearConfig !== undefined) updates.gearConfig = data.gearConfig ? JSON.stringify(data.gearConfig) : null;
 
     if (Object.keys(updates).length > 0) {
       db.update(schema.registryEntries)
@@ -99,6 +101,7 @@ export class Registry {
       role: source.role,
       clonedFromId: source.id,
       modelPackId: source.modelPackId,
+      gearConfig: source.gearConfig,
     });
   }
 
@@ -124,6 +127,7 @@ export class Registry {
       builtIn: row.builtIn ?? false,
       role: row.role ?? "worker",
       modelPackId: row.modelPackId ?? null,
+      gearConfig: row.gearConfig ? JSON.parse(row.gearConfig) : null,
       clonedFromId: row.clonedFromId ?? null,
       createdAt: row.createdAt,
     };

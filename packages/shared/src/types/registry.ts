@@ -1,3 +1,5 @@
+import type { GearConfig } from "./model-pack.js";
+
 export interface RegistryEntry {
   id: string;
   name: string;
@@ -10,6 +12,7 @@ export interface RegistryEntry {
   builtIn: boolean;
   role: "coo" | "team_lead" | "worker";
   modelPackId: string | null;
+  gearConfig: GearConfig | null;
   clonedFromId: string | null;
   createdAt: string;
 }
@@ -25,6 +28,7 @@ export interface RegistryEntryCreate {
   role?: "coo" | "team_lead" | "worker";
   clonedFromId?: string | null;
   modelPackId?: string | null;
+  gearConfig?: GearConfig | null;
 }
 
 export interface RegistryEntryUpdate {
@@ -36,6 +40,7 @@ export interface RegistryEntryUpdate {
   defaultProvider?: string;
   tools?: string[];
   modelPackId?: string | null;
+  gearConfig?: GearConfig | null;
 }
 
 export interface Project {

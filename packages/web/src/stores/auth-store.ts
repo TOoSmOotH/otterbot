@@ -26,6 +26,7 @@ interface AuthState {
     userTimezone: string;
     ttsVoice?: string;
     userModelPackId?: string;
+    userGearConfig?: Record<string, boolean> | null;
   }) => Promise<boolean>;
   logout: () => Promise<void>;
   setError: (error: string | null) => void;

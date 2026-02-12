@@ -7,7 +7,7 @@ import { FallbackAgent } from "./FallbackAgent";
 import type { Agent } from "@smoothbot/shared";
 
 interface LiveViewSceneProps {
-  userProfile?: { name: string | null; avatar: string | null; modelPackId?: string | null };
+  userProfile?: { name: string | null; avatar: string | null; modelPackId?: string | null; gearConfig?: Record<string, boolean> | null };
 }
 
 export function LiveViewScene({ userProfile }: LiveViewSceneProps) {
@@ -26,7 +26,7 @@ export function LiveViewScene({ userProfile }: LiveViewSceneProps) {
     const teamLeads = activeAgents.filter((a) => a.role === "team_lead");
     const workers = activeAgents.filter((a) => a.role === "worker");
 
-    const positions: { agent: Agent | null; role: string; x: number; z: number; label: string; modelPackId: string | null }[] = [];
+    const positions: { agent: Agent | null; role: string; x: number; z: number; label: string; modelPackId: string | null; gearConfig: Record<string, boolean> | null }[] = [];
 
     // CEO at center
     positions.push({
@@ -36,6 +36,7 @@ export function LiveViewScene({ userProfile }: LiveViewSceneProps) {
       z: 0,
       label: userProfile?.name ? `${userProfile.name} (CEO)` : "CEO (You)",
       modelPackId: userProfile?.modelPackId ?? null,
+      gearConfig: userProfile?.gearConfig ?? null,
     });
 
     // COO behind
@@ -48,6 +49,7 @@ export function LiveViewScene({ userProfile }: LiveViewSceneProps) {
         z: -3,
         label: "COO",
         modelPackId: coos[i].modelPackId ?? null,
+        gearConfig: coos[i].gearConfig ?? null,
       });
     }
 
@@ -61,6 +63,7 @@ export function LiveViewScene({ userProfile }: LiveViewSceneProps) {
         z: -6,
         label: `Team Lead`,
         modelPackId: teamLeads[i].modelPackId ?? null,
+        gearConfig: teamLeads[i].gearConfig ?? null,
       });
     }
 
@@ -74,6 +77,7 @@ export function LiveViewScene({ userProfile }: LiveViewSceneProps) {
         z: -9,
         label: `Worker ${workers[i].id.slice(0, 6)}`,
         modelPackId: workers[i].modelPackId ?? null,
+        gearConfig: workers[i].gearConfig ?? null,
       });
     }
 
@@ -116,6 +120,7 @@ export function LiveViewScene({ userProfile }: LiveViewSceneProps) {
               label={pos.label}
               role={pos.role}
               status={status}
+              gearConfig={pos.gearConfig}
             />
           );
         }

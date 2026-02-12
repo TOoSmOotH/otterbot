@@ -3,6 +3,7 @@ import { useAuthStore } from "../../stores/auth-store";
 import { useModelPackStore } from "../../stores/model-pack-store";
 import { CharacterSelect } from "../character-select/CharacterSelect";
 import { DEFAULT_AVATARS } from "./default-avatars";
+import type { GearConfig } from "@smoothbot/shared";
 
 const SUGGESTED_MODELS: Record<string, string[]> = {
   anthropic: ["claude-sonnet-4-5-20250929", "claude-haiku-4-20250414"],
@@ -78,6 +79,7 @@ export function SetupWizard() {
 
   // Step 4: Character
   const [characterPackId, setCharacterPackId] = useState<string | null>(null);
+  const [characterGearConfig, setCharacterGearConfig] = useState<GearConfig | null>(null);
   const modelPacks = useModelPackStore((s) => s.packs);
   const modelPacksLoading = useModelPackStore((s) => s.loading);
   const loadPacks = useModelPackStore((s) => s.loadPacks);
@@ -233,6 +235,7 @@ export function SetupWizard() {
       userTimezone: timezone,
       ttsVoice: ttsVoice || undefined,
       userModelPackId: characterPackId || undefined,
+      userGearConfig: characterGearConfig || undefined,
     });
     setSubmitting(false);
   };
@@ -660,6 +663,8 @@ export function SetupWizard() {
                 selected={characterPackId}
                 onSelect={setCharacterPackId}
                 loading={modelPacksLoading}
+                gearConfig={characterGearConfig}
+                onGearConfigChange={setCharacterGearConfig}
               />
 
               {error && <p className="text-sm text-destructive">{error}</p>}

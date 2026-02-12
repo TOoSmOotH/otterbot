@@ -324,6 +324,7 @@ async function main() {
       userTimezone: string;
       ttsVoice?: string;
       userModelPackId?: string;
+      userGearConfig?: Record<string, boolean> | null;
     };
   }>("/api/setup/complete", async (req, reply) => {
     if (isSetupComplete()) {
@@ -331,7 +332,7 @@ async function main() {
       return { error: "Setup already completed" };
     }
 
-    const { passphrase, provider, model, apiKey, baseUrl, userName, userAvatar, userBio, userTimezone, ttsVoice, userModelPackId } = req.body;
+    const { passphrase, provider, model, apiKey, baseUrl, userName, userAvatar, userBio, userTimezone, ttsVoice, userModelPackId, userGearConfig } = req.body;
 
     if (!passphrase || passphrase.length < 8) {
       reply.code(400);
@@ -383,6 +384,11 @@ async function main() {
     // Store 3D model pack preference
     if (userModelPackId) {
       setConfig("user_model_pack_id", userModelPackId);
+    }
+
+    // Store gear config
+    if (userGearConfig) {
+      setConfig("user_gear_config", JSON.stringify(userGearConfig));
     }
 
     // Create session
@@ -650,22 +656,31 @@ async function main() {
 
   // User profile endpoint
   app.get("/api/profile", async () => {
+    const gearConfigRaw = getConfig("user_gear_config");
     return {
       name: getConfig("user_name") ?? null,
       avatar: getConfig("user_avatar") ?? null,
       bio: getConfig("user_bio") ?? null,
       timezone: getConfig("user_timezone") ?? null,
       modelPackId: getConfig("user_model_pack_id") ?? null,
+      gearConfig: gearConfigRaw ? JSON.parse(gearConfigRaw) : null,
     };
   });
 
   app.put<{
-    Body: { modelPackId: string | null };
+    Body: { modelPackId: string | null; gearConfig?: Record<string, boolean> | null };
   }>("/api/profile/model-pack", async (req) => {
     if (req.body.modelPackId) {
       setConfig("user_model_pack_id", req.body.modelPackId);
     } else {
       deleteConfig("user_model_pack_id");
+    }
+    if (req.body.gearConfig !== undefined) {
+      if (req.body.gearConfig) {
+        setConfig("user_gear_config", JSON.stringify(req.body.gearConfig));
+      } else {
+        deleteConfig("user_gear_config");
+      }
     }
     return { ok: true };
   });

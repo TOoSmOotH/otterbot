@@ -260,6 +260,7 @@ export class TeamLead extends BaseAgent {
       parentId: this.id,
       registryEntryId: entry.id,
       modelPackId: (entry as any).modelPackId ?? null,
+      gearConfig: (entry as any).gearConfig ? JSON.parse((entry as any).gearConfig) : null,
       model: entry.defaultModel,
       provider: entry.defaultProvider,
       systemPrompt: entry.systemPrompt,

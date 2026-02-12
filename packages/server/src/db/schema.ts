@@ -16,6 +16,7 @@ export const agents = sqliteTable("agents", {
   temperature: integer("temperature"),
   systemPrompt: text("system_prompt"),
   modelPackId: text("model_pack_id"),
+  gearConfig: text("gear_config"),
   projectId: text("project_id"),
   workspacePath: text("workspace_path"),
   createdAt: text("created_at")
@@ -73,6 +74,7 @@ export const registryEntries = sqliteTable("registry_entries", {
     .notNull()
     .default("worker"),
   modelPackId: text("model_pack_id"),
+  gearConfig: text("gear_config"),
   clonedFromId: text("cloned_from_id"),
   createdAt: text("created_at")
     .notNull()

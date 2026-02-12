@@ -117,6 +117,20 @@ export async function migrateDb() {
     // Column already exists — ignore
   }
 
+  // Idempotent migration: add gear_config to agents
+  try {
+    db.run(sql`ALTER TABLE agents ADD COLUMN gear_config TEXT`);
+  } catch {
+    // Column already exists — ignore
+  }
+
+  // Idempotent migration: add gear_config to registry_entries
+  try {
+    db.run(sql`ALTER TABLE registry_entries ADD COLUMN gear_config TEXT`);
+  } catch {
+    // Column already exists — ignore
+  }
+
   db.run(sql`CREATE TABLE IF NOT EXISTS projects (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,

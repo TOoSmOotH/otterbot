@@ -54,6 +54,7 @@ interface UserProfile {
   name: string | null;
   avatar: string | null;
   modelPackId?: string | null;
+  gearConfig?: Record<string, boolean> | null;
 }
 
 type CenterView = "graph" | "live3d";

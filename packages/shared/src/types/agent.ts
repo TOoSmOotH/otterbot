@@ -1,3 +1,5 @@
+import type { GearConfig } from "./model-pack.js";
+
 export enum AgentRole {
   COO = "coo",
   TeamLead = "team_lead",
@@ -25,6 +27,7 @@ export interface Agent {
   systemPrompt?: string;
   projectId: string | null;
   modelPackId: string | null;
+  gearConfig: GearConfig | null;
   workspacePath: string | null;
   createdAt: string;
 }
@@ -40,4 +43,5 @@ export interface AgentSpawnOptions {
   temperature?: number;
   systemPrompt?: string;
   modelPackId?: string;
+  gearConfig?: GearConfig | null;
 }

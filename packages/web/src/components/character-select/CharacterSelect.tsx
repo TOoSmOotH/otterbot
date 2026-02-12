@@ -1,20 +1,58 @@
-import { Suspense, useMemo, useRef, useState, useEffect } from "react";
+import { Suspense, useMemo, useRef, useState, useEffect, useCallback } from "react";
 import { Canvas, useFrame } from "@react-three/fiber";
 import { OrbitControls, useGLTF, Center } from "@react-three/drei";
 import { clone as skeletonClone } from "three/examples/jsm/utils/SkeletonUtils.js";
-import type { ModelPack } from "@smoothbot/shared";
+import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+import type { ModelPack, GearConfig } from "@smoothbot/shared";
 import * as THREE from "three";
 import { cn } from "../../lib/utils";
+import { discoverGearMeshes, applyGearConfig, formatGearName } from "../../lib/gear-utils";
 
 interface CharacterSelectProps {
   packs: ModelPack[];
   selected: string | null;
   onSelect: (id: string | null) => void;
   loading?: boolean;
+  gearConfig?: GearConfig | null;
+  onGearConfigChange?: (config: GearConfig | null) => void;
 }
 
-export function CharacterSelect({ packs, selected, onSelect, loading }: CharacterSelectProps) {
+export function CharacterSelect({ packs, selected, onSelect, loading, gearConfig, onGearConfigChange }: CharacterSelectProps) {
   const selectedPack = packs.find((p) => p.id === selected);
+  const [discoveredGear, setDiscoveredGear] = useState<string[]>([]);
+
+  // Discover gear meshes outside the Canvas using GLTFLoader directly.
+  // This avoids the R3F/DOM reconciler boundary issue where state updates
+  // from inside <Canvas> don't reliably trigger re-renders in the outer tree.
+  useEffect(() => {
+    if (!selectedPack) {
+      setDiscoveredGear([]);
+      return;
+    }
+
+    const loader = new GLTFLoader();
+    loader.load(selectedPack.characterUrl, (gltf) => {
+      const gear = discoverGearMeshes(gltf.scene);
+      setDiscoveredGear(gear);
+    });
+  }, [selectedPack?.characterUrl]);
+
+  // Reset gear when switching packs
+  const handleSelect = useCallback((id: string | null) => {
+    onSelect(id);
+    setDiscoveredGear([]);
+    onGearConfigChange?.(null);
+  }, [onSelect, onGearConfigChange]);
+
+  const toggleGear = useCallback((meshName: string) => {
+    const current = gearConfig ?? {};
+    const isVisible = current[meshName] !== false;
+    const next = { ...current, [meshName]: !isVisible };
+
+    // If all entries are true (visible), compact to null
+    const hasHidden = Object.values(next).some((v) => v === false);
+    onGearConfigChange?.(hasHidden ? next : null);
+  }, [gearConfig, onGearConfigChange]);
 
   return (
     <div className="space-y-3">
@@ -29,7 +67,11 @@ export function CharacterSelect({ packs, selected, onSelect, loading }: Characte
             <directionalLight position={[3, 5, 3]} intensity={1} />
             <Suspense fallback={null}>
               <Center>
-                <CharacterPreview url={selectedPack.characterUrl} idleAnimUrl={selectedPack.animations.idle} />
+                <CharacterPreview
+                  url={selectedPack.characterUrl}
+                  idleAnimUrl={selectedPack.animations.idle}
+                  gearConfig={gearConfig}
+                />
               </Center>
             </Suspense>
             <OrbitControls
@@ -46,11 +88,39 @@ export function CharacterSelect({ packs, selected, onSelect, loading }: Characte
         </div>
       )}
 
+      {/* Gear toggles */}
+      {selectedPack && discoveredGear.length > 0 && onGearConfigChange && (
+        <div>
+          <p className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1.5">
+            Gear
+          </p>
+          <div className="flex flex-wrap gap-1.5">
+            {discoveredGear.map((name) => {
+              const visible = (gearConfig ?? {})[name] !== false;
+              return (
+                <button
+                  key={name}
+                  onClick={() => toggleGear(name)}
+                  className={cn(
+                    "text-xs px-2.5 py-1 rounded-md border transition-colors",
+                    visible
+                      ? "border-primary bg-primary/10 text-foreground"
+                      : "border-border text-muted-foreground line-through opacity-60 hover:opacity-80",
+                  )}
+                >
+                  {formatGearName(name)}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {/* Selection grid */}
       <div className="grid grid-cols-3 gap-2">
         {/* None option */}
         <button
-          onClick={() => onSelect(null)}
+          onClick={() => handleSelect(null)}
           className={cn(
             "flex flex-col items-center justify-center rounded-lg border-2 p-3 transition-all h-[80px]",
             selected === null
@@ -84,7 +154,7 @@ export function CharacterSelect({ packs, selected, onSelect, loading }: Characte
             key={pack.id}
             pack={pack}
             selected={selected === pack.id}
-            onSelect={() => onSelect(pack.id)}
+            onSelect={() => handleSelect(pack.id)}
           />
         ))}
       </div>
@@ -143,12 +213,25 @@ function CharacterCard({ pack, selected, onSelect }: { pack: ModelPack; selected
   );
 }
 
-function CharacterPreview({ url, idleAnimUrl }: { url: string; idleAnimUrl: string }) {
+function CharacterPreview({
+  url,
+  idleAnimUrl,
+  gearConfig,
+}: {
+  url: string;
+  idleAnimUrl: string;
+  gearConfig?: GearConfig | null;
+}) {
   const { scene } = useGLTF(url);
   const { animations } = useGLTF(idleAnimUrl);
 
   const clone = useMemo(() => skeletonClone(scene), [scene]);
   const mixerRef = useRef<THREE.AnimationMixer | null>(null);
+
+  // Apply gear visibility whenever config changes
+  useEffect(() => {
+    applyGearConfig(clone, gearConfig);
+  }, [clone, gearConfig]);
 
   useEffect(() => {
     const mixer = new THREE.AnimationMixer(clone);

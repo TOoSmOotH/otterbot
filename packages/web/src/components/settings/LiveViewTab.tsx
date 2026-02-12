@@ -1,11 +1,13 @@
 import { useState, useEffect } from "react";
 import { useModelPackStore } from "../../stores/model-pack-store";
 import { CharacterSelect } from "../character-select/CharacterSelect";
+import type { GearConfig } from "@smoothbot/shared";
 
 export function LiveViewTab() {
   const packs = useModelPackStore((s) => s.packs);
   const loadPacks = useModelPackStore((s) => s.loadPacks);
   const [ceoModelPackId, setCeoModelPackId] = useState<string | null>(null);
+  const [gearConfig, setGearConfig] = useState<GearConfig | null>(null);
   const [saving, setSaving] = useState(false);
   const [loaded, setLoaded] = useState(false);
 
@@ -16,6 +18,7 @@ export function LiveViewTab() {
       .then((r) => r.json())
       .then((data) => {
         setCeoModelPackId(data.modelPackId ?? null);
+        setGearConfig(data.gearConfig ?? null);
         setLoaded(true);
       })
       .catch(() => setLoaded(true));
@@ -23,12 +26,30 @@ export function LiveViewTab() {
 
   const handleSelect = async (id: string | null) => {
     setCeoModelPackId(id);
+    // Reset gear config when switching packs
+    setGearConfig(null);
     setSaving(true);
     try {
       await fetch("/api/profile/model-pack", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ modelPackId: id }),
+        body: JSON.stringify({ modelPackId: id, gearConfig: null }),
+      });
+    } catch {
+      // silently fail
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleGearConfigChange = async (config: GearConfig | null) => {
+    setGearConfig(config);
+    setSaving(true);
+    try {
+      await fetch("/api/profile/model-pack", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ modelPackId: ceoModelPackId, gearConfig: config }),
       });
     } catch {
       // silently fail
@@ -59,6 +80,8 @@ export function LiveViewTab() {
         packs={packs}
         selected={ceoModelPackId}
         onSelect={handleSelect}
+        gearConfig={gearConfig}
+        onGearConfigChange={handleGearConfigChange}
       />
     </div>
   );

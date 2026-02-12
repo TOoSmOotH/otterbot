@@ -8,3 +8,6 @@ export interface ModelPack {
     action: string;
   };
 }
+
+/** Map of gear mesh names to visibility. Missing key = visible, `false` = hidden. */
+export type GearConfig = Record<string, boolean>;
