@@ -15,7 +15,8 @@ export const useModelPackStore = create<ModelPackState>((set, get) => ({
   loaded: false,
 
   loadPacks: async () => {
-    if (get().loaded || get().loading) return;
+    if (get().loading) return;
+    if (get().loaded && get().packs.length > 0) return;
     set({ loading: true });
     try {
       const res = await fetch("/api/model-packs");

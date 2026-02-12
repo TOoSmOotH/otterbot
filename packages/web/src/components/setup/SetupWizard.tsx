@@ -79,7 +79,13 @@ export function SetupWizard() {
   // Step 4: Character
   const [characterPackId, setCharacterPackId] = useState<string | null>(null);
   const modelPacks = useModelPackStore((s) => s.packs);
+  const modelPacksLoading = useModelPackStore((s) => s.loading);
   const loadPacks = useModelPackStore((s) => s.loadPacks);
+
+  // Pre-fetch model packs on mount so they're ready by step 4
+  useEffect(() => {
+    loadPacks();
+  }, [loadPacks]);
 
   // Step 5: Voice
   const [ttsVoice, setTtsVoice] = useState<string | null>(null);
@@ -653,6 +659,7 @@ export function SetupWizard() {
                 packs={modelPacks}
                 selected={characterPackId}
                 onSelect={setCharacterPackId}
+                loading={modelPacksLoading}
               />
 
               {error && <p className="text-sm text-destructive">{error}</p>}
