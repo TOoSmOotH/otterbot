@@ -12,7 +12,7 @@ const isSupported =
 function errorMessage(error: string): string {
   switch (error) {
     case "not-allowed":
-      return "Microphone access denied. Check browser permissions.";
+      return "Microphone access denied. Click the lock icon in your address bar to allow it.";
     case "no-speech":
       return "No speech detected. Try again.";
     case "network":
@@ -45,10 +45,29 @@ export function useSpeechToText({
     };
   }, []);
 
-  const startListening = useCallback(() => {
+  const startListening = useCallback(async () => {
     if (!isSupported) return;
 
     setError(null);
+
+    // Explicitly request mic permission via getUserMedia first.
+    // This triggers Chrome's permission prompt and makes the mic setting
+    // appear in site settings. Without this, SpeechRecognition.start()
+    // may silently fail or not prompt the user.
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      // Stop the stream immediately — we only needed it to trigger the prompt.
+      stream.getTracks().forEach((t) => t.stop());
+    } catch (err) {
+      if (err instanceof DOMException && err.name === "NotAllowedError") {
+        setError("Microphone access denied. Click the lock icon in your address bar to allow it.");
+      } else if (err instanceof DOMException && err.name === "NotFoundError") {
+        setError("No microphone found.");
+      } else {
+        setError("Could not access microphone.");
+      }
+      return;
+    }
 
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     const recognition = new SR();
