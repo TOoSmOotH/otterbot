@@ -721,6 +721,39 @@ async function main() {
     return testTTSProvider(req.params.providerId);
   });
 
+  app.post<{
+    Body: { voice: string };
+  }>("/api/settings/tts/preview", async (req, reply) => {
+    const { voice } = req.body;
+    if (!voice) {
+      reply.code(400);
+      return { error: "voice is required" };
+    }
+
+    try {
+      const provider = getConfiguredTTSProvider();
+      if (!provider) {
+        reply.code(400);
+        return { error: "No TTS provider configured" };
+      }
+
+      const speed = parseFloat(getConfig("tts:speed") ?? "1");
+      const { audio, contentType } = await provider.synthesize(
+        "Hello from your AI assistant.",
+        voice,
+        speed,
+      );
+
+      reply.header("Content-Type", contentType);
+      return reply.send(audio);
+    } catch (err) {
+      reply.code(500);
+      return {
+        error: err instanceof Error ? err.message : "TTS synthesis failed",
+      };
+    }
+  });
+
   // SPA fallback for client-side routing
   if (existsSync(webDistPath)) {
     app.setNotFoundHandler(async (_req, reply) => {

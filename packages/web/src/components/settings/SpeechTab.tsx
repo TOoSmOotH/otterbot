@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { cn } from "../../lib/utils";
 import {
   useSettingsStore,
@@ -133,29 +133,128 @@ function VoiceSelector({
   onSelect: (voice: string) => void;
   provider: string;
 }) {
+  const [previewing, setPreviewing] = useState<string | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  const handleSelect = useCallback(
+    async (voice: string) => {
+      // Stop any currently playing preview
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current = null;
+      }
+
+      onSelect(voice);
+      setPreviewing(voice);
+
+      try {
+        const res = await fetch("/api/settings/tts/preview", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ voice }),
+        });
+
+        if (!res.ok) {
+          setPreviewing(null);
+          return;
+        }
+
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const audio = new Audio(url);
+        audioRef.current = audio;
+        audio.addEventListener("ended", () => {
+          URL.revokeObjectURL(url);
+          audioRef.current = null;
+          setPreviewing(null);
+        });
+        await audio.play();
+      } catch {
+        setPreviewing(null);
+      }
+    },
+    [onSelect],
+  );
+
+  const renderButton = (v: string, label: string) => {
+    const isActive = activeVoice === v;
+    const isLoading = previewing === v;
+    const isDisabled = previewing !== null && previewing !== v;
+
+    return (
+      <button
+        key={v}
+        onClick={() => handleSelect(v)}
+        disabled={isDisabled}
+        className={cn(
+          "relative px-2.5 py-1 rounded-md border text-xs transition-colors",
+          isDisabled && "opacity-40 cursor-not-allowed",
+          isActive
+            ? "border-primary bg-primary/10 text-foreground"
+            : "border-border text-muted-foreground hover:border-muted-foreground hover:text-foreground",
+        )}
+      >
+        <span className={isLoading ? "opacity-0" : ""}>{label}</span>
+        {isLoading && (
+          <span className="absolute inset-0 flex items-center justify-center">
+            <svg
+              className="animate-spin h-3 w-3 text-primary"
+              viewBox="0 0 24 24"
+              fill="none"
+            >
+              <circle
+                className="opacity-25"
+                cx="12"
+                cy="12"
+                r="10"
+                stroke="currentColor"
+                strokeWidth="4"
+              />
+              <path
+                className="opacity-75"
+                fill="currentColor"
+                d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+              />
+            </svg>
+          </span>
+        )}
+      </button>
+    );
+  };
+
   if (provider !== "kokoro") {
-    // Flat list for non-Kokoro providers
     return (
       <div>
         <label className="text-[10px] text-muted-foreground uppercase tracking-wider mb-2 block">
           Voice
         </label>
         <div className="flex flex-wrap gap-1.5">
-          {voices.map((v) => (
-            <button
-              key={v}
-              onClick={() => onSelect(v)}
-              className={cn(
-                "px-2.5 py-1 rounded-md border text-xs transition-colors",
-                activeVoice === v
-                  ? "border-primary bg-primary/10 text-foreground"
-                  : "border-border text-muted-foreground hover:border-muted-foreground hover:text-foreground",
-              )}
-            >
-              {v}
-            </button>
-          ))}
+          {voices.map((v) => renderButton(v, v))}
         </div>
+        {previewing && (
+          <div className="flex items-center gap-2 text-xs text-muted-foreground mt-2">
+            <svg
+              className="animate-spin h-3 w-3 shrink-0"
+              viewBox="0 0 24 24"
+              fill="none"
+            >
+              <circle
+                className="opacity-25"
+                cx="12"
+                cy="12"
+                r="10"
+                stroke="currentColor"
+                strokeWidth="4"
+              />
+              <path
+                className="opacity-75"
+                fill="currentColor"
+                d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+              />
+            </svg>
+            <span>Generating preview...</span>
+          </div>
+        )}
       </div>
     );
   }
@@ -177,23 +276,36 @@ function VoiceSelector({
             {group.label}
           </p>
           <div className="flex flex-wrap gap-1.5">
-            {group.voices.map((v) => (
-              <button
-                key={v}
-                onClick={() => onSelect(v)}
-                className={cn(
-                  "px-2.5 py-1 rounded-md border text-xs transition-colors",
-                  activeVoice === v
-                    ? "border-primary bg-primary/10 text-foreground"
-                    : "border-border text-muted-foreground hover:border-muted-foreground hover:text-foreground",
-                )}
-              >
-                {v.slice(group.prefix.length)}
-              </button>
-            ))}
+            {group.voices.map((v) =>
+              renderButton(v, v.slice(group.prefix.length)),
+            )}
           </div>
         </div>
       ))}
+      {previewing && (
+        <div className="flex items-center gap-2 text-xs text-muted-foreground bg-secondary rounded-md px-3 py-2">
+          <svg
+            className="animate-spin h-3.5 w-3.5 shrink-0"
+            viewBox="0 0 24 24"
+            fill="none"
+          >
+            <circle
+              className="opacity-25"
+              cx="12"
+              cy="12"
+              r="10"
+              stroke="currentColor"
+              strokeWidth="4"
+            />
+            <path
+              className="opacity-75"
+              fill="currentColor"
+              d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+            />
+          </svg>
+          <span>Generating preview...</span>
+        </div>
+      )}
     </div>
   );
 }
