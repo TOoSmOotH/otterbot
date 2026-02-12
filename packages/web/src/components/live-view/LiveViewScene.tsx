@@ -12,6 +12,8 @@ interface LiveViewSceneProps {
 
 export function LiveViewScene({ userProfile }: LiveViewSceneProps) {
   const agents = useAgentStore((s) => s.agents);
+  // Subscribe to packs so we re-render when they load asynchronously
+  const packs = useModelPackStore((s) => s.packs);
   const getPackById = useModelPackStore((s) => s.getPackById);
 
   const { positions } = useMemo(() => {
@@ -76,7 +78,7 @@ export function LiveViewScene({ userProfile }: LiveViewSceneProps) {
     }
 
     return { positions };
-  }, [agents, userProfile]);
+  }, [agents, userProfile, packs]);
 
   return (
     <>

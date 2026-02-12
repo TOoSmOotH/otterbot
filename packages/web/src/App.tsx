@@ -3,6 +3,7 @@ import { useSocket } from "./hooks/use-socket";
 import { useMessageStore } from "./stores/message-store";
 import { useAgentStore } from "./stores/agent-store";
 import { useAuthStore } from "./stores/auth-store";
+import { useModelPackStore } from "./stores/model-pack-store";
 import { CeoChat } from "./components/chat/CeoChat";
 import { AgentGraph } from "./components/graph/AgentGraph";
 import { LiveView } from "./components/live-view/LiveView";
@@ -62,6 +63,7 @@ function MainApp() {
   const loadHistory = useMessageStore((s) => s.loadHistory);
   const setConversations = useMessageStore((s) => s.setConversations);
   const loadAgents = useAgentStore((s) => s.loadAgents);
+  const loadPacks = useModelPackStore((s) => s.loadPacks);
   const logout = useAuthStore((s) => s.logout);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [userProfile, setUserProfile] = useState<UserProfile | undefined>();
@@ -87,6 +89,9 @@ function MainApp() {
       .then((r) => r.json())
       .then(setUserProfile)
       .catch(console.error);
+
+    // Pre-load model packs so Live View has them ready
+    loadPacks();
   }, []);
 
   const handleLogout = () => {
