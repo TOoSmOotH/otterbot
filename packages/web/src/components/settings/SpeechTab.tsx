@@ -49,30 +49,14 @@ export function SpeechTab() {
       {/* Voice selector */}
       {ttsEnabled && activeTTSProvider && (
         <>
-          <div>
-            <label className="text-[10px] text-muted-foreground uppercase tracking-wider mb-2 block">
-              Voice
-            </label>
-            <div className="flex flex-wrap gap-1.5">
-              {(
-                ttsProviders.find((p) => p.id === activeTTSProvider)?.voices ??
-                []
-              ).map((v) => (
-                <button
-                  key={v}
-                  onClick={() => setTTSVoiceFn(v)}
-                  className={cn(
-                    "px-2.5 py-1 rounded-md border text-xs transition-colors",
-                    ttsVoice === v
-                      ? "border-primary bg-primary/10 text-foreground"
-                      : "border-border text-muted-foreground hover:border-muted-foreground hover:text-foreground",
-                  )}
-                >
-                  {v}
-                </button>
-              ))}
-            </div>
-          </div>
+          <VoiceSelector
+            voices={
+              ttsProviders.find((p) => p.id === activeTTSProvider)?.voices ?? []
+            }
+            activeVoice={ttsVoice}
+            onSelect={setTTSVoiceFn}
+            provider={activeTTSProvider}
+          />
 
           {/* Speed slider */}
           <div>
@@ -110,6 +94,106 @@ export function SpeechTab() {
           />
         ))}
       </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Voice language groups for Kokoro (prefix → label)
+// ---------------------------------------------------------------------------
+
+const KOKORO_VOICE_GROUPS: { prefix: string; label: string }[] = [
+  { prefix: "af_", label: "American English (Female)" },
+  { prefix: "am_", label: "American English (Male)" },
+  { prefix: "bf_", label: "British English (Female)" },
+  { prefix: "bm_", label: "British English (Male)" },
+  { prefix: "jf_", label: "Japanese (Female)" },
+  { prefix: "jm_", label: "Japanese (Male)" },
+  { prefix: "zf_", label: "Mandarin Chinese (Female)" },
+  { prefix: "zm_", label: "Mandarin Chinese (Male)" },
+  { prefix: "ef_", label: "Spanish (Female)" },
+  { prefix: "em_", label: "Spanish (Male)" },
+  { prefix: "ff_", label: "French (Female)" },
+  { prefix: "hf_", label: "Hindi (Female)" },
+  { prefix: "hm_", label: "Hindi (Male)" },
+  { prefix: "if_", label: "Italian (Female)" },
+  { prefix: "im_", label: "Italian (Male)" },
+  { prefix: "pf_", label: "Portuguese (Female)" },
+  { prefix: "pm_", label: "Portuguese (Male)" },
+];
+
+function VoiceSelector({
+  voices,
+  activeVoice,
+  onSelect,
+  provider,
+}: {
+  voices: string[];
+  activeVoice: string;
+  onSelect: (voice: string) => void;
+  provider: string;
+}) {
+  if (provider !== "kokoro") {
+    // Flat list for non-Kokoro providers
+    return (
+      <div>
+        <label className="text-[10px] text-muted-foreground uppercase tracking-wider mb-2 block">
+          Voice
+        </label>
+        <div className="flex flex-wrap gap-1.5">
+          {voices.map((v) => (
+            <button
+              key={v}
+              onClick={() => onSelect(v)}
+              className={cn(
+                "px-2.5 py-1 rounded-md border text-xs transition-colors",
+                activeVoice === v
+                  ? "border-primary bg-primary/10 text-foreground"
+                  : "border-border text-muted-foreground hover:border-muted-foreground hover:text-foreground",
+              )}
+            >
+              {v}
+            </button>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  // Group Kokoro voices by prefix
+  const groups = KOKORO_VOICE_GROUPS.map((g) => ({
+    ...g,
+    voices: voices.filter((v) => v.startsWith(g.prefix)),
+  })).filter((g) => g.voices.length > 0);
+
+  return (
+    <div className="space-y-3">
+      <label className="text-[10px] text-muted-foreground uppercase tracking-wider block">
+        Voice
+      </label>
+      {groups.map((group) => (
+        <div key={group.prefix}>
+          <p className="text-[10px] text-muted-foreground mb-1.5">
+            {group.label}
+          </p>
+          <div className="flex flex-wrap gap-1.5">
+            {group.voices.map((v) => (
+              <button
+                key={v}
+                onClick={() => onSelect(v)}
+                className={cn(
+                  "px-2.5 py-1 rounded-md border text-xs transition-colors",
+                  activeVoice === v
+                    ? "border-primary bg-primary/10 text-foreground"
+                    : "border-border text-muted-foreground hover:border-muted-foreground hover:text-foreground",
+                )}
+              >
+                {v.slice(group.prefix.length)}
+              </button>
+            ))}
+          </div>
+        </div>
+      ))}
     </div>
   );
 }

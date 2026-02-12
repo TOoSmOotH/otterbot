@@ -540,19 +540,30 @@ const TTS_PROVIDER_META: Record<
 
 const TTS_VOICES: Record<string, string[]> = {
   kokoro: [
-    "af_heart",
-    "af_bella",
-    "af_nicole",
-    "af_aoede",
-    "af_kore",
-    "af_sarah",
-    "af_sky",
-    "am_adam",
-    "am_michael",
-    "am_echo",
-    "am_eric",
-    "am_liam",
-    "am_onyx",
+    // American English
+    "af_alloy", "af_aoede", "af_bella", "af_heart", "af_jessica",
+    "af_kore", "af_nicole", "af_nova", "af_river", "af_sarah", "af_sky",
+    "am_adam", "am_echo", "am_eric", "am_fenrir", "am_liam",
+    "am_michael", "am_onyx", "am_puck", "am_santa",
+    // British English
+    "bf_alice", "bf_emma", "bf_isabella", "bf_lily",
+    "bm_daniel", "bm_fable", "bm_george", "bm_lewis",
+    // Japanese
+    "jf_alpha", "jf_gongitsune", "jf_nezumi", "jf_tebukuro",
+    "jm_kumo",
+    // Mandarin Chinese
+    "zf_xiaobei", "zf_xiaoni", "zf_xiaoxiao", "zf_xiaoyi",
+    "zm_yunjian", "zm_yunxi", "zm_yunxia", "zm_yunyang",
+    // Spanish
+    "ef_dora", "em_alex", "em_santa",
+    // French
+    "ff_siwis",
+    // Hindi
+    "hf_alpha", "hf_beta", "hm_omega", "hm_psi",
+    // Italian
+    "if_sara", "im_nicola",
+    // Brazilian Portuguese
+    "pf_dora", "pm_alex", "pm_santa",
   ],
   "openai-compatible": [
     "alloy",

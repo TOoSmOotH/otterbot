@@ -750,7 +750,9 @@ export function SetupWizard() {
 
               {!previewingVoice && (
                 <p className="text-[10px] text-muted-foreground">
-                  Click a voice to hear a preview.
+                  Click a voice to hear a preview. More voices (British,
+                  Japanese, Spanish, and others) are available in Settings
+                  after setup.
                 </p>
               )}
 
