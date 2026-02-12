@@ -1,8 +1,8 @@
-import { Suspense, useRef, useEffect } from "react";
+import { Suspense, useMemo, useRef, useEffect } from "react";
 import { useFrame } from "@react-three/fiber";
-import { useGLTF, useAnimations, Html, Sparkles } from "@react-three/drei";
+import { useGLTF, Html, Sparkles } from "@react-three/drei";
+import { clone as skeletonClone } from "three/examples/jsm/utils/SkeletonUtils.js";
 import type { ModelPack } from "@smoothbot/shared";
-import type { Group } from "three";
 import * as THREE from "three";
 
 interface AgentCharacterProps {
@@ -74,57 +74,118 @@ export function AgentCharacter({ pack, position, label, role, status }: AgentCha
 }
 
 function CharacterModel({ pack, status }: { pack: ModelPack; status: string }) {
-  const group = useRef<Group>(null);
   const { scene } = useGLTF(pack.characterUrl);
-  const clonedScene = useRef(scene.clone(true));
+  const { animations: idleAnims } = useGLTF(pack.animations.idle);
+  const { animations: actionAnims } = useGLTF(pack.animations.action);
 
-  // Load animations
-  const idleGltf = useGLTF(pack.animations.idle);
-  const actionGltf = useGLTF(pack.animations.action);
+  // Properly clone the scene with skeleton bindings intact
+  const clone = useMemo(() => skeletonClone(scene), [scene]);
 
-  const allAnimations = [...idleGltf.animations, ...actionGltf.animations];
-  const { actions, names } = useAnimations(allAnimations, group);
+  // Collect all animation clips, filtering out T-Pose
+  const clips = useMemo(() => {
+    const seen = new Set<string>();
+    const result: THREE.AnimationClip[] = [];
+    for (const clip of [...idleAnims, ...actionAnims]) {
+      if (seen.has(clip.name) || clip.name === "T-Pose") continue;
+      seen.add(clip.name);
+      result.push(clip);
+    }
+    return result;
+  }, [idleAnims, actionAnims]);
 
-  // Pick animation based on status
+  // Manually manage AnimationMixer on the cloned scene so bone paths resolve correctly
+  const mixerRef = useRef<THREE.AnimationMixer | null>(null);
+  const actionsRef = useRef<Map<string, THREE.AnimationAction>>(new Map());
+  const currentClipRef = useRef<string | null>(null);
+
+  // Create mixer and actions
   useEffect(() => {
-    if (!actions || names.length === 0) return;
+    const mixer = new THREE.AnimationMixer(clone);
+    mixerRef.current = mixer;
 
-    // Stop all current animations
-    Object.values(actions).forEach((a) => a?.fadeOut(0.3));
+    const actionMap = new Map<string, THREE.AnimationAction>();
+    for (const clip of clips) {
+      actionMap.set(clip.name, mixer.clipAction(clip));
+    }
+    actionsRef.current = actionMap;
 
-    // Find appropriate clip
-    let clipName: string | undefined;
+    // Play initial animation immediately
+    const idleClip =
+      actionMap.get("Idle_A") ??
+      actionMap.get("Idle_B") ??
+      [...actionMap.values()][0];
+    if (idleClip) {
+      idleClip.play();
+      currentClipRef.current = idleClip.getClip().name;
+    }
+
+    return () => {
+      mixer.stopAllAction();
+      mixer.uncacheRoot(clone);
+    };
+  }, [clone, clips]);
+
+  // Switch animation when status changes
+  useEffect(() => {
+    const actions = actionsRef.current;
+    if (actions.size === 0) return;
+
+    let targetName: string | undefined;
+
     if (status === "acting") {
-      clipName = names.find((n) => n.toLowerCase().includes("walk") || n.toLowerCase().includes("run") || n.toLowerCase().includes("movement"));
-    }
-    if (status === "thinking") {
-      clipName = names.find((n) => n.toLowerCase().includes("look") || n.toLowerCase().includes("idle"));
-    }
-    // Default to first available idle
-    if (!clipName) {
-      clipName = names.find((n) => n.toLowerCase().includes("idle")) ?? names[0];
+      targetName =
+        findClip(actions, /Walking_A/i) ??
+        findClip(actions, /Running_A/i) ??
+        findClip(actions, /walk|run/i);
+    } else if (status === "thinking") {
+      targetName =
+        findClip(actions, /Idle_B/i) ??
+        findClip(actions, /Interact/i) ??
+        findClip(actions, /idle/i);
+    } else if (status === "error") {
+      targetName =
+        findClip(actions, /Hit_A/i) ??
+        findClip(actions, /hit/i);
     }
 
-    if (clipName && actions[clipName]) {
-      actions[clipName]!.reset().fadeIn(0.3).play();
+    // Default to Idle_A
+    if (!targetName) {
+      targetName =
+        findClip(actions, /Idle_A/i) ??
+        findClip(actions, /idle/i) ??
+        [...actions.keys()][0];
     }
-  }, [status, actions, names]);
 
-  // Subtle breathing/bob for thinking
+    if (!targetName || targetName === currentClipRef.current) return;
+
+    const prev = currentClipRef.current ? actions.get(currentClipRef.current) : null;
+    const next = actions.get(targetName);
+    if (next) {
+      if (prev) prev.fadeOut(0.3);
+      next.reset().fadeIn(0.3).play();
+      currentClipRef.current = targetName;
+    }
+  }, [status]);
+
+  // Tick the mixer and add subtle thinking bob
   useFrame((_, delta) => {
-    if (!group.current) return;
+    mixerRef.current?.update(delta);
+
     if (status === "thinking") {
-      group.current.position.y = Math.sin(Date.now() * 0.003) * 0.03;
+      clone.position.y = Math.sin(Date.now() * 0.003) * 0.03;
     } else {
-      group.current.position.y = THREE.MathUtils.lerp(group.current.position.y, 0, delta * 5);
+      clone.position.y = THREE.MathUtils.lerp(clone.position.y, 0, delta * 5);
     }
   });
 
-  return (
-    <group ref={group}>
-      <primitive object={clonedScene.current} castShadow />
-    </group>
-  );
+  return <primitive object={clone} castShadow />;
+}
+
+function findClip(actions: Map<string, THREE.AnimationAction>, pattern: RegExp): string | undefined {
+  for (const name of actions.keys()) {
+    if (pattern.test(name)) return name;
+  }
+  return undefined;
 }
 
 function FallbackMesh({ role }: { role: string }) {

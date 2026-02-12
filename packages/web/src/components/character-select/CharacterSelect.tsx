@@ -1,8 +1,9 @@
-import { Suspense, useRef, useState } from "react";
+import { Suspense, useMemo, useRef, useState, useEffect } from "react";
 import { Canvas, useFrame } from "@react-three/fiber";
-import { OrbitControls, useGLTF, useAnimations, Center } from "@react-three/drei";
+import { OrbitControls, useGLTF, Center } from "@react-three/drei";
+import { clone as skeletonClone } from "three/examples/jsm/utils/SkeletonUtils.js";
 import type { ModelPack } from "@smoothbot/shared";
-import type { Group } from "three";
+import * as THREE from "three";
 import { cn } from "../../lib/utils";
 
 interface CharacterSelectProps {
@@ -33,7 +34,7 @@ export function CharacterSelect({ packs, selected, onSelect, loading }: Characte
             </Suspense>
             <OrbitControls
               enableZoom
-              enablePan={false}
+              enablePan
               autoRotate
               autoRotateSpeed={1}
               minDistance={1.5}
@@ -143,24 +144,31 @@ function CharacterCard({ pack, selected, onSelect }: { pack: ModelPack; selected
 }
 
 function CharacterPreview({ url, idleAnimUrl }: { url: string; idleAnimUrl: string }) {
-  const group = useRef<Group>(null);
   const { scene } = useGLTF(url);
   const { animations } = useGLTF(idleAnimUrl);
-  const { actions } = useAnimations(animations, group);
 
-  // Play the first available animation
-  useFrame(() => {
-    if (actions) {
-      const firstAction = Object.values(actions)[0];
-      if (firstAction && !firstAction.isRunning()) {
-        firstAction.play();
-      }
+  const clone = useMemo(() => skeletonClone(scene), [scene]);
+  const mixerRef = useRef<THREE.AnimationMixer | null>(null);
+
+  useEffect(() => {
+    const mixer = new THREE.AnimationMixer(clone);
+    mixerRef.current = mixer;
+
+    // Play first idle clip, skipping T-Pose
+    const clip = animations.find((a) => a.name !== "T-Pose") ?? animations[0];
+    if (clip) {
+      mixer.clipAction(clip).play();
     }
+
+    return () => {
+      mixer.stopAllAction();
+      mixer.uncacheRoot(clone);
+    };
+  }, [clone, animations]);
+
+  useFrame((_, delta) => {
+    mixerRef.current?.update(delta);
   });
 
-  return (
-    <group ref={group}>
-      <primitive object={scene.clone()} />
-    </group>
-  );
+  return <primitive object={clone} />;
 }
