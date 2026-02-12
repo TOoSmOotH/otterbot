@@ -82,13 +82,13 @@ export class COO extends BaseAgent {
     this.onStream = deps.onStream;
   }
 
-  handleMessage(message: BusMessage): void {
+  async handleMessage(message: BusMessage): Promise<void> {
     if (message.type === MessageType.Chat) {
       // CEO is talking to us
-      this.handleCeoMessage(message);
+      await this.handleCeoMessage(message);
     } else if (message.type === MessageType.Report) {
       // Team Lead reporting back
-      this.handleTeamLeadReport(message);
+      await this.handleTeamLeadReport(message);
     }
   }
 
@@ -362,24 +362,11 @@ export class COO extends BaseAgent {
     return `Project "${name}" created (${projectId}). Team Lead ${teamLead.id} assigned and directive sent.`;
   }
 
-  private getProjectStatus(projectId?: string): string {
+  private async getProjectStatus(projectId?: string): Promise<string> {
     const db = getDb();
 
     if (projectId) {
-      const project = db
-        .select()
-        .from(schema.projects)
-        .where(eq(schema.projects.id, projectId))
-        .get();
-      if (!project) return `Project ${projectId} not found.`;
-
-      const agents = db
-        .select()
-        .from(schema.agents)
-        .where(eq(schema.agents.projectId, projectId))
-        .all();
-
-      return `Project "${project.name}" (${project.status}): ${agents.length} agents active.`;
+      return this.getSingleProjectStatus(projectId);
     }
 
     const projects = db
@@ -390,9 +377,72 @@ export class COO extends BaseAgent {
 
     if (projects.length === 0) return "No active projects.";
 
-    return projects
-      .map((p) => `- "${p.name}" (${p.id}): ${p.status}`)
-      .join("\n");
+    const summaries = await Promise.all(
+      projects.map((p) => this.getSingleProjectStatus(p.id)),
+    );
+    return summaries.join("\n\n---\n\n");
+  }
+
+  private async getSingleProjectStatus(projectId: string): Promise<string> {
+    const db = getDb();
+    const project = db
+      .select()
+      .from(schema.projects)
+      .where(eq(schema.projects.id, projectId))
+      .get();
+    if (!project) return `Project ${projectId} not found.`;
+
+    // 1. Get agent rows with their current statuses
+    const agents = db
+      .select()
+      .from(schema.agents)
+      .where(eq(schema.agents.projectId, projectId))
+      .all();
+
+    const agentLines = agents.map(
+      (a) => `  - ${a.role} ${a.id} [${a.status}]`,
+    );
+
+    // 2. Fetch recent bus messages for activity context
+    const recentMessages = this.bus.getHistory({
+      projectId,
+      limit: 5,
+    });
+    const activityLines = recentMessages.map(
+      (m) =>
+        `  - [${m.type}] ${m.fromAgentId ?? "CEO"} → ${m.toAgentId ?? "CEO"}: ${m.content.slice(0, 100)}${m.content.length > 100 ? "..." : ""}`,
+    );
+
+    // 3. Ask the TeamLead for live status (10s timeout)
+    let liveStatus = "  (no TeamLead assigned)";
+    const teamLead = this.teamLeads.get(projectId);
+    if (teamLead) {
+      const reply = await this.bus.request(
+        {
+          fromAgentId: this.id,
+          toAgentId: teamLead.id,
+          type: MessageType.StatusRequest,
+          content: "status",
+          projectId,
+        },
+        10_000,
+      );
+      liveStatus = reply
+        ? reply.content
+        : `  TeamLead ${teamLead.id}: no response (may be busy)`;
+    }
+
+    return [
+      `**Project "${project.name}"** (${project.status})`,
+      `Agents (${agents.length}):`,
+      ...agentLines,
+      `\nLive status from TeamLead:`,
+      liveStatus,
+      `\nRecent activity:`,
+      ...(activityLines.length > 0
+        ? activityLines
+        : ["  (no recent messages)"]),
+    ].join("\n");
   }
 
   private async manageModels(args: {

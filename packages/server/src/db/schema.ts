@@ -27,7 +27,7 @@ export const messages = sqliteTable("messages", {
   fromAgentId: text("from_agent_id"),
   toAgentId: text("to_agent_id"),
   type: text("type", {
-    enum: ["chat", "directive", "report", "status"],
+    enum: ["chat", "directive", "report", "status", "status_request", "status_response"],
   }).notNull(),
   content: text("content").notNull(),
   metadata: text("metadata", { mode: "json" })
@@ -35,6 +35,7 @@ export const messages = sqliteTable("messages", {
     .default({}),
   projectId: text("project_id"),
   conversationId: text("conversation_id"),
+  correlationId: text("correlation_id"),
   timestamp: text("timestamp")
     .notNull()
     .$defaultFn(() => new Date().toISOString()),

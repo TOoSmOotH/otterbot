@@ -66,7 +66,7 @@ export abstract class BaseAgent {
   }
 
   /** Handle an incoming message from the bus */
-  abstract handleMessage(message: BusMessage): void;
+  abstract handleMessage(message: BusMessage): Promise<void>;
 
   /** Get tools available to this agent for tool calling */
   protected getTools(): Record<string, unknown> {
@@ -83,6 +83,11 @@ export abstract class BaseAgent {
       .run();
   }
 
+  /** Get a human-readable status summary (override in subclasses) */
+  getStatusSummary(): string {
+    return `${this.role} [${this.status}]`;
+  }
+
   /** Send a response via the bus */
   protected sendMessage(
     toAgentId: string | null,
@@ -90,6 +95,7 @@ export abstract class BaseAgent {
     content: string,
     metadata?: Record<string, unknown>,
     conversationId?: string,
+    correlationId?: string,
   ): BusMessage {
     return this.bus.send({
       fromAgentId: this.id,
@@ -99,6 +105,7 @@ export abstract class BaseAgent {
       metadata,
       projectId: this.projectId ?? undefined,
       conversationId,
+      correlationId,
     });
   }
 

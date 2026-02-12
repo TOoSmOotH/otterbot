@@ -3,11 +3,15 @@ import { eq } from "drizzle-orm";
 import { getDb, schema } from "../db/index.js";
 import type { BusMessage, MessageType } from "@smoothbot/shared";
 
-type MessageHandler = (message: BusMessage) => void;
+type MessageHandler = (message: BusMessage) => void | Promise<void>;
 
 export class MessageBus {
   private handlers = new Map<string, MessageHandler>();
   private broadcastHandlers: MessageHandler[] = [];
+  private correlationHandlers = new Map<
+    string,
+    (message: BusMessage) => void
+  >();
 
   /** Register a handler for messages to a specific agent */
   subscribe(agentId: string, handler: MessageHandler): void {
@@ -40,6 +44,7 @@ export class MessageBus {
     metadata?: Record<string, unknown>;
     projectId?: string;
     conversationId?: string;
+    correlationId?: string;
   }): BusMessage {
     const message: BusMessage = {
       id: nanoid(),
@@ -50,26 +55,78 @@ export class MessageBus {
       metadata: params.metadata ?? {},
       projectId: params.projectId,
       conversationId: params.conversationId,
+      correlationId: params.correlationId,
       timestamp: new Date().toISOString(),
     };
 
     // 1. Persist
     this.persist(message);
 
-    // 2. Route to target agent
-    if (params.toAgentId) {
-      const handler = this.handlers.get(params.toAgentId);
-      if (handler) {
-        handler(message);
+    // 2. Check if this is a correlated reply
+    if (message.correlationId) {
+      const correlationHandler = this.correlationHandlers.get(
+        message.correlationId,
+      );
+      if (correlationHandler) {
+        correlationHandler(message);
       }
     }
 
-    // 3. Broadcast to all listeners (UI)
-    for (const handler of this.broadcastHandlers) {
-      handler(message);
+    // 3. Route to target agent
+    if (params.toAgentId) {
+      const handler = this.handlers.get(params.toAgentId);
+      if (handler) {
+        Promise.resolve(handler(message)).catch((err) => {
+          console.error(
+            `[MessageBus] Error in handler for agent ${params.toAgentId}:`,
+            err,
+          );
+        });
+      }
+    }
+
+    // 4. Broadcast to all listeners (UI)
+    for (const bh of this.broadcastHandlers) {
+      Promise.resolve(bh(message)).catch((err) => {
+        console.error("[MessageBus] Error in broadcast handler:", err);
+      });
     }
 
     return message;
+  }
+
+  /**
+   * Send a message and wait for a correlated reply.
+   * Returns the reply BusMessage, or null on timeout.
+   */
+  request(
+    params: {
+      fromAgentId: string | null;
+      toAgentId: string | null;
+      type: MessageType;
+      content: string;
+      metadata?: Record<string, unknown>;
+      projectId?: string;
+      conversationId?: string;
+    },
+    timeoutMs = 30_000,
+  ): Promise<BusMessage | null> {
+    const correlationId = nanoid();
+
+    return new Promise<BusMessage | null>((resolve) => {
+      const timer = setTimeout(() => {
+        this.correlationHandlers.delete(correlationId);
+        resolve(null);
+      }, timeoutMs);
+
+      this.correlationHandlers.set(correlationId, (reply) => {
+        clearTimeout(timer);
+        this.correlationHandlers.delete(correlationId);
+        resolve(reply);
+      });
+
+      this.send({ ...params, correlationId });
+    });
   }
 
   /** Get message history, optionally filtered */
@@ -134,6 +191,7 @@ export class MessageBus {
         metadata: message.metadata,
         projectId: message.projectId,
         conversationId: message.conversationId,
+        correlationId: message.correlationId,
         timestamp: message.timestamp,
       })
       .run();

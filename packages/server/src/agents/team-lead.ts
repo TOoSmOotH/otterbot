@@ -53,11 +53,13 @@ export class TeamLead extends BaseAgent {
     this.onAgentSpawned = deps.onAgentSpawned;
   }
 
-  handleMessage(message: BusMessage): void {
+  async handleMessage(message: BusMessage): Promise<void> {
     if (message.type === MessageType.Directive) {
-      this.handleDirective(message);
+      await this.handleDirective(message);
     } else if (message.type === MessageType.Report) {
-      this.handleWorkerReport(message);
+      await this.handleWorkerReport(message);
+    } else if (message.type === MessageType.StatusRequest) {
+      await this.handleStatusRequest(message);
     }
   }
 
@@ -78,6 +80,49 @@ export class TeamLead extends BaseAgent {
     if (this.parentId && response.trim()) {
       this.sendMessage(this.parentId, MessageType.Report, response);
     }
+  }
+
+  private async handleStatusRequest(message: BusMessage) {
+    const workerStatuses: string[] = [];
+
+    // Query each worker for its status (5s timeout per worker)
+    const workerEntries = Array.from(this.workers.entries());
+    const results = await Promise.all(
+      workerEntries.map(async ([id, _worker]) => {
+        const reply = await this.bus.request(
+          {
+            fromAgentId: this.id,
+            toAgentId: id,
+            type: MessageType.StatusRequest,
+            content: "status",
+            projectId: this.projectId ?? undefined,
+          },
+          5_000,
+        );
+        return reply ? reply.content : `Worker ${id}: no response (may be busy)`;
+      }),
+    );
+
+    workerStatuses.push(...results);
+
+    const summary = [
+      this.getStatusSummary(),
+      `Workers (${this.workers.size}):`,
+      ...workerStatuses.map((s) => `  - ${s}`),
+    ].join("\n");
+
+    this.sendMessage(
+      message.fromAgentId,
+      MessageType.StatusResponse,
+      summary,
+      undefined,
+      undefined,
+      message.correlationId,
+    );
+  }
+
+  override getStatusSummary(): string {
+    return `TeamLead ${this.id} [${this.status}] — ${this.workers.size} worker(s)`;
   }
 
   protected getTools(): Record<string, unknown> {

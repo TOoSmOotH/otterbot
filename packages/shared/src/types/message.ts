@@ -7,6 +7,10 @@ export enum MessageType {
   Report = "report",
   /** Agent status change broadcast */
   Status = "status",
+  /** Request current status from an agent */
+  StatusRequest = "status_request",
+  /** Response to a status request */
+  StatusResponse = "status_response",
 }
 
 export interface BusMessage {
@@ -18,6 +22,7 @@ export interface BusMessage {
   metadata: Record<string, unknown>;
   projectId?: string;
   conversationId?: string;
+  correlationId?: string;
   timestamp: string;
 }
 

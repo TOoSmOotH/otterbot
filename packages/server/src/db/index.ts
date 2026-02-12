@@ -63,6 +63,7 @@ export async function migrateDb() {
     metadata TEXT DEFAULT '{}',
     project_id TEXT,
     conversation_id TEXT,
+    correlation_id TEXT,
     timestamp TEXT NOT NULL
   )`);
 
@@ -76,6 +77,13 @@ export async function migrateDb() {
   // Idempotent migration: add conversation_id to existing messages table
   try {
     db.run(sql`ALTER TABLE messages ADD COLUMN conversation_id TEXT`);
+  } catch {
+    // Column already exists — ignore
+  }
+
+  // Idempotent migration: add correlation_id to existing messages table
+  try {
+    db.run(sql`ALTER TABLE messages ADD COLUMN correlation_id TEXT`);
   } catch {
     // Column already exists — ignore
   }

@@ -39,10 +39,23 @@ export class Worker extends BaseAgent {
     this.workspacePath = deps.workspacePath;
   }
 
-  handleMessage(message: BusMessage): void {
+  async handleMessage(message: BusMessage): Promise<void> {
     if (message.type === MessageType.Directive) {
-      this.handleTask(message);
+      await this.handleTask(message);
+    } else if (message.type === MessageType.StatusRequest) {
+      this.sendMessage(
+        message.fromAgentId,
+        MessageType.StatusResponse,
+        this.getStatusSummary(),
+        undefined,
+        undefined,
+        message.correlationId,
+      );
     }
+  }
+
+  override getStatusSummary(): string {
+    return `Worker ${this.id} [${this.status}]`;
   }
 
   protected getTools(): Record<string, unknown> {
