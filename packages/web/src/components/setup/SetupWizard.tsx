@@ -77,19 +77,24 @@ export function SetupWizard() {
   const [draggingOver, setDraggingOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Step 4: Character
+  // Step 4: COO customization
+  const [cooName, setCooName] = useState("");
+  const [cooModelPackId, setCooModelPackId] = useState<string | null>(null);
+  const [cooGearConfig, setCooGearConfig] = useState<GearConfig | null>(null);
+
+  // Step 5: Character
   const [characterPackId, setCharacterPackId] = useState<string | null>(null);
   const [characterGearConfig, setCharacterGearConfig] = useState<GearConfig | null>(null);
   const modelPacks = useModelPackStore((s) => s.packs);
   const modelPacksLoading = useModelPackStore((s) => s.loading);
   const loadPacks = useModelPackStore((s) => s.loadPacks);
 
-  // Pre-fetch model packs on mount so they're ready by step 4
+  // Pre-fetch model packs on mount so they're ready by step 4/5
   useEffect(() => {
     loadPacks();
   }, [loadPacks]);
 
-  // Step 5: Voice
+  // Step 6: Voice
   const [ttsVoice, setTtsVoice] = useState<string | null>(null);
   const [previewingVoice, setPreviewingVoice] = useState(false);
 
@@ -202,7 +207,7 @@ export function SetupWizard() {
     }
   };
 
-  const handleNextToCharacter = () => {
+  const handleNextToCoo = () => {
     if (!displayName.trim()) {
       setError("Display name is required");
       return;
@@ -216,9 +221,18 @@ export function SetupWizard() {
     setStep(4);
   };
 
-  const handleNextToVoice = () => {
+  const handleNextToUserCharacter = () => {
+    if (!cooName.trim()) {
+      setError("A name for your COO is required");
+      return;
+    }
     setError(null);
     setStep(5);
+  };
+
+  const handleNextToVoice = () => {
+    setError(null);
+    setStep(6);
   };
 
   const handleComplete = async () => {
@@ -236,6 +250,9 @@ export function SetupWizard() {
       ttsVoice: ttsVoice || undefined,
       userModelPackId: characterPackId || undefined,
       userGearConfig: characterGearConfig || undefined,
+      cooName: cooName.trim(),
+      cooModelPackId: cooModelPackId || undefined,
+      cooGearConfig: cooGearConfig || undefined,
     });
     setSubmitting(false);
   };
@@ -299,7 +316,7 @@ export function SetupWizard() {
 
           {/* Step indicator */}
           <div className="flex items-center justify-center gap-2 mb-6">
-            {[1, 2, 3, 4, 5].map((s, i) => (
+            {[1, 2, 3, 4, 5, 6].map((s, i) => (
               <div key={s} className="flex items-center gap-2">
                 {i > 0 && (
                   <div className={`w-6 h-px ${step >= s ? "bg-primary" : "bg-muted"}`} />
@@ -639,7 +656,7 @@ export function SetupWizard() {
                   Back
                 </button>
                 <button
-                  onClick={handleNextToCharacter}
+                  onClick={handleNextToCoo}
                   disabled={!displayName.trim() || !timezone}
                   className="flex-1 px-4 py-2 bg-primary text-primary-foreground text-sm font-medium rounded-md hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                 >
@@ -652,7 +669,64 @@ export function SetupWizard() {
           {step === 4 && (
             <div className="space-y-4">
               <h2 className="text-sm font-medium">
-                4. Choose your character
+                4. Customize your COO
+              </h2>
+              <p className="text-xs text-muted-foreground">
+                Your COO manages all operations and reports directly to you. Give them a name and optionally pick a 3D character.
+              </p>
+
+              {/* COO Name */}
+              <div>
+                <label className="block text-sm text-muted-foreground mb-1.5">
+                  Name <span className="text-destructive">*</span>
+                </label>
+                <input
+                  type="text"
+                  value={cooName}
+                  onChange={(e) => setCooName(e.target.value)}
+                  placeholder="e.g. Atlas, Friday, Jarvis..."
+                  autoFocus
+                  className="w-full px-3 py-2 bg-background border border-input rounded-md text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                />
+              </div>
+
+              {/* COO 3D Character */}
+              <CharacterSelect
+                packs={modelPacks}
+                selected={cooModelPackId}
+                onSelect={(id) => { setCooModelPackId(id); setCooGearConfig(null); }}
+                loading={modelPacksLoading}
+                gearConfig={cooGearConfig}
+                onGearConfigChange={setCooGearConfig}
+              />
+
+              {error && <p className="text-sm text-destructive">{error}</p>}
+
+              <div className="flex gap-2">
+                <button
+                  onClick={() => {
+                    setStep(3);
+                    setError(null);
+                  }}
+                  className="px-4 py-2 bg-secondary text-secondary-foreground text-sm font-medium rounded-md hover:bg-secondary/80 transition-colors"
+                >
+                  Back
+                </button>
+                <button
+                  onClick={handleNextToUserCharacter}
+                  disabled={!cooName.trim()}
+                  className="flex-1 px-4 py-2 bg-primary text-primary-foreground text-sm font-medium rounded-md hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                  Next
+                </button>
+              </div>
+            </div>
+          )}
+
+          {step === 5 && (
+            <div className="space-y-4">
+              <h2 className="text-sm font-medium">
+                5. Choose your character
               </h2>
               <p className="text-xs text-muted-foreground">
                 Pick a 3D character for the Live View. You can change this later in Settings.
@@ -672,7 +746,7 @@ export function SetupWizard() {
               <div className="flex gap-2">
                 <button
                   onClick={() => {
-                    setStep(3);
+                    setStep(4);
                     setError(null);
                   }}
                   className="px-4 py-2 bg-secondary text-secondary-foreground text-sm font-medium rounded-md hover:bg-secondary/80 transition-colors"
@@ -689,10 +763,10 @@ export function SetupWizard() {
             </div>
           )}
 
-          {step === 5 && (
+          {step === 6 && (
             <div className="space-y-4">
               <h2 className="text-sm font-medium">
-                5. Choose a voice for your assistant
+                6. Choose a voice for your assistant
               </h2>
               <p className="text-xs text-muted-foreground">
                 Your assistant can speak its responses aloud. Pick a voice, or
@@ -811,7 +885,7 @@ export function SetupWizard() {
               <div className="flex gap-2">
                 <button
                   onClick={() => {
-                    setStep(4);
+                    setStep(5);
                     setError(null);
                   }}
                   className="px-4 py-2 bg-secondary text-secondary-foreground text-sm font-medium rounded-md hover:bg-secondary/80 transition-colors"

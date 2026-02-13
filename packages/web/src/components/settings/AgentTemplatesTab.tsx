@@ -226,12 +226,15 @@ export function AgentTemplatesTab() {
                     </button>
                   </>
                 ) : selected.builtIn ? (
-                  <button
-                    onClick={() => cloneEntry(selected.id)}
-                    className="text-xs bg-secondary text-foreground px-3 py-1 rounded-md hover:bg-secondary/80"
-                  >
-                    Clone
-                  </button>
+                  // Built-in COO: no Clone (it's a singleton); other built-ins: allow Clone
+                  selected.role === "coo" ? null : (
+                    <button
+                      onClick={() => cloneEntry(selected.id)}
+                      className="text-xs bg-secondary text-foreground px-3 py-1 rounded-md hover:bg-secondary/80"
+                    >
+                      Clone
+                    </button>
+                  )
                 ) : (
                   <>
                     <button
@@ -246,12 +249,14 @@ export function AgentTemplatesTab() {
                     >
                       Clone
                     </button>
-                    <button
-                      onClick={deleteEntry}
-                      className="text-xs text-destructive px-3 py-1 rounded-md hover:bg-destructive/10"
-                    >
-                      Delete
-                    </button>
+                    {selected.role !== "coo" && (
+                      <button
+                        onClick={deleteEntry}
+                        className="text-xs text-destructive px-3 py-1 rounded-md hover:bg-destructive/10"
+                      >
+                        Delete
+                      </button>
+                    )}
                   </>
                 )}
               </div>

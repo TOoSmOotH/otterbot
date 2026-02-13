@@ -340,6 +340,9 @@ async function main() {
       ttsVoice?: string;
       userModelPackId?: string;
       userGearConfig?: Record<string, boolean> | null;
+      cooName: string;
+      cooModelPackId?: string;
+      cooGearConfig?: Record<string, boolean> | null;
     };
   }>("/api/setup/complete", async (req, reply) => {
     if (isSetupComplete()) {
@@ -347,7 +350,7 @@ async function main() {
       return { error: "Setup already completed" };
     }
 
-    const { passphrase, provider, model, apiKey, baseUrl, userName, userAvatar, userBio, userTimezone, ttsVoice, userModelPackId, userGearConfig } = req.body;
+    const { passphrase, provider, model, apiKey, baseUrl, userName, userAvatar, userBio, userTimezone, ttsVoice, userModelPackId, userGearConfig, cooName, cooModelPackId, cooGearConfig } = req.body;
 
     if (!passphrase || passphrase.length < 8) {
       reply.code(400);
@@ -364,6 +367,10 @@ async function main() {
     if (!userTimezone) {
       reply.code(400);
       return { error: "Timezone is required" };
+    }
+    if (!cooName || !cooName.trim()) {
+      reply.code(400);
+      return { error: "COO name is required" };
     }
 
     // Store config
@@ -404,6 +411,25 @@ async function main() {
     // Store gear config
     if (userGearConfig) {
       setConfig("user_gear_config", JSON.stringify(userGearConfig));
+    }
+
+    // Clone the built-in COO template with the user's customizations
+    const cooSource = registry.get("builtin-coo");
+    if (cooSource) {
+      const cooClone = registry.create({
+        name: cooName.trim(),
+        description: cooSource.description,
+        systemPrompt: cooSource.systemPrompt,
+        capabilities: [...cooSource.capabilities],
+        defaultModel: model,
+        defaultProvider: provider,
+        tools: [...cooSource.tools],
+        role: cooSource.role,
+        clonedFromId: "builtin-coo",
+        modelPackId: cooModelPackId ?? null,
+        gearConfig: cooGearConfig ?? null,
+      });
+      setConfig("coo_registry_id", cooClone.id);
     }
 
     // Create session
@@ -554,6 +580,11 @@ async function main() {
       if (existing.builtIn) {
         reply.code(403);
         return { error: "Built-in templates cannot be deleted" };
+      }
+      const cooRegistryId = getConfig("coo_registry_id");
+      if (cooRegistryId && req.params.id === cooRegistryId) {
+        reply.code(403);
+        return { error: "The COO template cannot be deleted. Edit it instead." };
       }
       registry.delete(req.params.id);
       return { ok: true };

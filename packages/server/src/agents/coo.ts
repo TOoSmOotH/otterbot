@@ -58,7 +58,10 @@ export class COO extends BaseAgent {
 
   constructor(deps: COODependencies) {
     const registry = new Registry();
-    const cooEntry = registry.get("builtin-coo");
+    const cooRegistryId = getConfig("coo_registry_id");
+    const cooEntry = cooRegistryId
+      ? registry.get(cooRegistryId) ?? registry.get("builtin-coo")
+      : registry.get("builtin-coo");
     let systemPrompt = cooEntry?.systemPrompt ?? COO_SYSTEM_PROMPT;
 
     // Inject user profile into system prompt if available
@@ -77,9 +80,11 @@ export class COO extends BaseAgent {
       role: AgentRole.COO,
       parentId: null,
       projectId: null,
-      model: getConfig("coo_model") ?? "claude-sonnet-4-5-20250929",
-      provider: getConfig("coo_provider") ?? "anthropic",
+      model: cooEntry?.defaultModel ?? getConfig("coo_model") ?? "claude-sonnet-4-5-20250929",
+      provider: cooEntry?.defaultProvider ?? getConfig("coo_provider") ?? "anthropic",
       systemPrompt,
+      modelPackId: cooEntry?.modelPackId ?? null,
+      gearConfig: cooEntry?.gearConfig ?? null,
       onStatusChange: deps.onStatusChange,
     };
     super(options, deps.bus);
