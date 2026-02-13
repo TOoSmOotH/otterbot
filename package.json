@@ -7,7 +7,7 @@
   "author": "Mike Reeves",
   "scripts": {
     "build": "pnpm -r build",
-    "dev": "pnpm --filter @smoothbot/shared build && (pnpm --filter @smoothbot/shared dev & pnpm --filter @smoothbot/server dev & pnpm --filter @smoothbot/web dev)",
+    "dev": "pnpm --filter @smoothbot/shared build && { pnpm --filter @smoothbot/shared dev & pnpm --filter @smoothbot/server dev & pnpm --filter @smoothbot/web dev; }",
     "dev:server": "pnpm --filter @smoothbot/server dev",
     "dev:web": "pnpm --filter @smoothbot/web dev",
     "test": "vitest run",
