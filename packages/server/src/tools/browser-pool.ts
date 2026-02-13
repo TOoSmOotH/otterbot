@@ -13,7 +13,7 @@ import type { Browser, BrowserContext } from "playwright";
 
 let browserInstance: Browser | null = null;
 
-const desktopEnabled = process.env.ENABLE_DESKTOP === "true";
+const desktopEnabled = process.env.ENABLE_DESKTOP !== "false";
 
 /**
  * Parse viewport dimensions from DESKTOP_RESOLUTION env var (e.g. "1280x720x24").

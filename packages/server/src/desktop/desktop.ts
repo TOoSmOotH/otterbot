@@ -23,14 +23,14 @@ export interface DesktopConfig {
 
 export function getDesktopConfig(): DesktopConfig {
   return {
-    enabled: process.env.ENABLE_DESKTOP === "true",
+    enabled: process.env.ENABLE_DESKTOP !== "false",
     vncPort: parseInt(process.env.VNC_PORT ?? "5900", 10),
     resolution: process.env.DESKTOP_RESOLUTION ?? "1280x720x24",
   };
 }
 
 export function isDesktopEnabled(): boolean {
-  return process.env.ENABLE_DESKTOP === "true";
+  return process.env.ENABLE_DESKTOP !== "false";
 }
 
 function parseCookies(header: string | undefined): Record<string, string> {
