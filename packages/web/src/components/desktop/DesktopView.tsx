@@ -16,12 +16,18 @@ function loadRFB(): Promise<typeof RFB> {
 
 export function DesktopView() {
   const enabled = useDesktopStore((s) => s.enabled);
+  const checkStatus = useDesktopStore((s) => s.checkStatus);
   const setConnected = useDesktopStore((s) => s.setConnected);
   const wsPath = useDesktopStore((s) => s.wsPath);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const rfbRef = useRef<RFB | null>(null);
   const [status, setStatus] = useState<"disconnected" | "connecting" | "connected">("disconnected");
+
+  // Ensure we've fetched desktop status (needed for popout window)
+  useEffect(() => {
+    checkStatus();
+  }, []);
 
   const connect = useCallback(async () => {
     if (!containerRef.current || rfbRef.current) return;
