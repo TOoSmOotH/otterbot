@@ -82,6 +82,10 @@ export class MessageBus {
             err,
           );
         });
+      } else {
+        console.warn(
+          `[MessageBus] No handler for agent "${params.toAgentId}" — message dropped. Registered: [${Array.from(this.handlers.keys()).join(", ")}]`,
+        );
       }
     }
 

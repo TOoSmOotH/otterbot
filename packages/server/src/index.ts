@@ -209,28 +209,34 @@ async function main() {
 
   function startCoo() {
     if (coo) return;
-    coo = new COO({
-      bus,
-      workspace,
-      onAgentSpawned: (agent) => {
-        emitAgentSpawned(io, agent);
-      },
-      onStatusChange: (agentId, status) => {
-        emitAgentStatus(io, agentId, status);
-      },
-      onStream: (token, messageId) => {
-        emitCooStream(io, token, messageId);
-      },
-      onThinking: (token, messageId) => {
-        emitCooThinking(io, token, messageId);
-      },
-      onThinkingEnd: (messageId) => {
-        emitCooThinkingEnd(io, messageId);
-      },
-    });
-    emitAgentSpawned(io, coo);
-    setupSocketHandlers(io, bus, coo, registry);
-    console.log("COO agent started.");
+    try {
+      const cooRegistryId = getConfig("coo_registry_id");
+      console.log(`Starting COO... (coo_registry_id=${cooRegistryId ?? "none"}, coo_model=${getConfig("coo_model") ?? "default"}, coo_provider=${getConfig("coo_provider") ?? "default"})`);
+      coo = new COO({
+        bus,
+        workspace,
+        onAgentSpawned: (agent) => {
+          emitAgentSpawned(io, agent);
+        },
+        onStatusChange: (agentId, status) => {
+          emitAgentStatus(io, agentId, status);
+        },
+        onStream: (token, messageId) => {
+          emitCooStream(io, token, messageId);
+        },
+        onThinking: (token, messageId) => {
+          emitCooThinking(io, token, messageId);
+        },
+        onThinkingEnd: (messageId) => {
+          emitCooThinkingEnd(io, messageId);
+        },
+      });
+      emitAgentSpawned(io, coo);
+      setupSocketHandlers(io, bus, coo, registry);
+      console.log(`COO agent started. (model=${coo.toData().model}, provider=${coo.toData().provider})`);
+    } catch (err) {
+      console.error("Failed to start COO agent:", err);
+    }
   }
 
   if (isSetupComplete()) {

@@ -98,6 +98,7 @@ export class COO extends BaseAgent {
   }
 
   async handleMessage(message: BusMessage): Promise<void> {
+    console.log(`[COO] handleMessage type=${message.type} from=${message.fromAgentId ?? "CEO"}`);
     if (message.type === MessageType.Chat) {
       // CEO is talking to us
       await this.handleCeoMessage(message);

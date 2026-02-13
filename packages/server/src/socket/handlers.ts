@@ -64,6 +64,7 @@ export function setupSocketHandlers(
 
     // CEO sends a message to the COO
     socket.on("ceo:message", (data, callback) => {
+      console.log(`[Socket] ceo:message received: "${data.content.slice(0, 80)}"`);
       const db = getDb();
       let conversationId = data.conversationId ?? coo.getCurrentConversationId();
 
