@@ -43,32 +43,39 @@ function makePairKey(a: string | null, b: string | null): string {
   return sa < sb ? `${sa}::${sb}` : `${sb}::${sa}`;
 }
 
+/** Group consecutive messages between the same pair chronologically */
 function groupByConversationPair(messages: BusMessage[]): ConversationGroup[] {
-  const map = new Map<string, ConversationGroup>();
+  const groups: ConversationGroup[] = [];
+  let current: ConversationGroup | null = null;
+  let pairCounter = 0;
 
   for (const msg of messages) {
-    const key = makePairKey(msg.fromAgentId, msg.toAgentId);
-    let group = map.get(key);
-    if (!group) {
-      // Determine canonical A/B order matching the key
+    const pairKey = makePairKey(msg.fromAgentId, msg.toAgentId);
+
+    if (!current || current.key !== pairKey) {
+      // Start a new consecutive group
       const sa = msg.fromAgentId ?? "__ceo__";
       const sb = msg.toAgentId ?? "__ceo__";
       const [pA, pB] = sa < sb
         ? [msg.fromAgentId, msg.toAgentId]
         : [msg.toAgentId, msg.fromAgentId];
-      group = { key, participantA: pA, participantB: pB, messages: [], latestTimestamp: msg.timestamp };
-      map.set(key, group);
+      current = {
+        key: `${pairKey}::${pairCounter++}`,
+        participantA: pA,
+        participantB: pB,
+        messages: [],
+        latestTimestamp: msg.timestamp,
+      };
+      groups.push(current);
     }
-    group.messages.push(msg);
-    if (msg.timestamp > group.latestTimestamp) {
-      group.latestTimestamp = msg.timestamp;
+
+    current.messages.push(msg);
+    if (msg.timestamp > current.latestTimestamp) {
+      current.latestTimestamp = msg.timestamp;
     }
   }
 
-  // Sort groups by latest timestamp descending (most recent first)
-  return Array.from(map.values()).sort(
-    (a, b) => new Date(b.latestTimestamp).getTime() - new Date(a.latestTimestamp).getTime(),
-  );
+  return groups;
 }
 
 // ---------------------------------------------------------------------------
