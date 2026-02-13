@@ -163,8 +163,6 @@ export function CharacterSelect({ packs, selected, onSelect, loading, gearConfig
 }
 
 function CharacterCard({ pack, selected, onSelect }: { pack: ModelPack; selected: boolean; onSelect: () => void }) {
-  const [canvasError, setCanvasError] = useState(false);
-
   return (
     <button
       onClick={onSelect}
@@ -176,35 +174,11 @@ function CharacterCard({ pack, selected, onSelect }: { pack: ModelPack; selected
       )}
     >
       <div className="flex-1 w-full">
-        {canvasError ? (
-          <img
-            src={pack.thumbnailUrl}
-            alt={pack.name}
-            className="w-full h-full object-contain"
-          />
-        ) : (
-          <Canvas
-            camera={{ position: [0, 1, 3], fov: 40 }}
-            style={{ background: "transparent" }}
-            onError={() => setCanvasError(true)}
-          >
-            <ambientLight intensity={0.6} />
-            <directionalLight position={[3, 5, 3]} intensity={1} />
-            <Suspense fallback={null}>
-              <Center>
-                <CharacterPreview url={pack.characterUrl} idleAnimUrl={pack.animations.idle} />
-              </Center>
-            </Suspense>
-            <OrbitControls
-              enableZoom={false}
-              enablePan={false}
-              autoRotate
-              autoRotateSpeed={2}
-              minPolarAngle={Math.PI / 3}
-              maxPolarAngle={Math.PI / 2.2}
-            />
-          </Canvas>
-        )}
+        <img
+          src={pack.thumbnailUrl}
+          alt={pack.name}
+          className="w-full h-full object-contain"
+        />
       </div>
       <div className="p-1 text-center w-full border-t border-border/50">
         <span className="text-[10px] font-medium">{pack.name}</span>
