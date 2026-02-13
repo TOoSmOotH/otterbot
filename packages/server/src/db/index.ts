@@ -189,6 +189,16 @@ export async function migrateDb() {
     updated_at TEXT NOT NULL
   )`);
 
+  db.run(sql`CREATE TABLE IF NOT EXISTS worktrees (
+    agent_id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    branch_name TEXT NOT NULL,
+    worktree_path TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'active',
+    created_at TEXT NOT NULL,
+    merged_at TEXT
+  )`);
+
   db.run(sql`CREATE TABLE IF NOT EXISTS agent_activity (
     id TEXT PRIMARY KEY,
     agent_id TEXT NOT NULL,
