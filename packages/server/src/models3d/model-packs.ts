@@ -13,7 +13,21 @@ export function discoverModelPacks(assetsRoot: string): ModelPack[] {
 
     const packDir = resolve(workersDir, dir.name);
     const characterDir = resolve(packDir, "characters");
-    const animDir = resolve(packDir, "Animations/gltf/Rig_Medium");
+
+    // Auto-detect rig size (Rig_Medium or Rig_Large)
+    const animGltfDir = resolve(packDir, "Animations/gltf");
+    let rigSize: string | null = null;
+    let animDir: string | null = null;
+    if (existsSync(animGltfDir)) {
+      for (const candidate of ["Rig_Medium", "Rig_Large"]) {
+        const candidateDir = resolve(animGltfDir, candidate);
+        if (existsSync(candidateDir)) {
+          rigSize = candidate;
+          animDir = candidateDir;
+          break;
+        }
+      }
+    }
 
     // Look for character GLB
     let characterFile: string | null = null;
@@ -29,7 +43,7 @@ export function discoverModelPacks(assetsRoot: string): ModelPack[] {
     // Look for animation GLBs
     let idleAnim: string | null = null;
     let actionAnim: string | null = null;
-    if (existsSync(animDir)) {
+    if (animDir) {
       const animFiles = readdirSync(animDir).filter((f) => f.endsWith(".glb"));
       for (const f of animFiles) {
         if (f.includes("General")) idleAnim = f;
@@ -42,21 +56,30 @@ export function discoverModelPacks(assetsRoot: string): ModelPack[] {
     const hasArtwork = existsSync(artworkPath);
 
     const prefix = `/assets/3d/workers/${dir.name}`;
+    const animPrefix = rigSize ? `${prefix}/Animations/gltf/${rigSize}` : null;
+
+    // Derive display name: "orc-brute" -> "Orc Brute"
+    const name = dir.name
+      .split("-")
+      .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+      .join(" ");
 
     packs.push({
       id: dir.name,
-      name: dir.name.charAt(0).toUpperCase() + dir.name.slice(1),
+      name,
       characterUrl: `${prefix}/characters/${characterFile}`,
       thumbnailUrl: hasArtwork
         ? `${prefix}/artwork.png`
         : `${prefix}/characters/${characterFile}`,
       animations: {
-        idle: idleAnim
-          ? `${prefix}/Animations/gltf/Rig_Medium/${idleAnim}`
-          : `${prefix}/characters/${characterFile}`,
-        action: actionAnim
-          ? `${prefix}/Animations/gltf/Rig_Medium/${actionAnim}`
-          : `${prefix}/characters/${characterFile}`,
+        idle:
+          idleAnim && animPrefix
+            ? `${animPrefix}/${idleAnim}`
+            : `${prefix}/characters/${characterFile}`,
+        action:
+          actionAnim && animPrefix
+            ? `${animPrefix}/${actionAnim}`
+            : `${prefix}/characters/${characterFile}`,
       },
     });
   }
