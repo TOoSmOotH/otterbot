@@ -9,6 +9,7 @@ interface EnvironmentState {
   loaded: boolean;
   loadEnvironment: () => Promise<void>;
   reloadEnvironment: () => Promise<void>;
+  setActiveSceneId: (id: string) => void;
   getActiveScene: () => SceneConfig | undefined;
   resolveAssetUrl: (assetRef: string) => string | undefined;
 }
@@ -68,6 +69,10 @@ export const useEnvironmentStore = create<EnvironmentState>((set, get) => ({
     } finally {
       set({ loading: false });
     }
+  },
+
+  setActiveSceneId: (id) => {
+    set({ activeSceneId: id });
   },
 
   getActiveScene: () => {

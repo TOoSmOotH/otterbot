@@ -1,7 +1,6 @@
 import { Suspense, useMemo, useRef, useEffect, useCallback } from "react";
 import { useGLTF, TransformControls } from "@react-three/drei";
 import * as THREE from "three";
-import type { SceneProp } from "@smoothbot/shared";
 import { useEnvironmentStore } from "../../stores/environment-store";
 import { useRoomBuilderStore, type EditableProp } from "../../stores/room-builder-store";
 
@@ -70,7 +69,7 @@ export function EditableEnvironmentScene() {
         position={[0, -0.01, 0]}
         visible={false}
         onPointerDown={(e) => {
-          // Only deselect if clicking the floor directly
+          if (useRoomBuilderStore.getState().dragging) return;
           if (e.eventObject === e.object) {
             selectProp(null);
           }
@@ -97,8 +96,10 @@ function TransformGizmo({
   propUid: string;
 }) {
   const updatePropTransform = useRoomBuilderStore((s) => s.updatePropTransform);
+  const setDragging = useRoomBuilderStore((s) => s.setDragging);
+  const controlsRef = useRef<any>(null);
 
-  const handleChange = useCallback(() => {
+  const syncTransform = useCallback(() => {
     if (!target) return;
     const pos = target.position;
     const rot = target.rotation;
@@ -112,14 +113,34 @@ function TransformGizmo({
     });
   }, [target, propUid, updatePropTransform]);
 
+  // Listen for dragging-changed on the underlying THREE.TransformControls
+  useEffect(() => {
+    const controls = controlsRef.current;
+    if (!controls) return;
+
+    const onDraggingChanged = (event: { value: boolean }) => {
+      setDragging(event.value);
+      // Sync transform back to store when drag ends
+      if (!event.value) {
+        syncTransform();
+      }
+    };
+
+    controls.addEventListener("dragging-changed", onDraggingChanged);
+    return () => {
+      controls.removeEventListener("dragging-changed", onDraggingChanged);
+      setDragging(false);
+    };
+  }, [setDragging, syncTransform]);
+
   return (
     <TransformControls
+      ref={controlsRef}
       object={target}
       mode={mode}
       translationSnap={snapEnabled ? snapSize : undefined}
       rotationSnap={snapEnabled ? Math.PI / 12 : undefined}
       scaleSnap={snapEnabled ? 0.1 : undefined}
-      onMouseUp={handleChange}
     />
   );
 }
@@ -174,6 +195,8 @@ function EditablePropModel({
       rotation={prop.rotation ?? [0, 0, 0]}
       scale={scale}
       onPointerDown={(e) => {
+        // Skip selection if TransformControls is being dragged
+        if (useRoomBuilderStore.getState().dragging) return;
         e.stopPropagation();
         onSelect();
       }}

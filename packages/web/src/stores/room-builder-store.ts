@@ -20,6 +20,7 @@ interface RoomBuilderState {
   snapSize: number;
   dirty: boolean;
   saving: boolean;
+  dragging: boolean;
 
   // Undo/redo
   history: EditableProp[][];
@@ -36,11 +37,13 @@ interface RoomBuilderState {
   selectProp: (uid: string | null) => void;
   updatePropTransform: (uid: string, updates: Partial<Pick<SceneProp, "position" | "rotation" | "scale" | "castShadow" | "receiveShadow">>) => void;
   setTransformMode: (mode: TransformMode) => void;
+  setDragging: (dragging: boolean) => void;
   toggleSnap: () => void;
   setSnapSize: (n: number) => void;
   undo: () => void;
   redo: () => void;
   saveScene: () => Promise<void>;
+  exportScene: () => void;
   registerPropRef: (uid: string, ref: RefObject<THREE.Group | null>) => void;
   unregisterPropRef: (uid: string) => void;
 }
@@ -72,6 +75,7 @@ export const useRoomBuilderStore = create<RoomBuilderState>((set, get) => ({
   snapSize: 0.5,
   dirty: false,
   saving: false,
+  dragging: false,
   history: [],
   future: [],
   propRefs: new Map(),
@@ -157,6 +161,10 @@ export const useRoomBuilderStore = create<RoomBuilderState>((set, get) => ({
     set({ transformMode: mode });
   },
 
+  setDragging: (dragging) => {
+    set({ dragging });
+  },
+
   toggleSnap: () => {
     set((s) => ({ snapEnabled: !s.snapEnabled }));
   },
@@ -221,6 +229,32 @@ export const useRoomBuilderStore = create<RoomBuilderState>((set, get) => ({
       console.error("[room-builder] save failed:", err);
       set({ saving: false });
     }
+  },
+
+  exportScene: () => {
+    const state = get();
+    if (!state.sceneId) return;
+
+    // Strip UIDs to get clean SceneProps
+    const props: SceneProp[] = state.editingProps.map(({ uid, ...rest }) => rest);
+
+    // Build a full SceneConfig preserving lighting/camera/agentPositions
+    const currentScene = useEnvironmentStore.getState().getActiveScene();
+    const sceneConfig: SceneConfig = {
+      ...(currentScene ?? { id: state.sceneId, name: state.sceneId }),
+      props,
+    };
+
+    const json = JSON.stringify(sceneConfig, null, 2);
+    const blob = new Blob([json], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${state.sceneId}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
   },
 
   registerPropRef: (uid, ref) => {
