@@ -15,6 +15,9 @@ import { SetupWizard } from "./components/setup/SetupWizard";
 import { CharterView } from "./components/project/CharterView";
 import { ProjectList } from "./components/project/ProjectList";
 import { KanbanBoard } from "./components/kanban/KanbanBoard";
+import { FileBrowser } from "./components/project/FileBrowser";
+import { DesktopView } from "./components/desktop/DesktopView";
+import { useDesktopStore } from "./stores/desktop-store";
 import { Group, Panel, Separator, useDefaultLayout, usePanelRef } from "react-resizable-panels";
 import { disconnectSocket, getSocket } from "./lib/socket";
 
@@ -25,6 +28,16 @@ export default function App() {
   useEffect(() => {
     checkStatus();
   }, []);
+
+  // Desktop pop-out mode — render only the desktop viewer
+  const isDesktopPopout = new URLSearchParams(window.location.search).has("desktop-popout");
+  if (isDesktopPopout && screen === "app") {
+    return (
+      <div className="h-screen bg-black">
+        <DesktopView />
+      </div>
+    );
+  }
 
   if (screen === "loading") {
     return (
@@ -62,7 +75,7 @@ interface UserProfile {
   cooName?: string;
 }
 
-type CenterView = "graph" | "live3d" | "charter" | "kanban";
+type CenterView = "graph" | "live3d" | "charter" | "kanban" | "desktop" | "files";
 
 function MainApp() {
   const socket = useSocket();
@@ -111,6 +124,9 @@ function MainApp() {
 
     // Pre-load model packs so Live View has them ready
     loadPacks();
+
+    // Check desktop environment status
+    useDesktopStore.getState().checkStatus();
   }, []);
 
   const handleEnterProject = useCallback(
@@ -275,12 +291,13 @@ function ResizableLayout({
     panelIds: PANEL_IDS,
   });
 
+  const desktopEnabled = useDesktopStore((s) => s.enabled);
   const streamPanelRef = usePanelRef();
   const [streamCollapsed, setStreamCollapsed] = useState(false);
 
   // Reset to graph from project-only views when no project is active
   useEffect(() => {
-    if (!activeProjectId && (centerView === "charter" || centerView === "kanban")) {
+    if (!activeProjectId && (centerView === "charter" || centerView === "kanban" || centerView === "files")) {
       setCenterView("graph");
     }
   }, [activeProjectId, centerView]);
@@ -295,6 +312,12 @@ function ResizableLayout({
         return activeProjectId ? (
           <KanbanBoard projectId={activeProjectId} />
         ) : null;
+      case "files":
+        return activeProjectId ? (
+          <FileBrowser projectId={activeProjectId} />
+        ) : null;
+      case "desktop":
+        return <DesktopView />;
       case "live3d":
         return (
           <LiveView userProfile={userProfile} onToggleView={() => setCenterView("graph")} />
@@ -331,13 +354,19 @@ function ResizableLayout({
 
       <Separator className="panel-resize-handle" />
 
-      {/* Center: Graph / Live View / Charter / Kanban */}
+      {/* Center: Graph / Live View / Charter / Kanban / Desktop */}
       <Panel id="graph" minSize="20%">
         <div className="h-full flex flex-col">
-          {/* Tab bar when project is active */}
-          {activeProjectId && (
+          {/* Tab bar — shown when project is active or desktop is available */}
+          {(activeProjectId || desktopEnabled) && (
             <div className="flex items-center gap-1 px-3 py-1.5 border-b border-border bg-card">
-              {(["graph", "charter", "kanban"] as CenterView[]).map((tab) => (
+              {(
+                [
+                  "graph",
+                  ...(activeProjectId ? (["charter", "kanban", "files"] as CenterView[]) : []),
+                  ...(desktopEnabled ? (["desktop"] as CenterView[]) : []),
+                ] as CenterView[]
+              ).map((tab) => (
                 <button
                   key={tab}
                   onClick={() => setCenterView(tab)}
@@ -347,7 +376,15 @@ function ResizableLayout({
                       : "text-muted-foreground hover:text-foreground hover:bg-secondary"
                   }`}
                 >
-                  {tab === "graph" ? "Graph" : tab === "charter" ? "Charter" : "Board"}
+                  {tab === "graph"
+                    ? "Graph"
+                    : tab === "charter"
+                      ? "Charter"
+                      : tab === "kanban"
+                        ? "Board"
+                        : tab === "files"
+                          ? "Files"
+                          : "Desktop"}
                 </button>
               ))}
             </div>

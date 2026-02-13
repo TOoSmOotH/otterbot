@@ -56,6 +56,7 @@ import {
 import { discoverModelPacks } from "./models3d/model-packs.js";
 import { discoverEnvironmentPacks } from "./models3d/environment-packs.js";
 import { discoverSceneConfigs } from "./models3d/scene-configs.js";
+import { registerDesktopProxy, isDesktopEnabled, getDesktopConfig } from "./desktop/desktop.js";
 import {
   listPackages,
   installAptPackage,
@@ -196,6 +197,9 @@ async function main() {
       cors: { origin: true, credentials: true },
     },
   );
+
+  // Register VNC WebSocket proxy (must be before Socket.IO starts listening)
+  registerDesktopProxy(app);
 
   // =========================================================================
   // Socket.IO auth middleware
@@ -569,6 +573,13 @@ async function main() {
   // Protected routes
   // =========================================================================
 
+  // Desktop status
+  app.get("/api/desktop/status", async () => ({
+    enabled: isDesktopEnabled(),
+    resolution: getDesktopConfig().resolution,
+    wsPath: "/desktop/ws",
+  }));
+
   // REST API for registry
   app.get("/api/registry", async () => {
     return registry.list();
@@ -714,6 +725,140 @@ async function main() {
         .where(eq(schema.conversations.projectId, req.params.projectId))
         .orderBy(desc(schema.conversations.updatedAt))
         .all();
+    },
+  );
+
+  // =========================================================================
+  // Project file browser routes
+  // =========================================================================
+
+  app.get<{ Params: { projectId: string }; Querystring: { path?: string } }>(
+    "/api/projects/:projectId/files",
+    async (req, reply) => {
+      const { readdirSync, statSync } = await import("node:fs");
+      const { resolve: resolvePath, normalize, join } = await import("node:path");
+      const projectRoot = workspace.projectPath(req.params.projectId);
+      if (!existsSync(projectRoot)) {
+        reply.code(404);
+        return { error: "Project not found" };
+      }
+      const relPath = req.query.path || "";
+      const target = normalize(resolvePath(projectRoot, relPath));
+      if (!target.startsWith(projectRoot)) {
+        reply.code(403);
+        return { error: "Access denied" };
+      }
+      if (!existsSync(target)) {
+        reply.code(404);
+        return { error: "Path not found" };
+      }
+      const raw = readdirSync(target, { withFileTypes: true });
+      const entries = raw
+        .filter((d) => !d.name.startsWith("."))
+        .map((d) => {
+          const fullPath = join(target, d.name);
+          try {
+            const st = statSync(fullPath);
+            return {
+              name: d.name,
+              type: d.isDirectory() ? ("directory" as const) : ("file" as const),
+              size: st.size,
+              mtime: st.mtime.toISOString(),
+            };
+          } catch {
+            return {
+              name: d.name,
+              type: d.isDirectory() ? ("directory" as const) : ("file" as const),
+              size: 0,
+              mtime: new Date().toISOString(),
+            };
+          }
+        })
+        .sort((a, b) => {
+          if (a.type !== b.type) return a.type === "directory" ? -1 : 1;
+          return a.name.localeCompare(b.name);
+        });
+      return { path: relPath || "/", entries };
+    },
+  );
+
+  app.get<{ Params: { projectId: string }; Querystring: { path: string } }>(
+    "/api/projects/:projectId/files/content",
+    async (req, reply) => {
+      const { readFileSync } = await import("node:fs");
+      const { resolve: resolvePath, normalize } = await import("node:path");
+      const projectRoot = workspace.projectPath(req.params.projectId);
+      const relPath = req.query.path;
+      if (!relPath) {
+        reply.code(400);
+        return { error: "path query parameter required" };
+      }
+      const target = normalize(resolvePath(projectRoot, relPath));
+      if (!target.startsWith(projectRoot)) {
+        reply.code(403);
+        return { error: "Access denied" };
+      }
+      if (!existsSync(target)) {
+        reply.code(404);
+        return { error: "File not found" };
+      }
+      const { statSync } = await import("node:fs");
+      const st = statSync(target);
+      const MAX_PREVIEW = 512 * 1024;
+      const truncated = st.size > MAX_PREVIEW;
+      const content = readFileSync(target, "utf-8").slice(0, MAX_PREVIEW);
+      return { content, truncated, size: st.size };
+    },
+  );
+
+  app.get<{ Params: { projectId: string }; Querystring: { path: string } }>(
+    "/api/projects/:projectId/files/download",
+    async (req, reply) => {
+      const { createReadStream } = await import("node:fs");
+      const { resolve: resolvePath, normalize, basename, extname } = await import("node:path");
+      const projectRoot = workspace.projectPath(req.params.projectId);
+      const relPath = req.query.path;
+      if (!relPath) {
+        reply.code(400);
+        return { error: "path query parameter required" };
+      }
+      const target = normalize(resolvePath(projectRoot, relPath));
+      if (!target.startsWith(projectRoot)) {
+        reply.code(403);
+        return { error: "Access denied" };
+      }
+      if (!existsSync(target)) {
+        reply.code(404);
+        return { error: "File not found" };
+      }
+      const mimeMap: Record<string, string> = {
+        ".txt": "text/plain",
+        ".md": "text/markdown",
+        ".json": "application/json",
+        ".js": "text/javascript",
+        ".ts": "text/typescript",
+        ".html": "text/html",
+        ".css": "text/css",
+        ".py": "text/x-python",
+        ".sh": "text/x-shellscript",
+        ".yaml": "text/yaml",
+        ".yml": "text/yaml",
+        ".xml": "text/xml",
+        ".csv": "text/csv",
+        ".svg": "image/svg+xml",
+        ".png": "image/png",
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".gif": "image/gif",
+        ".pdf": "application/pdf",
+        ".zip": "application/zip",
+      };
+      const ext = extname(target).toLowerCase();
+      const contentType = mimeMap[ext] ?? "application/octet-stream";
+      const fileName = basename(target);
+      reply.header("Content-Disposition", `attachment; filename="${fileName}"`);
+      reply.header("Content-Type", contentType);
+      return reply.send(createReadStream(target));
     },
   );
 
