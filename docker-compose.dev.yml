@@ -13,6 +13,7 @@ services:
       - SMOOTHBOT_DB_KEY=${SMOOTHBOT_DB_KEY}
       - SMOOTHBOT_UID=${SMOOTHBOT_UID:-1000}
       - SMOOTHBOT_GID=${SMOOTHBOT_GID:-1000}
+      - CI=true
 
   searxng:
     profiles: [search]
