@@ -266,6 +266,9 @@ export abstract class BaseAgent {
           toolName: part.toolName,
           args: part.args ?? {},
         }, messageId);
+      } else if (part.type === "tool-result") {
+        const resultStr = typeof part.result === "string" ? part.result : JSON.stringify(part.result ?? "");
+        console.log(`[Agent ${this.id}] Tool result (${part.toolName}): ${resultStr.slice(0, 300)}`);
       }
     };
 

@@ -341,87 +341,96 @@ export class TeamLead extends BaseAgent {
     registryEntryId: string,
     task: string,
   ): Promise<string> {
-    const db = getDb();
-    const entry = db
-      .select()
-      .from(schema.registryEntries)
-      .where(eq(schema.registryEntries.id, registryEntryId))
-      .get();
+    try {
+      const db = getDb();
+      const entry = db
+        .select()
+        .from(schema.registryEntries)
+        .where(eq(schema.registryEntries.id, registryEntryId))
+        .get();
 
-    if (!entry) {
-      return `Registry entry ${registryEntryId} not found.`;
-    }
-
-    const entryTools = (entry.tools as string[]) ?? [];
-    const isCodeWorker = entryTools.some((t) => CODE_TOOLS.has(t));
-    const workerId = nanoid();
-    let workspacePath: string | null = null;
-
-    if (this.projectId && isCodeWorker && this.gitWorktree) {
-      // Code workers get a git worktree
-      if (!this.gitWorktree.hasRepo()) {
-        this.gitWorktree.initRepo();
+      if (!entry) {
+        return `Registry entry ${registryEntryId} not found.`;
       }
-      const wtInfo = this.gitWorktree.createWorktree(workerId);
-      workspacePath = wtInfo.worktreePath;
 
-      // Record worktree in DB for recovery
-      db.insert(schema.worktrees)
-        .values({
-          agentId: workerId,
-          projectId: this.projectId,
-          branchName: wtInfo.branchName,
-          worktreePath: wtInfo.worktreePath,
-          status: "active",
-        })
-        .run();
-    } else if (this.projectId) {
-      // Non-code workers get a regular agent directory
-      workspacePath = this.workspace.createAgentWorkspace(
-        this.projectId,
-        workerId,
-      );
+      const entryTools = (entry.tools as string[]) ?? [];
+      const isCodeWorker = entryTools.some((t) => CODE_TOOLS.has(t));
+      const workerId = nanoid();
+      let workspacePath: string | null = null;
+
+      if (this.projectId && isCodeWorker && this.gitWorktree) {
+        // Code workers get a git worktree
+        if (!this.gitWorktree.hasRepo()) {
+          this.gitWorktree.initRepo();
+        }
+        const wtInfo = this.gitWorktree.createWorktree(workerId);
+        workspacePath = wtInfo.worktreePath;
+
+        // Record worktree in DB for recovery
+        db.insert(schema.worktrees)
+          .values({
+            agentId: workerId,
+            projectId: this.projectId,
+            branchName: wtInfo.branchName,
+            worktreePath: wtInfo.worktreePath,
+            status: "active",
+          })
+          .run();
+      } else if (this.projectId) {
+        // Non-code workers get a regular agent directory
+        workspacePath = this.workspace.createAgentWorkspace(
+          this.projectId,
+          workerId,
+        );
+      }
+
+      console.log(`[TeamLead ${this.id}] Spawning worker ${workerId} from ${entry.name} (workspace=${workspacePath})`);
+
+      const worker = new Worker({
+        id: workerId,
+        bus: this.bus,
+        projectId: this.projectId,
+        parentId: this.id,
+        registryEntryId: entry.id,
+        modelPackId: (entry as any).modelPackId ?? getRandomModelPackId(),
+        gearConfig: (entry as any).gearConfig ? JSON.parse((entry as any).gearConfig) : null,
+        model:
+          getConfig("worker_model") ??
+          getConfig("coo_model") ??
+          entry.defaultModel,
+        provider:
+          getConfig("worker_provider") ??
+          getConfig("coo_provider") ??
+          entry.defaultProvider,
+        systemPrompt: entry.systemPrompt,
+        workspacePath,
+        toolNames: entryTools,
+        onStatusChange: this.onStatusChange,
+        onAgentStream: this.onAgentStream,
+        onAgentThinking: this.onAgentThinking,
+        onAgentThinkingEnd: this.onAgentThinkingEnd,
+        onAgentToolCall: this.onAgentToolCall,
+      });
+
+      this.workers.set(worker.id, worker);
+
+      if (this.onAgentSpawned) {
+        this.onAgentSpawned(worker);
+      }
+
+      // Send the task to the worker
+      this.sendMessage(worker.id, MessageType.Directive, task, {
+        registryEntryName: entry.name,
+      });
+
+      const mode = isCodeWorker && this.gitWorktree ? " (worktree)" : "";
+      console.log(`[TeamLead ${this.id}] Worker ${workerId} spawned and directive sent`);
+      return `Spawned ${entry.name} worker (${worker.id})${mode} and assigned task.`;
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      console.error(`[TeamLead ${this.id}] Failed to spawn worker: ${errMsg}`, err);
+      return `Error spawning worker from ${registryEntryId}: ${errMsg}`;
     }
-
-    const worker = new Worker({
-      id: workerId,
-      bus: this.bus,
-      projectId: this.projectId,
-      parentId: this.id,
-      registryEntryId: entry.id,
-      modelPackId: (entry as any).modelPackId ?? getRandomModelPackId(),
-      gearConfig: (entry as any).gearConfig ? JSON.parse((entry as any).gearConfig) : null,
-      model:
-        getConfig("worker_model") ??
-        getConfig("coo_model") ??
-        entry.defaultModel,
-      provider:
-        getConfig("worker_provider") ??
-        getConfig("coo_provider") ??
-        entry.defaultProvider,
-      systemPrompt: entry.systemPrompt,
-      workspacePath,
-      toolNames: entryTools,
-      onStatusChange: this.onStatusChange,
-      onAgentStream: this.onAgentStream,
-      onAgentThinking: this.onAgentThinking,
-      onAgentThinkingEnd: this.onAgentThinkingEnd,
-      onAgentToolCall: this.onAgentToolCall,
-    });
-
-    this.workers.set(worker.id, worker);
-
-    if (this.onAgentSpawned) {
-      this.onAgentSpawned(worker);
-    }
-
-    // Send the task to the worker
-    this.sendMessage(worker.id, MessageType.Directive, task, {
-      registryEntryName: entry.name,
-    });
-
-    const mode = isCodeWorker && this.gitWorktree ? " (worktree)" : "";
-    return `Spawned ${entry.name} worker (${worker.id})${mode} and assigned task.`;
   }
 
   private mergeWorkerBranch(workerId: string): string {
