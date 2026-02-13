@@ -719,6 +719,9 @@ async function main() {
   // User profile endpoint
   app.get("/api/profile", async () => {
     const gearConfigRaw = getConfig("user_gear_config");
+    // Resolve COO display name from the custom clone, falling back to "COO"
+    const cooRegistryId = getConfig("coo_registry_id");
+    const cooEntry = cooRegistryId ? registry.get(cooRegistryId) : null;
     return {
       name: getConfig("user_name") ?? null,
       avatar: getConfig("user_avatar") ?? null,
@@ -726,6 +729,7 @@ async function main() {
       timezone: getConfig("user_timezone") ?? null,
       modelPackId: getConfig("user_model_pack_id") ?? null,
       gearConfig: gearConfigRaw ? JSON.parse(gearConfigRaw) : null,
+      cooName: cooEntry?.name ?? "COO",
     };
   });
 

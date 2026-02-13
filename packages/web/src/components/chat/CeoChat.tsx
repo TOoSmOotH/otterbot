@@ -52,7 +52,7 @@ const ThinkingDisclosure: FC<{ thinking: string }> = ({ thinking }) => {
   );
 };
 
-export function CeoChat() {
+export function CeoChat({ cooName }: { cooName?: string }) {
   const [input, setInput] = useState("");
   const [showHistory, setShowHistory] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -192,7 +192,7 @@ export function CeoChat() {
         <div className="flex items-center gap-2">
           <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
           <h2 className="text-sm font-semibold tracking-tight">
-            {showHistory ? "Chat History" : "COO Chat"}
+            {showHistory ? "Chat History" : `${cooName ?? "COO"} Chat`}
           </h2>
         </div>
         <div className="flex items-center gap-1">
@@ -282,7 +282,7 @@ export function CeoChat() {
             {chatMessages.length === 0 && !streamingContent && (
               <div className="flex items-center justify-center h-full">
                 <p className="text-sm text-muted-foreground text-center max-w-[240px]">
-                  Send a message to start working with your COO
+                  Send a message to start working with {cooName ?? "your COO"}
                 </p>
               </div>
             )}
@@ -380,7 +380,7 @@ export function CeoChat() {
                 value={input}
                 onChange={handleInput}
                 onKeyDown={handleKeyDown}
-                placeholder="Message the COO..."
+                placeholder={`Message ${cooName ?? "the COO"}...`}
                 rows={1}
                 className="flex-1 bg-transparent text-sm resize-none outline-none placeholder:text-muted-foreground max-h-[200px]"
               />

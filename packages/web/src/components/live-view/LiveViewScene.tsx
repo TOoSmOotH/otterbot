@@ -11,7 +11,7 @@ import { EditableEnvironmentScene } from "../room-builder/EditableEnvironmentSce
 import type { Agent } from "@smoothbot/shared";
 
 interface LiveViewSceneProps {
-  userProfile?: { name: string | null; avatar: string | null; modelPackId?: string | null; gearConfig?: Record<string, boolean> | null };
+  userProfile?: { name: string | null; avatar: string | null; modelPackId?: string | null; gearConfig?: Record<string, boolean> | null; cooName?: string };
 }
 
 export function LiveViewScene({ userProfile }: LiveViewSceneProps) {
@@ -43,7 +43,7 @@ export function LiveViewScene({ userProfile }: LiveViewSceneProps) {
         role: "ceo",
         x: ap.ceo.position[0],
         z: ap.ceo.position[2],
-        label: userProfile?.name ? `${userProfile.name} (CEO)` : "CEO (You)",
+        label: userProfile?.name ?? "CEO (You)",
         modelPackId: userProfile?.modelPackId ?? null,
         gearConfig: userProfile?.gearConfig ?? null,
         rotationY: ap.ceo.rotation ?? 0,
@@ -57,7 +57,7 @@ export function LiveViewScene({ userProfile }: LiveViewSceneProps) {
           role: "coo",
           x: slot.position[0],
           z: slot.position[2],
-          label: "COO",
+          label: userProfile?.cooName ?? "COO",
           modelPackId: coos[i].modelPackId ?? null,
           gearConfig: coos[i].gearConfig ?? null,
           rotationY: slot.rotation ?? 0,
@@ -100,7 +100,7 @@ export function LiveViewScene({ userProfile }: LiveViewSceneProps) {
         role: "ceo",
         x: 0,
         z: 0,
-        label: userProfile?.name ? `${userProfile.name} (CEO)` : "CEO (You)",
+        label: userProfile?.name ?? "CEO (You)",
         modelPackId: userProfile?.modelPackId ?? null,
         gearConfig: userProfile?.gearConfig ?? null,
         rotationY: 0,
@@ -113,7 +113,7 @@ export function LiveViewScene({ userProfile }: LiveViewSceneProps) {
           role: "coo",
           x: spread,
           z: -3,
-          label: "COO",
+          label: userProfile?.cooName ?? "COO",
           modelPackId: coos[i].modelPackId ?? null,
           gearConfig: coos[i].gearConfig ?? null,
           rotationY: 0,

@@ -55,6 +55,7 @@ interface UserProfile {
   avatar: string | null;
   modelPackId?: string | null;
   gearConfig?: Record<string, boolean> | null;
+  cooName?: string;
 }
 
 type CenterView = "graph" | "live3d";
@@ -171,7 +172,7 @@ function ResizableLayout({ userProfile }: { userProfile?: UserProfile; }) {
       {/* Left: CEO Chat */}
       <Panel id="chat" minSize="15%" maxSize="40%">
         <div className="h-full flex flex-col">
-          <CeoChat />
+          <CeoChat cooName={userProfile?.cooName} />
         </div>
       </Panel>
 
@@ -193,7 +194,7 @@ function ResizableLayout({ userProfile }: { userProfile?: UserProfile; }) {
       {/* Right: Message Stream */}
       <Panel id="stream" minSize="15%" maxSize="40%">
         <div className="h-full relative">
-          <MessageStream />
+          <MessageStream userProfile={userProfile} />
         </div>
       </Panel>
     </Group>

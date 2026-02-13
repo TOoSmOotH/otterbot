@@ -17,16 +17,16 @@ const TYPE_LABELS: Record<string, string> = {
   status: "Status",
 };
 
-function getAgentLabel(agentId: string | null): { name: string; role: string } {
-  if (agentId === null) return { name: "CEO", role: "ceo" };
-  if (agentId === "coo") return { name: "COO", role: "coo" };
+function getAgentLabel(agentId: string | null, ceoName?: string, cooName?: string): { name: string; role: string } {
+  if (agentId === null) return { name: ceoName || "CEO", role: "ceo" };
+  if (agentId === "coo") return { name: cooName || "COO", role: "coo" };
   // For other agents, abbreviate the ID
   return { name: agentId.slice(0, 8), role: "worker" };
 }
 
-function MessageItem({ message }: { message: BusMessage }) {
-  const from = getAgentLabel(message.fromAgentId);
-  const to = getAgentLabel(message.toAgentId);
+function MessageItem({ message, ceoName, cooName }: { message: BusMessage; ceoName?: string; cooName?: string }) {
+  const from = getAgentLabel(message.fromAgentId, ceoName, cooName);
+  const to = getAgentLabel(message.toAgentId, ceoName, cooName);
 
   return (
     <div className="group px-3 py-2 hover:bg-secondary/50 transition-colors">
@@ -76,7 +76,7 @@ function MessageItem({ message }: { message: BusMessage }) {
   );
 }
 
-export function MessageStream() {
+export function MessageStream({ userProfile }: { userProfile?: { name: string | null; cooName?: string } }) {
   const messages = useMessageStore((s) => s.messages);
   const agentFilter = useMessageStore((s) => s.agentFilter);
   const setAgentFilter = useMessageStore((s) => s.setAgentFilter);
@@ -136,7 +136,7 @@ export function MessageStream() {
             </p>
           </div>
         ) : (
-          filtered.map((msg) => <MessageItem key={msg.id} message={msg} />)
+          filtered.map((msg) => <MessageItem key={msg.id} message={msg} ceoName={userProfile?.name ?? undefined} cooName={userProfile?.cooName} />)
         )}
       </div>
 

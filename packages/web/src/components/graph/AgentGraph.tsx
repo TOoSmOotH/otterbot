@@ -18,7 +18,7 @@ const nodeTypes = { agent: AgentNode };
 
 function buildLayout(
   agents: Map<string, Agent>,
-  userProfile?: { name: string | null; avatar: string | null },
+  userProfile?: { name: string | null; avatar: string | null; cooName?: string },
 ): {
   nodes: Node[];
   edges: Edge[];
@@ -27,7 +27,7 @@ function buildLayout(
   const edges: Edge[] = [];
 
   // Always show CEO node at the top
-  const ceoLabel = userProfile?.name ? `${userProfile.name} (CEO)` : "CEO (You)";
+  const ceoLabel = userProfile?.name ?? "CEO (You)";
   nodes.push({
     id: "ceo",
     type: "agent",
@@ -82,7 +82,7 @@ function buildLayout(
       type: "agent",
       position: { x, y: levelY[agent.role] ?? 340 },
       data: {
-        label: getRoleLabel(agent),
+        label: getRoleLabel(agent, userProfile?.cooName),
         role: agent.role,
         status: agent.status,
       },
@@ -104,8 +104,8 @@ function buildLayout(
   return { nodes, edges };
 }
 
-function getRoleLabel(agent: Agent): string {
-  if (agent.role === "coo") return "COO";
+function getRoleLabel(agent: Agent, cooName?: string): string {
+  if (agent.role === "coo") return cooName ?? "COO";
   if (agent.role === "team_lead") return `Team Lead`;
   return `Worker ${agent.id.slice(0, 6)}`;
 }
@@ -114,7 +114,7 @@ export function AgentGraph({
   userProfile,
   onToggleView,
 }: {
-  userProfile?: { name: string | null; avatar: string | null };
+  userProfile?: { name: string | null; avatar: string | null; cooName?: string };
   onToggleView?: () => void;
 }) {
   return (
@@ -128,7 +128,7 @@ function AgentGraphInner({
   userProfile,
   onToggleView,
 }: {
-  userProfile?: { name: string | null; avatar: string | null };
+  userProfile?: { name: string | null; avatar: string | null; cooName?: string };
   onToggleView?: () => void;
 }) {
   const agents = useAgentStore((s) => s.agents);

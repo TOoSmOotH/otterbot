@@ -10,7 +10,7 @@ import { PropInspector } from "../room-builder/PropInspector";
 import { useRoomBuilderKeys } from "../../hooks/use-room-builder-keys";
 
 interface LiveViewProps {
-  userProfile?: { name: string | null; avatar: string | null; modelPackId?: string | null };
+  userProfile?: { name: string | null; avatar: string | null; modelPackId?: string | null; cooName?: string };
   onToggleView?: () => void;
 }
 

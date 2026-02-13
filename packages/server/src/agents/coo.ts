@@ -59,9 +59,9 @@ export class COO extends BaseAgent {
   constructor(deps: COODependencies) {
     const registry = new Registry();
     const cooRegistryId = getConfig("coo_registry_id");
-    const cooEntry = cooRegistryId
-      ? registry.get(cooRegistryId) ?? registry.get("builtin-coo")
-      : registry.get("builtin-coo");
+    // Prefer the custom clone; only fall back to the immutable builtin
+    const customCoo = cooRegistryId ? registry.get(cooRegistryId) : null;
+    const cooEntry = customCoo ?? registry.get("builtin-coo");
     let systemPrompt = cooEntry?.systemPrompt ?? COO_SYSTEM_PROMPT;
 
     // Inject user profile into system prompt if available
@@ -75,13 +75,15 @@ export class COO extends BaseAgent {
       systemPrompt = lines.join("\n") + "\n\n" + systemPrompt;
     }
 
+    // Only use registry model/provider from a custom clone — the builtin's
+    // hardcoded values must not override the user's configured provider.
     const options: AgentOptions = {
       id: "coo",
       role: AgentRole.COO,
       parentId: null,
       projectId: null,
-      model: cooEntry?.defaultModel ?? getConfig("coo_model") ?? "claude-sonnet-4-5-20250929",
-      provider: cooEntry?.defaultProvider ?? getConfig("coo_provider") ?? "anthropic",
+      model: customCoo?.defaultModel ?? getConfig("coo_model") ?? "claude-sonnet-4-5-20250929",
+      provider: customCoo?.defaultProvider ?? getConfig("coo_provider") ?? "anthropic",
       systemPrompt,
       modelPackId: cooEntry?.modelPackId ?? null,
       gearConfig: cooEntry?.gearConfig ?? null,

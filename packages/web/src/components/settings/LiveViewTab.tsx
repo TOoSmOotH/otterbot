@@ -69,7 +69,7 @@ export function LiveViewTab() {
   return (
     <div className="p-5 space-y-4">
       <div>
-        <h3 className="text-sm font-semibold mb-1">CEO Character</h3>
+        <h3 className="text-sm font-semibold mb-1">Your Character</h3>
         <p className="text-xs text-muted-foreground mb-3">
           Choose your 3D character for the Live View.
           {saving && <span className="ml-2 text-primary">Saving...</span>}
