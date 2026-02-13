@@ -13,6 +13,7 @@ import { SettingsPanel } from "./components/settings/SettingsPanel";
 import { LoginScreen } from "./components/auth/LoginScreen";
 import { SetupWizard } from "./components/setup/SetupWizard";
 import { CharterView } from "./components/project/CharterView";
+import { ProjectList } from "./components/project/ProjectList";
 import { KanbanBoard } from "./components/kanban/KanbanBoard";
 import { Group, Panel, Separator, useDefaultLayout } from "react-resizable-panels";
 import { disconnectSocket, getSocket } from "./lib/socket";
@@ -61,7 +62,7 @@ interface UserProfile {
   cooName?: string;
 }
 
-type CenterView = "graph" | "live3d" | "charter" | "kanban";
+type CenterView = "graph" | "live3d" | "charter" | "kanban" | "projects";
 
 function MainApp() {
   const socket = useSocket();
@@ -78,6 +79,7 @@ function MainApp() {
   const projects = useProjectStore((s) => s.projects);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [userProfile, setUserProfile] = useState<UserProfile | undefined>();
+  const [centerView, setCenterView] = useState<CenterView>("graph");
 
   // Load initial data
   useEffect(() => {
@@ -117,6 +119,7 @@ function MainApp() {
       socket.emit("project:enter", { projectId }, (result) => {
         if (result.project) {
           enterProject(projectId, result.project, result.conversations, result.tasks);
+          setCenterView("graph");
         }
       });
     },
@@ -125,6 +128,7 @@ function MainApp() {
 
   const handleExitProject = useCallback(() => {
     exitProject();
+    setCenterView("projects");
     // Reload global conversations
     const socket = getSocket();
     socket.emit("ceo:list-conversations", undefined, (conversations) => {
@@ -157,28 +161,33 @@ function MainApp() {
             </div>
             <h1 className="text-sm font-semibold tracking-tight">Smoothbot</h1>
           </div>
-          {/* Project selector */}
-          <div className="flex items-center gap-1">
-            <select
-              value={activeProjectId ?? ""}
-              onChange={(e) => {
-                const val = e.target.value;
-                if (val) {
-                  handleEnterProject(val);
-                } else {
-                  handleExitProject();
-                }
-              }}
-              className="text-xs bg-secondary text-foreground border border-border rounded px-2 py-1 outline-none max-w-[200px]"
+          {/* Project navigation */}
+          {activeProjectId && activeProject ? (
+            <div className="flex items-center gap-1 text-xs text-muted-foreground">
+              <span className="text-border">/</span>
+              <button
+                onClick={handleExitProject}
+                className="hover:text-foreground transition-colors px-1 py-0.5 rounded hover:bg-secondary"
+              >
+                &larr; Projects
+              </button>
+              <span className="text-border">/</span>
+              <span className="text-foreground font-medium truncate max-w-[200px]">
+                {activeProject.name}
+              </span>
+            </div>
+          ) : (
+            <button
+              onClick={() => setCenterView("projects")}
+              className={`text-xs transition-colors px-2 py-1 rounded ${
+                centerView === "projects"
+                  ? "text-primary bg-primary/10"
+                  : "text-muted-foreground hover:text-foreground hover:bg-secondary"
+              }`}
             >
-              <option value="">Global</option>
-              {projects.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name} ({p.status})
-                </option>
-              ))}
-            </select>
-          </div>
+              Projects
+            </button>
+          )}
         </div>
         <div className="flex items-center gap-1">
           <button
@@ -198,7 +207,15 @@ function MainApp() {
 
       {/* Three-panel layout */}
       <main className="flex-1 overflow-hidden">
-        <ResizableLayout userProfile={userProfile} activeProjectId={activeProjectId} activeProject={activeProject} />
+        <ResizableLayout
+          userProfile={userProfile}
+          activeProjectId={activeProjectId}
+          activeProject={activeProject}
+          projects={projects}
+          centerView={centerView}
+          setCenterView={setCenterView}
+          onEnterProject={handleEnterProject}
+        />
       </main>
 
       {/* Settings modal - rendered outside the resizable layout */}
@@ -219,19 +236,26 @@ function ResizableLayout({
   userProfile,
   activeProjectId,
   activeProject,
+  projects,
+  centerView,
+  setCenterView,
+  onEnterProject,
 }: {
   userProfile?: UserProfile;
   activeProjectId: string | null;
   activeProject: import("@smoothbot/shared").Project | null;
+  projects: import("@smoothbot/shared").Project[];
+  centerView: CenterView;
+  setCenterView: (view: CenterView) => void;
+  onEnterProject: (projectId: string) => void;
 }) {
-  const [centerView, setCenterView] = useState<CenterView>("graph");
   const { defaultLayout, onLayoutChanged } = useDefaultLayout({
     id: "smoothbot-layout",
     storage: localStorage,
     panelIds: PANEL_IDS,
   });
 
-  // Reset to graph when exiting project
+  // Reset to graph from project-only views when no project is active
   useEffect(() => {
     if (!activeProjectId && (centerView === "charter" || centerView === "kanban")) {
       setCenterView("graph");
@@ -240,6 +264,10 @@ function ResizableLayout({
 
   const renderCenterContent = () => {
     switch (centerView) {
+      case "projects":
+        return (
+          <ProjectList projects={projects} onEnterProject={onEnterProject} />
+        );
       case "charter":
         return activeProject ? (
           <CharterView project={activeProject} />
