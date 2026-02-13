@@ -17,12 +17,14 @@ import { eq } from "drizzle-orm";
 import { getConfig } from "../auth/auth.js";
 import { getConfiguredSearchProvider } from "../tools/search/providers.js";
 import { TEAM_LEAD_PROMPT } from "./prompts/team-lead.js";
+import { getRandomModelPackId } from "../models3d/model-packs.js";
 
 export interface TeamLeadDependencies {
   bus: MessageBus;
   workspace: WorkspaceManager;
   projectId: string;
   parentId: string;
+  modelPackId?: string | null;
   onAgentSpawned?: (agent: BaseAgent) => void;
   onStatusChange?: (agentId: string, status: AgentStatus) => void;
 }
@@ -39,6 +41,7 @@ export class TeamLead extends BaseAgent {
       role: AgentRole.TeamLead,
       parentId: deps.parentId,
       projectId: deps.projectId,
+      modelPackId: deps.modelPackId ?? null,
       model:
         getConfig("team_lead_model") ??
         getConfig("coo_model") ??
@@ -259,7 +262,7 @@ export class TeamLead extends BaseAgent {
       projectId: this.projectId,
       parentId: this.id,
       registryEntryId: entry.id,
-      modelPackId: (entry as any).modelPackId ?? null,
+      modelPackId: (entry as any).modelPackId ?? getRandomModelPackId(),
       gearConfig: (entry as any).gearConfig ? JSON.parse((entry as any).gearConfig) : null,
       model: entry.defaultModel,
       provider: entry.defaultProvider,

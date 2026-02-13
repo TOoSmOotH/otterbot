@@ -36,6 +36,7 @@ import {
   testSearchProvider,
 } from "../settings/settings.js";
 import { getConfiguredSearchProvider } from "../tools/search/providers.js";
+import { getRandomModelPackId } from "../models3d/model-packs.js";
 
 export interface COODependencies {
   bus: MessageBus;
@@ -375,6 +376,7 @@ export class COO extends BaseAgent {
       workspace: this.workspace,
       projectId,
       parentId: this.id,
+      modelPackId: getRandomModelPackId(),
       onAgentSpawned: this.onAgentSpawned,
       onStatusChange: this.onStatusChange,
     });
