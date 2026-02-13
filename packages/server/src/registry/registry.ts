@@ -39,6 +39,7 @@ export class Registry {
       role: data.role ?? "worker" as const,
       modelPackId: data.modelPackId ?? null,
       gearConfig: data.gearConfig ? JSON.stringify(data.gearConfig) : null,
+      promptAddendum: data.promptAddendum ?? null,
       clonedFromId: data.clonedFromId ?? null,
       createdAt: new Date().toISOString(),
     };
@@ -62,6 +63,7 @@ export class Registry {
     if (data.tools !== undefined) updates.tools = data.tools;
     if (data.modelPackId !== undefined) updates.modelPackId = data.modelPackId;
     if (data.gearConfig !== undefined) updates.gearConfig = data.gearConfig ? JSON.stringify(data.gearConfig) : null;
+    if (data.promptAddendum !== undefined) updates.promptAddendum = data.promptAddendum;
 
     if (Object.keys(updates).length > 0) {
       db.update(schema.registryEntries)
@@ -102,6 +104,7 @@ export class Registry {
       clonedFromId: source.id,
       modelPackId: source.modelPackId,
       gearConfig: source.gearConfig,
+      promptAddendum: source.promptAddendum,
     });
   }
 
@@ -120,6 +123,7 @@ export class Registry {
       name: row.name,
       description: row.description,
       systemPrompt: row.systemPrompt,
+      promptAddendum: row.promptAddendum ?? null,
       capabilities: row.capabilities as string[],
       defaultModel: row.defaultModel,
       defaultProvider: row.defaultProvider,

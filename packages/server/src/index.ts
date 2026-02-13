@@ -446,6 +446,7 @@ async function main() {
         name: cooName.trim(),
         description: cooSource.description,
         systemPrompt: cooSource.systemPrompt,
+        promptAddendum: null,
         capabilities: [...cooSource.capabilities],
         defaultModel: model,
         defaultProvider: provider,

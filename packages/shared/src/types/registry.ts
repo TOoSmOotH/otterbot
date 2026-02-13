@@ -5,6 +5,7 @@ export interface RegistryEntry {
   name: string;
   description: string;
   systemPrompt: string;
+  promptAddendum: string | null;
   capabilities: string[];
   defaultModel: string;
   defaultProvider: string;
@@ -21,6 +22,7 @@ export interface RegistryEntryCreate {
   name: string;
   description: string;
   systemPrompt: string;
+  promptAddendum?: string | null;
   capabilities: string[];
   defaultModel: string;
   defaultProvider: string;
@@ -35,6 +37,7 @@ export interface RegistryEntryUpdate {
   name?: string;
   description?: string;
   systemPrompt?: string;
+  promptAddendum?: string | null;
   capabilities?: string[];
   defaultModel?: string;
   defaultProvider?: string;

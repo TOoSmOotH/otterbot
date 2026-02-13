@@ -13,6 +13,7 @@ export function AgentTemplatesTab() {
     name: "",
     description: "",
     systemPrompt: "",
+    promptAddendum: "" as string,
     capabilities: "",
     defaultModel: "",
     defaultProvider: "anthropic",
@@ -51,6 +52,7 @@ export function AgentTemplatesTab() {
       name: entry.name,
       description: entry.description,
       systemPrompt: entry.systemPrompt,
+      promptAddendum: entry.promptAddendum ?? "",
       capabilities: entry.capabilities.join(", "),
       defaultModel: entry.defaultModel,
       defaultProvider: entry.defaultProvider,
@@ -61,10 +63,17 @@ export function AgentTemplatesTab() {
     setEditing(false);
   };
 
+  const isCooClone = selected != null && !selected.builtIn && selected.role === "coo";
+
+  const builtInCooPrompt = useMemo(() => {
+    const builtInCoo = entries.find((e) => e.builtIn && e.role === "coo");
+    return builtInCoo?.systemPrompt ?? "";
+  }, [entries]);
+
   const saveEntry = async () => {
     if (!selected) return;
 
-    const body = {
+    const body: Record<string, unknown> = {
       name: form.name,
       description: form.description,
       systemPrompt: form.systemPrompt,
@@ -81,6 +90,11 @@ export function AgentTemplatesTab() {
       modelPackId: form.modelPackId,
       gearConfig: form.gearConfig,
     };
+
+    // For COO clones, send promptAddendum (empty string → null)
+    if (isCooClone) {
+      body.promptAddendum = form.promptAddendum.trim() || null;
+    }
 
     await fetch(`/api/registry/${selected.id}`, {
       method: "PATCH",
@@ -411,23 +425,53 @@ export function AgentTemplatesTab() {
               )}
             </Field>
 
-            {/* System Prompt */}
-            <Field label="System Prompt" editing={editing}>
-              {editing ? (
-                <textarea
-                  value={form.systemPrompt}
-                  onChange={(e) =>
-                    setForm({ ...form, systemPrompt: e.target.value })
-                  }
-                  rows={8}
-                  className="w-full bg-secondary rounded-md px-3 py-2 text-sm outline-none focus:ring-1 ring-primary resize-y font-mono"
-                />
-              ) : (
-                <pre className="text-xs text-muted-foreground bg-secondary rounded-md p-3 whitespace-pre-wrap font-mono max-h-[200px] overflow-y-auto">
-                  {form.systemPrompt}
-                </pre>
-              )}
-            </Field>
+            {/* System Prompt — COO clones show base (read-only) + addendum (editable) */}
+            {isCooClone ? (
+              <>
+                <Field label="Base System Prompt" editing={false}>
+                  <p className="text-[10px] text-muted-foreground mb-1">
+                    This base prompt is maintained by Smoothbot and updates automatically.
+                  </p>
+                  <pre className="text-xs text-muted-foreground bg-secondary rounded-md p-3 whitespace-pre-wrap font-mono max-h-[200px] overflow-y-auto">
+                    {builtInCooPrompt}
+                  </pre>
+                </Field>
+                <Field label="Prompt Addendum" editing={editing}>
+                  {editing ? (
+                    <textarea
+                      value={form.promptAddendum}
+                      onChange={(e) =>
+                        setForm({ ...form, promptAddendum: e.target.value })
+                      }
+                      rows={6}
+                      placeholder="Add custom instructions that will be appended to the base prompt..."
+                      className="w-full bg-secondary rounded-md px-3 py-2 text-sm outline-none focus:ring-1 ring-primary resize-y font-mono"
+                    />
+                  ) : (
+                    <pre className="text-xs text-muted-foreground bg-secondary rounded-md p-3 whitespace-pre-wrap font-mono max-h-[200px] overflow-y-auto">
+                      {form.promptAddendum || "(none)"}
+                    </pre>
+                  )}
+                </Field>
+              </>
+            ) : (
+              <Field label="System Prompt" editing={editing}>
+                {editing ? (
+                  <textarea
+                    value={form.systemPrompt}
+                    onChange={(e) =>
+                      setForm({ ...form, systemPrompt: e.target.value })
+                    }
+                    rows={8}
+                    className="w-full bg-secondary rounded-md px-3 py-2 text-sm outline-none focus:ring-1 ring-primary resize-y font-mono"
+                  />
+                ) : (
+                  <pre className="text-xs text-muted-foreground bg-secondary rounded-md p-3 whitespace-pre-wrap font-mono max-h-[200px] overflow-y-auto">
+                    {form.systemPrompt}
+                  </pre>
+                )}
+              </Field>
+            )}
           </div>
         )}
       </div>

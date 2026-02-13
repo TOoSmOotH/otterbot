@@ -76,6 +76,7 @@ export const registryEntries = sqliteTable("registry_entries", {
     .default("worker"),
   modelPackId: text("model_pack_id"),
   gearConfig: text("gear_config"),
+  promptAddendum: text("prompt_addendum"),
   clonedFromId: text("cloned_from_id"),
   createdAt: text("created_at")
     .notNull()

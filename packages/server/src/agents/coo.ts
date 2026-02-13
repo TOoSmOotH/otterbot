@@ -81,7 +81,14 @@ export class COO extends BaseAgent {
     // Prefer the custom clone; only fall back to the immutable builtin
     const customCoo = cooRegistryId ? registry.get(cooRegistryId) : null;
     const cooEntry = customCoo ?? registry.get("builtin-coo");
-    let systemPrompt = cooEntry?.systemPrompt ?? COO_SYSTEM_PROMPT;
+
+    // Always start with the canonical base prompt so updates flow through
+    let systemPrompt = COO_SYSTEM_PROMPT;
+
+    // Append the user's addendum if the custom clone has one
+    if (customCoo?.promptAddendum) {
+      systemPrompt += "\n\n" + customCoo.promptAddendum;
+    }
 
     // Inject user profile into system prompt if available
     const userName = getConfig("user_name");

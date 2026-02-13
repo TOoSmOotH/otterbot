@@ -107,6 +107,7 @@ export async function migrateDb() {
     tools TEXT NOT NULL DEFAULT '[]',
     built_in INTEGER NOT NULL DEFAULT 0,
     role TEXT NOT NULL DEFAULT 'worker',
+    prompt_addendum TEXT,
     cloned_from_id TEXT,
     created_at TEXT NOT NULL
   )`);
@@ -135,6 +136,13 @@ export async function migrateDb() {
   // Idempotent migration: add gear_config to registry_entries
   try {
     db.run(sql`ALTER TABLE registry_entries ADD COLUMN gear_config TEXT`);
+  } catch {
+    // Column already exists — ignore
+  }
+
+  // Idempotent migration: add prompt_addendum to registry_entries
+  try {
+    db.run(sql`ALTER TABLE registry_entries ADD COLUMN prompt_addendum TEXT`);
   } catch {
     // Column already exists — ignore
   }
