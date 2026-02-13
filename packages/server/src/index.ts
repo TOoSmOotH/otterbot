@@ -190,6 +190,16 @@ async function main() {
     });
   }
 
+  // Serve noVNC ES module source (for the desktop VNC viewer)
+  const novncRoot = resolve(__dirname, "../../../novnc");
+  if (existsSync(novncRoot)) {
+    await app.register(fastifyStatic, {
+      root: novncRoot,
+      prefix: "/novnc/",
+      decorateReply: false,
+    });
+  }
+
   // Create Socket.IO server
   const io = new Server<ClientToServerEvents, ServerToClientEvents>(
     app.server,

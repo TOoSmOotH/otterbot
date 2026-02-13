@@ -1,13 +1,12 @@
 import { useEffect, useRef, useCallback, useState } from "react";
 import { useDesktopStore } from "../../stores/desktop-store";
 
-const NOVNC_ESM = "https://esm.sh/@novnc/novnc@1.5.0";
-
-/** Lazy-load noVNC RFB class from esm.sh (CJS→ESM conversion) */
+/** Lazy-load noVNC RFB class (served as static ES modules from the server) */
 let rfbClassPromise: Promise<typeof RFB> | null = null;
 function loadRFB(): Promise<typeof RFB> {
   if (!rfbClassPromise) {
-    rfbClassPromise = import(/* @vite-ignore */ NOVNC_ESM).then(
+    const url = "/novnc/rfb.js";
+    rfbClassPromise = (import(/* @vite-ignore */ url) as Promise<{ default: typeof RFB }>).then(
       (m) => m.default ?? m,
     );
   }

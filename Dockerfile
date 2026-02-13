@@ -68,6 +68,11 @@ COPY --from=build /app/assets ./assets
 # Install Playwright Chromium browser (headless, for agent web browsing)
 RUN node packages/server/node_modules/playwright/cli.js install chromium
 
+# Download noVNC ES module source (native ESM — served as static files for the web viewer)
+RUN curl -fsSL https://github.com/novnc/noVNC/archive/refs/tags/v1.5.0.tar.gz | tar xz -C /tmp \
+    && mv /tmp/noVNC-1.5.0/core /app/novnc \
+    && rm -rf /tmp/noVNC-1.5.0
+
 # Create data directories (use numeric UID:GID since group name may differ)
 RUN mkdir -p /smoothbot/config /smoothbot/data /smoothbot/projects /smoothbot/logs /smoothbot/home \
     && chown -R ${SMOOTHBOT_UID}:${SMOOTHBOT_GID} /smoothbot /app
