@@ -27,6 +27,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libcairo2 libasound2 libwayland-client0 \
     && rm -rf /var/lib/apt/lists/*
 
+# Desktop environment (conditionally started at runtime via ENABLE_DESKTOP)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    xvfb xfce4 xfce4-terminal dbus-x11 x11vnc \
+    xdg-utils fonts-noto-color-emoji fonts-dejavu-core \
+    && rm -rf /var/lib/apt/lists/*
+
 # Install GitHub CLI (gh)
 RUN install -m 0755 -d /etc/apt/keyrings \
     && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg -o /etc/apt/keyrings/githubcli-archive-keyring.gpg \
@@ -45,14 +51,7 @@ RUN (getent group ${SMOOTHBOT_GID} || groupadd -g ${SMOOTHBOT_GID} smoothbot) \
     && useradd -u ${SMOOTHBOT_UID} -g ${SMOOTHBOT_GID} -m smoothbot 2>/dev/null \
     || useradd -u ${SMOOTHBOT_UID} -g ${SMOOTHBOT_GID} -m -o smoothbot
 
-# Allow smoothbot user to manage packages and repos without a password
-# - apt-get: install/remove packages
-# - npm: global installs
-# - tee: write repo source files to /etc/apt/sources.list.d/
-# - gpg: import repository signing keys
-# - install: create directories for keyrings (used by apt key management)
-RUN echo "smoothbot ALL=(root) NOPASSWD: /usr/bin/apt-get, /usr/local/bin/npm, /usr/bin/tee, /usr/bin/gpg, /usr/bin/install" > /etc/sudoers.d/smoothbot \
-    && chmod 0440 /etc/sudoers.d/smoothbot
+# Sudoers configuration is handled at runtime in entrypoint.sh (SUDO_MODE env var)
 
 WORKDIR /app
 COPY --from=build /app/package.json /app/pnpm-workspace.yaml ./
@@ -80,6 +79,25 @@ set -e
 
 PUID="${SMOOTHBOT_UID:-1000}"
 PGID="${SMOOTHBOT_GID:-1000}"
+
+# Update user/group if runtime UID/GID differs from build-time
+CURRENT_UID=$(id -u smoothbot 2>/dev/null || echo "")
+CURRENT_GID=$(id -g smoothbot 2>/dev/null || echo "")
+
+if [ -n "$CURRENT_UID" ] && [ "$CURRENT_GID" != "$PGID" ]; then
+  groupmod -o -g "$PGID" smoothbot 2>/dev/null || true
+fi
+if [ -n "$CURRENT_UID" ] && [ "$CURRENT_UID" != "$PUID" ]; then
+  usermod -o -u "$PUID" smoothbot 2>/dev/null || true
+fi
+
+# Configure sudo policy (user-selectable)
+if [ "${SUDO_MODE}" = "full" ]; then
+  echo "smoothbot ALL=(root) NOPASSWD: ALL" > /etc/sudoers.d/smoothbot
+else
+  echo "smoothbot ALL=(root) NOPASSWD: /usr/bin/apt-get, /usr/local/bin/npm, /usr/bin/tee, /usr/bin/gpg, /usr/bin/install" > /etc/sudoers.d/smoothbot
+fi
+chmod 0440 /etc/sudoers.d/smoothbot
 
 # Ensure data directories exist (they may be empty bind mounts)
 mkdir -p /smoothbot/config /smoothbot/data /smoothbot/home/.ssh \
@@ -146,11 +164,59 @@ if [ -f /smoothbot/config/bootstrap.sh ]; then
   sh /smoothbot/config/bootstrap.sh
 fi
 
+# ── Conditional desktop startup ────────────────────────────────────
+if [ "${ENABLE_DESKTOP}" = "true" ]; then
+  echo "[smoothbot] Starting desktop environment..."
+  export DISPLAY=:99
+
+  # Create XDG_RUNTIME_DIR for the smoothbot user
+  XDG_DIR="/run/user/${PUID}"
+  mkdir -p "$XDG_DIR"
+  chown "${PUID}:${PGID}" "$XDG_DIR"
+  chmod 700 "$XDG_DIR"
+  export XDG_RUNTIME_DIR="$XDG_DIR"
+
+  # Start Xvfb
+  Xvfb :99 -screen 0 "${DESKTOP_RESOLUTION:-1280x720x24}" -ac +extension GLX +render -noreset &
+  XVFB_PID=$!
+
+  # Wait for X to be ready (max 30s)
+  TRIES=0
+  while ! xdpyinfo -display :99 >/dev/null 2>&1; do
+    TRIES=$((TRIES + 1))
+    if [ "$TRIES" -ge 60 ]; then
+      echo "[smoothbot] ERROR: Xvfb failed to start after 30s"
+      break
+    fi
+    sleep 0.5
+  done
+  echo "[smoothbot] Xvfb ready on :99"
+
+  # Start dbus (needed by XFCE)
+  eval "$(setpriv --reuid="${PUID}" --regid="${PGID}" --init-groups dbus-launch --sh-syntax 2>/dev/null || true)"
+  export DBUS_SESSION_BUS_ADDRESS
+
+  # Start XFCE4 session as the smoothbot user
+  setpriv --reuid="${PUID}" --regid="${PGID}" --init-groups \
+    env DISPLAY=:99 DBUS_SESSION_BUS_ADDRESS="$DBUS_SESSION_BUS_ADDRESS" XDG_RUNTIME_DIR="$XDG_DIR" \
+    startxfce4 &
+  echo "[smoothbot] XFCE4 session starting..."
+  sleep 2
+
+  # Start x11vnc bound to localhost only
+  setpriv --reuid="${PUID}" --regid="${PGID}" --init-groups \
+    x11vnc -display :99 -localhost -nopw -forever -shared -rfbport "${VNC_PORT:-5900}" &
+  echo "[smoothbot] x11vnc started on localhost:${VNC_PORT:-5900}"
+else
+  export DISPLAY=""
+fi
+
 # Clean up apt cache
 rm -rf /var/lib/apt/lists/*
 
 # Drop privileges and start the app
 exec setpriv --reuid="${PUID}" --regid="${PGID}" --init-groups \
+  env DISPLAY="$DISPLAY" DBUS_SESSION_BUS_ADDRESS="${DBUS_SESSION_BUS_ADDRESS:-}" XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-}" \
   node packages/server/dist/index.js
 EOF
 
@@ -164,6 +230,11 @@ ENV HOME=/smoothbot/home
 # Runtime tools installed via bootstrap.sh persist on the bind-mounted volume
 ENV NPM_CONFIG_PREFIX=/smoothbot/tools
 ENV PATH="/smoothbot/tools/bin:$PATH"
+
+ENV ENABLE_DESKTOP=false
+ENV DESKTOP_RESOLUTION=1280x720x24
+ENV VNC_PORT=5900
+ENV SUDO_MODE=restricted
 
 EXPOSE 3000
 

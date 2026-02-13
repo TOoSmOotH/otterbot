@@ -19,6 +19,11 @@ export default defineConfig({
         target: "http://localhost:3000",
         ws: true,
       },
+      "/desktop/ws": {
+        target: "https://localhost:3000",
+        ws: true,
+        secure: false,
+      },
     },
   },
 });
