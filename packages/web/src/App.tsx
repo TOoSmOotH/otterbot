@@ -15,7 +15,7 @@ import { SetupWizard } from "./components/setup/SetupWizard";
 import { CharterView } from "./components/project/CharterView";
 import { ProjectList } from "./components/project/ProjectList";
 import { KanbanBoard } from "./components/kanban/KanbanBoard";
-import { Group, Panel, Separator, useDefaultLayout } from "react-resizable-panels";
+import { Group, Panel, Separator, useDefaultLayout, usePanelRef } from "react-resizable-panels";
 import { disconnectSocket, getSocket } from "./lib/socket";
 
 export default function App() {
@@ -222,6 +222,34 @@ function MainApp() {
 
 const PANEL_IDS = ["chat", "graph", "stream"];
 
+function CollapsedStreamStrip({ onExpand }: { onExpand: () => void }) {
+  return (
+    <button
+      onClick={onExpand}
+      className="h-full w-full flex flex-col items-center justify-center gap-2 bg-card hover:bg-secondary/50 transition-colors cursor-pointer border-l border-border"
+      title="Expand Message Bus"
+    >
+      <svg
+        width="14"
+        height="14"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        className="text-muted-foreground rotate-180"
+      >
+        <polyline points="9 18 15 12 9 6" />
+      </svg>
+      <span
+        className="text-[10px] text-muted-foreground font-medium tracking-wide"
+        style={{ writingMode: "vertical-rl" }}
+      >
+        Message Bus
+      </span>
+    </button>
+  );
+}
+
 function ResizableLayout({
   userProfile,
   activeProjectId,
@@ -246,6 +274,9 @@ function ResizableLayout({
     storage: localStorage,
     panelIds: PANEL_IDS,
   });
+
+  const streamPanelRef = usePanelRef();
+  const [streamCollapsed, setStreamCollapsed] = useState(false);
 
   // Reset to graph from project-only views when no project is active
   useEffect(() => {
@@ -329,11 +360,29 @@ function ResizableLayout({
 
       <Separator className="panel-resize-handle" />
 
-      {/* Right: Message Stream */}
-      <Panel id="stream" minSize="15%" maxSize="40%">
-        <div className="h-full relative">
-          <MessageStream userProfile={userProfile} />
-        </div>
+      {/* Right: Message Stream (collapsible) */}
+      <Panel
+        id="stream"
+        minSize="15%"
+        maxSize="40%"
+        collapsible
+        collapsedSize="40px"
+        panelRef={streamPanelRef}
+        onResize={() => {
+          const collapsed = streamPanelRef.current?.isCollapsed() ?? false;
+          setStreamCollapsed(collapsed);
+        }}
+      >
+        {streamCollapsed ? (
+          <CollapsedStreamStrip onExpand={() => streamPanelRef.current?.expand()} />
+        ) : (
+          <div className="h-full relative">
+            <MessageStream
+              userProfile={userProfile}
+              onCollapse={() => streamPanelRef.current?.collapse()}
+            />
+          </div>
+        )}
       </Panel>
     </Group>
   );
