@@ -146,7 +146,12 @@ export abstract class BaseAgent {
       let reasoning = "";
       let wasReasoning = false;
 
+      let partCount = 0;
       for await (const part of result.fullStream) {
+        if (partCount === 0) {
+          console.log(`[Agent ${this.id}] First stream part: type=${part.type}`);
+        }
+        partCount++;
         if (part.type === "reasoning") {
           reasoning += part.textDelta;
           wasReasoning = true;
@@ -158,8 +163,13 @@ export abstract class BaseAgent {
           }
           fullResponse += part.textDelta;
           onToken?.(part.textDelta, messageId);
+        } else if (part.type === "tool-call") {
+          console.log(`[Agent ${this.id}] Tool call: ${(part as any).toolName}`);
+        } else if (part.type === "error") {
+          console.error(`[Agent ${this.id}] Stream error part:`, (part as any).error);
         }
       }
+      console.log(`[Agent ${this.id}] Stream finished — ${partCount} parts, ${fullResponse.length} chars`);
 
       // If reasoning ended but no text-delta followed, still fire end
       if (wasReasoning) {
