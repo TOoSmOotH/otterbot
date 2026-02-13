@@ -1,13 +1,13 @@
 import { useEffect, useRef, useCallback, useState } from "react";
 import { useDesktopStore } from "../../stores/desktop-store";
 
-const NOVNC_CDN = "https://cdn.jsdelivr.net/npm/@novnc/novnc@1.5.0/lib/rfb.js";
+const NOVNC_ESM = "https://esm.sh/@novnc/novnc@1.5.0";
 
-/** Lazy-load noVNC RFB class from CDN (avoids bundling CJS issues) */
+/** Lazy-load noVNC RFB class from esm.sh (CJS→ESM conversion) */
 let rfbClassPromise: Promise<typeof RFB> | null = null;
 function loadRFB(): Promise<typeof RFB> {
   if (!rfbClassPromise) {
-    rfbClassPromise = import(/* @vite-ignore */ NOVNC_CDN).then(
+    rfbClassPromise = import(/* @vite-ignore */ NOVNC_ESM).then(
       (m) => m.default ?? m,
     );
   }
@@ -23,6 +23,7 @@ export function DesktopView() {
   const containerRef = useRef<HTMLDivElement>(null);
   const rfbRef = useRef<RFB | null>(null);
   const [status, setStatus] = useState<"disconnected" | "connecting" | "connected">("disconnected");
+  const [error, setError] = useState<string | null>(null);
 
   // Ensure we've fetched desktop status (needed for popout window)
   useEffect(() => {
@@ -33,6 +34,7 @@ export function DesktopView() {
     if (!containerRef.current || rfbRef.current) return;
 
     setStatus("connecting");
+    setError(null);
 
     try {
       const RFBClass = await loadRFB();
@@ -50,6 +52,7 @@ export function DesktopView() {
 
       rfb.addEventListener("connect", () => {
         setStatus("connected");
+        setError(null);
         setConnected(true);
       });
 
@@ -58,13 +61,15 @@ export function DesktopView() {
         setConnected(false);
         rfbRef.current = null;
         if (!e.detail.clean) {
-          console.warn("[DesktopView] VNC connection lost");
+          setError("VNC connection lost unexpectedly");
         }
       });
 
       rfbRef.current = rfb;
     } catch (err) {
-      console.error("[DesktopView] Failed to load noVNC:", err);
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error("[DesktopView] Failed to connect:", msg);
+      setError(msg);
       setStatus("disconnected");
     }
   }, [wsPath, setConnected]);
@@ -80,6 +85,9 @@ export function DesktopView() {
 
   const reconnect = useCallback(() => {
     disconnect();
+    setError(null);
+    // Reset the cached promise so a fresh load is attempted
+    rfbClassPromise = null;
     setTimeout(connect, 200);
   }, [disconnect, connect]);
 
@@ -93,7 +101,7 @@ export function DesktopView() {
 
   // Auto-connect when enabled
   useEffect(() => {
-    if (enabled && status === "disconnected") {
+    if (enabled && status === "disconnected" && !error) {
       connect();
     }
     return () => {
@@ -149,6 +157,11 @@ export function DesktopView() {
                 : "Disconnected"}
           </span>
         </div>
+        {error && (
+          <span className="text-[11px] text-red-400 truncate max-w-[300px]" title={error}>
+            {error}
+          </span>
+        )}
         <div className="flex-1" />
         <button
           onClick={reconnect}
