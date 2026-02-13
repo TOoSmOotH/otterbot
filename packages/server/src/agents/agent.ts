@@ -147,17 +147,19 @@ export abstract class BaseAgent {
       const tools = this.getTools();
       const hasTools = Object.keys(tools).length > 0;
 
-      const { text, thinking } = await this.runStream(
+      const { text, thinking, hadToolCalls } = await this.runStream(
         hasTools ? tools : undefined,
         onToken,
         onReasoning,
         onReasoningEnd,
       );
 
-      // If tools were sent and the stream produced nothing, retry without
-      // tools — the provider may not support function calling.
-      if (hasTools && !text) {
-        console.warn(`[Agent ${this.id}] Empty response with tools — retrying without tools`);
+      // If tools were sent and the stream produced NO text AND NO tool calls,
+      // the provider likely doesn't support function calling — retry without tools.
+      // IMPORTANT: If tool calls were made (hadToolCalls), do NOT retry — the SDK
+      // already executed the tools via their `execute` callbacks during the stream.
+      if (hasTools && !text && !hadToolCalls) {
+        console.warn(`[Agent ${this.id}] Empty response with tools and no tool calls — retrying without tools`);
         const retry = await this.runStream(
           undefined,
           onToken,
@@ -169,15 +171,19 @@ export abstract class BaseAgent {
           content: retry.text,
         });
         this.setStatus(AgentStatus.Idle);
-        return retry;
+        return { text: retry.text, thinking: retry.thinking };
       }
+
+      // If tools were called but final text is empty, synthesize a placeholder
+      // so callers have something to work with.
+      const finalText = text || (hadToolCalls ? "(tool calls executed)" : "");
 
       this.conversationHistory.push({
         role: "assistant",
-        content: text,
+        content: finalText,
       });
       this.setStatus(AgentStatus.Idle);
-      return { text, thinking };
+      return { text: finalText, thinking };
     } catch (error) {
       this.setStatus(AgentStatus.Error);
       const errMsg =
@@ -205,7 +211,7 @@ export abstract class BaseAgent {
     onToken?: (token: string, messageId: string) => void,
     onReasoning?: (token: string, messageId: string) => void,
     onReasoningEnd?: (messageId: string) => void,
-  ): Promise<{ text: string; thinking: string | undefined }> {
+  ): Promise<{ text: string; thinking: string | undefined; hadToolCalls: boolean }> {
     const result = await stream(
       this.llmConfig,
       this.conversationHistory,
@@ -216,6 +222,7 @@ export abstract class BaseAgent {
     let fullResponse = "";
     let reasoning = "";
     let wasReasoning = false;
+    let hadToolCalls = false;
 
     // Race the first chunk against a 30s timeout to detect hanging providers
     const iterator = result.fullStream[Symbol.asyncIterator]();
@@ -235,7 +242,7 @@ export abstract class BaseAgent {
     if (first.done) {
       // Timed out or empty stream
       console.warn(`[Agent ${this.id}] Stream produced no data within ${FIRST_CHUNK_TIMEOUT / 1000}s (tools=${!!tools})`);
-      return { text: "", thinking: undefined };
+      return { text: "", thinking: undefined, hadToolCalls: false };
     }
 
     // Process first part
@@ -252,7 +259,8 @@ export abstract class BaseAgent {
         fullResponse += part.textDelta;
         onToken?.(part.textDelta, messageId);
       } else if (part.type === "tool-call") {
-        console.log(`[Agent ${this.id}] Tool call: ${part.toolName}`);
+        hadToolCalls = true;
+        console.log(`[Agent ${this.id}] Tool call: ${part.toolName}(${JSON.stringify(part.args ?? {}).slice(0, 200)})`);
         this.onAgentToolCall?.(this.id, part.toolName, (part.args ?? {}) as Record<string, unknown>);
         this.persistActivity("tool_call", JSON.stringify(part.args ?? {}), {
           toolName: part.toolName,
@@ -266,13 +274,7 @@ export abstract class BaseAgent {
     // Process remaining parts with per-chunk timeout
     while (true) {
       const next = await nextWithTimeout(CHUNK_TIMEOUT);
-      if (next.done) {
-        if (fullResponse || reasoning) {
-          // Stream produced some data then stopped — treat as complete
-          console.warn(`[Agent ${this.id}] Stream stalled after producing data — treating as complete`);
-        }
-        break;
-      }
+      if (next.done) break;
       processPart(next.value);
     }
 
@@ -280,23 +282,8 @@ export abstract class BaseAgent {
       onReasoningEnd?.(messageId);
     }
 
-    // Handle tool calls
-    const toolCallsPromise = Promise.race([
-      result.toolCalls,
-      new Promise<never>((_resolve, reject) =>
-        setTimeout(() => reject(new Error("toolCalls timeout")), 10_000),
-      ),
-    ]).catch(() => []);
-    const toolCalls = await toolCallsPromise;
-    if (toolCalls && (toolCalls as any[]).length > 0) {
-      this.setStatus(AgentStatus.Acting);
-      for (const toolCall of toolCalls as any[]) {
-        await this.executeTool(
-          toolCall.toolName,
-          toolCall.args as Record<string, unknown>,
-        );
-      }
-    }
+    // Note: tool execution is handled by the Vercel AI SDK via `execute`
+    // callbacks during the stream above — no need to call executeTool here.
 
     // Persist accumulated thinking and response
     if (reasoning) {
@@ -306,7 +293,8 @@ export abstract class BaseAgent {
       this.persistActivity("response", fullResponse, {}, messageId);
     }
 
-    return { text: fullResponse, thinking: reasoning || undefined };
+    console.log(`[Agent ${this.id}] runStream complete — text=${fullResponse.length} chars, thinking=${reasoning.length} chars, toolCalls=${hadToolCalls}`);
+    return { text: fullResponse, thinking: reasoning || undefined, hadToolCalls };
   }
 
   /** Get the agent's data representation */

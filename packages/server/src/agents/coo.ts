@@ -223,9 +223,8 @@ export class COO extends BaseAgent {
   private async handleTeamLeadReport(message: BusMessage) {
     // Process the Team Lead's report with a strong instruction to relay
     const summary = `[IMPORTANT: Always relay a summary of this report to the CEO. Never silently absorb it.]\n\n[Report from Team Lead ${message.fromAgentId}]: ${message.content}`;
-    // Add to conversation so COO remembers context
-    this.conversationHistory.push({ role: "user", content: summary });
-    // COO relays to CEO
+    // Note: think() already pushes the user message to conversationHistory,
+    // so we don't push here to avoid duplicating the message.
     const { text, thinking } = await this.think(
       summary,
       (token, messageId) => {
