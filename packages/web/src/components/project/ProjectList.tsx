@@ -1,4 +1,6 @@
+import { useState, type FormEvent } from "react";
 import type { Project, ProjectStatus } from "@smoothbot/shared";
+import { getSocket } from "../../lib/socket";
 
 const statusColors: Record<ProjectStatus, string> = {
   active: "bg-emerald-500/15 text-emerald-400 border-emerald-500/30",
@@ -7,57 +9,101 @@ const statusColors: Record<ProjectStatus, string> = {
   cancelled: "bg-amber-500/15 text-amber-400 border-amber-500/30",
 };
 
-function formatDate(iso: string) {
-  return new Date(iso).toLocaleDateString(undefined, {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  });
-}
-
 export function ProjectList({
   projects,
   onEnterProject,
+  cooName,
 }: {
   projects: Project[];
   onEnterProject: (projectId: string) => void;
+  cooName?: string;
 }) {
-  if (projects.length === 0) {
-    return (
-      <div className="h-full flex items-center justify-center text-muted-foreground text-sm">
-        No projects yet. Ask your assistant to create one.
-      </div>
-    );
-  }
+  const [showForm, setShowForm] = useState(false);
+  const [name, setName] = useState("");
+  const [description, setDescription] = useState("");
+
+  const handleSubmit = (e: FormEvent) => {
+    e.preventDefault();
+    const trimmed = name.trim();
+    if (!trimmed) return;
+
+    const desc = description.trim();
+    const content = desc
+      ? `Create a new project called "${trimmed}": ${desc}`
+      : `Create a new project called "${trimmed}"`;
+
+    const socket = getSocket();
+    socket.emit("ceo:message", { content });
+
+    setName("");
+    setDescription("");
+    setShowForm(false);
+  };
 
   return (
-    <div className="h-full overflow-y-auto p-6">
-      <div className="grid grid-cols-[repeat(auto-fill,minmax(260px,1fr))] gap-4">
-        {projects.map((p) => (
+    <div className="flex flex-col">
+      {/* Header */}
+      <div className="flex items-center justify-between px-4 py-2 border-b border-border">
+        <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Projects</h2>
+        <button
+          onClick={() => setShowForm(!showForm)}
+          className="text-[11px] text-primary hover:text-primary/80 transition-colors font-medium"
+        >
+          {showForm ? "Cancel" : "+ New"}
+        </button>
+      </div>
+
+      {/* Inline new project form */}
+      {showForm && (
+        <form onSubmit={handleSubmit} className="px-3 py-2 border-b border-border space-y-1.5">
+          <input
+            type="text"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="Project name"
+            autoFocus
+            className="w-full text-xs bg-secondary rounded px-2 py-1.5 outline-none placeholder:text-muted-foreground"
+          />
+          <textarea
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            placeholder="Description (optional)"
+            rows={2}
+            className="w-full text-xs bg-secondary rounded px-2 py-1.5 outline-none resize-none placeholder:text-muted-foreground"
+          />
           <button
-            key={p.id}
-            onClick={() => onEnterProject(p.id)}
-            className="text-left rounded-lg border border-border bg-card p-4 hover:border-primary/40 hover:bg-card/80 transition-colors flex flex-col gap-2"
+            type="submit"
+            disabled={!name.trim()}
+            className="w-full text-xs bg-primary text-primary-foreground rounded px-2 py-1.5 font-medium disabled:opacity-40 hover:bg-primary/90 transition-colors"
           >
-            <div className="flex items-center justify-between gap-2">
-              <span className="font-semibold text-sm truncate">{p.name}</span>
+            Create via {cooName ?? "COO"}
+          </button>
+        </form>
+      )}
+
+      {/* Project list */}
+      {projects.length === 0 ? (
+        <div className="px-4 py-4 text-xs text-muted-foreground text-center">
+          No projects yet
+        </div>
+      ) : (
+        <div className="divide-y divide-border/50">
+          {projects.map((p) => (
+            <button
+              key={p.id}
+              onClick={() => onEnterProject(p.id)}
+              className="w-full text-left px-4 py-2 hover:bg-secondary/50 transition-colors flex items-center gap-2"
+            >
+              <span className="text-xs font-medium truncate flex-1">{p.name}</span>
               <span
-                className={`text-[10px] font-medium px-1.5 py-0.5 rounded border shrink-0 ${statusColors[p.status]}`}
+                className={`text-[9px] font-medium px-1.5 py-0.5 rounded border shrink-0 ${statusColors[p.status]}`}
               >
                 {p.status}
               </span>
-            </div>
-            {p.description && (
-              <p className="text-xs text-muted-foreground line-clamp-2">
-                {p.description}
-              </p>
-            )}
-            <span className="text-[11px] text-muted-foreground/60 mt-auto">
-              {formatDate(p.createdAt)}
-            </span>
-          </button>
-        ))}
-      </div>
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

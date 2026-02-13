@@ -62,7 +62,7 @@ interface UserProfile {
   cooName?: string;
 }
 
-type CenterView = "graph" | "live3d" | "charter" | "kanban" | "projects";
+type CenterView = "graph" | "live3d" | "charter" | "kanban";
 
 function MainApp() {
   const socket = useSocket();
@@ -119,7 +119,7 @@ function MainApp() {
       socket.emit("project:enter", { projectId }, (result) => {
         if (result.project) {
           enterProject(projectId, result.project, result.conversations, result.tasks);
-          setCenterView("graph");
+          setCenterView("kanban");
         }
       });
     },
@@ -128,7 +128,7 @@ function MainApp() {
 
   const handleExitProject = useCallback(() => {
     exitProject();
-    setCenterView("projects");
+    setCenterView("graph");
     // Reload global conversations
     const socket = getSocket();
     socket.emit("ceo:list-conversations", undefined, (conversations) => {
@@ -161,32 +161,21 @@ function MainApp() {
             </div>
             <h1 className="text-sm font-semibold tracking-tight">Smoothbot</h1>
           </div>
-          {/* Project navigation */}
-          {activeProjectId && activeProject ? (
+          {/* Project breadcrumb */}
+          {activeProjectId && activeProject && (
             <div className="flex items-center gap-1 text-xs text-muted-foreground">
               <span className="text-border">/</span>
               <button
                 onClick={handleExitProject}
                 className="hover:text-foreground transition-colors px-1 py-0.5 rounded hover:bg-secondary"
               >
-                &larr; Projects
+                &larr; Back
               </button>
               <span className="text-border">/</span>
               <span className="text-foreground font-medium truncate max-w-[200px]">
                 {activeProject.name}
               </span>
             </div>
-          ) : (
-            <button
-              onClick={() => setCenterView("projects")}
-              className={`text-xs transition-colors px-2 py-1 rounded ${
-                centerView === "projects"
-                  ? "text-primary bg-primary/10"
-                  : "text-muted-foreground hover:text-foreground hover:bg-secondary"
-              }`}
-            >
-              Projects
-            </button>
           )}
         </div>
         <div className="flex items-center gap-1">
@@ -215,6 +204,7 @@ function MainApp() {
           centerView={centerView}
           setCenterView={setCenterView}
           onEnterProject={handleEnterProject}
+          cooName={userProfile?.cooName}
         />
       </main>
 
@@ -240,6 +230,7 @@ function ResizableLayout({
   centerView,
   setCenterView,
   onEnterProject,
+  cooName,
 }: {
   userProfile?: UserProfile;
   activeProjectId: string | null;
@@ -248,6 +239,7 @@ function ResizableLayout({
   centerView: CenterView;
   setCenterView: (view: CenterView) => void;
   onEnterProject: (projectId: string) => void;
+  cooName?: string;
 }) {
   const { defaultLayout, onLayoutChanged } = useDefaultLayout({
     id: "smoothbot-layout",
@@ -264,10 +256,6 @@ function ResizableLayout({
 
   const renderCenterContent = () => {
     switch (centerView) {
-      case "projects":
-        return (
-          <ProjectList projects={projects} onEnterProject={onEnterProject} />
-        );
       case "charter":
         return activeProject ? (
           <CharterView project={activeProject} />
@@ -294,10 +282,19 @@ function ResizableLayout({
       defaultLayout={defaultLayout ?? { chat: 20, graph: 50, stream: 30 }}
       onLayoutChanged={onLayoutChanged}
     >
-      {/* Left: CEO Chat */}
+      {/* Left: Project List + CEO Chat */}
       <Panel id="chat" minSize="15%" maxSize="40%">
         <div className="h-full flex flex-col">
-          <CeoChat cooName={userProfile?.cooName} />
+          {/* Project list — compact, scrollable */}
+          {!activeProjectId && (
+            <div className="shrink-0 max-h-[40%] border-b border-border overflow-y-auto">
+              <ProjectList projects={projects} onEnterProject={onEnterProject} cooName={cooName} />
+            </div>
+          )}
+          {/* CEO Chat fills remaining space */}
+          <div className="flex-1 min-h-0">
+            <CeoChat cooName={userProfile?.cooName} />
+          </div>
         </div>
       </Panel>
 

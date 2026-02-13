@@ -1,5 +1,6 @@
 import { useRef, useEffect, useState } from "react";
 import { useMessageStore } from "../../stores/message-store";
+import { useProjectStore } from "../../stores/project-store";
 import { cn } from "../../lib/utils";
 import type { BusMessage } from "@smoothbot/shared";
 
@@ -80,15 +81,20 @@ export function MessageStream({ userProfile }: { userProfile?: { name: string | 
   const messages = useMessageStore((s) => s.messages);
   const agentFilter = useMessageStore((s) => s.agentFilter);
   const setAgentFilter = useMessageStore((s) => s.setAgentFilter);
+  const activeProjectId = useProjectStore((s) => s.activeProjectId);
   const containerRef = useRef<HTMLDivElement>(null);
   const [autoScroll, setAutoScroll] = useState(true);
 
-  const filtered = agentFilter
+  let filtered = agentFilter
     ? messages.filter(
         (m) =>
           m.fromAgentId === agentFilter || m.toAgentId === agentFilter,
       )
     : messages;
+
+  if (activeProjectId) {
+    filtered = filtered.filter((m) => m.projectId === activeProjectId);
+  }
 
   useEffect(() => {
     if (autoScroll && containerRef.current) {
