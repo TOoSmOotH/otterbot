@@ -357,14 +357,13 @@ function ResizableLayout({
       {/* Center: Graph / Live View / Charter / Kanban / Desktop */}
       <Panel id="graph" minSize="20%">
         <div className="h-full flex flex-col">
-          {/* Tab bar — shown when project is active or desktop is available */}
-          {(activeProjectId || desktopEnabled) && (
-            <div className="flex items-center gap-1 px-3 py-1.5 border-b border-border bg-card">
+          {/* Tab bar */}
+          <div className="flex items-center gap-1 px-3 py-1.5 border-b border-border bg-card">
               {(
                 [
                   "graph",
                   ...(activeProjectId ? (["charter", "kanban", "files"] as CenterView[]) : []),
-                  ...(desktopEnabled ? (["desktop"] as CenterView[]) : []),
+                  "desktop" as CenterView,
                 ] as CenterView[]
               ).map((tab) => (
                 <button
@@ -387,8 +386,7 @@ function ResizableLayout({
                           : "Desktop"}
                 </button>
               ))}
-            </div>
-          )}
+          </div>
           <div className="flex-1 overflow-hidden">
             {renderCenterContent()}
           </div>
