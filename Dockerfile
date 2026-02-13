@@ -29,7 +29,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Desktop environment (conditionally started at runtime via ENABLE_DESKTOP)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    xvfb xfce4 xfce4-terminal dbus-x11 x11vnc \
+    xvfb xfce4 xfce4-terminal dbus-x11 x11vnc x11-utils \
     xdg-utils fonts-noto-color-emoji fonts-dejavu-core \
     && rm -rf /var/lib/apt/lists/*
 
@@ -205,7 +205,7 @@ if [ "${ENABLE_DESKTOP}" = "true" ]; then
 
   # Start x11vnc bound to localhost only
   setpriv --reuid="${PUID}" --regid="${PGID}" --init-groups \
-    x11vnc -display :99 -localhost -nopw -forever -shared -rfbport "${VNC_PORT:-5900}" &
+    x11vnc -display :99 -localhost -nopw -forever -shared -noshm -rfbport "${VNC_PORT:-5900}" &
   echo "[smoothbot] x11vnc started on localhost:${VNC_PORT:-5900}"
 else
   export DISPLAY=""

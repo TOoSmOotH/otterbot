@@ -5,6 +5,7 @@ services:
       args:
         SMOOTHBOT_UID: ${SMOOTHBOT_UID:-1000}
         SMOOTHBOT_GID: ${SMOOTHBOT_GID:-1000}
+    shm_size: "256m"
     ports:
       - "3000:3000"
     volumes:

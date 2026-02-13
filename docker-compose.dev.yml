@@ -2,6 +2,7 @@ services:
   smoothbot:
     build:
       target: deps
+    shm_size: "256m"
     command: sh -c "pnpm install --frozen-lockfile && pnpm dev"
     volumes:
       - .:/app
