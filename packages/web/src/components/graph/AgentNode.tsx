@@ -8,6 +8,7 @@ interface AgentNodeData {
   role: string;
   status: AgentStatus;
   avatarUrl?: string;
+  onClick?: () => void;
   [key: string]: unknown;
 }
 
@@ -45,13 +46,14 @@ const ROLE_ICONS: Record<string, string> = {
 export const AgentNode = memo(function AgentNode({
   data,
 }: NodeProps & { data: AgentNodeData }) {
-  const { label, role, status, avatarUrl } = data;
+  const { label, role, status, avatarUrl, onClick } = data;
   const statusLabel = STATUS_LABEL[status] ?? null;
 
   return (
     <div
+      onClick={onClick}
       className={cn(
-        "rounded-lg border-2 px-3 py-2 min-w-[120px] transition-all duration-300",
+        "rounded-lg border-2 px-3 py-2 min-w-[120px] transition-all duration-300 cursor-pointer hover:brightness-125",
         STATUS_COLORS[status] ?? STATUS_COLORS.idle,
       )}
     >

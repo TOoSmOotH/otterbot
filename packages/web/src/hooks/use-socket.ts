@@ -3,6 +3,7 @@ import { getSocket } from "../lib/socket";
 import { useMessageStore } from "../stores/message-store";
 import { useAgentStore } from "../stores/agent-store";
 import { useProjectStore } from "../stores/project-store";
+import { useAgentActivityStore } from "../stores/agent-activity-store";
 
 export function useSocket() {
   const initialized = useRef(false);
@@ -21,6 +22,10 @@ export function useSocket() {
   const updateTask = useProjectStore((s) => s.updateTask);
   const removeTask = useProjectStore((s) => s.removeTask);
   const addProjectConversation = useProjectStore((s) => s.addProjectConversation);
+  const appendAgentStream = useAgentActivityStore((s) => s.appendStream);
+  const appendAgentThinking = useAgentActivityStore((s) => s.appendThinking);
+  const endAgentThinking = useAgentActivityStore((s) => s.endThinking);
+  const addAgentToolCall = useAgentActivityStore((s) => s.addToolCall);
 
   useEffect(() => {
     if (initialized.current) return;
@@ -104,6 +109,22 @@ export function useSocket() {
       removeTask(taskId);
     });
 
+    socket.on("agent:stream", ({ agentId, token, messageId }) => {
+      appendAgentStream(agentId, token, messageId);
+    });
+
+    socket.on("agent:thinking", ({ agentId, token, messageId }) => {
+      appendAgentThinking(agentId, token, messageId);
+    });
+
+    socket.on("agent:thinking-end", ({ agentId, messageId }) => {
+      endAgentThinking(agentId, messageId);
+    });
+
+    socket.on("agent:tool-call", ({ agentId, toolName, args }) => {
+      addAgentToolCall(agentId, toolName, args);
+    });
+
     return () => {
       socket.off("bus:message");
       socket.off("coo:response");
@@ -120,6 +141,10 @@ export function useSocket() {
       socket.off("kanban:task-created");
       socket.off("kanban:task-updated");
       socket.off("kanban:task-deleted");
+      socket.off("agent:stream");
+      socket.off("agent:thinking");
+      socket.off("agent:thinking-end");
+      socket.off("agent:tool-call");
     };
   }, []);
 

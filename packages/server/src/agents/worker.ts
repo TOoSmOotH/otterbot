@@ -23,6 +23,10 @@ export interface WorkerDependencies {
   workspacePath: string | null;
   toolNames: string[];
   onStatusChange?: (agentId: string, status: AgentStatus) => void;
+  onAgentStream?: (agentId: string, token: string, messageId: string) => void;
+  onAgentThinking?: (agentId: string, token: string, messageId: string) => void;
+  onAgentThinkingEnd?: (agentId: string, messageId: string) => void;
+  onAgentToolCall?: (agentId: string, toolName: string, args: Record<string, unknown>) => void;
 }
 
 export class Worker extends BaseAgent {
@@ -43,6 +47,10 @@ export class Worker extends BaseAgent {
       systemPrompt: deps.systemPrompt,
       workspacePath: deps.workspacePath,
       onStatusChange: deps.onStatusChange,
+      onAgentStream: deps.onAgentStream,
+      onAgentThinking: deps.onAgentThinking,
+      onAgentThinkingEnd: deps.onAgentThinkingEnd,
+      onAgentToolCall: deps.onAgentToolCall,
     };
     super(options, deps.bus);
     this.toolNames = deps.toolNames;
@@ -82,7 +90,12 @@ export class Worker extends BaseAgent {
   }
 
   private async handleTask(message: BusMessage) {
-    const { text } = await this.think(message.content);
+    const { text } = await this.think(
+      message.content,
+      (token, messageId) => this.onAgentStream?.(this.id, token, messageId),
+      (token, messageId) => this.onAgentThinking?.(this.id, token, messageId),
+      (messageId) => this.onAgentThinkingEnd?.(this.id, messageId),
+    );
 
     // Report results back to Team Lead
     if (this.parentId) {

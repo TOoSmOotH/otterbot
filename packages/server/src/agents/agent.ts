@@ -28,6 +28,10 @@ export interface AgentOptions {
   systemPrompt: string;
   workspacePath?: string | null;
   onStatusChange?: (agentId: string, status: AgentStatus) => void;
+  onAgentStream?: (agentId: string, token: string, messageId: string) => void;
+  onAgentThinking?: (agentId: string, token: string, messageId: string) => void;
+  onAgentThinkingEnd?: (agentId: string, messageId: string) => void;
+  onAgentToolCall?: (agentId: string, toolName: string, args: Record<string, unknown>) => void;
 }
 
 export abstract class BaseAgent {
@@ -44,6 +48,10 @@ export abstract class BaseAgent {
   protected llmConfig: LLMConfig;
   protected systemPrompt: string;
   protected onStatusChange?: (agentId: string, status: AgentStatus) => void;
+  protected onAgentStream?: (agentId: string, token: string, messageId: string) => void;
+  protected onAgentThinking?: (agentId: string, token: string, messageId: string) => void;
+  protected onAgentThinkingEnd?: (agentId: string, messageId: string) => void;
+  protected onAgentToolCall?: (agentId: string, toolName: string, args: Record<string, unknown>) => void;
 
   constructor(options: AgentOptions, bus: MessageBus) {
     this.id = options.id ?? nanoid();
@@ -57,6 +65,10 @@ export abstract class BaseAgent {
     this.systemPrompt = options.systemPrompt;
 
     this.onStatusChange = options.onStatusChange;
+    this.onAgentStream = options.onAgentStream;
+    this.onAgentThinking = options.onAgentThinking;
+    this.onAgentThinkingEnd = options.onAgentThinkingEnd;
+    this.onAgentToolCall = options.onAgentToolCall;
     this.llmConfig = {
       provider: options.provider,
       model: options.model,
@@ -235,6 +247,11 @@ export abstract class BaseAgent {
         onToken?.(part.textDelta, messageId);
       } else if (part.type === "tool-call") {
         console.log(`[Agent ${this.id}] Tool call: ${part.toolName}`);
+        this.onAgentToolCall?.(this.id, part.toolName, (part.args ?? {}) as Record<string, unknown>);
+        this.persistActivity("tool_call", JSON.stringify(part.args ?? {}), {
+          toolName: part.toolName,
+          args: part.args ?? {},
+        }, messageId);
       }
     };
 
@@ -261,6 +278,14 @@ export abstract class BaseAgent {
           toolCall.args as Record<string, unknown>,
         );
       }
+    }
+
+    // Persist accumulated thinking and response
+    if (reasoning) {
+      this.persistActivity("thinking", reasoning, {}, messageId);
+    }
+    if (fullResponse) {
+      this.persistActivity("response", fullResponse, {}, messageId);
     }
 
     return { text: fullResponse, thinking: reasoning || undefined };
@@ -304,6 +329,32 @@ export abstract class BaseAgent {
       .where(eq(schema.agents.id, this.id))
       .run();
     this.onStatusChange?.(this.id, AgentStatus.Done);
+  }
+
+  /** Persist an activity record to the database */
+  private persistActivity(
+    type: "thinking" | "response" | "tool_call",
+    content: string,
+    metadata: Record<string, unknown>,
+    messageId?: string,
+  ) {
+    try {
+      const db = getDb();
+      db.insert(schema.agentActivity)
+        .values({
+          id: nanoid(),
+          agentId: this.id,
+          type,
+          content,
+          metadata,
+          projectId: this.projectId,
+          messageId: messageId ?? null,
+          timestamp: new Date().toISOString(),
+        })
+        .run();
+    } catch (err) {
+      console.error(`[Agent ${this.id}] Failed to persist activity:`, err);
+    }
   }
 
   private persistAgent(options: AgentOptions) {

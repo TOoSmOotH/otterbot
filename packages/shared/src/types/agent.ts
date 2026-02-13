@@ -32,6 +32,17 @@ export interface Agent {
   createdAt: string;
 }
 
+export interface AgentActivityRecord {
+  id: string;
+  agentId: string;
+  type: "thinking" | "response" | "tool_call";
+  content: string;
+  metadata: Record<string, unknown>;
+  projectId: string | null;
+  messageId: string | null;
+  timestamp: string;
+}
+
 export interface AgentSpawnOptions {
   registryEntryId?: string;
   role: AgentRole;

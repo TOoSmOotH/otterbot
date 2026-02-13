@@ -55,6 +55,10 @@ export interface COODependencies {
   onKanbanTaskCreated?: (task: KanbanTask) => void;
   onKanbanTaskUpdated?: (task: KanbanTask) => void;
   onKanbanTaskDeleted?: (taskId: string, projectId: string) => void;
+  onAgentStream?: (agentId: string, token: string, messageId: string) => void;
+  onAgentThinking?: (agentId: string, token: string, messageId: string) => void;
+  onAgentThinkingEnd?: (agentId: string, messageId: string) => void;
+  onAgentToolCall?: (agentId: string, toolName: string, args: Record<string, unknown>) => void;
 }
 
 export class COO extends BaseAgent {
@@ -69,11 +73,16 @@ export class COO extends BaseAgent {
   private onKanbanTaskCreated?: (task: KanbanTask) => void;
   private onKanbanTaskUpdated?: (task: KanbanTask) => void;
   private onKanbanTaskDeleted?: (taskId: string, projectId: string) => void;
+  private _onAgentStream?: (agentId: string, token: string, messageId: string) => void;
+  private _onAgentThinking?: (agentId: string, token: string, messageId: string) => void;
+  private _onAgentThinkingEnd?: (agentId: string, messageId: string) => void;
+  private _onAgentToolCall?: (agentId: string, toolName: string, args: Record<string, unknown>) => void;
   private contextManager!: ConversationContextManager;
   private activeContextId: string | null = null;
   private currentConversationId: string | null = null;
   private lastProjectCreatedAt = 0;
   private projectCreatedThisTurn = false;
+  private projectStatusCheckedThisTurn = false;
 
   constructor(deps: COODependencies) {
     const registry = new Registry();
@@ -126,6 +135,10 @@ export class COO extends BaseAgent {
     this.onKanbanTaskCreated = deps.onKanbanTaskCreated;
     this.onKanbanTaskUpdated = deps.onKanbanTaskUpdated;
     this.onKanbanTaskDeleted = deps.onKanbanTaskDeleted;
+    this._onAgentStream = deps.onAgentStream;
+    this._onAgentThinking = deps.onAgentThinking;
+    this._onAgentThinkingEnd = deps.onAgentThinkingEnd;
+    this._onAgentToolCall = deps.onAgentToolCall;
     this.contextManager = new ConversationContextManager(systemPrompt);
   }
 
@@ -162,8 +175,9 @@ export class COO extends BaseAgent {
       this.currentConversationId = message.conversationId;
     }
 
-    // Reset per-turn creation guard
+    // Reset per-turn creation guards
     this.projectCreatedThisTurn = false;
+    this.projectStatusCheckedThisTurn = false;
 
     // Swap to the correct conversation context
     const conversationId = this.currentConversationId;
@@ -207,11 +221,11 @@ export class COO extends BaseAgent {
   }
 
   private async handleTeamLeadReport(message: BusMessage) {
-    // Process the Team Lead's report
-    const summary = `[Report from Team Lead ${message.fromAgentId}]: ${message.content}`;
+    // Process the Team Lead's report with a strong instruction to relay
+    const summary = `[IMPORTANT: Always relay a summary of this report to the CEO. Never silently absorb it.]\n\n[Report from Team Lead ${message.fromAgentId}]: ${message.content}`;
     // Add to conversation so COO remembers context
     this.conversationHistory.push({ role: "user", content: summary });
-    // COO may decide to relay to CEO or take action
+    // COO relays to CEO
     const { text, thinking } = await this.think(
       summary,
       (token, messageId) => {
@@ -225,22 +239,23 @@ export class COO extends BaseAgent {
       },
     );
 
-    // If the report is significant, relay to CEO
-    if (text.trim()) {
-      this.sendMessage(
-        null,
-        MessageType.Chat,
-        text,
-        thinking ? { thinking } : undefined,
-      );
-    }
+    // Always relay to CEO — fall back to a raw snippet if LLM returns empty
+    const relay = text.trim()
+      ? text
+      : `Update from Team Lead: ${message.content.slice(0, 500)}${message.content.length > 500 ? "..." : ""}`;
+    this.sendMessage(
+      null,
+      MessageType.Chat,
+      relay,
+      thinking ? { thinking } : undefined,
+    );
   }
 
   protected getTools(): Record<string, unknown> {
     return {
       create_project: tool({
         description:
-          "Create a new project and spawn a Team Lead to manage it. Use this when the CEO gives you a new goal or task that requires work. Include a charter summarizing the project's goals, scope, constraints, and deliverables.",
+          "Create a NEW project and spawn a Team Lead. ONLY use this when no active project covers the CEO's goal. Always call get_project_status first to check existing projects. Prefer send_directive if an existing project can handle the work.",
         parameters: z.object({
           name: z
             .string()
@@ -261,6 +276,21 @@ export class COO extends BaseAgent {
         }),
         execute: async ({ name, description, charter, directive }) => {
           return this.createProject(name, description, directive, charter);
+        },
+      }),
+      send_directive: tool({
+        description:
+          "Send an additional directive to an existing project's Team Lead. ALWAYS prefer this over create_project when the CEO's request relates to an active project.",
+        parameters: z.object({
+          projectId: z
+            .string()
+            .describe("The project ID to send the directive to"),
+          directive: z
+            .string()
+            .describe("The directive for the Team Lead"),
+        }),
+        execute: async ({ projectId, directive }) => {
+          return this.sendDirectiveToTeamLead(projectId, directive);
         },
       }),
       update_charter: tool({
@@ -295,7 +325,7 @@ export class COO extends BaseAgent {
       }),
       get_project_status: tool({
         description:
-          "Get the status of all active projects or a specific project.",
+          "Get the status of all active projects or a specific project. Always call this before creating a new project to avoid duplicates.",
         parameters: z.object({
           projectId: z
             .string()
@@ -305,6 +335,7 @@ export class COO extends BaseAgent {
             ),
         }),
         execute: async ({ projectId }) => {
+          this.projectStatusCheckedThisTurn = true;
           return this.getProjectStatus(projectId);
         },
       }),
@@ -449,7 +480,22 @@ export class COO extends BaseAgent {
     };
   }
 
-  private static readonly PROJECT_COOLDOWN_MS = 60_000; // 60 seconds
+  private static readonly PROJECT_COOLDOWN_MS = 300_000; // 5 minutes
+
+  private async sendDirectiveToTeamLead(
+    projectId: string,
+    directive: string,
+  ): Promise<string> {
+    const teamLead = this.teamLeads.get(projectId);
+    if (!teamLead) {
+      return `Error: no Team Lead found for project ${projectId}. The project may have been completed or the Team Lead may not be running.`;
+    }
+
+    this.sendMessage(teamLead.id, MessageType.Directive, directive, {
+      projectId,
+    });
+    return `Directive sent to Team Lead ${teamLead.id} for project ${projectId}.`;
+  }
 
   private async createProject(
     name: string,
@@ -469,8 +515,18 @@ export class COO extends BaseAgent {
       return `Blocked: a project was created ${Math.floor(elapsed / 1000)}s ago. Wait ${waitSec}s or use get_project_status to check existing projects.`;
     }
 
-    const projectId = nanoid();
+    // Guard: require checking active projects before creating a new one
     const db = getDb();
+    const activeProjects = db
+      .select()
+      .from(schema.projects)
+      .where(eq(schema.projects.status, "active"))
+      .all();
+    if (activeProjects.length > 0 && !this.projectStatusCheckedThisTurn) {
+      return `Blocked: there are ${activeProjects.length} active project(s). Use send_directive to add work to an existing project, or use get_project_status to check them first. Only create a new project if this is genuinely unrelated work.`;
+    }
+
+    const projectId = nanoid();
 
     // Create project record
     db.insert(schema.projects)
@@ -502,6 +558,10 @@ export class COO extends BaseAgent {
         else if (event === "updated") this.onKanbanTaskUpdated?.(task);
         else if (event === "deleted") this.onKanbanTaskDeleted?.(task.id, task.projectId);
       },
+      onAgentStream: this._onAgentStream,
+      onAgentThinking: this._onAgentThinking,
+      onAgentThinkingEnd: this._onAgentThinkingEnd,
+      onAgentToolCall: this._onAgentToolCall,
     });
 
     this.teamLeads.set(projectId, teamLead);

@@ -1,4 +1,4 @@
-import { useMemo, useEffect } from "react";
+import { useMemo, useEffect, useCallback } from "react";
 import {
   ReactFlow,
   Background,
@@ -11,7 +11,9 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { useAgentStore } from "../../stores/agent-store";
+import { useAgentActivityStore } from "../../stores/agent-activity-store";
 import { AgentNode } from "./AgentNode";
+import { AgentDetailPanel } from "./AgentDetailPanel";
 import type { Agent } from "@smoothbot/shared";
 
 const nodeTypes = { agent: AgentNode };
@@ -19,6 +21,7 @@ const nodeTypes = { agent: AgentNode };
 function buildLayout(
   agents: Map<string, Agent>,
   userProfile?: { name: string | null; avatar: string | null; cooName?: string },
+  onNodeClick?: (agentId: string) => void,
 ): {
   nodes: Node[];
   edges: Edge[];
@@ -85,6 +88,7 @@ function buildLayout(
         label: getRoleLabel(agent, userProfile?.cooName),
         role: agent.role,
         status: agent.status,
+        onClick: onNodeClick ? () => onNodeClick(agent.id) : undefined,
       },
     });
 
@@ -132,9 +136,16 @@ function AgentGraphInner({
   onToggleView?: () => void;
 }) {
   const agents = useAgentStore((s) => s.agents);
+  const selectAgent = useAgentActivityStore((s) => s.selectAgent);
+  const selectedAgentId = useAgentActivityStore((s) => s.selectedAgentId);
+
+  const handleNodeClick = useCallback((agentId: string) => {
+    selectAgent(agentId);
+  }, [selectAgent]);
+
   const { nodes: layoutNodes, edges: layoutEdges } = useMemo(
-    () => buildLayout(agents, userProfile),
-    [agents, userProfile],
+    () => buildLayout(agents, userProfile, handleNodeClick),
+    [agents, userProfile, handleNodeClick],
   );
 
   const [nodes, setNodes, onNodesChange] = useNodesState(layoutNodes);
@@ -174,7 +185,7 @@ function AgentGraphInner({
       </div>
 
       {/* Graph */}
-      <div className="flex-1">
+      <div className="flex-1 relative">
         <ReactFlow
           nodes={nodes}
           edges={edges}
@@ -192,6 +203,7 @@ function AgentGraphInner({
         >
           <Background color="hsl(0 0% 15%)" gap={20} size={1} />
         </ReactFlow>
+        {selectedAgentId && <AgentDetailPanel />}
       </div>
     </div>
   );

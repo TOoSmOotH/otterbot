@@ -3,9 +3,9 @@ import type {
   ServerToClientEvents,
   ClientToServerEvents,
 } from "@smoothbot/shared";
-import { MessageType, type Agent, type BusMessage, type Conversation, type Project, type KanbanTask } from "@smoothbot/shared";
+import { MessageType, type Agent, type AgentActivityRecord, type BusMessage, type Conversation, type Project, type KanbanTask } from "@smoothbot/shared";
 import { nanoid } from "nanoid";
-import { eq, desc, isNull } from "drizzle-orm";
+import { eq, or, desc, isNull } from "drizzle-orm";
 import type { MessageBus } from "../bus/message-bus.js";
 import type { COO } from "../agents/coo.js";
 import type { Registry } from "../registry/registry.js";
@@ -243,6 +243,39 @@ export function setupSocketHandlers(
       callback(conversations as Conversation[]);
     });
 
+    // Retrieve agent activity (bus messages + persisted activity records)
+    socket.on("agent:activity", (data, callback) => {
+      const db = getDb();
+
+      // Bus messages involving this agent
+      const busMessages = db
+        .select()
+        .from(schema.messages)
+        .where(
+          or(
+            eq(schema.messages.fromAgentId, data.agentId),
+            eq(schema.messages.toAgentId, data.agentId),
+          ),
+        )
+        .orderBy(desc(schema.messages.timestamp))
+        .limit(50)
+        .all();
+
+      // Persisted activity records
+      const activity = db
+        .select()
+        .from(schema.agentActivity)
+        .where(eq(schema.agentActivity.agentId, data.agentId))
+        .orderBy(desc(schema.agentActivity.timestamp))
+        .limit(50)
+        .all();
+
+      callback({
+        messages: busMessages.reverse() as BusMessage[],
+        activity: activity.reverse() as unknown as AgentActivityRecord[],
+      });
+    });
+
     socket.on("disconnect", () => {
       console.log(`Client disconnected: ${socket.id}`);
     });
@@ -307,4 +340,20 @@ export function emitKanbanTaskUpdated(io: TypedServer, task: KanbanTask) {
 
 export function emitKanbanTaskDeleted(io: TypedServer, taskId: string, projectId: string) {
   io.emit("kanban:task-deleted", { taskId, projectId });
+}
+
+export function emitAgentStream(io: TypedServer, agentId: string, token: string, messageId: string) {
+  io.emit("agent:stream", { agentId, token, messageId });
+}
+
+export function emitAgentThinking(io: TypedServer, agentId: string, token: string, messageId: string) {
+  io.emit("agent:thinking", { agentId, token, messageId });
+}
+
+export function emitAgentThinkingEnd(io: TypedServer, agentId: string, messageId: string) {
+  io.emit("agent:thinking-end", { agentId, messageId });
+}
+
+export function emitAgentToolCall(io: TypedServer, agentId: string, toolName: string, args: Record<string, unknown>) {
+  io.emit("agent:tool-call", { agentId, toolName, args });
 }

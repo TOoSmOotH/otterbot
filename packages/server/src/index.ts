@@ -36,6 +36,10 @@ import {
   emitKanbanTaskCreated,
   emitKanbanTaskUpdated,
   emitKanbanTaskDeleted,
+  emitAgentStream,
+  emitAgentThinking,
+  emitAgentThinkingEnd,
+  emitAgentToolCall,
 } from "./socket/handlers.js";
 import {
   isSetupComplete,
@@ -249,6 +253,18 @@ async function main() {
         },
         onKanbanTaskDeleted: (taskId, projectId) => {
           emitKanbanTaskDeleted(io, taskId, projectId);
+        },
+        onAgentStream: (agentId, token, messageId) => {
+          emitAgentStream(io, agentId, token, messageId);
+        },
+        onAgentThinking: (agentId, token, messageId) => {
+          emitAgentThinking(io, agentId, token, messageId);
+        },
+        onAgentThinkingEnd: (agentId, messageId) => {
+          emitAgentThinkingEnd(io, agentId, messageId);
+        },
+        onAgentToolCall: (agentId, toolName, args) => {
+          emitAgentToolCall(io, agentId, toolName, args);
         },
       });
       emitAgentSpawned(io, coo);

@@ -33,6 +33,10 @@ export interface TeamLeadDependencies {
   onAgentSpawned?: (agent: BaseAgent) => void;
   onStatusChange?: (agentId: string, status: AgentStatus) => void;
   onKanbanChange?: (event: "created" | "updated" | "deleted", task: KanbanTask) => void;
+  onAgentStream?: (agentId: string, token: string, messageId: string) => void;
+  onAgentThinking?: (agentId: string, token: string, messageId: string) => void;
+  onAgentThinkingEnd?: (agentId: string, messageId: string) => void;
+  onAgentToolCall?: (agentId: string, toolName: string, args: Record<string, unknown>) => void;
 }
 
 export class TeamLead extends BaseAgent {
@@ -60,6 +64,10 @@ export class TeamLead extends BaseAgent {
         "anthropic",
       systemPrompt: tlEntry?.systemPrompt ?? TEAM_LEAD_PROMPT,
       onStatusChange: deps.onStatusChange,
+      onAgentStream: deps.onAgentStream,
+      onAgentThinking: deps.onAgentThinking,
+      onAgentThinkingEnd: deps.onAgentThinkingEnd,
+      onAgentToolCall: deps.onAgentToolCall,
     };
     super(options, deps.bus);
     this.workspace = deps.workspace;
@@ -85,7 +93,12 @@ export class TeamLead extends BaseAgent {
   }
 
   private async handleDirective(message: BusMessage) {
-    const { text } = await this.think(message.content);
+    const { text } = await this.think(
+      message.content,
+      (token, messageId) => this.onAgentStream?.(this.id, token, messageId),
+      (token, messageId) => this.onAgentThinking?.(this.id, token, messageId),
+      (messageId) => this.onAgentThinkingEnd?.(this.id, messageId),
+    );
 
     // Report plan/progress back to COO
     if (this.parentId) {
@@ -95,7 +108,12 @@ export class TeamLead extends BaseAgent {
 
   private async handleWorkerReport(message: BusMessage) {
     const summary = `[Worker ${message.fromAgentId} report]: ${message.content}`;
-    const { text } = await this.think(summary);
+    const { text } = await this.think(
+      summary,
+      (token, messageId) => this.onAgentStream?.(this.id, token, messageId),
+      (token, messageId) => this.onAgentThinking?.(this.id, token, messageId),
+      (messageId) => this.onAgentThinkingEnd?.(this.id, messageId),
+    );
 
     // Relay significant updates to COO
     if (this.parentId && text.trim()) {
@@ -379,6 +397,10 @@ export class TeamLead extends BaseAgent {
       workspacePath,
       toolNames: entryTools,
       onStatusChange: this.onStatusChange,
+      onAgentStream: this.onAgentStream,
+      onAgentThinking: this.onAgentThinking,
+      onAgentThinkingEnd: this.onAgentThinkingEnd,
+      onAgentToolCall: this.onAgentToolCall,
     });
 
     this.workers.set(worker.id, worker);

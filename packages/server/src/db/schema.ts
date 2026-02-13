@@ -134,6 +134,21 @@ export const kanbanTasks = sqliteTable("kanban_tasks", {
     .$defaultFn(() => new Date().toISOString()),
 });
 
+export const agentActivity = sqliteTable("agent_activity", {
+  id: text("id").primaryKey(),
+  agentId: text("agent_id").notNull(),
+  type: text("type", { enum: ["thinking", "response", "tool_call"] }).notNull(),
+  content: text("content").notNull(),
+  metadata: text("metadata", { mode: "json" })
+    .$type<Record<string, unknown>>()
+    .default({}),
+  projectId: text("project_id"),
+  messageId: text("message_id"),
+  timestamp: text("timestamp")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+});
+
 export const worktrees = sqliteTable("worktrees", {
   agentId: text("agent_id").primaryKey(),
   projectId: text("project_id").notNull(),

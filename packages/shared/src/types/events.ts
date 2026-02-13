@@ -1,4 +1,4 @@
-import type { Agent, AgentStatus } from "./agent.js";
+import type { Agent, AgentStatus, AgentActivityRecord } from "./agent.js";
 import type { BusMessage, Conversation } from "./message.js";
 import type { RegistryEntry, Project } from "./registry.js";
 import type { KanbanTask } from "./kanban.js";
@@ -20,6 +20,10 @@ export interface ServerToClientEvents {
   "kanban:task-created": (task: KanbanTask) => void;
   "kanban:task-updated": (task: KanbanTask) => void;
   "kanban:task-deleted": (data: { taskId: string; projectId: string }) => void;
+  "agent:stream": (data: { agentId: string; token: string; messageId: string }) => void;
+  "agent:thinking": (data: { agentId: string; token: string; messageId: string }) => void;
+  "agent:thinking-end": (data: { agentId: string; messageId: string }) => void;
+  "agent:tool-call": (data: { agentId: string; toolName: string; args: Record<string, unknown> }) => void;
 }
 
 /** Events emitted from client to server */
@@ -60,5 +64,9 @@ export interface ClientToServerEvents {
   "agent:inspect": (
     data: { agentId: string },
     callback: (agent: Agent | null) => void,
+  ) => void;
+  "agent:activity": (
+    data: { agentId: string },
+    callback: (result: { messages: BusMessage[]; activity: AgentActivityRecord[] }) => void,
   ) => void;
 }

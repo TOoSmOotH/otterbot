@@ -189,6 +189,17 @@ export async function migrateDb() {
     updated_at TEXT NOT NULL
   )`);
 
+  db.run(sql`CREATE TABLE IF NOT EXISTS agent_activity (
+    id TEXT PRIMARY KEY,
+    agent_id TEXT NOT NULL,
+    type TEXT NOT NULL,
+    content TEXT NOT NULL,
+    metadata TEXT DEFAULT '{}',
+    project_id TEXT,
+    message_id TEXT,
+    timestamp TEXT NOT NULL
+  )`);
+
   // Seed built-in registry entries on every startup (dynamic import to avoid circular dep)
   const { seedBuiltIns } = await import("./seed.js");
   seedBuiltIns();
