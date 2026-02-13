@@ -145,6 +145,8 @@ export function stripMarkdown(text: string): string {
       .replace(/^\s*>\s?/gm, "")
       // HTML tags
       .replace(/<[^>]+>/g, "")
+      // Emojis
+      .replace(/\p{Emoji_Presentation}|\p{Extended_Pictographic}/gu, "")
       // Collapse multiple blank lines
       .replace(/\n{3,}/g, "\n\n")
       .trim()
