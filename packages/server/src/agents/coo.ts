@@ -109,15 +109,37 @@ export class COO extends BaseAgent {
     }
   }
 
+  private getActiveProjectsSummary(): string {
+    const db = getDb();
+    const projects = db
+      .select()
+      .from(schema.projects)
+      .where(eq(schema.projects.status, "active"))
+      .all();
+
+    if (projects.length === 0) return "";
+
+    const lines = projects.map(
+      (p) => `- [${p.id}] "${p.name}": ${p.description}`,
+    );
+    return `\n\n[ACTIVE PROJECTS]\n${lines.join("\n")}\n[/ACTIVE PROJECTS]\n\nConsider the active projects above before deciding whether to create a new one.`;
+  }
+
   private async handleCeoMessage(message: BusMessage) {
     // Track conversation from inbound message
     if (message.conversationId) {
       this.currentConversationId = message.conversationId;
     }
 
+    // Inject active project context so the LLM can avoid duplicates
+    const projectContext = this.getActiveProjectsSummary();
+    const enrichedContent = projectContext
+      ? message.content + projectContext
+      : message.content;
+
     console.log(`[COO] Calling think() — model=${this.llmConfig.model} provider=${this.llmConfig.provider}`);
     const { text, thinking } = await this.think(
-      message.content,
+      enrichedContent,
       (token, messageId) => {
         this.onStream?.(token, messageId);
       },
