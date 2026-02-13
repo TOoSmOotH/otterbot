@@ -6,6 +6,7 @@ import {
   AgentStatus,
   MessageType,
   type BusMessage,
+  type KanbanTask,
 } from "@smoothbot/shared";
 import { BaseAgent, type AgentOptions } from "./agent.js";
 import { Worker } from "./worker.js";
@@ -31,6 +32,7 @@ export interface TeamLeadDependencies {
   modelPackId?: string | null;
   onAgentSpawned?: (agent: BaseAgent) => void;
   onStatusChange?: (agentId: string, status: AgentStatus) => void;
+  onKanbanChange?: (event: "created" | "updated" | "deleted", task: KanbanTask) => void;
 }
 
 export class TeamLead extends BaseAgent {
@@ -38,6 +40,7 @@ export class TeamLead extends BaseAgent {
   private workspace: WorkspaceManager;
   private gitWorktree: GitWorktreeManager | null = null;
   private onAgentSpawned?: (agent: BaseAgent) => void;
+  private onKanbanChange?: (event: "created" | "updated" | "deleted", task: KanbanTask) => void;
 
   constructor(deps: TeamLeadDependencies) {
     const registry = new Registry();
@@ -61,6 +64,7 @@ export class TeamLead extends BaseAgent {
     super(options, deps.bus);
     this.workspace = deps.workspace;
     this.onAgentSpawned = deps.onAgentSpawned;
+    this.onKanbanChange = deps.onKanbanChange;
 
     // Initialize git worktree manager for the project
     if (deps.projectId) {
@@ -253,6 +257,40 @@ export class TeamLead extends BaseAgent {
           return this.getBranchOverview();
         },
       }),
+      create_task: tool({
+        description:
+          "Create a kanban task card for this project. Use this to decompose directives into trackable work items before spawning workers.",
+        parameters: z.object({
+          title: z.string().describe("Short task title"),
+          description: z.string().optional().describe("Detailed task description"),
+          column: z.enum(["backlog", "in_progress", "done"]).optional().describe("Column to place the task in (default: backlog)"),
+          labels: z.array(z.string()).optional().describe("Labels/tags for the task"),
+        }),
+        execute: async ({ title, description, column, labels }) => {
+          return this.createKanbanTask(title, description, column, labels);
+        },
+      }),
+      update_task: tool({
+        description:
+          "Update a kanban task card. Move tasks between columns, assign agents, or update details.",
+        parameters: z.object({
+          taskId: z.string().describe("The task ID to update"),
+          column: z.enum(["backlog", "in_progress", "done"]).optional().describe("Move task to this column"),
+          assigneeAgentId: z.string().optional().describe("Agent ID to assign the task to"),
+          description: z.string().optional().describe("Updated description"),
+          title: z.string().optional().describe("Updated title"),
+        }),
+        execute: async ({ taskId, column, assigneeAgentId, description, title }) => {
+          return this.updateKanbanTask(taskId, { column, assigneeAgentId, description, title });
+        },
+      }),
+      list_tasks: tool({
+        description: "List all kanban tasks for this project.",
+        parameters: z.object({}),
+        execute: async () => {
+          return this.listKanbanTasks();
+        },
+      }),
     };
   }
 
@@ -407,6 +445,111 @@ export class TeamLead extends BaseAgent {
     });
 
     return lines.join("\n\n");
+  }
+
+  private createKanbanTask(
+    title: string,
+    description?: string,
+    column?: string,
+    labels?: string[],
+  ): string {
+    if (!this.projectId) return "No project context.";
+
+    const db = getDb();
+    const taskId = nanoid();
+    const now = new Date().toISOString();
+    const col = (column ?? "backlog") as "backlog" | "in_progress" | "done";
+
+    // Get max position in column
+    const existing = db
+      .select()
+      .from(schema.kanbanTasks)
+      .where(eq(schema.kanbanTasks.projectId, this.projectId))
+      .all();
+    const colTasks = existing.filter((t) => t.column === col);
+    const maxPos = colTasks.reduce((max, t) => Math.max(max, t.position), -1);
+
+    const task = {
+      id: taskId,
+      projectId: this.projectId,
+      title,
+      description: description ?? "",
+      column: col,
+      position: maxPos + 1,
+      assigneeAgentId: null,
+      createdBy: this.id,
+      labels: labels ?? [],
+      createdAt: now,
+      updatedAt: now,
+    };
+    db.insert(schema.kanbanTasks).values(task).run();
+
+    this.onKanbanChange?.("created", task as unknown as KanbanTask);
+    return `Task "${title}" created (${taskId}) in ${col}.`;
+  }
+
+  private updateKanbanTask(
+    taskId: string,
+    updates: { column?: string; assigneeAgentId?: string; description?: string; title?: string },
+  ): string {
+    const db = getDb();
+    const existing = db
+      .select()
+      .from(schema.kanbanTasks)
+      .where(eq(schema.kanbanTasks.id, taskId))
+      .get();
+    if (!existing) return `Task ${taskId} not found.`;
+
+    const setValues: Record<string, unknown> = { updatedAt: new Date().toISOString() };
+    if (updates.column) setValues.column = updates.column;
+    if (updates.assigneeAgentId !== undefined) setValues.assigneeAgentId = updates.assigneeAgentId;
+    if (updates.description !== undefined) setValues.description = updates.description;
+    if (updates.title !== undefined) setValues.title = updates.title;
+
+    db.update(schema.kanbanTasks)
+      .set(setValues)
+      .where(eq(schema.kanbanTasks.id, taskId))
+      .run();
+
+    const updated = db
+      .select()
+      .from(schema.kanbanTasks)
+      .where(eq(schema.kanbanTasks.id, taskId))
+      .get();
+    if (updated) {
+      this.onKanbanChange?.("updated", updated as unknown as KanbanTask);
+    }
+
+    return `Task "${existing.title}" updated.`;
+  }
+
+  private listKanbanTasks(): string {
+    if (!this.projectId) return "No project context.";
+
+    const db = getDb();
+    const tasks = db
+      .select()
+      .from(schema.kanbanTasks)
+      .where(eq(schema.kanbanTasks.projectId, this.projectId))
+      .all();
+
+    if (tasks.length === 0) return "No tasks in this project.";
+
+    const byColumn: Record<string, typeof tasks> = { backlog: [], in_progress: [], done: [] };
+    for (const t of tasks) {
+      (byColumn[t.column] ?? []).push(t);
+    }
+
+    const lines: string[] = [];
+    for (const [col, colTasks] of Object.entries(byColumn)) {
+      if (colTasks.length === 0) continue;
+      lines.push(`**${col.replace("_", " ").toUpperCase()}** (${colTasks.length}):`);
+      for (const t of colTasks.sort((a, b) => a.position - b.position)) {
+        const assignee = t.assigneeAgentId ? ` [${t.assigneeAgentId.slice(0, 6)}]` : "";
+        lines.push(`  - ${t.title} (${t.id})${assignee}`);
+      }
+    }
+    return lines.join("\n");
   }
 
   getWorkers(): Map<string, Worker> {

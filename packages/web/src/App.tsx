@@ -1,9 +1,10 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useSocket } from "./hooks/use-socket";
 import { useMessageStore } from "./stores/message-store";
 import { useAgentStore } from "./stores/agent-store";
 import { useAuthStore } from "./stores/auth-store";
 import { useModelPackStore } from "./stores/model-pack-store";
+import { useProjectStore } from "./stores/project-store";
 import { CeoChat } from "./components/chat/CeoChat";
 import { AgentGraph } from "./components/graph/AgentGraph";
 import { LiveView } from "./components/live-view/LiveView";
@@ -11,8 +12,10 @@ import { MessageStream } from "./components/stream/MessageStream";
 import { SettingsPanel } from "./components/settings/SettingsPanel";
 import { LoginScreen } from "./components/auth/LoginScreen";
 import { SetupWizard } from "./components/setup/SetupWizard";
+import { CharterView } from "./components/project/CharterView";
+import { KanbanBoard } from "./components/kanban/KanbanBoard";
 import { Group, Panel, Separator, useDefaultLayout } from "react-resizable-panels";
-import { disconnectSocket } from "./lib/socket";
+import { disconnectSocket, getSocket } from "./lib/socket";
 
 export default function App() {
   const screen = useAuthStore((s) => s.screen);
@@ -58,7 +61,7 @@ interface UserProfile {
   cooName?: string;
 }
 
-type CenterView = "graph" | "live3d";
+type CenterView = "graph" | "live3d" | "charter" | "kanban";
 
 function MainApp() {
   const socket = useSocket();
@@ -67,6 +70,12 @@ function MainApp() {
   const loadAgents = useAgentStore((s) => s.loadAgents);
   const loadPacks = useModelPackStore((s) => s.loadPacks);
   const logout = useAuthStore((s) => s.logout);
+  const setProjects = useProjectStore((s) => s.setProjects);
+  const activeProjectId = useProjectStore((s) => s.activeProjectId);
+  const activeProject = useProjectStore((s) => s.activeProject);
+  const enterProject = useProjectStore((s) => s.enterProject);
+  const exitProject = useProjectStore((s) => s.exitProject);
+  const projects = useProjectStore((s) => s.projects);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [userProfile, setUserProfile] = useState<UserProfile | undefined>();
 
@@ -92,9 +101,36 @@ function MainApp() {
       .then(setUserProfile)
       .catch(console.error);
 
+    // Load projects
+    fetch("/api/projects")
+      .then((r) => r.json())
+      .then(setProjects)
+      .catch(console.error);
+
     // Pre-load model packs so Live View has them ready
     loadPacks();
   }, []);
+
+  const handleEnterProject = useCallback(
+    (projectId: string) => {
+      const socket = getSocket();
+      socket.emit("project:enter", { projectId }, (result) => {
+        if (result.project) {
+          enterProject(projectId, result.project, result.conversations, result.tasks);
+        }
+      });
+    },
+    [enterProject],
+  );
+
+  const handleExitProject = useCallback(() => {
+    exitProject();
+    // Reload global conversations
+    const socket = getSocket();
+    socket.emit("ceo:list-conversations", undefined, (conversations) => {
+      setConversations(conversations);
+    });
+  }, [exitProject, setConversations]);
 
   const handleSettingsClose = () => {
     setSettingsOpen(false);
@@ -114,11 +150,35 @@ function MainApp() {
     <div className="h-screen flex flex-col overflow-hidden">
       {/* Top bar */}
       <header className="flex items-center justify-between px-4 py-2 border-b border-border bg-card">
-        <div className="flex items-center gap-2">
-          <div className="w-6 h-6 rounded-md bg-primary/20 flex items-center justify-center">
-            <span className="text-primary text-xs font-bold">S</span>
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
+            <div className="w-6 h-6 rounded-md bg-primary/20 flex items-center justify-center">
+              <span className="text-primary text-xs font-bold">S</span>
+            </div>
+            <h1 className="text-sm font-semibold tracking-tight">Smoothbot</h1>
           </div>
-          <h1 className="text-sm font-semibold tracking-tight">Smoothbot</h1>
+          {/* Project selector */}
+          <div className="flex items-center gap-1">
+            <select
+              value={activeProjectId ?? ""}
+              onChange={(e) => {
+                const val = e.target.value;
+                if (val) {
+                  handleEnterProject(val);
+                } else {
+                  handleExitProject();
+                }
+              }}
+              className="text-xs bg-secondary text-foreground border border-border rounded px-2 py-1 outline-none max-w-[200px]"
+            >
+              <option value="">Global</option>
+              {projects.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name} ({p.status})
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
         <div className="flex items-center gap-1">
           <button
@@ -138,7 +198,7 @@ function MainApp() {
 
       {/* Three-panel layout */}
       <main className="flex-1 overflow-hidden">
-        <ResizableLayout userProfile={userProfile} />
+        <ResizableLayout userProfile={userProfile} activeProjectId={activeProjectId} activeProject={activeProject} />
       </main>
 
       {/* Settings modal - rendered outside the resizable layout */}
@@ -155,13 +215,50 @@ function MainApp() {
 
 const PANEL_IDS = ["chat", "graph", "stream"];
 
-function ResizableLayout({ userProfile }: { userProfile?: UserProfile; }) {
+function ResizableLayout({
+  userProfile,
+  activeProjectId,
+  activeProject,
+}: {
+  userProfile?: UserProfile;
+  activeProjectId: string | null;
+  activeProject: import("@smoothbot/shared").Project | null;
+}) {
   const [centerView, setCenterView] = useState<CenterView>("graph");
   const { defaultLayout, onLayoutChanged } = useDefaultLayout({
     id: "smoothbot-layout",
     storage: localStorage,
     panelIds: PANEL_IDS,
   });
+
+  // Reset to graph when exiting project
+  useEffect(() => {
+    if (!activeProjectId && (centerView === "charter" || centerView === "kanban")) {
+      setCenterView("graph");
+    }
+  }, [activeProjectId, centerView]);
+
+  const renderCenterContent = () => {
+    switch (centerView) {
+      case "charter":
+        return activeProject ? (
+          <CharterView project={activeProject} />
+        ) : null;
+      case "kanban":
+        return activeProjectId ? (
+          <KanbanBoard projectId={activeProjectId} />
+        ) : null;
+      case "live3d":
+        return (
+          <LiveView userProfile={userProfile} onToggleView={() => setCenterView("graph")} />
+        );
+      case "graph":
+      default:
+        return (
+          <AgentGraph userProfile={userProfile} onToggleView={() => setCenterView("live3d")} />
+        );
+    }
+  };
 
   return (
     <Group
@@ -178,14 +275,30 @@ function ResizableLayout({ userProfile }: { userProfile?: UserProfile; }) {
 
       <Separator className="panel-resize-handle" />
 
-      {/* Center: Agent Graph / Live View */}
+      {/* Center: Graph / Live View / Charter / Kanban */}
       <Panel id="graph" minSize="20%">
-        <div className="h-full">
-          {centerView === "graph" ? (
-            <AgentGraph userProfile={userProfile} onToggleView={() => setCenterView("live3d")} />
-          ) : (
-            <LiveView userProfile={userProfile} onToggleView={() => setCenterView("graph")} />
+        <div className="h-full flex flex-col">
+          {/* Tab bar when project is active */}
+          {activeProjectId && (
+            <div className="flex items-center gap-1 px-3 py-1.5 border-b border-border bg-card">
+              {(["graph", "charter", "kanban"] as CenterView[]).map((tab) => (
+                <button
+                  key={tab}
+                  onClick={() => setCenterView(tab)}
+                  className={`text-xs px-2.5 py-1 rounded transition-colors ${
+                    centerView === tab
+                      ? "bg-primary/20 text-primary font-medium"
+                      : "text-muted-foreground hover:text-foreground hover:bg-secondary"
+                  }`}
+                >
+                  {tab === "graph" ? "Graph" : tab === "charter" ? "Charter" : "Board"}
+                </button>
+              ))}
+            </div>
           )}
+          <div className="flex-1 overflow-hidden">
+            {renderCenterContent()}
+          </div>
         </div>
       </Panel>
 

@@ -29,6 +29,7 @@ export interface BusMessage {
 export interface Conversation {
   id: string;
   title: string;
+  projectId: string | null;
   createdAt: string;
   updatedAt: string;
 }

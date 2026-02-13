@@ -3,9 +3,9 @@ import type {
   ServerToClientEvents,
   ClientToServerEvents,
 } from "@smoothbot/shared";
-import { MessageType, type Agent, type BusMessage, type Conversation } from "@smoothbot/shared";
+import { MessageType, type Agent, type BusMessage, type Conversation, type Project, type KanbanTask } from "@smoothbot/shared";
 import { nanoid } from "nanoid";
-import { eq, desc } from "drizzle-orm";
+import { eq, desc, isNull } from "drizzle-orm";
 import type { MessageBus } from "../bus/message-bus.js";
 import type { COO } from "../agents/coo.js";
 import type { Registry } from "../registry/registry.js";
@@ -66,6 +66,7 @@ export function setupSocketHandlers(
     socket.on("ceo:message", (data, callback) => {
       console.log(`[Socket] ceo:message received: "${data.content.slice(0, 80)}"`);
       const db = getDb();
+      const projectId = data.projectId ?? null;
       let conversationId = data.conversationId ?? coo.getCurrentConversationId();
 
       // Lazy conversation creation: first message creates the conversation
@@ -76,11 +77,12 @@ export function setupSocketHandlers(
         const conversation: Conversation = {
           id: conversationId,
           title,
+          projectId,
           createdAt: now,
           updatedAt: now,
         };
         db.insert(schema.conversations).values(conversation).run();
-        coo.startNewConversation(conversationId);
+        coo.startNewConversation(conversationId, projectId);
         io.emit("conversation:created", conversation);
       } else {
         // Update the conversation's updatedAt
@@ -96,6 +98,7 @@ export function setupSocketHandlers(
         type: MessageType.Chat,
         content: data.content,
         conversationId,
+        metadata: projectId ? { projectId } : undefined,
       });
 
       if (callback) {
@@ -111,21 +114,51 @@ export function setupSocketHandlers(
       }
     });
 
-    // List all conversations
-    socket.on("ceo:list-conversations", (callback) => {
+    // List conversations (optionally filtered by projectId)
+    socket.on("ceo:list-conversations", (data, callback) => {
       const db = getDb();
-      const conversations = db
-        .select()
-        .from(schema.conversations)
-        .orderBy(desc(schema.conversations.updatedAt))
-        .all();
+      const projectId = data?.projectId;
+      let conversations;
+      if (projectId) {
+        conversations = db
+          .select()
+          .from(schema.conversations)
+          .where(eq(schema.conversations.projectId, projectId))
+          .orderBy(desc(schema.conversations.updatedAt))
+          .all();
+      } else {
+        // Global conversations only (no project)
+        conversations = db
+          .select()
+          .from(schema.conversations)
+          .where(isNull(schema.conversations.projectId))
+          .orderBy(desc(schema.conversations.updatedAt))
+          .all();
+      }
       callback(conversations as Conversation[]);
     });
 
     // Load a specific conversation
     socket.on("ceo:load-conversation", (data, callback) => {
+      const db = getDb();
       const messages = bus.getConversationMessages(data.conversationId);
-      coo.loadConversation(data.conversationId, messages);
+      // Look up conversation to get projectId and charter
+      const conv = db
+        .select()
+        .from(schema.conversations)
+        .where(eq(schema.conversations.id, data.conversationId))
+        .get();
+      let charter: string | null = null;
+      const projectId = conv?.projectId ?? null;
+      if (projectId) {
+        const project = db
+          .select()
+          .from(schema.projects)
+          .where(eq(schema.projects.id, projectId))
+          .get();
+        charter = project?.charter ?? null;
+      }
+      coo.loadConversation(data.conversationId, messages, projectId, charter);
       callback({ messages });
     });
 
@@ -144,6 +177,70 @@ export function setupSocketHandlers(
         .where(eq(schema.agents.id, data.agentId))
         .get();
       callback((agent as Agent | undefined) ?? null);
+    });
+
+    // List all projects
+    socket.on("project:list", (callback) => {
+      const db = getDb();
+      const projects = db
+        .select()
+        .from(schema.projects)
+        .orderBy(desc(schema.projects.createdAt))
+        .all();
+      callback(projects as unknown as Project[]);
+    });
+
+    // Get a single project
+    socket.on("project:get", (data, callback) => {
+      const db = getDb();
+      const project = db
+        .select()
+        .from(schema.projects)
+        .where(eq(schema.projects.id, data.projectId))
+        .get();
+      callback((project as unknown as Project) ?? null);
+    });
+
+    // Enter a project (returns project + conversations + tasks)
+    socket.on("project:enter", (data, callback) => {
+      const db = getDb();
+      const project = db
+        .select()
+        .from(schema.projects)
+        .where(eq(schema.projects.id, data.projectId))
+        .get();
+      if (!project) {
+        callback({ project: null as any, conversations: [], tasks: [] });
+        return;
+      }
+      const conversations = db
+        .select()
+        .from(schema.conversations)
+        .where(eq(schema.conversations.projectId, data.projectId))
+        .orderBy(desc(schema.conversations.updatedAt))
+        .all();
+      const tasks = db
+        .select()
+        .from(schema.kanbanTasks)
+        .where(eq(schema.kanbanTasks.projectId, data.projectId))
+        .all();
+      callback({
+        project: project as unknown as Project,
+        conversations: conversations as Conversation[],
+        tasks: tasks as unknown as KanbanTask[],
+      });
+    });
+
+    // List conversations for a project
+    socket.on("project:conversations", (data, callback) => {
+      const db = getDb();
+      const conversations = db
+        .select()
+        .from(schema.conversations)
+        .where(eq(schema.conversations.projectId, data.projectId))
+        .orderBy(desc(schema.conversations.updatedAt))
+        .all();
+      callback(conversations as Conversation[]);
     });
 
     socket.on("disconnect", () => {
@@ -190,4 +287,24 @@ export function emitCooThinking(
 
 export function emitCooThinkingEnd(io: TypedServer, messageId: string) {
   io.emit("coo:thinking-end", { messageId });
+}
+
+export function emitProjectCreated(io: TypedServer, project: Project) {
+  io.emit("project:created", project);
+}
+
+export function emitProjectUpdated(io: TypedServer, project: Project) {
+  io.emit("project:updated", project);
+}
+
+export function emitKanbanTaskCreated(io: TypedServer, task: KanbanTask) {
+  io.emit("kanban:task-created", task);
+}
+
+export function emitKanbanTaskUpdated(io: TypedServer, task: KanbanTask) {
+  io.emit("kanban:task-updated", task);
+}
+
+export function emitKanbanTaskDeleted(io: TypedServer, taskId: string, projectId: string) {
+  io.emit("kanban:task-deleted", { taskId, projectId });
 }

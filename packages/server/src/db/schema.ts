@@ -46,6 +46,7 @@ export const messages = sqliteTable("messages", {
 export const conversations = sqliteTable("conversations", {
   id: text("id").primaryKey(),
   title: text("title").notNull(),
+  projectId: text("project_id"),
   createdAt: text("created_at")
     .notNull()
     .$defaultFn(() => new Date().toISOString()),
@@ -98,7 +99,36 @@ export const projects = sqliteTable("projects", {
   })
     .notNull()
     .default("active"),
+  charter: text("charter"),
+  charterStatus: text("charter_status", {
+    enum: ["gathering", "finalized"],
+  }).default("gathering"),
   createdAt: text("created_at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+});
+
+export const kanbanTasks = sqliteTable("kanban_tasks", {
+  id: text("id").primaryKey(),
+  projectId: text("project_id").notNull(),
+  title: text("title").notNull(),
+  description: text("description").notNull().default(""),
+  column: text("column", {
+    enum: ["backlog", "in_progress", "done"],
+  })
+    .notNull()
+    .default("backlog"),
+  position: integer("position").notNull().default(0),
+  assigneeAgentId: text("assignee_agent_id"),
+  createdBy: text("created_by"),
+  labels: text("labels", { mode: "json" })
+    .$type<string[]>()
+    .notNull()
+    .default([]),
+  createdAt: text("created_at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+  updatedAt: text("updated_at")
     .notNull()
     .$defaultFn(() => new Date().toISOString()),
 });

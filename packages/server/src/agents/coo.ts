@@ -7,9 +7,13 @@ import {
   MessageType,
   type BusMessage,
   ProjectStatus,
+  CharterStatus,
+  type Project,
+  type KanbanTask,
 } from "@smoothbot/shared";
 import { BaseAgent, type AgentOptions } from "./agent.js";
 import { COO_SYSTEM_PROMPT } from "./prompts/coo.js";
+import { ConversationContextManager } from "./conversation-context.js";
 import { TeamLead } from "./team-lead.js";
 import { getDb, schema } from "../db/index.js";
 import { Registry } from "../registry/registry.js";
@@ -46,6 +50,11 @@ export interface COODependencies {
   onStream?: (token: string, messageId: string) => void;
   onThinking?: (token: string, messageId: string) => void;
   onThinkingEnd?: (messageId: string) => void;
+  onProjectCreated?: (project: Project) => void;
+  onProjectUpdated?: (project: Project) => void;
+  onKanbanTaskCreated?: (task: KanbanTask) => void;
+  onKanbanTaskUpdated?: (task: KanbanTask) => void;
+  onKanbanTaskDeleted?: (taskId: string, projectId: string) => void;
 }
 
 export class COO extends BaseAgent {
@@ -55,6 +64,13 @@ export class COO extends BaseAgent {
   private onStream?: (token: string, messageId: string) => void;
   private onThinking?: (token: string, messageId: string) => void;
   private onThinkingEnd?: (messageId: string) => void;
+  private onProjectCreated?: (project: Project) => void;
+  private onProjectUpdated?: (project: Project) => void;
+  private onKanbanTaskCreated?: (task: KanbanTask) => void;
+  private onKanbanTaskUpdated?: (task: KanbanTask) => void;
+  private onKanbanTaskDeleted?: (taskId: string, projectId: string) => void;
+  private contextManager!: ConversationContextManager;
+  private activeContextId: string | null = null;
   private currentConversationId: string | null = null;
   private lastProjectCreatedAt = 0;
   private projectCreatedThisTurn = false;
@@ -98,6 +114,12 @@ export class COO extends BaseAgent {
     this.onStream = deps.onStream;
     this.onThinking = deps.onThinking;
     this.onThinkingEnd = deps.onThinkingEnd;
+    this.onProjectCreated = deps.onProjectCreated;
+    this.onProjectUpdated = deps.onProjectUpdated;
+    this.onKanbanTaskCreated = deps.onKanbanTaskCreated;
+    this.onKanbanTaskUpdated = deps.onKanbanTaskUpdated;
+    this.onKanbanTaskDeleted = deps.onKanbanTaskDeleted;
+    this.contextManager = new ConversationContextManager(systemPrompt);
   }
 
   async handleMessage(message: BusMessage): Promise<void> {
@@ -135,6 +157,16 @@ export class COO extends BaseAgent {
 
     // Reset per-turn creation guard
     this.projectCreatedThisTurn = false;
+
+    // Swap to the correct conversation context
+    const conversationId = this.currentConversationId;
+    const projectId = message.metadata?.projectId as string | null ?? null;
+    if (conversationId) {
+      const ctx = this.contextManager.getOrCreate(conversationId, projectId);
+      this.activeContextId = conversationId;
+      // Temporarily swap the base class history to this context's history
+      this.conversationHistory = ctx.history;
+    }
 
     // Inject active project context so the LLM can avoid duplicates
     const projectContext = this.getActiveProjectsSummary();
@@ -201,7 +233,7 @@ export class COO extends BaseAgent {
     return {
       create_project: tool({
         description:
-          "Create a new project and spawn a Team Lead to manage it. Use this when the CEO gives you a new goal or task that requires work.",
+          "Create a new project and spawn a Team Lead to manage it. Use this when the CEO gives you a new goal or task that requires work. Include a charter summarizing the project's goals, scope, constraints, and deliverables.",
         parameters: z.object({
           name: z
             .string()
@@ -209,14 +241,49 @@ export class COO extends BaseAgent {
           description: z
             .string()
             .describe("Detailed description of what needs to be done"),
+          charter: z
+            .string()
+            .describe(
+              "Markdown charter document summarizing the project goals, scope, constraints, and deliverables",
+            ),
           directive: z
             .string()
             .describe(
               "The directive to give the Team Lead — what they need to accomplish",
             ),
         }),
-        execute: async ({ name, description, directive }) => {
-          return this.createProject(name, description, directive);
+        execute: async ({ name, description, charter, directive }) => {
+          return this.createProject(name, description, directive, charter);
+        },
+      }),
+      update_charter: tool({
+        description:
+          "Update a project's charter document. Use this when project scope or goals change.",
+        parameters: z.object({
+          projectId: z
+            .string()
+            .describe("The project ID to update"),
+          charter: z
+            .string()
+            .describe("Updated markdown charter document"),
+        }),
+        execute: async ({ projectId, charter }) => {
+          return this.updateCharter(projectId, charter);
+        },
+      }),
+      update_project_status: tool({
+        description:
+          "Update a project's status. Use this to mark a project as completed, failed, or cancelled.",
+        parameters: z.object({
+          projectId: z
+            .string()
+            .describe("The project ID to update"),
+          status: z
+            .enum(["active", "completed", "failed", "cancelled"])
+            .describe("New project status"),
+        }),
+        execute: async ({ projectId, status }) => {
+          return this.updateProjectStatus(projectId, status as "active" | "completed" | "failed" | "cancelled");
         },
       }),
       get_project_status: tool({
@@ -381,6 +448,7 @@ export class COO extends BaseAgent {
     name: string,
     description: string,
     directive: string,
+    charter?: string,
   ): Promise<string> {
     // Guard: only one project per think() turn
     if (this.projectCreatedThisTurn) {
@@ -404,6 +472,8 @@ export class COO extends BaseAgent {
         name,
         description,
         status: ProjectStatus.Active,
+        charter: charter ?? null,
+        charterStatus: charter ? CharterStatus.Finalized : CharterStatus.Gathering,
         createdAt: new Date().toISOString(),
       })
       .run();
@@ -420,6 +490,11 @@ export class COO extends BaseAgent {
       modelPackId: getRandomModelPackId(),
       onAgentSpawned: this.onAgentSpawned,
       onStatusChange: this.onStatusChange,
+      onKanbanChange: (event, task) => {
+        if (event === "created") this.onKanbanTaskCreated?.(task);
+        else if (event === "updated") this.onKanbanTaskUpdated?.(task);
+        else if (event === "deleted") this.onKanbanTaskDeleted?.(task.id, task.projectId);
+      },
     });
 
     this.teamLeads.set(projectId, teamLead);
@@ -437,6 +512,16 @@ export class COO extends BaseAgent {
       projectId,
       projectName: name,
     });
+
+    // Emit project:created event
+    const project = db
+      .select()
+      .from(schema.projects)
+      .where(eq(schema.projects.id, projectId))
+      .get();
+    if (project) {
+      this.onProjectCreated?.(project as unknown as Project);
+    }
 
     return `Project "${name}" created (${projectId}). Team Lead ${teamLead.id} assigned and directive sent.`;
   }
@@ -522,6 +607,65 @@ export class COO extends BaseAgent {
         ? activityLines
         : ["  (no recent messages)"]),
     ].join("\n");
+  }
+
+  private async updateProjectStatus(
+    projectId: string,
+    status: "active" | "completed" | "failed" | "cancelled",
+  ): Promise<string> {
+    const db = getDb();
+    const project = db
+      .select()
+      .from(schema.projects)
+      .where(eq(schema.projects.id, projectId))
+      .get();
+    if (!project) return `Project ${projectId} not found.`;
+
+    db.update(schema.projects)
+      .set({ status })
+      .where(eq(schema.projects.id, projectId))
+      .run();
+
+    const updated = db
+      .select()
+      .from(schema.projects)
+      .where(eq(schema.projects.id, projectId))
+      .get();
+    if (updated) {
+      this.onProjectUpdated?.(updated as unknown as Project);
+    }
+
+    return `Project "${project.name}" status updated to ${status}.`;
+  }
+
+  private async updateCharter(projectId: string, charter: string): Promise<string> {
+    const db = getDb();
+    const project = db
+      .select()
+      .from(schema.projects)
+      .where(eq(schema.projects.id, projectId))
+      .get();
+    if (!project) return `Project ${projectId} not found.`;
+
+    db.update(schema.projects)
+      .set({
+        charter,
+        charterStatus: CharterStatus.Finalized,
+      })
+      .where(eq(schema.projects.id, projectId))
+      .run();
+
+    // Emit project:updated event
+    const updated = db
+      .select()
+      .from(schema.projects)
+      .where(eq(schema.projects.id, projectId))
+      .get();
+    if (updated) {
+      this.onProjectUpdated?.(updated as unknown as Project);
+    }
+
+    return `Charter updated for project "${project.name}".`;
   }
 
   private async manageModels(args: {
@@ -767,27 +911,19 @@ export class COO extends BaseAgent {
   }
 
   /** Load a previous conversation by replaying persisted messages */
-  loadConversation(conversationId: string, messages: BusMessage[]) {
+  loadConversation(conversationId: string, messages: BusMessage[], projectId?: string | null, charter?: string | null) {
     this.currentConversationId = conversationId;
-    this.conversationHistory = [
-      { role: "system", content: this.systemPrompt },
-    ];
-    for (const msg of messages) {
-      if (msg.type !== "chat") continue;
-      if (msg.fromAgentId === null) {
-        // CEO message
-        this.conversationHistory.push({ role: "user", content: msg.content });
-      } else if (msg.fromAgentId === "coo") {
-        // COO message
-        this.conversationHistory.push({ role: "assistant", content: msg.content });
-      }
-    }
+    const ctx = this.contextManager.load(conversationId, projectId ?? null, messages, charter);
+    this.activeContextId = conversationId;
+    this.conversationHistory = ctx.history;
   }
 
   /** Start a new conversation (sets ID, resets history) */
-  startNewConversation(conversationId: string) {
+  startNewConversation(conversationId: string, projectId?: string | null) {
     this.currentConversationId = conversationId;
-    this.resetConversation();
+    const ctx = this.contextManager.getOrCreate(conversationId, projectId ?? null);
+    this.activeContextId = conversationId;
+    this.conversationHistory = ctx.history;
   }
 
   /** Get the current conversation ID */

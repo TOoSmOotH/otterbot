@@ -31,6 +31,11 @@ import {
   emitCooStream,
   emitCooThinking,
   emitCooThinkingEnd,
+  emitProjectCreated,
+  emitProjectUpdated,
+  emitKanbanTaskCreated,
+  emitKanbanTaskUpdated,
+  emitKanbanTaskDeleted,
 } from "./socket/handlers.js";
 import {
   isSetupComplete,
@@ -229,6 +234,21 @@ async function main() {
         },
         onThinkingEnd: (messageId) => {
           emitCooThinkingEnd(io, messageId);
+        },
+        onProjectCreated: (project) => {
+          emitProjectCreated(io, project);
+        },
+        onProjectUpdated: (project) => {
+          emitProjectUpdated(io, project);
+        },
+        onKanbanTaskCreated: (task) => {
+          emitKanbanTaskCreated(io, task);
+        },
+        onKanbanTaskUpdated: (task) => {
+          emitKanbanTaskUpdated(io, task);
+        },
+        onKanbanTaskDeleted: (taskId, projectId) => {
+          emitKanbanTaskDeleted(io, taskId, projectId);
         },
       });
       emitAgentSpawned(io, coo);
@@ -619,6 +639,228 @@ async function main() {
       .orderBy(desc(schema.conversations.updatedAt))
       .all();
   });
+
+  // =========================================================================
+  // Project routes
+  // =========================================================================
+
+  app.get("/api/projects", async () => {
+    const { getDb, schema } = await import("./db/index.js");
+    const { desc } = await import("drizzle-orm");
+    const db = getDb();
+    return db
+      .select()
+      .from(schema.projects)
+      .orderBy(desc(schema.projects.createdAt))
+      .all();
+  });
+
+  app.get<{ Params: { projectId: string } }>(
+    "/api/projects/:projectId",
+    async (req, reply) => {
+      const { getDb, schema } = await import("./db/index.js");
+      const { eq } = await import("drizzle-orm");
+      const db = getDb();
+      const project = db
+        .select()
+        .from(schema.projects)
+        .where(eq(schema.projects.id, req.params.projectId))
+        .get();
+      if (!project) {
+        reply.code(404);
+        return { error: "Project not found" };
+      }
+      return project;
+    },
+  );
+
+  app.get<{ Params: { projectId: string } }>(
+    "/api/projects/:projectId/conversations",
+    async (req) => {
+      const { getDb, schema } = await import("./db/index.js");
+      const { eq, desc } = await import("drizzle-orm");
+      const db = getDb();
+      return db
+        .select()
+        .from(schema.conversations)
+        .where(eq(schema.conversations.projectId, req.params.projectId))
+        .orderBy(desc(schema.conversations.updatedAt))
+        .all();
+    },
+  );
+
+  // =========================================================================
+  // Kanban task routes
+  // =========================================================================
+
+  app.get<{ Params: { projectId: string } }>(
+    "/api/projects/:projectId/tasks",
+    async (req) => {
+      const { getDb, schema } = await import("./db/index.js");
+      const { eq } = await import("drizzle-orm");
+      const db = getDb();
+      return db
+        .select()
+        .from(schema.kanbanTasks)
+        .where(eq(schema.kanbanTasks.projectId, req.params.projectId))
+        .all();
+    },
+  );
+
+  app.post<{
+    Params: { projectId: string };
+    Body: { title: string; description?: string; column?: string; labels?: string[] };
+  }>(
+    "/api/projects/:projectId/tasks",
+    async (req) => {
+      const { getDb, schema } = await import("./db/index.js");
+      const { eq } = await import("drizzle-orm");
+      const { nanoid } = await import("nanoid");
+      const db = getDb();
+      const { title, description, column, labels } = req.body;
+      const now = new Date().toISOString();
+
+      // Get max position in column
+      const existing = db
+        .select()
+        .from(schema.kanbanTasks)
+        .where(eq(schema.kanbanTasks.projectId, req.params.projectId))
+        .all();
+      const colTasks = existing.filter((t) => t.column === (column ?? "backlog"));
+      const maxPos = colTasks.reduce((max, t) => Math.max(max, t.position), -1);
+
+      const task = {
+        id: nanoid(),
+        projectId: req.params.projectId,
+        title,
+        description: description ?? "",
+        column: (column ?? "backlog") as "backlog" | "in_progress" | "done",
+        position: maxPos + 1,
+        assigneeAgentId: null,
+        createdBy: "user",
+        labels: labels ?? [],
+        createdAt: now,
+        updatedAt: now,
+      };
+      db.insert(schema.kanbanTasks).values(task).run();
+
+      // Broadcast via socket
+      if (coo) {
+        io.emit("kanban:task-created", task as any);
+      }
+      return task;
+    },
+  );
+
+  app.patch<{
+    Params: { projectId: string; taskId: string };
+    Body: { title?: string; description?: string; column?: string; position?: number; assigneeAgentId?: string | null; labels?: string[] };
+  }>(
+    "/api/projects/:projectId/tasks/:taskId",
+    async (req, reply) => {
+      const { getDb, schema } = await import("./db/index.js");
+      const { eq } = await import("drizzle-orm");
+      const db = getDb();
+      const existing = db
+        .select()
+        .from(schema.kanbanTasks)
+        .where(eq(schema.kanbanTasks.id, req.params.taskId))
+        .get();
+      if (!existing) {
+        reply.code(404);
+        return { error: "Task not found" };
+      }
+
+      const updates: Record<string, unknown> = { updatedAt: new Date().toISOString() };
+      if (req.body.title !== undefined) updates.title = req.body.title;
+      if (req.body.description !== undefined) updates.description = req.body.description;
+      if (req.body.column !== undefined) updates.column = req.body.column;
+      if (req.body.position !== undefined) updates.position = req.body.position;
+      if (req.body.assigneeAgentId !== undefined) updates.assigneeAgentId = req.body.assigneeAgentId;
+      if (req.body.labels !== undefined) updates.labels = req.body.labels;
+
+      db.update(schema.kanbanTasks)
+        .set(updates)
+        .where(eq(schema.kanbanTasks.id, req.params.taskId))
+        .run();
+
+      const updated = db
+        .select()
+        .from(schema.kanbanTasks)
+        .where(eq(schema.kanbanTasks.id, req.params.taskId))
+        .get();
+
+      // Broadcast via socket
+      if (updated) {
+        io.emit("kanban:task-updated", updated as any);
+      }
+      return updated;
+    },
+  );
+
+  app.delete<{ Params: { projectId: string; taskId: string } }>(
+    "/api/projects/:projectId/tasks/:taskId",
+    async (req, reply) => {
+      const { getDb, schema } = await import("./db/index.js");
+      const { eq } = await import("drizzle-orm");
+      const db = getDb();
+      const existing = db
+        .select()
+        .from(schema.kanbanTasks)
+        .where(eq(schema.kanbanTasks.id, req.params.taskId))
+        .get();
+      if (!existing) {
+        reply.code(404);
+        return { error: "Task not found" };
+      }
+
+      db.delete(schema.kanbanTasks)
+        .where(eq(schema.kanbanTasks.id, req.params.taskId))
+        .run();
+
+      // Broadcast via socket
+      io.emit("kanban:task-deleted", {
+        taskId: req.params.taskId,
+        projectId: req.params.projectId,
+      });
+      return { ok: true };
+    },
+  );
+
+  app.post<{
+    Params: { projectId: string };
+    Body: { column: string; taskIds: string[] };
+  }>(
+    "/api/projects/:projectId/tasks/reorder",
+    async (req) => {
+      const { getDb, schema } = await import("./db/index.js");
+      const { eq } = await import("drizzle-orm");
+      const db = getDb();
+      const { column, taskIds } = req.body;
+      for (let i = 0; i < taskIds.length; i++) {
+        db.update(schema.kanbanTasks)
+          .set({
+            column: column as "backlog" | "in_progress" | "done",
+            position: i,
+            updatedAt: new Date().toISOString(),
+          })
+          .where(eq(schema.kanbanTasks.id, taskIds[i]))
+          .run();
+      }
+      // Broadcast updates
+      for (const taskId of taskIds) {
+        const updated = db
+          .select()
+          .from(schema.kanbanTasks)
+          .where(eq(schema.kanbanTasks.id, taskId))
+          .get();
+        if (updated) {
+          io.emit("kanban:task-updated", updated as any);
+        }
+      }
+      return { ok: true };
+    },
+  );
 
   // Package manifest endpoints
   app.get("/api/packages", async () => {

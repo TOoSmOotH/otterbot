@@ -43,11 +43,18 @@ export interface RegistryEntryUpdate {
   gearConfig?: GearConfig | null;
 }
 
+export enum CharterStatus {
+  Gathering = "gathering",
+  Finalized = "finalized",
+}
+
 export interface Project {
   id: string;
   name: string;
   description: string;
   status: ProjectStatus;
+  charter: string | null;
+  charterStatus: CharterStatus;
   createdAt: string;
 }
 

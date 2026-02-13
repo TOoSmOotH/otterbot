@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import { getSocket } from "../lib/socket";
 import { useMessageStore } from "../stores/message-store";
 import { useAgentStore } from "../stores/agent-store";
+import { useProjectStore } from "../stores/project-store";
 
 export function useSocket() {
   const initialized = useRef(false);
@@ -14,6 +15,12 @@ export function useSocket() {
   const addAgent = useAgentStore((s) => s.addAgent);
   const updateAgentStatus = useAgentStore((s) => s.updateAgentStatus);
   const removeAgent = useAgentStore((s) => s.removeAgent);
+  const addProject = useProjectStore((s) => s.addProject);
+  const updateProject = useProjectStore((s) => s.updateProject);
+  const addTask = useProjectStore((s) => s.addTask);
+  const updateTask = useProjectStore((s) => s.updateTask);
+  const removeTask = useProjectStore((s) => s.removeTask);
+  const addProjectConversation = useProjectStore((s) => s.addProjectConversation);
 
   useEffect(() => {
     if (initialized.current) return;
@@ -60,6 +67,9 @@ export function useSocket() {
 
     socket.on("conversation:created", (conversation) => {
       addConversation(conversation);
+      if (conversation.projectId) {
+        addProjectConversation(conversation);
+      }
     });
 
     socket.on("agent:spawned", (agent) => {
@@ -74,6 +84,26 @@ export function useSocket() {
       removeAgent(agentId);
     });
 
+    socket.on("project:created", (project) => {
+      addProject(project);
+    });
+
+    socket.on("project:updated", (project) => {
+      updateProject(project);
+    });
+
+    socket.on("kanban:task-created", (task) => {
+      addTask(task);
+    });
+
+    socket.on("kanban:task-updated", (task) => {
+      updateTask(task);
+    });
+
+    socket.on("kanban:task-deleted", ({ taskId }) => {
+      removeTask(taskId);
+    });
+
     return () => {
       socket.off("bus:message");
       socket.off("coo:response");
@@ -85,6 +115,11 @@ export function useSocket() {
       socket.off("agent:spawned");
       socket.off("agent:status");
       socket.off("agent:destroyed");
+      socket.off("project:created");
+      socket.off("project:updated");
+      socket.off("kanban:task-created");
+      socket.off("kanban:task-updated");
+      socket.off("kanban:task-deleted");
     };
   }, []);
 

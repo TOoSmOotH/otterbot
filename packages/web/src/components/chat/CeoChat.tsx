@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useCallback, type KeyboardEvent, type FC } from "react";
 import { useMessageStore } from "../../stores/message-store";
 import { useSettingsStore } from "../../stores/settings-store";
+import { useProjectStore } from "../../stores/project-store";
 import { useSpeechToText } from "../../hooks/use-speech-to-text";
 import { getSocket } from "../../lib/socket";
 import { cn } from "../../lib/utils";
@@ -68,6 +69,13 @@ export function CeoChat({ cooName }: { cooName?: string }) {
   const conversations = useMessageStore((s) => s.conversations);
   const loadConversationMessages = useMessageStore((s) => s.loadConversationMessages);
 
+  const activeProjectId = useProjectStore((s) => s.activeProjectId);
+  const activeProject = useProjectStore((s) => s.activeProject);
+  const projectConversations = useProjectStore((s) => s.projectConversations);
+
+  // Use project conversations when in a project context, global otherwise
+  const displayedConversations = activeProjectId ? projectConversations : conversations;
+
   const sttEnabled = useSettingsStore((s) => s.sttEnabled);
   const activeSTTProvider = useSettingsStore((s) => s.activeSTTProvider);
 
@@ -99,6 +107,12 @@ export function CeoChat({ cooName }: { cooName?: string }) {
         setInterimText(partialText);
       },
     });
+
+  // Clear chat when project context changes
+  useEffect(() => {
+    clearChat();
+    setShowHistory(false);
+  }, [activeProjectId]);
 
   // Sync speech-to-text errors to local state with auto-dismiss
   useEffect(() => {
@@ -139,7 +153,11 @@ export function CeoChat({ cooName }: { cooName?: string }) {
     const socket = getSocket();
     socket.emit(
       "ceo:message",
-      { content, conversationId: currentConversationId ?? undefined },
+      {
+        content,
+        conversationId: currentConversationId ?? undefined,
+        projectId: activeProjectId ?? undefined,
+      },
       (ack) => {
         if (ack?.conversationId) {
           setCurrentConversation(ack.conversationId);
@@ -192,8 +210,13 @@ export function CeoChat({ cooName }: { cooName?: string }) {
         <div className="flex items-center gap-2">
           <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
           <h2 className="text-sm font-semibold tracking-tight">
-            {showHistory ? "Chat History" : `${cooName ?? "COO"} Chat`}
+            {showHistory ? "Chat History" : activeProject ? activeProject.name : `${cooName ?? "COO"} Chat`}
           </h2>
+          {activeProject && !showHistory && (
+            <span className="text-[10px] text-muted-foreground bg-secondary rounded px-1.5 py-0.5">
+              project
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-1">
           {/* History toggle */}
@@ -249,7 +272,7 @@ export function CeoChat({ cooName }: { cooName?: string }) {
       {showHistory ? (
         /* Conversation history list */
         <div className="flex-1 overflow-y-auto">
-          {conversations.length === 0 ? (
+          {displayedConversations.length === 0 ? (
             <div className="flex items-center justify-center h-full">
               <p className="text-sm text-muted-foreground text-center max-w-[240px]">
                 No conversations yet
@@ -257,7 +280,7 @@ export function CeoChat({ cooName }: { cooName?: string }) {
             </div>
           ) : (
             <div className="divide-y divide-border">
-              {conversations.map((conv) => (
+              {displayedConversations.map((conv) => (
                 <button
                   key={conv.id}
                   onClick={() => handleLoadConversation(conv.id)}

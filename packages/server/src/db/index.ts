@@ -70,9 +70,17 @@ export async function migrateDb() {
   db.run(sql`CREATE TABLE IF NOT EXISTS conversations (
     id TEXT PRIMARY KEY,
     title TEXT NOT NULL,
+    project_id TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
   )`);
+
+  // Idempotent migration: add project_id to existing conversations table
+  try {
+    db.run(sql`ALTER TABLE conversations ADD COLUMN project_id TEXT`);
+  } catch {
+    // Column already exists — ignore
+  }
 
   // Idempotent migration: add conversation_id to existing messages table
   try {
@@ -136,7 +144,35 @@ export async function migrateDb() {
     name TEXT NOT NULL,
     description TEXT NOT NULL DEFAULT '',
     status TEXT NOT NULL DEFAULT 'active',
+    charter TEXT,
+    charter_status TEXT DEFAULT 'gathering',
     created_at TEXT NOT NULL
+  )`);
+
+  // Idempotent migration: add charter fields to existing projects table
+  try {
+    db.run(sql`ALTER TABLE projects ADD COLUMN charter TEXT`);
+  } catch {
+    // Column already exists — ignore
+  }
+  try {
+    db.run(sql`ALTER TABLE projects ADD COLUMN charter_status TEXT DEFAULT 'gathering'`);
+  } catch {
+    // Column already exists — ignore
+  }
+
+  db.run(sql`CREATE TABLE IF NOT EXISTS kanban_tasks (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    title TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    column TEXT NOT NULL DEFAULT 'backlog',
+    position INTEGER NOT NULL DEFAULT 0,
+    assignee_agent_id TEXT,
+    created_by TEXT,
+    labels TEXT NOT NULL DEFAULT '[]',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
   )`);
 
   db.run(sql`CREATE TABLE IF NOT EXISTS config (
