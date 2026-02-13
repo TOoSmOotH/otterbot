@@ -3,9 +3,11 @@ import { OrbitControls } from "@react-three/drei";
 import { useAgentStore } from "../../stores/agent-store";
 import { useModelPackStore } from "../../stores/model-pack-store";
 import { useEnvironmentStore } from "../../stores/environment-store";
+import { useRoomBuilderStore } from "../../stores/room-builder-store";
 import { AgentCharacter } from "./AgentCharacter";
 import { FallbackAgent } from "./FallbackAgent";
 import { EnvironmentScene } from "./EnvironmentScene";
+import { EditableEnvironmentScene } from "../room-builder/EditableEnvironmentScene";
 import type { Agent } from "@smoothbot/shared";
 
 interface LiveViewSceneProps {
@@ -18,6 +20,7 @@ export function LiveViewScene({ userProfile }: LiveViewSceneProps) {
   const packs = useModelPackStore((s) => s.packs);
   const getPackById = useModelPackStore((s) => s.getPackById);
   const activeScene = useEnvironmentStore((s) => s.getActiveScene());
+  const builderActive = useRoomBuilderStore((s) => s.active);
 
   const { positions } = useMemo(() => {
     const activeAgents = Array.from(agents.values()).filter(
@@ -171,8 +174,10 @@ export function LiveViewScene({ userProfile }: LiveViewSceneProps) {
         <pointLight position={[-5, 5, -5]} intensity={0.3} color="#4488ff" />
       )}
 
-      {/* Environment or fallback ground */}
-      {activeScene ? (
+      {/* Environment: editable in builder mode, read-only otherwise */}
+      {builderActive ? (
+        <EditableEnvironmentScene />
+      ) : activeScene ? (
         <EnvironmentScene scene={activeScene} />
       ) : (
         <>
@@ -184,37 +189,38 @@ export function LiveViewScene({ userProfile }: LiveViewSceneProps) {
         </>
       )}
 
-      {/* Characters */}
-      {positions.map((pos) => {
-        const pack = pos.modelPackId ? getPackById(pos.modelPackId) : undefined;
-        const status = pos.agent?.status ?? "idle";
+      {/* Characters — hidden during room editing */}
+      {!builderActive &&
+        positions.map((pos) => {
+          const pack = pos.modelPackId ? getPackById(pos.modelPackId) : undefined;
+          const status = pos.agent?.status ?? "idle";
 
-        if (pack) {
+          if (pack) {
+            return (
+              <AgentCharacter
+                key={pos.agent?.id ?? "ceo"}
+                pack={pack}
+                position={[pos.x, 0, pos.z]}
+                label={pos.label}
+                role={pos.role}
+                status={status}
+                gearConfig={pos.gearConfig}
+                rotationY={pos.rotationY}
+              />
+            );
+          }
+
           return (
-            <AgentCharacter
+            <FallbackAgent
               key={pos.agent?.id ?? "ceo"}
-              pack={pack}
               position={[pos.x, 0, pos.z]}
               label={pos.label}
               role={pos.role}
               status={status}
-              gearConfig={pos.gearConfig}
               rotationY={pos.rotationY}
             />
           );
-        }
-
-        return (
-          <FallbackAgent
-            key={pos.agent?.id ?? "ceo"}
-            position={[pos.x, 0, pos.z]}
-            label={pos.label}
-            role={pos.role}
-            status={status}
-            rotationY={pos.rotationY}
-          />
-        );
-      })}
+        })}
 
       {/* Camera controls */}
       <OrbitControls

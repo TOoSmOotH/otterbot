@@ -14,6 +14,7 @@ import type {
   ClientToServerEvents,
   RegistryEntryCreate,
   RegistryEntryUpdate,
+  SceneConfig,
 } from "@smoothbot/shared";
 import { migrateDb } from "./db/index.js";
 import { MessageBus } from "./bus/message-bus.js";
@@ -666,6 +667,22 @@ async function main() {
       reply.code(400);
       return { error: 'type must be "apt", "npm", or "repo"' };
     }
+  });
+
+  // Scene save endpoint
+  app.put<{
+    Params: { id: string };
+    Body: SceneConfig;
+  }>("/api/scenes/:id", async (req, reply) => {
+    const { id } = req.params;
+    const config = req.body as SceneConfig;
+    if (config.id !== id) {
+      reply.code(400);
+      return { error: "Scene ID in body does not match URL parameter" };
+    }
+    const scenePath = join(assetsRoot, "scenes", `${id}.json`);
+    writeFileSync(scenePath, JSON.stringify(config, null, 2));
+    return { ok: true };
   });
 
   // User profile endpoint

@@ -8,6 +8,7 @@ interface EnvironmentState {
   loading: boolean;
   loaded: boolean;
   loadEnvironment: () => Promise<void>;
+  reloadEnvironment: () => Promise<void>;
   getActiveScene: () => SceneConfig | undefined;
   resolveAssetUrl: (assetRef: string) => string | undefined;
 }
@@ -40,6 +41,30 @@ export const useEnvironmentStore = create<EnvironmentState>((set, get) => ({
       set({ packs, scenes, loaded: true });
     } catch (err) {
       console.error("[environment-store] error:", err);
+    } finally {
+      set({ loading: false });
+    }
+  },
+
+  reloadEnvironment: async () => {
+    set({ loading: true });
+    try {
+      const [packsRes, scenesRes] = await Promise.all([
+        fetch("/api/environment-packs"),
+        fetch("/api/scenes"),
+      ]);
+      const packs = packsRes.ok ? await packsRes.json() : [];
+      const scenes = scenesRes.ok ? await scenesRes.json() : [];
+      console.log(
+        "[environment-store] reloaded",
+        packs.length,
+        "packs,",
+        scenes.length,
+        "scenes",
+      );
+      set({ packs, scenes, loaded: true });
+    } catch (err) {
+      console.error("[environment-store] reload error:", err);
     } finally {
       set({ loading: false });
     }
