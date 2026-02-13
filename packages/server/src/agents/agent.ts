@@ -141,6 +141,7 @@ export abstract class BaseAgent {
   ): Promise<{ text: string; thinking: string | undefined }> {
     this.conversationHistory.push({ role: "user", content: userMessage });
     this.setStatus(AgentStatus.Thinking);
+    console.log(`[Agent ${this.id}] think() — provider=${this.llmConfig.provider} model=${this.llmConfig.model}`);
 
     try {
       const tools = this.getTools();
@@ -196,7 +197,8 @@ export abstract class BaseAgent {
 
   /**
    * Run a single LLM stream and collect the response.
-   * Includes a 30-second timeout for the first chunk to detect hanging providers.
+   * Includes a 30-second timeout for the first chunk and a 120-second
+   * per-chunk timeout for subsequent chunks to prevent infinite hangs.
    */
   private async runStream(
     tools: Record<string, unknown> | undefined,
@@ -218,13 +220,17 @@ export abstract class BaseAgent {
     // Race the first chunk against a 30s timeout to detect hanging providers
     const iterator = result.fullStream[Symbol.asyncIterator]();
     const FIRST_CHUNK_TIMEOUT = 30_000;
+    const CHUNK_TIMEOUT = 120_000; // 2 min per-chunk timeout for slow models
 
-    const first = await Promise.race([
-      iterator.next(),
-      new Promise<{ done: true; value: undefined }>((resolve) =>
-        setTimeout(() => resolve({ done: true, value: undefined }), FIRST_CHUNK_TIMEOUT),
-      ),
-    ]);
+    const nextWithTimeout = (timeoutMs: number) =>
+      Promise.race([
+        iterator.next(),
+        new Promise<{ done: true; value: undefined }>((resolve) =>
+          setTimeout(() => resolve({ done: true, value: undefined }), timeoutMs),
+        ),
+      ]);
+
+    const first = await nextWithTimeout(FIRST_CHUNK_TIMEOUT);
 
     if (first.done) {
       // Timed out or empty stream
@@ -257,10 +263,16 @@ export abstract class BaseAgent {
 
     processPart(first.value);
 
-    // Process remaining parts (no timeout — provider is responding)
+    // Process remaining parts with per-chunk timeout
     while (true) {
-      const next = await iterator.next();
-      if (next.done) break;
+      const next = await nextWithTimeout(CHUNK_TIMEOUT);
+      if (next.done) {
+        if (fullResponse || reasoning) {
+          // Stream produced some data then stopped — treat as complete
+          console.warn(`[Agent ${this.id}] Stream stalled after producing data — treating as complete`);
+        }
+        break;
+      }
       processPart(next.value);
     }
 
@@ -269,10 +281,16 @@ export abstract class BaseAgent {
     }
 
     // Handle tool calls
-    const toolCalls = await result.toolCalls;
-    if (toolCalls && toolCalls.length > 0) {
+    const toolCallsPromise = Promise.race([
+      result.toolCalls,
+      new Promise<never>((_resolve, reject) =>
+        setTimeout(() => reject(new Error("toolCalls timeout")), 10_000),
+      ),
+    ]).catch(() => []);
+    const toolCalls = await toolCallsPromise;
+    if (toolCalls && (toolCalls as any[]).length > 0) {
       this.setStatus(AgentStatus.Acting);
-      for (const toolCall of toolCalls) {
+      for (const toolCall of toolCalls as any[]) {
         await this.executeTool(
           toolCall.toolName,
           toolCall.args as Record<string, unknown>,

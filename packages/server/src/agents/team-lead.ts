@@ -391,8 +391,14 @@ export class TeamLead extends BaseAgent {
       registryEntryId: entry.id,
       modelPackId: (entry as any).modelPackId ?? getRandomModelPackId(),
       gearConfig: (entry as any).gearConfig ? JSON.parse((entry as any).gearConfig) : null,
-      model: entry.defaultModel,
-      provider: entry.defaultProvider,
+      model:
+        getConfig("worker_model") ??
+        getConfig("coo_model") ??
+        entry.defaultModel,
+      provider:
+        getConfig("worker_provider") ??
+        getConfig("coo_provider") ??
+        entry.defaultProvider,
       systemPrompt: entry.systemPrompt,
       workspacePath,
       toolNames: entryTools,
