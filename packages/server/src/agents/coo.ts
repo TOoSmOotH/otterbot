@@ -56,6 +56,8 @@ export class COO extends BaseAgent {
   private onThinking?: (token: string, messageId: string) => void;
   private onThinkingEnd?: (messageId: string) => void;
   private currentConversationId: string | null = null;
+  private lastProjectCreatedAt = 0;
+  private projectCreatedThisTurn = false;
 
   constructor(deps: COODependencies) {
     const registry = new Registry();
@@ -130,6 +132,9 @@ export class COO extends BaseAgent {
     if (message.conversationId) {
       this.currentConversationId = message.conversationId;
     }
+
+    // Reset per-turn creation guard
+    this.projectCreatedThisTurn = false;
 
     // Inject active project context so the LLM can avoid duplicates
     const projectContext = this.getActiveProjectsSummary();
@@ -370,11 +375,25 @@ export class COO extends BaseAgent {
     };
   }
 
+  private static readonly PROJECT_COOLDOWN_MS = 60_000; // 60 seconds
+
   private async createProject(
     name: string,
     description: string,
     directive: string,
   ): Promise<string> {
+    // Guard: only one project per think() turn
+    if (this.projectCreatedThisTurn) {
+      return `Blocked: a project was already created during this turn. Use get_project_status to check existing projects instead of creating another.`;
+    }
+
+    // Guard: cooldown between project creations
+    const elapsed = Date.now() - this.lastProjectCreatedAt;
+    if (elapsed < COO.PROJECT_COOLDOWN_MS) {
+      const waitSec = Math.ceil((COO.PROJECT_COOLDOWN_MS - elapsed) / 1000);
+      return `Blocked: a project was created ${Math.floor(elapsed / 1000)}s ago. Wait ${waitSec}s or use get_project_status to check existing projects.`;
+    }
+
     const projectId = nanoid();
     const db = getDb();
 
@@ -408,6 +427,10 @@ export class COO extends BaseAgent {
     if (this.onAgentSpawned) {
       this.onAgentSpawned(teamLead);
     }
+
+    // Mark creation guards
+    this.projectCreatedThisTurn = true;
+    this.lastProjectCreatedAt = Date.now();
 
     // Send directive to Team Lead
     this.sendMessage(teamLead.id, MessageType.Directive, directive, {
