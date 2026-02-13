@@ -114,6 +114,7 @@ export class COO extends BaseAgent {
       this.currentConversationId = message.conversationId;
     }
 
+    console.log(`[COO] Calling think() — model=${this.llmConfig.model} provider=${this.llmConfig.provider}`);
     const { text, thinking } = await this.think(
       message.content,
       (token, messageId) => {
@@ -126,6 +127,7 @@ export class COO extends BaseAgent {
         this.onThinkingEnd?.(messageId);
       },
     );
+    console.log(`[COO] think() returned (${text.length} chars): "${text.slice(0, 120)}"`);
 
     // Send the response back through the bus (to CEO / null)
     this.sendMessage(

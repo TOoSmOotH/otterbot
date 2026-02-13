@@ -133,11 +133,13 @@ export abstract class BaseAgent {
     try {
       const tools = this.getTools();
       const hasTools = Object.keys(tools).length > 0;
+      console.log(`[Agent ${this.id}] Calling stream() — hasTools=${hasTools}, history=${this.conversationHistory.length} msgs`);
       const result = await stream(
         this.llmConfig,
         this.conversationHistory,
         hasTools ? tools : undefined,
       );
+      console.log(`[Agent ${this.id}] stream() returned, iterating fullStream...`);
 
       const messageId = nanoid();
       let fullResponse = "";
