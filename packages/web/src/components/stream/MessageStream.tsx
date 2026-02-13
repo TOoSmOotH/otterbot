@@ -1,4 +1,4 @@
-import { useRef, useEffect, useState, useMemo } from "react";
+import { useRef, useEffect, useState, useMemo, useCallback } from "react";
 import { useMessageStore } from "../../stores/message-store";
 import { useProjectStore } from "../../stores/project-store";
 import { cn } from "../../lib/utils";
@@ -216,12 +216,15 @@ export function MessageStream({
   onCollapse?: () => void;
 }) {
   const messages = useMessageStore((s) => s.messages);
+  const hasMore = useMessageStore((s) => s.hasMore);
+  const prependHistory = useMessageStore((s) => s.prependHistory);
   const agentFilter = useMessageStore((s) => s.agentFilter);
   const setAgentFilter = useMessageStore((s) => s.setAgentFilter);
   const activeProjectId = useProjectStore((s) => s.activeProjectId);
   const containerRef = useRef<HTMLDivElement>(null);
   const [autoScroll, setAutoScroll] = useState(true);
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
+  const [loadingMore, setLoadingMore] = useState(false);
 
   let filtered = agentFilter
     ? messages.filter(
@@ -242,9 +245,48 @@ export function MessageStream({
     }
   }, [groups, autoScroll]);
 
+  const loadOlderMessages = useCallback(async () => {
+    if (loadingMore || !hasMore || messages.length === 0) return;
+    setLoadingMore(true);
+
+    const oldest = messages[0];
+    const params = new URLSearchParams({ limit: "50", before: oldest.timestamp });
+    if (activeProjectId) params.set("projectId", activeProjectId);
+    if (agentFilter) params.set("agentId", agentFilter);
+
+    try {
+      const res = await fetch(`/api/messages?${params}`);
+      const data = await res.json();
+
+      // Preserve scroll position: measure before prepend, restore offset after
+      const container = containerRef.current;
+      const prevScrollHeight = container?.scrollHeight ?? 0;
+
+      prependHistory(data);
+
+      // Restore scroll position after DOM update
+      requestAnimationFrame(() => {
+        if (container) {
+          const newScrollHeight = container.scrollHeight;
+          container.scrollTop = newScrollHeight - prevScrollHeight;
+        }
+      });
+    } catch (err) {
+      console.error("Failed to load older messages:", err);
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [loadingMore, hasMore, messages, activeProjectId, agentFilter, prependHistory]);
+
   const handleScroll = () => {
     if (!containerRef.current) return;
     const { scrollTop, scrollHeight, clientHeight } = containerRef.current;
+
+    // Load older messages when scrolled to top
+    if (scrollTop === 0 && hasMore && !loadingMore) {
+      loadOlderMessages();
+    }
+
     const isAtBottom = scrollHeight - scrollTop - clientHeight < 50;
     setAutoScroll(isAtBottom);
   };
@@ -297,6 +339,13 @@ export function MessageStream({
         onScroll={handleScroll}
         className="flex-1 overflow-y-auto divide-y divide-border/50"
       >
+        {loadingMore && (
+          <div className="flex items-center justify-center py-2">
+            <span className="text-[10px] text-muted-foreground animate-pulse">
+              Loading older messages...
+            </span>
+          </div>
+        )}
         {filtered.length === 0 ? (
           <div className="flex items-center justify-center h-full">
             <p className="text-sm text-muted-foreground">

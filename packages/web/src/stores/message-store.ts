@@ -4,6 +4,8 @@ import type { BusMessage, Conversation } from "@smoothbot/shared";
 interface MessageState {
   /** All bus messages (for the stream panel) */
   messages: BusMessage[];
+  /** Whether there are older messages on the server */
+  hasMore: boolean;
   /** Chat messages between CEO and COO */
   chatMessages: BusMessage[];
   /** Current streaming token buffer */
@@ -25,7 +27,8 @@ interface MessageState {
   appendCooThinking: (token: string, messageId: string) => void;
   endCooThinking: (messageId: string) => void;
   setAgentFilter: (agentId: string | null) => void;
-  loadHistory: (messages: BusMessage[]) => void;
+  loadHistory: (data: { messages: BusMessage[]; hasMore: boolean }) => void;
+  prependHistory: (data: { messages: BusMessage[]; hasMore: boolean }) => void;
   clearChat: () => void;
   setCurrentConversation: (id: string | null) => void;
   setConversations: (conversations: Conversation[]) => void;
@@ -35,6 +38,7 @@ interface MessageState {
 
 export const useMessageStore = create<MessageState>((set) => ({
   messages: [],
+  hasMore: true,
   chatMessages: [],
   streamingContent: "",
   streamingMessageId: null,
@@ -114,15 +118,31 @@ export const useMessageStore = create<MessageState>((set) => ({
 
   setAgentFilter: (agentId) => set({ agentFilter: agentId }),
 
-  loadHistory: (messages) =>
+  loadHistory: ({ messages, hasMore }) =>
     set({
       messages,
+      hasMore,
       chatMessages: messages.filter(
         (m) =>
           m.type === "chat" &&
           (m.fromAgentId === null || m.fromAgentId === "coo") &&
           (m.toAgentId === null || m.toAgentId === "coo"),
       ),
+    }),
+
+  prependHistory: ({ messages: older, hasMore }) =>
+    set((state) => {
+      const merged = [...older, ...state.messages];
+      return {
+        messages: merged,
+        hasMore,
+        chatMessages: merged.filter(
+          (m) =>
+            m.type === "chat" &&
+            (m.fromAgentId === null || m.fromAgentId === "coo") &&
+            (m.toAgentId === null || m.toAgentId === "coo"),
+        ),
+      };
     }),
 
   clearChat: () =>

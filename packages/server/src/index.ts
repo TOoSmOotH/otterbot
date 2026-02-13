@@ -617,14 +617,15 @@ async function main() {
     },
   );
 
-  // Message history endpoint
+  // Message history endpoint (cursor-paginated)
   app.get<{
-    Querystring: { projectId?: string; agentId?: string; limit?: string };
+    Querystring: { projectId?: string; agentId?: string; limit?: string; before?: string };
   }>("/api/messages", async (req) => {
     return bus.getHistory({
       projectId: req.query.projectId,
       agentId: req.query.agentId,
       limit: req.query.limit ? parseInt(req.query.limit) : undefined,
+      before: req.query.before,
     });
   });
 

@@ -568,7 +568,7 @@ export class COO extends BaseAgent {
     );
 
     // 2. Fetch recent bus messages for activity context
-    const recentMessages = this.bus.getHistory({
+    const { messages: recentMessages } = this.bus.getHistory({
       projectId,
       limit: 5,
     });

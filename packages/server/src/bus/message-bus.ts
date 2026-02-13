@@ -135,14 +135,14 @@ export class MessageBus {
     });
   }
 
-  /** Get message history, optionally filtered */
+  /** Get message history, optionally filtered with cursor pagination */
   getHistory(options?: {
     projectId?: string;
     agentId?: string;
     limit?: number;
-  }): BusMessage[] {
+    before?: string;
+  }): { messages: BusMessage[]; hasMore: boolean } {
     const db = getDb();
-    let query = db.select().from(schema.messages).$dynamic();
 
     // Drizzle doesn't support dynamic where chaining easily with better-sqlite3,
     // so we'll use the raw results and filter
@@ -166,11 +166,17 @@ export class MessageBus {
       );
     }
 
+    if (options?.before) {
+      filtered = filtered.filter((m) => m.timestamp < options.before!);
+    }
+
+    let hasMore = false;
     if (options?.limit) {
+      hasMore = filtered.length > options.limit;
       filtered = filtered.slice(-options.limit);
     }
 
-    return filtered;
+    return { messages: filtered, hasMore };
   }
 
   /** Get messages for a specific conversation, ordered by timestamp */

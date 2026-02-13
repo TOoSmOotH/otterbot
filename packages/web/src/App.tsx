@@ -83,7 +83,7 @@ function MainApp() {
 
   // Load initial data
   useEffect(() => {
-    fetch("/api/messages")
+    fetch("/api/messages?limit=50")
       .then((r) => r.json())
       .then(loadHistory)
       .catch(console.error);

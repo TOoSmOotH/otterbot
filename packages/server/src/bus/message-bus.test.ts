@@ -46,7 +46,7 @@ describe("MessageBus", () => {
         type: MessageType.Chat,
         content: "Test persistence",
       });
-      const history = bus.getHistory();
+      const { messages: history } = bus.getHistory();
       expect(history).toHaveLength(1);
       expect(history[0].content).toBe("Test persistence");
     });
@@ -179,14 +179,14 @@ describe("MessageBus", () => {
       bus.send({ fromAgentId: "b", toAgentId: "a", type: MessageType.Chat, content: "2" });
       bus.send({ fromAgentId: "a", toAgentId: "c", type: MessageType.Directive, content: "3" });
 
-      expect(bus.getHistory()).toHaveLength(3);
+      expect(bus.getHistory().messages).toHaveLength(3);
     });
 
     it("filters by agentId", () => {
       bus.send({ fromAgentId: "a", toAgentId: "b", type: MessageType.Chat, content: "1" });
       bus.send({ fromAgentId: "c", toAgentId: "d", type: MessageType.Chat, content: "2" });
 
-      const history = bus.getHistory({ agentId: "a" });
+      const { messages: history } = bus.getHistory({ agentId: "a" });
       expect(history).toHaveLength(1);
       expect(history[0].content).toBe("1");
     });
@@ -195,7 +195,7 @@ describe("MessageBus", () => {
       bus.send({ fromAgentId: "a", toAgentId: "b", type: MessageType.Chat, content: "1", projectId: "p1" });
       bus.send({ fromAgentId: "a", toAgentId: "b", type: MessageType.Chat, content: "2", projectId: "p2" });
 
-      const history = bus.getHistory({ projectId: "p1" });
+      const { messages: history } = bus.getHistory({ projectId: "p1" });
       expect(history).toHaveLength(1);
       expect(history[0].content).toBe("1");
     });
@@ -205,9 +205,10 @@ describe("MessageBus", () => {
         bus.send({ fromAgentId: "a", toAgentId: "b", type: MessageType.Chat, content: `msg-${i}` });
       }
 
-      const history = bus.getHistory({ limit: 3 });
+      const { messages: history, hasMore } = bus.getHistory({ limit: 3 });
       expect(history).toHaveLength(3);
       expect(history[0].content).toBe("msg-7");
+      expect(hasMore).toBe(true);
     });
   });
 });
