@@ -170,6 +170,64 @@ class TavilyProvider implements SearchProvider {
 }
 
 // ---------------------------------------------------------------------------
+// DuckDuckGo (free, no API key)
+// ---------------------------------------------------------------------------
+
+class DuckDuckGoProvider implements SearchProvider {
+  readonly id = "duckduckgo";
+
+  async search(query: string, maxResults: number): Promise<SearchResponse> {
+    const res = await fetch("https://html.duckduckgo.com/html/", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: `q=${encodeURIComponent(query)}`,
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (!res.ok) {
+      throw new Error(`DuckDuckGo returned ${res.status}: ${res.statusText}`);
+    }
+
+    const html = await res.text();
+    const results: SearchResult[] = [];
+
+    // Parse result blocks: each is a <div class="result ..."> containing
+    // an <a class="result__a"> (title + URL) and <a class="result__snippet"> (snippet).
+    const blockRe = /<div[^>]+class="[^"]*result [^"]*"[^>]*>([\s\S]*?)<\/div>\s*(?=<div[^>]+class="[^"]*result |$)/g;
+    let block: RegExpExecArray | null;
+    while ((block = blockRe.exec(html)) !== null && results.length < maxResults) {
+      const inner = block[1];
+
+      // Title + URL from <a class="result__a" href="...">Title</a>
+      const linkMatch = inner.match(
+        /<a[^>]+class="result__a"[^>]+href="([^"]*)"[^>]*>([\s\S]*?)<\/a>/,
+      );
+      if (!linkMatch) continue;
+
+      let url = linkMatch[1];
+      // DuckDuckGo wraps URLs in a redirect; extract the real one
+      const uddgMatch = url.match(/[?&]uddg=([^&]+)/);
+      if (uddgMatch) url = decodeURIComponent(uddgMatch[1]);
+
+      const title = linkMatch[2].replace(/<[^>]*>/g, "").trim();
+
+      // Snippet from <a class="result__snippet" ...>
+      const snippetMatch = inner.match(
+        /<a[^>]+class="result__snippet"[^>]*>([\s\S]*?)<\/a>/,
+      );
+      const snippet = snippetMatch
+        ? snippetMatch[1].replace(/<[^>]*>/g, "").trim()
+        : "";
+
+      if (url && title) {
+        results.push({ title, url, snippet });
+      }
+    }
+
+    return { results, provider: this.id, query };
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Factory
 // ---------------------------------------------------------------------------
 
@@ -178,6 +236,8 @@ export function getConfiguredSearchProvider(): SearchProvider | null {
   if (!activeId) return null;
 
   switch (activeId) {
+    case "duckduckgo":
+      return new DuckDuckGoProvider();
     case "searxng": {
       const baseUrl = getConfig("search:searxng:base_url");
       if (!baseUrl) return null;

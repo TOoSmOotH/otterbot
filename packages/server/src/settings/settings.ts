@@ -95,6 +95,7 @@ const SEARCH_PROVIDER_META: Record<
   string,
   { name: string; needsApiKey: boolean; needsBaseUrl: boolean }
 > = {
+  duckduckgo: { name: "DuckDuckGo", needsApiKey: false, needsBaseUrl: false },
   searxng: { name: "SearXNG", needsApiKey: false, needsBaseUrl: true },
   brave:   { name: "Brave Search", needsApiKey: true, needsBaseUrl: false },
   tavily:  { name: "Tavily", needsApiKey: true, needsBaseUrl: false },

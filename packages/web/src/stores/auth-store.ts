@@ -30,6 +30,9 @@ interface AuthState {
     cooName: string;
     cooModelPackId?: string;
     cooGearConfig?: Record<string, boolean> | null;
+    searchProvider?: string;
+    searchApiKey?: string;
+    searchBaseUrl?: string;
   }) => Promise<boolean>;
   logout: () => Promise<void>;
   setError: (error: string | null) => void;

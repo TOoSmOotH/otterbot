@@ -385,6 +385,9 @@ async function main() {
       cooName: string;
       cooModelPackId?: string;
       cooGearConfig?: Record<string, boolean> | null;
+      searchProvider?: string;
+      searchApiKey?: string;
+      searchBaseUrl?: string;
     };
   }>("/api/setup/complete", async (req, reply) => {
     if (isSetupComplete()) {
@@ -392,7 +395,7 @@ async function main() {
       return { error: "Setup already completed" };
     }
 
-    const { passphrase, provider, model, apiKey, baseUrl, userName, userAvatar, userBio, userTimezone, ttsVoice, userModelPackId, userGearConfig, cooName, cooModelPackId, cooGearConfig } = req.body;
+    const { passphrase, provider, model, apiKey, baseUrl, userName, userAvatar, userBio, userTimezone, ttsVoice, userModelPackId, userGearConfig, cooName, cooModelPackId, cooGearConfig, searchProvider, searchApiKey, searchBaseUrl } = req.body;
 
     if (!passphrase || passphrase.length < 8) {
       reply.code(400);
@@ -443,6 +446,13 @@ async function main() {
       setConfig("tts:enabled", "true");
       setConfig("tts:active_provider", "kokoro");
       setConfig("tts:voice", ttsVoice);
+    }
+
+    // Store search provider preference
+    if (searchProvider) {
+      setConfig("search:active_provider", searchProvider);
+      if (searchApiKey) setConfig(`search:${searchProvider}:api_key`, searchApiKey);
+      if (searchBaseUrl) setConfig(`search:${searchProvider}:base_url`, searchBaseUrl);
     }
 
     // Store 3D model pack preference

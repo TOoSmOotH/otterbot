@@ -77,24 +77,28 @@ export function SetupWizard() {
   const [draggingOver, setDraggingOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Step 4: COO customization
+  // Step 4: User Character (moved before COO)
+  const [characterPackId, setCharacterPackId] = useState<string | null>(null);
+  const [characterGearConfig, setCharacterGearConfig] = useState<GearConfig | null>(null);
+
+  // Step 5: COO customization
   const [cooName, setCooName] = useState("");
   const [cooModelPackId, setCooModelPackId] = useState<string | null>(null);
   const [cooGearConfig, setCooGearConfig] = useState<GearConfig | null>(null);
-
-  // Step 5: Character
-  const [characterPackId, setCharacterPackId] = useState<string | null>(null);
-  const [characterGearConfig, setCharacterGearConfig] = useState<GearConfig | null>(null);
   const modelPacks = useModelPackStore((s) => s.packs);
   const modelPacksLoading = useModelPackStore((s) => s.loading);
   const loadPacks = useModelPackStore((s) => s.loadPacks);
 
   // Pre-fetch model packs on mount so they're ready by step 4/5
+  // Step 6: Web Search
+  const [searchProvider, setSearchProvider] = useState<string>("duckduckgo");
+  const [searchApiKey, setSearchApiKey] = useState("");
+  const [searchBaseUrl, setSearchBaseUrl] = useState("");
   useEffect(() => {
     loadPacks();
   }, [loadPacks]);
 
-  // Step 6: Voice
+  // Step 7: Voice
   const [ttsVoice, setTtsVoice] = useState<string | null>(null);
   const [previewingVoice, setPreviewingVoice] = useState(false);
 
@@ -207,7 +211,7 @@ export function SetupWizard() {
     }
   };
 
-  const handleNextToCoo = () => {
+  const handleNextToUserCharacter = () => {
     if (!displayName.trim()) {
       setError("Display name is required");
       return;
@@ -221,18 +225,23 @@ export function SetupWizard() {
     setStep(4);
   };
 
-  const handleNextToUserCharacter = () => {
+  const handleNextToCoo = () => {
+    setError(null);
+    setStep(5);
+  };
+
+  const handleNextToSearch = () => {
     if (!cooName.trim()) {
       setError("A name for your COO is required");
       return;
     }
     setError(null);
-    setStep(5);
+    setStep(6);
   };
 
   const handleNextToVoice = () => {
     setError(null);
-    setStep(6);
+    setStep(7);
   };
 
   const handleComplete = async () => {
@@ -253,6 +262,9 @@ export function SetupWizard() {
       cooName: cooName.trim(),
       cooModelPackId: cooModelPackId || undefined,
       cooGearConfig: cooGearConfig || undefined,
+      searchProvider: searchProvider || undefined,
+      searchApiKey: searchApiKey || undefined,
+      searchBaseUrl: searchBaseUrl || undefined,
     });
     setSubmitting(false);
   };
@@ -316,7 +328,7 @@ export function SetupWizard() {
 
           {/* Step indicator */}
           <div className="flex items-center justify-center gap-2 mb-6">
-            {[1, 2, 3, 4, 5, 6].map((s, i) => (
+            {[1, 2, 3, 4, 5, 6, 7].map((s, i) => (
               <div key={s} className="flex items-center gap-2">
                 {i > 0 && (
                   <div className={`w-6 h-px ${step >= s ? "bg-primary" : "bg-muted"}`} />
@@ -656,7 +668,7 @@ export function SetupWizard() {
                   Back
                 </button>
                 <button
-                  onClick={handleNextToCoo}
+                  onClick={handleNextToUserCharacter}
                   disabled={!displayName.trim() || !timezone}
                   className="flex-1 px-4 py-2 bg-primary text-primary-foreground text-sm font-medium rounded-md hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                 >
@@ -669,7 +681,47 @@ export function SetupWizard() {
           {step === 4 && (
             <div className="space-y-4">
               <h2 className="text-sm font-medium">
-                4. Customize your COO
+                4. Choose your character
+              </h2>
+              <p className="text-xs text-muted-foreground">
+                Pick a 3D character for the Live View. You can change this later in Settings.
+              </p>
+
+              <CharacterSelect
+                packs={modelPacks}
+                selected={characterPackId}
+                onSelect={setCharacterPackId}
+                loading={modelPacksLoading}
+                gearConfig={characterGearConfig}
+                onGearConfigChange={setCharacterGearConfig}
+              />
+
+              {error && <p className="text-sm text-destructive">{error}</p>}
+
+              <div className="flex gap-2">
+                <button
+                  onClick={() => {
+                    setStep(3);
+                    setError(null);
+                  }}
+                  className="px-4 py-2 bg-secondary text-secondary-foreground text-sm font-medium rounded-md hover:bg-secondary/80 transition-colors"
+                >
+                  Back
+                </button>
+                <button
+                  onClick={handleNextToCoo}
+                  className="flex-1 px-4 py-2 bg-primary text-primary-foreground text-sm font-medium rounded-md hover:bg-primary/90 transition-colors"
+                >
+                  Next
+                </button>
+              </div>
+            </div>
+          )}
+
+          {step === 5 && (
+            <div className="space-y-4">
+              <h2 className="text-sm font-medium">
+                5. Customize your COO
               </h2>
               <p className="text-xs text-muted-foreground">
                 Your COO manages all operations and reports directly to you. Give them a name and optionally pick a 3D character.
@@ -705,7 +757,7 @@ export function SetupWizard() {
               <div className="flex gap-2">
                 <button
                   onClick={() => {
-                    setStep(3);
+                    setStep(4);
                     setError(null);
                   }}
                   className="px-4 py-2 bg-secondary text-secondary-foreground text-sm font-medium rounded-md hover:bg-secondary/80 transition-colors"
@@ -713,7 +765,7 @@ export function SetupWizard() {
                   Back
                 </button>
                 <button
-                  onClick={handleNextToUserCharacter}
+                  onClick={handleNextToSearch}
                   disabled={!cooName.trim()}
                   className="flex-1 px-4 py-2 bg-primary text-primary-foreground text-sm font-medium rounded-md hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                 >
@@ -723,30 +775,82 @@ export function SetupWizard() {
             </div>
           )}
 
-          {step === 5 && (
+          {step === 6 && (
             <div className="space-y-4">
               <h2 className="text-sm font-medium">
-                5. Choose your character
+                6. Set up web search
               </h2>
               <p className="text-xs text-muted-foreground">
-                Pick a 3D character for the Live View. You can change this later in Settings.
+                Give your agents the ability to search the web. DuckDuckGo works
+                out of the box — or configure a different provider.
               </p>
 
-              <CharacterSelect
-                packs={modelPacks}
-                selected={characterPackId}
-                onSelect={setCharacterPackId}
-                loading={modelPacksLoading}
-                gearConfig={characterGearConfig}
-                onGearConfigChange={setCharacterGearConfig}
-              />
+              {/* Search provider cards */}
+              <div className="grid grid-cols-2 gap-2">
+                {[
+                  { id: "duckduckgo", name: "DuckDuckGo", desc: "Free, no setup needed" },
+                  { id: "brave", name: "Brave Search", desc: "Requires API key" },
+                  { id: "tavily", name: "Tavily", desc: "Requires API key" },
+                  { id: "searxng", name: "SearXNG", desc: "Self-hosted, needs URL" },
+                ].map((sp) => (
+                  <button
+                    key={sp.id}
+                    onClick={() => {
+                      setSearchProvider(sp.id);
+                      setSearchApiKey("");
+                      setSearchBaseUrl("");
+                      setError(null);
+                    }}
+                    className={`p-3 rounded-md border text-left text-sm transition-colors ${
+                      searchProvider === sp.id
+                        ? "border-primary bg-primary/10 text-foreground"
+                        : "border-border bg-background text-muted-foreground hover:border-muted-foreground"
+                    }`}
+                  >
+                    <div className="font-medium">{sp.name}</div>
+                    <div className="text-xs text-muted-foreground mt-0.5">{sp.desc}</div>
+                  </button>
+                ))}
+              </div>
+
+              {/* API Key for Brave / Tavily */}
+              {(searchProvider === "brave" || searchProvider === "tavily") && (
+                <div>
+                  <label className="block text-sm text-muted-foreground mb-1.5">
+                    API Key
+                  </label>
+                  <input
+                    type="password"
+                    value={searchApiKey}
+                    onChange={(e) => setSearchApiKey(e.target.value)}
+                    placeholder={searchProvider === "brave" ? "BSA..." : "tvly-..."}
+                    className="w-full px-3 py-2 bg-background border border-input rounded-md text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                  />
+                </div>
+              )}
+
+              {/* Base URL for SearXNG */}
+              {searchProvider === "searxng" && (
+                <div>
+                  <label className="block text-sm text-muted-foreground mb-1.5">
+                    Base URL
+                  </label>
+                  <input
+                    type="text"
+                    value={searchBaseUrl}
+                    onChange={(e) => setSearchBaseUrl(e.target.value)}
+                    placeholder="http://localhost:8080"
+                    className="w-full px-3 py-2 bg-background border border-input rounded-md text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                  />
+                </div>
+              )}
 
               {error && <p className="text-sm text-destructive">{error}</p>}
 
               <div className="flex gap-2">
                 <button
                   onClick={() => {
-                    setStep(4);
+                    setStep(5);
                     setError(null);
                   }}
                   className="px-4 py-2 bg-secondary text-secondary-foreground text-sm font-medium rounded-md hover:bg-secondary/80 transition-colors"
@@ -760,13 +864,23 @@ export function SetupWizard() {
                   Next
                 </button>
               </div>
+
+              <button
+                onClick={() => {
+                  setSearchProvider("");
+                  handleNextToVoice();
+                }}
+                className="w-full text-xs text-muted-foreground hover:text-foreground transition-colors"
+              >
+                Skip — set up search later
+              </button>
             </div>
           )}
 
-          {step === 6 && (
+          {step === 7 && (
             <div className="space-y-4">
               <h2 className="text-sm font-medium">
-                6. Choose a voice for your assistant
+                7. Choose a voice for your assistant
               </h2>
               <p className="text-xs text-muted-foreground">
                 Your assistant can speak its responses aloud. Pick a voice, or
@@ -885,7 +999,7 @@ export function SetupWizard() {
               <div className="flex gap-2">
                 <button
                   onClick={() => {
-                    setStep(5);
+                    setStep(6);
                     setError(null);
                   }}
                   className="px-4 py-2 bg-secondary text-secondary-foreground text-sm font-medium rounded-md hover:bg-secondary/80 transition-colors"
