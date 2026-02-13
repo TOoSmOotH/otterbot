@@ -21,6 +21,8 @@ export class WorkspaceManager {
       resolve(projectPath, "shared", "docs"),
       resolve(projectPath, "shared", "artifacts"),
       resolve(projectPath, "agents"),
+      resolve(projectPath, "repo"),
+      resolve(projectPath, "worktrees"),
     ];
     for (const dir of dirs) {
       mkdirSync(dir, { recursive: true });
@@ -61,16 +63,28 @@ export class WorkspaceManager {
     const ownDir = this.agentPath(projectId, agentId);
     if (this.isUnder(normalized, ownDir)) return true;
 
+    // All agents can access their own worktree
+    const ownWorktree = this.worktreePath(projectId, agentId);
+    if (this.isUnder(normalized, ownWorktree)) return true;
+
     // All agents can access the shared directory
     const sharedDir = resolve(projectDir, "shared");
     if (this.isUnder(normalized, sharedDir)) return true;
 
-    // Team leads can read their workers' workspaces
+    // Team leads can read their workers' workspaces and worktrees
     if (role === "team_lead" && childAgentIds) {
       for (const childId of childAgentIds) {
         const childDir = this.agentPath(projectId, childId);
         if (this.isUnder(normalized, childDir)) return true;
+        const childWorktree = this.worktreePath(projectId, childId);
+        if (this.isUnder(normalized, childWorktree)) return true;
       }
+    }
+
+    // Team leads can access the repo directory
+    if (role === "team_lead") {
+      const repo = this.repoPath(projectId);
+      if (this.isUnder(normalized, repo)) return true;
     }
 
     // COO can read all project shared dirs (already covered above)
@@ -96,6 +110,18 @@ export class WorkspaceManager {
 
   sharedPath(projectId: string): string {
     return resolve(this.root, "projects", projectId, "shared");
+  }
+
+  repoPath(projectId: string): string {
+    return resolve(this.root, "projects", projectId, "repo");
+  }
+
+  worktreesBasePath(projectId: string): string {
+    return resolve(this.root, "projects", projectId, "worktrees");
+  }
+
+  worktreePath(projectId: string, agentId: string): string {
+    return resolve(this.root, "projects", projectId, "worktrees", agentId);
   }
 
   private isUnder(child: string, parent: string): boolean {

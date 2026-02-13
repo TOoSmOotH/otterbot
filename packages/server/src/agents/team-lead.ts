@@ -13,11 +13,15 @@ import { getDb, schema } from "../db/index.js";
 import { Registry } from "../registry/registry.js";
 import type { MessageBus } from "../bus/message-bus.js";
 import type { WorkspaceManager } from "../workspace/workspace.js";
+import { GitWorktreeManager } from "../workspace/git-worktree.js";
 import { eq } from "drizzle-orm";
 import { getConfig } from "../auth/auth.js";
 import { getConfiguredSearchProvider } from "../tools/search/providers.js";
 import { TEAM_LEAD_PROMPT } from "./prompts/team-lead.js";
 import { getRandomModelPackId } from "../models3d/model-packs.js";
+
+/** Tools that indicate a worker writes code and should get a worktree */
+const CODE_TOOLS = new Set(["file_write", "shell_exec"]);
 
 export interface TeamLeadDependencies {
   bus: MessageBus;
@@ -32,6 +36,7 @@ export interface TeamLeadDependencies {
 export class TeamLead extends BaseAgent {
   private workers: Map<string, Worker> = new Map();
   private workspace: WorkspaceManager;
+  private gitWorktree: GitWorktreeManager | null = null;
   private onAgentSpawned?: (agent: BaseAgent) => void;
 
   constructor(deps: TeamLeadDependencies) {
@@ -56,6 +61,13 @@ export class TeamLead extends BaseAgent {
     super(options, deps.bus);
     this.workspace = deps.workspace;
     this.onAgentSpawned = deps.onAgentSpawned;
+
+    // Initialize git worktree manager for the project
+    if (deps.projectId) {
+      const repoPath = this.workspace.repoPath(deps.projectId);
+      const worktreesDir = this.workspace.worktreesBasePath(deps.projectId);
+      this.gitWorktree = new GitWorktreeManager(repoPath, worktreesDir);
+    }
   }
 
   async handleMessage(message: BusMessage): Promise<void> {
@@ -206,6 +218,41 @@ export class TeamLead extends BaseAgent {
           return "Report sent to COO.";
         },
       }),
+      merge_worker_branch: tool({
+        description:
+          "Auto-commit a worker's changes and merge their branch into main. " +
+          "Use this when a worker has finished its task. " +
+          "Merge foundational branches first (e.g., schema before routes).",
+        parameters: z.object({
+          workerId: z
+            .string()
+            .describe("The ID of the worker whose branch to merge"),
+        }),
+        execute: async ({ workerId }) => {
+          return this.mergeWorkerBranch(workerId);
+        },
+      }),
+      sync_worker_branch: tool({
+        description:
+          "Rebase a worker's branch onto the latest main so it picks up other workers' merged changes. " +
+          "Use this when a worker depends on code that another worker has already merged.",
+        parameters: z.object({
+          workerId: z
+            .string()
+            .describe("The ID of the worker whose branch to sync"),
+        }),
+        execute: async ({ workerId }) => {
+          return this.syncWorkerBranch(workerId);
+        },
+      }),
+      get_branch_status: tool({
+        description:
+          "Show all active worktree branches with ahead/behind counts and diff summaries.",
+        parameters: z.object({}),
+        execute: async () => {
+          return this.getBranchOverview();
+        },
+      }),
     };
   }
 
@@ -249,15 +296,39 @@ export class TeamLead extends BaseAgent {
       return `Registry entry ${registryEntryId} not found.`;
     }
 
-    // Create worker workspace
-    const workspacePath = this.projectId
-      ? this.workspace.createAgentWorkspace(
-          this.projectId,
-          nanoid(),
-        )
-      : null;
+    const entryTools = (entry.tools as string[]) ?? [];
+    const isCodeWorker = entryTools.some((t) => CODE_TOOLS.has(t));
+    const workerId = nanoid();
+    let workspacePath: string | null = null;
+
+    if (this.projectId && isCodeWorker && this.gitWorktree) {
+      // Code workers get a git worktree
+      if (!this.gitWorktree.hasRepo()) {
+        this.gitWorktree.initRepo();
+      }
+      const wtInfo = this.gitWorktree.createWorktree(workerId);
+      workspacePath = wtInfo.worktreePath;
+
+      // Record worktree in DB for recovery
+      db.insert(schema.worktrees)
+        .values({
+          agentId: workerId,
+          projectId: this.projectId,
+          branchName: wtInfo.branchName,
+          worktreePath: wtInfo.worktreePath,
+          status: "active",
+        })
+        .run();
+    } else if (this.projectId) {
+      // Non-code workers get a regular agent directory
+      workspacePath = this.workspace.createAgentWorkspace(
+        this.projectId,
+        workerId,
+      );
+    }
 
     const worker = new Worker({
+      id: workerId,
       bus: this.bus,
       projectId: this.projectId,
       parentId: this.id,
@@ -268,7 +339,7 @@ export class TeamLead extends BaseAgent {
       provider: entry.defaultProvider,
       systemPrompt: entry.systemPrompt,
       workspacePath,
-      toolNames: (entry.tools as string[]) ?? [],
+      toolNames: entryTools,
       onStatusChange: this.onStatusChange,
     });
 
@@ -283,7 +354,59 @@ export class TeamLead extends BaseAgent {
       registryEntryName: entry.name,
     });
 
-    return `Spawned ${entry.name} worker (${worker.id}) and assigned task.`;
+    const mode = isCodeWorker && this.gitWorktree ? " (worktree)" : "";
+    return `Spawned ${entry.name} worker (${worker.id})${mode} and assigned task.`;
+  }
+
+  private mergeWorkerBranch(workerId: string): string {
+    if (!this.gitWorktree) return "No git worktree manager available.";
+
+    const result = this.gitWorktree.mergeBranch(workerId);
+
+    // Update DB record
+    if (this.projectId) {
+      const db = getDb();
+      db.update(schema.worktrees)
+        .set({
+          status: result.success ? "merged" : "conflict",
+          mergedAt: result.success ? new Date().toISOString() : null,
+        })
+        .where(eq(schema.worktrees.agentId, workerId))
+        .run();
+    }
+
+    // Cleanup worktree after successful merge
+    if (result.success && !result.message.includes("Nothing to merge")) {
+      this.gitWorktree.destroyWorktree(workerId);
+    }
+
+    return result.message;
+  }
+
+  private syncWorkerBranch(workerId: string): string {
+    if (!this.gitWorktree) return "No git worktree manager available.";
+    const result = this.gitWorktree.updateWorktree(workerId);
+    return result.message;
+  }
+
+  private getBranchOverview(): string {
+    if (!this.gitWorktree) return "No git worktree manager available.";
+
+    const worktrees = this.gitWorktree.listWorktrees();
+    if (worktrees.length === 0) return "No active worktree branches.";
+
+    const lines = worktrees.map((wt) => {
+      const diff = this.gitWorktree!.getBranchDiff(wt.agentId);
+      const status = this.gitWorktree!.getBranchStatus(wt.agentId);
+      return [
+        `**${wt.branchName}** (${wt.agentId})`,
+        `  Ahead: ${wt.ahead}, Behind: ${wt.behind}`,
+        status.trim() ? `  Uncommitted: ${status.trim()}` : "  Uncommitted: (clean)",
+        diff.trim() ? `  Diff vs main:\n${diff.trim().split("\n").map((l) => "    " + l).join("\n")}` : "  Diff vs main: (none)",
+      ].join("\n");
+    });
+
+    return lines.join("\n\n");
   }
 
   getWorkers(): Map<string, Worker> {

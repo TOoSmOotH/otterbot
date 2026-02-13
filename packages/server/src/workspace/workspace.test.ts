@@ -24,6 +24,8 @@ describe("WorkspaceManager", () => {
       expect(existsSync(join(tmpDir, "projects", "proj-1", "shared", "docs"))).toBe(true);
       expect(existsSync(join(tmpDir, "projects", "proj-1", "shared", "artifacts"))).toBe(true);
       expect(existsSync(join(tmpDir, "projects", "proj-1", "agents"))).toBe(true);
+      expect(existsSync(join(tmpDir, "projects", "proj-1", "repo"))).toBe(true);
+      expect(existsSync(join(tmpDir, "projects", "proj-1", "worktrees"))).toBe(true);
     });
   });
 
@@ -89,6 +91,51 @@ describe("WorkspaceManager", () => {
       const traversalPath = ws.agentPath("proj-1", "agent-1") + "/../../other-agent/file.txt";
       // After normalize, this would be agents/other-agent/file.txt which is outside own workspace
       expect(ws.validateAccess(traversalPath, "agent-1", "worker" as any, "proj-1")).toBe(false);
+    });
+
+    it("allows workers to access their own worktree", () => {
+      const wtPath = ws.worktreePath("proj-1", "agent-1") + "/src/index.ts";
+      expect(ws.validateAccess(wtPath, "agent-1", "worker" as any, "proj-1")).toBe(true);
+    });
+
+    it("denies workers access to other agents' worktrees", () => {
+      const wtPath = ws.worktreePath("proj-1", "agent-2") + "/src/index.ts";
+      expect(ws.validateAccess(wtPath, "agent-1", "worker" as any, "proj-1")).toBe(false);
+    });
+
+    it("allows team leads to read their workers' worktrees", () => {
+      const wtPath = ws.worktreePath("proj-1", "worker-1") + "/file.txt";
+      expect(
+        ws.validateAccess(wtPath, "lead-1", "team_lead" as any, "proj-1", ["worker-1"]),
+      ).toBe(true);
+    });
+
+    it("allows team leads to access the repo directory", () => {
+      const repoFile = ws.repoPath("proj-1") + "/README.md";
+      expect(
+        ws.validateAccess(repoFile, "lead-1", "team_lead" as any, "proj-1"),
+      ).toBe(true);
+    });
+
+    it("denies workers access to the repo directory", () => {
+      const repoFile = ws.repoPath("proj-1") + "/README.md";
+      expect(ws.validateAccess(repoFile, "agent-1", "worker" as any, "proj-1")).toBe(false);
+    });
+  });
+
+  describe("path helpers", () => {
+    it("returns correct repo path", () => {
+      expect(ws.repoPath("proj-1")).toBe(join(tmpDir, "projects", "proj-1", "repo"));
+    });
+
+    it("returns correct worktrees base path", () => {
+      expect(ws.worktreesBasePath("proj-1")).toBe(join(tmpDir, "projects", "proj-1", "worktrees"));
+    });
+
+    it("returns correct worktree path for an agent", () => {
+      expect(ws.worktreePath("proj-1", "agent-1")).toBe(
+        join(tmpDir, "projects", "proj-1", "worktrees", "agent-1"),
+      );
     });
   });
 });

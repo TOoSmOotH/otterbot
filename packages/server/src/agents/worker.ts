@@ -10,6 +10,7 @@ import type { MessageBus } from "../bus/message-bus.js";
 import { createTools } from "../tools/tool-factory.js";
 
 export interface WorkerDependencies {
+  id?: string;
   bus: MessageBus;
   projectId: string | null;
   parentId: string;
@@ -30,6 +31,7 @@ export class Worker extends BaseAgent {
 
   constructor(deps: WorkerDependencies) {
     const options: AgentOptions = {
+      id: deps.id,
       role: AgentRole.Worker,
       parentId: deps.parentId,
       projectId: deps.projectId,
