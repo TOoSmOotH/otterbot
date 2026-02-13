@@ -191,8 +191,15 @@ async function main() {
   }
 
   // Serve noVNC ES module source (for the desktop VNC viewer)
-  const novncRoot = resolve(__dirname, "../../../novnc");
-  if (existsSync(novncRoot)) {
+  // In Docker: /app/novnc/ (downloaded from GitHub during build)
+  // Locally: check both relative to dist/ and relative to project root
+  const novncCandidates = [
+    resolve(__dirname, "../../../novnc"),        // /app/novnc (Docker prod)
+    resolve(__dirname, "../../../../novnc"),      // fallback
+  ];
+  const novncRoot = novncCandidates.find((p) => existsSync(p));
+  console.log(`noVNC root: ${novncRoot ?? "NOT FOUND"} (candidates: ${novncCandidates.join(", ")})`);
+  if (novncRoot) {
     await app.register(fastifyStatic, {
       root: novncRoot,
       prefix: "/novnc/",
