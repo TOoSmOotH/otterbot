@@ -343,7 +343,7 @@ export class TeamLead extends BaseAgent {
   ): Promise<{ text: string; thinking: string | undefined }> {
     // Snapshot board state before first think() for stale-state detection
     let prevBoard = this.getKanbanBoardState();
-    let prevWorktreeCount = this.gitWorktree
+    let prevWorktreeCount = this.gitWorktree?.hasRepo()
       ? this.gitWorktree.listWorktrees().length
       : 0;
 
@@ -353,7 +353,7 @@ export class TeamLead extends BaseAgent {
       if (!result.hadToolCalls) break;
 
       const board = this.getKanbanBoardState();
-      const worktreeCount = this.gitWorktree
+      const worktreeCount = this.gitWorktree?.hasRepo()
         ? this.gitWorktree.listWorktrees().length
         : 0;
 
@@ -712,7 +712,7 @@ export class TeamLead extends BaseAgent {
   }
 
   private getBranchOverview(): string {
-    if (!this.gitWorktree) return "No git worktree manager available.";
+    if (!this.gitWorktree || !this.gitWorktree.hasRepo()) return "No active worktree branches.";
 
     const worktrees = this.gitWorktree.listWorktrees();
     if (worktrees.length === 0) return "No active worktree branches.";
@@ -920,7 +920,7 @@ export class TeamLead extends BaseAgent {
     this.workers.clear();
 
     // Destroy remaining worktrees and mark them abandoned in DB
-    if (this.gitWorktree && this.projectId) {
+    if (this.gitWorktree?.hasRepo() && this.projectId) {
       const db = getDb();
       const worktrees = this.gitWorktree.listWorktrees();
       for (const wt of worktrees) {
