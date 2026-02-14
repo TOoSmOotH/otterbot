@@ -116,6 +116,33 @@ class OpenAICompatibleProvider implements TTSProvider {
 }
 
 // ---------------------------------------------------------------------------
+// Edge TTS provider (Microsoft neural TTS, free cloud service)
+// ---------------------------------------------------------------------------
+
+class EdgeTTSProvider implements TTSProvider {
+  async synthesize(
+    text: string,
+    voice: string,
+    speed: number,
+  ): Promise<{ audio: Buffer; contentType: string }> {
+    const { EdgeTTS } = await import("@andresaya/edge-tts");
+    const tts = new EdgeTTS();
+
+    // Convert speed multiplier (0.5–2.0) to Edge TTS rate string (e.g. 1.5 → "+50%")
+    const ratePercent = Math.round((speed - 1) * 100);
+    const rate = ratePercent >= 0 ? `+${ratePercent}%` : `${ratePercent}%`;
+
+    await tts.synthesize(text, voice, { rate });
+    const buffer = await tts.toBuffer();
+
+    return {
+      audio: Buffer.from(buffer),
+      contentType: "audio/mpeg",
+    };
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Markdown stripping — remove formatting so TTS reads clean prose
 // ---------------------------------------------------------------------------
 
@@ -164,6 +191,9 @@ export function getConfiguredTTSProvider(): TTSProvider | null {
   switch (activeProvider) {
     case "kokoro":
       return new KokoroProvider();
+
+    case "edge-tts":
+      return new EdgeTTSProvider();
 
     case "openai-compatible": {
       const baseUrl = getConfig("tts:openai-compatible:base_url");

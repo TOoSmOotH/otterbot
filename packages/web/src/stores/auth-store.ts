@@ -25,6 +25,7 @@ interface AuthState {
     userBio?: string;
     userTimezone: string;
     ttsVoice?: string;
+    ttsProvider?: string;
     userModelPackId?: string;
     userGearConfig?: Record<string, boolean> | null;
     cooName: string;

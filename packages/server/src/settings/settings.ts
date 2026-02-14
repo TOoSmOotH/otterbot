@@ -533,6 +533,7 @@ const TTS_PROVIDER_META: Record<
   { name: string; needsApiKey: boolean; needsBaseUrl: boolean }
 > = {
   kokoro: { name: "Kokoro", needsApiKey: false, needsBaseUrl: false },
+  "edge-tts": { name: "Edge TTS", needsApiKey: false, needsBaseUrl: false },
   "openai-compatible": {
     name: "OpenAI-compatible",
     needsApiKey: true,
@@ -566,6 +567,33 @@ const TTS_VOICES: Record<string, string[]> = {
     "if_sara", "im_nicola",
     // Brazilian Portuguese
     "pf_dora", "pm_alex", "pm_santa",
+  ],
+  "edge-tts": [
+    // English (US)
+    "en-US-AriaNeural", "en-US-JennyNeural", "en-US-GuyNeural",
+    "en-US-DavisNeural", "en-US-SaraNeural",
+    // English (GB)
+    "en-GB-SoniaNeural", "en-GB-RyanNeural", "en-GB-LibbyNeural",
+    // English (AU)
+    "en-AU-NatashaNeural", "en-AU-WilliamNeural",
+    // German
+    "de-DE-KatjaNeural", "de-DE-ConradNeural",
+    // French
+    "fr-FR-DeniseNeural", "fr-FR-HenriNeural",
+    // Spanish
+    "es-ES-ElviraNeural", "es-ES-AlvaroNeural",
+    // Italian
+    "it-IT-ElsaNeural", "it-IT-DiegoNeural",
+    // Portuguese (BR)
+    "pt-BR-FranciscaNeural", "pt-BR-AntonioNeural",
+    // Japanese
+    "ja-JP-NanamiNeural", "ja-JP-KeitaNeural",
+    // Chinese (Mandarin)
+    "zh-CN-XiaoxiaoNeural", "zh-CN-YunxiNeural",
+    // Korean
+    "ko-KR-SunHiNeural", "ko-KR-InJoonNeural",
+    // Hindi
+    "hi-IN-SwaraNeural", "hi-IN-MadhurNeural",
   ],
   "openai-compatible": [
     "alloy",

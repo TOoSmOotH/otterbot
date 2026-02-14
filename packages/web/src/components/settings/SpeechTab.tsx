@@ -415,6 +415,21 @@ const KOKORO_VOICE_GROUPS: { prefix: string; label: string }[] = [
   { prefix: "pm_", label: "Portuguese (Male)" },
 ];
 
+const EDGE_TTS_VOICE_GROUPS: { prefix: string; label: string }[] = [
+  { prefix: "en-US-", label: "English (US)" },
+  { prefix: "en-GB-", label: "English (GB)" },
+  { prefix: "en-AU-", label: "English (AU)" },
+  { prefix: "de-DE-", label: "German" },
+  { prefix: "fr-FR-", label: "French" },
+  { prefix: "es-ES-", label: "Spanish" },
+  { prefix: "it-IT-", label: "Italian" },
+  { prefix: "pt-BR-", label: "Portuguese (BR)" },
+  { prefix: "ja-JP-", label: "Japanese" },
+  { prefix: "zh-CN-", label: "Chinese (Mandarin)" },
+  { prefix: "ko-KR-", label: "Korean" },
+  { prefix: "hi-IN-", label: "Hindi" },
+];
+
 function VoiceSelector({
   voices,
   activeVoice,
@@ -515,7 +530,15 @@ function VoiceSelector({
     );
   };
 
-  if (provider !== "kokoro") {
+  // Determine voice groupings based on provider
+  const voiceGroupDefs =
+    provider === "kokoro"
+      ? KOKORO_VOICE_GROUPS
+      : provider === "edge-tts"
+        ? EDGE_TTS_VOICE_GROUPS
+        : null;
+
+  if (!voiceGroupDefs) {
     return (
       <div>
         <label className="text-[10px] text-muted-foreground uppercase tracking-wider mb-2 block">
@@ -552,8 +575,8 @@ function VoiceSelector({
     );
   }
 
-  // Group Kokoro voices by prefix
-  const groups = KOKORO_VOICE_GROUPS.map((g) => ({
+  // Group voices by prefix
+  const groups = voiceGroupDefs.map((g) => ({
     ...g,
     voices: voices.filter((v) => v.startsWith(g.prefix)),
   })).filter((g) => g.voices.length > 0);
@@ -570,7 +593,7 @@ function VoiceSelector({
           </p>
           <div className="flex flex-wrap gap-1.5">
             {group.voices.map((v) =>
-              renderButton(v, v.slice(group.prefix.length)),
+              renderButton(v, v.slice(group.prefix.length).replace(/Neural$/, "")),
             )}
           </div>
         </div>
@@ -743,8 +766,9 @@ function TTSProviderCard({
           {/* No config needed note */}
           {!provider.needsApiKey && !provider.needsBaseUrl && (
             <p className="text-xs text-muted-foreground">
-              No configuration needed. Model downloads automatically on first
-              use (~100MB).
+              {provider.id === "edge-tts"
+                ? "Free cloud service by Microsoft. No API key or configuration needed."
+                : "No configuration needed. Model downloads automatically on first use (~100MB)."}
             </p>
           )}
 

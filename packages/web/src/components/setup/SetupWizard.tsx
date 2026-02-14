@@ -52,6 +52,48 @@ function resizeImage(file: File, maxSize: number): Promise<string> {
   });
 }
 
+function VoiceButton({
+  voice,
+  label,
+  ttsVoice,
+  previewingVoice,
+  onPreview,
+}: {
+  voice: string;
+  label: string;
+  ttsVoice: string | null;
+  previewingVoice: boolean;
+  onPreview: (voice: string) => void;
+}) {
+  const isActive = ttsVoice === voice;
+  const isLoading = previewingVoice && isActive;
+  const isDisabled = previewingVoice && !isActive;
+
+  return (
+    <button
+      onClick={() => onPreview(voice)}
+      disabled={isDisabled}
+      className={`relative px-2 py-1.5 rounded-md border text-xs transition-colors ${
+        isDisabled ? "opacity-40 cursor-not-allowed" : ""
+      } ${
+        isActive
+          ? "border-primary bg-primary/10 text-foreground"
+          : "border-border text-muted-foreground hover:border-muted-foreground hover:text-foreground"
+      }`}
+    >
+      <span className={isLoading ? "opacity-0" : ""}>{label}</span>
+      {isLoading && (
+        <span className="absolute inset-0 flex items-center justify-center">
+          <svg className="animate-spin h-3.5 w-3.5 text-primary" viewBox="0 0 24 24" fill="none">
+            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+          </svg>
+        </span>
+      )}
+    </button>
+  );
+}
+
 export function SetupWizard() {
   const { providers, completeSetup, error, setError } = useAuthStore();
 
@@ -99,8 +141,12 @@ export function SetupWizard() {
   }, [loadPacks]);
 
   // Step 7: Voice
+  const [ttsProvider, setTtsProvider] = useState<string | null>(null);
   const [ttsVoice, setTtsVoice] = useState<string | null>(null);
   const [previewingVoice, setPreviewingVoice] = useState(false);
+  // OpenAI-compatible TTS fields (shown when that provider is selected)
+  const [ttsApiKey, setTtsApiKey] = useState("");
+  const [ttsBaseUrl, setTtsBaseUrl] = useState("");
 
   const probeModels = useCallback(async (prov: string, key: string, url: string) => {
     const needsKey = NEEDS_API_KEY.has(prov);
@@ -257,6 +303,7 @@ export function SetupWizard() {
       userBio: bio.trim() || undefined,
       userTimezone: timezone,
       ttsVoice: ttsVoice || undefined,
+      ttsProvider: ttsProvider || undefined,
       userModelPackId: characterPackId || undefined,
       userGearConfig: characterGearConfig || undefined,
       cooName: cooName.trim(),
@@ -286,7 +333,7 @@ export function SetupWizard() {
       const res = await fetch("/api/setup/tts-preview", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ voice }),
+        body: JSON.stringify({ voice, provider: ttsProvider || "kokoro" }),
       });
 
       if (!res.ok) {
@@ -883,95 +930,127 @@ export function SetupWizard() {
                 7. Choose a voice for your assistant
               </h2>
               <p className="text-xs text-muted-foreground">
-                Your assistant can speak its responses aloud. Pick a voice, or
-                skip to use text only.
+                Your assistant can speak its responses aloud. Pick a TTS
+                provider, choose a voice, or skip to use text only.
               </p>
 
-              {/* Voice grid */}
-              <div>
-                <p className="text-[10px] text-muted-foreground uppercase tracking-wider mb-2">
-                  Female voices
-                </p>
-                <div className="grid grid-cols-3 gap-1.5 mb-3">
-                  {[
-                    "af_heart",
-                    "af_bella",
-                    "af_nicole",
-                    "af_aoede",
-                    "af_kore",
-                    "af_sarah",
-                    "af_sky",
-                  ].map((v) => (
-                    <button
-                      key={v}
-                      onClick={() => handlePreviewVoice(v)}
-                      disabled={previewingVoice}
-                      className={`relative px-2 py-1.5 rounded-md border text-xs transition-colors ${
-                        previewingVoice && ttsVoice !== v
-                          ? "opacity-40 cursor-not-allowed"
-                          : ""
-                      } ${
-                        ttsVoice === v
-                          ? "border-primary bg-primary/10 text-foreground"
-                          : "border-border text-muted-foreground hover:border-muted-foreground hover:text-foreground"
-                      }`}
-                    >
-                      <span className={previewingVoice && ttsVoice === v ? "opacity-0" : ""}>
-                        {v.replace("af_", "")}
-                      </span>
-                      {previewingVoice && ttsVoice === v && (
-                        <span className="absolute inset-0 flex items-center justify-center">
-                          <svg className="animate-spin h-3.5 w-3.5 text-primary" viewBox="0 0 24 24" fill="none">
-                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                          </svg>
-                        </span>
-                      )}
-                    </button>
-                  ))}
-                </div>
-
-                <p className="text-[10px] text-muted-foreground uppercase tracking-wider mb-2">
-                  Male voices
-                </p>
-                <div className="grid grid-cols-3 gap-1.5">
-                  {[
-                    "am_adam",
-                    "am_michael",
-                    "am_echo",
-                    "am_eric",
-                    "am_liam",
-                    "am_onyx",
-                  ].map((v) => (
-                    <button
-                      key={v}
-                      onClick={() => handlePreviewVoice(v)}
-                      disabled={previewingVoice}
-                      className={`relative px-2 py-1.5 rounded-md border text-xs transition-colors ${
-                        previewingVoice && ttsVoice !== v
-                          ? "opacity-40 cursor-not-allowed"
-                          : ""
-                      } ${
-                        ttsVoice === v
-                          ? "border-primary bg-primary/10 text-foreground"
-                          : "border-border text-muted-foreground hover:border-muted-foreground hover:text-foreground"
-                      }`}
-                    >
-                      <span className={previewingVoice && ttsVoice === v ? "opacity-0" : ""}>
-                        {v.replace("am_", "")}
-                      </span>
-                      {previewingVoice && ttsVoice === v && (
-                        <span className="absolute inset-0 flex items-center justify-center">
-                          <svg className="animate-spin h-3.5 w-3.5 text-primary" viewBox="0 0 24 24" fill="none">
-                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                          </svg>
-                        </span>
-                      )}
-                    </button>
-                  ))}
-                </div>
+              {/* TTS provider picker */}
+              <div className="grid grid-cols-3 gap-2">
+                {[
+                  { id: "kokoro", name: "Kokoro", desc: "Local, private. ~100MB model download on first use." },
+                  { id: "edge-tts", name: "Edge TTS", desc: "Free cloud service by Microsoft. No API key needed." },
+                  { id: "openai-compatible", name: "OpenAI TTS", desc: "Requires API key & endpoint." },
+                ].map((tp) => (
+                  <button
+                    key={tp.id}
+                    onClick={() => {
+                      setTtsProvider(tp.id);
+                      setTtsVoice(null);
+                      setError(null);
+                    }}
+                    className={`p-3 rounded-md border text-left text-xs transition-colors ${
+                      ttsProvider === tp.id
+                        ? "border-primary bg-primary/10 text-foreground"
+                        : "border-border bg-background text-muted-foreground hover:border-muted-foreground"
+                    }`}
+                  >
+                    <div className="font-medium text-sm">{tp.name}</div>
+                    <div className="text-muted-foreground mt-0.5 leading-snug">{tp.desc}</div>
+                  </button>
+                ))}
               </div>
+
+              {/* OpenAI-compatible config fields */}
+              {ttsProvider === "openai-compatible" && (
+                <div className="space-y-3">
+                  <div>
+                    <label className="block text-sm text-muted-foreground mb-1.5">
+                      API Key
+                    </label>
+                    <input
+                      type="password"
+                      value={ttsApiKey}
+                      onChange={(e) => setTtsApiKey(e.target.value)}
+                      placeholder="sk-..."
+                      className="w-full px-3 py-2 bg-background border border-input rounded-md text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm text-muted-foreground mb-1.5">
+                      Base URL
+                    </label>
+                    <input
+                      type="text"
+                      value={ttsBaseUrl}
+                      onChange={(e) => setTtsBaseUrl(e.target.value)}
+                      placeholder="https://api.openai.com"
+                      className="w-full px-3 py-2 bg-background border border-input rounded-md text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* Voice grid — Kokoro */}
+              {ttsProvider === "kokoro" && (
+                <div>
+                  <p className="text-[10px] text-muted-foreground uppercase tracking-wider mb-2">
+                    Female voices
+                  </p>
+                  <div className="grid grid-cols-3 gap-1.5 mb-3">
+                    {["af_heart", "af_bella", "af_nicole", "af_aoede", "af_kore", "af_sarah", "af_sky"].map((v) => (
+                      <VoiceButton key={v} voice={v} label={v.replace("af_", "")} ttsVoice={ttsVoice} previewingVoice={previewingVoice} onPreview={handlePreviewVoice} />
+                    ))}
+                  </div>
+                  <p className="text-[10px] text-muted-foreground uppercase tracking-wider mb-2">
+                    Male voices
+                  </p>
+                  <div className="grid grid-cols-3 gap-1.5">
+                    {["am_adam", "am_michael", "am_echo", "am_eric", "am_liam", "am_onyx"].map((v) => (
+                      <VoiceButton key={v} voice={v} label={v.replace("am_", "")} ttsVoice={ttsVoice} previewingVoice={previewingVoice} onPreview={handlePreviewVoice} />
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Voice grid — Edge TTS */}
+              {ttsProvider === "edge-tts" && (
+                <div className="space-y-3">
+                  {[
+                    { label: "English (US)", voices: ["en-US-AriaNeural", "en-US-JennyNeural", "en-US-GuyNeural", "en-US-DavisNeural", "en-US-SaraNeural"] },
+                    { label: "English (GB)", voices: ["en-GB-SoniaNeural", "en-GB-RyanNeural", "en-GB-LibbyNeural"] },
+                    { label: "German", voices: ["de-DE-KatjaNeural", "de-DE-ConradNeural"] },
+                    { label: "French", voices: ["fr-FR-DeniseNeural", "fr-FR-HenriNeural"] },
+                    { label: "Spanish", voices: ["es-ES-ElviraNeural", "es-ES-AlvaroNeural"] },
+                    { label: "Japanese", voices: ["ja-JP-NanamiNeural", "ja-JP-KeitaNeural"] },
+                    { label: "More", voices: ["it-IT-ElsaNeural", "pt-BR-FranciscaNeural", "zh-CN-XiaoxiaoNeural", "ko-KR-SunHiNeural", "hi-IN-SwaraNeural"] },
+                  ].map((group) => (
+                    <div key={group.label}>
+                      <p className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1.5">
+                        {group.label}
+                      </p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {group.voices.map((v) => (
+                          <VoiceButton key={v} voice={v} label={v.replace(/^[a-z]{2}-[A-Z]{2}-/, "").replace(/Neural$/, "")} ttsVoice={ttsVoice} previewingVoice={previewingVoice} onPreview={handlePreviewVoice} />
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Voice grid — OpenAI-compatible */}
+              {ttsProvider === "openai-compatible" && (
+                <div>
+                  <p className="text-[10px] text-muted-foreground uppercase tracking-wider mb-2">
+                    Voices
+                  </p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {["alloy", "echo", "fable", "onyx", "nova", "shimmer"].map((v) => (
+                      <VoiceButton key={v} voice={v} label={v} ttsVoice={ttsVoice} previewingVoice={previewingVoice} onPreview={handlePreviewVoice} />
+                    ))}
+                  </div>
+                </div>
+              )}
 
               {/* Loading status bar */}
               {previewingVoice && (
@@ -981,16 +1060,17 @@ export function SetupWizard() {
                     <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                   </svg>
                   <span>
-                    Generating preview... First time may take 30–60s while the voice model downloads.
+                    {ttsProvider === "kokoro"
+                      ? "Generating preview... First time may take 30\u201360s while the voice model downloads."
+                      : "Generating preview..."}
                   </span>
                 </div>
               )}
 
-              {!previewingVoice && (
+              {!previewingVoice && ttsProvider && (
                 <p className="text-[10px] text-muted-foreground">
-                  Click a voice to hear a preview. More voices (British,
-                  Japanese, Spanish, and others) are available in Settings
-                  after setup.
+                  Click a voice to hear a preview. More voices are available in
+                  Settings after setup.
                 </p>
               )}
 
@@ -1011,17 +1091,14 @@ export function SetupWizard() {
                   disabled={submitting}
                   className="flex-1 px-4 py-2 bg-primary text-primary-foreground text-sm font-medium rounded-md hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                 >
-                  {submitting
-                    ? "Setting up..."
-                    : ttsVoice
-                      ? "Complete Setup"
-                      : "Complete Setup"}
+                  {submitting ? "Setting up..." : "Complete Setup"}
                 </button>
               </div>
 
               <button
                 onClick={() => {
                   setTtsVoice(null);
+                  setTtsProvider(null);
                   handleComplete();
                 }}
                 disabled={submitting}

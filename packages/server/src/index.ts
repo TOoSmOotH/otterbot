@@ -355,17 +355,17 @@ async function main() {
   });
 
   app.post<{
-    Body: { voice: string };
+    Body: { voice: string; provider?: string };
   }>("/api/setup/tts-preview", async (req, reply) => {
-    const { voice } = req.body;
+    const { voice, provider: ttsProvider } = req.body;
     if (!voice) {
       reply.code(400);
       return { error: "voice is required" };
     }
 
-    // Temporarily configure Kokoro as the active provider for synthesis
+    // Temporarily configure the requested provider (default kokoro for backwards compat)
     const previousActive = getConfig("tts:active_provider");
-    setConfig("tts:active_provider", "kokoro");
+    setConfig("tts:active_provider", ttsProvider || "kokoro");
 
     try {
       const provider = getConfiguredTTSProvider();
@@ -428,6 +428,7 @@ async function main() {
       userBio?: string;
       userTimezone: string;
       ttsVoice?: string;
+      ttsProvider?: string;
       userModelPackId?: string;
       userGearConfig?: Record<string, boolean> | null;
       cooName: string;
@@ -443,7 +444,7 @@ async function main() {
       return { error: "Setup already completed" };
     }
 
-    const { passphrase, provider, model, apiKey, baseUrl, userName, userAvatar, userBio, userTimezone, ttsVoice, userModelPackId, userGearConfig, cooName, cooModelPackId, cooGearConfig, searchProvider, searchApiKey, searchBaseUrl } = req.body;
+    const { passphrase, provider, model, apiKey, baseUrl, userName, userAvatar, userBio, userTimezone, ttsVoice, ttsProvider, userModelPackId, userGearConfig, cooName, cooModelPackId, cooGearConfig, searchProvider, searchApiKey, searchBaseUrl } = req.body;
 
     if (!passphrase || passphrase.length < 8) {
       reply.code(400);
@@ -492,7 +493,7 @@ async function main() {
     // Store TTS preference
     if (ttsVoice) {
       setConfig("tts:enabled", "true");
-      setConfig("tts:active_provider", "kokoro");
+      setConfig("tts:active_provider", ttsProvider || "kokoro");
       setConfig("tts:voice", ttsVoice);
     }
 
