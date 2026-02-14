@@ -17,6 +17,7 @@ import type { WorkspaceManager } from "../workspace/workspace.js";
 import { GitWorktreeManager } from "../workspace/git-worktree.js";
 import { eq } from "drizzle-orm";
 import { getConfig } from "../auth/auth.js";
+import { execSync } from "node:child_process";
 import { getConfiguredSearchProvider } from "../tools/search/providers.js";
 import { isDesktopEnabled } from "../desktop/desktop.js";
 import { TEAM_LEAD_PROMPT } from "./prompts/team-lead.js";
@@ -35,6 +36,31 @@ const TOOL_DESCRIPTIONS: Record<string, string> = {
   install_package: "Install apt or npm packages (persisted across restarts)",
 };
 
+/** Find the Chromium binary — checks wrapper script, then Playwright install path */
+let _chromiumPath: string | null | undefined;
+function findChromiumPath(): string | null {
+  if (_chromiumPath !== undefined) return _chromiumPath;
+  try {
+    // Check for our wrapper script first
+    execSync("which chromium-browser", { stdio: "pipe" });
+    _chromiumPath = "chromium-browser";
+    return _chromiumPath;
+  } catch { /* not found */ }
+  try {
+    // Fall back to finding Playwright's Chromium directly
+    const browsersPath = process.env.PLAYWRIGHT_BROWSERS_PATH ?? `${process.env.HOME ?? "/root"}/.cache/ms-playwright`;
+    const result = execSync(
+      `find ${browsersPath} -name chrome -type f -path '*/chrome-linux*/chrome' 2>/dev/null | head -1`,
+      { stdio: "pipe" },
+    ).toString().trim();
+    _chromiumPath = result || null;
+    return _chromiumPath;
+  } catch {
+    _chromiumPath = null;
+    return null;
+  }
+}
+
 /** Build environment context to append to worker system prompts */
 function buildEnvironmentContext(toolNames: string[]): string {
   const sections: string[] = [];
@@ -50,12 +76,16 @@ function buildEnvironmentContext(toolNames: string[]): string {
   // Desktop environment
   if (isDesktopEnabled()) {
     const hasShell = toolNames.includes("shell_exec");
+    const chromium = findChromiumPath();
+    const browserInfo = chromium
+      ? `\nChromium is already installed at \`${chromium}\`. Do NOT try to install a browser — it is already available.`
+      : `\nNo browser is pre-installed on the desktop. Use install_package to install one if needed.`;
     sections.push(
       `## Desktop Environment` +
       `\nA full XFCE4 desktop is running on DISPLAY=:99, viewable by the user via the web UI.` +
-      `\nChromium browser is installed at \`chromium-browser\` and is the default system browser.` +
-      (hasShell
-        ? `\nYou can launch GUI applications via shell_exec (e.g. \`chromium-browser https://example.com &\`).`
+      browserInfo +
+      (hasShell && chromium
+        ? `\nTo launch the browser on the desktop: \`${chromium} --no-sandbox --disable-dev-shm-usage https://example.com &\``
         : "") +
       `\nThe user can see everything on the desktop in real-time.`,
     );
