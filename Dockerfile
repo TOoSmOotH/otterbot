@@ -66,7 +66,21 @@ COPY --from=build /app/packages/web/package.json ./packages/web/
 COPY --from=build /app/assets ./assets
 
 # Install Playwright Chromium browser (headless, for agent web browsing)
+# Use a fixed path so both root (build) and smoothbot (runtime) can find it
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/playwright
 RUN node packages/server/node_modules/playwright/cli.js install chromium
+
+# Make Playwright's Chromium available as the system default browser.
+# Wrapper script passes --no-sandbox (required in containers).
+RUN CHROME_BIN=$(find /opt/playwright -name chrome -type f -path '*/chrome-linux*/chrome' | head -1) \
+    && printf '#!/bin/sh\nexec "%s" --no-sandbox --disable-dev-shm-usage "$@"\n' "$CHROME_BIN" \
+       > /usr/local/bin/chromium-browser \
+    && chmod +x /usr/local/bin/chromium-browser \
+    && mkdir -p /usr/share/applications \
+    && printf '[Desktop Entry]\nName=Chromium\nExec=chromium-browser %%U\nType=Application\nCategories=Network;WebBrowser;\nMimeType=text/html;x-scheme-handler/http;x-scheme-handler/https;\n' \
+       > /usr/share/applications/chromium-browser.desktop \
+    && update-alternatives --install /usr/bin/x-www-browser x-www-browser /usr/local/bin/chromium-browser 200 \
+    && update-alternatives --install /usr/bin/gnome-www-browser gnome-www-browser /usr/local/bin/chromium-browser 200
 
 # Download noVNC ES module source (native ESM — served as static files for the web viewer)
 # Both core/ and vendor/ are needed because core/inflator.js imports ../vendor/pako/
@@ -240,6 +254,7 @@ ENV HOME=/smoothbot/home
 ENV NPM_CONFIG_PREFIX=/smoothbot/tools
 ENV PATH="/smoothbot/tools/bin:$PATH"
 
+ENV BROWSER=/usr/local/bin/chromium-browser
 ENV ENABLE_DESKTOP=true
 ENV DESKTOP_RESOLUTION=1280x720x24
 ENV VNC_PORT=5900
