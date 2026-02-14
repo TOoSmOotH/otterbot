@@ -256,6 +256,10 @@ export class TeamLead extends BaseAgent {
       `- If the worker SUCCEEDED at its task → \`update_task\` to move it to "done"\n` +
       `- If the worker FAILED → \`update_task\` to move it to "backlog" with \`assigneeAgentId: ""\` so it can be retried`;
 
+    const taskNotice = reportingTaskTitle
+      ? `[Task "${reportingTaskTitle}" (${reportingTaskId}) is still in_progress — YOU must evaluate and move it.]\n\n`
+      : "";
+
     // Build the ORPHANED TASKS block if any exist
     const orphanBlock = orphans.length > 0
       ? `\n\n**ORPHANED TASKS** (in_progress but assigned to dead workers — move these to "backlog" with \`assigneeAgentId: ""\`):\n` +
@@ -302,11 +306,39 @@ export class TeamLead extends BaseAgent {
           `If the app is running: report success to the COO using report_to_coo — include what was built, verification results, deployment URL/port, and workspace path: ${repoPath}\n` +
           `If deployment failed: create fix tasks, spawn workers to address the issues, then re-deploy`;
       }
+    } else if (livingWorkers > 0 && !board.hasBacklog && orphans.length === 0) {
+      // Workers still running, nothing to spawn — evaluate the report and return.
+      // Use a single think() (NOT thinkWithContinuation) to prevent the LLM from
+      // looping while it "waits" for workers that report via the message bus.
+      const waitInstructions =
+        `Evaluate the worker report and move the task accordingly (see ACTION REQUIRED below).` +
+        `\nAfter updating the task, STOP IMMEDIATELY. Do not call any other tools. ` +
+        `${livingWorkers} worker(s) are still in progress — you will be notified when they finish.` +
+        actionRequired;
+
+      const waitSummary =
+        `[Worker ${message.fromAgentId} report]: ${message.content}\n\n` +
+        taskNotice +
+        `[KANBAN BOARD]\n${board.summary}\n[/KANBAN BOARD]\n\n` +
+        waitInstructions;
+
+      const { text } = await this.think(
+        waitSummary,
+        (token, messageId) => this.onAgentStream?.(this.id, token, messageId),
+        (token, messageId) => this.onAgentThinking?.(this.id, token, messageId),
+        (messageId) => this.onAgentThinkingEnd?.(this.id, messageId),
+      );
+
+      if (this.parentId && text.trim()) {
+        this.sendMessage(this.parentId, MessageType.Report, text);
+      }
+      return;
     } else if (livingWorkers > 0) {
+      // Workers running but there are orphans or backlog to handle
       instructions =
         `Evaluate the worker report and move the task accordingly (see ACTION REQUIRED below).` +
-        `\nThen STOP and wait — ${livingWorkers} worker(s) are still in progress. ` +
-        `Do not call list_tasks or get_branch_status. Worker reports arrive automatically via the message bus.` +
+        `\nThen handle any orphaned/backlog tasks below. ${livingWorkers} worker(s) are still in progress — ` +
+        `after handling the items below, stop and wait for worker reports.` +
         actionRequired + orphanBlock;
     } else if (board.hasBacklog || orphans.length > 0) {
       instructions =
@@ -318,10 +350,6 @@ export class TeamLead extends BaseAgent {
         `Evaluate the worker report and proceed.` +
         actionRequired + orphanBlock;
     }
-
-    const taskNotice = reportingTaskTitle
-      ? `[Task "${reportingTaskTitle}" (${reportingTaskId}) is still in_progress — YOU must evaluate and move it.]\n\n`
-      : "";
 
     const summary =
       `[Worker ${message.fromAgentId} report]: ${message.content}\n\n` +
