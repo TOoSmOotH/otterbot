@@ -18,6 +18,7 @@ export function useSocket() {
   const removeAgent = useAgentStore((s) => s.removeAgent);
   const addProject = useProjectStore((s) => s.addProject);
   const updateProject = useProjectStore((s) => s.updateProject);
+  const removeProject = useProjectStore((s) => s.removeProject);
   const addTask = useProjectStore((s) => s.addTask);
   const updateTask = useProjectStore((s) => s.updateTask);
   const removeTask = useProjectStore((s) => s.removeTask);
@@ -97,6 +98,10 @@ export function useSocket() {
       updateProject(project);
     });
 
+    socket.on("project:deleted", ({ projectId }) => {
+      removeProject(projectId);
+    });
+
     socket.on("kanban:task-created", (task) => {
       addTask(task);
     });
@@ -138,6 +143,7 @@ export function useSocket() {
       socket.off("agent:destroyed");
       socket.off("project:created");
       socket.off("project:updated");
+      socket.off("project:deleted");
       socket.off("kanban:task-created");
       socket.off("kanban:task-updated");
       socket.off("kanban:task-deleted");

@@ -17,6 +17,7 @@ interface ProjectState {
   setProjects: (projects: Project[]) => void;
   addProject: (project: Project) => void;
   updateProject: (project: Project) => void;
+  removeProject: (projectId: string) => void;
   enterProject: (projectId: string, project: Project, conversations: Conversation[], tasks: KanbanTask[]) => void;
   exitProject: () => void;
   setTasks: (tasks: KanbanTask[]) => void;
@@ -45,6 +46,14 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     set((state) => ({
       projects: state.projects.map((p) => (p.id === project.id ? project : p)),
       activeProject: state.activeProjectId === project.id ? project : state.activeProject,
+    })),
+
+  removeProject: (projectId) =>
+    set((state) => ({
+      projects: state.projects.filter((p) => p.id !== projectId),
+      ...(state.activeProjectId === projectId
+        ? { activeProjectId: null, activeProject: null, tasks: [], projectConversations: [] }
+        : {}),
     })),
 
   enterProject: (projectId, project, conversations, tasks) =>

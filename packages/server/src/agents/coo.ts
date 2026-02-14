@@ -43,6 +43,7 @@ import { getConfiguredSearchProvider } from "../tools/search/providers.js";
 import { getRandomModelPackId } from "../models3d/model-packs.js";
 import { isDesktopEnabled } from "../desktop/desktop.js";
 import { execSync } from "node:child_process";
+import { rmSync } from "node:fs";
 
 export interface COODependencies {
   bus: MessageBus;
@@ -1057,5 +1058,21 @@ The user can see everything on the desktop in real-time.`;
 
   getTeamLeads(): Map<string, TeamLead> {
     return this.teamLeads;
+  }
+
+  /** Destroy the TeamLead (and its workers) for a project, remove workspace, and clean up */
+  destroyProject(projectId: string) {
+    const teamLead = this.teamLeads.get(projectId);
+    if (teamLead) {
+      teamLead.destroy();
+      this.teamLeads.delete(projectId);
+    }
+
+    // Remove workspace directory
+    try {
+      rmSync(this.workspace.projectPath(projectId), { recursive: true, force: true });
+    } catch {
+      // Best-effort filesystem cleanup
+    }
   }
 }

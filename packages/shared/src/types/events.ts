@@ -17,6 +17,7 @@ export interface ServerToClientEvents {
   "conversation:created": (conversation: Conversation) => void;
   "project:created": (project: Project) => void;
   "project:updated": (project: Project) => void;
+  "project:deleted": (data: { projectId: string }) => void;
   "kanban:task-created": (task: KanbanTask) => void;
   "kanban:task-updated": (task: KanbanTask) => void;
   "kanban:task-deleted": (data: { taskId: string; projectId: string }) => void;
@@ -53,6 +54,10 @@ export interface ClientToServerEvents {
   "project:enter": (
     data: { projectId: string },
     callback: (result: { project: Project; conversations: Conversation[]; tasks: KanbanTask[] }) => void,
+  ) => void;
+  "project:delete": (
+    data: { projectId: string },
+    callback?: (ack: { ok: boolean; error?: string }) => void,
   ) => void;
   "project:conversations": (
     data: { projectId: string },

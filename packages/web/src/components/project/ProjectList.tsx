@@ -89,18 +89,37 @@ export function ProjectList({
       ) : (
         <div className="divide-y divide-border/50">
           {projects.map((p) => (
-            <button
+            <div
               key={p.id}
-              onClick={() => onEnterProject(p.id)}
-              className="w-full text-left px-4 py-2 hover:bg-secondary/50 transition-colors flex items-center gap-2"
+              className="flex items-center hover:bg-secondary/50 transition-colors group"
             >
-              <span className="text-xs font-medium truncate flex-1">{p.name}</span>
-              <span
-                className={`text-[9px] font-medium px-1.5 py-0.5 rounded border shrink-0 ${statusColors[p.status]}`}
+              <button
+                onClick={() => onEnterProject(p.id)}
+                className="flex-1 text-left px-4 py-2 flex items-center gap-2 min-w-0"
               >
-                {p.status}
-              </span>
-            </button>
+                <span className="text-xs font-medium truncate flex-1">{p.name}</span>
+                <span
+                  className={`text-[9px] font-medium px-1.5 py-0.5 rounded border shrink-0 ${statusColors[p.status]}`}
+                >
+                  {p.status}
+                </span>
+              </button>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (window.confirm(`Delete project "${p.name}"? This will remove all tasks, conversations, and files.`)) {
+                    const socket = getSocket();
+                    socket.emit("project:delete", { projectId: p.id });
+                  }
+                }}
+                className="opacity-0 group-hover:opacity-100 px-2 py-2 text-muted-foreground hover:text-red-400 transition-all shrink-0"
+                title="Delete project"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M3 6h18" /><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" /><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
+                </svg>
+              </button>
+            </div>
           ))}
         </div>
       )}

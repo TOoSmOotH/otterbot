@@ -33,6 +33,7 @@ import {
   emitCooThinkingEnd,
   emitProjectCreated,
   emitProjectUpdated,
+  emitProjectDeleted,
   emitKanbanTaskCreated,
   emitKanbanTaskUpdated,
   emitKanbanTaskDeleted,
@@ -768,6 +769,43 @@ async function main() {
         .where(eq(schema.conversations.projectId, req.params.projectId))
         .orderBy(desc(schema.conversations.updatedAt))
         .all();
+    },
+  );
+
+  app.delete<{ Params: { projectId: string } }>(
+    "/api/projects/:projectId",
+    async (req, reply) => {
+      const { getDb, schema } = await import("./db/index.js");
+      const { eq } = await import("drizzle-orm");
+      const db = getDb();
+      const project = db
+        .select()
+        .from(schema.projects)
+        .where(eq(schema.projects.id, req.params.projectId))
+        .get();
+      if (!project) {
+        reply.code(404);
+        return { error: "Project not found" };
+      }
+
+      // Stop running agents and remove workspace
+      if (coo) {
+        coo.destroyProject(req.params.projectId);
+      }
+
+      // Cascade-delete related DB records
+      db.delete(schema.worktrees).where(eq(schema.worktrees.projectId, req.params.projectId)).run();
+      db.delete(schema.kanbanTasks).where(eq(schema.kanbanTasks.projectId, req.params.projectId)).run();
+      db.delete(schema.agentActivity).where(eq(schema.agentActivity.projectId, req.params.projectId)).run();
+      db.delete(schema.messages).where(eq(schema.messages.projectId, req.params.projectId)).run();
+      db.delete(schema.conversations).where(eq(schema.conversations.projectId, req.params.projectId)).run();
+      db.delete(schema.agents).where(eq(schema.agents.projectId, req.params.projectId)).run();
+      db.delete(schema.projects).where(eq(schema.projects.id, req.params.projectId)).run();
+
+      // Broadcast deletion via socket
+      emitProjectDeleted(io, req.params.projectId);
+
+      return { ok: true };
     },
   );
 

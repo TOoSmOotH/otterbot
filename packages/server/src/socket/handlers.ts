@@ -243,6 +243,37 @@ export function setupSocketHandlers(
       callback(conversations as Conversation[]);
     });
 
+    // Delete a project (cascading cleanup)
+    socket.on("project:delete", (data, callback) => {
+      const db = getDb();
+      const project = db
+        .select()
+        .from(schema.projects)
+        .where(eq(schema.projects.id, data.projectId))
+        .get();
+      if (!project) {
+        callback?.({ ok: false, error: "Project not found" });
+        return;
+      }
+
+      // Stop running agents and remove workspace
+      coo.destroyProject(data.projectId);
+
+      // Cascade-delete related DB records
+      db.delete(schema.worktrees).where(eq(schema.worktrees.projectId, data.projectId)).run();
+      db.delete(schema.kanbanTasks).where(eq(schema.kanbanTasks.projectId, data.projectId)).run();
+      db.delete(schema.agentActivity).where(eq(schema.agentActivity.projectId, data.projectId)).run();
+      db.delete(schema.messages).where(eq(schema.messages.projectId, data.projectId)).run();
+      db.delete(schema.conversations).where(eq(schema.conversations.projectId, data.projectId)).run();
+      db.delete(schema.agents).where(eq(schema.agents.projectId, data.projectId)).run();
+      db.delete(schema.projects).where(eq(schema.projects.id, data.projectId)).run();
+
+      // Broadcast deletion
+      io.emit("project:deleted", { projectId: data.projectId });
+
+      callback?.({ ok: true });
+    });
+
     // Retrieve agent activity (bus messages + persisted activity records)
     socket.on("agent:activity", (data, callback) => {
       const db = getDb();
@@ -328,6 +359,10 @@ export function emitProjectCreated(io: TypedServer, project: Project) {
 
 export function emitProjectUpdated(io: TypedServer, project: Project) {
   io.emit("project:updated", project);
+}
+
+export function emitProjectDeleted(io: TypedServer, projectId: string) {
+  io.emit("project:deleted", { projectId });
 }
 
 export function emitKanbanTaskCreated(io: TypedServer, task: KanbanTask) {
