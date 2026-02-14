@@ -208,10 +208,22 @@ export class TeamLead extends BaseAgent {
   }
 
   private async handleWorkerReport(message: BusMessage) {
-    // Auto-mark the worker's kanban task as "done"
-    const movedTask = message.fromAgentId
-      ? this.markWorkerTaskDone(message.fromAgentId)
-      : null;
+    // Find the reporting worker's task (read-only — do NOT auto-mark as done)
+    let reportingTaskTitle: string | null = null;
+    let reportingTaskId: string | null = null;
+    if (message.fromAgentId && this.projectId) {
+      const db = getDb();
+      const task = db
+        .select()
+        .from(schema.kanbanTasks)
+        .where(eq(schema.kanbanTasks.projectId, this.projectId))
+        .all()
+        .find((t) => t.assigneeAgentId === message.fromAgentId && t.column !== "done");
+      if (task) {
+        reportingTaskTitle = task.title;
+        reportingTaskId = task.id;
+      }
+    }
 
     // Clean up the finished worker — it already set itself to Done
     if (message.fromAgentId) {
@@ -223,22 +235,37 @@ export class TeamLead extends BaseAgent {
       }
     }
 
+    // Detect orphaned tasks (in_progress but assigned to dead workers)
+    const orphans = this.getOrphanedTasks();
+    const livingWorkers = this.workers.size;
+
     const board = this.getKanbanBoardState();
     const branchInfo = this.gitWorktree ? this.getBranchOverview() : "";
-
     const repoPath = this.projectId ? this.workspace.repoPath(this.projectId) : "";
+
+    // Build the ACTION REQUIRED block for evaluating the worker report
+    const actionRequired =
+      `\n\n**ACTION REQUIRED — evaluate the worker report above:**\n` +
+      `- If the worker SUCCEEDED at its task → \`update_task\` to move it to "done"\n` +
+      `- If the worker FAILED → \`update_task\` to move it to "backlog" with \`assigneeAgentId: ""\` so it can be retried`;
+
+    // Build the ORPHANED TASKS block if any exist
+    const orphanBlock = orphans.length > 0
+      ? `\n\n**ORPHANED TASKS** (in_progress but assigned to dead workers — move these to "backlog" with \`assigneeAgentId: ""\`):\n` +
+        orphans.map((o) => `  - "${o.title}" (${o.id}) was assigned to ${o.assigneeAgentId.slice(0, 6)}`).join("\n")
+      : "";
+
     let instructions: string;
-    if (board.allDone) {
+    if (board.allDone && orphans.length === 0) {
+      // All tasks genuinely done and no orphans — final assembly phases
       const hasUnmerged = this.gitWorktree?.hasRepo()
         ? this.gitWorktree.listWorktrees().length > 0
         : false;
       if (hasUnmerged) {
-        // Phase 1: Merge
         instructions =
           `ALL tasks are now complete. Begin FINAL ASSEMBLY:\n` +
           `1. Merge all worker branches in dependency order (foundational first) using merge_worker_branch`;
       } else if (!this.verificationRequested) {
-        // Phase 2: Verify
         this.verificationRequested = true;
         instructions =
           `ALL tasks done and all branches merged. Now VERIFY the deliverables work:\n` +
@@ -249,7 +276,6 @@ export class TeamLead extends BaseAgent {
           `5. Wait for the verification results — do NOT report to COO yet\n` +
           `The project repo is at: ${repoPath}`;
       } else if (!this.deploymentRequested) {
-        // Phase 3: Deploy
         this.deploymentRequested = true;
         instructions =
           `ALL tasks done, branches merged, and verification passed. Now DEPLOY the application:\n` +
@@ -263,25 +289,36 @@ export class TeamLead extends BaseAgent {
           `5. Wait for the deployment results — do NOT report to COO yet\n` +
           `The project repo is at: ${repoPath}`;
       } else {
-        // Phase 4: Report (verification and deployment complete)
         instructions =
           `ALL tasks done, branches merged, verification passed, and deployment complete.\n` +
           `Review the deployment results in the worker report above.\n` +
           `If the app is running: report success to the COO using report_to_coo — include what was built, verification results, deployment URL/port, and workspace path: ${repoPath}\n` +
           `If deployment failed: create fix tasks, spawn workers to address the issues, then re-deploy`;
       }
-    } else if (board.hasBacklog) {
-      instructions = `Backlog tasks remain — spawn workers for them.`;
+    } else if (livingWorkers > 0) {
+      instructions =
+        `Evaluate the worker report and move the task accordingly (see ACTION REQUIRED below).` +
+        `\nThen STOP and wait — ${livingWorkers} worker(s) are still in progress. ` +
+        `Do not call list_tasks or get_branch_status. Worker reports arrive automatically via the message bus.` +
+        actionRequired + orphanBlock;
+    } else if (board.hasBacklog || orphans.length > 0) {
+      instructions =
+        `Evaluate the worker report and move the task accordingly (see ACTION REQUIRED below).` +
+        `\nThen spawn workers for any backlog tasks.` +
+        actionRequired + orphanBlock;
     } else {
       instructions =
-        `Other workers are still in progress. ` +
-        `STOP. Do not call any tools. Do not call list_tasks or get_branch_status. ` +
-        `Return a brief status update and wait — worker reports arrive automatically via the message bus.`;
+        `Evaluate the worker report and proceed.` +
+        actionRequired + orphanBlock;
     }
+
+    const taskNotice = reportingTaskTitle
+      ? `[Task "${reportingTaskTitle}" (${reportingTaskId}) is still in_progress — YOU must evaluate and move it.]\n\n`
+      : "";
 
     const summary =
       `[Worker ${message.fromAgentId} report]: ${message.content}\n\n` +
-      (movedTask ? `[Task "${movedTask}" moved to done automatically.]\n\n` : "") +
+      taskNotice +
       `[KANBAN BOARD]\n${board.summary}\n[/KANBAN BOARD]\n\n` +
       (branchInfo ? `[GIT BRANCHES]\n${branchInfo}\n[/GIT BRANCHES]\n\n` : "") +
       instructions;
@@ -882,37 +919,25 @@ export class TeamLead extends BaseAgent {
     return lines.join("\n\n");
   }
 
-  /** Automatically move a worker's assigned task to "done" and fire the kanban change event. Returns the task title or null. */
-  private markWorkerTaskDone(workerId: string): string | null {
-    if (!this.projectId) return null;
+  /** Find in_progress tasks whose assigneeAgentId is not in this.workers (i.e. the worker is dead). Read-only — does not mutate state. */
+  private getOrphanedTasks(): Array<{ id: string; title: string; assigneeAgentId: string }> {
+    if (!this.projectId) return [];
 
     const db = getDb();
-    const task = db
+    const tasks = db
       .select()
       .from(schema.kanbanTasks)
       .where(eq(schema.kanbanTasks.projectId, this.projectId))
-      .all()
-      .find((t) => t.assigneeAgentId === workerId && t.column !== "done");
+      .all();
 
-    if (!task) return null;
-
-    const now = new Date().toISOString();
-    db.update(schema.kanbanTasks)
-      .set({ column: "done", updatedAt: now })
-      .where(eq(schema.kanbanTasks.id, task.id))
-      .run();
-
-    const updated = db
-      .select()
-      .from(schema.kanbanTasks)
-      .where(eq(schema.kanbanTasks.id, task.id))
-      .get();
-    if (updated) {
-      this.onKanbanChange?.("updated", updated as unknown as KanbanTask);
-    }
-
-    console.log(`[TeamLead ${this.id}] Auto-marked task "${task.title}" (${task.id}) as done for worker ${workerId}`);
-    return task.title;
+    return tasks
+      .filter(
+        (t) =>
+          t.column === "in_progress" &&
+          t.assigneeAgentId &&
+          !this.workers.has(t.assigneeAgentId),
+      )
+      .map((t) => ({ id: t.id, title: t.title, assigneeAgentId: t.assigneeAgentId! }));
   }
 
   /** Auto-assign a kanban task to a worker: move to in_progress and set assigneeAgentId */
