@@ -127,6 +127,8 @@ export class TeamLead extends BaseAgent {
   private workspace: WorkspaceManager;
   private gitWorktree: GitWorktreeManager | null = null;
   private verificationRequested = false;
+  /** Per-think-cycle call counts — prevents tools from being called repeatedly within a single streamText run */
+  private _toolCallCounts = new Map<string, number>();
   private onAgentSpawned?: (agent: BaseAgent) => void;
   private onKanbanChange?: (event: "created" | "updated" | "deleted", task: KanbanTask) => void;
 
@@ -458,6 +460,17 @@ export class TeamLead extends BaseAgent {
     return { text: result.text, thinking: result.thinking };
   }
 
+  /** Reset per-cycle tool call counters before each LLM invocation */
+  protected override async think(
+    userMessage: string,
+    onToken?: (token: string, messageId: string) => void,
+    onReasoning?: (token: string, messageId: string) => void,
+    onReasoningEnd?: (messageId: string) => void,
+  ): Promise<{ text: string; thinking: string | undefined; hadToolCalls: boolean }> {
+    this._toolCallCounts.clear();
+    return super.think(userMessage, onToken, onReasoning, onReasoningEnd);
+  }
+
   override getStatusSummary(): string {
     return `TeamLead ${this.id} [${this.status}] — ${this.workers.size} worker(s)`;
   }
@@ -577,9 +590,14 @@ export class TeamLead extends BaseAgent {
       }),
       get_branch_status: tool({
         description:
-          "Show all active worktree branches with ahead/behind counts and diff summaries.",
+          "Show all active worktree branches with ahead/behind counts and diff summaries. Only call once per cycle.",
         parameters: z.object({}),
         execute: async () => {
+          const count = (this._toolCallCounts.get("get_branch_status") ?? 0) + 1;
+          this._toolCallCounts.set("get_branch_status", count);
+          if (count > 1) {
+            return "REFUSED: You already checked branch status. STOP calling tools and return your response now.";
+          }
           return this.getBranchOverview();
         },
       }),
@@ -611,10 +629,20 @@ export class TeamLead extends BaseAgent {
         },
       }),
       list_tasks: tool({
-        description: "List all kanban tasks for this project.",
+        description: "List all kanban tasks for this project. Only call once — repeated calls return the same data.",
         parameters: z.object({}),
         execute: async () => {
-          return this.listKanbanTasks();
+          const count = (this._toolCallCounts.get("list_tasks") ?? 0) + 1;
+          this._toolCallCounts.set("list_tasks", count);
+          if (count > 1) {
+            return "REFUSED: You already called list_tasks. The board has not changed. STOP calling tools and return your response now.";
+          }
+          const result = this.listKanbanTasks();
+          const board = this.getKanbanBoardState();
+          if (board.hasInProgress && !board.hasBacklog && !board.allDone) {
+            return result + "\n\nALL TASKS ASSIGNED. Workers are in progress. STOP — do NOT call any more tools. Return immediately and wait for worker reports via the message bus.";
+          }
+          return result;
         },
       }),
     };
