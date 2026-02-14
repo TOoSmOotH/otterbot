@@ -208,12 +208,13 @@ export class TeamLead extends BaseAgent {
     const board = this.getKanbanBoardState();
     const branchInfo = this.gitWorktree ? this.getBranchOverview() : "";
 
+    const repoPath = this.projectId ? this.workspace.repoPath(this.projectId) : "";
     let instructions: string;
     if (board.allDone) {
       instructions =
         `ALL tasks are now complete. Begin FINAL ASSEMBLY:\n` +
         `1. Merge all worker branches in dependency order (foundational first) using merge_worker_branch\n` +
-        `2. Report the completed project to the COO using report_to_coo`;
+        `2. Report the completed project to the COO using report_to_coo — include the workspace path: ${repoPath}`;
     } else if (board.hasBacklog) {
       instructions = `Backlog tasks remain — spawn workers for them.`;
     } else {
@@ -373,9 +374,10 @@ export class TeamLead extends BaseAgent {
       if (!board.hasBacklog && !(board.allDone && hasUnmergedBranches)) break;
 
       const branchInfo = hasUnmergedBranches ? `\n${this.getBranchOverview()}` : "";
+      const repoPath = this.projectId ? this.workspace.repoPath(this.projectId) : "";
       const prompt = board.hasBacklog
         ? `[CONTINUATION] ${board.backlogCount} task(s) remain in backlog:\n${board.summary}\n\nSpawn workers for remaining backlog tasks.`
-        : `[FINAL ASSEMBLY] All tasks done. ${worktreeCount} unmerged branch(es) remain:${branchInfo}\n\nMerge all branches in dependency order and report completion to the COO.`;
+        : `[FINAL ASSEMBLY] All tasks done. ${worktreeCount} unmerged branch(es) remain:${branchInfo}\n\nMerge all branches in dependency order and report completion to the COO.\nThe project repo is at: ${repoPath}`;
 
       console.log(`[TeamLead ${this.id}] Continuation cycle ${i + 1}/${MAX_CONTINUATION_CYCLES} — ${board.hasBacklog ? `${board.backlogCount} backlog tasks remain` : "final assembly phase"}`);
 

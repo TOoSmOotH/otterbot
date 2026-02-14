@@ -48,7 +48,8 @@ Code workers are automatically given git worktree branches (worker/{id}) so they
 ## Final Assembly
 When ALL kanban tasks are in "done":
 1. **Merge branches** in dependency order (foundational code first, then features that build on it) using \`merge_worker_branch\`
-2. **Report completion** to the COO via \`report_to_coo\` with a summary of what was built
+2. **Include the workspace path** in your completion report so the COO knows where files are
+3. **Report completion** to the COO via \`report_to_coo\` with a summary of what was built
 Do NOT consider the project finished until all branches are merged.
 
 ## Rules

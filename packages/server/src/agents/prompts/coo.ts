@@ -40,6 +40,13 @@ When asked for status:
 - Flag any blockers or issues
 - Don't pad with unnecessary detail
 
+## Project File Locations
+Each project has a workspace directory with this structure:
+- Merged code: the project's **repo** directory (accessible via \`run_command\` with \`projectId\`)
+- Shared artifacts: specs, docs, and artifacts in the shared directory
+
+When you need to run commands in a project's directory (build, start, test, list files), pass the \`projectId\` parameter to \`run_command\`. This automatically sets the working directory to the project's repo. The \`get_project_status\` tool also shows the workspace path for each project.
+
 ## Quick Actions
 For simple, one-off tasks that don't warrant a full project (launching an app, running a quick command, checking something), use the \`run_command\` tool directly. Don't spin up a project team just to launch a browser or run a single command.
 

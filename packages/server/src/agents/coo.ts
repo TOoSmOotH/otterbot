@@ -43,7 +43,7 @@ import { getConfiguredSearchProvider } from "../tools/search/providers.js";
 import { getRandomModelPackId } from "../models3d/model-packs.js";
 import { isDesktopEnabled } from "../desktop/desktop.js";
 import { execSync } from "node:child_process";
-import { rmSync } from "node:fs";
+import { existsSync, rmSync } from "node:fs";
 
 export interface COODependencies {
   bus: MessageBus;
@@ -280,18 +280,26 @@ The user can see everything on the desktop in real-time.`;
       run_command: tool({
         description:
           "Run a shell command directly for quick, one-off tasks (launching apps, checking system status, simple file operations). " +
-          "Don't create a project just for simple commands. Output is capped at 50KB. Default timeout: 30s, max: 120s.",
+          "Don't create a project just for simple commands. Output is capped at 50KB. Default timeout: 30s, max: 120s. " +
+          "Pass projectId to run the command inside that project's repo directory.",
         parameters: z.object({
           command: z.string().describe("The shell command to execute"),
+          projectId: z.string().optional().describe("Project ID — sets working directory to the project's repo"),
           timeout: z
             .number()
             .optional()
             .describe("Timeout in milliseconds (default: 30000, max: 120000)"),
         }),
-        execute: async ({ command, timeout }) => {
+        execute: async ({ command, projectId, timeout }) => {
           const effectiveTimeout = Math.min(timeout ?? 30_000, 120_000);
+          let cwd: string | undefined;
+          if (projectId) {
+            const repoDir = this.workspace.repoPath(projectId);
+            cwd = existsSync(repoDir) ? repoDir : this.workspace.projectPath(projectId);
+          }
           try {
             const output = execSync(command, {
+              cwd,
               timeout: effectiveTimeout,
               stdio: "pipe",
               maxBuffer: 1024 * 1024,
@@ -681,6 +689,11 @@ The user can see everything on the desktop in real-time.`;
       .get();
     if (!project) return `Project ${projectId} not found.`;
 
+    // Resolve workspace path for this project
+    const repoDir = this.workspace.repoPath(project.id);
+    const hasRepo = existsSync(repoDir);
+    const workspacePath = hasRepo ? repoDir : this.workspace.projectPath(project.id);
+
     // 1. Get agent rows with their current statuses
     const agents = db
       .select()
@@ -723,6 +736,7 @@ The user can see everything on the desktop in real-time.`;
 
     return [
       `**Project "${project.name}"** (${project.status})`,
+      `Workspace: ${workspacePath}`,
       `Agents (${agents.length}):`,
       ...agentLines,
       `\nLive status from TeamLead:`,
