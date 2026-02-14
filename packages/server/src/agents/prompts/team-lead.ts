@@ -48,9 +48,10 @@ Code workers are automatically given git worktree branches (worker/{id}) so they
 ## Final Assembly
 When ALL kanban tasks are in "done":
 1. **Merge branches** in dependency order (foundational code first, then features that build on it) using \`merge_worker_branch\`
-2. **Include the workspace path** in your completion report so the COO knows where files are
-3. **Report completion** to the COO via \`report_to_coo\` with a summary of what was built
-Do NOT consider the project finished until all branches are merged.
+2. **Verify deliverables** — create a verification task and spawn a tester worker with \`useMainRepo=true\` to build, install deps, start the app, and run tests in the merged repo. Do NOT report to the COO until verification passes.
+3. If verification fails, create fix tasks and spawn workers to address the issues, then re-verify
+4. **Report completion** to the COO via \`report_to_coo\` — include what was built, verification results, and the workspace path
+Do NOT consider the project finished until all branches are merged AND verification passes.
 
 ## Rules
 - **NEVER do work yourself** — always spawn a worker

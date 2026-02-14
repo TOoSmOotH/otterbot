@@ -126,6 +126,7 @@ export class TeamLead extends BaseAgent {
   private workers: Map<string, Worker> = new Map();
   private workspace: WorkspaceManager;
   private gitWorktree: GitWorktreeManager | null = null;
+  private verificationRequested = false;
   private onAgentSpawned?: (agent: BaseAgent) => void;
   private onKanbanChange?: (event: "created" | "updated" | "deleted", task: KanbanTask) => void;
 
@@ -176,6 +177,7 @@ export class TeamLead extends BaseAgent {
   }
 
   private async handleDirective(message: BusMessage) {
+    this.verificationRequested = false;
     const { text } = await this.thinkWithContinuation(
       message.content,
       (token, messageId) => this.onAgentStream?.(this.id, token, messageId),
@@ -211,10 +213,33 @@ export class TeamLead extends BaseAgent {
     const repoPath = this.projectId ? this.workspace.repoPath(this.projectId) : "";
     let instructions: string;
     if (board.allDone) {
-      instructions =
-        `ALL tasks are now complete. Begin FINAL ASSEMBLY:\n` +
-        `1. Merge all worker branches in dependency order (foundational first) using merge_worker_branch\n` +
-        `2. Report the completed project to the COO using report_to_coo — include the workspace path: ${repoPath}`;
+      const hasUnmerged = this.gitWorktree?.hasRepo()
+        ? this.gitWorktree.listWorktrees().length > 0
+        : false;
+      if (hasUnmerged) {
+        // Phase 1: Merge
+        instructions =
+          `ALL tasks are now complete. Begin FINAL ASSEMBLY:\n` +
+          `1. Merge all worker branches in dependency order (foundational first) using merge_worker_branch`;
+      } else if (!this.verificationRequested) {
+        // Phase 2: Verify
+        this.verificationRequested = true;
+        instructions =
+          `ALL tasks done and all branches merged. Now VERIFY the deliverables work:\n` +
+          `1. Create a "Verify build and tests" task using create_task\n` +
+          `2. Search the registry for a tester worker (search_registry with capability "testing")\n` +
+          `3. Spawn the worker with useMainRepo=true so it runs in the merged codebase\n` +
+          `4. Give it clear instructions: install dependencies, build the project, start the app, and run tests\n` +
+          `5. Wait for the verification results — do NOT report to COO yet\n` +
+          `The project repo is at: ${repoPath}`;
+      } else {
+        // Phase 3: Report (verification already completed)
+        instructions =
+          `ALL tasks done, branches merged, and verification complete.\n` +
+          `Review the verification results in the worker report above.\n` +
+          `If everything passed: report success to the COO using report_to_coo — include what was built, verification results, and workspace path: ${repoPath}\n` +
+          `If there were failures: create fix tasks, spawn workers to address the issues, then re-verify`;
+      }
     } else if (board.hasBacklog) {
       instructions = `Backlog tasks remain — spawn workers for them.`;
     } else {
@@ -404,13 +429,29 @@ export class TeamLead extends BaseAgent {
         : 0;
       if (postBoard.allDone && postWorktreeCount === 0) {
         const repoPath = this.projectId ? this.workspace.repoPath(this.projectId) : "";
-        console.log(`[TeamLead ${this.id}] Post-merge report cycle — prompting TL to report completion to COO`);
-        result = await this.think(
-          `[REPORT] All tasks complete and all branches merged into main. Report the completed project to the COO now using report_to_coo. Include a summary of what was built and the workspace path: ${repoPath}`,
-          onToken,
-          onReasoning,
-          onReasoningEnd,
-        );
+        if (!this.verificationRequested) {
+          this.verificationRequested = true;
+          console.log(`[TeamLead ${this.id}] Post-merge verification — spawning verification worker`);
+          result = await this.think(
+            `[VERIFY] All tasks complete and all branches merged. Before reporting to the COO, verify the deliverables:\n` +
+            `1. Create a "Verify build and tests" task\n` +
+            `2. Search the registry for a tester worker (search_registry with "testing")\n` +
+            `3. Spawn it with useMainRepo=true so it runs in the merged code\n` +
+            `4. Give it instructions to: install deps, build, start the app, and run any tests\n` +
+            `The project repo is at: ${repoPath}`,
+            onToken,
+            onReasoning,
+            onReasoningEnd,
+          );
+        } else {
+          console.log(`[TeamLead ${this.id}] Post-merge report — verification done, reporting to COO`);
+          result = await this.think(
+            `[REPORT] All tasks complete, branches merged, and verification done. Report the completed project to the COO now using report_to_coo. Include what was built, verification results, and workspace path: ${repoPath}`,
+            onToken,
+            onReasoning,
+            onReasoningEnd,
+          );
+        }
       }
     }
 
@@ -451,9 +492,15 @@ export class TeamLead extends BaseAgent {
             .string()
             .optional()
             .describe("The kanban task ID to auto-assign to this worker (moves task to in_progress)"),
+          useMainRepo: z
+            .boolean()
+            .optional()
+            .describe(
+              "If true, worker runs in the project's main repo instead of a git worktree. Use for verification/testing of merged code.",
+            ),
         }),
-        execute: async ({ registryEntryId, task, taskId }) => {
-          return this.spawnWorker(registryEntryId, task, taskId);
+        execute: async ({ registryEntryId, task, taskId, useMainRepo }) => {
+          return this.spawnWorker(registryEntryId, task, taskId, useMainRepo);
         },
       }),
       web_search: tool({
@@ -602,6 +649,7 @@ export class TeamLead extends BaseAgent {
     registryEntryId: string,
     task: string,
     taskId?: string,
+    useMainRepo?: boolean,
   ): Promise<string> {
     try {
       const db = getDb();
@@ -620,7 +668,7 @@ export class TeamLead extends BaseAgent {
       const workerId = nanoid();
       let workspacePath: string | null = null;
 
-      if (this.projectId && isCodeWorker && this.gitWorktree) {
+      if (this.projectId && isCodeWorker && this.gitWorktree && !useMainRepo) {
         // Code workers get a git worktree
         if (!this.gitWorktree.hasRepo()) {
           this.gitWorktree.initRepo();
@@ -638,6 +686,9 @@ export class TeamLead extends BaseAgent {
             status: "active",
           })
           .run();
+      } else if (this.projectId && useMainRepo) {
+        // Verification workers get the main repo path directly
+        workspacePath = this.workspace.repoPath(this.projectId);
       } else if (this.projectId) {
         // Non-code workers get a regular agent directory
         workspacePath = this.workspace.createAgentWorkspace(

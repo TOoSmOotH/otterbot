@@ -12,6 +12,7 @@ export interface LLMConfig {
   apiKey?: string;
   temperature?: number;
   thinkingBudget?: number;
+  maxSteps?: number;
 }
 
 /** Returns true for Anthropic models that support extended thinking */
@@ -110,7 +111,7 @@ export async function stream(
     model,
     messages,
     temperature: config.temperature,
-    ...(tools ? { tools: tools as any, maxSteps: 10 } : {}),
+    ...(tools ? { tools: tools as any, maxSteps: config.maxSteps ?? 20 } : {}),
     ...(thinking
       ? {
           providerOptions: {
