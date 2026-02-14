@@ -86,6 +86,8 @@ export class COO extends BaseAgent {
   private lastProjectCreatedAt = 0;
   private projectCreatedThisTurn = false;
   private projectStatusCheckedThisTurn = false;
+  /** Per-think-cycle run_command call count — prevents the COO from burning steps on repeated commands */
+  private _runCommandCalls = 0;
 
   constructor(deps: COODependencies) {
     const registry = new Registry();
@@ -278,12 +280,24 @@ The user can see everything on the desktop in real-time.`;
     );
   }
 
+  /** Reset per-cycle tool call counters before each LLM invocation */
+  protected override async think(
+    userMessage: string,
+    onToken?: (token: string, messageId: string) => void,
+    onReasoning?: (token: string, messageId: string) => void,
+    onReasoningEnd?: (messageId: string) => void,
+  ): Promise<{ text: string; thinking: string | undefined; hadToolCalls: boolean }> {
+    this._runCommandCalls = 0;
+    return super.think(userMessage, onToken, onReasoning, onReasoningEnd);
+  }
+
   protected getTools(): Record<string, unknown> {
     return {
       run_command: tool({
         description:
-          "Run a shell command directly for quick, one-off tasks (launching apps, checking system status, simple file operations). " +
-          "Don't create a project just for simple commands. Output is capped at 50KB. Default timeout: 30s, max: 120s. " +
+          "Run a shell command for quick, one-off checks (ls, git log, curl, system status). " +
+          "NEVER use this to create files, write code, or build projects — delegate that to a Team Lead. " +
+          "Output is capped at 50KB. Default timeout: 30s, max: 120s. " +
           "Pass projectId to run the command inside that project's repo directory.",
         parameters: z.object({
           command: z.string().describe("The shell command to execute"),
@@ -294,6 +308,12 @@ The user can see everything on the desktop in real-time.`;
             .describe("Timeout in milliseconds (default: 30000, max: 120000)"),
         }),
         execute: async ({ command, projectId, timeout }) => {
+          this._runCommandCalls++;
+          if (this._runCommandCalls > 5) {
+            return "REFUSED: You have run too many commands this cycle. STOP using run_command. " +
+              "If you need a project built, use create_project to delegate to a Team Lead. " +
+              "Return your response to the CEO now.";
+          }
           const effectiveTimeout = Math.min(timeout ?? 30_000, 120_000);
           let cwd: string | undefined;
           if (projectId) {

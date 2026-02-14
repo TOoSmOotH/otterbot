@@ -755,7 +755,12 @@ export class TeamLead extends BaseAgent {
           getConfig("worker_provider") ??
           getConfig("coo_provider") ??
           entry.defaultProvider,
-        systemPrompt: entry.systemPrompt + buildEnvironmentContext(entryTools),
+        systemPrompt: entry.systemPrompt + buildEnvironmentContext(entryTools) +
+          (workspacePath
+            ? `\n\n## Your Workspace\nYour workspace directory is: \`${workspacePath}\`\n` +
+              `All file paths should be relative to this directory (e.g. \`src/main.go\`, not \`/workspace/src/main.go\`).\n` +
+              `Do NOT write to /workspace, /usr, /etc, /opt, /var, or any other location outside your workspace.`
+            : ""),
         workspacePath,
         toolNames: entryTools,
         onStatusChange: this.onStatusChange,
