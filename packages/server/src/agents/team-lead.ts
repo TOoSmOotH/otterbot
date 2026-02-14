@@ -108,6 +108,16 @@ function buildEnvironmentContext(toolNames: string[]): string {
     );
 
     sections.push(
+      `## Dependency Installation\n` +
+      `**CRITICAL: Always install project dependencies before building, testing, or running.**\n` +
+      `- **Node.js:** Run \`npm install\` in the project directory before \`npm run dev\`, \`npm run build\`, \`npm test\`, etc.\n` +
+      `- **Python:** Run \`pip install -r requirements.txt\` before running scripts.\n` +
+      `- **Go:** Run \`go mod download\` before building.\n` +
+      `- **Rust:** \`cargo build\` handles deps automatically.\n` +
+      `If a command fails with "not found" or "Cannot find module", install dependencies and retry.`,
+    );
+
+    sections.push(
       `## Software Installation\n` +
       `**IMPORTANT: Install language runtimes and tools into the home directory, NOT system paths.**\n` +
       `Do NOT write to \`/usr/local/\`, \`/opt/\`, or other system directories — use \`$HOME\` instead.\n` +
@@ -240,6 +250,8 @@ export class TeamLead extends BaseAgent {
   /**
    * Safety net: if the LLM didn't move the reporting task, force-move it
    * programmatically so it never stays stuck in in_progress.
+   * For failed tasks, appends a failure summary to the description so the
+   * next worker gets context about what went wrong.
    */
   private ensureTaskMoved(taskId: string, workerReport: string): void {
     const db = getDb();
@@ -260,7 +272,23 @@ export class TeamLead extends BaseAgent {
       `Force-moving to "${targetColumn}" (report ${failed ? "indicates failure" : "looks successful"}).`,
     );
 
-    this.updateKanbanTask(taskId, { column: targetColumn, assigneeAgentId: assignee ?? "" });
+    // For failures, enrich the task description with what went wrong
+    const updates: { column: string; assigneeAgentId: string; description?: string } = {
+      column: targetColumn,
+      assigneeAgentId: assignee ?? "",
+    };
+
+    if (failed) {
+      const snippet = workerReport.length > 500
+        ? workerReport.slice(-500)
+        : workerReport;
+      const existing = task.description ?? "";
+      updates.description = existing +
+        `\n\n--- PREVIOUS ATTEMPT FAILED ---\n${snippet}\n` +
+        `--- Analyze the error above and fix the root cause in your next attempt. ---`;
+    }
+
+    this.updateKanbanTask(taskId, updates);
   }
 
   private async handleWorkerReport(message: BusMessage) {
@@ -397,7 +425,9 @@ export class TeamLead extends BaseAgent {
     } else if (board.hasBacklog || orphans.length > 0) {
       instructions =
         `Evaluate the worker report and move the task accordingly (see ACTION REQUIRED below).` +
-        `\nThen spawn workers for any backlog tasks.` +
+        `\nThen spawn workers for any backlog tasks. ` +
+        `If a task was previously attempted and failed, its description will contain error details — ` +
+        `analyze the failure and include specific fix instructions in the new worker's directive.` +
         actionRequired + orphanBlock;
     } else {
       instructions =
@@ -503,6 +533,10 @@ export class TeamLead extends BaseAgent {
       for (const t of colTasks.sort((a, b) => a.position - b.position)) {
         const assignee = t.assigneeAgentId ? ` [assigned: ${t.assigneeAgentId.slice(0, 6)}]` : "";
         lines.push(`  - ${t.title} (${t.id})${assignee}`);
+        // Include descriptions for backlog tasks so the TL can see failure context from previous attempts
+        if (col === "backlog" && t.description && t.description.includes("PREVIOUS ATTEMPT FAILED")) {
+          lines.push(`    ${t.description.slice(t.description.lastIndexOf("--- PREVIOUS ATTEMPT FAILED ---")).slice(0, 300)}`);
+        }
       }
     }
 
@@ -562,7 +596,11 @@ export class TeamLead extends BaseAgent {
       const branchInfo = hasUnmergedBranches ? `\n${this.getBranchOverview()}` : "";
       const repoPath = this.projectId ? this.workspace.repoPath(this.projectId) : "";
       const prompt = board.hasBacklog
-        ? `[CONTINUATION] ${board.backlogCount} task(s) remain in backlog:\n${board.summary}\n\nSpawn workers for remaining backlog tasks.`
+        ? `[CONTINUATION] ${board.backlogCount} task(s) remain in backlog:\n${board.summary}\n\n` +
+          `Spawn workers for remaining backlog tasks. ` +
+          `If a task description contains a "PREVIOUS ATTEMPT FAILED" section, READ IT CAREFULLY — ` +
+          `analyze what went wrong and include specific fix instructions in the worker directive ` +
+          `(e.g. "run npm install before npm run dev", "use port 4000 instead of 3000").`
         : `[FINAL ASSEMBLY] All tasks done. ${worktreeCount} unmerged branch(es) remain:${branchInfo}\n\nMerge all branches in dependency order and report completion to the COO.\nThe project repo is at: ${repoPath}`;
 
       console.log(`[TeamLead ${this.id}] Continuation cycle ${i + 1}/${MAX_CONTINUATION_CYCLES} — ${board.hasBacklog ? `${board.backlogCount} backlog tasks remain` : "final assembly phase"}`);

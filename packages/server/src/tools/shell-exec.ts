@@ -42,6 +42,38 @@ function checkBlockedCommand(command: string): string | null {
   return null;
 }
 
+const RECOVERY_HINTS: { pattern: RegExp; hint: string }[] = [
+  {
+    pattern: /: not found|command not found|No such file or directory.*bin\//i,
+    hint: "A command was not found. If this is a project dependency (e.g. vite, tsc, jest, eslint), " +
+      "you probably need to install dependencies first: run `npm install` (or `yarn install` / `pnpm install`) " +
+      "in the project directory, then retry. For globally-needed tools, install them with `npm install -g <package>`.",
+  },
+  {
+    pattern: /Cannot find module|MODULE_NOT_FOUND|Error: Cannot find package/i,
+    hint: "A Node.js module was not found. Run `npm install` in the project directory to install dependencies, then retry.",
+  },
+  {
+    pattern: /ModuleNotFoundError|No module named/i,
+    hint: "A Python module was not found. Run `pip install -r requirements.txt` (or `pip install <package>`) then retry.",
+  },
+  {
+    pattern: /EADDRINUSE|address already in use/i,
+    hint: "The port is already in use. Either kill the existing process (`lsof -ti:<port> | xargs kill`) or use a different port.",
+  },
+  {
+    pattern: /EACCES|permission denied/i,
+    hint: "Permission denied. Avoid writing to system paths — use your workspace directory instead.",
+  },
+];
+
+function getRecoveryHint(output: string): string | null {
+  for (const { pattern, hint } of RECOVERY_HINTS) {
+    if (pattern.test(output)) return hint;
+  }
+  return null;
+}
+
 export function createShellExecTool(ctx: ToolContext) {
   return tool({
     description:
@@ -99,7 +131,14 @@ export function createShellExecTool(ctx: ToolContext) {
         };
         const stderr = execErr.stderr?.toString() ?? "";
         const stdout = execErr.stdout?.toString() ?? "";
-        const combined = `Exit code: ${execErr.status ?? "unknown"}\nstdout: ${stdout}\nstderr: ${stderr}`;
+        let combined = `Exit code: ${execErr.status ?? "unknown"}\nstdout: ${stdout}\nstderr: ${stderr}`;
+
+        // Append recovery hints for common errors so the LLM can self-correct
+        const hint = getRecoveryHint(stderr + stdout);
+        if (hint) {
+          combined += `\n\n[HINT] ${hint}`;
+        }
+
         if (combined.length > MAX_OUTPUT_SIZE) {
           return combined.slice(0, MAX_OUTPUT_SIZE) + "\n[truncated]";
         }
