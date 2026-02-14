@@ -91,7 +91,7 @@ function buildEnvironmentContext(toolNames: string[]): string {
     );
   }
 
-  // sudo availability
+  // sudo availability and installation guidance
   if (toolNames.includes("shell_exec")) {
     const sudoMode = process.env.SUDO_MODE ?? "restricted";
     if (sudoMode === "full") {
@@ -99,6 +99,18 @@ function buildEnvironmentContext(toolNames: string[]): string {
     } else {
       sections.push(`## System Access\nsudo is available for: apt-get, npm, tee, gpg, install. Use install_package tool when possible.`);
     }
+
+    sections.push(
+      `## Software Installation\n` +
+      `**IMPORTANT: Install language runtimes and tools into the home directory, NOT system paths.**\n` +
+      `Do NOT write to \`/usr/local/\`, \`/opt/\`, or other system directories — use \`$HOME\` instead.\n` +
+      `- **Go:** Download the tarball and extract to \`$HOME/go\`. Set \`export GOROOT=$HOME/go\` and \`export PATH=$HOME/go/bin:$PATH\`.\n` +
+      `- **Rust:** Use \`curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y\` (installs to \`$HOME/.rustup\` and \`$HOME/.cargo\` by default).\n` +
+      `- **Node.js/npm:** If not already available, use \`nvm\` or download and extract to \`$HOME/.local/\`.\n` +
+      `- **Python packages:** Use \`pip install --user\` or a virtualenv in the workspace.\n` +
+      `- **Other tools:** Install to \`$HOME/.local/bin/\` and add to PATH.\n` +
+      `Always update \`$PATH\` in the same shell session after installing.`,
+    );
   }
 
   if (sections.length === 0) return "";
