@@ -214,6 +214,55 @@ export class TeamLead extends BaseAgent {
     }
   }
 
+  /**
+   * Detect whether a worker report indicates failure.
+   * Returns true if the report contains clear failure signals.
+   */
+  private isFailureReport(report: string): boolean {
+    const lower = report.toLowerCase();
+    const failureSignals = [
+      "worker error:",
+      "task failed",
+      "not found",
+      "command not found",
+      "error:",
+      "failed to",
+      "could not",
+      "unable to",
+      "exit code: 1",
+      "permission denied",
+      "enoent",
+      "segmentation fault",
+    ];
+    return failureSignals.some((signal) => lower.includes(signal));
+  }
+
+  /**
+   * Safety net: if the LLM didn't move the reporting task, force-move it
+   * programmatically so it never stays stuck in in_progress.
+   */
+  private ensureTaskMoved(taskId: string, workerReport: string): void {
+    const db = getDb();
+    const task = db
+      .select()
+      .from(schema.kanbanTasks)
+      .where(eq(schema.kanbanTasks.id, taskId))
+      .get();
+
+    if (!task || task.column !== "in_progress") return; // LLM already moved it
+
+    const failed = this.isFailureReport(workerReport);
+    const targetColumn = failed ? "backlog" : "done";
+    const assignee = failed ? "" : task.assigneeAgentId;
+
+    console.warn(
+      `[TeamLead ${this.id}] Safety net: LLM did not move task "${task.title}" (${taskId}). ` +
+      `Force-moving to "${targetColumn}" (report ${failed ? "indicates failure" : "looks successful"}).`,
+    );
+
+    this.updateKanbanTask(taskId, { column: targetColumn, assigneeAgentId: assignee ?? "" });
+  }
+
   private async handleWorkerReport(message: BusMessage) {
     // Find the reporting worker's task (read-only — do NOT auto-mark as done)
     let reportingTaskTitle: string | null = null;
@@ -329,6 +378,11 @@ export class TeamLead extends BaseAgent {
         (messageId) => this.onAgentThinkingEnd?.(this.id, messageId),
       );
 
+      // Safety net: if the LLM didn't move the task, force-move it
+      if (reportingTaskId) {
+        this.ensureTaskMoved(reportingTaskId, message.content);
+      }
+
       if (this.parentId && text.trim()) {
         this.sendMessage(this.parentId, MessageType.Report, text);
       }
@@ -364,6 +418,11 @@ export class TeamLead extends BaseAgent {
       (token, messageId) => this.onAgentThinking?.(this.id, token, messageId),
       (messageId) => this.onAgentThinkingEnd?.(this.id, messageId),
     );
+
+    // Safety net: if the LLM didn't move the task, force-move it
+    if (reportingTaskId) {
+      this.ensureTaskMoved(reportingTaskId, message.content);
+    }
 
     // Relay significant updates to COO
     if (this.parentId && text.trim()) {
