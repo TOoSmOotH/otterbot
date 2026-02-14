@@ -53,6 +53,9 @@ export abstract class BaseAgent {
   protected onAgentThinkingEnd?: (agentId: string, messageId: string) => void;
   protected onAgentToolCall?: (agentId: string, toolName: string, args: Record<string, unknown>) => void;
 
+  private messageQueue: BusMessage[] = [];
+  private processing = false;
+
   constructor(options: AgentOptions, bus: MessageBus) {
     this.id = options.id ?? nanoid();
     this.role = options.role;
@@ -80,8 +83,8 @@ export abstract class BaseAgent {
       { role: "system", content: this.systemPrompt },
     ];
 
-    // Register with the bus
-    this.bus.subscribe(this.id, (msg) => this.handleMessage(msg));
+    // Register with the bus — queue messages to serialize processing
+    this.bus.subscribe(this.id, (msg) => this.enqueue(msg));
 
     // Persist to database
     this.persistAgent(options);
@@ -89,6 +92,28 @@ export abstract class BaseAgent {
 
   /** Handle an incoming message from the bus */
   abstract handleMessage(message: BusMessage): Promise<void>;
+
+  /** Enqueue a message for serialized processing */
+  private enqueue(message: BusMessage): void {
+    this.messageQueue.push(message);
+    if (!this.processing) {
+      void this.drainQueue();
+    }
+  }
+
+  /** Process queued messages one at a time */
+  private async drainQueue(): Promise<void> {
+    this.processing = true;
+    while (this.messageQueue.length > 0) {
+      const msg = this.messageQueue.shift()!;
+      try {
+        await this.handleMessage(msg);
+      } catch (err) {
+        console.error(`[Agent ${this.id}] Error handling message:`, err);
+      }
+    }
+    this.processing = false;
+  }
 
   /** Get tools available to this agent for tool calling */
   protected getTools(): Record<string, unknown> {
@@ -138,7 +163,7 @@ export abstract class BaseAgent {
     onToken?: (token: string, messageId: string) => void,
     onReasoning?: (token: string, messageId: string) => void,
     onReasoningEnd?: (messageId: string) => void,
-  ): Promise<{ text: string; thinking: string | undefined }> {
+  ): Promise<{ text: string; thinking: string | undefined; hadToolCalls: boolean }> {
     this.conversationHistory.push({ role: "user", content: userMessage });
     this.setStatus(AgentStatus.Thinking);
     console.log(`[Agent ${this.id}] think() — provider=${this.llmConfig.provider} model=${this.llmConfig.model}`);
@@ -171,7 +196,7 @@ export abstract class BaseAgent {
           content: retry.text,
         });
         this.setStatus(AgentStatus.Idle);
-        return { text: retry.text, thinking: retry.thinking };
+        return { text: retry.text, thinking: retry.thinking, hadToolCalls: false };
       }
 
       // If tools were called but final text is empty, synthesize a placeholder
@@ -183,13 +208,13 @@ export abstract class BaseAgent {
         content: finalText,
       });
       this.setStatus(AgentStatus.Idle);
-      return { text: finalText, thinking };
+      return { text: finalText, thinking, hadToolCalls };
     } catch (error) {
       this.setStatus(AgentStatus.Error);
       const errMsg =
         error instanceof Error ? error.message : "Unknown LLM error";
       console.error(`Agent ${this.id} LLM error:`, errMsg);
-      return { text: `Error: ${errMsg}`, thinking: undefined };
+      return { text: `Error: ${errMsg}`, thinking: undefined, hadToolCalls: false };
     }
   }
 

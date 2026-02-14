@@ -120,6 +120,8 @@ export interface TeamLeadDependencies {
   onAgentToolCall?: (agentId: string, toolName: string, args: Record<string, unknown>) => void;
 }
 
+const MAX_CONTINUATION_CYCLES = 3;
+
 export class TeamLead extends BaseAgent {
   private workers: Map<string, Worker> = new Map();
   private workspace: WorkspaceManager;
@@ -174,7 +176,7 @@ export class TeamLead extends BaseAgent {
   }
 
   private async handleDirective(message: BusMessage) {
-    const { text } = await this.think(
+    const { text } = await this.thinkWithContinuation(
       message.content,
       (token, messageId) => this.onAgentStream?.(this.id, token, messageId),
       (token, messageId) => this.onAgentThinking?.(this.id, token, messageId),
@@ -188,8 +190,13 @@ export class TeamLead extends BaseAgent {
   }
 
   private async handleWorkerReport(message: BusMessage) {
-    const summary = `[Worker ${message.fromAgentId} report]: ${message.content}`;
-    const { text } = await this.think(
+    const board = this.getKanbanBoardState();
+    const summary =
+      `[Worker ${message.fromAgentId} report]: ${message.content}\n\n` +
+      `[KANBAN BOARD]\n${board.summary}\n[/KANBAN BOARD]\n\n` +
+      `Update the completed task to "done". If backlog tasks remain, spawn workers for them.`;
+
+    const { text } = await this.thinkWithContinuation(
       summary,
       (token, messageId) => this.onAgentStream?.(this.id, token, messageId),
       (token, messageId) => this.onAgentThinking?.(this.id, token, messageId),
@@ -239,6 +246,73 @@ export class TeamLead extends BaseAgent {
       undefined,
       message.correlationId,
     );
+  }
+
+  /** Get a snapshot of the kanban board state for continuation decisions */
+  private getKanbanBoardState(): { hasBacklog: boolean; backlogCount: number; summary: string } {
+    if (!this.projectId) {
+      return { hasBacklog: false, backlogCount: 0, summary: "No project context." };
+    }
+
+    const db = getDb();
+    const tasks = db
+      .select()
+      .from(schema.kanbanTasks)
+      .where(eq(schema.kanbanTasks.projectId, this.projectId))
+      .all();
+
+    if (tasks.length === 0) {
+      return { hasBacklog: false, backlogCount: 0, summary: "No tasks." };
+    }
+
+    const byColumn: Record<string, typeof tasks> = { backlog: [], in_progress: [], done: [] };
+    for (const t of tasks) {
+      (byColumn[t.column] ?? []).push(t);
+    }
+
+    const lines: string[] = [];
+    for (const [col, colTasks] of Object.entries(byColumn)) {
+      if (colTasks.length === 0) continue;
+      lines.push(`${col.replace("_", " ").toUpperCase()} (${colTasks.length}):`);
+      for (const t of colTasks.sort((a, b) => a.position - b.position)) {
+        const assignee = t.assigneeAgentId ? ` [assigned: ${t.assigneeAgentId.slice(0, 6)}]` : "";
+        lines.push(`  - ${t.title} (${t.id})${assignee}`);
+      }
+    }
+
+    const backlogCount = byColumn.backlog.length;
+    return {
+      hasBacklog: backlogCount > 0,
+      backlogCount,
+      summary: lines.join("\n"),
+    };
+  }
+
+  /** Wrap think() with a continuation loop that checks for remaining backlog tasks */
+  private async thinkWithContinuation(
+    initialMessage: string,
+    onToken?: (token: string, messageId: string) => void,
+    onReasoning?: (token: string, messageId: string) => void,
+    onReasoningEnd?: (messageId: string) => void,
+  ): Promise<{ text: string; thinking: string | undefined }> {
+    let result = await this.think(initialMessage, onToken, onReasoning, onReasoningEnd);
+
+    for (let i = 0; i < MAX_CONTINUATION_CYCLES; i++) {
+      if (!result.hadToolCalls) break;
+
+      const board = this.getKanbanBoardState();
+      if (!board.hasBacklog) break;
+
+      console.log(`[TeamLead ${this.id}] Continuation cycle ${i + 1}/${MAX_CONTINUATION_CYCLES} — ${board.backlogCount} backlog tasks remain`);
+      result = await this.think(
+        `[CONTINUATION] ${board.backlogCount} task(s) remain in backlog:\n${board.summary}\n\nSpawn workers for remaining backlog tasks.`,
+        onToken,
+        onReasoning,
+        onReasoningEnd,
+      );
+    }
+
+    return { text: result.text, thinking: result.thinking };
   }
 
   override getStatusSummary(): string {
