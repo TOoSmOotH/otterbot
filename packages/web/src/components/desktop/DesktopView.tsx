@@ -5,7 +5,7 @@ import { useDesktopStore } from "../../stores/desktop-store";
 let rfbClassPromise: Promise<typeof RFB> | null = null;
 function loadRFB(): Promise<typeof RFB> {
   if (!rfbClassPromise) {
-    const url = "/novnc/rfb.js";
+    const url = "/novnc/core/rfb.js";
     rfbClassPromise = (import(/* @vite-ignore */ url) as Promise<{ default: typeof RFB }>).then(
       (m) => m.default ?? m,
     );

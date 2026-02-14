@@ -199,13 +199,39 @@ async function main() {
   ];
   const novncRoot = novncCandidates.find((p) => existsSync(p));
   console.log(`noVNC root: ${novncRoot ?? "NOT FOUND"} (candidates: ${novncCandidates.join(", ")})`);
-  if (novncRoot) {
-    await app.register(fastifyStatic, {
-      root: novncRoot,
-      prefix: "/novnc/",
-      decorateReply: false,
-    });
-  }
+
+  // Serve noVNC files with an explicit route handler to avoid fastify-static prefix conflicts.
+  // Uses readFileSync instead of sendFile to avoid dependency on fastify-static decoration.
+  app.get("/novnc/*", async (req, reply) => {
+    if (!novncRoot) {
+      reply.code(404);
+      return { error: "noVNC not installed" };
+    }
+    const filePath = (req.params as { "*": string })["*"];
+    const fullPath = resolve(novncRoot, filePath);
+
+    // Prevent directory traversal
+    if (!fullPath.startsWith(novncRoot)) {
+      reply.code(403);
+      return { error: "Forbidden" };
+    }
+
+    if (!existsSync(fullPath)) {
+      console.log(`[novnc] 404: ${filePath} (resolved: ${fullPath})`);
+      reply.code(404);
+      return { error: `noVNC file not found: ${filePath}` };
+    }
+
+    // Set correct MIME type for ES modules
+    if (filePath.endsWith(".js")) {
+      reply.type("application/javascript; charset=utf-8");
+    } else if (filePath.endsWith(".json")) {
+      reply.type("application/json; charset=utf-8");
+    }
+
+    const content = readFileSync(fullPath);
+    return reply.send(content);
+  });
 
   // Create Socket.IO server
   const io = new Server<ClientToServerEvents, ServerToClientEvents>(
@@ -1427,10 +1453,17 @@ async function main() {
     }
   });
 
-  // SPA fallback for client-side routing
+  // SPA fallback for client-side routing (only for page navigation, not JS/CSS/API requests)
   if (existsSync(webDistPath)) {
-    app.setNotFoundHandler(async (_req, reply) => {
-      return reply.sendFile("index.html");
+    app.setNotFoundHandler(async (req, reply) => {
+      const accept = req.headers.accept ?? "";
+      // Only serve index.html for browser navigation requests (Accept: text/html)
+      // This prevents masking 404s for JS module imports, API calls, etc.
+      if (accept.includes("text/html")) {
+        return reply.sendFile("index.html");
+      }
+      reply.code(404);
+      return { error: "Not found", path: req.url };
     });
   }
 
