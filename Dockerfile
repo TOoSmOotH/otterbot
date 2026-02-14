@@ -20,6 +20,7 @@ RUN pnpm build
 FROM base AS production
 RUN apt-get update && apt-get install -y --no-install-recommends \
     tini git curl sudo gnupg apt-transport-https ca-certificates ffmpeg sqlite3 \
+    build-essential pkg-config \
     # Playwright/Chromium system dependencies
     libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 libcups2 \
     libdrm2 libdbus-1-3 libxkbcommon0 libatspi2.0-0 libxcomposite1 \
@@ -41,6 +42,21 @@ RUN install -m 0755 -d /etc/apt/keyrings \
        > /etc/apt/sources.list.d/github-cli.list \
     && apt-get update && apt-get install -y --no-install-recommends gh \
     && rm -rf /var/lib/apt/lists/*
+
+# Install Go
+ENV GOLANG_VERSION=1.24.0
+RUN curl -fsSL "https://go.dev/dl/go${GOLANG_VERSION}.linux-$(dpkg --print-architecture).tar.gz" \
+    | tar xz -C /usr/local \
+    && ln -s /usr/local/go/bin/go /usr/local/bin/go \
+    && ln -s /usr/local/go/bin/gofmt /usr/local/bin/gofmt
+
+# Install Rust via rustup (shared location so all users can access it)
+ENV RUSTUP_HOME=/usr/local/rustup
+ENV CARGO_HOME=/usr/local/cargo
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+    | sh -s -- -y --default-toolchain stable --profile minimal --no-modify-path \
+    && chmod -R a+rX /usr/local/rustup /usr/local/cargo
+ENV PATH="/usr/local/cargo/bin:$PATH"
 
 # Create non-root user with configurable UID/GID
 ARG SMOOTHBOT_UID=1000
@@ -254,6 +270,8 @@ ENV HOME=/smoothbot/home
 ENV NPM_CONFIG_PREFIX=/smoothbot/tools
 ENV PATH="/smoothbot/tools/bin:$PATH"
 
+ENV GOPATH=/smoothbot/home/go
+ENV PATH="/smoothbot/home/go/bin:$PATH"
 ENV BROWSER=/usr/local/bin/chromium-browser
 ENV ENABLE_DESKTOP=true
 ENV DESKTOP_RESOLUTION=1280x720x24
