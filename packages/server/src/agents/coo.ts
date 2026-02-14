@@ -152,6 +152,10 @@ The user can see everything on the desktop in real-time.`;
       onStatusChange: deps.onStatusChange,
     };
     super(options, deps.bus);
+    // Cap the COO's tool-call rounds — it should never need more than a few
+    // tool calls per think(). The default maxSteps=20 lets smaller models
+    // loop endlessly between blocked tools.
+    this.llmConfig.maxSteps = 5;
     this.workspace = deps.workspace;
     this.onAgentSpawned = deps.onAgentSpawned;
     this.onStream = deps.onStream;
@@ -251,11 +255,11 @@ The user can see everything on the desktop in real-time.`;
     // Reset per-turn guards for this new think cycle
     this.projectStatusCheckedThisTurn = false;
 
-    // Process the Team Lead's report with a strong instruction to relay
-    const summary = `[IMPORTANT: Always relay a summary of this report to the CEO. Never silently absorb it.]\n\n[Report from Team Lead ${message.fromAgentId}]: ${message.content}`;
-    // Note: think() already pushes the user message to conversationHistory,
-    // so we don't push here to avoid duplicating the message.
-    const { text, thinking } = await this.think(
+    // Process the Team Lead's report with a strong instruction to relay.
+    // Use thinkWithoutTools so the COO just summarises instead of looping
+    // on get_project_status or other tools — it only needs to relay.
+    const summary = `[IMPORTANT: Summarize this report and relay it to the CEO immediately. Do NOT call any tools — just write your summary.]\n\n[Report from Team Lead ${message.fromAgentId}]: ${message.content}`;
+    const { text, thinking } = await this.thinkWithoutTools(
       summary,
       (token, messageId) => {
         this.onStream?.(token, messageId);
@@ -289,6 +293,26 @@ The user can see everything on the desktop in real-time.`;
   ): Promise<{ text: string; thinking: string | undefined; hadToolCalls: boolean }> {
     this._runCommandCalls = 0;
     return super.think(userMessage, onToken, onReasoning, onReasoningEnd);
+  }
+
+  /**
+   * Run LLM inference WITHOUT tools — prevents the LLM from looping on
+   * tool calls when it only needs to summarise or relay information.
+   */
+  private async thinkWithoutTools(
+    userMessage: string,
+    onToken?: (token: string, messageId: string) => void,
+    onReasoning?: (token: string, messageId: string) => void,
+    onReasoningEnd?: (messageId: string) => void,
+  ): Promise<{ text: string; thinking: string | undefined; hadToolCalls: boolean }> {
+    // Temporarily disable tools by swapping getTools
+    const origGetTools = this.getTools.bind(this);
+    this.getTools = () => ({});
+    try {
+      return await super.think(userMessage, onToken, onReasoning, onReasoningEnd);
+    } finally {
+      this.getTools = origGetTools;
+    }
   }
 
   protected getTools(): Record<string, unknown> {
