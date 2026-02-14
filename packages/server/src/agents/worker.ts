@@ -90,14 +90,22 @@ export class Worker extends BaseAgent {
   }
 
   private async handleTask(message: BusMessage) {
-    const { text } = await this.think(
-      message.content,
-      (token, messageId) => this.onAgentStream?.(this.id, token, messageId),
-      (token, messageId) => this.onAgentThinking?.(this.id, token, messageId),
-      (messageId) => this.onAgentThinkingEnd?.(this.id, messageId),
-    );
+    let text: string;
+    try {
+      const result = await this.think(
+        message.content,
+        (token, messageId) => this.onAgentStream?.(this.id, token, messageId),
+        (token, messageId) => this.onAgentThinking?.(this.id, token, messageId),
+        (messageId) => this.onAgentThinkingEnd?.(this.id, messageId),
+      );
+      text = result.text;
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      console.error(`[Worker ${this.id}] Task failed:`, reason);
+      text = `WORKER ERROR: Task failed — ${reason}`;
+    }
 
-    // Report results back to Team Lead
+    // Always report back so the Team Lead can evaluate and clean up
     if (this.parentId) {
       this.sendMessage(this.parentId, MessageType.Report, text);
     }
