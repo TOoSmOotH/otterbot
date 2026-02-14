@@ -86,6 +86,7 @@ export class COO extends BaseAgent {
   private lastProjectCreatedAt = 0;
   private projectCreatedThisTurn = false;
   private projectStatusCheckedThisTurn = false;
+  private lastProjectStatusResult: string | null = null;
 
   constructor(deps: COODependencies) {
     const registry = new Registry();
@@ -200,9 +201,10 @@ The user can see everything on the desktop in real-time.`;
       this.currentConversationId = message.conversationId;
     }
 
-    // Reset per-turn creation guards
+    // Reset per-turn guards
     this.projectCreatedThisTurn = false;
     this.projectStatusCheckedThisTurn = false;
+    this.lastProjectStatusResult = null;
 
     // Swap to the correct conversation context
     const conversationId = this.currentConversationId;
@@ -246,6 +248,10 @@ The user can see everything on the desktop in real-time.`;
   }
 
   private async handleTeamLeadReport(message: BusMessage) {
+    // Reset per-turn guards for this new think cycle
+    this.projectStatusCheckedThisTurn = false;
+    this.lastProjectStatusResult = null;
+
     // Process the Team Lead's report with a strong instruction to relay
     const summary = `[IMPORTANT: Always relay a summary of this report to the CEO. Never silently absorb it.]\n\n[Report from Team Lead ${message.fromAgentId}]: ${message.content}`;
     // Note: think() already pushes the user message to conversationHistory,
@@ -401,8 +407,13 @@ The user can see everything on the desktop in real-time.`;
             ),
         }),
         execute: async ({ projectId }) => {
+          if (this.projectStatusCheckedThisTurn && this.lastProjectStatusResult) {
+            return this.lastProjectStatusResult + "\n\n(You already checked status this turn. Use this information to proceed.)";
+          }
           this.projectStatusCheckedThisTurn = true;
-          return this.getProjectStatus(projectId);
+          const result = await this.getProjectStatus(projectId);
+          this.lastProjectStatusResult = result;
+          return result;
         },
       }),
       manage_models: tool({
