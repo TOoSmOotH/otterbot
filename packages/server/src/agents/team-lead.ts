@@ -393,6 +393,27 @@ export class TeamLead extends BaseAgent {
       );
     }
 
+    // Post-merge report: if the last cycle had tool calls (merges) and all
+    // work is done with no remaining worktrees, give the TL one final prompt
+    // to explicitly call report_to_coo — the loop above breaks before this
+    // can happen because worktreeCount drops to 0 after merging.
+    if (result.hadToolCalls) {
+      const postBoard = this.getKanbanBoardState();
+      const postWorktreeCount = this.gitWorktree?.hasRepo()
+        ? this.gitWorktree.listWorktrees().length
+        : 0;
+      if (postBoard.allDone && postWorktreeCount === 0) {
+        const repoPath = this.projectId ? this.workspace.repoPath(this.projectId) : "";
+        console.log(`[TeamLead ${this.id}] Post-merge report cycle — prompting TL to report completion to COO`);
+        result = await this.think(
+          `[REPORT] All tasks complete and all branches merged into main. Report the completed project to the COO now using report_to_coo. Include a summary of what was built and the workspace path: ${repoPath}`,
+          onToken,
+          onReasoning,
+          onReasoningEnd,
+        );
+      }
+    }
+
     return { text: result.text, thinking: result.thinking };
   }
 
