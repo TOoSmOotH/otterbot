@@ -7,6 +7,30 @@ const DEFAULT_TIMEOUT = 30_000; // 30 seconds
 const MAX_TIMEOUT = 120_000; // 2 minutes
 const MAX_OUTPUT_SIZE = 50_000; // 50KB — trim output to fit LLM context
 
+const BLOCKED_COMMANDS: { pattern: RegExp; reason: string; suggestion?: string }[] = [
+  { pattern: /\bpkill\b/, reason: "pkill matches processes by name across the whole system and can kill the host", suggestion: "Use `kill <pid>` with a specific PID" },
+  { pattern: /\bkillall\b/, reason: "killall matches processes by name across the whole system and can kill the host", suggestion: "Use `kill <pid>` with a specific PID" },
+  { pattern: /\bshutdown\b/, reason: "System shutdown is not permitted" },
+  { pattern: /\breboot\b/, reason: "System reboot is not permitted" },
+  { pattern: /\bhalt\b/, reason: "System halt is not permitted" },
+  { pattern: /\bpoweroff\b/, reason: "System poweroff is not permitted" },
+  { pattern: /rm\s+(-[a-zA-Z]*f[a-zA-Z]*\s+)?\/\b/, reason: "rm targeting root filesystem paths is not permitted", suggestion: "Only delete files within your workspace" },
+  { pattern: /\bmkfs\b/, reason: "Formatting filesystems is not permitted" },
+  { pattern: /\bdd\b.*\bof=\/dev\//, reason: "Raw disk writes are not permitted" },
+];
+
+function checkBlockedCommand(command: string): string | null {
+  for (const { pattern, reason, suggestion } of BLOCKED_COMMANDS) {
+    if (pattern.test(command)) {
+      const parts = [`BLOCKED: ${reason}.`];
+      if (suggestion) parts.push(`${suggestion}.`);
+      parts.push("Use a more targeted command instead.");
+      return parts.join(" ");
+    }
+  }
+  return null;
+}
+
 export function createShellExecTool(ctx: ToolContext) {
   return tool({
     description:
@@ -24,6 +48,12 @@ export function createShellExecTool(ctx: ToolContext) {
         ),
     }),
     execute: async ({ command, timeout }) => {
+      const blocked = checkBlockedCommand(command);
+      if (blocked) {
+        console.warn(`[shell-exec] Blocked command: ${command}`);
+        return blocked;
+      }
+
       const effectiveTimeout = Math.min(
         timeout ?? DEFAULT_TIMEOUT,
         MAX_TIMEOUT,
