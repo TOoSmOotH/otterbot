@@ -309,10 +309,9 @@ The user can see everything on the desktop in real-time.`;
         }),
         execute: async ({ command, projectId, timeout }) => {
           this._runCommandCalls++;
-          if (this._runCommandCalls > 5) {
-            return "REFUSED: You have run too many commands this cycle. STOP using run_command. " +
-              "If you need a project built, use create_project to delegate to a Team Lead. " +
-              "Return your response to the CEO now.";
+          if (this._runCommandCalls > 3) {
+            return "REFUSED: Too many commands. STOP using run_command and return your response to the CEO now. " +
+              "If you need something built, tested, or started, delegate to a Team Lead — do NOT do it yourself.";
           }
           const effectiveTimeout = Math.min(timeout ?? 30_000, 120_000);
           let cwd: string | undefined;

@@ -139,6 +139,7 @@ export class TeamLead extends BaseAgent {
   private workspace: WorkspaceManager;
   private gitWorktree: GitWorktreeManager | null = null;
   private verificationRequested = false;
+  private deploymentRequested = false;
   /** Per-think-cycle call counts — prevents tools from being called repeatedly within a single streamText run */
   private _toolCallCounts = new Map<string, number>();
   private onAgentSpawned?: (agent: BaseAgent) => void;
@@ -192,6 +193,7 @@ export class TeamLead extends BaseAgent {
 
   private async handleDirective(message: BusMessage) {
     this.verificationRequested = false;
+    this.deploymentRequested = false;
     const { text } = await this.thinkWithContinuation(
       message.content,
       (token, messageId) => this.onAgentStream?.(this.id, token, messageId),
@@ -246,13 +248,27 @@ export class TeamLead extends BaseAgent {
           `4. Give it clear instructions: install dependencies, build the project, start the app, and run tests\n` +
           `5. Wait for the verification results — do NOT report to COO yet\n` +
           `The project repo is at: ${repoPath}`;
-      } else {
-        // Phase 3: Report (verification already completed)
+      } else if (!this.deploymentRequested) {
+        // Phase 3: Deploy
+        this.deploymentRequested = true;
         instructions =
-          `ALL tasks done, branches merged, and verification complete.\n` +
-          `Review the verification results in the worker report above.\n` +
-          `If everything passed: report success to the COO using report_to_coo — include what was built, verification results, and workspace path: ${repoPath}\n` +
-          `If there were failures: create fix tasks, spawn workers to address the issues, then re-verify`;
+          `ALL tasks done, branches merged, and verification passed. Now DEPLOY the application:\n` +
+          `1. Create a "Deploy application" task using create_task\n` +
+          `2. Search the registry for a coder worker (search_registry with capability "code")\n` +
+          `3. Spawn the worker with useMainRepo=true so it runs in the merged codebase\n` +
+          `4. Give it instructions to:\n` +
+          `   - Start the application as a persistent background process (use nohup and & so it survives after the worker exits)\n` +
+          `   - Wait a few seconds, then verify the app is accessible (curl/wget the health endpoint or main URL)\n` +
+          `   - Report back what URL/port the app is running on\n` +
+          `5. Wait for the deployment results — do NOT report to COO yet\n` +
+          `The project repo is at: ${repoPath}`;
+      } else {
+        // Phase 4: Report (verification and deployment complete)
+        instructions =
+          `ALL tasks done, branches merged, verification passed, and deployment complete.\n` +
+          `Review the deployment results in the worker report above.\n` +
+          `If the app is running: report success to the COO using report_to_coo — include what was built, verification results, deployment URL/port, and workspace path: ${repoPath}\n` +
+          `If deployment failed: create fix tasks, spawn workers to address the issues, then re-deploy`;
       }
     } else if (board.hasBacklog) {
       instructions = `Backlog tasks remain — spawn workers for them.`;
@@ -457,10 +473,26 @@ export class TeamLead extends BaseAgent {
             onReasoning,
             onReasoningEnd,
           );
-        } else {
-          console.log(`[TeamLead ${this.id}] Post-merge report — verification done, reporting to COO`);
+        } else if (!this.deploymentRequested) {
+          this.deploymentRequested = true;
+          console.log(`[TeamLead ${this.id}] Post-merge deploy — spawning deployment worker`);
           result = await this.think(
-            `[REPORT] All tasks complete, branches merged, and verification done. Report the completed project to the COO now using report_to_coo. Include what was built, verification results, and workspace path: ${repoPath}`,
+            `[DEPLOY] All tasks complete, branches merged, and verification passed. Deploy the application:\n` +
+            `1. Create a "Deploy application" task\n` +
+            `2. Search the registry for a coder worker (search_registry with "code")\n` +
+            `3. Spawn it with useMainRepo=true so it runs in the merged code\n` +
+            `4. Give it instructions to: start the app as a persistent background process (nohup/&), wait a few seconds, verify it's accessible, and report the URL/port\n` +
+            `The project repo is at: ${repoPath}`,
+            onToken,
+            onReasoning,
+            onReasoningEnd,
+          );
+        } else {
+          console.log(`[TeamLead ${this.id}] Post-merge report — deployment done, reporting to COO`);
+          result = await this.think(
+            `[REPORT] All tasks complete, branches merged, verification passed, and deployment done.\n` +
+            `Review the deployment results. If the app is running: report to the COO using report_to_coo — include what was built, verification results, deployment URL/port, and workspace path: ${repoPath}\n` +
+            `If deployment failed: create fix tasks, spawn workers to address the issues, then re-deploy.`,
             onToken,
             onReasoning,
             onReasoningEnd,
