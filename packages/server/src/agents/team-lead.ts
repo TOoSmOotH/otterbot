@@ -195,6 +195,16 @@ export class TeamLead extends BaseAgent {
       ? this.markWorkerTaskDone(message.fromAgentId)
       : null;
 
+    // Clean up the finished worker — it already set itself to Done
+    if (message.fromAgentId) {
+      const worker = this.workers.get(message.fromAgentId);
+      if (worker) {
+        worker.destroy();
+        this.workers.delete(message.fromAgentId);
+        console.log(`[TeamLead ${this.id}] Cleaned up finished worker ${message.fromAgentId}`);
+      }
+    }
+
     const board = this.getKanbanBoardState();
     const branchInfo = this.gitWorktree ? this.getBranchOverview() : "";
 
@@ -207,7 +217,10 @@ export class TeamLead extends BaseAgent {
     } else if (board.hasBacklog) {
       instructions = `Backlog tasks remain — spawn workers for them.`;
     } else {
-      instructions = `Other workers are still in progress — wait for their reports.`;
+      instructions =
+        `Other workers are still in progress. ` +
+        `STOP. Do not call any tools. Do not call list_tasks or get_branch_status. ` +
+        `Return a brief status update and wait — worker reports arrive automatically via the message bus.`;
     }
 
     const summary =
@@ -328,25 +341,48 @@ export class TeamLead extends BaseAgent {
     onReasoning?: (token: string, messageId: string) => void,
     onReasoningEnd?: (messageId: string) => void,
   ): Promise<{ text: string; thinking: string | undefined }> {
+    // Snapshot board state before first think() for stale-state detection
+    let prevBoard = this.getKanbanBoardState();
+    let prevWorktreeCount = this.gitWorktree
+      ? this.gitWorktree.listWorktrees().length
+      : 0;
+
     let result = await this.think(initialMessage, onToken, onReasoning, onReasoningEnd);
 
     for (let i = 0; i < MAX_CONTINUATION_CYCLES; i++) {
       if (!result.hadToolCalls) break;
 
       const board = this.getKanbanBoardState();
-      const hasUnmergedBranches = this.gitWorktree
-        ? this.gitWorktree.listWorktrees().length > 0
-        : false;
+      const worktreeCount = this.gitWorktree
+        ? this.gitWorktree.listWorktrees().length
+        : 0;
+
+      // Stale-state detection: if nothing changed since last cycle, stop looping
+      if (
+        board.backlogCount === prevBoard.backlogCount &&
+        board.inProgressCount === prevBoard.inProgressCount &&
+        board.doneCount === prevBoard.doneCount &&
+        worktreeCount === prevWorktreeCount
+      ) {
+        console.warn(`[TeamLead ${this.id}] Stale state detected — board and worktrees unchanged after cycle. Breaking continuation loop.`);
+        break;
+      }
 
       // Continue if there's backlog work OR if all tasks are done but branches need merging
+      const hasUnmergedBranches = worktreeCount > 0;
       if (!board.hasBacklog && !(board.allDone && hasUnmergedBranches)) break;
 
       const branchInfo = hasUnmergedBranches ? `\n${this.getBranchOverview()}` : "";
       const prompt = board.hasBacklog
         ? `[CONTINUATION] ${board.backlogCount} task(s) remain in backlog:\n${board.summary}\n\nSpawn workers for remaining backlog tasks.`
-        : `[FINAL ASSEMBLY] All tasks done. ${this.gitWorktree!.listWorktrees().length} unmerged branch(es) remain:${branchInfo}\n\nMerge all branches in dependency order and report completion to the COO.`;
+        : `[FINAL ASSEMBLY] All tasks done. ${worktreeCount} unmerged branch(es) remain:${branchInfo}\n\nMerge all branches in dependency order and report completion to the COO.`;
 
       console.log(`[TeamLead ${this.id}] Continuation cycle ${i + 1}/${MAX_CONTINUATION_CYCLES} — ${board.hasBacklog ? `${board.backlogCount} backlog tasks remain` : "final assembly phase"}`);
+
+      // Update snapshot for next iteration
+      prevBoard = board;
+      prevWorktreeCount = worktreeCount;
+
       result = await this.think(
         prompt,
         onToken,
@@ -380,7 +416,7 @@ export class TeamLead extends BaseAgent {
       }),
       spawn_worker: tool({
         description:
-          "Spawn a worker agent from a registry template and assign it a task.",
+          "Spawn a worker agent from a registry template and assign it a task. Always pass taskId to auto-assign the kanban task.",
         parameters: z.object({
           registryEntryId: z
             .string()
@@ -388,9 +424,13 @@ export class TeamLead extends BaseAgent {
           task: z
             .string()
             .describe("The specific task to assign to the worker"),
+          taskId: z
+            .string()
+            .optional()
+            .describe("The kanban task ID to auto-assign to this worker (moves task to in_progress)"),
         }),
-        execute: async ({ registryEntryId, task }) => {
-          return this.spawnWorker(registryEntryId, task);
+        execute: async ({ registryEntryId, task, taskId }) => {
+          return this.spawnWorker(registryEntryId, task, taskId);
         },
       }),
       web_search: tool({
@@ -538,6 +578,7 @@ export class TeamLead extends BaseAgent {
   private async spawnWorker(
     registryEntryId: string,
     task: string,
+    taskId?: string,
   ): Promise<string> {
     try {
       const db = getDb();
@@ -616,14 +657,20 @@ export class TeamLead extends BaseAgent {
         this.onAgentSpawned(worker);
       }
 
+      // Auto-assign kanban task if taskId provided
+      if (taskId) {
+        this.autoAssignTask(taskId, worker.id);
+      }
+
       // Send the task to the worker
       this.sendMessage(worker.id, MessageType.Directive, task, {
         registryEntryName: entry.name,
       });
 
       const mode = isCodeWorker && this.gitWorktree ? " (worktree)" : "";
+      const assigned = taskId ? ` Task ${taskId} moved to in_progress.` : "";
       console.log(`[TeamLead ${this.id}] Worker ${workerId} spawned and directive sent`);
-      return `Spawned ${entry.name} worker (${worker.id})${mode} and assigned task.`;
+      return `Spawned ${entry.name} worker (${worker.id})${mode} and assigned task.${assigned}`;
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
       console.error(`[TeamLead ${this.id}] Failed to spawn worker: ${errMsg}`, err);
@@ -648,9 +695,11 @@ export class TeamLead extends BaseAgent {
         .run();
     }
 
-    // Cleanup worktree after successful merge
-    if (result.success && !result.message.includes("Nothing to merge")) {
+    // Always clean up worktree — whether merge succeeded, was empty, or conflicted
+    try {
       this.gitWorktree.destroyWorktree(workerId);
+    } catch (err) {
+      console.warn(`[TeamLead ${this.id}] Failed to destroy worktree for ${workerId}:`, err);
     }
 
     return result.message;
@@ -713,6 +762,40 @@ export class TeamLead extends BaseAgent {
 
     console.log(`[TeamLead ${this.id}] Auto-marked task "${task.title}" (${task.id}) as done for worker ${workerId}`);
     return task.title;
+  }
+
+  /** Auto-assign a kanban task to a worker: move to in_progress and set assigneeAgentId */
+  private autoAssignTask(taskId: string, workerId: string): void {
+    if (!this.projectId) return;
+
+    const db = getDb();
+    const task = db
+      .select()
+      .from(schema.kanbanTasks)
+      .where(eq(schema.kanbanTasks.id, taskId))
+      .get();
+
+    if (!task) {
+      console.warn(`[TeamLead ${this.id}] autoAssignTask: task ${taskId} not found`);
+      return;
+    }
+
+    const now = new Date().toISOString();
+    db.update(schema.kanbanTasks)
+      .set({ column: "in_progress", assigneeAgentId: workerId, updatedAt: now })
+      .where(eq(schema.kanbanTasks.id, taskId))
+      .run();
+
+    const updated = db
+      .select()
+      .from(schema.kanbanTasks)
+      .where(eq(schema.kanbanTasks.id, taskId))
+      .get();
+    if (updated) {
+      this.onKanbanChange?.("updated", updated as unknown as KanbanTask);
+    }
+
+    console.log(`[TeamLead ${this.id}] Auto-assigned task "${task.title}" (${taskId}) to worker ${workerId}`);
   }
 
   private createKanbanTask(
@@ -822,5 +905,37 @@ export class TeamLead extends BaseAgent {
 
   getWorkers(): Map<string, Worker> {
     return this.workers;
+  }
+
+  /** Clean up all workers and worktrees on project deletion */
+  override destroy(): void {
+    // Destroy all active workers
+    for (const [id, worker] of this.workers) {
+      try {
+        worker.destroy();
+      } catch (err) {
+        console.warn(`[TeamLead ${this.id}] Failed to destroy worker ${id}:`, err);
+      }
+    }
+    this.workers.clear();
+
+    // Destroy remaining worktrees and mark them abandoned in DB
+    if (this.gitWorktree && this.projectId) {
+      const db = getDb();
+      const worktrees = this.gitWorktree.listWorktrees();
+      for (const wt of worktrees) {
+        try {
+          this.gitWorktree.destroyWorktree(wt.agentId);
+        } catch (err) {
+          console.warn(`[TeamLead ${this.id}] Failed to destroy worktree ${wt.agentId}:`, err);
+        }
+        db.update(schema.worktrees)
+          .set({ status: "abandoned" })
+          .where(eq(schema.worktrees.agentId, wt.agentId))
+          .run();
+      }
+    }
+
+    super.destroy();
   }
 }
