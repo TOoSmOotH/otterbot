@@ -18,11 +18,62 @@ import { GitWorktreeManager } from "../workspace/git-worktree.js";
 import { eq } from "drizzle-orm";
 import { getConfig } from "../auth/auth.js";
 import { getConfiguredSearchProvider } from "../tools/search/providers.js";
+import { isDesktopEnabled } from "../desktop/desktop.js";
 import { TEAM_LEAD_PROMPT } from "./prompts/team-lead.js";
 import { getRandomModelPackId } from "../models3d/model-packs.js";
 
 /** Tools that indicate a worker writes code and should get a worktree */
 const CODE_TOOLS = new Set(["file_write", "shell_exec"]);
+
+/** Tool descriptions for environment context injection */
+const TOOL_DESCRIPTIONS: Record<string, string> = {
+  file_read: "Read files from the workspace",
+  file_write: "Create and edit files in the workspace",
+  shell_exec: "Execute shell commands in the workspace directory",
+  web_search: "Search the web for information",
+  web_browse: "Browse web pages with a headless browser (Playwright)",
+  install_package: "Install apt or npm packages (persisted across restarts)",
+};
+
+/** Build environment context to append to worker system prompts */
+function buildEnvironmentContext(toolNames: string[]): string {
+  const sections: string[] = [];
+
+  // Tools available
+  const toolLines = toolNames
+    .map((t) => `- ${t}: ${TOOL_DESCRIPTIONS[t] ?? t}`)
+    .join("\n");
+  if (toolLines) {
+    sections.push(`## Available Tools\n${toolLines}`);
+  }
+
+  // Desktop environment
+  if (isDesktopEnabled()) {
+    const hasShell = toolNames.includes("shell_exec");
+    sections.push(
+      `## Desktop Environment` +
+      `\nA full XFCE4 desktop is running on DISPLAY=:99, viewable by the user via the web UI.` +
+      `\nChromium browser is installed at \`chromium-browser\` and is the default system browser.` +
+      (hasShell
+        ? `\nYou can launch GUI applications via shell_exec (e.g. \`chromium-browser https://example.com &\`).`
+        : "") +
+      `\nThe user can see everything on the desktop in real-time.`,
+    );
+  }
+
+  // sudo availability
+  if (toolNames.includes("shell_exec")) {
+    const sudoMode = process.env.SUDO_MODE ?? "restricted";
+    if (sudoMode === "full") {
+      sections.push(`## System Access\nsudo is available with full privileges (no password required).`);
+    } else {
+      sections.push(`## System Access\nsudo is available for: apt-get, npm, tee, gpg, install. Use install_package tool when possible.`);
+    }
+  }
+
+  if (sections.length === 0) return "";
+  return "\n\n---\n# Environment\n" + sections.join("\n\n");
+}
 
 export interface TeamLeadDependencies {
   bus: MessageBus;
@@ -402,7 +453,7 @@ export class TeamLead extends BaseAgent {
           getConfig("worker_provider") ??
           getConfig("coo_provider") ??
           entry.defaultProvider,
-        systemPrompt: entry.systemPrompt,
+        systemPrompt: entry.systemPrompt + buildEnvironmentContext(entryTools),
         workspacePath,
         toolNames: entryTools,
         onStatusChange: this.onStatusChange,
