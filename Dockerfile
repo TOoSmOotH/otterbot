@@ -58,6 +58,21 @@ RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
     && chmod -R a+rX /usr/local/rustup /usr/local/cargo
 ENV PATH="/usr/local/cargo/bin:$PATH"
 
+# Install Python 3 with pip and venv
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3 python3-pip python3-venv \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Java (OpenJDK headless)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    default-jdk-headless \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Ruby
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ruby-full \
+    && rm -rf /var/lib/apt/lists/*
+
 # Create non-root user with configurable UID/GID
 ARG SMOOTHBOT_UID=1000
 ARG SMOOTHBOT_GID=1000
@@ -148,6 +163,13 @@ chown -R "${PUID}:${PGID}" /smoothbot
 # Strict SSH permissions
 chmod 700 /smoothbot/home/.ssh
 find /smoothbot/home/.ssh -type f -exec chmod 600 {} + 2>/dev/null || true
+
+# ── Create Python venv (persists on bind-mounted volume) ─────────────
+if [ ! -f /smoothbot/home/.venv/bin/activate ]; then
+  echo "[smoothbot] Creating Python venv..."
+  python3 -m venv /smoothbot/home/.venv
+  chown -R "${PUID}:${PGID}" /smoothbot/home/.venv
+fi
 
 # ── Install packages from manifest ──────────────────────────────────
 # The COO agent (or user) writes /smoothbot/config/packages.json with
@@ -272,6 +294,8 @@ ENV PATH="/smoothbot/tools/bin:$PATH"
 
 ENV GOPATH=/smoothbot/home/go
 ENV PATH="/smoothbot/home/go/bin:$PATH"
+ENV VIRTUAL_ENV=/smoothbot/home/.venv
+ENV PATH="/smoothbot/home/.venv/bin:$PATH"
 ENV BROWSER=/usr/local/bin/chromium-browser
 ENV ENABLE_DESKTOP=true
 ENV DESKTOP_RESOLUTION=1280x720x24
