@@ -120,7 +120,7 @@ export interface TeamLeadDependencies {
   onAgentToolCall?: (agentId: string, toolName: string, args: Record<string, unknown>) => void;
 }
 
-const MAX_CONTINUATION_CYCLES = 3;
+const MAX_CONTINUATION_CYCLES = 5;
 
 export class TeamLead extends BaseAgent {
   private workers: Map<string, Worker> = new Map();
@@ -190,11 +190,32 @@ export class TeamLead extends BaseAgent {
   }
 
   private async handleWorkerReport(message: BusMessage) {
+    // Auto-mark the worker's kanban task as "done"
+    const movedTask = message.fromAgentId
+      ? this.markWorkerTaskDone(message.fromAgentId)
+      : null;
+
     const board = this.getKanbanBoardState();
+    const branchInfo = this.gitWorktree ? this.getBranchOverview() : "";
+
+    let instructions: string;
+    if (board.allDone) {
+      instructions =
+        `ALL tasks are now complete. Begin FINAL ASSEMBLY:\n` +
+        `1. Merge all worker branches in dependency order (foundational first) using merge_worker_branch\n` +
+        `2. Report the completed project to the COO using report_to_coo`;
+    } else if (board.hasBacklog) {
+      instructions = `Backlog tasks remain — spawn workers for them.`;
+    } else {
+      instructions = `Other workers are still in progress — wait for their reports.`;
+    }
+
     const summary =
       `[Worker ${message.fromAgentId} report]: ${message.content}\n\n` +
+      (movedTask ? `[Task "${movedTask}" moved to done automatically.]\n\n` : "") +
       `[KANBAN BOARD]\n${board.summary}\n[/KANBAN BOARD]\n\n` +
-      `Update the completed task to "done". If backlog tasks remain, spawn workers for them.`;
+      (branchInfo ? `[GIT BRANCHES]\n${branchInfo}\n[/GIT BRANCHES]\n\n` : "") +
+      instructions;
 
     const { text } = await this.thinkWithContinuation(
       summary,
@@ -249,9 +270,14 @@ export class TeamLead extends BaseAgent {
   }
 
   /** Get a snapshot of the kanban board state for continuation decisions */
-  private getKanbanBoardState(): { hasBacklog: boolean; backlogCount: number; summary: string } {
+  private getKanbanBoardState(): {
+    hasBacklog: boolean; backlogCount: number;
+    hasInProgress: boolean; inProgressCount: number;
+    allDone: boolean; doneCount: number;
+    summary: string;
+  } {
     if (!this.projectId) {
-      return { hasBacklog: false, backlogCount: 0, summary: "No project context." };
+      return { hasBacklog: false, backlogCount: 0, hasInProgress: false, inProgressCount: 0, allDone: false, doneCount: 0, summary: "No project context." };
     }
 
     const db = getDb();
@@ -262,7 +288,7 @@ export class TeamLead extends BaseAgent {
       .all();
 
     if (tasks.length === 0) {
-      return { hasBacklog: false, backlogCount: 0, summary: "No tasks." };
+      return { hasBacklog: false, backlogCount: 0, hasInProgress: false, inProgressCount: 0, allDone: false, doneCount: 0, summary: "No tasks." };
     }
 
     const byColumn: Record<string, typeof tasks> = { backlog: [], in_progress: [], done: [] };
@@ -281,9 +307,16 @@ export class TeamLead extends BaseAgent {
     }
 
     const backlogCount = byColumn.backlog.length;
+    const inProgressCount = byColumn.in_progress.length;
+    const doneCount = byColumn.done.length;
+    const allDone = tasks.length > 0 && backlogCount === 0 && inProgressCount === 0;
     return {
       hasBacklog: backlogCount > 0,
       backlogCount,
+      hasInProgress: inProgressCount > 0,
+      inProgressCount,
+      allDone,
+      doneCount,
       summary: lines.join("\n"),
     };
   }
@@ -301,11 +334,21 @@ export class TeamLead extends BaseAgent {
       if (!result.hadToolCalls) break;
 
       const board = this.getKanbanBoardState();
-      if (!board.hasBacklog) break;
+      const hasUnmergedBranches = this.gitWorktree
+        ? this.gitWorktree.listWorktrees().length > 0
+        : false;
 
-      console.log(`[TeamLead ${this.id}] Continuation cycle ${i + 1}/${MAX_CONTINUATION_CYCLES} — ${board.backlogCount} backlog tasks remain`);
+      // Continue if there's backlog work OR if all tasks are done but branches need merging
+      if (!board.hasBacklog && !(board.allDone && hasUnmergedBranches)) break;
+
+      const branchInfo = hasUnmergedBranches ? `\n${this.getBranchOverview()}` : "";
+      const prompt = board.hasBacklog
+        ? `[CONTINUATION] ${board.backlogCount} task(s) remain in backlog:\n${board.summary}\n\nSpawn workers for remaining backlog tasks.`
+        : `[FINAL ASSEMBLY] All tasks done. ${this.gitWorktree!.listWorktrees().length} unmerged branch(es) remain:${branchInfo}\n\nMerge all branches in dependency order and report completion to the COO.`;
+
+      console.log(`[TeamLead ${this.id}] Continuation cycle ${i + 1}/${MAX_CONTINUATION_CYCLES} — ${board.hasBacklog ? `${board.backlogCount} backlog tasks remain` : "final assembly phase"}`);
       result = await this.think(
-        `[CONTINUATION] ${board.backlogCount} task(s) remain in backlog:\n${board.summary}\n\nSpawn workers for remaining backlog tasks.`,
+        prompt,
         onToken,
         onReasoning,
         onReasoningEnd,
@@ -637,6 +680,39 @@ export class TeamLead extends BaseAgent {
     });
 
     return lines.join("\n\n");
+  }
+
+  /** Automatically move a worker's assigned task to "done" and fire the kanban change event. Returns the task title or null. */
+  private markWorkerTaskDone(workerId: string): string | null {
+    if (!this.projectId) return null;
+
+    const db = getDb();
+    const task = db
+      .select()
+      .from(schema.kanbanTasks)
+      .where(eq(schema.kanbanTasks.projectId, this.projectId))
+      .all()
+      .find((t) => t.assigneeAgentId === workerId && t.column !== "done");
+
+    if (!task) return null;
+
+    const now = new Date().toISOString();
+    db.update(schema.kanbanTasks)
+      .set({ column: "done", updatedAt: now })
+      .where(eq(schema.kanbanTasks.id, task.id))
+      .run();
+
+    const updated = db
+      .select()
+      .from(schema.kanbanTasks)
+      .where(eq(schema.kanbanTasks.id, task.id))
+      .get();
+    if (updated) {
+      this.onKanbanChange?.("updated", updated as unknown as KanbanTask);
+    }
+
+    console.log(`[TeamLead ${this.id}] Auto-marked task "${task.title}" (${task.id}) as done for worker ${workerId}`);
+    return task.title;
   }
 
   private createKanbanTask(

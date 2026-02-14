@@ -42,6 +42,12 @@ Code workers are automatically given git worktree branches (worker/{id}) so they
 - **Monitoring:** Use \`get_branch_status\` to see all active branches.
 - Workers write files normally — they don't need to know about git. You handle all commits and merges.
 
+## Final Assembly
+When ALL kanban tasks are in "done":
+1. **Merge branches** in dependency order (foundational code first, then features that build on it) using \`merge_worker_branch\`
+2. **Report completion** to the COO via \`report_to_coo\` with a summary of what was built
+Do NOT consider the project finished until all branches are merged.
+
 ## Rules
 - **NEVER do work yourself** — always spawn a worker
 - Break large tasks into smaller pieces — each worker gets one focused task
