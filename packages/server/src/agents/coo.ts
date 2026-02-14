@@ -41,6 +41,8 @@ import {
 } from "../settings/settings.js";
 import { getConfiguredSearchProvider } from "../tools/search/providers.js";
 import { getRandomModelPackId } from "../models3d/model-packs.js";
+import { isDesktopEnabled } from "../desktop/desktop.js";
+import { execSync } from "node:child_process";
 
 export interface COODependencies {
   bus: MessageBus;
@@ -97,6 +99,28 @@ export class COO extends BaseAgent {
     // Append the user's addendum if the custom clone has one
     if (customCoo?.promptAddendum) {
       systemPrompt += "\n\n" + customCoo.promptAddendum;
+    }
+
+    // Inject desktop environment context
+    if (isDesktopEnabled()) {
+      let chromiumPath = "chromium-browser";
+      try {
+        execSync("which chromium-browser", { stdio: "pipe" });
+      } catch {
+        // Fallback: find Playwright's Chrome binary
+        try {
+          const browsersPath = process.env.PLAYWRIGHT_BROWSERS_PATH ?? `${process.env.HOME ?? "/root"}/.cache/ms-playwright`;
+          chromiumPath = execSync(
+            `find ${browsersPath} -name chrome -type f -path '*/chrome-linux*/chrome' 2>/dev/null | head -1`,
+            { stdio: "pipe" },
+          ).toString().trim() || "chromium-browser";
+        } catch { /* use default */ }
+      }
+      systemPrompt += `\n\n## Desktop Environment
+A full XFCE4 desktop is running on DISPLAY=:99, viewable by the user via the web UI.
+Chromium is already installed at \`${chromiumPath}\`. Do NOT try to install a browser.
+To launch it: use run_command with \`${chromiumPath} --no-sandbox --disable-dev-shm-usage <url> &\`
+The user can see everything on the desktop in real-time.`;
     }
 
     // Inject user profile into system prompt if available
@@ -252,6 +276,40 @@ export class COO extends BaseAgent {
 
   protected getTools(): Record<string, unknown> {
     return {
+      run_command: tool({
+        description:
+          "Run a shell command directly for quick, one-off tasks (launching apps, checking system status, simple file operations). " +
+          "Don't create a project just for simple commands. Output is capped at 50KB. Default timeout: 30s, max: 120s.",
+        parameters: z.object({
+          command: z.string().describe("The shell command to execute"),
+          timeout: z
+            .number()
+            .optional()
+            .describe("Timeout in milliseconds (default: 30000, max: 120000)"),
+        }),
+        execute: async ({ command, timeout }) => {
+          const effectiveTimeout = Math.min(timeout ?? 30_000, 120_000);
+          try {
+            const output = execSync(command, {
+              timeout: effectiveTimeout,
+              stdio: "pipe",
+              maxBuffer: 1024 * 1024,
+              env: { ...process.env },
+            });
+            const text = output.toString();
+            if (text.length > 50_000) {
+              return text.slice(0, 50_000) + `\n\n[Output truncated at 50KB. Total: ${text.length} bytes]`;
+            }
+            return text || "(no output)";
+          } catch (err: unknown) {
+            const execErr = err as { status?: number; stdout?: Buffer; stderr?: Buffer };
+            const stderr = execErr.stderr?.toString() ?? "";
+            const stdout = execErr.stdout?.toString() ?? "";
+            const combined = `Exit code: ${execErr.status ?? "unknown"}\nstdout: ${stdout}\nstderr: ${stderr}`;
+            return combined.length > 50_000 ? combined.slice(0, 50_000) + "\n[truncated]" : combined;
+          }
+        },
+      }),
       create_project: tool({
         description:
           "Create a NEW project and spawn a Team Lead. ONLY use this when no active project covers the CEO's goal. Always call get_project_status first to check existing projects. Prefer send_directive if an existing project can handle the work.",
