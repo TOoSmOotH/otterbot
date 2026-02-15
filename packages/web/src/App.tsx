@@ -131,15 +131,23 @@ function MainApp() {
 
   const handleEnterProject = useCallback(
     (projectId: string) => {
+      // Optimistically switch view using the already-loaded project data
+      // so the UI responds immediately even if the server event loop is busy.
+      const cached = useProjectStore.getState().projects.find((p) => p.id === projectId);
+      if (cached) {
+        enterProject(projectId, cached, [], []);
+        setCenterView("kanban");
+      }
+      // Then fetch full data (conversations + tasks) from the server
       const socket = getSocket();
       socket.emit("project:enter", { projectId }, (result) => {
         if (result.project) {
           enterProject(projectId, result.project, result.conversations, result.tasks);
-          setCenterView("kanban");
+          if (!cached) setCenterView("kanban");
         }
       });
     },
-    [enterProject],
+    [enterProject, setCenterView],
   );
 
   const handleExitProject = useCallback(() => {
