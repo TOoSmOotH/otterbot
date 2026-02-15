@@ -1,5 +1,7 @@
+import { useState } from "react";
 import { useProjectStore } from "../../stores/project-store";
 import { KanbanCard } from "./KanbanCard";
+import { KanbanTaskDetail } from "./KanbanTaskDetail";
 import { KanbanColumn } from "@smoothbot/shared";
 
 const COLUMNS: { key: KanbanColumn; label: string }[] = [
@@ -10,11 +12,16 @@ const COLUMNS: { key: KanbanColumn; label: string }[] = [
 
 export function KanbanBoard({ projectId }: { projectId: string }) {
   const tasks = useProjectStore((s) => s.tasks);
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
 
   const tasksByColumn = (column: KanbanColumn) =>
     tasks
       .filter((t) => t.column === column && t.projectId === projectId)
       .sort((a, b) => a.position - b.position);
+
+  const selectedTask = selectedTaskId
+    ? tasks.find((t) => t.id === selectedTaskId) ?? null
+    : null;
 
   return (
     <div className="h-full flex gap-4 p-4 overflow-x-auto">
@@ -40,13 +47,24 @@ export function KanbanBoard({ projectId }: { projectId: string }) {
                 </div>
               ) : (
                 columnTasks.map((task) => (
-                  <KanbanCard key={task.id} task={task} />
+                  <KanbanCard
+                    key={task.id}
+                    task={task}
+                    onClick={setSelectedTaskId}
+                  />
                 ))
               )}
             </div>
           </div>
         );
       })}
+
+      {selectedTask && (
+        <KanbanTaskDetail
+          task={selectedTask}
+          onClose={() => setSelectedTaskId(null)}
+        />
+      )}
     </div>
   );
 }

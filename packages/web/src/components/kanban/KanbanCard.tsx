@@ -2,20 +2,28 @@ import type { KanbanTask } from "@smoothbot/shared";
 
 export function KanbanCard({
   task,
-  onUpdate,
+  onClick,
 }: {
   task: KanbanTask;
-  onUpdate?: (taskId: string, updates: Partial<KanbanTask>) => void;
+  onClick?: (taskId: string) => void;
 }) {
   return (
-    <div className="bg-card border border-border rounded-lg p-3 mb-2 hover:border-primary/30 transition-colors cursor-pointer">
+    <div
+      className="bg-card border border-border rounded-lg p-3 mb-2 hover:border-primary/30 transition-colors cursor-pointer"
+      onClick={() => onClick?.(task.id)}
+    >
       <h4 className="text-sm font-medium leading-snug">{task.title}</h4>
       {task.description && (
         <p className="text-xs text-muted-foreground mt-1 line-clamp-2">
           {task.description}
         </p>
       )}
-      <div className="flex items-center gap-2 mt-2">
+      <div className="flex items-center gap-2 mt-2 flex-wrap">
+        {task.column === "backlog" && task.blockedBy?.length > 0 && (
+          <span className="text-[10px] bg-destructive/15 text-destructive rounded px-1.5 py-0.5 font-medium">
+            Blocked
+          </span>
+        )}
         {task.labels.map((label) => (
           <span
             key={label}
