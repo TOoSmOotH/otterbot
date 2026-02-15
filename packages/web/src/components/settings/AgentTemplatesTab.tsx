@@ -1,9 +1,10 @@
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { cn } from "../../lib/utils";
 import { useSettingsStore } from "../../stores/settings-store";
 import { useModelPackStore } from "../../stores/model-pack-store";
 import type { RegistryEntry, GearConfig } from "@smoothbot/shared";
 import { CharacterSelect } from "../character-select/CharacterSelect";
+import { ModelCombobox } from "./ModelCombobox";
 
 export function AgentTemplatesTab() {
   const [entries, setEntries] = useState<RegistryEntry[]>([]);
@@ -23,6 +24,8 @@ export function AgentTemplatesTab() {
   });
 
   const providers = useSettingsStore((s) => s.providers);
+  const models = useSettingsStore((s) => s.models);
+  const fetchModels = useSettingsStore((s) => s.fetchModels);
   const modelPacks = useModelPackStore((s) => s.packs);
   const loadPacks = useModelPackStore((s) => s.loadPacks);
 
@@ -30,6 +33,13 @@ export function AgentTemplatesTab() {
     loadEntries();
     loadPacks();
   }, []);
+
+  // Fetch models when the selected provider changes
+  useEffect(() => {
+    if (form.defaultProvider && !models[form.defaultProvider]) {
+      fetchModels(form.defaultProvider);
+    }
+  }, [form.defaultProvider]);
 
   const loadEntries = async () => {
     const res = await fetch("/api/registry");
@@ -314,28 +324,17 @@ export function AgentTemplatesTab() {
 
             {/* Model & Provider */}
             <div className="grid grid-cols-2 gap-3">
-              <Field label="Model" editing={editing}>
-                {editing ? (
-                  <input
-                    value={form.defaultModel}
-                    onChange={(e) =>
-                      setForm({ ...form, defaultModel: e.target.value })
-                    }
-                    className="w-full bg-secondary rounded-md px-3 py-1.5 text-sm outline-none focus:ring-1 ring-primary"
-                  />
-                ) : (
-                  <p className="text-xs font-mono bg-secondary inline-block px-2 py-0.5 rounded">
-                    {form.defaultModel}
-                  </p>
-                )}
-              </Field>
               <Field label="Provider" editing={editing}>
                 {editing ? (
                   <select
                     value={form.defaultProvider}
-                    onChange={(e) =>
-                      setForm({ ...form, defaultProvider: e.target.value })
-                    }
+                    onChange={(e) => {
+                      const newProvider = e.target.value;
+                      setForm({ ...form, defaultProvider: newProvider });
+                      if (!models[newProvider]) {
+                        fetchModels(newProvider);
+                      }
+                    }}
                     className="w-full bg-secondary rounded-md px-3 py-1.5 text-sm outline-none focus:ring-1 ring-primary"
                   >
                     {providers.map((p) => (
@@ -346,7 +345,21 @@ export function AgentTemplatesTab() {
                   </select>
                 ) : (
                   <p className="text-xs font-mono bg-secondary inline-block px-2 py-0.5 rounded">
-                    {form.defaultProvider}
+                    {providers.find((p) => p.id === form.defaultProvider)?.name ?? form.defaultProvider}
+                  </p>
+                )}
+              </Field>
+              <Field label="Model" editing={editing}>
+                {editing ? (
+                  <ModelCombobox
+                    value={form.defaultModel}
+                    options={models[form.defaultProvider] ?? []}
+                    onChange={(model) => setForm({ ...form, defaultModel: model })}
+                    placeholder="Select or type a model..."
+                  />
+                ) : (
+                  <p className="text-xs font-mono bg-secondary inline-block px-2 py-0.5 rounded">
+                    {form.defaultModel}
                   </p>
                 )}
               </Field>

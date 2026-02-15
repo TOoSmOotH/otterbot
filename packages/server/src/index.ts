@@ -99,6 +99,9 @@ import {
   getOpenCodeSettings,
   updateOpenCodeSettings,
   testOpenCodeConnection,
+  listCustomModels,
+  createCustomModel,
+  deleteCustomModel,
   type TierDefaults,
 } from "./settings/settings.js";
 import type { ProviderType } from "@smoothbot/shared";
@@ -1361,6 +1364,32 @@ async function main() {
     Body: Partial<TierDefaults>;
   }>("/api/settings/defaults", async (req) => {
     updateTierDefaults(req.body);
+    return { ok: true };
+  });
+
+  // Custom models CRUD
+  app.get<{
+    Querystring: { providerId?: string };
+  }>("/api/settings/custom-models", async (req) => {
+    return { customModels: listCustomModels(req.query.providerId) };
+  });
+
+  app.post<{
+    Body: { providerId: string; modelId: string; label?: string };
+  }>("/api/settings/custom-models", async (req, reply) => {
+    const { providerId, modelId } = req.body;
+    if (!providerId || !modelId) {
+      reply.code(400);
+      return { error: "providerId and modelId are required" };
+    }
+    const created = createCustomModel(req.body);
+    return created;
+  });
+
+  app.delete<{
+    Params: { id: string };
+  }>("/api/settings/custom-models/:id", async (req) => {
+    deleteCustomModel(req.params.id);
     return { ok: true };
   });
 

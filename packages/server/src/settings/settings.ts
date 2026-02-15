@@ -17,7 +17,7 @@ import { OpenCodeClient } from "../tools/opencode-client.js";
 import { getDb, schema } from "../db/index.js";
 import { eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
-import type { NamedProvider, ProviderType, ProviderTypeMeta } from "@smoothbot/shared";
+import type { NamedProvider, ProviderType, ProviderTypeMeta, CustomModel, ModelOption } from "@smoothbot/shared";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -360,14 +360,83 @@ export async function fetchModelsWithCredentials(
   }
 }
 
-export async function fetchModels(providerId: string): Promise<string[]> {
+export async function fetchModels(providerId: string): Promise<ModelOption[]> {
   // Look up credentials from the providers table
   const row = getProviderRow(providerId);
-  if (row) {
-    return fetchModelsWithCredentials(row.type, row.apiKey ?? undefined, row.baseUrl ?? undefined);
+  const discovered = row
+    ? await fetchModelsWithCredentials(row.type, row.apiKey ?? undefined, row.baseUrl ?? undefined)
+    : await fetchModelsWithCredentials(providerId);
+
+  // Get custom models for this provider
+  const custom = listCustomModels(providerId);
+
+  // Build merged list: custom models first (they win on labels), then discovered
+  const seen = new Set<string>();
+  const result: ModelOption[] = [];
+
+  for (const cm of custom) {
+    seen.add(cm.modelId);
+    result.push({ modelId: cm.modelId, label: cm.label, source: "custom" });
   }
-  // Fallback: treat providerId as a legacy type string
-  return fetchModelsWithCredentials(providerId);
+  for (const modelId of discovered) {
+    if (!seen.has(modelId)) {
+      result.push({ modelId, source: "discovered" });
+    }
+  }
+
+  return result;
+}
+
+// ---------------------------------------------------------------------------
+// Custom models CRUD
+// ---------------------------------------------------------------------------
+
+export function listCustomModels(providerId?: string): CustomModel[] {
+  const db = getDb();
+  if (providerId) {
+    return db
+      .select()
+      .from(schema.customModels)
+      .where(eq(schema.customModels.providerId, providerId))
+      .all()
+      .map(toCustomModel);
+  }
+  return db.select().from(schema.customModels).all().map(toCustomModel);
+}
+
+export function createCustomModel(data: {
+  providerId: string;
+  modelId: string;
+  label?: string;
+}): CustomModel {
+  const db = getDb();
+  const id = nanoid();
+  const now = new Date().toISOString();
+  db.insert(schema.customModels)
+    .values({
+      id,
+      providerId: data.providerId,
+      modelId: data.modelId,
+      label: data.label ?? null,
+      createdAt: now,
+    })
+    .run();
+  return { id, providerId: data.providerId, modelId: data.modelId, label: data.label, createdAt: now };
+}
+
+export function deleteCustomModel(id: string): void {
+  const db = getDb();
+  db.delete(schema.customModels).where(eq(schema.customModels.id, id)).run();
+}
+
+function toCustomModel(row: typeof schema.customModels.$inferSelect): CustomModel {
+  return {
+    id: row.id,
+    providerId: row.providerId,
+    modelId: row.modelId,
+    label: row.label ?? undefined,
+    createdAt: row.createdAt,
+  };
 }
 
 // ---------------------------------------------------------------------------

@@ -1,11 +1,11 @@
 import { create } from "zustand";
-import type { NamedProvider, ProviderTypeMeta, ProviderType } from "@smoothbot/shared";
+import type { NamedProvider, ProviderTypeMeta, ProviderType, CustomModel, ModelOption } from "@smoothbot/shared";
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
-export type { NamedProvider, ProviderTypeMeta, ProviderType };
+export type { NamedProvider, ProviderTypeMeta, ProviderType, CustomModel, ModelOption };
 
 export interface TierDefaults {
   coo: { provider: string; model: string };
@@ -54,7 +54,8 @@ interface SettingsState {
   providers: NamedProvider[];
   providerTypes: ProviderTypeMeta[];
   defaults: TierDefaults;
-  models: Record<string, string[]>; // providerId → model list
+  models: Record<string, ModelOption[]>; // providerId → model list
+  customModels: CustomModel[];
   loading: boolean;
   error: string | null;
   testResults: Record<string, TestResult>;
@@ -99,6 +100,11 @@ interface SettingsState {
   updateDefaults: (data: Partial<TierDefaults>) => Promise<void>;
   testProvider: (id: string, model?: string) => Promise<void>;
   fetchModels: (providerId: string) => Promise<void>;
+
+  // Custom models
+  loadCustomModels: (providerId?: string) => Promise<void>;
+  createCustomModel: (data: { providerId: string; modelId: string; label?: string }) => Promise<CustomModel | null>;
+  deleteCustomModel: (id: string) => Promise<void>;
 
   // Search actions
   loadSearchSettings: () => Promise<void>;
@@ -159,6 +165,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     worker: { provider: "", model: "" },
   },
   models: {},
+  customModels: [],
   loading: false,
   error: null,
   testResults: {},
@@ -324,6 +331,52 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       }));
     } catch {
       // Silently fail — user can still type model names manually
+    }
+  },
+
+  loadCustomModels: async (providerId) => {
+    try {
+      const url = providerId
+        ? `/api/settings/custom-models?providerId=${encodeURIComponent(providerId)}`
+        : "/api/settings/custom-models";
+      const res = await fetch(url);
+      if (!res.ok) return;
+      const data = await res.json();
+      set({ customModels: data.customModels });
+    } catch {
+      // Silently fail
+    }
+  },
+
+  createCustomModel: async (data) => {
+    try {
+      const res = await fetch("/api/settings/custom-models", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) return null;
+      const created = await res.json();
+      await get().loadCustomModels();
+      // Refresh the model list for this provider so the new custom model appears
+      await get().fetchModels(data.providerId);
+      return created as CustomModel;
+    } catch {
+      return null;
+    }
+  },
+
+  deleteCustomModel: async (id) => {
+    try {
+      const cm = get().customModels.find((m) => m.id === id);
+      await fetch(`/api/settings/custom-models/${id}`, { method: "DELETE" });
+      await get().loadCustomModels();
+      // Refresh model list for the affected provider
+      if (cm) {
+        await get().fetchModels(cm.providerId);
+      }
+    } catch {
+      // Silently fail
     }
   },
 

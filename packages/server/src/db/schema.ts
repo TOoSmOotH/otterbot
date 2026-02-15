@@ -154,6 +154,16 @@ export const agentActivity = sqliteTable("agent_activity", {
     .$defaultFn(() => new Date().toISOString()),
 });
 
+export const customModels = sqliteTable("custom_models", {
+  id: text("id").primaryKey(),
+  providerId: text("provider_id").notNull(),
+  modelId: text("model_id").notNull(),
+  label: text("label"),
+  createdAt: text("created_at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+});
+
 export const providers = sqliteTable("providers", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),

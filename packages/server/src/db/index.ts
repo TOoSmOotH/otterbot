@@ -216,6 +216,14 @@ export async function migrateDb() {
     updated_at TEXT NOT NULL
   )`);
 
+  db.run(sql`CREATE TABLE IF NOT EXISTS custom_models (
+    id TEXT PRIMARY KEY,
+    provider_id TEXT NOT NULL,
+    model_id TEXT NOT NULL,
+    label TEXT,
+    created_at TEXT NOT NULL
+  )`);
+
   db.run(sql`CREATE TABLE IF NOT EXISTS agent_activity (
     id TEXT PRIMARY KEY,
     agent_id TEXT NOT NULL,

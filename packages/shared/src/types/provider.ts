@@ -16,3 +16,17 @@ export interface ProviderTypeMeta {
   needsApiKey: boolean;
   needsBaseUrl: boolean;
 }
+
+export interface CustomModel {
+  id: string;
+  providerId: string;
+  modelId: string;
+  label?: string;
+  createdAt: string;
+}
+
+export interface ModelOption {
+  modelId: string;
+  label?: string;
+  source: "discovered" | "custom";
+}
