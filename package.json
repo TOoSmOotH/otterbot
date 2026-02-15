@@ -20,9 +20,14 @@
     "docker:dev": "docker compose -f docker-compose.yml -f docker-compose.dev.yml up",
     "docker:up:search": "docker compose --profile search up -d",
     "db:push": "pnpm --filter @smoothbot/server db:push",
-    "db:seed": "pnpm --filter @smoothbot/server db:seed"
+    "db:seed": "pnpm --filter @smoothbot/server db:seed",
+    "test:e2e:docker": "docker compose -f docker-compose.e2e.yml up -d --build --wait && npx playwright test -c e2e/playwright.config.ts; docker compose -f docker-compose.e2e.yml down",
+    "test:e2e:docker:up": "docker compose -f docker-compose.e2e.yml up -d --build --wait",
+    "test:e2e:docker:down": "docker compose -f docker-compose.e2e.yml down",
+    "test:e2e:docker:run": "npx playwright test -c e2e/playwright.config.ts"
   },
   "devDependencies": {
+    "@playwright/test": "^1.58.2",
     "typescript": "^5.7.3",
     "vitest": "^3.0.5"
   },

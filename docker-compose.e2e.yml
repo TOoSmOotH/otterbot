@@ -1,0 +1,18 @@
+services:
+  smoothbot-e2e:
+    build: .
+    shm_size: "256m"
+    ports:
+      - "62627:3000"
+    tmpfs:
+      - /smoothbot
+    environment:
+      - SMOOTHBOT_DB_KEY=e2e-test-key-not-secret
+      - ENABLE_DESKTOP=false
+      - SUDO_MODE=restricted
+    healthcheck:
+      test: ["CMD", "curl", "-fk", "https://localhost:3000/api/setup/status"]
+      interval: 3s
+      timeout: 5s
+      retries: 30
+      start_period: 15s

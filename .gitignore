@@ -33,5 +33,9 @@ coverage/
 test-results/
 playwright-report/
 
+# E2E credentials and auth state
+.credentials
+e2e/.auth-state.json
+
 # Docker data
 data/
