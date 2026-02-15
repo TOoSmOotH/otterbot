@@ -7,8 +7,8 @@ const DEFAULT_TIMEOUT = 30_000; // 30 seconds
 const MAX_TIMEOUT = 120_000; // 2 minutes
 const MAX_OUTPUT_SIZE = 50_000; // 50KB — trim output to fit LLM context
 
-// Port 3000 is reserved for the Smoothbot server — workers must not bind to it
-const RESERVED_PORT = parseInt(process.env.PORT ?? "3000", 10);
+// Port 62626 is reserved for the Smoothbot server — workers must not bind to it
+const RESERVED_PORT = parseInt(process.env.PORT ?? "62626", 10);
 
 const BLOCKED_COMMANDS: { pattern: RegExp; reason: string; suggestion?: string }[] = [
   { pattern: /\bpkill\b/, reason: "pkill matches processes by name across the whole system and can kill the host", suggestion: "Use `kill <pid>` with a specific PID" },

@@ -13,18 +13,18 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      "/api": "http://localhost:3000",
-      "/assets/3d": "http://localhost:3000",
+      "/api": "http://localhost:62626",
+      "/assets/3d": "http://localhost:62626",
       "/socket.io": {
-        target: "http://localhost:3000",
+        target: "http://localhost:62626",
         ws: true,
       },
       "/novnc": {
-        target: "https://localhost:3000",
+        target: "https://localhost:62626",
         secure: false,
       },
       "/desktop/ws": {
-        target: "https://localhost:3000",
+        target: "https://localhost:62626",
         ws: true,
         secure: false,
       },

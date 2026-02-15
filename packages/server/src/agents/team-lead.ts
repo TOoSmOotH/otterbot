@@ -97,7 +97,7 @@ function buildEnvironmentContext(toolNames: string[]): string {
       sections.push(`## System Access\nsudo is available for: apt-get, npm, tee, gpg, install. Use install_package tool when possible.`);
     }
 
-    const reservedPort = process.env.PORT ?? "3000";
+    const reservedPort = process.env.PORT ?? "62626";
     sections.push(
       `## Reserved Ports\n` +
       `**Port ${reservedPort} is reserved for the Smoothbot server and MUST NOT be used by your applications.** ` +

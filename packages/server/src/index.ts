@@ -1598,7 +1598,7 @@ async function main() {
   }
 
   // Start server
-  const port = parseInt(process.env.PORT ?? "3000");
+  const port = parseInt(process.env.PORT ?? "62626");
   const host = process.env.HOST ?? "0.0.0.0";
 
   await app.listen({ port, host });

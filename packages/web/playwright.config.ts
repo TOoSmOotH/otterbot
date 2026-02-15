@@ -20,7 +20,7 @@ export default defineConfig({
   webServer: [
     {
       command: "pnpm --filter @smoothbot/server dev",
-      port: 3000,
+      port: 62626,
       reuseExistingServer: !process.env.CI,
       cwd: "../..",
     },
