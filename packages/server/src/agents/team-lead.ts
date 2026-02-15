@@ -34,6 +34,7 @@ const TOOL_DESCRIPTIONS: Record<string, string> = {
   web_search: "Search the web for information",
   web_browse: "Browse web pages with a headless browser (Playwright)",
   install_package: "Install apt or npm packages (persisted across restarts)",
+  opencode_task: "Delegate complex coding tasks to OpenCode (autonomous AI coding agent)",
 };
 
 /** Find the Chromium binary — checks wrapper script, then Playwright install path */

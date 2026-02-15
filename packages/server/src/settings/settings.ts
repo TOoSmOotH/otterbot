@@ -14,6 +14,7 @@ import { generateText } from "ai";
 import { getConfiguredSearchProvider } from "../tools/search/providers.js";
 import { getConfiguredTTSProvider } from "../tts/tts.js";
 import { getConfiguredSTTProvider } from "../stt/stt.js";
+import { OpenCodeClient } from "../tools/opencode-client.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -881,4 +882,89 @@ export async function testSTTProvider(
       deleteConfig("stt:active_provider");
     }
   }
+}
+
+// ---------------------------------------------------------------------------
+// OpenCode settings
+// ---------------------------------------------------------------------------
+
+export interface OpenCodeSettingsResponse {
+  enabled: boolean;
+  apiUrl: string;
+  username: string;
+  passwordSet: boolean;
+  timeoutMs: number;
+  maxIterations: number;
+}
+
+export function getOpenCodeSettings(): OpenCodeSettingsResponse {
+  return {
+    enabled: getConfig("opencode:enabled") === "true",
+    apiUrl: getConfig("opencode:api_url") ?? "",
+    username: getConfig("opencode:username") ?? "",
+    passwordSet: !!getConfig("opencode:password"),
+    timeoutMs: parseInt(getConfig("opencode:timeout_ms") ?? "180000", 10),
+    maxIterations: parseInt(getConfig("opencode:max_iterations") ?? "50", 10),
+  };
+}
+
+export function updateOpenCodeSettings(data: {
+  enabled?: boolean;
+  apiUrl?: string;
+  username?: string;
+  password?: string;
+  timeoutMs?: number;
+  maxIterations?: number;
+}): void {
+  if (data.enabled !== undefined) {
+    setConfig("opencode:enabled", data.enabled ? "true" : "false");
+  }
+  if (data.apiUrl !== undefined) {
+    if (data.apiUrl === "") {
+      deleteConfig("opencode:api_url");
+    } else {
+      setConfig("opencode:api_url", data.apiUrl);
+    }
+  }
+  if (data.username !== undefined) {
+    if (data.username === "") {
+      deleteConfig("opencode:username");
+    } else {
+      setConfig("opencode:username", data.username);
+    }
+  }
+  if (data.password !== undefined) {
+    if (data.password === "") {
+      deleteConfig("opencode:password");
+    } else {
+      setConfig("opencode:password", data.password);
+    }
+  }
+  if (data.timeoutMs !== undefined) {
+    setConfig("opencode:timeout_ms", String(data.timeoutMs));
+  }
+  if (data.maxIterations !== undefined) {
+    setConfig("opencode:max_iterations", String(data.maxIterations));
+  }
+}
+
+export async function testOpenCodeConnection(): Promise<TestResult> {
+  const apiUrl = getConfig("opencode:api_url");
+  if (!apiUrl) {
+    return { ok: false, error: "API URL not configured." };
+  }
+
+  const start = Date.now();
+  const client = new OpenCodeClient({
+    apiUrl,
+    username: getConfig("opencode:username") ?? undefined,
+    password: getConfig("opencode:password") ?? undefined,
+  });
+
+  const result = await client.healthCheck();
+  return {
+    ok: result.ok,
+    error: result.error,
+    latencyMs: Date.now() - start,
+  };
 }

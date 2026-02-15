@@ -86,6 +86,15 @@ interface SettingsState {
   sttModelId: string;
   sttTestResults: Record<string, TestResult>;
 
+  // OpenCode
+  openCodeEnabled: boolean;
+  openCodeApiUrl: string;
+  openCodeUsername: string;
+  openCodePasswordSet: boolean;
+  openCodeTimeoutMs: number;
+  openCodeMaxIterations: number;
+  openCodeTestResult: TestResult | null;
+
   loadSettings: () => Promise<void>;
   updateProvider: (
     id: string,
@@ -127,6 +136,18 @@ interface SettingsState {
     data: { apiKey?: string; baseUrl?: string },
   ) => Promise<void>;
   testSTTProvider: (id: string) => Promise<void>;
+
+  // OpenCode actions
+  loadOpenCodeSettings: () => Promise<void>;
+  updateOpenCodeSettings: (data: {
+    enabled?: boolean;
+    apiUrl?: string;
+    username?: string;
+    password?: string;
+    timeoutMs?: number;
+    maxIterations?: number;
+  }) => Promise<void>;
+  testOpenCodeConnection: () => Promise<void>;
 }
 
 // ---------------------------------------------------------------------------
@@ -159,6 +180,13 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   sttLanguage: "",
   sttModelId: "onnx-community/whisper-base",
   sttTestResults: {},
+  openCodeEnabled: false,
+  openCodeApiUrl: "",
+  openCodeUsername: "",
+  openCodePasswordSet: false,
+  openCodeTimeoutMs: 180000,
+  openCodeMaxIterations: 50,
+  openCodeTestResult: null,
 
   loadSettings: async () => {
     set({ loading: true, error: null });
@@ -594,6 +622,68 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
           },
         },
       }));
+    }
+  },
+
+  // OpenCode actions
+
+  loadOpenCodeSettings: async () => {
+    try {
+      const res = await fetch("/api/settings/opencode");
+      if (!res.ok) return;
+      const data = await res.json();
+      set({
+        openCodeEnabled: data.enabled,
+        openCodeApiUrl: data.apiUrl,
+        openCodeUsername: data.username,
+        openCodePasswordSet: data.passwordSet,
+        openCodeTimeoutMs: data.timeoutMs,
+        openCodeMaxIterations: data.maxIterations,
+      });
+    } catch {
+      // Silently fail
+    }
+  },
+
+  updateOpenCodeSettings: async (data) => {
+    set({ error: null });
+    try {
+      const res = await fetch("/api/settings/opencode", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) throw new Error("Failed to update OpenCode settings");
+      await get().loadOpenCodeSettings();
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "Unknown error" });
+    }
+  },
+
+  testOpenCodeConnection: async () => {
+    set({ openCodeTestResult: { ok: false, testing: true } });
+    try {
+      const res = await fetch("/api/settings/opencode/test", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      const data = await res.json();
+      set({
+        openCodeTestResult: {
+          ok: data.ok,
+          error: data.error,
+          testing: false,
+        },
+      });
+    } catch (err) {
+      set({
+        openCodeTestResult: {
+          ok: false,
+          error: err instanceof Error ? err.message : "Unknown error",
+          testing: false,
+        },
+      });
     }
   },
 }));

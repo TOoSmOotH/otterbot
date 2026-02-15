@@ -7,8 +7,9 @@ import { AgentTemplatesTab } from "./AgentTemplatesTab";
 import { SearchTab } from "./SearchTab";
 import { SpeechTab } from "./SpeechTab";
 import { LiveViewTab } from "./LiveViewTab";
+import { OpenCodeTab } from "./OpenCodeTab";
 
-type Tab = "providers" | "models" | "templates" | "search" | "speech" | "liveview";
+type Tab = "providers" | "models" | "templates" | "search" | "speech" | "liveview" | "opencode";
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "providers", label: "Providers" },
@@ -17,6 +18,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: "search", label: "Search" },
   { id: "speech", label: "Speech" },
   { id: "liveview", label: "Live View" },
+  { id: "opencode", label: "OpenCode" },
 ];
 
 export function SettingsPanel({ onClose }: { onClose: () => void }) {
@@ -77,6 +79,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
               {activeTab === "search" && <SearchTab />}
               {activeTab === "speech" && <SpeechTab />}
               {activeTab === "liveview" && <LiveViewTab />}
+              {activeTab === "opencode" && <OpenCodeTab />}
             </>
           )}
         </div>

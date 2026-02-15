@@ -92,6 +92,9 @@ import {
   setSTTModel,
   updateSTTProviderConfig,
   testSTTProvider,
+  getOpenCodeSettings,
+  updateOpenCodeSettings,
+  testOpenCodeConnection,
   type TierDefaults,
 } from "./settings/settings.js";
 
@@ -964,7 +967,7 @@ async function main() {
 
   app.post<{
     Params: { projectId: string };
-    Body: { title: string; description?: string; column?: string; labels?: string[] };
+    Body: { title: string; description?: string; column?: string; labels?: string[]; blockedBy?: string[] };
   }>(
     "/api/projects/:projectId/tasks",
     async (req) => {
@@ -972,7 +975,7 @@ async function main() {
       const { eq } = await import("drizzle-orm");
       const { nanoid } = await import("nanoid");
       const db = getDb();
-      const { title, description, column, labels } = req.body;
+      const { title, description, column, labels, blockedBy } = req.body;
       const now = new Date().toISOString();
 
       // Get max position in column
@@ -994,6 +997,7 @@ async function main() {
         assigneeAgentId: null,
         createdBy: "user",
         labels: labels ?? [],
+        blockedBy: blockedBy ?? [],
         createdAt: now,
         updatedAt: now,
       };
@@ -1009,7 +1013,7 @@ async function main() {
 
   app.patch<{
     Params: { projectId: string; taskId: string };
-    Body: { title?: string; description?: string; column?: string; position?: number; assigneeAgentId?: string | null; labels?: string[] };
+    Body: { title?: string; description?: string; column?: string; position?: number; assigneeAgentId?: string | null; labels?: string[]; blockedBy?: string[] };
   }>(
     "/api/projects/:projectId/tasks/:taskId",
     async (req, reply) => {
@@ -1033,6 +1037,7 @@ async function main() {
       if (req.body.position !== undefined) updates.position = req.body.position;
       if (req.body.assigneeAgentId !== undefined) updates.assigneeAgentId = req.body.assigneeAgentId;
       if (req.body.labels !== undefined) updates.labels = req.body.labels;
+      if (req.body.blockedBy !== undefined) updates.blockedBy = req.body.blockedBy;
 
       db.update(schema.kanbanTasks)
         .set(updates)
@@ -1490,6 +1495,32 @@ async function main() {
         error: err instanceof Error ? err.message : "Transcription failed",
       };
     }
+  });
+
+  // =========================================================================
+  // OpenCode settings routes
+  // =========================================================================
+
+  app.get("/api/settings/opencode", async () => {
+    return getOpenCodeSettings();
+  });
+
+  app.put<{
+    Body: {
+      enabled?: boolean;
+      apiUrl?: string;
+      username?: string;
+      password?: string;
+      timeoutMs?: number;
+      maxIterations?: number;
+    };
+  }>("/api/settings/opencode", async (req) => {
+    updateOpenCodeSettings(req.body);
+    return { ok: true };
+  });
+
+  app.post("/api/settings/opencode/test", async () => {
+    return testOpenCodeConnection();
   });
 
   // SPA fallback for client-side routing (only for page navigation, not JS/CSS/API requests)

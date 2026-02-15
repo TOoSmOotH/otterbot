@@ -6,6 +6,7 @@ import { createWebSearchTool } from "./web-search.js";
 import { createWebBrowseTool } from "./web-browse.js";
 import { createGitCommitTool } from "./git-commit.js";
 import { createInstallPackageTool } from "./install-package.js";
+import { createOpenCodeTaskTool } from "./opencode-task.js";
 
 type ToolCreator = (ctx: ToolContext) => unknown;
 
@@ -17,6 +18,7 @@ const TOOL_REGISTRY: Record<string, ToolCreator> = {
   web_browse: createWebBrowseTool,
   git_commit: createGitCommitTool,
   install_package: createInstallPackageTool,
+  opencode_task: createOpenCodeTaskTool,
 };
 
 /**
