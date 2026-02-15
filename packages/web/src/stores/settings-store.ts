@@ -1,18 +1,11 @@
 import { create } from "zustand";
+import type { NamedProvider, ProviderTypeMeta, ProviderType } from "@smoothbot/shared";
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
-export interface ProviderConfig {
-  id: string;
-  name: string;
-  apiKey?: string; // masked: "...XXXX"
-  apiKeySet: boolean;
-  baseUrl?: string;
-  needsApiKey: boolean;
-  needsBaseUrl: boolean;
-}
+export type { NamedProvider, ProviderTypeMeta, ProviderType };
 
 export interface TierDefaults {
   coo: { provider: string; model: string };
@@ -58,7 +51,8 @@ export interface STTProviderConfig {
 }
 
 interface SettingsState {
-  providers: ProviderConfig[];
+  providers: NamedProvider[];
+  providerTypes: ProviderTypeMeta[];
   defaults: TierDefaults;
   models: Record<string, string[]>; // providerId → model list
   loading: boolean;
@@ -96,10 +90,12 @@ interface SettingsState {
   openCodeTestResult: TestResult | null;
 
   loadSettings: () => Promise<void>;
+  createProvider: (data: { name: string; type: ProviderType; apiKey?: string; baseUrl?: string }) => Promise<NamedProvider | null>;
   updateProvider: (
     id: string,
-    data: { apiKey?: string; baseUrl?: string },
+    data: { name?: string; apiKey?: string; baseUrl?: string },
   ) => Promise<void>;
+  deleteProvider: (id: string) => Promise<{ ok: boolean; error?: string }>;
   updateDefaults: (data: Partial<TierDefaults>) => Promise<void>;
   testProvider: (id: string, model?: string) => Promise<void>;
   fetchModels: (providerId: string) => Promise<void>;
@@ -156,10 +152,11 @@ interface SettingsState {
 
 export const useSettingsStore = create<SettingsState>((set, get) => ({
   providers: [],
+  providerTypes: [],
   defaults: {
-    coo: { provider: "anthropic", model: "" },
-    teamLead: { provider: "anthropic", model: "" },
-    worker: { provider: "anthropic", model: "" },
+    coo: { provider: "", model: "" },
+    teamLead: { provider: "", model: "" },
+    worker: { provider: "", model: "" },
   },
   models: {},
   loading: false,
@@ -196,6 +193,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       const data = await res.json();
       set({
         providers: data.providers,
+        providerTypes: data.providerTypes ?? [],
         defaults: data.defaults,
         loading: false,
       });
@@ -207,21 +205,61 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     }
   },
 
+  createProvider: async (data) => {
+    set({ error: null });
+    try {
+      const res = await fetch("/api/settings/providers", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || "Failed to create provider");
+      }
+      const created = await res.json();
+      await get().loadSettings();
+      return created as NamedProvider;
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "Unknown error" });
+      return null;
+    }
+  },
+
   updateProvider: async (id, data) => {
     set({ error: null });
     try {
-      const res = await fetch(`/api/settings/provider/${id}`, {
+      const res = await fetch(`/api/settings/providers/${id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(data),
       });
       if (!res.ok) throw new Error("Failed to update provider");
-      // Reload settings to get fresh masked keys
       await get().loadSettings();
     } catch (err) {
       set({
         error: err instanceof Error ? err.message : "Unknown error",
       });
+    }
+  },
+
+  deleteProvider: async (id) => {
+    set({ error: null });
+    try {
+      const res = await fetch(`/api/settings/providers/${id}`, {
+        method: "DELETE",
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        set({ error: data.error || "Failed to delete provider" });
+        return { ok: false, error: data.error };
+      }
+      await get().loadSettings();
+      return { ok: true };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Unknown error";
+      set({ error: msg });
+      return { ok: false, error: msg };
     }
   },
 
@@ -250,7 +288,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       },
     }));
     try {
-      const res = await fetch(`/api/settings/provider/${id}/test`, {
+      const res = await fetch(`/api/settings/providers/${id}/test`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ model }),
@@ -278,7 +316,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
 
   fetchModels: async (providerId) => {
     try {
-      const res = await fetch(`/api/settings/models/${providerId}`);
+      const res = await fetch(`/api/settings/providers/${providerId}/models`);
       if (!res.ok) return;
       const data = await res.json();
       set((s) => ({

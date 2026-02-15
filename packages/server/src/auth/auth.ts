@@ -97,15 +97,3 @@ export function isSetupComplete(): boolean {
   );
 }
 
-// ---------------------------------------------------------------------------
-// Available LLM providers (static list — keys are stored in DB, not env)
-// ---------------------------------------------------------------------------
-
-export function getAvailableProviders(): Array<{ id: string; name: string }> {
-  return [
-    { id: "anthropic", name: "Anthropic" },
-    { id: "openai", name: "OpenAI" },
-    { id: "ollama", name: "Ollama" },
-    { id: "openai-compatible", name: "OpenAI-Compatible" },
-  ];
-}

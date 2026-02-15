@@ -1,15 +1,11 @@
 import { create } from "zustand";
+import type { ProviderTypeMeta } from "@smoothbot/shared";
 
 export type AppScreen = "loading" | "setup" | "login" | "app";
 
-export interface Provider {
-  id: string;
-  name: string;
-}
-
 interface AuthState {
   screen: AppScreen;
-  providers: Provider[];
+  providerTypes: ProviderTypeMeta[];
   error: string | null;
 
   checkStatus: () => Promise<void>;
@@ -17,6 +13,7 @@ interface AuthState {
   completeSetup: (data: {
     passphrase: string;
     provider: string;
+    providerName?: string;
     model: string;
     apiKey?: string;
     baseUrl?: string;
@@ -41,7 +38,7 @@ interface AuthState {
 
 export const useAuthStore = create<AuthState>((set) => ({
   screen: "loading",
-  providers: [],
+  providerTypes: [],
   error: null,
 
   checkStatus: async () => {
@@ -50,7 +47,7 @@ export const useAuthStore = create<AuthState>((set) => ({
       const setupData = await setupRes.json();
 
       if (!setupData.setupComplete) {
-        set({ screen: "setup", providers: setupData.providers });
+        set({ screen: "setup", providerTypes: setupData.providerTypes ?? [] });
         return;
       }
 

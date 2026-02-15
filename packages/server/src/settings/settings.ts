@@ -7,7 +7,6 @@ import {
   getConfig,
   setConfig,
   deleteConfig,
-  getAvailableProviders,
 } from "../auth/auth.js";
 import { resolveModel, type LLMConfig } from "../llm/adapter.js";
 import { generateText } from "ai";
@@ -15,20 +14,14 @@ import { getConfiguredSearchProvider } from "../tools/search/providers.js";
 import { getConfiguredTTSProvider } from "../tts/tts.js";
 import { getConfiguredSTTProvider } from "../stt/stt.js";
 import { OpenCodeClient } from "../tools/opencode-client.js";
+import { getDb, schema } from "../db/index.js";
+import { eq } from "drizzle-orm";
+import { nanoid } from "nanoid";
+import type { NamedProvider, ProviderType, ProviderTypeMeta } from "@smoothbot/shared";
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
-
-export interface ProviderConfig {
-  id: string;
-  name: string;
-  apiKey?: string; // masked: "...XXXX"
-  apiKeySet: boolean;
-  baseUrl?: string;
-  needsApiKey: boolean;
-  needsBaseUrl: boolean;
-}
 
 export interface TierDefaults {
   coo: { provider: string; model: string };
@@ -37,7 +30,8 @@ export interface TierDefaults {
 }
 
 export interface SettingsResponse {
-  providers: ProviderConfig[];
+  providers: NamedProvider[];
+  providerTypes: ProviderTypeMeta[];
   defaults: TierDefaults;
 }
 
@@ -48,18 +42,15 @@ export interface TestResult {
 }
 
 // ---------------------------------------------------------------------------
-// Provider metadata
+// Provider type metadata (static)
 // ---------------------------------------------------------------------------
 
-const PROVIDER_META: Record<
-  string,
-  { needsApiKey: boolean; needsBaseUrl: boolean }
-> = {
-  anthropic: { needsApiKey: true, needsBaseUrl: false },
-  openai: { needsApiKey: true, needsBaseUrl: false },
-  ollama: { needsApiKey: false, needsBaseUrl: true },
-  "openai-compatible": { needsApiKey: true, needsBaseUrl: true },
-};
+export const PROVIDER_TYPE_META: ProviderTypeMeta[] = [
+  { type: "anthropic", label: "Anthropic", needsApiKey: true, needsBaseUrl: false },
+  { type: "openai", label: "OpenAI", needsApiKey: true, needsBaseUrl: false },
+  { type: "ollama", label: "Ollama", needsApiKey: false, needsBaseUrl: true },
+  { type: "openai-compatible", label: "OpenAI-Compatible", needsApiKey: true, needsBaseUrl: true },
+];
 
 // Static fallback models per provider (used when API fetch fails)
 const FALLBACK_MODELS: Record<string, string[]> = {
@@ -112,33 +103,92 @@ function maskApiKey(key: string | undefined): string | undefined {
 }
 
 // ---------------------------------------------------------------------------
+// Provider CRUD
+// ---------------------------------------------------------------------------
+
+export function listProviders(): NamedProvider[] {
+  const db = getDb();
+  const rows = db.select().from(schema.providers).all();
+  return rows.map((row) => ({
+    id: row.id,
+    name: row.name,
+    type: row.type as ProviderType,
+    apiKeySet: !!row.apiKey,
+    apiKeyMasked: maskApiKey(row.apiKey ?? undefined),
+    baseUrl: row.baseUrl ?? undefined,
+    createdAt: row.createdAt,
+  }));
+}
+
+export function getProviderRow(id: string) {
+  const db = getDb();
+  return db.select().from(schema.providers).where(eq(schema.providers.id, id)).get();
+}
+
+export function createProvider(data: {
+  name: string;
+  type: ProviderType;
+  apiKey?: string;
+  baseUrl?: string;
+}): NamedProvider {
+  const db = getDb();
+  const id = nanoid();
+  const now = new Date().toISOString();
+  db.insert(schema.providers)
+    .values({
+      id,
+      name: data.name,
+      type: data.type,
+      apiKey: data.apiKey ?? null,
+      baseUrl: data.baseUrl ?? null,
+      createdAt: now,
+      updatedAt: now,
+    })
+    .run();
+  return {
+    id,
+    name: data.name,
+    type: data.type,
+    apiKeySet: !!data.apiKey,
+    apiKeyMasked: maskApiKey(data.apiKey),
+    baseUrl: data.baseUrl,
+    createdAt: now,
+  };
+}
+
+export function updateProvider(
+  id: string,
+  data: { name?: string; apiKey?: string; baseUrl?: string },
+): void {
+  const db = getDb();
+  const updates: Record<string, unknown> = { updatedAt: new Date().toISOString() };
+  if (data.name !== undefined) updates.name = data.name;
+  if (data.apiKey !== undefined) updates.apiKey = data.apiKey || null;
+  if (data.baseUrl !== undefined) updates.baseUrl = data.baseUrl || null;
+  db.update(schema.providers).set(updates).where(eq(schema.providers.id, id)).run();
+}
+
+export function deleteProvider(id: string): { ok: boolean; error?: string } {
+  // Check if provider is referenced by tier defaults
+  for (const key of ["coo_provider", "team_lead_provider", "worker_provider"]) {
+    if (getConfig(key) === id) {
+      return { ok: false, error: `Provider is in use as a tier default (${key.replace("_provider", "").replace("_", " ")})` };
+    }
+  }
+  const db = getDb();
+  db.delete(schema.providers).where(eq(schema.providers.id, id)).run();
+  return { ok: true };
+}
+
+// ---------------------------------------------------------------------------
 // Read settings
 // ---------------------------------------------------------------------------
 
 export function getSettings(): SettingsResponse {
-  const providers = getAvailableProviders().map((p) => {
-    const meta = PROVIDER_META[p.id] ?? {
-      needsApiKey: true,
-      needsBaseUrl: false,
-    };
-    const rawKey = getConfig(`provider:${p.id}:api_key`);
-    const baseUrl = getConfig(`provider:${p.id}:base_url`);
+  const providers = listProviders();
 
-    return {
-      id: p.id,
-      name: p.name,
-      apiKey: maskApiKey(rawKey),
-      apiKeySet: !!rawKey,
-      baseUrl: baseUrl || undefined,
-      needsApiKey: meta.needsApiKey,
-      needsBaseUrl: meta.needsBaseUrl,
-    } satisfies ProviderConfig;
-  });
-
-  const cooProvider =
-    getConfig("coo_provider") ?? "anthropic";
-  const cooModel =
-    getConfig("coo_model") ?? "claude-sonnet-4-5-20250929";
+  const cooProvider = getConfig("coo_provider") ?? "";
+  const cooModel = getConfig("coo_model") ?? "claude-sonnet-4-5-20250929";
 
   const defaults: TierDefaults = {
     coo: {
@@ -155,31 +205,7 @@ export function getSettings(): SettingsResponse {
     },
   };
 
-  return { providers, defaults };
-}
-
-// ---------------------------------------------------------------------------
-// Update provider config
-// ---------------------------------------------------------------------------
-
-export function updateProviderConfig(
-  providerId: string,
-  data: { apiKey?: string; baseUrl?: string },
-): void {
-  if (data.apiKey !== undefined) {
-    if (data.apiKey === "") {
-      deleteConfig(`provider:${providerId}:api_key`);
-    } else {
-      setConfig(`provider:${providerId}:api_key`, data.apiKey);
-    }
-  }
-  if (data.baseUrl !== undefined) {
-    if (data.baseUrl === "") {
-      deleteConfig(`provider:${providerId}:base_url`);
-    } else {
-      setConfig(`provider:${providerId}:base_url`, data.baseUrl);
-    }
-  }
+  return { providers, providerTypes: PROVIDER_TYPE_META, defaults };
 }
 
 // ---------------------------------------------------------------------------
@@ -213,10 +239,14 @@ export async function testProvider(
 ): Promise<TestResult> {
   const start = Date.now();
 
+  // Look up provider row to determine type
+  const row = getProviderRow(providerId);
+  const providerType = row?.type ?? providerId;
+
   // Determine which model to test with
   const testModel =
     model ??
-    FALLBACK_MODELS[providerId]?.[0] ??
+    FALLBACK_MODELS[providerType]?.[0] ??
     "test";
 
   const config: LLMConfig = {
@@ -331,85 +361,13 @@ export async function fetchModelsWithCredentials(
 }
 
 export async function fetchModels(providerId: string): Promise<string[]> {
-  try {
-    switch (providerId) {
-      case "anthropic": {
-        const apiKey = getConfig("provider:anthropic:api_key");
-        if (!apiKey) return FALLBACK_MODELS.anthropic ?? [];
-        const res = await fetch("https://api.anthropic.com/v1/models", {
-          headers: {
-            "x-api-key": apiKey,
-            "anthropic-version": "2023-06-01",
-          },
-          signal: AbortSignal.timeout(10_000),
-        });
-        if (!res.ok) return FALLBACK_MODELS.anthropic ?? [];
-        const data = (await res.json()) as {
-          data?: Array<{ id: string }>;
-        };
-        return data.data?.map((m) => m.id) ?? FALLBACK_MODELS.anthropic ?? [];
-      }
-
-      case "openai": {
-        const apiKey = getConfig("provider:openai:api_key");
-        if (!apiKey) return FALLBACK_MODELS.openai ?? [];
-        const baseUrl =
-          getConfig("provider:openai:base_url") ?? "https://api.openai.com";
-        const res = await fetch(`${baseUrl}/v1/models`, {
-          headers: { Authorization: `Bearer ${apiKey}` },
-          signal: AbortSignal.timeout(10_000),
-        });
-        if (!res.ok) return FALLBACK_MODELS.openai ?? [];
-        const data = (await res.json()) as {
-          data?: Array<{ id: string }>;
-        };
-        return data.data?.map((m) => m.id).sort() ?? FALLBACK_MODELS.openai ?? [];
-      }
-
-      case "ollama": {
-        const baseUrl =
-          getConfig("provider:ollama:base_url") ??
-          "http://localhost:11434/api";
-        // Ollama uses /api/tags to list models
-        const tagsUrl = baseUrl.endsWith("/api")
-          ? `${baseUrl}/tags`
-          : `${baseUrl}/api/tags`;
-        const res = await fetch(tagsUrl, {
-          signal: AbortSignal.timeout(10_000),
-        });
-        if (!res.ok) return FALLBACK_MODELS.ollama ?? [];
-        const data = (await res.json()) as {
-          models?: Array<{ name: string }>;
-        };
-        return (
-          data.models?.map((m) => m.name) ?? FALLBACK_MODELS.ollama ?? []
-        );
-      }
-
-      case "openai-compatible": {
-        const baseUrl = getConfig("provider:openai-compatible:base_url");
-        const apiKey = getConfig("provider:openai-compatible:api_key");
-        if (!baseUrl) return [];
-        const headers: Record<string, string> = {};
-        if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
-        const res = await fetch(`${baseUrl}/v1/models`, {
-          headers,
-          signal: AbortSignal.timeout(10_000),
-        });
-        if (!res.ok) return [];
-        const data = (await res.json()) as {
-          data?: Array<{ id: string }>;
-        };
-        return data.data?.map((m) => m.id).sort() ?? [];
-      }
-
-      default:
-        return FALLBACK_MODELS[providerId] ?? [];
-    }
-  } catch {
-    // Network error, timeout, etc. — return fallback list
-    return FALLBACK_MODELS[providerId] ?? [];
+  // Look up credentials from the providers table
+  const row = getProviderRow(providerId);
+  if (row) {
+    return fetchModelsWithCredentials(row.type, row.apiKey ?? undefined, row.baseUrl ?? undefined);
   }
+  // Fallback: treat providerId as a legacy type string
+  return fetchModelsWithCredentials(providerId);
 }
 
 // ---------------------------------------------------------------------------

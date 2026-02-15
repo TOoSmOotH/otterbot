@@ -95,10 +95,11 @@ function VoiceButton({
 }
 
 export function SetupWizard() {
-  const { providers, completeSetup, error, setError } = useAuthStore();
+  const { providerTypes, completeSetup, error, setError } = useAuthStore();
 
   const [step, setStep] = useState(1);
   const [provider, setProvider] = useState("");
+  const [providerName, setProviderName] = useState("");
   const [model, setModel] = useState("");
   const [apiKey, setApiKey] = useState("");
   const [baseUrl, setBaseUrl] = useState("");
@@ -195,6 +196,9 @@ export function SetupWizard() {
   const handleSelectProvider = (id: string) => {
     setProvider(id);
     setFetchedModels([]);
+    // Set default provider name from type label
+    const typeMeta = providerTypes.find((pt) => pt.type === id);
+    setProviderName(typeMeta?.label || id);
     // Set default model from suggestions
     const suggestions = SUGGESTED_MODELS[id];
     if (suggestions && suggestions.length > 0) {
@@ -295,6 +299,7 @@ export function SetupWizard() {
     await completeSetup({
       passphrase,
       provider,
+      providerName: providerName || undefined,
       model,
       apiKey: apiKey || undefined,
       baseUrl: baseUrl || undefined,
@@ -391,19 +396,19 @@ export function SetupWizard() {
                 1. Configure your LLM provider
               </h2>
 
-              {/* Provider cards */}
+              {/* Provider type cards */}
               <div className="grid grid-cols-2 gap-2">
-                {providers.map((p) => (
+                {providerTypes.map((pt) => (
                   <button
-                    key={p.id}
-                    onClick={() => handleSelectProvider(p.id)}
+                    key={pt.type}
+                    onClick={() => handleSelectProvider(pt.type)}
                     className={`p-3 rounded-md border text-left text-sm transition-colors ${
-                      provider === p.id
+                      provider === pt.type
                         ? "border-primary bg-primary/10 text-foreground"
                         : "border-border bg-background text-muted-foreground hover:border-muted-foreground"
                     }`}
                   >
-                    <div className="font-medium">{p.name}</div>
+                    <div className="font-medium">{pt.label}</div>
                   </button>
                 ))}
               </div>
@@ -412,6 +417,25 @@ export function SetupWizard() {
                 <p className="text-xs text-muted-foreground">
                   {PROVIDER_DESCRIPTIONS[provider]}
                 </p>
+              )}
+
+              {/* Provider Name */}
+              {provider && (
+                <div>
+                  <label className="block text-sm text-muted-foreground mb-1.5">
+                    Provider Name
+                  </label>
+                  <input
+                    type="text"
+                    value={providerName}
+                    onChange={(e) => setProviderName(e.target.value)}
+                    placeholder="e.g. My Anthropic, Work OpenAI"
+                    className="w-full px-3 py-2 bg-background border border-input rounded-md text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                  />
+                  <p className="text-[10px] text-muted-foreground mt-1">
+                    A friendly name for this provider connection. You can add more providers later.
+                  </p>
+                </div>
               )}
 
               {/* API Key */}
@@ -485,6 +509,17 @@ export function SetupWizard() {
                       </div>
                     ) : null;
                   })()}
+                </div>
+              )}
+
+              {/* Model strategy tip */}
+              {provider && model && (
+                <div className="text-xs text-muted-foreground bg-secondary/50 border border-border rounded-md px-3 py-2.5 leading-relaxed">
+                  This provider and model will be used for all agent tiers initially. After setup, you
+                  can configure different models per tier in Settings. <span className="text-foreground font-medium">Tip:</span> Assign
+                  a reasoning model (like Claude Opus or Sonnet 4.5) to the Team Lead for better
+                  planning. Workers can use cheaper/faster models since they execute the Team Lead's
+                  detailed plans.
                 </div>
               )}
 

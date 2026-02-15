@@ -290,6 +290,11 @@ export class TeamLead extends BaseAgent {
     }
 
     this.updateKanbanTask(taskId, updates);
+
+    // If force-moved to done, check for newly unblocked tasks
+    if (targetColumn === "done") {
+      this.checkUnblockedTasks(taskId);
+    }
   }
 
   private async handleWorkerReport(message: BusMessage) {
@@ -384,14 +389,17 @@ export class TeamLead extends BaseAgent {
           `If the app is running: report success to the COO using report_to_coo — include what was built, verification results, deployment URL/port, and workspace path: ${repoPath}\n` +
           `If deployment failed: create fix tasks, spawn workers to address the issues, then re-deploy`;
       }
-    } else if (livingWorkers > 0 && !board.hasBacklog && orphans.length === 0) {
-      // Workers still running, nothing to spawn — evaluate the report and return.
+    } else if (livingWorkers > 0 && !board.hasUnblockedBacklog && orphans.length === 0) {
+      // Workers still running, nothing spawnable — evaluate the report and return.
       // Use a single think() (NOT thinkWithContinuation) to prevent the LLM from
       // looping while it "waits" for workers that report via the message bus.
+      const blockedNote = board.hasBacklog && !board.hasUnblockedBacklog
+        ? ` (${board.backlogCount} backlog task(s) are BLOCKED — they will become available when their blockers complete)`
+        : "";
       const waitInstructions =
         `Evaluate the worker report and move the task accordingly (see ACTION REQUIRED below).` +
         `\nAfter updating the task, STOP IMMEDIATELY. Do not call any other tools. ` +
-        `${livingWorkers} worker(s) are still in progress — you will be notified when they finish.` +
+        `${livingWorkers} worker(s) are still in progress — you will be notified when they finish.${blockedNote}` +
         actionRequired;
 
       const waitSummary =
@@ -421,12 +429,12 @@ export class TeamLead extends BaseAgent {
       instructions =
         `Evaluate the worker report and move the task accordingly (see ACTION REQUIRED below).` +
         `\nThen handle any orphaned/backlog tasks below. ${livingWorkers} worker(s) are still in progress — ` +
-        `after handling the items below, stop and wait for worker reports.` +
+        `after handling the items below, stop and wait for worker reports. Do NOT spawn workers for [BLOCKED] tasks.` +
         actionRequired + orphanBlock;
-    } else if (board.hasBacklog || orphans.length > 0) {
+    } else if (board.hasUnblockedBacklog || orphans.length > 0) {
       instructions =
         `Evaluate the worker report and move the task accordingly (see ACTION REQUIRED below).` +
-        `\nThen spawn workers for any backlog tasks. ` +
+        `\nThen spawn workers for any unblocked backlog tasks. Do NOT spawn workers for [BLOCKED] tasks — they will become available when their blockers complete. ` +
         `If a task was previously attempted and failed, its description will contain error details — ` +
         `analyze the failure and include specific fix instructions in the new worker's directive.` +
         actionRequired + orphanBlock;
@@ -503,12 +511,13 @@ export class TeamLead extends BaseAgent {
   /** Get a snapshot of the kanban board state for continuation decisions */
   private getKanbanBoardState(): {
     hasBacklog: boolean; backlogCount: number;
+    hasUnblockedBacklog: boolean; unblockedBacklogCount: number;
     hasInProgress: boolean; inProgressCount: number;
     allDone: boolean; doneCount: number;
     summary: string;
   } {
     if (!this.projectId) {
-      return { hasBacklog: false, backlogCount: 0, hasInProgress: false, inProgressCount: 0, allDone: false, doneCount: 0, summary: "No project context." };
+      return { hasBacklog: false, backlogCount: 0, hasUnblockedBacklog: false, unblockedBacklogCount: 0, hasInProgress: false, inProgressCount: 0, allDone: false, doneCount: 0, summary: "No project context." };
     }
 
     const db = getDb();
@@ -519,7 +528,7 @@ export class TeamLead extends BaseAgent {
       .all();
 
     if (tasks.length === 0) {
-      return { hasBacklog: false, backlogCount: 0, hasInProgress: false, inProgressCount: 0, allDone: false, doneCount: 0, summary: "No tasks." };
+      return { hasBacklog: false, backlogCount: 0, hasUnblockedBacklog: false, unblockedBacklogCount: 0, hasInProgress: false, inProgressCount: 0, allDone: false, doneCount: 0, summary: "No tasks." };
     }
 
     const byColumn: Record<string, typeof tasks> = { backlog: [], in_progress: [], done: [] };
@@ -533,7 +542,10 @@ export class TeamLead extends BaseAgent {
       lines.push(`${col.replace("_", " ").toUpperCase()} (${colTasks.length}):`);
       for (const t of colTasks.sort((a, b) => a.position - b.position)) {
         const assignee = t.assigneeAgentId ? ` [assigned: ${t.assigneeAgentId.slice(0, 6)}]` : "";
-        lines.push(`  - ${t.title} (${t.id})${assignee}`);
+        const blockedBy = (t.blockedBy as string[]) ?? [];
+        const blocked = col === "backlog" && this.isTaskBlocked(blockedBy);
+        const blockedTag = blocked ? ` [BLOCKED by: ${blockedBy.join(", ")}]` : "";
+        lines.push(`  - ${t.title} (${t.id})${assignee}${blockedTag}`);
         // Include descriptions for backlog tasks so the TL can see failure context from previous attempts
         if (col === "backlog" && t.description && t.description.includes("PREVIOUS ATTEMPT FAILED")) {
           lines.push(`    ${t.description.slice(t.description.lastIndexOf("--- PREVIOUS ATTEMPT FAILED ---")).slice(0, 300)}`);
@@ -542,12 +554,17 @@ export class TeamLead extends BaseAgent {
     }
 
     const backlogCount = byColumn.backlog.length;
+    const unblockedBacklogCount = byColumn.backlog.filter(
+      (t) => !this.isTaskBlocked((t.blockedBy as string[]) ?? []),
+    ).length;
     const inProgressCount = byColumn.in_progress.length;
     const doneCount = byColumn.done.length;
     const allDone = tasks.length > 0 && backlogCount === 0 && inProgressCount === 0;
     return {
       hasBacklog: backlogCount > 0,
       backlogCount,
+      hasUnblockedBacklog: unblockedBacklogCount > 0,
+      unblockedBacklogCount,
       hasInProgress: inProgressCount > 0,
       inProgressCount,
       allDone,
@@ -590,15 +607,15 @@ export class TeamLead extends BaseAgent {
         break;
       }
 
-      // Continue if there's backlog work OR if all tasks are done but branches need merging
+      // Continue if there's unblocked backlog work OR if all tasks are done but branches need merging
       const hasUnmergedBranches = worktreeCount > 0;
-      if (!board.hasBacklog && !(board.allDone && hasUnmergedBranches)) break;
+      if (!board.hasUnblockedBacklog && !(board.allDone && hasUnmergedBranches)) break;
 
       const branchInfo = hasUnmergedBranches ? `\n${this.getBranchOverview()}` : "";
       const repoPath = this.projectId ? this.workspace.repoPath(this.projectId) : "";
-      const prompt = board.hasBacklog
-        ? `[CONTINUATION] ${board.backlogCount} task(s) remain in backlog:\n${board.summary}\n\n` +
-          `Spawn workers for remaining backlog tasks. ` +
+      const prompt = board.hasUnblockedBacklog
+        ? `[CONTINUATION] ${board.unblockedBacklogCount} unblocked task(s) remain in backlog:\n${board.summary}\n\n` +
+          `Spawn workers for unblocked backlog tasks. Do NOT spawn workers for [BLOCKED] tasks — they will become available when their blockers complete. ` +
           `If a task description contains a "PREVIOUS ATTEMPT FAILED" section, READ IT CAREFULLY — ` +
           `analyze what went wrong and include specific fix instructions in the worker directive ` +
           `(e.g. "run npm install before npm run dev", "use port 4000 instead of 3000").`
@@ -817,15 +834,16 @@ export class TeamLead extends BaseAgent {
       }),
       create_task: tool({
         description:
-          "Create a kanban task card for this project. Use this to decompose directives into trackable work items before spawning workers.",
+          "Create a kanban task card for this project. Use this to decompose directives into trackable work items before spawning workers. Use blockedBy to declare dependencies on other tasks.",
         parameters: z.object({
           title: z.string().describe("Short task title"),
           description: z.string().optional().describe("Detailed task description"),
           column: z.enum(["backlog", "in_progress", "done"]).optional().describe("Column to place the task in (default: backlog)"),
           labels: z.array(z.string()).optional().describe("Labels/tags for the task"),
+          blockedBy: z.array(z.string()).optional().describe("Task IDs that must complete before this task can start"),
         }),
-        execute: async ({ title, description, column, labels }) => {
-          return this.createKanbanTask(title, description, column, labels);
+        execute: async ({ title, description, column, labels, blockedBy }) => {
+          return this.createKanbanTask(title, description, column, labels, blockedBy);
         },
       }),
       update_task: tool({
@@ -837,9 +855,10 @@ export class TeamLead extends BaseAgent {
           assigneeAgentId: z.string().optional().describe("Agent ID to assign the task to"),
           description: z.string().optional().describe("Updated description"),
           title: z.string().optional().describe("Updated title"),
+          blockedBy: z.array(z.string()).optional().describe("Task IDs that must complete before this task can start"),
         }),
-        execute: async ({ taskId, column, assigneeAgentId, description, title }) => {
-          return this.updateKanbanTask(taskId, { column, assigneeAgentId, description, title });
+        execute: async ({ taskId, column, assigneeAgentId, description, title, blockedBy }) => {
+          return this.updateKanbanTask(taskId, { column, assigneeAgentId, description, title, blockedBy });
         },
       }),
       list_tasks: tool({
@@ -980,7 +999,18 @@ export class TeamLead extends BaseAgent {
 
       // Auto-assign kanban task if taskId provided
       if (taskId) {
-        this.autoAssignTask(taskId, worker.id);
+        const assigned = this.autoAssignTask(taskId, worker.id);
+        if (!assigned) {
+          // Task is blocked — clean up the worker and abort
+          worker.destroy();
+          this.workers.delete(worker.id);
+          // Clean up worktree if one was created
+          if (workspacePath && this.gitWorktree && isCodeWorker && !useMainRepo) {
+            try { this.gitWorktree.destroyWorktree(workerId); } catch { /* ignore */ }
+          }
+          console.warn(`[TeamLead ${this.id}] Aborted spawn for blocked task ${taskId}`);
+          return `BLOCKED: Task ${taskId} cannot start — it depends on tasks that are not yet done. Wait for blockers to complete first.`;
+        }
       }
 
       // Send the task to the worker
@@ -989,9 +1019,9 @@ export class TeamLead extends BaseAgent {
       });
 
       const mode = isCodeWorker && this.gitWorktree ? " (worktree)" : "";
-      const assigned = taskId ? ` Task ${taskId} moved to in_progress.` : "";
+      const assignedMsg = taskId ? ` Task ${taskId} moved to in_progress.` : "";
       console.log(`[TeamLead ${this.id}] Worker ${workerId} spawned and directive sent`);
-      return `Spawned ${entry.name} worker (${worker.id})${mode} and assigned task.${assigned}`;
+      return `Spawned ${entry.name} worker (${worker.id})${mode} and assigned task.${assignedMsg}`;
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
       console.error(`[TeamLead ${this.id}] Failed to spawn worker: ${errMsg}`, err);
@@ -1073,9 +1103,25 @@ export class TeamLead extends BaseAgent {
       .map((t) => ({ id: t.id, title: t.title, assigneeAgentId: t.assigneeAgentId! }));
   }
 
-  /** Auto-assign a kanban task to a worker: move to in_progress and set assigneeAgentId */
-  private autoAssignTask(taskId: string, workerId: string): void {
-    if (!this.projectId) return;
+  /** Check if a task is blocked — returns true if any blocker task is not yet "done" (missing/deleted IDs resolve automatically) */
+  private isTaskBlocked(blockedBy: string[]): boolean {
+    if (!blockedBy || blockedBy.length === 0) return false;
+    const db = getDb();
+    for (const blockerId of blockedBy) {
+      const blocker = db
+        .select()
+        .from(schema.kanbanTasks)
+        .where(eq(schema.kanbanTasks.id, blockerId))
+        .get();
+      // Missing/deleted blockers resolve automatically
+      if (blocker && blocker.column !== "done") return true;
+    }
+    return false;
+  }
+
+  /** Auto-assign a kanban task to a worker: move to in_progress and set assigneeAgentId. Returns false if blocked. */
+  private autoAssignTask(taskId: string, workerId: string): boolean {
+    if (!this.projectId) return false;
 
     const db = getDb();
     const task = db
@@ -1086,7 +1132,16 @@ export class TeamLead extends BaseAgent {
 
     if (!task) {
       console.warn(`[TeamLead ${this.id}] autoAssignTask: task ${taskId} not found`);
-      return;
+      return false;
+    }
+
+    // Programmatic enforcement: refuse if task is blocked
+    const blockedBy = (task.blockedBy as string[]) ?? [];
+    if (this.isTaskBlocked(blockedBy)) {
+      console.warn(
+        `[TeamLead ${this.id}] autoAssignTask: task "${task.title}" (${taskId}) is BLOCKED by [${blockedBy.join(", ")}] — refusing assignment`,
+      );
+      return false;
     }
 
     const now = new Date().toISOString();
@@ -1105,6 +1160,7 @@ export class TeamLead extends BaseAgent {
     }
 
     console.log(`[TeamLead ${this.id}] Auto-assigned task "${task.title}" (${taskId}) to worker ${workerId}`);
+    return true;
   }
 
   private createKanbanTask(
@@ -1112,6 +1168,7 @@ export class TeamLead extends BaseAgent {
     description?: string,
     column?: string,
     labels?: string[],
+    blockedBy?: string[],
   ): string {
     if (!this.projectId) return "No project context.";
 
@@ -1139,18 +1196,20 @@ export class TeamLead extends BaseAgent {
       assigneeAgentId: null,
       createdBy: this.id,
       labels: labels ?? [],
+      blockedBy: blockedBy ?? [],
       createdAt: now,
       updatedAt: now,
     };
     db.insert(schema.kanbanTasks).values(task).run();
 
     this.onKanbanChange?.("created", task as unknown as KanbanTask);
-    return `Task "${title}" created (${taskId}) in ${col}.`;
+    const blockedInfo = blockedBy?.length ? ` (blocked by: ${blockedBy.join(", ")})` : "";
+    return `Task "${title}" created (${taskId}) in ${col}.${blockedInfo}`;
   }
 
   private updateKanbanTask(
     taskId: string,
-    updates: { column?: string; assigneeAgentId?: string; description?: string; title?: string },
+    updates: { column?: string; assigneeAgentId?: string; description?: string; title?: string; blockedBy?: string[] },
   ): string {
     const db = getDb();
     const existing = db
@@ -1165,6 +1224,7 @@ export class TeamLead extends BaseAgent {
     if (updates.assigneeAgentId !== undefined) setValues.assigneeAgentId = updates.assigneeAgentId;
     if (updates.description !== undefined) setValues.description = updates.description;
     if (updates.title !== undefined) setValues.title = updates.title;
+    if (updates.blockedBy !== undefined) setValues.blockedBy = updates.blockedBy;
 
     db.update(schema.kanbanTasks)
       .set(setValues)
@@ -1180,7 +1240,35 @@ export class TeamLead extends BaseAgent {
       this.onKanbanChange?.("updated", updated as unknown as KanbanTask);
     }
 
+    // When a task moves to done, check for newly unblocked tasks
+    if (updates.column === "done") {
+      this.checkUnblockedTasks(taskId);
+    }
+
     return `Task "${existing.title}" updated.`;
+  }
+
+  /** Log which tasks become unblocked when a task completes. No auto-spawning — the continuation loop picks them up. */
+  private checkUnblockedTasks(completedTaskId: string): void {
+    if (!this.projectId) return;
+
+    const db = getDb();
+    const tasks = db
+      .select()
+      .from(schema.kanbanTasks)
+      .where(eq(schema.kanbanTasks.projectId, this.projectId))
+      .all();
+
+    for (const task of tasks) {
+      const blockedBy = (task.blockedBy as string[]) ?? [];
+      if (blockedBy.includes(completedTaskId) && task.column === "backlog") {
+        if (!this.isTaskBlocked(blockedBy)) {
+          console.log(
+            `[TeamLead ${this.id}] Task "${task.title}" (${task.id}) is now UNBLOCKED after completion of ${completedTaskId}`,
+          );
+        }
+      }
+    }
   }
 
   private listKanbanTasks(): string {
@@ -1206,7 +1294,10 @@ export class TeamLead extends BaseAgent {
       lines.push(`**${col.replace("_", " ").toUpperCase()}** (${colTasks.length}):`);
       for (const t of colTasks.sort((a, b) => a.position - b.position)) {
         const assignee = t.assigneeAgentId ? ` [${t.assigneeAgentId.slice(0, 6)}]` : "";
-        lines.push(`  - ${t.title} (${t.id})${assignee}`);
+        const blockedBy = (t.blockedBy as string[]) ?? [];
+        const blocked = col === "backlog" && this.isTaskBlocked(blockedBy);
+        const blockedTag = blocked ? ` [BLOCKED by: ${blockedBy.join(", ")}]` : "";
+        lines.push(`  - ${t.title} (${t.id})${assignee}${blockedTag}`);
       }
     }
     return lines.join("\n");

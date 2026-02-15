@@ -44,7 +44,6 @@ import {
 } from "./socket/handlers.js";
 import {
   isSetupComplete,
-  getAvailableProviders,
   hashPassphrase,
   verifyPassphrase,
   getConfig,
@@ -69,11 +68,16 @@ import {
 } from "./packages/packages.js";
 import {
   getSettings,
-  updateProviderConfig,
+  listProviders,
+  createProvider,
+  updateProvider as updateProviderRow,
+  deleteProvider,
+  getProviderRow,
   updateTierDefaults,
   testProvider,
   fetchModels,
   fetchModelsWithCredentials,
+  PROVIDER_TYPE_META,
   getSearchSettings,
   updateSearchProviderConfig,
   setActiveSearchProvider,
@@ -97,6 +101,7 @@ import {
   testOpenCodeConnection,
   type TierDefaults,
 } from "./settings/settings.js";
+import type { ProviderType } from "@smoothbot/shared";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -341,7 +346,7 @@ async function main() {
   app.get("/api/setup/status", async () => {
     return {
       setupComplete: isSetupComplete(),
-      providers: getAvailableProviders(),
+      providerTypes: PROVIDER_TYPE_META,
     };
   });
 
@@ -423,6 +428,7 @@ async function main() {
     Body: {
       passphrase: string;
       provider: string;
+      providerName?: string;
       model: string;
       apiKey?: string;
       baseUrl?: string;
@@ -447,7 +453,7 @@ async function main() {
       return { error: "Setup already completed" };
     }
 
-    const { passphrase, provider, model, apiKey, baseUrl, userName, userAvatar, userBio, userTimezone, ttsVoice, ttsProvider, userModelPackId, userGearConfig, cooName, cooModelPackId, cooGearConfig, searchProvider, searchApiKey, searchBaseUrl } = req.body;
+    const { passphrase, provider, providerName, model, apiKey, baseUrl, userName, userAvatar, userBio, userTimezone, ttsVoice, ttsProvider, userModelPackId, userGearConfig, cooName, cooModelPackId, cooGearConfig, searchProvider, searchApiKey, searchBaseUrl } = req.body;
 
     if (!passphrase || passphrase.length < 8) {
       reply.code(400);
@@ -473,15 +479,18 @@ async function main() {
     // Store config
     const hash = await hashPassphrase(passphrase);
     setConfig("passphrase_hash", hash);
-    setConfig("coo_provider", provider);
-    setConfig("coo_model", model);
 
-    if (apiKey) {
-      setConfig(`provider:${provider}:api_key`, apiKey);
-    }
-    if (baseUrl) {
-      setConfig(`provider:${provider}:base_url`, baseUrl);
-    }
+    // Create a named provider row
+    const typeMeta = PROVIDER_TYPE_META.find((m) => m.type === provider);
+    const namedProvider = createProvider({
+      name: providerName || typeMeta?.label || provider,
+      type: provider as ProviderType,
+      apiKey: apiKey,
+      baseUrl: baseUrl,
+    });
+
+    setConfig("coo_provider", namedProvider.id);
+    setConfig("coo_model", model);
 
     // Store user profile
     setConfig("user_name", userName.trim());
@@ -527,7 +536,7 @@ async function main() {
         promptAddendum: null,
         capabilities: [...cooSource.capabilities],
         defaultModel: model,
-        defaultProvider: provider,
+        defaultProvider: namedProvider.id,
         tools: [...cooSource.tools],
         role: cooSource.role,
         clonedFromId: "builtin-coo",
@@ -1275,12 +1284,78 @@ async function main() {
     return getSettings();
   });
 
+  // Named provider CRUD
+  app.get("/api/settings/providers", async () => {
+    return listProviders();
+  });
+
+  app.post<{
+    Body: { name: string; type: ProviderType; apiKey?: string; baseUrl?: string };
+  }>("/api/settings/providers", async (req, reply) => {
+    const { name, type, apiKey, baseUrl } = req.body;
+    if (!name || !type) {
+      reply.code(400);
+      return { error: "name and type are required" };
+    }
+    const validTypes = PROVIDER_TYPE_META.map((m) => m.type);
+    if (!validTypes.includes(type)) {
+      reply.code(400);
+      return { error: `Invalid provider type. Must be one of: ${validTypes.join(", ")}` };
+    }
+    return createProvider({ name, type, apiKey, baseUrl });
+  });
+
   app.put<{
-    Params: { providerId: string };
-    Body: { apiKey?: string; baseUrl?: string };
-  }>("/api/settings/provider/:providerId", async (req) => {
-    updateProviderConfig(req.params.providerId, req.body);
+    Params: { id: string };
+    Body: { name?: string; apiKey?: string; baseUrl?: string };
+  }>("/api/settings/providers/:id", async (req, reply) => {
+    const row = getProviderRow(req.params.id);
+    if (!row) {
+      reply.code(404);
+      return { error: "Provider not found" };
+    }
+    updateProviderRow(req.params.id, req.body);
     return { ok: true };
+  });
+
+  app.delete<{
+    Params: { id: string };
+  }>("/api/settings/providers/:id", async (req, reply) => {
+    const row = getProviderRow(req.params.id);
+    if (!row) {
+      reply.code(404);
+      return { error: "Provider not found" };
+    }
+    const result = deleteProvider(req.params.id);
+    if (!result.ok) {
+      reply.code(409);
+      return { error: result.error };
+    }
+    return { ok: true };
+  });
+
+  app.post<{
+    Params: { id: string };
+    Body: { model?: string };
+  }>("/api/settings/providers/:id/test", async (req, reply) => {
+    const row = getProviderRow(req.params.id);
+    if (!row) {
+      reply.code(404);
+      return { error: "Provider not found" };
+    }
+    return testProvider(req.params.id, req.body.model);
+  });
+
+  app.get<{
+    Params: { id: string };
+  }>("/api/settings/providers/:id/models", async (req, reply) => {
+    const row = getProviderRow(req.params.id);
+    if (!row) {
+      reply.code(404);
+      return { error: "Provider not found" };
+    }
+    const models = await fetchModels(req.params.id);
+    return { models };
   });
 
   app.put<{
@@ -1288,20 +1363,6 @@ async function main() {
   }>("/api/settings/defaults", async (req) => {
     updateTierDefaults(req.body);
     return { ok: true };
-  });
-
-  app.post<{
-    Params: { providerId: string };
-    Body: { model?: string };
-  }>("/api/settings/provider/:providerId/test", async (req) => {
-    return testProvider(req.params.providerId, req.body.model);
-  });
-
-  app.get<{
-    Params: { providerId: string };
-  }>("/api/settings/models/:providerId", async (req) => {
-    const models = await fetchModels(req.params.providerId);
-    return { models };
   });
 
   // =========================================================================

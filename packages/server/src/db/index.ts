@@ -183,6 +183,13 @@ export async function migrateDb() {
     updated_at TEXT NOT NULL
   )`);
 
+  // Idempotent migration: add blocked_by to kanban_tasks
+  try {
+    db.run(sql`ALTER TABLE kanban_tasks ADD COLUMN blocked_by TEXT NOT NULL DEFAULT '[]'`);
+  } catch {
+    // Column already exists — ignore
+  }
+
   db.run(sql`CREATE TABLE IF NOT EXISTS config (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL,
@@ -199,6 +206,16 @@ export async function migrateDb() {
     merged_at TEXT
   )`);
 
+  db.run(sql`CREATE TABLE IF NOT EXISTS providers (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    type TEXT NOT NULL,
+    api_key TEXT,
+    base_url TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  )`);
+
   db.run(sql`CREATE TABLE IF NOT EXISTS agent_activity (
     id TEXT PRIMARY KEY,
     agent_id TEXT NOT NULL,
@@ -213,6 +230,94 @@ export async function migrateDb() {
   // Seed built-in registry entries on every startup (dynamic import to avoid circular dep)
   const { seedBuiltIns } = await import("./seed.js");
   seedBuiltIns();
+
+  // One-time migration: move provider credentials from config KV to providers table
+  await migrateProviders(db);
+}
+
+const PROVIDER_TYPE_LABELS: Record<string, string> = {
+  anthropic: "Anthropic",
+  openai: "OpenAI",
+  ollama: "Ollama",
+  "openai-compatible": "OpenAI-Compatible",
+};
+
+async function migrateProviders(db: ReturnType<typeof drizzle<typeof schema>>) {
+  // Check if already migrated
+  const flag = db
+    .select()
+    .from(schema.config)
+    .where(sql`${schema.config.key} = 'providers_migrated'`)
+    .get();
+  if (flag) return;
+
+  const { nanoid } = await import("nanoid");
+
+  // Map old provider type string → new provider row ID
+  const typeToId: Record<string, string> = {};
+
+  for (const provType of ["anthropic", "openai", "ollama", "openai-compatible"]) {
+    const apiKeyRow = db
+      .select()
+      .from(schema.config)
+      .where(sql`${schema.config.key} = ${"provider:" + provType + ":api_key"}`)
+      .get();
+    const baseUrlRow = db
+      .select()
+      .from(schema.config)
+      .where(sql`${schema.config.key} = ${"provider:" + provType + ":base_url"}`)
+      .get();
+
+    // Only create a provider row if credentials were actually configured
+    if (!apiKeyRow && !baseUrlRow) continue;
+
+    const id = nanoid();
+    const now = new Date().toISOString();
+    db.insert(schema.providers)
+      .values({
+        id,
+        name: PROVIDER_TYPE_LABELS[provType] ?? provType,
+        type: provType as "anthropic" | "openai" | "ollama" | "openai-compatible",
+        apiKey: apiKeyRow?.value ?? null,
+        baseUrl: baseUrlRow?.value ?? null,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .run();
+
+    typeToId[provType] = id;
+  }
+
+  // Update tier default config values from type strings to provider row IDs
+  for (const key of ["coo_provider", "team_lead_provider", "worker_provider"]) {
+    const row = db
+      .select()
+      .from(schema.config)
+      .where(sql`${schema.config.key} = ${key}`)
+      .get();
+    if (row && typeToId[row.value]) {
+      db.update(schema.config)
+        .set({ value: typeToId[row.value], updatedAt: new Date().toISOString() })
+        .where(sql`${schema.config.key} = ${key}`)
+        .run();
+    }
+  }
+
+  // Update registry_entries.default_provider from type strings to provider row IDs
+  const entries = db.select().from(schema.registryEntries).all();
+  for (const entry of entries) {
+    if (typeToId[entry.defaultProvider]) {
+      db.update(schema.registryEntries)
+        .set({ defaultProvider: typeToId[entry.defaultProvider] })
+        .where(sql`${schema.registryEntries.id} = ${entry.id}`)
+        .run();
+    }
+  }
+
+  // Set migration flag
+  db.insert(schema.config)
+    .values({ key: "providers_migrated", value: "true", updatedAt: new Date().toISOString() })
+    .run();
 }
 
 /** Reset the DB singleton (for testing) */

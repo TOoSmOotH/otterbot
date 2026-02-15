@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useSettingsStore } from "../../stores/settings-store";
 
-const TIER_LABELS: Record<string, { label: string; hint: string }> = {
+const TIER_LABELS: Record<string, { label: string; hint: string; tip?: string }> = {
   coo: {
     label: "COO (Chief Operating Officer)",
     hint: "The main orchestration agent. All other tiers fall back to this default.",
@@ -9,10 +9,12 @@ const TIER_LABELS: Record<string, { label: string; hint: string }> = {
   teamLead: {
     label: "Team Lead",
     hint: "Manages projects and coordinates workers. Falls back to COO default if not set.",
+    tip: "Tip: Use a reasoning model (e.g., Claude Opus, Sonnet 4.5) for better task planning and decomposition.",
   },
   worker: {
     label: "Worker",
     hint: "Executes tasks (coding, research, etc.). Falls back to COO default if not set.",
+    tip: "Tip: Workers execute detailed plans from the Team Lead, so cheaper/faster models work well here to save costs.",
   },
 };
 
@@ -43,7 +45,7 @@ export function ModelsTab() {
   // Fetch model lists for configured providers
   useEffect(() => {
     for (const p of providers) {
-      if (p.apiKeySet || !p.needsApiKey) {
+      if (p.apiKeySet || p.type === "ollama") {
         fetchModels(p.id);
       }
     }
@@ -99,6 +101,12 @@ export function ModelsTab() {
               <p className="text-[10px] text-muted-foreground">{tierInfo.hint}</p>
             </div>
 
+            {tierInfo.tip && (
+              <p className="text-[11px] text-primary/80 bg-primary/5 border border-primary/10 rounded-md px-3 py-2">
+                {tierInfo.tip}
+              </p>
+            )}
+
             <div className="grid grid-cols-2 gap-3">
               {/* Provider select */}
               <div>
@@ -110,9 +118,12 @@ export function ModelsTab() {
                   onChange={(e) => handleProviderChange(tier, e.target.value)}
                   className="w-full bg-secondary rounded-md px-3 py-1.5 text-sm outline-none focus:ring-1 ring-primary"
                 >
+                  {providers.length === 0 && (
+                    <option value="">No providers configured</option>
+                  )}
                   {providers.map((p) => (
                     <option key={p.id} value={p.id}>
-                      {p.name}
+                      {p.name} ({p.type})
                     </option>
                   ))}
                 </select>

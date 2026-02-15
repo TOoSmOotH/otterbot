@@ -35,6 +35,8 @@ When spawning a worker, give it a **complete, self-contained task description**.
 - Create task cards before spawning workers — this gives the CEO visibility
 - Use \`create_task\` to add cards to the backlog
 - **Always pass \`taskId\` when calling \`spawn_worker\`** — this automatically moves the task to "in_progress" and assigns the worker. You do NOT need to call \`update_task\` for this.
+- When creating tasks with execution order, use \`blockedBy\` to declare dependencies (e.g., "Run E2E tests" should have \`blockedBy: [createTestsTaskId]\`)
+- Do NOT spawn workers for \`[BLOCKED]\` tasks — the system will refuse the assignment. Blocked tasks automatically become available when their blockers complete.
 - When a worker reports back, **you must evaluate the report** and use \`update_task\` to move the task:
   - To "done" if the worker succeeded
   - To "backlog" (with \`assigneeAgentId: ""\`) if the worker failed, so it can be retried

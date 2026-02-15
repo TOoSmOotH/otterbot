@@ -4,6 +4,8 @@ import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import { createOllama } from "ollama-ai-provider";
 import { streamText, generateText, type LanguageModel } from "ai";
 import { getConfig } from "../auth/auth.js";
+import { getDb, schema } from "../db/index.js";
+import { eq } from "drizzle-orm";
 
 export interface LLMConfig {
   provider: string;
@@ -15,29 +17,64 @@ export interface LLMConfig {
   maxSteps?: number;
 }
 
+interface ResolvedCredentials {
+  type: string;
+  apiKey?: string;
+  baseUrl?: string;
+}
+
+/** Look up provider credentials from the providers table by ID, falling back to legacy config keys */
+export function resolveProviderCredentials(providerIdOrType: string): ResolvedCredentials {
+  // Try providers table first
+  try {
+    const db = getDb();
+    const row = db
+      .select()
+      .from(schema.providers)
+      .where(eq(schema.providers.id, providerIdOrType))
+      .get();
+    if (row) {
+      return {
+        type: row.type,
+        apiKey: row.apiKey ?? undefined,
+        baseUrl: row.baseUrl ?? undefined,
+      };
+    }
+  } catch {
+    // DB not yet initialized — fall through to legacy
+  }
+
+  // Legacy fallback: treat as provider type string
+  return {
+    type: providerIdOrType,
+    apiKey: getConfig(`provider:${providerIdOrType}:api_key`) ?? undefined,
+    baseUrl: getConfig(`provider:${providerIdOrType}:base_url`) ?? undefined,
+  };
+}
+
 /** Returns true for Anthropic models that support extended thinking */
 export function isThinkingModel(config: LLMConfig): boolean {
-  if (config.provider !== "anthropic") return false;
+  const resolved = resolveProviderCredentials(config.provider);
+  if (resolved.type !== "anthropic") return false;
   return /^claude-(sonnet-4-5|opus-4)/.test(config.model);
 }
 
 /** Resolve a Vercel AI SDK language model from agent config */
 export function resolveModel(config: LLMConfig): LanguageModel {
-  switch (config.provider) {
+  const resolved = resolveProviderCredentials(config.provider);
+
+  switch (resolved.type) {
     case "anthropic": {
       const anthropic = createAnthropic({
-        apiKey:
-          config.apiKey ?? getConfig("provider:anthropic:api_key") ?? "",
+        apiKey: config.apiKey ?? resolved.apiKey ?? "",
       });
       return anthropic(config.model);
     }
 
     case "openai": {
-      const baseUrl =
-        config.baseUrl ?? getConfig("provider:openai:base_url");
+      const baseUrl = config.baseUrl ?? resolved.baseUrl;
       const openai = createOpenAI({
-        apiKey:
-          config.apiKey ?? getConfig("provider:openai:api_key") ?? "",
+        apiKey: config.apiKey ?? resolved.apiKey ?? "",
         ...(baseUrl ? { baseURL: baseUrl } : {}),
       });
       return openai(config.model);
@@ -47,16 +84,14 @@ export function resolveModel(config: LLMConfig): LanguageModel {
       const ollama = createOllama({
         baseURL:
           config.baseUrl ??
-          getConfig("provider:ollama:base_url") ??
+          resolved.baseUrl ??
           "http://localhost:11434/api",
       });
       return ollama(config.model);
     }
 
     case "openai-compatible": {
-      const baseUrl =
-        config.baseUrl ??
-        getConfig("provider:openai-compatible:base_url");
+      const baseUrl = config.baseUrl ?? resolved.baseUrl;
       if (!baseUrl) {
         throw new Error(
           "openai-compatible provider requires a baseUrl configured in settings",
@@ -65,16 +100,13 @@ export function resolveModel(config: LLMConfig): LanguageModel {
       const compatible = createOpenAICompatible({
         name: "openai-compatible",
         baseURL: baseUrl,
-        apiKey:
-          config.apiKey ??
-          getConfig("provider:openai-compatible:api_key") ??
-          "",
+        apiKey: config.apiKey ?? resolved.apiKey ?? "",
       });
       return compatible(config.model);
     }
 
     default:
-      throw new Error(`Unknown LLM provider: ${config.provider}`);
+      throw new Error(`Unknown LLM provider: ${config.provider} (type: ${resolved.type})`);
   }
 }
 

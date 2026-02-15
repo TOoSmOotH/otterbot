@@ -868,9 +868,10 @@ The user can see everything on the desktop in real-time.`;
       case "list_providers": {
         const settings = getSettings();
         const lines = settings.providers.map((p) => {
-          const status = p.apiKeySet || !p.needsApiKey ? "configured" : "not configured";
+          const meta = settings.providerTypes.find((m) => m.type === p.type);
+          const status = p.apiKeySet || !meta?.needsApiKey ? "configured" : "not configured";
           const url = p.baseUrl ? ` (${p.baseUrl})` : "";
-          return `- **${p.name}** (${p.id}): ${status}${url}`;
+          return `- **${p.name}** [${p.type}] (${p.id}): ${status}${url}`;
         });
         return `**Configured providers:**\n${lines.join("\n")}`;
       }

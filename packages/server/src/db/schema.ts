@@ -126,6 +126,10 @@ export const kanbanTasks = sqliteTable("kanban_tasks", {
     .$type<string[]>()
     .notNull()
     .default([]),
+  blockedBy: text("blocked_by", { mode: "json" })
+    .$type<string[]>()
+    .notNull()
+    .default([]),
   createdAt: text("created_at")
     .notNull()
     .$defaultFn(() => new Date().toISOString()),
@@ -145,6 +149,22 @@ export const agentActivity = sqliteTable("agent_activity", {
   projectId: text("project_id"),
   messageId: text("message_id"),
   timestamp: text("timestamp")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+});
+
+export const providers = sqliteTable("providers", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  type: text("type", {
+    enum: ["anthropic", "openai", "ollama", "openai-compatible"],
+  }).notNull(),
+  apiKey: text("api_key"),
+  baseUrl: text("base_url"),
+  createdAt: text("created_at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+  updatedAt: text("updated_at")
     .notNull()
     .$defaultFn(() => new Date().toISOString()),
 });
