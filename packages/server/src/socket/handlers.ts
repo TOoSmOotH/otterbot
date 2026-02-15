@@ -82,7 +82,17 @@ export function setupSocketHandlers(
           updatedAt: now,
         };
         db.insert(schema.conversations).values(conversation).run();
-        coo.startNewConversation(conversationId, projectId);
+        // Look up the project charter for new project chats
+        let charter: string | null = null;
+        if (projectId) {
+          const project = db
+            .select()
+            .from(schema.projects)
+            .where(eq(schema.projects.id, projectId))
+            .get();
+          charter = project?.charter ?? null;
+        }
+        coo.startNewConversation(conversationId, projectId, charter);
         io.emit("conversation:created", conversation);
       } else {
         // Update the conversation's updatedAt
@@ -336,20 +346,22 @@ export function emitCooStream(
   io: TypedServer,
   token: string,
   messageId: string,
+  conversationId: string | null,
 ) {
-  io.emit("coo:stream", { token, messageId });
+  io.emit("coo:stream", { token, messageId, conversationId });
 }
 
 export function emitCooThinking(
   io: TypedServer,
   token: string,
   messageId: string,
+  conversationId: string | null,
 ) {
-  io.emit("coo:thinking", { token, messageId });
+  io.emit("coo:thinking", { token, messageId, conversationId });
 }
 
-export function emitCooThinkingEnd(io: TypedServer, messageId: string) {
-  io.emit("coo:thinking-end", { messageId });
+export function emitCooThinkingEnd(io: TypedServer, messageId: string, conversationId: string | null) {
+  io.emit("coo:thinking-end", { messageId, conversationId });
 }
 
 export function emitProjectCreated(io: TypedServer, project: Project) {

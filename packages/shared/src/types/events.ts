@@ -10,9 +10,9 @@ export interface ServerToClientEvents {
   "agent:destroyed": (data: { agentId: string }) => void;
   "bus:message": (message: BusMessage) => void;
   "coo:response": (message: BusMessage) => void;
-  "coo:stream": (data: { token: string; messageId: string }) => void;
-  "coo:thinking": (data: { token: string; messageId: string }) => void;
-  "coo:thinking-end": (data: { messageId: string }) => void;
+  "coo:stream": (data: { token: string; messageId: string; conversationId: string | null }) => void;
+  "coo:thinking": (data: { token: string; messageId: string; conversationId: string | null }) => void;
+  "coo:thinking-end": (data: { messageId: string; conversationId: string | null }) => void;
   "coo:audio": (data: { messageId: string; audio: string; contentType: string }) => void;
   "conversation:created": (conversation: Conversation) => void;
   "project:created": (project: Project) => void;

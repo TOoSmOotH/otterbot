@@ -289,14 +289,14 @@ async function main() {
         onStatusChange: (agentId, status) => {
           emitAgentStatus(io, agentId, status);
         },
-        onStream: (token, messageId) => {
-          emitCooStream(io, token, messageId);
+        onStream: (token, messageId, conversationId) => {
+          emitCooStream(io, token, messageId, conversationId);
         },
-        onThinking: (token, messageId) => {
-          emitCooThinking(io, token, messageId);
+        onThinking: (token, messageId, conversationId) => {
+          emitCooThinking(io, token, messageId, conversationId);
         },
-        onThinkingEnd: (messageId) => {
-          emitCooThinkingEnd(io, messageId);
+        onThinkingEnd: (messageId, conversationId) => {
+          emitCooThinkingEnd(io, messageId, conversationId);
         },
         onProjectCreated: (project) => {
           emitProjectCreated(io, project);

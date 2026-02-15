@@ -50,9 +50,9 @@ export interface COODependencies {
   workspace: WorkspaceManager;
   onAgentSpawned?: (agent: BaseAgent) => void;
   onStatusChange?: (agentId: string, status: AgentStatus) => void;
-  onStream?: (token: string, messageId: string) => void;
-  onThinking?: (token: string, messageId: string) => void;
-  onThinkingEnd?: (messageId: string) => void;
+  onStream?: (token: string, messageId: string, conversationId: string | null) => void;
+  onThinking?: (token: string, messageId: string, conversationId: string | null) => void;
+  onThinkingEnd?: (messageId: string, conversationId: string | null) => void;
   onProjectCreated?: (project: Project) => void;
   onProjectUpdated?: (project: Project) => void;
   onKanbanTaskCreated?: (task: KanbanTask) => void;
@@ -68,9 +68,9 @@ export class COO extends BaseAgent {
   private teamLeads: Map<string, TeamLead> = new Map();
   private workspace: WorkspaceManager;
   private onAgentSpawned?: (agent: BaseAgent) => void;
-  private onStream?: (token: string, messageId: string) => void;
-  private onThinking?: (token: string, messageId: string) => void;
-  private onThinkingEnd?: (messageId: string) => void;
+  private onStream?: (token: string, messageId: string, conversationId: string | null) => void;
+  private onThinking?: (token: string, messageId: string, conversationId: string | null) => void;
+  private onThinkingEnd?: (messageId: string, conversationId: string | null) => void;
   private onProjectCreated?: (project: Project) => void;
   private onProjectUpdated?: (project: Project) => void;
   private onKanbanTaskCreated?: (task: KanbanTask) => void;
@@ -230,13 +230,13 @@ The user can see everything on the desktop in real-time.`;
     const { text, thinking } = await this.think(
       enrichedContent,
       (token, messageId) => {
-        this.onStream?.(token, messageId);
+        this.onStream?.(token, messageId, this.currentConversationId);
       },
       (token, messageId) => {
-        this.onThinking?.(token, messageId);
+        this.onThinking?.(token, messageId, this.currentConversationId);
       },
       (messageId) => {
-        this.onThinkingEnd?.(messageId);
+        this.onThinkingEnd?.(messageId, this.currentConversationId);
       },
     );
     console.log(`[COO] think() returned (${text.length} chars): "${text.slice(0, 120)}"`);
@@ -262,13 +262,13 @@ The user can see everything on the desktop in real-time.`;
     const { text, thinking } = await this.thinkWithoutTools(
       summary,
       (token, messageId) => {
-        this.onStream?.(token, messageId);
+        this.onStream?.(token, messageId, this.currentConversationId);
       },
       (token, messageId) => {
-        this.onThinking?.(token, messageId);
+        this.onThinking?.(token, messageId, this.currentConversationId);
       },
       (messageId) => {
-        this.onThinkingEnd?.(messageId);
+        this.onThinkingEnd?.(messageId, this.currentConversationId);
       },
     );
 
@@ -1285,11 +1285,18 @@ The user can see everything on the desktop in real-time.`;
   }
 
   /** Start a new conversation (sets ID, resets history) */
-  startNewConversation(conversationId: string, projectId?: string | null) {
+  startNewConversation(conversationId: string, projectId?: string | null, charter?: string | null) {
     this.currentConversationId = conversationId;
-    const ctx = this.contextManager.getOrCreate(conversationId, projectId ?? null);
+    const ctx = this.contextManager.getOrCreate(conversationId, projectId ?? null, charter);
     this.activeContextId = conversationId;
     this.conversationHistory = ctx.history;
+  }
+
+  /** Override to also clear COO-specific state */
+  override resetConversation() {
+    super.resetConversation();
+    this.currentConversationId = null;
+    this.activeContextId = null;
   }
 
   /** Get the current conversation ID */

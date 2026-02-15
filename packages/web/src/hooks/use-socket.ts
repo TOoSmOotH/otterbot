@@ -42,16 +42,16 @@ export function useSocket() {
       setCooResponse(message);
     });
 
-    socket.on("coo:stream", ({ token, messageId }) => {
-      appendCooStream(token, messageId);
+    socket.on("coo:stream", ({ token, messageId, conversationId }) => {
+      appendCooStream(token, messageId, conversationId);
     });
 
-    socket.on("coo:thinking", ({ token, messageId }) => {
-      appendCooThinking(token, messageId);
+    socket.on("coo:thinking", ({ token, messageId, conversationId }) => {
+      appendCooThinking(token, messageId, conversationId);
     });
 
-    socket.on("coo:thinking-end", ({ messageId }) => {
-      endCooThinking(messageId);
+    socket.on("coo:thinking-end", ({ messageId, conversationId }) => {
+      endCooThinking(messageId, conversationId);
     });
 
     socket.on("coo:audio", ({ audio, contentType }) => {

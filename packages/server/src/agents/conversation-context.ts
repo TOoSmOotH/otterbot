@@ -21,14 +21,23 @@ export class ConversationContextManager {
   }
 
   /** Get or create a context for a conversation */
-  getOrCreate(conversationId: string, projectId: string | null): ConversationContext {
+  getOrCreate(conversationId: string, projectId: string | null, charter?: string | null): ConversationContext {
     let ctx = this.contexts.get(conversationId);
     if (!ctx) {
+      const history = [{ role: "system" as const, content: this.systemPrompt }];
+      let charterInjected = false;
+      if (charter) {
+        history.push({
+          role: "system" as const,
+          content: `[PROJECT CHARTER]\n${charter}\n[/PROJECT CHARTER]\nYou are in the context of this project. Reference the charter for goals, scope, and decisions.`,
+        });
+        charterInjected = true;
+      }
       ctx = {
         conversationId,
         projectId,
-        history: [{ role: "system", content: this.systemPrompt }],
-        charterInjected: false,
+        history,
+        charterInjected,
       };
       this.contexts.set(conversationId, ctx);
     }

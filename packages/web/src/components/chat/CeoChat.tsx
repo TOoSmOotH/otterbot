@@ -69,9 +69,12 @@ export function CeoChat({ cooName }: { cooName?: string }) {
   const conversations = useMessageStore((s) => s.conversations);
   const loadConversationMessages = useMessageStore((s) => s.loadConversationMessages);
 
+  const setConversations = useMessageStore((s) => s.setConversations);
+
   const activeProjectId = useProjectStore((s) => s.activeProjectId);
   const activeProject = useProjectStore((s) => s.activeProject);
   const projectConversations = useProjectStore((s) => s.projectConversations);
+  const setProjectConversations = useProjectStore((s) => s.setProjectConversations);
 
   // Use project conversations when in a project context, global otherwise
   const displayedConversations = activeProjectId ? projectConversations : conversations;
@@ -113,6 +116,21 @@ export function CeoChat({ cooName }: { cooName?: string }) {
     clearChat();
     setShowHistory(false);
   }, [activeProjectId]);
+
+  // Refresh conversation list when history panel opens
+  useEffect(() => {
+    if (!showHistory) return;
+    const socket = getSocket();
+    if (activeProjectId) {
+      socket.emit("project:conversations", { projectId: activeProjectId }, (convs) => {
+        setProjectConversations(convs);
+      });
+    } else {
+      socket.emit("ceo:list-conversations", undefined, (convs) => {
+        setConversations(convs);
+      });
+    }
+  }, [showHistory, activeProjectId, setConversations, setProjectConversations]);
 
   // Sync speech-to-text errors to local state with auto-dismiss
   useEffect(() => {
@@ -209,9 +227,21 @@ export function CeoChat({ cooName }: { cooName?: string }) {
       <div className="flex items-center justify-between px-4 py-3 border-b border-border">
         <div className="flex items-center gap-2">
           <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-          <h2 className="text-sm font-semibold tracking-tight">
-            {showHistory ? "Chat History" : activeProject ? activeProject.name : `${cooName ?? "COO"} Chat`}
+          <h2 className="text-sm font-semibold tracking-tight truncate">
+            {showHistory
+              ? "Chat History"
+              : activeProject
+                ? activeProject.name
+                : `${cooName ?? "COO"} Chat`}
           </h2>
+          {!showHistory && currentConversationId && (() => {
+            const activeConv = displayedConversations.find((c) => c.id === currentConversationId);
+            return activeConv ? (
+              <span className="text-[10px] text-muted-foreground truncate max-w-[120px]" title={activeConv.title}>
+                {activeConv.title}
+              </span>
+            ) : null;
+          })()}
           {activeProject && !showHistory && (
             <span className="text-[10px] text-muted-foreground bg-secondary rounded px-1.5 py-0.5">
               project
@@ -289,7 +319,14 @@ export function CeoChat({ cooName }: { cooName?: string }) {
                     conv.id === currentConversationId && "bg-secondary/30",
                   )}
                 >
-                  <p className="text-sm truncate">{conv.title}</p>
+                  <div className="flex items-center gap-1.5">
+                    <p className="text-sm truncate">{conv.title}</p>
+                    {conv.projectId && !activeProjectId && (
+                      <span className="shrink-0 text-[9px] text-muted-foreground bg-secondary rounded px-1 py-0.5">
+                        project
+                      </span>
+                    )}
+                  </div>
                   <p className="text-[10px] text-muted-foreground mt-0.5">
                     {formatRelativeTime(conv.updatedAt)}
                   </p>
