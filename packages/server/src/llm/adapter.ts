@@ -15,6 +15,7 @@ export interface LLMConfig {
   temperature?: number;
   thinkingBudget?: number;
   maxSteps?: number;
+  maxRetries?: number;
 }
 
 interface ResolvedCredentials {
@@ -126,6 +127,7 @@ export async function generate(
     model,
     messages,
     temperature: config.temperature,
+    maxRetries: config.maxRetries ?? 8,
     ...(tools ? { tools: tools as any } : {}),
   });
   return result;
@@ -143,6 +145,7 @@ export async function stream(
     model,
     messages,
     temperature: config.temperature,
+    maxRetries: config.maxRetries ?? 8,
     ...(tools ? { tools: tools as any, maxSteps: config.maxSteps ?? 20 } : {}),
     ...(thinking
       ? {

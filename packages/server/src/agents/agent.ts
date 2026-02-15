@@ -11,6 +11,7 @@ import { getDb, schema } from "../db/index.js";
 import type { MessageBus } from "../bus/message-bus.js";
 import type { ChatMessage, LLMConfig } from "../llm/adapter.js";
 import { stream } from "../llm/adapter.js";
+import { RetryError } from "ai";
 import { eq } from "drizzle-orm";
 
 export interface AgentOptions {
@@ -211,6 +212,10 @@ export abstract class BaseAgent {
       return { text: finalText, thinking, hadToolCalls };
     } catch (error) {
       this.setStatus(AgentStatus.Error);
+      if (error instanceof RetryError) {
+        console.error(`[Agent ${this.id}] Rate limited by provider — retries exhausted`);
+        return { text: "Error: Rate limited by provider — retries exhausted", thinking: undefined, hadToolCalls: false };
+      }
       const errMsg =
         error instanceof Error ? error.message : "Unknown LLM error";
       console.error(`Agent ${this.id} LLM error:`, errMsg);
