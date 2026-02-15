@@ -14,7 +14,7 @@ import { useAgentStore } from "../../stores/agent-store";
 import { useAgentActivityStore } from "../../stores/agent-activity-store";
 import { AgentNode } from "./AgentNode";
 import { AgentDetailPanel } from "./AgentDetailPanel";
-import type { Agent } from "@smoothbot/shared";
+import type { Agent } from "@otterbot/shared";
 
 const nodeTypes = { agent: AgentNode };
 

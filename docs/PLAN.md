@@ -1,8 +1,8 @@
-# Smoothbot Phase 1: WebUI + Agent Orchestration
+# Otterbot Phase 1: WebUI + Agent Orchestration
 
 ## Context
 
-Smoothbot is an alternative to OpenClaw — a multi-agent AI orchestration system. The key frustrations with OpenClaw are: unreliable agent communication, no real-time visibility into agent activity, confusing multi-agent setup, and too many options. Smoothbot solves this with a clear CEO/COO hierarchy, a central message bus that makes ALL communication observable, and a simple WebUI.
+Otterbot is an alternative to OpenClaw — a multi-agent AI orchestration system. The key frustrations with OpenClaw are: unreliable agent communication, no real-time visibility into agent activity, confusing multi-agent setup, and too many options. Otterbot solves this with a clear CEO/COO hierarchy, a central message bus that makes ALL communication observable, and a simple WebUI.
 
 **Phase 1 goal**: A working WebUI where the user (CEO) chats with the COO, who can spawn Team Leads, who pull Worker agents from a registry — with all communication visible in real-time.
 
@@ -28,7 +28,7 @@ Smoothbot is an alternative to OpenClaw — a multi-agent AI orchestration syste
 ## Project Structure
 
 ```
-smoothbot/
+otterbot/
 ├── package.json              # Root workspace config
 ├── pnpm-workspace.yaml
 ├── tsconfig.base.json
@@ -37,7 +37,7 @@ smoothbot/
 ├── .dockerignore
 ├── .env.example              # API keys (ANTHROPIC_API_KEY, OPENAI_API_KEY, etc.)
 ├── packages/
-│   ├── shared/               # @smoothbot/shared — types, constants, schemas
+│   ├── shared/               # @otterbot/shared — types, constants, schemas
 │   │   ├── src/
 │   │   │   ├── types/
 │   │   │   │   ├── agent.ts      # Agent, AgentRole, AgentStatus
@@ -47,7 +47,7 @@ smoothbot/
 │   │   │   └── index.ts
 │   │   ├── package.json
 │   │   └── tsconfig.json
-│   ├── server/               # @smoothbot/server — backend
+│   ├── server/               # @otterbot/server — backend
 │   │   ├── src/
 │   │   │   ├── index.ts          # Fastify + Socket.IO bootstrap
 │   │   │   ├── db/
@@ -72,7 +72,7 @@ smoothbot/
 │   │   │       └── handlers.ts   # Socket.IO event handlers
 │   │   ├── package.json
 │   │   └── tsconfig.json
-│   └── web/                  # @smoothbot/web — frontend
+│   └── web/                  # @otterbot/web — frontend
 │       ├── src/
 │       │   ├── main.tsx
 │       │   ├── App.tsx           # Three-panel layout
@@ -161,16 +161,16 @@ The CEO can say "What's the status of all projects?" and the COO summarizes acro
 
 ### Docker-First Architecture (Container Isolation)
 
-Smoothbot runs inside a Docker container. This is a hard requirement, not optional. If the container gets compromised, only the container is affected — not the host system.
+Otterbot runs inside a Docker container. This is a hard requirement, not optional. If the container gets compromised, only the container is affected — not the host system.
 
 **Host layout (bind mount):**
 ```
-/docker/smoothbot/              # Bind-mounted into the container
+/docker/otterbot/              # Bind-mounted into the container
 ├── config/
-│   ├── smoothbot.json          # User config (LLM keys, preferences, COO personality tweaks)
+│   ├── otterbot.json          # User config (LLM keys, preferences, COO personality tweaks)
 │   └── bootstrap.sh            # Runs on container start: installs extra packages, applies configs
 ├── data/
-│   ├── smoothbot.db            # SQLite database (persists across restarts)
+│   ├── otterbot.db            # SQLite database (persists across restarts)
 │   └── registry/               # Custom registry entries (persists across restarts)
 ├── projects/
 │   └── <project-id>/
@@ -187,7 +187,7 @@ Smoothbot runs inside a Docker container. This is a hard requirement, not option
 
 **Container behavior:**
 - On start: runs `bootstrap.sh` if it exists (installs user-requested packages, applies custom configs)
-- The container has NO access to the host filesystem beyond `/docker/smoothbot/`
+- The container has NO access to the host filesystem beyond `/docker/otterbot/`
 - Runs as a non-root user inside the container
 - Network access is limited to outbound LLM API calls and the WebUI port
 
@@ -277,7 +277,7 @@ Three-panel layout, simple and focused:
 
 ```
 ┌──────────────────────────────────────────────────────────┐
-│  Smoothbot                                    [Settings] │
+│  Otterbot                                    [Settings] │
 ├────────────────┬─────────────────────┬───────────────────┤
 │                │                     │                   │
 │   CEO ↔ COO    │   Agent Graph       │  Message Stream   │
@@ -345,7 +345,7 @@ Playwright config lives in `packages/web/playwright.config.ts`. Tests in `packag
 - Three package stubs with their own `package.json` and `tsconfig.json`
 - `.gitignore`, `.env.example`
 - `Dockerfile` (Node.js 22 base, non-root user, copies build output, runs Fastify)
-- `docker-compose.yml` (bind mount `/docker/smoothbot`, port mapping, env vars)
+- `docker-compose.yml` (bind mount `/docker/otterbot`, port mapping, env vars)
 - `.dockerignore`
 - `pnpm docker:build`, `pnpm docker:up`, `pnpm docker:dev` scripts
 

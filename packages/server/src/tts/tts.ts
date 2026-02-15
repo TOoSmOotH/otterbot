@@ -12,7 +12,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 function getModelCacheDir(): string {
   const dataDir =
     process.env.WORKSPACE_ROOT ??
-    resolve(__dirname, "../../../../docker/smoothbot");
+    resolve(__dirname, "../../../../docker/otterbot");
   return resolve(dataDir, "data", "models");
 }
 

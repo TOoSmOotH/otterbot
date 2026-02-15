@@ -1,4 +1,4 @@
-import type { EnvironmentAsset } from "@smoothbot/shared";
+import type { EnvironmentAsset } from "@otterbot/shared";
 
 interface CategoryDef {
   id: string;

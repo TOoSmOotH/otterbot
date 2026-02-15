@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useProjectStore } from "../../stores/project-store";
 import { KanbanCard } from "./KanbanCard";
 import { KanbanTaskDetail } from "./KanbanTaskDetail";
-import { KanbanColumn } from "@smoothbot/shared";
+import { KanbanColumn } from "@otterbot/shared";
 
 const COLUMNS: { key: KanbanColumn; label: string }[] = [
   { key: KanbanColumn.Backlog, label: "Backlog" },

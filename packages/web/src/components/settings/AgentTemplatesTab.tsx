@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from "react";
 import { cn } from "../../lib/utils";
 import { useSettingsStore } from "../../stores/settings-store";
 import { useModelPackStore } from "../../stores/model-pack-store";
-import type { RegistryEntry, GearConfig } from "@smoothbot/shared";
+import type { RegistryEntry, GearConfig } from "@otterbot/shared";
 import { CharacterSelect } from "../character-select/CharacterSelect";
 import { ModelCombobox } from "./ModelCombobox";
 
@@ -443,7 +443,7 @@ export function AgentTemplatesTab() {
               <>
                 <Field label="Base System Prompt" editing={false}>
                   <p className="text-[10px] text-muted-foreground mb-1">
-                    This base prompt is maintained by Smoothbot and updates automatically.
+                    This base prompt is maintained by Otterbot and updates automatically.
                   </p>
                   <pre className="text-xs text-muted-foreground bg-secondary rounded-md p-3 whitespace-pre-wrap font-mono max-h-[200px] overflow-y-auto">
                     {builtInCooPrompt}

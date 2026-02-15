@@ -4,7 +4,7 @@ import {
   AgentStatus,
   MessageType,
   type BusMessage,
-} from "@smoothbot/shared";
+} from "@otterbot/shared";
 import { BaseAgent, type AgentOptions } from "./agent.js";
 import type { MessageBus } from "../bus/message-bus.js";
 import { createTools } from "../tools/tool-factory.js";

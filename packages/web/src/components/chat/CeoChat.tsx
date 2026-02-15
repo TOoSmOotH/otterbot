@@ -85,7 +85,7 @@ export function CeoChat({ cooName }: { cooName?: string }) {
   const [speechError, setSpeechError] = useState<string | null>(null);
   const [interimText, setInterimText] = useState("");
   const [speakerOn, setSpeakerOn] = useState(() => {
-    return localStorage.getItem("smoothbot:speaker") === "true";
+    return localStorage.getItem("otterbot:speaker") === "true";
   });
 
   const resizeTextarea = useCallback(() => {
@@ -153,7 +153,7 @@ export function CeoChat({ cooName }: { cooName?: string }) {
   const toggleSpeaker = useCallback(() => {
     setSpeakerOn((prev) => {
       const next = !prev;
-      localStorage.setItem("smoothbot:speaker", String(next));
+      localStorage.setItem("otterbot:speaker", String(next));
       return next;
     });
   }, []);

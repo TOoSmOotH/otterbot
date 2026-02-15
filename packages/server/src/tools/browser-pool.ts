@@ -43,7 +43,7 @@ export async function getBrowser(): Promise<Browser> {
     "--disable-setuid-sandbox",
     "--disable-dev-shm-usage",
     // Isolate from any manually-opened Chrome on the desktop
-    "--user-data-dir=/tmp/smoothbot-browser-profile",
+    "--user-data-dir=/tmp/otterbot-browser-profile",
   ];
 
   if (desktopEnabled) {

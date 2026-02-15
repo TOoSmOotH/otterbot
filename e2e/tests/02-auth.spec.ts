@@ -6,7 +6,7 @@ test.describe("Authentication", () => {
   test("authenticated user sees main app", async ({ page }) => {
     await page.goto("/");
     await expect(page.locator("header")).toBeVisible({ timeout: 10_000 });
-    await expect(page.locator("text=Smoothbot")).toBeVisible();
+    await expect(page.locator("text=Otterbot")).toBeVisible();
   });
 
   test("logout redirects to login screen", async ({ page }) => {
@@ -45,6 +45,6 @@ base.describe("Authentication (no auth)", () => {
     await page.fill('input[type="password"]', creds.setup.passphrase);
     await page.click('button:has-text("Sign In")');
     await expect(page.locator("header")).toBeVisible({ timeout: 15_000 });
-    await expect(page.locator("text=Smoothbot")).toBeVisible();
+    await expect(page.locator("text=Otterbot")).toBeVisible();
   });
 });

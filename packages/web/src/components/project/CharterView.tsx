@@ -1,4 +1,4 @@
-import type { Project } from "@smoothbot/shared";
+import type { Project } from "@otterbot/shared";
 import { MarkdownContent } from "../chat/MarkdownContent";
 
 export function CharterView({ project }: { project: Project }) {

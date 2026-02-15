@@ -1,11 +1,11 @@
 /**
  * Package manifest manager.
  *
- * Manages /smoothbot/config/packages.json — a structured list of OS (apt) and
+ * Manages /otterbot/config/packages.json — a structured list of OS (apt) and
  * npm packages that should be installed at container startup.  The Docker
  * entrypoint reads this file and installs everything before starting the app.
  *
- * npm packages are installed globally with NPM_CONFIG_PREFIX=/smoothbot/tools
+ * npm packages are installed globally with NPM_CONFIG_PREFIX=/otterbot/tools
  * so they persist on the bind-mounted volume across restarts.  OS (apt)
  * packages live in the container layer and are reinstalled on every start.
  */
@@ -211,7 +211,7 @@ export function installNpmPackage(
     const output = execSync(`sudo npm install -g ${spec}`, {
       stdio: "pipe",
       timeout: 180_000,
-      env: { ...process.env, NPM_CONFIG_PREFIX: process.env.NPM_CONFIG_PREFIX ?? "/smoothbot/tools" },
+      env: { ...process.env, NPM_CONFIG_PREFIX: process.env.NPM_CONFIG_PREFIX ?? "/otterbot/tools" },
     });
     return {
       success: true,
@@ -262,7 +262,7 @@ export function uninstallNpmPackage(name: string): InstallResult {
     const output = execSync(`sudo npm uninstall -g ${name}`, {
       stdio: "pipe",
       timeout: 60_000,
-      env: { ...process.env, NPM_CONFIG_PREFIX: process.env.NPM_CONFIG_PREFIX ?? "/smoothbot/tools" },
+      env: { ...process.env, NPM_CONFIG_PREFIX: process.env.NPM_CONFIG_PREFIX ?? "/otterbot/tools" },
     });
     return {
       success: true,

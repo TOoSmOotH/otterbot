@@ -6,7 +6,7 @@ import {
   AgentStatus,
   MessageType,
   type BusMessage,
-} from "@smoothbot/shared";
+} from "@otterbot/shared";
 import { getDb, schema } from "../db/index.js";
 import type { MessageBus } from "../bus/message-bus.js";
 import type { ChatMessage, LLMConfig } from "../llm/adapter.js";

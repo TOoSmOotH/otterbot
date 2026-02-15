@@ -3,7 +3,7 @@ import { useAuthStore } from "../../stores/auth-store";
 import { useModelPackStore } from "../../stores/model-pack-store";
 import { CharacterSelect } from "../character-select/CharacterSelect";
 import { DEFAULT_AVATARS } from "./default-avatars";
-import type { GearConfig } from "@smoothbot/shared";
+import type { GearConfig } from "@otterbot/shared";
 
 const SUGGESTED_MODELS: Record<string, string[]> = {
   anthropic: ["claude-sonnet-4-5-20250929", "claude-haiku-4-20250414"],
@@ -372,7 +372,7 @@ export function SetupWizard() {
             <div className="w-8 h-8 rounded-lg bg-primary/20 flex items-center justify-center">
               <span className="text-primary text-sm font-bold">S</span>
             </div>
-            <h1 className="text-lg font-semibold tracking-tight">Smoothbot</h1>
+            <h1 className="text-lg font-semibold tracking-tight">Otterbot</h1>
           </div>
           <p className="text-center text-sm text-muted-foreground mb-6">
             Initial Setup
@@ -541,7 +541,7 @@ export function SetupWizard() {
                 2. Set a passphrase to protect the UI
               </h2>
               <p className="text-xs text-muted-foreground">
-                You will need this passphrase to access Smoothbot. Minimum 8
+                You will need this passphrase to access Otterbot. Minimum 8
                 characters.
               </p>
 

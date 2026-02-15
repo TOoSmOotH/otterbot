@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { ModelPack } from "@smoothbot/shared";
+import type { ModelPack } from "@otterbot/shared";
 
 interface ModelPackState {
   packs: ModelPack[];

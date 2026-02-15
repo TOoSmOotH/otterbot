@@ -56,7 +56,7 @@ export function useSocket() {
 
     socket.on("coo:audio", ({ audio, contentType }) => {
       // Only play if speaker is toggled on
-      if (localStorage.getItem("smoothbot:speaker") !== "true") return;
+      if (localStorage.getItem("otterbot:speaker") !== "true") return;
       try {
         const bytes = atob(audio);
         const arr = new Uint8Array(bytes.length);

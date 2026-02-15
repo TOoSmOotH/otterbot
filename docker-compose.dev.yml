@@ -1,5 +1,5 @@
 services:
-  smoothbot:
+  otterbot:
     build:
       target: deps
     shm_size: "256m"
@@ -7,13 +7,13 @@ services:
     volumes:
       - .:/app
       - node_modules:/app/node_modules
-      - ${SMOOTHBOT_DATA_DIR:-./docker/smoothbot}:/smoothbot
+      - ${OTTERBOT_DATA_DIR:-./docker/otterbot}:/otterbot
     environment:
       - NODE_ENV=development
-      - HOME=/smoothbot/home
-      - SMOOTHBOT_DB_KEY=${SMOOTHBOT_DB_KEY}
-      - SMOOTHBOT_UID=${SMOOTHBOT_UID:-1000}
-      - SMOOTHBOT_GID=${SMOOTHBOT_GID:-1000}
+      - HOME=/otterbot/home
+      - OTTERBOT_DB_KEY=${OTTERBOT_DB_KEY}
+      - OTTERBOT_UID=${OTTERBOT_UID:-1000}
+      - OTTERBOT_GID=${OTTERBOT_GID:-1000}
       - CI=true
       - ENABLE_DESKTOP=${ENABLE_DESKTOP:-true}
       - DESKTOP_RESOLUTION=${DESKTOP_RESOLUTION:-1280x720x24}

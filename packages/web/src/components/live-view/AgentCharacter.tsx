@@ -2,7 +2,7 @@ import { Suspense, useMemo, useRef, useEffect } from "react";
 import { useFrame } from "@react-three/fiber";
 import { useGLTF, Html, Sparkles } from "@react-three/drei";
 import { clone as skeletonClone } from "three/examples/jsm/utils/SkeletonUtils.js";
-import type { ModelPack, GearConfig } from "@smoothbot/shared";
+import type { ModelPack, GearConfig } from "@otterbot/shared";
 import * as THREE from "three";
 import { applyGearConfig } from "../../lib/gear-utils";
 

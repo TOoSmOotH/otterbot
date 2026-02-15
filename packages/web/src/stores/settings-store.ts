@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { NamedProvider, ProviderTypeMeta, ProviderType, CustomModel, ModelOption } from "@smoothbot/shared";
+import type { NamedProvider, ProviderTypeMeta, ProviderType, CustomModel, ModelOption } from "@otterbot/shared";
 
 // ---------------------------------------------------------------------------
 // Types

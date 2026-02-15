@@ -1,6 +1,6 @@
 import { Suspense, useMemo } from "react";
 import { useGLTF } from "@react-three/drei";
-import type { SceneConfig, SceneProp } from "@smoothbot/shared";
+import type { SceneConfig, SceneProp } from "@otterbot/shared";
 import { useEnvironmentStore } from "../../stores/environment-store";
 import * as THREE from "three";
 

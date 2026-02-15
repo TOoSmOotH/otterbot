@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useModelPackStore } from "../../stores/model-pack-store";
 import { CharacterSelect } from "../character-select/CharacterSelect";
-import type { GearConfig } from "@smoothbot/shared";
+import type { GearConfig } from "@otterbot/shared";
 
 export function LiveViewTab() {
   const packs = useModelPackStore((s) => s.packs);

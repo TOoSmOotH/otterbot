@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Smoothbot is a personal AI assistant — an open-source alternative to [OpenClaw](https://github.com/openclaw/openclaw). Like OpenClaw, it aims to be an autonomous AI agent that connects to messaging platforms (WhatsApp, Telegram, Slack, Discord, etc.) and performs tasks on the user's behalf, with data kept local and private.
+Otterbot is a personal AI assistant — an open-source alternative to [OpenClaw](https://github.com/openclaw/openclaw). Like OpenClaw, it aims to be an autonomous AI agent that connects to messaging platforms (WhatsApp, Telegram, Slack, Discord, etc.) and performs tasks on the user's behalf, with data kept local and private.
 
 ## Current State
 

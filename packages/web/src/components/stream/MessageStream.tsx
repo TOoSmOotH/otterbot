@@ -2,7 +2,7 @@ import { useRef, useEffect, useState, useMemo, useCallback } from "react";
 import { useMessageStore } from "../../stores/message-store";
 import { useProjectStore } from "../../stores/project-store";
 import { cn } from "../../lib/utils";
-import type { BusMessage } from "@smoothbot/shared";
+import type { BusMessage } from "@otterbot/shared";
 
 const ROLE_COLORS: Record<string, string> = {
   coo: "bg-violet-500/20 text-violet-400",

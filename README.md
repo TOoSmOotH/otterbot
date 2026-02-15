@@ -1,8 +1,8 @@
-# Smoothbot
+# Otterbot
 
 An open-source multi-agent AI orchestration system with voice, 3D visualization, and local-first operation. Chat with a COO agent who manages teams of specialized workers — with every message visible in real-time.
 
-Smoothbot is an alternative to [OpenClaw](https://github.com/openclaw/openclaw) that prioritizes **visibility**, **simplicity**, and **local-first operation**. Instead of opaque agent pipelines, every agent-to-agent message flows through a central bus that the UI observes directly. All data — including API keys, conversations, and settings — stays encrypted on your machine.
+Otterbot is an alternative to [OpenClaw](https://github.com/openclaw/openclaw) that prioritizes **visibility**, **simplicity**, and **local-first operation**. Instead of opaque agent pipelines, every agent-to-agent message flows through a central bus that the UI observes directly. All data — including API keys, conversations, and settings — stays encrypted on your machine.
 
 ## How It Works
 
@@ -38,13 +38,13 @@ The WebUI gives you multiple views into the system:
 
 ```bash
 # Clone and install
-git clone https://github.com/TOoSmOotH/smoothbot.git
-cd smoothbot
+git clone https://github.com/TOoSmOotH/otterbot.git
+cd otterbot
 pnpm install
 
 # Configure environment
 cp .env.example .env
-# Edit .env and set SMOOTHBOT_DB_KEY to a strong secret (used to encrypt the database)
+# Edit .env and set OTTERBOT_DB_KEY to a strong secret (used to encrypt the database)
 
 # Push the database schema
 pnpm db:push
@@ -78,7 +78,7 @@ pnpm docker:up:search
 pnpm docker:dev
 ```
 
-The container runs Node 22 as a non-root user with Playwright/Chromium and GitHub CLI pre-installed. Data is persisted to `./docker/smoothbot/` (or `$SMOOTHBOT_DATA_DIR`).
+The container runs Node 22 as a non-root user with Playwright/Chromium and GitHub CLI pre-installed. Data is persisted to `./docker/otterbot/` (or `$OTTERBOT_DATA_DIR`).
 
 ## Architecture
 
@@ -122,7 +122,7 @@ Templates are fully customizable — edit the system prompt, model, provider, ca
 
 ### LLM Provider Support
 
-Smoothbot uses the [Vercel AI SDK](https://sdk.vercel.ai/) for multi-provider support. API keys and provider configuration are managed through the **Settings UI** (stored encrypted in the database).
+Otterbot uses the [Vercel AI SDK](https://sdk.vercel.ai/) for multi-provider support. API keys and provider configuration are managed through the **Settings UI** (stored encrypted in the database).
 
 | Provider | Use Case |
 |----------|----------|
@@ -138,7 +138,7 @@ Each agent can use a different provider and model. Override at the template leve
 Each project gets a sandboxed workspace:
 
 ```
-/smoothbot/projects/<project-id>/
+/otterbot/projects/<project-id>/
 ├── repo/                # Project repository — all code workers write here directly
 ├── shared/              # All agents on this project can read/write
 │   ├── specs/
@@ -153,7 +153,7 @@ All code workers operate directly in the `repo/` directory. The Team Lead coordi
 
 ## Voice (TTS & STT)
 
-Smoothbot supports optional text-to-speech and speech-to-text, configurable in the Settings UI.
+Otterbot supports optional text-to-speech and speech-to-text, configurable in the Settings UI.
 
 ### Text-to-Speech
 
@@ -184,19 +184,19 @@ Web search is available to agents via the `web_search` tool. Configure your pref
 | **Brave Search** | Requires an API key from [brave.com](https://brave.com/search/api/). |
 | **Tavily** | Requires an API key from [tavily.com](https://tavily.com). |
 
-To start SearXNG alongside Smoothbot: `pnpm docker:up:search`
+To start SearXNG alongside Otterbot: `pnpm docker:up:search`
 
 ## Authentication & Setup
 
-Smoothbot uses **passphrase-based authentication** with bcrypt hashing and secure session cookies (30-day expiry). On first launch, the Setup Wizard guides you through provider configuration, profile creation, and passphrase setup. All credentials are stored in the encrypted SQLite database (keyed by `SMOOTHBOT_DB_KEY`).
+Otterbot uses **passphrase-based authentication** with bcrypt hashing and secure session cookies (30-day expiry). On first launch, the Setup Wizard guides you through provider configuration, profile creation, and passphrase setup. All credentials are stored in the encrypted SQLite database (keyed by `OTTERBOT_DB_KEY`).
 
 ## Project Structure
 
 ```
-smoothbot/
+otterbot/
 ├── packages/
-│   ├── shared/              # @smoothbot/shared — TypeScript types & event contracts
-│   ├── server/              # @smoothbot/server — Fastify + Socket.IO backend
+│   ├── shared/              # @otterbot/shared — TypeScript types & event contracts
+│   ├── server/              # @otterbot/server — Fastify + Socket.IO backend
 │   │   └── src/
 │   │       ├── agents/      # COO, Team Lead, Worker + base class
 │   │       │   └── prompts/ # System prompts
@@ -214,7 +214,7 @@ smoothbot/
 │   │       │   └── search/  # Search provider implementations
 │   │       ├── tts/         # Text-to-speech providers
 │   │       └── workspace/   # Sandboxed file access
-│   └── web/                 # @smoothbot/web — React + Vite frontend
+│   └── web/                 # @otterbot/web — React + Vite frontend
 │       └── src/
 │           ├── components/
 │           │   ├── auth/            # Login screen
@@ -301,14 +301,14 @@ cp .env.example .env
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `SMOOTHBOT_DB_KEY` | **Yes** | — | Encryption key for the SQLite database |
+| `OTTERBOT_DB_KEY` | **Yes** | — | Encryption key for the SQLite database |
 | `PORT` | | `3000` | Server port |
 | `HOST` | | `0.0.0.0` | Server bind host |
-| `DATABASE_URL` | | `file:./data/smoothbot.db` | SQLite database path |
+| `DATABASE_URL` | | `file:./data/otterbot.db` | SQLite database path |
 | `WORKSPACE_ROOT` | | `./data` | Root directory for agent workspaces |
-| `SMOOTHBOT_UID` | | `1000` | Docker container user ID |
-| `SMOOTHBOT_GID` | | `1000` | Docker container group ID |
-| `SMOOTHBOT_DATA_DIR` | | `./docker/smoothbot` | Docker host data directory |
+| `OTTERBOT_UID` | | `1000` | Docker container user ID |
+| `OTTERBOT_GID` | | `1000` | Docker container group ID |
+| `OTTERBOT_DATA_DIR` | | `./docker/otterbot` | Docker host data directory |
 
 > **Note:** LLM API keys, search provider keys, TTS/STT configuration, and model preferences are all managed through the **Settings UI** and stored in the encrypted database — not in environment variables.
 

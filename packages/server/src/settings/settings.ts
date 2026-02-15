@@ -17,7 +17,7 @@ import { OpenCodeClient } from "../tools/opencode-client.js";
 import { getDb, schema } from "../db/index.js";
 import { eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
-import type { NamedProvider, ProviderType, ProviderTypeMeta, CustomModel, ModelOption } from "@smoothbot/shared";
+import type { NamedProvider, ProviderType, ProviderTypeMeta, CustomModel, ModelOption } from "@otterbot/shared";
 
 // ---------------------------------------------------------------------------
 // Types

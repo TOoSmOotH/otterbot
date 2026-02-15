@@ -26,7 +26,7 @@ export function LoginScreen() {
             <div className="w-8 h-8 rounded-lg bg-primary/20 flex items-center justify-center">
               <span className="text-primary text-sm font-bold">S</span>
             </div>
-            <h1 className="text-lg font-semibold tracking-tight">Smoothbot</h1>
+            <h1 className="text-lg font-semibold tracking-tight">Otterbot</h1>
           </div>
 
           {/* Form */}

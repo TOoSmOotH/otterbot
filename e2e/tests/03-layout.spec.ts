@@ -16,7 +16,7 @@ test.describe("Layout", () => {
   });
 
   test("header shows branding", async ({ page }) => {
-    await expect(page.locator("header")).toContainText("Smoothbot");
+    await expect(page.locator("header")).toContainText("Otterbot");
   });
 
   test("Settings button is visible", async ({ page }) => {

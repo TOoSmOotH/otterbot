@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { ProviderTypeMeta } from "@smoothbot/shared";
+import type { ProviderTypeMeta } from "@otterbot/shared";
 
 export type AppScreen = "loading" | "setup" | "login" | "app";
 

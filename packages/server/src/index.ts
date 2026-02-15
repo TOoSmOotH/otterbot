@@ -15,7 +15,7 @@ import type {
   RegistryEntryCreate,
   RegistryEntryUpdate,
   SceneConfig,
-} from "@smoothbot/shared";
+} from "@otterbot/shared";
 import { migrateDb } from "./db/index.js";
 import { MessageBus } from "./bus/message-bus.js";
 import { WorkspaceManager } from "./workspace/workspace.js";
@@ -104,7 +104,7 @@ import {
   deleteCustomModel,
   type TierDefaults,
 } from "./settings/settings.js";
-import type { ProviderType } from "@smoothbot/shared";
+import type { ProviderType } from "@otterbot/shared";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -142,7 +142,7 @@ function ensureSelfSignedCert(dataDir: string): { key: Buffer; cert: Buffer } {
     console.log("Generating self-signed TLS certificate...");
     execSync(
       `openssl req -x509 -newkey rsa:2048 -keyout ${keyPath} -out ${certPath} ` +
-        `-days 365 -nodes -subj "/CN=smoothbot"`,
+        `-days 365 -nodes -subj "/CN=otterbot"`,
       { stdio: "pipe" },
     );
   }
@@ -175,7 +175,7 @@ async function main() {
   const registry = new Registry();
 
   // Create Fastify server with HTTPS (required for mic/getUserMedia from remote hosts)
-  const dataDir = process.env.WORKSPACE_ROOT ?? resolve(__dirname, "../../../docker/smoothbot");
+  const dataDir = process.env.WORKSPACE_ROOT ?? resolve(__dirname, "../../../docker/otterbot");
   const tls = ensureSelfSignedCert(join(dataDir, "data"));
   const app = Fastify({ logger: false, https: { key: tls.key, cert: tls.cert } });
   await app.register(cors, { origin: true, credentials: true });
@@ -1636,7 +1636,7 @@ async function main() {
   const host = process.env.HOST ?? "0.0.0.0";
 
   await app.listen({ port, host });
-  console.log(`Smoothbot server listening on https://${host}:${port}`);
+  console.log(`Otterbot server listening on https://${host}:${port}`);
 
   // Graceful shutdown — close Playwright browser if running
   const shutdown = async () => {

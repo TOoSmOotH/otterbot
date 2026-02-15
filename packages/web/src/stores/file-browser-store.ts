@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { FileEntry } from "@smoothbot/shared";
+import type { FileEntry } from "@otterbot/shared";
 
 interface PreviewFile {
   name: string;

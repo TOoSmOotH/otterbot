@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { Agent, AgentStatus } from "@smoothbot/shared";
+import type { Agent, AgentStatus } from "@otterbot/shared";
 
 interface AgentState {
   agents: Map<string, Agent>;

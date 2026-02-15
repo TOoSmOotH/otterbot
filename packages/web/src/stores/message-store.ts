@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { BusMessage, Conversation } from "@smoothbot/shared";
+import type { BusMessage, Conversation } from "@otterbot/shared";
 
 interface MessageState {
   /** All bus messages (for the stream panel) */

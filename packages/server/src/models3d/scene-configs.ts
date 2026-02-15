@@ -1,6 +1,6 @@
 import { readdirSync, readFileSync, existsSync } from "node:fs";
 import { resolve } from "node:path";
-import type { SceneConfig } from "@smoothbot/shared";
+import type { SceneConfig } from "@otterbot/shared";
 
 export function discoverSceneConfigs(assetsRoot: string): SceneConfig[] {
   const scenesDir = resolve(assetsRoot, "scenes");

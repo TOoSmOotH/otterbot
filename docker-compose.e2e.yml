@@ -1,13 +1,13 @@
 services:
-  smoothbot-e2e:
+  otterbot-e2e:
     build: .
     shm_size: "256m"
     ports:
       - "62627:3000"
     tmpfs:
-      - /smoothbot
+      - /otterbot
     environment:
-      - SMOOTHBOT_DB_KEY=e2e-test-key-not-secret
+      - OTTERBOT_DB_KEY=e2e-test-key-not-secret
       - ENABLE_DESKTOP=false
       - SUDO_MODE=restricted
     healthcheck:

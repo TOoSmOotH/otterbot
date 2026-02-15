@@ -74,13 +74,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Create non-root user with configurable UID/GID
-ARG SMOOTHBOT_UID=1000
-ARG SMOOTHBOT_GID=1000
-ENV SMOOTHBOT_UID=${SMOOTHBOT_UID}
-ENV SMOOTHBOT_GID=${SMOOTHBOT_GID}
-RUN (getent group ${SMOOTHBOT_GID} || groupadd -g ${SMOOTHBOT_GID} smoothbot) \
-    && useradd -u ${SMOOTHBOT_UID} -g ${SMOOTHBOT_GID} -m smoothbot 2>/dev/null \
-    || useradd -u ${SMOOTHBOT_UID} -g ${SMOOTHBOT_GID} -m -o smoothbot
+ARG OTTERBOT_UID=1000
+ARG OTTERBOT_GID=1000
+ENV OTTERBOT_UID=${OTTERBOT_UID}
+ENV OTTERBOT_GID=${OTTERBOT_GID}
+RUN (getent group ${OTTERBOT_GID} || groupadd -g ${OTTERBOT_GID} otterbot) \
+    && useradd -u ${OTTERBOT_UID} -g ${OTTERBOT_GID} -m otterbot 2>/dev/null \
+    || useradd -u ${OTTERBOT_UID} -g ${OTTERBOT_GID} -m -o otterbot
 
 # Sudoers configuration is handled at runtime in entrypoint.sh (SUDO_MODE env var)
 
@@ -97,14 +97,14 @@ COPY --from=build /app/packages/web/package.json ./packages/web/
 COPY --from=build /app/assets ./assets
 
 # Install Playwright Chromium browser (headless, for agent web browsing)
-# Use a fixed path so both root (build) and smoothbot (runtime) can find it
+# Use a fixed path so both root (build) and otterbot (runtime) can find it
 ENV PLAYWRIGHT_BROWSERS_PATH=/opt/playwright
 RUN node packages/server/node_modules/playwright/cli.js install chromium
 
 # Make Playwright's Chromium available as the system default browser.
 # Wrapper script passes --no-sandbox (required in containers).
 RUN CHROME_BIN=$(find /opt/playwright -name chrome -type f -path '*/chrome-linux*/chrome' | head -1) \
-    && printf '#!/bin/sh\nexec "%s" --no-sandbox --disable-dev-shm-usage --user-data-dir=/tmp/smoothbot-desktop-browser "$@"\n' "$CHROME_BIN" \
+    && printf '#!/bin/sh\nexec "%s" --no-sandbox --disable-dev-shm-usage --user-data-dir=/tmp/otterbot-desktop-browser "$@"\n' "$CHROME_BIN" \
        > /usr/local/bin/chromium-browser \
     && chmod +x /usr/local/bin/chromium-browser \
     && mkdir -p /usr/share/applications \
@@ -123,58 +123,58 @@ RUN curl -fsSL https://github.com/novnc/noVNC/archive/refs/tags/v1.5.0.tar.gz | 
     && ls -la /app/novnc/core/rfb.js
 
 # Create data directories (use numeric UID:GID since group name may differ)
-RUN mkdir -p /smoothbot/config /smoothbot/data /smoothbot/projects /smoothbot/logs /smoothbot/home \
-    && chown -R ${SMOOTHBOT_UID}:${SMOOTHBOT_GID} /smoothbot /app
+RUN mkdir -p /otterbot/config /otterbot/data /otterbot/projects /otterbot/logs /otterbot/home \
+    && chown -R ${OTTERBOT_UID}:${OTTERBOT_GID} /otterbot /app
 
-# Entrypoint script — runs as root, drops to smoothbot user via setpriv
+# Entrypoint script — runs as root, drops to otterbot user via setpriv
 COPY --chmod=755 <<'EOF' /app/entrypoint.sh
 #!/bin/sh
 set -e
 
-PUID="${SMOOTHBOT_UID:-1000}"
-PGID="${SMOOTHBOT_GID:-1000}"
+PUID="${OTTERBOT_UID:-1000}"
+PGID="${OTTERBOT_GID:-1000}"
 
 # Update user/group if runtime UID/GID differs from build-time
-CURRENT_UID=$(id -u smoothbot 2>/dev/null || echo "")
-CURRENT_GID=$(id -g smoothbot 2>/dev/null || echo "")
+CURRENT_UID=$(id -u otterbot 2>/dev/null || echo "")
+CURRENT_GID=$(id -g otterbot 2>/dev/null || echo "")
 
 if [ -n "$CURRENT_UID" ] && [ "$CURRENT_GID" != "$PGID" ]; then
-  groupmod -o -g "$PGID" smoothbot 2>/dev/null || true
+  groupmod -o -g "$PGID" otterbot 2>/dev/null || true
 fi
 if [ -n "$CURRENT_UID" ] && [ "$CURRENT_UID" != "$PUID" ]; then
-  usermod -o -u "$PUID" smoothbot 2>/dev/null || true
+  usermod -o -u "$PUID" otterbot 2>/dev/null || true
 fi
 
 # Configure sudo policy (user-selectable)
 if [ "${SUDO_MODE}" = "full" ]; then
-  echo "smoothbot ALL=(root) NOPASSWD: ALL" > /etc/sudoers.d/smoothbot
+  echo "otterbot ALL=(root) NOPASSWD: ALL" > /etc/sudoers.d/otterbot
 else
-  echo "smoothbot ALL=(root) NOPASSWD: /usr/bin/apt-get, /usr/local/bin/npm, /usr/bin/tee, /usr/bin/gpg, /usr/bin/install" > /etc/sudoers.d/smoothbot
+  echo "otterbot ALL=(root) NOPASSWD: /usr/bin/apt-get, /usr/local/bin/npm, /usr/bin/tee, /usr/bin/gpg, /usr/bin/install" > /etc/sudoers.d/otterbot
 fi
-chmod 0440 /etc/sudoers.d/smoothbot
+chmod 0440 /etc/sudoers.d/otterbot
 
 # Ensure data directories exist (they may be empty bind mounts)
-mkdir -p /smoothbot/config /smoothbot/data /smoothbot/home/.ssh \
-         /smoothbot/logs /smoothbot/projects /smoothbot/tools
+mkdir -p /otterbot/config /otterbot/data /otterbot/home/.ssh \
+         /otterbot/logs /otterbot/projects /otterbot/tools
 
 # Fix ownership
-chown -R "${PUID}:${PGID}" /smoothbot
+chown -R "${PUID}:${PGID}" /otterbot
 
 # Strict SSH permissions
-chmod 700 /smoothbot/home/.ssh
-find /smoothbot/home/.ssh -type f -exec chmod 600 {} + 2>/dev/null || true
+chmod 700 /otterbot/home/.ssh
+find /otterbot/home/.ssh -type f -exec chmod 600 {} + 2>/dev/null || true
 
 # ── Create Python venv (persists on bind-mounted volume) ─────────────
-if [ ! -f /smoothbot/home/.venv/bin/activate ]; then
-  echo "[smoothbot] Creating Python venv..."
-  python3 -m venv /smoothbot/home/.venv
-  chown -R "${PUID}:${PGID}" /smoothbot/home/.venv
+if [ ! -f /otterbot/home/.venv/bin/activate ]; then
+  echo "[otterbot] Creating Python venv..."
+  python3 -m venv /otterbot/home/.venv
+  chown -R "${PUID}:${PGID}" /otterbot/home/.venv
 fi
 
 # ── Install packages from manifest ──────────────────────────────────
-# The COO agent (or user) writes /smoothbot/config/packages.json with
+# The COO agent (or user) writes /otterbot/config/packages.json with
 # { "repos": [...], "apt": [{"name":"..."}], "npm": [{"name":"...","version":"..."}] }
-MANIFEST="/smoothbot/config/packages.json"
+MANIFEST="/otterbot/config/packages.json"
 if [ -f "$MANIFEST" ]; then
   # Restore apt repositories (GPG keys + source lists)
   node -e "
@@ -190,7 +190,7 @@ if [ -f "$MANIFEST" ]; then
     REPO_KEY_PATH=$(echo "$repo" | node -e "process.stdout.write(JSON.parse(require('fs').readFileSync('/dev/stdin','utf-8')).keyPath)")
     REPO_SOURCE=$(echo "$repo" | node -e "process.stdout.write(JSON.parse(require('fs').readFileSync('/dev/stdin','utf-8')).source)")
     if [ ! -f "/etc/apt/sources.list.d/${REPO_NAME}.list" ]; then
-      echo "[smoothbot] Adding repo: $REPO_NAME"
+      echo "[otterbot] Adding repo: $REPO_NAME"
       install -m 0755 -d /etc/apt/keyrings
       curl -fsSL "$REPO_KEY_URL" | gpg --dearmor -o "$REPO_KEY_PATH" 2>/dev/null || true
       echo "$REPO_SOURCE" > "/etc/apt/sources.list.d/${REPO_NAME}.list"
@@ -203,7 +203,7 @@ if [ -f "$MANIFEST" ]; then
     if (m.apt && m.apt.length) console.log(m.apt.map(p=>p.name).join(' '));
   " 2>/dev/null || true)
   if [ -n "$APT_PKGS" ]; then
-    echo "[smoothbot] Installing apt packages: $APT_PKGS"
+    echo "[otterbot] Installing apt packages: $APT_PKGS"
     apt-get update && apt-get install -y --no-install-recommends $APT_PKGS
   fi
 
@@ -213,24 +213,24 @@ if [ -f "$MANIFEST" ]; then
     if (m.npm && m.npm.length) console.log(m.npm.map(p => p.version ? p.name+'@'+p.version : p.name).join(' '));
   " 2>/dev/null || true)
   if [ -n "$NPM_PKGS" ]; then
-    echo "[smoothbot] Installing npm packages: $NPM_PKGS"
+    echo "[otterbot] Installing npm packages: $NPM_PKGS"
     npm install -g $NPM_PKGS
   fi
 fi
 
 # ── Run custom bootstrap script ─────────────────────────────────────
 # For anything not covered by packages.json (custom setup, config, etc.)
-if [ -f /smoothbot/config/bootstrap.sh ]; then
-  echo "[smoothbot] Running bootstrap script..."
-  sh /smoothbot/config/bootstrap.sh
+if [ -f /otterbot/config/bootstrap.sh ]; then
+  echo "[otterbot] Running bootstrap script..."
+  sh /otterbot/config/bootstrap.sh
 fi
 
 # ── Conditional desktop startup ────────────────────────────────────
 if [ "${ENABLE_DESKTOP}" = "true" ]; then
-  echo "[smoothbot] Starting desktop environment..."
+  echo "[otterbot] Starting desktop environment..."
   export DISPLAY=:99
 
-  # Create XDG_RUNTIME_DIR for the smoothbot user
+  # Create XDG_RUNTIME_DIR for the otterbot user
   XDG_DIR="/run/user/${PUID}"
   mkdir -p "$XDG_DIR"
   chown "${PUID}:${PGID}" "$XDG_DIR"
@@ -246,28 +246,28 @@ if [ "${ENABLE_DESKTOP}" = "true" ]; then
   while ! xdpyinfo -display :99 >/dev/null 2>&1; do
     TRIES=$((TRIES + 1))
     if [ "$TRIES" -ge 60 ]; then
-      echo "[smoothbot] ERROR: Xvfb failed to start after 30s"
+      echo "[otterbot] ERROR: Xvfb failed to start after 30s"
       break
     fi
     sleep 0.5
   done
-  echo "[smoothbot] Xvfb ready on :99"
+  echo "[otterbot] Xvfb ready on :99"
 
   # Start dbus (needed by XFCE)
   eval "$(setpriv --reuid="${PUID}" --regid="${PGID}" --init-groups dbus-launch --sh-syntax 2>/dev/null || true)"
   export DBUS_SESSION_BUS_ADDRESS
 
-  # Start XFCE4 session as the smoothbot user
+  # Start XFCE4 session as the otterbot user
   setpriv --reuid="${PUID}" --regid="${PGID}" --init-groups \
     env DISPLAY=:99 DBUS_SESSION_BUS_ADDRESS="$DBUS_SESSION_BUS_ADDRESS" XDG_RUNTIME_DIR="$XDG_DIR" \
     startxfce4 &
-  echo "[smoothbot] XFCE4 session starting..."
+  echo "[otterbot] XFCE4 session starting..."
   sleep 2
 
   # Start x11vnc bound to localhost only
   setpriv --reuid="${PUID}" --regid="${PGID}" --init-groups \
     x11vnc -display :99 -localhost -nopw -forever -shared -noshm -rfbport "${VNC_PORT:-5900}" &
-  echo "[smoothbot] x11vnc started on localhost:${VNC_PORT:-5900}"
+  echo "[otterbot] x11vnc started on localhost:${VNC_PORT:-5900}"
 else
   export DISPLAY=""
 fi
@@ -284,18 +284,18 @@ EOF
 ENV NODE_ENV=production
 ENV PORT=3000
 ENV HOST=0.0.0.0
-ENV DATABASE_URL=file:/smoothbot/data/smoothbot.db
-ENV WORKSPACE_ROOT=/smoothbot
-ENV HOME=/smoothbot/home
+ENV DATABASE_URL=file:/otterbot/data/otterbot.db
+ENV WORKSPACE_ROOT=/otterbot
+ENV HOME=/otterbot/home
 
 # Runtime tools installed via bootstrap.sh persist on the bind-mounted volume
-ENV NPM_CONFIG_PREFIX=/smoothbot/tools
-ENV PATH="/smoothbot/tools/bin:$PATH"
+ENV NPM_CONFIG_PREFIX=/otterbot/tools
+ENV PATH="/otterbot/tools/bin:$PATH"
 
-ENV GOPATH=/smoothbot/home/go
-ENV PATH="/smoothbot/home/go/bin:$PATH"
-ENV VIRTUAL_ENV=/smoothbot/home/.venv
-ENV PATH="/smoothbot/home/.venv/bin:$PATH"
+ENV GOPATH=/otterbot/home/go
+ENV PATH="/otterbot/home/go/bin:$PATH"
+ENV VIRTUAL_ENV=/otterbot/home/.venv
+ENV PATH="/otterbot/home/.venv/bin:$PATH"
 ENV BROWSER=/usr/local/bin/chromium-browser
 ENV ENABLE_DESKTOP=true
 ENV DESKTOP_RESOLUTION=1280x720x24

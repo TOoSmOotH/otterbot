@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { BusMessage, AgentActivityRecord } from "@smoothbot/shared";
+import type { BusMessage, AgentActivityRecord } from "@otterbot/shared";
 
 interface AgentStreamState {
   tokens: string;

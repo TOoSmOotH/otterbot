@@ -1,6 +1,6 @@
 import { readdirSync, existsSync } from "node:fs";
 import { resolve } from "node:path";
-import type { EnvironmentPack } from "@smoothbot/shared";
+import type { EnvironmentPack } from "@otterbot/shared";
 
 export function discoverEnvironmentPacks(assetsRoot: string): EnvironmentPack[] {
   const envsDir = resolve(assetsRoot, "environments");

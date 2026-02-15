@@ -1,5 +1,5 @@
 {
-  "name": "@smoothbot/web",
+  "name": "@otterbot/web",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -12,7 +12,7 @@
   "dependencies": {
     "@react-three/drei": "^10.7.7",
     "@react-three/fiber": "^9.5.0",
-    "@smoothbot/shared": "workspace:*",
+    "@otterbot/shared": "workspace:*",
     "@xyflow/react": "^12.4.3",
     "clsx": "^2.1.1",
     "highlight.js": "^11.11.1",

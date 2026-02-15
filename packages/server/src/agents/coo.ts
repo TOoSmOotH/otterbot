@@ -10,7 +10,7 @@ import {
   CharterStatus,
   type Project,
   type KanbanTask,
-} from "@smoothbot/shared";
+} from "@otterbot/shared";
 import { BaseAgent, type AgentOptions } from "./agent.js";
 import { COO_SYSTEM_PROMPT } from "./prompts/coo.js";
 import { ConversationContextManager } from "./conversation-context.js";

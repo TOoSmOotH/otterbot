@@ -1,4 +1,4 @@
-import type { AgentRole } from "@smoothbot/shared";
+import type { AgentRole } from "@otterbot/shared";
 
 export interface ToolContext {
   /** Agent's private workspace directory (absolute path) */

@@ -1,7 +1,7 @@
 import { nanoid } from "nanoid";
 import { eq } from "drizzle-orm";
 import { getDb, schema } from "../db/index.js";
-import type { BusMessage, MessageType } from "@smoothbot/shared";
+import type { BusMessage, MessageType } from "@otterbot/shared";
 
 type MessageHandler = (message: BusMessage) => void | Promise<void>;
 

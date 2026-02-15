@@ -93,7 +93,7 @@ export function DesktopView() {
   const popOut = useCallback(() => {
     window.open(
       `${location.origin}?desktop-popout=true`,
-      "smoothbot-desktop",
+      "otterbot-desktop",
       "width=1300,height=760,menubar=no,toolbar=no,status=no",
     );
   }, []);

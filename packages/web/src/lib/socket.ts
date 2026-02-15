@@ -2,7 +2,7 @@ import { io, Socket } from "socket.io-client";
 import type {
   ServerToClientEvents,
   ClientToServerEvents,
-} from "@smoothbot/shared";
+} from "@otterbot/shared";
 
 type TypedSocket = Socket<ServerToClientEvents, ClientToServerEvents>;
 

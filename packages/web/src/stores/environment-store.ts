@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { EnvironmentPack, SceneConfig } from "@smoothbot/shared";
+import type { EnvironmentPack, SceneConfig } from "@otterbot/shared";
 
 interface EnvironmentState {
   packs: EnvironmentPack[];

@@ -2,8 +2,8 @@ import type { Server, Socket } from "socket.io";
 import type {
   ServerToClientEvents,
   ClientToServerEvents,
-} from "@smoothbot/shared";
-import { MessageType, type Agent, type AgentActivityRecord, type BusMessage, type Conversation, type Project, type KanbanTask } from "@smoothbot/shared";
+} from "@otterbot/shared";
+import { MessageType, type Agent, type AgentActivityRecord, type BusMessage, type Conversation, type Project, type KanbanTask } from "@otterbot/shared";
 import { nanoid } from "nanoid";
 import { eq, or, desc, isNull } from "drizzle-orm";
 import type { MessageBus } from "../bus/message-bus.js";

@@ -7,7 +7,7 @@ import {
   MessageType,
   type BusMessage,
   type KanbanTask,
-} from "@smoothbot/shared";
+} from "@otterbot/shared";
 import { BaseAgent, type AgentOptions } from "./agent.js";
 import { Worker } from "./worker.js";
 import { getDb, schema } from "../db/index.js";
@@ -100,7 +100,7 @@ function buildEnvironmentContext(toolNames: string[]): string {
     const reservedPort = process.env.PORT ?? "62626";
     sections.push(
       `## Reserved Ports\n` +
-      `**Port ${reservedPort} is reserved for the Smoothbot server and MUST NOT be used by your applications.** ` +
+      `**Port ${reservedPort} is reserved for the Otterbot server and MUST NOT be used by your applications.** ` +
       `Choose a different port (e.g. 4000, 5000, 8080). Commands that reference port ${reservedPort} will be blocked.`,
     );
 

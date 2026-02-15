@@ -1,4 +1,4 @@
-import type { KanbanTask } from "@smoothbot/shared";
+import type { KanbanTask } from "@otterbot/shared";
 
 export function KanbanCard({
   task,

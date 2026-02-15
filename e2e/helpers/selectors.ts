@@ -4,7 +4,7 @@
 
 // Layout
 export const HEADER = "header";
-export const BRANDING_TEXT = "Smoothbot";
+export const BRANDING_TEXT = "Otterbot";
 export const SETTINGS_BUTTON = 'button:has-text("Settings")';
 export const LOGOUT_BUTTON = 'button:has-text("Logout")';
 

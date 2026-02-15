@@ -5,7 +5,7 @@ test.describe("Full Flow", () => {
     await page.goto("/");
 
     // Header
-    await expect(page.locator("text=Smoothbot")).toBeVisible();
+    await expect(page.locator("text=Otterbot")).toBeVisible();
     await expect(page.locator("text=Settings")).toBeVisible();
 
     // Three panels

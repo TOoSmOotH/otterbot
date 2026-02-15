@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { MessageBus } from "./message-bus.js";
 import { migrateDb, resetDb } from "../db/index.js";
-import { MessageType } from "@smoothbot/shared";
+import { MessageType } from "@otterbot/shared";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -11,10 +11,10 @@ describe("MessageBus", () => {
   let bus: MessageBus;
 
   beforeEach(async () => {
-    tmpDir = mkdtempSync(join(tmpdir(), "smoothbot-bus-test-"));
+    tmpDir = mkdtempSync(join(tmpdir(), "otterbot-bus-test-"));
     resetDb();
     process.env.DATABASE_URL = `file:${join(tmpDir, "test.db")}`;
-    process.env.SMOOTHBOT_DB_KEY = "test-key";
+    process.env.OTTERBOT_DB_KEY = "test-key";
     await migrateDb();
     bus = new MessageBus();
   });
@@ -22,7 +22,7 @@ describe("MessageBus", () => {
   afterEach(() => {
     resetDb();
     delete process.env.DATABASE_URL;
-    delete process.env.SMOOTHBOT_DB_KEY;
+    delete process.env.OTTERBOT_DB_KEY;
     rmSync(tmpDir, { recursive: true, force: true });
   });
 

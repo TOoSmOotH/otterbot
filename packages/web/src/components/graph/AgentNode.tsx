@@ -1,7 +1,7 @@
 import { memo } from "react";
 import { Handle, Position, type NodeProps } from "@xyflow/react";
 import { cn } from "../../lib/utils";
-import type { AgentStatus } from "@smoothbot/shared";
+import type { AgentStatus } from "@otterbot/shared";
 
 interface AgentNodeData {
   label: string;

@@ -183,7 +183,7 @@ function MainApp() {
             <div className="w-6 h-6 rounded-md bg-primary/20 flex items-center justify-center">
               <span className="text-primary text-xs font-bold">S</span>
             </div>
-            <h1 className="text-sm font-semibold tracking-tight">Smoothbot</h1>
+            <h1 className="text-sm font-semibold tracking-tight">Otterbot</h1>
           </div>
           {/* Project breadcrumb */}
           {activeProjectId && activeProject && (
@@ -286,15 +286,15 @@ function ResizableLayout({
 }: {
   userProfile?: UserProfile;
   activeProjectId: string | null;
-  activeProject: import("@smoothbot/shared").Project | null;
-  projects: import("@smoothbot/shared").Project[];
+  activeProject: import("@otterbot/shared").Project | null;
+  projects: import("@otterbot/shared").Project[];
   centerView: CenterView;
   setCenterView: (view: CenterView) => void;
   onEnterProject: (projectId: string) => void;
   cooName?: string;
 }) {
   const { defaultLayout, onLayoutChanged } = useDefaultLayout({
-    id: "smoothbot-layout",
+    id: "otterbot-layout",
     storage: localStorage,
     panelIds: PANEL_IDS,
   });

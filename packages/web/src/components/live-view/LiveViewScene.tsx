@@ -8,7 +8,7 @@ import { AgentCharacter } from "./AgentCharacter";
 import { FallbackAgent } from "./FallbackAgent";
 import { EnvironmentScene } from "./EnvironmentScene";
 import { EditableEnvironmentScene } from "../room-builder/EditableEnvironmentScene";
-import type { Agent } from "@smoothbot/shared";
+import type { Agent } from "@otterbot/shared";
 
 interface LiveViewSceneProps {
   userProfile?: { name: string | null; avatar: string | null; modelPackId?: string | null; gearConfig?: Record<string, boolean> | null; cooName?: string };

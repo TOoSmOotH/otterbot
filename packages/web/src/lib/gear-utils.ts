@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import type { GearConfig } from "@smoothbot/shared";
+import type { GearConfig } from "@otterbot/shared";
 
 /**
  * Body-part mesh name patterns — these are never treated as gear.

@@ -9,7 +9,7 @@ describe("WorkspaceManager", () => {
   let ws: WorkspaceManager;
 
   beforeEach(() => {
-    tmpDir = mkdtempSync(join(tmpdir(), "smoothbot-test-"));
+    tmpDir = mkdtempSync(join(tmpdir(), "otterbot-test-"));
     ws = new WorkspaceManager(tmpDir);
   });
 

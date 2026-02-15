@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { cn } from "../../lib/utils";
-import type { RegistryEntry } from "@smoothbot/shared";
+import type { RegistryEntry } from "@otterbot/shared";
 
 const PROVIDER_OPTIONS = [
   "anthropic",

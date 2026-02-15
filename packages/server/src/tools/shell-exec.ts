@@ -7,7 +7,7 @@ const DEFAULT_TIMEOUT = 30_000; // 30 seconds
 const MAX_TIMEOUT = 120_000; // 2 minutes
 const MAX_OUTPUT_SIZE = 50_000; // 50KB — trim output to fit LLM context
 
-// Port 62626 is reserved for the Smoothbot server — workers must not bind to it
+// Port 62626 is reserved for the Otterbot server — workers must not bind to it
 const RESERVED_PORT = parseInt(process.env.PORT ?? "62626", 10);
 
 const BLOCKED_COMMANDS: { pattern: RegExp; reason: string; suggestion?: string }[] = [
@@ -32,11 +32,11 @@ function checkBlockedCommand(command: string): string | null {
     }
   }
 
-  // Block commands that try to listen on the reserved Smoothbot server port
+  // Block commands that try to listen on the reserved Otterbot server port
   const portStr = String(RESERVED_PORT);
   const portPattern = new RegExp(`(?:--|:|=|\\s)${portStr}(?:\\s|$|"|\\')`);
   if (portPattern.test(command)) {
-    return `BLOCKED: Port ${portStr} is reserved for the Smoothbot server. Use a different port (e.g. 4000, 5000, 8080).`;
+    return `BLOCKED: Port ${portStr} is reserved for the Otterbot server. Use a different port (e.g. 4000, 5000, 8080).`;
   }
 
   return null;

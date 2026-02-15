@@ -1,19 +1,19 @@
 services:
-  smoothbot:
+  otterbot:
     build:
       context: .
       args:
-        SMOOTHBOT_UID: ${SMOOTHBOT_UID:-1000}
-        SMOOTHBOT_GID: ${SMOOTHBOT_GID:-1000}
+        OTTERBOT_UID: ${OTTERBOT_UID:-1000}
+        OTTERBOT_GID: ${OTTERBOT_GID:-1000}
     shm_size: "256m"
     ports:
       - "3000:3000"
     volumes:
-      - ${SMOOTHBOT_DATA_DIR:-./docker/smoothbot}:/smoothbot
+      - ${OTTERBOT_DATA_DIR:-./docker/otterbot}:/otterbot
     environment:
-      - SMOOTHBOT_DB_KEY=${SMOOTHBOT_DB_KEY}
-      - SMOOTHBOT_UID=${SMOOTHBOT_UID:-1000}
-      - SMOOTHBOT_GID=${SMOOTHBOT_GID:-1000}
+      - OTTERBOT_DB_KEY=${OTTERBOT_DB_KEY}
+      - OTTERBOT_UID=${OTTERBOT_UID:-1000}
+      - OTTERBOT_GID=${OTTERBOT_GID:-1000}
       - ENABLE_DESKTOP=${ENABLE_DESKTOP:-true}
       - DESKTOP_RESOLUTION=${DESKTOP_RESOLUTION:-1280x720x24}
       - SUDO_MODE=${SUDO_MODE:-restricted}
@@ -25,5 +25,5 @@ services:
     ports:
       - "8080:8080"
     volumes:
-      - ${SMOOTHBOT_DATA_DIR:-./docker/smoothbot}/searxng:/etc/searxng
+      - ${OTTERBOT_DATA_DIR:-./docker/otterbot}/searxng:/etc/searxng
     restart: unless-stopped

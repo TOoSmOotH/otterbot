@@ -1,6 +1,6 @@
 import { useEffect } from "react";
-import type { KanbanTask } from "@smoothbot/shared";
-import { KanbanColumn } from "@smoothbot/shared";
+import type { KanbanTask } from "@otterbot/shared";
+import { KanbanColumn } from "@otterbot/shared";
 import { useProjectStore } from "../../stores/project-store";
 
 const STATUS_CONFIG: Record<KanbanColumn, { label: string; className: string }> = {

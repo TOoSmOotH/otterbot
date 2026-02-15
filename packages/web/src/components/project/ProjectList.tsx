@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from "react";
-import type { Project, ProjectStatus } from "@smoothbot/shared";
+import type { Project, ProjectStatus } from "@otterbot/shared";
 import { getSocket } from "../../lib/socket";
 
 const statusColors: Record<ProjectStatus, string> = {

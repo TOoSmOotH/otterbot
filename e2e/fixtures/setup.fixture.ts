@@ -41,7 +41,7 @@ export default async function globalSetup(_config: FullConfig) {
   await page.fill('input[type="password"]', creds.setup.passphrase);
   await page.click('button:has-text("Sign In")');
 
-  // Wait for the main app to load (header with "Smoothbot" text)
+  // Wait for the main app to load (header with "Otterbot" text)
   await page.waitForSelector("header", { timeout: 15_000 });
 
   // Save auth state

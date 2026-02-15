@@ -11,7 +11,7 @@ test.describe("Setup Wizard", () => {
     await page.goto("/");
     // Should NOT see the setup wizard — should go straight to the main app
     await expect(page.locator("header")).toBeVisible({ timeout: 10_000 });
-    await expect(page.locator("text=Smoothbot")).toBeVisible();
+    await expect(page.locator("text=Otterbot")).toBeVisible();
   });
 
   test("re-setup returns 400", async () => {

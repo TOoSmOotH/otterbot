@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { SceneConfig, SceneProp } from "@smoothbot/shared";
+import type { SceneConfig, SceneProp } from "@otterbot/shared";
 import type { RefObject } from "react";
 import * as THREE from "three";
 import { useEnvironmentStore } from "./environment-store";

@@ -5,7 +5,7 @@ import type {
   RegistryEntry,
   RegistryEntryCreate,
   RegistryEntryUpdate,
-} from "@smoothbot/shared";
+} from "@otterbot/shared";
 
 export class Registry {
   list(): RegistryEntry[] {

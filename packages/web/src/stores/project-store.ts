@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { Project, KanbanTask, Conversation } from "@smoothbot/shared";
+import type { Project, KanbanTask, Conversation } from "@otterbot/shared";
 
 interface ProjectState {
   /** All known projects */

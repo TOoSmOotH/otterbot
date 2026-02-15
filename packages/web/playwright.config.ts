@@ -19,13 +19,13 @@ export default defineConfig({
   ],
   webServer: [
     {
-      command: "pnpm --filter @smoothbot/server dev",
+      command: "pnpm --filter @otterbot/server dev",
       port: 62626,
       reuseExistingServer: !process.env.CI,
       cwd: "../..",
     },
     {
-      command: "pnpm --filter @smoothbot/web dev",
+      command: "pnpm --filter @otterbot/web dev",
       port: 5173,
       reuseExistingServer: !process.env.CI,
       cwd: "../..",

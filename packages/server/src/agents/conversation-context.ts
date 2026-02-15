@@ -1,5 +1,5 @@
 import type { ChatMessage } from "../llm/adapter.js";
-import type { BusMessage } from "@smoothbot/shared";
+import type { BusMessage } from "@otterbot/shared";
 
 export interface ConversationContext {
   conversationId: string;

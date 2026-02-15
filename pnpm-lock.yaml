@@ -47,7 +47,7 @@ importers:
       '@huggingface/transformers':
         specifier: ^3.4.1
         version: 3.8.1
-      '@smoothbot/shared':
+      '@otterbot/shared':
         specifier: workspace:*
         version: link:../shared
       ai:
@@ -117,15 +117,15 @@ importers:
 
   packages/web:
     dependencies:
+      '@otterbot/shared':
+        specifier: workspace:*
+        version: link:../shared
       '@react-three/drei':
         specifier: ^10.7.7
         version: 10.7.7(@react-three/fiber@9.5.0(@types/react@19.2.13)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(three@0.182.0))(@types/react@19.2.13)(@types/three@0.182.0)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(three@0.182.0)
       '@react-three/fiber':
         specifier: ^9.5.0
         version: 9.5.0(@types/react@19.2.13)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(three@0.182.0)
-      '@smoothbot/shared':
-        specifier: workspace:*
-        version: link:../shared
       '@xyflow/react':
         specifier: ^12.4.3
         version: 12.10.0(@types/react@19.2.13)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)

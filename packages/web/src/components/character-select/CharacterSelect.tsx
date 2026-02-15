@@ -3,7 +3,7 @@ import { Canvas, useFrame } from "@react-three/fiber";
 import { OrbitControls, useGLTF, Center } from "@react-three/drei";
 import { clone as skeletonClone } from "three/examples/jsm/utils/SkeletonUtils.js";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
-import type { ModelPack, GearConfig } from "@smoothbot/shared";
+import type { ModelPack, GearConfig } from "@otterbot/shared";
 import * as THREE from "three";
 import { cn } from "../../lib/utils";
 import { discoverGearMeshes, applyGearConfig, formatGearName } from "../../lib/gear-utils";

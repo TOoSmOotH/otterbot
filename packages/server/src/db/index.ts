@@ -6,7 +6,7 @@ import { resolve, dirname } from "node:path";
 import { mkdirSync } from "node:fs";
 
 function getDbPath(): string {
-  const url = process.env.DATABASE_URL ?? "file:./data/smoothbot.db";
+  const url = process.env.DATABASE_URL ?? "file:./data/otterbot.db";
   return url.replace(/^file:/, "");
 }
 
@@ -19,10 +19,10 @@ export function getDb() {
     const sqlite = new Database(dbPath);
 
     // Encrypt the database
-    const dbKey = process.env.SMOOTHBOT_DB_KEY;
+    const dbKey = process.env.OTTERBOT_DB_KEY;
     if (!dbKey) {
       throw new Error(
-        "SMOOTHBOT_DB_KEY environment variable is required. Set it in your .env file.",
+        "OTTERBOT_DB_KEY environment variable is required. Set it in your .env file.",
       );
     }
     sqlite.pragma(`key='${dbKey}'`);
