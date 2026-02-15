@@ -14,7 +14,6 @@ import { getDb, schema } from "../db/index.js";
 import { Registry } from "../registry/registry.js";
 import type { MessageBus } from "../bus/message-bus.js";
 import type { WorkspaceManager } from "../workspace/workspace.js";
-import { GitWorktreeManager } from "../workspace/git-worktree.js";
 import { eq } from "drizzle-orm";
 import { getConfig } from "../auth/auth.js";
 import { execSync } from "node:child_process";
@@ -22,9 +21,6 @@ import { getConfiguredSearchProvider } from "../tools/search/providers.js";
 import { isDesktopEnabled } from "../desktop/desktop.js";
 import { TEAM_LEAD_PROMPT } from "./prompts/team-lead.js";
 import { getRandomModelPackId } from "../models3d/model-packs.js";
-
-/** Tools that indicate a worker writes code and should get a worktree */
-const CODE_TOOLS = new Set(["file_write", "shell_exec"]);
 
 /** Tool descriptions for environment context injection */
 const TOOL_DESCRIPTIONS: Record<string, string> = {
@@ -155,7 +151,6 @@ const MAX_CONTINUATION_CYCLES = 5;
 export class TeamLead extends BaseAgent {
   private workers: Map<string, Worker> = new Map();
   private workspace: WorkspaceManager;
-  private gitWorktree: GitWorktreeManager | null = null;
   private verificationRequested = false;
   private deploymentRequested = false;
   /** Per-think-cycle call counts — prevents tools from being called repeatedly within a single streamText run */
@@ -191,12 +186,6 @@ export class TeamLead extends BaseAgent {
     this.onAgentSpawned = deps.onAgentSpawned;
     this.onKanbanChange = deps.onKanbanChange;
 
-    // Initialize git worktree manager for the project
-    if (deps.projectId) {
-      const repoPath = this.workspace.repoPath(deps.projectId);
-      const worktreesDir = this.workspace.worktreesBasePath(deps.projectId);
-      this.gitWorktree = new GitWorktreeManager(repoPath, worktreesDir);
-    }
   }
 
   async handleMessage(message: BusMessage): Promise<void> {
@@ -330,7 +319,6 @@ export class TeamLead extends BaseAgent {
     const livingWorkers = this.workers.size;
 
     const board = this.getKanbanBoardState();
-    const branchInfo = this.gitWorktree ? this.getBranchOverview() : "";
     const repoPath = this.projectId ? this.workspace.repoPath(this.projectId) : "";
 
     // Build the ACTION REQUIRED block for evaluating the worker report
@@ -352,30 +340,23 @@ export class TeamLead extends BaseAgent {
     let instructions: string;
     if (board.allDone && orphans.length === 0) {
       // All tasks genuinely done and no orphans — final assembly phases
-      const hasUnmerged = this.gitWorktree?.hasRepo()
-        ? this.gitWorktree.listWorktrees().length > 0
-        : false;
-      if (hasUnmerged) {
-        instructions =
-          `ALL tasks are now complete. Begin FINAL ASSEMBLY:\n` +
-          `1. Merge all worker branches in dependency order (foundational first) using merge_worker_branch`;
-      } else if (!this.verificationRequested) {
+      if (!this.verificationRequested) {
         this.verificationRequested = true;
         instructions =
-          `ALL tasks done and all branches merged. Now VERIFY the deliverables work:\n` +
+          `ALL tasks done. Now VERIFY the deliverables work:\n` +
           `1. Create a "Verify build and tests" task using create_task\n` +
           `2. Search the registry for a tester worker (search_registry with capability "testing")\n` +
-          `3. Spawn the worker with useMainRepo=true so it runs in the merged codebase\n` +
+          `3. Spawn the worker so it runs in the project codebase\n` +
           `4. Give it clear instructions: install dependencies, build the project, start the app, and run tests\n` +
           `5. Wait for the verification results — do NOT report to COO yet\n` +
           `The project repo is at: ${repoPath}`;
       } else if (!this.deploymentRequested) {
         this.deploymentRequested = true;
         instructions =
-          `ALL tasks done, branches merged, and verification passed. Now DEPLOY the application:\n` +
+          `ALL tasks done and verification passed. Now DEPLOY the application:\n` +
           `1. Create a "Deploy application" task using create_task\n` +
           `2. Search the registry for a coder worker (search_registry with capability "code")\n` +
-          `3. Spawn the worker with useMainRepo=true so it runs in the merged codebase\n` +
+          `3. Spawn the worker so it runs in the project codebase\n` +
           `4. Give it instructions to:\n` +
           `   - Start the application as a persistent background process (use nohup and & so it survives after the worker exits)\n` +
           `   - Wait a few seconds, then verify the app is accessible (curl/wget the health endpoint or main URL)\n` +
@@ -384,7 +365,7 @@ export class TeamLead extends BaseAgent {
           `The project repo is at: ${repoPath}`;
       } else {
         instructions =
-          `ALL tasks done, branches merged, verification passed, and deployment complete.\n` +
+          `ALL tasks done, verification passed, and deployment complete.\n` +
           `Review the deployment results in the worker report above.\n` +
           `If the app is running: report success to the COO using report_to_coo — include what was built, verification results, deployment URL/port, and workspace path: ${repoPath}\n` +
           `If deployment failed: create fix tasks, spawn workers to address the issues, then re-deploy`;
@@ -448,7 +429,6 @@ export class TeamLead extends BaseAgent {
       `[Worker ${message.fromAgentId} report]: ${message.content}\n\n` +
       taskNotice +
       `[KANBAN BOARD]\n${board.summary}\n[/KANBAN BOARD]\n\n` +
-      (branchInfo ? `[GIT BRANCHES]\n${branchInfo}\n[/GIT BRANCHES]\n\n` : "") +
       instructions;
 
     const { text } = await this.thinkWithContinuation(
@@ -582,9 +562,6 @@ export class TeamLead extends BaseAgent {
   ): Promise<{ text: string; thinking: string | undefined }> {
     // Snapshot board state before first think() for stale-state detection
     let prevBoard = this.getKanbanBoardState();
-    let prevWorktreeCount = this.gitWorktree?.hasRepo()
-      ? this.gitWorktree.listWorktrees().length
-      : 0;
 
     let result = await this.think(initialMessage, onToken, onReasoning, onReasoningEnd);
 
@@ -592,40 +569,31 @@ export class TeamLead extends BaseAgent {
       if (!result.hadToolCalls) break;
 
       const board = this.getKanbanBoardState();
-      const worktreeCount = this.gitWorktree?.hasRepo()
-        ? this.gitWorktree.listWorktrees().length
-        : 0;
 
       // Stale-state detection: if nothing changed since last cycle, stop looping
       if (
         board.backlogCount === prevBoard.backlogCount &&
         board.inProgressCount === prevBoard.inProgressCount &&
-        board.doneCount === prevBoard.doneCount &&
-        worktreeCount === prevWorktreeCount
+        board.doneCount === prevBoard.doneCount
       ) {
-        console.warn(`[TeamLead ${this.id}] Stale state detected — board and worktrees unchanged after cycle. Breaking continuation loop.`);
+        console.warn(`[TeamLead ${this.id}] Stale state detected — board unchanged after cycle. Breaking continuation loop.`);
         break;
       }
 
-      // Continue if there's unblocked backlog work OR if all tasks are done but branches need merging
-      const hasUnmergedBranches = worktreeCount > 0;
-      if (!board.hasUnblockedBacklog && !(board.allDone && hasUnmergedBranches)) break;
+      // Continue only if there's unblocked backlog work
+      if (!board.hasUnblockedBacklog) break;
 
-      const branchInfo = hasUnmergedBranches ? `\n${this.getBranchOverview()}` : "";
-      const repoPath = this.projectId ? this.workspace.repoPath(this.projectId) : "";
-      const prompt = board.hasUnblockedBacklog
-        ? `[CONTINUATION] ${board.unblockedBacklogCount} unblocked task(s) remain in backlog:\n${board.summary}\n\n` +
-          `Spawn workers for unblocked backlog tasks. Do NOT spawn workers for [BLOCKED] tasks — they will become available when their blockers complete. ` +
-          `If a task description contains a "PREVIOUS ATTEMPT FAILED" section, READ IT CAREFULLY — ` +
-          `analyze what went wrong and include specific fix instructions in the worker directive ` +
-          `(e.g. "run npm install before npm run dev", "use port 4000 instead of 3000").`
-        : `[FINAL ASSEMBLY] All tasks done. ${worktreeCount} unmerged branch(es) remain:${branchInfo}\n\nMerge all branches in dependency order and report completion to the COO.\nThe project repo is at: ${repoPath}`;
+      const prompt =
+        `[CONTINUATION] ${board.unblockedBacklogCount} unblocked task(s) remain in backlog:\n${board.summary}\n\n` +
+        `Spawn workers for unblocked backlog tasks. Do NOT spawn workers for [BLOCKED] tasks — they will become available when their blockers complete. ` +
+        `If a task description contains a "PREVIOUS ATTEMPT FAILED" section, READ IT CAREFULLY — ` +
+        `analyze what went wrong and include specific fix instructions in the worker directive ` +
+        `(e.g. "run npm install before npm run dev", "use port 4000 instead of 3000").`;
 
-      console.log(`[TeamLead ${this.id}] Continuation cycle ${i + 1}/${MAX_CONTINUATION_CYCLES} — ${board.hasBacklog ? `${board.backlogCount} backlog tasks remain` : "final assembly phase"}`);
+      console.log(`[TeamLead ${this.id}] Continuation cycle ${i + 1}/${MAX_CONTINUATION_CYCLES} — ${board.backlogCount} backlog tasks remain`);
 
       // Update snapshot for next iteration
       prevBoard = board;
-      prevWorktreeCount = worktreeCount;
 
       result = await this.think(
         prompt,
@@ -633,59 +601,6 @@ export class TeamLead extends BaseAgent {
         onReasoning,
         onReasoningEnd,
       );
-    }
-
-    // Post-merge report: if the last cycle had tool calls (merges) and all
-    // work is done with no remaining worktrees, give the TL one final prompt
-    // to explicitly call report_to_coo — the loop above breaks before this
-    // can happen because worktreeCount drops to 0 after merging.
-    if (result.hadToolCalls) {
-      const postBoard = this.getKanbanBoardState();
-      const postWorktreeCount = this.gitWorktree?.hasRepo()
-        ? this.gitWorktree.listWorktrees().length
-        : 0;
-      if (postBoard.allDone && postWorktreeCount === 0) {
-        const repoPath = this.projectId ? this.workspace.repoPath(this.projectId) : "";
-        if (!this.verificationRequested) {
-          this.verificationRequested = true;
-          console.log(`[TeamLead ${this.id}] Post-merge verification — spawning verification worker`);
-          result = await this.think(
-            `[VERIFY] All tasks complete and all branches merged. Before reporting to the COO, verify the deliverables:\n` +
-            `1. Create a "Verify build and tests" task\n` +
-            `2. Search the registry for a tester worker (search_registry with "testing")\n` +
-            `3. Spawn it with useMainRepo=true so it runs in the merged code\n` +
-            `4. Give it instructions to: install deps, build, start the app, and run any tests\n` +
-            `The project repo is at: ${repoPath}`,
-            onToken,
-            onReasoning,
-            onReasoningEnd,
-          );
-        } else if (!this.deploymentRequested) {
-          this.deploymentRequested = true;
-          console.log(`[TeamLead ${this.id}] Post-merge deploy — spawning deployment worker`);
-          result = await this.think(
-            `[DEPLOY] All tasks complete, branches merged, and verification passed. Deploy the application:\n` +
-            `1. Create a "Deploy application" task\n` +
-            `2. Search the registry for a coder worker (search_registry with "code")\n` +
-            `3. Spawn it with useMainRepo=true so it runs in the merged code\n` +
-            `4. Give it instructions to: start the app as a persistent background process (nohup/&), wait a few seconds, verify it's accessible, and report the URL/port\n` +
-            `The project repo is at: ${repoPath}`,
-            onToken,
-            onReasoning,
-            onReasoningEnd,
-          );
-        } else {
-          console.log(`[TeamLead ${this.id}] Post-merge report — deployment done, reporting to COO`);
-          result = await this.think(
-            `[REPORT] All tasks complete, branches merged, verification passed, and deployment done.\n` +
-            `Review the deployment results. If the app is running: report to the COO using report_to_coo — include what was built, verification results, deployment URL/port, and workspace path: ${repoPath}\n` +
-            `If deployment failed: create fix tasks, spawn workers to address the issues, then re-deploy.`,
-            onToken,
-            onReasoning,
-            onReasoningEnd,
-          );
-        }
-      }
     }
 
     return { text: result.text, thinking: result.thinking };
@@ -736,15 +651,9 @@ export class TeamLead extends BaseAgent {
             .string()
             .optional()
             .describe("The kanban task ID to auto-assign to this worker (moves task to in_progress)"),
-          useMainRepo: z
-            .boolean()
-            .optional()
-            .describe(
-              "If true, worker runs in the project's main repo instead of a git worktree. Use for verification/testing of merged code.",
-            ),
         }),
-        execute: async ({ registryEntryId, task, taskId, useMainRepo }) => {
-          return this.spawnWorker(registryEntryId, task, taskId, useMainRepo);
+        execute: async ({ registryEntryId, task, taskId }) => {
+          return this.spawnWorker(registryEntryId, task, taskId);
         },
       }),
       web_search: tool({
@@ -790,46 +699,6 @@ export class TeamLead extends BaseAgent {
             this.sendMessage(this.parentId, MessageType.Report, content);
           }
           return "Report sent to COO.";
-        },
-      }),
-      merge_worker_branch: tool({
-        description:
-          "Auto-commit a worker's changes and merge their branch into main. " +
-          "Use this when a worker has finished its task. " +
-          "Merge foundational branches first (e.g., schema before routes).",
-        parameters: z.object({
-          workerId: z
-            .string()
-            .describe("The ID of the worker whose branch to merge"),
-        }),
-        execute: async ({ workerId }) => {
-          return this.mergeWorkerBranch(workerId);
-        },
-      }),
-      sync_worker_branch: tool({
-        description:
-          "Rebase a worker's branch onto the latest main so it picks up other workers' merged changes. " +
-          "Use this when a worker depends on code that another worker has already merged.",
-        parameters: z.object({
-          workerId: z
-            .string()
-            .describe("The ID of the worker whose branch to sync"),
-        }),
-        execute: async ({ workerId }) => {
-          return this.syncWorkerBranch(workerId);
-        },
-      }),
-      get_branch_status: tool({
-        description:
-          "Show all active worktree branches with ahead/behind counts and diff summaries. Only call once per cycle.",
-        parameters: z.object({}),
-        execute: async () => {
-          const count = (this._toolCallCounts.get("get_branch_status") ?? 0) + 1;
-          this._toolCallCounts.set("get_branch_status", count);
-          if (count > 1) {
-            return "REFUSED: You already checked branch status. STOP calling tools and return your response now.";
-          }
-          return this.getBranchOverview();
         },
       }),
       create_task: tool({
@@ -910,7 +779,6 @@ export class TeamLead extends BaseAgent {
     registryEntryId: string,
     task: string,
     taskId?: string,
-    useMainRepo?: boolean,
   ): Promise<string> {
     try {
       const db = getDb();
@@ -925,37 +793,12 @@ export class TeamLead extends BaseAgent {
       }
 
       const entryTools = (entry.tools as string[]) ?? [];
-      const isCodeWorker = entryTools.some((t) => CODE_TOOLS.has(t));
       const workerId = nanoid();
       let workspacePath: string | null = null;
 
-      if (this.projectId && isCodeWorker && this.gitWorktree && !useMainRepo) {
-        // Code workers get a git worktree
-        if (!this.gitWorktree.hasRepo()) {
-          this.gitWorktree.initRepo();
-        }
-        const wtInfo = this.gitWorktree.createWorktree(workerId);
-        workspacePath = wtInfo.worktreePath;
-
-        // Record worktree in DB for recovery
-        db.insert(schema.worktrees)
-          .values({
-            agentId: workerId,
-            projectId: this.projectId,
-            branchName: wtInfo.branchName,
-            worktreePath: wtInfo.worktreePath,
-            status: "active",
-          })
-          .run();
-      } else if (this.projectId && useMainRepo) {
-        // Verification workers get the main repo path directly
+      if (this.projectId) {
+        // All workers with a project get the repo path
         workspacePath = this.workspace.repoPath(this.projectId);
-      } else if (this.projectId) {
-        // Non-code workers get a regular agent directory
-        workspacePath = this.workspace.createAgentWorkspace(
-          this.projectId,
-          workerId,
-        );
       }
 
       console.log(`[TeamLead ${this.id}] Spawning worker ${workerId} from ${entry.name} (workspace=${workspacePath})`);
@@ -1004,10 +847,6 @@ export class TeamLead extends BaseAgent {
           // Task is blocked — clean up the worker and abort
           worker.destroy();
           this.workers.delete(worker.id);
-          // Clean up worktree if one was created
-          if (workspacePath && this.gitWorktree && isCodeWorker && !useMainRepo) {
-            try { this.gitWorktree.destroyWorktree(workerId); } catch { /* ignore */ }
-          }
           console.warn(`[TeamLead ${this.id}] Aborted spawn for blocked task ${taskId}`);
           return `BLOCKED: Task ${taskId} cannot start — it depends on tasks that are not yet done. Wait for blockers to complete first.`;
         }
@@ -1018,68 +857,14 @@ export class TeamLead extends BaseAgent {
         registryEntryName: entry.name,
       });
 
-      const mode = isCodeWorker && this.gitWorktree ? " (worktree)" : "";
       const assignedMsg = taskId ? ` Task ${taskId} moved to in_progress.` : "";
       console.log(`[TeamLead ${this.id}] Worker ${workerId} spawned and directive sent`);
-      return `Spawned ${entry.name} worker (${worker.id})${mode} and assigned task.${assignedMsg}`;
+      return `Spawned ${entry.name} worker (${worker.id}) and assigned task.${assignedMsg}`;
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
       console.error(`[TeamLead ${this.id}] Failed to spawn worker: ${errMsg}`, err);
       return `Error spawning worker from ${registryEntryId}: ${errMsg}`;
     }
-  }
-
-  private mergeWorkerBranch(workerId: string): string {
-    if (!this.gitWorktree) return "No git worktree manager available.";
-
-    const result = this.gitWorktree.mergeBranch(workerId);
-
-    // Update DB record
-    if (this.projectId) {
-      const db = getDb();
-      db.update(schema.worktrees)
-        .set({
-          status: result.success ? "merged" : "conflict",
-          mergedAt: result.success ? new Date().toISOString() : null,
-        })
-        .where(eq(schema.worktrees.agentId, workerId))
-        .run();
-    }
-
-    // Always clean up worktree — whether merge succeeded, was empty, or conflicted
-    try {
-      this.gitWorktree.destroyWorktree(workerId);
-    } catch (err) {
-      console.warn(`[TeamLead ${this.id}] Failed to destroy worktree for ${workerId}:`, err);
-    }
-
-    return result.message;
-  }
-
-  private syncWorkerBranch(workerId: string): string {
-    if (!this.gitWorktree) return "No git worktree manager available.";
-    const result = this.gitWorktree.updateWorktree(workerId);
-    return result.message;
-  }
-
-  private getBranchOverview(): string {
-    if (!this.gitWorktree || !this.gitWorktree.hasRepo()) return "No active worktree branches.";
-
-    const worktrees = this.gitWorktree.listWorktrees();
-    if (worktrees.length === 0) return "No active worktree branches.";
-
-    const lines = worktrees.map((wt) => {
-      const diff = this.gitWorktree!.getBranchDiff(wt.agentId);
-      const status = this.gitWorktree!.getBranchStatus(wt.agentId);
-      return [
-        `**${wt.branchName}** (${wt.agentId})`,
-        `  Ahead: ${wt.ahead}, Behind: ${wt.behind}`,
-        status.trim() ? `  Uncommitted: ${status.trim()}` : "  Uncommitted: (clean)",
-        diff.trim() ? `  Diff vs main:\n${diff.trim().split("\n").map((l) => "    " + l).join("\n")}` : "  Diff vs main: (none)",
-      ].join("\n");
-    });
-
-    return lines.join("\n\n");
   }
 
   /** Find in_progress tasks whose assigneeAgentId is not in this.workers (i.e. the worker is dead). Read-only — does not mutate state. */
@@ -1307,7 +1092,7 @@ export class TeamLead extends BaseAgent {
     return this.workers;
   }
 
-  /** Clean up all workers and worktrees on project deletion */
+  /** Clean up all workers on project deletion */
   override destroy(): void {
     // Destroy all active workers
     for (const [id, worker] of this.workers) {
@@ -1318,23 +1103,6 @@ export class TeamLead extends BaseAgent {
       }
     }
     this.workers.clear();
-
-    // Destroy remaining worktrees and mark them abandoned in DB
-    if (this.gitWorktree?.hasRepo() && this.projectId) {
-      const db = getDb();
-      const worktrees = this.gitWorktree.listWorktrees();
-      for (const wt of worktrees) {
-        try {
-          this.gitWorktree.destroyWorktree(wt.agentId);
-        } catch (err) {
-          console.warn(`[TeamLead ${this.id}] Failed to destroy worktree ${wt.agentId}:`, err);
-        }
-        db.update(schema.worktrees)
-          .set({ status: "abandoned" })
-          .where(eq(schema.worktrees.agentId, wt.agentId))
-          .run();
-      }
-    }
 
     super.destroy();
   }

@@ -260,7 +260,6 @@ export function setupSocketHandlers(
       coo.destroyProject(data.projectId);
 
       // Cascade-delete related DB records
-      db.delete(schema.worktrees).where(eq(schema.worktrees.projectId, data.projectId)).run();
       db.delete(schema.kanbanTasks).where(eq(schema.kanbanTasks.projectId, data.projectId)).run();
       db.delete(schema.agentActivity).where(eq(schema.agentActivity.projectId, data.projectId)).run();
       db.delete(schema.messages).where(eq(schema.messages.projectId, data.projectId)).run();

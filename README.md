@@ -135,14 +135,11 @@ Each agent can use a different provider and model. Override at the template leve
 
 ### Workspace Isolation
 
-Each project gets a sandboxed workspace with git worktree support for parallel code work:
+Each project gets a sandboxed workspace:
 
 ```
 /smoothbot/projects/<project-id>/
-├── repo/                # Main git repository
-├── worktrees/           # Per-worker git worktrees
-│   ├── <worker-1>/      # Isolated branch for worker 1
-│   └── <worker-2>/      # Isolated branch for worker 2
+├── repo/                # Project repository — all code workers write here directly
 ├── shared/              # All agents on this project can read/write
 │   ├── specs/
 │   ├── docs/
@@ -152,7 +149,7 @@ Each project gets a sandboxed workspace with git worktree support for parallel c
     └── <agent-2>/       # Private to agent 2
 ```
 
-Git worktrees allow multiple code workers to operate on the same repository simultaneously without conflicts. Team Leads can merge worker branches and sync changes between them.
+All code workers operate directly in the `repo/` directory. The Team Lead coordinates task ordering to avoid conflicts.
 
 ## Voice (TTS & STT)
 
@@ -216,7 +213,7 @@ smoothbot/
 │   │       ├── tools/       # Agent tools (file ops, shell, web)
 │   │       │   └── search/  # Search provider implementations
 │   │       ├── tts/         # Text-to-speech providers
-│   │       └── workspace/   # Sandboxed file access + git worktrees
+│   │       └── workspace/   # Sandboxed file access
 │   └── web/                 # @smoothbot/web — React + Vite frontend
 │       └── src/
 │           ├── components/

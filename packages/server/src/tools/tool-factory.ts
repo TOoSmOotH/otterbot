@@ -4,7 +4,6 @@ import { createFileWriteTool } from "./file-write.js";
 import { createShellExecTool } from "./shell-exec.js";
 import { createWebSearchTool } from "./web-search.js";
 import { createWebBrowseTool } from "./web-browse.js";
-import { createGitCommitTool } from "./git-commit.js";
 import { createInstallPackageTool } from "./install-package.js";
 import { createOpenCodeTaskTool } from "./opencode-task.js";
 
@@ -16,7 +15,6 @@ const TOOL_REGISTRY: Record<string, ToolCreator> = {
   shell_exec: createShellExecTool,
   web_search: createWebSearchTool,
   web_browse: createWebBrowseTool,
-  git_commit: createGitCommitTool,
   install_package: createInstallPackageTool,
   opencode_task: createOpenCodeTaskTool,
 };

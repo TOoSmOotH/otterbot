@@ -169,18 +169,3 @@ export const providers = sqliteTable("providers", {
     .$defaultFn(() => new Date().toISOString()),
 });
 
-export const worktrees = sqliteTable("worktrees", {
-  agentId: text("agent_id").primaryKey(),
-  projectId: text("project_id").notNull(),
-  branchName: text("branch_name").notNull(),
-  worktreePath: text("worktree_path").notNull(),
-  status: text("status", {
-    enum: ["active", "merged", "conflict", "abandoned"],
-  })
-    .notNull()
-    .default("active"),
-  createdAt: text("created_at")
-    .notNull()
-    .$defaultFn(() => new Date().toISOString()),
-  mergedAt: text("merged_at"),
-});

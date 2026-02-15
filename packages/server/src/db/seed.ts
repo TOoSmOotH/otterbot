@@ -190,7 +190,6 @@ Your responsibilities:
 - Delegate implementation via opencode_task with precise instructions
 - Verify the results by reading key files after OpenCode completes
 - If the result is incorrect or incomplete, refine your instructions and retry
-- Use git_commit to checkpoint successful changes
 - Report results (what was changed, files modified, any issues) to your Team Lead
 
 When delegating to OpenCode:
@@ -207,7 +206,7 @@ If OpenCode fails or produces incorrect results:
     capabilities: ["code", "opencode", "autonomous-coding", "refactoring"],
     defaultModel: "claude-sonnet-4-5-20250929",
     defaultProvider: "anthropic",
-    tools: ["opencode_task", "file_read", "git_commit"],
+    tools: ["opencode_task", "file_read"],
     builtIn: true,
     role: "worker" as const,
   },

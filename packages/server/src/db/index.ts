@@ -196,15 +196,8 @@ export async function migrateDb() {
     updated_at TEXT NOT NULL
   )`);
 
-  db.run(sql`CREATE TABLE IF NOT EXISTS worktrees (
-    agent_id TEXT PRIMARY KEY,
-    project_id TEXT NOT NULL,
-    branch_name TEXT NOT NULL,
-    worktree_path TEXT NOT NULL,
-    status TEXT NOT NULL DEFAULT 'active',
-    created_at TEXT NOT NULL,
-    merged_at TEXT
-  )`);
+  // Clean up legacy worktrees table (removed — agents now write directly to repo/)
+  db.run(sql`DROP TABLE IF EXISTS worktrees`);
 
   db.run(sql`CREATE TABLE IF NOT EXISTS providers (
     id TEXT PRIMARY KEY,

@@ -807,7 +807,6 @@ async function main() {
       }
 
       // Cascade-delete related DB records
-      db.delete(schema.worktrees).where(eq(schema.worktrees.projectId, req.params.projectId)).run();
       db.delete(schema.kanbanTasks).where(eq(schema.kanbanTasks.projectId, req.params.projectId)).run();
       db.delete(schema.agentActivity).where(eq(schema.agentActivity.projectId, req.params.projectId)).run();
       db.delete(schema.messages).where(eq(schema.messages.projectId, req.params.projectId)).run();
