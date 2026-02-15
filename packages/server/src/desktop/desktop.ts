@@ -49,7 +49,7 @@ function parseCookies(header: string | undefined): Record<string, string> {
  * Listens for WebSocket upgrades on /desktop/ws, authenticates via cookie,
  * then bridges the WebSocket to a TCP connection to x11vnc on localhost.
  */
-export function registerDesktopProxy(app: FastifyInstance): void {
+export function registerDesktopProxy(app: FastifyInstance, allowedOrigins?: string[] | false): void {
   const config = getDesktopConfig();
 
   const wss = new WebSocketServer({ noServer: true });
@@ -59,6 +59,20 @@ export function registerDesktopProxy(app: FastifyInstance): void {
 
     // Only handle /desktop/ws — let Socket.IO handle /socket.io/
     if (!url.startsWith("/desktop/ws")) return;
+
+    // Verify Origin header to prevent cross-site WebSocket hijacking.
+    // Missing Origin is allowed (non-browser clients), but a present Origin must match.
+    const origin = req.headers.origin;
+    if (origin) {
+      const allowed = allowedOrigins === false
+        ? false
+        : Array.isArray(allowedOrigins) && allowedOrigins.includes(origin);
+      if (!allowed) {
+        socket.write("HTTP/1.1 403 Forbidden\r\n\r\n");
+        socket.destroy();
+        return;
+      }
+    }
 
     // Authenticate via cookie
     const cookies = parseCookies(req.headers.cookie);

@@ -5,7 +5,7 @@ import fastifyCookie from "@fastify/cookie";
 import fastifyStatic from "@fastify/static";
 import multipart from "@fastify/multipart";
 import { Server } from "socket.io";
-import { resolve, dirname, join } from "node:path";
+import { resolve, dirname, join, sep } from "node:path";
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { execSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -52,6 +52,7 @@ import {
   createSession,
   validateSession,
   destroySession,
+  rotateSession,
 } from "./auth/auth.js";
 import { discoverModelPacks } from "./models3d/model-packs.js";
 import { discoverEnvironmentPacks } from "./models3d/environment-packs.js";
@@ -107,6 +108,42 @@ import {
 import type { ProviderType } from "@otterbot/shared";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+
+// ---------------------------------------------------------------------------
+// CORS origin helper
+// ---------------------------------------------------------------------------
+
+function getCorsOrigin(): string[] | false {
+  const env = process.env.OTTERBOT_ALLOWED_ORIGIN;
+  if (!env) return false; // same-origin only
+  return env.split(",").map((o) => o.trim()).filter(Boolean);
+}
+
+const corsOrigin = getCorsOrigin();
+
+// ---------------------------------------------------------------------------
+// Rate limiter (in-memory sliding window)
+// ---------------------------------------------------------------------------
+
+class RateLimiter {
+  private attempts = new Map<string, number[]>();
+  constructor(private maxAttempts: number, private windowMs: number) {}
+
+  check(key: string): boolean {
+    const now = Date.now();
+    const timestamps = this.attempts.get(key) ?? [];
+    const recent = timestamps.filter((t) => now - t < this.windowMs);
+    if (recent.length >= this.maxAttempts) {
+      this.attempts.set(key, recent);
+      return false; // rate limited
+    }
+    recent.push(now);
+    this.attempts.set(key, recent);
+    return true; // allowed
+  }
+}
+
+const authLimiter = new RateLimiter(5, 60_000);
 
 // ---------------------------------------------------------------------------
 // Public API path whitelist (no auth required)
@@ -178,7 +215,7 @@ async function main() {
   const dataDir = process.env.WORKSPACE_ROOT ?? resolve(__dirname, "../../../docker/otterbot");
   const tls = ensureSelfSignedCert(join(dataDir, "data"));
   const app = Fastify({ logger: false, https: { key: tls.key, cert: tls.cert } });
-  await app.register(cors, { origin: true, credentials: true });
+  await app.register(cors, { origin: corsOrigin, credentials: true });
   await app.register(fastifyCookie);
   await app.register(multipart, { limits: { fileSize: 50 * 1024 * 1024 } });
 
@@ -249,12 +286,12 @@ async function main() {
   const io = new Server<ClientToServerEvents, ServerToClientEvents>(
     app.server,
     {
-      cors: { origin: true, credentials: true },
+      cors: { origin: corsOrigin, credentials: true },
     },
   );
 
   // Register VNC WebSocket proxy (must be before Socket.IO starts listening)
-  registerDesktopProxy(app);
+  registerDesktopProxy(app, corsOrigin);
 
   // =========================================================================
   // Socket.IO auth middleware
@@ -456,6 +493,12 @@ async function main() {
       searchBaseUrl?: string;
     };
   }>("/api/setup/complete", async (req, reply) => {
+    const clientIp = req.ip;
+    if (!authLimiter.check(clientIp)) {
+      reply.code(429);
+      return { error: "Too many attempts. Try again later." };
+    }
+
     if (isSetupComplete()) {
       reply.code(400);
       return { error: "Setup already completed" };
@@ -560,6 +603,7 @@ async function main() {
       path: "/",
       httpOnly: true,
       sameSite: "lax",
+      secure: true,
       maxAge,
     });
 
@@ -574,6 +618,12 @@ async function main() {
   app.post<{ Body: { passphrase: string } }>(
     "/api/auth/login",
     async (req, reply) => {
+      const clientIp = req.ip;
+      if (!authLimiter.check(clientIp)) {
+        reply.code(429);
+        return { error: "Too many login attempts. Try again later." };
+      }
+
       if (!isSetupComplete()) {
         reply.code(400);
         return { error: "Setup not complete" };
@@ -591,11 +641,14 @@ async function main() {
         return { error: "Invalid passphrase" };
       }
 
-      const { token, maxAge } = createSession();
+      // Rotate session to prevent fixation attacks
+      const oldToken = req.cookies.sb_session;
+      const { token, maxAge } = rotateSession(oldToken);
       reply.setCookie("sb_session", token, {
         path: "/",
         httpOnly: true,
         sameSite: "lax",
+        secure: true,
         maxAge,
       });
 
@@ -845,7 +898,7 @@ async function main() {
       }
       const relPath = req.query.path || "";
       const target = normalize(resolvePath(projectRoot, relPath));
-      if (!target.startsWith(projectRoot)) {
+      if (target !== projectRoot && !target.startsWith(projectRoot + sep)) {
         reply.code(403);
         return { error: "Access denied" };
       }
@@ -895,7 +948,7 @@ async function main() {
         return { error: "path query parameter required" };
       }
       const target = normalize(resolvePath(projectRoot, relPath));
-      if (!target.startsWith(projectRoot)) {
+      if (target !== projectRoot && !target.startsWith(projectRoot + sep)) {
         reply.code(403);
         return { error: "Access denied" };
       }
@@ -924,7 +977,7 @@ async function main() {
         return { error: "path query parameter required" };
       }
       const target = normalize(resolvePath(projectRoot, relPath));
-      if (!target.startsWith(projectRoot)) {
+      if (target !== projectRoot && !target.startsWith(projectRoot + sep)) {
         reply.code(403);
         return { error: "Access denied" };
       }

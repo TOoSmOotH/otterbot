@@ -164,6 +164,14 @@ export const customModels = sqliteTable("custom_models", {
     .$defaultFn(() => new Date().toISOString()),
 });
 
+export const sessions = sqliteTable("sessions", {
+  token: text("token").primaryKey(),
+  expiresAt: text("expires_at").notNull(),
+  createdAt: text("created_at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+});
+
 export const providers = sqliteTable("providers", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),

@@ -20,6 +20,10 @@ const BLOCKED_COMMANDS: { pattern: RegExp; reason: string; suggestion?: string }
   { pattern: /rm\s+(-[a-zA-Z]*f[a-zA-Z]*\s+)?\/\b/, reason: "rm targeting root filesystem paths is not permitted", suggestion: "Only delete files within your workspace" },
   { pattern: /\bmkfs\b/, reason: "Formatting filesystems is not permitted" },
   { pattern: /\bdd\b.*\bof=\/dev\//, reason: "Raw disk writes are not permitted" },
+  { pattern: /\bcurl\b/, reason: "curl can exfiltrate data or fetch malicious payloads", suggestion: "Use the web_browse tool to fetch web content" },
+  { pattern: /\bwget\b/, reason: "wget can exfiltrate data or fetch malicious payloads", suggestion: "Use the web_browse tool to fetch web content" },
+  { pattern: /\b(?:nc|ncat|netcat)\b/, reason: "Netcat can open arbitrary network connections", suggestion: "Use higher-level tools for network operations" },
+  { pattern: /\bsocat\b/, reason: "socat can open arbitrary network connections", suggestion: "Use higher-level tools for network operations" },
 ];
 
 function checkBlockedCommand(command: string): string | null {

@@ -12,7 +12,39 @@
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { resolve, dirname } from "node:path";
-import { execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
+
+// ---------------------------------------------------------------------------
+// Input validation helpers
+// ---------------------------------------------------------------------------
+
+const PACKAGE_NAME_RE = /^[a-zA-Z0-9][a-zA-Z0-9._@/\-]*$/;
+const MAX_PACKAGE_NAME_LEN = 214;
+
+function validatePackageName(name: string): void {
+  if (!name || name.length > MAX_PACKAGE_NAME_LEN || !PACKAGE_NAME_RE.test(name)) {
+    throw new Error(`Invalid package name: ${name}`);
+  }
+}
+
+function validateKeyUrl(url: string): void {
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== "https:") {
+      throw new Error(`Key URL must use https: scheme, got ${parsed.protocol}`);
+    }
+  } catch (err) {
+    if (err instanceof Error && err.message.startsWith("Key URL must use")) throw err;
+    throw new Error(`Invalid key URL: ${url}`);
+  }
+}
+
+function validateKeyPath(path: string): void {
+  const resolved = resolve(path);
+  if (!resolved.startsWith("/etc/apt/keyrings/")) {
+    throw new Error(`Key path must be under /etc/apt/keyrings/, got ${resolved}`);
+  }
+}
 
 export interface PackageEntry {
   name: string;
@@ -172,12 +204,13 @@ export interface InstallResult {
 
 /** Install an apt package immediately via sudo and add to manifest */
 export function installAptPackage(name: string, addedBy?: string): InstallResult {
+  validatePackageName(name);
   const alreadyInManifest = !addAptPackage(name, addedBy);
 
   try {
-    execSync("sudo apt-get update", { stdio: "pipe", timeout: 60_000 });
-    const output = execSync(
-      `sudo apt-get install -y --no-install-recommends ${name}`,
+    execFileSync("sudo", ["apt-get", "update"], { stdio: "pipe", timeout: 60_000 });
+    const output = execFileSync(
+      "sudo", ["apt-get", "install", "-y", "--no-install-recommends", name],
       { stdio: "pipe", timeout: 120_000 },
     );
     return {
@@ -204,11 +237,13 @@ export function installNpmPackage(
   version?: string,
   addedBy?: string,
 ): InstallResult {
+  validatePackageName(name);
+  if (version) validatePackageName(version);
   const alreadyInManifest = !addNpmPackage(name, version, addedBy);
   const spec = version ? `${name}@${version}` : name;
 
   try {
-    const output = execSync(`sudo npm install -g ${spec}`, {
+    const output = execFileSync("sudo", ["npm", "install", "-g", spec], {
       stdio: "pipe",
       timeout: 180_000,
       env: { ...process.env, NPM_CONFIG_PREFIX: process.env.NPM_CONFIG_PREFIX ?? "/otterbot/tools" },
@@ -233,11 +268,12 @@ export function installNpmPackage(
 
 /** Uninstall an apt package immediately via sudo and remove from manifest */
 export function uninstallAptPackage(name: string): InstallResult {
+  validatePackageName(name);
   const wasInManifest = removeAptPackage(name);
 
   try {
-    const output = execSync(
-      `sudo apt-get remove -y ${name}`,
+    const output = execFileSync(
+      "sudo", ["apt-get", "remove", "-y", name],
       { stdio: "pipe", timeout: 120_000 },
     );
     return {
@@ -256,10 +292,11 @@ export function uninstallAptPackage(name: string): InstallResult {
 
 /** Uninstall an npm package immediately (global) and remove from manifest */
 export function uninstallNpmPackage(name: string): InstallResult {
+  validatePackageName(name);
   const wasInManifest = removeNpmPackage(name);
 
   try {
-    const output = execSync(`sudo npm uninstall -g ${name}`, {
+    const output = execFileSync("sudo", ["npm", "uninstall", "-g", name], {
       stdio: "pipe",
       timeout: 60_000,
       env: { ...process.env, NPM_CONFIG_PREFIX: process.env.NPM_CONFIG_PREFIX ?? "/otterbot/tools" },
@@ -286,30 +323,40 @@ export function uninstallNpmPackage(name: string): InstallResult {
 export function installRepo(
   repo: Omit<RepoEntry, "addedAt">,
 ): InstallResult {
+  validatePackageName(repo.name);
+  validateKeyUrl(repo.keyUrl);
+  validateKeyPath(repo.keyPath);
   const alreadyInManifest = !addRepo(repo);
 
   try {
     // Create keyrings directory if needed
-    execSync("sudo install -m 0755 -d /etc/apt/keyrings", {
+    execFileSync("sudo", ["install", "-m", "0755", "-d", "/etc/apt/keyrings"], {
       stdio: "pipe",
       timeout: 30_000,
     });
 
-    // Download and dearmor the GPG key
-    execSync(
-      `curl -fsSL "${repo.keyUrl}" | sudo gpg --dearmor -o "${repo.keyPath}"`,
-      { stdio: "pipe", timeout: 30_000, shell: "/bin/sh" },
-    );
+    // Download the GPG key (to a temp file, then dearmor)
+    const tmpKeyPath = `/tmp/otterbot-key-${repo.name}.gpg`;
+    execFileSync("curl", ["-fsSL", "-o", tmpKeyPath, repo.keyUrl], {
+      stdio: "pipe",
+      timeout: 30_000,
+    });
+    execFileSync("sudo", ["gpg", "--dearmor", "-o", repo.keyPath, tmpKeyPath], {
+      stdio: "pipe",
+      timeout: 30_000,
+    });
 
-    // Write the sources list file
+    // Write the sources list file safely (write to tmp, then sudo cp)
     const sourcesPath = `/etc/apt/sources.list.d/${repo.name}.list`;
-    execSync(
-      `echo "${repo.source}" | sudo tee "${sourcesPath}" > /dev/null`,
-      { stdio: "pipe", timeout: 10_000, shell: "/bin/sh" },
-    );
+    const tmpSourcesPath = `/tmp/otterbot-sources-${repo.name}.list`;
+    writeFileSync(tmpSourcesPath, repo.source + "\n", "utf-8");
+    execFileSync("sudo", ["cp", tmpSourcesPath, sourcesPath], {
+      stdio: "pipe",
+      timeout: 10_000,
+    });
 
     // Update apt cache for the new repo
-    execSync("sudo apt-get update", { stdio: "pipe", timeout: 60_000 });
+    execFileSync("sudo", ["apt-get", "update"], { stdio: "pipe", timeout: 60_000 });
 
     return { success: true, alreadyInManifest };
   } catch (err) {
@@ -326,6 +373,7 @@ export function installRepo(
 
 /** Remove an apt repository: delete source file and GPG key */
 export function uninstallRepo(name: string): InstallResult {
+  validatePackageName(name);
   const manifest = readManifest();
   const repo = manifest.repos.find((r) => r.name === name);
   const wasInManifest = removeRepo(name);
@@ -334,18 +382,19 @@ export function uninstallRepo(name: string): InstallResult {
     // Remove sources list file
     const sourcesPath = `/etc/apt/sources.list.d/${name}.list`;
     try {
-      execSync(`sudo rm -f "${sourcesPath}"`, { stdio: "pipe", timeout: 10_000 });
+      execFileSync("sudo", ["rm", "-f", sourcesPath], { stdio: "pipe", timeout: 10_000 });
     } catch { /* ignore if file doesn't exist */ }
 
     // Remove GPG key
     if (repo?.keyPath) {
+      validateKeyPath(repo.keyPath);
       try {
-        execSync(`sudo rm -f "${repo.keyPath}"`, { stdio: "pipe", timeout: 10_000 });
+        execFileSync("sudo", ["rm", "-f", repo.keyPath], { stdio: "pipe", timeout: 10_000 });
       } catch { /* ignore if file doesn't exist */ }
     }
 
     // Update apt cache
-    execSync("sudo apt-get update", { stdio: "pipe", timeout: 60_000 });
+    execFileSync("sudo", ["apt-get", "update"], { stdio: "pipe", timeout: 60_000 });
 
     return { success: true, alreadyInManifest: !wasInManifest };
   } catch (err) {

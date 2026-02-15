@@ -25,7 +25,7 @@ export function getDb() {
         "OTTERBOT_DB_KEY environment variable is required. Set it in your .env file.",
       );
     }
-    sqlite.pragma(`key='${dbKey}'`);
+    sqlite.pragma(`key='${dbKey.replace(/'/g, "''")}'`);
 
     sqlite.pragma("journal_mode = WAL");
     sqlite.pragma("foreign_keys = ON");
@@ -196,6 +196,12 @@ export async function migrateDb() {
   } catch {
     // Column already exists — ignore
   }
+
+  db.run(sql`CREATE TABLE IF NOT EXISTS sessions (
+    token TEXT PRIMARY KEY,
+    expires_at TEXT NOT NULL,
+    created_at TEXT NOT NULL
+  )`);
 
   db.run(sql`CREATE TABLE IF NOT EXISTS config (
     key TEXT PRIMARY KEY,
