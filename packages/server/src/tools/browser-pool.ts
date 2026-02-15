@@ -38,26 +38,25 @@ export async function getBrowser(): Promise<Browser> {
   // Dynamic import — playwright may not be installed yet
   const { chromium } = await import("playwright");
 
+  const commonArgs = [
+    "--no-sandbox",
+    "--disable-setuid-sandbox",
+    "--disable-dev-shm-usage",
+    // Isolate from any manually-opened Chrome on the desktop
+    "--user-data-dir=/tmp/smoothbot-browser-profile",
+  ];
+
   if (desktopEnabled) {
     // Headed mode — browser visible on the virtual desktop
     browserInstance = await chromium.launch({
       headless: false,
-      args: [
-        "--no-sandbox",
-        "--disable-setuid-sandbox",
-        "--disable-dev-shm-usage",
-      ],
+      args: commonArgs,
     });
   } else {
     // Headless mode — default behavior
     browserInstance = await chromium.launch({
       headless: true,
-      args: [
-        "--no-sandbox",
-        "--disable-setuid-sandbox",
-        "--disable-dev-shm-usage",
-        "--disable-gpu",
-      ],
+      args: [...commonArgs, "--disable-gpu"],
     });
   }
 

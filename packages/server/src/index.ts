@@ -329,6 +329,11 @@ async function main() {
       emitAgentSpawned(io, coo);
       setupSocketHandlers(io, bus, coo, registry);
       console.log(`COO agent started. (model=${coo.toData().model}, provider=${coo.toData().provider})`);
+
+      // Recover active projects from previous run (non-blocking)
+      coo.recoverActiveProjects().catch((err) => {
+        console.error("Failed to recover active projects:", err);
+      });
     } catch (err) {
       console.error("Failed to start COO agent:", err);
     }

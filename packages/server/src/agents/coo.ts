@@ -19,7 +19,7 @@ import { getDb, schema } from "../db/index.js";
 import { Registry } from "../registry/registry.js";
 import type { MessageBus } from "../bus/message-bus.js";
 import type { WorkspaceManager } from "../workspace/workspace.js";
-import { eq } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import { getConfig } from "../auth/auth.js";
 import {
   listPackages,
@@ -1097,6 +1097,183 @@ The user can see everything on the desktop in real-time.`;
       default:
         return `Unknown action: ${action}`;
     }
+  }
+
+  /** Re-spawn TeamLeads for any projects that are still active in the DB */
+  async recoverActiveProjects(): Promise<void> {
+    const db = getDb();
+    const activeProjects = db
+      .select()
+      .from(schema.projects)
+      .where(eq(schema.projects.status, "active"))
+      .all();
+
+    if (activeProjects.length === 0) {
+      console.log("[COO] No active projects to recover.");
+      return;
+    }
+
+    console.log(`[COO] Recovering ${activeProjects.length} active project(s)...`);
+    for (const project of activeProjects) {
+      try {
+        await this.recoverProject(project);
+        console.log(`[COO] Recovered project "${project.name}" (${project.id})`);
+      } catch (err) {
+        console.error(`[COO] Failed to recover project "${project.name}" (${project.id}):`, err);
+      }
+    }
+  }
+
+  private async recoverProject(project: {
+    id: string;
+    name: string;
+    description: string;
+    charter: string | null;
+  }): Promise<void> {
+    const db = getDb();
+
+    // Ensure workspace exists (idempotent)
+    this.workspace.createProject(project.id);
+
+    // Reset orphaned in_progress tasks back to backlog (their workers are dead)
+    const orphanedTasks = db
+      .select()
+      .from(schema.kanbanTasks)
+      .where(
+        and(
+          eq(schema.kanbanTasks.projectId, project.id),
+          eq(schema.kanbanTasks.column, "in_progress"),
+        ),
+      )
+      .all();
+
+    for (const task of orphanedTasks) {
+      db.update(schema.kanbanTasks)
+        .set({
+          column: "backlog",
+          assigneeAgentId: null,
+          updatedAt: new Date().toISOString(),
+        })
+        .where(eq(schema.kanbanTasks.id, task.id))
+        .run();
+
+      // Emit UI update for each reset task
+      const updated = db
+        .select()
+        .from(schema.kanbanTasks)
+        .where(eq(schema.kanbanTasks.id, task.id))
+        .get();
+      if (updated) {
+        this.onKanbanTaskUpdated?.(updated as unknown as KanbanTask);
+      }
+    }
+
+    if (orphanedTasks.length > 0) {
+      console.log(`[COO] Reset ${orphanedTasks.length} orphaned in_progress task(s) to backlog for project ${project.id}`);
+    }
+
+    // Spawn a fresh TeamLead (same logic as createProject but skip DB insert + guards)
+    const teamLead = new TeamLead({
+      bus: this.bus,
+      workspace: this.workspace,
+      projectId: project.id,
+      parentId: this.id,
+      modelPackId: getRandomModelPackId(),
+      onAgentSpawned: this.onAgentSpawned,
+      onStatusChange: this.onStatusChange,
+      onKanbanChange: (event, task) => {
+        if (event === "created") this.onKanbanTaskCreated?.(task);
+        else if (event === "updated") this.onKanbanTaskUpdated?.(task);
+        else if (event === "deleted") this.onKanbanTaskDeleted?.(task.id, task.projectId);
+      },
+      onAgentStream: this._onAgentStream,
+      onAgentThinking: this._onAgentThinking,
+      onAgentThinkingEnd: this._onAgentThinkingEnd,
+      onAgentToolCall: this._onAgentToolCall,
+    });
+
+    this.teamLeads.set(project.id, teamLead);
+    this.onAgentSpawned?.(teamLead);
+
+    // Build and send recovery directive
+    const tasks = db
+      .select()
+      .from(schema.kanbanTasks)
+      .where(eq(schema.kanbanTasks.projectId, project.id))
+      .all();
+
+    const directive = this.buildRecoveryDirective(project, tasks);
+    this.sendMessage(teamLead.id, MessageType.Directive, directive, {
+      projectId: project.id,
+      projectName: project.name,
+    });
+  }
+
+  private buildRecoveryDirective(
+    project: { name: string; description: string; charter: string | null },
+    tasks: Array<{
+      id: string;
+      title: string;
+      description: string;
+      column: string;
+      blockedBy: string[];
+      completionReport: string | null;
+    }>,
+  ): string {
+    const lines: string[] = [
+      "[RECOVERY] The server was restarted. You are resuming work on an existing project.",
+      "",
+      `PROJECT: ${project.name}`,
+      `DESCRIPTION: ${project.description}`,
+    ];
+
+    if (project.charter) {
+      lines.push(`CHARTER: ${project.charter}`);
+    }
+
+    const backlog = tasks.filter((t) => t.column === "backlog");
+    const done = tasks.filter((t) => t.column === "done");
+
+    if (backlog.length > 0 || done.length > 0) {
+      lines.push("", "KANBAN BOARD:");
+
+      if (backlog.length > 0) {
+        lines.push(`BACKLOG (${backlog.length}):`);
+        for (const t of backlog) {
+          const blocked = t.blockedBy.length > 0 ? ` [blockedBy: ${t.blockedBy.join(", ")}]` : "";
+          lines.push(`  - ${t.title} (${t.id})${blocked}`);
+          if (t.description) {
+            lines.push(`    ${t.description.slice(0, 200)}${t.description.length > 200 ? "..." : ""}`);
+          }
+        }
+      }
+
+      if (done.length > 0) {
+        lines.push(`DONE (${done.length}):`);
+        for (const t of done) {
+          lines.push(`  - ${t.title} (${t.id})`);
+        }
+      }
+    }
+
+    // Include completion reports from done tasks
+    const reports = tasks.filter((t) => t.completionReport);
+    if (reports.length > 0) {
+      lines.push("", "COMPLETED TASK REPORTS:");
+      for (const t of reports) {
+        lines.push(`  "${t.title}": ${t.completionReport!.slice(0, 300)}${t.completionReport!.length > 300 ? "..." : ""}`);
+      }
+    }
+
+    lines.push(
+      "",
+      "INSTRUCTIONS:",
+      "- Pick up unblocked backlog tasks by spawning workers.",
+      "- If all tasks are done, run verification and deployment as normal.",
+      "- Do NOT create duplicate tasks for work already on the board.",
+    );
+
+    return lines.join("\n");
   }
 
   /** Load a previous conversation by replaying persisted messages */
