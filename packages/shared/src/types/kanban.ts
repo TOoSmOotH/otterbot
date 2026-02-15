@@ -13,6 +13,7 @@ export interface KanbanTask {
   position: number;
   assigneeAgentId: string | null;
   createdBy: string | null;
+  completionReport: string | null;
   labels: string[];
   blockedBy: string[];
   createdAt: string;
@@ -33,6 +34,7 @@ export interface KanbanTaskUpdate {
   column?: KanbanColumn;
   position?: number;
   assigneeAgentId?: string | null;
+  completionReport?: string;
   labels?: string[];
   blockedBy?: string[];
 }

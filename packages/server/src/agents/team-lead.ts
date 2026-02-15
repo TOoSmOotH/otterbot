@@ -155,6 +155,7 @@ export class TeamLead extends BaseAgent {
   private deploymentRequested = false;
   /** Per-think-cycle call counts — prevents tools from being called repeatedly within a single streamText run */
   private _toolCallCounts = new Map<string, number>();
+  private _pendingWorkerReport = new Map<string, string>();
   private onAgentSpawned?: (agent: BaseAgent) => void;
   private onKanbanChange?: (event: "created" | "updated" | "deleted", task: KanbanTask) => void;
 
@@ -263,10 +264,14 @@ export class TeamLead extends BaseAgent {
     );
 
     // For failures, enrich the task description with what went wrong
-    const updates: { column: string; assigneeAgentId: string; description?: string } = {
+    const updates: { column: string; assigneeAgentId: string; description?: string; completionReport?: string } = {
       column: targetColumn,
       assigneeAgentId: assignee ?? "",
     };
+
+    if (!failed) {
+      updates.completionReport = workerReport;
+    }
 
     if (failed) {
       const snippet = workerReport.length > 500
@@ -301,6 +306,7 @@ export class TeamLead extends BaseAgent {
       if (task) {
         reportingTaskTitle = task.title;
         reportingTaskId = task.id;
+        this._pendingWorkerReport.set(task.id, message.content);
       }
     }
 
@@ -994,7 +1000,7 @@ export class TeamLead extends BaseAgent {
 
   private updateKanbanTask(
     taskId: string,
-    updates: { column?: string; assigneeAgentId?: string; description?: string; title?: string; blockedBy?: string[] },
+    updates: { column?: string; assigneeAgentId?: string; description?: string; title?: string; blockedBy?: string[]; completionReport?: string },
   ): string {
     const db = getDb();
     const existing = db
@@ -1010,6 +1016,17 @@ export class TeamLead extends BaseAgent {
     if (updates.description !== undefined) setValues.description = updates.description;
     if (updates.title !== undefined) setValues.title = updates.title;
     if (updates.blockedBy !== undefined) setValues.blockedBy = updates.blockedBy;
+
+    // Attach completion report: explicit value takes priority, otherwise use pending worker report
+    if (updates.completionReport !== undefined) {
+      setValues.completionReport = updates.completionReport;
+    } else if (updates.column === "done") {
+      const pending = this._pendingWorkerReport.get(taskId);
+      if (pending) {
+        setValues.completionReport = pending;
+        this._pendingWorkerReport.delete(taskId);
+      }
+    }
 
     db.update(schema.kanbanTasks)
       .set(setValues)

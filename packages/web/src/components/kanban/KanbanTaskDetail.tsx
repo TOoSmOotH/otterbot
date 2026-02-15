@@ -94,6 +94,18 @@ export function KanbanTaskDetail({
             </section>
           )}
 
+          {/* Completion Report */}
+          {task.completionReport && (
+            <section>
+              <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1.5">
+                Completion Report
+              </h3>
+              <p className="whitespace-pre-wrap text-foreground/90 leading-relaxed">
+                {task.completionReport}
+              </p>
+            </section>
+          )}
+
           {/* Blocked By */}
           {blockers.length > 0 && (
             <section>

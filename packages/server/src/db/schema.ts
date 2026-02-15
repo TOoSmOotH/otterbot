@@ -130,6 +130,7 @@ export const kanbanTasks = sqliteTable("kanban_tasks", {
     .$type<string[]>()
     .notNull()
     .default([]),
+  completionReport: text("completion_report"),
   createdAt: text("created_at")
     .notNull()
     .$defaultFn(() => new Date().toISOString()),
