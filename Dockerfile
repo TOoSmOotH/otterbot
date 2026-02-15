@@ -104,7 +104,7 @@ RUN node packages/server/node_modules/playwright/cli.js install chromium
 # Make Playwright's Chromium available as the system default browser.
 # Wrapper script passes --no-sandbox (required in containers).
 RUN CHROME_BIN=$(find /opt/playwright -name chrome -type f -path '*/chrome-linux*/chrome' | head -1) \
-    && printf '#!/bin/sh\nexec "%s" --no-sandbox --disable-dev-shm-usage "$@"\n' "$CHROME_BIN" \
+    && printf '#!/bin/sh\nexec "%s" --no-sandbox --disable-dev-shm-usage --user-data-dir=/tmp/smoothbot-desktop-browser "$@"\n' "$CHROME_BIN" \
        > /usr/local/bin/chromium-browser \
     && chmod +x /usr/local/bin/chromium-browser \
     && mkdir -p /usr/share/applications \
