@@ -190,6 +190,13 @@ export async function migrateDb() {
     // Column already exists — ignore
   }
 
+  // Idempotent migration: add completion_report to kanban_tasks
+  try {
+    db.run(sql`ALTER TABLE kanban_tasks ADD COLUMN completion_report TEXT`);
+  } catch {
+    // Column already exists — ignore
+  }
+
   db.run(sql`CREATE TABLE IF NOT EXISTS config (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL,
