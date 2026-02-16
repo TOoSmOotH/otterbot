@@ -23,10 +23,10 @@ runs:
       shell: bash
       run: pnpm install --frozen-lockfile
 
-    - name: Run tests
-      shell: bash
-      run: pnpm test
-
     - name: Build
       shell: bash
       run: pnpm build
+
+    - name: Run tests
+      shell: bash
+      run: pnpm test

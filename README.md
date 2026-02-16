@@ -80,6 +80,53 @@ pnpm docker:dev
 
 The container runs Node 22 as a non-root user with Playwright/Chromium and GitHub CLI pre-installed. Data is persisted to `./docker/otterbot/` (or `$OTTERBOT_DATA_DIR`).
 
+### Container Images
+
+Pre-built images are published to GitHub Container Registry:
+
+```bash
+# Stable release
+docker pull ghcr.io/toosmooth/otterbot:latest
+
+# Beta / pre-release
+docker pull ghcr.io/toosmooth/otterbot:beta
+
+# Specific version
+docker pull ghcr.io/toosmooth/otterbot:v0.1.0
+```
+
+## Contributing
+
+### Branching Strategy
+
+Otterbot uses a three-branch promotion model:
+
+```
+dev → beta → main
+```
+
+| Branch | Purpose | Protection | Container Tag |
+|--------|---------|------------|---------------|
+| `dev` | Integration / daily work | None (push freely) | — |
+| `beta` | Pre-release testing | PRs required, CI must pass | `:beta`, `:vX.Y.Z-beta.N` |
+| `main` | Stable releases | PRs required, CI must pass | `:latest`, `:vX.Y.Z` |
+
+### Development Workflow
+
+1. **Push your changes to `dev`** — CI runs tests and build automatically.
+2. **Open a PR from `dev` → `beta`** — once CI passes, merge it. Release-please will create a release PR with a changelog and pre-release version bump.
+3. **Merge the release PR on `beta`** — this publishes a `:beta` container image to GHCR.
+4. **Open a PR from `beta` → `main`** — once CI passes, merge it. Release-please will create a release PR with a stable version bump.
+5. **Merge the release PR on `main`** — this publishes the `:latest` container image to GHCR.
+
+### Commit Convention
+
+This project uses [Conventional Commits](https://www.conventionalcommits.org/) for automated versioning:
+
+- `fix: ...` → patch bump (0.1.0 → 0.1.1)
+- `feat: ...` → minor bump (0.1.0 → 0.2.0)
+- `feat!: ...` or `BREAKING CHANGE:` → major bump (0.1.0 → 1.0.0)
+
 ## Architecture
 
 ### The Message Bus
