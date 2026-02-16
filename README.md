@@ -49,7 +49,7 @@ cp .env.example .env
 # Push the database schema
 pnpm db:push
 
-# Start development servers (backend on :3000, frontend on :5173)
+# Start development servers (backend on :62626, frontend on :5173)
 pnpm dev
 ```
 
@@ -311,7 +311,7 @@ otterbot/
 
 ```bash
 # Development
-pnpm dev              # Start server (:3000) and web (:5173)
+pnpm dev              # Start server (:62626) and web (:5173)
 pnpm dev:server       # Server only
 pnpm dev:web          # Frontend only
 
@@ -349,7 +349,7 @@ cp .env.example .env
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
 | `OTTERBOT_DB_KEY` | **Yes** | — | Encryption key for the SQLite database |
-| `PORT` | | `3000` | Server port |
+| `PORT` | | `62626` | Server port |
 | `HOST` | | `0.0.0.0` | Server bind host |
 | `DATABASE_URL` | | `file:./data/otterbot.db` | SQLite database path |
 | `WORKSPACE_ROOT` | | `./data` | Root directory for agent workspaces |

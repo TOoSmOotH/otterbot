@@ -3,7 +3,7 @@ services:
     build: .
     shm_size: "256m"
     ports:
-      - "62627:3000"
+      - "62627:62626"
     tmpfs:
       - /otterbot
     environment:
@@ -11,7 +11,7 @@ services:
       - ENABLE_DESKTOP=false
       - SUDO_MODE=restricted
     healthcheck:
-      test: ["CMD", "curl", "-fk", "https://localhost:3000/api/setup/status"]
+      test: ["CMD", "curl", "-fk", "https://localhost:62626/api/setup/status"]
       interval: 3s
       timeout: 5s
       retries: 30

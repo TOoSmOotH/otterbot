@@ -7,7 +7,7 @@ services:
         OTTERBOT_GID: ${OTTERBOT_GID:-1000}
     shm_size: "256m"
     ports:
-      - "3000:3000"
+      - "62626:62626"
     volumes:
       - ${OTTERBOT_DATA_DIR:-./docker/otterbot}:/otterbot
     environment:
