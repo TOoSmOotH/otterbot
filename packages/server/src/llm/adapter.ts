@@ -2,7 +2,7 @@ import { createAnthropic } from "@ai-sdk/anthropic";
 import { createOpenAI } from "@ai-sdk/openai";
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import { createOllama } from "ollama-ai-provider";
-import { streamText, generateText, type LanguageModel } from "ai";
+import { streamText, generateText, type LanguageModel, type CoreMessage } from "ai";
 import { getConfig } from "../auth/auth.js";
 import { getDb, schema } from "../db/index.js";
 import { eq } from "drizzle-orm";
@@ -124,10 +124,14 @@ export function resolveModel(config: LLMConfig): LanguageModel {
   }
 }
 
-export interface ChatMessage {
-  role: "system" | "user" | "assistant";
-  content: string;
-}
+/**
+ * ChatMessage is an alias for the Vercel AI SDK's CoreMessage type.
+ * This supports the standard system/user/assistant roles with string content,
+ * as well as richer message types needed for tool-call and tool-result
+ * round-trips (e.g. assistant messages with tool-call parts, tool messages
+ * with results).
+ */
+export type ChatMessage = CoreMessage;
 
 /** Generate a complete response (non-streaming) */
 export async function generate(

@@ -12,6 +12,11 @@ import type { MessageBus } from "../bus/message-bus.js";
 import type { ChatMessage, LLMConfig } from "../llm/adapter.js";
 import { stream, resolveProviderCredentials } from "../llm/adapter.js";
 import { RetryError } from "ai";
+import {
+  containsKimiToolMarkup,
+  findToolMarkupStart,
+  parseKimiToolCalls,
+} from "../llm/kimi-tool-parser.js";
 import { eq } from "drizzle-orm";
 import { calculateCost } from "../settings/model-pricing.js";
 
@@ -276,6 +281,10 @@ export abstract class BaseAgent {
       return { text: "", thinking: undefined, hadToolCalls: false };
     }
 
+    // Track whether we've entered Kimi tool-call markup so we can
+    // suppress streaming those tokens to the user.
+    let kimiMarkupDetected = false;
+
     // Process first part
     const processPart = (part: any) => {
       if (part.type === "reasoning") {
@@ -287,8 +296,26 @@ export abstract class BaseAgent {
           wasReasoning = false;
           onReasoningEnd?.(messageId);
         }
+
+        // Always accumulate the full response (needed for parsing later)
         fullResponse += part.textDelta;
-        onToken?.(part.textDelta, messageId);
+
+        if (!kimiMarkupDetected) {
+          // Check if we've hit the start of Kimi tool markup
+          const markupIdx = findToolMarkupStart(fullResponse);
+          if (markupIdx !== -1) {
+            kimiMarkupDetected = true;
+            // Emit only the portion of this token that falls before the markup
+            const alreadyEmitted = fullResponse.length - part.textDelta.length;
+            const safeEnd = markupIdx - alreadyEmitted;
+            if (safeEnd > 0) {
+              onToken?.(part.textDelta.slice(0, safeEnd), messageId);
+            }
+          } else {
+            onToken?.(part.textDelta, messageId);
+          }
+        }
+        // If kimiMarkupDetected, swallow the token (don't forward to onToken)
       } else if (part.type === "tool-call") {
         hadToolCalls = true;
         console.log(`[Agent ${this.id}] Tool call: ${part.toolName}(${JSON.stringify(part.args ?? {}).slice(0, 200)})`);
@@ -332,7 +359,116 @@ export abstract class BaseAgent {
     // Capture token usage from the stream result (fire-and-forget)
     this.captureTokenUsage(result as any, messageId);
 
+    // Detect Kimi K2.5 proprietary tool-call markup in the response.
+    // If found, execute the tools and recurse for the follow-up response.
+    if (tools && containsKimiToolMarkup(fullResponse)) {
+      console.log(`[Agent ${this.id}] Kimi tool markup detected — executing tool calls`);
+      return this.executeKimiToolCalls(
+        fullResponse,
+        reasoning || undefined,
+        tools,
+        onToken,
+        onReasoning,
+        onReasoningEnd,
+        0,
+      );
+    }
+
     return { text: fullResponse, thinking: reasoning || undefined, hadToolCalls };
+  }
+
+  /**
+   * Handle Kimi K2.5 proprietary tool-call markup.
+   *
+   * Parses the markup, executes each tool, pushes assistant + tool messages
+   * into conversation history, and recurses via runStream() so the model
+   * can see the tool results and produce a follow-up response.
+   */
+  private async executeKimiToolCalls(
+    rawResponse: string,
+    thinking: string | undefined,
+    tools: Record<string, unknown>,
+    onToken?: (token: string, messageId: string) => void,
+    onReasoning?: (token: string, messageId: string) => void,
+    onReasoningEnd?: (messageId: string) => void,
+    depth: number = 0,
+  ): Promise<{ text: string; thinking: string | undefined; hadToolCalls: boolean }> {
+    const MAX_DEPTH = 5;
+    if (depth >= MAX_DEPTH) {
+      console.warn(`[Agent ${this.id}] Kimi tool recursion depth limit (${MAX_DEPTH}) reached — returning as-is`);
+      const { cleanText } = parseKimiToolCalls(rawResponse);
+      return { text: cleanText || rawResponse, thinking, hadToolCalls: true };
+    }
+
+    const { cleanText, toolCalls } = parseKimiToolCalls(rawResponse);
+
+    if (toolCalls.length === 0) {
+      // Markup was malformed — treat as a normal response
+      return { text: rawResponse, thinking, hadToolCalls: false };
+    }
+
+    // Log each tool call
+    for (const tc of toolCalls) {
+      console.log(`[Agent ${this.id}] Kimi tool call: ${tc.name}(${JSON.stringify(tc.args).slice(0, 200)})`);
+      this.onAgentToolCall?.(this.id, tc.name, tc.args);
+    }
+
+    // Execute each tool and collect results
+    const toolResults: { toolCallId: string; toolName: string; result: unknown }[] = [];
+    for (const tc of toolCalls) {
+      const toolDef = tools[tc.name] as { execute?: (args: Record<string, unknown>) => Promise<unknown> } | undefined;
+      let result: unknown;
+      if (toolDef?.execute) {
+        try {
+          result = await toolDef.execute(tc.args);
+        } catch (err) {
+          result = `Error: ${err instanceof Error ? err.message : String(err)}`;
+        }
+      } else {
+        result = `Error: Tool "${tc.name}" not found or has no execute method`;
+      }
+      toolResults.push({ toolCallId: tc.toolCallId, toolName: tc.name, result });
+
+      const resultStr = typeof result === "string" ? result : JSON.stringify(result ?? "");
+      console.log(`[Agent ${this.id}] Kimi tool result (${tc.name}): ${resultStr.slice(0, 300)}`);
+    }
+
+    // Push assistant message with tool-call parts into conversation history
+    this.conversationHistory.push({
+      role: "assistant" as const,
+      content: [
+        ...(cleanText ? [{ type: "text" as const, text: cleanText }] : []),
+        ...toolCalls.map((tc) => ({
+          type: "tool-call" as const,
+          toolCallId: tc.toolCallId,
+          toolName: tc.name,
+          args: tc.args,
+        })),
+      ],
+    });
+
+    // Push tool-result message
+    this.conversationHistory.push({
+      role: "tool" as const,
+      content: toolResults.map((tr) => ({
+        type: "tool-result" as const,
+        toolCallId: tr.toolCallId,
+        toolName: tr.toolName,
+        result: typeof tr.result === "string" ? tr.result : JSON.stringify(tr.result ?? ""),
+      })),
+    });
+
+    // Recurse: let the model see tool results and produce a follow-up
+    const followUp = await this.runStream(tools, onToken, onReasoning, onReasoningEnd);
+
+    // Combine thinking from both rounds
+    const combinedThinking = [thinking, followUp.thinking].filter(Boolean).join("\n\n");
+
+    return {
+      text: followUp.text,
+      thinking: combinedThinking || undefined,
+      hadToolCalls: true,
+    };
   }
 
   /** Get the agent's data representation */
