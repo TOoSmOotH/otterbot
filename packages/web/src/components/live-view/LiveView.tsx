@@ -129,7 +129,8 @@ export function LiveView({ userProfile, onToggleView }: LiveViewProps) {
             onChange={handleSceneChange}
             className="text-xs bg-secondary border border-border rounded px-2 py-1 text-foreground outline-none focus:ring-1 focus:ring-primary"
           >
-            {scenes.map((s) => (
+            <option value="world-base">Office World</option>
+            {scenes.filter((s) => s.id !== "default-office" && s.id !== "world-base").map((s) => (
               <option key={s.id} value={s.id}>
                 {s.name}
               </option>

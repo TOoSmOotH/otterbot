@@ -20,7 +20,7 @@ export const useEnvironmentStore = create<EnvironmentState>((set, get) => ({
   packs: [],
   scenes: [],
   worldScene: null,
-  activeSceneId: "default-office",
+  activeSceneId: "world-base",
   loading: false,
   loaded: false,
 
@@ -107,7 +107,9 @@ export const useEnvironmentStore = create<EnvironmentState>((set, get) => ({
   },
 
   resolveAssetUrl: (assetRef: string) => {
+    if (!assetRef) return undefined;
     const [packId, assetId] = assetRef.split("/");
+    if (!packId || !assetId) return undefined;
     const pack = get().packs.find((p) => p.id === packId);
     if (!pack) return undefined;
     const asset = pack.assets.find((a) => a.id === assetId);

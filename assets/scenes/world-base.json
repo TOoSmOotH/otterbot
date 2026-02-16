@@ -2,7 +2,6 @@
   "id": "world-base",
   "name": "Office World",
   "props": [
-    {"_comment": "=== MAIN OFFICE FLOOR (5x4 grid of 4x4 tiles) ==="},
     { "asset": "kaykit-prototype-bits/Floor", "position": [-8, -0.5, -2], "receiveShadow": true },
     { "asset": "kaykit-prototype-bits/Floor", "position": [-4, -0.5, -2], "receiveShadow": true },
     { "asset": "kaykit-prototype-bits/Floor", "position": [0, -0.5, -2], "receiveShadow": true },
@@ -24,7 +23,6 @@
     { "asset": "kaykit-prototype-bits/Floor", "position": [4, -0.5, -14], "receiveShadow": true },
     { "asset": "kaykit-prototype-bits/Floor", "position": [8, -0.5, -14], "receiveShadow": true },
 
-    {"_comment": "=== MAIN OFFICE WALLS ==="},
     { "asset": "kaykit-prototype-bits/Wall", "position": [-8, -0.5, -16], "castShadow": true },
     { "asset": "kaykit-prototype-bits/Wall_Window_Open", "position": [-4, -0.5, -16], "castShadow": true },
     { "asset": "kaykit-prototype-bits/Wall", "position": [0, -0.5, -16], "castShadow": true },
@@ -47,26 +45,22 @@
     { "asset": "kaykit-prototype-bits/Wall", "position": [10, -0.5, -10], "rotation": [0, -1.5708, 0], "castShadow": true },
     { "asset": "kaykit-prototype-bits/Wall", "position": [10, -0.5, -14], "rotation": [0, -1.5708, 0], "castShadow": true },
 
-    {"_comment": "=== CORNER PILLARS ==="},
     { "asset": "kaykit-prototype-bits/Pillar_A", "position": [-10, -0.5, 0], "castShadow": true },
     { "asset": "kaykit-prototype-bits/Pillar_A", "position": [10, -0.5, 0], "castShadow": true },
     { "asset": "kaykit-prototype-bits/Pillar_A", "position": [-10, -0.5, -16], "castShadow": true },
     { "asset": "kaykit-prototype-bits/Pillar_A", "position": [10, -0.5, -16], "castShadow": true },
 
-    {"_comment": "=== MAIN OFFICE DESKS ==="},
     { "asset": "kaykit-prototype-bits/Pallet_Large", "position": [-7, 0, -3], "scale": [0.5, 1.6, 0.3], "castShadow": true, "receiveShadow": true },
     { "asset": "kaykit-prototype-bits/Pallet_Large", "position": [-7, 0, -7], "scale": [0.5, 1.6, 0.3], "castShadow": true, "receiveShadow": true },
     { "asset": "kaykit-prototype-bits/Pallet_Large", "position": [7, 0, -3], "scale": [0.5, 1.6, 0.3], "castShadow": true, "receiveShadow": true },
     { "asset": "kaykit-prototype-bits/Pallet_Large", "position": [7, 0, -7], "scale": [0.5, 1.6, 0.3], "castShadow": true, "receiveShadow": true },
     { "asset": "kaykit-prototype-bits/Pallet_Large", "position": [0, 0, -12], "scale": [0.8, 1.6, 0.4], "castShadow": true, "receiveShadow": true },
 
-    {"_comment": "=== DECOR ==="},
     { "asset": "kaykit-prototype-bits/Barrel_A", "position": [8.5, 0.5, -1], "castShadow": true },
     { "asset": "kaykit-prototype-bits/Box_A", "position": [-8.5, 0, -1.5], "scale": 2, "castShadow": true },
     { "asset": "kaykit-prototype-bits/Barrel_B", "position": [-9, 0.5, -15], "castShadow": true },
     { "asset": "kaykit-prototype-bits/Box_B", "position": [9, 0, -14.5], "scale": 2, "castShadow": true },
 
-    {"_comment": "=== HALLWAY FLOOR (extending along positive Z from doorway) ==="},
     { "asset": "kaykit-prototype-bits/Floor", "position": [0, -0.5, 2], "receiveShadow": true },
     { "asset": "kaykit-prototype-bits/Floor", "position": [0, -0.5, 6], "receiveShadow": true },
     { "asset": "kaykit-prototype-bits/Floor", "position": [0, -0.5, 10], "receiveShadow": true },
@@ -74,7 +68,6 @@
     { "asset": "kaykit-prototype-bits/Floor", "position": [0, -0.5, 18], "receiveShadow": true },
     { "asset": "kaykit-prototype-bits/Floor", "position": [0, -0.5, 22], "receiveShadow": true },
 
-    {"_comment": "=== HALLWAY WALLS ==="},
     { "asset": "kaykit-prototype-bits/Wall", "position": [-2, -0.5, 2], "rotation": [0, 1.5708, 0], "castShadow": true },
     { "asset": "kaykit-prototype-bits/Wall", "position": [-2, -0.5, 6], "rotation": [0, 1.5708, 0], "castShadow": true },
     { "asset": "kaykit-prototype-bits/Wall", "position": [-2, -0.5, 10], "rotation": [0, 1.5708, 0], "castShadow": true },
