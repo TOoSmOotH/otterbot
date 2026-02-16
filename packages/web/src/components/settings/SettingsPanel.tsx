@@ -8,10 +8,12 @@ import { SearchTab } from "./SearchTab";
 import { SpeechTab } from "./SpeechTab";
 import { LiveViewTab } from "./LiveViewTab";
 import { OpenCodeTab } from "./OpenCodeTab";
+import { AppearanceTab } from "./AppearanceTab";
 
-type Tab = "providers" | "models" | "templates" | "search" | "speech" | "liveview" | "opencode";
+type Tab = "appearance" | "providers" | "models" | "templates" | "search" | "speech" | "liveview" | "opencode";
 
 const TABS: { id: Tab; label: string }[] = [
+  { id: "appearance", label: "Appearance" },
   { id: "providers", label: "Providers" },
   { id: "models", label: "Models" },
   { id: "templates", label: "Agent Templates" },
@@ -22,7 +24,7 @@ const TABS: { id: Tab; label: string }[] = [
 ];
 
 export function SettingsPanel({ onClose }: { onClose: () => void }) {
-  const [activeTab, setActiveTab] = useState<Tab>("providers");
+  const [activeTab, setActiveTab] = useState<Tab>("appearance");
   const loadSettings = useSettingsStore((s) => s.loadSettings);
   const loading = useSettingsStore((s) => s.loading);
 
@@ -67,7 +69,9 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
 
         {/* Tab content */}
         <div className="flex-1 overflow-y-auto">
-          {loading ? (
+          {activeTab === "appearance" ? (
+            <AppearanceTab />
+          ) : loading ? (
             <div className="flex items-center justify-center h-48 text-sm text-muted-foreground">
               Loading settings...
             </div>

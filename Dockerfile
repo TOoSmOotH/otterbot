@@ -282,7 +282,7 @@ exec setpriv --reuid="${PUID}" --regid="${PGID}" --init-groups \
 EOF
 
 ENV NODE_ENV=production
-ENV PORT=3000
+ENV PORT=62626
 ENV HOST=0.0.0.0
 ENV DATABASE_URL=file:/otterbot/data/otterbot.db
 ENV WORKSPACE_ROOT=/otterbot
@@ -302,7 +302,7 @@ ENV DESKTOP_RESOLUTION=1280x720x24
 ENV VNC_PORT=5900
 ENV SUDO_MODE=restricted
 
-EXPOSE 3000
+EXPOSE 62626
 
 ENTRYPOINT ["tini", "--"]
 CMD ["/app/entrypoint.sh"]
