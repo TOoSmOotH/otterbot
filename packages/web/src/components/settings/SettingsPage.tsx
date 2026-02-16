@@ -9,6 +9,7 @@ import { SearchTab } from "./SearchTab";
 import { SpeechTab } from "./SpeechTab";
 import { LiveViewTab } from "./LiveViewTab";
 import { OpenCodeTab } from "./OpenCodeTab";
+import { PricingTab } from "./PricingTab";
 import { ProfileSection } from "./ProfileSection";
 import { SystemSection } from "./SystemSection";
 import { ChannelsSection } from "./ChannelsSection";
@@ -57,6 +58,8 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
         return <ModelsTab />;
       case "templates":
         return <AgentTemplatesTab />;
+      case "pricing":
+        return <PricingTab />;
       case "search":
         return <SearchTab />;
       case "speech":

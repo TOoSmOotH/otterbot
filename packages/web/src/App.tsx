@@ -17,6 +17,7 @@ import { ProjectList } from "./components/project/ProjectList";
 import { KanbanBoard } from "./components/kanban/KanbanBoard";
 import { FileBrowser } from "./components/project/FileBrowser";
 import { DesktopView } from "./components/desktop/DesktopView";
+import { UsageDashboard } from "./components/usage/UsageDashboard";
 import { useDesktopStore } from "./stores/desktop-store";
 import { initMovementTriggers } from "./lib/movement-triggers";
 import { Group, Panel, Separator, useDefaultLayout, usePanelRef } from "react-resizable-panels";
@@ -76,7 +77,7 @@ interface UserProfile {
   cooName?: string;
 }
 
-type CenterView = "graph" | "live3d" | "charter" | "kanban" | "desktop" | "files";
+type CenterView = "graph" | "live3d" | "charter" | "kanban" | "desktop" | "files" | "usage";
 
 function MainApp() {
   const socket = useSocket();
@@ -331,6 +332,8 @@ function ResizableLayout({
         return activeProjectId ? (
           <FileBrowser projectId={activeProjectId} />
         ) : null;
+      case "usage":
+        return <UsageDashboard />;
       case "desktop":
         return <DesktopView />;
       case "live3d":
@@ -378,6 +381,7 @@ function ResizableLayout({
                 [
                   "graph",
                   ...(activeProjectId ? (["charter", "kanban", "files"] as CenterView[]) : []),
+                  "usage" as CenterView,
                   "desktop" as CenterView,
                 ] as CenterView[]
               ).map((tab) => (
@@ -398,7 +402,9 @@ function ResizableLayout({
                         ? "Board"
                         : tab === "files"
                           ? "Files"
-                          : "Desktop"}
+                          : tab === "usage"
+                            ? "Usage"
+                            : "Desktop"}
                 </button>
               ))}
           </div>

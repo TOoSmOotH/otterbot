@@ -70,6 +70,11 @@ import {
   uninstallRepo,
 } from "./packages/packages.js";
 import {
+  getAllModelPrices,
+  setModelPrice,
+  resetModelPrice,
+} from "./settings/model-pricing.js";
+import {
   getSettings,
   listProviders,
   createProvider,
@@ -1761,6 +1766,143 @@ async function main() {
 
   app.post("/api/settings/opencode/test", async () => {
     return testOpenCodeConnection();
+  });
+
+  // =========================================================================
+  // Pricing settings routes
+  // =========================================================================
+
+  app.get("/api/settings/pricing", async () => {
+    return getAllModelPrices();
+  });
+
+  app.put<{
+    Params: { model: string };
+    Body: { inputPerMillion: number; outputPerMillion: number };
+  }>("/api/settings/pricing/:model", async (req, reply) => {
+    const { inputPerMillion, outputPerMillion } = req.body;
+    if (typeof inputPerMillion !== "number" || typeof outputPerMillion !== "number") {
+      reply.code(400);
+      return { error: "inputPerMillion and outputPerMillion are required numbers" };
+    }
+    setModelPrice(req.params.model, inputPerMillion, outputPerMillion);
+    return { ok: true };
+  });
+
+  app.delete<{
+    Params: { model: string };
+  }>("/api/settings/pricing/:model", async (req) => {
+    resetModelPrice(req.params.model);
+    return { ok: true };
+  });
+
+  // =========================================================================
+  // Usage API routes
+  // =========================================================================
+
+  app.get<{
+    Querystring: { from?: string; to?: string; groupBy?: string };
+  }>("/api/usage/summary", async (req) => {
+    const { getDb, schema } = await import("./db/index.js");
+    const { sql } = await import("drizzle-orm");
+    const db = getDb();
+
+    const conditions: string[] = [];
+    const params: unknown[] = [];
+    if (req.query.from) {
+      conditions.push("timestamp >= ?");
+      params.push(req.query.from);
+    }
+    if (req.query.to) {
+      conditions.push("timestamp <= ?");
+      params.push(req.query.to);
+    }
+    const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+
+    const groupBy = req.query.groupBy;
+    if (groupBy === "day" || groupBy === "hour") {
+      const substr = groupBy === "day" ? "substr(timestamp, 1, 10)" : "substr(timestamp, 1, 13)";
+      const rows = db.all(sql.raw(
+        `SELECT ${substr} as period, SUM(input_tokens) as inputTokens, SUM(output_tokens) as outputTokens, SUM(COALESCE(cost, 0)) as cost FROM token_usage ${where} GROUP BY period ORDER BY period`
+      )) as any[];
+      return rows;
+    }
+
+    if (groupBy === "model") {
+      const rows = db.all(sql.raw(
+        `SELECT model, SUM(input_tokens) as inputTokens, SUM(output_tokens) as outputTokens, SUM(COALESCE(cost, 0)) as cost, COUNT(*) as count FROM token_usage ${where} GROUP BY model ORDER BY cost DESC`
+      )) as any[];
+      return rows;
+    }
+
+    if (groupBy === "agent") {
+      const rows = db.all(sql.raw(
+        `SELECT agent_id as agentId, SUM(input_tokens) as inputTokens, SUM(output_tokens) as outputTokens, SUM(COALESCE(cost, 0)) as cost, COUNT(*) as count FROM token_usage ${where} GROUP BY agent_id ORDER BY cost DESC`
+      )) as any[];
+      return rows;
+    }
+
+    // Default: totals
+    const row = db.get(sql.raw(
+      `SELECT SUM(input_tokens) as totalInputTokens, SUM(output_tokens) as totalOutputTokens, SUM(COALESCE(cost, 0)) as totalCost, COUNT(*) as recordCount FROM token_usage ${where}`
+    )) as any;
+    return {
+      totalInputTokens: row?.totalInputTokens ?? 0,
+      totalOutputTokens: row?.totalOutputTokens ?? 0,
+      totalCost: row?.totalCost ?? 0,
+      recordCount: row?.recordCount ?? 0,
+    };
+  });
+
+  app.get<{
+    Querystring: { from?: string; to?: string };
+  }>("/api/usage/by-model", async (req) => {
+    const { getDb } = await import("./db/index.js");
+    const { sql } = await import("drizzle-orm");
+    const db = getDb();
+
+    const conditions: string[] = [];
+    if (req.query.from) conditions.push(`timestamp >= '${req.query.from}'`);
+    if (req.query.to) conditions.push(`timestamp <= '${req.query.to}'`);
+    const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+
+    const rows = db.all(sql.raw(
+      `SELECT model, SUM(input_tokens) as inputTokens, SUM(output_tokens) as outputTokens, SUM(COALESCE(cost, 0)) as cost, COUNT(*) as count FROM token_usage ${where} GROUP BY model ORDER BY cost DESC`
+    )) as any[];
+    return rows;
+  });
+
+  app.get<{
+    Querystring: { from?: string; to?: string };
+  }>("/api/usage/by-agent", async (req) => {
+    const { getDb } = await import("./db/index.js");
+    const { sql } = await import("drizzle-orm");
+    const db = getDb();
+
+    const conditions: string[] = [];
+    if (req.query.from) conditions.push(`timestamp >= '${req.query.from}'`);
+    if (req.query.to) conditions.push(`timestamp <= '${req.query.to}'`);
+    const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+
+    const rows = db.all(sql.raw(
+      `SELECT agent_id as agentId, SUM(input_tokens) as inputTokens, SUM(output_tokens) as outputTokens, SUM(COALESCE(cost, 0)) as cost, COUNT(*) as count FROM token_usage ${where} GROUP BY agent_id ORDER BY cost DESC`
+    )) as any[];
+    return rows;
+  });
+
+  app.get<{
+    Querystring: { limit?: string };
+  }>("/api/usage/recent", async (req) => {
+    const { getDb, schema } = await import("./db/index.js");
+    const { desc } = await import("drizzle-orm");
+    const db = getDb();
+    const limit = Math.min(parseInt(req.query.limit ?? "50"), 200);
+    return db
+      .select()
+      .from(schema.tokenUsage)
+      .orderBy(desc(schema.tokenUsage.timestamp))
+      .limit(limit)
+      .all();
   });
 
   // SPA fallback for client-side routing (only for page navigation, not JS/CSS/API requests)

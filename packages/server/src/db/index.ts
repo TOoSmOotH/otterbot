@@ -230,6 +230,20 @@ export async function migrateDb() {
     created_at TEXT NOT NULL
   )`);
 
+  db.run(sql`CREATE TABLE IF NOT EXISTS token_usage (
+    id TEXT PRIMARY KEY,
+    agent_id TEXT NOT NULL,
+    provider TEXT NOT NULL,
+    model TEXT NOT NULL,
+    input_tokens INTEGER NOT NULL DEFAULT 0,
+    output_tokens INTEGER NOT NULL DEFAULT 0,
+    cost INTEGER,
+    project_id TEXT,
+    conversation_id TEXT,
+    message_id TEXT,
+    timestamp TEXT NOT NULL
+  )`);
+
   db.run(sql`CREATE TABLE IF NOT EXISTS agent_activity (
     id TEXT PRIMARY KEY,
     agent_id TEXT NOT NULL,

@@ -10,9 +10,10 @@ import {
 import { getDb, schema } from "../db/index.js";
 import type { MessageBus } from "../bus/message-bus.js";
 import type { ChatMessage, LLMConfig } from "../llm/adapter.js";
-import { stream } from "../llm/adapter.js";
+import { stream, resolveProviderCredentials } from "../llm/adapter.js";
 import { RetryError } from "ai";
 import { eq } from "drizzle-orm";
+import { calculateCost } from "../settings/model-pricing.js";
 
 export interface AgentOptions {
   id?: string;
@@ -327,6 +328,10 @@ export abstract class BaseAgent {
     }
 
     console.log(`[Agent ${this.id}] runStream complete — text=${fullResponse.length} chars, thinking=${reasoning.length} chars, toolCalls=${hadToolCalls}`);
+
+    // Capture token usage from the stream result (fire-and-forget)
+    this.captureTokenUsage(result as any, messageId);
+
     return { text: fullResponse, thinking: reasoning || undefined, hadToolCalls };
   }
 
@@ -393,6 +398,45 @@ export abstract class BaseAgent {
         .run();
     } catch (err) {
       console.error(`[Agent ${this.id}] Failed to persist activity:`, err);
+    }
+  }
+
+  /** Fire-and-forget: read usage from the stream result and persist */
+  private captureTokenUsage(result: { usage: Promise<{ promptTokens: number; completionTokens: number }> }, messageId: string) {
+    result.usage
+      .then((usage) => {
+        if (usage.promptTokens > 0 || usage.completionTokens > 0) {
+          this.persistTokenUsage(usage.promptTokens, usage.completionTokens, messageId);
+        }
+      })
+      .catch((err) => {
+        console.error(`[Agent ${this.id}] Failed to read usage:`, err);
+      });
+  }
+
+  /** Insert a token usage record into the database */
+  private persistTokenUsage(inputTokens: number, outputTokens: number, messageId: string) {
+    try {
+      const db = getDb();
+      const resolved = resolveProviderCredentials(this.llmConfig.provider);
+      const cost = calculateCost(this.llmConfig.model, inputTokens, outputTokens);
+      db.insert(schema.tokenUsage)
+        .values({
+          id: nanoid(),
+          agentId: this.id,
+          provider: resolved.type,
+          model: this.llmConfig.model,
+          inputTokens,
+          outputTokens,
+          cost,
+          projectId: this.projectId,
+          messageId,
+          timestamp: new Date().toISOString(),
+        })
+        .run();
+      console.log(`[Agent ${this.id}] Token usage: ${inputTokens} in / ${outputTokens} out, cost=${cost} microcents`);
+    } catch (err) {
+      console.error(`[Agent ${this.id}] Failed to persist token usage:`, err);
     }
   }
 
