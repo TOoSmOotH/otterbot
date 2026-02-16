@@ -45,6 +45,7 @@ import {
 } from "./socket/handlers.js";
 import {
   isSetupComplete,
+  isPassphraseSet,
   hashPassphrase,
   verifyPassphrase,
   getConfig,
@@ -159,7 +160,7 @@ const authLimiter = new RateLimiter(5, 60_000);
 // Public API path whitelist (no auth required)
 // ---------------------------------------------------------------------------
 
-const PUBLIC_PATHS = ["/api/setup/", "/api/auth/", "/api/model-packs", "/api/environment-packs", "/api/scenes"];
+const PUBLIC_PATHS = ["/api/setup/status", "/api/setup/passphrase", "/api/auth/login"];
 
 // ---------------------------------------------------------------------------
 // Cookie helper for Socket.IO (parse raw Cookie header)
@@ -423,6 +424,47 @@ async function main() {
     };
   });
 
+  app.post<{ Body: { passphrase: string } }>(
+    "/api/setup/passphrase",
+    async (req, reply) => {
+      const clientIp = req.ip;
+      if (!authLimiter.check(clientIp)) {
+        reply.code(429);
+        return { error: "Too many attempts. Try again later." };
+      }
+
+      if (isSetupComplete()) {
+        reply.code(400);
+        return { error: "Setup already completed" };
+      }
+
+      if (isPassphraseSet()) {
+        reply.code(400);
+        return { error: "Passphrase already set. Restart setup to change it." };
+      }
+
+      const { passphrase } = req.body;
+      if (!passphrase || passphrase.length < 8) {
+        reply.code(400);
+        return { error: "Passphrase must be at least 8 characters" };
+      }
+
+      const hash = await hashPassphrase(passphrase);
+      setConfig("passphrase_hash", hash);
+
+      const { token, maxAge } = createSession();
+      reply.setCookie("sb_session", token, {
+        path: "/",
+        httpOnly: true,
+        sameSite: "lax",
+        secure: true,
+        maxAge,
+      });
+
+      return { ok: true };
+    },
+  );
+
   app.post<{
     Body: { provider: string; apiKey?: string; baseUrl?: string };
   }>("/api/setup/probe-models", async (req, reply) => {
@@ -499,7 +541,6 @@ async function main() {
 
   app.post<{
     Body: {
-      passphrase: string;
       provider: string;
       providerName?: string;
       model: string;
@@ -521,23 +562,18 @@ async function main() {
       searchBaseUrl?: string;
     };
   }>("/api/setup/complete", async (req, reply) => {
-    const clientIp = req.ip;
-    if (!authLimiter.check(clientIp)) {
-      reply.code(429);
-      return { error: "Too many attempts. Try again later." };
-    }
-
     if (isSetupComplete()) {
       reply.code(400);
       return { error: "Setup already completed" };
     }
 
-    const { passphrase, provider, providerName, model, apiKey, baseUrl, userName, userAvatar, userBio, userTimezone, ttsVoice, ttsProvider, userModelPackId, userGearConfig, cooName, cooModelPackId, cooGearConfig, searchProvider, searchApiKey, searchBaseUrl } = req.body;
-
-    if (!passphrase || passphrase.length < 8) {
+    if (!isPassphraseSet()) {
       reply.code(400);
-      return { error: "Passphrase must be at least 8 characters" };
+      return { error: "Passphrase not set. Start setup from the beginning." };
     }
+
+    const { provider, providerName, model, apiKey, baseUrl, userName, userAvatar, userBio, userTimezone, ttsVoice, ttsProvider, userModelPackId, userGearConfig, cooName, cooModelPackId, cooGearConfig, searchProvider, searchApiKey, searchBaseUrl } = req.body;
+
     if (!provider || !model) {
       reply.code(400);
       return { error: "Provider and model are required" };
@@ -555,11 +591,6 @@ async function main() {
       return { error: "COO name is required" };
     }
 
-    // Store config
-    const hash = await hashPassphrase(passphrase);
-    setConfig("passphrase_hash", hash);
-
-    // Create a named provider row
     const typeMeta = PROVIDER_TYPE_META.find((m) => m.type === provider);
     const namedProvider = createProvider({
       name: providerName || typeMeta?.label || provider,
@@ -571,7 +602,6 @@ async function main() {
     setConfig("coo_provider", namedProvider.id);
     setConfig("coo_model", model);
 
-    // Store user profile
     setConfig("user_name", userName.trim());
     setConfig("user_timezone", userTimezone);
     if (userAvatar) {
@@ -581,31 +611,26 @@ async function main() {
       setConfig("user_bio", userBio.trim());
     }
 
-    // Store TTS preference
     if (ttsVoice) {
       setConfig("tts:enabled", "true");
       setConfig("tts:active_provider", ttsProvider || "kokoro");
       setConfig("tts:voice", ttsVoice);
     }
 
-    // Store search provider preference
     if (searchProvider) {
       setConfig("search:active_provider", searchProvider);
       if (searchApiKey) setConfig(`search:${searchProvider}:api_key`, searchApiKey);
       if (searchBaseUrl) setConfig(`search:${searchProvider}:base_url`, searchBaseUrl);
     }
 
-    // Store 3D model pack preference
     if (userModelPackId) {
       setConfig("user_model_pack_id", userModelPackId);
     }
 
-    // Store gear config
     if (userGearConfig) {
       setConfig("user_gear_config", JSON.stringify(userGearConfig));
     }
 
-    // Clone the built-in COO template with the user's customizations
     const cooSource = registry.get("builtin-coo");
     if (cooSource) {
       const cooClone = registry.create({
@@ -625,17 +650,6 @@ async function main() {
       setConfig("coo_registry_id", cooClone.id);
     }
 
-    // Create session
-    const { token, maxAge } = createSession();
-    reply.setCookie("sb_session", token, {
-      path: "/",
-      httpOnly: true,
-      sameSite: "lax",
-      secure: true,
-      maxAge,
-    });
-
-    // Start the COO agent now that config is in place
     startCoo();
 
     return { ok: true };
@@ -703,15 +717,29 @@ async function main() {
   // =========================================================================
 
   app.addHook("onRequest", async (req, reply) => {
-    // Skip non-API routes (static files, SPA)
     if (!req.url.startsWith("/api/")) return;
 
-    // Skip public API routes
     if (PUBLIC_PATHS.some((p) => req.url.startsWith(p))) return;
 
     const token = req.cookies.sb_session;
     if (!validateSession(token)) {
       reply.code(401).send({ error: "Unauthorized" });
+      return;
+    }
+
+    if (!isSetupComplete()) {
+      const allowedDuringSetup = [
+        "/api/setup/",
+        "/api/auth/",
+        "/api/settings/pricing",
+        "/api/model-packs",
+        "/api/environment-packs",
+        "/api/scenes",
+      ];
+      if (!allowedDuringSetup.some((p) => req.url.startsWith(p))) {
+        reply.code(401).send({ error: "Setup incomplete" });
+        return;
+      }
     }
   });
 
