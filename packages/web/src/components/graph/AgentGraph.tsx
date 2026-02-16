@@ -100,7 +100,7 @@ function buildLayout(
         source: parentId,
         target: agent.id,
         animated: agent.status === "thinking" || agent.status === "acting",
-        style: { stroke: "hsl(0 0% 30%)" },
+        style: { stroke: "hsl(var(--muted-foreground))" },
       });
     }
   }
@@ -201,7 +201,7 @@ function AgentGraphInner({
           minZoom={0.5}
           maxZoom={1.5}
         >
-          <Background color="hsl(0 0% 15%)" gap={20} size={1} />
+          <Background color="hsl(var(--secondary))" gap={20} size={1} />
         </ReactFlow>
         {selectedAgentId && <AgentDetailPanel />}
       </div>
