@@ -1,4 +1,4 @@
-import { useMemo, useEffect, useCallback } from "react";
+import { useMemo, useEffect, useCallback, useRef } from "react";
 import {
   ReactFlow,
   Background,
@@ -151,13 +151,17 @@ function AgentGraphInner({
   const [nodes, setNodes, onNodesChange] = useNodesState(layoutNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(layoutEdges);
   const { fitView } = useReactFlow();
+  const prevAgentCountRef = useRef(0);
 
   useEffect(() => {
     setNodes(layoutNodes);
     setEdges(layoutEdges);
-    // Re-fit the view after nodes change so all agents are visible
-    requestAnimationFrame(() => fitView());
-  }, [layoutNodes, layoutEdges, setNodes, setEdges, fitView]);
+    const currentCount = agents.size;
+    if (prevAgentCountRef.current !== currentCount) {
+      prevAgentCountRef.current = currentCount;
+      requestAnimationFrame(() => fitView());
+    }
+  }, [layoutNodes, layoutEdges, setNodes, setEdges, fitView, agents.size]);
 
   return (
     <div className="flex flex-col h-full">
@@ -196,8 +200,9 @@ function AgentGraphInner({
           proOptions={{ hideAttribution: true }}
           nodesDraggable={false}
           nodesConnectable={false}
-          zoomOnScroll={false}
-          panOnScroll
+          zoomOnScroll={true}
+          panOnScroll={false}
+          panOnDrag={true}
           minZoom={0.5}
           maxZoom={1.5}
         >
