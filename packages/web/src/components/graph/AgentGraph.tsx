@@ -196,7 +196,6 @@ function AgentGraphInner({
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
           nodeTypes={nodeTypes}
-          fitView
           proOptions={{ hideAttribution: true }}
           nodesDraggable={false}
           nodesConnectable={false}
