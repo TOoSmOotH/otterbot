@@ -1,6 +1,9 @@
 import { useState, useEffect, useRef, useId } from "react";
+import { useThemeStore } from "../../stores/theme-store";
 
-let mermaidInitialized = false;
+function getCssVar(name: string): string {
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+}
 
 export function MermaidBlock({ code }: { code: string }) {
   const id = useId();
@@ -8,6 +11,7 @@ export function MermaidBlock({ code }: { code: string }) {
   const [svg, setSvg] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const theme = useThemeStore((s) => s.theme);
 
   useEffect(() => {
     let cancelled = false;
@@ -17,25 +21,23 @@ export function MermaidBlock({ code }: { code: string }) {
       try {
         const mermaid = (await import("mermaid")).default;
 
-        if (!mermaidInitialized) {
-          mermaid.initialize({
-            startOnLoad: false,
-            theme: "dark",
-            themeVariables: {
-              darkMode: true,
-              background: "hsl(0 0% 9%)",
-              primaryColor: "hsl(217 92% 60%)",
-              primaryTextColor: "hsl(0 0% 93%)",
-              primaryBorderColor: "hsl(0 0% 25%)",
-              lineColor: "hsl(0 0% 60%)",
-              secondaryColor: "hsl(0 0% 15%)",
-              tertiaryColor: "hsl(0 0% 12%)",
-              fontFamily:
-                '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
-            },
-          });
-          mermaidInitialized = true;
-        }
+        const isDark = theme !== "light";
+        mermaid.initialize({
+          startOnLoad: false,
+          theme: isDark ? "dark" : "default",
+          themeVariables: {
+            darkMode: isDark,
+            background: `hsl(${getCssVar("--card")})`,
+            primaryColor: `hsl(${getCssVar("--primary")})`,
+            primaryTextColor: `hsl(${getCssVar("--foreground")})`,
+            primaryBorderColor: `hsl(${getCssVar("--border")})`,
+            lineColor: `hsl(${getCssVar("--muted-foreground")})`,
+            secondaryColor: `hsl(${getCssVar("--secondary")})`,
+            tertiaryColor: `hsl(${getCssVar("--muted")})`,
+            fontFamily:
+              '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+          },
+        });
 
         // Create a unique element id (useId returns colons which mermaid doesn't like)
         const elId = `mermaid-${id.replace(/:/g, "")}`;
@@ -58,7 +60,7 @@ export function MermaidBlock({ code }: { code: string }) {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [code, id]);
+  }, [code, id, theme]);
 
   if (loading) {
     return (
@@ -85,7 +87,7 @@ export function MermaidBlock({ code }: { code: string }) {
 
   if (error) {
     return (
-      <div className="rounded-lg bg-white/5 p-3 overflow-x-auto">
+      <div className="rounded-lg bg-secondary p-3 overflow-x-auto">
         <p className="text-xs text-destructive mb-1">Diagram error</p>
         <pre className="text-xs text-muted-foreground whitespace-pre-wrap">{code}</pre>
       </div>

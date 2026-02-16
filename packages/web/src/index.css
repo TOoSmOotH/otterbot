@@ -6,6 +6,11 @@
 
 @layer base {
   :root {
+    --radius: 0.5rem;
+  }
+
+  /* Dark theme (default) — current values preserved exactly */
+  [data-theme="dark"] {
     --background: 0 0% 7%;
     --foreground: 0 0% 93%;
     --card: 0 0% 9%;
@@ -23,7 +28,57 @@
     --border: 0 0% 18%;
     --input: 0 0% 18%;
     --ring: 217 92% 60%;
-    --radius: 0.5rem;
+    --scrollbar-thumb: 0 0% 25%;
+    --scrollbar-thumb-hover: 0 0% 35%;
+    --code-block-bg: rgba(255, 255, 255, 0.05);
+  }
+
+  /* Otter theme — brand colors from otterbot-site */
+  [data-theme="otter"] {
+    --background: 216 57% 10%;
+    --foreground: 195 50% 94%;
+    --card: 216 62% 16%;
+    --card-foreground: 195 40% 85%;
+    --primary: 191 100% 50%;
+    --primary-foreground: 216 57% 10%;
+    --secondary: 216 63% 20%;
+    --secondary-foreground: 195 50% 94%;
+    --muted: 216 63% 20%;
+    --muted-foreground: 207 31% 60%;
+    --accent: 216 63% 20%;
+    --accent-foreground: 195 50% 94%;
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 216 50% 25%;
+    --input: 216 50% 25%;
+    --ring: 189 93% 36%;
+    --scrollbar-thumb: 216 50% 30%;
+    --scrollbar-thumb-hover: 216 50% 40%;
+    --code-block-bg: rgba(255, 255, 255, 0.06);
+  }
+
+  /* Light theme — inverted brand variant */
+  [data-theme="light"] {
+    --background: 195 30% 97%;
+    --foreground: 216 50% 15%;
+    --card: 0 0% 100%;
+    --card-foreground: 216 50% 15%;
+    --primary: 189 93% 36%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 195 20% 92%;
+    --secondary-foreground: 216 50% 15%;
+    --muted: 195 20% 92%;
+    --muted-foreground: 216 20% 45%;
+    --accent: 195 20% 92%;
+    --accent-foreground: 216 50% 15%;
+    --destructive: 0 84% 50%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 195 20% 85%;
+    --input: 195 20% 85%;
+    --ring: 189 93% 36%;
+    --scrollbar-thumb: 195 15% 75%;
+    --scrollbar-thumb-hover: 195 15% 60%;
+    --code-block-bg: rgba(0, 0, 0, 0.04);
   }
 }
 
@@ -45,17 +100,17 @@
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: hsl(0 0% 25%);
+  background: hsl(var(--scrollbar-thumb));
   border-radius: 3px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: hsl(0 0% 35%);
+  background: hsl(var(--scrollbar-thumb-hover));
 }
 
 /* Panel resize handles */
 .panel-resize-handle {
   width: 1px;
-  background: hsl(0 0% 18%);
+  background: hsl(var(--border));
   transition: background 150ms, width 150ms;
   position: relative;
 }
@@ -125,7 +180,7 @@
   margin-bottom: 0.5em;
   padding: 0.75em 1em;
   border-radius: 0.5rem;
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--code-block-bg);
 }
 
 /* Remove backtick decoration that prose adds to inline code */
@@ -143,4 +198,44 @@
 
 .prose :where(th, td):not(:where([class~="not-prose"], [class~="not-prose"] *)) {
   padding: 0.35em 0.625em;
+}
+
+/* Syntax highlighting overrides for light theme */
+[data-theme="light"] .hljs {
+  background: var(--code-block-bg);
+  color: #24292e;
+}
+[data-theme="light"] .hljs-comment,
+[data-theme="light"] .hljs-quote {
+  color: #6a737d;
+}
+[data-theme="light"] .hljs-keyword,
+[data-theme="light"] .hljs-selector-tag,
+[data-theme="light"] .hljs-type {
+  color: #d73a49;
+}
+[data-theme="light"] .hljs-string,
+[data-theme="light"] .hljs-addition {
+  color: #032f62;
+}
+[data-theme="light"] .hljs-number,
+[data-theme="light"] .hljs-literal,
+[data-theme="light"] .hljs-built_in {
+  color: #005cc5;
+}
+[data-theme="light"] .hljs-title,
+[data-theme="light"] .hljs-section,
+[data-theme="light"] .hljs-attr {
+  color: #6f42c1;
+}
+[data-theme="light"] .hljs-name,
+[data-theme="light"] .hljs-tag {
+  color: #22863a;
+}
+[data-theme="light"] .hljs-deletion {
+  color: #b31d28;
+}
+[data-theme="light"] .hljs-variable,
+[data-theme="light"] .hljs-template-variable {
+  color: #e36209;
 }
