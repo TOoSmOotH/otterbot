@@ -196,8 +196,9 @@ function AgentGraphInner({
           proOptions={{ hideAttribution: true }}
           nodesDraggable={false}
           nodesConnectable={false}
-          zoomOnScroll={false}
-          panOnScroll
+          zoomOnScroll={true}
+          panOnScroll={false}
+          panOnDrag={true}
           minZoom={0.5}
           maxZoom={1.5}
         >
