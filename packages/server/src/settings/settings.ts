@@ -1013,3 +1013,79 @@ export async function testOpenCodeConnection(): Promise<TestResult> {
     latencyMs: Date.now() - start,
   };
 }
+
+// ---------------------------------------------------------------------------
+// GitHub settings
+// ---------------------------------------------------------------------------
+
+export interface GitHubSettingsResponse {
+  enabled: boolean;
+  tokenSet: boolean;
+  username: string | null;
+}
+
+export function getGitHubSettings(): GitHubSettingsResponse {
+  return {
+    enabled: getConfig("github:enabled") === "true",
+    tokenSet: !!getConfig("github:token"),
+    username: getConfig("github:username") ?? null,
+  };
+}
+
+export function updateGitHubSettings(data: {
+  enabled?: boolean;
+  token?: string;
+}): void {
+  if (data.enabled !== undefined) {
+    setConfig("github:enabled", data.enabled ? "true" : "false");
+  }
+  if (data.token !== undefined) {
+    if (data.token === "") {
+      deleteConfig("github:token");
+      deleteConfig("github:username");
+    } else {
+      setConfig("github:token", data.token);
+    }
+  }
+}
+
+export async function testGitHubConnection(): Promise<TestResult & { username?: string }> {
+  const token = getConfig("github:token");
+  if (!token) {
+    return { ok: false, error: "GitHub token not configured." };
+  }
+
+  const start = Date.now();
+
+  try {
+    const res = await fetch("https://api.github.com/user", {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: "application/vnd.github+json",
+        "User-Agent": "Otterbot",
+      },
+      signal: AbortSignal.timeout(10_000),
+    });
+
+    if (!res.ok) {
+      if (res.status === 401) {
+        return { ok: false, error: "Invalid token. Check scopes: repo, read:org, workflow" };
+      }
+      return { ok: false, error: `GitHub API error: ${res.status}` };
+    }
+
+    const data = (await res.json()) as { login?: string };
+    const username = data.login ?? null;
+
+    if (username) {
+      setConfig("github:username", username);
+    }
+
+    return { ok: true, latencyMs: Date.now() - start, username: username ?? undefined };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "Unknown error",
+    };
+  }
+}
