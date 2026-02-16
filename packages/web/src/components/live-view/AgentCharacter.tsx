@@ -1,17 +1,11 @@
-import { Suspense, useMemo, useRef, useEffect } from "react";
+import { Suspense, useMemo, useRef, useEffect, useState } from "react";
 import { useFrame } from "@react-three/fiber";
 import { useGLTF, Html, Sparkles } from "@react-three/drei";
 import { clone as skeletonClone } from "three/examples/jsm/utils/SkeletonUtils.js";
 import type { ModelPack, GearConfig } from "@otterbot/shared";
 import * as THREE from "three";
 import { applyGearConfig } from "../../lib/gear-utils";
-import type { InterpolatorState } from "../../lib/path-interpolator";
-
-export interface MovementState {
-  position: [number, number, number];
-  rotationY: number;
-  isMoving: boolean;
-}
+import { useMovementStore } from "../../stores/movement-store";
 
 interface AgentCharacterProps {
   pack: ModelPack;
@@ -19,9 +13,9 @@ interface AgentCharacterProps {
   label: string;
   role: string;
   status: string;
+  agentId?: string;
   gearConfig?: GearConfig | null;
   rotationY?: number;
-  movementState?: InterpolatorState | null;
 }
 
 const STATUS_COLORS: Record<string, string> = {
@@ -32,27 +26,43 @@ const STATUS_COLORS: Record<string, string> = {
   error: "#ef4444",
 };
 
-export function AgentCharacter({ pack, position, label, role, status, gearConfig, rotationY = 0, movementState }: AgentCharacterProps) {
+export function AgentCharacter({ pack, position, label, role, status, agentId, gearConfig, rotationY = 0 }: AgentCharacterProps) {
   const groupRef = useRef<THREE.Group>(null);
   const currentRotationRef = useRef(rotationY);
+  const [isMoving, setIsMoving] = useState(false);
+  const targetPosRef = useRef(new THREE.Vector3(...position));
 
-  // Smooth rotation interpolation for movement
+  // Update target position when prop changes
+  useEffect(() => {
+    targetPosRef.current.set(...position);
+  }, [position[0], position[1], position[2]]);
+
+  // Read movement state directly from store each frame
   useFrame((_, delta) => {
     if (!groupRef.current) return;
-    const targetRotation = movementState?.isMoving ? movementState.rotationY : rotationY;
-    currentRotationRef.current = THREE.MathUtils.lerp(currentRotationRef.current, targetRotation, delta * 8);
-    groupRef.current.rotation.y = currentRotationRef.current;
 
-    if (movementState?.isMoving) {
-      groupRef.current.position.set(...movementState.position);
+    const ms = agentId ? useMovementStore.getState().getAgentPosition(agentId) : null;
+    const moving = ms?.isMoving ?? false;
+
+    // Track moving state for animation switching (triggers re-render)
+    if (moving !== isMoving) setIsMoving(moving);
+
+    if (moving && ms) {
+      groupRef.current.position.set(...ms.position);
+      currentRotationRef.current = THREE.MathUtils.lerp(currentRotationRef.current, ms.rotationY, delta * 8);
+    } else {
+      // Smoothly interpolate to home position
+      groupRef.current.position.lerp(targetPosRef.current, delta * 5);
+      currentRotationRef.current = THREE.MathUtils.lerp(currentRotationRef.current, rotationY, delta * 5);
     }
+
+    groupRef.current.rotation.y = currentRotationRef.current;
   });
 
-  const effectivePosition = movementState?.isMoving ? movementState.position : position;
-  const effectiveStatus = movementState?.isMoving ? "walking" : status;
+  const effectiveStatus = isMoving ? "walking" : status;
 
   return (
-    <group ref={groupRef} position={effectivePosition} rotation={[0, rotationY, 0]}>
+    <group ref={groupRef} position={position} rotation={[0, rotationY, 0]}>
       <Suspense fallback={<FallbackMesh role={role} />}>
         <CharacterModel pack={pack} status={effectiveStatus} gearConfig={gearConfig} />
       </Suspense>
