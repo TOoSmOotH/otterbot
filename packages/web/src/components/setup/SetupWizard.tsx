@@ -4,6 +4,7 @@ import { useModelPackStore } from "../../stores/model-pack-store";
 import { CharacterSelect } from "../character-select/CharacterSelect";
 import { DEFAULT_AVATARS } from "./default-avatars";
 import type { GearConfig } from "@otterbot/shared";
+import { ModelPricingPrompt } from "../settings/ModelPricingPrompt";
 
 const SUGGESTED_MODELS: Record<string, string[]> = {
   anthropic: ["claude-sonnet-4-5-20250929", "claude-haiku-4-20250414"],
@@ -588,6 +589,9 @@ export function SetupWizard() {
                   </div>
                 </div>
               )}
+
+              {/* Model pricing check */}
+              {provider && model && <ModelPricingPrompt model={model} />}
 
               {/* Model strategy tip */}
               {provider && model && (
