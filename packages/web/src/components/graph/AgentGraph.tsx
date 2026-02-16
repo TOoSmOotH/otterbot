@@ -189,25 +189,27 @@ function AgentGraphInner({
       </div>
 
       {/* Graph */}
-      <div className="flex-1 relative">
-        <ReactFlow
-          nodes={nodes}
-          edges={edges}
-          onNodesChange={onNodesChange}
-          onEdgesChange={onEdgesChange}
-          nodeTypes={nodeTypes}
-          defaultViewport={{ x: 0, y: 0, zoom: 1 }}
-          proOptions={{ hideAttribution: true }}
-          nodesDraggable={false}
-          nodesConnectable={false}
-          zoomOnScroll={true}
-          panOnScroll={false}
-          panOnDrag={true}
-          minZoom={0.5}
-          maxZoom={1.5}
-        >
-          <Background color="hsl(var(--secondary))" gap={20} size={1} />
-        </ReactFlow>
+      <div className="flex-1 relative min-h-0">
+        <div className="absolute inset-0">
+          <ReactFlow
+            nodes={nodes}
+            edges={edges}
+            onNodesChange={onNodesChange}
+            onEdgesChange={onEdgesChange}
+            nodeTypes={nodeTypes}
+            defaultViewport={{ x: 0, y: 0, zoom: 1 }}
+            proOptions={{ hideAttribution: true }}
+            nodesDraggable={false}
+            nodesConnectable={false}
+            zoomOnScroll={true}
+            panOnScroll={false}
+            panOnDrag={true}
+            minZoom={0.5}
+            maxZoom={1.5}
+          >
+            <Background color="hsl(var(--secondary))" gap={20} size={1} />
+          </ReactFlow>
+        </div>
         {selectedAgentId && <AgentDetailPanel />}
       </div>
     </div>
