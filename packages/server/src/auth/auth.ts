@@ -136,3 +136,7 @@ export function isSetupComplete(): boolean {
 export function isPassphraseSet(): boolean {
   return getConfig("passphrase_hash") !== undefined;
 }
+
+export function isPassphraseTemporary(): boolean {
+  return getConfig("passphrase_is_temporary") === "true";
+}

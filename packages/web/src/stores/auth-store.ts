@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import type { ProviderTypeMeta } from "@otterbot/shared";
 
-export type AppScreen = "loading" | "setup" | "login" | "app";
+export type AppScreen = "loading" | "setup" | "change-passphrase" | "login" | "app";
 
 interface AuthState {
   screen: AppScreen;
@@ -11,6 +11,7 @@ interface AuthState {
   checkStatus: () => Promise<void>;
   login: (passphrase: string) => Promise<boolean>;
   setSetupPassphrase: (passphrase: string) => Promise<boolean>;
+  changeTemporaryPassphrase: (newPassphrase: string) => Promise<boolean>;
   completeSetup: (data: {
     provider: string;
     providerName?: string;
@@ -47,6 +48,20 @@ export const useAuthStore = create<AuthState>((set) => ({
       const setupData = await setupRes.json();
 
       if (!setupData.setupComplete) {
+        // Check if passphrase was set via env (temporary)
+        const authRes = await fetch("/api/auth/check");
+        const authData = await authRes.json();
+
+        if (authData.authenticated && authData.isTemporary) {
+          set({ screen: "change-passphrase", providerTypes: setupData.providerTypes ?? [] });
+          return;
+        }
+
+        if (authData.authenticated) {
+          set({ screen: "setup", providerTypes: setupData.providerTypes ?? [] });
+          return;
+        }
+
         set({ screen: "setup", providerTypes: setupData.providerTypes ?? [] });
         return;
       }
@@ -75,7 +90,24 @@ export const useAuthStore = create<AuthState>((set) => ({
       });
 
       if (res.ok) {
-        set({ screen: "app" });
+        // Check if temporary passphrase
+        const authRes = await fetch("/api/auth/check");
+        const authData = await authRes.json();
+        
+        if (authData.isTemporary) {
+          set({ screen: "change-passphrase" });
+          return true;
+        }
+
+        // Check if setup is complete
+        const setupRes = await fetch("/api/setup/status");
+        const setupData = await setupRes.json();
+        
+        if (!setupData.setupComplete) {
+          set({ screen: "setup", providerTypes: setupData.providerTypes ?? [] });
+        } else {
+          set({ screen: "app" });
+        }
         return true;
       }
 
@@ -103,6 +135,29 @@ export const useAuthStore = create<AuthState>((set) => ({
 
       const data = await res.json();
       set({ error: data.error || "Failed to set passphrase" });
+      return false;
+    } catch {
+      set({ error: "Failed to connect to server" });
+      return false;
+    }
+  },
+
+  changeTemporaryPassphrase: async (newPassphrase) => {
+    set({ error: null });
+    try {
+      const res = await fetch("/api/auth/change-temporary-passphrase", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ newPassphrase }),
+      });
+
+      if (res.ok) {
+        set({ screen: "setup" });
+        return true;
+      }
+
+      const data = await res.json();
+      set({ error: data.error || "Failed to change passphrase" });
       return false;
     } catch {
       set({ error: "Failed to connect to server" });
