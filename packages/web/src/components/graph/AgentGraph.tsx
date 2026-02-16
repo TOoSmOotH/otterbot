@@ -151,7 +151,7 @@ function AgentGraphInner({
   const [nodes, setNodes, onNodesChange] = useNodesState(layoutNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(layoutEdges);
   const { fitView } = useReactFlow();
-  const prevAgentCountRef = useRef(0);
+  const prevAgentCountRef = useRef(-1);
 
   useEffect(() => {
     setNodes(layoutNodes);
@@ -196,6 +196,7 @@ function AgentGraphInner({
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
           nodeTypes={nodeTypes}
+          defaultViewport={{ x: 0, y: 0, zoom: 1 }}
           proOptions={{ hideAttribution: true }}
           nodesDraggable={false}
           nodesConnectable={false}
