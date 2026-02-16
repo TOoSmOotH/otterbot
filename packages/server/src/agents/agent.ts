@@ -17,6 +17,7 @@ import {
   findToolMarkupStart,
   formatToolsForPrompt,
   parseKimiToolCalls,
+  usesTextToolCalling,
 } from "../llm/kimi-tool-parser.js";
 import { eq } from "drizzle-orm";
 import { calculateCost } from "../settings/model-pricing.js";
@@ -179,20 +180,36 @@ export abstract class BaseAgent {
     try {
       const tools = this.getTools();
       const hasTools = Object.keys(tools).length > 0;
+      const textToolMode = hasTools && usesTextToolCalling(this.llmConfig.model);
 
-      const { text, thinking, hadToolCalls } = await this.runStream(
-        hasTools ? tools : undefined,
-        onToken,
-        onReasoning,
-        onReasoningEnd,
-      );
+      // For models that use text-based tool calling (e.g. Kimi K2.5), skip the
+      // SDK-tools call entirely — it always returns empty. Go straight to text injection.
+      let text: string;
+      let thinking: string | undefined;
+      let hadToolCalls: boolean;
 
-      // If tools were sent and the stream produced NO text AND NO tool calls,
-      // the provider likely doesn't support function calling — retry without tools.
+      if (textToolMode) {
+        text = "";
+        thinking = undefined;
+        hadToolCalls = false;
+        console.log(`[Agent ${this.id}] Text-tool-calling model detected — skipping SDK tools`);
+      } else {
+        ({ text, thinking, hadToolCalls } = await this.runStream(
+          hasTools ? tools : undefined,
+          onToken,
+          onReasoning,
+          onReasoningEnd,
+        ));
+      }
+
+      // If tools were available but the stream produced NO text AND NO tool calls,
+      // the provider likely doesn't support function calling — use text injection.
       // IMPORTANT: If tool calls were made (hadToolCalls), do NOT retry — the SDK
       // already executed the tools via their `execute` callbacks during the stream.
       if (hasTools && !text && !hadToolCalls) {
-        console.warn(`[Agent ${this.id}] Empty response with tools and no tool calls — retrying without tools`);
+        if (!textToolMode) {
+          console.warn(`[Agent ${this.id}] Empty response with tools and no tool calls — retrying without tools`);
+        }
 
         // Inject tool descriptions as a system message so models that don't
         // support structured function calling (e.g. Kimi K2.5) can still

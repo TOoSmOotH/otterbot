@@ -5,6 +5,7 @@ import {
   findToolMarkupStart,
   formatToolsForPrompt,
   parseKimiToolCalls,
+  usesTextToolCalling,
 } from "./kimi-tool-parser.js";
 
 describe("kimi-tool-parser", () => {
@@ -30,6 +31,21 @@ describe("kimi-tool-parser", () => {
     it("returns the index where markup begins", () => {
       const text = "Hello world<|tool_calls_section_begin|>rest";
       expect(findToolMarkupStart(text)).toBe(11);
+    });
+  });
+
+  describe("usesTextToolCalling", () => {
+    it("returns true for Kimi K2.5", () => {
+      expect(usesTextToolCalling("moonshotai/kimi-k2.5")).toBe(true);
+    });
+
+    it("returns true for Kimi K2", () => {
+      expect(usesTextToolCalling("moonshotai/kimi-k2")).toBe(true);
+    });
+
+    it("returns false for other models", () => {
+      expect(usesTextToolCalling("openai/gpt-4o")).toBe(false);
+      expect(usesTextToolCalling("anthropic/claude-sonnet-4-5-20250929")).toBe(false);
     });
   });
 

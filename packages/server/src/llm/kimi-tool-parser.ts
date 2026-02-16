@@ -34,6 +34,22 @@ export interface ParseResult {
   toolCalls: KimiToolCall[];
 }
 
+/**
+ * Models that don't support structured (SDK) function calling and instead
+ * require tool descriptions injected as text. When tools are present, we
+ * skip the initial SDK-tools call entirely and go straight to text injection.
+ */
+const TEXT_TOOL_CALLING_MODELS = [
+  "moonshotai/kimi-k2.5",
+  "moonshotai/kimi-k2",
+];
+
+/** Returns true if the model uses text-based tool calling (e.g. Kimi K2.5). */
+export function usesTextToolCalling(model: string): boolean {
+  const normalized = model.toLowerCase();
+  return TEXT_TOOL_CALLING_MODELS.some((m) => normalized.includes(m));
+}
+
 /** Vercel AI SDK tool shape (subset we need for formatting) */
 interface AiTool {
   description?: string;
