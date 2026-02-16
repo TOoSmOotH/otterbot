@@ -10,8 +10,8 @@ interface AuthState {
 
   checkStatus: () => Promise<void>;
   login: (passphrase: string) => Promise<boolean>;
+  setSetupPassphrase: (passphrase: string) => Promise<boolean>;
   completeSetup: (data: {
-    passphrase: string;
     provider: string;
     providerName?: string;
     model: string;
@@ -81,6 +81,28 @@ export const useAuthStore = create<AuthState>((set) => ({
 
       const data = await res.json();
       set({ error: data.error || "Invalid passphrase" });
+      return false;
+    } catch {
+      set({ error: "Failed to connect to server" });
+      return false;
+    }
+  },
+
+  setSetupPassphrase: async (passphrase) => {
+    set({ error: null });
+    try {
+      const res = await fetch("/api/setup/passphrase", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ passphrase }),
+      });
+
+      if (res.ok) {
+        return true;
+      }
+
+      const data = await res.json();
+      set({ error: data.error || "Failed to set passphrase" });
       return false;
     } catch {
       set({ error: "Failed to connect to server" });

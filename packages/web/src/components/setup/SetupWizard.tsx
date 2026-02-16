@@ -102,7 +102,7 @@ function VoiceButton({
 }
 
 export function SetupWizard() {
-  const { providerTypes, completeSetup, error, setError } = useAuthStore();
+  const { providerTypes, setSetupPassphrase, completeSetup, error, setError } = useAuthStore();
 
   const [step, setStep] = useState(1);
   const [provider, setProvider] = useState("");
@@ -236,7 +236,23 @@ export function SetupWizard() {
     setError(null);
   };
 
-  const handleNext = () => {
+  const handleNextFromPassphrase = async () => {
+    if (passphrase.length < 8) {
+      setError("Passphrase must be at least 8 characters");
+      return;
+    }
+    if (passphrase !== confirmPassphrase) {
+      setError("Passphrases do not match");
+      return;
+    }
+    const success = await setSetupPassphrase(passphrase);
+    if (success) {
+      setError(null);
+      setStep(2);
+    }
+  };
+
+  const handleNextToProfile = () => {
     if (!provider) {
       setError("Please select a provider");
       return;
@@ -251,19 +267,6 @@ export function SetupWizard() {
     }
     if (NEEDS_BASE_URL.has(provider) && !baseUrl) {
       setError("A base URL is required for this provider");
-      return;
-    }
-    setError(null);
-    setStep(2);
-  };
-
-  const handleNextToProfile = () => {
-    if (passphrase.length < 8) {
-      setError("Passphrase must be at least 8 characters");
-      return;
-    }
-    if (passphrase !== confirmPassphrase) {
-      setError("Passphrases do not match");
       return;
     }
     setError(null);
@@ -320,7 +323,6 @@ export function SetupWizard() {
   const handleComplete = async () => {
     setSubmitting(true);
     await completeSetup({
-      passphrase,
       provider,
       providerName: providerName || undefined,
       model,
@@ -416,7 +418,59 @@ export function SetupWizard() {
           {step === 1 && (
             <div className="space-y-4">
               <h2 className="text-sm font-medium">
-                1. Configure your LLM provider
+                1. Set a passphrase to protect the UI
+              </h2>
+              <p className="text-xs text-muted-foreground">
+                You will need this passphrase to access Otterbot. Minimum 8
+                characters.
+              </p>
+
+              <div>
+                <label className="block text-sm text-muted-foreground mb-1.5">
+                  Passphrase
+                </label>
+                <input
+                  type="password"
+                  value={passphrase}
+                  onChange={(e) => setPassphrase(e.target.value)}
+                  placeholder="Enter a passphrase"
+                  autoFocus
+                  className="w-full px-3 py-2 bg-background border border-input rounded-md text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm text-muted-foreground mb-1.5">
+                  Confirm Passphrase
+                </label>
+                <input
+                  type="password"
+                  value={confirmPassphrase}
+                  onChange={(e) => setConfirmPassphrase(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") handleNextFromPassphrase();
+                  }}
+                  placeholder="Confirm your passphrase"
+                  className="w-full px-3 py-2 bg-background border border-input rounded-md text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                />
+              </div>
+
+              {error && <p className="text-sm text-destructive">{error}</p>}
+
+              <button
+                onClick={handleNextFromPassphrase}
+                disabled={!passphrase || !confirmPassphrase}
+                className="w-full px-4 py-2 bg-primary text-primary-foreground text-sm font-medium rounded-md hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              >
+                Next
+              </button>
+            </div>
+          )}
+
+          {step === 2 && (
+            <div className="space-y-4">
+              <h2 className="text-sm font-medium">
+                2. Configure your LLM provider
               </h2>
 
               {/* Provider type cards */}
@@ -606,58 +660,6 @@ export function SetupWizard() {
 
               {error && <p className="text-sm text-destructive">{error}</p>}
 
-              <button
-                onClick={handleNext}
-                disabled={!provider || !model}
-                className="w-full px-4 py-2 bg-primary text-primary-foreground text-sm font-medium rounded-md hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-              >
-                Next
-              </button>
-            </div>
-          )}
-
-          {step === 2 && (
-            <div className="space-y-4">
-              <h2 className="text-sm font-medium">
-                2. Set a passphrase to protect the UI
-              </h2>
-              <p className="text-xs text-muted-foreground">
-                You will need this passphrase to access Otterbot. Minimum 8
-                characters.
-              </p>
-
-              <div>
-                <label className="block text-sm text-muted-foreground mb-1.5">
-                  Passphrase
-                </label>
-                <input
-                  type="password"
-                  value={passphrase}
-                  onChange={(e) => setPassphrase(e.target.value)}
-                  placeholder="Enter a passphrase"
-                  autoFocus
-                  className="w-full px-3 py-2 bg-background border border-input rounded-md text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm text-muted-foreground mb-1.5">
-                  Confirm Passphrase
-                </label>
-                <input
-                  type="password"
-                  value={confirmPassphrase}
-                  onChange={(e) => setConfirmPassphrase(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") handleNextToProfile();
-                  }}
-                  placeholder="Confirm your passphrase"
-                  className="w-full px-3 py-2 bg-background border border-input rounded-md text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-                />
-              </div>
-
-              {error && <p className="text-sm text-destructive">{error}</p>}
-
               <div className="flex gap-2">
                 <button
                   onClick={() => {
@@ -670,7 +672,7 @@ export function SetupWizard() {
                 </button>
                 <button
                   onClick={handleNextToProfile}
-                  disabled={!passphrase || !confirmPassphrase}
+                  disabled={!provider || !model}
                   className="flex-1 px-4 py-2 bg-primary text-primary-foreground text-sm font-medium rounded-md hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                 >
                   Next
