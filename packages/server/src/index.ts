@@ -691,6 +691,34 @@ async function main() {
   // Protected routes
   // =========================================================================
 
+  // Change passphrase
+  app.put<{
+    Body: { currentPassphrase: string; newPassphrase: string };
+  }>("/api/auth/passphrase", async (req, reply) => {
+    const { currentPassphrase, newPassphrase } = req.body;
+
+    const storedHash = getConfig("passphrase_hash");
+    if (!storedHash) {
+      reply.code(500);
+      return { error: "No passphrase configured" };
+    }
+
+    const valid = await verifyPassphrase(currentPassphrase, storedHash);
+    if (!valid) {
+      reply.code(401);
+      return { error: "Current passphrase is incorrect" };
+    }
+
+    if (newPassphrase.length < 6) {
+      reply.code(400);
+      return { error: "New passphrase must be at least 6 characters" };
+    }
+
+    const newHash = await hashPassphrase(newPassphrase);
+    setConfig("passphrase_hash", newHash);
+    return { ok: true };
+  });
+
   // Desktop status
   app.get("/api/desktop/status", async () => ({
     enabled: isDesktopEnabled(),
@@ -1308,6 +1336,17 @@ async function main() {
       gearConfig: gearConfigRaw ? JSON.parse(gearConfigRaw) : null,
       cooName: cooEntry?.name ?? "COO",
     };
+  });
+
+  app.put<{
+    Body: { name: string | null; avatar: string | null; bio: string | null; timezone: string | null };
+  }>("/api/profile", async (req) => {
+    const { name, avatar, bio, timezone } = req.body;
+    if (name) setConfig("user_name", name); else deleteConfig("user_name");
+    if (avatar) setConfig("user_avatar", avatar); else deleteConfig("user_avatar");
+    if (bio) setConfig("user_bio", bio); else deleteConfig("user_bio");
+    if (timezone) setConfig("user_timezone", timezone); else deleteConfig("user_timezone");
+    return { ok: true };
   });
 
   app.put<{
