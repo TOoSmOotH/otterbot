@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.4.0](https://github.com/TOoSmOotH/otterbot/compare/otterbot-v0.3.0...otterbot-v0.4.0) (2026-02-16)
+
+
+### Features
+
+* theme defaults and CORS updates ([601958e](https://github.com/TOoSmOotH/otterbot/commit/601958e443cfd1fc84b9b30b122480ed44b462a4))
+
+
+### Bug Fixes
+
+* add prerelease-type to beta release config ([c219393](https://github.com/TOoSmOotH/otterbot/commit/c219393c954865dfe2863e6a0e03403b716e3b54))
+
 ## [0.3.0](https://github.com/TOoSmOotH/otterbot/compare/otterbot-v0.2.0...otterbot-v0.3.0) (2026-02-16)
 
 
