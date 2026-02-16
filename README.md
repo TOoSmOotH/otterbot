@@ -49,7 +49,7 @@ cp .env.example .env
 # Push the database schema
 pnpm db:push
 
-# Start development servers (backend on :3000, frontend on :5173)
+# Start development servers (backend on :62626, frontend on :5173)
 pnpm dev
 ```
 
@@ -70,9 +70,6 @@ Once setup completes, you'll be chatting with the COO.
 # Build and run in a container
 pnpm docker:build
 pnpm docker:up
-
-# Or start with the self-hosted SearXNG search engine
-pnpm docker:up:search
 
 # Or for development with hot-reload
 pnpm docker:dev
@@ -227,11 +224,9 @@ Web search is available to agents via the `web_search` tool. Configure your pref
 
 | Provider | Description |
 |----------|-------------|
-| **SearXNG** | Self-hosted, no API key required. Included as an optional Docker Compose profile. |
+| **SearXNG** | Self-hosted, no API key required. |
 | **Brave Search** | Requires an API key from [brave.com](https://brave.com/search/api/). |
 | **Tavily** | Requires an API key from [tavily.com](https://tavily.com). |
-
-To start SearXNG alongside Otterbot: `pnpm docker:up:search`
 
 ## Authentication & Setup
 
@@ -284,7 +279,7 @@ otterbot/
 │   ├── environments/        # 3D environment packs
 │   └── scenes/              # Scene configuration files
 ├── Dockerfile               # Multi-stage production build (Node 22)
-└── docker-compose.yml       # Container orchestration + optional SearXNG
+└── docker-compose.yml       # Container orchestration
 ```
 
 ## Tech Stack
@@ -311,7 +306,7 @@ otterbot/
 
 ```bash
 # Development
-pnpm dev              # Start server (:3000) and web (:5173)
+pnpm dev              # Start server (:62626) and web (:5173)
 pnpm dev:server       # Server only
 pnpm dev:web          # Frontend only
 
@@ -335,7 +330,6 @@ pnpm docker:build     # Build container image
 pnpm docker:up        # Start container (detached)
 pnpm docker:down      # Stop container
 pnpm docker:dev       # Start with hot-reload (dev mode)
-pnpm docker:up:search # Start with SearXNG search engine
 ```
 
 ## Environment Variables
@@ -349,7 +343,7 @@ cp .env.example .env
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
 | `OTTERBOT_DB_KEY` | **Yes** | — | Encryption key for the SQLite database |
-| `PORT` | | `3000` | Server port |
+| `PORT` | | `62626` | Server port |
 | `HOST` | | `0.0.0.0` | Server bind host |
 | `DATABASE_URL` | | `file:./data/otterbot.db` | SQLite database path |
 | `WORKSPACE_ROOT` | | `./data` | Root directory for agent workspaces |
