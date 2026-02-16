@@ -18,6 +18,7 @@ import { KanbanBoard } from "./components/kanban/KanbanBoard";
 import { FileBrowser } from "./components/project/FileBrowser";
 import { DesktopView } from "./components/desktop/DesktopView";
 import { useDesktopStore } from "./stores/desktop-store";
+import { initMovementTriggers } from "./lib/movement-triggers";
 import { Group, Panel, Separator, useDefaultLayout, usePanelRef } from "react-resizable-panels";
 import { disconnectSocket, getSocket } from "./lib/socket";
 
@@ -127,6 +128,9 @@ function MainApp() {
 
     // Check desktop environment status
     useDesktopStore.getState().checkStatus();
+
+    // Initialize movement trigger system
+    initMovementTriggers();
   }, []);
 
   const handleEnterProject = useCallback(

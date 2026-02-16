@@ -21,6 +21,7 @@ import { MessageBus } from "./bus/message-bus.js";
 import { WorkspaceManager } from "./workspace/workspace.js";
 import { Registry } from "./registry/registry.js";
 import { COO } from "./agents/coo.js";
+import { AdminAssistant } from "./agents/admin-assistant.js";
 import { closeBrowser } from "./tools/browser-pool.js";
 import { getConfiguredTTSProvider } from "./tts/tts.js";
 import { getConfiguredSTTProvider } from "./stt/stt.js";
@@ -57,6 +58,7 @@ import {
 import { discoverModelPacks } from "./models3d/model-packs.js";
 import { discoverEnvironmentPacks } from "./models3d/environment-packs.js";
 import { discoverSceneConfigs } from "./models3d/scene-configs.js";
+import { WorldLayoutManager } from "./models3d/world-layout.js";
 import { registerDesktopProxy, isDesktopEnabled, getDesktopConfig } from "./desktop/desktop.js";
 import {
   listPackages,
@@ -337,6 +339,11 @@ async function main() {
         },
         onProjectCreated: (project) => {
           emitProjectCreated(io, project);
+          // Auto-create a zone for the new project
+          const zone = worldLayout.addZone(project.id);
+          if (zone) {
+            io.emit("world:zone-added", { zone });
+          }
         },
         onProjectUpdated: (project) => {
           emitProjectUpdated(io, project);
@@ -366,6 +373,19 @@ async function main() {
       emitAgentSpawned(io, coo);
       setupSocketHandlers(io, bus, coo, registry);
       console.log(`COO agent started. (model=${coo.toData().model}, provider=${coo.toData().provider})`);
+
+      // Spawn AdminAssistant alongside COO
+      const adminAssistant = new AdminAssistant({
+        model: coo.toData().model,
+        provider: coo.toData().provider,
+        baseUrl: coo.toData().baseUrl,
+      });
+      adminAssistant.spawn().then((agentData) => {
+        io.emit("agent:spawned", agentData);
+        console.log("AdminAssistant agent spawned.");
+      }).catch((err) => {
+        console.error("Failed to spawn AdminAssistant:", err);
+      });
 
       // Recover active projects from previous run (non-blocking)
       coo.recoverActiveProjects().catch((err) => {
@@ -1318,6 +1338,40 @@ async function main() {
     }
     const scenePath = join(assetsRoot, "scenes", `${id}.json`);
     writeFileSync(scenePath, JSON.stringify(config, null, 2));
+    return { ok: true };
+  });
+
+  // World layout API
+  const worldLayout = new WorldLayoutManager(assetsRoot);
+
+  app.get("/api/world", async () => {
+    const composite = worldLayout.getCompositeWorld();
+    if (!composite) return { error: "No world base scene found" };
+    return composite;
+  });
+
+  app.post<{
+    Body: { projectId: string; templateId?: string };
+  }>("/api/world/zones", async (req) => {
+    const { projectId, templateId } = req.body;
+    const zone = worldLayout.addZone(projectId, templateId ?? "default-project-office");
+    if (!zone) return { error: "Failed to create zone" };
+
+    // Emit socket event
+    io.emit("world:zone-added", { zone });
+
+    return { ok: true, zone };
+  });
+
+  app.delete<{
+    Params: { projectId: string };
+  }>("/api/world/zones/:projectId", async (req) => {
+    const { projectId } = req.params;
+    const removed = worldLayout.removeZone(projectId);
+    if (!removed) return { error: "Zone not found" };
+
+    io.emit("world:zone-removed", { projectId });
+
     return { ok: true };
   });
 

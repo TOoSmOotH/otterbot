@@ -3,6 +3,7 @@ import { useFrame } from "@react-three/fiber";
 import { Html, Sparkles } from "@react-three/drei";
 import type { Mesh } from "three";
 import * as THREE from "three";
+import type { InterpolatorState } from "../../lib/path-interpolator";
 
 interface FallbackAgentProps {
   position: [number, number, number];
@@ -10,6 +11,7 @@ interface FallbackAgentProps {
   role: string;
   status: string;
   rotationY?: number;
+  movementState?: InterpolatorState | null;
 }
 
 const ROLE_COLORS: Record<string, string> = {
@@ -17,6 +19,7 @@ const ROLE_COLORS: Record<string, string> = {
   coo: "#8b5cf6",     // violet
   team_lead: "#f59e0b", // amber
   worker: "#06b6d4",   // cyan
+  admin_assistant: "#e879f9", // pink
 };
 
 const STATUS_COLORS: Record<string, string> = {
@@ -27,16 +30,29 @@ const STATUS_COLORS: Record<string, string> = {
   error: "#ef4444",
 };
 
-export function FallbackAgent({ position, label, role, status, rotationY = 0 }: FallbackAgentProps) {
+export function FallbackAgent({ position, label, role, status, rotationY = 0, movementState }: FallbackAgentProps) {
   const meshRef = useRef<Mesh>(null);
+  const groupRef = useRef<THREE.Group>(null);
+  const currentRotationRef = useRef(rotationY);
   const color = ROLE_COLORS[role] ?? ROLE_COLORS.worker;
 
   useFrame((_, delta) => {
     if (!meshRef.current) return;
 
+    // Update group position/rotation for movement
+    if (groupRef.current && movementState?.isMoving) {
+      groupRef.current.position.set(...movementState.position);
+      const targetRot = movementState.rotationY;
+      currentRotationRef.current = THREE.MathUtils.lerp(currentRotationRef.current, targetRot, delta * 8);
+      groupRef.current.rotation.y = currentRotationRef.current;
+    }
+
     // Gentle hover animation
     const baseY = 0.75;
-    if (status === "thinking") {
+    if (movementState?.isMoving) {
+      // Bobbing while walking
+      meshRef.current.position.y = baseY + Math.sin(Date.now() * 0.008) * 0.05;
+    } else if (status === "thinking") {
       meshRef.current.position.y = baseY + Math.sin(Date.now() * 0.003) * 0.08;
       meshRef.current.rotation.y += delta * 0.5;
     } else if (status === "acting") {
@@ -48,8 +64,10 @@ export function FallbackAgent({ position, label, role, status, rotationY = 0 }: 
     }
   });
 
+  const effectivePosition = movementState?.isMoving ? movementState.position : position;
+
   return (
-    <group position={position} rotation={[0, rotationY, 0]}>
+    <group ref={groupRef} position={effectivePosition} rotation={[0, rotationY, 0]}>
       {/* Capsule body */}
       <mesh ref={meshRef} position={[0, 0.75, 0]} castShadow>
         <capsuleGeometry args={[0.3, 0.8, 8, 16]} />

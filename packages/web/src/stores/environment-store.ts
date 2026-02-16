@@ -4,11 +4,13 @@ import type { EnvironmentPack, SceneConfig } from "@otterbot/shared";
 interface EnvironmentState {
   packs: EnvironmentPack[];
   scenes: SceneConfig[];
+  worldScene: SceneConfig | null;
   activeSceneId: string;
   loading: boolean;
   loaded: boolean;
   loadEnvironment: () => Promise<void>;
   reloadEnvironment: () => Promise<void>;
+  loadWorld: () => Promise<void>;
   setActiveSceneId: (id: string) => void;
   getActiveScene: () => SceneConfig | undefined;
   resolveAssetUrl: (assetRef: string) => string | undefined;
@@ -17,6 +19,7 @@ interface EnvironmentState {
 export const useEnvironmentStore = create<EnvironmentState>((set, get) => ({
   packs: [],
   scenes: [],
+  worldScene: null,
   activeSceneId: "default-office",
   loading: false,
   loaded: false,
@@ -40,6 +43,9 @@ export const useEnvironmentStore = create<EnvironmentState>((set, get) => ({
         "scenes",
       );
       set({ packs, scenes, loaded: true });
+
+      // Also try loading the world scene
+      get().loadWorld();
     } catch (err) {
       console.error("[environment-store] error:", err);
     } finally {
@@ -64,10 +70,26 @@ export const useEnvironmentStore = create<EnvironmentState>((set, get) => ({
         "scenes",
       );
       set({ packs, scenes, loaded: true });
+
+      // Also reload the world scene
+      get().loadWorld();
     } catch (err) {
       console.error("[environment-store] reload error:", err);
     } finally {
       set({ loading: false });
+    }
+  },
+
+  loadWorld: async () => {
+    try {
+      const res = await fetch("/api/world");
+      if (res.ok) {
+        const worldScene = await res.json() as SceneConfig;
+        set({ worldScene });
+        console.log("[environment-store] world scene loaded with", worldScene.zones?.length ?? 0, "zones");
+      }
+    } catch (err) {
+      console.error("[environment-store] world load error:", err);
     }
   },
 
@@ -76,7 +98,11 @@ export const useEnvironmentStore = create<EnvironmentState>((set, get) => ({
   },
 
   getActiveScene: () => {
-    const { scenes, activeSceneId } = get();
+    const { scenes, worldScene, activeSceneId } = get();
+    // If activeSceneId is "world-base" and we have a composite world, return it
+    if (activeSceneId === "world-base" && worldScene) {
+      return worldScene;
+    }
     return scenes.find((s) => s.id === activeSceneId);
   },
 

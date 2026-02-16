@@ -5,6 +5,13 @@ import { clone as skeletonClone } from "three/examples/jsm/utils/SkeletonUtils.j
 import type { ModelPack, GearConfig } from "@otterbot/shared";
 import * as THREE from "three";
 import { applyGearConfig } from "../../lib/gear-utils";
+import type { InterpolatorState } from "../../lib/path-interpolator";
+
+export interface MovementState {
+  position: [number, number, number];
+  rotationY: number;
+  isMoving: boolean;
+}
 
 interface AgentCharacterProps {
   pack: ModelPack;
@@ -14,6 +21,7 @@ interface AgentCharacterProps {
   status: string;
   gearConfig?: GearConfig | null;
   rotationY?: number;
+  movementState?: InterpolatorState | null;
 }
 
 const STATUS_COLORS: Record<string, string> = {
@@ -24,11 +32,29 @@ const STATUS_COLORS: Record<string, string> = {
   error: "#ef4444",
 };
 
-export function AgentCharacter({ pack, position, label, role, status, gearConfig, rotationY = 0 }: AgentCharacterProps) {
+export function AgentCharacter({ pack, position, label, role, status, gearConfig, rotationY = 0, movementState }: AgentCharacterProps) {
+  const groupRef = useRef<THREE.Group>(null);
+  const currentRotationRef = useRef(rotationY);
+
+  // Smooth rotation interpolation for movement
+  useFrame((_, delta) => {
+    if (!groupRef.current) return;
+    const targetRotation = movementState?.isMoving ? movementState.rotationY : rotationY;
+    currentRotationRef.current = THREE.MathUtils.lerp(currentRotationRef.current, targetRotation, delta * 8);
+    groupRef.current.rotation.y = currentRotationRef.current;
+
+    if (movementState?.isMoving) {
+      groupRef.current.position.set(...movementState.position);
+    }
+  });
+
+  const effectivePosition = movementState?.isMoving ? movementState.position : position;
+  const effectiveStatus = movementState?.isMoving ? "walking" : status;
+
   return (
-    <group position={position} rotation={[0, rotationY, 0]}>
+    <group ref={groupRef} position={effectivePosition} rotation={[0, rotationY, 0]}>
       <Suspense fallback={<FallbackMesh role={role} />}>
-        <CharacterModel pack={pack} status={status} gearConfig={gearConfig} />
+        <CharacterModel pack={pack} status={effectiveStatus} gearConfig={gearConfig} />
       </Suspense>
 
       {/* Status ring on ground */}
@@ -140,7 +166,12 @@ function CharacterModel({ pack, status, gearConfig }: { pack: ModelPack; status:
 
     let targetName: string | undefined;
 
-    if (status === "acting") {
+    if (status === "walking") {
+      targetName =
+        findClip(actions, /Walking_A/i) ??
+        findClip(actions, /Running_A/i) ??
+        findClip(actions, /walk|run/i);
+    } else if (status === "acting") {
       targetName =
         findClip(actions, /Walking_A/i) ??
         findClip(actions, /Running_A/i) ??
@@ -197,7 +228,7 @@ function findClip(actions: Map<string, THREE.AnimationAction>, pattern: RegExp):
 }
 
 function FallbackMesh({ role }: { role: string }) {
-  const color = role === "coo" ? "#8b5cf6" : role === "team_lead" ? "#f59e0b" : "#06b6d4";
+  const color = role === "coo" ? "#8b5cf6" : role === "team_lead" ? "#f59e0b" : role === "admin_assistant" ? "#e879f9" : "#06b6d4";
   return (
     <mesh position={[0, 0.75, 0]}>
       <capsuleGeometry args={[0.3, 0.8, 8, 16]} />
