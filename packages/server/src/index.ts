@@ -100,6 +100,9 @@ import {
   getOpenCodeSettings,
   updateOpenCodeSettings,
   testOpenCodeConnection,
+  getGitHubSettings,
+  updateGitHubSettings,
+  testGitHubConnection,
   listCustomModels,
   createCustomModel,
   deleteCustomModel,
@@ -1668,6 +1671,28 @@ async function main() {
 
   app.post("/api/settings/opencode/test", async () => {
     return testOpenCodeConnection();
+  });
+
+  // =========================================================================
+  // GitHub settings routes
+  // =========================================================================
+
+  app.get("/api/settings/github", async () => {
+    return getGitHubSettings();
+  });
+
+  app.put<{
+    Body: {
+      enabled?: boolean;
+      token?: string;
+    };
+  }>("/api/settings/github", async (req) => {
+    updateGitHubSettings(req.body);
+    return { ok: true };
+  });
+
+  app.post("/api/settings/github/test", async () => {
+    return testGitHubConnection();
   });
 
   // SPA fallback for client-side routing (only for page navigation, not JS/CSS/API requests)

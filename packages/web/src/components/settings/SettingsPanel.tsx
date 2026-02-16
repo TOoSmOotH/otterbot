@@ -8,9 +8,10 @@ import { SearchTab } from "./SearchTab";
 import { SpeechTab } from "./SpeechTab";
 import { LiveViewTab } from "./LiveViewTab";
 import { OpenCodeTab } from "./OpenCodeTab";
+import { GitHubTab } from "./GitHubTab";
 import { AppearanceTab } from "./AppearanceTab";
 
-type Tab = "appearance" | "providers" | "models" | "templates" | "search" | "speech" | "liveview" | "opencode";
+type Tab = "appearance" | "providers" | "models" | "templates" | "search" | "speech" | "liveview" | "opencode" | "github";
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "appearance", label: "Appearance" },
@@ -21,6 +22,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: "speech", label: "Speech" },
   { id: "liveview", label: "Live View" },
   { id: "opencode", label: "OpenCode" },
+  { id: "github", label: "GitHub" },
 ];
 
 export function SettingsPanel({ onClose }: { onClose: () => void }) {
@@ -84,6 +86,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
               {activeTab === "speech" && <SpeechTab />}
               {activeTab === "liveview" && <LiveViewTab />}
               {activeTab === "opencode" && <OpenCodeTab />}
+              {activeTab === "github" && <GitHubTab />}
             </>
           )}
         </div>

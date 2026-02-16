@@ -90,6 +90,12 @@ interface SettingsState {
   openCodeMaxIterations: number;
   openCodeTestResult: TestResult | null;
 
+  // GitHub
+  gitHubEnabled: boolean;
+  gitHubTokenSet: boolean;
+  gitHubUsername: string | null;
+  gitHubTestResult: TestResult | null;
+
   loadSettings: () => Promise<void>;
   createProvider: (data: { name: string; type: ProviderType; apiKey?: string; baseUrl?: string }) => Promise<NamedProvider | null>;
   updateProvider: (
@@ -150,6 +156,14 @@ interface SettingsState {
     maxIterations?: number;
   }) => Promise<void>;
   testOpenCodeConnection: () => Promise<void>;
+
+  // GitHub actions
+  loadGitHubSettings: () => Promise<void>;
+  updateGitHubSettings: (data: {
+    enabled?: boolean;
+    token?: string;
+  }) => Promise<void>;
+  testGitHubConnection: () => Promise<void>;
 }
 
 // ---------------------------------------------------------------------------
@@ -191,6 +205,10 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   openCodeTimeoutMs: 180000,
   openCodeMaxIterations: 50,
   openCodeTestResult: null,
+  gitHubEnabled: false,
+  gitHubTokenSet: false,
+  gitHubUsername: null,
+  gitHubTestResult: null,
 
   loadSettings: async () => {
     set({ loading: true, error: null });
@@ -770,6 +788,66 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     } catch (err) {
       set({
         openCodeTestResult: {
+          ok: false,
+          error: err instanceof Error ? err.message : "Unknown error",
+          testing: false,
+        },
+      });
+    }
+  },
+
+  // GitHub actions
+
+  loadGitHubSettings: async () => {
+    try {
+      const res = await fetch("/api/settings/github");
+      if (!res.ok) return;
+      const data = await res.json();
+      set({
+        gitHubEnabled: data.enabled,
+        gitHubTokenSet: data.tokenSet,
+        gitHubUsername: data.username,
+      });
+    } catch {
+      // Silently fail
+    }
+  },
+
+  updateGitHubSettings: async (data) => {
+    set({ error: null });
+    try {
+      const res = await fetch("/api/settings/github", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) throw new Error("Failed to update GitHub settings");
+      await get().loadGitHubSettings();
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "Unknown error" });
+    }
+  },
+
+  testGitHubConnection: async () => {
+    set({ gitHubTestResult: { ok: false, testing: true } });
+    try {
+      const res = await fetch("/api/settings/github/test", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      const data = await res.json();
+      set({
+        gitHubTestResult: {
+          ok: data.ok,
+          error: data.error,
+          testing: false,
+        },
+        gitHubUsername: data.ok ? data.username : get().gitHubUsername,
+      });
+    } catch (err) {
+      set({
+        gitHubTestResult: {
           ok: false,
           error: err instanceof Error ? err.message : "Unknown error",
           testing: false,
