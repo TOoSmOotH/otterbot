@@ -172,6 +172,22 @@ export const sessions = sqliteTable("sessions", {
     .$defaultFn(() => new Date().toISOString()),
 });
 
+export const tokenUsage = sqliteTable("token_usage", {
+  id: text("id").primaryKey(),
+  agentId: text("agent_id").notNull(),
+  provider: text("provider").notNull(),
+  model: text("model").notNull(),
+  inputTokens: integer("input_tokens").notNull().default(0),
+  outputTokens: integer("output_tokens").notNull().default(0),
+  cost: integer("cost"), // cost in microcents (1/10000 of a cent) for precision without floats
+  projectId: text("project_id"),
+  conversationId: text("conversation_id"),
+  messageId: text("message_id"),
+  timestamp: text("timestamp")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+});
+
 export const providers = sqliteTable("providers", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
