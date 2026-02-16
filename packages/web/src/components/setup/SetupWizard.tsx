@@ -115,6 +115,9 @@ export function SetupWizard() {
   const [fetchedModels, setFetchedModels] = useState<string[]>([]);
   const [fetchingModels, setFetchingModels] = useState(false);
   const probeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [modelDropdownOpen, setModelDropdownOpen] = useState(false);
+  const [modelFilter, setModelFilter] = useState("");
+  const modelComboRef = useRef<HTMLDivElement>(null);
 
   // Step 3: Profile
   const [displayName, setDisplayName] = useState("");
@@ -199,9 +202,22 @@ export function SetupWizard() {
     };
   }, [provider, apiKey, baseUrl, probeModels]);
 
+  // Close model dropdown on click outside
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (modelComboRef.current && !modelComboRef.current.contains(e.target as Node)) {
+        setModelDropdownOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
   const handleSelectProvider = (id: string) => {
     setProvider(id);
     setFetchedModels([]);
+    setModelFilter("");
+    setModelDropdownOpen(false);
     // Set default provider name from type label
     const typeMeta = providerTypes.find((pt) => pt.type === id);
     setProviderName(typeMeta?.label || id);
@@ -482,22 +498,20 @@ export function SetupWizard() {
                   <label className="block text-sm text-muted-foreground mb-1.5">
                     Model
                   </label>
-                  <input
-                    type="text"
-                    value={model}
-                    onChange={(e) => setModel(e.target.value)}
-                    placeholder="Model name"
-                    className="w-full px-3 py-2 bg-background border border-input rounded-md text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-                  />
+
+                  {/* Suggested model chips */}
                   {(() => {
                     const suggested = SUGGESTED_MODELS[provider] ?? [];
-                    const merged = [...new Set([...suggested, ...fetchedModels])];
-                    return merged.length > 0 || fetchingModels ? (
-                      <div className="flex gap-1.5 mt-1.5 flex-wrap items-center">
-                        {merged.map((m) => (
+                    return suggested.length > 0 ? (
+                      <div className="flex gap-1.5 mb-2 flex-wrap">
+                        {suggested.map((m) => (
                           <button
                             key={m}
-                            onClick={() => setModel(m)}
+                            onClick={() => {
+                              setModel(m);
+                              setModelFilter("");
+                              setModelDropdownOpen(false);
+                            }}
                             className={`text-xs px-2 py-0.5 rounded border transition-colors ${
                               model === m
                                 ? "border-primary text-primary"
@@ -507,14 +521,71 @@ export function SetupWizard() {
                             {m}
                           </button>
                         ))}
-                        {fetchingModels && (
-                          <span className="text-xs text-muted-foreground">
-                            Loading models...
-                          </span>
-                        )}
                       </div>
                     ) : null;
                   })()}
+
+                  {/* Searchable model combobox */}
+                  <div ref={modelComboRef} className="relative">
+                    <input
+                      type="text"
+                      value={modelDropdownOpen ? modelFilter : model}
+                      onChange={(e) => {
+                        setModelFilter(e.target.value);
+                        setModel(e.target.value);
+                        setModelDropdownOpen(true);
+                      }}
+                      onFocus={() => {
+                        setModelFilter(model);
+                        setModelDropdownOpen(true);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === "Escape") {
+                          setModelDropdownOpen(false);
+                          (e.target as HTMLInputElement).blur();
+                        }
+                      }}
+                      placeholder="Search or type a model name"
+                      className="w-full px-3 py-2 bg-background border border-input rounded-md text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                    />
+                    {fetchingModels && (
+                      <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">
+                        Loading...
+                      </span>
+                    )}
+                    {!fetchingModels && fetchedModels.length > 0 && !modelDropdownOpen && (
+                      <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">
+                        {fetchedModels.length} models
+                      </span>
+                    )}
+
+                    {/* Dropdown */}
+                    {modelDropdownOpen && fetchedModels.length > 0 && (() => {
+                      const filtered = fetchedModels.filter((m) =>
+                        m.toLowerCase().includes(modelFilter.toLowerCase()),
+                      );
+                      return filtered.length > 0 ? (
+                        <div className="absolute z-50 mt-1 w-full bg-popover border border-border rounded-md shadow-md max-h-[200px] overflow-y-auto">
+                          {filtered.map((m) => (
+                            <button
+                              key={m}
+                              onMouseDown={(e) => e.preventDefault()}
+                              onClick={() => {
+                                setModel(m);
+                                setModelFilter("");
+                                setModelDropdownOpen(false);
+                              }}
+                              className={`w-full text-left px-3 py-1.5 text-sm hover:bg-accent transition-colors ${
+                                model === m ? "bg-accent text-accent-foreground" : "text-foreground"
+                              }`}
+                            >
+                              {m}
+                            </button>
+                          ))}
+                        </div>
+                      ) : null;
+                    })()}
+                  </div>
                 </div>
               )}
 
