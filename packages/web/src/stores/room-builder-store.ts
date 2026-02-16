@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { SceneConfig, SceneProp } from "@otterbot/shared";
+import type { SceneConfig, SceneProp, Waypoint, WaypointEdge } from "@otterbot/shared";
 import type { RefObject } from "react";
 import * as THREE from "three";
 import { useEnvironmentStore } from "./environment-store";
@@ -8,7 +8,17 @@ export interface EditableProp extends SceneProp {
   uid: string;
 }
 
+export interface EditableWaypoint extends Waypoint {
+  uid: string;
+}
+
+export interface EditableEdge extends WaypointEdge {
+  uid: string;
+}
+
 type TransformMode = "translate" | "rotate" | "scale";
+type EditorTool = "props" | "waypoints";
+type WaypointTool = "select" | "add" | "connect" | "delete";
 
 interface RoomBuilderState {
   active: boolean;
@@ -21,6 +31,16 @@ interface RoomBuilderState {
   dirty: boolean;
   saving: boolean;
   dragging: boolean;
+
+  // Editor tool mode
+  editorTool: EditorTool;
+
+  // Waypoint editing state
+  editingWaypoints: EditableWaypoint[];
+  editingEdges: EditableEdge[];
+  selectedWaypointId: string | null;
+  connectingFromId: string | null;
+  waypointTool: WaypointTool;
 
   // Undo/redo
   history: EditableProp[][];
@@ -46,6 +66,21 @@ interface RoomBuilderState {
   exportScene: () => void;
   registerPropRef: (uid: string, ref: RefObject<THREE.Group | null>) => void;
   unregisterPropRef: (uid: string) => void;
+
+  // Waypoint actions
+  setEditorTool: (tool: EditorTool) => void;
+  setWaypointTool: (tool: WaypointTool) => void;
+  addWaypoint: (position: [number, number, number]) => void;
+  deleteWaypoint: (id: string) => void;
+  selectWaypoint: (id: string | null) => void;
+  updateWaypointPosition: (id: string, position: [number, number, number]) => void;
+  updateWaypointLabel: (id: string, label: string) => void;
+  updateWaypointTag: (id: string, tag: string) => void;
+  updateWaypointZone: (id: string, zoneId: string | undefined) => void;
+  startConnecting: (fromId: string) => void;
+  finishConnecting: (toId: string) => void;
+  cancelConnecting: () => void;
+  deleteEdge: (uid: string) => void;
 }
 
 function cloneProps(props: EditableProp[]): EditableProp[] {
@@ -76,6 +111,12 @@ export const useRoomBuilderStore = create<RoomBuilderState>((set, get) => ({
   dirty: false,
   saving: false,
   dragging: false,
+  editorTool: "props",
+  editingWaypoints: [],
+  editingEdges: [],
+  selectedWaypointId: null,
+  connectingFromId: null,
+  waypointTool: "select",
   history: [],
   future: [],
   propRefs: new Map(),
@@ -88,12 +129,31 @@ export const useRoomBuilderStore = create<RoomBuilderState>((set, get) => ({
       rotation: p.rotation ? ([...p.rotation] as [number, number, number]) : undefined,
       scale: Array.isArray(p.scale) ? ([...p.scale] as [number, number, number]) : p.scale,
     }));
+
+    // Load waypoints from scene config
+    const editingWaypoints: EditableWaypoint[] = (scene.waypointGraph?.waypoints ?? []).map((wp) => ({
+      ...wp,
+      uid: crypto.randomUUID(),
+      position: [...wp.position] as [number, number, number],
+    }));
+
+    const editingEdges: EditableEdge[] = (scene.waypointGraph?.edges ?? []).map((e) => ({
+      ...e,
+      uid: crypto.randomUUID(),
+    }));
+
     set({
       active: true,
       sceneId: scene.id,
       editingProps,
       selectedPropUid: null,
       transformMode: "translate",
+      editorTool: "props",
+      editingWaypoints,
+      editingEdges,
+      selectedWaypointId: null,
+      connectingFromId: null,
+      waypointTool: "select",
       dirty: false,
       saving: false,
       history: [],
@@ -108,6 +168,12 @@ export const useRoomBuilderStore = create<RoomBuilderState>((set, get) => ({
       sceneId: null,
       editingProps: [],
       selectedPropUid: null,
+      editorTool: "props",
+      editingWaypoints: [],
+      editingEdges: [],
+      selectedWaypointId: null,
+      connectingFromId: null,
+      waypointTool: "select",
       dirty: false,
       saving: false,
       history: [],
@@ -206,11 +272,18 @@ export const useRoomBuilderStore = create<RoomBuilderState>((set, get) => ({
     // Strip UIDs to get clean SceneProps
     const props: SceneProp[] = state.editingProps.map(({ uid, ...rest }) => rest);
 
+    // Build waypoint graph from editing state
+    const waypointGraph = state.editingWaypoints.length > 0 ? {
+      waypoints: state.editingWaypoints.map(({ uid, ...rest }) => rest),
+      edges: state.editingEdges.map(({ uid, ...rest }) => rest),
+    } : undefined;
+
     // Get the current scene to preserve non-prop data
     const currentScene = useEnvironmentStore.getState().getActiveScene();
     const sceneConfig: SceneConfig = {
       ...(currentScene ?? { id: state.sceneId, name: state.sceneId }),
       props,
+      ...(waypointGraph ? { waypointGraph } : {}),
     };
 
     try {
@@ -238,11 +311,18 @@ export const useRoomBuilderStore = create<RoomBuilderState>((set, get) => ({
     // Strip UIDs to get clean SceneProps
     const props: SceneProp[] = state.editingProps.map(({ uid, ...rest }) => rest);
 
+    // Build waypoint graph
+    const waypointGraph = state.editingWaypoints.length > 0 ? {
+      waypoints: state.editingWaypoints.map(({ uid, ...rest }) => rest),
+      edges: state.editingEdges.map(({ uid, ...rest }) => rest),
+    } : undefined;
+
     // Build a full SceneConfig preserving lighting/camera/agentPositions
     const currentScene = useEnvironmentStore.getState().getActiveScene();
     const sceneConfig: SceneConfig = {
       ...(currentScene ?? { id: state.sceneId, name: state.sceneId }),
       props,
+      ...(waypointGraph ? { waypointGraph } : {}),
     };
 
     const json = JSON.stringify(sceneConfig, null, 2);
@@ -267,5 +347,120 @@ export const useRoomBuilderStore = create<RoomBuilderState>((set, get) => ({
     const refs = get().propRefs;
     refs.delete(uid);
     set({ propRefs: new Map(refs) });
+  },
+
+  // Waypoint actions
+  setEditorTool: (tool) => {
+    set({ editorTool: tool, selectedPropUid: null, selectedWaypointId: null, connectingFromId: null });
+  },
+
+  setWaypointTool: (tool) => {
+    set({ waypointTool: tool, connectingFromId: null });
+  },
+
+  addWaypoint: (position) => {
+    const id = `wp-${crypto.randomUUID().slice(0, 8)}`;
+    const wp: EditableWaypoint = {
+      uid: crypto.randomUUID(),
+      id,
+      position: [...position] as [number, number, number],
+    };
+    set((s) => ({
+      editingWaypoints: [...s.editingWaypoints, wp],
+      selectedWaypointId: id,
+      dirty: true,
+    }));
+  },
+
+  deleteWaypoint: (id) => {
+    set((s) => ({
+      editingWaypoints: s.editingWaypoints.filter((wp) => wp.id !== id),
+      editingEdges: s.editingEdges.filter((e) => e.from !== id && e.to !== id),
+      selectedWaypointId: s.selectedWaypointId === id ? null : s.selectedWaypointId,
+      dirty: true,
+    }));
+  },
+
+  selectWaypoint: (id) => {
+    set({ selectedWaypointId: id });
+  },
+
+  updateWaypointPosition: (id, position) => {
+    set((s) => ({
+      editingWaypoints: s.editingWaypoints.map((wp) =>
+        wp.id === id ? { ...wp, position: [...position] as [number, number, number] } : wp,
+      ),
+      dirty: true,
+    }));
+  },
+
+  updateWaypointLabel: (id, label) => {
+    set((s) => ({
+      editingWaypoints: s.editingWaypoints.map((wp) =>
+        wp.id === id ? { ...wp, label: label || undefined } : wp,
+      ),
+      dirty: true,
+    }));
+  },
+
+  updateWaypointTag: (id, tag) => {
+    set((s) => ({
+      editingWaypoints: s.editingWaypoints.map((wp) =>
+        wp.id === id ? { ...wp, tag: tag || undefined } : wp,
+      ),
+      dirty: true,
+    }));
+  },
+
+  updateWaypointZone: (id, zoneId) => {
+    set((s) => ({
+      editingWaypoints: s.editingWaypoints.map((wp) =>
+        wp.id === id ? { ...wp, zoneId } : wp,
+      ),
+      dirty: true,
+    }));
+  },
+
+  startConnecting: (fromId) => {
+    set({ connectingFromId: fromId });
+  },
+
+  finishConnecting: (toId) => {
+    const { connectingFromId, editingEdges } = get();
+    if (!connectingFromId || connectingFromId === toId) {
+      set({ connectingFromId: null });
+      return;
+    }
+
+    // Check if edge already exists
+    const exists = editingEdges.some(
+      (e) => (e.from === connectingFromId && e.to === toId) || (e.from === toId && e.to === connectingFromId),
+    );
+
+    if (!exists) {
+      const edge: EditableEdge = {
+        uid: crypto.randomUUID(),
+        from: connectingFromId,
+        to: toId,
+      };
+      set((s) => ({
+        editingEdges: [...s.editingEdges, edge],
+        connectingFromId: null,
+        dirty: true,
+      }));
+    } else {
+      set({ connectingFromId: null });
+    }
+  },
+
+  cancelConnecting: () => {
+    set({ connectingFromId: null });
+  },
+
+  deleteEdge: (uid) => {
+    set((s) => ({
+      editingEdges: s.editingEdges.filter((e) => e.uid !== uid),
+      dirty: true,
+    }));
   },
 }));

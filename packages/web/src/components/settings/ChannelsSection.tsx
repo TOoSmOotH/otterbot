@@ -1,0 +1,61 @@
+const CHANNELS = [
+  {
+    name: "WhatsApp",
+    description: "Connect to WhatsApp messaging",
+    icon: "W",
+  },
+  {
+    name: "Telegram",
+    description: "Connect to Telegram bots and channels",
+    icon: "T",
+  },
+  {
+    name: "Slack",
+    description: "Integrate with Slack workspaces",
+    icon: "S",
+  },
+  {
+    name: "Discord",
+    description: "Connect to Discord servers",
+    icon: "D",
+  },
+];
+
+export function ChannelsSection() {
+  return (
+    <div className="p-5 space-y-4">
+      <div>
+        <h3 className="text-xs font-semibold mb-1">Channels</h3>
+        <p className="text-xs text-muted-foreground">
+          Connect Otterbot to messaging platforms.
+        </p>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3">
+        {CHANNELS.map((channel) => (
+          <div
+            key={channel.name}
+            className="flex items-start gap-3 rounded-lg border border-border p-4 bg-secondary"
+          >
+            <div className="w-8 h-8 rounded-md bg-muted flex items-center justify-center shrink-0">
+              <span className="text-xs font-bold text-muted-foreground">
+                {channel.icon}
+              </span>
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2">
+                <p className="text-xs font-medium">{channel.name}</p>
+                <span className="text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
+                  Coming Soon
+                </span>
+              </div>
+              <p className="text-[10px] text-muted-foreground mt-0.5">
+                {channel.description}
+              </p>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}

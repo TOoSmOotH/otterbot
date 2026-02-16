@@ -2,6 +2,7 @@ import type { Agent, AgentStatus, AgentActivityRecord } from "./agent.js";
 import type { BusMessage, Conversation } from "./message.js";
 import type { RegistryEntry, Project } from "./registry.js";
 import type { KanbanTask } from "./kanban.js";
+import type { SceneZone } from "./environment.js";
 
 /** Events emitted from server to client */
 export interface ServerToClientEvents {
@@ -25,6 +26,9 @@ export interface ServerToClientEvents {
   "agent:thinking": (data: { agentId: string; token: string; messageId: string }) => void;
   "agent:thinking-end": (data: { agentId: string; messageId: string }) => void;
   "agent:tool-call": (data: { agentId: string; toolName: string; args: Record<string, unknown> }) => void;
+  "agent:move": (data: { agentId: string; fromZoneId: string | null; toZoneId: string | null }) => void;
+  "world:zone-added": (data: { zone: SceneZone }) => void;
+  "world:zone-removed": (data: { projectId: string }) => void;
 }
 
 /** Events emitted from client to server */

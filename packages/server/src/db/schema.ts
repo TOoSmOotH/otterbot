@@ -3,7 +3,7 @@ import { sqliteTable, text, integer } from "drizzle-orm/sqlite-core";
 export const agents = sqliteTable("agents", {
   id: text("id").primaryKey(),
   registryEntryId: text("registry_entry_id"),
-  role: text("role", { enum: ["coo", "team_lead", "worker"] }).notNull(),
+  role: text("role", { enum: ["coo", "team_lead", "worker", "admin_assistant"] }).notNull(),
   parentId: text("parent_id"),
   status: text("status", {
     enum: ["idle", "thinking", "acting", "done", "error"],
@@ -71,7 +71,7 @@ export const registryEntries = sqliteTable("registry_entries", {
     .notNull()
     .default([]),
   builtIn: integer("built_in", { mode: "boolean" }).notNull().default(false),
-  role: text("role", { enum: ["coo", "team_lead", "worker"] })
+  role: text("role", { enum: ["coo", "team_lead", "worker", "admin_assistant"] })
     .notNull()
     .default("worker"),
   modelPackId: text("model_pack_id"),

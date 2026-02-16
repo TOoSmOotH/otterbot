@@ -4,6 +4,7 @@ import { useMessageStore } from "../stores/message-store";
 import { useAgentStore } from "../stores/agent-store";
 import { useProjectStore } from "../stores/project-store";
 import { useAgentActivityStore } from "../stores/agent-activity-store";
+import { useEnvironmentStore } from "../stores/environment-store";
 
 export function useSocket() {
   const initialized = useRef(false);
@@ -27,6 +28,7 @@ export function useSocket() {
   const appendAgentThinking = useAgentActivityStore((s) => s.appendThinking);
   const endAgentThinking = useAgentActivityStore((s) => s.endThinking);
   const addAgentToolCall = useAgentActivityStore((s) => s.addToolCall);
+  const loadWorld = useEnvironmentStore((s) => s.loadWorld);
 
   useEffect(() => {
     if (initialized.current) return;
@@ -130,6 +132,14 @@ export function useSocket() {
       addAgentToolCall(agentId, toolName, args);
     });
 
+    socket.on("world:zone-added", () => {
+      loadWorld();
+    });
+
+    socket.on("world:zone-removed", () => {
+      loadWorld();
+    });
+
     return () => {
       socket.off("bus:message");
       socket.off("coo:response");
@@ -151,6 +161,8 @@ export function useSocket() {
       socket.off("agent:thinking");
       socket.off("agent:thinking-end");
       socket.off("agent:tool-call");
+      socket.off("world:zone-added");
+      socket.off("world:zone-removed");
     };
   }, []);
 

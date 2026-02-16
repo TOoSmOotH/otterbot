@@ -9,7 +9,7 @@ import { CeoChat } from "./components/chat/CeoChat";
 import { AgentGraph } from "./components/graph/AgentGraph";
 import { LiveView } from "./components/live-view/LiveView";
 import { MessageStream } from "./components/stream/MessageStream";
-import { SettingsPanel } from "./components/settings/SettingsPanel";
+import { SettingsPage } from "./components/settings/SettingsPage";
 import { LoginScreen } from "./components/auth/LoginScreen";
 import { SetupWizard } from "./components/setup/SetupWizard";
 import { CharterView } from "./components/project/CharterView";
@@ -18,6 +18,7 @@ import { KanbanBoard } from "./components/kanban/KanbanBoard";
 import { FileBrowser } from "./components/project/FileBrowser";
 import { DesktopView } from "./components/desktop/DesktopView";
 import { useDesktopStore } from "./stores/desktop-store";
+import { initMovementTriggers } from "./lib/movement-triggers";
 import { Group, Panel, Separator, useDefaultLayout, usePanelRef } from "react-resizable-panels";
 import { disconnectSocket, getSocket } from "./lib/socket";
 
@@ -127,6 +128,9 @@ function MainApp() {
 
     // Check desktop environment status
     useDesktopStore.getState().checkStatus();
+
+    // Initialize movement trigger system
+    initMovementTriggers();
   }, []);
 
   const handleEnterProject = useCallback(
@@ -205,7 +209,11 @@ function MainApp() {
         <div className="flex items-center gap-1">
           <button
             onClick={() => setSettingsOpen(!settingsOpen)}
-            className="text-xs text-muted-foreground hover:text-foreground transition-colors px-2 py-1 rounded hover:bg-secondary"
+            className={`text-xs transition-colors px-2 py-1 rounded ${
+              settingsOpen
+                ? "text-primary bg-primary/10"
+                : "text-muted-foreground hover:text-foreground hover:bg-secondary"
+            }`}
           >
             Settings
           </button>
@@ -218,23 +226,22 @@ function MainApp() {
         </div>
       </header>
 
-      {/* Three-panel layout */}
-      <main className="flex-1 overflow-hidden">
-        <ResizableLayout
-          userProfile={userProfile}
-          activeProjectId={activeProjectId}
-          activeProject={activeProject}
-          projects={projects}
-          centerView={centerView}
-          setCenterView={setCenterView}
-          onEnterProject={handleEnterProject}
-          cooName={userProfile?.cooName}
-        />
-      </main>
-
-      {/* Settings modal - rendered outside the resizable layout */}
-      {settingsOpen && (
-        <SettingsPanel onClose={handleSettingsClose} />
+      {/* Full-page settings or three-panel layout */}
+      {settingsOpen ? (
+        <SettingsPage onClose={handleSettingsClose} />
+      ) : (
+        <main className="flex-1 overflow-hidden">
+          <ResizableLayout
+            userProfile={userProfile}
+            activeProjectId={activeProjectId}
+            activeProject={activeProject}
+            projects={projects}
+            centerView={centerView}
+            setCenterView={setCenterView}
+            onEnterProject={handleEnterProject}
+            cooName={userProfile?.cooName}
+          />
+        </main>
       )}
     </div>
   );

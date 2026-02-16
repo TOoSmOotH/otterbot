@@ -1,10 +1,11 @@
-import { Suspense, useMemo, useRef, useEffect } from "react";
+import { Suspense, useMemo, useRef, useEffect, useState } from "react";
 import { useFrame } from "@react-three/fiber";
 import { useGLTF, Html, Sparkles } from "@react-three/drei";
 import { clone as skeletonClone } from "three/examples/jsm/utils/SkeletonUtils.js";
 import type { ModelPack, GearConfig } from "@otterbot/shared";
 import * as THREE from "three";
 import { applyGearConfig } from "../../lib/gear-utils";
+import { useMovementStore } from "../../stores/movement-store";
 
 interface AgentCharacterProps {
   pack: ModelPack;
@@ -12,6 +13,7 @@ interface AgentCharacterProps {
   label: string;
   role: string;
   status: string;
+  agentId?: string;
   gearConfig?: GearConfig | null;
   rotationY?: number;
 }
@@ -24,11 +26,45 @@ const STATUS_COLORS: Record<string, string> = {
   error: "#ef4444",
 };
 
-export function AgentCharacter({ pack, position, label, role, status, gearConfig, rotationY = 0 }: AgentCharacterProps) {
+export function AgentCharacter({ pack, position, label, role, status, agentId, gearConfig, rotationY = 0 }: AgentCharacterProps) {
+  const groupRef = useRef<THREE.Group>(null);
+  const currentRotationRef = useRef(rotationY);
+  const [isMoving, setIsMoving] = useState(false);
+  const targetPosRef = useRef(new THREE.Vector3(...position));
+
+  // Update target position when prop changes
+  useEffect(() => {
+    targetPosRef.current.set(...position);
+  }, [position[0], position[1], position[2]]);
+
+  // Read movement state directly from store each frame
+  useFrame((_, delta) => {
+    if (!groupRef.current) return;
+
+    const ms = agentId ? useMovementStore.getState().getAgentPosition(agentId) : null;
+    const moving = ms?.isMoving ?? false;
+
+    // Track moving state for animation switching (triggers re-render)
+    if (moving !== isMoving) setIsMoving(moving);
+
+    if (moving && ms) {
+      groupRef.current.position.set(...ms.position);
+      currentRotationRef.current = THREE.MathUtils.lerp(currentRotationRef.current, ms.rotationY, delta * 8);
+    } else {
+      // Smoothly interpolate to home position
+      groupRef.current.position.lerp(targetPosRef.current, delta * 5);
+      currentRotationRef.current = THREE.MathUtils.lerp(currentRotationRef.current, rotationY, delta * 5);
+    }
+
+    groupRef.current.rotation.y = currentRotationRef.current;
+  });
+
+  const effectiveStatus = isMoving ? "walking" : status;
+
   return (
-    <group position={position} rotation={[0, rotationY, 0]}>
+    <group ref={groupRef} position={position} rotation={[0, rotationY, 0]}>
       <Suspense fallback={<FallbackMesh role={role} />}>
-        <CharacterModel pack={pack} status={status} gearConfig={gearConfig} />
+        <CharacterModel pack={pack} status={effectiveStatus} gearConfig={gearConfig} />
       </Suspense>
 
       {/* Status ring on ground */}
@@ -140,7 +176,12 @@ function CharacterModel({ pack, status, gearConfig }: { pack: ModelPack; status:
 
     let targetName: string | undefined;
 
-    if (status === "acting") {
+    if (status === "walking") {
+      targetName =
+        findClip(actions, /Walking_A/i) ??
+        findClip(actions, /Running_A/i) ??
+        findClip(actions, /walk|run/i);
+    } else if (status === "acting") {
       targetName =
         findClip(actions, /Walking_A/i) ??
         findClip(actions, /Running_A/i) ??
@@ -197,7 +238,7 @@ function findClip(actions: Map<string, THREE.AnimationAction>, pattern: RegExp):
 }
 
 function FallbackMesh({ role }: { role: string }) {
-  const color = role === "coo" ? "#8b5cf6" : role === "team_lead" ? "#f59e0b" : "#06b6d4";
+  const color = role === "coo" ? "#8b5cf6" : role === "team_lead" ? "#f59e0b" : role === "admin_assistant" ? "#e879f9" : "#06b6d4";
   return (
     <mesh position={[0, 0.75, 0]}>
       <capsuleGeometry args={[0.3, 0.8, 8, 16]} />
