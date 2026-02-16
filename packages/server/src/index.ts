@@ -1804,90 +1804,175 @@ async function main() {
     Querystring: { from?: string; to?: string; groupBy?: string };
   }>("/api/usage/summary", async (req) => {
     const { getDb, schema } = await import("./db/index.js");
-    const { sql } = await import("drizzle-orm");
+    const { sql, sum, count, gte, lte, and } = await import("drizzle-orm");
     const db = getDb();
+    const t = schema.tokenUsage;
 
-    const conditions: string[] = [];
-    const params: unknown[] = [];
-    if (req.query.from) {
-      conditions.push("timestamp >= ?");
-      params.push(req.query.from);
-    }
-    if (req.query.to) {
-      conditions.push("timestamp <= ?");
-      params.push(req.query.to);
-    }
-    const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+    // Build filter conditions
+    const conditions = [];
+    if (req.query.from) conditions.push(gte(t.timestamp, req.query.from));
+    if (req.query.to) conditions.push(lte(t.timestamp, req.query.to));
+    const where = conditions.length > 0 ? and(...conditions) : undefined;
 
     const groupBy = req.query.groupBy;
+
     if (groupBy === "day" || groupBy === "hour") {
-      const substr = groupBy === "day" ? "substr(timestamp, 1, 10)" : "substr(timestamp, 1, 13)";
-      const rows = db.all(sql.raw(
-        `SELECT ${substr} as period, SUM(input_tokens) as inputTokens, SUM(output_tokens) as outputTokens, SUM(COALESCE(cost, 0)) as cost FROM token_usage ${where} GROUP BY period ORDER BY period`
-      )) as any[];
-      return rows;
+      const len = groupBy === "day" ? 10 : 13;
+      const periodExpr = sql<string>`substr(${t.timestamp}, 1, ${len})`;
+      const rows = db
+        .select({
+          period: periodExpr.as("period"),
+          inputTokens: sum(t.inputTokens).as("inputTokens"),
+          outputTokens: sum(t.outputTokens).as("outputTokens"),
+          cost: sql<number>`SUM(COALESCE(${t.cost}, 0))`.as("cost"),
+        })
+        .from(t)
+        .where(where)
+        .groupBy(periodExpr)
+        .orderBy(periodExpr)
+        .all();
+      return rows.map((r) => ({
+        period: r.period,
+        inputTokens: Number(r.inputTokens ?? 0),
+        outputTokens: Number(r.outputTokens ?? 0),
+        cost: Number(r.cost ?? 0),
+      }));
     }
 
     if (groupBy === "model") {
-      const rows = db.all(sql.raw(
-        `SELECT model, SUM(input_tokens) as inputTokens, SUM(output_tokens) as outputTokens, SUM(COALESCE(cost, 0)) as cost, COUNT(*) as count FROM token_usage ${where} GROUP BY model ORDER BY cost DESC`
-      )) as any[];
-      return rows;
+      const rows = db
+        .select({
+          model: t.model,
+          inputTokens: sum(t.inputTokens).as("inputTokens"),
+          outputTokens: sum(t.outputTokens).as("outputTokens"),
+          cost: sql<number>`SUM(COALESCE(${t.cost}, 0))`.as("cost"),
+          count: count().as("count"),
+        })
+        .from(t)
+        .where(where)
+        .groupBy(t.model)
+        .orderBy(sql`cost DESC`)
+        .all();
+      return rows.map((r) => ({
+        model: r.model,
+        inputTokens: Number(r.inputTokens ?? 0),
+        outputTokens: Number(r.outputTokens ?? 0),
+        cost: Number(r.cost ?? 0),
+        count: Number(r.count),
+      }));
     }
 
     if (groupBy === "agent") {
-      const rows = db.all(sql.raw(
-        `SELECT agent_id as agentId, SUM(input_tokens) as inputTokens, SUM(output_tokens) as outputTokens, SUM(COALESCE(cost, 0)) as cost, COUNT(*) as count FROM token_usage ${where} GROUP BY agent_id ORDER BY cost DESC`
-      )) as any[];
-      return rows;
+      const rows = db
+        .select({
+          agentId: t.agentId,
+          inputTokens: sum(t.inputTokens).as("inputTokens"),
+          outputTokens: sum(t.outputTokens).as("outputTokens"),
+          cost: sql<number>`SUM(COALESCE(${t.cost}, 0))`.as("cost"),
+          count: count().as("count"),
+        })
+        .from(t)
+        .where(where)
+        .groupBy(t.agentId)
+        .orderBy(sql`cost DESC`)
+        .all();
+      return rows.map((r) => ({
+        agentId: r.agentId,
+        inputTokens: Number(r.inputTokens ?? 0),
+        outputTokens: Number(r.outputTokens ?? 0),
+        cost: Number(r.cost ?? 0),
+        count: Number(r.count),
+      }));
     }
 
     // Default: totals
-    const row = db.get(sql.raw(
-      `SELECT SUM(input_tokens) as totalInputTokens, SUM(output_tokens) as totalOutputTokens, SUM(COALESCE(cost, 0)) as totalCost, COUNT(*) as recordCount FROM token_usage ${where}`
-    )) as any;
+    const rows = db
+      .select({
+        totalInputTokens: sum(t.inputTokens).as("totalInputTokens"),
+        totalOutputTokens: sum(t.outputTokens).as("totalOutputTokens"),
+        totalCost: sql<number>`SUM(COALESCE(${t.cost}, 0))`.as("totalCost"),
+        recordCount: count().as("recordCount"),
+      })
+      .from(t)
+      .where(where)
+      .all();
+    const row = rows[0];
     return {
-      totalInputTokens: row?.totalInputTokens ?? 0,
-      totalOutputTokens: row?.totalOutputTokens ?? 0,
-      totalCost: row?.totalCost ?? 0,
-      recordCount: row?.recordCount ?? 0,
+      totalInputTokens: Number(row?.totalInputTokens ?? 0),
+      totalOutputTokens: Number(row?.totalOutputTokens ?? 0),
+      totalCost: Number(row?.totalCost ?? 0),
+      recordCount: Number(row?.recordCount ?? 0),
     };
   });
 
   app.get<{
     Querystring: { from?: string; to?: string };
   }>("/api/usage/by-model", async (req) => {
-    const { getDb } = await import("./db/index.js");
-    const { sql } = await import("drizzle-orm");
+    const { getDb, schema } = await import("./db/index.js");
+    const { sql, sum, count, gte, lte, and } = await import("drizzle-orm");
     const db = getDb();
+    const t = schema.tokenUsage;
 
-    const conditions: string[] = [];
-    if (req.query.from) conditions.push(`timestamp >= '${req.query.from}'`);
-    if (req.query.to) conditions.push(`timestamp <= '${req.query.to}'`);
-    const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+    const conditions = [];
+    if (req.query.from) conditions.push(gte(t.timestamp, req.query.from));
+    if (req.query.to) conditions.push(lte(t.timestamp, req.query.to));
+    const where = conditions.length > 0 ? and(...conditions) : undefined;
 
-    const rows = db.all(sql.raw(
-      `SELECT model, SUM(input_tokens) as inputTokens, SUM(output_tokens) as outputTokens, SUM(COALESCE(cost, 0)) as cost, COUNT(*) as count FROM token_usage ${where} GROUP BY model ORDER BY cost DESC`
-    )) as any[];
-    return rows;
+    const rows = db
+      .select({
+        model: t.model,
+        inputTokens: sum(t.inputTokens).as("inputTokens"),
+        outputTokens: sum(t.outputTokens).as("outputTokens"),
+        cost: sql<number>`SUM(COALESCE(${t.cost}, 0))`.as("cost"),
+        count: count().as("count"),
+      })
+      .from(t)
+      .where(where)
+      .groupBy(t.model)
+      .orderBy(sql`cost DESC`)
+      .all();
+    return rows.map((r) => ({
+      model: r.model,
+      inputTokens: Number(r.inputTokens ?? 0),
+      outputTokens: Number(r.outputTokens ?? 0),
+      cost: Number(r.cost ?? 0),
+      count: Number(r.count),
+    }));
   });
 
   app.get<{
     Querystring: { from?: string; to?: string };
   }>("/api/usage/by-agent", async (req) => {
-    const { getDb } = await import("./db/index.js");
-    const { sql } = await import("drizzle-orm");
+    const { getDb, schema } = await import("./db/index.js");
+    const { sql, sum, count, gte, lte, and } = await import("drizzle-orm");
     const db = getDb();
+    const t = schema.tokenUsage;
 
-    const conditions: string[] = [];
-    if (req.query.from) conditions.push(`timestamp >= '${req.query.from}'`);
-    if (req.query.to) conditions.push(`timestamp <= '${req.query.to}'`);
-    const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+    const conditions = [];
+    if (req.query.from) conditions.push(gte(t.timestamp, req.query.from));
+    if (req.query.to) conditions.push(lte(t.timestamp, req.query.to));
+    const where = conditions.length > 0 ? and(...conditions) : undefined;
 
-    const rows = db.all(sql.raw(
-      `SELECT agent_id as agentId, SUM(input_tokens) as inputTokens, SUM(output_tokens) as outputTokens, SUM(COALESCE(cost, 0)) as cost, COUNT(*) as count FROM token_usage ${where} GROUP BY agent_id ORDER BY cost DESC`
-    )) as any[];
-    return rows;
+    const rows = db
+      .select({
+        agentId: t.agentId,
+        inputTokens: sum(t.inputTokens).as("inputTokens"),
+        outputTokens: sum(t.outputTokens).as("outputTokens"),
+        cost: sql<number>`SUM(COALESCE(${t.cost}, 0))`.as("cost"),
+        count: count().as("count"),
+      })
+      .from(t)
+      .where(where)
+      .groupBy(t.agentId)
+      .orderBy(sql`cost DESC`)
+      .all();
+    return rows.map((r) => ({
+      agentId: r.agentId,
+      inputTokens: Number(r.inputTokens ?? 0),
+      outputTokens: Number(r.outputTokens ?? 0),
+      cost: Number(r.cost ?? 0),
+      count: Number(r.count),
+    }));
   });
 
   app.get<{
