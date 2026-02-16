@@ -241,6 +241,72 @@ describe("kimi-tool-parser", () => {
       expect(result.cleanText).toBe("Response with trailing space");
     });
 
+    it("parses Format B with argument markers and index suffix", () => {
+      const text = [
+        "Let me check.",
+        "<|tool_calls_section_begin|>",
+        "<|tool_call_begin|>functions.get_project_status:0<|tool_call_argument_begin|>",
+        "{}",
+        "<|tool_call_argument_end|>",
+        "<|tool_call_end|>",
+        "<|tool_calls_section_end|>",
+      ].join("\n");
+
+      const result = parseKimiToolCalls(text);
+      expect(result.cleanText).toBe("Let me check.");
+      expect(result.toolCalls).toHaveLength(1);
+      expect(result.toolCalls[0].name).toBe("get_project_status");
+      expect(result.toolCalls[0].args).toEqual({});
+    });
+
+    it("parses Format B with non-empty args", () => {
+      const text = [
+        "",
+        "<|tool_calls_section_begin|>",
+        "<|tool_call_begin|>functions.web_search:0<|tool_call_argument_begin|>",
+        '{"query": "weather today"}',
+        "<|tool_call_argument_end|>",
+        "<|tool_call_end|>",
+        "<|tool_calls_section_end|>",
+      ].join("\n");
+
+      const result = parseKimiToolCalls(text);
+      expect(result.toolCalls).toHaveLength(1);
+      expect(result.toolCalls[0].name).toBe("web_search");
+      expect(result.toolCalls[0].args).toEqual({ query: "weather today" });
+    });
+
+    it("parses Format B with inline argument (no newline)", () => {
+      const text = [
+        "",
+        "<|tool_calls_section_begin|>",
+        "<|tool_call_begin|>functions.get_project_status:0<|tool_call_argument_begin|>{}<|tool_call_argument_end|>",
+        "<|tool_call_end|>",
+        "<|tool_calls_section_end|>",
+      ].join("\n");
+
+      const result = parseKimiToolCalls(text);
+      expect(result.toolCalls).toHaveLength(1);
+      expect(result.toolCalls[0].name).toBe("get_project_status");
+      expect(result.toolCalls[0].args).toEqual({});
+    });
+
+    it("strips :N index suffix from Format A tool names too", () => {
+      const text = [
+        "",
+        "<|tool_calls_section_begin|>",
+        "<|tool_call_begin|>functions.my_tool:2",
+        "```json",
+        '{"x": 1}',
+        "```",
+        "<|tool_call_end|>",
+        "<|tool_calls_section_end|>",
+      ].join("\n");
+
+      const result = parseKimiToolCalls(text);
+      expect(result.toolCalls[0].name).toBe("my_tool");
+    });
+
     it("returns empty clean text when markup is at the very start", () => {
       const text = [
         "<|tool_calls_section_begin|>",

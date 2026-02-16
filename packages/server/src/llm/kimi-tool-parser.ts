@@ -91,6 +91,8 @@ const SECTION_BEGIN = "<|tool_calls_section_begin|>";
 const SECTION_END = "<|tool_calls_section_end|>";
 const CALL_BEGIN = "<|tool_call_begin|>";
 const CALL_END = "<|tool_call_end|>";
+const ARG_BEGIN = "<|tool_call_argument_begin|>";
+const ARG_END = "<|tool_call_argument_end|>";
 
 /** Quick check: does the text contain Kimi tool-call markup? */
 export function containsKimiToolMarkup(text: string): boolean {
@@ -155,47 +157,82 @@ export function parseKimiToolCalls(text: string): ParseResult {
 }
 
 /**
- * Parse a single tool-call block body, e.g.:
+ * Parse a single tool-call block body. Supports two formats:
  *
+ * Format A (fenced code block):
  *   functions.web_search
  *   ```json
  *   {"query": "hello"}
  *   ```
+ *
+ * Format B (Kimi argument markers, possibly with :N index suffix):
+ *   functions.get_project_status:0<|tool_call_argument_begin|>
+ *   {"query": "hello"}
+ *   <|tool_call_argument_end|>
  */
 function parseSingleCall(
   body: string,
   index: number,
 ): KimiToolCall | null {
-  const lines = body.trim().split("\n");
-  if (lines.length === 0) return null;
+  const trimmed = body.trim();
+  if (!trimmed) return null;
 
-  // First line is the function name, possibly prefixed with "functions."
-  let name = lines[0].trim();
-  if (name.startsWith("functions.")) {
-    name = name.slice("functions.".length);
-  }
-  if (!name) return null;
-
-  // Extract JSON from fenced code block
+  let name: string;
   let args: Record<string, unknown> = {};
-  const jsonStart = body.indexOf("```");
-  if (jsonStart !== -1) {
-    const afterFence = body.indexOf("\n", jsonStart);
-    if (afterFence !== -1) {
-      const jsonEnd = body.indexOf("```", afterFence);
-      if (jsonEnd !== -1) {
-        const jsonStr = body.slice(afterFence + 1, jsonEnd).trim();
-        if (jsonStr) {
-          try {
-            args = JSON.parse(jsonStr);
-          } catch {
-            // Bad JSON — skip this call
-            return null;
+
+  // Try Format B first: <|tool_call_argument_begin|> ... <|tool_call_argument_end|>
+  const argBeginIdx = trimmed.indexOf(ARG_BEGIN);
+  if (argBeginIdx !== -1) {
+    // Everything before the argument marker is the function name
+    name = trimmed.slice(0, argBeginIdx).trim();
+
+    // Extract JSON between argument markers
+    const argEndIdx = trimmed.indexOf(ARG_END, argBeginIdx);
+    const jsonStr = (argEndIdx !== -1
+      ? trimmed.slice(argBeginIdx + ARG_BEGIN.length, argEndIdx)
+      : trimmed.slice(argBeginIdx + ARG_BEGIN.length)
+    ).trim();
+
+    if (jsonStr) {
+      try {
+        args = JSON.parse(jsonStr);
+      } catch {
+        return null;
+      }
+    }
+  } else {
+    // Format A: first line is the name, args in fenced code block
+    const lines = trimmed.split("\n");
+    name = lines[0].trim();
+
+    const jsonStart = body.indexOf("```");
+    if (jsonStart !== -1) {
+      const afterFence = body.indexOf("\n", jsonStart);
+      if (afterFence !== -1) {
+        const jsonEnd = body.indexOf("```", afterFence);
+        if (jsonEnd !== -1) {
+          const jsonStr = body.slice(afterFence + 1, jsonEnd).trim();
+          if (jsonStr) {
+            try {
+              args = JSON.parse(jsonStr);
+            } catch {
+              return null;
+            }
           }
         }
       }
     }
   }
+
+  // Strip "functions." prefix
+  if (name.startsWith("functions.")) {
+    name = name.slice("functions.".length);
+  }
+
+  // Strip trailing ":N" index suffix (e.g. "get_project_status:0")
+  name = name.replace(/:\d+$/, "");
+
+  if (!name) return null;
 
   return {
     name,
