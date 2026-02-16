@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.0](https://github.com/TOoSmOotH/otterbot/compare/otterbot-v0.2.0...otterbot-v0.3.0) (2026-02-16)
+
+
+### Features
+
+* add branching and CI/CD documentation to CLAUDE.md ([2d33095](https://github.com/TOoSmOotH/otterbot/commit/2d33095a5e99ec24e2abf752fd141faf0099d1a4))
+
 ## [0.2.0](https://github.com/TOoSmOotH/otterbot/compare/otterbot-v0.1.0...otterbot-v0.2.0) (2026-02-15)
 
 
