@@ -7,6 +7,10 @@ export function PricingTab() {
   const [editing, setEditing] = useState<string | null>(null);
   const [editInput, setEditInput] = useState("");
   const [editOutput, setEditOutput] = useState("");
+  const [adding, setAdding] = useState(false);
+  const [newModel, setNewModel] = useState("");
+  const [newInput, setNewInput] = useState("");
+  const [newOutput, setNewOutput] = useState("");
 
   const loadPrices = () => {
     setLoading(true);
@@ -49,6 +53,24 @@ export function PricingTab() {
     setEditOutput(String(price.outputPerMillion));
   };
 
+  const handleAdd = async () => {
+    const model = newModel.trim();
+    if (!model) return;
+    const inputPerMillion = parseFloat(newInput);
+    const outputPerMillion = parseFloat(newOutput);
+    if (isNaN(inputPerMillion) || isNaN(outputPerMillion)) return;
+    await fetch(`/api/settings/pricing/${encodeURIComponent(model)}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ inputPerMillion, outputPerMillion }),
+    });
+    setAdding(false);
+    setNewModel("");
+    setNewInput("");
+    setNewOutput("");
+    loadPrices();
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-48 text-sm text-muted-foreground">
@@ -68,6 +90,64 @@ export function PricingTab() {
           Override any price or reset to the built-in default.
         </p>
       </div>
+
+      {adding ? (
+        <div className="flex items-end gap-2 p-3 border border-border rounded-lg bg-secondary/10">
+          <div className="flex-1">
+            <label className="text-[10px] text-muted-foreground uppercase tracking-wider block mb-1">Model ID</label>
+            <input
+              type="text"
+              value={newModel}
+              onChange={(e) => setNewModel(e.target.value)}
+              placeholder="e.g. claude-sonnet-4-5"
+              className="w-full px-2 py-1 bg-background border border-border rounded text-xs"
+              autoFocus
+            />
+          </div>
+          <div className="w-24">
+            <label className="text-[10px] text-muted-foreground uppercase tracking-wider block mb-1">Input $/M</label>
+            <input
+              type="number"
+              step="0.01"
+              value={newInput}
+              onChange={(e) => setNewInput(e.target.value)}
+              placeholder="0.00"
+              className="w-full text-right px-2 py-1 bg-background border border-border rounded text-xs"
+            />
+          </div>
+          <div className="w-24">
+            <label className="text-[10px] text-muted-foreground uppercase tracking-wider block mb-1">Output $/M</label>
+            <input
+              type="number"
+              step="0.01"
+              value={newOutput}
+              onChange={(e) => setNewOutput(e.target.value)}
+              placeholder="0.00"
+              className="w-full text-right px-2 py-1 bg-background border border-border rounded text-xs"
+            />
+          </div>
+          <button
+            onClick={handleAdd}
+            disabled={!newModel.trim() || isNaN(parseFloat(newInput)) || isNaN(parseFloat(newOutput))}
+            className="px-3 py-1 rounded bg-primary text-primary-foreground hover:bg-primary/90 text-xs disabled:opacity-50"
+          >
+            Add
+          </button>
+          <button
+            onClick={() => { setAdding(false); setNewModel(""); setNewInput(""); setNewOutput(""); }}
+            className="px-3 py-1 rounded bg-secondary text-secondary-foreground hover:bg-secondary/80 text-xs"
+          >
+            Cancel
+          </button>
+        </div>
+      ) : (
+        <button
+          onClick={() => setAdding(true)}
+          className="text-xs px-3 py-1.5 rounded border border-dashed border-border text-muted-foreground hover:text-foreground hover:border-foreground/30 transition-colors"
+        >
+          + Add Model
+        </button>
+      )}
 
       <div className="border border-border rounded-lg overflow-hidden">
         <table className="w-full text-xs">
