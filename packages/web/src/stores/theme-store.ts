@@ -12,7 +12,7 @@ function getInitialTheme(): Theme {
   if (stored && ["dark", "otter", "light"].includes(stored)) return stored;
 
   if (window.matchMedia("(prefers-color-scheme: light)").matches) return "light";
-  return "dark";
+  return "otter";
 }
 
 function applyTheme(theme: Theme) {
@@ -44,7 +44,7 @@ export const useThemeStore = create<ThemeState>((set) => ({
 if (!localStorage.getItem("otterbot-theme")) {
   window.matchMedia("(prefers-color-scheme: light)").addEventListener("change", (e) => {
     if (localStorage.getItem("otterbot-theme")) return;
-    const theme: Theme = e.matches ? "light" : "dark";
+    const theme: Theme = e.matches ? "light" : "otter";
     applyTheme(theme);
     useThemeStore.setState({ theme });
   });
