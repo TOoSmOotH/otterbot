@@ -501,11 +501,43 @@ export abstract class BaseAgent {
       })),
     });
 
-    // Recurse: let the model see tool results and produce a follow-up
-    const followUp = await this.runStream(tools, onToken, onReasoning, onReasoningEnd);
+    // Recurse: let the model see tool results and produce a follow-up.
+    // Inject tool descriptions as text (the model doesn't support SDK tools,
+    // which is why we're in this Kimi-markup path in the first place).
+    const toolPrompt = formatToolsForPrompt(tools);
+    if (toolPrompt) {
+      this.conversationHistory.push({ role: "system", content: toolPrompt });
+    }
+
+    const followUp = await this.runStream(undefined, onToken, onReasoning, onReasoningEnd);
+
+    // Remove the injected tool-description system message
+    if (toolPrompt) {
+      const idx = this.conversationHistory.lastIndexOf(
+        this.conversationHistory.find(
+          (m) => m.role === "system" && m.content === toolPrompt,
+        )!,
+      );
+      if (idx !== -1) {
+        this.conversationHistory.splice(idx, 1);
+      }
+    }
 
     // Combine thinking from both rounds
     const combinedThinking = [thinking, followUp.thinking].filter(Boolean).join("\n\n");
+
+    // If the follow-up also contains Kimi markup, recurse
+    if (containsKimiToolMarkup(followUp.text)) {
+      return this.executeKimiToolCalls(
+        followUp.text,
+        combinedThinking || undefined,
+        tools,
+        onToken,
+        onReasoning,
+        onReasoningEnd,
+        depth + 1,
+      );
+    }
 
     return {
       text: followUp.text,
