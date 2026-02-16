@@ -71,9 +71,6 @@ Once setup completes, you'll be chatting with the COO.
 pnpm docker:build
 pnpm docker:up
 
-# Or start with the self-hosted SearXNG search engine
-pnpm docker:up:search
-
 # Or for development with hot-reload
 pnpm docker:dev
 ```
@@ -227,11 +224,9 @@ Web search is available to agents via the `web_search` tool. Configure your pref
 
 | Provider | Description |
 |----------|-------------|
-| **SearXNG** | Self-hosted, no API key required. Included as an optional Docker Compose profile. |
+| **SearXNG** | Self-hosted, no API key required. |
 | **Brave Search** | Requires an API key from [brave.com](https://brave.com/search/api/). |
 | **Tavily** | Requires an API key from [tavily.com](https://tavily.com). |
-
-To start SearXNG alongside Otterbot: `pnpm docker:up:search`
 
 ## Authentication & Setup
 
@@ -284,7 +279,7 @@ otterbot/
 │   ├── environments/        # 3D environment packs
 │   └── scenes/              # Scene configuration files
 ├── Dockerfile               # Multi-stage production build (Node 22)
-└── docker-compose.yml       # Container orchestration + optional SearXNG
+└── docker-compose.yml       # Container orchestration
 ```
 
 ## Tech Stack
@@ -335,7 +330,6 @@ pnpm docker:build     # Build container image
 pnpm docker:up        # Start container (detached)
 pnpm docker:down      # Stop container
 pnpm docker:dev       # Start with hot-reload (dev mode)
-pnpm docker:up:search # Start with SearXNG search engine
 ```
 
 ## Environment Variables
