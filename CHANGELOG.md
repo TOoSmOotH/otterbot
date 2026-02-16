@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.0](https://github.com/TOoSmOotH/otterbot/compare/otterbot-v0.2.0...otterbot-v0.3.0) (2026-02-16)
+
+
+### Features
+
+* theme defaults and CORS updates ([601958e](https://github.com/TOoSmOotH/otterbot/commit/601958e443cfd1fc84b9b30b122480ed44b462a4))
+
 ## [0.2.0](https://github.com/TOoSmOotH/otterbot/compare/otterbot-v0.1.0...otterbot-v0.2.0) (2026-02-15)
 
 
