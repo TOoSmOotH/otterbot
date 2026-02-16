@@ -1,7 +1,9 @@
 import { describe, it, expect } from "vitest";
+import { z } from "zod";
 import {
   containsKimiToolMarkup,
   findToolMarkupStart,
+  formatToolsForPrompt,
   parseKimiToolCalls,
 } from "./kimi-tool-parser.js";
 
@@ -28,6 +30,56 @@ describe("kimi-tool-parser", () => {
     it("returns the index where markup begins", () => {
       const text = "Hello world<|tool_calls_section_begin|>rest";
       expect(findToolMarkupStart(text)).toBe(11);
+    });
+  });
+
+  describe("formatToolsForPrompt", () => {
+    it("returns empty string for empty tools object", () => {
+      expect(formatToolsForPrompt({})).toBe("");
+    });
+
+    it("correctly serializes tool name, description, and parameters", () => {
+      const tools = {
+        web_search: {
+          description: "Search the web for information.",
+          parameters: z.object({
+            query: z.string().describe("The search query"),
+            maxResults: z.number().optional().describe("Max results"),
+          }),
+        },
+      };
+
+      const result = formatToolsForPrompt(tools);
+      expect(result).toContain("## Available Tools");
+      expect(result).toContain("<|tool_calls_section_begin|>");
+      expect(result).toContain("### web_search");
+      expect(result).toContain("Search the web for information.");
+      expect(result).toContain("Parameters (JSON Schema):");
+      expect(result).toContain('"query"');
+    });
+
+    it("handles tools with no parameters", () => {
+      const tools = {
+        get_time: {
+          description: "Get the current time.",
+        },
+      };
+
+      const result = formatToolsForPrompt(tools);
+      expect(result).toContain("### get_time");
+      expect(result).toContain("Get the current time.");
+      expect(result).not.toContain("Parameters (JSON Schema):");
+    });
+
+    it("handles multiple tools", () => {
+      const tools = {
+        tool_a: { description: "First tool." },
+        tool_b: { description: "Second tool." },
+      };
+
+      const result = formatToolsForPrompt(tools);
+      expect(result).toContain("### tool_a");
+      expect(result).toContain("### tool_b");
     });
   });
 

@@ -17,6 +17,8 @@
  */
 
 import { nanoid } from "nanoid";
+import { zodToJsonSchema } from "zod-to-json-schema";
+import type { z } from "zod";
 
 export interface KimiToolCall {
   name: string;
@@ -30,6 +32,59 @@ export interface ParseResult {
   cleanText: string;
   /** Parsed tool calls extracted from the markup */
   toolCalls: KimiToolCall[];
+}
+
+/** Vercel AI SDK tool shape (subset we need for formatting) */
+interface AiTool {
+  description?: string;
+  parameters?: z.ZodType;
+}
+
+/**
+ * Serialize tool definitions into a text block that Kimi K2.5 can understand.
+ *
+ * The returned string contains the tool descriptions and parameter schemas,
+ * along with the exact markup format Kimi should use to call them.
+ * Returns an empty string if no tools are provided.
+ */
+export function formatToolsForPrompt(
+  tools: Record<string, unknown>,
+): string {
+  const entries = Object.entries(tools);
+  if (entries.length === 0) return "";
+
+  const toolSections = entries.map(([name, def]) => {
+    const t = def as AiTool;
+    let section = `### ${name}`;
+    if (t.description) {
+      section += `\n${t.description}`;
+    }
+    if (t.parameters) {
+      try {
+        const jsonSchema = zodToJsonSchema(t.parameters, { target: "openApi3" });
+        section += `\nParameters (JSON Schema):\n${JSON.stringify(jsonSchema)}`;
+      } catch {
+        // If schema conversion fails, skip parameters
+      }
+    }
+    return section;
+  });
+
+  return [
+    "## Available Tools",
+    "",
+    "You have access to the following tools. To call a tool, use this exact format in your response:",
+    "",
+    "<|tool_calls_section_begin|>",
+    "<|tool_call_begin|>functions.<tool_name>",
+    "```json",
+    '{"param": "value"}',
+    "```",
+    "<|tool_call_end|>",
+    "<|tool_calls_section_end|>",
+    "",
+    ...toolSections,
+  ].join("\n");
 }
 
 const SECTION_BEGIN = "<|tool_calls_section_begin|>";

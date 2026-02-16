@@ -15,6 +15,7 @@ import { RetryError } from "ai";
 import {
   containsKimiToolMarkup,
   findToolMarkupStart,
+  formatToolsForPrompt,
   parseKimiToolCalls,
 } from "../llm/kimi-tool-parser.js";
 import { eq } from "drizzle-orm";
@@ -192,12 +193,54 @@ export abstract class BaseAgent {
       // already executed the tools via their `execute` callbacks during the stream.
       if (hasTools && !text && !hadToolCalls) {
         console.warn(`[Agent ${this.id}] Empty response with tools and no tool calls — retrying without tools`);
+
+        // Inject tool descriptions as a system message so models that don't
+        // support structured function calling (e.g. Kimi K2.5) can still
+        // see what tools are available and emit proprietary markup.
+        const toolPrompt = formatToolsForPrompt(tools);
+        if (toolPrompt) {
+          this.conversationHistory.push({ role: "system", content: toolPrompt });
+        }
+
         const retry = await this.runStream(
           undefined,
           onToken,
           onReasoning,
           onReasoningEnd,
         );
+
+        // Remove the injected system message — it was a one-shot injection
+        if (toolPrompt) {
+          const idx = this.conversationHistory.lastIndexOf(
+            this.conversationHistory.find(
+              (m) => m.role === "system" && m.content === toolPrompt,
+            )!,
+          );
+          if (idx !== -1) {
+            this.conversationHistory.splice(idx, 1);
+          }
+        }
+
+        // Check for Kimi tool markup in the retry response
+        if (containsKimiToolMarkup(retry.text)) {
+          console.log(`[Agent ${this.id}] Kimi tool markup detected in retry — executing tool calls`);
+          const result = await this.executeKimiToolCalls(
+            retry.text,
+            retry.thinking,
+            tools,
+            onToken,
+            onReasoning,
+            onReasoningEnd,
+            0,
+          );
+          this.conversationHistory.push({
+            role: "assistant",
+            content: result.text,
+          });
+          this.setStatus(AgentStatus.Idle);
+          return result;
+        }
+
         this.conversationHistory.push({
           role: "assistant",
           content: retry.text,
