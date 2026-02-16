@@ -1,7 +1,6 @@
 import { useMemo, useEffect, useCallback, useRef } from "react";
 import {
   ReactFlow,
-  Background,
   type Node,
   type Edge,
   useNodesState,
@@ -206,9 +205,7 @@ function AgentGraphInner({
             panOnDrag={true}
             minZoom={0.5}
             maxZoom={1.5}
-          >
-            <Background color="hsl(var(--secondary))" gap={20} size={1} />
-          </ReactFlow>
+          />
         </div>
         {selectedAgentId && <AgentDetailPanel />}
       </div>
