@@ -56,8 +56,13 @@ export function resolveProviderCredentials(providerIdOrType: string): ResolvedCr
 /** Returns true for Anthropic models that support extended thinking */
 export function isThinkingModel(config: LLMConfig): boolean {
   const resolved = resolveProviderCredentials(config.provider);
-  if (resolved.type !== "anthropic") return false;
-  return /^claude-(sonnet-4-5|opus-4)/.test(config.model);
+  if (resolved.type === "anthropic") {
+    return /^claude-(sonnet-4-5|opus-4)/.test(config.model);
+  }
+  if (resolved.type === "openrouter") {
+    return /^anthropic\/claude-(sonnet-4-5|opus-4)/.test(config.model);
+  }
+  return false;
 }
 
 /** Resolve a Vercel AI SDK language model from agent config */
@@ -89,6 +94,14 @@ export function resolveModel(config: LLMConfig): LanguageModel {
           "http://localhost:11434/api",
       });
       return ollama(config.model);
+    }
+
+    case "openrouter": {
+      const openrouter = createOpenAI({
+        baseURL: "https://openrouter.ai/api/v1",
+        apiKey: config.apiKey ?? resolved.apiKey ?? "",
+      });
+      return openrouter(config.model);
     }
 
     case "openai-compatible": {

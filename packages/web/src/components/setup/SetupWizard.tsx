@@ -9,6 +9,11 @@ const SUGGESTED_MODELS: Record<string, string[]> = {
   anthropic: ["claude-sonnet-4-5-20250929", "claude-haiku-4-20250414"],
   openai: ["gpt-4o", "gpt-4o-mini"],
   ollama: ["llama3.1", "mistral", "codellama"],
+  openrouter: [
+    "anthropic/claude-sonnet-4-5-20250929",
+    "openai/gpt-4o",
+    "google/gemini-2.0-flash-exp:free",
+  ],
   "openai-compatible": [],
 };
 
@@ -16,11 +21,12 @@ const PROVIDER_DESCRIPTIONS: Record<string, string> = {
   anthropic: "Claude models from Anthropic. Requires an API key.",
   openai: "GPT models from OpenAI. Requires an API key.",
   ollama: "Run local models with Ollama. Requires a base URL.",
+  openrouter: "Access 200+ models through one API. Requires an OpenRouter API key.",
   "openai-compatible":
     "Any OpenAI-compatible API endpoint. Requires a base URL and optionally an API key.",
 };
 
-const NEEDS_API_KEY = new Set(["anthropic", "openai", "openai-compatible"]);
+const NEEDS_API_KEY = new Set(["anthropic", "openai", "openrouter", "openai-compatible"]);
 const NEEDS_BASE_URL = new Set(["ollama", "openai-compatible"]);
 
 const IANA_TIMEZONES = Intl.supportedValuesOf("timeZone");

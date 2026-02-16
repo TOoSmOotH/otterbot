@@ -48,6 +48,7 @@ export interface TestResult {
 export const PROVIDER_TYPE_META: ProviderTypeMeta[] = [
   { type: "anthropic", label: "Anthropic", needsApiKey: true, needsBaseUrl: false },
   { type: "openai", label: "OpenAI", needsApiKey: true, needsBaseUrl: false },
+  { type: "openrouter", label: "OpenRouter", needsApiKey: true, needsBaseUrl: false },
   { type: "ollama", label: "Ollama", needsApiKey: false, needsBaseUrl: true },
   { type: "openai-compatible", label: "OpenAI-Compatible", needsApiKey: true, needsBaseUrl: true },
 ];
@@ -61,6 +62,12 @@ const FALLBACK_MODELS: Record<string, string[]> = {
   ],
   openai: ["gpt-4o", "gpt-4o-mini", "gpt-4.1", "gpt-4.1-mini", "o3-mini"],
   ollama: ["llama3.1", "mistral", "codellama", "qwen2.5-coder"],
+  openrouter: [
+    "anthropic/claude-sonnet-4-5-20250929",
+    "openai/gpt-4o",
+    "google/gemini-2.0-flash-exp:free",
+    "meta-llama/llama-3.3-70b-instruct",
+  ],
   "openai-compatible": [],
 };
 
@@ -335,6 +342,17 @@ export async function fetchModelsWithCredentials(
         return (
           data.models?.map((m) => m.name) ?? FALLBACK_MODELS.ollama ?? []
         );
+      }
+
+      case "openrouter": {
+        if (!apiKey) return FALLBACK_MODELS.openrouter ?? [];
+        const res = await fetch("https://openrouter.ai/api/v1/models", {
+          headers: { Authorization: `Bearer ${apiKey}` },
+          signal: AbortSignal.timeout(10_000),
+        });
+        if (!res.ok) return FALLBACK_MODELS.openrouter ?? [];
+        const data = (await res.json()) as { data?: Array<{ id: string }> };
+        return data.data?.map((m) => m.id).sort() ?? FALLBACK_MODELS.openrouter ?? [];
       }
 
       case "openai-compatible": {
