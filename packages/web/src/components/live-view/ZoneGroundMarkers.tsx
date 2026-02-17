@@ -54,7 +54,7 @@ function ZoneBorder({ zone }: { zone: SceneZone }) {
       />
       {/* Zone label */}
       <Text
-        position={[zone.position[0], 0.1, zone.position[2] - zone.size[2] / 2 + 0.5]}
+        position={[zone.position[0], 1.5, zone.position[2] - zone.size[2] / 2 + 0.5]}
         fontSize={0.5}
         color={color}
         anchorX="center"
