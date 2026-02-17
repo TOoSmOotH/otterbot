@@ -31,7 +31,6 @@
     { "asset": "kaykit-prototype-bits/table_medium", "position": [-4, 0, -12], "castShadow": true, "receiveShadow": true },
     { "asset": "kaykit-prototype-bits/table_medium", "position": [4, 0, -12], "castShadow": true, "receiveShadow": true },
     { "asset": "kaykit-prototype-bits/table_medium", "position": [0, 0, -4], "castShadow": true, "receiveShadow": true },
-    { "asset": "kaykit-prototype-bits/table_medium_Decorated", "position": [0, 0, -14], "castShadow": true, "receiveShadow": true },
 
     { "asset": "kaykit-prototype-bits/Barrel_A", "position": [8.5, 0.5, -1], "castShadow": true },
     { "asset": "kaykit-prototype-bits/Box_A", "position": [-8.5, 0, -1.5], "scale": 2, "castShadow": true },
