@@ -1,6 +1,7 @@
 import { useMemo, useCallback, useRef, useEffect } from "react";
 import {
   ReactFlow,
+  Controls,
   type Node,
   type Edge,
   useReactFlow,
@@ -146,9 +147,17 @@ function AgentGraphInner({
   );
 
   const { fitView } = useReactFlow();
+  const initializedRef = useRef(false);
   const prevAgentCountRef = useRef(-1);
 
+  const handleInit = useCallback(() => {
+    initializedRef.current = true;
+    prevAgentCountRef.current = agents.size;
+    fitView();
+  }, [fitView, agents.size]);
+
   useEffect(() => {
+    if (!initializedRef.current) return;
     const currentCount = agents.size;
     if (prevAgentCountRef.current !== currentCount) {
       prevAgentCountRef.current = currentCount;
@@ -192,13 +201,15 @@ function AgentGraphInner({
             proOptions={{ hideAttribution: true }}
             nodesDraggable={false}
             nodesConnectable={false}
-            elementsSelectable={false}
+            onInit={handleInit}
             zoomOnScroll={true}
             panOnScroll={false}
             panOnDrag={true}
             minZoom={0.5}
             maxZoom={1.5}
-          />
+          >
+            <Controls showInteractive={false} />
+          </ReactFlow>
         </div>
         {selectedAgentId && <AgentDetailPanel />}
       </div>
