@@ -1,11 +1,8 @@
-import { useMemo, useEffect, useCallback } from "react";
+import { useMemo, useCallback, useRef, useEffect } from "react";
 import {
   ReactFlow,
-  Background,
   type Node,
   type Edge,
-  useNodesState,
-  useEdgesState,
   useReactFlow,
   ReactFlowProvider,
 } from "@xyflow/react";
@@ -143,21 +140,21 @@ function AgentGraphInner({
     selectAgent(agentId);
   }, [selectAgent]);
 
-  const { nodes: layoutNodes, edges: layoutEdges } = useMemo(
+  const { nodes, edges } = useMemo(
     () => buildLayout(agents, userProfile, handleNodeClick),
     [agents, userProfile, handleNodeClick],
   );
 
-  const [nodes, setNodes, onNodesChange] = useNodesState(layoutNodes);
-  const [edges, setEdges, onEdgesChange] = useEdgesState(layoutEdges);
   const { fitView } = useReactFlow();
+  const prevAgentCountRef = useRef(-1);
 
   useEffect(() => {
-    setNodes(layoutNodes);
-    setEdges(layoutEdges);
-    // Re-fit the view after nodes change so all agents are visible
-    requestAnimationFrame(() => fitView());
-  }, [layoutNodes, layoutEdges, setNodes, setEdges, fitView]);
+    const currentCount = agents.size;
+    if (prevAgentCountRef.current !== currentCount) {
+      prevAgentCountRef.current = currentCount;
+      requestAnimationFrame(() => fitView());
+    }
+  }, [agents.size, fitView]);
 
   return (
     <div className="flex flex-col h-full">
@@ -185,24 +182,24 @@ function AgentGraphInner({
       </div>
 
       {/* Graph */}
-      <div className="flex-1 relative">
-        <ReactFlow
-          nodes={nodes}
-          edges={edges}
-          onNodesChange={onNodesChange}
-          onEdgesChange={onEdgesChange}
-          nodeTypes={nodeTypes}
-          fitView
-          proOptions={{ hideAttribution: true }}
-          nodesDraggable={false}
-          nodesConnectable={false}
-          zoomOnScroll={false}
-          panOnScroll
-          minZoom={0.5}
-          maxZoom={1.5}
-        >
-          <Background color="hsl(var(--secondary))" gap={20} size={1} />
-        </ReactFlow>
+      <div className="flex-1 relative min-h-0">
+        <div className="absolute inset-0">
+          <ReactFlow
+            nodes={nodes}
+            edges={edges}
+            nodeTypes={nodeTypes}
+            defaultViewport={{ x: 0, y: 0, zoom: 1 }}
+            proOptions={{ hideAttribution: true }}
+            nodesDraggable={false}
+            nodesConnectable={false}
+            elementsSelectable={false}
+            zoomOnScroll={true}
+            panOnScroll={false}
+            panOnDrag={true}
+            minZoom={0.5}
+            maxZoom={1.5}
+          />
+        </div>
         {selectedAgentId && <AgentDetailPanel />}
       </div>
     </div>
