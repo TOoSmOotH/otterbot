@@ -75,6 +75,13 @@ export function LiveViewScene({ userProfile }: LiveViewSceneProps) {
 
       // Global desk index counter — each agent in the main office gets a unique desk
       let nextDeskIndex = 0;
+      // Per-zone desk counters for project offices
+      const zoneDeskCounters = new Map<string, number>();
+      const getZoneDeskIndex = (zoneId: string): number => {
+        const idx = zoneDeskCounters.get(zoneId) ?? 0;
+        zoneDeskCounters.set(zoneId, idx + 1);
+        return idx;
+      };
 
       // CEO always at its desk (deskIndex 0)
       const ceoDeskIndex = nextDeskIndex++;
@@ -129,7 +136,7 @@ export function LiveViewScene({ userProfile }: LiveViewSceneProps) {
           ? activeScene.zones.find((z) => z.projectId === tl.projectId)
           : null;
         const zoneId = projectZone?.id ?? mainZoneId;
-        const deskIdx = projectZone ? 0 : nextDeskIndex++;
+        const deskIdx = projectZone ? getZoneDeskIndex(projectZone.id) : nextDeskIndex++;
         const pos = getStatusAwarePos(tl, zoneId, deskIdx);
         positions.push({
           agent: tl,
@@ -150,7 +157,7 @@ export function LiveViewScene({ userProfile }: LiveViewSceneProps) {
           ? activeScene.zones.find((z) => z.projectId === w.projectId)
           : null;
         const zoneId = projectZone?.id ?? mainZoneId;
-        const deskIdx = projectZone ? i : nextDeskIndex++;
+        const deskIdx = projectZone ? getZoneDeskIndex(projectZone.id) : nextDeskIndex++;
         const pos = getStatusAwarePos(w, zoneId, deskIdx);
         positions.push({
           agent: w,
