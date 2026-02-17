@@ -8,4 +8,7 @@ export * from "./types/kanban.js";
 export * from "./types/files.js";
 export * from "./types/provider.js";
 export * from "./types/usage.js";
+export * from "./types/todo.js";
+export * from "./types/gmail.js";
+export * from "./types/calendar.js";
 export * from "./types/skill.js";

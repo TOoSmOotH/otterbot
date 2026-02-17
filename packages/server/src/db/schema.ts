@@ -189,6 +189,61 @@ export const tokenUsage = sqliteTable("token_usage", {
     .$defaultFn(() => new Date().toISOString()),
 });
 
+export const oauthTokens = sqliteTable("oauth_tokens", {
+  provider: text("provider").notNull(),
+  accountId: text("account_id").notNull(),
+  accessToken: text("access_token").notNull(),
+  refreshToken: text("refresh_token"),
+  expiresAt: text("expires_at"),
+  scopes: text("scopes"),
+  updatedAt: text("updated_at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+});
+
+export const todos = sqliteTable("todos", {
+  id: text("id").primaryKey(),
+  title: text("title").notNull(),
+  description: text("description").notNull().default(""),
+  status: text("status", { enum: ["todo", "in_progress", "done"] })
+    .notNull()
+    .default("todo"),
+  priority: text("priority", { enum: ["low", "medium", "high"] })
+    .notNull()
+    .default("medium"),
+  dueDate: text("due_date"),
+  tags: text("tags", { mode: "json" })
+    .$type<string[]>()
+    .notNull()
+    .default([]),
+  createdAt: text("created_at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+  updatedAt: text("updated_at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+});
+
+export const calendarEvents = sqliteTable("calendar_events", {
+  id: text("id").primaryKey(),
+  title: text("title").notNull(),
+  description: text("description").notNull().default(""),
+  location: text("location"),
+  start: text("start").notNull(),
+  end: text("end").notNull(),
+  allDay: integer("all_day", { mode: "boolean" }).notNull().default(false),
+  recurrence: text("recurrence", { mode: "json" })
+    .$type<string[] | null>()
+    .default(null),
+  color: text("color"),
+  createdAt: text("created_at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+  updatedAt: text("updated_at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+});
+
 export const providers = sqliteTable("providers", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),

@@ -255,6 +255,43 @@ export async function migrateDb() {
     timestamp TEXT NOT NULL
   )`);
 
+  db.run(sql`CREATE TABLE IF NOT EXISTS oauth_tokens (
+    provider TEXT NOT NULL,
+    account_id TEXT NOT NULL,
+    access_token TEXT NOT NULL,
+    refresh_token TEXT,
+    expires_at TEXT,
+    scopes TEXT,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (provider, account_id)
+  )`);
+
+  db.run(sql`CREATE TABLE IF NOT EXISTS todos (
+    id TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'todo',
+    priority TEXT NOT NULL DEFAULT 'medium',
+    due_date TEXT,
+    tags TEXT NOT NULL DEFAULT '[]',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  )`);
+
+  db.run(sql`CREATE TABLE IF NOT EXISTS calendar_events (
+    id TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    location TEXT,
+    start TEXT NOT NULL,
+    end TEXT NOT NULL,
+    all_day INTEGER NOT NULL DEFAULT 0,
+    recurrence TEXT,
+    color TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  )`);
+
   db.run(sql`CREATE TABLE IF NOT EXISTS skills (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,

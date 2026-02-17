@@ -19,6 +19,9 @@ import { KanbanBoard } from "./components/kanban/KanbanBoard";
 import { FileBrowser } from "./components/project/FileBrowser";
 import { DesktopView } from "./components/desktop/DesktopView";
 import { UsageDashboard } from "./components/usage/UsageDashboard";
+import { TodoView } from "./components/todos/TodoView";
+import { InboxView } from "./components/inbox/InboxView";
+import { CalendarView } from "./components/calendar/CalendarView";
 import { useDesktopStore } from "./stores/desktop-store";
 import { initMovementTriggers } from "./lib/movement-triggers";
 import { Group, Panel, Separator, useDefaultLayout, usePanelRef } from "react-resizable-panels";
@@ -82,7 +85,7 @@ interface UserProfile {
   cooName?: string;
 }
 
-type CenterView = "graph" | "live3d" | "charter" | "kanban" | "desktop" | "files" | "usage";
+type CenterView = "graph" | "live3d" | "charter" | "kanban" | "desktop" | "files" | "usage" | "todos" | "inbox" | "calendar";
 
 function MainApp() {
   const socket = useSocket();
@@ -339,6 +342,12 @@ function ResizableLayout({
         ) : null;
       case "usage":
         return <UsageDashboard />;
+      case "todos":
+        return <TodoView />;
+      case "inbox":
+        return <InboxView />;
+      case "calendar":
+        return <CalendarView />;
       case "desktop":
         return <DesktopView />;
       case "live3d":
@@ -386,32 +395,39 @@ function ResizableLayout({
                 [
                   "graph",
                   ...(activeProjectId ? (["charter", "kanban", "files"] as CenterView[]) : []),
+                  "todos" as CenterView,
+                  "inbox" as CenterView,
+                  "calendar" as CenterView,
                   "usage" as CenterView,
                   "desktop" as CenterView,
                 ] as CenterView[]
-              ).map((tab) => (
-                <button
-                  key={tab}
-                  onClick={() => setCenterView(tab)}
-                  className={`text-xs px-2.5 py-1 rounded transition-colors ${
-                    centerView === tab
-                      ? "bg-primary/20 text-primary font-medium"
-                      : "text-muted-foreground hover:text-foreground hover:bg-secondary"
-                  }`}
-                >
-                  {tab === "graph"
-                    ? "Graph"
-                    : tab === "charter"
-                      ? "Charter"
-                      : tab === "kanban"
-                        ? "Board"
-                        : tab === "files"
-                          ? "Files"
-                          : tab === "usage"
-                            ? "Usage"
-                            : "Desktop"}
-                </button>
-              ))}
+              ).map((tab) => {
+                const labels: Record<CenterView, string> = {
+                  graph: "Graph",
+                  live3d: "Live",
+                  charter: "Charter",
+                  kanban: "Board",
+                  files: "Files",
+                  todos: "Todos",
+                  inbox: "Inbox",
+                  calendar: "Calendar",
+                  usage: "Usage",
+                  desktop: "Desktop",
+                };
+                return (
+                  <button
+                    key={tab}
+                    onClick={() => setCenterView(tab)}
+                    className={`text-xs px-2.5 py-1 rounded transition-colors ${
+                      centerView === tab
+                        ? "bg-primary/20 text-primary font-medium"
+                        : "text-muted-foreground hover:text-foreground hover:bg-secondary"
+                    }`}
+                  >
+                    {labels[tab]}
+                  </button>
+                );
+              })}
           </div>
           <div className="flex-1 overflow-hidden">
             {renderCenterContent()}
