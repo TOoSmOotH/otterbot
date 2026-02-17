@@ -109,7 +109,7 @@ export class WorldLayoutManager {
   getNextZonePosition(existingZones: SceneZone[], zoneSize: [number, number, number]): [number, number, number] {
     // Project zones are placed along the positive X side of the hallway
     // Each zone is offset along Z, starting at Z=4 with gaps
-    const hallwayX = 3; // Right side of hallway (hallway is at x=0, wall at x=2)
+    const hallwayX = 4; // Right side of hallway (hallway is at x=0, no walls)
 
     // Find the furthest Z position used by existing project zones
     let maxZ = 4;
