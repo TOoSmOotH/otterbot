@@ -23,11 +23,14 @@
     { "asset": "kaykit-prototype-bits/Floor", "position": [4, -0.5, -14], "receiveShadow": true },
     { "asset": "kaykit-prototype-bits/Floor", "position": [8, -0.5, -14], "receiveShadow": true },
 
-    { "asset": "kaykit-prototype-bits/Pallet_Large", "position": [-7, 0, -3], "scale": [0.5, 1.6, 0.3], "castShadow": true, "receiveShadow": true },
-    { "asset": "kaykit-prototype-bits/Pallet_Large", "position": [-7, 0, -7], "scale": [0.5, 1.6, 0.3], "castShadow": true, "receiveShadow": true },
-    { "asset": "kaykit-prototype-bits/Pallet_Large", "position": [7, 0, -3], "scale": [0.5, 1.6, 0.3], "castShadow": true, "receiveShadow": true },
-    { "asset": "kaykit-prototype-bits/Pallet_Large", "position": [7, 0, -7], "scale": [0.5, 1.6, 0.3], "castShadow": true, "receiveShadow": true },
-    { "asset": "kaykit-prototype-bits/Pallet_Large", "position": [0, 0, -12], "scale": [0.8, 1.6, 0.4], "castShadow": true, "receiveShadow": true },
+    { "asset": "kaykit-prototype-bits/table_medium_Decorated", "position": [-7, 0, -3], "castShadow": true, "receiveShadow": true },
+    { "asset": "kaykit-prototype-bits/table_medium_Decorated", "position": [-7, 0, -7], "castShadow": true, "receiveShadow": true },
+    { "asset": "kaykit-prototype-bits/table_medium", "position": [7, 0, -3], "castShadow": true, "receiveShadow": true },
+    { "asset": "kaykit-prototype-bits/table_medium", "position": [7, 0, -7], "castShadow": true, "receiveShadow": true },
+    { "asset": "kaykit-prototype-bits/table_medium_long", "position": [0, 0, -12], "castShadow": true, "receiveShadow": true },
+    { "asset": "kaykit-prototype-bits/table_medium", "position": [-4, 0, -12], "castShadow": true, "receiveShadow": true },
+    { "asset": "kaykit-prototype-bits/table_medium", "position": [4, 0, -12], "castShadow": true, "receiveShadow": true },
+    { "asset": "kaykit-prototype-bits/table_medium", "position": [0, 0, -4], "castShadow": true, "receiveShadow": true },
 
     { "asset": "kaykit-prototype-bits/Barrel_A", "position": [8.5, 0.5, -1], "castShadow": true },
     { "asset": "kaykit-prototype-bits/Box_A", "position": [-8.5, 0, -1.5], "scale": 2, "castShadow": true },
@@ -68,6 +71,9 @@
       { "id": "mo-desk-admin", "position": [7, 0, -2], "label": "Admin Desk", "zoneId": "main-office", "tag": "desk" },
       { "id": "mo-desk-tl1", "position": [7, 0, -6], "label": "Team Lead Desk 1", "zoneId": "main-office", "tag": "desk" },
       { "id": "mo-desk-meeting", "position": [0, 0, -12], "label": "Meeting Table", "zoneId": "main-office", "tag": "desk" },
+      { "id": "mo-desk-tl2", "position": [-4, 0, -12], "label": "Team Lead Desk 2", "zoneId": "main-office", "tag": "desk" },
+      { "id": "mo-desk-w1", "position": [4, 0, -12], "label": "Worker Desk 1", "zoneId": "main-office", "tag": "desk" },
+      { "id": "mo-desk-w2", "position": [0, 0, -4], "label": "Worker Desk 2", "zoneId": "main-office", "tag": "desk" },
       { "id": "mo-inner-1", "position": [0, 0, -4], "label": "Inner 1", "zoneId": "main-office" },
       { "id": "mo-inner-2", "position": [-4, 0, -8], "label": "Inner Left", "zoneId": "main-office" },
       { "id": "mo-inner-3", "position": [4, 0, -8], "label": "Inner Right", "zoneId": "main-office" },
@@ -91,6 +97,9 @@
       { "from": "mo-inner-3", "to": "mo-desk-tl1" },
       { "from": "mo-inner-3", "to": "mo-desk-admin" },
       { "from": "mo-inner-2", "to": "mo-desk-ceo" },
+      { "from": "mo-center", "to": "mo-desk-tl2" },
+      { "from": "mo-inner-3", "to": "mo-desk-w1" },
+      { "from": "mo-inner-1", "to": "mo-desk-w2" },
 
       { "from": "mo-entrance", "to": "hall-0" },
       { "from": "hall-0", "to": "hall-1" },
@@ -105,10 +114,11 @@
     "coo": [{ "position": [-7, 0, -6], "rotation": 3.14159 }],
     "teamLead": [
       { "position": [7, 0, -6], "rotation": 3.14159 },
-      { "position": [0, 0, -12], "rotation": 3.14159 }
+      { "position": [-4, 0, -12], "rotation": 3.14159 }
     ],
     "worker": [
-      { "position": [7, 0, -2], "rotation": 3.14159 },
+      { "position": [0, 0, -12], "rotation": 3.14159 },
+      { "position": [4, 0, -12], "rotation": 3.14159 },
       { "position": [0, 0, -4], "rotation": 3.14159 }
     ]
   }
