@@ -1,4 +1,5 @@
 import { test, expect } from "../fixtures";
+import { getStoredCookie } from "../helpers/api";
 
 test.describe("Settings - Templates (UI)", () => {
   test.beforeEach(async ({ page }) => {
@@ -27,13 +28,7 @@ test.describe("Settings - Templates (UI)", () => {
 
 test.describe("Settings - Templates (API)", () => {
   test("clone and delete template via API", async ({ credentials }) => {
-    // Login first
-    const loginRes = await fetch("https://localhost:62627/api/auth/login", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ passphrase: credentials.setup.passphrase }),
-    });
-    const cookie = loginRes.headers.get("set-cookie") ?? "";
+    const cookie = getStoredCookie();
 
     // Get registry to find a built-in template
     const registryRes = await fetch("https://localhost:62627/api/registry", {

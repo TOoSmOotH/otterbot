@@ -16,6 +16,7 @@ export default defineConfig({
     ignoreHTTPSErrors: true,
     trace: "on-first-retry",
     screenshot: "only-on-failure",
+    storageState: "./e2e/.auth-state.json",
   },
   projects: [
     {
