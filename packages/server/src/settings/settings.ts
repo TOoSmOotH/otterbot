@@ -17,6 +17,10 @@ import { OpenCodeClient } from "../tools/opencode-client.js";
 import { getDb, schema } from "../db/index.js";
 import { eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
+import { execSync } from "node:child_process";
+import { existsSync, readFileSync, writeFileSync, unlinkSync, mkdirSync, chmodSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import type { NamedProvider, ProviderType, ProviderTypeMeta, CustomModel, ModelOption } from "@otterbot/shared";
 
 // ---------------------------------------------------------------------------
@@ -1022,6 +1026,9 @@ export interface GitHubSettingsResponse {
   enabled: boolean;
   tokenSet: boolean;
   username: string | null;
+  sshKeySet: boolean;
+  sshKeyFingerprint: string | null;
+  sshKeyType: string | null;
 }
 
 export function getGitHubSettings(): GitHubSettingsResponse {
@@ -1029,6 +1036,9 @@ export function getGitHubSettings(): GitHubSettingsResponse {
     enabled: getConfig("github:enabled") === "true",
     tokenSet: !!getConfig("github:token"),
     username: getConfig("github:username") ?? null,
+    sshKeySet: existsSync(join(homedir(), ".ssh", "otterbot_github")),
+    sshKeyFingerprint: getConfig("github:ssh_fingerprint") ?? null,
+    sshKeyType: getConfig("github:ssh_key_type") ?? null,
   };
 }
 
@@ -1086,6 +1096,229 @@ export async function testGitHubConnection(): Promise<TestResult & { username?: 
     return {
       ok: false,
       error: error instanceof Error ? error.message : "Unknown error",
+    };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// GitHub SSH key management
+// ---------------------------------------------------------------------------
+
+const SSH_KEY_NAME = "otterbot_github";
+
+function sshDir(): string {
+  return join(homedir(), ".ssh");
+}
+
+function sshKeyPath(): string {
+  return join(sshDir(), SSH_KEY_NAME);
+}
+
+function sshPubKeyPath(): string {
+  return join(sshDir(), `${SSH_KEY_NAME}.pub`);
+}
+
+function getFingerprint(pubKeyPath: string): string {
+  const out = execSync(`ssh-keygen -lf ${pubKeyPath}`, { encoding: "utf-8" }).trim();
+  // Output format: "256 SHA256:xxxxx comment (ED25519)"
+  return out.split(" ")[1] ?? out;
+}
+
+function configureGitSSH(): void {
+  const keyPath = sshKeyPath();
+  const pubKeyPath = sshPubKeyPath();
+  const sshConfigPath = join(sshDir(), "config");
+
+  // --- ~/.ssh/config entry ---
+  const hostBlock = [
+    "",
+    "# Otterbot GitHub SSH",
+    "Host github.com",
+    `  IdentityFile ${keyPath}`,
+    "  IdentitiesOnly yes",
+    "",
+  ].join("\n");
+
+  let sshConfig = existsSync(sshConfigPath) ? readFileSync(sshConfigPath, "utf-8") : "";
+  // Remove any existing otterbot block
+  sshConfig = sshConfig.replace(/\n?# Otterbot GitHub SSH\nHost github\.com\n  IdentityFile [^\n]+\n  IdentitiesOnly yes\n?/g, "");
+  sshConfig = sshConfig.trimEnd() + hostBlock;
+  writeFileSync(sshConfigPath, sshConfig, { mode: 0o600 });
+
+  // --- git config for commit signing ---
+  const gitCmds = [
+    `git config --global gpg.format ssh`,
+    `git config --global user.signingkey "${pubKeyPath}"`,
+    `git config --global commit.gpgsign true`,
+    `git config --global tag.gpgsign true`,
+  ];
+  for (const cmd of gitCmds) {
+    execSync(cmd, { stdio: "pipe" });
+  }
+}
+
+function removeGitSSHConfig(): void {
+  // Remove ~/.ssh/config block
+  const sshConfigPath = join(sshDir(), "config");
+  if (existsSync(sshConfigPath)) {
+    let sshConfig = readFileSync(sshConfigPath, "utf-8");
+    sshConfig = sshConfig.replace(/\n?# Otterbot GitHub SSH\nHost github\.com\n  IdentityFile [^\n]+\n  IdentitiesOnly yes\n?/g, "");
+    writeFileSync(sshConfigPath, sshConfig, { mode: 0o600 });
+  }
+
+  // Unset git signing config
+  const gitCmds = [
+    "git config --global --unset gpg.format",
+    "git config --global --unset user.signingkey",
+    "git config --global --unset commit.gpgsign",
+    "git config --global --unset tag.gpgsign",
+  ];
+  for (const cmd of gitCmds) {
+    try { execSync(cmd, { stdio: "pipe" }); } catch { /* key may not exist */ }
+  }
+}
+
+export function generateSSHKey(data?: {
+  type?: "ed25519" | "rsa";
+  comment?: string;
+}): { ok: boolean; fingerprint?: string; publicKey?: string; error?: string } {
+  const keyType = data?.type ?? "ed25519";
+  const comment = data?.comment ?? "otterbot@github";
+  const keyPath = sshKeyPath();
+
+  // Ensure ~/.ssh exists
+  const dir = sshDir();
+  if (!existsSync(dir)) {
+    mkdirSync(dir, { recursive: true, mode: 0o700 });
+  }
+
+  // Don't overwrite existing key
+  if (existsSync(keyPath)) {
+    return { ok: false, error: "SSH key already exists. Remove it first." };
+  }
+
+  try {
+    execSync(
+      `ssh-keygen -t ${keyType} -C "${comment}" -f "${keyPath}" -N ""`,
+      { stdio: "pipe" },
+    );
+    chmodSync(keyPath, 0o600);
+    chmodSync(sshPubKeyPath(), 0o644);
+
+    const fingerprint = getFingerprint(sshPubKeyPath());
+    const publicKey = readFileSync(sshPubKeyPath(), "utf-8").trim();
+
+    setConfig("github:ssh_fingerprint", fingerprint);
+    setConfig("github:ssh_key_type", keyType);
+
+    configureGitSSH();
+
+    return { ok: true, fingerprint, publicKey };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "Failed to generate SSH key",
+    };
+  }
+}
+
+export function importSSHKey(privateKey: string): {
+  ok: boolean;
+  fingerprint?: string;
+  publicKey?: string;
+  error?: string;
+} {
+  const keyPath = sshKeyPath();
+  const pubKeyPath = sshPubKeyPath();
+
+  const dir = sshDir();
+  if (!existsSync(dir)) {
+    mkdirSync(dir, { recursive: true, mode: 0o700 });
+  }
+
+  if (existsSync(keyPath)) {
+    return { ok: false, error: "SSH key already exists. Remove it first." };
+  }
+
+  try {
+    // Ensure trailing newline
+    const normalized = privateKey.trimEnd() + "\n";
+    writeFileSync(keyPath, normalized, { mode: 0o600 });
+
+    // Derive public key
+    const pubKey = execSync(`ssh-keygen -y -f "${keyPath}"`, { encoding: "utf-8" }).trim();
+    writeFileSync(pubKeyPath, pubKey + "\n", { mode: 0o644 });
+
+    const fingerprint = getFingerprint(pubKeyPath);
+
+    // Detect key type from public key line
+    const keyType = pubKey.startsWith("ssh-ed25519") ? "ed25519" : "rsa";
+
+    setConfig("github:ssh_fingerprint", fingerprint);
+    setConfig("github:ssh_key_type", keyType);
+
+    configureGitSSH();
+
+    return { ok: true, fingerprint, publicKey: pubKey };
+  } catch (error) {
+    // Clean up on failure
+    try { if (existsSync(keyPath)) unlinkSync(keyPath); } catch { /* ignore */ }
+    try { if (existsSync(pubKeyPath)) unlinkSync(pubKeyPath); } catch { /* ignore */ }
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "Failed to import SSH key",
+    };
+  }
+}
+
+export function getSSHPublicKey(): { publicKey: string | null } {
+  const pubPath = sshPubKeyPath();
+  if (!existsSync(pubPath)) return { publicKey: null };
+  return { publicKey: readFileSync(pubPath, "utf-8").trim() };
+}
+
+export function removeSSHKey(): { ok: boolean; error?: string } {
+  try {
+    const keyPath = sshKeyPath();
+    const pubPath = sshPubKeyPath();
+
+    if (existsSync(keyPath)) unlinkSync(keyPath);
+    if (existsSync(pubPath)) unlinkSync(pubPath);
+
+    deleteConfig("github:ssh_fingerprint");
+    deleteConfig("github:ssh_key_type");
+
+    removeGitSSHConfig();
+
+    return { ok: true };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "Failed to remove SSH key",
+    };
+  }
+}
+
+export function testSSHConnection(): { ok: boolean; username?: string; error?: string } {
+  try {
+    // ssh -T git@github.com exits with code 1 on success (it prints "Hi username!")
+    const result = execSync(
+      `ssh -T -o StrictHostKeyChecking=accept-new -o BatchMode=yes git@github.com 2>&1`,
+      { encoding: "utf-8", timeout: 15_000 },
+    ).trim();
+
+    const match = result.match(/Hi (\S+)!/);
+    return { ok: true, username: match?.[1] };
+  } catch (error: unknown) {
+    // ssh -T returns exit code 1 on successful auth
+    const stderr = (error as { stdout?: string })?.stdout ?? String(error);
+    const match = stderr.match(/Hi (\S+)!/);
+    if (match) {
+      return { ok: true, username: match[1] };
+    }
+    return {
+      ok: false,
+      error: stderr.slice(0, 200) || "SSH connection failed",
     };
   }
 }

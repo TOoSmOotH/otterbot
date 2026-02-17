@@ -112,6 +112,11 @@ import {
   getGitHubSettings,
   updateGitHubSettings,
   testGitHubConnection,
+  generateSSHKey,
+  importSSHKey,
+  getSSHPublicKey,
+  removeSSHKey,
+  testSSHConnection,
   listCustomModels,
   createCustomModel,
   deleteCustomModel,
@@ -2090,6 +2095,36 @@ async function main() {
 
   app.post("/api/settings/github/test", async () => {
     return testGitHubConnection();
+  });
+
+  // --- GitHub SSH ---
+
+  app.post<{
+    Body: { type?: "ed25519" | "rsa"; comment?: string };
+  }>("/api/settings/github/ssh/generate", async (req) => {
+    return generateSSHKey(req.body);
+  });
+
+  app.post<{
+    Body: { privateKey: string };
+  }>("/api/settings/github/ssh/import", async (req, reply) => {
+    if (!req.body.privateKey) {
+      reply.code(400);
+      return { error: "privateKey is required" };
+    }
+    return importSSHKey(req.body.privateKey);
+  });
+
+  app.get("/api/settings/github/ssh/public-key", async () => {
+    return getSSHPublicKey();
+  });
+
+  app.delete("/api/settings/github/ssh", async () => {
+    return removeSSHKey();
+  });
+
+  app.post("/api/settings/github/ssh/test", async () => {
+    return testSSHConnection();
   });
 
   // SPA fallback for client-side routing (only for page navigation, not JS/CSS/API requests)

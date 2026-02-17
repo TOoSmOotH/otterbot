@@ -96,6 +96,13 @@ interface SettingsState {
   gitHubUsername: string | null;
   gitHubTestResult: TestResult | null;
 
+  // GitHub SSH
+  sshKeySet: boolean;
+  sshKeyFingerprint: string | null;
+  sshKeyType: string | null;
+  sshPublicKey: string | null;
+  sshTestResult: TestResult & { username?: string } | null;
+
   loadSettings: () => Promise<void>;
   createProvider: (data: { name: string; type: ProviderType; apiKey?: string; baseUrl?: string }) => Promise<NamedProvider | null>;
   updateProvider: (
@@ -164,6 +171,13 @@ interface SettingsState {
     token?: string;
   }) => Promise<void>;
   testGitHubConnection: () => Promise<void>;
+
+  // GitHub SSH actions
+  generateSSHKey: (type?: "ed25519" | "rsa") => Promise<void>;
+  importSSHKey: (privateKey: string) => Promise<void>;
+  getSSHPublicKey: () => Promise<void>;
+  removeSSHKey: () => Promise<void>;
+  testSSHConnection: () => Promise<void>;
 }
 
 // ---------------------------------------------------------------------------
@@ -209,6 +223,11 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   gitHubTokenSet: false,
   gitHubUsername: null,
   gitHubTestResult: null,
+  sshKeySet: false,
+  sshKeyFingerprint: null,
+  sshKeyType: null,
+  sshPublicKey: null,
+  sshTestResult: null,
 
   loadSettings: async () => {
     set({ loading: true, error: null });
@@ -807,6 +826,9 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
         gitHubEnabled: data.enabled,
         gitHubTokenSet: data.tokenSet,
         gitHubUsername: data.username,
+        sshKeySet: data.sshKeySet,
+        sshKeyFingerprint: data.sshKeyFingerprint,
+        sshKeyType: data.sshKeyType,
       });
     } catch {
       // Silently fail
@@ -848,6 +870,105 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     } catch (err) {
       set({
         gitHubTestResult: {
+          ok: false,
+          error: err instanceof Error ? err.message : "Unknown error",
+          testing: false,
+        },
+      });
+    }
+  },
+
+  // GitHub SSH actions
+
+  generateSSHKey: async (type) => {
+    set({ error: null });
+    try {
+      const res = await fetch("/api/settings/github/ssh/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type: type ?? "ed25519" }),
+      });
+      const data = await res.json();
+      if (!data.ok) {
+        set({ error: data.error ?? "Failed to generate SSH key" });
+        return;
+      }
+      set({ sshPublicKey: data.publicKey });
+      await get().loadGitHubSettings();
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "Unknown error" });
+    }
+  },
+
+  importSSHKey: async (privateKey) => {
+    set({ error: null });
+    try {
+      const res = await fetch("/api/settings/github/ssh/import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ privateKey }),
+      });
+      const data = await res.json();
+      if (!data.ok) {
+        set({ error: data.error ?? "Failed to import SSH key" });
+        return;
+      }
+      set({ sshPublicKey: data.publicKey });
+      await get().loadGitHubSettings();
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "Unknown error" });
+    }
+  },
+
+  getSSHPublicKey: async () => {
+    try {
+      const res = await fetch("/api/settings/github/ssh/public-key");
+      if (!res.ok) return;
+      const data = await res.json();
+      set({ sshPublicKey: data.publicKey });
+    } catch {
+      // Silently fail
+    }
+  },
+
+  removeSSHKey: async () => {
+    set({ error: null });
+    try {
+      const res = await fetch("/api/settings/github/ssh", {
+        method: "DELETE",
+      });
+      const data = await res.json();
+      if (!data.ok) {
+        set({ error: data.error ?? "Failed to remove SSH key" });
+        return;
+      }
+      set({ sshPublicKey: null, sshTestResult: null });
+      await get().loadGitHubSettings();
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "Unknown error" });
+    }
+  },
+
+  testSSHConnection: async () => {
+    set({ sshTestResult: { ok: false, testing: true } });
+    try {
+      const res = await fetch("/api/settings/github/ssh/test", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      const data = await res.json();
+      set({
+        sshTestResult: {
+          ok: data.ok,
+          error: data.error,
+          username: data.username,
+          testing: false,
+        },
+      });
+    } catch (err) {
+      set({
+        sshTestResult: {
           ok: false,
           error: err instanceof Error ? err.message : "Unknown error",
           testing: false,
