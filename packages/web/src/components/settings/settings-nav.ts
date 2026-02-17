@@ -10,7 +10,11 @@ export type SettingsSection =
   | "speech"
   | "liveview"
   | "opencode"
+  | "scheduled"
+  | "skills"
   | "channels"
+  | "email"
+  | "github"
   | "security";
 
 export interface NavItem {
@@ -52,12 +56,18 @@ export const SETTINGS_NAV: NavGroup[] = [
       { id: "speech", label: "Speech" },
       { id: "liveview", label: "Live View" },
       { id: "opencode", label: "OpenCode" },
+      { id: "scheduled", label: "Scheduled Tasks" },
+      { id: "skills", label: "Skills Center" },
     ],
   },
   {
     label: "Integrations",
     defaultOpen: false,
-    items: [{ id: "channels", label: "Channels" }],
+    items: [
+      { id: "channels", label: "Channels" },
+      { id: "email", label: "Email Setup" },
+      { id: "github", label: "GitHub" },
+    ],
   },
   {
     label: "Security",

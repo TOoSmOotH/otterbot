@@ -13,6 +13,10 @@ import { PricingTab } from "./PricingTab";
 import { ProfileSection } from "./ProfileSection";
 import { SystemSection } from "./SystemSection";
 import { ChannelsSection } from "./ChannelsSection";
+import { ScheduledTasksSection } from "./ScheduledTasksSection";
+import { EmailSection } from "./EmailSection";
+import { SkillsCenterSection } from "./SkillsCenterSection";
+import { GitHubTab } from "./GitHubTab";
 import { SecuritySection } from "./SecuritySection";
 import type { SettingsSection } from "./settings-nav";
 
@@ -40,6 +44,10 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
     if (activeSection === "profile") return <ProfileSection />;
     if (activeSection === "system") return <SystemSection />;
     if (activeSection === "channels") return <ChannelsSection />;
+    if (activeSection === "scheduled") return <ScheduledTasksSection />;
+    if (activeSection === "email") return <EmailSection />;
+    if (activeSection === "skills") return <SkillsCenterSection />;
+    if (activeSection === "github") return <GitHubTab />;
     if (activeSection === "security") return <SecuritySection />;
 
     // AI & Features tabs need settings loaded first
