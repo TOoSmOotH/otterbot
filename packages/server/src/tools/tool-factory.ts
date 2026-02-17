@@ -21,6 +21,7 @@ import { createCalendarCreateEventTool } from "./calendar-create-event.js";
 import { createCalendarUpdateEventTool } from "./calendar-update-event.js";
 import { createCalendarDeleteEventTool } from "./calendar-delete-event.js";
 import { createCalendarListCalendarsTool } from "./calendar-list-calendars.js";
+import { SkillService } from "../skills/skill-service.js";
 
 type ToolCreator = (ctx: ToolContext) => unknown;
 
@@ -89,6 +90,45 @@ export function createAdminTools(): Record<string, unknown> {
     tools[name] = creator();
   }
   return tools;
+}
+
+/**
+ * Create tools for an agent, merging tools from assigned skills.
+ * Returns the tools and any additional system prompt content from skills.
+ */
+export function createToolsForAgent(
+  toolNames: string[],
+  ctx: ToolContext,
+  registryEntryId?: string,
+): { tools: Record<string, unknown>; skillPromptContent: string } {
+  // Start with the base tools
+  const allToolNames = new Set(toolNames);
+  let skillPromptContent = "";
+
+  // Merge skill tools and prompts if agent has a registry entry
+  if (registryEntryId) {
+    try {
+      const skillService = new SkillService();
+      const skills = skillService.getForAgent(registryEntryId);
+
+      for (const skill of skills) {
+        // Add the skill's required tools
+        for (const toolName of skill.meta.tools) {
+          allToolNames.add(toolName);
+        }
+
+        // Append the skill's system prompt content
+        if (skill.body.trim()) {
+          skillPromptContent += `\n\n--- Skill: ${skill.meta.name} ---\n${skill.body}`;
+        }
+      }
+    } catch (err) {
+      console.warn("[tool-factory] Failed to load agent skills:", err);
+    }
+  }
+
+  const tools = createTools([...allToolNames], ctx);
+  return { tools, skillPromptContent };
 }
 
 /** List all available tool names */

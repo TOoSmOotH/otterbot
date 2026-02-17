@@ -59,16 +59,33 @@ export function LiveViewScene({ userProfile }: LiveViewSceneProps) {
         return { x: wp.position[0], z: wp.position[2], rotationY: 0 };
       };
 
-      // Status-aware position: agents go to desk when thinking/acting, center when idle
+      // Status-aware position: agents go to desk when thinking/acting, idle agents spread near center
       const getStatusAwarePos = (agent: Agent | null, zoneId: string | undefined, deskIndex: number): { x: number; z: number; rotationY: number } => {
         const status = agent?.status ?? "idle";
         const isWorking = status === "thinking" || status === "acting";
-        const tag = isWorking ? "desk" : "center";
-        return getZoneWaypointPos(zoneId, tag, deskIndex) ?? getZoneWaypointPos(zoneId, "center", 0) ?? { x: 0, z: 0, rotationY: 0 };
+        if (isWorking) {
+          return getZoneWaypointPos(zoneId, "desk", deskIndex) ?? getZoneWaypointPos(zoneId, "center", 0) ?? { x: 0, z: 0, rotationY: 0 };
+        }
+        // Idle: spread agents around center so they don't stack
+        const centerPos = getZoneWaypointPos(zoneId, "center", 0) ?? { x: 0, z: 0, rotationY: 0 };
+        const angle = (deskIndex / 8) * Math.PI * 2;
+        const radius = 1.5;
+        return { x: centerPos.x + Math.cos(angle) * radius, z: centerPos.z + Math.sin(angle) * radius, rotationY: 0 };
       };
 
-      // CEO at main office center (always center since they don't act)
-      const ceoPos = getZoneWaypointPos(mainZoneId, "center", 0) ?? { x: 0, z: 0, rotationY: 0 };
+      // Global desk index counter — each agent in the main office gets a unique desk
+      let nextDeskIndex = 0;
+      // Per-zone desk counters for project offices
+      const zoneDeskCounters = new Map<string, number>();
+      const getZoneDeskIndex = (zoneId: string): number => {
+        const idx = zoneDeskCounters.get(zoneId) ?? 0;
+        zoneDeskCounters.set(zoneId, idx + 1);
+        return idx;
+      };
+
+      // CEO always at its desk (deskIndex 0)
+      const ceoDeskIndex = nextDeskIndex++;
+      const ceoPos = getZoneWaypointPos(mainZoneId, "desk", ceoDeskIndex) ?? { x: 0, z: 0, rotationY: 0 };
       positions.push({
         agent: null,
         role: "ceo",
@@ -80,9 +97,10 @@ export function LiveViewScene({ userProfile }: LiveViewSceneProps) {
         rotationY: ceoPos.rotationY,
       });
 
-      // COOs — status-aware: idle at center, thinking/acting at desk
+      // COOs — status-aware: idle spread near center, thinking/acting at desk
       for (let i = 0; i < coos.length; i++) {
-        const pos = getStatusAwarePos(coos[i], mainZoneId, i);
+        const deskIdx = nextDeskIndex++;
+        const pos = getStatusAwarePos(coos[i], mainZoneId, deskIdx);
         positions.push({
           agent: coos[i],
           role: "coo",
@@ -97,7 +115,8 @@ export function LiveViewScene({ userProfile }: LiveViewSceneProps) {
 
       // Admin Assistants — status-aware
       for (let i = 0; i < adminAssistants.length; i++) {
-        const pos = getStatusAwarePos(adminAssistants[i], mainZoneId, coos.length + i);
+        const deskIdx = nextDeskIndex++;
+        const pos = getStatusAwarePos(adminAssistants[i], mainZoneId, deskIdx);
         positions.push({
           agent: adminAssistants[i],
           role: "admin_assistant",
@@ -117,7 +136,8 @@ export function LiveViewScene({ userProfile }: LiveViewSceneProps) {
           ? activeScene.zones.find((z) => z.projectId === tl.projectId)
           : null;
         const zoneId = projectZone?.id ?? mainZoneId;
-        const pos = getStatusAwarePos(tl, zoneId, 0);
+        const deskIdx = projectZone ? getZoneDeskIndex(projectZone.id) : nextDeskIndex++;
+        const pos = getStatusAwarePos(tl, zoneId, deskIdx);
         positions.push({
           agent: tl,
           role: "team_lead",
@@ -137,7 +157,8 @@ export function LiveViewScene({ userProfile }: LiveViewSceneProps) {
           ? activeScene.zones.find((z) => z.projectId === w.projectId)
           : null;
         const zoneId = projectZone?.id ?? mainZoneId;
-        const pos = getStatusAwarePos(w, zoneId, i);
+        const deskIdx = projectZone ? getZoneDeskIndex(projectZone.id) : nextDeskIndex++;
+        const pos = getStatusAwarePos(w, zoneId, deskIdx);
         positions.push({
           agent: w,
           role: "worker",

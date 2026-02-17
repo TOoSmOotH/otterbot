@@ -1,4 +1,5 @@
-import { sqliteTable, text, integer } from "drizzle-orm/sqlite-core";
+import { sqliteTable, text, integer, primaryKey } from "drizzle-orm/sqlite-core";
+import type { ScanFinding, SkillScanStatus } from "@otterbot/shared";
 
 export const agents = sqliteTable("agents", {
   id: text("id").primaryKey(),
@@ -258,4 +259,54 @@ export const providers = sqliteTable("providers", {
     .notNull()
     .$defaultFn(() => new Date().toISOString()),
 });
+
+export const skills = sqliteTable("skills", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  description: text("description").notNull().default(""),
+  version: text("version").notNull().default("1.0.0"),
+  author: text("author").notNull().default(""),
+  tools: text("tools", { mode: "json" })
+    .$type<string[]>()
+    .notNull()
+    .default([]),
+  capabilities: text("capabilities", { mode: "json" })
+    .$type<string[]>()
+    .notNull()
+    .default([]),
+  parameters: text("parameters", { mode: "json" })
+    .$type<Record<string, unknown>>()
+    .notNull()
+    .default({}),
+  tags: text("tags", { mode: "json" })
+    .$type<string[]>()
+    .notNull()
+    .default([]),
+  body: text("body").notNull().default(""),
+  scanStatus: text("scan_status", {
+    enum: ["clean", "warnings", "errors", "unscanned"],
+  })
+    .$type<SkillScanStatus>()
+    .notNull()
+    .default("unscanned"),
+  scanFindings: text("scan_findings", { mode: "json" })
+    .$type<ScanFinding[]>()
+    .notNull()
+    .default([]),
+  createdAt: text("created_at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+  updatedAt: text("updated_at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+});
+
+export const agentSkills = sqliteTable(
+  "agent_skills",
+  {
+    registryEntryId: text("registry_entry_id").notNull(),
+    skillId: text("skill_id").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.registryEntryId, table.skillId] })],
+);
 

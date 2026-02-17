@@ -292,6 +292,29 @@ export async function migrateDb() {
     updated_at TEXT NOT NULL
   )`);
 
+  db.run(sql`CREATE TABLE IF NOT EXISTS skills (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    version TEXT NOT NULL DEFAULT '1.0.0',
+    author TEXT NOT NULL DEFAULT '',
+    tools TEXT NOT NULL DEFAULT '[]',
+    capabilities TEXT NOT NULL DEFAULT '[]',
+    parameters TEXT NOT NULL DEFAULT '{}',
+    tags TEXT NOT NULL DEFAULT '[]',
+    body TEXT NOT NULL DEFAULT '',
+    scan_status TEXT NOT NULL DEFAULT 'unscanned',
+    scan_findings TEXT NOT NULL DEFAULT '[]',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  )`);
+
+  db.run(sql`CREATE TABLE IF NOT EXISTS agent_skills (
+    registry_entry_id TEXT NOT NULL,
+    skill_id TEXT NOT NULL,
+    PRIMARY KEY (registry_entry_id, skill_id)
+  )`);
+
   // Seed built-in registry entries on every startup (dynamic import to avoid circular dep)
   const { seedBuiltIns } = await import("./seed.js");
   seedBuiltIns();
