@@ -31,6 +31,7 @@
     "nanoid": "^5.0.9",
     "ollama-ai-provider": "^1.2.0",
     "playwright": "^1.50.0",
+    "puppeteer": "^24.2.0",
     "socket.io": "^4.8.1",
     "ws": "^8.18.0",
     "zod": "^3.24.1",

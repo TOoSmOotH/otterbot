@@ -36,7 +36,8 @@
       "better-sqlite3",
       "better-sqlite3-multiple-ciphers",
       "esbuild",
-      "onnxruntime-node"
+      "onnxruntime-node",
+      "puppeteer"
     ]
   },
   "packageManager": "pnpm@10.29.3",
