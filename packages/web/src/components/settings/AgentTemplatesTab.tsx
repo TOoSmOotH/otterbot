@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from "react";
 import { cn } from "../../lib/utils";
 import { useSettingsStore } from "../../stores/settings-store";
 import { useModelPackStore } from "../../stores/model-pack-store";
+import { useSkillsStore } from "../../stores/skills-store";
 import type { RegistryEntry, GearConfig } from "@otterbot/shared";
 import { CharacterSelect } from "../character-select/CharacterSelect";
 import { ModelCombobox } from "./ModelCombobox";
@@ -23,15 +24,20 @@ export function AgentTemplatesTab() {
     gearConfig: null as GearConfig | null,
   });
 
+  const [assignedSkillIds, setAssignedSkillIds] = useState<string[]>([]);
+
   const providers = useSettingsStore((s) => s.providers);
   const models = useSettingsStore((s) => s.models);
   const fetchModels = useSettingsStore((s) => s.fetchModels);
   const modelPacks = useModelPackStore((s) => s.packs);
   const loadPacks = useModelPackStore((s) => s.loadPacks);
+  const allSkills = useSkillsStore((s) => s.skills);
+  const loadSkills = useSkillsStore((s) => s.loadSkills);
 
   useEffect(() => {
     loadEntries();
     loadPacks();
+    loadSkills();
   }, []);
 
   // Fetch models when the selected provider changes
@@ -56,7 +62,7 @@ export function AgentTemplatesTab() {
     return { core, workers, custom };
   }, [entries]);
 
-  const selectEntry = (entry: RegistryEntry) => {
+  const selectEntry = async (entry: RegistryEntry) => {
     setSelected(entry);
     setForm({
       name: entry.name,
@@ -71,6 +77,17 @@ export function AgentTemplatesTab() {
       gearConfig: entry.gearConfig ?? null,
     });
     setEditing(false);
+
+    // Load assigned skills
+    try {
+      const res = await fetch(`/api/registry/${entry.id}/skills`);
+      if (res.ok) {
+        const skills = await res.json();
+        setAssignedSkillIds(skills.map((s: { id: string }) => s.id));
+      }
+    } catch {
+      setAssignedSkillIds([]);
+    }
   };
 
   const isCooClone = selected != null && !selected.builtIn && selected.role === "coo";
@@ -110,6 +127,13 @@ export function AgentTemplatesTab() {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
+    });
+
+    // Save skill assignments
+    await fetch(`/api/registry/${selected.id}/skills`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ skillIds: assignedSkillIds }),
     });
 
     await loadEntries();
@@ -434,6 +458,63 @@ export function AgentTemplatesTab() {
                         {t.trim()}
                       </span>
                     ))}
+                </div>
+              )}
+            </Field>
+
+            {/* Skills */}
+            <Field label="Skills" editing={editing}>
+              {editing ? (
+                <div className="space-y-1.5">
+                  {allSkills.length === 0 ? (
+                    <p className="text-xs text-muted-foreground">
+                      No skills available. Create skills in the Skills Center first.
+                    </p>
+                  ) : (
+                    <div className="flex flex-wrap gap-1.5">
+                      {allSkills.map((skill) => {
+                        const isAssigned = assignedSkillIds.includes(skill.id);
+                        return (
+                          <button
+                            key={skill.id}
+                            type="button"
+                            onClick={() => {
+                              setAssignedSkillIds((prev) =>
+                                isAssigned
+                                  ? prev.filter((id) => id !== skill.id)
+                                  : [...prev, skill.id],
+                              );
+                            }}
+                            className={`text-[10px] px-2 py-1 rounded-md border transition-colors ${
+                              isAssigned
+                                ? "bg-primary/15 text-primary border-primary/30"
+                                : "bg-secondary text-muted-foreground border-transparent hover:border-border"
+                            }`}
+                          >
+                            {skill.meta.name}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="flex flex-wrap gap-1">
+                  {assignedSkillIds.length === 0 ? (
+                    <span className="text-xs text-muted-foreground">None</span>
+                  ) : (
+                    assignedSkillIds.map((skillId) => {
+                      const skill = allSkills.find((s) => s.id === skillId);
+                      return (
+                        <span
+                          key={skillId}
+                          className="text-[10px] bg-primary/10 text-primary px-2 py-0.5 rounded"
+                        >
+                          {skill?.meta.name ?? skillId}
+                        </span>
+                      );
+                    })
+                  )}
                 </div>
               )}
             </Field>

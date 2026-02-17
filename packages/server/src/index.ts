@@ -15,11 +15,16 @@ import type {
   RegistryEntryCreate,
   RegistryEntryUpdate,
   SceneConfig,
+  SkillCreate,
+  SkillUpdate,
 } from "@otterbot/shared";
 import { migrateDb } from "./db/index.js";
 import { MessageBus } from "./bus/message-bus.js";
 import { WorkspaceManager } from "./workspace/workspace.js";
 import { Registry } from "./registry/registry.js";
+import { SkillService } from "./skills/skill-service.js";
+import { scanSkillContent } from "./skills/skill-scanner.js";
+import { getAvailableToolNames } from "./tools/tool-factory.js";
 import { COO } from "./agents/coo.js";
 import { AdminAssistant } from "./agents/admin-assistant.js";
 import { closeBrowser } from "./tools/browser-pool.js";
@@ -249,6 +254,7 @@ async function main() {
   const bus = new MessageBus();
   const workspace = new WorkspaceManager();
   const registry = new Registry();
+  const skillService = new SkillService();
 
   // Create Fastify server with HTTPS (required for mic/getUserMedia from remote hosts)
   const dataDir = process.env.WORKSPACE_ROOT ?? resolve(__dirname, "../../../docker/otterbot");
@@ -2126,6 +2132,132 @@ async function main() {
   app.post("/api/settings/github/ssh/test", async () => {
     return testSSHConnection();
   });
+
+  // =========================================================================
+  // Skills API
+  // =========================================================================
+
+  app.get("/api/skills", async () => {
+    return skillService.list();
+  });
+
+  app.get<{ Params: { id: string } }>(
+    "/api/skills/:id",
+    async (req, reply) => {
+      const skill = skillService.get(req.params.id);
+      if (!skill) {
+        reply.code(404);
+        return { error: "Not found" };
+      }
+      return skill;
+    },
+  );
+
+  app.post<{ Body: SkillCreate }>(
+    "/api/skills",
+    async (req) => {
+      const raw = skillService.serializeSkillFile(req.body.meta, req.body.body);
+      const scanReport = scanSkillContent(raw);
+      return skillService.create(req.body, scanReport);
+    },
+  );
+
+  app.put<{ Params: { id: string }; Body: SkillUpdate }>(
+    "/api/skills/:id",
+    async (req, reply) => {
+      const updated = skillService.update(req.params.id, req.body);
+      if (!updated) {
+        reply.code(404);
+        return { error: "Not found" };
+      }
+      return updated;
+    },
+  );
+
+  app.delete<{ Params: { id: string } }>(
+    "/api/skills/:id",
+    async (req, reply) => {
+      const deleted = skillService.delete(req.params.id);
+      if (!deleted) {
+        reply.code(404);
+        return { error: "Not found" };
+      }
+      return { ok: true };
+    },
+  );
+
+  // Import a .md skill file (multipart upload)
+  app.post("/api/skills/import", async (req, reply) => {
+    const file = await req.file();
+    if (!file) {
+      reply.code(400);
+      return { error: "No file provided" };
+    }
+    const raw = (await file.toBuffer()).toString("utf-8");
+    const scanReport = scanSkillContent(raw);
+    const { meta, body } = skillService.parseSkillFile(raw);
+    const skill = skillService.create({ meta, body }, scanReport);
+    return { skill, scanReport };
+  });
+
+  // Scan content without saving
+  app.post<{ Body: { content: string } }>(
+    "/api/skills/scan",
+    async (req) => {
+      return scanSkillContent(req.body.content);
+    },
+  );
+
+  // Export as .md file download
+  app.get<{ Params: { id: string } }>(
+    "/api/skills/:id/export",
+    async (req, reply) => {
+      const md = skillService.exportAsMarkdown(req.params.id);
+      if (!md) {
+        reply.code(404);
+        return { error: "Not found" };
+      }
+      const skill = skillService.get(req.params.id);
+      const filename = (skill?.meta.name ?? "skill").replace(/[^a-zA-Z0-9_-]/g, "_") + ".md";
+      reply.header("Content-Type", "text/markdown; charset=utf-8");
+      reply.header("Content-Disposition", `attachment; filename="${filename}"`);
+      return reply.send(md);
+    },
+  );
+
+  // Available tools for the editor picker
+  app.get("/api/tools/available", async () => {
+    return { tools: getAvailableToolNames() };
+  });
+
+  // =========================================================================
+  // Agent skill assignment routes
+  // =========================================================================
+
+  app.get<{ Params: { id: string } }>(
+    "/api/registry/:id/skills",
+    async (req, reply) => {
+      const entry = registry.get(req.params.id);
+      if (!entry) {
+        reply.code(404);
+        return { error: "Not found" };
+      }
+      return skillService.getForAgent(req.params.id);
+    },
+  );
+
+  app.put<{ Params: { id: string }; Body: { skillIds: string[] } }>(
+    "/api/registry/:id/skills",
+    async (req, reply) => {
+      const entry = registry.get(req.params.id);
+      if (!entry) {
+        reply.code(404);
+        return { error: "Not found" };
+      }
+      skillService.setAgentSkills(req.params.id, req.body.skillIds);
+      return { ok: true };
+    },
+  );
 
   // SPA fallback for client-side routing (only for page navigation, not JS/CSS/API requests)
   if (existsSync(webDistPath)) {
