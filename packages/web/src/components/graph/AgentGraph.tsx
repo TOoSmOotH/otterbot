@@ -1,10 +1,8 @@
-import { useMemo, useEffect, useCallback, useRef } from "react";
+import { useMemo, useCallback, useRef, useEffect } from "react";
 import {
   ReactFlow,
   type Node,
   type Edge,
-  useNodesState,
-  useEdgesState,
   useReactFlow,
   ReactFlowProvider,
 } from "@xyflow/react";
@@ -142,25 +140,21 @@ function AgentGraphInner({
     selectAgent(agentId);
   }, [selectAgent]);
 
-  const { nodes: layoutNodes, edges: layoutEdges } = useMemo(
+  const { nodes, edges } = useMemo(
     () => buildLayout(agents, userProfile, handleNodeClick),
     [agents, userProfile, handleNodeClick],
   );
 
-  const [nodes, setNodes, onNodesChange] = useNodesState(layoutNodes);
-  const [edges, setEdges, onEdgesChange] = useEdgesState(layoutEdges);
   const { fitView } = useReactFlow();
   const prevAgentCountRef = useRef(-1);
 
   useEffect(() => {
-    setNodes(layoutNodes);
-    setEdges(layoutEdges);
     const currentCount = agents.size;
     if (prevAgentCountRef.current !== currentCount) {
       prevAgentCountRef.current = currentCount;
       requestAnimationFrame(() => fitView());
     }
-  }, [layoutNodes, layoutEdges, setNodes, setEdges, fitView, agents.size]);
+  }, [agents.size, fitView]);
 
   return (
     <div className="flex flex-col h-full">
@@ -193,13 +187,12 @@ function AgentGraphInner({
           <ReactFlow
             nodes={nodes}
             edges={edges}
-            onNodesChange={onNodesChange}
-            onEdgesChange={onEdgesChange}
             nodeTypes={nodeTypes}
             defaultViewport={{ x: 0, y: 0, zoom: 1 }}
             proOptions={{ hideAttribution: true }}
             nodesDraggable={false}
             nodesConnectable={false}
+            elementsSelectable={false}
             zoomOnScroll={true}
             panOnScroll={false}
             panOnDrag={true}
