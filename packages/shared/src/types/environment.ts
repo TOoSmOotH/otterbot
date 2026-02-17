@@ -23,6 +23,7 @@ export interface SceneZone {
   projectId: string | null;  // null = main office
   position: [number, number, number];
   size: [number, number, number];
+  borderColor?: string;
 }
 
 export interface OfficeTemplate {

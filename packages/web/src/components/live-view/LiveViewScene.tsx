@@ -9,6 +9,7 @@ import { useMovementStore } from "../../stores/movement-store";
 import { AgentCharacter } from "./AgentCharacter";
 import { FallbackAgent } from "./FallbackAgent";
 import { EnvironmentScene } from "./EnvironmentScene";
+import { ZoneGroundMarkers } from "./ZoneGroundMarkers";
 import { EditableEnvironmentScene } from "../room-builder/EditableEnvironmentScene";
 import type { Agent } from "@otterbot/shared";
 import { findWaypointsByZoneAndTag } from "../../lib/pathfinding";
@@ -292,7 +293,10 @@ export function LiveViewScene({ userProfile }: LiveViewSceneProps) {
       {builderActive ? (
         <EditableEnvironmentScene />
       ) : activeScene ? (
-        <EnvironmentScene scene={activeScene} />
+        <>
+          <EnvironmentScene scene={activeScene} />
+          {activeScene.zones && <ZoneGroundMarkers zones={activeScene.zones} />}
+        </>
       ) : (
         <>
           <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.01, -4]} receiveShadow>
