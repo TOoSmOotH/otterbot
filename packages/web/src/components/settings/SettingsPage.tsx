@@ -17,6 +17,7 @@ import { ScheduledTasksSection } from "./ScheduledTasksSection";
 import { EmailSection } from "./EmailSection";
 import { SkillsCenterSection } from "./SkillsCenterSection";
 import { GitHubTab } from "./GitHubTab";
+import { GoogleSection } from "./GoogleSection";
 import { SecuritySection } from "./SecuritySection";
 import type { SettingsSection } from "./settings-nav";
 
@@ -46,6 +47,7 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
     if (activeSection === "channels") return <ChannelsSection />;
     if (activeSection === "scheduled") return <ScheduledTasksSection />;
     if (activeSection === "email") return <EmailSection />;
+    if (activeSection === "google") return <GoogleSection />;
     if (activeSection === "skills") return <SkillsCenterSection />;
     if (activeSection === "github") return <GitHubTab />;
     if (activeSection === "security") return <SecuritySection />;

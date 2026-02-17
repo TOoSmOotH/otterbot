@@ -103,6 +103,13 @@ interface SettingsState {
   sshPublicKey: string | null;
   sshTestResult: TestResult & { username?: string } | null;
 
+  // Google
+  googleConnected: boolean;
+  googleConnectedEmail: string | null;
+  googleClientIdSet: boolean;
+  googleClientSecretSet: boolean;
+  googleRedirectBaseUrl: string | null;
+
   loadSettings: () => Promise<void>;
   createProvider: (data: { name: string; type: ProviderType; apiKey?: string; baseUrl?: string }) => Promise<NamedProvider | null>;
   updateProvider: (
@@ -178,6 +185,16 @@ interface SettingsState {
   getSSHPublicKey: () => Promise<void>;
   removeSSHKey: () => Promise<void>;
   testSSHConnection: () => Promise<void>;
+
+  // Google actions
+  loadGoogleSettings: () => Promise<void>;
+  updateGoogleCredentials: (data: {
+    clientId?: string;
+    clientSecret?: string;
+    redirectBaseUrl?: string;
+  }) => Promise<void>;
+  beginGoogleOAuth: () => Promise<string | null>;
+  disconnectGoogle: () => Promise<void>;
 }
 
 // ---------------------------------------------------------------------------
@@ -228,6 +245,11 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   sshKeyType: null,
   sshPublicKey: null,
   sshTestResult: null,
+  googleConnected: false,
+  googleConnectedEmail: null,
+  googleClientIdSet: false,
+  googleClientSecretSet: false,
+  googleRedirectBaseUrl: null,
 
   loadSettings: async () => {
     set({ loading: true, error: null });
@@ -974,6 +996,70 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
           testing: false,
         },
       });
+    }
+  },
+
+  // Google actions
+
+  loadGoogleSettings: async () => {
+    try {
+      const res = await fetch("/api/settings/google");
+      if (!res.ok) return;
+      const data = await res.json();
+      set({
+        googleConnected: data.connected,
+        googleConnectedEmail: data.connectedEmail,
+        googleClientIdSet: data.clientIdSet,
+        googleClientSecretSet: data.clientSecretSet,
+        googleRedirectBaseUrl: data.redirectBaseUrl,
+      });
+    } catch {
+      // Silently fail
+    }
+  },
+
+  updateGoogleCredentials: async (data) => {
+    set({ error: null });
+    try {
+      const res = await fetch("/api/settings/google", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) throw new Error("Failed to update Google credentials");
+      await get().loadGoogleSettings();
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "Unknown error" });
+    }
+  },
+
+  beginGoogleOAuth: async () => {
+    try {
+      const res = await fetch("/api/settings/google/oauth/begin", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      if (!res.ok) return null;
+      const data = await res.json();
+      return data.url ?? null;
+    } catch {
+      return null;
+    }
+  },
+
+  disconnectGoogle: async () => {
+    set({ error: null });
+    try {
+      const res = await fetch("/api/settings/google/disconnect", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      if (!res.ok) throw new Error("Failed to disconnect Google");
+      await get().loadGoogleSettings();
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "Unknown error" });
     }
   },
 }));

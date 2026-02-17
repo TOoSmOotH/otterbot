@@ -14,6 +14,7 @@ export type SettingsSection =
   | "skills"
   | "channels"
   | "email"
+  | "google"
   | "github"
   | "security";
 
@@ -65,6 +66,7 @@ export const SETTINGS_NAV: NavGroup[] = [
     defaultOpen: false,
     items: [
       { id: "channels", label: "Channels" },
+      { id: "google", label: "Google" },
       { id: "email", label: "Email Setup" },
       { id: "github", label: "GitHub" },
     ],

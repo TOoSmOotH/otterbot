@@ -1,84 +1,101 @@
-import { nanoid } from "nanoid";
-import { AgentRole, AgentStatus, type Agent as AgentData } from "@otterbot/shared";
-import { getDb, schema } from "../db/index.js";
-import { eq } from "drizzle-orm";
+import {
+  AgentRole,
+  AgentStatus,
+  MessageType,
+  type BusMessage,
+} from "@otterbot/shared";
+import { BaseAgent, type AgentOptions } from "./agent.js";
+import type { MessageBus } from "../bus/message-bus.js";
+import { createAdminTools } from "../tools/tool-factory.js";
+import { ADMIN_ASSISTANT_PROMPT } from "./prompts/admin-assistant.js";
+import { getConfig } from "../auth/auth.js";
 
 const ADMIN_ASSISTANT_ID = "admin-assistant";
 
-export interface AdminAssistantOptions {
-  model: string;
-  provider: string;
-  baseUrl?: string;
+export interface AdminAssistantDependencies {
+  bus: MessageBus;
   onStatusChange?: (agentId: string, status: AgentStatus) => void;
+  onStream?: (token: string, messageId: string) => void;
+  onThinking?: (token: string, messageId: string) => void;
+  onThinkingEnd?: (messageId: string) => void;
 }
 
-/**
- * AdminAssistant is a placeholder agent that exists in the main office.
- * It has no LLM capabilities yet — it simply registers in the DB and
- * is visually present in the 3D world.
- */
-export class AdminAssistant {
-  readonly id = ADMIN_ASSISTANT_ID;
-  private status: AgentStatus = AgentStatus.Idle;
-  private options: AdminAssistantOptions;
+export class AdminAssistant extends BaseAgent {
+  private onStream?: (token: string, messageId: string) => void;
+  private onThinking?: (token: string, messageId: string) => void;
+  private onThinkingEnd?: (messageId: string) => void;
 
-  constructor(options: AdminAssistantOptions) {
-    this.options = options;
-  }
+  constructor(deps: AdminAssistantDependencies) {
+    // Build system prompt with current date
+    const now = new Date();
+    const dateStr = now.toLocaleDateString("en-US", {
+      weekday: "long",
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+    });
 
-  /** Spawn the admin assistant (insert into DB if not already present) */
-  async spawn(): Promise<AgentData> {
-    const db = getDb();
+    let systemPrompt = ADMIN_ASSISTANT_PROMPT;
+    systemPrompt += `\n\n## Current Date\nToday is ${dateStr}. Current time: ${now.toISOString()}.`;
 
-    // Check if already exists
-    const existing = db
-      .select()
-      .from(schema.agents)
-      .where(eq(schema.agents.id, this.id))
-      .get();
-
-    if (existing) {
-      // Update status to idle on restart
-      db.update(schema.agents)
-        .set({ status: "idle" })
-        .where(eq(schema.agents.id, this.id))
-        .run();
-
-      return this.toAgentData();
+    // Inject user profile context
+    const userName = getConfig("user_name");
+    if (userName) {
+      const userTimezone = getConfig("user_timezone");
+      const lines = [`## About Your CEO`, `- Name: ${userName}`];
+      if (userTimezone) lines.push(`- Timezone: ${userTimezone}`);
+      systemPrompt = lines.join("\n") + "\n\n" + systemPrompt;
     }
 
-    // Insert new agent
-    db.insert(schema.agents)
-      .values({
-        id: this.id,
-        role: "admin_assistant",
-        parentId: null,
-        status: "idle",
-        model: this.options.model,
-        provider: this.options.provider,
-        baseUrl: this.options.baseUrl ?? null,
-        projectId: null,
-      })
-      .run();
-
-    return this.toAgentData();
-  }
-
-  private toAgentData(): AgentData {
-    return {
-      id: this.id,
-      registryEntryId: null,
+    const options: AgentOptions = {
+      id: ADMIN_ASSISTANT_ID,
       role: AgentRole.AdminAssistant,
       parentId: null,
-      status: this.status,
-      model: this.options.model,
-      provider: this.options.provider,
-      baseUrl: this.options.baseUrl,
       projectId: null,
+      model: getConfig("coo_model") ?? "claude-sonnet-4-5-20250929",
+      provider: getConfig("coo_provider") ?? "anthropic",
+      systemPrompt,
       modelPackId: null,
       gearConfig: null,
-      workspacePath: null,
-      createdAt: new Date().toISOString(),
+      onStatusChange: deps.onStatusChange,
     };
+
+    super(options, deps.bus);
+    this.onStream = deps.onStream;
+    this.onThinking = deps.onThinking;
+    this.onThinkingEnd = deps.onThinkingEnd;
+  }
+
+  getTools(): Record<string, unknown> {
+    return createAdminTools();
+  }
+
+  async handleMessage(message: BusMessage): Promise<void> {
+    if (message.type === MessageType.Chat) {
+      await this.handleChatMessage(message);
+    }
+  }
+
+  private async handleChatMessage(message: BusMessage) {
+    const { text, thinking } = await this.think(
+      message.content,
+      (token, messageId) => {
+        this.onStream?.(token, messageId);
+      },
+      (token, messageId) => {
+        this.onThinking?.(token, messageId);
+      },
+      (messageId) => {
+        this.onThinkingEnd?.(messageId);
+      },
+    );
+
+    // Send the response back through the bus
+    this.sendMessage(
+      null,
+      MessageType.Chat,
+      text,
+      thinking ? { thinking } : undefined,
+    );
   }
 }

@@ -166,7 +166,7 @@ const authLimiter = new RateLimiter(5, 60_000);
 // Public API path whitelist (no auth required)
 // ---------------------------------------------------------------------------
 
-const PUBLIC_PATHS = ["/api/setup/status", "/api/setup/passphrase", "/api/auth/login"];
+const PUBLIC_PATHS = ["/api/setup/status", "/api/setup/passphrase", "/api/auth/login", "/api/oauth/google/callback"];
 
 // ---------------------------------------------------------------------------
 // Cookie helper for Socket.IO (parse raw Cookie header)
@@ -413,15 +413,34 @@ async function main() {
 
       // Spawn AdminAssistant alongside COO
       const adminAssistant = new AdminAssistant({
-        model: coo.toData().model,
-        provider: coo.toData().provider,
-        baseUrl: coo.toData().baseUrl,
+        bus,
+        onStatusChange: (agentId, status) => {
+          emitAgentStatus(io, agentId, status);
+        },
+        onStream: (token, messageId) => {
+          io.emit("admin-assistant:stream", { token, messageId });
+        },
+        onThinking: (token, messageId) => {
+          io.emit("admin-assistant:thinking", { token, messageId });
+        },
+        onThinkingEnd: (messageId) => {
+          io.emit("admin-assistant:thinking-end", { messageId });
+        },
       });
-      adminAssistant.spawn().then((agentData) => {
-        io.emit("agent:spawned", agentData);
-        console.log("AdminAssistant agent spawned.");
-      }).catch((err) => {
-        console.error("Failed to spawn AdminAssistant:", err);
+      emitAgentSpawned(io, adminAssistant);
+      console.log("AdminAssistant agent started.");
+
+      // Handle admin-assistant messages from the client
+      io.on("connection", (socket) => {
+        socket.on("admin-assistant:message" as any, async (data: { content: string }) => {
+          if (!data?.content) return;
+          bus.send({
+            fromAgentId: null,
+            toAgentId: "admin-assistant",
+            type: "chat" as any,
+            content: data.content,
+          });
+        });
       });
 
       // Recover active projects from previous run (non-blocking)
@@ -734,6 +753,36 @@ async function main() {
     reply.clearCookie("sb_session", { path: "/" });
     return { ok: true };
   });
+
+  // --- Google OAuth callback (public — receives redirect from Google) ---
+
+  app.get<{ Querystring: { code?: string; state?: string; error?: string } }>(
+    "/api/oauth/google/callback",
+    async (req, reply) => {
+      const { completeOAuthFlow } = await import("./google/google-auth.js");
+      const { code, state, error: oauthError } = req.query;
+
+      let resultPayload: string;
+      if (oauthError || !code || !state) {
+        resultPayload = JSON.stringify({ ok: false, error: oauthError || "Missing code or state" });
+      } else {
+        const result = await completeOAuthFlow(code, state);
+        resultPayload = JSON.stringify(result);
+      }
+
+      // Return an HTML page that posts the result back to the opener window
+      reply.type("text/html");
+      return `<!DOCTYPE html>
+<html><head><title>Google OAuth</title></head>
+<body>
+<p>Completing authentication...</p>
+<script>
+  window.opener && window.opener.postMessage({ type: "google-oauth-callback", payload: ${resultPayload} }, "*");
+  window.close();
+</script>
+</body></html>`;
+    },
+  );
 
   app.get("/api/auth/check", async (req) => {
     const token = req.cookies.sb_session;
@@ -2125,6 +2174,220 @@ async function main() {
 
   app.post("/api/settings/github/ssh/test", async () => {
     return testSSHConnection();
+  });
+
+  // =========================================================================
+  // Google settings routes
+  // =========================================================================
+
+  app.get("/api/settings/google", async () => {
+    const { getGoogleSettings } = await import("./google/google-auth.js");
+    return getGoogleSettings();
+  });
+
+  app.put<{
+    Body: { clientId?: string; clientSecret?: string; redirectBaseUrl?: string };
+  }>("/api/settings/google", async (req) => {
+    const { updateGoogleCredentials } = await import("./google/google-auth.js");
+    updateGoogleCredentials(req.body);
+    return { ok: true };
+  });
+
+  app.post("/api/settings/google/oauth/begin", async (req, reply) => {
+    const { beginOAuthFlow } = await import("./google/google-auth.js");
+    const result = beginOAuthFlow();
+    if ("error" in result) {
+      reply.code(400);
+      return result;
+    }
+    return result;
+  });
+
+  app.post("/api/settings/google/disconnect", async () => {
+    const { disconnectGoogle } = await import("./google/google-auth.js");
+    disconnectGoogle();
+    return { ok: true };
+  });
+
+  // =========================================================================
+  // Todos REST routes
+  // =========================================================================
+
+  app.get<{
+    Querystring: { status?: string; priority?: string };
+  }>("/api/todos", async (req) => {
+    const { listTodos } = await import("./todos/todos.js");
+    return listTodos(req.query);
+  });
+
+  app.post<{
+    Body: { title: string; description?: string; priority?: string; dueDate?: string; tags?: string[] };
+  }>("/api/todos", async (req, reply) => {
+    const { createTodo } = await import("./todos/todos.js");
+    if (!req.body.title) {
+      reply.code(400);
+      return { error: "title is required" };
+    }
+    return createTodo(req.body);
+  });
+
+  app.put<{
+    Params: { id: string };
+    Body: { title?: string; description?: string; status?: string; priority?: string; dueDate?: string | null; tags?: string[] };
+  }>("/api/todos/:id", async (req, reply) => {
+    const { updateTodo } = await import("./todos/todos.js");
+    const result = updateTodo(req.params.id, req.body);
+    if (!result) {
+      reply.code(404);
+      return { error: "Todo not found" };
+    }
+    return result;
+  });
+
+  app.delete<{
+    Params: { id: string };
+  }>("/api/todos/:id", async (req, reply) => {
+    const { deleteTodo } = await import("./todos/todos.js");
+    const ok = deleteTodo(req.params.id);
+    if (!ok) {
+      reply.code(404);
+      return { error: "Todo not found" };
+    }
+    return { ok: true };
+  });
+
+  // =========================================================================
+  // Calendar REST routes (local + Google merged)
+  // =========================================================================
+
+  app.get<{
+    Querystring: { timeMin?: string; timeMax?: string };
+  }>("/api/calendar/events", async (req) => {
+    const { listLocalEvents } = await import("./calendar/calendar.js");
+    const localEvents = listLocalEvents(req.query.timeMin, req.query.timeMax);
+
+    // Try to also fetch Google Calendar events
+    let googleEvents: any[] = [];
+    try {
+      const { listGoogleEvents } = await import("./google/calendar-client.js");
+      googleEvents = await listGoogleEvents(req.query.timeMin, req.query.timeMax);
+    } catch {
+      // Google not connected or error — that's fine
+    }
+
+    return [...localEvents, ...googleEvents];
+  });
+
+  app.post<{
+    Body: { title: string; description?: string; location?: string; start: string; end: string; allDay?: boolean; color?: string; source?: string };
+  }>("/api/calendar/events", async (req, reply) => {
+    if (!req.body.title || !req.body.start || !req.body.end) {
+      reply.code(400);
+      return { error: "title, start, and end are required" };
+    }
+    if (req.body.source === "google") {
+      const { createGoogleEvent } = await import("./google/calendar-client.js");
+      return createGoogleEvent(req.body);
+    }
+    const { createLocalEvent } = await import("./calendar/calendar.js");
+    return createLocalEvent(req.body);
+  });
+
+  app.put<{
+    Params: { eventId: string };
+    Body: { title?: string; description?: string; location?: string; start?: string; end?: string; allDay?: boolean; color?: string; source?: string };
+  }>("/api/calendar/events/:eventId", async (req, reply) => {
+    if (req.body.source === "google") {
+      const { updateGoogleEvent } = await import("./google/calendar-client.js");
+      const result = await updateGoogleEvent(req.params.eventId, req.body);
+      if (!result) { reply.code(404); return { error: "Event not found" }; }
+      return result;
+    }
+    const { updateLocalEvent } = await import("./calendar/calendar.js");
+    const result = updateLocalEvent(req.params.eventId, req.body);
+    if (!result) { reply.code(404); return { error: "Event not found" }; }
+    return result;
+  });
+
+  app.delete<{
+    Params: { eventId: string };
+    Querystring: { source?: string };
+  }>("/api/calendar/events/:eventId", async (req, reply) => {
+    if (req.query.source === "google") {
+      const { deleteGoogleEvent } = await import("./google/calendar-client.js");
+      const ok = await deleteGoogleEvent(req.params.eventId);
+      if (!ok) { reply.code(404); return { error: "Event not found" }; }
+      return { ok: true };
+    }
+    const { deleteLocalEvent } = await import("./calendar/calendar.js");
+    const ok = deleteLocalEvent(req.params.eventId);
+    if (!ok) { reply.code(404); return { error: "Event not found" }; }
+    return { ok: true };
+  });
+
+  // =========================================================================
+  // Gmail REST routes
+  // =========================================================================
+
+  app.get<{
+    Querystring: { q?: string; maxResults?: string; pageToken?: string };
+  }>("/api/gmail/messages", async (req, reply) => {
+    try {
+      const { listEmails } = await import("./google/gmail-client.js");
+      return await listEmails(req.query);
+    } catch (err) {
+      reply.code(500);
+      return { error: err instanceof Error ? err.message : "Failed to list emails" };
+    }
+  });
+
+  app.get<{
+    Params: { id: string };
+  }>("/api/gmail/messages/:id", async (req, reply) => {
+    try {
+      const { readEmail } = await import("./google/gmail-client.js");
+      const email = await readEmail(req.params.id);
+      if (!email) { reply.code(404); return { error: "Email not found" }; }
+      return email;
+    } catch (err) {
+      reply.code(500);
+      return { error: err instanceof Error ? err.message : "Failed to read email" };
+    }
+  });
+
+  app.post<{
+    Body: { to: string; subject: string; body: string; cc?: string; bcc?: string; inReplyTo?: string; threadId?: string };
+  }>("/api/gmail/send", async (req, reply) => {
+    try {
+      const { sendEmail } = await import("./google/gmail-client.js");
+      return await sendEmail(req.body);
+    } catch (err) {
+      reply.code(500);
+      return { error: err instanceof Error ? err.message : "Failed to send email" };
+    }
+  });
+
+  app.post<{
+    Params: { id: string };
+  }>("/api/gmail/messages/:id/archive", async (req, reply) => {
+    try {
+      const { archiveEmail } = await import("./google/gmail-client.js");
+      await archiveEmail(req.params.id);
+      return { ok: true };
+    } catch (err) {
+      reply.code(500);
+      return { error: err instanceof Error ? err.message : "Failed to archive email" };
+    }
+  });
+
+  app.get("/api/gmail/labels", async (req, reply) => {
+    try {
+      const { listLabels } = await import("./google/gmail-client.js");
+      return await listLabels();
+    } catch (err) {
+      reply.code(500);
+      return { error: err instanceof Error ? err.message : "Failed to list labels" };
+    }
   });
 
   // SPA fallback for client-side routing (only for page navigation, not JS/CSS/API requests)

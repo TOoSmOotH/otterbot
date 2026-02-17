@@ -29,6 +29,9 @@ export interface ServerToClientEvents {
   "agent:move": (data: { agentId: string; fromZoneId: string | null; toZoneId: string | null }) => void;
   "world:zone-added": (data: { zone: SceneZone }) => void;
   "world:zone-removed": (data: { projectId: string }) => void;
+  "admin-assistant:stream": (data: { token: string; messageId: string }) => void;
+  "admin-assistant:thinking": (data: { token: string; messageId: string }) => void;
+  "admin-assistant:thinking-end": (data: { messageId: string }) => void;
 }
 
 /** Events emitted from client to server */
