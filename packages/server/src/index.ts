@@ -46,6 +46,7 @@ import {
 import {
   isSetupComplete,
   isPassphraseSet,
+  isPassphraseTemporary,
   hashPassphrase,
   verifyPassphrase,
   getConfig,
@@ -216,6 +217,28 @@ async function main() {
       .run();
   }
   console.log("Database initialized.");
+
+  // Bootstrap passphrase from environment (one-time setup)
+  if (!isPassphraseSet()) {
+    let bootstrapPassphrase: string | undefined;
+    
+    if (process.env.OTTER_PASSPHRASE_FILE) {
+      try {
+        bootstrapPassphrase = readFileSync(process.env.OTTER_PASSPHRASE_FILE, "utf-8").trim();
+      } catch (err) {
+        console.error(`Failed to read OTTER_PASSPHRASE_FILE: ${process.env.OTTER_PASSPHRASE_FILE}`, err);
+      }
+    } else if (process.env.OTTER_PASSPHRASE) {
+      bootstrapPassphrase = process.env.OTTER_PASSPHRASE;
+    }
+    
+    if (bootstrapPassphrase && bootstrapPassphrase.length >= 8) {
+      const hash = await hashPassphrase(bootstrapPassphrase);
+      setConfig("passphrase_hash", hash);
+      setConfig("passphrase_is_temporary", "true");
+      console.log("Bootstrap passphrase set from environment. User must change it on first login.");
+    }
+  }
 
   // Core services
   const bus = new MessageBus();
@@ -709,8 +732,34 @@ async function main() {
 
   app.get("/api/auth/check", async (req) => {
     const token = req.cookies.sb_session;
-    return { authenticated: validateSession(token) };
+    const authenticated = validateSession(token);
+    return { 
+      authenticated,
+      isTemporary: authenticated && isPassphraseTemporary(),
+    };
   });
+
+  app.post<{ Body: { newPassphrase: string } }>(
+    "/api/auth/change-temporary-passphrase",
+    async (req, reply) => {
+      if (!isPassphraseTemporary()) {
+        reply.code(400);
+        return { error: "Passphrase is not temporary" };
+      }
+
+      const { newPassphrase } = req.body;
+      if (!newPassphrase || newPassphrase.length < 8) {
+        reply.code(400);
+        return { error: "New passphrase must be at least 8 characters" };
+      }
+
+      const hash = await hashPassphrase(newPassphrase);
+      setConfig("passphrase_hash", hash);
+      deleteConfig("passphrase_is_temporary");
+
+      return { ok: true };
+    },
+  );
 
   // =========================================================================
   // Auth middleware — protects all /api/* routes registered after this hook
