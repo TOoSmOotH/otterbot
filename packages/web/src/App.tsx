@@ -11,6 +11,7 @@ import { LiveView } from "./components/live-view/LiveView";
 import { MessageStream } from "./components/stream/MessageStream";
 import { SettingsPage } from "./components/settings/SettingsPage";
 import { LoginScreen } from "./components/auth/LoginScreen";
+import { ChangeTemporaryPassphraseScreen } from "./components/auth/ChangeTemporaryPassphraseScreen";
 import { SetupWizard } from "./components/setup/SetupWizard";
 import { CharterView } from "./components/project/CharterView";
 import { ProjectList } from "./components/project/ProjectList";
@@ -56,6 +57,10 @@ export default function App() {
 
   if (screen === "setup") {
     return <SetupWizard />;
+  }
+
+  if (screen === "change-passphrase") {
+    return <ChangeTemporaryPassphraseScreen />;
   }
 
   if (screen === "login") {
