@@ -13,6 +13,7 @@ interface SkillsState {
   createSkill: (data: SkillCreate) => Promise<Skill | null>;
   updateSkill: (id: string, data: SkillUpdate) => Promise<Skill | null>;
   deleteSkill: (id: string) => Promise<boolean>;
+  cloneSkill: (id: string) => Promise<Skill | null>;
   importSkill: (file: File) => Promise<{ skill: Skill; scanReport: ScanReport } | null>;
   exportSkill: (id: string) => Promise<void>;
   scanContent: (content: string) => Promise<ScanReport | null>;
@@ -97,6 +98,23 @@ export const useSkillsStore = create<SkillsState>((set, get) => ({
     } catch (err) {
       set({ error: err instanceof Error ? err.message : "Unknown error" });
       return false;
+    }
+  },
+
+  cloneSkill: async (id) => {
+    set({ error: null });
+    try {
+      const res = await fetch(`/api/skills/${id}/clone`, { method: "POST" });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || "Failed to clone skill");
+      }
+      const skill = await res.json();
+      await get().loadSkills();
+      return skill as Skill;
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "Unknown error" });
+      return null;
     }
   },
 

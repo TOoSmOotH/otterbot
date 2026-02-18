@@ -15,15 +15,30 @@ const SCAN_STATUS_LABELS: Record<string, string> = {
   unscanned: "Not Scanned",
 };
 
+const SOURCE_STYLES: Record<string, string> = {
+  "built-in": "bg-blue-500/15 text-blue-400",
+  created: "bg-secondary text-muted-foreground",
+  imported: "bg-purple-500/15 text-purple-400",
+  cloned: "bg-orange-500/15 text-orange-400",
+};
+
+const SOURCE_LABELS: Record<string, string> = {
+  "built-in": "Built-in",
+  created: "Created",
+  imported: "Imported",
+  cloned: "Cloned",
+};
+
 interface SkillCardProps {
   skill: Skill;
   onEdit: (skill: Skill) => void;
   onExport: (id: string) => void;
   onDelete: (id: string) => void;
+  onClone: (id: string) => void;
   onViewScan: (skill: Skill) => void;
 }
 
-export function SkillCard({ skill, onEdit, onExport, onDelete, onViewScan }: SkillCardProps) {
+export function SkillCard({ skill, onEdit, onExport, onDelete, onClone, onViewScan }: SkillCardProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -44,6 +59,11 @@ export function SkillCard({ skill, onEdit, onExport, onDelete, onViewScan }: Ski
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
             <h4 className="text-sm font-medium truncate">{skill.meta.name}</h4>
+            <span
+              className={`text-[9px] px-1.5 py-0.5 rounded font-medium ${SOURCE_STYLES[skill.source] ?? SOURCE_STYLES.created}`}
+            >
+              {SOURCE_LABELS[skill.source] ?? "Created"}
+            </span>
             <span
               className={`text-[9px] px-1.5 py-0.5 rounded font-medium ${SCAN_STATUS_STYLES[skill.scanStatus]}`}
             >
@@ -71,11 +91,19 @@ export function SkillCard({ skill, onEdit, onExport, onDelete, onViewScan }: Ski
           </button>
           {menuOpen && (
             <div className="absolute right-0 top-full mt-1 w-32 rounded-md border border-border bg-popover shadow-lg z-10">
+              {skill.source !== "built-in" && (
+                <button
+                  onClick={() => { onEdit(skill); setMenuOpen(false); }}
+                  className="w-full text-left text-xs px-3 py-1.5 hover:bg-secondary transition-colors"
+                >
+                  Edit
+                </button>
+              )}
               <button
-                onClick={() => { onEdit(skill); setMenuOpen(false); }}
+                onClick={() => { onClone(skill.id); setMenuOpen(false); }}
                 className="w-full text-left text-xs px-3 py-1.5 hover:bg-secondary transition-colors"
               >
-                Edit
+                Clone
               </button>
               <button
                 onClick={() => { onExport(skill.id); setMenuOpen(false); }}
@@ -89,12 +117,14 @@ export function SkillCard({ skill, onEdit, onExport, onDelete, onViewScan }: Ski
               >
                 View Scan
               </button>
-              <button
-                onClick={() => { onDelete(skill.id); setMenuOpen(false); }}
-                className="w-full text-left text-xs px-3 py-1.5 hover:bg-secondary text-red-400 transition-colors"
-              >
-                Delete
-              </button>
+              {skill.source !== "built-in" && (
+                <button
+                  onClick={() => { onDelete(skill.id); setMenuOpen(false); }}
+                  className="w-full text-left text-xs px-3 py-1.5 hover:bg-secondary text-red-400 transition-colors"
+                >
+                  Delete
+                </button>
+              )}
             </div>
           )}
         </div>

@@ -686,19 +686,20 @@ async function main() {
 
     const cooSource = registry.get("builtin-coo");
     if (cooSource) {
+      // Get the skills from the source COO to copy to the clone
+      const sourceSkills = skillService.getForAgent("builtin-coo");
       const cooClone = registry.create({
         name: cooName.trim(),
         description: cooSource.description,
         systemPrompt: cooSource.systemPrompt,
         promptAddendum: null,
-        capabilities: [...cooSource.capabilities],
         defaultModel: model,
         defaultProvider: namedProvider.id,
-        tools: [...cooSource.tools],
         role: cooSource.role,
         clonedFromId: "builtin-coo",
         modelPackId: cooModelPackId ?? null,
         gearConfig: cooGearConfig ?? null,
+        skillIds: sourceSkills.map((s) => s.id),
       });
       setConfig("coo_registry_id", cooClone.id);
     }
@@ -908,7 +909,7 @@ async function main() {
     },
   );
 
-  app.post<{ Body: RegistryEntryCreate }>(
+  app.post<{ Body: RegistryEntryCreate & { skillIds?: string[] } }>(
     "/api/registry",
     async (req) => {
       return registry.create(req.body);
@@ -2428,11 +2429,16 @@ async function main() {
   app.put<{ Params: { id: string }; Body: SkillUpdate }>(
     "/api/skills/:id",
     async (req, reply) => {
-      const updated = skillService.update(req.params.id, req.body);
-      if (!updated) {
+      const existing = skillService.get(req.params.id);
+      if (!existing) {
         reply.code(404);
         return { error: "Not found" };
       }
+      if (existing.source === "built-in") {
+        reply.code(403);
+        return { error: "Built-in skills cannot be modified. Clone it first." };
+      }
+      const updated = skillService.update(req.params.id, req.body);
       return updated;
     },
   );
@@ -2440,12 +2446,30 @@ async function main() {
   app.delete<{ Params: { id: string } }>(
     "/api/skills/:id",
     async (req, reply) => {
-      const deleted = skillService.delete(req.params.id);
-      if (!deleted) {
+      const existing = skillService.get(req.params.id);
+      if (!existing) {
         reply.code(404);
         return { error: "Not found" };
       }
+      if (existing.source === "built-in") {
+        reply.code(403);
+        return { error: "Built-in skills cannot be deleted" };
+      }
+      skillService.delete(req.params.id);
       return { ok: true };
+    },
+  );
+
+  // Clone a skill
+  app.post<{ Params: { id: string } }>(
+    "/api/skills/:id/clone",
+    async (req, reply) => {
+      const cloned = skillService.clone(req.params.id);
+      if (!cloned) {
+        reply.code(404);
+        return { error: "Not found" };
+      }
+      return cloned;
     },
   );
 
@@ -2459,7 +2483,7 @@ async function main() {
     const raw = (await file.toBuffer()).toString("utf-8");
     const scanReport = scanSkillContent(raw);
     const { meta, body } = skillService.parseSkillFile(raw);
-    const skill = skillService.create({ meta, body }, scanReport);
+    const skill = skillService.create({ meta, body }, scanReport, { source: "imported" });
     return { skill, scanReport };
   });
 

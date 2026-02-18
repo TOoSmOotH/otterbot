@@ -315,9 +315,27 @@ export async function migrateDb() {
     PRIMARY KEY (registry_entry_id, skill_id)
   )`);
 
+  // Idempotent migration: add source column to skills
+  try {
+    db.run(sql`ALTER TABLE skills ADD COLUMN source TEXT NOT NULL DEFAULT 'created'`);
+  } catch {
+    // Column already exists — ignore
+  }
+
+  // Idempotent migration: add cloned_from_id column to skills
+  try {
+    db.run(sql`ALTER TABLE skills ADD COLUMN cloned_from_id TEXT`);
+  } catch {
+    // Column already exists — ignore
+  }
+
   // Seed built-in registry entries on every startup (dynamic import to avoid circular dep)
   const { seedBuiltIns } = await import("./seed.js");
   seedBuiltIns();
+
+  // Seed built-in skills and their assignments on every startup
+  const { seedBuiltInSkills } = await import("../skills/seed-skills.js");
+  seedBuiltInSkills();
 
   // One-time migration: move provider credentials from config KV to providers table
   await migrateProviders(db);

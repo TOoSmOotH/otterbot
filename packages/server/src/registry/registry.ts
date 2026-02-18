@@ -1,6 +1,7 @@
 import { nanoid } from "nanoid";
 import { eq } from "drizzle-orm";
 import { getDb, schema } from "../db/index.js";
+import { SkillService } from "../skills/skill-service.js";
 import type {
   RegistryEntry,
   RegistryEntryCreate,
@@ -8,10 +9,12 @@ import type {
 } from "@otterbot/shared";
 
 export class Registry {
+  private skillService = new SkillService();
+
   list(): RegistryEntry[] {
     const db = getDb();
     const entries = db.select().from(schema.registryEntries).all();
-    return entries.map(this.toRegistryEntry);
+    return entries.map((row) => this.toRegistryEntry(row));
   }
 
   get(id: string): RegistryEntry | null {
@@ -26,15 +29,16 @@ export class Registry {
 
   create(data: RegistryEntryCreate): RegistryEntry {
     const db = getDb();
+    const id = nanoid();
     const entry = {
-      id: nanoid(),
+      id,
       name: data.name,
       description: data.description,
       systemPrompt: data.systemPrompt,
-      capabilities: data.capabilities,
+      capabilities: [] as string[],
       defaultModel: data.defaultModel,
       defaultProvider: data.defaultProvider,
-      tools: data.tools,
+      tools: [] as string[],
       builtIn: false,
       role: data.role ?? "worker" as const,
       modelPackId: data.modelPackId ?? null,
@@ -44,6 +48,12 @@ export class Registry {
       createdAt: new Date().toISOString(),
     };
     db.insert(schema.registryEntries).values(entry).run();
+
+    // Assign skills if provided
+    if (data.skillIds && data.skillIds.length > 0) {
+      this.skillService.setAgentSkills(id, data.skillIds);
+    }
+
     return this.toRegistryEntry(entry);
   }
 
@@ -57,10 +67,8 @@ export class Registry {
     if (data.name !== undefined) updates.name = data.name;
     if (data.description !== undefined) updates.description = data.description;
     if (data.systemPrompt !== undefined) updates.systemPrompt = data.systemPrompt;
-    if (data.capabilities !== undefined) updates.capabilities = data.capabilities;
     if (data.defaultModel !== undefined) updates.defaultModel = data.defaultModel;
     if (data.defaultProvider !== undefined) updates.defaultProvider = data.defaultProvider;
-    if (data.tools !== undefined) updates.tools = data.tools;
     if (data.modelPackId !== undefined) updates.modelPackId = data.modelPackId;
     if (data.gearConfig !== undefined) updates.gearConfig = data.gearConfig ? JSON.stringify(data.gearConfig) : null;
     if (data.promptAddendum !== undefined) updates.promptAddendum = data.promptAddendum;
@@ -81,6 +89,11 @@ export class Registry {
     if (!existing) return false;
     if (existing.builtIn) return false;
 
+    // Remove skill assignments first
+    db.delete(schema.agentSkills)
+      .where(eq(schema.agentSkills.registryEntryId, id))
+      .run();
+
     const result = db
       .delete(schema.registryEntries)
       .where(eq(schema.registryEntries.id, id))
@@ -92,19 +105,22 @@ export class Registry {
     const source = this.get(id);
     if (!source) return null;
 
+    // Get skills from the source entry to copy them
+    const sourceSkills = this.skillService.getForAgent(id);
+    const skillIds = sourceSkills.map((s) => s.id);
+
     return this.create({
       name: `${source.name} (Custom)`,
       description: source.description,
       systemPrompt: source.systemPrompt,
-      capabilities: [...source.capabilities],
       defaultModel: source.defaultModel,
       defaultProvider: source.defaultProvider,
-      tools: [...source.tools],
       role: source.role,
       clonedFromId: source.id,
       modelPackId: source.modelPackId,
       gearConfig: source.gearConfig,
       promptAddendum: source.promptAddendum,
+      skillIds,
     });
   }
 
@@ -117,17 +133,28 @@ export class Registry {
     );
   }
 
+  /**
+   * Derive tools and capabilities from assigned skills for a registry entry.
+   */
+  private deriveFromSkills(entryId: string): { tools: string[]; capabilities: string[] } {
+    const skills = this.skillService.getForAgent(entryId);
+    const tools = [...new Set(skills.flatMap((s) => s.meta.tools))];
+    const capabilities = [...new Set(skills.flatMap((s) => s.meta.capabilities))];
+    return { tools, capabilities };
+  }
+
   private toRegistryEntry(row: any): RegistryEntry {
+    const { tools, capabilities } = this.deriveFromSkills(row.id);
     return {
       id: row.id,
       name: row.name,
       description: row.description,
       systemPrompt: row.systemPrompt,
       promptAddendum: row.promptAddendum ?? null,
-      capabilities: row.capabilities as string[],
+      capabilities,
       defaultModel: row.defaultModel,
       defaultProvider: row.defaultProvider,
-      tools: row.tools as string[],
+      tools,
       builtIn: row.builtIn ?? false,
       role: row.role ?? "worker",
       modelPackId: row.modelPackId ?? null,

@@ -283,6 +283,12 @@ export const skills = sqliteTable("skills", {
     .notNull()
     .default([]),
   body: text("body").notNull().default(""),
+  source: text("source", {
+    enum: ["built-in", "created", "imported", "cloned"],
+  })
+    .notNull()
+    .default("created"),
+  clonedFromId: text("cloned_from_id"),
   scanStatus: text("scan_status", {
     enum: ["clean", "warnings", "errors", "unscanned"],
   })
