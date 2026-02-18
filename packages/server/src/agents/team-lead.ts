@@ -22,6 +22,7 @@ import { getConfiguredSearchProvider } from "../tools/search/providers.js";
 import { isDesktopEnabled } from "../desktop/desktop.js";
 import { TEAM_LEAD_PROMPT } from "./prompts/team-lead.js";
 import { getRandomModelPackId } from "../models3d/model-packs.js";
+import { debug } from "../utils/debug.js";
 
 /** Tool descriptions for environment context injection */
 const TOOL_DESCRIPTIONS: Record<string, string> = {
@@ -271,6 +272,7 @@ export class TeamLead extends BaseAgent {
    * Returns true if the report contains clear failure signals.
    */
   private isFailureReport(report: string): boolean {
+    if (!report.trim()) return true;
     const lower = report.toLowerCase();
     const failureSignals = [
       "worker error:",
@@ -382,6 +384,9 @@ export class TeamLead extends BaseAgent {
         this._pendingWorkerReport.set(task.id, message.content);
       }
     }
+
+    debug("team-lead", `handleWorkerReport from=${message.fromAgentId} taskId=${reportingTaskId} reportLen=${message.content.length} report="${message.content.slice(0, 200)}"`);
+    debug("team-lead", `isFailureReport=${reportingTaskId ? this.isFailureReport(message.content) : "N/A"}`);
 
     // Clean up the finished worker — it already set itself to Done
     if (message.fromAgentId) {
@@ -725,9 +730,13 @@ export class TeamLead extends BaseAgent {
     let result = await this.think(initialMessage, onToken, onReasoning, onReasoningEnd);
 
     for (let i = 0; i < MAX_CONTINUATION_CYCLES; i++) {
-      if (!result.hadToolCalls) break;
+      if (!result.hadToolCalls) {
+        debug("team-lead", `thinkWithContinuation cycle=${i} — no tool calls, breaking`);
+        break;
+      }
 
       const board = this.getKanbanBoardState();
+      debug("team-lead", `thinkWithContinuation cycle=${i} board: backlog=${board.backlogCount} unblocked=${board.unblockedBacklogCount} inProgress=${board.inProgressCount} done=${board.doneCount} allDone=${board.allDone}`);
 
       // Stale-state detection: if nothing changed since last cycle, stop looping
       if (
@@ -742,11 +751,15 @@ export class TeamLead extends BaseAgent {
       // If everything is done, stop — no point looping when there's nothing to spawn
       if (board.allDone) {
         console.log(`[TeamLead ${this.id}] All tasks done — exiting continuation loop.`);
+        debug("team-lead", `thinkWithContinuation cycle=${i} — allDone, breaking`);
         break;
       }
 
       // Continue only if there's unblocked backlog work
-      if (!board.hasUnblockedBacklog) break;
+      if (!board.hasUnblockedBacklog) {
+        debug("team-lead", `thinkWithContinuation cycle=${i} — no unblocked backlog, breaking`);
+        break;
+      }
 
       // If a coding worker is already running, don't continue just for coding tasks
       // that would be refused anyway — this prevents the spam-retry loop
