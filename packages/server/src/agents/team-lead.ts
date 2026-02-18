@@ -126,6 +126,7 @@ function buildEnvironmentContext(toolNames: string[]): string {
       `- **Ruby**\n` +
       `- **git**, **gh** (GitHub CLI)\n` +
       `- **Playwright** with Chromium — already installed, do NOT run \`npx playwright install\` or install browsers\n` +
+      `- **Puppeteer** — already installed with shared Chromium, do NOT reinstall\n` +
       `- **SQLite 3**\n` +
       `- **build-essential**, **pkg-config**, **curl**\n` +
       `- **ss** (iproute2), **netstat** (net-tools)`,
