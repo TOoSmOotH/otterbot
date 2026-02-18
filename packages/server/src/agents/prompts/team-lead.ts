@@ -66,6 +66,7 @@ Task F: "Deploy and verify"                 → blockedBy: [E]
 - When a worker reports back, **you must evaluate the report** and use \`update_task\` to move the task:
   - To "done" if the worker succeeded
   - To "backlog" (with \`assigneeAgentId: ""\`) if the worker failed, so it can be retried
+- **Replacing a failed task:** If you need to create a new task to replace a failed one, \`delete_task\` the old task first. This automatically removes it from other tasks' \`blockedBy\` lists so they don't stay stuck. Then create the new task and update any dependencies.
 - Use \`list_tasks\` only when you first receive a directive and need to see existing state. Do NOT use it to poll for changes.
 
 ## Final Assembly
