@@ -69,11 +69,13 @@ export function processAgentMovement(agent: Agent, prevStatus?: string) {
   const currentZoneId = agentZoneMap.get(agent.id);
   const targetTag = getTargetTag(agent.status);
 
-  // Zone change: agent needs to walk between zones
+  // Zone change: agent needs to walk between zones to their final destination
   if (currentZoneId !== undefined && currentZoneId !== targetZoneId) {
-    // Find entrance of target zone
-    const targetEntrance = findWaypointsByZoneAndTag(graph, targetZoneId, "entrance");
-    if (targetEntrance.length === 0) return;
+    // Find the final destination in the target zone (desk or center based on status)
+    const toWps = findWaypointsByZoneAndTag(graph, targetZoneId, targetTag);
+    const fallbackWps = findWaypointsByZoneAndTag(graph, targetZoneId, "center");
+    const toWp = toWps.length > 0 ? toWps[0] : fallbackWps.length > 0 ? fallbackWps[0] : null;
+    if (!toWp) return;
 
     // Find current location: nearest waypoint in current zone
     const currentWps = currentZoneId
@@ -82,7 +84,7 @@ export function processAgentMovement(agent: Agent, prevStatus?: string) {
     const fromWp = currentWps.length > 0 ? currentWps[0] : null;
     if (!fromWp) return;
 
-    triggerMovement(agent.id, graph, fromWp.id, targetEntrance[0].id);
+    triggerMovement(agent.id, graph, fromWp.id, toWp.id);
     agentZoneMap.set(agent.id, targetZoneId);
     return;
   }
@@ -104,7 +106,7 @@ export function processAgentMovement(agent: Agent, prevStatus?: string) {
 }
 
 /**
- * Process agent spawn: appear at entrance and walk to center.
+ * Process agent spawn: appear at main office entrance and walk to final destination.
  */
 export function processAgentSpawn(agent: Agent) {
   const scene = useEnvironmentStore.getState().getActiveScene();
@@ -115,11 +117,20 @@ export function processAgentSpawn(agent: Agent) {
   const targetZoneId = getTargetZoneId(agent, zones);
   if (!targetZoneId) return;
 
-  const entranceWps = findWaypointsByZoneAndTag(graph, targetZoneId, "entrance");
-  const centerWps = findWaypointsByZoneAndTag(graph, targetZoneId, "center");
+  // Always start from main office entrance
+  const mainZone = zones.find((z) => z.projectId === null);
+  const startWps = mainZone
+    ? findWaypointsByZoneAndTag(graph, mainZone.id, "entrance")
+    : [];
 
-  if (entranceWps.length > 0 && centerWps.length > 0) {
-    triggerMovement(agent.id, graph, entranceWps[0].id, centerWps[0].id);
+  // Walk to target based on current status
+  const targetTag = getTargetTag(agent.status);
+  const destWps = findWaypointsByZoneAndTag(graph, targetZoneId, targetTag);
+  const fallbackWps = findWaypointsByZoneAndTag(graph, targetZoneId, "center");
+  const toWp = destWps.length > 0 ? destWps[0] : fallbackWps.length > 0 ? fallbackWps[0] : null;
+
+  if (startWps.length > 0 && toWp) {
+    triggerMovement(agent.id, graph, startWps[0].id, toWp.id);
   }
 
   agentZoneMap.set(agent.id, targetZoneId);
@@ -140,10 +151,17 @@ export function initMovementTriggers() {
       }
     }
 
-    // Check for status changes
+    // Check for status changes or project reassignment (zone change)
     for (const [id, agent] of state.agents) {
+      if (!prevState.agents.has(id)) continue; // already handled by spawn
+
       const prev = agentPrevStatus.get(id);
-      if (prev && prev !== agent.status) {
+      const prevAgent = prevState.agents.get(id);
+
+      // Detect projectId change (zone reassignment)
+      if (prevAgent && prevAgent.projectId !== agent.projectId) {
+        processAgentMovement(agent, prev);
+      } else if (prev && prev !== agent.status) {
         processAgentMovement(agent, prev);
       }
       agentPrevStatus.set(id, agent.status);

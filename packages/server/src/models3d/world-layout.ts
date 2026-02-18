@@ -147,7 +147,11 @@ export class WorldLayoutManager {
       id: zoneId,
       name: `Project Office`,
       projectId,
-      position,
+      position: [
+        position[0] + template.size[0] / 2,
+        position[1],
+        position[2] + template.size[2] / 2,
+      ] as [number, number, number],
       size: template.size,
     };
 
