@@ -788,6 +788,17 @@ export class TeamLead extends BaseAgent {
           return this.updateKanbanTask(taskId, { column, assigneeAgentId, description, title, blockedBy });
         },
       }),
+      delete_task: tool({
+        description:
+          "Delete a kanban task. Any tasks that had this task in their blockedBy will be automatically unblocked. " +
+          "Use this when a task is replaced by a new one, or is no longer needed.",
+        parameters: z.object({
+          taskId: z.string().describe("The task ID to delete"),
+        }),
+        execute: async ({ taskId }) => {
+          return this.deleteKanbanTask(taskId);
+        },
+      }),
       list_tasks: tool({
         description: "List all kanban tasks for this project. Only call once — repeated calls return the same data.",
         parameters: z.object({}),
@@ -1133,6 +1144,57 @@ export class TeamLead extends BaseAgent {
     }
 
     return `Task "${existing.title}" updated.`;
+  }
+
+  private deleteKanbanTask(taskId: string): string {
+    if (!this.projectId) return "No project context.";
+
+    const db = getDb();
+    const existing = db
+      .select()
+      .from(schema.kanbanTasks)
+      .where(eq(schema.kanbanTasks.id, taskId))
+      .get();
+    if (!existing) return `Task ${taskId} not found.`;
+
+    // Delete the task
+    db.delete(schema.kanbanTasks)
+      .where(eq(schema.kanbanTasks.id, taskId))
+      .run();
+
+    this.onKanbanChange?.("deleted", existing as unknown as KanbanTask);
+
+    // Remove this task from other tasks' blockedBy lists so they become unblocked
+    const allTasks = db
+      .select()
+      .from(schema.kanbanTasks)
+      .where(eq(schema.kanbanTasks.projectId, this.projectId))
+      .all();
+
+    let unblockedCount = 0;
+    for (const t of allTasks) {
+      const blockedBy = (t.blockedBy as string[]) ?? [];
+      if (blockedBy.includes(taskId)) {
+        const newBlockedBy = blockedBy.filter((id) => id !== taskId);
+        db.update(schema.kanbanTasks)
+          .set({ blockedBy: newBlockedBy, updatedAt: new Date().toISOString() })
+          .where(eq(schema.kanbanTasks.id, t.id))
+          .run();
+
+        if (!this.isTaskBlocked(newBlockedBy)) {
+          unblockedCount++;
+          console.log(`[TeamLead ${this.id}] Task "${t.title}" (${t.id}) unblocked after deletion of ${taskId}`);
+        }
+
+        const updated = db.select().from(schema.kanbanTasks).where(eq(schema.kanbanTasks.id, t.id)).get();
+        if (updated) {
+          this.onKanbanChange?.("updated", updated as unknown as KanbanTask);
+        }
+      }
+    }
+
+    const unblockedMsg = unblockedCount > 0 ? ` ${unblockedCount} task(s) unblocked.` : "";
+    return `Task "${existing.title}" deleted.${unblockedMsg}`;
   }
 
   /** Log which tasks become unblocked when a task completes. No auto-spawning — the continuation loop picks them up. */
