@@ -14,6 +14,7 @@ import { getConfiguredSearchProvider } from "../tools/search/providers.js";
 import { getConfiguredTTSProvider } from "../tts/tts.js";
 import { getConfiguredSTTProvider } from "../stt/stt.js";
 import { OpenCodeClient } from "../tools/opencode-client.js";
+import { startOpenCodeServer, stopOpenCodeServer } from "../opencode/opencode-manager.js";
 import { getDb, schema } from "../db/index.js";
 import { eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
@@ -965,6 +966,8 @@ export function updateOpenCodeSettings(data: {
   timeoutMs?: number;
   maxIterations?: number;
 }): void {
+  const wasEnabled = getConfig("opencode:enabled") === "true";
+
   if (data.enabled !== undefined) {
     setConfig("opencode:enabled", data.enabled ? "true" : "false");
   }
@@ -994,6 +997,14 @@ export function updateOpenCodeSettings(data: {
   }
   if (data.maxIterations !== undefined) {
     setConfig("opencode:max_iterations", String(data.maxIterations));
+  }
+
+  // Manage OpenCode process lifecycle based on enabled state changes
+  const isNowEnabled = getConfig("opencode:enabled") === "true";
+  if (!wasEnabled && isNowEnabled) {
+    startOpenCodeServer();
+  } else if (wasEnabled && !isNowEnabled) {
+    stopOpenCodeServer();
   }
 }
 

@@ -50,6 +50,12 @@ When ALL kanban tasks are in "done":
 4. **Report completion** to the COO via \`report_to_coo\` — include what was built, verification results, deployment URL/port, and the workspace path
 Do NOT consider the project finished until verification passes AND the app is deployed.
 
+## Coding Worker Selection
+When spawning workers for coding tasks, prefer the **OpenCode Coder** (builtin-opencode-coder)
+over the regular Coder when it appears in registry search results. The OpenCode Coder delegates
+to a specialized autonomous coding agent that handles complex multi-file changes more effectively.
+Use the regular Coder only as a fallback if OpenCode is unavailable.
+
 ## Rules
 - **NEVER do work yourself** — always spawn a worker
 - **NEVER poll** — when workers are in progress with no backlog, stop and return immediately
