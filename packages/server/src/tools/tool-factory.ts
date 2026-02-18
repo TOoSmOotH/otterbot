@@ -159,6 +159,20 @@ export function getAvailableToolNames(): string[] {
   ];
 }
 
+interface ToolParamMeta {
+  name: string;
+  type: string;
+  required: boolean;
+  description: string;
+}
+
+interface ToolMetaEntry {
+  description: string;
+  builtIn: boolean;
+  parameters?: ToolParamMeta[];
+  category?: string;
+}
+
 /**
  * Get metadata for all tools: built-in and custom.
  * Returns tool names grouped by type, plus metadata for each.
@@ -166,48 +180,238 @@ export function getAvailableToolNames(): string[] {
 export function getToolsWithMeta(): {
   builtInTools: string[];
   customTools: import("@otterbot/shared").CustomTool[];
-  toolMeta: Record<string, { description: string; builtIn: boolean }>;
+  toolMeta: Record<string, ToolMetaEntry>;
 } {
   const builtInNames = [...Object.keys(TOOL_REGISTRY), ...Object.keys(CONTEXTLESS_TOOL_REGISTRY)];
   const customToolService = new CustomToolService();
   const customs = customToolService.list();
 
-  const toolMeta: Record<string, { description: string; builtIn: boolean }> = {};
+  const toolMeta: Record<string, ToolMetaEntry> = {};
 
-  // Built-in tool descriptions (basic since they don't expose detailed metadata)
-  const BUILTIN_DESCRIPTIONS: Record<string, string> = {
-    file_read: "Read file contents from the workspace",
-    file_write: "Write or create files in the workspace",
-    shell_exec: "Execute shell commands in the workspace",
-    web_search: "Search the web for information",
-    web_browse: "Browse and interact with web pages",
-    install_package: "Install packages via npm/pip/etc",
-    opencode_task: "Delegate coding tasks to OpenCode agent",
-    todo_list: "List all todos",
-    todo_create: "Create a new todo item",
-    todo_update: "Update an existing todo",
-    todo_delete: "Delete a todo item",
-    gmail_list: "List Gmail messages",
-    gmail_read: "Read a specific Gmail message",
-    gmail_send: "Send a new email via Gmail",
-    gmail_reply: "Reply to a Gmail message",
-    gmail_label: "Add/remove labels on Gmail messages",
-    gmail_archive: "Archive Gmail messages",
-    calendar_list_events: "List calendar events",
-    calendar_create_event: "Create a new calendar event",
-    calendar_update_event: "Update a calendar event",
-    calendar_delete_event: "Delete a calendar event",
-    calendar_list_calendars: "List available calendars",
-    create_custom_tool: "Create a new custom JavaScript tool",
-    list_custom_tools: "List all custom tools",
-    update_custom_tool: "Update an existing custom tool",
-    test_custom_tool: "Test a custom tool with parameters",
+  // Detailed built-in tool metadata
+  const BUILTIN_META: Record<string, { description: string; category: string; parameters: ToolParamMeta[] }> = {
+    file_read: {
+      description: "Read the contents of a file in the workspace. Paths are relative to the workspace directory.",
+      category: "Workspace",
+      parameters: [
+        { name: "path", type: "string", required: true, description: "Relative path to the file within the workspace" },
+      ],
+    },
+    file_write: {
+      description: "Write content to a file in the workspace. Creates the file if it doesn't exist, overwrites if it does.",
+      category: "Workspace",
+      parameters: [
+        { name: "path", type: "string", required: true, description: "Relative path to the file within the workspace" },
+        { name: "content", type: "string", required: true, description: "Content to write to the file" },
+      ],
+    },
+    shell_exec: {
+      description: "Execute a shell command in the workspace directory. Commands have a 30-second timeout by default (max 120s). Output is capped at 50KB.",
+      category: "Workspace",
+      parameters: [
+        { name: "command", type: "string", required: true, description: "The shell command to execute" },
+        { name: "timeout", type: "number", required: false, description: "Timeout in milliseconds (default: 30000, max: 120000)" },
+      ],
+    },
+    web_search: {
+      description: "Search the web for information using a configured search provider.",
+      category: "Web",
+      parameters: [
+        { name: "query", type: "string", required: true, description: "The search query" },
+      ],
+    },
+    web_browse: {
+      description: "Browse and interact with web pages using a headless browser. Supports navigation, clicking, form filling, text extraction, and JavaScript evaluation.",
+      category: "Web",
+      parameters: [
+        { name: "action", type: "string", required: true, description: "Action to perform: navigate, click, fill, get_text, evaluate, screenshot, close" },
+        { name: "url", type: "string", required: false, description: "URL to navigate to (for navigate action)" },
+        { name: "selector", type: "string", required: false, description: "CSS selector for click/fill actions" },
+        { name: "value", type: "string", required: false, description: "Value for fill action or JS code for evaluate" },
+      ],
+    },
+    install_package: {
+      description: "Install a package using the appropriate package manager (npm, pip, etc.).",
+      category: "Workspace",
+      parameters: [
+        { name: "manager", type: "string", required: true, description: "Package manager to use: npm, pip, etc." },
+        { name: "package", type: "string", required: true, description: "Package name to install" },
+      ],
+    },
+    opencode_task: {
+      description: "Delegate a complex coding task to OpenCode, an autonomous AI coding agent. Ideal for multi-file implementations, refactoring, and large code changes.",
+      category: "Workspace",
+      parameters: [
+        { name: "task", type: "string", required: true, description: "Detailed description of the coding task" },
+      ],
+    },
+    todo_list: {
+      description: "List all todo items, optionally filtered by status.",
+      category: "Personal",
+      parameters: [
+        { name: "status", type: "string", required: false, description: "Filter by status: todo, in_progress, done" },
+      ],
+    },
+    todo_create: {
+      description: "Create a new todo item with title, description, priority, and optional due date.",
+      category: "Personal",
+      parameters: [
+        { name: "title", type: "string", required: true, description: "Title of the todo" },
+        { name: "description", type: "string", required: false, description: "Detailed description" },
+        { name: "priority", type: "string", required: false, description: "Priority: low, medium, high" },
+        { name: "dueDate", type: "string", required: false, description: "Due date in ISO format" },
+        { name: "tags", type: "string[]", required: false, description: "Tags for categorization" },
+      ],
+    },
+    todo_update: {
+      description: "Update an existing todo item by ID.",
+      category: "Personal",
+      parameters: [
+        { name: "id", type: "string", required: true, description: "The todo ID to update" },
+        { name: "title", type: "string", required: false, description: "New title" },
+        { name: "status", type: "string", required: false, description: "New status: todo, in_progress, done" },
+        { name: "priority", type: "string", required: false, description: "New priority: low, medium, high" },
+      ],
+    },
+    todo_delete: {
+      description: "Delete a todo item by ID.",
+      category: "Personal",
+      parameters: [
+        { name: "id", type: "string", required: true, description: "The todo ID to delete" },
+      ],
+    },
+    gmail_list: {
+      description: "List Gmail messages from the inbox, with optional query filtering.",
+      category: "Email",
+      parameters: [
+        { name: "query", type: "string", required: false, description: "Gmail search query (e.g. 'is:unread', 'from:user@example.com')" },
+        { name: "maxResults", type: "number", required: false, description: "Maximum number of messages to return (default: 10)" },
+      ],
+    },
+    gmail_read: {
+      description: "Read the full content of a specific Gmail message by ID.",
+      category: "Email",
+      parameters: [
+        { name: "messageId", type: "string", required: true, description: "The Gmail message ID" },
+      ],
+    },
+    gmail_send: {
+      description: "Send a new email via Gmail.",
+      category: "Email",
+      parameters: [
+        { name: "to", type: "string", required: true, description: "Recipient email address" },
+        { name: "subject", type: "string", required: true, description: "Email subject" },
+        { name: "body", type: "string", required: true, description: "Email body (plain text)" },
+      ],
+    },
+    gmail_reply: {
+      description: "Reply to an existing Gmail message.",
+      category: "Email",
+      parameters: [
+        { name: "messageId", type: "string", required: true, description: "The message ID to reply to" },
+        { name: "body", type: "string", required: true, description: "Reply body (plain text)" },
+      ],
+    },
+    gmail_label: {
+      description: "Add or remove labels on Gmail messages.",
+      category: "Email",
+      parameters: [
+        { name: "messageId", type: "string", required: true, description: "The message ID" },
+        { name: "addLabels", type: "string[]", required: false, description: "Labels to add" },
+        { name: "removeLabels", type: "string[]", required: false, description: "Labels to remove" },
+      ],
+    },
+    gmail_archive: {
+      description: "Archive Gmail messages by removing the INBOX label.",
+      category: "Email",
+      parameters: [
+        { name: "messageId", type: "string", required: true, description: "The message ID to archive" },
+      ],
+    },
+    calendar_list_events: {
+      description: "List calendar events within a date range.",
+      category: "Calendar",
+      parameters: [
+        { name: "startDate", type: "string", required: false, description: "Start date in ISO format" },
+        { name: "endDate", type: "string", required: false, description: "End date in ISO format" },
+      ],
+    },
+    calendar_create_event: {
+      description: "Create a new calendar event with title, time, and optional location.",
+      category: "Calendar",
+      parameters: [
+        { name: "title", type: "string", required: true, description: "Event title" },
+        { name: "start", type: "string", required: true, description: "Start time in ISO format" },
+        { name: "end", type: "string", required: true, description: "End time in ISO format" },
+        { name: "description", type: "string", required: false, description: "Event description" },
+        { name: "location", type: "string", required: false, description: "Event location" },
+      ],
+    },
+    calendar_update_event: {
+      description: "Update an existing calendar event by ID.",
+      category: "Calendar",
+      parameters: [
+        { name: "id", type: "string", required: true, description: "The event ID to update" },
+        { name: "title", type: "string", required: false, description: "New title" },
+        { name: "start", type: "string", required: false, description: "New start time" },
+        { name: "end", type: "string", required: false, description: "New end time" },
+      ],
+    },
+    calendar_delete_event: {
+      description: "Delete a calendar event by ID.",
+      category: "Calendar",
+      parameters: [
+        { name: "id", type: "string", required: true, description: "The event ID to delete" },
+      ],
+    },
+    calendar_list_calendars: {
+      description: "List all available calendars.",
+      category: "Calendar",
+      parameters: [],
+    },
+    create_custom_tool: {
+      description: "Create a new custom JavaScript tool that agents can use.",
+      category: "Tool Builder",
+      parameters: [
+        { name: "name", type: "string", required: true, description: "Unique snake_case name for the tool" },
+        { name: "description", type: "string", required: true, description: "What the tool does" },
+        { name: "parameters", type: "object[]", required: true, description: "Tool parameters definition" },
+        { name: "code", type: "string", required: true, description: "JavaScript async function body" },
+        { name: "timeout", type: "number", required: false, description: "Execution timeout in ms (default 30000)" },
+      ],
+    },
+    list_custom_tools: {
+      description: "List all custom tools.",
+      category: "Tool Builder",
+      parameters: [],
+    },
+    update_custom_tool: {
+      description: "Update an existing custom tool by ID.",
+      category: "Tool Builder",
+      parameters: [
+        { name: "id", type: "string", required: true, description: "The tool ID to update" },
+        { name: "name", type: "string", required: false, description: "New name" },
+        { name: "description", type: "string", required: false, description: "New description" },
+        { name: "code", type: "string", required: false, description: "New code" },
+      ],
+    },
+    test_custom_tool: {
+      description: "Test a custom tool by executing it with given parameters and returning the result.",
+      category: "Tool Builder",
+      parameters: [
+        { name: "id", type: "string", required: true, description: "The tool ID to test" },
+        { name: "params", type: "object", required: true, description: "Parameters to pass to the tool" },
+      ],
+    },
   };
 
   for (const name of builtInNames) {
+    const meta = BUILTIN_META[name];
     toolMeta[name] = {
-      description: BUILTIN_DESCRIPTIONS[name] ?? "",
+      description: meta?.description ?? "",
       builtIn: true,
+      parameters: meta?.parameters ?? [],
+      category: meta?.category ?? "Other",
     };
   }
 
@@ -215,6 +419,13 @@ export function getToolsWithMeta(): {
     toolMeta[ct.name] = {
       description: ct.description,
       builtIn: false,
+      parameters: ct.parameters.map((p) => ({
+        name: p.name,
+        type: p.type,
+        required: p.required,
+        description: p.description,
+      })),
+      category: "Custom",
     };
   }
 

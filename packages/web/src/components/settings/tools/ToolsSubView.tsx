@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo, useRef } from "react";
 import { cn } from "../../../lib/utils";
 import { useToolsStore } from "../../../stores/tools-store";
 import { useSkillsStore } from "../../../stores/skills-store";
@@ -36,6 +36,8 @@ export function ToolsSubView({ navigateToName, onNavigatedTo }: ToolsSubViewProp
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [showAiAssist, setShowAiAssist] = useState(false);
 
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   // Editor form state
   const [formName, setFormName] = useState("");
   const [formDescription, setFormDescription] = useState("");
@@ -56,14 +58,12 @@ export function ToolsSubView({ navigateToName, onNavigatedTo }: ToolsSubViewProp
   // Navigate to a specific tool when cross-referencing
   useEffect(() => {
     if (!navigateToName) return;
-    // Check custom tools first
     const custom = customTools.find((t) => t.name === navigateToName);
     if (custom) {
       selectCustom(custom);
       onNavigatedTo?.();
       return;
     }
-    // Check built-in tools
     if (builtInTools.includes(navigateToName)) {
       setSelected({ kind: "builtin", name: navigateToName });
       setEditing(false);
@@ -71,6 +71,17 @@ export function ToolsSubView({ navigateToName, onNavigatedTo }: ToolsSubViewProp
       onNavigatedTo?.();
     }
   }, [navigateToName, customTools, builtInTools]);
+
+  // Group built-in tools by category
+  const builtInGrouped = useMemo(() => {
+    const groups: Record<string, string[]> = {};
+    for (const name of builtInTools) {
+      const category = toolMeta[name]?.category ?? "Other";
+      if (!groups[category]) groups[category] = [];
+      groups[category].push(name);
+    }
+    return groups;
+  }, [builtInTools, toolMeta]);
 
   const selectCustom = (tool: CustomTool) => {
     setSelected({ kind: "custom", tool });
@@ -160,6 +171,54 @@ export function ToolsSubView({ navigateToName, onNavigatedTo }: ToolsSubViewProp
     setShowAiAssist(false);
   };
 
+  // Export a custom tool as JSON
+  const handleExport = () => {
+    if (selected?.kind !== "custom") return;
+    const tool = selected.tool;
+    const exportData = {
+      name: tool.name,
+      description: tool.description,
+      parameters: tool.parameters,
+      code: tool.code,
+      timeout: tool.timeout,
+    };
+    const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${tool.name}.tool.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  // Import a custom tool from JSON
+  const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const data = JSON.parse(text);
+      if (!data.name || !data.code) {
+        alert("Invalid tool file: must have 'name' and 'code' fields.");
+        return;
+      }
+      const created = await createTool({
+        name: data.name,
+        description: data.description ?? "",
+        parameters: data.parameters ?? [],
+        code: data.code,
+        timeout: data.timeout ?? 30000,
+      });
+      if (created) {
+        selectCustom(created);
+      }
+    } catch (err) {
+      alert(`Failed to import: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    // Reset the input so the same file can be re-imported
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  };
+
   // Find which skills use a given tool
   const usedBySkills = useMemo(() => {
     const toolName = selected?.kind === "builtin" ? selected.name : selected?.kind === "custom" ? selected.tool.name : null;
@@ -167,16 +226,41 @@ export function ToolsSubView({ navigateToName, onNavigatedTo }: ToolsSubViewProp
     return skills.filter((s) => s.meta.tools.includes(toolName));
   }, [selected, skills]);
 
+  const CATEGORY_STYLES: Record<string, string> = {
+    Workspace: "text-blue-400",
+    Web: "text-purple-400",
+    Personal: "text-green-400",
+    Email: "text-orange-400",
+    Calendar: "text-cyan-400",
+    "Tool Builder": "text-yellow-400",
+    Other: "text-muted-foreground",
+  };
+
   return (
     <div className="flex flex-1 overflow-hidden" style={{ minHeight: "400px" }}>
+      {/* Hidden file input for import */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept=".json"
+        className="hidden"
+        onChange={handleImportFile}
+      />
+
       {/* Sidebar */}
       <div className="w-[240px] border-r border-border overflow-y-auto">
-        <div className="p-2">
+        <div className="p-2 space-y-1">
           <button
             onClick={resetFormForNew}
             className="w-full text-xs text-center py-1.5 rounded-md border border-dashed border-border hover:border-primary/50 hover:text-primary transition-colors"
           >
             + New Tool
+          </button>
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            className="w-full text-xs text-center py-1.5 rounded-md border border-dashed border-border hover:border-primary/50 hover:text-primary transition-colors"
+          >
+            Import
           </button>
         </div>
 
@@ -184,9 +268,10 @@ export function ToolsSubView({ navigateToName, onNavigatedTo }: ToolsSubViewProp
           <div className="px-3 py-4 text-xs text-muted-foreground text-center">Loading...</div>
         )}
 
-        {builtInTools.length > 0 && (
-          <SidebarGroup label="Built-in">
-            {builtInTools.map((name) => (
+        {/* Built-in tools grouped by category */}
+        {Object.entries(builtInGrouped).map(([category, names]) => (
+          <SidebarGroup key={category} label={category}>
+            {names.map((name) => (
               <ToolSidebarItem
                 key={name}
                 name={name}
@@ -202,7 +287,7 @@ export function ToolsSubView({ navigateToName, onNavigatedTo }: ToolsSubViewProp
               />
             ))}
           </SidebarGroup>
-        )}
+        ))}
 
         {customTools.length > 0 && (
           <SidebarGroup label="Custom">
@@ -282,29 +367,56 @@ export function ToolsSubView({ navigateToName, onNavigatedTo }: ToolsSubViewProp
           <div className="space-y-4">
             <div className="flex items-center gap-2">
               <h3 className="text-sm font-semibold font-mono">{selected.name}</h3>
-              <span className="text-[9px] uppercase tracking-wider text-blue-400">Built-in</span>
+              <span className="text-[9px] uppercase tracking-wider text-blue-400 bg-blue-500/15 px-1.5 py-0.5 rounded">
+                Built-in
+              </span>
+              {toolMeta[selected.name]?.category && (
+                <span className={`text-[9px] uppercase tracking-wider ${CATEGORY_STYLES[toolMeta[selected.name].category!] ?? "text-muted-foreground"}`}>
+                  {toolMeta[selected.name].category}
+                </span>
+              )}
             </div>
 
-            {toolMeta[selected.name]?.description && (
-              <Field label="Description">
-                <p className="text-sm text-muted-foreground">{toolMeta[selected.name].description}</p>
-              </Field>
-            )}
+            <Field label="Description">
+              <p className="text-sm text-muted-foreground">
+                {toolMeta[selected.name]?.description || "(no description)"}
+              </p>
+            </Field>
 
-            {toolMeta[selected.name]?.parameters && toolMeta[selected.name].parameters!.length > 0 && (
-              <Field label="Parameters">
-                <div className="space-y-1">
-                  {toolMeta[selected.name].parameters!.map((p) => (
-                    <div key={p.name} className="text-xs">
-                      <span className="font-mono text-primary">{p.name}</span>
-                      <span className="text-muted-foreground"> ({p.type})</span>
-                      {p.required && <span className="text-red-400"> *</span>}
-                      {p.description && <span className="text-muted-foreground"> — {p.description}</span>}
-                    </div>
-                  ))}
+            <Field label="Parameters">
+              {toolMeta[selected.name]?.parameters && toolMeta[selected.name].parameters!.length > 0 ? (
+                <div className="rounded-md border border-border overflow-hidden">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="bg-secondary/50">
+                        <th className="text-left px-3 py-1.5 font-medium text-muted-foreground">Name</th>
+                        <th className="text-left px-3 py-1.5 font-medium text-muted-foreground">Type</th>
+                        <th className="text-left px-3 py-1.5 font-medium text-muted-foreground">Required</th>
+                        <th className="text-left px-3 py-1.5 font-medium text-muted-foreground">Description</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {toolMeta[selected.name].parameters!.map((p) => (
+                        <tr key={p.name} className="border-t border-border">
+                          <td className="px-3 py-1.5 font-mono text-primary">{p.name}</td>
+                          <td className="px-3 py-1.5 font-mono text-muted-foreground">{p.type}</td>
+                          <td className="px-3 py-1.5">
+                            {p.required ? (
+                              <span className="text-red-400">yes</span>
+                            ) : (
+                              <span className="text-muted-foreground">no</span>
+                            )}
+                          </td>
+                          <td className="px-3 py-1.5 text-muted-foreground">{p.description}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
-              </Field>
-            )}
+              ) : (
+                <p className="text-xs text-muted-foreground">No parameters.</p>
+              )}
+            </Field>
 
             {usedBySkills.length > 0 && (
               <Field label="Used by Skills">
@@ -324,7 +436,9 @@ export function ToolsSubView({ navigateToName, onNavigatedTo }: ToolsSubViewProp
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <h3 className="text-sm font-semibold font-mono">{selected.tool.name}</h3>
-                <span className="text-[9px] uppercase tracking-wider text-muted-foreground">Custom</span>
+                <span className="text-[9px] uppercase tracking-wider text-muted-foreground bg-secondary px-1.5 py-0.5 rounded">
+                  Custom
+                </span>
               </div>
               <div className="flex gap-2">
                 <button
@@ -332,6 +446,12 @@ export function ToolsSubView({ navigateToName, onNavigatedTo }: ToolsSubViewProp
                   className="text-xs bg-secondary text-foreground px-3 py-1 rounded-md hover:bg-secondary/80"
                 >
                   Edit
+                </button>
+                <button
+                  onClick={handleExport}
+                  className="text-xs bg-secondary text-foreground px-3 py-1 rounded-md hover:bg-secondary/80"
+                >
+                  Export
                 </button>
                 <button
                   onClick={handleDelete}
@@ -353,15 +473,33 @@ export function ToolsSubView({ navigateToName, onNavigatedTo }: ToolsSubViewProp
 
             {selected.tool.parameters.length > 0 && (
               <Field label="Parameters">
-                <div className="space-y-1">
-                  {selected.tool.parameters.map((p) => (
-                    <div key={p.name} className="text-xs">
-                      <span className="font-mono text-primary">{p.name}</span>
-                      <span className="text-muted-foreground"> ({p.type})</span>
-                      {p.required && <span className="text-red-400"> *</span>}
-                      {p.description && <span className="text-muted-foreground"> — {p.description}</span>}
-                    </div>
-                  ))}
+                <div className="rounded-md border border-border overflow-hidden">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="bg-secondary/50">
+                        <th className="text-left px-3 py-1.5 font-medium text-muted-foreground">Name</th>
+                        <th className="text-left px-3 py-1.5 font-medium text-muted-foreground">Type</th>
+                        <th className="text-left px-3 py-1.5 font-medium text-muted-foreground">Required</th>
+                        <th className="text-left px-3 py-1.5 font-medium text-muted-foreground">Description</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {selected.tool.parameters.map((p) => (
+                        <tr key={p.name} className="border-t border-border">
+                          <td className="px-3 py-1.5 font-mono text-primary">{p.name}</td>
+                          <td className="px-3 py-1.5 font-mono text-muted-foreground">{p.type}</td>
+                          <td className="px-3 py-1.5">
+                            {p.required ? (
+                              <span className="text-red-400">yes</span>
+                            ) : (
+                              <span className="text-muted-foreground">no</span>
+                            )}
+                          </td>
+                          <td className="px-3 py-1.5 text-muted-foreground">{p.description}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
               </Field>
             )}
