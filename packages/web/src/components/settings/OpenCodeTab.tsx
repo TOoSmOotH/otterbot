@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { cn } from "../../lib/utils";
 import { useSettingsStore } from "../../stores/settings-store";
 
@@ -9,8 +9,12 @@ export function OpenCodeTab() {
   const passwordSet = useSettingsStore((s) => s.openCodePasswordSet);
   const timeoutMs = useSettingsStore((s) => s.openCodeTimeoutMs);
   const maxIterations = useSettingsStore((s) => s.openCodeMaxIterations);
+  const model = useSettingsStore((s) => s.openCodeModel);
+  const providerId = useSettingsStore((s) => s.openCodeProviderId);
   const testResult = useSettingsStore((s) => s.openCodeTestResult);
+  const providers = useSettingsStore((s) => s.providers);
   const loadOpenCodeSettings = useSettingsStore((s) => s.loadOpenCodeSettings);
+  const loadSettings = useSettingsStore((s) => s.loadSettings);
   const updateOpenCodeSettings = useSettingsStore(
     (s) => s.updateOpenCodeSettings,
   );
@@ -25,10 +29,16 @@ export function OpenCodeTab() {
   const [localMaxIterations, setLocalMaxIterations] = useState(
     String(maxIterations),
   );
+  const [localProviderId, setLocalProviderId] = useState(providerId);
+  const [localModel, setLocalModel] = useState(model);
+  const [availableModels, setAvailableModels] = useState<string[]>([]);
+  const [fetchingModels, setFetchingModels] = useState(false);
   const [saving, setSaving] = useState(false);
+  const probeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     loadOpenCodeSettings();
+    loadSettings();
   }, []);
 
   // Sync local state when store updates
@@ -37,7 +47,43 @@ export function OpenCodeTab() {
     setLocalUsername(username);
     setLocalTimeoutMs(String(timeoutMs));
     setLocalMaxIterations(String(maxIterations));
-  }, [apiUrl, username, timeoutMs, maxIterations]);
+    setLocalProviderId(providerId);
+    setLocalModel(model);
+  }, [apiUrl, username, timeoutMs, maxIterations, providerId, model]);
+
+  // Fetch models when provider changes
+  const fetchModels = useCallback(async (pid: string) => {
+    if (!pid) {
+      setAvailableModels([]);
+      return;
+    }
+    setFetchingModels(true);
+    try {
+      const res = await fetch(`/api/settings/providers/${pid}/models`);
+      if (res.ok) {
+        const data = await res.json();
+        const models = (data.models ?? data ?? []) as Array<{ id: string } | string>;
+        setAvailableModels(
+          models.map((m) => (typeof m === "string" ? m : m.id)),
+        );
+      }
+    } catch {
+      // Silently fail
+    } finally {
+      setFetchingModels(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!localProviderId) return;
+    if (probeTimerRef.current) clearTimeout(probeTimerRef.current);
+    probeTimerRef.current = setTimeout(() => {
+      fetchModels(localProviderId);
+    }, 300);
+    return () => {
+      if (probeTimerRef.current) clearTimeout(probeTimerRef.current);
+    };
+  }, [localProviderId, fetchModels]);
 
   const handleSave = async () => {
     setSaving(true);
@@ -46,6 +92,8 @@ export function OpenCodeTab() {
       username: localUsername,
       timeoutMs: parseInt(localTimeoutMs, 10) || 180000,
       maxIterations: parseInt(localMaxIterations, 10) || 50,
+      model: localModel,
+      providerId: localProviderId,
     };
     if (localPassword) {
       data.password = localPassword;
@@ -102,6 +150,59 @@ export function OpenCodeTab() {
       </label>
 
       <div className="border border-border rounded-lg p-4 space-y-3">
+        {/* Provider */}
+        <div>
+          <label className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1 block">
+            Provider
+          </label>
+          <select
+            value={localProviderId}
+            onChange={(e) => {
+              setLocalProviderId(e.target.value);
+              setLocalModel("");
+              setAvailableModels([]);
+            }}
+            className="w-full bg-secondary rounded-md px-3 py-1.5 text-sm outline-none focus:ring-1 ring-primary"
+          >
+            <option value="">Select a provider...</option>
+            {providers.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name} ({p.type})
+              </option>
+            ))}
+          </select>
+        </div>
+
+        {/* Model */}
+        <div>
+          <label className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1 block">
+            Model{" "}
+            {fetchingModels && (
+              <span className="normal-case tracking-normal text-muted-foreground">
+                (loading...)
+              </span>
+            )}
+          </label>
+          <input
+            type="text"
+            value={localModel}
+            onChange={(e) => setLocalModel(e.target.value)}
+            placeholder="e.g. claude-sonnet-4-5-20250929"
+            list="opencode-models"
+            className="w-full bg-secondary rounded-md px-3 py-1.5 text-sm outline-none focus:ring-1 ring-primary"
+          />
+          {availableModels.length > 0 && (
+            <datalist id="opencode-models">
+              {availableModels.map((m) => (
+                <option key={m} value={m} />
+              ))}
+            </datalist>
+          )}
+          <p className="text-[10px] text-muted-foreground mt-1">
+            The model OpenCode will use for coding tasks. Type to enter or select from available models.
+          </p>
+        </div>
+
         {/* API URL */}
         <div>
           <label className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1 block">

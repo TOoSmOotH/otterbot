@@ -945,6 +945,8 @@ export interface OpenCodeSettingsResponse {
   passwordSet: boolean;
   timeoutMs: number;
   maxIterations: number;
+  model: string;
+  providerId: string;
 }
 
 export function getOpenCodeSettings(): OpenCodeSettingsResponse {
@@ -955,6 +957,8 @@ export function getOpenCodeSettings(): OpenCodeSettingsResponse {
     passwordSet: !!getConfig("opencode:password"),
     timeoutMs: parseInt(getConfig("opencode:timeout_ms") ?? "180000", 10),
     maxIterations: parseInt(getConfig("opencode:max_iterations") ?? "50", 10),
+    model: getConfig("opencode:model") ?? "",
+    providerId: getConfig("opencode:provider_id") ?? "",
   };
 }
 
@@ -965,8 +969,12 @@ export function updateOpenCodeSettings(data: {
   password?: string;
   timeoutMs?: number;
   maxIterations?: number;
+  model?: string;
+  providerId?: string;
 }): void {
   const wasEnabled = getConfig("opencode:enabled") === "true";
+  const oldModel = getConfig("opencode:model") ?? "";
+  const oldProviderId = getConfig("opencode:provider_id") ?? "";
 
   if (data.enabled !== undefined) {
     setConfig("opencode:enabled", data.enabled ? "true" : "false");
@@ -998,13 +1006,32 @@ export function updateOpenCodeSettings(data: {
   if (data.maxIterations !== undefined) {
     setConfig("opencode:max_iterations", String(data.maxIterations));
   }
+  if (data.model !== undefined) {
+    setConfig("opencode:model", data.model);
+  }
+  if (data.providerId !== undefined) {
+    setConfig("opencode:provider_id", data.providerId);
+    // Also store the provider type for config generation
+    const row = getProviderRow(data.providerId);
+    if (row) {
+      setConfig("opencode:provider_type", row.type);
+    }
+  }
 
-  // Manage OpenCode process lifecycle based on enabled state changes
   const isNowEnabled = getConfig("opencode:enabled") === "true";
+  const newModel = getConfig("opencode:model") ?? "";
+  const newProviderId = getConfig("opencode:provider_id") ?? "";
+  const modelOrProviderChanged = newModel !== oldModel || newProviderId !== oldProviderId;
+
+  // Manage OpenCode process lifecycle
   if (!wasEnabled && isNowEnabled) {
     startOpenCodeServer();
   } else if (wasEnabled && !isNowEnabled) {
     stopOpenCodeServer();
+  } else if (isNowEnabled && modelOrProviderChanged) {
+    // Model or provider changed — rewrite config and restart
+    stopOpenCodeServer();
+    startOpenCodeServer();
   }
 }
 

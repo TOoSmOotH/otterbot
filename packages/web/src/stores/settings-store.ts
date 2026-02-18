@@ -88,6 +88,8 @@ interface SettingsState {
   openCodePasswordSet: boolean;
   openCodeTimeoutMs: number;
   openCodeMaxIterations: number;
+  openCodeModel: string;
+  openCodeProviderId: string;
   openCodeTestResult: TestResult | null;
 
   // GitHub
@@ -235,6 +237,8 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   openCodePasswordSet: false,
   openCodeTimeoutMs: 180000,
   openCodeMaxIterations: 50,
+  openCodeModel: "",
+  openCodeProviderId: "",
   openCodeTestResult: null,
   gitHubEnabled: false,
   gitHubTokenSet: false,
@@ -789,6 +793,8 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
         openCodePasswordSet: data.passwordSet,
         openCodeTimeoutMs: data.timeoutMs,
         openCodeMaxIterations: data.maxIterations,
+        openCodeModel: data.model ?? "",
+        openCodeProviderId: data.providerId ?? "",
       });
     } catch {
       // Silently fail
