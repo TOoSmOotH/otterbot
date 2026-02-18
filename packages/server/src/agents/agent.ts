@@ -63,6 +63,9 @@ export abstract class BaseAgent {
   protected onAgentThinkingEnd?: (agentId: string, messageId: string) => void;
   protected onAgentToolCall?: (agentId: string, toolName: string, args: Record<string, unknown>) => void;
 
+  /** Set by tool guards to signal that the current think() stream should abort after the current step */
+  protected _shouldAbortThink = false;
+
   private messageQueue: BusMessage[] = [];
   private processing = false;
 
@@ -174,6 +177,9 @@ export abstract class BaseAgent {
     onReasoning?: (token: string, messageId: string) => void,
     onReasoningEnd?: (messageId: string) => void,
   ): Promise<{ text: string; thinking: string | undefined; hadToolCalls: boolean; isError?: boolean }> {
+    // Reset abort flag at the start of each think cycle
+    this._shouldAbortThink = false;
+
     // Circuit breaker: reject immediately if provider is known to be down
     if (!isProviderAvailable(this.llmConfig.provider)) {
       const breaker = getCircuitBreaker(this.llmConfig.provider);
@@ -324,10 +330,22 @@ export abstract class BaseAgent {
     onReasoning?: (token: string, messageId: string) => void,
     onReasoningEnd?: (messageId: string) => void,
   ): Promise<{ text: string; thinking: string | undefined; hadToolCalls: boolean }> {
+    // Create an AbortController so tool guards can stop the stream mid-think
+    const abortController = new AbortController();
+
     const result = await stream(
       this.llmConfig,
       this.conversationHistory,
       tools,
+      {
+        abortSignal: abortController.signal,
+        onStepFinish: () => {
+          if (this._shouldAbortThink) {
+            console.log(`[Agent ${this.id}] _shouldAbortThink is set — aborting stream after step`);
+            abortController.abort();
+          }
+        },
+      },
     );
 
     const messageId = nanoid();
@@ -414,11 +432,20 @@ export abstract class BaseAgent {
     processPart(first.value);
 
     // Process remaining parts — use longer timeout while tools are executing
-    while (true) {
-      const timeout = pendingToolCalls > 0 ? TOOL_EXEC_TIMEOUT : CHUNK_TIMEOUT;
-      const next = await nextWithTimeout(timeout);
-      if (next.done) break;
-      processPart(next.value);
+    try {
+      while (true) {
+        const timeout = pendingToolCalls > 0 ? TOOL_EXEC_TIMEOUT : CHUNK_TIMEOUT;
+        const next = await nextWithTimeout(timeout);
+        if (next.done) break;
+        processPart(next.value);
+      }
+    } catch (err: unknown) {
+      // AbortError is expected when _shouldAbortThink fires — treat as stream-done
+      if (err instanceof Error && err.name === "AbortError") {
+        console.log(`[Agent ${this.id}] Stream aborted by tool guard — returning accumulated text`);
+      } else {
+        throw err; // Re-throw unexpected errors
+      }
     }
 
     if (wasReasoning) {
