@@ -349,10 +349,10 @@ The user can see everything on the desktop in real-time.`;
     return {
       run_command: tool({
         description:
-          "Run a shell command for quick, one-off checks (ls, git log, curl, system status). " +
-          "NEVER use this to create files, write code, or build projects — delegate that to a Team Lead. " +
-          "Output is capped at 50KB. Default timeout: 30s, max: 120s. " +
-          "Pass projectId to run the command inside that project's repo directory.",
+          "Run ONE quick shell command for system-level checks only (e.g. docker ps, uptime, df). " +
+          "NEVER use this to explore project files, list directories, check services, or inspect code — " +
+          "that is the Team Lead's job. Use send_directive to tell the Team Lead what to do. " +
+          "You get at most 1 command per turn. Output is capped at 50KB. Default timeout: 30s, max: 120s.",
         parameters: z.object({
           command: z.string().describe("The shell command to execute"),
           projectId: z.string().optional().describe("Project ID — sets working directory to the project's repo"),
@@ -363,9 +363,9 @@ The user can see everything on the desktop in real-time.`;
         }),
         execute: async ({ command, projectId, timeout }) => {
           this._runCommandCalls++;
-          if (this._runCommandCalls > 3) {
-            return "REFUSED: Too many commands. STOP using run_command and return your response to the CEO now. " +
-              "If you need something built, tested, or started, delegate to a Team Lead — do NOT do it yourself.";
+          if (this._runCommandCalls > 1) {
+            return "REFUSED: You already used your one command this turn. " +
+              "STOP and use send_directive to delegate work to the Team Lead. Do NOT run more commands.";
           }
           const effectiveTimeout = Math.min(timeout ?? 30_000, 120_000);
           let cwd: string | undefined;
