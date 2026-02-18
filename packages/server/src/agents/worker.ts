@@ -90,6 +90,7 @@ export class Worker extends BaseAgent {
   }
 
   private async handleTask(message: BusMessage) {
+    console.log(`[Worker ${this.id}] handleTask starting (registry=${this.registryEntryId})`);
     let text: string;
     try {
       const result = await this.think(
@@ -99,6 +100,7 @@ export class Worker extends BaseAgent {
         (messageId) => this.onAgentThinkingEnd?.(this.id, messageId),
       );
       text = result.text;
+      console.log(`[Worker ${this.id}] think() completed — text=${text.length} chars, hadToolCalls=${result.hadToolCalls}`);
     } catch (err) {
       const reason = err instanceof Error ? err.message : String(err);
       console.error(`[Worker ${this.id}] Task failed:`, reason);
@@ -107,7 +109,10 @@ export class Worker extends BaseAgent {
 
     // Always report back so the Team Lead can evaluate and clean up
     if (this.parentId) {
+      console.log(`[Worker ${this.id}] Sending report to parent ${this.parentId} (${text.length} chars): ${text.slice(0, 300)}`);
       this.sendMessage(this.parentId, MessageType.Report, text);
+    } else {
+      console.warn(`[Worker ${this.id}] No parentId — report not sent!`);
     }
 
     // Worker is a one-shot agent — mark as done after completing the task

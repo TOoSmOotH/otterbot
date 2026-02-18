@@ -73,6 +73,7 @@ export class OpenCodeClient {
 
   /** Create a new OpenCode session */
   async createSession(): Promise<OpenCodeSession> {
+    console.log(`[OpenCode Client] POST ${this.apiUrl}/session`);
     const res = await fetch(`${this.apiUrl}/session`, {
       method: "POST",
       headers: this.headers(),
@@ -81,9 +82,12 @@ export class OpenCodeClient {
     });
     if (!res.ok) {
       const body = await res.text().catch(() => "");
+      console.error(`[OpenCode Client] createSession failed: ${res.status} ${res.statusText} ${body}`);
       throw new Error(`Failed to create session: ${res.status} ${res.statusText} ${body}`);
     }
-    return (await res.json()) as OpenCodeSession;
+    const session = (await res.json()) as OpenCodeSession;
+    console.log(`[OpenCode Client] Session created: ${session.id}`);
+    return session;
   }
 
   /** Send a task message to a session (blocks until OpenCode finishes) */
@@ -91,6 +95,7 @@ export class OpenCodeClient {
     sessionId: string,
     task: string,
   ): Promise<{ content: string; [key: string]: unknown }> {
+    console.log(`[OpenCode Client] POST ${this.apiUrl}/session/${sessionId}/message (task: ${task.length} chars, timeout: ${this.timeoutMs}ms)`);
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
 
@@ -103,13 +108,16 @@ export class OpenCodeClient {
         }),
         signal: controller.signal,
       });
+      const rawBody = await res.text();
+      console.log(`[OpenCode Client] sendMessage response: status=${res.status} body=${rawBody.slice(0, 1000)}`);
       if (!res.ok) {
-        const body = await res.text().catch(() => "");
         throw new Error(
-          `Failed to send message: ${res.status} ${res.statusText} ${body}`,
+          `Failed to send message: ${res.status} ${res.statusText} ${rawBody}`,
         );
       }
-      return (await res.json()) as { content: string; [key: string]: unknown };
+      const parsed = JSON.parse(rawBody);
+      console.log(`[OpenCode Client] sendMessage parsed keys: ${Object.keys(parsed).join(", ")}`);
+      return parsed as { content: string; [key: string]: unknown };
     } finally {
       clearTimeout(timeout);
     }
@@ -197,20 +205,25 @@ export class OpenCodeClient {
    * or a simple { content } object.
    */
   private extractContent(response: Record<string, unknown>): string {
+    console.log(`[OpenCode Client] extractContent — type=${typeof response}, isArray=${Array.isArray(response)}, keys=${typeof response === "object" && response ? Object.keys(response).join(",") : "N/A"}`);
+
     // Direct content field
-    if (typeof response.content === "string") return response.content;
+    if (typeof response.content === "string") {
+      console.log(`[OpenCode Client] extractContent — matched: direct content field (${response.content.length} chars)`);
+      return response.content;
+    }
 
     // Message with parts array (OpenCode v2 format)
     const parts = response.parts as Array<{ type?: string; text?: string }> | undefined;
     if (Array.isArray(parts)) {
-      return parts
-        .filter((p) => p.type === "text" && p.text)
-        .map((p) => p.text)
-        .join("\n");
+      const textParts = parts.filter((p) => p.type === "text" && p.text);
+      console.log(`[OpenCode Client] extractContent — matched: parts array (${parts.length} parts, ${textParts.length} text parts)`);
+      return textParts.map((p) => p.text).join("\n");
     }
 
     // Array of messages — extract from last assistant message
     if (Array.isArray(response)) {
+      console.log(`[OpenCode Client] extractContent — matched: array of messages (${response.length} items)`);
       for (let i = response.length - 1; i >= 0; i--) {
         const msg = response[i] as Record<string, unknown>;
         if (msg.role === "assistant") {
@@ -220,7 +233,9 @@ export class OpenCodeClient {
     }
 
     // Fallback: stringify
-    return JSON.stringify(response).slice(0, 2000);
+    const fallback = JSON.stringify(response).slice(0, 2000);
+    console.log(`[OpenCode Client] extractContent — FALLBACK (no match): ${fallback.slice(0, 500)}`);
+    return fallback;
   }
 
   /**
@@ -230,6 +245,7 @@ export class OpenCodeClient {
   async executeTask(
     task: string,
   ): Promise<OpenCodeTaskResult> {
+    console.log(`[OpenCode Client] executeTask starting (task: ${task.slice(0, 200)}...)`);
     const session = await this.createSession();
 
     let response: { content: string; [key: string]: unknown };
@@ -237,6 +253,7 @@ export class OpenCodeClient {
       response = await this.sendMessage(session.id, task);
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") {
+        console.warn(`[OpenCode Client] executeTask timed out after ${this.timeoutMs}ms`);
         await this.abort(session.id);
         return {
           success: false,
@@ -246,20 +263,26 @@ export class OpenCodeClient {
           error: "timeout",
         };
       }
+      console.error(`[OpenCode Client] executeTask error:`, err);
       throw err;
     }
+
+    console.log(`[OpenCode Client] executeTask response received, extracting content...`);
+    const summary = this.extractContent(response as Record<string, unknown>);
+    console.log(`[OpenCode Client] extractContent result (${summary.length} chars): ${summary.slice(0, 500)}`);
 
     let diff: OpenCodeDiff | null = null;
     try {
       diff = await this.getDiff(session.id);
-    } catch {
-      // Diff may not be available — that's OK
+      console.log(`[OpenCode Client] getDiff: ${diff?.files?.length ?? 0} files changed`);
+    } catch (err) {
+      console.warn(`[OpenCode Client] getDiff failed (non-fatal):`, err);
     }
 
     return {
       success: true,
       sessionId: session.id,
-      summary: this.extractContent(response as Record<string, unknown>),
+      summary,
       diff,
     };
   }

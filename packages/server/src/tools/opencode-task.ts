@@ -66,9 +66,12 @@ export function createOpenCodeTaskTool(ctx: ToolContext) {
             `Do NOT use /home/user, /app, or any other directory.\n\n${task}`
           : task;
 
+        console.log(`[opencode_task] Sending task to OpenCode (${taskWithContext.length} chars)...`);
         const result = await client.executeTask(taskWithContext);
+        console.log(`[opencode_task] Result: success=${result.success}, sessionId=${result.sessionId}, summary=${result.summary.length} chars, diff=${result.diff?.files?.length ?? 0} files`);
 
         if (!result.success) {
+          console.warn(`[opencode_task] Task failed: ${result.summary.slice(0, 500)}`);
           return `OpenCode task failed: ${result.summary}`;
         }
 
