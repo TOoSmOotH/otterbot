@@ -9,12 +9,14 @@ export interface OpenCodeConfig {
   apiUrl: string;
   username?: string;
   password?: string;
+  /** Idle timeout — abort only after this many ms with NO new activity (default: 180 000) */
   timeoutMs?: number;
   maxIterations?: number;
 }
 
 export interface OpenCodeSession {
   id: string;
+  time?: { created?: number; updated?: number };
   [key: string]: unknown;
 }
 
@@ -36,16 +38,19 @@ export interface OpenCodeTaskResult {
   error?: string;
 }
 
+const POLL_INTERVAL_MS = 15_000; // Check for activity every 15 seconds
+const MAX_TOTAL_WAIT_MS = 30 * 60 * 1000; // Hard cap at 30 minutes regardless of activity
+
 export class OpenCodeClient {
   private apiUrl: string;
   private authHeader: string | null;
-  private timeoutMs: number;
+  private idleTimeoutMs: number;
   private maxIterations: number;
 
   constructor(config: OpenCodeConfig) {
     // Strip trailing slash
     this.apiUrl = config.apiUrl.replace(/\/+$/, "");
-    this.timeoutMs = config.timeoutMs ?? 180_000;
+    this.idleTimeoutMs = config.timeoutMs ?? 180_000;
     this.maxIterations = config.maxIterations ?? 50;
 
     if (config.username && config.password) {
@@ -90,43 +95,38 @@ export class OpenCodeClient {
     return session;
   }
 
-  /** Send a task message to a session (blocks until OpenCode finishes) */
+  /** Send a task message to a session (blocks until OpenCode finishes). Caller provides AbortSignal. */
   async sendMessage(
     sessionId: string,
     task: string,
+    signal?: AbortSignal,
   ): Promise<{ content: string; [key: string]: unknown }> {
-    console.log(`[OpenCode Client] POST ${this.apiUrl}/session/${sessionId}/message (task: ${task.length} chars, timeout: ${this.timeoutMs}ms)`);
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
+    console.log(`[OpenCode Client] POST ${this.apiUrl}/session/${sessionId}/message (task: ${task.length} chars)`);
 
-    try {
-      const res = await fetch(`${this.apiUrl}/session/${sessionId}/message`, {
-        method: "POST",
-        headers: this.headers(),
-        body: JSON.stringify({
-          parts: [{ type: "text", text: task }],
-        }),
-        signal: controller.signal,
-      });
-      const rawBody = await res.text();
-      console.log(`[OpenCode Client] sendMessage response: status=${res.status} body=${rawBody.slice(0, 1000)}`);
-      if (!res.ok) {
-        throw new Error(
-          `Failed to send message: ${res.status} ${res.statusText} ${rawBody}`,
-        );
-      }
-      const parsed = JSON.parse(rawBody);
-      console.log(`[OpenCode Client] sendMessage parsed keys: ${Object.keys(parsed).join(", ")}`);
-      return parsed as { content: string; [key: string]: unknown };
-    } finally {
-      clearTimeout(timeout);
+    const res = await fetch(`${this.apiUrl}/session/${sessionId}/message`, {
+      method: "POST",
+      headers: this.headers(),
+      body: JSON.stringify({
+        parts: [{ type: "text", text: task }],
+      }),
+      signal,
+    });
+    const rawBody = await res.text();
+    console.log(`[OpenCode Client] sendMessage response: status=${res.status} body=${rawBody.slice(0, 1000)}`);
+    if (!res.ok) {
+      throw new Error(
+        `Failed to send message: ${res.status} ${res.statusText} ${rawBody}`,
+      );
     }
+    const parsed = JSON.parse(rawBody);
+    console.log(`[OpenCode Client] sendMessage parsed keys: ${Object.keys(parsed).join(", ")}`);
+    return parsed as { content: string; [key: string]: unknown };
   }
 
   /** Get session status/summary */
   async getSession(
     sessionId: string,
-  ): Promise<{ id: string; [key: string]: unknown }> {
+  ): Promise<OpenCodeSession> {
     const res = await fetch(`${this.apiUrl}/session/${sessionId}`, {
       method: "GET",
       headers: this.headers(),
@@ -137,7 +137,25 @@ export class OpenCodeClient {
         `Failed to get session: ${res.status} ${res.statusText}`,
       );
     }
-    return (await res.json()) as { id: string; [key: string]: unknown };
+    return (await res.json()) as OpenCodeSession;
+  }
+
+  /** Get messages for a session */
+  async getMessages(
+    sessionId: string,
+  ): Promise<Array<Record<string, unknown>>> {
+    const res = await fetch(`${this.apiUrl}/session/${sessionId}/message`, {
+      method: "GET",
+      headers: this.headers(),
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!res.ok) {
+      throw new Error(
+        `Failed to get messages: ${res.status} ${res.statusText}`,
+      );
+    }
+    const data = await res.json();
+    return Array.isArray(data) ? data : [];
   }
 
   /** Get file changes made in a session */
@@ -239,51 +257,194 @@ export class OpenCodeClient {
   }
 
   /**
-   * High-level orchestrator: create session, send message, fetch diff,
-   * return structured result.
+   * Monitor session activity. Resolves when the session has been idle
+   * (no new messages or session updates) for longer than idleTimeoutMs.
+   * The caller should race this against the actual sendMessage call.
+   */
+  private async monitorActivity(
+    sessionId: string,
+    controller: AbortController,
+  ): Promise<"idle" | "hard_cap"> {
+    const startTime = Date.now();
+    let lastActivityTime = Date.now();
+    let lastMessageCount = 0;
+    let lastUpdated = 0;
+
+    while (!controller.signal.aborted) {
+      await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
+
+      // If the sendMessage already completed, the controller will be aborted
+      if (controller.signal.aborted) return "idle"; // doesn't matter, won't be used
+
+      // Hard cap — don't wait forever regardless of activity
+      if (Date.now() - startTime > MAX_TOTAL_WAIT_MS) {
+        console.warn(`[OpenCode Client] Hard cap reached (${MAX_TOTAL_WAIT_MS / 1000}s total). Aborting.`);
+        controller.abort();
+        return "hard_cap";
+      }
+
+      try {
+        // Check session updated timestamp
+        const session = await this.getSession(sessionId);
+        const sessionUpdated = session.time?.updated ?? 0;
+
+        // Check message count
+        let messageCount = 0;
+        try {
+          const messages = await this.getMessages(sessionId);
+          messageCount = messages.length;
+        } catch {
+          // Message endpoint may not be available — fall back to session-only check
+        }
+
+        // Detect activity: session timestamp changed or new messages appeared
+        if (sessionUpdated > lastUpdated || messageCount > lastMessageCount) {
+          console.log(
+            `[OpenCode Client] Activity detected — messages: ${lastMessageCount}→${messageCount}, ` +
+            `updated: ${lastUpdated}→${sessionUpdated}`,
+          );
+          lastActivityTime = Date.now();
+          lastUpdated = sessionUpdated;
+          lastMessageCount = messageCount;
+        } else {
+          const idleMs = Date.now() - lastActivityTime;
+          console.log(
+            `[OpenCode Client] No new activity — idle for ${Math.round(idleMs / 1000)}s ` +
+            `(timeout at ${Math.round(this.idleTimeoutMs / 1000)}s), messages=${messageCount}`,
+          );
+        }
+
+        // Idle timeout — no activity for too long
+        if (Date.now() - lastActivityTime > this.idleTimeoutMs) {
+          console.warn(
+            `[OpenCode Client] Idle timeout reached (${Math.round(this.idleTimeoutMs / 1000)}s with no activity). Aborting.`,
+          );
+          controller.abort();
+          return "idle";
+        }
+      } catch (err) {
+        // Polling failure — don't abort, just log and try again
+        console.warn(`[OpenCode Client] Activity poll error (non-fatal):`, err instanceof Error ? err.message : err);
+      }
+    }
+
+    return "idle";
+  }
+
+  /**
+   * High-level orchestrator: create session, send message with activity-based
+   * timeout, fetch diff, return structured result.
+   *
+   * Instead of a fixed timeout, monitors session activity (new messages,
+   * session timestamp updates). Only aborts after idleTimeoutMs of inactivity.
    */
   async executeTask(
     task: string,
   ): Promise<OpenCodeTaskResult> {
-    console.log(`[OpenCode Client] executeTask starting (task: ${task.slice(0, 200)}...)`);
+    console.log(`[OpenCode Client] executeTask starting (idleTimeout=${this.idleTimeoutMs}ms, task: ${task.slice(0, 200)}...)`);
     const session = await this.createSession();
 
-    let response: { content: string; [key: string]: unknown };
+    const controller = new AbortController();
+
+    // Race: sendMessage vs activity monitor
+    const messagePromise = this.sendMessage(session.id, task, controller.signal)
+      .then((response) => ({ type: "response" as const, response }))
+      .catch((err) => {
+        if (err instanceof DOMException && err.name === "AbortError") {
+          return { type: "aborted" as const, response: null };
+        }
+        // Node 18+ uses a different error type for AbortSignal
+        if (err instanceof Error && err.name === "AbortError") {
+          return { type: "aborted" as const, response: null };
+        }
+        throw err;
+      });
+
+    const monitorPromise = this.monitorActivity(session.id, controller);
+
     try {
-      response = await this.sendMessage(session.id, task);
-    } catch (err) {
-      if (err instanceof DOMException && err.name === "AbortError") {
-        console.warn(`[OpenCode Client] executeTask timed out after ${this.timeoutMs}ms`);
-        await this.abort(session.id);
+      const result = await Promise.race([
+        messagePromise,
+        monitorPromise.then((reason) => ({ type: "timeout" as const, reason, response: null })),
+      ]);
+
+      // Stop the monitor if sendMessage completed first
+      if (!controller.signal.aborted) {
+        controller.abort();
+      }
+
+      if (result.type === "response" && result.response) {
+        console.log(`[OpenCode Client] executeTask response received, extracting content...`);
+        const summary = this.extractContent(result.response as Record<string, unknown>);
+        console.log(`[OpenCode Client] extractContent result (${summary.length} chars): ${summary.slice(0, 500)}`);
+
+        let diff: OpenCodeDiff | null = null;
+        try {
+          diff = await this.getDiff(session.id);
+          console.log(`[OpenCode Client] getDiff: ${diff?.files?.length ?? 0} files changed`);
+        } catch (err) {
+          console.warn(`[OpenCode Client] getDiff failed (non-fatal):`, err);
+        }
+
         return {
-          success: false,
+          success: true,
           sessionId: session.id,
-          summary: `Task timed out after ${Math.round(this.timeoutMs / 1000)}s. The session was aborted.`,
-          diff: null,
-          error: "timeout",
+          summary,
+          diff,
         };
+      }
+
+      // Timed out (idle or hard cap)
+      const reason = result.type === "timeout"
+        ? (result as { reason: string }).reason
+        : "idle";
+      const timeoutDesc = reason === "hard_cap"
+        ? `${Math.round(MAX_TOTAL_WAIT_MS / 1000)}s total time`
+        : `${Math.round(this.idleTimeoutMs / 1000)}s with no activity`;
+
+      console.warn(`[OpenCode Client] executeTask timed out (${reason}: ${timeoutDesc})`);
+      await this.abort(session.id);
+
+      // Try to salvage partial results
+      let summary = `Task timed out after ${timeoutDesc}. The session was aborted.`;
+      try {
+        const messages = await this.getMessages(session.id);
+        if (messages.length > 0) {
+          const lastAssistant = [...messages].reverse().find(
+            (m) => (m as Record<string, unknown>).role === "assistant",
+          );
+          if (lastAssistant) {
+            const partial = this.extractContent(lastAssistant as Record<string, unknown>);
+            if (partial.length > 50) {
+              summary += `\n\nPartial result from last assistant message:\n${partial}`;
+            }
+          }
+        }
+      } catch {
+        // Best-effort partial result extraction
+      }
+
+      let diff: OpenCodeDiff | null = null;
+      try {
+        diff = await this.getDiff(session.id);
+      } catch {
+        // Best-effort diff
+      }
+
+      return {
+        success: false,
+        sessionId: session.id,
+        summary,
+        diff,
+        error: reason === "hard_cap" ? "hard_timeout" : "idle_timeout",
+      };
+    } catch (err) {
+      // Stop monitor on unexpected errors
+      if (!controller.signal.aborted) {
+        controller.abort();
       }
       console.error(`[OpenCode Client] executeTask error:`, err);
       throw err;
     }
-
-    console.log(`[OpenCode Client] executeTask response received, extracting content...`);
-    const summary = this.extractContent(response as Record<string, unknown>);
-    console.log(`[OpenCode Client] extractContent result (${summary.length} chars): ${summary.slice(0, 500)}`);
-
-    let diff: OpenCodeDiff | null = null;
-    try {
-      diff = await this.getDiff(session.id);
-      console.log(`[OpenCode Client] getDiff: ${diff?.files?.length ?? 0} files changed`);
-    } catch (err) {
-      console.warn(`[OpenCode Client] getDiff failed (non-fatal):`, err);
-    }
-
-    return {
-      success: true,
-      sessionId: session.id,
-      summary,
-      diff,
-    };
   }
 }
