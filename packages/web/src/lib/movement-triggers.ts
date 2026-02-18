@@ -41,6 +41,70 @@ function getTargetTag(status: AgentStatus | string): string {
 }
 
 /**
+ * Compute the desk waypoint index for an agent, matching LiveViewScene's assignment order.
+ * Main office: CEO=0, COOs, AdminAssistants, TeamLeads (no project), Workers (no project)
+ * Project zones: TeamLeads then Workers, per-zone counter starting at 0
+ */
+function computeDeskIndex(
+  agent: Agent,
+  allAgents: Map<string, Agent>,
+  zones: { id: string; projectId: string | null }[],
+): number {
+  const active = Array.from(allAgents.values()).filter((a) => a.status !== "done");
+  const coos = active.filter((a) => a.role === "coo");
+  const admins = active.filter((a) => a.role === "admin_assistant");
+  const teamLeads = active.filter((a) => a.role === "team_lead");
+  const workers = active.filter((a) => a.role === "worker");
+
+  const targetZoneId = getTargetZoneId(agent, zones);
+  const mainZone = zones.find((z) => z.projectId === null);
+
+  if (targetZoneId === mainZone?.id) {
+    // Main office: CEO=0, then COOs, admins, team leads (no project zone), workers (no project zone)
+    let idx = 1; // CEO occupies 0
+    for (const c of coos) {
+      if (c.id === agent.id) return idx;
+      idx++;
+    }
+    for (const a of admins) {
+      if (a.id === agent.id) return idx;
+      idx++;
+    }
+    for (const tl of teamLeads) {
+      const hasProjectZone = tl.projectId && zones.some((z) => z.projectId === tl.projectId);
+      if (!hasProjectZone) {
+        if (tl.id === agent.id) return idx;
+        idx++;
+      }
+    }
+    for (const w of workers) {
+      const hasProjectZone = w.projectId && zones.some((z) => z.projectId === w.projectId);
+      if (!hasProjectZone) {
+        if (w.id === agent.id) return idx;
+        idx++;
+      }
+    }
+    return idx;
+  }
+
+  // Project zone: team leads first, then workers
+  let idx = 0;
+  for (const tl of teamLeads) {
+    if (tl.projectId === agent.projectId) {
+      if (tl.id === agent.id) return idx;
+      idx++;
+    }
+  }
+  for (const w of workers) {
+    if (w.projectId === agent.projectId) {
+      if (w.id === agent.id) return idx;
+      idx++;
+    }
+  }
+  return idx;
+}
+
+/**
  * Trigger a movement for an agent from their current location to a target waypoint.
  */
 function triggerMovement(
@@ -71,10 +135,14 @@ export function processAgentMovement(agent: Agent, prevStatus?: string) {
 
   // Zone change: agent needs to walk between zones to their final destination
   if (currentZoneId !== undefined && currentZoneId !== targetZoneId) {
+    const allAgents = useAgentStore.getState().agents;
+    const deskIndex = computeDeskIndex(agent, allAgents, zones);
     // Find the final destination in the target zone (desk or center based on status)
     const toWps = findWaypointsByZoneAndTag(graph, targetZoneId, targetTag);
     const fallbackWps = findWaypointsByZoneAndTag(graph, targetZoneId, "center");
-    const toWp = toWps.length > 0 ? toWps[0] : fallbackWps.length > 0 ? fallbackWps[0] : null;
+    const toWp = toWps.length > 0
+      ? toWps[deskIndex % toWps.length]
+      : fallbackWps.length > 0 ? fallbackWps[0] : null;
     if (!toWp) return;
 
     // Find current location: nearest waypoint in current zone
@@ -89,9 +157,21 @@ export function processAgentMovement(agent: Agent, prevStatus?: string) {
     return;
   }
 
-  // Within-zone status changes (center ↔ desk) are handled by AgentCharacter's
-  // smooth lerp to the correct static position computed by LiveViewScene.
-  // Pathfinding here would require replicating the per-agent desk index assignment.
+  // Status change within same zone: move between center and desk
+  if (prevStatus && prevStatus !== agent.status) {
+    const prevTag = getTargetTag(prevStatus);
+    if (prevTag !== targetTag) {
+      const allAgents = useAgentStore.getState().agents;
+      const deskIndex = computeDeskIndex(agent, allAgents, zones);
+      const fromWps = findWaypointsByZoneAndTag(graph, targetZoneId, prevTag);
+      const toWps = findWaypointsByZoneAndTag(graph, targetZoneId, targetTag);
+      if (fromWps.length > 0 && toWps.length > 0) {
+        const fromWp = fromWps[0]; // center has one waypoint
+        const toWp = toWps[deskIndex % toWps.length];
+        triggerMovement(agent.id, graph, fromWp.id, toWp.id);
+      }
+    }
+  }
 
   // Track agent zone
   agentZoneMap.set(agent.id, targetZoneId);
@@ -116,10 +196,14 @@ export function processAgentSpawn(agent: Agent) {
     : [];
 
   // Walk to target based on current status
+  const allAgents = useAgentStore.getState().agents;
+  const deskIndex = computeDeskIndex(agent, allAgents, zones);
   const targetTag = getTargetTag(agent.status);
   const destWps = findWaypointsByZoneAndTag(graph, targetZoneId, targetTag);
   const fallbackWps = findWaypointsByZoneAndTag(graph, targetZoneId, "center");
-  const toWp = destWps.length > 0 ? destWps[0] : fallbackWps.length > 0 ? fallbackWps[0] : null;
+  const toWp = destWps.length > 0
+    ? destWps[deskIndex % destWps.length]
+    : fallbackWps.length > 0 ? fallbackWps[0] : null;
 
   if (startWps.length > 0 && toWp) {
     triggerMovement(agent.id, graph, startWps[0].id, toWp.id);
