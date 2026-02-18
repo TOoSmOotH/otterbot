@@ -17,6 +17,7 @@ import { ConversationContextManager } from "./conversation-context.js";
 import { TeamLead } from "./team-lead.js";
 import { getDb, schema } from "../db/index.js";
 import { Registry } from "../registry/registry.js";
+import { SkillService } from "../skills/skill-service.js";
 import type { MessageBus } from "../bus/message-bus.js";
 import type { WorkspaceManager } from "../workspace/workspace.js";
 import { eq, and } from "drizzle-orm";
@@ -80,6 +81,7 @@ export class COO extends BaseAgent {
   private _onAgentThinking?: (agentId: string, token: string, messageId: string) => void;
   private _onAgentThinkingEnd?: (agentId: string, messageId: string) => void;
   private _onAgentToolCall?: (agentId: string, toolName: string, args: Record<string, unknown>) => void;
+  private allowedToolNames: Set<string>;
   private contextManager!: ConversationContextManager;
   private activeContextId: string | null = null;
   private currentConversationId: string | null = null;
@@ -156,6 +158,13 @@ The user can see everything on the desktop in real-time.`;
     // tool calls per think(). The default maxSteps=20 lets smaller models
     // loop endlessly between blocked tools.
     this.llmConfig.maxSteps = 5;
+
+    // Derive allowed tools from assigned skills
+    const skillService = new SkillService();
+    const cooEntryId = cooRegistryId ?? "builtin-coo";
+    const skills = skillService.getForAgent(cooEntryId);
+    this.allowedToolNames = new Set(skills.flatMap((s) => s.meta.tools));
+
     this.workspace = deps.workspace;
     this.onAgentSpawned = deps.onAgentSpawned;
     this.onStream = deps.onStream;
@@ -316,6 +325,24 @@ The user can see everything on the desktop in real-time.`;
   }
 
   protected getTools(): Record<string, unknown> {
+    const allTools: Record<string, unknown> = this.getAllCooTools();
+
+    // Filter to only the tools declared by assigned skills
+    if (this.allowedToolNames.size > 0) {
+      const filtered: Record<string, unknown> = {};
+      for (const [name, t] of Object.entries(allTools)) {
+        if (this.allowedToolNames.has(name)) {
+          filtered[name] = t;
+        }
+      }
+      return filtered;
+    }
+
+    return allTools;
+  }
+
+  /** All possible COO tools — filtered by skills in getTools() */
+  private getAllCooTools(): Record<string, unknown> {
     return {
       run_command: tool({
         description:

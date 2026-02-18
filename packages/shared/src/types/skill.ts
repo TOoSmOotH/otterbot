@@ -32,10 +32,14 @@ export interface ScanReport {
 
 export type SkillScanStatus = "clean" | "warnings" | "errors" | "unscanned";
 
+export type SkillSource = "built-in" | "created" | "imported" | "cloned";
+
 export interface Skill {
   id: string;
   meta: SkillMeta;
   body: string;
+  source: SkillSource;
+  clonedFromId: string | null;
   scanStatus: SkillScanStatus;
   scanFindings: ScanFinding[];
   createdAt: string;

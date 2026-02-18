@@ -11,6 +11,7 @@ import type {
   SkillParameterDef,
   ScanReport,
   SkillScanStatus,
+  SkillSource,
 } from "@otterbot/shared";
 
 export class SkillService {
@@ -71,13 +72,13 @@ export class SkillService {
     return row ? this.toSkill(row) : null;
   }
 
-  create(data: SkillCreate, scanReport?: ScanReport): Skill {
+  create(data: SkillCreate, scanReport?: ScanReport, opts?: { id?: string; source?: SkillSource; clonedFromId?: string | null }): Skill {
     const db = getDb();
     const now = new Date().toISOString();
     const scanStatus = this.deriveScanStatus(scanReport);
 
     const row = {
-      id: nanoid(),
+      id: opts?.id ?? nanoid(),
       name: data.meta.name,
       description: data.meta.description,
       version: data.meta.version,
@@ -87,6 +88,8 @@ export class SkillService {
       parameters: data.meta.parameters as Record<string, unknown>,
       tags: data.meta.tags,
       body: data.body,
+      source: opts?.source ?? "created",
+      clonedFromId: opts?.clonedFromId ?? null,
       scanStatus,
       scanFindings: scanReport?.findings ?? [],
       createdAt: now,
@@ -150,6 +153,70 @@ export class SkillService {
       .where(eq(schema.skills.id, id))
       .run();
     return result.changes > 0;
+  }
+
+  /**
+   * Clone a skill. Returns the new skill with source "cloned".
+   */
+  clone(id: string): Skill | null {
+    const source = this.get(id);
+    if (!source) return null;
+
+    return this.create(
+      { meta: { ...source.meta, name: `${source.meta.name} (Clone)` }, body: source.body },
+      undefined,
+      { source: "cloned", clonedFromId: id },
+    );
+  }
+
+  /**
+   * Upsert a built-in skill (for seeding on startup).
+   * If the skill already exists, updates it. Otherwise inserts it.
+   */
+  upsert(id: string, data: SkillCreate, source: SkillSource = "built-in"): Skill {
+    const db = getDb();
+    const now = new Date().toISOString();
+
+    db.insert(schema.skills)
+      .values({
+        id,
+        name: data.meta.name,
+        description: data.meta.description,
+        version: data.meta.version,
+        author: data.meta.author,
+        tools: data.meta.tools,
+        capabilities: data.meta.capabilities,
+        parameters: data.meta.parameters as Record<string, unknown>,
+        tags: data.meta.tags,
+        body: data.body,
+        source,
+        clonedFromId: null,
+        scanStatus: "clean",
+        scanFindings: [],
+        createdAt: now,
+        updatedAt: now,
+      })
+      .onConflictDoUpdate({
+        target: schema.skills.id,
+        set: {
+          name: data.meta.name,
+          description: data.meta.description,
+          version: data.meta.version,
+          author: data.meta.author,
+          tools: data.meta.tools,
+          capabilities: data.meta.capabilities,
+          parameters: data.meta.parameters as Record<string, unknown>,
+          tags: data.meta.tags,
+          body: data.body,
+          source,
+          scanStatus: "clean",
+          scanFindings: [],
+          updatedAt: now,
+        },
+      })
+      .run();
+
+    return this.get(id)!;
   }
 
   /**
@@ -220,6 +287,8 @@ export class SkillService {
         tags: row.tags as string[],
       },
       body: row.body,
+      source: row.source ?? "created",
+      clonedFromId: row.clonedFromId ?? null,
       scanStatus: row.scanStatus,
       scanFindings: row.scanFindings as any[],
       createdAt: row.createdAt,

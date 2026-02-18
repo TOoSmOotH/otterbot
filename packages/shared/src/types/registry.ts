@@ -6,9 +6,11 @@ export interface RegistryEntry {
   description: string;
   systemPrompt: string;
   promptAddendum: string | null;
+  /** Derived from assigned skills — not stored on the entry directly */
   capabilities: string[];
   defaultModel: string;
   defaultProvider: string;
+  /** Derived from assigned skills — not stored on the entry directly */
   tools: string[];
   builtIn: boolean;
   role: "coo" | "team_lead" | "worker";
@@ -23,14 +25,14 @@ export interface RegistryEntryCreate {
   description: string;
   systemPrompt: string;
   promptAddendum?: string | null;
-  capabilities: string[];
   defaultModel: string;
   defaultProvider: string;
-  tools: string[];
   role?: "coo" | "team_lead" | "worker";
   clonedFromId?: string | null;
   modelPackId?: string | null;
   gearConfig?: GearConfig | null;
+  /** Optional skill IDs to assign after creation */
+  skillIds?: string[];
 }
 
 export interface RegistryEntryUpdate {
@@ -38,10 +40,8 @@ export interface RegistryEntryUpdate {
   description?: string;
   systemPrompt?: string;
   promptAddendum?: string | null;
-  capabilities?: string[];
   defaultModel?: string;
   defaultProvider?: string;
-  tools?: string[];
   modelPackId?: string | null;
   gearConfig?: GearConfig | null;
 }

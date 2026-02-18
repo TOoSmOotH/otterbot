@@ -16,10 +16,8 @@ export function AgentTemplatesTab() {
     description: "",
     systemPrompt: "",
     promptAddendum: "" as string,
-    capabilities: "",
     defaultModel: "",
     defaultProvider: "anthropic",
-    tools: "",
     modelPackId: null as string | null,
     gearConfig: null as GearConfig | null,
   });
@@ -69,10 +67,8 @@ export function AgentTemplatesTab() {
       description: entry.description,
       systemPrompt: entry.systemPrompt,
       promptAddendum: entry.promptAddendum ?? "",
-      capabilities: entry.capabilities.join(", "),
       defaultModel: entry.defaultModel,
       defaultProvider: entry.defaultProvider,
-      tools: entry.tools.join(", "),
       modelPackId: entry.modelPackId ?? null,
       gearConfig: entry.gearConfig ?? null,
     });
@@ -104,16 +100,8 @@ export function AgentTemplatesTab() {
       name: form.name,
       description: form.description,
       systemPrompt: form.systemPrompt,
-      capabilities: form.capabilities
-        .split(",")
-        .map((s) => s.trim())
-        .filter(Boolean),
       defaultModel: form.defaultModel,
       defaultProvider: form.defaultProvider,
-      tools: form.tools
-        .split(",")
-        .map((s) => s.trim())
-        .filter(Boolean),
       modelPackId: form.modelPackId,
       gearConfig: form.gearConfig,
     };
@@ -145,10 +133,8 @@ export function AgentTemplatesTab() {
       name: "New Agent",
       description: "Description",
       systemPrompt: "You are a helpful assistant.",
-      capabilities: [],
       defaultModel: "claude-sonnet-4-5-20250929",
       defaultProvider: "anthropic",
-      tools: [],
     };
 
     const res = await fetch("/api/registry", {
@@ -177,6 +163,25 @@ export function AgentTemplatesTab() {
     setSelected(null);
     await loadEntries();
   };
+
+  // Derive tools and capabilities from assigned skills
+  const derivedTools = useMemo(() => {
+    return [...new Set(
+      assignedSkillIds.flatMap((id) => {
+        const skill = allSkills.find((s) => s.id === id);
+        return skill?.meta.tools ?? [];
+      }),
+    )];
+  }, [assignedSkillIds, allSkills]);
+
+  const derivedCapabilities = useMemo(() => {
+    return [...new Set(
+      assignedSkillIds.flatMap((id) => {
+        const skill = allSkills.find((s) => s.id === id);
+        return skill?.meta.capabilities ?? [];
+      }),
+    )];
+  }, [assignedSkillIds, allSkills]);
 
   const clonedFromName = useMemo(() => {
     if (!selected?.clonedFromId) return null;
@@ -410,58 +415,6 @@ export function AgentTemplatesTab() {
               )}
             </Field>
 
-            {/* Capabilities */}
-            <Field label="Capabilities (comma-separated)" editing={editing}>
-              {editing ? (
-                <input
-                  value={form.capabilities}
-                  onChange={(e) =>
-                    setForm({ ...form, capabilities: e.target.value })
-                  }
-                  className="w-full bg-secondary rounded-md px-3 py-1.5 text-sm outline-none focus:ring-1 ring-primary"
-                />
-              ) : (
-                <div className="flex flex-wrap gap-1">
-                  {form.capabilities
-                    .split(",")
-                    .filter(Boolean)
-                    .map((c) => (
-                      <span
-                        key={c.trim()}
-                        className="text-[10px] bg-secondary px-2 py-0.5 rounded"
-                      >
-                        {c.trim()}
-                      </span>
-                    ))}
-                </div>
-              )}
-            </Field>
-
-            {/* Tools */}
-            <Field label="Tools (comma-separated)" editing={editing}>
-              {editing ? (
-                <input
-                  value={form.tools}
-                  onChange={(e) => setForm({ ...form, tools: e.target.value })}
-                  className="w-full bg-secondary rounded-md px-3 py-1.5 text-sm outline-none focus:ring-1 ring-primary"
-                />
-              ) : (
-                <div className="flex flex-wrap gap-1">
-                  {form.tools
-                    .split(",")
-                    .filter(Boolean)
-                    .map((t) => (
-                      <span
-                        key={t.trim()}
-                        className="text-[10px] bg-secondary px-2 py-0.5 rounded font-mono"
-                      >
-                        {t.trim()}
-                      </span>
-                    ))}
-                </div>
-              )}
-            </Field>
-
             {/* Skills */}
             <Field label="Skills" editing={editing}>
               {editing ? (
@@ -518,6 +471,38 @@ export function AgentTemplatesTab() {
                 </div>
               )}
             </Field>
+
+            {/* Derived Tools (read-only) */}
+            {derivedTools.length > 0 && (
+              <Field label="Tools (from skills)" editing={false}>
+                <div className="flex flex-wrap gap-1">
+                  {derivedTools.map((t) => (
+                    <span
+                      key={t}
+                      className="text-[10px] bg-secondary px-2 py-0.5 rounded font-mono"
+                    >
+                      {t}
+                    </span>
+                  ))}
+                </div>
+              </Field>
+            )}
+
+            {/* Derived Capabilities (read-only) */}
+            {derivedCapabilities.length > 0 && (
+              <Field label="Capabilities (from skills)" editing={false}>
+                <div className="flex flex-wrap gap-1">
+                  {derivedCapabilities.map((c) => (
+                    <span
+                      key={c}
+                      className="text-[10px] bg-secondary px-2 py-0.5 rounded"
+                    >
+                      {c}
+                    </span>
+                  ))}
+                </div>
+              </Field>
+            )}
 
             {/* System Prompt — COO clones show base (read-only) + addendum (editable) */}
             {isCooClone ? (

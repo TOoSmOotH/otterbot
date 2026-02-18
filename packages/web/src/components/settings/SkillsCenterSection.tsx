@@ -14,6 +14,7 @@ export function SkillsCenterSection() {
   const createSkill = useSkillsStore((s) => s.createSkill);
   const updateSkill = useSkillsStore((s) => s.updateSkill);
   const deleteSkill = useSkillsStore((s) => s.deleteSkill);
+  const cloneSkill = useSkillsStore((s) => s.cloneSkill);
   const importSkill = useSkillsStore((s) => s.importSkill);
   const exportSkill = useSkillsStore((s) => s.exportSkill);
   const availableTools = useSkillsStore((s) => s.availableTools);
@@ -54,6 +55,10 @@ export function SkillsCenterSection() {
     } else {
       await createSkill({ meta, body });
     }
+  };
+
+  const handleClone = async (id: string) => {
+    await cloneSkill(id);
   };
 
   const handleDelete = async (id: string) => {
@@ -152,6 +157,7 @@ export function SkillsCenterSection() {
               onEdit={handleEditSkill}
               onExport={exportSkill}
               onDelete={handleDelete}
+              onClone={handleClone}
               onViewScan={setScanViewSkill}
             />
           ))}

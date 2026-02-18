@@ -12,6 +12,7 @@ import { BaseAgent, type AgentOptions } from "./agent.js";
 import { Worker } from "./worker.js";
 import { getDb, schema } from "../db/index.js";
 import { Registry } from "../registry/registry.js";
+import { SkillService } from "../skills/skill-service.js";
 import type { MessageBus } from "../bus/message-bus.js";
 import type { WorkspaceManager } from "../workspace/workspace.js";
 import { eq } from "drizzle-orm";
@@ -156,6 +157,7 @@ export class TeamLead extends BaseAgent {
   /** Per-think-cycle call counts — prevents tools from being called repeatedly within a single streamText run */
   private _toolCallCounts = new Map<string, number>();
   private _pendingWorkerReport = new Map<string, string>();
+  private allowedToolNames: Set<string>;
   private onAgentSpawned?: (agent: BaseAgent) => void;
   private onKanbanChange?: (event: "created" | "updated" | "deleted", task: KanbanTask) => void;
 
@@ -183,10 +185,15 @@ export class TeamLead extends BaseAgent {
       onAgentToolCall: deps.onAgentToolCall,
     };
     super(options, deps.bus);
+
+    // Derive allowed tools from assigned skills
+    const skillService = new SkillService();
+    const tlSkills = skillService.getForAgent("builtin-team-lead");
+    this.allowedToolNames = new Set(tlSkills.flatMap((s) => s.meta.tools));
+
     this.workspace = deps.workspace;
     this.onAgentSpawned = deps.onAgentSpawned;
     this.onKanbanChange = deps.onKanbanChange;
-
   }
 
   async handleMessage(message: BusMessage): Promise<void> {
@@ -628,6 +635,24 @@ export class TeamLead extends BaseAgent {
   }
 
   protected getTools(): Record<string, unknown> {
+    const allTools: Record<string, unknown> = this.getAllTeamLeadTools();
+
+    // Filter to only the tools declared by assigned skills
+    if (this.allowedToolNames.size > 0) {
+      const filtered: Record<string, unknown> = {};
+      for (const [name, t] of Object.entries(allTools)) {
+        if (this.allowedToolNames.has(name)) {
+          filtered[name] = t;
+        }
+      }
+      return filtered;
+    }
+
+    return allTools;
+  }
+
+  /** All possible Team Lead tools — filtered by skills in getTools() */
+  private getAllTeamLeadTools(): Record<string, unknown> {
     return {
       search_registry: tool({
         description:
@@ -757,14 +782,13 @@ export class TeamLead extends BaseAgent {
   }
 
   private searchRegistry(capability: string): string {
-    const db = getDb();
-    const allEntries = db.select().from(schema.registryEntries).all();
+    const registry = new Registry();
+    const allEntries = registry.list();
 
     const matches = allEntries.filter((entry) => {
       // Only return worker-role entries (not COO or Team Lead)
       if (entry.role !== "worker") return false;
-      const caps = entry.capabilities as string[];
-      return caps.some((c) =>
+      return entry.capabilities.some((c) =>
         c.toLowerCase().includes(capability.toLowerCase()),
       );
     });
@@ -776,7 +800,7 @@ export class TeamLead extends BaseAgent {
     return matches
       .map(
         (e) =>
-          `- ${e.name} (${e.id}): ${e.description} [capabilities: ${(e.capabilities as string[]).join(", ")}]`,
+          `- ${e.name} (${e.id}): ${e.description} [capabilities: ${e.capabilities.join(", ")}]`,
       )
       .join("\n");
   }
@@ -798,7 +822,12 @@ export class TeamLead extends BaseAgent {
         return `Registry entry ${registryEntryId} not found.`;
       }
 
-      const entryTools = (entry.tools as string[]) ?? [];
+      // Derive tools and system prompt content from assigned skills
+      const skillService = new SkillService();
+      const entrySkills = skillService.getForAgent(entry.id);
+      const entryTools = [...new Set(entrySkills.flatMap((s) => s.meta.tools as string[]))];
+      const skillPromptContent = entrySkills.map((s) => s.body.trim()).filter(Boolean).join("\n\n");
+
       const workerId = nanoid();
       let workspacePath: string | null = null;
 
@@ -825,7 +854,7 @@ export class TeamLead extends BaseAgent {
           getConfig("worker_provider") ??
           getConfig("coo_provider") ??
           entry.defaultProvider,
-        systemPrompt: entry.systemPrompt + buildEnvironmentContext(entryTools) +
+        systemPrompt: (skillPromptContent || entry.systemPrompt) + buildEnvironmentContext(entryTools) +
           (workspacePath
             ? `\n\n## Your Workspace\nYour workspace directory is: \`${workspacePath}\`\n` +
               `All file paths should be relative to this directory (e.g. \`src/main.go\`, not \`/workspace/src/main.go\`).\n` +
