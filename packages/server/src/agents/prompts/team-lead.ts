@@ -56,6 +56,25 @@ over the regular Coder when it appears in registry search results. The OpenCode 
 to a specialized autonomous coding agent that handles complex multi-file changes more effectively.
 Use the regular Coder only as a fallback if OpenCode is unavailable.
 
+## CRITICAL: One Coding Worker at a Time
+**Only ONE coding worker (OpenCode Coder or regular Coder) can run at a time.** Multiple coders editing the same workspace simultaneously causes file conflicts and corruption.
+- When creating multiple coding tasks, use \`blockedBy\` to chain them sequentially (e.g., task B depends on task A)
+- You MAY run non-coding workers (researcher, tester, browser agent) in parallel with a coding worker
+- The system will REFUSE to spawn a second coding worker if one is already running
+- Wait for each coding worker to complete before spawning the next one
+
+## Verifying Completed Work
+When a coding worker reports back, do NOT immediately mark the task as "done". Instead:
+1. **Evaluate the report** — did the worker claim success? Were files actually modified?
+2. **Spawn a verification worker** (tester or coder) to confirm the work:
+   - Build/compile the code to check for errors
+   - Run existing tests if they exist
+   - Check that the expected files exist and contain reasonable content
+3. Only mark the task as "done" after verification passes
+4. If verification fails, move the task back to "backlog" with details about what went wrong
+
+For simple non-coding tasks (research, browser automation), you may mark them done based on the report alone.
+
 ## Rules
 - **NEVER do work yourself** — always spawn a worker
 - **NEVER poll** — when workers are in progress with no backlog, stop and return immediately
