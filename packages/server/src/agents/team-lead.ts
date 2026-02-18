@@ -16,7 +16,7 @@ import { SkillService } from "../skills/skill-service.js";
 import type { MessageBus } from "../bus/message-bus.js";
 import type { WorkspaceManager } from "../workspace/workspace.js";
 import { eq } from "drizzle-orm";
-import { getConfig } from "../auth/auth.js";
+import { getConfig, setConfig, deleteConfig } from "../auth/auth.js";
 import { execSync } from "node:child_process";
 import { getConfiguredSearchProvider } from "../tools/search/providers.js";
 import { isDesktopEnabled } from "../desktop/desktop.js";
@@ -165,6 +165,7 @@ export interface TeamLeadDependencies {
 }
 
 const MAX_CONTINUATION_CYCLES = 5;
+const MAX_TASK_RETRIES = 3;
 
 export class TeamLead extends BaseAgent {
   private workers: Map<string, Worker> = new Map();
@@ -214,6 +215,27 @@ export class TeamLead extends BaseAgent {
     this.workspace = deps.workspace;
     this.onAgentSpawned = deps.onAgentSpawned;
     this.onKanbanChange = deps.onKanbanChange;
+
+    // Restore persisted flags from previous runs
+    this.verificationRequested = this.loadFlag("verification");
+    this.deploymentRequested = this.loadFlag("deployment");
+  }
+
+  /** Persist a flag to the config KV table so it survives restarts */
+  private persistFlag(flag: "verification" | "deployment", value: boolean): void {
+    const key = `project:${this.projectId}:${flag}_requested`;
+    if (value) {
+      setConfig(key, "true");
+    } else {
+      deleteConfig(key);
+    }
+  }
+
+  /** Load a persisted flag from the config KV table */
+  private loadFlag(flag: "verification" | "deployment"): boolean {
+    if (!this.projectId) return false;
+    const key = `project:${this.projectId}:${flag}_requested`;
+    return getConfig(key) === "true";
   }
 
   async handleMessage(message: BusMessage): Promise<void> {
@@ -229,6 +251,8 @@ export class TeamLead extends BaseAgent {
   private async handleDirective(message: BusMessage) {
     this.verificationRequested = false;
     this.deploymentRequested = false;
+    this.persistFlag("verification", false);
+    this.persistFlag("deployment", false);
     const { text } = await this.thinkWithContinuation(
       message.content,
       (token, messageId) => this.onAgentStream?.(this.id, token, messageId),
@@ -282,25 +306,36 @@ export class TeamLead extends BaseAgent {
     if (!task || task.column !== "in_progress") return false; // LLM already moved it
 
     const failed = this.isFailureReport(workerReport);
-    const targetColumn = failed ? "backlog" : "done";
     const assignee = failed ? "" : task.assigneeAgentId;
+
+    // For failures, increment retry count and check limits
+    const currentRetries = (task as any).retryCount ?? 0;
+    const newRetryCount = failed ? currentRetries + 1 : currentRetries;
+    const retriesExhausted = failed && newRetryCount >= MAX_TASK_RETRIES;
+    const targetColumn = failed ? (retriesExhausted ? "done" : "backlog") : "done";
 
     console.warn(
       `[TeamLead ${this.id}] Safety net: LLM did not move task "${task.title}" (${taskId}). ` +
-      `Force-moving to "${targetColumn}" (report ${failed ? "indicates failure" : "looks successful"}).`,
+      `Force-moving to "${targetColumn}" (report ${failed ? "indicates failure" : "looks successful"}` +
+      `${failed ? `, retry ${newRetryCount}/${MAX_TASK_RETRIES}` : ""}).`,
     );
 
     // For failures, enrich the task description with what went wrong
     const updates: { column: string; assigneeAgentId: string; description?: string; completionReport?: string } = {
       column: targetColumn,
-      assigneeAgentId: assignee ?? "",
+      assigneeAgentId: retriesExhausted ? (assignee ?? "") : (assignee ?? ""),
     };
 
     if (!failed) {
       updates.completionReport = workerReport;
     }
 
-    if (failed) {
+    if (retriesExhausted) {
+      const snippet = workerReport.length > 500 ? workerReport.slice(-500) : workerReport;
+      updates.completionReport = `FAILED: Exceeded maximum retry attempts (${MAX_TASK_RETRIES}). Last error: ${snippet}`;
+    }
+
+    if (failed && !retriesExhausted) {
       const snippet = workerReport.length > 500
         ? workerReport.slice(-500)
         : workerReport;
@@ -308,6 +343,15 @@ export class TeamLead extends BaseAgent {
       updates.description = existing +
         `\n\n--- PREVIOUS ATTEMPT FAILED ---\n${snippet}\n` +
         `--- Analyze the error above and fix the root cause in your next attempt. ---`;
+    }
+
+    // Persist retry count
+    if (failed) {
+      const db = getDb();
+      db.update(schema.kanbanTasks)
+        .set({ retryCount: newRetryCount })
+        .where(eq(schema.kanbanTasks.id, taskId))
+        .run();
     }
 
     this.updateKanbanTask(taskId, updates);
@@ -377,6 +421,7 @@ export class TeamLead extends BaseAgent {
       // All tasks genuinely done and no orphans — final assembly phases
       if (!this.verificationRequested) {
         this.verificationRequested = true;
+        this.persistFlag("verification", true);
         instructions =
           `ALL tasks done. Now VERIFY the deliverables work:\n` +
           `1. Create a "Verify build and tests" task using create_task\n` +
@@ -387,6 +432,7 @@ export class TeamLead extends BaseAgent {
           `The project repo is at: ${repoPath}`;
       } else if (!this.deploymentRequested) {
         this.deploymentRequested = true;
+        this.persistFlag("deployment", true);
         instructions =
           `ALL tasks done and verification passed. Now DEPLOY the application:\n` +
           `1. Create a "Deploy application" task using create_task\n` +
@@ -636,7 +682,9 @@ export class TeamLead extends BaseAgent {
         const blockedBy = (t.blockedBy as string[]) ?? [];
         const blocked = col === "backlog" && this.isTaskBlocked(blockedBy);
         const blockedTag = blocked ? ` [BLOCKED by: ${blockedBy.join(", ")}]` : "";
-        lines.push(`  - ${t.title} (${t.id})${assignee}${blockedTag}`);
+        const retryCount = (t as any).retryCount ?? 0;
+        const retryTag = col === "backlog" && retryCount > 0 ? ` [retry ${retryCount}/${MAX_TASK_RETRIES}]` : "";
+        lines.push(`  - ${t.title} (${t.id})${assignee}${blockedTag}${retryTag}`);
         // Include descriptions for backlog tasks so the TL can see failure context from previous attempts
         if (col === "backlog" && t.description && t.description.includes("PREVIOUS ATTEMPT FAILED")) {
           lines.push(`    ${t.description.slice(t.description.lastIndexOf("--- PREVIOUS ATTEMPT FAILED ---")).slice(0, 300)}`);
@@ -733,14 +781,15 @@ export class TeamLead extends BaseAgent {
     return { text: result.text, thinking: result.thinking };
   }
 
-  /** Reset per-cycle tool call counters before each LLM invocation */
+  /** Reset per-cycle tool call counters and prune history before each LLM invocation */
   protected override async think(
     userMessage: string,
     onToken?: (token: string, messageId: string) => void,
     onReasoning?: (token: string, messageId: string) => void,
     onReasoningEnd?: (messageId: string) => void,
-  ): Promise<{ text: string; thinking: string | undefined; hadToolCalls: boolean }> {
+  ): Promise<{ text: string; thinking: string | undefined; hadToolCalls: boolean; isError?: boolean }> {
     this._toolCallCounts.clear();
+    this.pruneConversationHistory(40);
     return super.think(userMessage, onToken, onReasoning, onReasoningEnd);
   }
 
@@ -1225,6 +1274,23 @@ export class TeamLead extends BaseAgent {
     if (updates.description !== undefined) setValues.description = updates.description;
     if (updates.title !== undefined) setValues.title = updates.title;
     if (updates.blockedBy !== undefined) setValues.blockedBy = updates.blockedBy;
+
+    // Retry count enforcement: when LLM moves a task from in_progress back to backlog
+    if (updates.column === "backlog" && existing.column === "in_progress") {
+      const currentRetries = (existing as any).retryCount ?? 0;
+      const newRetryCount = currentRetries + 1;
+      setValues.retryCount = newRetryCount;
+
+      if (newRetryCount >= MAX_TASK_RETRIES) {
+        // Exceeded max retries — force to done with failure report
+        setValues.column = "done";
+        const snippet = (updates.description ?? existing.description ?? "").slice(-500);
+        setValues.completionReport = `FAILED: Exceeded maximum retry attempts (${MAX_TASK_RETRIES}). Last error: ${snippet}`;
+        console.warn(
+          `[TeamLead ${this.id}] Task "${existing.title}" (${taskId}) exceeded ${MAX_TASK_RETRIES} retries — marking as FAILED.`,
+        );
+      }
+    }
 
     // Attach completion report: explicit value takes priority, otherwise use pending worker report
     if (updates.completionReport !== undefined) {

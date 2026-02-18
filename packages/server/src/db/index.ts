@@ -197,6 +197,13 @@ export async function migrateDb() {
     // Column already exists — ignore
   }
 
+  // Idempotent migration: add retry_count to kanban_tasks
+  try {
+    db.run(sql`ALTER TABLE kanban_tasks ADD COLUMN retry_count INTEGER NOT NULL DEFAULT 0`);
+  } catch {
+    // Column already exists — ignore
+  }
+
   db.run(sql`CREATE TABLE IF NOT EXISTS sessions (
     token TEXT PRIMARY KEY,
     expires_at TEXT NOT NULL,

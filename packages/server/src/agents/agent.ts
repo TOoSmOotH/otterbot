@@ -21,6 +21,7 @@ import {
 } from "../llm/kimi-tool-parser.js";
 import { eq } from "drizzle-orm";
 import { calculateCost } from "../settings/model-pricing.js";
+import { getCircuitBreaker, isProviderAvailable } from "../llm/circuit-breaker.js";
 
 export interface AgentOptions {
   id?: string;
@@ -172,7 +173,20 @@ export abstract class BaseAgent {
     onToken?: (token: string, messageId: string) => void,
     onReasoning?: (token: string, messageId: string) => void,
     onReasoningEnd?: (messageId: string) => void,
-  ): Promise<{ text: string; thinking: string | undefined; hadToolCalls: boolean }> {
+  ): Promise<{ text: string; thinking: string | undefined; hadToolCalls: boolean; isError?: boolean }> {
+    // Circuit breaker: reject immediately if provider is known to be down
+    if (!isProviderAvailable(this.llmConfig.provider)) {
+      const breaker = getCircuitBreaker(this.llmConfig.provider);
+      const cooldown = Math.ceil(breaker.remainingCooldownMs / 1000);
+      console.warn(`[Agent ${this.id}] Circuit breaker OPEN for provider ${this.llmConfig.provider} — rejecting (${cooldown}s remaining)`);
+      return {
+        text: `Error: LLM provider "${this.llmConfig.provider}" temporarily unavailable (circuit breaker open, ${cooldown}s cooldown remaining). Retries will resume automatically.`,
+        thinking: undefined,
+        hadToolCalls: false,
+        isError: true,
+      };
+    }
+
     this.conversationHistory.push({ role: "user", content: userMessage });
     this.setStatus(AgentStatus.Thinking);
     console.log(`[Agent ${this.id}] think() — provider=${this.llmConfig.provider} model=${this.llmConfig.model}`);
@@ -200,6 +214,7 @@ export abstract class BaseAgent {
           onReasoning,
           onReasoningEnd,
         ));
+        getCircuitBreaker(this.llmConfig.provider).recordSuccess();
       }
 
       // If tools were available but the stream produced NO text AND NO tool calls,
@@ -278,14 +293,15 @@ export abstract class BaseAgent {
       return { text: finalText, thinking, hadToolCalls };
     } catch (error) {
       this.setStatus(AgentStatus.Error);
+      getCircuitBreaker(this.llmConfig.provider).recordFailure();
       if (error instanceof RetryError) {
         console.error(`[Agent ${this.id}] Rate limited by provider — retries exhausted`);
-        return { text: "Error: Rate limited by provider — retries exhausted", thinking: undefined, hadToolCalls: false };
+        return { text: "Error: Rate limited by provider — retries exhausted", thinking: undefined, hadToolCalls: false, isError: true };
       }
       const errMsg =
         error instanceof Error ? error.message : "Unknown LLM error";
       console.error(`Agent ${this.id} LLM error:`, errMsg);
-      return { text: `Error: ${errMsg}`, thinking: undefined, hadToolCalls: false };
+      return { text: `Error: ${errMsg}`, thinking: undefined, hadToolCalls: false, isError: true };
     }
   }
 
@@ -588,6 +604,32 @@ export abstract class BaseAgent {
       workspacePath: null,
       createdAt: new Date().toISOString(),
     };
+  }
+
+  /** Prune conversation history to keep it within bounds */
+  protected pruneConversationHistory(maxMessages: number = 40): void {
+    if (this.conversationHistory.length <= maxMessages) return;
+
+    const keepRecent = 20;
+    const system = this.conversationHistory[0]; // system prompt
+    const recent = this.conversationHistory.slice(-keepRecent);
+    const pruned = this.conversationHistory.slice(1, -keepRecent);
+
+    // Compress pruned messages into a summary
+    const summary = pruned
+      .map((m) => {
+        const content = typeof m.content === "string" ? m.content : JSON.stringify(m.content);
+        return `[${m.role}]: ${content.slice(0, 150)}`;
+      })
+      .join("\n");
+
+    this.conversationHistory = [
+      system,
+      { role: "system", content: `[History summary — ${pruned.length} older messages condensed]\n${summary}` },
+      ...recent,
+    ];
+
+    console.log(`[Agent ${this.id}] Pruned conversation history: ${pruned.length + keepRecent + 1} → ${this.conversationHistory.length} messages`);
   }
 
   /** Reset conversation history to just the system prompt */
