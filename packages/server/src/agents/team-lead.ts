@@ -826,7 +826,7 @@ export class TeamLead extends BaseAgent {
           description: z.string().optional().describe("Detailed task description"),
           column: z.enum(["backlog", "in_progress", "done"]).optional().describe("Column to place the task in (default: backlog)"),
           labels: z.array(z.string()).optional().describe("Labels/tags for the task"),
-          blockedBy: z.array(z.string()).optional().describe("Task IDs that must complete before this task can start"),
+          blockedBy: z.array(z.string()).optional().describe("Actual task IDs (from create_task results) that must complete before this task can start. Do NOT use symbolic names like 'task-1'."),
         }),
         execute: async ({ title, description, column, labels, blockedBy }) => {
           return this.createKanbanTask(title, description, column, labels, blockedBy);
@@ -859,13 +859,13 @@ export class TeamLead extends BaseAgent {
         },
       }),
       list_tasks: tool({
-        description: "List all kanban tasks for this project. Only call once — repeated calls return the same data.",
+        description: "List all kanban tasks for this project. Only call once per cycle — repeated calls return nothing.",
         parameters: z.object({}),
         execute: async () => {
           const count = (this._toolCallCounts.get("list_tasks") ?? 0) + 1;
           this._toolCallCounts.set("list_tasks", count);
           if (count > 1) {
-            return "STOP.";
+            return "";  // Empty response — already listed
           }
           const result = this.listKanbanTasks();
           const board = this.getKanbanBoardState();
@@ -1123,12 +1123,29 @@ export class TeamLead extends BaseAgent {
     const now = new Date().toISOString();
     const col = (column ?? "backlog") as "backlog" | "in_progress" | "done";
 
-    // Get max position in column
+    // Get existing tasks for position and blockedBy validation
     const existing = db
       .select()
       .from(schema.kanbanTasks)
       .where(eq(schema.kanbanTasks.projectId, this.projectId))
       .all();
+
+    // Validate blockedBy IDs — reject symbolic names like "task-1"
+    if (blockedBy && blockedBy.length > 0) {
+      const existingIds = new Set(existing.map((t) => t.id));
+      const invalid = blockedBy.filter((id) => !existingIds.has(id));
+      if (invalid.length > 0) {
+        // Build a lookup of existing tasks for the error message
+        const taskList = existing.map((t) => `  "${t.title}" → ${t.id}`).join("\n");
+        return (
+          `ERROR: blockedBy contains invalid task IDs: ${invalid.join(", ")}. ` +
+          `You must use the actual task IDs returned by create_task (the string in parentheses), ` +
+          `NOT symbolic names like "task-1". Existing tasks:\n${taskList}\n` +
+          `Re-create this task with the correct blockedBy IDs.`
+        );
+      }
+    }
+
     const colTasks = existing.filter((t) => t.column === col);
     const maxPos = colTasks.reduce((max, t) => Math.max(max, t.position), -1);
 
@@ -1150,7 +1167,7 @@ export class TeamLead extends BaseAgent {
 
     this.onKanbanChange?.("created", task as unknown as KanbanTask);
     const blockedInfo = blockedBy?.length ? ` (blocked by: ${blockedBy.join(", ")})` : "";
-    return `Task "${title}" created (${taskId}) in ${col}.${blockedInfo}`;
+    return `Created task ID=${taskId} — "${title}" in ${col}.${blockedInfo} Use ID "${taskId}" when referencing this task in blockedBy.`;
   }
 
   private updateKanbanTask(
