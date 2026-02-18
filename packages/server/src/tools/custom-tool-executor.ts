@@ -4,7 +4,10 @@ import type { CustomTool } from "@otterbot/shared";
 /**
  * Execute a custom tool's JavaScript code in a sandboxed VM context.
  * The code receives a `params` object and must return a string.
- * Available globals: fetch, JSON, Math, Date, console.log, URL, URLSearchParams.
+ * Available globals: fetch, JSON, Math, Date, console.log, URL, URLSearchParams,
+ * TextEncoder, TextDecoder, atob, btoa, setTimeout, setInterval, clearTimeout,
+ * clearInterval, crypto.randomUUID, encodeURIComponent, decodeURIComponent,
+ * AbortController, Headers, structuredClone.
  * No access to: fs, child_process, require, process, Buffer, etc.
  */
 export async function executeCustomTool(
@@ -26,6 +29,27 @@ export async function executeCustomTool(
         logs.push(args.map((a) => (typeof a === "string" ? a : JSON.stringify(a))).join(" "));
       },
     },
+    // Text encoding/decoding
+    TextEncoder,
+    TextDecoder,
+    // Base64
+    atob,
+    btoa,
+    // Timers
+    setTimeout,
+    setInterval,
+    clearTimeout,
+    clearInterval,
+    // Crypto (limited to randomUUID)
+    crypto: { randomUUID: () => globalThis.crypto.randomUUID() },
+    // URL encoding
+    encodeURIComponent,
+    decodeURIComponent,
+    // Fetch helpers
+    AbortController,
+    Headers,
+    // Deep cloning
+    structuredClone,
     // Provide a way to set the result from async code
     __result: undefined as string | undefined,
   };

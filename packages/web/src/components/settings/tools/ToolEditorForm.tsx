@@ -1,3 +1,7 @@
+import { useState } from "react";
+import { ToolExamples } from "./ToolExamples";
+import type { ToolExample } from "../../../stores/tools-store";
+
 interface ToolParameter {
   name: string;
   type: "string" | "number" | "boolean";
@@ -30,6 +34,8 @@ export function ToolEditorForm({
   onCodeChange,
   onTimeoutChange,
 }: ToolEditorFormProps) {
+  const [showExamples, setShowExamples] = useState(false);
+
   const addParameter = () => {
     onParametersChange([...parameters, { name: "", type: "string", required: true, description: "" }]);
   };
@@ -44,8 +50,32 @@ export function ToolEditorForm({
     );
   };
 
+  const handleExampleSelect = (example: ToolExample) => {
+    onNameChange(example.name);
+    onDescriptionChange(example.description);
+    onParametersChange([...example.parameters]);
+    onCodeChange(example.code);
+    onTimeoutChange(example.timeout);
+    setShowExamples(false);
+  };
+
   return (
     <div className="space-y-4">
+      {/* Load Example */}
+      <div>
+        <button
+          onClick={() => setShowExamples(!showExamples)}
+          className="text-xs text-primary hover:text-primary/80 transition-colors"
+        >
+          {showExamples ? "Hide Examples" : "Load Example"}
+        </button>
+        {showExamples && (
+          <div className="mt-2">
+            <ToolExamples onSelect={handleExampleSelect} onClose={() => setShowExamples(false)} />
+          </div>
+        )}
+      </div>
+
       {/* Name */}
       <div>
         <label className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1 block">
@@ -143,7 +173,8 @@ export function ToolEditorForm({
         </label>
         <p className="text-[10px] text-muted-foreground mb-1">
           Async function body. Receives <code className="font-mono">params</code> object. Must return a string.
-          Available globals: fetch, JSON, Math, Date, console.log.
+          Available globals: fetch, Headers, AbortController, JSON, Math, Date, URL, URLSearchParams,
+          TextEncoder/Decoder, atob/btoa, setTimeout/setInterval, crypto.randomUUID(), structuredClone, console.log.
         </p>
         <textarea
           value={code}

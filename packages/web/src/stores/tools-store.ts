@@ -8,14 +8,30 @@ interface ToolMeta {
   category?: string;
 }
 
+export interface ToolExample {
+  name: string;
+  description: string;
+  category: string;
+  parameters: Array<{
+    name: string;
+    type: "string" | "number" | "boolean";
+    required: boolean;
+    description: string;
+  }>;
+  code: string;
+  timeout: number;
+}
+
 interface ToolsState {
   customTools: CustomTool[];
   builtInTools: string[];
   toolMeta: Record<string, ToolMeta>;
+  examples: ToolExample[];
   loading: boolean;
   error: string | null;
 
   loadTools: () => Promise<void>;
+  loadExamples: () => Promise<void>;
   getCustomTool: (id: string) => Promise<CustomTool | null>;
   createTool: (data: CustomToolCreate) => Promise<CustomTool | null>;
   updateTool: (id: string, data: CustomToolUpdate) => Promise<CustomTool | null>;
@@ -28,8 +44,20 @@ export const useToolsStore = create<ToolsState>((set, get) => ({
   customTools: [],
   builtInTools: [],
   toolMeta: {},
+  examples: [],
   loading: false,
   error: null,
+
+  loadExamples: async () => {
+    try {
+      const res = await fetch("/api/tools/examples");
+      if (!res.ok) return;
+      const data = await res.json();
+      set({ examples: data });
+    } catch {
+      // silently ignore — examples are optional
+    }
+  },
 
   loadTools: async () => {
     set({ loading: true, error: null });
