@@ -131,6 +131,7 @@ export const kanbanTasks = sqliteTable("kanban_tasks", {
     .$type<string[]>()
     .notNull()
     .default([]),
+  retryCount: integer("retry_count").notNull().default(0),
   completionReport: text("completion_report"),
   createdAt: text("created_at")
     .notNull()

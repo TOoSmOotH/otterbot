@@ -1229,7 +1229,16 @@ The user can see everything on the desktop in real-time.`;
       .where(eq(schema.kanbanTasks.projectId, project.id))
       .all();
 
-    const directive = this.buildRecoveryDirective(project, tasks);
+    // Query recent agent activity for richer recovery context
+    const recentActivity = db
+      .select()
+      .from(schema.agentActivity)
+      .where(eq(schema.agentActivity.projectId, project.id))
+      .all()
+      .filter((a) => a.type === "response")
+      .slice(-10);
+
+    const directive = this.buildRecoveryDirective(project, tasks, recentActivity);
     this.sendMessage(teamLead.id, MessageType.Directive, directive, {
       projectId: project.id,
       projectName: project.name,
@@ -1245,6 +1254,11 @@ The user can see everything on the desktop in real-time.`;
       column: string;
       blockedBy: string[];
       completionReport: string | null;
+    }>,
+    recentActivity?: Array<{
+      agentId: string;
+      content: string;
+      timestamp: string;
     }>,
   ): string {
     const lines: string[] = [
@@ -1268,9 +1282,20 @@ The user can see everything on the desktop in real-time.`;
         lines.push(`BACKLOG (${backlog.length}):`);
         for (const t of backlog) {
           const blocked = t.blockedBy.length > 0 ? ` [blockedBy: ${t.blockedBy.join(", ")}]` : "";
-          lines.push(`  - ${t.title} (${t.id})${blocked}`);
+          const retryCount = (t as any).retryCount ?? 0;
+          const retryTag = retryCount > 0 ? ` [retry ${retryCount}/3]` : "";
+          lines.push(`  - ${t.title} (${t.id})${blocked}${retryTag}`);
           if (t.description) {
-            lines.push(`    ${t.description.slice(0, 200)}${t.description.length > 200 ? "..." : ""}`);
+            // Show full description up to 500 chars (increased from 200)
+            lines.push(`    ${t.description.slice(0, 500)}${t.description.length > 500 ? "..." : ""}`);
+          }
+          // Include full PREVIOUS ATTEMPT FAILED blocks for context
+          if (t.description && t.description.includes("PREVIOUS ATTEMPT FAILED")) {
+            const failBlock = t.description.slice(t.description.lastIndexOf("--- PREVIOUS ATTEMPT FAILED ---"));
+            if (failBlock.length > 500) {
+              // Only add the extra block if it wasn't already covered by the description above
+              lines.push(`    ${failBlock}`);
+            }
           }
         }
       }
@@ -1283,12 +1308,22 @@ The user can see everything on the desktop in real-time.`;
       }
     }
 
-    // Include completion reports from done tasks
+    // Include completion reports from done tasks (increased from 300 to 1500 chars)
     const reports = tasks.filter((t) => t.completionReport);
     if (reports.length > 0) {
       lines.push("", "COMPLETED TASK REPORTS:");
       for (const t of reports) {
-        lines.push(`  "${t.title}": ${t.completionReport!.slice(0, 300)}${t.completionReport!.length > 300 ? "..." : ""}`);
+        lines.push(`  "${t.title}": ${t.completionReport!.slice(0, 1500)}${t.completionReport!.length > 1500 ? "..." : ""}`);
+      }
+    }
+
+    // Include recent agent activity for approach/methodology context
+    if (recentActivity && recentActivity.length > 0) {
+      lines.push("", "RECENT AGENT ACTIVITY (last responses before restart):");
+      for (const a of recentActivity) {
+        const snippet = a.content.slice(0, 300);
+        const truncated = a.content.length > 300 ? "..." : "";
+        lines.push(`  [${a.timestamp}] Agent ${a.agentId.slice(0, 8)}: ${snippet}${truncated}`);
       }
     }
 
