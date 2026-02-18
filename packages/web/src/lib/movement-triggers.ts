@@ -89,17 +89,9 @@ export function processAgentMovement(agent: Agent, prevStatus?: string) {
     return;
   }
 
-  // Status change within same zone: move between center and desk
-  if (prevStatus && prevStatus !== agent.status) {
-    const prevTag = getTargetTag(prevStatus);
-    if (prevTag !== targetTag) {
-      const fromWps = findWaypointsByZoneAndTag(graph, targetZoneId, prevTag);
-      const toWps = findWaypointsByZoneAndTag(graph, targetZoneId, targetTag);
-      if (fromWps.length > 0 && toWps.length > 0) {
-        triggerMovement(agent.id, graph, fromWps[0].id, toWps[0].id);
-      }
-    }
-  }
+  // Within-zone status changes (center ↔ desk) are handled by AgentCharacter's
+  // smooth lerp to the correct static position computed by LiveViewScene.
+  // Pathfinding here would require replicating the per-agent desk index assignment.
 
   // Track agent zone
   agentZoneMap.set(agent.id, targetZoneId);
