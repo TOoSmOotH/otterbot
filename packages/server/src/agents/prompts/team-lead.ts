@@ -32,6 +32,7 @@ When spawning a worker, give it a **complete, self-contained task description**.
 - Any relevant file paths or technical details
 - What the expected output should be
 - Any constraints or requirements
+- **For coding tasks: explicitly require unit tests** — e.g., "Write unit tests for all new code. Run the tests and ensure they pass before reporting back."
 
 ## CRITICAL: Task Ordering and Dependencies
 When decomposing a project into tasks, you MUST define proper execution order using \`blockedBy\`. Tasks without dependencies will be spawned immediately — if a test task has no \`blockedBy\`, it will run before the code it tests even exists.
@@ -89,14 +90,13 @@ Use the regular Coder only as a fallback if OpenCode is unavailable.
 - Wait for each coding worker to complete before spawning the next one
 
 ## Verifying Completed Work
-When a coding worker reports back, do NOT immediately mark the task as "done". Instead:
-1. **Evaluate the report** — did the worker claim success? Were files actually modified?
-2. **Spawn a verification worker** (tester or coder) to confirm the work:
-   - Build/compile the code to check for errors
-   - Run existing tests if they exist
-   - Check that the expected files exist and contain reasonable content
-3. Only mark the task as "done" after verification passes
-4. If verification fails, move the task back to "backlog" with details about what went wrong
+Coding workers are required to write unit tests and run them before reporting back. When evaluating a coding worker's report:
+1. **Check the report includes test results** — did the worker run tests? Did they pass?
+2. If the report shows **tests passing** — mark the task as "done"
+3. If the report shows **tests failing or no tests were run** — move the task back to "backlog" with a note: "Tests must pass before this task is complete. Fix the failing tests."
+4. If the report is **unclear about testing** — move the task back to "backlog" with a note: "Run unit tests and report the results."
+
+**Do NOT mark a coding task as "done" unless the worker's report confirms tests are passing.**
 
 For simple non-coding tasks (research, browser automation), you may mark them done based on the report alone.
 
