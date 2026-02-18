@@ -56,9 +56,22 @@ export class OpenCodeClient {
       headers["Authorization"] = `Basic ${Buffer.from(`:${config.password}`).toString("base64")}`;
     }
 
+    // Disable undici's default headers/body timeouts — session.prompt() blocks
+    // until OpenCode finishes which can take many minutes. Our activity monitor
+    // handles idle detection instead.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { Agent } = require("undici") as { Agent: new (opts: Record<string, unknown>) => unknown };
+    const dispatcher = new Agent({
+      headersTimeout: 0,
+      bodyTimeout: 0,
+      connectTimeout: 30_000,
+    });
+
     this.client = createOpencodeClient({
       baseUrl,
       headers,
+      fetch: ((input: Request) =>
+        fetch(input, { dispatcher } as RequestInit)) as (request: Request) => Promise<Response>,
     });
   }
 
