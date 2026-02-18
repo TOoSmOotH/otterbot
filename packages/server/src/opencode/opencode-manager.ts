@@ -25,8 +25,11 @@ const PROVIDER_TYPE_MAP: Record<string, string> = {
   openai: "openai",
   ollama: "ollama",
   openrouter: "openrouter",
-  "openai-compatible": "openai",
+  "openai-compatible": "custom",
 };
+
+/** Provider types that need the @ai-sdk/openai-compatible npm adapter in OpenCode */
+const NEEDS_COMPAT_ADAPTER = new Set(["ollama", "openai-compatible"]);
 
 // ---------------------------------------------------------------------------
 // Config writer
@@ -43,7 +46,13 @@ export function writeOpenCodeConfig(opts: OpenCodeConfigOptions): void {
   const configDir = join(homedir(), ".config", "opencode");
   mkdirSync(configDir, { recursive: true });
 
-  const openCodeProvider = PROVIDER_TYPE_MAP[opts.providerType] ?? "openai";
+  let openCodeProvider = PROVIDER_TYPE_MAP[opts.providerType] ?? "custom";
+
+  // If "openai" provider has a custom base URL, it's actually openai-compatible
+  // and needs the compat adapter to avoid model validation against OpenAI's list
+  if (openCodeProvider === "openai" && opts.baseUrl) {
+    openCodeProvider = "custom";
+  }
 
   // Build provider options — use env var reference to avoid writing raw keys to disk
   const providerOptions: Record<string, unknown> = {};
@@ -54,11 +63,13 @@ export function writeOpenCodeConfig(opts: OpenCodeConfigOptions): void {
     providerOptions.baseURL = opts.baseUrl;
   }
 
-  // For ollama, use the openai-compatible SDK adapter
   const providerEntry: Record<string, unknown> = {
     options: providerOptions,
   };
-  if (openCodeProvider === "ollama") {
+
+  // Use the openai-compatible SDK adapter for ollama, openai-compatible,
+  // and any provider with a custom base URL
+  if (NEEDS_COMPAT_ADAPTER.has(opts.providerType) || opts.baseUrl) {
     providerEntry.npm = "@ai-sdk/openai-compatible";
   }
 
