@@ -489,12 +489,23 @@ export class TeamLead extends BaseAgent {
       `[KANBAN BOARD]\n${board.summary}\n[/KANBAN BOARD]\n\n` +
       instructions;
 
-    const { text } = await this.thinkWithContinuation(
-      summary,
-      (token, messageId) => this.onAgentStream?.(this.id, token, messageId),
-      (token, messageId) => this.onAgentThinking?.(this.id, token, messageId),
-      (messageId) => this.onAgentThinkingEnd?.(this.id, messageId),
-    );
+    // When all tasks are done, use a single think() — there's no backlog to
+    // continue on, so thinkWithContinuation would just loop the LLM pointlessly.
+    const useSimpleThink = board.allDone && orphans.length === 0;
+
+    const { text } = useSimpleThink
+      ? await this.think(
+          summary,
+          (token, messageId) => this.onAgentStream?.(this.id, token, messageId),
+          (token, messageId) => this.onAgentThinking?.(this.id, token, messageId),
+          (messageId) => this.onAgentThinkingEnd?.(this.id, messageId),
+        )
+      : await this.thinkWithContinuation(
+          summary,
+          (token, messageId) => this.onAgentStream?.(this.id, token, messageId),
+          (token, messageId) => this.onAgentThinking?.(this.id, token, messageId),
+          (messageId) => this.onAgentThinkingEnd?.(this.id, messageId),
+        );
 
     // Safety net: if the LLM didn't move the task, force-move it
     let forceMoved = false;
@@ -657,6 +668,12 @@ export class TeamLead extends BaseAgent {
         board.doneCount === prevBoard.doneCount
       ) {
         console.warn(`[TeamLead ${this.id}] Stale state detected — board unchanged after cycle. Breaking continuation loop.`);
+        break;
+      }
+
+      // If everything is done, stop — no point looping when there's nothing to spawn
+      if (board.allDone) {
+        console.log(`[TeamLead ${this.id}] All tasks done — exiting continuation loop.`);
         break;
       }
 

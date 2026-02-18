@@ -324,6 +324,7 @@ export abstract class BaseAgent {
     const iterator = result.fullStream[Symbol.asyncIterator]();
     const FIRST_CHUNK_TIMEOUT = 30_000;
     const CHUNK_TIMEOUT = 120_000; // 2 min per-chunk timeout for slow models
+    const TOOL_EXEC_TIMEOUT = 25 * 60_000; // 25 min for long-running tool calls (e.g. opencode_task)
 
     const nextWithTimeout = (timeoutMs: number) =>
       Promise.race([
@@ -344,6 +345,8 @@ export abstract class BaseAgent {
     // Track whether we've entered Kimi tool-call markup so we can
     // suppress streaming those tokens to the user.
     let kimiMarkupDetected = false;
+    // Track pending tool calls — use longer timeout while tools are executing
+    let pendingToolCalls = 0;
 
     // Process first part
     const processPart = (part: any) => {
@@ -378,6 +381,7 @@ export abstract class BaseAgent {
         // If kimiMarkupDetected, swallow the token (don't forward to onToken)
       } else if (part.type === "tool-call") {
         hadToolCalls = true;
+        pendingToolCalls++;
         console.log(`[Agent ${this.id}] Tool call: ${part.toolName}(${JSON.stringify(part.args ?? {}).slice(0, 200)})`);
         this.onAgentToolCall?.(this.id, part.toolName, (part.args ?? {}) as Record<string, unknown>);
         this.persistActivity("tool_call", JSON.stringify(part.args ?? {}), {
@@ -385,6 +389,7 @@ export abstract class BaseAgent {
           args: part.args ?? {},
         }, messageId);
       } else if (part.type === "tool-result") {
+        pendingToolCalls = Math.max(0, pendingToolCalls - 1);
         const resultStr = typeof part.result === "string" ? part.result : JSON.stringify(part.result ?? "");
         console.log(`[Agent ${this.id}] Tool result (${part.toolName}): ${resultStr.slice(0, 300)}`);
       }
@@ -392,9 +397,10 @@ export abstract class BaseAgent {
 
     processPart(first.value);
 
-    // Process remaining parts with per-chunk timeout
+    // Process remaining parts — use longer timeout while tools are executing
     while (true) {
-      const next = await nextWithTimeout(CHUNK_TIMEOUT);
+      const timeout = pendingToolCalls > 0 ? TOOL_EXEC_TIMEOUT : CHUNK_TIMEOUT;
+      const next = await nextWithTimeout(timeout);
       if (next.done) break;
       processPart(next.value);
     }
