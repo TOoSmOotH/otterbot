@@ -82,6 +82,8 @@ export function writeOpenCodeConfig(opts: OpenCodeConfigOptions): void {
       [openCodeProvider]: providerEntry,
     },
     model: `${openCodeProvider}/${opts.model}`,
+    // Auto-approve all permission prompts — OpenCode runs autonomously as a tool
+    permission: "allow",
     server: {
       port: 4096,
       hostname: "127.0.0.1",
