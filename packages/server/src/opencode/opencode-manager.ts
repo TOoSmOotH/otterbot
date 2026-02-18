@@ -9,7 +9,7 @@
  */
 
 import { spawn, type ChildProcess } from "node:child_process";
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { getConfig, setConfig } from "../auth/auth.js";
@@ -69,8 +69,11 @@ export function writeOpenCodeConfig(opts: OpenCodeConfigOptions): void {
 
   // Use the openai-compatible SDK adapter for ollama, openai-compatible,
   // and any provider with a custom base URL
-  if (NEEDS_COMPAT_ADAPTER.has(opts.providerType) || opts.baseUrl) {
+  const needsCompat = NEEDS_COMPAT_ADAPTER.has(opts.providerType) || opts.baseUrl;
+  if (needsCompat) {
     providerEntry.npm = "@ai-sdk/openai-compatible";
+    // Custom/compat providers must explicitly register their models
+    providerEntry.models = { [opts.model]: {} };
   }
 
   const config: Record<string, unknown> = {
@@ -155,8 +158,6 @@ function isManagedMode(): boolean {
  * Auto-generates them from stored settings or COO provider if missing.
  */
 function ensureConfigAndCredentials(): boolean {
-  const configPath = join(homedir(), ".config", "opencode", "opencode.json");
-
   // Ensure auth credentials exist
   if (!getConfig("opencode:username")) {
     const username = nanoid(32);
@@ -171,24 +172,22 @@ function ensureConfigAndCredentials(): boolean {
     setConfig("opencode:api_url", "http://127.0.0.1:4096");
   }
 
-  // Ensure config file exists
-  if (!existsSync(configPath)) {
-    const model = getConfig("opencode:model") ?? getConfig("coo_model");
-    if (!model) {
-      console.warn("[OpenCode] No model configured — cannot write config file.");
-      return false;
-    }
-
-    const { apiKey, providerType, baseUrl } = resolveProviderInfo();
-    const effectiveProviderType = getConfig("opencode:provider_type") ?? providerType ?? "anthropic";
-
-    writeOpenCodeConfig({
-      providerType: effectiveProviderType,
-      model,
-      apiKey,
-      baseUrl,
-    });
+  // Always (re)write config file to pick up provider/model changes and fixes
+  const model = getConfig("opencode:model") ?? getConfig("coo_model");
+  if (!model) {
+    console.warn("[OpenCode] No model configured — cannot write config file.");
+    return false;
   }
+
+  const { apiKey, providerType, baseUrl } = resolveProviderInfo();
+  const effectiveProviderType = getConfig("opencode:provider_type") ?? providerType ?? "anthropic";
+
+  writeOpenCodeConfig({
+    providerType: effectiveProviderType,
+    model,
+    apiKey,
+    baseUrl,
+  });
 
   return true;
 }
