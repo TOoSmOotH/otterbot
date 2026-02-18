@@ -59,7 +59,14 @@ export function createOpenCodeTaskTool(ctx: ToolContext) {
       });
 
       try {
-        const result = await client.executeTask(task);
+        // Inject workspace path so OpenCode creates files in the correct location
+        const taskWithContext = ctx.workspacePath
+          ? `IMPORTANT: All files must be created/edited inside this directory: ${ctx.workspacePath}\n` +
+            `Use absolute paths rooted at ${ctx.workspacePath} (e.g. ${ctx.workspacePath}/src/main.go).\n` +
+            `Do NOT use /home/user, /app, or any other directory.\n\n${task}`
+          : task;
+
+        const result = await client.executeTask(taskWithContext);
 
         if (!result.success) {
           return `OpenCode task failed: ${result.summary}`;
