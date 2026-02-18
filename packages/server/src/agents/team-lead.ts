@@ -613,6 +613,16 @@ export class TeamLead extends BaseAgent {
       // Continue only if there's unblocked backlog work
       if (!board.hasUnblockedBacklog) break;
 
+      // If a coding worker is already running, don't continue just for coding tasks
+      // that would be refused anyway — this prevents the spam-retry loop
+      const hasCodingWorkerRunning = [...this.workers.values()].some(
+        (w) => w.registryEntryId === "builtin-opencode-coder" || w.registryEntryId === "builtin-coder",
+      );
+      if (hasCodingWorkerRunning && board.hasInProgress) {
+        console.log(`[TeamLead ${this.id}] Coding worker running with tasks in progress — waiting for reports.`);
+        break;
+      }
+
       const prompt =
         `[CONTINUATION] ${board.unblockedBacklogCount} unblocked task(s) remain in backlog:\n${board.summary}\n\n` +
         `Spawn workers for unblocked backlog tasks. Do NOT spawn workers for [BLOCKED] tasks — they will become available when their blockers complete. ` +
@@ -869,7 +879,7 @@ export class TeamLead extends BaseAgent {
             console.warn(
               `[TeamLead ${this.id}] Refused to spawn coding worker — another coding worker (${existingId}) is already running. Use blockedBy to sequence coding tasks.`,
             );
-            return `REFUSED: Another coding worker (${existingId}) is already running. Only one coding worker can run at a time to avoid file conflicts. Use \`blockedBy\` when creating tasks to sequence coding work, or wait for the current coding worker to finish before spawning another.`;
+            return `REFUSED: Another coding worker (${existingId}) is already running. Only one coding worker can run at a time to avoid file conflicts. STOP trying to spawn coding workers — you will be notified when the current one finishes. Do NOT call spawn_worker again until you receive a worker report.`;
           }
         }
       }
