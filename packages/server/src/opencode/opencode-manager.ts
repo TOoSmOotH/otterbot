@@ -45,22 +45,29 @@ export function writeOpenCodeConfig(opts: OpenCodeConfigOptions): void {
 
   const openCodeProvider = PROVIDER_TYPE_MAP[opts.providerType] ?? "openai";
 
-  // Build provider config — use env var reference to avoid writing raw keys to disk
-  const providerConfig: Record<string, unknown> = {};
+  // Build provider options — use env var reference to avoid writing raw keys to disk
+  const providerOptions: Record<string, unknown> = {};
   if (opts.apiKey) {
-    providerConfig.apiKey = "{env:OPENCODE_PROVIDER_API_KEY}";
+    providerOptions.apiKey = "{env:OPENCODE_PROVIDER_API_KEY}";
   }
   if (opts.baseUrl) {
-    providerConfig.baseUrl = opts.baseUrl;
+    providerOptions.baseURL = opts.baseUrl;
   }
 
-  const config = {
+  // For ollama, use the openai-compatible SDK adapter
+  const providerEntry: Record<string, unknown> = {
+    options: providerOptions,
+  };
+  if (openCodeProvider === "ollama") {
+    providerEntry.npm = "@ai-sdk/openai-compatible";
+  }
+
+  const config: Record<string, unknown> = {
+    $schema: "https://opencode.ai/config.json",
     provider: {
-      [openCodeProvider]: providerConfig,
+      [openCodeProvider]: providerEntry,
     },
-    model: {
-      default: `${openCodeProvider}/${opts.model}`,
-    },
+    model: `${openCodeProvider}/${opts.model}`,
     server: {
       port: 4096,
       hostname: "127.0.0.1",
