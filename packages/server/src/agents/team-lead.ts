@@ -797,12 +797,24 @@ export class TeamLead extends BaseAgent {
       return `No agents found with capability "${capability}".`;
     }
 
-    return matches
+    let result = matches
       .map(
         (e) =>
           `- ${e.name} (${e.id}): ${e.description} [capabilities: ${e.capabilities.join(", ")}]`,
       )
       .join("\n");
+
+    // If OpenCode is enabled and the search matches coding capabilities, recommend OpenCode Coder
+    const codingKeywords = ["code", "coding", "programming", "develop", "implement", "refactor", "software"];
+    const isCodingSearch = codingKeywords.some((kw) => capability.toLowerCase().includes(kw));
+    const hasOpenCodeCoder = matches.some((e) => e.id === "builtin-opencode-coder");
+    const openCodeEnabled = getConfig("opencode:enabled") === "true";
+
+    if (isCodingSearch && hasOpenCodeCoder && openCodeEnabled) {
+      result += `\n\n**RECOMMENDATION:** Use "OpenCode Coder" (builtin-opencode-coder) for coding tasks. It delegates to a dedicated autonomous coding agent with superior multi-file editing. Only use the regular "Coder" for very simple single-file changes.`;
+    }
+
+    return result;
   }
 
   private async spawnWorker(

@@ -35,6 +35,11 @@ interface AuthState {
     adminName: string;
     adminModelPackId?: string;
     adminGearConfig?: Record<string, boolean> | null;
+    openCodeEnabled?: boolean;
+    openCodeProvider?: string;
+    openCodeModel?: string;
+    openCodeApiKey?: string;
+    openCodeBaseUrl?: string;
   }) => Promise<boolean>;
   logout: () => Promise<void>;
   setError: (error: string | null) => void;

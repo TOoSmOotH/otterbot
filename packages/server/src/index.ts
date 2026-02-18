@@ -130,6 +130,7 @@ import {
   type TierDefaults,
 } from "./settings/settings.js";
 import type { ProviderType } from "@otterbot/shared";
+import { writeOpenCodeConfig, startOpenCodeServer, stopOpenCodeServer } from "./opencode/opencode-manager.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -462,6 +463,7 @@ async function main() {
 
   if (isSetupComplete()) {
     startCoo();
+    startOpenCodeServer();
   } else {
     console.log("Setup not complete. Waiting for setup wizard...");
   }
@@ -618,6 +620,11 @@ async function main() {
       adminName: string;
       adminModelPackId?: string;
       adminGearConfig?: Record<string, boolean> | null;
+      openCodeEnabled?: boolean;
+      openCodeProvider?: string;
+      openCodeModel?: string;
+      openCodeApiKey?: string;
+      openCodeBaseUrl?: string;
     };
   }>("/api/setup/complete", async (req, reply) => {
     if (isSetupComplete()) {
@@ -630,7 +637,7 @@ async function main() {
       return { error: "Passphrase not set. Start setup from the beginning." };
     }
 
-    const { provider, providerName, model, apiKey, baseUrl, userName, userAvatar, userBio, userTimezone, ttsVoice, ttsProvider, userModelPackId, userGearConfig, cooName, cooModelPackId, cooGearConfig, searchProvider, searchApiKey, searchBaseUrl, adminName, adminModelPackId, adminGearConfig } = req.body;
+    const { provider, providerName, model, apiKey, baseUrl, userName, userAvatar, userBio, userTimezone, ttsVoice, ttsProvider, userModelPackId, userGearConfig, cooName, cooModelPackId, cooGearConfig, searchProvider, searchApiKey, searchBaseUrl, adminName, adminModelPackId, adminGearConfig, openCodeEnabled, openCodeProvider, openCodeModel, openCodeApiKey, openCodeBaseUrl } = req.body;
 
     if (!provider || !model) {
       reply.code(400);
@@ -722,7 +729,57 @@ async function main() {
       setConfig("admin_assistant_gear_config", JSON.stringify(adminGearConfig));
     }
 
+    // OpenCode coding agent config
+    if (openCodeEnabled && openCodeModel) {
+      const { nanoid: generateId } = await import("nanoid");
+
+      // Determine if we need a separate provider or reuse the COO's
+      let openCodeProviderType = provider;
+      let openCodeProviderApiKey = apiKey;
+      let openCodeProviderBaseUrl = baseUrl;
+      let openCodeProviderId = namedProvider.id;
+
+      if (openCodeProvider && openCodeProvider !== provider) {
+        // Create a new provider entry for OpenCode
+        openCodeProviderType = openCodeProvider;
+        openCodeProviderApiKey = openCodeApiKey;
+        openCodeProviderBaseUrl = openCodeBaseUrl;
+
+        const ocProvider = createProvider({
+          name: `OpenCode (${openCodeProvider})`,
+          type: openCodeProvider as ProviderType,
+          apiKey: openCodeApiKey,
+          baseUrl: openCodeBaseUrl,
+        });
+        openCodeProviderId = ocProvider.id;
+      }
+
+      // Generate random auth credentials for the local OpenCode server
+      const ocUsername = generateId(32);
+      const ocPassword = generateId(32);
+
+      // Write OpenCode config file
+      writeOpenCodeConfig({
+        providerType: openCodeProviderType,
+        model: openCodeModel,
+        apiKey: openCodeProviderApiKey,
+        baseUrl: openCodeProviderBaseUrl,
+      });
+
+      // Store OpenCode settings
+      setConfig("opencode:enabled", "true");
+      setConfig("opencode:api_url", "http://127.0.0.1:4096");
+      setConfig("opencode:username", ocUsername);
+      setConfig("opencode:password", ocPassword);
+      setConfig("opencode:timeout_ms", "300000");
+      setConfig("opencode:max_iterations", "200");
+      setConfig("opencode:model", openCodeModel);
+      setConfig("opencode:provider_type", openCodeProviderType);
+      setConfig("opencode:provider_id", openCodeProviderId);
+    }
+
     startCoo();
+    startOpenCodeServer();
 
     return { ok: true };
   });
@@ -2766,8 +2823,9 @@ Respond with ONLY a JSON object (no markdown, no explanation) with these fields:
   await app.listen({ port, host });
   console.log(`Otterbot server listening on https://${host}:${port}`);
 
-  // Graceful shutdown — close Playwright browser if running
+  // Graceful shutdown
   const shutdown = async () => {
+    stopOpenCodeServer();
     await closeBrowser();
     process.exit(0);
   };

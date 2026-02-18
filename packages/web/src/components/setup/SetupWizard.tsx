@@ -18,6 +18,18 @@ const SUGGESTED_MODELS: Record<string, string[]> = {
   "openai-compatible": [],
 };
 
+const CODING_SUGGESTED_MODELS: Record<string, string[]> = {
+  anthropic: ["claude-sonnet-4-5-20250929", "claude-opus-4-20250514"],
+  openai: ["gpt-4.1", "gpt-4o", "o3-mini"],
+  ollama: ["qwen2.5-coder", "codellama", "deepseek-coder-v2"],
+  openrouter: [
+    "anthropic/claude-sonnet-4-5-20250929",
+    "openai/gpt-4.1",
+    "deepseek/deepseek-coder",
+  ],
+  "openai-compatible": [],
+};
+
 const PROVIDER_DESCRIPTIONS: Record<string, string> = {
   anthropic: "Claude models from Anthropic. Requires an API key.",
   openai: "GPT models from OpenAI. Requires an API key.",
@@ -164,6 +176,20 @@ export function SetupWizard() {
   const [ttsApiKey, setTtsApiKey] = useState("");
   const [ttsBaseUrl, setTtsBaseUrl] = useState("");
 
+  // Step 8: OpenCode coding agent
+  const [openCodeEnabled, setOpenCodeEnabled] = useState(true);
+  const [openCodeUseSameProvider, setOpenCodeUseSameProvider] = useState(true);
+  const [openCodeProvider, setOpenCodeProvider] = useState("");
+  const [openCodeModel, setOpenCodeModel] = useState("");
+  const [openCodeApiKey, setOpenCodeApiKey] = useState("");
+  const [openCodeBaseUrl, setOpenCodeBaseUrl] = useState("");
+  const [openCodeFetchedModels, setOpenCodeFetchedModels] = useState<string[]>([]);
+  const [openCodeFetchingModels, setOpenCodeFetchingModels] = useState(false);
+  const openCodeProbeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [openCodeModelDropdownOpen, setOpenCodeModelDropdownOpen] = useState(false);
+  const [openCodeModelFilter, setOpenCodeModelFilter] = useState("");
+  const openCodeModelComboRef = useRef<HTMLDivElement>(null);
+
   const probeModels = useCallback(async (prov: string, key: string, url: string) => {
     const needsKey = NEEDS_API_KEY.has(prov);
     const needsUrl = NEEDS_BASE_URL.has(prov);
@@ -214,10 +240,68 @@ export function SetupWizard() {
       if (modelComboRef.current && !modelComboRef.current.contains(e.target as Node)) {
         setModelDropdownOpen(false);
       }
+      if (openCodeModelComboRef.current && !openCodeModelComboRef.current.contains(e.target as Node)) {
+        setOpenCodeModelDropdownOpen(false);
+      }
     };
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
+
+  // OpenCode model probing when credentials change
+  const effectiveOpenCodeProvider = openCodeUseSameProvider ? provider : openCodeProvider;
+  const effectiveOpenCodeApiKey = openCodeUseSameProvider ? apiKey : openCodeApiKey;
+  const effectiveOpenCodeBaseUrl = openCodeUseSameProvider ? baseUrl : openCodeBaseUrl;
+
+  useEffect(() => {
+    if (!effectiveOpenCodeProvider || !openCodeEnabled) return;
+
+    if (openCodeProbeTimerRef.current) clearTimeout(openCodeProbeTimerRef.current);
+    openCodeProbeTimerRef.current = setTimeout(async () => {
+      const needsKey = NEEDS_API_KEY.has(effectiveOpenCodeProvider);
+      const needsUrl = NEEDS_BASE_URL.has(effectiveOpenCodeProvider);
+      if (needsKey && !effectiveOpenCodeApiKey) return;
+      if (needsUrl && !effectiveOpenCodeBaseUrl) return;
+
+      setOpenCodeFetchingModels(true);
+      try {
+        const res = await fetch("/api/setup/probe-models", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            provider: effectiveOpenCodeProvider,
+            apiKey: effectiveOpenCodeApiKey || undefined,
+            baseUrl: effectiveOpenCodeBaseUrl || undefined,
+          }),
+        });
+        if (res.ok) {
+          const data = (await res.json()) as { models: string[] };
+          setOpenCodeFetchedModels(data.models);
+          if (data.models.length > 0) {
+            setOpenCodeModel((prev) => prev || data.models[0]);
+          }
+        }
+      } catch {
+        // Silently fail
+      } finally {
+        setOpenCodeFetchingModels(false);
+      }
+    }, 600);
+
+    return () => {
+      if (openCodeProbeTimerRef.current) clearTimeout(openCodeProbeTimerRef.current);
+    };
+  }, [effectiveOpenCodeProvider, effectiveOpenCodeApiKey, effectiveOpenCodeBaseUrl, openCodeEnabled]);
+
+  // Auto-set default coding model when "same provider" is used
+  useEffect(() => {
+    if (openCodeUseSameProvider && provider && !openCodeModel) {
+      const suggestions = CODING_SUGGESTED_MODELS[provider];
+      if (suggestions && suggestions.length > 0) {
+        setOpenCodeModel(suggestions[0]);
+      }
+    }
+  }, [openCodeUseSameProvider, provider, openCodeModel]);
 
   const handleSelectProvider = (id: string) => {
     setProvider(id);
@@ -329,9 +413,21 @@ export function SetupWizard() {
     setStep(7);
   };
 
+  const handleNextToOpenCode = () => {
+    setError(null);
+    // Auto-set default coding model if using same provider and no model selected
+    if (openCodeUseSameProvider && provider && !openCodeModel) {
+      const suggestions = CODING_SUGGESTED_MODELS[provider];
+      if (suggestions && suggestions.length > 0) {
+        setOpenCodeModel(suggestions[0]);
+      }
+    }
+    setStep(8);
+  };
+
   const handleNextToVoice = () => {
     setError(null);
-    setStep(8);
+    setStep(9);
   };
 
   const handleComplete = async () => {
@@ -359,6 +455,17 @@ export function SetupWizard() {
       adminName: adminName.trim(),
       adminModelPackId: adminModelPackId || undefined,
       adminGearConfig: adminGearConfig || undefined,
+      openCodeEnabled: openCodeEnabled || undefined,
+      openCodeProvider: openCodeEnabled
+        ? (openCodeUseSameProvider ? provider : openCodeProvider) || undefined
+        : undefined,
+      openCodeModel: openCodeEnabled ? openCodeModel || undefined : undefined,
+      openCodeApiKey: openCodeEnabled && !openCodeUseSameProvider
+        ? openCodeApiKey || undefined
+        : undefined,
+      openCodeBaseUrl: openCodeEnabled && !openCodeUseSameProvider
+        ? openCodeBaseUrl || undefined
+        : undefined,
     });
     setSubmitting(false);
   };
@@ -422,7 +529,7 @@ export function SetupWizard() {
 
           {/* Step indicator */}
           <div className="flex items-center justify-center gap-2 mb-6">
-            {[1, 2, 3, 4, 5, 6, 7, 8].map((s, i) => (
+            {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((s, i) => (
               <div key={s} className="flex items-center gap-2">
                 {i > 0 && (
                   <div className={`w-6 h-px ${step >= s ? "bg-primary" : "bg-muted"}`} />
@@ -1099,7 +1206,7 @@ export function SetupWizard() {
                   Back
                 </button>
                 <button
-                  onClick={handleNextToVoice}
+                  onClick={handleNextToOpenCode}
                   className="flex-1 px-4 py-2 bg-primary text-primary-foreground text-sm font-medium rounded-md hover:bg-primary/90 transition-colors"
                 >
                   Next
@@ -1109,7 +1216,7 @@ export function SetupWizard() {
               <button
                 onClick={() => {
                   setSearchProvider("");
-                  handleNextToVoice();
+                  handleNextToOpenCode();
                 }}
                 className="w-full text-xs text-muted-foreground hover:text-foreground transition-colors"
               >
@@ -1121,7 +1228,246 @@ export function SetupWizard() {
           {step === 8 && (
             <div className="space-y-4">
               <h2 className="text-sm font-medium">
-                8. Choose a voice for your assistant
+                8. Configure OpenCode coding agent
+              </h2>
+              <p className="text-xs text-muted-foreground">
+                OpenCode is an autonomous coding agent that handles multi-file edits, refactoring, and complex code changes.
+                When enabled, the team lead will prefer OpenCode for coding tasks.
+              </p>
+
+              {/* Enable toggle */}
+              <label className="flex items-center gap-3 cursor-pointer">
+                <div
+                  onClick={() => setOpenCodeEnabled(!openCodeEnabled)}
+                  className={`relative w-10 h-5 rounded-full transition-colors ${
+                    openCodeEnabled ? "bg-primary" : "bg-muted"
+                  }`}
+                >
+                  <div
+                    className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${
+                      openCodeEnabled ? "translate-x-5" : "translate-x-0.5"
+                    }`}
+                  />
+                </div>
+                <span className="text-sm">Enable OpenCode for coding tasks</span>
+              </label>
+
+              {openCodeEnabled && (
+                <>
+                  {/* Same provider checkbox */}
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={openCodeUseSameProvider}
+                      onChange={(e) => {
+                        setOpenCodeUseSameProvider(e.target.checked);
+                        if (e.target.checked) {
+                          setOpenCodeProvider("");
+                          setOpenCodeApiKey("");
+                          setOpenCodeBaseUrl("");
+                          setOpenCodeFetchedModels([]);
+                        }
+                      }}
+                      className="rounded border-border"
+                    />
+                    <span className="text-sm text-muted-foreground">Use same provider as COO</span>
+                  </label>
+
+                  {/* Different provider selection */}
+                  {!openCodeUseSameProvider && (
+                    <>
+                      <div className="grid grid-cols-2 gap-2">
+                        {providerTypes.map((pt) => (
+                          <button
+                            key={pt.type}
+                            onClick={() => {
+                              setOpenCodeProvider(pt.type);
+                              setOpenCodeFetchedModels([]);
+                              setOpenCodeModelFilter("");
+                              setOpenCodeModelDropdownOpen(false);
+                              const suggestions = CODING_SUGGESTED_MODELS[pt.type];
+                              if (suggestions && suggestions.length > 0) {
+                                setOpenCodeModel(suggestions[0]);
+                              } else {
+                                setOpenCodeModel("");
+                              }
+                              if (pt.type === "ollama" && !openCodeBaseUrl) {
+                                setOpenCodeBaseUrl("http://localhost:11434/api");
+                              }
+                            }}
+                            className={`p-3 rounded-md border text-left text-sm transition-colors ${
+                              openCodeProvider === pt.type
+                                ? "border-primary bg-primary/10 text-foreground"
+                                : "border-border bg-background text-muted-foreground hover:border-muted-foreground"
+                            }`}
+                          >
+                            <div className="font-medium">{pt.label}</div>
+                          </button>
+                        ))}
+                      </div>
+
+                      {openCodeProvider && NEEDS_API_KEY.has(openCodeProvider) && (
+                        <div>
+                          <label className="block text-sm text-muted-foreground mb-1.5">API Key</label>
+                          <input
+                            type="password"
+                            value={openCodeApiKey}
+                            onChange={(e) => setOpenCodeApiKey(e.target.value)}
+                            placeholder="sk-..."
+                            className="w-full px-3 py-2 bg-background border border-input rounded-md text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                          />
+                        </div>
+                      )}
+
+                      {openCodeProvider && NEEDS_BASE_URL.has(openCodeProvider) && (
+                        <div>
+                          <label className="block text-sm text-muted-foreground mb-1.5">Base URL</label>
+                          <input
+                            type="text"
+                            value={openCodeBaseUrl}
+                            onChange={(e) => setOpenCodeBaseUrl(e.target.value)}
+                            placeholder="http://localhost:11434/api"
+                            className="w-full px-3 py-2 bg-background border border-input rounded-md text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                          />
+                        </div>
+                      )}
+                    </>
+                  )}
+
+                  {/* Model selector */}
+                  <div>
+                    <label className="block text-sm text-muted-foreground mb-1.5">
+                      Coding Model
+                    </label>
+
+                    {/* Suggested coding model chips */}
+                    {(() => {
+                      const prov = openCodeUseSameProvider ? provider : openCodeProvider;
+                      const suggested = CODING_SUGGESTED_MODELS[prov] ?? [];
+                      return suggested.length > 0 ? (
+                        <div className="flex gap-1.5 mb-2 flex-wrap">
+                          {suggested.map((m) => (
+                            <button
+                              key={m}
+                              onClick={() => {
+                                setOpenCodeModel(m);
+                                setOpenCodeModelFilter("");
+                                setOpenCodeModelDropdownOpen(false);
+                              }}
+                              className={`text-xs px-2 py-0.5 rounded border transition-colors ${
+                                openCodeModel === m
+                                  ? "border-primary text-primary"
+                                  : "border-border text-muted-foreground hover:text-foreground"
+                              }`}
+                            >
+                              {m}
+                            </button>
+                          ))}
+                        </div>
+                      ) : null;
+                    })()}
+
+                    {/* Searchable model combobox */}
+                    <div ref={openCodeModelComboRef} className="relative">
+                      <input
+                        type="text"
+                        value={openCodeModelDropdownOpen ? openCodeModelFilter : openCodeModel}
+                        onChange={(e) => {
+                          setOpenCodeModelFilter(e.target.value);
+                          setOpenCodeModel(e.target.value);
+                          setOpenCodeModelDropdownOpen(true);
+                        }}
+                        onFocus={() => {
+                          setOpenCodeModelFilter(openCodeModel);
+                          setOpenCodeModelDropdownOpen(true);
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === "Escape") {
+                            setOpenCodeModelDropdownOpen(false);
+                            (e.target as HTMLInputElement).blur();
+                          }
+                        }}
+                        placeholder="Search or type a model name"
+                        className="w-full px-3 py-2 bg-background border border-input rounded-md text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                      />
+                      {openCodeFetchingModels && (
+                        <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">
+                          Loading...
+                        </span>
+                      )}
+                      {!openCodeFetchingModels && openCodeFetchedModels.length > 0 && !openCodeModelDropdownOpen && (
+                        <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">
+                          {openCodeFetchedModels.length} models
+                        </span>
+                      )}
+
+                      {openCodeModelDropdownOpen && openCodeFetchedModels.length > 0 && (() => {
+                        const filtered = openCodeFetchedModels.filter((m) =>
+                          m.toLowerCase().includes(openCodeModelFilter.toLowerCase()),
+                        );
+                        return filtered.length > 0 ? (
+                          <div className="absolute z-50 mt-1 w-full bg-popover border border-border rounded-md shadow-md max-h-[200px] overflow-y-auto">
+                            {filtered.map((m) => (
+                              <button
+                                key={m}
+                                onMouseDown={(e) => e.preventDefault()}
+                                onClick={() => {
+                                  setOpenCodeModel(m);
+                                  setOpenCodeModelFilter("");
+                                  setOpenCodeModelDropdownOpen(false);
+                                }}
+                                className={`w-full text-left px-3 py-1.5 text-sm hover:bg-accent transition-colors ${
+                                  openCodeModel === m ? "bg-accent text-accent-foreground" : "text-foreground"
+                                }`}
+                              >
+                                {m}
+                              </button>
+                            ))}
+                          </div>
+                        ) : null;
+                      })()}
+                    </div>
+                  </div>
+                </>
+              )}
+
+              {error && <p className="text-sm text-destructive">{error}</p>}
+
+              <div className="flex gap-2">
+                <button
+                  onClick={() => {
+                    setStep(7);
+                    setError(null);
+                  }}
+                  className="px-4 py-2 bg-secondary text-secondary-foreground text-sm font-medium rounded-md hover:bg-secondary/80 transition-colors"
+                >
+                  Back
+                </button>
+                <button
+                  onClick={handleNextToVoice}
+                  disabled={openCodeEnabled && !openCodeModel}
+                  className="flex-1 px-4 py-2 bg-primary text-primary-foreground text-sm font-medium rounded-md hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                  Next
+                </button>
+              </div>
+
+              <button
+                onClick={() => {
+                  setOpenCodeEnabled(false);
+                  handleNextToVoice();
+                }}
+                className="w-full text-xs text-muted-foreground hover:text-foreground transition-colors"
+              >
+                Skip — disable OpenCode
+              </button>
+            </div>
+          )}
+
+          {step === 9 && (
+            <div className="space-y-4">
+              <h2 className="text-sm font-medium">
+                9. Choose a voice for your assistant
               </h2>
               <p className="text-xs text-muted-foreground">
                 Your assistant can speak its responses aloud. Pick a TTS
@@ -1273,7 +1619,7 @@ export function SetupWizard() {
               <div className="flex gap-2">
                 <button
                   onClick={() => {
-                    setStep(7);
+                    setStep(8);
                     setError(null);
                   }}
                   className="px-4 py-2 bg-secondary text-secondary-foreground text-sm font-medium rounded-md hover:bg-secondary/80 transition-colors"
