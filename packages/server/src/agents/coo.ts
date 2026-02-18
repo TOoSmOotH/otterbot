@@ -63,6 +63,7 @@ export interface COODependencies {
   onAgentThinking?: (agentId: string, token: string, messageId: string) => void;
   onAgentThinkingEnd?: (agentId: string, messageId: string) => void;
   onAgentToolCall?: (agentId: string, toolName: string, args: Record<string, unknown>) => void;
+  onAgentDestroyed?: (agentId: string) => void;
 }
 
 export class COO extends BaseAgent {
@@ -81,6 +82,7 @@ export class COO extends BaseAgent {
   private _onAgentThinking?: (agentId: string, token: string, messageId: string) => void;
   private _onAgentThinkingEnd?: (agentId: string, messageId: string) => void;
   private _onAgentToolCall?: (agentId: string, toolName: string, args: Record<string, unknown>) => void;
+  private onAgentDestroyed?: (agentId: string) => void;
   private allowedToolNames: Set<string>;
   private contextManager!: ConversationContextManager;
   private activeContextId: string | null = null;
@@ -179,6 +181,7 @@ The user can see everything on the desktop in real-time.`;
     this._onAgentThinking = deps.onAgentThinking;
     this._onAgentThinkingEnd = deps.onAgentThinkingEnd;
     this._onAgentToolCall = deps.onAgentToolCall;
+    this.onAgentDestroyed = deps.onAgentDestroyed;
     this.contextManager = new ConversationContextManager(systemPrompt);
   }
 
@@ -1374,7 +1377,14 @@ The user can see everything on the desktop in real-time.`;
   destroyProject(projectId: string) {
     const teamLead = this.teamLeads.get(projectId);
     if (teamLead) {
+      // Collect worker IDs before destroy clears them
+      const workerIds = [...teamLead.getWorkers().keys()];
       teamLead.destroy();
+      // Notify UI about destroyed agents
+      for (const wid of workerIds) {
+        this.onAgentDestroyed?.(wid);
+      }
+      this.onAgentDestroyed?.(teamLead.id);
       this.teamLeads.delete(projectId);
     }
 
@@ -1384,5 +1394,37 @@ The user can see everything on the desktop in real-time.`;
     } catch {
       // Best-effort filesystem cleanup
     }
+  }
+
+  /** Tear down the existing TeamLead + workers and spawn a fresh one, preserving all project data */
+  async recoverLiveProject(projectId: string): Promise<{ ok: boolean; error?: string }> {
+    const db = getDb();
+    const project = db
+      .select()
+      .from(schema.projects)
+      .where(eq(schema.projects.id, projectId))
+      .get();
+
+    if (!project) {
+      return { ok: false, error: "Project not found" };
+    }
+
+    // Tear down existing TeamLead if present
+    const teamLead = this.teamLeads.get(projectId);
+    if (teamLead) {
+      const workerIds = [...teamLead.getWorkers().keys()];
+      teamLead.destroy();
+      for (const wid of workerIds) {
+        this.onAgentDestroyed?.(wid);
+      }
+      this.onAgentDestroyed?.(teamLead.id);
+      this.teamLeads.delete(projectId);
+    }
+
+    // Delegate to existing recovery logic (resets orphaned tasks, spawns fresh TL, sends recovery directive)
+    await this.recoverProject(project as { id: string; name: string; description: string; charter: string | null });
+
+    console.log(`[COO] Live-recovered project "${project.name}" (${projectId})`);
+    return { ok: true };
   }
 }

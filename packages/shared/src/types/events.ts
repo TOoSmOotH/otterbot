@@ -66,6 +66,10 @@ export interface ClientToServerEvents {
     data: { projectId: string },
     callback?: (ack: { ok: boolean; error?: string }) => void,
   ) => void;
+  "project:recover": (
+    data: { projectId: string },
+    callback?: (ack: { ok: boolean; error?: string }) => void,
+  ) => void;
   "project:conversations": (
     data: { projectId: string },
     callback: (conversations: Conversation[]) => void,

@@ -50,6 +50,7 @@ import {
   emitAgentThinking,
   emitAgentThinkingEnd,
   emitAgentToolCall,
+  emitAgentDestroyed,
 } from "./socket/handlers.js";
 import {
   isSetupComplete,
@@ -415,6 +416,9 @@ async function main() {
         },
         onAgentToolCall: (agentId, toolName, args) => {
           emitAgentToolCall(io, agentId, toolName, args);
+        },
+        onAgentDestroyed: (agentId) => {
+          emitAgentDestroyed(io, agentId);
         },
       });
       emitAgentSpawned(io, coo);
@@ -1149,6 +1153,22 @@ async function main() {
       emitProjectDeleted(io, req.params.projectId);
 
       return { ok: true };
+    },
+  );
+
+  // Recover a stuck project (tear down old TL + workers, spawn fresh one)
+  app.post<{ Params: { projectId: string } }>(
+    "/api/projects/:projectId/recover",
+    async (req, reply) => {
+      if (!coo) {
+        reply.code(503);
+        return { error: "COO not running" };
+      }
+      const result = await coo.recoverLiveProject(req.params.projectId);
+      if (!result.ok) {
+        reply.code(404);
+      }
+      return result;
     },
   );
 
