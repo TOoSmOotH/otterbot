@@ -76,10 +76,12 @@ export class OpenCodeClient {
     const res = await fetch(`${this.apiUrl}/session`, {
       method: "POST",
       headers: this.headers(),
+      body: JSON.stringify({}),
       signal: AbortSignal.timeout(10_000),
     });
     if (!res.ok) {
-      throw new Error(`Failed to create session: ${res.status} ${res.statusText}`);
+      const body = await res.text().catch(() => "");
+      throw new Error(`Failed to create session: ${res.status} ${res.statusText} ${body}`);
     }
     return (await res.json()) as OpenCodeSession;
   }
@@ -97,14 +99,14 @@ export class OpenCodeClient {
         method: "POST",
         headers: this.headers(),
         body: JSON.stringify({
-          message: task,
-          maxIterations: this.maxIterations,
+          parts: [{ type: "text", text: task }],
         }),
         signal: controller.signal,
       });
       if (!res.ok) {
+        const body = await res.text().catch(() => "");
         throw new Error(
-          `Failed to send message: ${res.status} ${res.statusText}`,
+          `Failed to send message: ${res.status} ${res.statusText} ${body}`,
         );
       }
       return (await res.json()) as { content: string; [key: string]: unknown };
@@ -145,15 +147,21 @@ export class OpenCodeClient {
 
   /** Cancel a running session */
   async abort(sessionId: string): Promise<void> {
-    const res = await fetch(`${this.apiUrl}/session/${sessionId}/abort`, {
-      method: "POST",
-      headers: this.headers(),
-      signal: AbortSignal.timeout(10_000),
-    });
-    if (!res.ok) {
-      throw new Error(
-        `Failed to abort session: ${res.status} ${res.statusText}`,
-      );
+    try {
+      const res = await fetch(`${this.apiUrl}/session/${sessionId}/abort`, {
+        method: "POST",
+        headers: this.headers(),
+        body: JSON.stringify({}),
+        signal: AbortSignal.timeout(10_000),
+      });
+      // Abort may 404 if session already finished — that's OK
+      if (!res.ok && res.status !== 404) {
+        throw new Error(
+          `Failed to abort session: ${res.status} ${res.statusText}`,
+        );
+      }
+    } catch {
+      // Best-effort abort
     }
   }
 
@@ -184,6 +192,38 @@ export class OpenCodeClient {
   }
 
   /**
+   * Extract text content from an OpenCode message response.
+   * The response may be a message object with parts, a list of messages,
+   * or a simple { content } object.
+   */
+  private extractContent(response: Record<string, unknown>): string {
+    // Direct content field
+    if (typeof response.content === "string") return response.content;
+
+    // Message with parts array (OpenCode v2 format)
+    const parts = response.parts as Array<{ type?: string; text?: string }> | undefined;
+    if (Array.isArray(parts)) {
+      return parts
+        .filter((p) => p.type === "text" && p.text)
+        .map((p) => p.text)
+        .join("\n");
+    }
+
+    // Array of messages — extract from last assistant message
+    if (Array.isArray(response)) {
+      for (let i = response.length - 1; i >= 0; i--) {
+        const msg = response[i] as Record<string, unknown>;
+        if (msg.role === "assistant") {
+          return this.extractContent(msg);
+        }
+      }
+    }
+
+    // Fallback: stringify
+    return JSON.stringify(response).slice(0, 2000);
+  }
+
+  /**
    * High-level orchestrator: create session, send message, fetch diff,
    * return structured result.
    */
@@ -197,10 +237,7 @@ export class OpenCodeClient {
       response = await this.sendMessage(session.id, task);
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") {
-        // Try to abort the session gracefully
-        try {
-          await this.abort(session.id);
-        } catch { /* ignore */ }
+        await this.abort(session.id);
         return {
           success: false,
           sessionId: session.id,
@@ -222,7 +259,7 @@ export class OpenCodeClient {
     return {
       success: true,
       sessionId: session.id,
-      summary: response.content ?? "(no response)",
+      summary: this.extractContent(response as Record<string, unknown>),
       diff,
     };
   }
