@@ -24,7 +24,7 @@ export function createOpenCodeTaskTool(ctx: ToolContext) {
         .number()
         .optional()
         .describe(
-          "Timeout in milliseconds (default: 180000). Increase for large tasks.",
+          "Idle timeout in milliseconds — abort after this long with no activity (default: 180000). OpenCode can run much longer as long as it's actively working.",
         ),
     }),
     execute: async ({ task, timeoutMs }) => {
