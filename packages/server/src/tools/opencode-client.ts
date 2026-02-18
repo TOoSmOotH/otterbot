@@ -45,7 +45,7 @@ export class OpenCodeClient {
   constructor(config: OpenCodeConfig) {
     const baseUrl = config.apiUrl.replace(/\/+$/, "");
     this.apiUrl = baseUrl;
-    this.idleTimeoutMs = config.timeoutMs ?? 180_000;
+    this.idleTimeoutMs = config.timeoutMs ?? 1_200_000;
     this.maxIterations = config.maxIterations ?? 50;
 
     // Build auth header for HTTP Basic

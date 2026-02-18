@@ -4,7 +4,7 @@ import type { ToolContext } from "./tool-context.js";
 import { OpenCodeClient } from "./opencode-client.js";
 import { getConfig } from "../auth/auth.js";
 
-const DEFAULT_TIMEOUT = 180_000; // 3 minutes
+const DEFAULT_TIMEOUT = 1_200_000; // 20 minutes idle timeout
 const DEFAULT_MAX_ITERATIONS = 50;
 
 export function createOpenCodeTaskTool(ctx: ToolContext) {
