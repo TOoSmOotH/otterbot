@@ -47,6 +47,9 @@ importers:
       '@huggingface/transformers':
         specifier: ^3.4.1
         version: 3.8.1
+      '@opencode-ai/sdk':
+        specifier: ^1.2.6
+        version: 1.2.6
       '@otterbot/shared':
         specifier: workspace:*
         version: link:../shared
@@ -1271,6 +1274,9 @@ packages:
   '@nodelib/fs.walk@1.2.8':
     resolution: {integrity: sha512-oGB+UxlgWcgQkgwo8GcEGwemoTFt3FIO9ababBmaGwXIoBKZ+GTy0pP185beGg7Llih/NSHSV2XAs1lnznocSg==}
     engines: {node: '>= 8'}
+
+  '@opencode-ai/sdk@1.2.6':
+    resolution: {integrity: sha512-dWMF8Aku4h7fh8sw5tQ2FtbqRLbIFT8FcsukpxTird49ax7oUXP+gzqxM/VdxHjfksQvzLBjLZyMdDStc5g7xA==}
 
   '@opentelemetry/api@1.9.0':
     resolution: {integrity: sha512-3giAOQvZiH5F9bMlMiv8+GSPMeqg0dbaeo58/0SlA9sxSqZhnUtxzX9/2FzyhS9sWQf5S0GJE0AKBrFqjpeYcg==}
@@ -5292,6 +5298,8 @@ snapshots:
     dependencies:
       '@nodelib/fs.scandir': 2.1.5
       fastq: 1.20.1
+
+  '@opencode-ai/sdk@1.2.6': {}
 
   '@opentelemetry/api@1.9.0': {}
 
