@@ -338,7 +338,7 @@ Your responsibilities:
 Sandbox constraints for custom tool code:
 - The code is an async function body that receives a \`params\` object
 - Must return a string (the tool's output)
-- Available globals: fetch, JSON, Math, Date, URL, URLSearchParams, console.log
+- Available globals: fetch, Headers, AbortController, JSON, Math, Date, URL, URLSearchParams, TextEncoder, TextDecoder, atob, btoa, setTimeout, setInterval, clearTimeout, clearInterval, crypto.randomUUID(), encodeURIComponent, decodeURIComponent, structuredClone, console.log
 - NOT available: fs, child_process, require, process, Buffer, import
 - Use fetch() for any HTTP/API interactions
 - Default timeout is 30 seconds

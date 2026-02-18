@@ -27,6 +27,7 @@ import { scanSkillContent } from "./skills/skill-scanner.js";
 import { getAvailableToolNames, getToolsWithMeta } from "./tools/tool-factory.js";
 import { CustomToolService } from "./tools/custom-tool-service.js";
 import { executeCustomTool } from "./tools/custom-tool-executor.js";
+import { TOOL_EXAMPLES } from "./tools/tool-examples.js";
 import { COO } from "./agents/coo.js";
 import { AdminAssistant } from "./agents/admin-assistant.js";
 import { closeBrowser } from "./tools/browser-pool.js";
@@ -2547,6 +2548,11 @@ async function main() {
     return getToolsWithMeta();
   });
 
+  // GET /api/tools/examples — curated example tools for custom tool authors
+  app.get("/api/tools/examples", async () => {
+    return TOOL_EXAMPLES;
+  });
+
   // GET /api/tools/:id — get single custom tool
   app.get<{ Params: { id: string } }>("/api/tools/:id", async (req, reply) => {
     const tool = customToolService.get(req.params.id);
@@ -2675,8 +2681,14 @@ async function main() {
           system: `You are a tool generation assistant. Given a description, generate a custom JavaScript tool definition.
 
 The tool will run in a sandboxed environment with these globals available:
-- fetch (for HTTP requests)
+- fetch, Headers, AbortController (for HTTP requests)
 - JSON, Math, Date, URL, URLSearchParams
+- TextEncoder, TextDecoder (UTF-8 encoding/decoding)
+- atob, btoa (Base64 encoding/decoding)
+- setTimeout, setInterval, clearTimeout, clearInterval (timers)
+- crypto.randomUUID() (generate unique IDs)
+- encodeURIComponent, decodeURIComponent (URL encoding)
+- structuredClone (deep object cloning)
 - console.log (for debugging)
 
 NOT available: fs, child_process, require, process, Buffer, import
