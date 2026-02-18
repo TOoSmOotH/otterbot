@@ -7,7 +7,11 @@ import type { RegistryEntry, GearConfig } from "@otterbot/shared";
 import { CharacterSelect } from "../character-select/CharacterSelect";
 import { ModelCombobox } from "./ModelCombobox";
 
-export function AgentTemplatesTab() {
+interface AgentTemplatesTabProps {
+  onNavigateToSkill?: (skillId: string) => void;
+}
+
+export function AgentTemplatesTab({ onNavigateToSkill }: AgentTemplatesTabProps) {
   const [entries, setEntries] = useState<RegistryEntry[]>([]);
   const [selected, setSelected] = useState<RegistryEntry | null>(null);
   const [editing, setEditing] = useState(false);
@@ -459,12 +463,14 @@ export function AgentTemplatesTab() {
                     assignedSkillIds.map((skillId) => {
                       const skill = allSkills.find((s) => s.id === skillId);
                       return (
-                        <span
+                        <button
                           key={skillId}
-                          className="text-[10px] bg-primary/10 text-primary px-2 py-0.5 rounded"
+                          type="button"
+                          onClick={() => onNavigateToSkill?.(skillId)}
+                          className="text-[10px] bg-primary/10 text-primary px-2 py-0.5 rounded hover:bg-primary/20 transition-colors cursor-pointer"
                         >
                           {skill?.meta.name ?? skillId}
-                        </span>
+                        </button>
                       );
                     })
                   )}

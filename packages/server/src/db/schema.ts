@@ -307,6 +307,24 @@ export const skills = sqliteTable("skills", {
     .$defaultFn(() => new Date().toISOString()),
 });
 
+export const customTools = sqliteTable("custom_tools", {
+  id: text("id").primaryKey(),
+  name: text("name").unique().notNull(),
+  description: text("description").notNull(),
+  parameters: text("parameters", { mode: "json" })
+    .$type<{ name: string; type: string; required: boolean; description: string }[]>()
+    .notNull()
+    .default([]),
+  code: text("code").notNull(),
+  timeout: integer("timeout").notNull().default(30000),
+  createdAt: text("created_at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+  updatedAt: text("updated_at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+});
+
 export const agentSkills = sqliteTable(
   "agent_skills",
   {

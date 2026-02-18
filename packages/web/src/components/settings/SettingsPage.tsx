@@ -4,7 +4,7 @@ import { SettingsNav } from "./SettingsNav";
 import { AppearanceTab } from "./AppearanceTab";
 import { ProvidersTab } from "./ProvidersTab";
 import { ModelsTab } from "./ModelsTab";
-import { AgentTemplatesTab } from "./AgentTemplatesTab";
+import { AgentWorkshopTab } from "./AgentWorkshopTab";
 import { SearchTab } from "./SearchTab";
 import { SpeechTab } from "./SpeechTab";
 import { LiveViewTab } from "./LiveViewTab";
@@ -15,7 +15,6 @@ import { SystemSection } from "./SystemSection";
 import { ChannelsSection } from "./ChannelsSection";
 import { ScheduledTasksSection } from "./ScheduledTasksSection";
 import { EmailSection } from "./EmailSection";
-import { SkillsCenterSection } from "./SkillsCenterSection";
 import { GitHubTab } from "./GitHubTab";
 import { GoogleSection } from "./GoogleSection";
 import { SecuritySection } from "./SecuritySection";
@@ -48,7 +47,6 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
     if (activeSection === "scheduled") return <ScheduledTasksSection />;
     if (activeSection === "email") return <EmailSection />;
     if (activeSection === "google") return <GoogleSection />;
-    if (activeSection === "skills") return <SkillsCenterSection />;
     if (activeSection === "github") return <GitHubTab />;
     if (activeSection === "security") return <SecuritySection />;
 
@@ -66,8 +64,8 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
         return <ProvidersTab />;
       case "models":
         return <ModelsTab />;
-      case "templates":
-        return <AgentTemplatesTab />;
+      case "workshop":
+        return <AgentWorkshopTab />;
       case "pricing":
         return <PricingTab />;
       case "search":

@@ -315,6 +315,17 @@ export async function migrateDb() {
     PRIMARY KEY (registry_entry_id, skill_id)
   )`);
 
+  db.run(sql`CREATE TABLE IF NOT EXISTS custom_tools (
+    id TEXT PRIMARY KEY,
+    name TEXT UNIQUE NOT NULL,
+    description TEXT NOT NULL,
+    parameters TEXT NOT NULL DEFAULT '[]',
+    code TEXT NOT NULL,
+    timeout INTEGER NOT NULL DEFAULT 30000,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  )`);
+
   // Idempotent migration: add source column to skills
   try {
     db.run(sql`ALTER TABLE skills ADD COLUMN source TEXT NOT NULL DEFAULT 'created'`);

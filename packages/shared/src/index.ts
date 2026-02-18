@@ -12,3 +12,4 @@ export * from "./types/todo.js";
 export * from "./types/gmail.js";
 export * from "./types/calendar.js";
 export * from "./types/skill.js";
+export * from "./types/custom-tool.js";

@@ -3,7 +3,7 @@ import { cn } from "../../lib/utils";
 import { useSettingsStore } from "../../stores/settings-store";
 import { ProvidersTab } from "./ProvidersTab";
 import { ModelsTab } from "./ModelsTab";
-import { AgentTemplatesTab } from "./AgentTemplatesTab";
+import { AgentWorkshopTab } from "./AgentWorkshopTab";
 import { SearchTab } from "./SearchTab";
 import { SpeechTab } from "./SpeechTab";
 import { LiveViewTab } from "./LiveViewTab";
@@ -11,13 +11,13 @@ import { OpenCodeTab } from "./OpenCodeTab";
 import { GitHubTab } from "./GitHubTab";
 import { AppearanceTab } from "./AppearanceTab";
 
-type Tab = "appearance" | "providers" | "models" | "templates" | "search" | "speech" | "liveview" | "opencode" | "github";
+type Tab = "appearance" | "providers" | "models" | "workshop" | "search" | "speech" | "liveview" | "opencode" | "github";
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "appearance", label: "Appearance" },
   { id: "providers", label: "Providers" },
   { id: "models", label: "Models" },
-  { id: "templates", label: "Agent Templates" },
+  { id: "workshop", label: "Agent Workshop" },
   { id: "search", label: "Search" },
   { id: "speech", label: "Speech" },
   { id: "liveview", label: "Live View" },
@@ -81,7 +81,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
             <>
               {activeTab === "providers" && <ProvidersTab />}
               {activeTab === "models" && <ModelsTab />}
-              {activeTab === "templates" && <AgentTemplatesTab />}
+              {activeTab === "workshop" && <AgentWorkshopTab />}
               {activeTab === "search" && <SearchTab />}
               {activeTab === "speech" && <SpeechTab />}
               {activeTab === "liveview" && <LiveViewTab />}

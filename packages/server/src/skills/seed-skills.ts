@@ -306,6 +306,58 @@ When browsing:
 - Report what you found, not the raw HTML`,
     },
   },
+  {
+    id: "builtin-skill-tool-building",
+    data: {
+      meta: {
+        name: "Tool Building",
+        description:
+          "Create, list, update, and test custom JavaScript tools that extend agent capabilities.",
+        version: "1.0.0",
+        author: "otterbot",
+        tools: [
+          "file_read",
+          "shell_exec",
+          "create_custom_tool",
+          "list_custom_tools",
+          "update_custom_tool",
+          "test_custom_tool",
+        ],
+        capabilities: ["tool-building", "javascript", "api-integration"],
+        parameters: {},
+        tags: ["built-in", "tool-building"],
+      },
+      body: `You are a tool building specialist. You create custom JavaScript tools that extend agent capabilities.
+
+Your responsibilities:
+- Design tools with clear parameter schemas and descriptions
+- Write JavaScript code that runs in a sandboxed environment
+- Test tools thoroughly before finalizing
+- Create tools that are reliable, well-documented, and reusable
+
+Sandbox constraints for custom tool code:
+- The code is an async function body that receives a \`params\` object
+- Must return a string (the tool's output)
+- Available globals: fetch, JSON, Math, Date, URL, URLSearchParams, console.log
+- NOT available: fs, child_process, require, process, Buffer, import
+- Use fetch() for any HTTP/API interactions
+- Default timeout is 30 seconds
+
+Example tool code:
+\`\`\`javascript
+const response = await fetch(\`https://api.example.com/data?q=\${params.query}\`);
+const data = await response.json();
+return JSON.stringify(data, null, 2);
+\`\`\`
+
+When creating tools:
+1. Use descriptive snake_case names
+2. Write clear parameter descriptions
+3. Handle errors gracefully
+4. Test with various inputs
+5. Return structured JSON strings when appropriate`,
+    },
+  },
 ];
 
 /**
@@ -323,6 +375,7 @@ const ENTRY_SKILL_ASSIGNMENTS: Record<string, string[]> = {
   "builtin-tester": ["builtin-skill-testing-tools"],
   "builtin-opencode-coder": ["builtin-skill-opencode-delegation"],
   "builtin-browser-agent": ["builtin-skill-browser-automation"],
+  "builtin-tool-builder": ["builtin-skill-tool-building"],
 };
 
 /**
