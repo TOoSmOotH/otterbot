@@ -116,6 +116,23 @@ function buildEnvironmentContext(toolNames: string[]): string {
     );
 
     sections.push(
+      `## Pre-installed Tools\n` +
+      `The following are already installed system-wide — do NOT try to install them:\n` +
+      `- **Node.js** (v22), **npm**, **pnpm** (via corepack)\n` +
+      `- **Go** (${process.env.GOLANG_VERSION ?? "1.24"})\n` +
+      `- **Rust** (stable, via rustup)\n` +
+      `- **Python 3** with pip and venv\n` +
+      `- **Java** (OpenJDK headless)\n` +
+      `- **Ruby**\n` +
+      `- **git**, **gh** (GitHub CLI)\n` +
+      `- **Playwright** with Chromium — already installed, do NOT run \`npx playwright install\` or install browsers\n` +
+      `- **Puppeteer** — already installed with shared Chromium, do NOT reinstall\n` +
+      `- **SQLite 3**\n` +
+      `- **build-essential**, **pkg-config**, **curl**\n` +
+      `- **ss** (iproute2), **netstat** (net-tools)`,
+    );
+
+    sections.push(
       `## Software Installation\n` +
       `**IMPORTANT: Install language runtimes and tools into the home directory, NOT system paths.**\n` +
       `Do NOT write to \`/usr/local/\`, \`/opt/\`, or other system directories — use \`$HOME\` instead.\n` +
