@@ -253,6 +253,12 @@ export function setupSocketHandlers(
       callback(conversations as Conversation[]);
     });
 
+    // Recover a stuck project (tear down old TL + workers, spawn fresh one)
+    socket.on("project:recover", async (data, callback) => {
+      const result = await coo.recoverLiveProject(data.projectId);
+      callback?.(result);
+    });
+
     // Delete a project (cascading cleanup)
     socket.on("project:delete", (data, callback) => {
       const db = getDb();
