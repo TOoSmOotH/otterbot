@@ -271,7 +271,7 @@ export class TeamLead extends BaseAgent {
    * For failed tasks, appends a failure summary to the description so the
    * next worker gets context about what went wrong.
    */
-  private ensureTaskMoved(taskId: string, workerReport: string): void {
+  private ensureTaskMoved(taskId: string, workerReport: string): boolean {
     const db = getDb();
     const task = db
       .select()
@@ -279,7 +279,7 @@ export class TeamLead extends BaseAgent {
       .where(eq(schema.kanbanTasks.id, taskId))
       .get();
 
-    if (!task || task.column !== "in_progress") return; // LLM already moved it
+    if (!task || task.column !== "in_progress") return false; // LLM already moved it
 
     const failed = this.isFailureReport(workerReport);
     const targetColumn = failed ? "backlog" : "done";
@@ -316,6 +316,8 @@ export class TeamLead extends BaseAgent {
     if (targetColumn === "done") {
       this.checkUnblockedTasks(taskId);
     }
+
+    return true; // We did force-move
   }
 
   private async handleWorkerReport(message: BusMessage) {
@@ -430,12 +432,35 @@ export class TeamLead extends BaseAgent {
       );
 
       // Safety net: if the LLM didn't move the task, force-move it
+      let forceMoved = false;
       if (reportingTaskId) {
-        this.ensureTaskMoved(reportingTaskId, message.content);
+        forceMoved = this.ensureTaskMoved(reportingTaskId, message.content);
       }
 
       if (this.parentId && text.trim()) {
         this.sendMessage(this.parentId, MessageType.Report, text);
+      }
+
+      // If the safety net force-moved the task, check if there are now unblocked
+      // backlog tasks that need workers spawned. The original branch skipped
+      // thinkWithContinuation, so we need to trigger it explicitly.
+      if (forceMoved) {
+        const postBoard = this.getKanbanBoardState();
+        if (postBoard.hasUnblockedBacklog) {
+          console.log(
+            `[TeamLead ${this.id}] Safety net unblocked ${postBoard.unblockedBacklogCount} task(s) — triggering continuation to spawn workers.`,
+          );
+          const contPrompt =
+            `[CONTINUATION] The safety net moved a completed task to "done", unblocking ${postBoard.unblockedBacklogCount} task(s).\n` +
+            `[KANBAN BOARD]\n${postBoard.summary}\n[/KANBAN BOARD]\n\n` +
+            `Spawn workers for the unblocked backlog tasks. Do NOT spawn workers for [BLOCKED] tasks.`;
+          await this.thinkWithContinuation(
+            contPrompt,
+            (token, messageId) => this.onAgentStream?.(this.id, token, messageId),
+            (token, messageId) => this.onAgentThinking?.(this.id, token, messageId),
+            (messageId) => this.onAgentThinkingEnd?.(this.id, messageId),
+          );
+        }
       }
       return;
     } else if (livingWorkers > 0) {
@@ -472,13 +497,35 @@ export class TeamLead extends BaseAgent {
     );
 
     // Safety net: if the LLM didn't move the task, force-move it
+    let forceMoved = false;
     if (reportingTaskId) {
-      this.ensureTaskMoved(reportingTaskId, message.content);
+      forceMoved = this.ensureTaskMoved(reportingTaskId, message.content);
     }
 
     // Relay significant updates to COO
     if (this.parentId && text.trim()) {
       this.sendMessage(this.parentId, MessageType.Report, text);
+    }
+
+    // If the safety net force-moved a task after thinkWithContinuation already
+    // finished, there may be newly unblocked tasks. Trigger one more continuation.
+    if (forceMoved) {
+      const postBoard = this.getKanbanBoardState();
+      if (postBoard.hasUnblockedBacklog) {
+        console.log(
+          `[TeamLead ${this.id}] Safety net unblocked ${postBoard.unblockedBacklogCount} task(s) after continuation — spawning workers.`,
+        );
+        const contPrompt =
+          `[CONTINUATION] The safety net moved a completed task to "done", unblocking ${postBoard.unblockedBacklogCount} task(s).\n` +
+          `[KANBAN BOARD]\n${postBoard.summary}\n[/KANBAN BOARD]\n\n` +
+          `Spawn workers for the unblocked backlog tasks. Do NOT spawn workers for [BLOCKED] tasks.`;
+        await this.thinkWithContinuation(
+          contPrompt,
+          (token, messageId) => this.onAgentStream?.(this.id, token, messageId),
+          (token, messageId) => this.onAgentThinking?.(this.id, token, messageId),
+          (messageId) => this.onAgentThinkingEnd?.(this.id, messageId),
+        );
+      }
     }
   }
 
