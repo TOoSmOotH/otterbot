@@ -203,6 +203,9 @@ export class TeamLead extends BaseAgent {
     };
     super(options, deps.bus);
 
+    // Limit tool call rounds to prevent runaway loops with less capable models
+    this.llmConfig.maxSteps = 10;
+
     // Derive allowed tools from assigned skills
     const skillService = new SkillService();
     const tlSkills = skillService.getForAgent("builtin-team-lead");
@@ -711,7 +714,16 @@ export class TeamLead extends BaseAgent {
             .describe("The kanban task ID to auto-assign to this worker (moves task to in_progress)"),
         }),
         execute: async ({ registryEntryId, task, taskId }) => {
-          return this.spawnWorker(registryEntryId, task, taskId);
+          // After a spawn refusal, block all further spawn attempts in this think cycle
+          const refusals = this._toolCallCounts.get("spawn_worker_refused") ?? 0;
+          if (refusals > 0) {
+            return "STOP. Already refused. Wait for current worker to finish.";
+          }
+          const result = await this.spawnWorker(registryEntryId, task, taskId);
+          if (result.startsWith("REFUSED:")) {
+            this._toolCallCounts.set("spawn_worker_refused", refusals + 1);
+          }
+          return result;
         },
       }),
       web_search: tool({
@@ -806,7 +818,7 @@ export class TeamLead extends BaseAgent {
           const count = (this._toolCallCounts.get("list_tasks") ?? 0) + 1;
           this._toolCallCounts.set("list_tasks", count);
           if (count > 1) {
-            return "REFUSED: You already called list_tasks. The board has not changed. STOP calling tools and return your response now.";
+            return "STOP.";
           }
           const result = this.listKanbanTasks();
           const board = this.getKanbanBoardState();
