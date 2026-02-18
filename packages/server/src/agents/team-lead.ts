@@ -887,6 +887,25 @@ export class TeamLead extends BaseAgent {
         this.onAgentSpawned(worker);
       }
 
+      // Enforce single-coding-worker rule: only one OpenCode coder (or regular coder)
+      // can run at a time to prevent file conflicts in the shared workspace
+      const isCodingWorker = registryEntryId === "builtin-opencode-coder" || registryEntryId === "builtin-coder";
+      if (isCodingWorker) {
+        for (const [existingId, existingWorker] of this.workers) {
+          if (
+            existingWorker.registryEntryId === "builtin-opencode-coder" ||
+            existingWorker.registryEntryId === "builtin-coder"
+          ) {
+            worker.destroy();
+            this.workers.delete(worker.id);
+            console.warn(
+              `[TeamLead ${this.id}] Refused to spawn coding worker — another coding worker (${existingId}) is already running. Use blockedBy to sequence coding tasks.`,
+            );
+            return `REFUSED: Another coding worker (${existingId}) is already running. Only one coding worker can run at a time to avoid file conflicts. Use \`blockedBy\` when creating tasks to sequence coding work, or wait for the current coding worker to finish before spawning another.`;
+          }
+        }
+      }
+
       // Auto-assign kanban task if taskId provided
       if (taskId) {
         const assigned = this.autoAssignTask(taskId, worker.id);
