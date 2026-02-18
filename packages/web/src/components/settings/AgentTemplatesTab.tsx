@@ -306,14 +306,12 @@ export function AgentTemplatesTab({ onNavigateToSkill }: AgentTemplatesTabProps)
                     >
                       Clone
                     </button>
-                    {selected.role !== "coo" && (
-                      <button
-                        onClick={deleteEntry}
-                        className="text-xs text-destructive px-3 py-1 rounded-md hover:bg-destructive/10"
-                      >
-                        Delete
-                      </button>
-                    )}
+                    <button
+                      onClick={deleteEntry}
+                      className="text-xs text-destructive px-3 py-1 rounded-md hover:bg-destructive/10"
+                    >
+                      Delete
+                    </button>
                   </>
                 )}
               </div>

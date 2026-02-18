@@ -5,6 +5,7 @@ interface ToolMeta {
   description: string;
   parameters?: { name: string; type: string; required: boolean; description: string }[];
   builtIn: boolean;
+  category?: string;
 }
 
 interface ToolsState {
