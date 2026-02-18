@@ -8,6 +8,7 @@ import {
 import { BaseAgent, type AgentOptions } from "./agent.js";
 import type { MessageBus } from "../bus/message-bus.js";
 import { createTools } from "../tools/tool-factory.js";
+import { debug } from "../utils/debug.js";
 
 export interface WorkerDependencies {
   id?: string;
@@ -100,6 +101,14 @@ export class Worker extends BaseAgent {
         (messageId) => this.onAgentThinkingEnd?.(this.id, messageId),
       );
       text = result.text;
+      debug("worker", `think() result — timedOut=${result.timedOut} textLen=${result.text.length} hadToolCalls=${result.hadToolCalls} agent=${this.id}`);
+
+      if (result.timedOut || text.trim() === "") {
+        const reason = result.timedOut ? "LLM timeout" : "empty response";
+        console.warn(`[Worker ${this.id}] Task produced no output (${reason})`);
+        text = `WORKER ERROR: Task produced no output (likely ${reason})`;
+      }
+
       console.log(`[Worker ${this.id}] think() completed — text=${text.length} chars, hadToolCalls=${result.hadToolCalls}`);
     } catch (err) {
       const reason = err instanceof Error ? err.message : String(err);

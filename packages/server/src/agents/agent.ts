@@ -22,6 +22,7 @@ import {
 import { eq } from "drizzle-orm";
 import { calculateCost } from "../settings/model-pricing.js";
 import { getCircuitBreaker, isProviderAvailable } from "../llm/circuit-breaker.js";
+import { debug } from "../utils/debug.js";
 
 export interface AgentOptions {
   id?: string;
@@ -176,7 +177,7 @@ export abstract class BaseAgent {
     onToken?: (token: string, messageId: string) => void,
     onReasoning?: (token: string, messageId: string) => void,
     onReasoningEnd?: (messageId: string) => void,
-  ): Promise<{ text: string; thinking: string | undefined; hadToolCalls: boolean; isError?: boolean }> {
+  ): Promise<{ text: string; thinking: string | undefined; hadToolCalls: boolean; isError?: boolean; timedOut?: boolean }> {
     // Reset abort flag at the start of each think cycle
     this._shouldAbortThink = false;
 
@@ -207,14 +208,16 @@ export abstract class BaseAgent {
       let text: string;
       let thinking: string | undefined;
       let hadToolCalls: boolean;
+      let timedOut: boolean | undefined;
 
       if (textToolMode) {
         text = "";
         thinking = undefined;
         hadToolCalls = false;
+        timedOut = false;
         console.log(`[Agent ${this.id}] Text-tool-calling model detected — skipping SDK tools`);
       } else {
-        ({ text, thinking, hadToolCalls } = await this.runStream(
+        ({ text, thinking, hadToolCalls, timedOut } = await this.runStream(
           hasTools ? tools : undefined,
           onToken,
           onReasoning,
@@ -296,7 +299,7 @@ export abstract class BaseAgent {
         content: finalText,
       });
       this.setStatus(AgentStatus.Idle);
-      return { text: finalText, thinking, hadToolCalls };
+      return { text: finalText, thinking, hadToolCalls, timedOut: timedOut || undefined };
     } catch (error) {
       this.setStatus(AgentStatus.Error);
       getCircuitBreaker(this.llmConfig.provider).recordFailure();
@@ -329,7 +332,7 @@ export abstract class BaseAgent {
     onToken?: (token: string, messageId: string) => void,
     onReasoning?: (token: string, messageId: string) => void,
     onReasoningEnd?: (messageId: string) => void,
-  ): Promise<{ text: string; thinking: string | undefined; hadToolCalls: boolean }> {
+  ): Promise<{ text: string; thinking: string | undefined; hadToolCalls: boolean; timedOut?: boolean }> {
     // Create an AbortController so tool guards can stop the stream mid-think
     const abortController = new AbortController();
 
@@ -360,20 +363,22 @@ export abstract class BaseAgent {
     const CHUNK_TIMEOUT = 120_000; // 2 min per-chunk timeout for slow models
     const TOOL_EXEC_TIMEOUT = 25 * 60_000; // 25 min for long-running tool calls (e.g. opencode_task)
 
+    const TIMEOUT_SENTINEL = Symbol("timeout");
     const nextWithTimeout = (timeoutMs: number) =>
       Promise.race([
         iterator.next(),
-        new Promise<{ done: true; value: undefined }>((resolve) =>
-          setTimeout(() => resolve({ done: true, value: undefined }), timeoutMs),
+        new Promise<{ done: true; value: typeof TIMEOUT_SENTINEL }>((resolve) =>
+          setTimeout(() => resolve({ done: true, value: TIMEOUT_SENTINEL }), timeoutMs),
         ),
       ]);
 
     const first = await nextWithTimeout(FIRST_CHUNK_TIMEOUT);
 
     if (first.done) {
-      // Timed out or empty stream
-      console.warn(`[Agent ${this.id}] Stream produced no data within ${FIRST_CHUNK_TIMEOUT / 1000}s (tools=${!!tools})`);
-      return { text: "", thinking: undefined, hadToolCalls: false };
+      const wasTimeout = first.value === TIMEOUT_SENTINEL;
+      console.warn(`[Agent ${this.id}] Stream produced no data within ${FIRST_CHUNK_TIMEOUT / 1000}s (tools=${!!tools}, timeout=${wasTimeout})`);
+      debug("runStream", `First-chunk timeout after ${FIRST_CHUNK_TIMEOUT / 1000}s — agent=${this.id} tools=${!!tools}`);
+      return { text: "", thinking: undefined, hadToolCalls: false, timedOut: wasTimeout };
     }
 
     // Track whether we've entered Kimi tool-call markup so we can
@@ -432,11 +437,20 @@ export abstract class BaseAgent {
     processPart(first.value);
 
     // Process remaining parts — use longer timeout while tools are executing
+    let midStreamTimedOut = false;
     try {
       while (true) {
         const timeout = pendingToolCalls > 0 ? TOOL_EXEC_TIMEOUT : CHUNK_TIMEOUT;
         const next = await nextWithTimeout(timeout);
-        if (next.done) break;
+        if (next.done) {
+          if (next.value === TIMEOUT_SENTINEL) {
+            midStreamTimedOut = true;
+            const timeoutLabel = pendingToolCalls > 0 ? "tool-exec" : "chunk";
+            console.warn(`[Agent ${this.id}] Mid-stream ${timeoutLabel} timeout after ${timeout / 1000}s (accumulated ${fullResponse.length} chars)`);
+            debug("runStream", `Mid-stream ${timeoutLabel} timeout after ${timeout / 1000}s — agent=${this.id} chars=${fullResponse.length}`);
+          }
+          break;
+        }
         processPart(next.value);
       }
     } catch (err: unknown) {
@@ -483,7 +497,7 @@ export abstract class BaseAgent {
       );
     }
 
-    return { text: fullResponse, thinking: reasoning || undefined, hadToolCalls };
+    return { text: fullResponse, thinking: reasoning || undefined, hadToolCalls, timedOut: midStreamTimedOut || undefined };
   }
 
   /**
@@ -501,7 +515,7 @@ export abstract class BaseAgent {
     onReasoning?: (token: string, messageId: string) => void,
     onReasoningEnd?: (messageId: string) => void,
     depth: number = 0,
-  ): Promise<{ text: string; thinking: string | undefined; hadToolCalls: boolean }> {
+  ): Promise<{ text: string; thinking: string | undefined; hadToolCalls: boolean; timedOut?: boolean }> {
     const MAX_DEPTH = 5;
     if (depth >= MAX_DEPTH) {
       console.warn(`[Agent ${this.id}] Kimi tool recursion depth limit (${MAX_DEPTH}) reached — returning as-is`);
