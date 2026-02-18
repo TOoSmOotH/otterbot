@@ -477,9 +477,19 @@ export class TeamLead extends BaseAgent {
         `If a task was previously attempted and failed, its description will contain error details — ` +
         `analyze the failure and include specific fix instructions in the new worker's directive.` +
         actionRequired + orphanBlock;
+    } else if (board.hasBacklog && !board.hasUnblockedBacklog) {
+      // All remaining backlog tasks are blocked, no workers running, not all done.
+      // This is a deadlock or the blocked tasks' blockers just completed.
+      // Use single think() — there's nothing to spawn.
+      instructions =
+        `Evaluate the worker report and move the task accordingly (see ACTION REQUIRED below).` +
+        `\nAll remaining backlog tasks are BLOCKED — after evaluating the report, STOP. ` +
+        `Do NOT call any more tools. Blocked tasks will become available when their blockers complete.` +
+        actionRequired + orphanBlock;
     } else {
       instructions =
-        `Evaluate the worker report and proceed.` +
+        `Evaluate the worker report and move the task accordingly (see ACTION REQUIRED below).` +
+        `\nAfter evaluating the report, STOP. Do NOT call any more tools.` +
         actionRequired + orphanBlock;
     }
 
@@ -489,9 +499,19 @@ export class TeamLead extends BaseAgent {
       `[KANBAN BOARD]\n${board.summary}\n[/KANBAN BOARD]\n\n` +
       instructions;
 
-    // When all tasks are done, use a single think() — there's no backlog to
-    // continue on, so thinkWithContinuation would just loop the LLM pointlessly.
-    const useSimpleThink = board.allDone && orphans.length === 0;
+    // Use a single think() when there's nothing to spawn — thinkWithContinuation
+    // would just loop the LLM pointlessly. This covers:
+    //  - all tasks done
+    //  - all backlog tasks are blocked (nothing to spawn)
+    //  - no backlog, no orphans, no workers (edge case)
+    const useSimpleThink = orphans.length === 0 && (
+      board.allDone ||
+      !board.hasUnblockedBacklog
+    );
+
+    console.log(
+      `[TeamLead ${this.id}] handleWorkerReport: allDone=${board.allDone} backlog=${board.backlogCount} unblocked=${board.unblockedBacklogCount} inProgress=${board.inProgressCount} workers=${livingWorkers} orphans=${orphans.length} → ${useSimpleThink ? "think()" : "thinkWithContinuation()"}`,
+    );
 
     const { text } = useSimpleThink
       ? await this.think(
