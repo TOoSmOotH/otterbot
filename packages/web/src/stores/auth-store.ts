@@ -32,6 +32,9 @@ interface AuthState {
     searchProvider?: string;
     searchApiKey?: string;
     searchBaseUrl?: string;
+    adminName: string;
+    adminModelPackId?: string;
+    adminGearConfig?: Record<string, boolean> | null;
   }) => Promise<boolean>;
   logout: () => Promise<void>;
   setError: (error: string | null) => void;
