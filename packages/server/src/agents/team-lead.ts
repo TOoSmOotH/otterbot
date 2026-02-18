@@ -850,11 +850,13 @@ export class TeamLead extends BaseAgent {
           // After a spawn refusal, block all further spawn attempts in this think cycle
           const refusals = this._toolCallCounts.get("spawn_worker_refused") ?? 0;
           if (refusals > 0) {
+            this._shouldAbortThink = true;
             return "STOP. Already refused. Wait for current worker to finish.";
           }
           const result = await this.spawnWorker(registryEntryId, task, taskId);
           if (result.startsWith("REFUSED:")) {
             this._toolCallCounts.set("spawn_worker_refused", refusals + 1);
+            this._shouldAbortThink = true;
           }
           return result;
         },
@@ -951,7 +953,8 @@ export class TeamLead extends BaseAgent {
           const count = (this._toolCallCounts.get("list_tasks") ?? 0) + 1;
           this._toolCallCounts.set("list_tasks", count);
           if (count > 1) {
-            return "";  // Empty response — already listed
+            this._shouldAbortThink = true;
+            return "ALREADY LISTED — do not call again.";
           }
           const result = this.listKanbanTasks();
           const board = this.getKanbanBoardState();

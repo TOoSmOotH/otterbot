@@ -155,6 +155,10 @@ export async function stream(
   config: LLMConfig,
   messages: ChatMessage[],
   tools?: Record<string, unknown>,
+  options?: {
+    abortSignal?: AbortSignal;
+    onStepFinish?: (event: { toolCalls: unknown[] }) => void | Promise<void>;
+  },
 ) {
   const model = resolveModel(config);
   const thinking = isThinkingModel(config);
@@ -164,6 +168,8 @@ export async function stream(
     temperature: config.temperature,
     maxRetries: config.maxRetries ?? 8,
     ...(tools ? { tools: tools as any, maxSteps: config.maxSteps ?? 20 } : {}),
+    ...(options?.abortSignal ? { abortSignal: options.abortSignal } : {}),
+    ...(options?.onStepFinish ? { onStepFinish: options.onStepFinish } : {}),
     ...(thinking
       ? {
           providerOptions: {
