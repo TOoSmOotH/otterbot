@@ -4,14 +4,13 @@ export type SettingsSection =
   | "system"
   | "providers"
   | "models"
-  | "templates"
+  | "workshop"
   | "pricing"
   | "search"
   | "speech"
   | "liveview"
   | "opencode"
   | "scheduled"
-  | "skills"
   | "channels"
   | "email"
   | "google"
@@ -45,7 +44,7 @@ export const SETTINGS_NAV: NavGroup[] = [
     items: [
       { id: "providers", label: "Providers" },
       { id: "models", label: "Models" },
-      { id: "templates", label: "Agent Templates" },
+      { id: "workshop", label: "Agent Workshop" },
       { id: "pricing", label: "Pricing" },
     ],
   },
@@ -58,7 +57,6 @@ export const SETTINGS_NAV: NavGroup[] = [
       { id: "liveview", label: "Live View" },
       { id: "opencode", label: "OpenCode" },
       { id: "scheduled", label: "Scheduled Tasks" },
-      { id: "skills", label: "Skills Center" },
     ],
   },
   {

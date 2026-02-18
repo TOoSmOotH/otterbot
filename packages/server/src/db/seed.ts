@@ -147,6 +147,19 @@ const SEED_ENTRIES = [
     builtIn: true,
     role: "worker" as const,
   },
+  {
+    id: "builtin-tool-builder",
+    name: "Tool Builder",
+    description:
+      "Creates custom JavaScript tools that extend agent capabilities. Can design, implement, and test new tools.",
+    systemPrompt: "See assigned skills for instructions.",
+    capabilities: [] as string[],
+    defaultModel: "claude-sonnet-4-5-20250929",
+    defaultProvider: "anthropic",
+    tools: [] as string[],
+    builtIn: true,
+    role: "worker" as const,
+  },
 ];
 
 /** Upsert all built-in registry entries. Safe to call on every startup. */

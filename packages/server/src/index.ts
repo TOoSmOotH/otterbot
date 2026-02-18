@@ -24,7 +24,9 @@ import { WorkspaceManager } from "./workspace/workspace.js";
 import { Registry } from "./registry/registry.js";
 import { SkillService } from "./skills/skill-service.js";
 import { scanSkillContent } from "./skills/skill-scanner.js";
-import { getAvailableToolNames } from "./tools/tool-factory.js";
+import { getAvailableToolNames, getToolsWithMeta } from "./tools/tool-factory.js";
+import { CustomToolService } from "./tools/custom-tool-service.js";
+import { executeCustomTool } from "./tools/custom-tool-executor.js";
 import { COO } from "./agents/coo.js";
 import { AdminAssistant } from "./agents/admin-assistant.js";
 import { closeBrowser } from "./tools/browser-pool.js";
@@ -2533,6 +2535,186 @@ async function main() {
   app.get("/api/tools/available", async () => {
     return { tools: getAvailableToolNames() };
   });
+
+  // =========================================================================
+  // Custom Tools CRUD
+  // =========================================================================
+
+  const customToolService = new CustomToolService();
+
+  // GET /api/tools — all tools (built-in metadata + custom tools)
+  app.get("/api/tools", async () => {
+    return getToolsWithMeta();
+  });
+
+  // GET /api/tools/:id — get single custom tool
+  app.get<{ Params: { id: string } }>("/api/tools/:id", async (req, reply) => {
+    const tool = customToolService.get(req.params.id);
+    if (!tool) {
+      reply.code(404);
+      return { error: "Not found" };
+    }
+    return tool;
+  });
+
+  // POST /api/tools — create custom tool
+  app.post<{ Body: { name: string; description: string; parameters: unknown[]; code: string; timeout?: number } }>(
+    "/api/tools",
+    async (req, reply) => {
+      const { name, description, parameters, code, timeout } = req.body;
+      if (!name || !code) {
+        reply.code(400);
+        return { error: "name and code are required" };
+      }
+      // Validate name is snake_case
+      if (!/^[a-z][a-z0-9_]*$/.test(name)) {
+        reply.code(400);
+        return { error: "name must be snake_case (lowercase letters, numbers, underscores)" };
+      }
+      // Check name uniqueness against all tools
+      const allNames = getAvailableToolNames();
+      if (allNames.includes(name)) {
+        reply.code(409);
+        return { error: `Tool name "${name}" already exists` };
+      }
+      return customToolService.create({ name, description, parameters: parameters as any, code, timeout });
+    },
+  );
+
+  // PATCH /api/tools/:id — update custom tool
+  app.patch<{ Params: { id: string }; Body: { name?: string; description?: string; parameters?: unknown[]; code?: string; timeout?: number } }>(
+    "/api/tools/:id",
+    async (req, reply) => {
+      const existing = customToolService.get(req.params.id);
+      if (!existing) {
+        reply.code(404);
+        return { error: "Not found" };
+      }
+      if (req.body.name && req.body.name !== existing.name) {
+        if (!/^[a-z][a-z0-9_]*$/.test(req.body.name)) {
+          reply.code(400);
+          return { error: "name must be snake_case" };
+        }
+        if (!customToolService.isNameAvailable(req.body.name, req.params.id)) {
+          reply.code(409);
+          return { error: `Tool name "${req.body.name}" already exists` };
+        }
+      }
+      return customToolService.update(req.params.id, req.body as any);
+    },
+  );
+
+  // DELETE /api/tools/:id — delete custom tool
+  app.delete<{ Params: { id: string } }>("/api/tools/:id", async (req, reply) => {
+    const deleted = customToolService.delete(req.params.id);
+    if (!deleted) {
+      reply.code(404);
+      return { error: "Not found" };
+    }
+    return { ok: true };
+  });
+
+  // POST /api/tools/:id/test — execute tool with test params
+  app.post<{ Params: { id: string }; Body: { params: Record<string, unknown> } }>(
+    "/api/tools/:id/test",
+    async (req, reply) => {
+      const tool = customToolService.get(req.params.id);
+      if (!tool) {
+        reply.code(404);
+        return { error: "Not found" };
+      }
+      try {
+        const result = await executeCustomTool(tool, req.body.params ?? {});
+        return { result };
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        return { error: message };
+      }
+    },
+  );
+
+  // POST /api/tools/ai-generate — AI-assisted tool generation
+  app.post<{ Body: { description: string } }>(
+    "/api/tools/ai-generate",
+    async (req, reply) => {
+      const { description } = req.body;
+      if (!description?.trim()) {
+        reply.code(400);
+        return { error: "description is required" };
+      }
+
+      try {
+        // Find a configured provider and resolve its model
+        const { getDb: getDatabase, schema: dbSchema } = await import("./db/index.js");
+        const db = getDatabase();
+        const providerRows = db.select().from(dbSchema.providers).all();
+        if (providerRows.length === 0) {
+          reply.code(400);
+          return { error: "No AI provider configured" };
+        }
+
+        const provider = providerRows[0];
+        let modelId: string;
+        switch (provider.type) {
+          case "anthropic":
+            modelId = "claude-sonnet-4-5-20250929";
+            break;
+          case "openai":
+            modelId = "gpt-4o";
+            break;
+          default:
+            modelId = "claude-sonnet-4-5-20250929";
+        }
+
+        const { generateText } = await import("ai");
+        const { resolveModel } = await import("./llm/adapter.js");
+        const llmModel = resolveModel({ provider: provider.id, model: modelId });
+
+        const result = await generateText({
+          model: llmModel,
+          system: `You are a tool generation assistant. Given a description, generate a custom JavaScript tool definition.
+
+The tool will run in a sandboxed environment with these globals available:
+- fetch (for HTTP requests)
+- JSON, Math, Date, URL, URLSearchParams
+- console.log (for debugging)
+
+NOT available: fs, child_process, require, process, Buffer, import
+
+The code must be an async function body that:
+- Receives a \`params\` object with the defined parameters
+- Must return a string (the tool's output)
+- Can use await for async operations
+
+Respond with ONLY a JSON object (no markdown, no explanation) with these fields:
+{
+  "name": "snake_case_name",
+  "description": "What the tool does",
+  "parameters": [{"name": "param_name", "type": "string|number|boolean", "required": true, "description": "..."}],
+  "code": "// async function body\\nreturn 'result';",
+  "timeout": 30000
+}`,
+          prompt: description,
+          maxTokens: 2000,
+        });
+
+        // Parse the JSON response
+        const text = result.text.trim();
+        // Try to extract JSON from the response (handle markdown code blocks)
+        const jsonMatch = text.match(/\{[\s\S]*\}/);
+        if (!jsonMatch) {
+          reply.code(500);
+          return { error: "Failed to parse AI response" };
+        }
+        const parsed = JSON.parse(jsonMatch[0]);
+        return parsed;
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        reply.code(500);
+        return { error: `AI generation failed: ${message}` };
+      }
+    },
+  );
 
   // =========================================================================
   // Agent skill assignment routes
