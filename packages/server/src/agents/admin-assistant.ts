@@ -7,7 +7,7 @@ import {
 import { BaseAgent, type AgentOptions } from "./agent.js";
 import type { MessageBus } from "../bus/message-bus.js";
 import { createAdminTools } from "../tools/tool-factory.js";
-import { ADMIN_ASSISTANT_PROMPT } from "./prompts/admin-assistant.js";
+import { buildAdminAssistantPrompt } from "./prompts/admin-assistant.js";
 import { getConfig } from "../auth/auth.js";
 
 const ADMIN_ASSISTANT_ID = "admin-assistant";
@@ -35,7 +35,8 @@ export class AdminAssistant extends BaseAgent {
       day: "numeric",
     });
 
-    let systemPrompt = ADMIN_ASSISTANT_PROMPT;
+    const agentName = getConfig("admin_assistant_name") ?? "Admin Assistant";
+    let systemPrompt = buildAdminAssistantPrompt(agentName);
     systemPrompt += `\n\n## Current Date\nToday is ${dateStr}. Current time: ${now.toISOString()}.`;
 
     // Inject user profile context
@@ -47,6 +48,11 @@ export class AdminAssistant extends BaseAgent {
       systemPrompt = lines.join("\n") + "\n\n" + systemPrompt;
     }
 
+    // Read optional 3D character config
+    const modelPackId = getConfig("admin_assistant_model_pack_id") ?? null;
+    const gearConfigRaw = getConfig("admin_assistant_gear_config");
+    const gearConfig = gearConfigRaw ? JSON.parse(gearConfigRaw) : null;
+
     const options: AgentOptions = {
       id: ADMIN_ASSISTANT_ID,
       role: AgentRole.AdminAssistant,
@@ -55,8 +61,8 @@ export class AdminAssistant extends BaseAgent {
       model: getConfig("coo_model") ?? "claude-sonnet-4-5-20250929",
       provider: getConfig("coo_provider") ?? "anthropic",
       systemPrompt,
-      modelPackId: null,
-      gearConfig: null,
+      modelPackId,
+      gearConfig,
       onStatusChange: deps.onStatusChange,
     };
 

@@ -613,6 +613,9 @@ async function main() {
       searchProvider?: string;
       searchApiKey?: string;
       searchBaseUrl?: string;
+      adminName: string;
+      adminModelPackId?: string;
+      adminGearConfig?: Record<string, boolean> | null;
     };
   }>("/api/setup/complete", async (req, reply) => {
     if (isSetupComplete()) {
@@ -625,7 +628,7 @@ async function main() {
       return { error: "Passphrase not set. Start setup from the beginning." };
     }
 
-    const { provider, providerName, model, apiKey, baseUrl, userName, userAvatar, userBio, userTimezone, ttsVoice, ttsProvider, userModelPackId, userGearConfig, cooName, cooModelPackId, cooGearConfig, searchProvider, searchApiKey, searchBaseUrl } = req.body;
+    const { provider, providerName, model, apiKey, baseUrl, userName, userAvatar, userBio, userTimezone, ttsVoice, ttsProvider, userModelPackId, userGearConfig, cooName, cooModelPackId, cooGearConfig, searchProvider, searchApiKey, searchBaseUrl, adminName, adminModelPackId, adminGearConfig } = req.body;
 
     if (!provider || !model) {
       reply.code(400);
@@ -642,6 +645,10 @@ async function main() {
     if (!cooName || !cooName.trim()) {
       reply.code(400);
       return { error: "COO name is required" };
+    }
+    if (!adminName || !adminName.trim()) {
+      reply.code(400);
+      return { error: "Admin Assistant name is required" };
     }
 
     const typeMeta = PROVIDER_TYPE_META.find((m) => m.type === provider);
@@ -702,6 +709,15 @@ async function main() {
         skillIds: sourceSkills.map((s) => s.id),
       });
       setConfig("coo_registry_id", cooClone.id);
+    }
+
+    // Admin Assistant config
+    setConfig("admin_assistant_name", adminName.trim());
+    if (adminModelPackId) {
+      setConfig("admin_assistant_model_pack_id", adminModelPackId);
+    }
+    if (adminGearConfig) {
+      setConfig("admin_assistant_gear_config", JSON.stringify(adminGearConfig));
     }
 
     startCoo();
@@ -1535,6 +1551,7 @@ async function main() {
       modelPackId: getConfig("user_model_pack_id") ?? null,
       gearConfig: gearConfigRaw ? JSON.parse(gearConfigRaw) : null,
       cooName: cooEntry?.name ?? "COO",
+      adminName: getConfig("admin_assistant_name") ?? "Admin Assistant",
     };
   });
 
