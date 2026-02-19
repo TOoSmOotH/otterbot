@@ -372,17 +372,21 @@ export class OpenCodeClient {
             console.log(`[OpenCode Client] Permission event properties:`, JSON.stringify(props));
             const permissionId = (props.id ?? props.permissionID) as string | undefined;
             if (permissionId) {
-              console.log(`[OpenCode Client] Permission requested: ${props.title ?? props.type} (${permissionId})`);
+              // permission.asked shape: { id, sessionID, permission: "toolname", patterns: [...], metadata, tool: { messageID, callID } }
+              const permissionType = (props.permission as string) ?? (props.type as string) ?? "unknown";
+              const permissionTitle = permissionType; // No separate title field — use the permission/tool name
+              const permissionPatterns = (props.patterns ?? props.pattern) as string | string[] | undefined;
+              console.log(`[OpenCode Client] Permission requested: ${permissionTitle} (${permissionId})`);
               this.permissionPending = true;
               try {
                 let response: "once" | "always" | "reject" = "once";
                 if (this.onPermissionRequest) {
                   response = await this.onPermissionRequest(sessionId, {
                     id: permissionId,
-                    type: (props.type as string) ?? "unknown",
-                    title: (props.title as string) ?? "",
-                    pattern: props.pattern as string | string[] | undefined,
-                    metadata: props.metadata as Record<string, unknown> ?? {},
+                    type: permissionType,
+                    title: permissionTitle,
+                    pattern: permissionPatterns,
+                    metadata: (props.metadata as Record<string, unknown>) ?? {},
                   });
                 }
                 console.log(`[OpenCode Client] Responding to permission ${permissionId}: ${response}`);
