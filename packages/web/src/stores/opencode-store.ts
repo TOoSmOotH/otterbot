@@ -51,26 +51,46 @@ export const useOpenCodeStore = create<OpenCodeState>((set) => ({
 
   loadSessions: (data) =>
     set((state) => {
-      const sessions = new Map(state.sessions);
+      // Only create new Maps if we actually add something, to avoid unnecessary re-renders
+      let sessionsChanged = false;
+      let messagesChanged = false;
+      let diffsChanged = false;
+
       for (const s of data.sessions) {
-        // Don't overwrite live sessions (they have fresher data)
-        if (!sessions.has(s.agentId)) {
-          sessions.set(s.agentId, s);
-        }
+        if (!state.sessions.has(s.agentId)) { sessionsChanged = true; break; }
       }
-      const messages = new Map(state.messages);
-      for (const [sid, msgs] of Object.entries(data.messages)) {
-        if (!messages.has(sid)) {
-          messages.set(sid, msgs);
-        }
+      for (const sid of Object.keys(data.messages)) {
+        if (!state.messages.has(sid)) { messagesChanged = true; break; }
       }
-      const diffs = new Map(state.diffs);
-      for (const [sid, d] of Object.entries(data.diffs)) {
-        if (!diffs.has(sid)) {
-          diffs.set(sid, d);
-        }
+      for (const sid of Object.keys(data.diffs)) {
+        if (!state.diffs.has(sid)) { diffsChanged = true; break; }
       }
-      return { sessions, messages, diffs };
+
+      if (!sessionsChanged && !messagesChanged && !diffsChanged) return state;
+
+      const result: Partial<OpenCodeState> = {};
+      if (sessionsChanged) {
+        const sessions = new Map(state.sessions);
+        for (const s of data.sessions) {
+          if (!sessions.has(s.agentId)) sessions.set(s.agentId, s);
+        }
+        result.sessions = sessions;
+      }
+      if (messagesChanged) {
+        const messages = new Map(state.messages);
+        for (const [sid, msgs] of Object.entries(data.messages)) {
+          if (!messages.has(sid)) messages.set(sid, msgs);
+        }
+        result.messages = messages;
+      }
+      if (diffsChanged) {
+        const diffs = new Map(state.diffs);
+        for (const [sid, d] of Object.entries(data.diffs)) {
+          if (!diffs.has(sid)) diffs.set(sid, d);
+        }
+        result.diffs = diffs;
+      }
+      return result;
     }),
 
   setAwaitingInput: (agentId, data) =>

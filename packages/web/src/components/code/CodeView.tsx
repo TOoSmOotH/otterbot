@@ -1,5 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from "react";
-import { useShallow } from "zustand/react/shallow";
+import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { useOpenCodeStore } from "../../stores/opencode-store";
 import { getSocket } from "../../lib/socket";
 import type { OpenCodeSession, OpenCodeMessage, OpenCodeFileDiff } from "@otterbot/shared";
@@ -8,7 +7,6 @@ type PartBuffer = { type: string; content: string; toolName?: string; toolState?
 
 const EMPTY_MESSAGES: OpenCodeMessage[] = [];
 const EMPTY_DIFFS: OpenCodeFileDiff[] = [];
-const EMPTY_PART_BUFFERS: [string, PartBuffer][] = [];
 
 function StatusDot({ status }: { status: OpenCodeSession["status"] }) {
   const colors: Record<string, string> = {
@@ -221,16 +219,7 @@ function SessionContent({ agentId }: { agentId: string }) {
   const session = useOpenCodeStore((s) => s.sessions.get(agentId));
   const sessionId = session?.id || "";
   const sessionMessages = useOpenCodeStore((s) => s.messages.get(sessionId) ?? EMPTY_MESSAGES);
-  const sessionPartBuffers = useOpenCodeStore(
-    useShallow((s) => {
-      if (!sessionId) return EMPTY_PART_BUFFERS;
-      const result: [string, PartBuffer][] = [];
-      for (const [key, buf] of s.partBuffers) {
-        if (key.startsWith(`${sessionId}:`)) result.push([key, buf]);
-      }
-      return result.length === 0 ? EMPTY_PART_BUFFERS : result;
-    }),
-  );
+  const partBuffers = useOpenCodeStore((s) => s.partBuffers);
   const sessionDiffs = useOpenCodeStore((s) => s.diffs.get(sessionId) ?? EMPTY_DIFFS);
 
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -246,7 +235,7 @@ function SessionContent({ agentId }: { agentId: string }) {
       }
     });
     return () => cancelAnimationFrame(rafRef.current);
-  }, [sessionMessages, sessionPartBuffers]);
+  }, [sessionMessages, partBuffers]);
 
   const handleScroll = useCallback(() => {
     if (!scrollRef.current) return;
@@ -262,37 +251,29 @@ function SessionContent({ agentId }: { agentId: string }) {
     );
   }
 
-  // Collect streaming parts from buffers for this session
-  const streamingParts: Array<{
-    key: string;
-    messageId: string;
-    partId: string;
-    type: string;
-    content: string;
-    toolName?: string;
-    toolState?: string;
-  }> = [];
-
-  for (const [key, buf] of sessionPartBuffers) {
-    const parts = key.split(":");
-    streamingParts.push({
-      key,
-      messageId: parts[1],
-      partId: parts[2],
-      type: buf.type,
-      content: buf.content,
-      toolName: buf.toolName,
-      toolState: buf.toolState,
-    });
-  }
-
-  // Group streaming parts by messageId
-  const streamingByMessage = new Map<string, typeof streamingParts>();
-  for (const part of streamingParts) {
-    const existing = streamingByMessage.get(part.messageId) ?? [];
-    existing.push(part);
-    streamingByMessage.set(part.messageId, existing);
-  }
+  // Collect streaming parts from buffers for this session, grouped by messageId
+  const streamingByMessage = useMemo(() => {
+    if (!sessionId) return new Map<string, Array<{ key: string; messageId: string; partId: string; type: string; content: string; toolName?: string; toolState?: string }>>();
+    const result = new Map<string, Array<{ key: string; messageId: string; partId: string; type: string; content: string; toolName?: string; toolState?: string }>>();
+    const prefix = `${sessionId}:`;
+    for (const [key, buf] of partBuffers) {
+      if (!key.startsWith(prefix)) continue;
+      const parts = key.split(":");
+      const entry = {
+        key,
+        messageId: parts[1],
+        partId: parts.slice(2).join(":"),
+        type: buf.type,
+        content: buf.content,
+        toolName: buf.toolName,
+        toolState: buf.toolState,
+      };
+      const existing = result.get(entry.messageId);
+      if (existing) existing.push(entry);
+      else result.set(entry.messageId, [entry]);
+    }
+    return result;
+  }, [sessionId, partBuffers]);
 
   // Track which messageIds are in full messages to avoid duplication
   const fullMessageIds = new Set(sessionMessages.map((m) => m.id));
