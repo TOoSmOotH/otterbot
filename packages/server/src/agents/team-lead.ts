@@ -966,8 +966,7 @@ export class TeamLead extends BaseAgent {
           const count = (this._toolCallCounts.get("list_tasks") ?? 0) + 1;
           this._toolCallCounts.set("list_tasks", count);
           if (count > 1) {
-            this._shouldAbortThink = true;
-            return "ALREADY LISTED — do not call again.";
+            return "ALREADY LISTED — do not call again. Proceed with spawning workers.";
           }
           const result = this.listKanbanTasks();
           const board = this.getKanbanBoardState();
