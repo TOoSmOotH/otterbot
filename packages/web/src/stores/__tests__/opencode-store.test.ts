@@ -34,6 +34,7 @@ describe("opencode-store", () => {
       partBuffers: new Map(),
       diffs: new Map(),
       selectedAgentId: null,
+      awaitingInput: new Map(),
     });
   });
 
@@ -198,6 +199,48 @@ describe("opencode-store", () => {
     });
   });
 
+  describe("setAwaitingInput", () => {
+    it("sets awaiting input data for an agent", () => {
+      useOpenCodeStore.getState().startSession(makeSession());
+      useOpenCodeStore.getState().setAwaitingInput("agent-1", { sessionId: "sess-1", prompt: "Which approach?" });
+
+      const awaiting = useOpenCodeStore.getState().awaitingInput.get("agent-1");
+      expect(awaiting).toEqual({ sessionId: "sess-1", prompt: "Which approach?" });
+    });
+
+    it("updates session status to awaiting-input", () => {
+      useOpenCodeStore.getState().startSession(makeSession());
+      useOpenCodeStore.getState().setAwaitingInput("agent-1", { sessionId: "sess-1", prompt: "Which approach?" });
+
+      const session = useOpenCodeStore.getState().sessions.get("agent-1")!;
+      expect(session.status).toBe("awaiting-input");
+    });
+  });
+
+  describe("clearAwaitingInput", () => {
+    it("removes awaiting input data", () => {
+      useOpenCodeStore.getState().startSession(makeSession());
+      useOpenCodeStore.getState().setAwaitingInput("agent-1", { sessionId: "sess-1", prompt: "Which?" });
+      useOpenCodeStore.getState().clearAwaitingInput("agent-1");
+
+      expect(useOpenCodeStore.getState().awaitingInput.has("agent-1")).toBe(false);
+    });
+
+    it("restores session status to active", () => {
+      useOpenCodeStore.getState().startSession(makeSession());
+      useOpenCodeStore.getState().setAwaitingInput("agent-1", { sessionId: "sess-1", prompt: "Which?" });
+      useOpenCodeStore.getState().clearAwaitingInput("agent-1");
+
+      const session = useOpenCodeStore.getState().sessions.get("agent-1")!;
+      expect(session.status).toBe("active");
+    });
+
+    it("does not crash for unknown agent", () => {
+      useOpenCodeStore.getState().clearAwaitingInput("unknown");
+      expect(useOpenCodeStore.getState().awaitingInput.size).toBe(0);
+    });
+  });
+
   describe("clearSession", () => {
     it("removes session, messages, diffs, and part buffers", () => {
       const store = useOpenCodeStore.getState();
@@ -240,6 +283,14 @@ describe("opencode-store", () => {
       useOpenCodeStore.getState().clearSession("agent-1");
       expect(useOpenCodeStore.getState().sessions.size).toBe(1);
       expect(useOpenCodeStore.getState().sessions.has("agent-2")).toBe(true);
+    });
+
+    it("also clears awaitingInput", () => {
+      useOpenCodeStore.getState().startSession(makeSession());
+      useOpenCodeStore.getState().setAwaitingInput("agent-1", { sessionId: "sess-1", prompt: "Which?" });
+      useOpenCodeStore.getState().clearSession("agent-1");
+
+      expect(useOpenCodeStore.getState().awaitingInput.has("agent-1")).toBe(false);
     });
 
     it("does not crash for unknown agent", () => {

@@ -436,6 +436,15 @@ export function emitOpenCodeEvent(
     return;
   }
 
+  if (type === "__awaiting-input") {
+    io.emit("opencode:awaiting-input", {
+      agentId,
+      sessionId,
+      prompt: (properties.prompt as string) || "",
+    });
+    return;
+  }
+
   if (type === "__session-end") {
     const rawDiff = properties.diff as Array<{ path: string; additions: number; deletions: number }> | null;
     io.emit("opencode:session-end", {

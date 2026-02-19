@@ -1,3 +1,4 @@
+import { nanoid } from "nanoid";
 import {
   type GearConfig,
   AgentRole,
@@ -10,6 +11,7 @@ import type { MessageBus } from "../bus/message-bus.js";
 import { createTools } from "../tools/tool-factory.js";
 import { debug } from "../utils/debug.js";
 import { getConfig } from "../auth/auth.js";
+import { getDb, schema } from "../db/index.js";
 
 export interface WorkerDependencies {
   id?: string;
@@ -30,12 +32,14 @@ export interface WorkerDependencies {
   onAgentThinkingEnd?: (agentId: string, messageId: string) => void;
   onAgentToolCall?: (agentId: string, toolName: string, args: Record<string, unknown>) => void;
   onOpenCodeEvent?: (agentId: string, sessionId: string, event: { type: string; properties: Record<string, unknown> }) => void;
+  onOpenCodeAwaitingInput?: (agentId: string, sessionId: string, prompt: string) => Promise<string | null>;
 }
 
 export class Worker extends BaseAgent {
   private toolNames: string[];
   private workspacePath: string | null;
   private _onOpenCodeEvent?: (agentId: string, sessionId: string, event: { type: string; properties: Record<string, unknown> }) => void;
+  private _onOpenCodeAwaitingInput?: (agentId: string, sessionId: string, prompt: string) => Promise<string | null>;
 
   constructor(deps: WorkerDependencies) {
     const options: AgentOptions = {
@@ -60,6 +64,7 @@ export class Worker extends BaseAgent {
     this.toolNames = deps.toolNames;
     this.workspacePath = deps.workspacePath;
     this._onOpenCodeEvent = deps.onOpenCodeEvent;
+    this._onOpenCodeAwaitingInput = deps.onOpenCodeAwaitingInput;
   }
 
   async handleMessage(message: BusMessage): Promise<void> {
@@ -140,9 +145,45 @@ export class Worker extends BaseAgent {
       properties: { task, projectId: this.projectId ?? "" },
     });
 
+    // Build human response callback for interactive sessions (only when interactive mode is on)
+    const interactiveMode = getConfig("opencode:interactive") === "true";
+    const getHumanResponse = interactiveMode && this._onOpenCodeAwaitingInput
+      ? async (sessionId: string, assistantText: string) => {
+          // Emit awaiting-input event so the frontend shows the prompt
+          this._onOpenCodeEvent?.(this.id, sessionId, {
+            type: "__awaiting-input",
+            properties: { prompt: assistantText },
+          });
+          return this._onOpenCodeAwaitingInput!(this.id, sessionId, assistantText);
+        }
+      : undefined;
+
     console.log(`[Worker ${this.id}] Sending task directly to OpenCode (${taskWithContext.length} chars)...`);
-    const result = await client.executeTask(taskWithContext);
+    const result = await client.executeTask(taskWithContext, getHumanResponse);
     console.log(`[Worker ${this.id}] OpenCode result: success=${result.success}, sessionId=${result.sessionId}, diff=${result.diff?.files?.length ?? 0} files`);
+
+    // Persist token usage from OpenCode
+    if (result.usage) {
+      try {
+        const db = getDb();
+        db.insert(schema.tokenUsage)
+          .values({
+            id: nanoid(),
+            agentId: this.id,
+            provider: result.usage.provider,
+            model: result.usage.model,
+            inputTokens: result.usage.inputTokens,
+            outputTokens: result.usage.outputTokens,
+            cost: result.usage.cost,
+            projectId: this.projectId,
+            timestamp: new Date().toISOString(),
+          })
+          .run();
+        console.log(`[Worker ${this.id}] OpenCode token usage persisted: ${result.usage.inputTokens} in / ${result.usage.outputTokens} out, cost=${result.usage.cost} microcents`);
+      } catch (err) {
+        console.error(`[Worker ${this.id}] Failed to persist OpenCode token usage:`, err);
+      }
+    }
 
     // Emit session-end event
     this._onOpenCodeEvent?.(this.id, result.sessionId, {

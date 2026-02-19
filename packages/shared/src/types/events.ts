@@ -38,6 +38,7 @@ export interface ServerToClientEvents {
   "opencode:event": (data: { agentId: string; sessionId: string; type: string; properties: Record<string, unknown> }) => void;
   "opencode:message": (data: { agentId: string; sessionId: string; message: OpenCodeMessage }) => void;
   "opencode:part-delta": (data: { agentId: string; sessionId: string; messageId: string; partId: string; type: string; delta: string; toolName?: string; toolState?: string }) => void;
+  "opencode:awaiting-input": (data: { agentId: string; sessionId: string; prompt: string }) => void;
 }
 
 /** Events emitted from client to server */
@@ -90,5 +91,9 @@ export interface ClientToServerEvents {
   "agent:activity": (
     data: { agentId: string },
     callback: (result: { messages: BusMessage[]; activity: AgentActivityRecord[] }) => void,
+  ) => void;
+  "opencode:respond": (
+    data: { agentId: string; sessionId: string; content: string },
+    callback?: (ack: { ok: boolean; error?: string }) => void,
   ) => void;
 }

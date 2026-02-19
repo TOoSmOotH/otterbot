@@ -12,8 +12,12 @@ interface OpenCodeState {
   diffs: Map<string, OpenCodeFileDiff[]>;
   /** Currently selected agentId for viewing */
   selectedAgentId: string | null;
+  /** Agents awaiting user input, keyed by agentId */
+  awaitingInput: Map<string, { sessionId: string; prompt: string }>;
 
   selectAgent: (agentId: string | null) => void;
+  setAwaitingInput: (agentId: string, data: { sessionId: string; prompt: string }) => void;
+  clearAwaitingInput: (agentId: string) => void;
   startSession: (session: OpenCodeSession) => void;
   endSession: (agentId: string, sessionId: string, status: string, diff: OpenCodeFileDiff[] | null) => void;
   addMessage: (agentId: string, sessionId: string, message: OpenCodeMessage) => void;
@@ -36,8 +40,35 @@ export const useOpenCodeStore = create<OpenCodeState>((set) => ({
   partBuffers: new Map(),
   diffs: new Map(),
   selectedAgentId: null,
+  awaitingInput: new Map(),
 
   selectAgent: (agentId) => set({ selectedAgentId: agentId }),
+
+  setAwaitingInput: (agentId, data) =>
+    set((state) => {
+      const awaitingInput = new Map(state.awaitingInput);
+      awaitingInput.set(agentId, data);
+      // Update session status to awaiting-input
+      const sessions = new Map(state.sessions);
+      const session = sessions.get(agentId);
+      if (session) {
+        sessions.set(agentId, { ...session, status: "awaiting-input" });
+      }
+      return { awaitingInput, sessions };
+    }),
+
+  clearAwaitingInput: (agentId) =>
+    set((state) => {
+      const awaitingInput = new Map(state.awaitingInput);
+      awaitingInput.delete(agentId);
+      // Restore session status to active
+      const sessions = new Map(state.sessions);
+      const session = sessions.get(agentId);
+      if (session && session.status === "awaiting-input") {
+        sessions.set(agentId, { ...session, status: "active" });
+      }
+      return { awaitingInput, sessions };
+    }),
 
   startSession: (session) =>
     set((state) => {
@@ -119,6 +150,8 @@ export const useOpenCodeStore = create<OpenCodeState>((set) => ({
       const messages = new Map(state.messages);
       const partBuffers = new Map(state.partBuffers);
       const diffs = new Map(state.diffs);
+      const awaitingInput = new Map(state.awaitingInput);
+      awaitingInput.delete(agentId);
       if (session) {
         messages.delete(session.id);
         diffs.delete(session.id);
@@ -130,6 +163,6 @@ export const useOpenCodeStore = create<OpenCodeState>((set) => ({
         }
       }
       const selectedAgentId = state.selectedAgentId === agentId ? null : state.selectedAgentId;
-      return { sessions, messages, partBuffers, diffs, selectedAgentId };
+      return { sessions, messages, partBuffers, diffs, awaitingInput, selectedAgentId };
     }),
 }));

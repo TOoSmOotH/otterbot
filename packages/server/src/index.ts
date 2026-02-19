@@ -363,6 +363,20 @@ async function main() {
 
   let coo: COO | null = null;
 
+  // Resolver map for interactive OpenCode sessions: when a Worker awaits human
+  // input, a promise is stored here keyed by `${agentId}:${sessionId}`. The
+  // frontend sends `opencode:respond` which resolves it.
+  const openCodeResponseResolvers = new Map<string, (response: string | null) => void>();
+
+  function resolveOpenCodeResponse(agentId: string, sessionId: string, content: string): boolean {
+    const key = `${agentId}:${sessionId}`;
+    const resolver = openCodeResponseResolvers.get(key);
+    if (!resolver) return false;
+    openCodeResponseResolvers.delete(key);
+    resolver(content);
+    return true;
+  }
+
   function startCoo() {
     if (coo) return;
     try {
@@ -420,6 +434,21 @@ async function main() {
         },
         onOpenCodeEvent: (agentId, sessionId, event) => {
           emitOpenCodeEvent(io, agentId, sessionId, event);
+          // Clean up pending resolver when session ends
+          if (event.type === "__session-end") {
+            const key = `${agentId}:${sessionId}`;
+            const resolver = openCodeResponseResolvers.get(key);
+            if (resolver) {
+              openCodeResponseResolvers.delete(key);
+              resolver(null);
+            }
+          }
+        },
+        onOpenCodeAwaitingInput: (agentId, sessionId, prompt) => {
+          return new Promise<string | null>((resolve) => {
+            const key = `${agentId}:${sessionId}`;
+            openCodeResponseResolvers.set(key, resolve);
+          });
         },
         onAgentDestroyed: (agentId) => {
           emitAgentDestroyed(io, agentId);
@@ -448,7 +477,7 @@ async function main() {
       emitAgentSpawned(io, adminAssistant);
       console.log("AdminAssistant agent started.");
 
-      // Handle admin-assistant messages from the client
+      // Handle admin-assistant messages and opencode:respond from the client
       io.on("connection", (socket) => {
         socket.on("admin-assistant:message" as any, async (data: { content: string }) => {
           if (!data?.content) return;
@@ -458,6 +487,11 @@ async function main() {
             type: "chat" as any,
             content: data.content,
           });
+        });
+
+        socket.on("opencode:respond", (data, callback) => {
+          const resolved = resolveOpenCodeResponse(data.agentId, data.sessionId, data.content);
+          callback?.({ ok: resolved, error: resolved ? undefined : "No pending request" });
         });
       });
 
@@ -634,6 +668,7 @@ async function main() {
       openCodeModel?: string;
       openCodeApiKey?: string;
       openCodeBaseUrl?: string;
+      openCodeInteractive?: boolean;
     };
   }>("/api/setup/complete", async (req, reply) => {
     if (isSetupComplete()) {
@@ -646,7 +681,7 @@ async function main() {
       return { error: "Passphrase not set. Start setup from the beginning." };
     }
 
-    const { provider, providerName, model, apiKey, baseUrl, userName, userAvatar, userBio, userTimezone, ttsVoice, ttsProvider, userModelPackId, userGearConfig, cooName, cooModelPackId, cooGearConfig, searchProvider, searchApiKey, searchBaseUrl, adminName, adminModelPackId, adminGearConfig, openCodeEnabled, openCodeProvider, openCodeModel, openCodeApiKey, openCodeBaseUrl } = req.body;
+    const { provider, providerName, model, apiKey, baseUrl, userName, userAvatar, userBio, userTimezone, ttsVoice, ttsProvider, userModelPackId, userGearConfig, cooName, cooModelPackId, cooGearConfig, searchProvider, searchApiKey, searchBaseUrl, adminName, adminModelPackId, adminGearConfig, openCodeEnabled, openCodeProvider, openCodeModel, openCodeApiKey, openCodeBaseUrl, openCodeInteractive } = req.body;
 
     if (!provider || !model) {
       reply.code(400);
@@ -785,6 +820,9 @@ async function main() {
       setConfig("opencode:model", openCodeModel);
       setConfig("opencode:provider_type", openCodeProviderType);
       setConfig("opencode:provider_id", openCodeProviderId);
+      if (openCodeInteractive) {
+        setConfig("opencode:interactive", "true");
+      }
     }
 
     startCoo();

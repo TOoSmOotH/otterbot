@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { useOpenCodeStore } from "../../stores/opencode-store";
+import { getSocket } from "../../lib/socket";
 import type { OpenCodeSession, OpenCodeFileDiff } from "@otterbot/shared";
 
 function StatusDot({ status }: { status: OpenCodeSession["status"] }) {
@@ -8,6 +9,7 @@ function StatusDot({ status }: { status: OpenCodeSession["status"] }) {
     idle: "bg-yellow-400",
     completed: "bg-emerald-500",
     error: "bg-red-500",
+    "awaiting-input": "bg-yellow-400 animate-pulse",
   };
   return <span className={`inline-block w-2 h-2 rounded-full ${colors[status] ?? "bg-gray-400"}`} />;
 }
@@ -144,6 +146,70 @@ function DiffSummary({ diffs }: { diffs: OpenCodeFileDiff[] }) {
   );
 }
 
+function InputPrompt({ agentId }: { agentId: string }) {
+  const awaiting = useOpenCodeStore((s) => s.awaitingInput.get(agentId));
+  const [value, setValue] = useState("");
+  const [sending, setSending] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (awaiting) {
+      inputRef.current?.focus();
+      setValue("");
+      setSending(false);
+    }
+  }, [awaiting]);
+
+  const handleSubmit = useCallback(() => {
+    if (!awaiting || !value.trim() || sending) return;
+    setSending(true);
+    getSocket().emit("opencode:respond", {
+      agentId,
+      sessionId: awaiting.sessionId,
+      content: value.trim(),
+    }, (ack) => {
+      if (!ack?.ok) {
+        setSending(false);
+      }
+    });
+  }, [agentId, awaiting, value, sending]);
+
+  if (!awaiting) return null;
+
+  return (
+    <div className="border-t border-yellow-500/30 bg-yellow-500/5 px-3 py-2">
+      <div className="flex items-center gap-2 mb-1.5">
+        <span className="inline-block w-1.5 h-1.5 rounded-full bg-yellow-400 animate-pulse" />
+        <span className="text-xs text-yellow-400 font-medium">OpenCode is waiting for your input</span>
+      </div>
+      <div className="flex gap-2">
+        <input
+          ref={inputRef}
+          type="text"
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              handleSubmit();
+            }
+          }}
+          placeholder="Type your response..."
+          disabled={sending}
+          className="flex-1 bg-black/30 border border-yellow-500/20 rounded px-2 py-1.5 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-yellow-500/50 disabled:opacity-50"
+        />
+        <button
+          onClick={handleSubmit}
+          disabled={!value.trim() || sending}
+          className="px-3 py-1.5 rounded text-xs font-medium bg-yellow-500/20 text-yellow-400 hover:bg-yellow-500/30 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+        >
+          {sending ? "Sending..." : "Send"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function SessionContent({ agentId }: { agentId: string }) {
   const session = useOpenCodeStore((s) => s.sessions.get(agentId));
   const sessionId = session?.id || "";
@@ -275,6 +341,14 @@ function SessionContent({ agentId }: { agentId: string }) {
           </div>
         )}
 
+        {/* Awaiting input indicator */}
+        {session.status === "awaiting-input" && (
+          <div className="flex items-center gap-2 text-xs text-yellow-400/70">
+            <span className="inline-block w-1.5 h-1.5 rounded-full bg-yellow-400 animate-pulse" />
+            Waiting for your input...
+          </div>
+        )}
+
         {/* Diff summary */}
         {sessionDiffs.length > 0 && <DiffSummary diffs={sessionDiffs} />}
 
@@ -290,6 +364,9 @@ function SessionContent({ agentId }: { agentId: string }) {
           </div>
         )}
       </div>
+
+      {/* Input prompt — sticky footer */}
+      <InputPrompt agentId={agentId} />
     </div>
   );
 }

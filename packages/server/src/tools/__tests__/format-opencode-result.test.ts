@@ -9,6 +9,7 @@ describe("formatOpenCodeResult", () => {
       sessionId: "sess-1",
       summary: "Could not compile project",
       diff: null,
+      usage: null,
     };
     expect(formatOpenCodeResult(result)).toBe(
       "OpenCode task failed: Could not compile project",
@@ -21,6 +22,7 @@ describe("formatOpenCodeResult", () => {
       sessionId: "sess-2",
       summary: "Refactored module",
       diff: null,
+      usage: null,
     };
     const output = formatOpenCodeResult(result);
     expect(output).toContain("OpenCode task completed successfully.");
@@ -39,6 +41,7 @@ describe("formatOpenCodeResult", () => {
           { path: "src/utils.ts", additions: 5, deletions: 2 },
         ],
       },
+      usage: null,
     };
     const output = formatOpenCodeResult(result);
     expect(output).toContain("src/index.ts (+10, -3)");
@@ -55,6 +58,7 @@ describe("formatOpenCodeResult", () => {
       diff: {
         files: [{ path: "src/new.ts", additions: 20, deletions: 0 }],
       },
+      usage: null,
     };
     const output = formatOpenCodeResult(result);
     expect(output).toContain("src/new.ts (+20)");
@@ -68,6 +72,7 @@ describe("formatOpenCodeResult", () => {
       sessionId: "sess-5",
       summary: longSummary,
       diff: null,
+      usage: null,
     };
     const output = formatOpenCodeResult(result);
     expect(output).toContain("[truncated]");
@@ -81,6 +86,7 @@ describe("formatOpenCodeResult", () => {
       sessionId: "sess-6",
       summary: "No-op",
       diff: { files: [] },
+      usage: null,
     };
     const output = formatOpenCodeResult(result);
     expect(output).toContain("No file changes detected.");

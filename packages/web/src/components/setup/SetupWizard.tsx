@@ -178,6 +178,7 @@ export function SetupWizard() {
 
   // Step 8: OpenCode coding agent
   const [openCodeEnabled, setOpenCodeEnabled] = useState(true);
+  const [openCodeInteractive, setOpenCodeInteractive] = useState(false);
   const [openCodeUseSameProvider, setOpenCodeUseSameProvider] = useState(true);
   const [openCodeProvider, setOpenCodeProvider] = useState("");
   const [openCodeModel, setOpenCodeModel] = useState("");
@@ -456,6 +457,7 @@ export function SetupWizard() {
       adminModelPackId: adminModelPackId || undefined,
       adminGearConfig: adminGearConfig || undefined,
       openCodeEnabled: openCodeEnabled || undefined,
+      openCodeInteractive: openCodeEnabled ? openCodeInteractive : undefined,
       openCodeProvider: openCodeEnabled
         ? (openCodeUseSameProvider ? provider : openCodeProvider) || undefined
         : undefined,
@@ -1254,6 +1256,28 @@ export function SetupWizard() {
 
               {openCodeEnabled && (
                 <>
+                  {/* Interactive mode toggle */}
+                  <label className="flex items-center gap-3 cursor-pointer">
+                    <div
+                      onClick={() => setOpenCodeInteractive(!openCodeInteractive)}
+                      className={`relative w-10 h-5 rounded-full transition-colors ${
+                        openCodeInteractive ? "bg-primary" : "bg-muted"
+                      }`}
+                    >
+                      <div
+                        className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${
+                          openCodeInteractive ? "translate-x-5" : "translate-x-0.5"
+                        }`}
+                      />
+                    </div>
+                    <div>
+                      <span className="text-sm">Interactive mode</span>
+                      <p className="text-[10px] text-muted-foreground">
+                        Pause and ask for your input instead of running fully autonomously.
+                      </p>
+                    </div>
+                  </label>
+
                   {/* Same provider checkbox */}
                   <label className="flex items-center gap-2 cursor-pointer">
                     <input
