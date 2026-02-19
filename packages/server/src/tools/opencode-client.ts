@@ -363,8 +363,9 @@ export class OpenCodeClient {
           }
 
           // Handle permission requests (interactive mode)
-          if (eventType === "permission.updated" && eventSessionId === sessionId && props) {
-            const permissionId = props.id as string | undefined;
+          if (eventType === "permission.asked" && isOurSession && props) {
+            console.log(`[OpenCode Client] Permission event properties:`, JSON.stringify(props));
+            const permissionId = (props.id ?? props.permissionID) as string | undefined;
             if (permissionId) {
               console.log(`[OpenCode Client] Permission requested: ${props.title ?? props.type} (${permissionId})`);
               this.permissionPending = true;
