@@ -724,9 +724,6 @@ export class TeamLead extends BaseAgent {
     onReasoning?: (token: string, messageId: string) => void,
     onReasoningEnd?: (messageId: string) => void,
   ): Promise<{ text: string; thinking: string | undefined }> {
-    // Snapshot board state before first think() for stale-state detection
-    let prevBoard = this.getKanbanBoardState();
-
     let result = await this.think(initialMessage, onToken, onReasoning, onReasoningEnd);
 
     for (let i = 0; i < MAX_CONTINUATION_CYCLES; i++) {
@@ -737,16 +734,6 @@ export class TeamLead extends BaseAgent {
 
       const board = this.getKanbanBoardState();
       debug("team-lead", `thinkWithContinuation cycle=${i} board: backlog=${board.backlogCount} unblocked=${board.unblockedBacklogCount} inProgress=${board.inProgressCount} done=${board.doneCount} allDone=${board.allDone}`);
-
-      // Stale-state detection: if nothing changed since last cycle, stop looping
-      if (
-        board.backlogCount === prevBoard.backlogCount &&
-        board.inProgressCount === prevBoard.inProgressCount &&
-        board.doneCount === prevBoard.doneCount
-      ) {
-        console.warn(`[TeamLead ${this.id}] Stale state detected — board unchanged after cycle. Breaking continuation loop.`);
-        break;
-      }
 
       // If everything is done, stop — no point looping when there's nothing to spawn
       if (board.allDone) {
@@ -780,8 +767,8 @@ export class TeamLead extends BaseAgent {
 
       console.log(`[TeamLead ${this.id}] Continuation cycle ${i + 1}/${MAX_CONTINUATION_CYCLES} — ${board.backlogCount} backlog tasks remain`);
 
-      // Update snapshot for next iteration
-      prevBoard = board;
+      // Snapshot board BEFORE think() so we can detect no-progress cycles immediately
+      const boardBeforeThink = board;
 
       result = await this.think(
         prompt,
@@ -789,6 +776,19 @@ export class TeamLead extends BaseAgent {
         onReasoning,
         onReasoningEnd,
       );
+
+      // Zero-lag stale-state detection: if think() didn't change the board, stop
+      // immediately instead of waiting for the next cycle to notice
+      const boardAfterThink = this.getKanbanBoardState();
+      if (
+        boardAfterThink.backlogCount === boardBeforeThink.backlogCount &&
+        boardAfterThink.inProgressCount === boardBeforeThink.inProgressCount &&
+        boardAfterThink.doneCount === boardBeforeThink.doneCount
+      ) {
+        console.warn(`[TeamLead ${this.id}] No board progress in cycle ${i + 1} — breaking continuation loop.`);
+        debug("team-lead", `thinkWithContinuation cycle=${i} — board unchanged after think(), breaking`);
+        break;
+      }
     }
 
     return { text: result.text, thinking: result.thinking };
