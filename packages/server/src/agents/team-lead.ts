@@ -1274,6 +1274,21 @@ export class TeamLead extends BaseAgent {
       .get();
     if (!existing) return `Task ${taskId} not found.`;
 
+    // Guard: no-op if already in the target column (prevents redundant updates)
+    if (updates.column && updates.column === existing.column && !updates.description && !updates.title && updates.assigneeAgentId === undefined) {
+      return `Task "${existing.title}" is already in "${updates.column}" — no change needed.`;
+    }
+
+    // Guard: prevent moving tasks backwards out of "done"
+    // The LLM sometimes marks a task done then immediately reverts it to backlog in the same cycle.
+    // If a task needs to be redone, use delete_task + create_task instead.
+    if (updates.column && updates.column !== "done" && existing.column === "done") {
+      console.warn(
+        `[TeamLead ${this.id}] Blocked update_task: cannot move "${existing.title}" (${taskId}) from "done" back to "${updates.column}". Use delete_task + create_task to redo a completed task.`,
+      );
+      return `REJECTED: Task "${existing.title}" is already done. You cannot move a completed task back to "${updates.column}". If this task needs to be redone, use delete_task to remove it and create_task to create a new one.`;
+    }
+
     const setValues: Record<string, unknown> = { updatedAt: new Date().toISOString() };
     if (updates.column) setValues.column = updates.column;
     if (updates.assigneeAgentId !== undefined) setValues.assigneeAgentId = updates.assigneeAgentId;
