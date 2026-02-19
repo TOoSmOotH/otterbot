@@ -2146,7 +2146,7 @@ async function main() {
       maxIterations?: number;
     };
   }>("/api/settings/opencode", async (req) => {
-    updateOpenCodeSettings(req.body);
+    await updateOpenCodeSettings(req.body);
     return { ok: true };
   });
 
@@ -3052,7 +3052,7 @@ Respond with ONLY a JSON object (no markdown, no explanation) with these fields:
 
   // Graceful shutdown
   const shutdown = async () => {
-    stopOpenCodeServer();
+    await stopOpenCodeServer();
     await closeBrowser();
     process.exit(0);
   };

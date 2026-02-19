@@ -964,7 +964,7 @@ export function getOpenCodeSettings(): OpenCodeSettingsResponse {
   };
 }
 
-export function updateOpenCodeSettings(data: {
+export async function updateOpenCodeSettings(data: {
   enabled?: boolean;
   apiUrl?: string;
   username?: string;
@@ -974,7 +974,7 @@ export function updateOpenCodeSettings(data: {
   model?: string;
   providerId?: string;
   interactive?: boolean;
-}): void {
+}): Promise<void> {
   const wasEnabled = getConfig("opencode:enabled") === "true";
   const oldModel = getConfig("opencode:model") ?? "";
   const oldProviderId = getConfig("opencode:provider_id") ?? "";
@@ -1040,10 +1040,10 @@ export function updateOpenCodeSettings(data: {
   if (!wasEnabled && isNowEnabled) {
     startOpenCodeServer();
   } else if (wasEnabled && !isNowEnabled) {
-    stopOpenCodeServer();
+    await stopOpenCodeServer();
   } else if (isNowEnabled && configChanged) {
     // Model, provider, or interactive mode changed — rewrite config and restart
-    stopOpenCodeServer();
+    await stopOpenCodeServer();
     startOpenCodeServer();
   }
 }

@@ -287,25 +287,46 @@ function scheduleRestart(): void {
   }, delay);
 }
 
-export function stopOpenCodeServer(): void {
+export function stopOpenCodeServer(): Promise<void> {
   if (restartTimer) {
     clearTimeout(restartTimer);
     restartTimer = null;
   }
 
   if (!openCodeProcess) {
-    return;
+    return Promise.resolve();
   }
 
-  console.log("[OpenCode] Stopping server (pid=%d)...", openCodeProcess.pid);
+  const proc = openCodeProcess;
+  console.log("[OpenCode] Stopping server (pid=%d)...", proc.pid);
 
-  try {
-    openCodeProcess.kill("SIGTERM");
-  } catch {
-    // Process may have already exited
-  }
+  return new Promise<void>((resolve) => {
+    const killTimeout = setTimeout(() => {
+      // Force kill if SIGTERM didn't work after 5s
+      try {
+        proc.kill("SIGKILL");
+      } catch {
+        // already dead
+      }
+      openCodeProcess = null;
+      resolve();
+    }, 5000);
 
-  openCodeProcess = null;
+    proc.once("exit", () => {
+      clearTimeout(killTimeout);
+      openCodeProcess = null;
+      resolve();
+    });
+
+    try {
+      proc.kill("SIGTERM");
+    } catch {
+      // Process may have already exited
+      clearTimeout(killTimeout);
+      openCodeProcess = null;
+      resolve();
+    }
+  });
 }
 
 export function isOpenCodeRunning(): boolean {
