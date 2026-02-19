@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { cn } from "../../lib/utils";
 import { useSettingsStore } from "../../stores/settings-store";
 
@@ -15,7 +15,6 @@ export function OpenCodeTab() {
   const testResult = useSettingsStore((s) => s.openCodeTestResult);
   const providers = useSettingsStore((s) => s.providers);
   const loadOpenCodeSettings = useSettingsStore((s) => s.loadOpenCodeSettings);
-  const loadSettings = useSettingsStore((s) => s.loadSettings);
   const updateOpenCodeSettings = useSettingsStore(
     (s) => s.updateOpenCodeSettings,
   );
@@ -39,7 +38,6 @@ export function OpenCodeTab() {
 
   useEffect(() => {
     loadOpenCodeSettings();
-    loadSettings();
   }, []);
 
   // Sync local state when store updates

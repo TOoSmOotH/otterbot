@@ -324,12 +324,29 @@ export class OpenCodeClient {
             }
           }
 
-          // Check for error events
-          if (eventType === "session.error" && eventSessionId === sessionId) {
-            console.error(`[OpenCode Client] Session error event:`, props?.error);
-            clearInterval(checkInterval);
-            controller.abort();
-            return "error";
+          // Check for completion events
+          if (eventSessionId === sessionId) {
+            if (eventType === "session.error") {
+              console.error(`[OpenCode Client] Session error event:`, props?.error);
+              clearInterval(checkInterval);
+              controller.abort();
+              return "error";
+            }
+            if (eventType === "session.idle") {
+              console.log(`[OpenCode Client] Session idle event — task complete.`);
+              clearInterval(checkInterval);
+              controller.abort();
+              return "idle";
+            }
+            if (eventType === "session.status") {
+              const statusObj = props?.status as { type?: string } | undefined;
+              if (statusObj?.type === "idle") {
+                console.log(`[OpenCode Client] Session status=idle — task complete.`);
+                clearInterval(checkInterval);
+                controller.abort();
+                return "idle";
+              }
+            }
           }
         }
       }
