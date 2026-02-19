@@ -568,15 +568,15 @@ export function emitOpenCodeEvent(
   // Parse specific event types into structured events
 
   // Handle streaming deltas — message.part.delta carries incremental text chunks
+  // Shape: { sessionID, messageID, partID, field: "text"|"reasoning"|..., delta: "chunk" }
   if (type === "message.part.delta") {
-    // Properties may contain: delta (text), part or partID/id, sessionID, messageID, type
-    const delta = (properties.delta ?? properties.content) as string | undefined;
-    // Part info may be nested in a "part" object or flat in properties
-    const part = properties.part as Record<string, unknown> | undefined;
-    const partId = ((part?.id ?? properties.partID ?? properties.id) || "") as string;
-    const messageId = ((part?.messageID ?? properties.messageID) || "") as string;
-    const partType = ((part?.type ?? properties.type ?? "text") as string);
-    const toolName = ((part?.tool ?? properties.tool) || "") as string;
+    const delta = properties.delta as string | undefined;
+    const partId = (properties.partID || "") as string;
+    const messageId = (properties.messageID || "") as string;
+    // "field" indicates which part field is being streamed (text, reasoning, etc.)
+    const field = (properties.field || "text") as string;
+    // Map field names to our part types
+    const partType = field === "reasoning" ? "reasoning" : "text";
 
     if (delta && partId && messageId) {
       io.emit("opencode:part-delta", {
@@ -584,9 +584,9 @@ export function emitOpenCodeEvent(
         sessionId,
         messageId,
         partId,
-        type: partType === "message.part.delta" ? "text" : partType,
+        type: partType,
         delta,
-        toolName: toolName || undefined,
+        toolName: undefined,
         toolState: undefined,
       });
 
@@ -594,9 +594,9 @@ export function emitOpenCodeEvent(
       const bufKey = `${agentId}:${messageId}:${partId}`;
       const existing = serverPartBuffers.get(bufKey);
       serverPartBuffers.set(bufKey, {
-        type: partType === "message.part.delta" ? "text" : partType,
+        type: partType,
         content: (existing?.content ?? "") + delta,
-        toolName: toolName || existing?.toolName,
+        toolName: existing?.toolName,
         toolState: existing?.toolState,
       });
     }
