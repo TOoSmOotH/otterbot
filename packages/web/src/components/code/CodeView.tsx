@@ -58,15 +58,23 @@ function SessionSidebar({
 
 function PartContent({
   type,
-  content,
+  content: rawContent,
   toolName,
-  toolState,
+  toolState: rawToolState,
 }: {
   type: string;
   content: string;
   toolName?: string;
   toolState?: string;
 }) {
+  // Safety: ensure content is always a string (SSE data may contain objects)
+  const content = typeof rawContent === "string"
+    ? rawContent
+    : (rawContent != null ? JSON.stringify(rawContent) : "");
+  const toolState = typeof rawToolState === "string"
+    ? rawToolState
+    : (rawToolState != null ? JSON.stringify(rawToolState) : undefined);
+
   if (type === "reasoning") {
     return (
       <details className="group">
@@ -234,9 +242,9 @@ function SessionContent({ agentId }: { agentId: string }) {
                 <PartContent
                   key={part.id || i}
                   type={part.type}
-                  content={part.content}
+                  content={String(part.content ?? "")}
                   toolName={part.toolName}
-                  toolState={part.toolState}
+                  toolState={typeof part.toolState === "string" ? part.toolState : undefined}
                 />
               ))}
             </div>

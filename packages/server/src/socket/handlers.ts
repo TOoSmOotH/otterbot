@@ -451,53 +451,78 @@ export function emitOpenCodeEvent(
   io.emit("opencode:event", { agentId, sessionId, type, properties });
 
   // Parse specific event types into structured events
+  // SDK shape: EventMessagePartUpdated = { type, properties: { part: Part, delta?: string } }
+  // Part has: id, sessionID, messageID, type, and type-specific fields
   if (type === "message.part.updated") {
+    const part = properties.part as Record<string, unknown> | undefined;
     const delta = properties.delta as string | undefined;
-    const partType = properties.type as string | undefined;
-    const partId = (properties.partID ?? properties.id) as string | undefined;
-    const messageId = properties.messageID as string | undefined;
-    const toolName = properties.toolName as string | undefined;
-    const toolState = properties.state as string | undefined;
 
-    if (delta && partId && messageId && partType) {
-      io.emit("opencode:part-delta", {
-        agentId,
-        sessionId,
-        messageId,
-        partId,
-        type: partType,
-        delta,
-        toolName,
-        toolState,
-      });
+    if (part) {
+      const partId = (part.id ?? "") as string;
+      const messageId = (part.messageID ?? "") as string;
+      const partType = (part.type ?? "text") as string;
+
+      // Extract tool name from ToolPart (type: "tool")
+      const toolName = (part.tool ?? "") as string;
+      // ToolPart.state is an object { status, input, output, ... } — extract status string
+      const toolStateObj = part.state as Record<string, unknown> | undefined;
+      const toolState = (typeof toolStateObj === "object" && toolStateObj !== null)
+        ? (toolStateObj.status as string | undefined)
+        : undefined;
+
+      // Build delta text: use explicit delta if present, else extract from part type
+      let deltaText = delta;
+      if (!deltaText) {
+        // For text/reasoning parts, use the text field as initial content
+        if (typeof part.text === "string") {
+          deltaText = part.text;
+        }
+        // For tool parts, stringify the input or output
+        if (partType === "tool" && toolStateObj) {
+          if (typeof toolStateObj.output === "string") {
+            deltaText = toolStateObj.output;
+          } else if (toolStateObj.input) {
+            deltaText = JSON.stringify(toolStateObj.input);
+          }
+        }
+      }
+
+      if (deltaText && partId && messageId) {
+        io.emit("opencode:part-delta", {
+          agentId,
+          sessionId,
+          messageId,
+          partId,
+          type: partType,
+          delta: deltaText,
+          toolName: toolName || undefined,
+          toolState,
+        });
+      }
     }
   }
 
+  // SDK shape: EventMessageUpdated = { type, properties: { info: Message } }
+  // Message = UserMessage | AssistantMessage (has role, id, sessionID, but NO parts)
   if (type === "message.updated") {
-    const msgId = (properties.messageID ?? properties.id) as string | undefined;
-    const role = properties.role as string | undefined;
-    const parts = properties.parts as Array<Record<string, unknown>> | undefined;
+    const info = properties.info as Record<string, unknown> | undefined;
 
-    if (msgId && role) {
-      const parsedParts: OpenCodePart[] = (parts ?? []).map((p) => ({
-        id: (p.id ?? "") as string,
-        messageId: msgId,
-        type: (p.type ?? "text") as OpenCodePart["type"],
-        content: (p.content ?? p.text ?? "") as string,
-        toolName: p.toolName as string | undefined,
-        toolArgs: p.toolArgs as Record<string, unknown> | undefined,
-        toolState: p.state as OpenCodePart["toolState"],
-        toolResult: p.toolResult as string | undefined,
-      }));
+    if (info) {
+      const msgId = (info.id ?? "") as string;
+      const role = info.role as string | undefined;
+      const msgSessionId = (info.sessionID ?? sessionId) as string;
 
-      const message: OpenCodeMessage = {
-        id: msgId,
-        sessionId,
-        role: role as "user" | "assistant",
-        parts: parsedParts,
-        createdAt: (properties.createdAt as string) || new Date().toISOString(),
-      };
-      io.emit("opencode:message", { agentId, sessionId, message });
+      if (msgId && role) {
+        // message.updated carries message metadata, not parts — emit with empty parts
+        const message: OpenCodeMessage = {
+          id: msgId,
+          sessionId: msgSessionId,
+          role: role as "user" | "assistant",
+          parts: [],
+          createdAt: new Date().toISOString(),
+        };
+        io.emit("opencode:message", { agentId, sessionId, message });
+      }
     }
   }
 }

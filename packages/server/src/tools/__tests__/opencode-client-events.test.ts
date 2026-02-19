@@ -48,7 +48,7 @@ describe("OpenCodeClient — onEvent callback", () => {
 
     // Create an async iterable that yields a few events then ends
     const events = [
-      { type: "message.part.updated", properties: { sessionID: "sess-1", delta: "Hello", partID: "p1", messageID: "m1", type: "text" } },
+      { type: "message.part.updated", properties: { sessionID: "sess-1", part: { id: "p1", sessionID: "sess-1", messageID: "m1", type: "text", text: "Hello" }, delta: "Hello" } },
       { type: "session.status", properties: { sessionID: "sess-1", status: "active" } },
     ];
 
@@ -86,7 +86,7 @@ describe("OpenCodeClient — onEvent callback", () => {
     expect(onEvent).toHaveBeenCalledTimes(2);
     expect(onEvent).toHaveBeenCalledWith({
       type: "message.part.updated",
-      properties: expect.objectContaining({ delta: "Hello" }),
+      properties: expect.objectContaining({ delta: "Hello", part: expect.any(Object) }),
     });
     expect(onEvent).toHaveBeenCalledWith({
       type: "session.status",
