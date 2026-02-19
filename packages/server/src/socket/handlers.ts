@@ -566,6 +566,42 @@ export function emitOpenCodeEvent(
   io.emit("opencode:event", { agentId, sessionId, type, properties });
 
   // Parse specific event types into structured events
+
+  // Handle streaming deltas — message.part.delta carries incremental text chunks
+  if (type === "message.part.delta") {
+    // Properties may contain: delta (text), part or partID/id, sessionID, messageID, type
+    const delta = (properties.delta ?? properties.content) as string | undefined;
+    // Part info may be nested in a "part" object or flat in properties
+    const part = properties.part as Record<string, unknown> | undefined;
+    const partId = ((part?.id ?? properties.partID ?? properties.id) || "") as string;
+    const messageId = ((part?.messageID ?? properties.messageID) || "") as string;
+    const partType = ((part?.type ?? properties.type ?? "text") as string);
+    const toolName = ((part?.tool ?? properties.tool) || "") as string;
+
+    if (delta && partId && messageId) {
+      io.emit("opencode:part-delta", {
+        agentId,
+        sessionId,
+        messageId,
+        partId,
+        type: partType === "message.part.delta" ? "text" : partType,
+        delta,
+        toolName: toolName || undefined,
+        toolState: undefined,
+      });
+
+      // Accumulate into server-side buffer
+      const bufKey = `${agentId}:${messageId}:${partId}`;
+      const existing = serverPartBuffers.get(bufKey);
+      serverPartBuffers.set(bufKey, {
+        type: partType === "message.part.delta" ? "text" : partType,
+        content: (existing?.content ?? "") + delta,
+        toolName: toolName || existing?.toolName,
+        toolState: existing?.toolState,
+      });
+    }
+  }
+
   // SDK shape: EventMessagePartUpdated = { type, properties: { part: Part, delta?: string } }
   // Part has: id, sessionID, messageID, type, and type-specific fields
   if (type === "message.part.updated") {

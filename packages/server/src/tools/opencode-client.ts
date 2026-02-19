@@ -328,6 +328,11 @@ export class OpenCodeClient {
           lastActivityTime = Date.now();
           console.log(`[OpenCode Client] SSE activity: ${eventType ?? "unknown"}`);
 
+          // Debug: log structure of delta and permission events
+          if (eventType === "message.part.delta") {
+            console.log(`[OpenCode Client] part.delta properties:`, JSON.stringify(props).slice(0, 500));
+          }
+
           // Forward event to listener
           if (eventType) {
             try {
