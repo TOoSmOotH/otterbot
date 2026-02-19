@@ -1,7 +1,14 @@
 import { useEffect, useRef, useState, useCallback } from "react";
+import { useShallow } from "zustand/react/shallow";
 import { useOpenCodeStore } from "../../stores/opencode-store";
 import { getSocket } from "../../lib/socket";
-import type { OpenCodeSession, OpenCodeFileDiff } from "@otterbot/shared";
+import type { OpenCodeSession, OpenCodeMessage, OpenCodeFileDiff } from "@otterbot/shared";
+
+type PartBuffer = { type: string; content: string; toolName?: string; toolState?: string };
+
+const EMPTY_MESSAGES: OpenCodeMessage[] = [];
+const EMPTY_DIFFS: OpenCodeFileDiff[] = [];
+const EMPTY_PART_BUFFERS: [string, PartBuffer][] = [];
 
 function StatusDot({ status }: { status: OpenCodeSession["status"] }) {
   const colors: Record<string, string> = {
@@ -213,25 +220,39 @@ function InputPrompt({ agentId }: { agentId: string }) {
 function SessionContent({ agentId }: { agentId: string }) {
   const session = useOpenCodeStore((s) => s.sessions.get(agentId));
   const sessionId = session?.id || "";
-  const sessionMessages = useOpenCodeStore((s) => s.messages.get(sessionId) ?? []);
-  const partBuffers = useOpenCodeStore((s) => s.partBuffers);
-  const sessionDiffs = useOpenCodeStore((s) => s.diffs.get(sessionId) ?? []);
+  const sessionMessages = useOpenCodeStore((s) => s.messages.get(sessionId) ?? EMPTY_MESSAGES);
+  const sessionPartBuffers = useOpenCodeStore(
+    useShallow((s) => {
+      if (!sessionId) return EMPTY_PART_BUFFERS;
+      const result: [string, PartBuffer][] = [];
+      for (const [key, buf] of s.partBuffers) {
+        if (key.startsWith(`${sessionId}:`)) result.push([key, buf]);
+      }
+      return result.length === 0 ? EMPTY_PART_BUFFERS : result;
+    }),
+  );
+  const sessionDiffs = useOpenCodeStore((s) => s.diffs.get(sessionId) ?? EMPTY_DIFFS);
 
   const scrollRef = useRef<HTMLDivElement>(null);
-  const [autoScroll, setAutoScroll] = useState(true);
+  const autoScrollRef = useRef(true);
+  const rafRef = useRef<number>(0);
 
   // Auto-scroll on new content
   useEffect(() => {
-    if (autoScroll && scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
-  }, [sessionMessages, partBuffers, autoScroll]);
+    cancelAnimationFrame(rafRef.current);
+    rafRef.current = requestAnimationFrame(() => {
+      if (autoScrollRef.current && scrollRef.current) {
+        scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+      }
+    });
+    return () => cancelAnimationFrame(rafRef.current);
+  }, [sessionMessages, sessionPartBuffers]);
 
-  const handleScroll = () => {
+  const handleScroll = useCallback(() => {
     if (!scrollRef.current) return;
     const { scrollTop, scrollHeight, clientHeight } = scrollRef.current;
-    setAutoScroll(scrollHeight - scrollTop - clientHeight < 50);
-  };
+    autoScrollRef.current = scrollHeight - scrollTop - clientHeight < 50;
+  }, []);
 
   if (!session) {
     return (
@@ -252,19 +273,17 @@ function SessionContent({ agentId }: { agentId: string }) {
     toolState?: string;
   }> = [];
 
-  for (const [key, buf] of partBuffers) {
-    if (key.startsWith(`${sessionId}:`)) {
-      const parts = key.split(":");
-      streamingParts.push({
-        key,
-        messageId: parts[1],
-        partId: parts[2],
-        type: buf.type,
-        content: buf.content,
-        toolName: buf.toolName,
-        toolState: buf.toolState,
-      });
-    }
+  for (const [key, buf] of sessionPartBuffers) {
+    const parts = key.split(":");
+    streamingParts.push({
+      key,
+      messageId: parts[1],
+      partId: parts[2],
+      type: buf.type,
+      content: buf.content,
+      toolName: buf.toolName,
+      toolState: buf.toolState,
+    });
   }
 
   // Group streaming parts by messageId
@@ -392,7 +411,7 @@ export function CodeView() {
 
       {/* Main content */}
       {selectedAgentId ? (
-        <SessionContent agentId={selectedAgentId} />
+        <SessionContent key={selectedAgentId} agentId={selectedAgentId} />
       ) : (
         <div className="flex-1 flex items-center justify-center">
           <div className="text-center text-muted-foreground text-xs">

@@ -171,7 +171,6 @@ export function useSocket() {
         data.toolName,
         data.toolState,
       );
-      clearAwaitingInput(data.agentId);
     });
 
     socket.on("opencode:awaiting-input", (data) => {

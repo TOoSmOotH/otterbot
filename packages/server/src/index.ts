@@ -2049,6 +2049,53 @@ async function main() {
   });
 
   // =========================================================================
+  // OpenCode session history routes
+  // =========================================================================
+
+  app.get<{
+    Querystring: { limit?: string };
+  }>("/api/opencode/sessions", async (req) => {
+    const { getDb, schema } = await import("./db/index.js");
+    const { desc } = await import("drizzle-orm");
+    const db = getDb();
+    const limit = Math.min(parseInt(req.query.limit ?? "50", 10) || 50, 200);
+    return db
+      .select()
+      .from(schema.opencodeSessions)
+      .orderBy(desc(schema.opencodeSessions.startedAt))
+      .limit(limit)
+      .all();
+  });
+
+  app.get<{
+    Params: { id: string };
+  }>("/api/opencode/sessions/:id", async (req, reply) => {
+    const { getDb, schema } = await import("./db/index.js");
+    const { eq } = await import("drizzle-orm");
+    const db = getDb();
+    const session = db
+      .select()
+      .from(schema.opencodeSessions)
+      .where(eq(schema.opencodeSessions.id, req.params.id))
+      .get();
+    if (!session) {
+      reply.code(404);
+      return { error: "Session not found" };
+    }
+    const messages = db
+      .select()
+      .from(schema.opencodeMessages)
+      .where(eq(schema.opencodeMessages.sessionId, session.sessionId))
+      .all();
+    const diffs = db
+      .select()
+      .from(schema.opencodeDiffs)
+      .where(eq(schema.opencodeDiffs.sessionId, session.sessionId))
+      .all();
+    return { session, messages, diffs };
+  });
+
+  // =========================================================================
   // Pricing settings routes
   // =========================================================================
 

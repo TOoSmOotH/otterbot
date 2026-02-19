@@ -24,6 +24,7 @@ import { InboxView } from "./components/inbox/InboxView";
 import { CalendarView } from "./components/calendar/CalendarView";
 import { CodeView } from "./components/code/CodeView";
 import { useDesktopStore } from "./stores/desktop-store";
+import { useOpenCodeStore } from "./stores/opencode-store";
 import { initMovementTriggers } from "./lib/movement-triggers";
 import { Group, Panel, Separator, useDefaultLayout, usePanelRef } from "react-resizable-panels";
 import { disconnectSocket, getSocket } from "./lib/socket";
@@ -135,6 +136,38 @@ function MainApp() {
 
     // Pre-load model packs so Live View has them ready
     loadPacks();
+
+    // Hydrate OpenCode session history
+    fetch("/api/opencode/sessions?limit=50")
+      .then((r) => r.json())
+      .then(async (sessions: Array<{ id: string; sessionId: string; agentId: string; projectId: string | null; task: string; status: string; startedAt: string; completedAt?: string }>) => {
+        const messagesMap: Record<string, import("@otterbot/shared").OpenCodeMessage[]> = {};
+        const diffsMap: Record<string, import("@otterbot/shared").OpenCodeFileDiff[]> = {};
+        await Promise.all(
+          sessions.map(async (s) => {
+            if (!s.sessionId) return;
+            try {
+              const detail = await fetch(`/api/opencode/sessions/${s.id}`).then((r) => r.json());
+              messagesMap[s.sessionId] = detail.messages;
+              diffsMap[s.sessionId] = detail.diffs;
+            } catch {
+              // ignore individual fetch failures
+            }
+          }),
+        );
+        // Map DB rows to store types: session.id in the store = DB row.sessionId
+        const mapped = sessions.map((s) => ({
+          id: s.sessionId || s.id,
+          agentId: s.agentId,
+          projectId: s.projectId,
+          task: s.task,
+          status: s.status as import("@otterbot/shared").OpenCodeSession["status"],
+          startedAt: s.startedAt,
+          completedAt: s.completedAt,
+        }));
+        useOpenCodeStore.getState().loadSessions({ sessions: mapped, messages: messagesMap, diffs: diffsMap });
+      })
+      .catch(console.error);
 
     // Check desktop environment status
     useDesktopStore.getState().checkStatus();

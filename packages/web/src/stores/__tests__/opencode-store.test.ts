@@ -241,6 +241,89 @@ describe("opencode-store", () => {
     });
   });
 
+  describe("loadSessions", () => {
+    it("loads historical sessions into the store", () => {
+      const sessions = [
+        makeSession({ agentId: "agent-1", id: "sess-1", status: "completed" }),
+        makeSession({ agentId: "agent-2", id: "sess-2", status: "completed" }),
+      ];
+      const messages = {
+        "sess-1": [makeMessage({ id: "msg-1", sessionId: "sess-1" })],
+        "sess-2": [makeMessage({ id: "msg-2", sessionId: "sess-2" })],
+      };
+      const diffs = {
+        "sess-1": [{ path: "src/a.ts", additions: 5, deletions: 2 }],
+      };
+
+      useOpenCodeStore.getState().loadSessions({ sessions, messages, diffs });
+
+      expect(useOpenCodeStore.getState().sessions.size).toBe(2);
+      expect(useOpenCodeStore.getState().messages.get("sess-1")!.length).toBe(1);
+      expect(useOpenCodeStore.getState().messages.get("sess-2")!.length).toBe(1);
+      expect(useOpenCodeStore.getState().diffs.get("sess-1")!.length).toBe(1);
+    });
+
+    it("does not overwrite existing live sessions", () => {
+      // Start a live session
+      useOpenCodeStore.getState().startSession(makeSession({ agentId: "agent-1", id: "sess-1", task: "Live task" }));
+
+      // Load historical data with the same agentId
+      const sessions = [
+        makeSession({ agentId: "agent-1", id: "sess-1", task: "Old task", status: "completed" }),
+      ];
+      useOpenCodeStore.getState().loadSessions({ sessions, messages: {}, diffs: {} });
+
+      // Live session should be preserved
+      const session = useOpenCodeStore.getState().sessions.get("agent-1")!;
+      expect(session.task).toBe("Live task");
+      expect(session.status).toBe("active");
+    });
+
+    it("does not overwrite existing live messages", () => {
+      // Add a live message
+      useOpenCodeStore.getState().addMessage("agent-1", "sess-1", makeMessage({ id: "msg-live" }));
+
+      // Load historical messages for the same session
+      const messages = {
+        "sess-1": [makeMessage({ id: "msg-old" })],
+      };
+      useOpenCodeStore.getState().loadSessions({ sessions: [], messages, diffs: {} });
+
+      // Live messages should be preserved
+      const msgs = useOpenCodeStore.getState().messages.get("sess-1")!;
+      expect(msgs.length).toBe(1);
+      expect(msgs[0].id).toBe("msg-live");
+    });
+
+    it("does not overwrite existing live diffs", () => {
+      useOpenCodeStore.getState().startSession(makeSession());
+      useOpenCodeStore.getState().endSession("agent-1", "sess-1", "completed", [
+        { path: "live.ts", additions: 1, deletions: 0 },
+      ]);
+
+      const diffs = {
+        "sess-1": [{ path: "old.ts", additions: 10, deletions: 5 }],
+      };
+      useOpenCodeStore.getState().loadSessions({ sessions: [], messages: {}, diffs });
+
+      const stored = useOpenCodeStore.getState().diffs.get("sess-1")!;
+      expect(stored[0].path).toBe("live.ts");
+    });
+
+    it("merges new sessions alongside existing ones", () => {
+      useOpenCodeStore.getState().startSession(makeSession({ agentId: "agent-1", id: "sess-1" }));
+
+      const sessions = [
+        makeSession({ agentId: "agent-2", id: "sess-2", status: "completed" }),
+      ];
+      useOpenCodeStore.getState().loadSessions({ sessions, messages: {}, diffs: {} });
+
+      expect(useOpenCodeStore.getState().sessions.size).toBe(2);
+      expect(useOpenCodeStore.getState().sessions.has("agent-1")).toBe(true);
+      expect(useOpenCodeStore.getState().sessions.has("agent-2")).toBe(true);
+    });
+  });
+
   describe("clearSession", () => {
     it("removes session, messages, diffs, and part buffers", () => {
       const store = useOpenCodeStore.getState();

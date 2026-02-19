@@ -1,5 +1,5 @@
 import { sqliteTable, text, integer, primaryKey } from "drizzle-orm/sqlite-core";
-import type { ScanFinding, SkillScanStatus } from "@otterbot/shared";
+import type { ScanFinding, SkillScanStatus, OpenCodePart } from "@otterbot/shared";
 
 export const agents = sqliteTable("agents", {
   id: text("id").primaryKey(),
@@ -334,4 +334,39 @@ export const agentSkills = sqliteTable(
   },
   (table) => [primaryKey({ columns: [table.registryEntryId, table.skillId] })],
 );
+
+export const opencodeSessions = sqliteTable("opencode_sessions", {
+  id: text("id").primaryKey(),
+  agentId: text("agent_id").notNull(),
+  sessionId: text("session_id").notNull().default(""),
+  projectId: text("project_id"),
+  task: text("task").notNull().default(""),
+  status: text("status", {
+    enum: ["active", "idle", "completed", "error", "awaiting-input"],
+  })
+    .notNull()
+    .default("active"),
+  startedAt: text("started_at").notNull(),
+  completedAt: text("completed_at"),
+});
+
+export const opencodeMessages = sqliteTable("opencode_messages", {
+  id: text("id").primaryKey(),
+  sessionId: text("session_id").notNull(),
+  agentId: text("agent_id").notNull(),
+  role: text("role", { enum: ["user", "assistant"] }).notNull(),
+  parts: text("parts", { mode: "json" })
+    .$type<OpenCodePart[]>()
+    .notNull()
+    .default([]),
+  createdAt: text("created_at").notNull(),
+});
+
+export const opencodeDiffs = sqliteTable("opencode_diffs", {
+  id: text("id").primaryKey(),
+  sessionId: text("session_id").notNull(),
+  path: text("path").notNull(),
+  additions: integer("additions").notNull().default(0),
+  deletions: integer("deletions").notNull().default(0),
+});
 
