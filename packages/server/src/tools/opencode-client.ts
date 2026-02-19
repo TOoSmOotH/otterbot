@@ -328,6 +328,11 @@ export class OpenCodeClient {
           lastActivityTime = Date.now();
           console.log(`[OpenCode Client] SSE activity: ${eventType ?? "unknown"}`);
 
+          // Debug: log structure of delta and permission events
+          if (eventType === "message.part.delta") {
+            console.log(`[OpenCode Client] part.delta properties:`, JSON.stringify(props).slice(0, 500));
+          }
+
           // Forward event to listener
           if (eventType) {
             try {
@@ -363,8 +368,9 @@ export class OpenCodeClient {
           }
 
           // Handle permission requests (interactive mode)
-          if (eventType === "permission.updated" && eventSessionId === sessionId && props) {
-            const permissionId = props.id as string | undefined;
+          if (eventType === "permission.asked" && isOurSession && props) {
+            console.log(`[OpenCode Client] Permission event properties:`, JSON.stringify(props));
+            const permissionId = (props.id ?? props.permissionID) as string | undefined;
             if (permissionId) {
               console.log(`[OpenCode Client] Permission requested: ${props.title ?? props.type} (${permissionId})`);
               this.permissionPending = true;
