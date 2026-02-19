@@ -9,6 +9,9 @@ import { BaseAgent, type AgentOptions } from "./agent.js";
 import type { MessageBus } from "../bus/message-bus.js";
 import { createTools } from "../tools/tool-factory.js";
 import { debug } from "../utils/debug.js";
+import { OpenCodeClient } from "../tools/opencode-client.js";
+import { formatOpenCodeResult } from "../tools/opencode-task.js";
+import { getConfig } from "../auth/auth.js";
 
 export interface WorkerDependencies {
   id?: string;
@@ -90,26 +93,75 @@ export class Worker extends BaseAgent {
     });
   }
 
+  private async executeOpenCodeTask(task: string): Promise<string> {
+    const apiUrl = getConfig("opencode:api_url");
+    if (!apiUrl) {
+      console.warn(`[Worker ${this.id}] OpenCode not configured (no api_url), falling back to think()`);
+      return "";
+    }
+
+    const username = getConfig("opencode:username") ?? undefined;
+    const password = getConfig("opencode:password") ?? undefined;
+    const timeoutMs = parseInt(getConfig("opencode:timeout_ms") ?? "1200000", 10);
+    const maxIterations = parseInt(getConfig("opencode:max_iterations") ?? "50", 10);
+
+    const client = new OpenCodeClient({
+      apiUrl,
+      username,
+      password,
+      timeoutMs,
+      maxIterations,
+    });
+
+    const taskWithContext = this.workspacePath
+      ? `IMPORTANT: All files must be created/edited inside this directory: ${this.workspacePath}\n` +
+        `Use absolute paths rooted at ${this.workspacePath} (e.g. ${this.workspacePath}/src/main.go).\n` +
+        `Do NOT use /home/user, /app, or any other directory.\n\n${task}`
+      : task;
+
+    console.log(`[Worker ${this.id}] Sending task directly to OpenCode (${taskWithContext.length} chars)...`);
+    const result = await client.executeTask(taskWithContext);
+    console.log(`[Worker ${this.id}] OpenCode result: success=${result.success}, sessionId=${result.sessionId}, diff=${result.diff?.files?.length ?? 0} files`);
+
+    return formatOpenCodeResult(result);
+  }
+
   private async handleTask(message: BusMessage) {
     console.log(`[Worker ${this.id}] handleTask starting (registry=${this.registryEntryId})`);
     let text: string;
     try {
-      const result = await this.think(
-        message.content,
-        (token, messageId) => this.onAgentStream?.(this.id, token, messageId),
-        (token, messageId) => this.onAgentThinking?.(this.id, token, messageId),
-        (messageId) => this.onAgentThinkingEnd?.(this.id, messageId),
-      );
-      text = result.text;
-      debug("worker", `think() result — timedOut=${result.timedOut} textLen=${result.text.length} hadToolCalls=${result.hadToolCalls} agent=${this.id}`);
+      if (this.registryEntryId === "builtin-opencode-coder" && this.workspacePath) {
+        text = await this.executeOpenCodeTask(message.content);
+        // Empty string means OpenCode wasn't configured — fall back to think()
+        if (text === "") {
+          const result = await this.think(
+            message.content,
+            (token, messageId) => this.onAgentStream?.(this.id, token, messageId),
+            (token, messageId) => this.onAgentThinking?.(this.id, token, messageId),
+            (messageId) => this.onAgentThinkingEnd?.(this.id, messageId),
+          );
+          text = result.text;
+        } else {
+          console.log(`[Worker ${this.id}] Direct OpenCode call completed — ${text.length} chars`);
+        }
+      } else {
+        const result = await this.think(
+          message.content,
+          (token, messageId) => this.onAgentStream?.(this.id, token, messageId),
+          (token, messageId) => this.onAgentThinking?.(this.id, token, messageId),
+          (messageId) => this.onAgentThinkingEnd?.(this.id, messageId),
+        );
+        text = result.text;
+        debug("worker", `think() result — timedOut=${result.timedOut} textLen=${result.text.length} hadToolCalls=${result.hadToolCalls} agent=${this.id}`);
 
-      if (result.timedOut || text.trim() === "") {
-        const reason = result.timedOut ? "LLM timeout" : "empty response";
-        console.warn(`[Worker ${this.id}] Task produced no output (${reason})`);
-        text = `WORKER ERROR: Task produced no output (likely ${reason})`;
+        if (result.timedOut || text.trim() === "") {
+          const reason = result.timedOut ? "LLM timeout" : "empty response";
+          console.warn(`[Worker ${this.id}] Task produced no output (${reason})`);
+          text = `WORKER ERROR: Task produced no output (likely ${reason})`;
+        }
+
+        console.log(`[Worker ${this.id}] think() completed — text=${text.length} chars, hadToolCalls=${result.hadToolCalls}`);
       }
-
-      console.log(`[Worker ${this.id}] think() completed — text=${text.length} chars, hadToolCalls=${result.hadToolCalls}`);
     } catch (err) {
       const reason = err instanceof Error ? err.message : String(err);
       console.error(`[Worker ${this.id}] Task failed:`, reason);

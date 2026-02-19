@@ -1,11 +1,45 @@
 import { tool } from "ai";
 import { z } from "zod";
 import type { ToolContext } from "./tool-context.js";
-import { OpenCodeClient } from "./opencode-client.js";
+import { OpenCodeClient, type OpenCodeTaskResult } from "./opencode-client.js";
 import { getConfig } from "../auth/auth.js";
 
 const DEFAULT_TIMEOUT = 1_200_000; // 20 minutes idle timeout
 const DEFAULT_MAX_ITERATIONS = 50;
+
+export function formatOpenCodeResult(result: OpenCodeTaskResult): string {
+  if (!result.success) {
+    return `OpenCode task failed: ${result.summary}`;
+  }
+
+  const lines: string[] = [];
+  lines.push("OpenCode task completed successfully.");
+  lines.push("");
+  lines.push("**Summary:**");
+  lines.push(
+    result.summary.length > 2000
+      ? result.summary.slice(0, 2000) + "\n[truncated]"
+      : result.summary,
+  );
+
+  if (result.diff?.files && result.diff.files.length > 0) {
+    lines.push("");
+    lines.push("**Files modified:**");
+    for (const file of result.diff.files) {
+      const adds = file.additions > 0 ? `+${file.additions}` : "";
+      const dels = file.deletions > 0 ? `-${file.deletions}` : "";
+      const stats = [adds, dels].filter(Boolean).join(", ");
+      lines.push(`  - ${file.path}${stats ? ` (${stats})` : ""}`);
+    }
+    lines.push(
+      `\nTotal: ${result.diff.files.length} file(s) changed`,
+    );
+  } else {
+    lines.push("\nNo file changes detected.");
+  }
+
+  return lines.join("\n");
+}
 
 export function createOpenCodeTaskTool(ctx: ToolContext) {
   return tool({
@@ -72,37 +106,9 @@ export function createOpenCodeTaskTool(ctx: ToolContext) {
 
         if (!result.success) {
           console.warn(`[opencode_task] Task failed: ${result.summary.slice(0, 500)}`);
-          return `OpenCode task failed: ${result.summary}`;
         }
 
-        // Build human-readable summary
-        const lines: string[] = [];
-        lines.push("OpenCode task completed successfully.");
-        lines.push("");
-        lines.push("**Summary:**");
-        lines.push(
-          result.summary.length > 2000
-            ? result.summary.slice(0, 2000) + "\n[truncated]"
-            : result.summary,
-        );
-
-        if (result.diff?.files && result.diff.files.length > 0) {
-          lines.push("");
-          lines.push("**Files modified:**");
-          for (const file of result.diff.files) {
-            const adds = file.additions > 0 ? `+${file.additions}` : "";
-            const dels = file.deletions > 0 ? `-${file.deletions}` : "";
-            const stats = [adds, dels].filter(Boolean).join(", ");
-            lines.push(`  - ${file.path}${stats ? ` (${stats})` : ""}`);
-          }
-          lines.push(
-            `\nTotal: ${result.diff.files.length} file(s) changed`,
-          );
-        } else {
-          lines.push("\nNo file changes detected.");
-        }
-
-        return lines.join("\n");
+        return formatOpenCodeResult(result);
       } catch (err: unknown) {
         const message =
           err instanceof Error ? err.message : String(err);
