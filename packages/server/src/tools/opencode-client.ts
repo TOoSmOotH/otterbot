@@ -6,6 +6,9 @@
  */
 
 import { createOpencodeClient, type OpencodeClient } from "@opencode-ai/sdk/client";
+import { createRequire } from "node:module";
+
+const require = createRequire(import.meta.url);
 
 export interface OpenCodeConfig {
   apiUrl: string;
@@ -59,7 +62,6 @@ export class OpenCodeClient {
     // Disable undici's default headers/body timeouts — session.prompt() blocks
     // until OpenCode finishes which can take many minutes. Our activity monitor
     // handles idle detection instead.
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { Agent } = require("undici") as { Agent: new (opts: Record<string, unknown>) => unknown };
     const dispatcher = new Agent({
       headersTimeout: 0,
