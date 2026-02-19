@@ -1,0 +1,121 @@
+import { create } from "zustand";
+import type { OpenCodeSession, OpenCodeMessage, OpenCodePart, OpenCodeFileDiff } from "@otterbot/shared";
+
+interface OpenCodeState {
+  /** Active and recent sessions keyed by agentId */
+  sessions: Map<string, OpenCodeSession>;
+  /** Messages per session (keyed by sessionId) */
+  messages: Map<string, OpenCodeMessage[]>;
+  /** Accumulated deltas per partId for streaming display */
+  partBuffers: Map<string, { type: string; content: string; toolName?: string; toolState?: string }>;
+  /** File diffs per session */
+  diffs: Map<string, OpenCodeFileDiff[]>;
+  /** Currently selected agentId for viewing */
+  selectedAgentId: string | null;
+
+  selectAgent: (agentId: string | null) => void;
+  startSession: (session: OpenCodeSession) => void;
+  endSession: (agentId: string, sessionId: string, status: string, diff: OpenCodeFileDiff[] | null) => void;
+  addMessage: (agentId: string, sessionId: string, message: OpenCodeMessage) => void;
+  appendPartDelta: (
+    agentId: string,
+    sessionId: string,
+    messageId: string,
+    partId: string,
+    type: string,
+    delta: string,
+    toolName?: string,
+    toolState?: string,
+  ) => void;
+  clearSession: (agentId: string) => void;
+}
+
+export const useOpenCodeStore = create<OpenCodeState>((set) => ({
+  sessions: new Map(),
+  messages: new Map(),
+  partBuffers: new Map(),
+  diffs: new Map(),
+  selectedAgentId: null,
+
+  selectAgent: (agentId) => set({ selectedAgentId: agentId }),
+
+  startSession: (session) =>
+    set((state) => {
+      const sessions = new Map(state.sessions);
+      sessions.set(session.agentId, session);
+      // Auto-select the first active session
+      const selectedAgentId = state.selectedAgentId ?? session.agentId;
+      return { sessions, selectedAgentId };
+    }),
+
+  endSession: (agentId, sessionId, status, diff) =>
+    set((state) => {
+      const sessions = new Map(state.sessions);
+      const existing = sessions.get(agentId);
+      if (existing) {
+        sessions.set(agentId, {
+          ...existing,
+          id: sessionId || existing.id,
+          status: status as OpenCodeSession["status"],
+          completedAt: new Date().toISOString(),
+        });
+      }
+      const diffs = new Map(state.diffs);
+      if (diff) {
+        diffs.set(sessionId || existing?.id || "", diff);
+      }
+      return { sessions, diffs };
+    }),
+
+  addMessage: (_agentId, sessionId, message) =>
+    set((state) => {
+      const messages = new Map(state.messages);
+      const existing = messages.get(sessionId) ?? [];
+      // Replace if message ID already exists, otherwise append
+      const idx = existing.findIndex((m) => m.id === message.id);
+      if (idx >= 0) {
+        const updated = [...existing];
+        updated[idx] = message;
+        messages.set(sessionId, updated);
+      } else {
+        messages.set(sessionId, [...existing, message]);
+      }
+      return { messages };
+    }),
+
+  appendPartDelta: (_agentId, sessionId, messageId, partId, type, delta, toolName, toolState) =>
+    set((state) => {
+      const partBuffers = new Map(state.partBuffers);
+      const key = `${sessionId}:${messageId}:${partId}`;
+      const existing = partBuffers.get(key);
+      partBuffers.set(key, {
+        type,
+        content: (existing?.content ?? "") + delta,
+        toolName: toolName ?? existing?.toolName,
+        toolState: toolState ?? existing?.toolState,
+      });
+      return { partBuffers };
+    }),
+
+  clearSession: (agentId) =>
+    set((state) => {
+      const sessions = new Map(state.sessions);
+      const session = sessions.get(agentId);
+      sessions.delete(agentId);
+      const messages = new Map(state.messages);
+      const partBuffers = new Map(state.partBuffers);
+      const diffs = new Map(state.diffs);
+      if (session) {
+        messages.delete(session.id);
+        diffs.delete(session.id);
+        // Clean up part buffers for this session
+        for (const key of partBuffers.keys()) {
+          if (key.startsWith(`${session.id}:`)) {
+            partBuffers.delete(key);
+          }
+        }
+      }
+      const selectedAgentId = state.selectedAgentId === agentId ? null : state.selectedAgentId;
+      return { sessions, messages, partBuffers, diffs, selectedAgentId };
+    }),
+}));

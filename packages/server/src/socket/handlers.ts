@@ -3,7 +3,7 @@ import type {
   ServerToClientEvents,
   ClientToServerEvents,
 } from "@otterbot/shared";
-import { MessageType, type Agent, type AgentActivityRecord, type BusMessage, type Conversation, type Project, type KanbanTask } from "@otterbot/shared";
+import { MessageType, type Agent, type AgentActivityRecord, type BusMessage, type Conversation, type Project, type KanbanTask, type OpenCodeSession, type OpenCodeMessage, type OpenCodePart, type OpenCodeFileDiff } from "@otterbot/shared";
 import { nanoid } from "nanoid";
 import { eq, or, desc, isNull } from "drizzle-orm";
 import type { MessageBus } from "../bus/message-bus.js";
@@ -408,4 +408,96 @@ export function emitAgentThinkingEnd(io: TypedServer, agentId: string, messageId
 
 export function emitAgentToolCall(io: TypedServer, agentId: string, toolName: string, args: Record<string, unknown>) {
   io.emit("agent:tool-call", { agentId, toolName, args });
+}
+
+/**
+ * Parse and emit OpenCode SSE events as structured Socket.IO events.
+ * Handles internal __session-start/__session-end markers plus raw OpenCode events.
+ */
+export function emitOpenCodeEvent(
+  io: TypedServer,
+  agentId: string,
+  sessionId: string,
+  event: { type: string; properties: Record<string, unknown> },
+) {
+  const { type, properties } = event;
+
+  // Internal markers emitted by Worker
+  if (type === "__session-start") {
+    const session: OpenCodeSession = {
+      id: sessionId,
+      agentId,
+      projectId: (properties.projectId as string) || null,
+      task: (properties.task as string) || "",
+      status: "active",
+      startedAt: new Date().toISOString(),
+    };
+    io.emit("opencode:session-start", session);
+    return;
+  }
+
+  if (type === "__session-end") {
+    const rawDiff = properties.diff as Array<{ path: string; additions: number; deletions: number }> | null;
+    io.emit("opencode:session-end", {
+      agentId,
+      sessionId,
+      status: (properties.status as string) || "completed",
+      diff: rawDiff?.map((f) => ({ path: f.path, additions: f.additions, deletions: f.deletions })) ?? null,
+    });
+    return;
+  }
+
+  // Forward raw event for debugging / generic listeners
+  io.emit("opencode:event", { agentId, sessionId, type, properties });
+
+  // Parse specific event types into structured events
+  if (type === "message.part.updated") {
+    const delta = properties.delta as string | undefined;
+    const partType = properties.type as string | undefined;
+    const partId = (properties.partID ?? properties.id) as string | undefined;
+    const messageId = properties.messageID as string | undefined;
+    const toolName = properties.toolName as string | undefined;
+    const toolState = properties.state as string | undefined;
+
+    if (delta && partId && messageId && partType) {
+      io.emit("opencode:part-delta", {
+        agentId,
+        sessionId,
+        messageId,
+        partId,
+        type: partType,
+        delta,
+        toolName,
+        toolState,
+      });
+    }
+  }
+
+  if (type === "message.updated") {
+    const msgId = (properties.messageID ?? properties.id) as string | undefined;
+    const role = properties.role as string | undefined;
+    const parts = properties.parts as Array<Record<string, unknown>> | undefined;
+
+    if (msgId && role) {
+      const parsedParts: OpenCodePart[] = (parts ?? []).map((p) => ({
+        id: (p.id ?? "") as string,
+        messageId: msgId,
+        type: (p.type ?? "text") as OpenCodePart["type"],
+        content: (p.content ?? p.text ?? "") as string,
+        toolName: p.toolName as string | undefined,
+        toolArgs: p.toolArgs as Record<string, unknown> | undefined,
+        toolState: p.state as OpenCodePart["toolState"],
+        toolResult: p.toolResult as string | undefined,
+      }));
+
+      const message: OpenCodeMessage = {
+        id: msgId,
+        sessionId,
+        role: role as "user" | "assistant",
+        parts: parsedParts,
+        createdAt: (properties.createdAt as string) || new Date().toISOString(),
+      };
+      io.emit("opencode:message", { agentId, sessionId, message });
+    }
+  }
 }

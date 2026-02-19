@@ -29,11 +29,13 @@ export interface WorkerDependencies {
   onAgentThinking?: (agentId: string, token: string, messageId: string) => void;
   onAgentThinkingEnd?: (agentId: string, messageId: string) => void;
   onAgentToolCall?: (agentId: string, toolName: string, args: Record<string, unknown>) => void;
+  onOpenCodeEvent?: (agentId: string, sessionId: string, event: { type: string; properties: Record<string, unknown> }) => void;
 }
 
 export class Worker extends BaseAgent {
   private toolNames: string[];
   private workspacePath: string | null;
+  private _onOpenCodeEvent?: (agentId: string, sessionId: string, event: { type: string; properties: Record<string, unknown> }) => void;
 
   constructor(deps: WorkerDependencies) {
     const options: AgentOptions = {
@@ -57,6 +59,7 @@ export class Worker extends BaseAgent {
     super(options, deps.bus);
     this.toolNames = deps.toolNames;
     this.workspacePath = deps.workspacePath;
+    this._onOpenCodeEvent = deps.onOpenCodeEvent;
   }
 
   async handleMessage(message: BusMessage): Promise<void> {
@@ -107,12 +110,22 @@ export class Worker extends BaseAgent {
     const timeoutMs = parseInt(getConfig("opencode:timeout_ms") ?? "1200000", 10);
     const maxIterations = parseInt(getConfig("opencode:max_iterations") ?? "50", 10);
 
+    let currentSessionId = "";
     const client = new OpenCodeClient({
       apiUrl,
       username,
       password,
       timeoutMs,
       maxIterations,
+      onEvent: (event) => {
+        // Extract session ID from event properties if we don't have it yet
+        const eventSessionId = event.properties?.sessionID as string | undefined;
+        if (eventSessionId && !currentSessionId) {
+          currentSessionId = eventSessionId;
+        }
+        const sid = currentSessionId || eventSessionId || "";
+        this._onOpenCodeEvent?.(this.id, sid, event);
+      },
     });
 
     const taskWithContext = this.workspacePath
@@ -121,9 +134,25 @@ export class Worker extends BaseAgent {
         `Do NOT use /home/user, /app, or any other directory.\n\n${task}`
       : task;
 
+    // Emit session-start event
+    this._onOpenCodeEvent?.(this.id, "", {
+      type: "__session-start",
+      properties: { task, projectId: this.projectId ?? "" },
+    });
+
     console.log(`[Worker ${this.id}] Sending task directly to OpenCode (${taskWithContext.length} chars)...`);
     const result = await client.executeTask(taskWithContext);
     console.log(`[Worker ${this.id}] OpenCode result: success=${result.success}, sessionId=${result.sessionId}, diff=${result.diff?.files?.length ?? 0} files`);
+
+    // Emit session-end event
+    this._onOpenCodeEvent?.(this.id, result.sessionId, {
+      type: "__session-end",
+      properties: {
+        status: result.success ? "completed" : "error",
+        diff: result.diff?.files ?? null,
+        error: result.error,
+      },
+    });
 
     const { formatOpenCodeResult } = await import("../tools/opencode-task.js");
     return formatOpenCodeResult(result);

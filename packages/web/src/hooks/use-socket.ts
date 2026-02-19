@@ -5,6 +5,7 @@ import { useAgentStore } from "../stores/agent-store";
 import { useProjectStore } from "../stores/project-store";
 import { useAgentActivityStore } from "../stores/agent-activity-store";
 import { useEnvironmentStore } from "../stores/environment-store";
+import { useOpenCodeStore } from "../stores/opencode-store";
 
 export function useSocket() {
   const initialized = useRef(false);
@@ -29,6 +30,10 @@ export function useSocket() {
   const endAgentThinking = useAgentActivityStore((s) => s.endThinking);
   const addAgentToolCall = useAgentActivityStore((s) => s.addToolCall);
   const loadWorld = useEnvironmentStore((s) => s.loadWorld);
+  const startOpenCodeSession = useOpenCodeStore((s) => s.startSession);
+  const endOpenCodeSession = useOpenCodeStore((s) => s.endSession);
+  const addOpenCodeMessage = useOpenCodeStore((s) => s.addMessage);
+  const appendOpenCodePartDelta = useOpenCodeStore((s) => s.appendPartDelta);
 
   useEffect(() => {
     if (initialized.current) return;
@@ -140,6 +145,31 @@ export function useSocket() {
       loadWorld();
     });
 
+    socket.on("opencode:session-start", (data) => {
+      startOpenCodeSession(data);
+    });
+
+    socket.on("opencode:session-end", (data) => {
+      endOpenCodeSession(data.agentId, data.sessionId, data.status, data.diff);
+    });
+
+    socket.on("opencode:message", (data) => {
+      addOpenCodeMessage(data.agentId, data.sessionId, data.message);
+    });
+
+    socket.on("opencode:part-delta", (data) => {
+      appendOpenCodePartDelta(
+        data.agentId,
+        data.sessionId,
+        data.messageId,
+        data.partId,
+        data.type,
+        data.delta,
+        data.toolName,
+        data.toolState,
+      );
+    });
+
     return () => {
       socket.off("bus:message");
       socket.off("coo:response");
@@ -163,6 +193,10 @@ export function useSocket() {
       socket.off("agent:tool-call");
       socket.off("world:zone-added");
       socket.off("world:zone-removed");
+      socket.off("opencode:session-start");
+      socket.off("opencode:session-end");
+      socket.off("opencode:message");
+      socket.off("opencode:part-delta");
     };
   }, []);
 

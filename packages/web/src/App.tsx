@@ -22,6 +22,7 @@ import { UsageDashboard } from "./components/usage/UsageDashboard";
 import { TodoView } from "./components/todos/TodoView";
 import { InboxView } from "./components/inbox/InboxView";
 import { CalendarView } from "./components/calendar/CalendarView";
+import { CodeView } from "./components/code/CodeView";
 import { useDesktopStore } from "./stores/desktop-store";
 import { initMovementTriggers } from "./lib/movement-triggers";
 import { Group, Panel, Separator, useDefaultLayout, usePanelRef } from "react-resizable-panels";
@@ -85,7 +86,7 @@ interface UserProfile {
   cooName?: string;
 }
 
-type CenterView = "graph" | "live3d" | "charter" | "kanban" | "desktop" | "files" | "usage" | "todos" | "inbox" | "calendar";
+type CenterView = "graph" | "live3d" | "charter" | "kanban" | "desktop" | "files" | "usage" | "todos" | "inbox" | "calendar" | "code";
 
 function MainApp() {
   const socket = useSocket();
@@ -350,6 +351,8 @@ function ResizableLayout({
         return <CalendarView />;
       case "desktop":
         return <DesktopView />;
+      case "code":
+        return <CodeView />;
       case "live3d":
         return (
           <LiveView userProfile={userProfile} onToggleView={() => setCenterView("graph")} />
@@ -398,6 +401,7 @@ function ResizableLayout({
                   "todos" as CenterView,
                   "inbox" as CenterView,
                   "calendar" as CenterView,
+                  "code" as CenterView,
                   "usage" as CenterView,
                   "desktop" as CenterView,
                 ] as CenterView[]
@@ -411,6 +415,7 @@ function ResizableLayout({
                   todos: "Todos",
                   inbox: "Inbox",
                   calendar: "Calendar",
+                  code: "Code",
                   usage: "Usage",
                   desktop: "Desktop",
                 };

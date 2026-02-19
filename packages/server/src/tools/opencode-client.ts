@@ -15,6 +15,8 @@ export interface OpenCodeConfig {
   /** Idle timeout — abort only after this many ms with NO new activity (default: 180 000) */
   timeoutMs?: number;
   maxIterations?: number;
+  /** Called for each SSE event received from the OpenCode server */
+  onEvent?: (event: { type: string; properties: Record<string, unknown> }) => void;
 }
 
 export interface OpenCodeDiff {
@@ -42,12 +44,14 @@ export class OpenCodeClient {
   private apiUrl: string;
   private idleTimeoutMs: number;
   private maxIterations: number;
+  private onEvent?: (event: { type: string; properties: Record<string, unknown> }) => void;
 
   constructor(config: OpenCodeConfig) {
     const baseUrl = config.apiUrl.replace(/\/+$/, "");
     this.apiUrl = baseUrl;
     this.idleTimeoutMs = config.timeoutMs ?? 1_200_000;
     this.maxIterations = config.maxIterations ?? 50;
+    this.onEvent = config.onEvent;
 
     // Build auth header for HTTP Basic
     const headers: Record<string, string> = {};
@@ -273,6 +277,15 @@ export class OpenCodeClient {
         if (isOurSession) {
           lastActivityTime = Date.now();
           console.log(`[OpenCode Client] SSE activity: ${eventType ?? "unknown"}`);
+
+          // Forward event to listener
+          if (eventType) {
+            try {
+              this.onEvent?.({ type: eventType, properties: props ?? {} });
+            } catch {
+              // Best-effort event forwarding
+            }
+          }
 
           // Check for error events
           if (eventType === "session.error" && eventSessionId === sessionId) {

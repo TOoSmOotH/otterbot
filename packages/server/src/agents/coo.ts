@@ -63,6 +63,7 @@ export interface COODependencies {
   onAgentThinking?: (agentId: string, token: string, messageId: string) => void;
   onAgentThinkingEnd?: (agentId: string, messageId: string) => void;
   onAgentToolCall?: (agentId: string, toolName: string, args: Record<string, unknown>) => void;
+  onOpenCodeEvent?: (agentId: string, sessionId: string, event: { type: string; properties: Record<string, unknown> }) => void;
   onAgentDestroyed?: (agentId: string) => void;
 }
 
@@ -82,6 +83,7 @@ export class COO extends BaseAgent {
   private _onAgentThinking?: (agentId: string, token: string, messageId: string) => void;
   private _onAgentThinkingEnd?: (agentId: string, messageId: string) => void;
   private _onAgentToolCall?: (agentId: string, toolName: string, args: Record<string, unknown>) => void;
+  private _onOpenCodeEvent?: (agentId: string, sessionId: string, event: { type: string; properties: Record<string, unknown> }) => void;
   private onAgentDestroyed?: (agentId: string) => void;
   private allowedToolNames: Set<string>;
   private contextManager!: ConversationContextManager;
@@ -181,6 +183,7 @@ The user can see everything on the desktop in real-time.`;
     this._onAgentThinking = deps.onAgentThinking;
     this._onAgentThinkingEnd = deps.onAgentThinkingEnd;
     this._onAgentToolCall = deps.onAgentToolCall;
+    this._onOpenCodeEvent = deps.onOpenCodeEvent;
     this.onAgentDestroyed = deps.onAgentDestroyed;
     this.contextManager = new ConversationContextManager(systemPrompt);
   }
@@ -707,6 +710,7 @@ The user can see everything on the desktop in real-time.`;
       onAgentThinking: this._onAgentThinking,
       onAgentThinkingEnd: this._onAgentThinkingEnd,
       onAgentToolCall: this._onAgentToolCall,
+      onOpenCodeEvent: this._onOpenCodeEvent,
     });
 
     this.teamLeads.set(projectId, teamLead);
@@ -1220,6 +1224,7 @@ The user can see everything on the desktop in real-time.`;
       onAgentThinking: this._onAgentThinking,
       onAgentThinkingEnd: this._onAgentThinkingEnd,
       onAgentToolCall: this._onAgentToolCall,
+      onOpenCodeEvent: this._onOpenCodeEvent,
     });
 
     this.teamLeads.set(project.id, teamLead);
