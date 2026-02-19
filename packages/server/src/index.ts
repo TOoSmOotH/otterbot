@@ -51,6 +51,7 @@ import {
   emitAgentThinkingEnd,
   emitAgentToolCall,
   emitAgentDestroyed,
+  emitOpenCodeEvent,
 } from "./socket/handlers.js";
 import {
   isSetupComplete,
@@ -416,6 +417,9 @@ async function main() {
         },
         onAgentToolCall: (agentId, toolName, args) => {
           emitAgentToolCall(io, agentId, toolName, args);
+        },
+        onOpenCodeEvent: (agentId, sessionId, event) => {
+          emitOpenCodeEvent(io, agentId, sessionId, event);
         },
         onAgentDestroyed: (agentId) => {
           emitAgentDestroyed(io, agentId);

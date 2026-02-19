@@ -163,6 +163,7 @@ export interface TeamLeadDependencies {
   onAgentThinking?: (agentId: string, token: string, messageId: string) => void;
   onAgentThinkingEnd?: (agentId: string, messageId: string) => void;
   onAgentToolCall?: (agentId: string, toolName: string, args: Record<string, unknown>) => void;
+  onOpenCodeEvent?: (agentId: string, sessionId: string, event: { type: string; properties: Record<string, unknown> }) => void;
 }
 
 const MAX_CONTINUATION_CYCLES = 5;
@@ -179,6 +180,7 @@ export class TeamLead extends BaseAgent {
   private allowedToolNames: Set<string>;
   private onAgentSpawned?: (agent: BaseAgent) => void;
   private onKanbanChange?: (event: "created" | "updated" | "deleted", task: KanbanTask) => void;
+  private _onOpenCodeEvent?: (agentId: string, sessionId: string, event: { type: string; properties: Record<string, unknown> }) => void;
 
   constructor(deps: TeamLeadDependencies) {
     const registry = new Registry();
@@ -216,6 +218,7 @@ export class TeamLead extends BaseAgent {
     this.workspace = deps.workspace;
     this.onAgentSpawned = deps.onAgentSpawned;
     this.onKanbanChange = deps.onKanbanChange;
+    this._onOpenCodeEvent = deps.onOpenCodeEvent;
 
     // Restore persisted flags from previous runs
     this.verificationRequested = this.loadFlag("verification");
@@ -1138,6 +1141,7 @@ export class TeamLead extends BaseAgent {
         onAgentThinking: this.onAgentThinking,
         onAgentThinkingEnd: this.onAgentThinkingEnd,
         onAgentToolCall: this.onAgentToolCall,
+        onOpenCodeEvent: this._onOpenCodeEvent,
       });
 
       this.workers.set(worker.id, worker);

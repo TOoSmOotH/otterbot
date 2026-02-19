@@ -3,6 +3,7 @@ import type { BusMessage, Conversation } from "./message.js";
 import type { RegistryEntry, Project } from "./registry.js";
 import type { KanbanTask } from "./kanban.js";
 import type { SceneZone } from "./environment.js";
+import type { OpenCodeSession, OpenCodeMessage, OpenCodeFileDiff } from "./opencode.js";
 
 /** Events emitted from server to client */
 export interface ServerToClientEvents {
@@ -32,6 +33,11 @@ export interface ServerToClientEvents {
   "admin-assistant:stream": (data: { token: string; messageId: string }) => void;
   "admin-assistant:thinking": (data: { token: string; messageId: string }) => void;
   "admin-assistant:thinking-end": (data: { messageId: string }) => void;
+  "opencode:session-start": (data: OpenCodeSession) => void;
+  "opencode:session-end": (data: { agentId: string; sessionId: string; status: string; diff: OpenCodeFileDiff[] | null }) => void;
+  "opencode:event": (data: { agentId: string; sessionId: string; type: string; properties: Record<string, unknown> }) => void;
+  "opencode:message": (data: { agentId: string; sessionId: string; message: OpenCodeMessage }) => void;
+  "opencode:part-delta": (data: { agentId: string; sessionId: string; messageId: string; partId: string; type: string; delta: string; toolName?: string; toolState?: string }) => void;
 }
 
 /** Events emitted from client to server */
