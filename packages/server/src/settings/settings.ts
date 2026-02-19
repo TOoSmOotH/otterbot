@@ -978,6 +978,7 @@ export function updateOpenCodeSettings(data: {
   const wasEnabled = getConfig("opencode:enabled") === "true";
   const oldModel = getConfig("opencode:model") ?? "";
   const oldProviderId = getConfig("opencode:provider_id") ?? "";
+  const oldInteractive = getConfig("opencode:interactive") === "true";
 
   if (data.enabled !== undefined) {
     setConfig("opencode:enabled", data.enabled ? "true" : "false");
@@ -1031,15 +1032,17 @@ export function updateOpenCodeSettings(data: {
   const isNowEnabled = getConfig("opencode:enabled") === "true";
   const newModel = getConfig("opencode:model") ?? "";
   const newProviderId = getConfig("opencode:provider_id") ?? "";
-  const modelOrProviderChanged = newModel !== oldModel || newProviderId !== oldProviderId;
+  const newInteractive = getConfig("opencode:interactive") === "true";
+  const configChanged =
+    newModel !== oldModel || newProviderId !== oldProviderId || newInteractive !== oldInteractive;
 
   // Manage OpenCode process lifecycle
   if (!wasEnabled && isNowEnabled) {
     startOpenCodeServer();
   } else if (wasEnabled && !isNowEnabled) {
     stopOpenCodeServer();
-  } else if (isNowEnabled && modelOrProviderChanged) {
-    // Model or provider changed — rewrite config and restart
+  } else if (isNowEnabled && configChanged) {
+    // Model, provider, or interactive mode changed — rewrite config and restart
     stopOpenCodeServer();
     startOpenCodeServer();
   }

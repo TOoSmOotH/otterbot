@@ -29,11 +29,22 @@ export function resetOpenCodePersistence() {
   sessionRowIds.clear();
 }
 
+export interface SocketHooks {
+  /** Intercept CEO messages before they reach the COO.
+   *  Return true if the message was handled (e.g. permission response). */
+  beforeCeoMessage?: (
+    content: string,
+    conversationId: string | undefined,
+    callback?: (ack: { messageId: string; conversationId: string }) => void,
+  ) => boolean;
+}
+
 export function setupSocketHandlers(
   io: TypedServer,
   bus: MessageBus,
   coo: COO,
   registry: Registry,
+  hooks?: SocketHooks,
 ) {
   // Broadcast all bus messages to connected clients
   bus.onBroadcast(async (message: BusMessage) => {
@@ -77,6 +88,12 @@ export function setupSocketHandlers(
     // CEO sends a message to the COO
     socket.on("ceo:message", (data, callback) => {
       console.log(`[Socket] ceo:message received: "${data.content.slice(0, 80)}"`);
+
+      // Check if this message is a permission response (intercept before COO)
+      if (hooks?.beforeCeoMessage?.(data.content, data.conversationId, callback)) {
+        return;
+      }
+
       const db = getDb();
       const projectId = data.projectId ?? null;
       let conversationId = data.conversationId ?? coo.getCurrentConversationId();
@@ -475,6 +492,18 @@ export function emitOpenCodeEvent(
       sessionId,
       prompt: (properties.prompt as string) || "",
     });
+    return;
+  }
+
+  if (type === "__permission-request") {
+    const permission = properties.permission as { id: string; type: string; title: string; pattern?: string | string[]; metadata: Record<string, unknown> } | undefined;
+    if (permission) {
+      io.emit("opencode:permission-request", {
+        agentId,
+        sessionId,
+        permission,
+      });
+    }
     return;
   }
 

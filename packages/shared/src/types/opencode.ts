@@ -5,7 +5,7 @@ export interface OpenCodeSession {
   agentId: string;
   projectId: string | null;
   task: string;
-  status: "active" | "idle" | "completed" | "error" | "awaiting-input";
+  status: "active" | "idle" | "completed" | "error" | "awaiting-input" | "awaiting-permission";
   startedAt: string;
   completedAt?: string;
 }
@@ -33,4 +33,12 @@ export interface OpenCodeFileDiff {
   path: string;
   additions: number;
   deletions: number;
+}
+
+export interface OpenCodePermission {
+  id: string;
+  type: string;       // "edit" | "bash" | "webfetch" etc.
+  title: string;
+  pattern?: string | string[];
+  metadata: Record<string, unknown>;
 }

@@ -165,6 +165,7 @@ export interface TeamLeadDependencies {
   onAgentToolCall?: (agentId: string, toolName: string, args: Record<string, unknown>) => void;
   onOpenCodeEvent?: (agentId: string, sessionId: string, event: { type: string; properties: Record<string, unknown> }) => void;
   onOpenCodeAwaitingInput?: (agentId: string, sessionId: string, prompt: string) => Promise<string | null>;
+  onOpenCodePermissionRequest?: (agentId: string, sessionId: string, permission: { id: string; type: string; title: string; pattern?: string | string[]; metadata: Record<string, unknown> }) => Promise<"once" | "always" | "reject">;
 }
 
 const MAX_CONTINUATION_CYCLES = 5;
@@ -183,6 +184,7 @@ export class TeamLead extends BaseAgent {
   private onKanbanChange?: (event: "created" | "updated" | "deleted", task: KanbanTask) => void;
   private _onOpenCodeEvent?: (agentId: string, sessionId: string, event: { type: string; properties: Record<string, unknown> }) => void;
   private _onOpenCodeAwaitingInput?: (agentId: string, sessionId: string, prompt: string) => Promise<string | null>;
+  private _onOpenCodePermissionRequest?: (agentId: string, sessionId: string, permission: { id: string; type: string; title: string; pattern?: string | string[]; metadata: Record<string, unknown> }) => Promise<"once" | "always" | "reject">;
 
   constructor(deps: TeamLeadDependencies) {
     const registry = new Registry();
@@ -222,6 +224,7 @@ export class TeamLead extends BaseAgent {
     this.onKanbanChange = deps.onKanbanChange;
     this._onOpenCodeEvent = deps.onOpenCodeEvent;
     this._onOpenCodeAwaitingInput = deps.onOpenCodeAwaitingInput;
+    this._onOpenCodePermissionRequest = deps.onOpenCodePermissionRequest;
 
     // Restore persisted flags from previous runs
     this.verificationRequested = this.loadFlag("verification");
@@ -1146,6 +1149,7 @@ export class TeamLead extends BaseAgent {
         onAgentToolCall: this.onAgentToolCall,
         onOpenCodeEvent: this._onOpenCodeEvent,
         onOpenCodeAwaitingInput: this._onOpenCodeAwaitingInput,
+        onOpenCodePermissionRequest: this._onOpenCodePermissionRequest,
       });
 
       this.workers.set(worker.id, worker);

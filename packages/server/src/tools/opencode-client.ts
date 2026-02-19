@@ -17,6 +17,12 @@ export interface OpenCodeConfig {
   maxIterations?: number;
   /** Called for each SSE event received from the OpenCode server */
   onEvent?: (event: { type: string; properties: Record<string, unknown> }) => void;
+  /** Called when OpenCode requests permission for a tool use (interactive mode).
+   *  Return the user's response; if absent, auto-approves with "once". */
+  onPermissionRequest?: (
+    sessionId: string,
+    permission: { id: string; type: string; title: string; pattern?: string | string[]; metadata: Record<string, unknown> },
+  ) => Promise<"once" | "always" | "reject">;
 }
 
 export interface OpenCodeDiff {
@@ -59,6 +65,9 @@ export class OpenCodeClient {
   private idleTimeoutMs: number;
   private maxIterations: number;
   private onEvent?: (event: { type: string; properties: Record<string, unknown> }) => void;
+  private onPermissionRequest?: OpenCodeConfig["onPermissionRequest"];
+  /** True while waiting for a permission response — prevents idle timeout */
+  private permissionPending = false;
 
   constructor(config: OpenCodeConfig) {
     const baseUrl = config.apiUrl.replace(/\/+$/, "");
@@ -66,6 +75,7 @@ export class OpenCodeClient {
     this.idleTimeoutMs = config.timeoutMs ?? 1_200_000;
     this.maxIterations = config.maxIterations ?? 50;
     this.onEvent = config.onEvent;
+    this.onPermissionRequest = config.onPermissionRequest;
 
     // Build auth header for HTTP Basic
     const headers: Record<string, string> = {};
@@ -291,6 +301,9 @@ export class OpenCodeClient {
         return;
       }
 
+      // Skip idle timeout while waiting for user permission response
+      if (this.permissionPending) return;
+
       // Idle timeout
       const idleMs = Date.now() - lastActivityTime;
       if (idleMs > this.idleTimeoutMs) {
@@ -345,6 +358,44 @@ export class OpenCodeClient {
                 clearInterval(checkInterval);
                 controller.abort();
                 return "idle";
+              }
+            }
+          }
+
+          // Handle permission requests (interactive mode)
+          if (eventType === "permission.updated" && eventSessionId === sessionId && props) {
+            const permissionId = props.id as string | undefined;
+            if (permissionId) {
+              console.log(`[OpenCode Client] Permission requested: ${props.title ?? props.type} (${permissionId})`);
+              this.permissionPending = true;
+              try {
+                let response: "once" | "always" | "reject" = "once";
+                if (this.onPermissionRequest) {
+                  response = await this.onPermissionRequest(sessionId, {
+                    id: permissionId,
+                    type: (props.type as string) ?? "unknown",
+                    title: (props.title as string) ?? "",
+                    pattern: props.pattern as string | string[] | undefined,
+                    metadata: props.metadata as Record<string, unknown> ?? {},
+                  });
+                }
+                console.log(`[OpenCode Client] Responding to permission ${permissionId}: ${response}`);
+                await this.client.postSessionIdPermissionsPermissionId({
+                  path: { id: sessionId, permissionID: permissionId },
+                  body: { response },
+                });
+              } catch (err) {
+                console.error(`[OpenCode Client] Permission response failed:`, err instanceof Error ? err.message : err);
+                // Auto-approve on error to prevent session hang
+                try {
+                  await this.client.postSessionIdPermissionsPermissionId({
+                    path: { id: sessionId, permissionID: permissionId },
+                    body: { response: "once" },
+                  });
+                } catch { /* best-effort */ }
+              } finally {
+                this.permissionPending = false;
+                lastActivityTime = Date.now();
               }
             }
           }
@@ -473,7 +524,16 @@ export class OpenCodeClient {
    *
    * Without `getHumanResponse`, the loop runs exactly once (backwards compatible).
    */
-  async executeTask(task: string, getHumanResponse?: GetHumanResponse): Promise<OpenCodeTaskResult> {
+  async executeTask(
+    task: string,
+    getHumanResponse?: GetHumanResponse,
+    onPermissionRequest?: OpenCodeConfig["onPermissionRequest"],
+  ): Promise<OpenCodeTaskResult> {
+    // Allow per-task permission callback override
+    if (onPermissionRequest) {
+      this.onPermissionRequest = onPermissionRequest;
+    }
+
     console.log(`[OpenCode Client] executeTask starting (idleTimeout=${this.idleTimeoutMs}ms, task: ${task.slice(0, 200)}...)`);
     const session = await this.createSession();
 

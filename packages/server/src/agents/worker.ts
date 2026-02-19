@@ -33,6 +33,7 @@ export interface WorkerDependencies {
   onAgentToolCall?: (agentId: string, toolName: string, args: Record<string, unknown>) => void;
   onOpenCodeEvent?: (agentId: string, sessionId: string, event: { type: string; properties: Record<string, unknown> }) => void;
   onOpenCodeAwaitingInput?: (agentId: string, sessionId: string, prompt: string) => Promise<string | null>;
+  onOpenCodePermissionRequest?: (agentId: string, sessionId: string, permission: { id: string; type: string; title: string; pattern?: string | string[]; metadata: Record<string, unknown> }) => Promise<"once" | "always" | "reject">;
 }
 
 export class Worker extends BaseAgent {
@@ -40,6 +41,7 @@ export class Worker extends BaseAgent {
   private workspacePath: string | null;
   private _onOpenCodeEvent?: (agentId: string, sessionId: string, event: { type: string; properties: Record<string, unknown> }) => void;
   private _onOpenCodeAwaitingInput?: (agentId: string, sessionId: string, prompt: string) => Promise<string | null>;
+  private _onOpenCodePermissionRequest?: (agentId: string, sessionId: string, permission: { id: string; type: string; title: string; pattern?: string | string[]; metadata: Record<string, unknown> }) => Promise<"once" | "always" | "reject">;
 
   constructor(deps: WorkerDependencies) {
     const options: AgentOptions = {
@@ -65,6 +67,7 @@ export class Worker extends BaseAgent {
     this.workspacePath = deps.workspacePath;
     this._onOpenCodeEvent = deps.onOpenCodeEvent;
     this._onOpenCodeAwaitingInput = deps.onOpenCodeAwaitingInput;
+    this._onOpenCodePermissionRequest = deps.onOpenCodePermissionRequest;
   }
 
   async handleMessage(message: BusMessage): Promise<void> {
@@ -158,8 +161,20 @@ export class Worker extends BaseAgent {
         }
       : undefined;
 
+    // Build permission request callback for interactive sessions
+    const onPermissionRequest = interactiveMode && this._onOpenCodePermissionRequest
+      ? async (sid: string, permission: { id: string; type: string; title: string; pattern?: string | string[]; metadata: Record<string, unknown> }) => {
+          // Emit permission-request event so the frontend shows the prompt
+          this._onOpenCodeEvent?.(this.id, sid, {
+            type: "__permission-request",
+            properties: { permission },
+          });
+          return this._onOpenCodePermissionRequest!(this.id, sid, permission);
+        }
+      : undefined;
+
     console.log(`[Worker ${this.id}] Sending task directly to OpenCode (${taskWithContext.length} chars)...`);
-    const result = await client.executeTask(taskWithContext, getHumanResponse);
+    const result = await client.executeTask(taskWithContext, getHumanResponse, onPermissionRequest);
     console.log(`[Worker ${this.id}] OpenCode result: success=${result.success}, sessionId=${result.sessionId}, diff=${result.diff?.files?.length ?? 0} files`);
 
     // Persist token usage from OpenCode

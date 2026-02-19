@@ -342,7 +342,7 @@ export const opencodeSessions = sqliteTable("opencode_sessions", {
   projectId: text("project_id"),
   task: text("task").notNull().default(""),
   status: text("status", {
-    enum: ["active", "idle", "completed", "error", "awaiting-input"],
+    enum: ["active", "idle", "completed", "error", "awaiting-input", "awaiting-permission"],
   })
     .notNull()
     .default("active"),

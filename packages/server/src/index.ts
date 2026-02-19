@@ -377,6 +377,30 @@ async function main() {
     return true;
   }
 
+  // Resolver map for OpenCode permission requests: when a Worker receives a
+  // permission.updated event, a promise is stored here keyed by
+  // `${agentId}:${permissionId}`. The frontend sends `opencode:permission-respond`
+  // which resolves it. Auto-approves after 5 minutes to prevent session hang.
+  const PERMISSION_TIMEOUT_MS = 5 * 60 * 1000;
+  const openCodePermissionResolvers = new Map<string, { resolve: (response: "once" | "always" | "reject") => void; timeout: ReturnType<typeof setTimeout> }>();
+
+  function resolveOpenCodePermission(agentId: string, permissionId: string, response: "once" | "always" | "reject"): boolean {
+    const key = `${agentId}:${permissionId}`;
+    const entry = openCodePermissionResolvers.get(key);
+    if (!entry) return false;
+    clearTimeout(entry.timeout);
+    openCodePermissionResolvers.delete(key);
+    entry.resolve(response);
+    // Clear active permission if it matches
+    if (activePermissionRequest?.permissionId === permissionId) {
+      activePermissionRequest = null;
+    }
+    return true;
+  }
+
+  // Track the most recent permission request so chat replies can resolve it
+  let activePermissionRequest: { agentId: string; permissionId: string; sessionId: string } | null = null;
+
   function startCoo() {
     if (coo) return;
     try {
@@ -434,13 +458,43 @@ async function main() {
         },
         onOpenCodeEvent: (agentId, sessionId, event) => {
           emitOpenCodeEvent(io, agentId, sessionId, event);
-          // Clean up pending resolver when session ends
+          // Emit a chat message for permission requests so users can approve from chat
+          if (event.type === "__permission-request") {
+            const permission = event.properties.permission as { id: string; type: string; title: string; pattern?: string | string[] } | undefined;
+            if (permission && coo) {
+              activePermissionRequest = { agentId, permissionId: permission.id, sessionId };
+              const pattern = permission.pattern
+                ? `\n\`${Array.isArray(permission.pattern) ? permission.pattern.join("`, `") : permission.pattern}\``
+                : "";
+              const permissionMsg = bus.send({
+                fromAgentId: "coo",
+                toAgentId: null,
+                type: "chat" as any,
+                content: `**Permission Required** — OpenCode wants to **${permission.title || permission.type}**${pattern}\n\nReply **allow**, **always allow**, or **deny**.`,
+                conversationId: coo.getCurrentConversationId() ?? undefined,
+              });
+              io.emit("coo:response", permissionMsg);
+            }
+          }
+
+          // Clean up pending resolvers when session ends
           if (event.type === "__session-end") {
             const key = `${agentId}:${sessionId}`;
             const resolver = openCodeResponseResolvers.get(key);
             if (resolver) {
               openCodeResponseResolvers.delete(key);
               resolver(null);
+            }
+            // Clean up any pending permission resolvers for this agent
+            for (const [pKey, entry] of openCodePermissionResolvers) {
+              if (pKey.startsWith(`${agentId}:`)) {
+                clearTimeout(entry.timeout);
+                openCodePermissionResolvers.delete(pKey);
+                entry.resolve("reject");
+              }
+            }
+            if (activePermissionRequest?.agentId === agentId) {
+              activePermissionRequest = null;
             }
           }
         },
@@ -450,12 +504,59 @@ async function main() {
             openCodeResponseResolvers.set(key, resolve);
           });
         },
+        onOpenCodePermissionRequest: (agentId, sessionId, permission) => {
+          return new Promise<"once" | "always" | "reject">((resolve) => {
+            const key = `${agentId}:${permission.id}`;
+            const timeout = setTimeout(() => {
+              // Auto-approve on timeout to prevent indefinite session hang
+              openCodePermissionResolvers.delete(key);
+              console.warn(`[OpenCode] Permission ${permission.id} timed out — auto-approving`);
+              resolve("once");
+            }, PERMISSION_TIMEOUT_MS);
+            openCodePermissionResolvers.set(key, { resolve, timeout });
+          });
+        },
         onAgentDestroyed: (agentId) => {
           emitAgentDestroyed(io, agentId);
         },
       });
       emitAgentSpawned(io, coo);
-      setupSocketHandlers(io, bus, coo, registry);
+      setupSocketHandlers(io, bus, coo, registry, {
+        beforeCeoMessage: (content, conversationId, callback) => {
+          if (!activePermissionRequest) return false;
+
+          const lower = content.trim().toLowerCase();
+          let response: "once" | "always" | "reject" | null = null;
+
+          if (["allow", "yes", "approve", "ok", "y", "allow once"].includes(lower)) {
+            response = "once";
+          } else if (["always", "always allow"].includes(lower)) {
+            response = "always";
+          } else if (["deny", "no", "reject", "n"].includes(lower)) {
+            response = "reject";
+          }
+
+          if (!response) return false; // Not a permission response — let normal chat flow handle it
+
+          const { agentId, permissionId } = activePermissionRequest;
+          const resolved = resolveOpenCodePermission(agentId, permissionId, response);
+          if (!resolved) return false;
+
+          // Emit confirmation message to chat
+          const label = response === "reject" ? "denied" : response === "always" ? "set to always allow" : "allowed";
+          const confirmMsg = bus.send({
+            fromAgentId: "coo",
+            toAgentId: null,
+            type: "chat" as any,
+            content: `Permission ${label}.`,
+            conversationId,
+          });
+          io.emit("coo:response", confirmMsg);
+
+          callback?.({ messageId: confirmMsg.id, conversationId: conversationId ?? "" });
+          return true;
+        },
+      });
       console.log(`COO agent started. (model=${coo.toData().model}, provider=${coo.toData().provider})`);
 
       // Spawn AdminAssistant alongside COO
@@ -492,6 +593,11 @@ async function main() {
         socket.on("opencode:respond", (data, callback) => {
           const resolved = resolveOpenCodeResponse(data.agentId, data.sessionId, data.content);
           callback?.({ ok: resolved, error: resolved ? undefined : "No pending request" });
+        });
+
+        socket.on("opencode:permission-respond", (data, callback) => {
+          const resolved = resolveOpenCodePermission(data.agentId, data.permissionId, data.response);
+          callback?.({ ok: resolved, error: resolved ? undefined : "No pending permission request" });
         });
       });
 
