@@ -17,6 +17,18 @@ import { getConfig } from "../auth/auth.js";
 type TypedSocket = Socket<ClientToServerEvents, ServerToClientEvents>;
 type TypedServer = Server<ClientToServerEvents, ServerToClientEvents>;
 
+// Server-side part accumulator (mirrors client's partBuffers)
+// Key: `${agentId}:${messageId}:${partId}`
+const serverPartBuffers = new Map<string, { type: string; content: string; toolName?: string; toolState?: string }>();
+// Track agentId → DB row ID for session updates
+const sessionRowIds = new Map<string, string>();
+
+/** Reset module-level persistence state (for testing) */
+export function resetOpenCodePersistence() {
+  serverPartBuffers.clear();
+  sessionRowIds.clear();
+}
+
 export function setupSocketHandlers(
   io: TypedServer,
   bus: MessageBus,
@@ -424,15 +436,36 @@ export function emitOpenCodeEvent(
 
   // Internal markers emitted by Worker
   if (type === "__session-start") {
+    const now = new Date().toISOString();
     const session: OpenCodeSession = {
       id: sessionId,
       agentId,
       projectId: (properties.projectId as string) || null,
       task: (properties.task as string) || "",
       status: "active",
-      startedAt: new Date().toISOString(),
+      startedAt: now,
     };
     io.emit("opencode:session-start", session);
+
+    // Persist session row
+    try {
+      const db = getDb();
+      const rowId = nanoid();
+      db.insert(schema.opencodeSessions)
+        .values({
+          id: rowId,
+          agentId,
+          sessionId: sessionId || "",
+          projectId: session.projectId,
+          task: session.task,
+          status: "active",
+          startedAt: now,
+        })
+        .run();
+      sessionRowIds.set(agentId, rowId);
+    } catch (err) {
+      console.error("Failed to persist opencode session:", err);
+    }
     return;
   }
 
@@ -447,12 +480,56 @@ export function emitOpenCodeEvent(
 
   if (type === "__session-end") {
     const rawDiff = properties.diff as Array<{ path: string; additions: number; deletions: number }> | null;
+    const endStatus = (properties.status as string) || "completed";
     io.emit("opencode:session-end", {
       agentId,
       sessionId,
-      status: (properties.status as string) || "completed",
+      status: endStatus,
       diff: rawDiff?.map((f) => ({ path: f.path, additions: f.additions, deletions: f.deletions })) ?? null,
     });
+
+    // Persist session end + diffs
+    try {
+      const db = getDb();
+      const rowId = sessionRowIds.get(agentId);
+      if (rowId) {
+        db.update(schema.opencodeSessions)
+          .set({
+            status: endStatus as OpenCodeSession["status"],
+            completedAt: new Date().toISOString(),
+            sessionId: sessionId || undefined,
+          })
+          .where(eq(schema.opencodeSessions.id, rowId))
+          .run();
+
+        // Insert diff rows
+        const resolvedSessionId = sessionId || db.select().from(schema.opencodeSessions).where(eq(schema.opencodeSessions.id, rowId)).get()?.sessionId || "";
+        if (rawDiff) {
+          for (const f of rawDiff) {
+            db.insert(schema.opencodeDiffs)
+              .values({
+                id: nanoid(),
+                sessionId: resolvedSessionId,
+                path: f.path,
+                additions: f.additions,
+                deletions: f.deletions,
+              })
+              .run();
+          }
+        }
+
+        sessionRowIds.delete(agentId);
+      }
+
+      // Clean up serverPartBuffers for this agent
+      for (const key of serverPartBuffers.keys()) {
+        if (key.startsWith(`${agentId}:`)) {
+          serverPartBuffers.delete(key);
+        }
+      }
+    } catch (err) {
+      console.error("Failed to persist opencode session end:", err);
+    }
     return;
   }
 
@@ -507,6 +584,16 @@ export function emitOpenCodeEvent(
           toolName: toolName || undefined,
           toolState,
         });
+
+        // Accumulate into server-side buffer (no DB write — too high frequency)
+        const bufKey = `${agentId}:${messageId}:${partId}`;
+        const existing = serverPartBuffers.get(bufKey);
+        serverPartBuffers.set(bufKey, {
+          type: partType,
+          content: (existing?.content ?? "") + deltaText,
+          toolName: toolName || existing?.toolName,
+          toolState: toolState ?? existing?.toolState,
+        });
       }
     }
   }
@@ -531,6 +618,62 @@ export function emitOpenCodeEvent(
           createdAt: new Date().toISOString(),
         };
         io.emit("opencode:message", { agentId, sessionId, message });
+
+        // Build parts from accumulated serverPartBuffers and persist message
+        try {
+          const db = getDb();
+          const parts: OpenCodePart[] = [];
+          for (const [key, buf] of serverPartBuffers.entries()) {
+            if (key.startsWith(`${agentId}:${msgId}:`)) {
+              const partId = key.split(":").slice(2).join(":");
+              parts.push({
+                id: partId,
+                messageId: msgId,
+                type: buf.type as OpenCodePart["type"],
+                content: buf.content,
+                toolName: buf.toolName,
+                toolState: buf.toolState as OpenCodePart["toolState"],
+              });
+            }
+          }
+
+          const now = new Date().toISOString();
+          // Upsert: try insert, on conflict update parts
+          const existing = db.select().from(schema.opencodeMessages).where(eq(schema.opencodeMessages.id, msgId)).get();
+          if (existing) {
+            db.update(schema.opencodeMessages)
+              .set({ parts, sessionId: msgSessionId })
+              .where(eq(schema.opencodeMessages.id, msgId))
+              .run();
+          } else {
+            db.insert(schema.opencodeMessages)
+              .values({
+                id: msgId,
+                sessionId: msgSessionId,
+                agentId,
+                role: role as "user" | "assistant",
+                parts,
+                createdAt: now,
+              })
+              .run();
+          }
+
+          // If this is the first event with a real sessionId, update session row
+          if (msgSessionId) {
+            const rowId = sessionRowIds.get(agentId);
+            if (rowId) {
+              const sessionRow = db.select().from(schema.opencodeSessions).where(eq(schema.opencodeSessions.id, rowId)).get();
+              if (sessionRow && !sessionRow.sessionId) {
+                db.update(schema.opencodeSessions)
+                  .set({ sessionId: msgSessionId })
+                  .where(eq(schema.opencodeSessions.id, rowId))
+                  .run();
+              }
+            }
+          }
+        } catch (err) {
+          console.error("Failed to persist opencode message:", err);
+        }
       }
     }
   }

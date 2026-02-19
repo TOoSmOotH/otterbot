@@ -18,6 +18,11 @@ interface OpenCodeState {
   selectAgent: (agentId: string | null) => void;
   setAwaitingInput: (agentId: string, data: { sessionId: string; prompt: string }) => void;
   clearAwaitingInput: (agentId: string) => void;
+  loadSessions: (data: {
+    sessions: OpenCodeSession[];
+    messages: Record<string, OpenCodeMessage[]>;
+    diffs: Record<string, OpenCodeFileDiff[]>;
+  }) => void;
   startSession: (session: OpenCodeSession) => void;
   endSession: (agentId: string, sessionId: string, status: string, diff: OpenCodeFileDiff[] | null) => void;
   addMessage: (agentId: string, sessionId: string, message: OpenCodeMessage) => void;
@@ -44,6 +49,30 @@ export const useOpenCodeStore = create<OpenCodeState>((set) => ({
 
   selectAgent: (agentId) => set({ selectedAgentId: agentId }),
 
+  loadSessions: (data) =>
+    set((state) => {
+      const sessions = new Map(state.sessions);
+      for (const s of data.sessions) {
+        // Don't overwrite live sessions (they have fresher data)
+        if (!sessions.has(s.agentId)) {
+          sessions.set(s.agentId, s);
+        }
+      }
+      const messages = new Map(state.messages);
+      for (const [sid, msgs] of Object.entries(data.messages)) {
+        if (!messages.has(sid)) {
+          messages.set(sid, msgs);
+        }
+      }
+      const diffs = new Map(state.diffs);
+      for (const [sid, d] of Object.entries(data.diffs)) {
+        if (!diffs.has(sid)) {
+          diffs.set(sid, d);
+        }
+      }
+      return { sessions, messages, diffs };
+    }),
+
   setAwaitingInput: (agentId, data) =>
     set((state) => {
       const awaitingInput = new Map(state.awaitingInput);
@@ -59,15 +88,17 @@ export const useOpenCodeStore = create<OpenCodeState>((set) => ({
 
   clearAwaitingInput: (agentId) =>
     set((state) => {
+      if (!state.awaitingInput.has(agentId)) return state; // no-op
       const awaitingInput = new Map(state.awaitingInput);
       awaitingInput.delete(agentId);
       // Restore session status to active
-      const sessions = new Map(state.sessions);
-      const session = sessions.get(agentId);
+      const session = state.sessions.get(agentId);
       if (session && session.status === "awaiting-input") {
+        const sessions = new Map(state.sessions);
         sessions.set(agentId, { ...session, status: "active" });
+        return { awaitingInput, sessions };
       }
-      return { awaitingInput, sessions };
+      return { awaitingInput };
     }),
 
   startSession: (session) =>
@@ -124,9 +155,10 @@ export const useOpenCodeStore = create<OpenCodeState>((set) => ({
   appendPartDelta: (agentId, sessionId, messageId, partId, type, delta, toolName, toolState) =>
     set((state) => {
       // Update the session's ID if it was empty (started before session was created)
-      const sessions = new Map(state.sessions);
-      const session = sessions.get(agentId);
-      if (session && !session.id && sessionId) {
+      const session = state.sessions.get(agentId);
+      const needsSessionUpdate = session && !session.id && sessionId;
+      const sessions = needsSessionUpdate ? new Map(state.sessions) : state.sessions;
+      if (needsSessionUpdate) {
         sessions.set(agentId, { ...session, id: sessionId });
       }
 
