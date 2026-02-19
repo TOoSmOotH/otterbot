@@ -310,31 +310,27 @@ export class TeamLead extends BaseAgent {
     const failed = this.isFailureReport(workerReport);
     const assignee = failed ? "" : task.assigneeAgentId;
 
-    // For failures, increment retry count and check limits
+    // Preview retry count to decide target column (updateKanbanTask handles the actual increment)
     const currentRetries = (task as any).retryCount ?? 0;
-    const newRetryCount = failed ? currentRetries + 1 : currentRetries;
-    const retriesExhausted = failed && newRetryCount >= MAX_TASK_RETRIES;
-    const targetColumn = failed ? (retriesExhausted ? "done" : "backlog") : "done";
+    const nextRetryCount = failed ? currentRetries + 1 : currentRetries;
+    const retriesExhausted = failed && nextRetryCount >= MAX_TASK_RETRIES;
+    // Always target "backlog" for failures — updateKanbanTask will force to "done" if retries exhausted
+    const targetColumn = failed ? "backlog" : "done";
 
     console.warn(
       `[TeamLead ${this.id}] Safety net: LLM did not move task "${task.title}" (${taskId}). ` +
       `Force-moving to "${targetColumn}" (report ${failed ? "indicates failure" : "looks successful"}` +
-      `${failed ? `, retry ${newRetryCount}/${MAX_TASK_RETRIES}` : ""}).`,
+      `${failed ? `, retry ${nextRetryCount}/${MAX_TASK_RETRIES}` : ""}).`,
     );
 
-    // For failures, enrich the task description with what went wrong
+    // Build updates — updateKanbanTask handles retry counting for backlog transitions
     const updates: { column: string; assigneeAgentId: string; description?: string; completionReport?: string } = {
       column: targetColumn,
-      assigneeAgentId: retriesExhausted ? (assignee ?? "") : (assignee ?? ""),
+      assigneeAgentId: assignee ?? "",
     };
 
     if (!failed) {
       updates.completionReport = workerReport;
-    }
-
-    if (retriesExhausted) {
-      const snippet = workerReport.length > 500 ? workerReport.slice(-500) : workerReport;
-      updates.completionReport = `FAILED: Exceeded maximum retry attempts (${MAX_TASK_RETRIES}). Last error: ${snippet}`;
     }
 
     if (failed && !retriesExhausted) {
@@ -347,19 +343,16 @@ export class TeamLead extends BaseAgent {
         `--- Analyze the error above and fix the root cause in your next attempt. ---`;
     }
 
-    // Persist retry count
-    if (failed) {
-      const db = getDb();
-      db.update(schema.kanbanTasks)
-        .set({ retryCount: newRetryCount })
-        .where(eq(schema.kanbanTasks.id, taskId))
-        .run();
-    }
-
     this.updateKanbanTask(taskId, updates);
 
-    // If force-moved to done, check for newly unblocked tasks
-    if (targetColumn === "done") {
+    // Re-read the task to check if updateKanbanTask forced it to "done" (retries exhausted)
+    const updated = db
+      .select()
+      .from(schema.kanbanTasks)
+      .where(eq(schema.kanbanTasks.id, taskId))
+      .get();
+
+    if (updated?.column === "done") {
       this.checkUnblockedTasks(taskId);
     }
 
@@ -398,7 +391,16 @@ export class TeamLead extends BaseAgent {
       }
     }
 
-    // Detect orphaned tasks (in_progress but assigned to dead workers)
+    // Programmatically clean up orphaned tasks (in_progress but assigned to dead workers)
+    // Don't rely on the LLM — it consistently fails to handle orphans
+    for (const orphan of this.getOrphanedTasks()) {
+      console.log(
+        `[TeamLead ${this.id}] Auto-cleaning orphaned task "${orphan.title}" (${orphan.id}) — assigned to dead worker ${orphan.assigneeAgentId.slice(0, 6)}`,
+      );
+      this.updateKanbanTask(orphan.id, { column: "backlog", assigneeAgentId: "" });
+    }
+
+    // Re-check orphans after cleanup (should be 0 now)
     const orphans = this.getOrphanedTasks();
     const livingWorkers = this.workers.size;
 
@@ -609,6 +611,57 @@ export class TeamLead extends BaseAgent {
         );
       }
     }
+
+    // Auto-spawn fallback: if the LLM failed to spawn workers for unblocked tasks,
+    // do it programmatically. Bounded by MAX_TASK_RETRIES (tasks eventually move to
+    // "done" as FAILED) and single-coding-worker rule (spawnWorker refuses duplicates).
+    await this.autoSpawnUnblockedTasks();
+  }
+
+  /**
+   * Programmatically spawn workers for unblocked backlog tasks that the LLM missed.
+   * Only spawns one coding worker at a time. Non-coding tasks are skipped (rare).
+   */
+  private async autoSpawnUnblockedTasks(): Promise<void> {
+    if (!this.projectId) return;
+
+    const finalBoard = this.getKanbanBoardState();
+    if (!finalBoard.hasUnblockedBacklog || this.workers.size > 0) return;
+
+    const db = getDb();
+    const tasks = db
+      .select()
+      .from(schema.kanbanTasks)
+      .where(eq(schema.kanbanTasks.projectId, this.projectId))
+      .all();
+
+    const unblockedBacklog = tasks
+      .filter(
+        (t) =>
+          t.column === "backlog" &&
+          !this.isTaskBlocked((t.blockedBy as string[]) ?? []),
+      )
+      .sort((a, b) => a.position - b.position);
+
+    if (unblockedBacklog.length === 0) return;
+
+    // Pick the first unblocked task
+    const task = unblockedBacklog[0];
+
+    // Find the right registry entry — default to opencode-coder for coding tasks
+    const openCodeEnabled = getConfig("opencode:enabled") === "true";
+    const registryEntryId = openCodeEnabled ? "builtin-opencode-coder" : "builtin-coder";
+
+    console.log(
+      `[TeamLead ${this.id}] Auto-spawn: LLM failed to spawn worker for "${task.title}" (${task.id}) — spawning ${registryEntryId} programmatically.`,
+    );
+
+    const taskDescription = task.description
+      ? `${task.title}\n\n${task.description}`
+      : task.title;
+
+    const result = await this.spawnWorker(registryEntryId, taskDescription, task.id);
+    console.log(`[TeamLead ${this.id}] Auto-spawn result: ${result.slice(0, 200)}`);
   }
 
   private async handleStatusRequest(message: BusMessage) {

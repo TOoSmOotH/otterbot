@@ -9,8 +9,6 @@ import { BaseAgent, type AgentOptions } from "./agent.js";
 import type { MessageBus } from "../bus/message-bus.js";
 import { createTools } from "../tools/tool-factory.js";
 import { debug } from "../utils/debug.js";
-import { OpenCodeClient } from "../tools/opencode-client.js";
-import { formatOpenCodeResult } from "../tools/opencode-task.js";
 import { getConfig } from "../auth/auth.js";
 
 export interface WorkerDependencies {
@@ -100,6 +98,10 @@ export class Worker extends BaseAgent {
       return "";
     }
 
+    // Dynamic imports to avoid loading @opencode-ai/sdk at module init
+    // (the SDK uses CommonJS require() which fails in ESM context at top-level)
+    const { OpenCodeClient } = await import("../tools/opencode-client.js");
+
     const username = getConfig("opencode:username") ?? undefined;
     const password = getConfig("opencode:password") ?? undefined;
     const timeoutMs = parseInt(getConfig("opencode:timeout_ms") ?? "1200000", 10);
@@ -123,6 +125,7 @@ export class Worker extends BaseAgent {
     const result = await client.executeTask(taskWithContext);
     console.log(`[Worker ${this.id}] OpenCode result: success=${result.success}, sessionId=${result.sessionId}, diff=${result.diff?.files?.length ?? 0} files`);
 
+    const { formatOpenCodeResult } = await import("../tools/opencode-task.js");
     return formatOpenCodeResult(result);
   }
 
