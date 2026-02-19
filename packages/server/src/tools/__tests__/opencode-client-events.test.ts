@@ -216,6 +216,101 @@ describe("OpenCodeClient — onEvent callback", () => {
     });
   });
 
+  it("returns 'idle' immediately on session.idle event", async () => {
+    const events = [
+      { type: "message.updated", properties: { sessionID: "sess-1", role: "assistant" } },
+      { type: "session.idle", properties: { sessionID: "sess-1" } },
+      // This event should never be reached
+      { type: "message.updated", properties: { sessionID: "sess-1", role: "assistant" } },
+    ];
+    let eventIdx = 0;
+    mockSubscribe.mockResolvedValue({
+      stream: {
+        [Symbol.asyncIterator]() {
+          return {
+            next: async () => {
+              if (eventIdx < events.length) {
+                return { value: events[eventIdx++], done: false };
+              }
+              return { value: undefined, done: true };
+            },
+          };
+        },
+      },
+    });
+
+    const client = new OpenCodeClient({ apiUrl: "http://localhost:3333" });
+    const controller = new AbortController();
+
+    const result = await (client as any).monitorViaSse("sess-1", controller, Date.now(), Date.now());
+    expect(result).toBe("idle");
+    // Should have processed only 2 events (message.updated + session.idle)
+    expect(eventIdx).toBe(2);
+    expect(controller.signal.aborted).toBe(true);
+  });
+
+  it("returns 'idle' immediately on session.status with status.type=idle", async () => {
+    const events = [
+      { type: "message.updated", properties: { sessionID: "sess-1", role: "assistant" } },
+      { type: "session.status", properties: { sessionID: "sess-1", status: { type: "idle" } } },
+      // This event should never be reached
+      { type: "message.updated", properties: { sessionID: "sess-1", role: "assistant" } },
+    ];
+    let eventIdx = 0;
+    mockSubscribe.mockResolvedValue({
+      stream: {
+        [Symbol.asyncIterator]() {
+          return {
+            next: async () => {
+              if (eventIdx < events.length) {
+                return { value: events[eventIdx++], done: false };
+              }
+              return { value: undefined, done: true };
+            },
+          };
+        },
+      },
+    });
+
+    const client = new OpenCodeClient({ apiUrl: "http://localhost:3333" });
+    const controller = new AbortController();
+
+    const result = await (client as any).monitorViaSse("sess-1", controller, Date.now(), Date.now());
+    expect(result).toBe("idle");
+    expect(eventIdx).toBe(2);
+    expect(controller.signal.aborted).toBe(true);
+  });
+
+  it("does not treat session.status with non-idle status as completion", async () => {
+    const events = [
+      { type: "session.status", properties: { sessionID: "sess-1", status: { type: "active" } } },
+    ];
+    let eventIdx = 0;
+    mockSubscribe.mockResolvedValue({
+      stream: {
+        [Symbol.asyncIterator]() {
+          return {
+            next: async () => {
+              if (eventIdx < events.length) {
+                return { value: events[eventIdx++], done: false };
+              }
+              return { value: undefined, done: true };
+            },
+          };
+        },
+      },
+    });
+
+    const client = new OpenCodeClient({ apiUrl: "http://localhost:3333" });
+    const controller = new AbortController();
+
+    const result = await (client as any).monitorViaSse("sess-1", controller, Date.now(), Date.now());
+    // Stream ends naturally (not via idle detection), so it falls through to the end
+    expect(result).toBe("idle");
+    // All events consumed
+    expect(eventIdx).toBe(1);
+  });
+
   it("catches errors in onEvent callback without breaking the loop", async () => {
     const onEvent = vi.fn().mockImplementation(() => {
       throw new Error("callback error");
