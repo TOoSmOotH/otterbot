@@ -122,6 +122,14 @@ describe("opencode-store", () => {
       expect(useOpenCodeStore.getState().messages.get("sess-1")!.length).toBe(2);
     });
 
+    it("updates session ID if it was empty", () => {
+      useOpenCodeStore.getState().startSession(makeSession({ id: "" }));
+      useOpenCodeStore.getState().addMessage("agent-1", "sess-real", makeMessage({ id: "msg-1" }));
+
+      const session = useOpenCodeStore.getState().sessions.get("agent-1")!;
+      expect(session.id).toBe("sess-real");
+    });
+
     it("replaces a message with the same ID", () => {
       useOpenCodeStore.getState().addMessage("agent-1", "sess-1", makeMessage({
         id: "msg-1",
@@ -139,6 +147,14 @@ describe("opencode-store", () => {
   });
 
   describe("appendPartDelta", () => {
+    it("updates session ID if it was empty", () => {
+      useOpenCodeStore.getState().startSession(makeSession({ id: "" }));
+      useOpenCodeStore.getState().appendPartDelta("agent-1", "sess-real", "msg-1", "p1", "text", "hi");
+
+      const session = useOpenCodeStore.getState().sessions.get("agent-1")!;
+      expect(session.id).toBe("sess-real");
+    });
+
     it("accumulates delta text for a part", () => {
       const store = useOpenCodeStore.getState();
       store.appendPartDelta("agent-1", "sess-1", "msg-1", "part-1", "text", "Hello ");

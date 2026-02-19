@@ -71,26 +71,24 @@ describe("emitOpenCodeEvent", () => {
     });
   });
 
-  describe("message.part.updated events", () => {
-    it("emits opencode:event and opencode:part-delta for text deltas", () => {
+  describe("message.part.updated events (SDK format)", () => {
+    it("emits part-delta for text parts with delta", () => {
+      // SDK EventMessagePartUpdated: { part: TextPart, delta?: string }
       emitOpenCodeEvent(io, "agent-1", "sess-1", {
         type: "message.part.updated",
         properties: {
-          partID: "part-1",
-          messageID: "msg-1",
-          type: "text",
+          part: {
+            id: "part-1",
+            sessionID: "sess-1",
+            messageID: "msg-1",
+            type: "text",
+            text: "Full text so far",
+          },
           delta: "Hello world",
         },
       });
 
-      // Should emit both the raw event and the parsed part-delta
-      expect(io.emit).toHaveBeenCalledWith("opencode:event", {
-        agentId: "agent-1",
-        sessionId: "sess-1",
-        type: "message.part.updated",
-        properties: expect.any(Object),
-      });
-
+      expect(io.emit).toHaveBeenCalledWith("opencode:event", expect.any(Object));
       expect(io.emit).toHaveBeenCalledWith("opencode:part-delta", {
         agentId: "agent-1",
         sessionId: "sess-1",
@@ -103,16 +101,18 @@ describe("emitOpenCodeEvent", () => {
       });
     });
 
-    it("includes toolName and toolState for tool-invocation parts", () => {
+    it("extracts text from part when no explicit delta", () => {
       emitOpenCodeEvent(io, "agent-1", "sess-1", {
         type: "message.part.updated",
         properties: {
-          partID: "part-2",
-          messageID: "msg-1",
-          type: "tool-invocation",
-          delta: '{"file": "src/x.ts"}',
-          toolName: "file_write",
-          state: "call",
+          part: {
+            id: "part-2",
+            sessionID: "sess-1",
+            messageID: "msg-1",
+            type: "text",
+            text: "Some accumulated text",
+          },
+          // no delta
         },
       });
 
@@ -121,46 +121,138 @@ describe("emitOpenCodeEvent", () => {
         sessionId: "sess-1",
         messageId: "msg-1",
         partId: "part-2",
-        type: "tool-invocation",
-        delta: '{"file": "src/x.ts"}',
-        toolName: "file_write",
-        toolState: "call",
+        type: "text",
+        delta: "Some accumulated text",
+        toolName: undefined,
+        toolState: undefined,
       });
     });
 
-    it("does not emit part-delta when delta is missing", () => {
+    it("handles tool parts with state object", () => {
+      // SDK ToolPart: { type: "tool", tool: "shell_exec", state: { status: "completed", input: {...}, output: "..." } }
       emitOpenCodeEvent(io, "agent-1", "sess-1", {
         type: "message.part.updated",
         properties: {
-          partID: "part-3",
-          messageID: "msg-1",
-          type: "text",
-          // no delta field
+          part: {
+            id: "part-3",
+            sessionID: "sess-1",
+            messageID: "msg-1",
+            type: "tool",
+            tool: "file_write",
+            callID: "call-1",
+            state: {
+              status: "completed",
+              input: { path: "src/x.ts" },
+              output: "File written successfully",
+              title: "file_write",
+              metadata: {},
+              time: { start: 1, end: 2 },
+            },
+          },
+          delta: "File written successfully",
         },
       });
 
-      // Should still emit the raw event
-      expect(io.emit).toHaveBeenCalledWith("opencode:event", expect.any(Object));
-      // Should NOT emit part-delta
+      expect(io.emit).toHaveBeenCalledWith("opencode:part-delta", {
+        agentId: "agent-1",
+        sessionId: "sess-1",
+        messageId: "msg-1",
+        partId: "part-3",
+        type: "tool",
+        delta: "File written successfully",
+        toolName: "file_write",
+        toolState: "completed",
+      });
+    });
+
+    it("uses tool output when no delta for tool parts", () => {
+      emitOpenCodeEvent(io, "agent-1", "sess-1", {
+        type: "message.part.updated",
+        properties: {
+          part: {
+            id: "part-4",
+            sessionID: "sess-1",
+            messageID: "msg-1",
+            type: "tool",
+            tool: "shell_exec",
+            callID: "call-2",
+            state: {
+              status: "completed",
+              input: { command: "ls" },
+              output: "file1.ts\nfile2.ts",
+              title: "shell_exec",
+              metadata: {},
+              time: { start: 1, end: 2 },
+            },
+          },
+          // no delta
+        },
+      });
+
+      expect(io.emit).toHaveBeenCalledWith("opencode:part-delta", expect.objectContaining({
+        delta: "file1.ts\nfile2.ts",
+        toolName: "shell_exec",
+        toolState: "completed",
+      }));
+    });
+
+    it("does not emit part-delta when part is missing", () => {
+      emitOpenCodeEvent(io, "agent-1", "sess-1", {
+        type: "message.part.updated",
+        properties: {
+          // no part
+          delta: "orphan delta",
+        },
+      });
+
       const partDeltaCalls = io.emit.mock.calls.filter(
         (c: any[]) => c[0] === "opencode:part-delta",
       );
       expect(partDeltaCalls).toHaveLength(0);
     });
+
+    it("handles reasoning parts", () => {
+      emitOpenCodeEvent(io, "agent-1", "sess-1", {
+        type: "message.part.updated",
+        properties: {
+          part: {
+            id: "part-5",
+            sessionID: "sess-1",
+            messageID: "msg-1",
+            type: "reasoning",
+            text: "Thinking about this...",
+            time: { start: 1 },
+          },
+          delta: "more thinking",
+        },
+      });
+
+      expect(io.emit).toHaveBeenCalledWith("opencode:part-delta", expect.objectContaining({
+        type: "reasoning",
+        delta: "more thinking",
+      }));
+    });
   });
 
-  describe("message.updated events", () => {
-    it("emits opencode:event and opencode:message with parsed parts", () => {
+  describe("message.updated events (SDK format)", () => {
+    it("emits opencode:message from properties.info", () => {
+      // SDK EventMessageUpdated: { properties: { info: Message } }
       emitOpenCodeEvent(io, "agent-1", "sess-1", {
         type: "message.updated",
         properties: {
-          messageID: "msg-1",
-          role: "assistant",
-          parts: [
-            { id: "p1", type: "text", content: "Hello" },
-            { id: "p2", type: "tool-invocation", toolName: "shell", state: "result", toolResult: "ok" },
-          ],
-          createdAt: "2026-01-01T00:00:00Z",
+          info: {
+            id: "msg-1",
+            sessionID: "sess-1",
+            role: "assistant",
+            time: { created: 1706745600 },
+            parentID: "msg-0",
+            modelID: "claude-sonnet-4-5-20250929",
+            providerID: "anthropic",
+            mode: "default",
+            path: { cwd: "/workspace", root: "/workspace" },
+            cost: 0.01,
+            tokens: { input: 100, output: 50, reasoning: 0, cache: { read: 0, write: 0 } },
+          },
         },
       });
 
@@ -171,47 +263,42 @@ describe("emitOpenCodeEvent", () => {
           id: "msg-1",
           sessionId: "sess-1",
           role: "assistant",
-          parts: [
-            {
-              id: "p1",
-              messageId: "msg-1",
-              type: "text",
-              content: "Hello",
-              toolName: undefined,
-              toolArgs: undefined,
-              toolState: undefined,
-              toolResult: undefined,
-            },
-            {
-              id: "p2",
-              messageId: "msg-1",
-              type: "tool-invocation",
-              content: "",
-              toolName: "shell",
-              toolArgs: undefined,
-              toolState: "result",
-              toolResult: "ok",
-            },
-          ],
-          createdAt: "2026-01-01T00:00:00Z",
+          parts: [],
+          createdAt: expect.any(String),
         },
       });
     });
 
-    it("does not emit opencode:message when role is missing", () => {
+    it("does not emit when info is missing", () => {
       emitOpenCodeEvent(io, "agent-1", "sess-1", {
         type: "message.updated",
-        properties: {
-          messageID: "msg-1",
-          // no role
-          parts: [],
-        },
+        properties: {},
       });
 
       const messageCalls = io.emit.mock.calls.filter(
         (c: any[]) => c[0] === "opencode:message",
       );
       expect(messageCalls).toHaveLength(0);
+    });
+
+    it("handles user messages", () => {
+      emitOpenCodeEvent(io, "agent-1", "sess-1", {
+        type: "message.updated",
+        properties: {
+          info: {
+            id: "msg-0",
+            sessionID: "sess-1",
+            role: "user",
+            time: { created: 1706745600 },
+            agent: "default",
+            model: { providerID: "anthropic", modelID: "claude-sonnet-4-5-20250929" },
+          },
+        },
+      });
+
+      const msgCall = io.emit.mock.calls.find((c: any[]) => c[0] === "opencode:message");
+      expect(msgCall).toBeDefined();
+      expect(msgCall![1].message.role).toBe("user");
     });
   });
 

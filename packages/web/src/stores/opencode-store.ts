@@ -67,8 +67,15 @@ export const useOpenCodeStore = create<OpenCodeState>((set) => ({
       return { sessions, diffs };
     }),
 
-  addMessage: (_agentId, sessionId, message) =>
+  addMessage: (agentId, sessionId, message) =>
     set((state) => {
+      // Update the session's ID if it was empty
+      const sessions = new Map(state.sessions);
+      const session = sessions.get(agentId);
+      if (session && !session.id && sessionId) {
+        sessions.set(agentId, { ...session, id: sessionId });
+      }
+
       const messages = new Map(state.messages);
       const existing = messages.get(sessionId) ?? [];
       // Replace if message ID already exists, otherwise append
@@ -80,11 +87,18 @@ export const useOpenCodeStore = create<OpenCodeState>((set) => ({
       } else {
         messages.set(sessionId, [...existing, message]);
       }
-      return { messages };
+      return { sessions, messages };
     }),
 
-  appendPartDelta: (_agentId, sessionId, messageId, partId, type, delta, toolName, toolState) =>
+  appendPartDelta: (agentId, sessionId, messageId, partId, type, delta, toolName, toolState) =>
     set((state) => {
+      // Update the session's ID if it was empty (started before session was created)
+      const sessions = new Map(state.sessions);
+      const session = sessions.get(agentId);
+      if (session && !session.id && sessionId) {
+        sessions.set(agentId, { ...session, id: sessionId });
+      }
+
       const partBuffers = new Map(state.partBuffers);
       const key = `${sessionId}:${messageId}:${partId}`;
       const existing = partBuffers.get(key);
@@ -94,7 +108,7 @@ export const useOpenCodeStore = create<OpenCodeState>((set) => ({
         toolName: toolName ?? existing?.toolName,
         toolState: toolState ?? existing?.toolState,
       });
-      return { partBuffers };
+      return { sessions, partBuffers };
     }),
 
   clearSession: (agentId) =>
