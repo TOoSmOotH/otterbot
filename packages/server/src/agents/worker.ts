@@ -1,3 +1,4 @@
+import { nanoid } from "nanoid";
 import {
   type GearConfig,
   AgentRole,
@@ -10,6 +11,7 @@ import type { MessageBus } from "../bus/message-bus.js";
 import { createTools } from "../tools/tool-factory.js";
 import { debug } from "../utils/debug.js";
 import { getConfig } from "../auth/auth.js";
+import { getDb, schema } from "../db/index.js";
 
 export interface WorkerDependencies {
   id?: string;
@@ -159,6 +161,29 @@ export class Worker extends BaseAgent {
     console.log(`[Worker ${this.id}] Sending task directly to OpenCode (${taskWithContext.length} chars)...`);
     const result = await client.executeTask(taskWithContext, getHumanResponse);
     console.log(`[Worker ${this.id}] OpenCode result: success=${result.success}, sessionId=${result.sessionId}, diff=${result.diff?.files?.length ?? 0} files`);
+
+    // Persist token usage from OpenCode
+    if (result.usage) {
+      try {
+        const db = getDb();
+        db.insert(schema.tokenUsage)
+          .values({
+            id: nanoid(),
+            agentId: this.id,
+            provider: result.usage.provider,
+            model: result.usage.model,
+            inputTokens: result.usage.inputTokens,
+            outputTokens: result.usage.outputTokens,
+            cost: result.usage.cost,
+            projectId: this.projectId,
+            timestamp: new Date().toISOString(),
+          })
+          .run();
+        console.log(`[Worker ${this.id}] OpenCode token usage persisted: ${result.usage.inputTokens} in / ${result.usage.outputTokens} out, cost=${result.usage.cost} microcents`);
+      } catch (err) {
+        console.error(`[Worker ${this.id}] Failed to persist OpenCode token usage:`, err);
+      }
+    }
 
     // Emit session-end event
     this._onOpenCodeEvent?.(this.id, result.sessionId, {

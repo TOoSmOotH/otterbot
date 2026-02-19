@@ -28,11 +28,23 @@ export interface OpenCodeDiff {
   }>;
 }
 
+export interface OpenCodeTokenUsage {
+  inputTokens: number;
+  outputTokens: number;
+  reasoningTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  cost: number; // microcents (from OpenCode SDK)
+  model: string;
+  provider: string;
+}
+
 export interface OpenCodeTaskResult {
   success: boolean;
   sessionId: string;
   summary: string;
   diff: OpenCodeDiff | null;
+  usage: OpenCodeTokenUsage | null;
   error?: string;
 }
 
@@ -98,7 +110,7 @@ export class OpenCodeClient {
     sessionId: string,
     task: string,
     signal?: AbortSignal,
-  ): Promise<Record<string, unknown>> {
+  ): Promise<{ content: Record<string, unknown>; usage: OpenCodeTokenUsage | null }> {
     console.log(`[OpenCode Client] Sending message to session ${sessionId} (${task.length} chars)`);
     const result = await this.client.session.prompt({
       path: { id: sessionId },
@@ -112,7 +124,30 @@ export class OpenCodeClient {
       throw new Error(`Failed to send message: ${JSON.stringify(result.error)}`);
     }
     console.log(`[OpenCode Client] sendMessage response received`);
-    return (result.data ?? {}) as Record<string, unknown>;
+
+    const data = (result.data ?? {}) as Record<string, unknown>;
+
+    // Extract token usage from AssistantMessage info
+    let usage: OpenCodeTokenUsage | null = null;
+    const info = data.info as Record<string, unknown> | undefined;
+    if (info) {
+      const tokens = info.tokens as { input?: number; output?: number; reasoning?: number; cache?: { read?: number; write?: number } } | undefined;
+      if (tokens) {
+        usage = {
+          inputTokens: tokens.input ?? 0,
+          outputTokens: tokens.output ?? 0,
+          reasoningTokens: tokens.reasoning ?? 0,
+          cacheReadTokens: tokens.cache?.read ?? 0,
+          cacheWriteTokens: tokens.cache?.write ?? 0,
+          cost: (info.cost as number) ?? 0,
+          model: (info.modelID as string) ?? "unknown",
+          provider: (info.providerID as string) ?? "unknown",
+        };
+        console.log(`[OpenCode Client] Token usage: ${usage.inputTokens} in / ${usage.outputTokens} out / ${usage.reasoningTokens} reasoning, cost=${usage.cost} microcents`);
+      }
+    }
+
+    return { content: data, usage };
   }
 
   /** Get session messages */
@@ -365,19 +400,19 @@ export class OpenCodeClient {
     sessionId: string,
     message: string,
   ): Promise<
-    | { type: "response"; response: Record<string, unknown> }
+    | { type: "response"; response: Record<string, unknown>; usage: OpenCodeTokenUsage | null }
     | { type: "timeout"; reason: string }
   > {
     const controller = new AbortController();
 
     const messagePromise = this.sendMessage(sessionId, message, controller.signal)
-      .then((response) => ({ type: "response" as const, response }))
+      .then(({ content, usage }) => ({ type: "response" as const, response: content, usage }))
       .catch((err) => {
         if (err instanceof DOMException && err.name === "AbortError") {
-          return { type: "aborted" as const, response: null };
+          return { type: "aborted" as const, response: null, usage: null };
         }
         if (err instanceof Error && err.name === "AbortError") {
-          return { type: "aborted" as const, response: null };
+          return { type: "aborted" as const, response: null, usage: null };
         }
         throw err;
       });
@@ -387,7 +422,7 @@ export class OpenCodeClient {
     try {
       const result = await Promise.race([
         messagePromise,
-        monitorPromise.then((reason) => ({ type: "timeout" as const, reason, response: null })),
+        monitorPromise.then((reason) => ({ type: "timeout" as const, reason, response: null, usage: null })),
       ]);
 
       if (!controller.signal.aborted) {
@@ -395,7 +430,7 @@ export class OpenCodeClient {
       }
 
       if (result.type === "response" && result.response) {
-        return { type: "response", response: result.response };
+        return { type: "response", response: result.response, usage: result.usage };
       }
 
       const reason = result.type === "timeout"
@@ -429,6 +464,7 @@ export class OpenCodeClient {
     let lastSummary = "";
     let timedOut = false;
     let timeoutReason = "";
+    let accumulatedUsage: OpenCodeTokenUsage | null = null;
 
     for (let turn = 0; turn < this.maxIterations; turn++) {
       console.log(`[OpenCode Client] executeTask turn ${turn + 1}/${this.maxIterations}`);
@@ -440,6 +476,23 @@ export class OpenCodeClient {
           const summary = this.extractContent(result.response);
           console.log(`[OpenCode Client] Turn ${turn + 1} response (${summary.length} chars): ${summary.slice(0, 500)}`);
           lastSummary = summary;
+
+          // Accumulate token usage across turns
+          if (result.usage) {
+            if (accumulatedUsage) {
+              accumulatedUsage.inputTokens += result.usage.inputTokens;
+              accumulatedUsage.outputTokens += result.usage.outputTokens;
+              accumulatedUsage.reasoningTokens += result.usage.reasoningTokens;
+              accumulatedUsage.cacheReadTokens += result.usage.cacheReadTokens;
+              accumulatedUsage.cacheWriteTokens += result.usage.cacheWriteTokens;
+              accumulatedUsage.cost += result.usage.cost;
+              // Keep model/provider from the latest turn
+              accumulatedUsage.model = result.usage.model;
+              accumulatedUsage.provider = result.usage.provider;
+            } else {
+              accumulatedUsage = { ...result.usage };
+            }
+          }
 
           // If no callback, single-turn mode — break after first response
           if (!getHumanResponse) break;
@@ -506,6 +559,7 @@ export class OpenCodeClient {
         sessionId: session.id,
         summary,
         diff,
+        usage: accumulatedUsage,
         error: timeoutReason === "hard_cap" ? "hard_timeout" : timeoutReason === "error" ? "session_error" : "idle_timeout",
       };
     }
@@ -519,6 +573,6 @@ export class OpenCodeClient {
       console.warn(`[OpenCode Client] getDiff failed (non-fatal):`, err);
     }
 
-    return { success: true, sessionId: session.id, summary: lastSummary, diff };
+    return { success: true, sessionId: session.id, summary: lastSummary, diff, usage: accumulatedUsage };
   }
 }
