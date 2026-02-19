@@ -65,6 +65,7 @@ export interface COODependencies {
   onAgentToolCall?: (agentId: string, toolName: string, args: Record<string, unknown>) => void;
   onOpenCodeEvent?: (agentId: string, sessionId: string, event: { type: string; properties: Record<string, unknown> }) => void;
   onOpenCodeAwaitingInput?: (agentId: string, sessionId: string, prompt: string) => Promise<string | null>;
+  onOpenCodePermissionRequest?: (agentId: string, sessionId: string, permission: { id: string; type: string; title: string; pattern?: string | string[]; metadata: Record<string, unknown> }) => Promise<"once" | "always" | "reject">;
   onAgentDestroyed?: (agentId: string) => void;
 }
 
@@ -86,6 +87,7 @@ export class COO extends BaseAgent {
   private _onAgentToolCall?: (agentId: string, toolName: string, args: Record<string, unknown>) => void;
   private _onOpenCodeEvent?: (agentId: string, sessionId: string, event: { type: string; properties: Record<string, unknown> }) => void;
   private _onOpenCodeAwaitingInput?: (agentId: string, sessionId: string, prompt: string) => Promise<string | null>;
+  private _onOpenCodePermissionRequest?: (agentId: string, sessionId: string, permission: { id: string; type: string; title: string; pattern?: string | string[]; metadata: Record<string, unknown> }) => Promise<"once" | "always" | "reject">;
   private onAgentDestroyed?: (agentId: string) => void;
   private allowedToolNames: Set<string>;
   private contextManager!: ConversationContextManager;
@@ -187,6 +189,7 @@ The user can see everything on the desktop in real-time.`;
     this._onAgentToolCall = deps.onAgentToolCall;
     this._onOpenCodeEvent = deps.onOpenCodeEvent;
     this._onOpenCodeAwaitingInput = deps.onOpenCodeAwaitingInput;
+    this._onOpenCodePermissionRequest = deps.onOpenCodePermissionRequest;
     this.onAgentDestroyed = deps.onAgentDestroyed;
     this.contextManager = new ConversationContextManager(systemPrompt);
   }
@@ -715,6 +718,7 @@ The user can see everything on the desktop in real-time.`;
       onAgentToolCall: this._onAgentToolCall,
       onOpenCodeEvent: this._onOpenCodeEvent,
       onOpenCodeAwaitingInput: this._onOpenCodeAwaitingInput,
+      onOpenCodePermissionRequest: this._onOpenCodePermissionRequest,
     });
 
     this.teamLeads.set(projectId, teamLead);
@@ -1230,6 +1234,7 @@ The user can see everything on the desktop in real-time.`;
       onAgentToolCall: this._onAgentToolCall,
       onOpenCodeEvent: this._onOpenCodeEvent,
       onOpenCodeAwaitingInput: this._onOpenCodeAwaitingInput,
+      onOpenCodePermissionRequest: this._onOpenCodePermissionRequest,
     });
 
     this.teamLeads.set(project.id, teamLead);

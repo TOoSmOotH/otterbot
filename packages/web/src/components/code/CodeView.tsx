@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { useOpenCodeStore } from "../../stores/opencode-store";
 import { getSocket } from "../../lib/socket";
-import type { OpenCodeSession, OpenCodeMessage, OpenCodeFileDiff } from "@otterbot/shared";
+import type { OpenCodeSession, OpenCodeMessage, OpenCodeFileDiff, OpenCodePermission } from "@otterbot/shared";
 
 type PartBuffer = { type: string; content: string; toolName?: string; toolState?: string };
 
@@ -15,6 +15,7 @@ function StatusDot({ status }: { status: OpenCodeSession["status"] }) {
     completed: "bg-emerald-500",
     error: "bg-red-500",
     "awaiting-input": "bg-yellow-400 animate-pulse",
+    "awaiting-permission": "bg-orange-400 animate-pulse",
   };
   return <span className={`inline-block w-2 h-2 rounded-full ${colors[status] ?? "bg-gray-400"}`} />;
 }
@@ -215,6 +216,77 @@ function InputPrompt({ agentId }: { agentId: string }) {
   );
 }
 
+function PermissionPrompt({ agentId }: { agentId: string }) {
+  const pending = useOpenCodeStore((s) => s.pendingPermission.get(agentId));
+  const clearPendingPermission = useOpenCodeStore((s) => s.clearPendingPermission);
+  const [sending, setSending] = useState(false);
+
+  useEffect(() => {
+    if (pending) setSending(false);
+  }, [pending]);
+
+  const handleRespond = useCallback((response: "once" | "always" | "reject") => {
+    if (!pending || sending) return;
+    setSending(true);
+    getSocket().emit("opencode:permission-respond", {
+      agentId,
+      sessionId: pending.sessionId,
+      permissionId: pending.permission.id,
+      response,
+    }, (ack) => {
+      if (ack?.ok) {
+        clearPendingPermission(agentId);
+      } else {
+        setSending(false);
+      }
+    });
+  }, [agentId, pending, sending, clearPendingPermission]);
+
+  if (!pending) return null;
+
+  const { permission } = pending;
+
+  return (
+    <div className="border-t border-orange-500/30 bg-orange-500/5 px-3 py-2">
+      <div className="flex items-center gap-2 mb-1.5">
+        <span className="inline-block w-1.5 h-1.5 rounded-full bg-orange-400 animate-pulse" />
+        <span className="text-xs text-orange-400 font-medium">Permission required</span>
+      </div>
+      <div className="text-xs text-foreground/90 mb-1.5">
+        <span className="font-medium">{permission.title || permission.type}</span>
+        {permission.pattern && (
+          <span className="ml-1.5 text-muted-foreground font-mono text-[10px]">
+            {Array.isArray(permission.pattern) ? permission.pattern.join(", ") : permission.pattern}
+          </span>
+        )}
+      </div>
+      <div className="flex gap-2">
+        <button
+          onClick={() => handleRespond("once")}
+          disabled={sending}
+          className="px-3 py-1.5 rounded text-xs font-medium bg-green-500/20 text-green-400 hover:bg-green-500/30 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+        >
+          Allow Once
+        </button>
+        <button
+          onClick={() => handleRespond("always")}
+          disabled={sending}
+          className="px-3 py-1.5 rounded text-xs font-medium bg-blue-500/20 text-blue-400 hover:bg-blue-500/30 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+        >
+          Always Allow
+        </button>
+        <button
+          onClick={() => handleRespond("reject")}
+          disabled={sending}
+          className="px-3 py-1.5 rounded text-xs font-medium bg-red-500/20 text-red-400 hover:bg-red-500/30 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+        >
+          Deny
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function SessionContent({ agentId }: { agentId: string }) {
   const session = useOpenCodeStore((s) => s.sessions.get(agentId));
   const sessionId = session?.id || "";
@@ -349,6 +421,14 @@ function SessionContent({ agentId }: { agentId: string }) {
           </div>
         )}
 
+        {/* Awaiting permission indicator */}
+        {(session.status as string) === "awaiting-permission" && (
+          <div className="flex items-center gap-2 text-xs text-orange-400/70">
+            <span className="inline-block w-1.5 h-1.5 rounded-full bg-orange-400 animate-pulse" />
+            Permission required...
+          </div>
+        )}
+
         {/* Diff summary */}
         {sessionDiffs.length > 0 && <DiffSummary diffs={sessionDiffs} />}
 
@@ -365,6 +445,8 @@ function SessionContent({ agentId }: { agentId: string }) {
         )}
       </div>
 
+      {/* Permission prompt — sticky footer */}
+      <PermissionPrompt agentId={agentId} />
       {/* Input prompt — sticky footer */}
       <InputPrompt agentId={agentId} />
     </div>

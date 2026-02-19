@@ -36,6 +36,8 @@ export function useSocket() {
   const appendOpenCodePartDelta = useOpenCodeStore((s) => s.appendPartDelta);
   const setAwaitingInput = useOpenCodeStore((s) => s.setAwaitingInput);
   const clearAwaitingInput = useOpenCodeStore((s) => s.clearAwaitingInput);
+  const setPendingPermission = useOpenCodeStore((s) => s.setPendingPermission);
+  const clearPendingPermission = useOpenCodeStore((s) => s.clearPendingPermission);
 
   useEffect(() => {
     if (initialized.current) return;
@@ -154,6 +156,7 @@ export function useSocket() {
     socket.on("opencode:session-end", (data) => {
       endOpenCodeSession(data.agentId, data.sessionId, data.status, data.diff);
       clearAwaitingInput(data.agentId);
+      clearPendingPermission(data.agentId);
     });
 
     socket.on("opencode:message", (data) => {
@@ -175,6 +178,10 @@ export function useSocket() {
 
     socket.on("opencode:awaiting-input", (data) => {
       setAwaitingInput(data.agentId, { sessionId: data.sessionId, prompt: data.prompt });
+    });
+
+    socket.on("opencode:permission-request", (data) => {
+      setPendingPermission(data.agentId, { sessionId: data.sessionId, permission: data.permission });
     });
 
     return () => {
@@ -205,6 +212,7 @@ export function useSocket() {
       socket.off("opencode:message");
       socket.off("opencode:part-delta");
       socket.off("opencode:awaiting-input");
+      socket.off("opencode:permission-request");
     };
   }, []);
 

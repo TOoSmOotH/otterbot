@@ -40,6 +40,7 @@ export interface OpenCodeConfigOptions {
   model: string;
   apiKey?: string;
   baseUrl?: string;
+  interactive?: boolean;
 }
 
 export function writeOpenCodeConfig(opts: OpenCodeConfigOptions): void {
@@ -82,8 +83,8 @@ export function writeOpenCodeConfig(opts: OpenCodeConfigOptions): void {
       [openCodeProvider]: providerEntry,
     },
     model: `${openCodeProvider}/${opts.model}`,
-    // Auto-approve all permission prompts — OpenCode runs autonomously as a tool
-    permission: "allow",
+    // When interactive mode is on, require permission for tool use; otherwise auto-approve
+    permission: opts.interactive ? "ask" : "allow",
     server: {
       port: 4096,
       hostname: "127.0.0.1",
@@ -184,11 +185,13 @@ function ensureConfigAndCredentials(): boolean {
   const { apiKey, providerType, baseUrl } = resolveProviderInfo();
   const effectiveProviderType = getConfig("opencode:provider_type") ?? providerType ?? "anthropic";
 
+  const interactive = getConfig("opencode:interactive") === "true";
   writeOpenCodeConfig({
     providerType: effectiveProviderType,
     model,
     apiKey,
     baseUrl,
+    interactive,
   });
 
   return true;
