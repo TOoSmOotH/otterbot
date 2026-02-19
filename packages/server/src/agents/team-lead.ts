@@ -983,10 +983,13 @@ export class TeamLead extends BaseAgent {
   private searchRegistry(capability: string): string {
     const registry = new Registry();
     const allEntries = registry.list();
+    const openCodeEnabled = getConfig("opencode:enabled") === "true";
 
     const matches = allEntries.filter((entry) => {
       // Only return worker-role entries (not COO or Team Lead)
       if (entry.role !== "worker") return false;
+      // Hide the regular coder when OpenCode is enabled — force all coding through OpenCode
+      if (openCodeEnabled && entry.id === "builtin-coder") return false;
       return entry.capabilities.some((c) =>
         c.toLowerCase().includes(capability.toLowerCase()),
       );
@@ -996,24 +999,12 @@ export class TeamLead extends BaseAgent {
       return `No agents found with capability "${capability}".`;
     }
 
-    let result = matches
+    return matches
       .map(
         (e) =>
           `- ${e.name} (${e.id}): ${e.description} [capabilities: ${e.capabilities.join(", ")}]`,
       )
       .join("\n");
-
-    // If OpenCode is enabled and the search matches coding capabilities, recommend OpenCode Coder
-    const codingKeywords = ["code", "coding", "programming", "develop", "implement", "refactor", "software"];
-    const isCodingSearch = codingKeywords.some((kw) => capability.toLowerCase().includes(kw));
-    const hasOpenCodeCoder = matches.some((e) => e.id === "builtin-opencode-coder");
-    const openCodeEnabled = getConfig("opencode:enabled") === "true";
-
-    if (isCodingSearch && hasOpenCodeCoder && openCodeEnabled) {
-      result += `\n\n**RECOMMENDATION:** Use "OpenCode Coder" (builtin-opencode-coder) for coding tasks. It delegates to a dedicated autonomous coding agent with superior multi-file editing. Only use the regular "Coder" for very simple single-file changes.`;
-    }
-
-    return result;
   }
 
   private async spawnWorker(
