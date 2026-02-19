@@ -947,6 +947,7 @@ export interface OpenCodeSettingsResponse {
   maxIterations: number;
   model: string;
   providerId: string;
+  interactive: boolean;
 }
 
 export function getOpenCodeSettings(): OpenCodeSettingsResponse {
@@ -959,6 +960,7 @@ export function getOpenCodeSettings(): OpenCodeSettingsResponse {
     maxIterations: parseInt(getConfig("opencode:max_iterations") ?? "50", 10),
     model: getConfig("opencode:model") ?? "",
     providerId: getConfig("opencode:provider_id") ?? "",
+    interactive: getConfig("opencode:interactive") === "true",
   };
 }
 
@@ -971,6 +973,7 @@ export function updateOpenCodeSettings(data: {
   maxIterations?: number;
   model?: string;
   providerId?: string;
+  interactive?: boolean;
 }): void {
   const wasEnabled = getConfig("opencode:enabled") === "true";
   const oldModel = getConfig("opencode:model") ?? "";
@@ -1015,6 +1018,13 @@ export function updateOpenCodeSettings(data: {
     const row = getProviderRow(data.providerId);
     if (row) {
       setConfig("opencode:provider_type", row.type);
+    }
+  }
+  if (data.interactive !== undefined) {
+    if (data.interactive) {
+      setConfig("opencode:interactive", "true");
+    } else {
+      deleteConfig("opencode:interactive");
     }
   }
 

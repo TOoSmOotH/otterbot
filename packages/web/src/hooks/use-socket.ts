@@ -34,6 +34,8 @@ export function useSocket() {
   const endOpenCodeSession = useOpenCodeStore((s) => s.endSession);
   const addOpenCodeMessage = useOpenCodeStore((s) => s.addMessage);
   const appendOpenCodePartDelta = useOpenCodeStore((s) => s.appendPartDelta);
+  const setAwaitingInput = useOpenCodeStore((s) => s.setAwaitingInput);
+  const clearAwaitingInput = useOpenCodeStore((s) => s.clearAwaitingInput);
 
   useEffect(() => {
     if (initialized.current) return;
@@ -151,6 +153,7 @@ export function useSocket() {
 
     socket.on("opencode:session-end", (data) => {
       endOpenCodeSession(data.agentId, data.sessionId, data.status, data.diff);
+      clearAwaitingInput(data.agentId);
     });
 
     socket.on("opencode:message", (data) => {
@@ -168,6 +171,11 @@ export function useSocket() {
         data.toolName,
         data.toolState,
       );
+      clearAwaitingInput(data.agentId);
+    });
+
+    socket.on("opencode:awaiting-input", (data) => {
+      setAwaitingInput(data.agentId, { sessionId: data.sessionId, prompt: data.prompt });
     });
 
     return () => {
@@ -197,6 +205,7 @@ export function useSocket() {
       socket.off("opencode:session-end");
       socket.off("opencode:message");
       socket.off("opencode:part-delta");
+      socket.off("opencode:awaiting-input");
     };
   }, []);
 

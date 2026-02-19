@@ -11,6 +11,7 @@ export function OpenCodeTab() {
   const maxIterations = useSettingsStore((s) => s.openCodeMaxIterations);
   const model = useSettingsStore((s) => s.openCodeModel);
   const providerId = useSettingsStore((s) => s.openCodeProviderId);
+  const interactive = useSettingsStore((s) => s.openCodeInteractive);
   const testResult = useSettingsStore((s) => s.openCodeTestResult);
   const providers = useSettingsStore((s) => s.providers);
   const loadOpenCodeSettings = useSettingsStore((s) => s.loadOpenCodeSettings);
@@ -147,6 +148,30 @@ export function OpenCodeTab() {
           />
         </button>
         <span className="text-sm">Enable OpenCode integration</span>
+      </label>
+
+      {/* Interactive mode toggle */}
+      <label className="flex items-center gap-3 cursor-pointer">
+        <button
+          onClick={() => updateOpenCodeSettings({ interactive: !interactive })}
+          className={cn(
+            "relative w-9 h-5 rounded-full transition-colors",
+            interactive ? "bg-primary" : "bg-secondary",
+          )}
+        >
+          <span
+            className={cn(
+              "absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full transition-transform",
+              interactive && "translate-x-4",
+            )}
+          />
+        </button>
+        <div>
+          <span className="text-sm">Interactive mode</span>
+          <p className="text-[10px] text-muted-foreground">
+            Pause and ask for your input instead of running fully autonomously. Respond in the Code tab.
+          </p>
+        </div>
       </label>
 
       <div className="border border-border rounded-lg p-4 space-y-3">

@@ -5,7 +5,7 @@ export interface OpenCodeSession {
   agentId: string;
   projectId: string | null;
   task: string;
-  status: "active" | "idle" | "completed" | "error";
+  status: "active" | "idle" | "completed" | "error" | "awaiting-input";
   startedAt: string;
   completedAt?: string;
 }

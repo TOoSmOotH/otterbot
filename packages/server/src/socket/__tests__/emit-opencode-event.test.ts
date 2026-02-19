@@ -43,6 +43,35 @@ describe("emitOpenCodeEvent", () => {
     });
   });
 
+  describe("__awaiting-input internal marker", () => {
+    it("emits opencode:awaiting-input with prompt data", () => {
+      emitOpenCodeEvent(io, "agent-1", "sess-1", {
+        type: "__awaiting-input",
+        properties: { prompt: "Which approach should I use?" },
+      });
+
+      expect(io.emit).toHaveBeenCalledTimes(1);
+      expect(io.emit).toHaveBeenCalledWith("opencode:awaiting-input", {
+        agentId: "agent-1",
+        sessionId: "sess-1",
+        prompt: "Which approach should I use?",
+      });
+    });
+
+    it("handles empty prompt", () => {
+      emitOpenCodeEvent(io, "agent-1", "sess-1", {
+        type: "__awaiting-input",
+        properties: {},
+      });
+
+      expect(io.emit).toHaveBeenCalledWith("opencode:awaiting-input", {
+        agentId: "agent-1",
+        sessionId: "sess-1",
+        prompt: "",
+      });
+    });
+  });
+
   describe("__session-end internal marker", () => {
     it("emits opencode:session-end with status and diff", () => {
       const diff = [{ path: "src/x.ts", additions: 10, deletions: 2 }];

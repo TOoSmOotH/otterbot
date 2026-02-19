@@ -30,12 +30,14 @@ export interface WorkerDependencies {
   onAgentThinkingEnd?: (agentId: string, messageId: string) => void;
   onAgentToolCall?: (agentId: string, toolName: string, args: Record<string, unknown>) => void;
   onOpenCodeEvent?: (agentId: string, sessionId: string, event: { type: string; properties: Record<string, unknown> }) => void;
+  onOpenCodeAwaitingInput?: (agentId: string, sessionId: string, prompt: string) => Promise<string | null>;
 }
 
 export class Worker extends BaseAgent {
   private toolNames: string[];
   private workspacePath: string | null;
   private _onOpenCodeEvent?: (agentId: string, sessionId: string, event: { type: string; properties: Record<string, unknown> }) => void;
+  private _onOpenCodeAwaitingInput?: (agentId: string, sessionId: string, prompt: string) => Promise<string | null>;
 
   constructor(deps: WorkerDependencies) {
     const options: AgentOptions = {
@@ -60,6 +62,7 @@ export class Worker extends BaseAgent {
     this.toolNames = deps.toolNames;
     this.workspacePath = deps.workspacePath;
     this._onOpenCodeEvent = deps.onOpenCodeEvent;
+    this._onOpenCodeAwaitingInput = deps.onOpenCodeAwaitingInput;
   }
 
   async handleMessage(message: BusMessage): Promise<void> {
@@ -140,8 +143,21 @@ export class Worker extends BaseAgent {
       properties: { task, projectId: this.projectId ?? "" },
     });
 
+    // Build human response callback for interactive sessions (only when interactive mode is on)
+    const interactiveMode = getConfig("opencode:interactive") === "true";
+    const getHumanResponse = interactiveMode && this._onOpenCodeAwaitingInput
+      ? async (sessionId: string, assistantText: string) => {
+          // Emit awaiting-input event so the frontend shows the prompt
+          this._onOpenCodeEvent?.(this.id, sessionId, {
+            type: "__awaiting-input",
+            properties: { prompt: assistantText },
+          });
+          return this._onOpenCodeAwaitingInput!(this.id, sessionId, assistantText);
+        }
+      : undefined;
+
     console.log(`[Worker ${this.id}] Sending task directly to OpenCode (${taskWithContext.length} chars)...`);
-    const result = await client.executeTask(taskWithContext);
+    const result = await client.executeTask(taskWithContext, getHumanResponse);
     console.log(`[Worker ${this.id}] OpenCode result: success=${result.success}, sessionId=${result.sessionId}, diff=${result.diff?.files?.length ?? 0} files`);
 
     // Emit session-end event

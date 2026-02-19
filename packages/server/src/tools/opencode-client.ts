@@ -36,6 +36,8 @@ export interface OpenCodeTaskResult {
   error?: string;
 }
 
+export type GetHumanResponse = (sessionId: string, assistantText: string) => Promise<string | null>;
+
 const POLL_INTERVAL_MS = 15_000; // Fallback poll interval if SSE isn't available
 const MAX_TOTAL_WAIT_MS = 30 * 60 * 1000; // Hard cap at 30 minutes regardless of activity
 
@@ -356,17 +358,19 @@ export class OpenCodeClient {
   }
 
   /**
-   * High-level orchestrator: create session, send message with activity-based
-   * timeout, fetch diff, return structured result.
+   * Execute a single turn: race sendMessage vs activity monitor.
+   * Returns the response if sendMessage wins, or a timeout result.
    */
-  async executeTask(task: string): Promise<OpenCodeTaskResult> {
-    console.log(`[OpenCode Client] executeTask starting (idleTimeout=${this.idleTimeoutMs}ms, task: ${task.slice(0, 200)}...)`);
-    const session = await this.createSession();
-
+  private async executeTurn(
+    sessionId: string,
+    message: string,
+  ): Promise<
+    | { type: "response"; response: Record<string, unknown> }
+    | { type: "timeout"; reason: string }
+  > {
     const controller = new AbortController();
 
-    // Race: sendMessage vs activity monitor
-    const messagePromise = this.sendMessage(session.id, task, controller.signal)
+    const messagePromise = this.sendMessage(sessionId, message, controller.signal)
       .then((response) => ({ type: "response" as const, response }))
       .catch((err) => {
         if (err instanceof DOMException && err.name === "AbortError") {
@@ -378,7 +382,7 @@ export class OpenCodeClient {
         throw err;
       });
 
-    const monitorPromise = this.monitorActivity(session.id, controller);
+    const monitorPromise = this.monitorActivity(sessionId, controller);
 
     try {
       const result = await Promise.race([
@@ -386,41 +390,92 @@ export class OpenCodeClient {
         monitorPromise.then((reason) => ({ type: "timeout" as const, reason, response: null })),
       ]);
 
-      // Stop the monitor if sendMessage completed first
       if (!controller.signal.aborted) {
         controller.abort();
       }
 
       if (result.type === "response" && result.response) {
-        console.log(`[OpenCode Client] executeTask response received, extracting content...`);
-        const summary = this.extractContent(result.response);
-        console.log(`[OpenCode Client] extractContent result (${summary.length} chars): ${summary.slice(0, 500)}`);
-
-        let diff: OpenCodeDiff | null = null;
-        try {
-          diff = await this.getDiff(session.id);
-          console.log(`[OpenCode Client] getDiff: ${diff?.files?.length ?? 0} files changed`);
-        } catch (err) {
-          console.warn(`[OpenCode Client] getDiff failed (non-fatal):`, err);
-        }
-
-        return { success: true, sessionId: session.id, summary, diff };
+        return { type: "response", response: result.response };
       }
 
-      // Timed out (idle, hard cap, or error)
       const reason = result.type === "timeout"
         ? (result as { reason: string }).reason
         : "idle";
-      const timeoutDesc = reason === "hard_cap"
+      return { type: "timeout", reason };
+    } catch (err) {
+      if (!controller.signal.aborted) {
+        controller.abort();
+      }
+      throw err;
+    }
+  }
+
+  /**
+   * High-level orchestrator: create session, send message with activity-based
+   * timeout, fetch diff, return structured result.
+   *
+   * When `getHumanResponse` is provided, runs a multi-turn loop: after each
+   * assistant turn, the callback is invoked with the assistant's last message.
+   * If it returns a non-null string, that becomes the next user message.
+   * If null (user declined/timed out), the loop ends.
+   *
+   * Without `getHumanResponse`, the loop runs exactly once (backwards compatible).
+   */
+  async executeTask(task: string, getHumanResponse?: GetHumanResponse): Promise<OpenCodeTaskResult> {
+    console.log(`[OpenCode Client] executeTask starting (idleTimeout=${this.idleTimeoutMs}ms, task: ${task.slice(0, 200)}...)`);
+    const session = await this.createSession();
+
+    let currentMessage = task;
+    let lastSummary = "";
+    let timedOut = false;
+    let timeoutReason = "";
+
+    for (let turn = 0; turn < this.maxIterations; turn++) {
+      console.log(`[OpenCode Client] executeTask turn ${turn + 1}/${this.maxIterations}`);
+
+      try {
+        const result = await this.executeTurn(session.id, currentMessage);
+
+        if (result.type === "response") {
+          const summary = this.extractContent(result.response);
+          console.log(`[OpenCode Client] Turn ${turn + 1} response (${summary.length} chars): ${summary.slice(0, 500)}`);
+          lastSummary = summary;
+
+          // If no callback, single-turn mode — break after first response
+          if (!getHumanResponse) break;
+
+          // Ask for human response
+          const humanResponse = await getHumanResponse(session.id, summary);
+          if (humanResponse === null) {
+            console.log(`[OpenCode Client] Human declined to respond — ending loop`);
+            break;
+          }
+
+          currentMessage = humanResponse;
+          continue;
+        }
+
+        // Timeout
+        timedOut = true;
+        timeoutReason = result.reason;
+        break;
+      } catch (err) {
+        console.error(`[OpenCode Client] executeTask turn error:`, err);
+        throw err;
+      }
+    }
+
+    // Finalization: fetch diff and build result
+    if (timedOut) {
+      const timeoutDesc = timeoutReason === "hard_cap"
         ? `${Math.round(MAX_TOTAL_WAIT_MS / 1000)}s total time`
-        : reason === "error"
+        : timeoutReason === "error"
           ? "session error"
           : `${Math.round(this.idleTimeoutMs / 1000)}s with no activity`;
 
-      console.warn(`[OpenCode Client] executeTask timed out (${reason}: ${timeoutDesc})`);
+      console.warn(`[OpenCode Client] executeTask timed out (${timeoutReason}: ${timeoutDesc})`);
       await this.abort(session.id);
 
-      // Try to salvage partial results
       let summary = `Task timed out after ${timeoutDesc}. The session was aborted.`;
       try {
         const messages = await this.getMessages(session.id);
@@ -451,14 +506,19 @@ export class OpenCodeClient {
         sessionId: session.id,
         summary,
         diff,
-        error: reason === "hard_cap" ? "hard_timeout" : reason === "error" ? "session_error" : "idle_timeout",
+        error: timeoutReason === "hard_cap" ? "hard_timeout" : timeoutReason === "error" ? "session_error" : "idle_timeout",
       };
-    } catch (err) {
-      if (!controller.signal.aborted) {
-        controller.abort();
-      }
-      console.error(`[OpenCode Client] executeTask error:`, err);
-      throw err;
     }
+
+    // Success path
+    let diff: OpenCodeDiff | null = null;
+    try {
+      diff = await this.getDiff(session.id);
+      console.log(`[OpenCode Client] getDiff: ${diff?.files?.length ?? 0} files changed`);
+    } catch (err) {
+      console.warn(`[OpenCode Client] getDiff failed (non-fatal):`, err);
+    }
+
+    return { success: true, sessionId: session.id, summary: lastSummary, diff };
   }
 }

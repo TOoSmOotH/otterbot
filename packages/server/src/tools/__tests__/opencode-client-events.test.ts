@@ -153,6 +153,69 @@ describe("OpenCodeClient — onEvent callback", () => {
     expect(onEvent).not.toHaveBeenCalled();
   });
 
+  describe("multi-turn executeTask with getHumanResponse", () => {
+    it("runs a single turn when getHumanResponse is not provided", async () => {
+      mockCreate.mockResolvedValue({ error: null, data: { id: "sess-1" } });
+      mockPrompt.mockResolvedValue({ error: null, data: { content: "Done!" } });
+      mockDiff.mockResolvedValue({ error: null, data: [] });
+
+      // SSE subscription that ends immediately so executeTurn's monitor doesn't block
+      mockSubscribe.mockResolvedValue({
+        stream: { [Symbol.asyncIterator]() { return { next: async () => ({ done: true, value: undefined }) }; } },
+      });
+
+      const client = new OpenCodeClient({ apiUrl: "http://localhost:3333" });
+      const result = await client.executeTask("Build X");
+
+      expect(result.success).toBe(true);
+      expect(result.summary).toBe("Done!");
+      expect(mockPrompt).toHaveBeenCalledTimes(1);
+    });
+
+    it("loops when getHumanResponse returns a string", async () => {
+      mockCreate.mockResolvedValue({ error: null, data: { id: "sess-1" } });
+      let promptCount = 0;
+      mockPrompt.mockImplementation(async () => {
+        promptCount++;
+        return { error: null, data: { content: promptCount === 1 ? "Which approach?" : "Done with approach A." } };
+      });
+      mockDiff.mockResolvedValue({ error: null, data: [] });
+      mockSubscribe.mockResolvedValue({
+        stream: { [Symbol.asyncIterator]() { return { next: async () => ({ done: true, value: undefined }) }; } },
+      });
+
+      const getHumanResponse = vi.fn()
+        .mockResolvedValueOnce("Use approach A")
+        .mockResolvedValueOnce(null); // end loop after second turn
+
+      const client = new OpenCodeClient({ apiUrl: "http://localhost:3333" });
+      const result = await client.executeTask("Build X", getHumanResponse);
+
+      expect(result.success).toBe(true);
+      expect(mockPrompt).toHaveBeenCalledTimes(2);
+      expect(getHumanResponse).toHaveBeenCalledTimes(2);
+      expect(getHumanResponse).toHaveBeenCalledWith("sess-1", "Which approach?");
+    });
+
+    it("stops loop when getHumanResponse returns null", async () => {
+      mockCreate.mockResolvedValue({ error: null, data: { id: "sess-1" } });
+      mockPrompt.mockResolvedValue({ error: null, data: { content: "Which?" } });
+      mockDiff.mockResolvedValue({ error: null, data: [] });
+      mockSubscribe.mockResolvedValue({
+        stream: { [Symbol.asyncIterator]() { return { next: async () => ({ done: true, value: undefined }) }; } },
+      });
+
+      const getHumanResponse = vi.fn().mockResolvedValue(null);
+
+      const client = new OpenCodeClient({ apiUrl: "http://localhost:3333" });
+      const result = await client.executeTask("Build X", getHumanResponse);
+
+      expect(result.success).toBe(true);
+      expect(mockPrompt).toHaveBeenCalledTimes(1);
+      expect(getHumanResponse).toHaveBeenCalledTimes(1);
+    });
+  });
+
   it("catches errors in onEvent callback without breaking the loop", async () => {
     const onEvent = vi.fn().mockImplementation(() => {
       throw new Error("callback error");
