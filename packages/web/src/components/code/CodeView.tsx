@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { useOpenCodeStore } from "../../stores/opencode-store";
 import { getSocket } from "../../lib/socket";
+import { MarkdownContent } from "../chat/MarkdownContent";
 import type { OpenCodeSession, OpenCodeMessage, OpenCodeFileDiff, OpenCodePermission } from "@otterbot/shared";
 
 type PartBuffer = { type: string; content: string; toolName?: string; toolState?: string };
@@ -85,35 +86,36 @@ function PartContent({
 
   if (type === "reasoning") {
     return (
-      <details className="group">
-        <summary className="cursor-pointer text-xs text-violet-400 opacity-70 hover:opacity-100 py-0.5">
-          Thinking...
-        </summary>
-        <div className="pl-3 border-l border-violet-500/20 text-violet-300/60 text-xs whitespace-pre-wrap">
+      <div className="border-l-2 border-blue-500 pl-3 py-1">
+        <span className="text-xs italic text-muted-foreground">
+          <span className="text-blue-400">Thinking:</span>{" "}
           {content}
-        </div>
-      </details>
+        </span>
+      </div>
     );
   }
 
-  if (type === "tool-invocation") {
+  if (type === "tool" || type === "tool-invocation") {
     return (
-      <div className="my-1 rounded border border-blue-500/20 bg-blue-500/5 text-xs">
-        <div className="flex items-center gap-1.5 px-2 py-1 border-b border-blue-500/10">
-          <span className="text-blue-400 font-medium">{toolName || "tool"}</span>
-          {toolState && (
-            <span className={`text-[10px] px-1 rounded ${
-              toolState === "result"
-                ? "bg-emerald-500/20 text-emerald-400"
-                : "bg-yellow-500/20 text-yellow-400"
+      <div className="border-l-2 border-yellow-500 pl-3 py-1 my-1">
+        <div className="text-xs text-muted-foreground mb-1">
+          <span className="text-yellow-400/80">#</span>{" "}
+          {toolName || "tool"}
+          {toolState && toolState !== "pending" && (
+            <span className={`ml-1.5 ${
+              toolState === "completed" || toolState === "result"
+                ? "text-emerald-400/70"
+                : "text-yellow-400/70"
             }`}>
-              {toolState}
+              ({toolState})
             </span>
           )}
         </div>
-        <pre className="px-2 py-1 whitespace-pre-wrap break-all text-foreground/80 max-h-[200px] overflow-y-auto">
-          {content}
-        </pre>
+        {content && (
+          <div className="text-xs [&_.prose]:text-xs [&_.prose_pre]:my-1 [&_.prose_pre]:text-xs [&_.prose_code]:text-xs">
+            <MarkdownContent content={content} />
+          </div>
+        )}
       </div>
     );
   }
@@ -128,9 +130,12 @@ function PartContent({
     );
   }
 
-  // text or other
+  // text — render as markdown for inline code, links, code blocks, etc.
+  if (!content.trim()) return null;
   return (
-    <div className="whitespace-pre-wrap text-xs text-foreground/90">{content}</div>
+    <div className="text-xs text-foreground/90 [&_.prose]:text-xs [&_.prose_pre]:my-1 [&_.prose_pre]:text-xs [&_.prose_code]:text-xs">
+      <MarkdownContent content={content} />
+    </div>
   );
 }
 
@@ -366,9 +371,8 @@ function SessionContent({ agentId }: { agentId: string }) {
         className="flex-1 overflow-y-auto p-3 space-y-3 font-mono bg-[#0d1117]"
       >
         {/* User message (the task) */}
-        <div className="rounded border border-border/50 bg-card/30 p-2">
-          <div className="text-[10px] text-muted-foreground mb-1">Task</div>
-          <div className="text-xs text-foreground whitespace-pre-wrap">{session.task}</div>
+        <div className="border-l-2 border-blue-500 pl-3 py-1">
+          <div className="text-xs text-foreground font-medium whitespace-pre-wrap">{session.task}</div>
         </div>
 
         {/* Full messages from server */}
@@ -434,13 +438,21 @@ function SessionContent({ agentId }: { agentId: string }) {
 
         {/* Completion status */}
         {session.status === "completed" && (
-          <div className="text-xs text-emerald-400 border-t border-border pt-2 mt-2">
-            Session completed
+          <div className="flex items-center gap-2 text-xs text-muted-foreground mt-3 pt-2">
+            <span className="inline-block w-2.5 h-2.5 rounded-sm bg-emerald-500" />
+            <span>Completed</span>
+            {session.completedAt && (
+              <>
+                <span className="text-border">·</span>
+                <span>{Math.round((new Date(session.completedAt).getTime() - new Date(session.startedAt).getTime()) / 1000)}s</span>
+              </>
+            )}
           </div>
         )}
         {session.status === "error" && (
-          <div className="text-xs text-red-400 border-t border-border pt-2 mt-2">
-            Session ended with error
+          <div className="flex items-center gap-2 text-xs text-muted-foreground mt-3 pt-2">
+            <span className="inline-block w-2.5 h-2.5 rounded-sm bg-red-500" />
+            <span className="text-red-400">Error</span>
           </div>
         )}
       </div>
