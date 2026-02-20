@@ -746,7 +746,7 @@ export function SetupWizard() {
                         m.toLowerCase().includes(modelFilter.toLowerCase()),
                       );
                       return filtered.length > 0 ? (
-                        <div className="absolute z-50 mt-1 w-full bg-popover border border-border rounded-md shadow-md max-h-[200px] overflow-y-auto">
+                        <div className="absolute z-50 mt-1 w-full bg-card border border-border rounded-md shadow-md max-h-[300px] overflow-y-auto">
                           {filtered.map((m) => (
                             <button
                               key={m}
@@ -756,7 +756,7 @@ export function SetupWizard() {
                                 setModelFilter("");
                                 setModelDropdownOpen(false);
                               }}
-                              className={`w-full text-left px-3 py-1.5 text-sm hover:bg-accent transition-colors ${
+                              className={`w-full text-left px-4 py-2.5 text-sm hover:bg-accent transition-colors ${
                                 model === m ? "bg-accent text-accent-foreground" : "text-foreground"
                               }`}
                             >
@@ -1430,7 +1430,7 @@ export function SetupWizard() {
                           m.toLowerCase().includes(openCodeModelFilter.toLowerCase()),
                         );
                         return filtered.length > 0 ? (
-                          <div className="absolute z-50 mt-1 w-full bg-popover border border-border rounded-md shadow-md max-h-[200px] overflow-y-auto">
+                        <div className="absolute z-50 mt-1 w-full bg-card border border-border rounded-md shadow-md max-h-[300px] overflow-y-auto">
                             {filtered.map((m) => (
                               <button
                                 key={m}
@@ -1440,7 +1440,7 @@ export function SetupWizard() {
                                   setOpenCodeModelFilter("");
                                   setOpenCodeModelDropdownOpen(false);
                                 }}
-                                className={`w-full text-left px-3 py-1.5 text-sm hover:bg-accent transition-colors ${
+                              className={`w-full text-left px-4 py-2.5 text-sm hover:bg-accent transition-colors ${
                                   openCodeModel === m ? "bg-accent text-accent-foreground" : "text-foreground"
                                 }`}
                               >
