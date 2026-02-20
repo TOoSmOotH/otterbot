@@ -56,6 +56,31 @@ export interface OpenCodeTaskResult {
 
 export type GetHumanResponse = (sessionId: string, assistantText: string) => Promise<string | null>;
 
+/**
+ * Extract the sessionID from an SSE event, checking all known SDK locations:
+ * - properties.sessionID (most events)
+ * - properties.part.sessionID (message.part.updated, message.part.delta)
+ * - properties.info.sessionID (message.updated)
+ * - properties.info.id (session.created/updated/deleted — Session objects use `id`)
+ */
+export function extractSessionId(eventType: string, props: Record<string, unknown>): string | undefined {
+  // Direct sessionID (most events)
+  if (typeof props.sessionID === "string") return props.sessionID;
+
+  // Nested in part (message.part.updated, message.part.delta)
+  const part = props.part as Record<string, unknown> | undefined;
+  if (typeof part?.sessionID === "string") return part.sessionID;
+
+  // Nested in info (message.updated)
+  const info = props.info as Record<string, unknown> | undefined;
+  if (typeof info?.sessionID === "string") return info.sessionID;
+
+  // Session objects use `id` instead of `sessionID` (session.created/updated/deleted)
+  if (eventType.startsWith("session.") && typeof info?.id === "string") return info.id;
+
+  return undefined;
+}
+
 const POLL_INTERVAL_MS = 15_000; // Fallback poll interval if SSE isn't available
 const MAX_TOTAL_WAIT_MS = 30 * 60 * 1000; // Hard cap at 30 minutes regardless of activity
 
@@ -344,9 +369,9 @@ export class OpenCodeClient {
         const eventType = (event as Record<string, unknown>).type as string | undefined;
         const props = (event as Record<string, unknown>).properties as Record<string, unknown> | undefined;
 
-        // Check if this event is related to our session
-        const eventSessionId = props?.sessionID as string | undefined;
-        const isOurSession = !eventSessionId || eventSessionId === sessionId;
+        // Check if this event is related to our session (strict match — reject events without a sessionID)
+        const eventSessionId = extractSessionId(eventType ?? "", props ?? {});
+        const isOurSession = eventSessionId === sessionId;
 
         if (isOurSession) {
           lastActivityTime = Date.now();
@@ -381,10 +406,7 @@ export class OpenCodeClient {
             }
           }
 
-          // Check for completion events.
-          // Use isOurSession (accepts events with or without sessionID) instead of
-          // strict equality, because OpenCode may send completion events without a
-          // sessionID field.
+          // Check for completion events
           if (isOurSession) {
             if (eventType === "session.error") {
               console.error(`[OpenCode Client] Session error event:`, props?.error);
