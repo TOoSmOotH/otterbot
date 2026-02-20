@@ -11,6 +11,7 @@ export enum AgentStatus {
   Idle = "idle",
   Thinking = "thinking",
   Acting = "acting",
+  AwaitingInput = "awaiting_input",
   Done = "done",
   Error = "error",
 }

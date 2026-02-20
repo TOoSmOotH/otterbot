@@ -97,7 +97,7 @@ function buildLayout(
         id: `${parentId}-${agent.id}`,
         source: parentId,
         target: agent.id,
-        animated: agent.status === "thinking" || agent.status === "acting",
+        animated: agent.status === "thinking" || agent.status === "acting" || agent.status === "awaiting_input",
         style: { stroke: "hsl(var(--muted-foreground))" },
       });
     }

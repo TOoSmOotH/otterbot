@@ -14,6 +14,7 @@ const STATUS_DOT: Record<string, string> = {
   idle: "bg-zinc-500",
   thinking: "bg-blue-500 animate-pulse",
   acting: "bg-emerald-500 animate-pulse",
+  awaiting_input: "bg-orange-500 animate-pulse",
   done: "bg-zinc-600",
   error: "bg-red-500",
 };

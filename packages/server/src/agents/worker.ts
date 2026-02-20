@@ -142,6 +142,9 @@ export class Worker extends BaseAgent {
         `Do NOT use /home/user, /app, or any other directory.\n\n${task}`
       : task;
 
+    // Mark worker as actively working on the graph
+    this.setStatus(AgentStatus.Acting);
+
     // Emit session-start event
     this._onOpenCodeEvent?.(this.id, "", {
       type: "__session-start",
@@ -152,24 +155,30 @@ export class Worker extends BaseAgent {
     const interactiveMode = getConfig("opencode:interactive") === "true";
     const getHumanResponse = interactiveMode && this._onOpenCodeAwaitingInput
       ? async (sessionId: string, assistantText: string) => {
+          this.setStatus(AgentStatus.AwaitingInput);
           // Emit awaiting-input event so the frontend shows the prompt
           this._onOpenCodeEvent?.(this.id, sessionId, {
             type: "__awaiting-input",
             properties: { prompt: assistantText },
           });
-          return this._onOpenCodeAwaitingInput!(this.id, sessionId, assistantText);
+          const response = await this._onOpenCodeAwaitingInput!(this.id, sessionId, assistantText);
+          this.setStatus(AgentStatus.Acting);
+          return response;
         }
       : undefined;
 
     // Build permission request callback for interactive sessions
     const onPermissionRequest = interactiveMode && this._onOpenCodePermissionRequest
       ? async (sid: string, permission: { id: string; type: string; title: string; pattern?: string | string[]; metadata: Record<string, unknown> }) => {
+          this.setStatus(AgentStatus.AwaitingInput);
           // Emit permission-request event so the frontend shows the prompt
           this._onOpenCodeEvent?.(this.id, sid, {
             type: "__permission-request",
             properties: { permission },
           });
-          return this._onOpenCodePermissionRequest!(this.id, sid, permission);
+          const response = await this._onOpenCodePermissionRequest!(this.id, sid, permission);
+          this.setStatus(AgentStatus.Acting);
+          return response;
         }
       : undefined;
 

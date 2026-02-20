@@ -7,7 +7,7 @@ export const agents = sqliteTable("agents", {
   role: text("role", { enum: ["coo", "team_lead", "worker", "admin_assistant"] }).notNull(),
   parentId: text("parent_id"),
   status: text("status", {
-    enum: ["idle", "thinking", "acting", "done", "error"],
+    enum: ["idle", "thinking", "acting", "awaiting_input", "done", "error"],
   })
     .notNull()
     .default("idle"),
