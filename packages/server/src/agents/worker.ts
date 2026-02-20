@@ -12,6 +12,7 @@ import { createTools } from "../tools/tool-factory.js";
 import { debug } from "../utils/debug.js";
 import { getConfig } from "../auth/auth.js";
 import { getDb, schema } from "../db/index.js";
+import { TASK_COMPLETE_SENTINEL } from "../tools/opencode-client.js";
 
 export interface WorkerDependencies {
   id?: string;
@@ -145,12 +146,18 @@ export class Worker extends BaseAgent {
       `- Puppeteer — already installed with shared Chromium, do NOT reinstall\n` +
       `- Go, Rust, Python 3, Java, Ruby, git, gh (GitHub CLI), SQLite 3, build-essential\n`;
 
+    const completionInstruction =
+      `\nIMPORTANT — Completion signal: When you have fully completed ALL tasks and have no more work to do, ` +
+      `you MUST output the following exact string on its own line as the very last thing you write:\n` +
+      `${TASK_COMPLETE_SENTINEL}\n` +
+      `This signals to the system that your work is finished. Do not output this string until everything is done.\n`;
+
     const taskWithContext = this.workspacePath
       ? `IMPORTANT: All files must be created/edited inside this directory: ${this.workspacePath}\n` +
         `Use absolute paths rooted at ${this.workspacePath} (e.g. ${this.workspacePath}/src/main.go).\n` +
         `Do NOT use /home/user, /app, or any other directory.\n\n` +
-        preInstalledContext + `\n${task}`
-      : preInstalledContext + `\n${task}`;
+        preInstalledContext + completionInstruction + `\n${task}`
+      : preInstalledContext + completionInstruction + `\n${task}`;
 
     // Mark worker as actively working on the graph
     this.setStatus(AgentStatus.Acting);

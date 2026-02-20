@@ -18,6 +18,7 @@ let capturedOnEvent: ((event: { type: string; properties: Record<string, unknown
 
 const mockExecuteTask = vi.fn();
 vi.mock("../../tools/opencode-client.js", () => ({
+  TASK_COMPLETE_SENTINEL: "◊◊TASK_COMPLETE_9f8e7d◊◊",
   OpenCodeClient: vi.fn().mockImplementation((config: any) => {
     capturedOnEvent = config.onEvent;
     return { executeTask: mockExecuteTask };

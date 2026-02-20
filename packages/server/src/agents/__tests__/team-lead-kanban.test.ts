@@ -64,6 +64,7 @@ vi.mock("../../tools/tool-factory.js", () => ({
 
 // Mock opencode-client
 vi.mock("../../tools/opencode-client.js", () => ({
+  TASK_COMPLETE_SENTINEL: "◊◊TASK_COMPLETE_9f8e7d◊◊",
   OpenCodeClient: vi.fn().mockImplementation(() => ({
     executeTask: vi.fn().mockResolvedValue({ success: true, sessionId: "s", summary: "Done", diff: null }),
   })),

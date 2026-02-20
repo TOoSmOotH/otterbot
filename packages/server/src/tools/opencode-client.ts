@@ -59,6 +59,12 @@ export type GetHumanResponse = (sessionId: string, assistantText: string) => Pro
 const POLL_INTERVAL_MS = 15_000; // Fallback poll interval if SSE isn't available
 const MAX_TOTAL_WAIT_MS = 30 * 60 * 1000; // Hard cap at 30 minutes regardless of activity
 
+/** Sentinel string that signals task completion when detected in streaming output.
+ *  The worker injects a prompt instruction telling OpenCode to output this exact
+ *  string when all work is finished, giving us a reliable completion signal even
+ *  when SDK session events are unreliable. */
+export const TASK_COMPLETE_SENTINEL = "◊◊TASK_COMPLETE_9f8e7d◊◊";
+
 export class OpenCodeClient {
   private client: OpencodeClient;
   private apiUrl: string;
@@ -230,30 +236,42 @@ export class OpenCodeClient {
    * Extract text content from an OpenCode message/response.
    */
   private extractContent(response: Record<string, unknown>): string {
+    let text: string;
+
     // Direct content field
     if (typeof response.content === "string") {
-      return response.content;
+      text = response.content;
     }
-
     // Message with parts array (OpenCode v2 format)
-    const parts = response.parts as Array<{ type?: string; text?: string }> | undefined;
-    if (Array.isArray(parts)) {
-      const textParts = parts.filter((p) => p.type === "text" && p.text);
-      return textParts.map((p) => p.text).join("\n");
-    }
-
-    // Array of messages — extract from last assistant message
-    if (Array.isArray(response)) {
-      for (let i = response.length - 1; i >= 0; i--) {
-        const msg = response[i] as Record<string, unknown>;
-        if (msg.role === "assistant") {
-          return this.extractContent(msg);
+    else {
+      const parts = response.parts as Array<{ type?: string; text?: string }> | undefined;
+      if (Array.isArray(parts)) {
+        const textParts = parts.filter((p) => p.type === "text" && p.text);
+        text = textParts.map((p) => p.text).join("\n");
+      }
+      // Array of messages — extract from last assistant message
+      else if (Array.isArray(response)) {
+        text = "";
+        for (let i = response.length - 1; i >= 0; i--) {
+          const msg = response[i] as Record<string, unknown>;
+          if (msg.role === "assistant") {
+            text = this.extractContent(msg);
+            break;
+          }
         }
+      }
+      // Fallback: stringify
+      else {
+        text = JSON.stringify(response).slice(0, 2000);
       }
     }
 
-    // Fallback: stringify
-    return JSON.stringify(response).slice(0, 2000);
+    // Strip the completion sentinel so it doesn't pollute summaries
+    if (text.includes(TASK_COMPLETE_SENTINEL)) {
+      text = text.replace(TASK_COMPLETE_SENTINEL, "").trim();
+    }
+
+    return text;
   }
 
   /**
@@ -313,6 +331,12 @@ export class OpenCodeClient {
       }
     }, 5_000);
 
+    // Rolling buffer of recent text output to detect the completion sentinel.
+    // We keep the last 100 chars which is more than enough to catch the ~30-char sentinel
+    // even if it arrives split across multiple delta chunks.
+    let recentText = "";
+    const SENTINEL_BUF_SIZE = 100;
+
     try {
       for await (const event of events.stream) {
         if (controller.signal.aborted) break;
@@ -339,6 +363,21 @@ export class OpenCodeClient {
               this.onEvent?.({ type: eventType, properties: props ?? {} });
             } catch {
               // Best-effort event forwarding
+            }
+          }
+
+          // Accumulate text deltas to detect the completion sentinel
+          if (eventType === "message.part.delta") {
+            const field = (props?.field ?? "text") as string;
+            const delta = props?.delta as string | undefined;
+            if (field === "text" && delta) {
+              recentText = (recentText + delta).slice(-SENTINEL_BUF_SIZE);
+              if (recentText.includes(TASK_COMPLETE_SENTINEL)) {
+                console.log(`[OpenCode Client] Completion sentinel detected in streaming output — task complete.`);
+                clearInterval(checkInterval);
+                controller.abort();
+                return "idle";
+              }
             }
           }
 

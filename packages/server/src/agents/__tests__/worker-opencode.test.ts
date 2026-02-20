@@ -17,6 +17,7 @@ vi.mock("../../auth/auth.js", () => ({
 // Mock opencode-client (dynamic import target)
 const mockExecuteTask = vi.fn();
 vi.mock("../../tools/opencode-client.js", () => ({
+  TASK_COMPLETE_SENTINEL: "◊◊TASK_COMPLETE_9f8e7d◊◊",
   OpenCodeClient: vi.fn().mockImplementation(() => ({
     executeTask: mockExecuteTask,
   })),
