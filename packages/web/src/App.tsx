@@ -23,6 +23,7 @@ import { TodoView } from "./components/todos/TodoView";
 import { InboxView } from "./components/inbox/InboxView";
 import { CalendarView } from "./components/calendar/CalendarView";
 import { CodeView } from "./components/code/CodeView";
+import { DetachedLiveView } from "./components/live-view/DetachedLiveView";
 import { useDesktopStore } from "./stores/desktop-store";
 import { useOpenCodeStore } from "./stores/opencode-store";
 import { initMovementTriggers } from "./lib/movement-triggers";
@@ -45,6 +46,12 @@ export default function App() {
         <DesktopView />
       </div>
     );
+  }
+
+  // Detached 3D view mode
+  const isDetached3D = new URLSearchParams(window.location.search).has("detached-3d");
+  if (isDetached3D && screen === "app") {
+    return <DetachedLiveView />;
   }
 
   if (screen === "loading") {
