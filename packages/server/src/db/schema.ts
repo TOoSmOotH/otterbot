@@ -106,6 +106,13 @@ export const projects = sqliteTable("projects", {
   charterStatus: text("charter_status", {
     enum: ["gathering", "finalized"],
   }).default("gathering"),
+  githubRepo: text("github_repo"),
+  githubBranch: text("github_branch"),
+  githubIssueMonitor: integer("github_issue_monitor", { mode: "boolean" }).notNull().default(false),
+  rules: text("rules", { mode: "json" })
+    .$type<string[]>()
+    .notNull()
+    .default([]),
   createdAt: text("created_at")
     .notNull()
     .$defaultFn(() => new Date().toISOString()),

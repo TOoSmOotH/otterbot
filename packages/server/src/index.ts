@@ -140,6 +140,7 @@ import {
 } from "./settings/settings.js";
 import type { ProviderType } from "@otterbot/shared";
 import { writeOpenCodeConfig, startOpenCodeServer, stopOpenCodeServer } from "./opencode/opencode-manager.js";
+import { GitHubIssueMonitor } from "./github/issue-monitor.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -368,6 +369,7 @@ async function main() {
   // =========================================================================
 
   let coo: COO | null = null;
+  let issueMonitor: GitHubIssueMonitor | null = null;
 
   // Resolver map for interactive coding agent sessions: when a Worker awaits human
   // input, a promise is stored here keyed by `${agentId}:${sessionId}`. The
@@ -527,6 +529,9 @@ async function main() {
         },
       });
       emitAgentSpawned(io, coo);
+      // Create issue monitor
+      issueMonitor = new GitHubIssueMonitor(coo, io);
+
       setupSocketHandlers(io, bus, coo, registry, {
         beforeCeoMessage: (content, conversationId, callback) => {
           if (!activePermissionRequest) return false;
@@ -562,7 +567,7 @@ async function main() {
           callback?.({ messageId: confirmMsg.id, conversationId: conversationId ?? "" });
           return true;
         },
-      });
+      }, { workspace, issueMonitor: issueMonitor! });
       console.log(`COO agent started. (model=${coo.toData().model}, provider=${coo.toData().provider})`);
 
       // Spawn AdminAssistant alongside COO
@@ -611,6 +616,12 @@ async function main() {
       coo.recoverActiveProjects().catch((err) => {
         console.error("Failed to recover active projects:", err);
       });
+
+      // Start GitHub issue monitor
+      if (issueMonitor) {
+        issueMonitor.loadFromDb();
+        issueMonitor.start();
+      }
     } catch (err) {
       console.error("Failed to start COO agent:", err);
     }

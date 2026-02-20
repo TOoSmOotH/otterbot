@@ -101,4 +101,15 @@ export interface ClientToServerEvents {
     data: { agentId: string; sessionId: string; permissionId: string; response: "once" | "always" | "reject" },
     callback?: (ack: { ok: boolean; error?: string }) => void,
   ) => void;
+  "project:create-manual": (
+    data: {
+      name: string;
+      description: string;
+      githubRepo: string;
+      githubBranch?: string;
+      rules?: string[];
+      issueMonitor?: boolean;
+    },
+    callback?: (ack: { ok: boolean; projectId?: string; error?: string }) => void,
+  ) => void;
 }

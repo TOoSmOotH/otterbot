@@ -177,6 +177,28 @@ export async function migrateDb() {
     // Column already exists — ignore
   }
 
+  // Idempotent migration: add GitHub fields to projects
+  try {
+    db.run(sql`ALTER TABLE projects ADD COLUMN github_repo TEXT`);
+  } catch {
+    // Column already exists — ignore
+  }
+  try {
+    db.run(sql`ALTER TABLE projects ADD COLUMN github_branch TEXT`);
+  } catch {
+    // Column already exists — ignore
+  }
+  try {
+    db.run(sql`ALTER TABLE projects ADD COLUMN github_issue_monitor INTEGER NOT NULL DEFAULT 0`);
+  } catch {
+    // Column already exists — ignore
+  }
+  try {
+    db.run(sql`ALTER TABLE projects ADD COLUMN rules TEXT NOT NULL DEFAULT '[]'`);
+  } catch {
+    // Column already exists — ignore
+  }
+
   db.run(sql`CREATE TABLE IF NOT EXISTS kanban_tasks (
     id TEXT PRIMARY KEY,
     project_id TEXT NOT NULL,

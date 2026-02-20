@@ -58,6 +58,10 @@ export interface Project {
   status: ProjectStatus;
   charter: string | null;
   charterStatus: CharterStatus;
+  githubRepo: string | null;
+  githubBranch: string | null;
+  githubIssueMonitor: boolean;
+  rules: string[];
   createdAt: string;
 }
 

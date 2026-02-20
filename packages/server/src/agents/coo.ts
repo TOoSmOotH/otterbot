@@ -1141,6 +1141,60 @@ The user can see everything on the desktop in real-time.`;
     }
   }
 
+  /**
+   * Spawn a TeamLead for a manually-created (user-initiated) project.
+   * Skips LLM guards (cooldown, duplicate check) since this is user-initiated via the UI.
+   */
+  async spawnTeamLeadForManualProject(
+    projectId: string,
+    githubRepo: string,
+    branch: string,
+    rules: string[],
+  ): Promise<void> {
+    const teamLead = new TeamLead({
+      bus: this.bus,
+      workspace: this.workspace,
+      projectId,
+      parentId: this.id,
+      modelPackId: getRandomModelPackId(),
+      onAgentSpawned: this.onAgentSpawned,
+      onStatusChange: this.onStatusChange,
+      onKanbanChange: (event, task) => {
+        if (event === "created") this.onKanbanTaskCreated?.(task);
+        else if (event === "updated") this.onKanbanTaskUpdated?.(task);
+        else if (event === "deleted") this.onKanbanTaskDeleted?.(task.id, task.projectId);
+      },
+      onAgentStream: this._onAgentStream,
+      onAgentThinking: this._onAgentThinking,
+      onAgentThinkingEnd: this._onAgentThinkingEnd,
+      onAgentToolCall: this._onAgentToolCall,
+      onCodingAgentEvent: this._onCodingAgentEvent,
+      onCodingAgentAwaitingInput: this._onCodingAgentAwaitingInput,
+      onCodingAgentPermissionRequest: this._onCodingAgentPermissionRequest,
+    });
+
+    this.teamLeads.set(projectId, teamLead);
+    this.onAgentSpawned?.(teamLead);
+
+    // Build GitHub-aware initial directive
+    const rulesBlock = rules.length > 0
+      ? `\nProject rules:\n${rules.map((r) => `- ${r}`).join("\n")}`
+      : "";
+
+    const directive =
+      `You are the Team Lead for a GitHub-linked project.\n\n` +
+      `Repository: ${githubRepo}\n` +
+      `Target branch: ${branch}\n` +
+      `Repository is already cloned to your workspace.\n\n` +
+      `**PR Workflow:** Workers must create feature branches from \`${branch}\`, commit their changes, push, and open a pull request targeting \`${branch}\`.\n` +
+      `Use conventional commits and reference issue numbers where applicable.${rulesBlock}\n\n` +
+      `Await issue-triggered tasks or COO directives.`;
+
+    this.sendMessage(teamLead.id, MessageType.Directive, directive, {
+      projectId,
+    });
+  }
+
   /** Re-spawn TeamLeads for any projects that are still active in the DB */
   async recoverActiveProjects(): Promise<void> {
     const db = getDb();
@@ -1264,7 +1318,7 @@ The user can see everything on the desktop in real-time.`;
   }
 
   private buildRecoveryDirective(
-    project: { name: string; description: string; charter: string | null },
+    project: { id: string; name: string; description: string; charter: string | null },
     tasks: Array<{
       id: string;
       title: string;
@@ -1288,6 +1342,24 @@ The user can see everything on the desktop in real-time.`;
 
     if (project.charter) {
       lines.push(`CHARTER: ${project.charter}`);
+    }
+
+    // Include GitHub context if available
+    const ghRepo = getConfig(`project:${project.id}:github:repo`);
+    const ghBranch = getConfig(`project:${project.id}:github:branch`);
+    const ghRulesRaw = getConfig(`project:${project.id}:github:rules`);
+    if (ghRepo) {
+      lines.push(`GITHUB REPO: ${ghRepo}`);
+      lines.push(`TARGET BRANCH: ${ghBranch ?? "main"}`);
+      lines.push(`PR WORKFLOW: Workers must create feature branches from \`${ghBranch ?? "main"}\`, commit, push, and open a PR targeting \`${ghBranch ?? "main"}\`.`);
+      if (ghRulesRaw) {
+        try {
+          const rules = JSON.parse(ghRulesRaw) as string[];
+          if (rules.length > 0) {
+            lines.push(`RULES: ${rules.map((r) => `- ${r}`).join("\n")}`);
+          }
+        } catch { /* ignore parse errors */ }
+      }
     }
 
     const backlog = tasks.filter((t) => t.column === "backlog");

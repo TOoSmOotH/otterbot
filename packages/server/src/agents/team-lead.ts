@@ -192,6 +192,33 @@ export class TeamLead extends BaseAgent {
   constructor(deps: TeamLeadDependencies) {
     const registry = new Registry();
     const tlEntry = registry.get("builtin-team-lead");
+    // Build system prompt with optional GitHub context
+    let systemPrompt = tlEntry?.systemPrompt ?? TEAM_LEAD_PROMPT;
+
+    // Inject GitHub context if this project is linked to a repo
+    const ghRepo = getConfig(`project:${deps.projectId}:github:repo`);
+    const ghBranch = getConfig(`project:${deps.projectId}:github:branch`);
+    const ghRulesRaw = getConfig(`project:${deps.projectId}:github:rules`);
+    if (ghRepo) {
+      const sections: string[] = [
+        `\n\n## GitHub Integration`,
+        `Repository: ${ghRepo}`,
+        `Target branch: ${ghBranch ?? "main"}`,
+        `**PR Workflow:** Workers must create feature branches from \`${ghBranch ?? "main"}\`, commit, push, and open a PR targeting \`${ghBranch ?? "main"}\`.`,
+        `Use conventional commits and reference issue numbers.`,
+      ];
+      if (ghRulesRaw) {
+        try {
+          const rules = JSON.parse(ghRulesRaw) as string[];
+          if (rules.length > 0) {
+            sections.push(`\n**Project Rules:**`);
+            sections.push(...rules.map((r) => `- ${r}`));
+          }
+        } catch { /* ignore */ }
+      }
+      systemPrompt += sections.join("\n");
+    }
+
     const options: AgentOptions = {
       role: AgentRole.TeamLead,
       parentId: deps.parentId,
@@ -205,7 +232,7 @@ export class TeamLead extends BaseAgent {
         getConfig("team_lead_provider") ??
         getConfig("coo_provider") ??
         "anthropic",
-      systemPrompt: tlEntry?.systemPrompt ?? TEAM_LEAD_PROMPT,
+      systemPrompt,
       onStatusChange: deps.onStatusChange,
       onAgentStream: deps.onAgentStream,
       onAgentThinking: deps.onAgentThinking,
@@ -1155,6 +1182,33 @@ export class TeamLead extends BaseAgent {
 
       console.log(`[TeamLead ${this.id}] Spawning worker ${workerId} "${workerName}" from ${entry.name} (workspace=${workspacePath})`);
 
+      // Build GitHub context for worker system prompt if project is linked to a repo
+      let githubWorkerContext = "";
+      if (this.projectId) {
+        const wGhRepo = getConfig(`project:${this.projectId}:github:repo`);
+        const wGhBranch = getConfig(`project:${this.projectId}:github:branch`);
+        const wGhRulesRaw = getConfig(`project:${this.projectId}:github:rules`);
+        if (wGhRepo) {
+          const parts: string[] = [
+            `\n\n## GitHub Workflow`,
+            `Repository: ${wGhRepo}`,
+            `Create a feature branch from \`${wGhBranch ?? "main"}\`.`,
+            `After completing your work, push your branch and create a pull request targeting \`${wGhBranch ?? "main"}\`.`,
+            `Use conventional commits and reference issue numbers where applicable.`,
+          ];
+          if (wGhRulesRaw) {
+            try {
+              const rules = JSON.parse(wGhRulesRaw) as string[];
+              if (rules.length > 0) {
+                parts.push(`\n**Project Rules:**`);
+                parts.push(...rules.map((r) => `- ${r}`));
+              }
+            } catch { /* ignore */ }
+          }
+          githubWorkerContext = parts.join("\n");
+        }
+      }
+
       const worker = new Worker({
         id: workerId,
         name: workerName,
@@ -1173,6 +1227,7 @@ export class TeamLead extends BaseAgent {
           getConfig("coo_provider") ??
           entry.defaultProvider,
         systemPrompt: (skillPromptContent || entry.systemPrompt) + buildEnvironmentContext(entryTools) +
+          githubWorkerContext +
           (workspacePath
             ? `\n\n## Your Workspace\nYour workspace directory is: \`${workspacePath}\`\n` +
               `All file paths should be relative to this directory (e.g. \`src/main.go\`, not \`/workspace/src/main.go\`).\n` +
