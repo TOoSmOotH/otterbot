@@ -3,6 +3,7 @@ import type { ScanFinding, SkillScanStatus, OpenCodePart } from "@otterbot/share
 
 export const agents = sqliteTable("agents", {
   id: text("id").primaryKey(),
+  name: text("name"),
   registryEntryId: text("registry_entry_id"),
   role: text("role", { enum: ["coo", "team_lead", "worker", "admin_assistant"] }).notNull(),
   parentId: text("parent_id"),

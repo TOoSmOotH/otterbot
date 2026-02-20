@@ -105,7 +105,7 @@ export function AgentDetailPanel() {
               {badge.label}
             </span>
           )}
-          <span className="text-xs font-medium">{selectedAgentId === "coo" ? "COO" : selectedAgentId.slice(0, 10)}</span>
+          <span className="text-xs font-medium">{selectedAgentId === "coo" ? "COO" : (agent?.name ?? selectedAgentId.slice(0, 10))}</span>
           <div className={cn("w-2 h-2 rounded-full", statusDot)} />
           {agent && (
             <span className="text-[10px] text-muted-foreground capitalize">{agent.status}</span>

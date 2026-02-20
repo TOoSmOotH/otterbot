@@ -26,6 +26,7 @@ import { debug } from "../utils/debug.js";
 
 export interface AgentOptions {
   id?: string;
+  name?: string | null;
   role: AgentRole;
   parentId: string | null;
   projectId: string | null;
@@ -47,6 +48,7 @@ export interface AgentOptions {
 
 export abstract class BaseAgent {
   readonly id: string;
+  readonly name: string | null;
   readonly role: AgentRole;
   readonly parentId: string | null;
   readonly projectId: string | null;
@@ -72,6 +74,7 @@ export abstract class BaseAgent {
 
   constructor(options: AgentOptions, bus: MessageBus) {
     this.id = options.id ?? nanoid();
+    this.name = options.name ?? null;
     this.role = options.role;
     this.parentId = options.parentId;
     this.projectId = options.projectId;
@@ -630,6 +633,7 @@ export abstract class BaseAgent {
   toData(): AgentData {
     return {
       id: this.id,
+      name: this.name,
       registryEntryId: this.registryEntryId,
       role: this.role,
       parentId: this.parentId,
@@ -761,6 +765,7 @@ export abstract class BaseAgent {
     const db = getDb();
     const values = {
       id: this.id,
+      name: this.name,
       registryEntryId: this.registryEntryId,
       role: this.role,
       parentId: this.parentId,

@@ -1116,10 +1116,28 @@ export class TeamLead extends BaseAgent {
         workspacePath = this.workspace.repoPath(this.projectId);
       }
 
-      console.log(`[TeamLead ${this.id}] Spawning worker ${workerId} from ${entry.name} (workspace=${workspacePath})`);
+      // Derive human-readable name from kanban task title or task description
+      let workerName: string | null = null;
+      if (taskId) {
+        const kanbanTask = db
+          .select({ title: schema.kanbanTasks.title })
+          .from(schema.kanbanTasks)
+          .where(eq(schema.kanbanTasks.id, taskId))
+          .get();
+        if (kanbanTask?.title) {
+          workerName = kanbanTask.title.slice(0, 60);
+        }
+      }
+      if (!workerName) {
+        // Fallback: first line of the task string, truncated
+        workerName = task.split("\n")[0].slice(0, 60) || null;
+      }
+
+      console.log(`[TeamLead ${this.id}] Spawning worker ${workerId} "${workerName}" from ${entry.name} (workspace=${workspacePath})`);
 
       const worker = new Worker({
         id: workerId,
+        name: workerName,
         bus: this.bus,
         projectId: this.projectId,
         parentId: this.id,

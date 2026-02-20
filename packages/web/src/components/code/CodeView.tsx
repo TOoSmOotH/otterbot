@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { useOpenCodeStore } from "../../stores/opencode-store";
+import { useAgentStore } from "../../stores/agent-store";
 import { getSocket } from "../../lib/socket";
 import { MarkdownContent } from "../chat/MarkdownContent";
 import type { OpenCodeSession, OpenCodeMessage, OpenCodeFileDiff, OpenCodePermission } from "@otterbot/shared";
@@ -30,6 +31,7 @@ function SessionSidebar({
   selectedAgentId: string | null;
   onSelect: (agentId: string) => void;
 }) {
+  const agents = useAgentStore((s) => s.agents);
   const entries = Array.from(sessions.values()).sort(
     (a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime(),
   );
@@ -44,23 +46,27 @@ function SessionSidebar({
 
   return (
     <div className="flex flex-col gap-0.5 p-1">
-      {entries.map((session) => (
-        <button
-          key={session.agentId}
-          onClick={() => onSelect(session.agentId)}
-          className={`flex items-center gap-2 px-2 py-1.5 rounded text-left text-xs transition-colors ${
-            selectedAgentId === session.agentId
-              ? "bg-primary/20 text-primary"
-              : "text-muted-foreground hover:text-foreground hover:bg-secondary"
-          }`}
-        >
-          <StatusDot status={session.status} />
-          <div className="min-w-0 flex-1">
-            <div className="truncate font-mono">{session.agentId.slice(0, 8)}</div>
-            <div className="truncate opacity-70">{session.task.slice(0, 50)}</div>
-          </div>
-        </button>
-      ))}
+      {entries.map((session) => {
+        const agent = agents.get(session.agentId);
+        const displayName = agent?.name ?? session.agentId.slice(0, 8);
+        return (
+          <button
+            key={session.agentId}
+            onClick={() => onSelect(session.agentId)}
+            className={`flex items-center gap-2 px-2 py-1.5 rounded text-left text-xs transition-colors ${
+              selectedAgentId === session.agentId
+                ? "bg-primary/20 text-primary"
+                : "text-muted-foreground hover:text-foreground hover:bg-secondary"
+            }`}
+          >
+            <StatusDot status={session.status} />
+            <div className="min-w-0 flex-1">
+              <div className="truncate font-mono">{displayName}</div>
+              <div className="truncate opacity-70">{session.task.slice(0, 50)}</div>
+            </div>
+          </button>
+        );
+      })}
     </div>
   );
 }
@@ -336,6 +342,7 @@ function PermissionPrompt({ agentId }: { agentId: string }) {
 
 function SessionContent({ agentId }: { agentId: string }) {
   const session = useOpenCodeStore((s) => s.sessions.get(agentId));
+  const agent = useAgentStore((s) => s.agents.get(agentId));
   const sessionId = session?.id || "";
   const sessionMessages = useOpenCodeStore((s) => s.messages.get(sessionId) ?? EMPTY_MESSAGES);
   const partBuffers = useOpenCodeStore((s) => s.partBuffers);
@@ -402,7 +409,7 @@ function SessionContent({ agentId }: { agentId: string }) {
       {/* Session header */}
       <div className="flex items-center gap-2 px-3 py-2 border-b border-border bg-card/50">
         <StatusDot status={session.status} />
-        <span className="text-xs font-mono text-foreground/80">{session.agentId.slice(0, 12)}</span>
+        <span className="text-xs font-mono text-foreground/80">{agent?.name ?? session.agentId.slice(0, 12)}</span>
         <span className="text-xs text-muted-foreground truncate flex-1">{session.task.slice(0, 100)}</span>
       </div>
 

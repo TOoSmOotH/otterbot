@@ -109,7 +109,7 @@ function buildLayout(
 function getRoleLabel(agent: Agent, cooName?: string): string {
   if (agent.role === "coo") return cooName ?? "COO";
   if (agent.role === "team_lead") return `Team Lead`;
-  return `Worker ${agent.id.slice(0, 6)}`;
+  return agent.name ?? `Worker ${agent.id.slice(0, 6)}`;
 }
 
 export function AgentGraph({

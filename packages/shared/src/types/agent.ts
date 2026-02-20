@@ -18,6 +18,7 @@ export enum AgentStatus {
 
 export interface Agent {
   id: string;
+  name: string | null;
   registryEntryId: string | null;
   role: AgentRole;
   parentId: string | null;

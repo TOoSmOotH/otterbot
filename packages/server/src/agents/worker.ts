@@ -15,6 +15,7 @@ import { getDb, schema } from "../db/index.js";
 
 export interface WorkerDependencies {
   id?: string;
+  name?: string | null;
   bus: MessageBus;
   projectId: string | null;
   parentId: string;
@@ -46,6 +47,7 @@ export class Worker extends BaseAgent {
   constructor(deps: WorkerDependencies) {
     const options: AgentOptions = {
       id: deps.id,
+      name: deps.name,
       role: AgentRole.Worker,
       parentId: deps.parentId,
       projectId: deps.projectId,

@@ -40,6 +40,7 @@ export async function migrateDb() {
 
   db.run(sql`CREATE TABLE IF NOT EXISTS agents (
     id TEXT PRIMARY KEY,
+    name TEXT,
     registry_entry_id TEXT,
     role TEXT NOT NULL,
     parent_id TEXT,
@@ -111,6 +112,13 @@ export async function migrateDb() {
     cloned_from_id TEXT,
     created_at TEXT NOT NULL
   )`);
+
+  // Idempotent migration: add name to agents
+  try {
+    db.run(sql`ALTER TABLE agents ADD COLUMN name TEXT`);
+  } catch {
+    // Column already exists — ignore
+  }
 
   // Idempotent migration: add model_pack_id to registry_entries
   try {

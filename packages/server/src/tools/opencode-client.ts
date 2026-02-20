@@ -342,8 +342,11 @@ export class OpenCodeClient {
             }
           }
 
-          // Check for completion events
-          if (eventSessionId === sessionId) {
+          // Check for completion events.
+          // Use isOurSession (accepts events with or without sessionID) instead of
+          // strict equality, because OpenCode may send completion events without a
+          // sessionID field.
+          if (isOurSession) {
             if (eventType === "session.error") {
               console.error(`[OpenCode Client] Session error event:`, props?.error);
               clearInterval(checkInterval);
@@ -360,6 +363,15 @@ export class OpenCodeClient {
               const statusObj = props?.status as { type?: string } | undefined;
               if (statusObj?.type === "idle") {
                 console.log(`[OpenCode Client] Session status=idle — task complete.`);
+                clearInterval(checkInterval);
+                controller.abort();
+                return "idle";
+              }
+            }
+            if (eventType === "session.updated") {
+              const statusObj = props?.status as { type?: string } | undefined;
+              if (statusObj?.type === "idle" || statusObj?.type === "completed") {
+                console.log(`[OpenCode Client] Session updated status=${statusObj.type} — task complete.`);
                 clearInterval(checkInterval);
                 controller.abort();
                 return "idle";
@@ -414,11 +426,13 @@ export class OpenCodeClient {
     } catch (err) {
       // Stream ended or was aborted
       if (!controller.signal.aborted) {
-        console.warn(`[OpenCode Client] SSE stream ended:`, err instanceof Error ? err.message : err);
+        console.warn(`[OpenCode Client] SSE stream ended unexpectedly:`, err instanceof Error ? err.message : err);
       }
     } finally {
       clearInterval(checkInterval);
     }
+
+    console.log(`[OpenCode Client] SSE monitor exited — determining stop reason (elapsed=${Math.round((Date.now() - startTime) / 1000)}s, idleMs=${Math.round((Date.now() - lastActivityTime) / 1000)}s)`);
 
     // Determine why we stopped
     if (Date.now() - startTime > MAX_TOTAL_WAIT_MS) return "hard_cap";
