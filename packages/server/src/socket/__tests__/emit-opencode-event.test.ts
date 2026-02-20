@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { emitOpenCodeEvent } from "../handlers.js";
+import { emitOpenCodeEvent, resetOpenCodePersistence } from "../handlers.js";
 
 function createMockIo() {
   return {
@@ -12,6 +12,7 @@ describe("emitOpenCodeEvent", () => {
 
   beforeEach(() => {
     io = createMockIo();
+    resetOpenCodePersistence();
   });
 
   describe("__session-start internal marker", () => {
@@ -308,6 +309,56 @@ describe("emitOpenCodeEvent", () => {
         (c: any[]) => c[0] === "opencode:message",
       );
       expect(messageCalls).toHaveLength(0);
+    });
+
+    it("includes accumulated part deltas in emitted message", () => {
+      // First, send some part deltas to build up the buffer
+      emitOpenCodeEvent(io, "agent-1", "sess-1", {
+        type: "message.part.delta",
+        properties: {
+          sessionID: "sess-1",
+          messageID: "msg-2",
+          partID: "part-a",
+          field: "text",
+          delta: "Hello ",
+        },
+      });
+      emitOpenCodeEvent(io, "agent-1", "sess-1", {
+        type: "message.part.delta",
+        properties: {
+          sessionID: "sess-1",
+          messageID: "msg-2",
+          partID: "part-a",
+          field: "text",
+          delta: "world",
+        },
+      });
+
+      // Now message.updated should include the accumulated parts
+      emitOpenCodeEvent(io, "agent-1", "sess-1", {
+        type: "message.updated",
+        properties: {
+          info: {
+            id: "msg-2",
+            sessionID: "sess-1",
+            role: "assistant",
+          },
+        },
+      });
+
+      const msgCall = io.emit.mock.calls.find(
+        (c: any[]) => c[0] === "opencode:message" && c[1].message.id === "msg-2",
+      );
+      expect(msgCall).toBeDefined();
+      expect(msgCall![1].message.parts).toHaveLength(1);
+      expect(msgCall![1].message.parts[0]).toEqual({
+        id: "part-a",
+        messageId: "msg-2",
+        type: "text",
+        content: "Hello world",
+        toolName: undefined,
+        toolState: undefined,
+      });
     });
 
     it("handles user messages", () => {
