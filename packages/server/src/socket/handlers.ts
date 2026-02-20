@@ -3,7 +3,7 @@ import type {
   ServerToClientEvents,
   ClientToServerEvents,
 } from "@otterbot/shared";
-import { MessageType, type Agent, type AgentActivityRecord, type BusMessage, type Conversation, type Project, type KanbanTask, type OpenCodeSession, type OpenCodeMessage, type OpenCodePart, type OpenCodeFileDiff } from "@otterbot/shared";
+import { MessageType, type Agent, type AgentActivityRecord, type BusMessage, type Conversation, type Project, type KanbanTask, type CodingAgentSession, type CodingAgentMessage, type CodingAgentPart, type CodingAgentFileDiff, type CodingAgentType } from "@otterbot/shared";
 import { nanoid } from "nanoid";
 import { eq, or, desc, isNull } from "drizzle-orm";
 import type { MessageBus } from "../bus/message-bus.js";
@@ -24,10 +24,13 @@ const serverPartBuffers = new Map<string, { type: string; content: string; toolN
 const sessionRowIds = new Map<string, string>();
 
 /** Reset module-level persistence state (for testing) */
-export function resetOpenCodePersistence() {
+export function resetCodingAgentPersistence() {
   serverPartBuffers.clear();
   sessionRowIds.clear();
 }
+
+/** @deprecated Use resetCodingAgentPersistence instead */
+export const resetOpenCodePersistence = resetCodingAgentPersistence;
 
 export interface SocketHooks {
   /** Intercept CEO messages before they reach the COO.
@@ -440,10 +443,10 @@ export function emitAgentToolCall(io: TypedServer, agentId: string, toolName: st
 }
 
 /**
- * Parse and emit OpenCode SSE events as structured Socket.IO events.
- * Handles internal __session-start/__session-end markers plus raw OpenCode events.
+ * Parse and emit coding agent SSE events as structured Socket.IO events.
+ * Handles internal __session-start/__session-end markers plus raw events.
  */
-export function emitOpenCodeEvent(
+export function emitCodingAgentEvent(
   io: TypedServer,
   agentId: string,
   sessionId: string,
@@ -454,40 +457,43 @@ export function emitOpenCodeEvent(
   // Internal markers emitted by Worker
   if (type === "__session-start") {
     const now = new Date().toISOString();
-    const session: OpenCodeSession = {
+    const agentType = (properties.agentType as CodingAgentType) || "opencode";
+    const session: CodingAgentSession = {
       id: sessionId,
       agentId,
       projectId: (properties.projectId as string) || null,
       task: (properties.task as string) || "",
+      agentType,
       status: "active",
       startedAt: now,
     };
-    io.emit("opencode:session-start", session);
+    io.emit("codeagent:session-start", session);
 
     // Persist session row
     try {
       const db = getDb();
       const rowId = nanoid();
-      db.insert(schema.opencodeSessions)
+      db.insert(schema.codingAgentSessions)
         .values({
           id: rowId,
           agentId,
           sessionId: sessionId || "",
           projectId: session.projectId,
           task: session.task,
+          agentType,
           status: "active",
           startedAt: now,
         })
         .run();
       sessionRowIds.set(agentId, rowId);
     } catch (err) {
-      console.error("Failed to persist opencode session:", err);
+      console.error("Failed to persist coding agent session:", err);
     }
     return;
   }
 
   if (type === "__awaiting-input") {
-    io.emit("opencode:awaiting-input", {
+    io.emit("codeagent:awaiting-input", {
       agentId,
       sessionId,
       prompt: (properties.prompt as string) || "",
@@ -498,7 +504,7 @@ export function emitOpenCodeEvent(
   if (type === "__permission-request") {
     const permission = properties.permission as { id: string; type: string; title: string; pattern?: string | string[]; metadata: Record<string, unknown> } | undefined;
     if (permission) {
-      io.emit("opencode:permission-request", {
+      io.emit("codeagent:permission-request", {
         agentId,
         sessionId,
         permission,
@@ -510,7 +516,7 @@ export function emitOpenCodeEvent(
   if (type === "__session-end") {
     const rawDiff = properties.diff as Array<{ path: string; additions: number; deletions: number }> | null;
     const endStatus = (properties.status as string) || "completed";
-    io.emit("opencode:session-end", {
+    io.emit("codeagent:session-end", {
       agentId,
       sessionId,
       status: endStatus,
@@ -522,20 +528,20 @@ export function emitOpenCodeEvent(
       const db = getDb();
       const rowId = sessionRowIds.get(agentId);
       if (rowId) {
-        db.update(schema.opencodeSessions)
+        db.update(schema.codingAgentSessions)
           .set({
-            status: endStatus as OpenCodeSession["status"],
+            status: endStatus as CodingAgentSession["status"],
             completedAt: new Date().toISOString(),
             sessionId: sessionId || undefined,
           })
-          .where(eq(schema.opencodeSessions.id, rowId))
+          .where(eq(schema.codingAgentSessions.id, rowId))
           .run();
 
         // Insert diff rows
-        const resolvedSessionId = sessionId || db.select().from(schema.opencodeSessions).where(eq(schema.opencodeSessions.id, rowId)).get()?.sessionId || "";
+        const resolvedSessionId = sessionId || db.select().from(schema.codingAgentSessions).where(eq(schema.codingAgentSessions.id, rowId)).get()?.sessionId || "";
         if (rawDiff) {
           for (const f of rawDiff) {
-            db.insert(schema.opencodeDiffs)
+            db.insert(schema.codingAgentDiffs)
               .values({
                 id: nanoid(),
                 sessionId: resolvedSessionId,
@@ -557,13 +563,13 @@ export function emitOpenCodeEvent(
         }
       }
     } catch (err) {
-      console.error("Failed to persist opencode session end:", err);
+      console.error("Failed to persist coding agent session end:", err);
     }
     return;
   }
 
   // Forward raw event for debugging / generic listeners
-  io.emit("opencode:event", { agentId, sessionId, type, properties });
+  io.emit("codeagent:event", { agentId, sessionId, type, properties });
 
   // Parse specific event types into structured events
 
@@ -579,7 +585,7 @@ export function emitOpenCodeEvent(
     const partType = field === "reasoning" ? "reasoning" : "text";
 
     if (delta && partId && messageId) {
-      io.emit("opencode:part-delta", {
+      io.emit("codeagent:part-delta", {
         agentId,
         sessionId,
         messageId,
@@ -633,7 +639,7 @@ export function emitOpenCodeEvent(
 
         if (explicitDelta) {
           // Mode 1: explicit delta — append like message.part.delta does
-          io.emit("opencode:part-delta", {
+          io.emit("codeagent:part-delta", {
             agentId,
             sessionId,
             messageId,
@@ -681,7 +687,7 @@ export function emitOpenCodeEvent(
           const existingLen = existing?.content?.length ?? 0;
           if (fullContent.length > existingLen) {
             const missingDelta = fullContent.slice(existingLen);
-            io.emit("opencode:part-delta", {
+            io.emit("codeagent:part-delta", {
               agentId,
               sessionId,
               messageId,
@@ -693,7 +699,7 @@ export function emitOpenCodeEvent(
             });
           } else if (toolState && toolState !== existing?.toolState) {
             // Tool state changed but no new content — emit empty delta for state update
-            io.emit("opencode:part-delta", {
+            io.emit("codeagent:part-delta", {
               agentId,
               sessionId,
               messageId,
@@ -721,43 +727,43 @@ export function emitOpenCodeEvent(
 
       if (msgId && role) {
         // Build parts from accumulated serverPartBuffers so the full message includes them
-        const accumulatedParts: OpenCodePart[] = [];
+        const accumulatedParts: CodingAgentPart[] = [];
         for (const [key, buf] of serverPartBuffers.entries()) {
           if (key.startsWith(`${agentId}:${msgId}:`)) {
             const partId = key.split(":").slice(2).join(":");
             accumulatedParts.push({
               id: partId,
               messageId: msgId,
-              type: buf.type as OpenCodePart["type"],
+              type: buf.type as CodingAgentPart["type"],
               content: buf.content,
               toolName: buf.toolName,
-              toolState: buf.toolState as OpenCodePart["toolState"],
+              toolState: buf.toolState as CodingAgentPart["toolState"],
             });
           }
         }
 
-        const message: OpenCodeMessage = {
+        const message: CodingAgentMessage = {
           id: msgId,
           sessionId: msgSessionId,
           role: role as "user" | "assistant",
           parts: accumulatedParts,
           createdAt: new Date().toISOString(),
         };
-        io.emit("opencode:message", { agentId, sessionId, message });
+        io.emit("codeagent:message", { agentId, sessionId, message });
 
         // Persist message with accumulated parts to DB
         try {
           const db = getDb();
           const now = new Date().toISOString();
           // Upsert: try insert, on conflict update parts
-          const existing = db.select().from(schema.opencodeMessages).where(eq(schema.opencodeMessages.id, msgId)).get();
+          const existing = db.select().from(schema.codingAgentMessages).where(eq(schema.codingAgentMessages.id, msgId)).get();
           if (existing) {
-            db.update(schema.opencodeMessages)
+            db.update(schema.codingAgentMessages)
               .set({ parts: accumulatedParts, sessionId: msgSessionId })
-              .where(eq(schema.opencodeMessages.id, msgId))
+              .where(eq(schema.codingAgentMessages.id, msgId))
               .run();
           } else {
-            db.insert(schema.opencodeMessages)
+            db.insert(schema.codingAgentMessages)
               .values({
                 id: msgId,
                 sessionId: msgSessionId,
@@ -773,19 +779,22 @@ export function emitOpenCodeEvent(
           if (msgSessionId) {
             const rowId = sessionRowIds.get(agentId);
             if (rowId) {
-              const sessionRow = db.select().from(schema.opencodeSessions).where(eq(schema.opencodeSessions.id, rowId)).get();
+              const sessionRow = db.select().from(schema.codingAgentSessions).where(eq(schema.codingAgentSessions.id, rowId)).get();
               if (sessionRow && !sessionRow.sessionId) {
-                db.update(schema.opencodeSessions)
+                db.update(schema.codingAgentSessions)
                   .set({ sessionId: msgSessionId })
-                  .where(eq(schema.opencodeSessions.id, rowId))
+                  .where(eq(schema.codingAgentSessions.id, rowId))
                   .run();
               }
             }
           }
         } catch (err) {
-          console.error("Failed to persist opencode message:", err);
+          console.error("Failed to persist coding agent message:", err);
         }
       }
     }
   }
 }
+
+/** @deprecated Use emitCodingAgentEvent instead */
+export const emitOpenCodeEvent = emitCodingAgentEvent;

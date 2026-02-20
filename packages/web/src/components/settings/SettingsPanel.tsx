@@ -7,7 +7,7 @@ import { AgentWorkshopTab } from "./AgentWorkshopTab";
 import { SearchTab } from "./SearchTab";
 import { SpeechTab } from "./SpeechTab";
 import { LiveViewTab } from "./LiveViewTab";
-import { OpenCodeTab } from "./OpenCodeTab";
+import { CodingAgentsTab } from "./CodingAgentsTab";
 import { GitHubTab } from "./GitHubTab";
 import { AppearanceTab } from "./AppearanceTab";
 
@@ -21,7 +21,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: "search", label: "Search" },
   { id: "speech", label: "Speech" },
   { id: "liveview", label: "Live View" },
-  { id: "opencode", label: "OpenCode" },
+  { id: "opencode", label: "Coding Agents" },
   { id: "github", label: "GitHub" },
 ];
 
@@ -85,7 +85,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
               {activeTab === "search" && <SearchTab />}
               {activeTab === "speech" && <SpeechTab />}
               {activeTab === "liveview" && <LiveViewTab />}
-              {activeTab === "opencode" && <OpenCodeTab />}
+              {activeTab === "opencode" && <CodingAgentsTab />}
               {activeTab === "github" && <GitHubTab />}
             </>
           )}

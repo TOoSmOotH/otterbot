@@ -93,6 +93,25 @@ interface SettingsState {
   openCodeInteractive: boolean;
   openCodeTestResult: TestResult | null;
 
+  // Claude Code
+  claudeCodeEnabled: boolean;
+  claudeCodeAuthMode: "api-key" | "oauth";
+  claudeCodeApiKeySet: boolean;
+  claudeCodeModel: string;
+  claudeCodeApprovalMode: "full-auto" | "auto-edit";
+  claudeCodeTimeoutMs: number;
+  claudeCodeMaxTurns: number;
+  claudeCodeTestResult: TestResult | null;
+
+  // Codex
+  codexEnabled: boolean;
+  codexAuthMode: "api-key" | "oauth";
+  codexApiKeySet: boolean;
+  codexModel: string;
+  codexApprovalMode: "full-auto" | "suggest" | "ask";
+  codexTimeoutMs: number;
+  codexTestResult: TestResult | null;
+
   // GitHub
   gitHubEnabled: boolean;
   gitHubTokenSet: boolean;
@@ -175,6 +194,31 @@ interface SettingsState {
   }) => Promise<void>;
   testOpenCodeConnection: () => Promise<void>;
 
+  // Claude Code actions
+  loadClaudeCodeSettings: () => Promise<void>;
+  updateClaudeCodeSettings: (data: {
+    enabled?: boolean;
+    authMode?: "api-key" | "oauth";
+    apiKey?: string;
+    model?: string;
+    approvalMode?: "full-auto" | "auto-edit";
+    timeoutMs?: number;
+    maxTurns?: number;
+  }) => Promise<void>;
+  testClaudeCodeConnection: () => Promise<void>;
+
+  // Codex actions
+  loadCodexSettings: () => Promise<void>;
+  updateCodexSettings: (data: {
+    enabled?: boolean;
+    authMode?: "api-key" | "oauth";
+    apiKey?: string;
+    model?: string;
+    approvalMode?: "full-auto" | "suggest" | "ask";
+    timeoutMs?: number;
+  }) => Promise<void>;
+  testCodexConnection: () => Promise<void>;
+
   // GitHub actions
   loadGitHubSettings: () => Promise<void>;
   updateGitHubSettings: (data: {
@@ -243,6 +287,21 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   openCodeProviderId: "",
   openCodeInteractive: false,
   openCodeTestResult: null,
+  claudeCodeEnabled: false,
+  claudeCodeAuthMode: "api-key",
+  claudeCodeApiKeySet: false,
+  claudeCodeModel: "claude-sonnet-4-5-20250929",
+  claudeCodeApprovalMode: "full-auto",
+  claudeCodeTimeoutMs: 1200000,
+  claudeCodeMaxTurns: 50,
+  claudeCodeTestResult: null,
+  codexEnabled: false,
+  codexAuthMode: "api-key",
+  codexApiKeySet: false,
+  codexModel: "codex-mini",
+  codexApprovalMode: "full-auto",
+  codexTimeoutMs: 1200000,
+  codexTestResult: null,
   gitHubEnabled: false,
   gitHubTokenSet: false,
   gitHubUsername: null,
@@ -839,6 +898,131 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     } catch (err) {
       set({
         openCodeTestResult: {
+          ok: false,
+          error: err instanceof Error ? err.message : "Unknown error",
+          testing: false,
+        },
+      });
+    }
+  },
+
+  // Claude Code actions
+
+  loadClaudeCodeSettings: async () => {
+    try {
+      const res = await fetch("/api/settings/claude-code");
+      if (!res.ok) return;
+      const data = await res.json();
+      set({
+        claudeCodeEnabled: data.enabled,
+        claudeCodeAuthMode: data.authMode ?? "api-key",
+        claudeCodeApiKeySet: data.apiKeySet,
+        claudeCodeModel: data.model ?? "claude-sonnet-4-5-20250929",
+        claudeCodeApprovalMode: data.approvalMode ?? "full-auto",
+        claudeCodeTimeoutMs: data.timeoutMs ?? 1200000,
+        claudeCodeMaxTurns: data.maxTurns ?? 50,
+      });
+    } catch {
+      // Silently fail
+    }
+  },
+
+  updateClaudeCodeSettings: async (data) => {
+    set({ error: null });
+    try {
+      const res = await fetch("/api/settings/claude-code", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) throw new Error("Failed to update Claude Code settings");
+      await get().loadClaudeCodeSettings();
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "Unknown error" });
+    }
+  },
+
+  testClaudeCodeConnection: async () => {
+    set({ claudeCodeTestResult: { ok: false, testing: true } });
+    try {
+      const res = await fetch("/api/settings/claude-code/test", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      const data = await res.json();
+      set({
+        claudeCodeTestResult: {
+          ok: data.ok,
+          error: data.error,
+          testing: false,
+        },
+      });
+    } catch (err) {
+      set({
+        claudeCodeTestResult: {
+          ok: false,
+          error: err instanceof Error ? err.message : "Unknown error",
+          testing: false,
+        },
+      });
+    }
+  },
+
+  // Codex actions
+
+  loadCodexSettings: async () => {
+    try {
+      const res = await fetch("/api/settings/codex");
+      if (!res.ok) return;
+      const data = await res.json();
+      set({
+        codexEnabled: data.enabled,
+        codexAuthMode: data.authMode ?? "api-key",
+        codexApiKeySet: data.apiKeySet,
+        codexModel: data.model ?? "codex-mini",
+        codexApprovalMode: data.approvalMode ?? "full-auto",
+        codexTimeoutMs: data.timeoutMs ?? 1200000,
+      });
+    } catch {
+      // Silently fail
+    }
+  },
+
+  updateCodexSettings: async (data) => {
+    set({ error: null });
+    try {
+      const res = await fetch("/api/settings/codex", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) throw new Error("Failed to update Codex settings");
+      await get().loadCodexSettings();
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "Unknown error" });
+    }
+  },
+
+  testCodexConnection: async () => {
+    set({ codexTestResult: { ok: false, testing: true } });
+    try {
+      const res = await fetch("/api/settings/codex/test", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      const data = await res.json();
+      set({
+        codexTestResult: {
+          ok: data.ok,
+          error: data.error,
+          testing: false,
+        },
+      });
+    } catch (err) {
+      set({
+        codexTestResult: {
           ok: false,
           error: err instanceof Error ? err.message : "Unknown error",
           testing: false,

@@ -9,7 +9,10 @@ import {
   type KanbanTask,
 } from "@otterbot/shared";
 import { BaseAgent, type AgentOptions } from "./agent.js";
-import { Worker } from "./worker.js";
+import { Worker, CODING_AGENT_REGISTRY_IDS } from "./worker.js";
+
+/** All coding agent IDs including the fallback builtin-coder */
+const CODING_AGENT_IDS = CODING_AGENT_REGISTRY_IDS;
 import { getDb, schema } from "../db/index.js";
 import { Registry } from "../registry/registry.js";
 import { SkillService } from "../skills/skill-service.js";
@@ -163,9 +166,9 @@ export interface TeamLeadDependencies {
   onAgentThinking?: (agentId: string, token: string, messageId: string) => void;
   onAgentThinkingEnd?: (agentId: string, messageId: string) => void;
   onAgentToolCall?: (agentId: string, toolName: string, args: Record<string, unknown>) => void;
-  onOpenCodeEvent?: (agentId: string, sessionId: string, event: { type: string; properties: Record<string, unknown> }) => void;
-  onOpenCodeAwaitingInput?: (agentId: string, sessionId: string, prompt: string) => Promise<string | null>;
-  onOpenCodePermissionRequest?: (agentId: string, sessionId: string, permission: { id: string; type: string; title: string; pattern?: string | string[]; metadata: Record<string, unknown> }) => Promise<"once" | "always" | "reject">;
+  onCodingAgentEvent?: (agentId: string, sessionId: string, event: { type: string; properties: Record<string, unknown> }) => void;
+  onCodingAgentAwaitingInput?: (agentId: string, sessionId: string, prompt: string) => Promise<string | null>;
+  onCodingAgentPermissionRequest?: (agentId: string, sessionId: string, permission: { id: string; type: string; title: string; pattern?: string | string[]; metadata: Record<string, unknown> }) => Promise<"once" | "always" | "reject">;
 }
 
 const MAX_CONTINUATION_CYCLES = 5;
@@ -182,9 +185,9 @@ export class TeamLead extends BaseAgent {
   private allowedToolNames: Set<string>;
   private onAgentSpawned?: (agent: BaseAgent) => void;
   private onKanbanChange?: (event: "created" | "updated" | "deleted", task: KanbanTask) => void;
-  private _onOpenCodeEvent?: (agentId: string, sessionId: string, event: { type: string; properties: Record<string, unknown> }) => void;
-  private _onOpenCodeAwaitingInput?: (agentId: string, sessionId: string, prompt: string) => Promise<string | null>;
-  private _onOpenCodePermissionRequest?: (agentId: string, sessionId: string, permission: { id: string; type: string; title: string; pattern?: string | string[]; metadata: Record<string, unknown> }) => Promise<"once" | "always" | "reject">;
+  private _onCodingAgentEvent?: (agentId: string, sessionId: string, event: { type: string; properties: Record<string, unknown> }) => void;
+  private _onCodingAgentAwaitingInput?: (agentId: string, sessionId: string, prompt: string) => Promise<string | null>;
+  private _onCodingAgentPermissionRequest?: (agentId: string, sessionId: string, permission: { id: string; type: string; title: string; pattern?: string | string[]; metadata: Record<string, unknown> }) => Promise<"once" | "always" | "reject">;
 
   constructor(deps: TeamLeadDependencies) {
     const registry = new Registry();
@@ -222,9 +225,9 @@ export class TeamLead extends BaseAgent {
     this.workspace = deps.workspace;
     this.onAgentSpawned = deps.onAgentSpawned;
     this.onKanbanChange = deps.onKanbanChange;
-    this._onOpenCodeEvent = deps.onOpenCodeEvent;
-    this._onOpenCodeAwaitingInput = deps.onOpenCodeAwaitingInput;
-    this._onOpenCodePermissionRequest = deps.onOpenCodePermissionRequest;
+    this._onCodingAgentEvent = deps.onCodingAgentEvent;
+    this._onCodingAgentAwaitingInput = deps.onCodingAgentAwaitingInput;
+    this._onCodingAgentPermissionRequest = deps.onCodingAgentPermissionRequest;
 
     // Restore persisted flags from previous runs
     this.verificationRequested = this.loadFlag("verification");
@@ -657,9 +660,21 @@ export class TeamLead extends BaseAgent {
     // Pick the first unblocked task
     const task = unblockedBacklog[0];
 
-    // Find the right registry entry — default to opencode-coder for coding tasks
-    const openCodeEnabled = getConfig("opencode:enabled") === "true";
-    const registryEntryId = openCodeEnabled ? "builtin-opencode-coder" : "builtin-coder";
+    // Check if task is browser/desktop-related — sandboxed coding agents can't do these
+    const taskText = `${task.title} ${task.description ?? ""}`.toLowerCase();
+    const isBrowserTask = /\b(browser|chrome|chromium|firefox|launch.*browser|open.*url|browse.*web|headless|puppeteer|playwright|selenium|desktop.*app)\b/.test(taskText);
+
+    // Find the right registry entry — pick the first enabled coding agent
+    let registryEntryId = "builtin-coder";
+    if (isBrowserTask) {
+      registryEntryId = "builtin-browser-agent";
+    } else if (getConfig("opencode:enabled") === "true") {
+      registryEntryId = "builtin-opencode-coder";
+    } else if (getConfig("claude-code:enabled") === "true") {
+      registryEntryId = "builtin-claude-code-coder";
+    } else if (getConfig("codex:enabled") === "true") {
+      registryEntryId = "builtin-codex-coder";
+    }
 
     console.log(
       `[TeamLead ${this.id}] Auto-spawn: LLM failed to spawn worker for "${task.title}" (${task.id}) — spawning ${registryEntryId} programmatically.`,
@@ -813,7 +828,7 @@ export class TeamLead extends BaseAgent {
       // If a coding worker is already running, don't continue just for coding tasks
       // that would be refused anyway — this prevents the spam-retry loop
       const hasCodingWorkerRunning = [...this.workers.values()].some(
-        (w) => w.registryEntryId === "builtin-opencode-coder" || w.registryEntryId === "builtin-coder",
+        (w) => CODING_AGENT_IDS.has(w.registryEntryId!),
       );
       if (hasCodingWorkerRunning && board.hasInProgress) {
         console.log(`[TeamLead ${this.id}] Coding worker running with tasks in progress — waiting for reports.`);
@@ -1044,13 +1059,21 @@ export class TeamLead extends BaseAgent {
   private searchRegistry(capability: string): string {
     const registry = new Registry();
     const allEntries = registry.list();
-    const openCodeEnabled = getConfig("opencode:enabled") === "true";
+    // Check which external coding agents are enabled
+    const hasExternalCodingAgent =
+      getConfig("opencode:enabled") === "true" ||
+      getConfig("claude-code:enabled") === "true" ||
+      getConfig("codex:enabled") === "true";
 
     const matches = allEntries.filter((entry) => {
       // Only return worker-role entries (not COO or Team Lead)
       if (entry.role !== "worker") return false;
-      // Hide the regular coder when OpenCode is enabled — force all coding through OpenCode
-      if (openCodeEnabled && entry.id === "builtin-coder") return false;
+      // Hide the regular coder when any external coding agent is enabled
+      if (hasExternalCodingAgent && entry.id === "builtin-coder") return false;
+      // Hide disabled external coding agents
+      if (entry.id === "builtin-opencode-coder" && getConfig("opencode:enabled") !== "true") return false;
+      if (entry.id === "builtin-claude-code-coder" && getConfig("claude-code:enabled") !== "true") return false;
+      if (entry.id === "builtin-codex-coder" && getConfig("codex:enabled") !== "true") return false;
       return entry.capabilities.some((c) =>
         c.toLowerCase().includes(capability.toLowerCase()),
       );
@@ -1091,15 +1114,12 @@ export class TeamLead extends BaseAgent {
       const entryTools = [...new Set(entrySkills.flatMap((s) => s.meta.tools as string[]))];
       const skillPromptContent = entrySkills.map((s) => s.body.trim()).filter(Boolean).join("\n\n");
 
-      // Enforce single-coding-worker rule: only one OpenCode coder (or regular coder)
+      // Enforce single-coding-worker rule: only one coding agent
       // can run at a time to prevent file conflicts in the shared workspace
-      const isCodingWorker = registryEntryId === "builtin-opencode-coder" || registryEntryId === "builtin-coder";
+      const isCodingWorker = CODING_AGENT_IDS.has(registryEntryId);
       if (isCodingWorker) {
         for (const [existingId, existingWorker] of this.workers) {
-          if (
-            existingWorker.registryEntryId === "builtin-opencode-coder" ||
-            existingWorker.registryEntryId === "builtin-coder"
-          ) {
+          if (CODING_AGENT_IDS.has(existingWorker.registryEntryId!)) {
             console.warn(
               `[TeamLead ${this.id}] Refused to spawn coding worker — another coding worker (${existingId}) is already running. Use blockedBy to sequence coding tasks.`,
             );
@@ -1165,9 +1185,9 @@ export class TeamLead extends BaseAgent {
         onAgentThinking: this.onAgentThinking,
         onAgentThinkingEnd: this.onAgentThinkingEnd,
         onAgentToolCall: this.onAgentToolCall,
-        onOpenCodeEvent: this._onOpenCodeEvent,
-        onOpenCodeAwaitingInput: this._onOpenCodeAwaitingInput,
-        onOpenCodePermissionRequest: this._onOpenCodePermissionRequest,
+        onCodingAgentEvent: this._onCodingAgentEvent,
+        onCodingAgentAwaitingInput: this._onCodingAgentAwaitingInput,
+        onCodingAgentPermissionRequest: this._onCodingAgentPermissionRequest,
       });
 
       this.workers.set(worker.id, worker);

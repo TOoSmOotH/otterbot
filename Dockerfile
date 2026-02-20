@@ -73,8 +73,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ruby-full \
     && rm -rf /var/lib/apt/lists/*
 
-# Install OpenCode (AI coding agent — used by the OpenCode Coder worker)
+# Install coding agents (OpenCode, Claude Code, Codex)
 RUN npm install -g opencode-ai@latest
+RUN npm install -g @anthropic-ai/claude-code@latest
+RUN npm install -g @openai/codex@latest
 
 # Create non-root user with configurable UID/GID
 ARG OTTERBOT_UID=1000

@@ -430,5 +430,97 @@ describe("TeamLead — Kanban logic", () => {
 
       expect(spawnSpy).toHaveBeenCalledWith("builtin-coder", expect.any(String), "task-y");
     });
+
+    it("uses claude-code-coder when claude-code:enabled is true and opencode is not", async () => {
+      configStore.set("claude-code:enabled", "true");
+      insertTask({ id: "task-cc", title: "Code task", column: "backlog" });
+
+      const spawnSpy = vi.spyOn(tl as any, "spawnWorker").mockResolvedValue("Spawned");
+      await (tl as any).autoSpawnUnblockedTasks();
+
+      expect(spawnSpy).toHaveBeenCalledWith("builtin-claude-code-coder", expect.any(String), "task-cc");
+    });
+
+    it("uses codex-coder when codex:enabled is true and others are not", async () => {
+      configStore.set("codex:enabled", "true");
+      insertTask({ id: "task-cx", title: "Code task", column: "backlog" });
+
+      const spawnSpy = vi.spyOn(tl as any, "spawnWorker").mockResolvedValue("Spawned");
+      await (tl as any).autoSpawnUnblockedTasks();
+
+      expect(spawnSpy).toHaveBeenCalledWith("builtin-codex-coder", expect.any(String), "task-cx");
+    });
+
+    it("prefers opencode over claude-code when both enabled", async () => {
+      configStore.set("opencode:enabled", "true");
+      configStore.set("claude-code:enabled", "true");
+      insertTask({ id: "task-both1", title: "Code task", column: "backlog" });
+
+      const spawnSpy = vi.spyOn(tl as any, "spawnWorker").mockResolvedValue("Spawned");
+      await (tl as any).autoSpawnUnblockedTasks();
+
+      expect(spawnSpy).toHaveBeenCalledWith("builtin-opencode-coder", expect.any(String), "task-both1");
+    });
+
+    it("prefers claude-code over codex when both enabled", async () => {
+      configStore.set("claude-code:enabled", "true");
+      configStore.set("codex:enabled", "true");
+      insertTask({ id: "task-both2", title: "Code task", column: "backlog" });
+
+      const spawnSpy = vi.spyOn(tl as any, "spawnWorker").mockResolvedValue("Spawned");
+      await (tl as any).autoSpawnUnblockedTasks();
+
+      expect(spawnSpy).toHaveBeenCalledWith("builtin-claude-code-coder", expect.any(String), "task-both2");
+    });
+
+    it("uses browser-agent for tasks mentioning Chrome/browser instead of coding agent", async () => {
+      configStore.set("opencode:enabled", "true");
+      insertTask({ id: "task-br1", title: "Launch Chrome and navigate to dashboard", column: "backlog" });
+
+      const spawnSpy = vi.spyOn(tl as any, "spawnWorker").mockResolvedValue("Spawned");
+      await (tl as any).autoSpawnUnblockedTasks();
+
+      expect(spawnSpy).toHaveBeenCalledWith("builtin-browser-agent", expect.any(String), "task-br1");
+    });
+
+    it("uses browser-agent for tasks mentioning desktop app", async () => {
+      configStore.set("opencode:enabled", "true");
+      insertTask({ id: "task-br2", title: "Open desktop app and take screenshot", column: "backlog" });
+
+      const spawnSpy = vi.spyOn(tl as any, "spawnWorker").mockResolvedValue("Spawned");
+      await (tl as any).autoSpawnUnblockedTasks();
+
+      expect(spawnSpy).toHaveBeenCalledWith("builtin-browser-agent", expect.any(String), "task-br2");
+    });
+  });
+
+  // ─── searchRegistry ─────────────────────────────────────────
+
+  describe("searchRegistry", () => {
+    it("hides builtin-coder when opencode is enabled", () => {
+      configStore.set("opencode:enabled", "true");
+      const result = (tl as any).searchRegistry("code");
+      expect(result).not.toContain("builtin-coder");
+    });
+
+    it("shows builtin-coder when no external agent is enabled", () => {
+      const result = (tl as any).searchRegistry("code");
+      expect(result).toContain("builtin-coder");
+    });
+
+    it("hides disabled external agents", () => {
+      configStore.set("opencode:enabled", "true");
+      const result = (tl as any).searchRegistry("code");
+      expect(result).not.toContain("builtin-claude-code-coder");
+      expect(result).not.toContain("builtin-codex-coder");
+    });
+
+    it("shows only enabled external agents", () => {
+      configStore.set("claude-code:enabled", "true");
+      const result = (tl as any).searchRegistry("code");
+      expect(result).toContain("builtin-claude-code-coder");
+      expect(result).not.toContain("builtin-opencode-coder");
+      expect(result).not.toContain("builtin-codex-coder");
+    });
   });
 });

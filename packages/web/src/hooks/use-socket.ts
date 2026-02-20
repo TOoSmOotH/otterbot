@@ -5,7 +5,7 @@ import { useAgentStore } from "../stores/agent-store";
 import { useProjectStore } from "../stores/project-store";
 import { useAgentActivityStore } from "../stores/agent-activity-store";
 import { useEnvironmentStore } from "../stores/environment-store";
-import { useOpenCodeStore } from "../stores/opencode-store";
+import { useCodingAgentStore } from "../stores/coding-agent-store";
 
 export function useSocket() {
   const initialized = useRef(false);
@@ -30,14 +30,14 @@ export function useSocket() {
   const endAgentThinking = useAgentActivityStore((s) => s.endThinking);
   const addAgentToolCall = useAgentActivityStore((s) => s.addToolCall);
   const loadWorld = useEnvironmentStore((s) => s.loadWorld);
-  const startOpenCodeSession = useOpenCodeStore((s) => s.startSession);
-  const endOpenCodeSession = useOpenCodeStore((s) => s.endSession);
-  const addOpenCodeMessage = useOpenCodeStore((s) => s.addMessage);
-  const appendOpenCodePartDelta = useOpenCodeStore((s) => s.appendPartDelta);
-  const setAwaitingInput = useOpenCodeStore((s) => s.setAwaitingInput);
-  const clearAwaitingInput = useOpenCodeStore((s) => s.clearAwaitingInput);
-  const setPendingPermission = useOpenCodeStore((s) => s.setPendingPermission);
-  const clearPendingPermission = useOpenCodeStore((s) => s.clearPendingPermission);
+  const startCodingAgentSession = useCodingAgentStore((s) => s.startSession);
+  const endCodingAgentSession = useCodingAgentStore((s) => s.endSession);
+  const addCodingAgentMessage = useCodingAgentStore((s) => s.addMessage);
+  const appendCodingAgentPartDelta = useCodingAgentStore((s) => s.appendPartDelta);
+  const setAwaitingInput = useCodingAgentStore((s) => s.setAwaitingInput);
+  const clearAwaitingInput = useCodingAgentStore((s) => s.clearAwaitingInput);
+  const setPendingPermission = useCodingAgentStore((s) => s.setPendingPermission);
+  const clearPendingPermission = useCodingAgentStore((s) => s.clearPendingPermission);
 
   useEffect(() => {
     if (initialized.current) return;
@@ -149,22 +149,22 @@ export function useSocket() {
       loadWorld();
     });
 
-    socket.on("opencode:session-start", (data) => {
-      startOpenCodeSession(data);
+    socket.on("codeagent:session-start", (data) => {
+      startCodingAgentSession(data);
     });
 
-    socket.on("opencode:session-end", (data) => {
-      endOpenCodeSession(data.agentId, data.sessionId, data.status, data.diff);
+    socket.on("codeagent:session-end", (data) => {
+      endCodingAgentSession(data.agentId, data.sessionId, data.status, data.diff);
       clearAwaitingInput(data.agentId);
       clearPendingPermission(data.agentId);
     });
 
-    socket.on("opencode:message", (data) => {
-      addOpenCodeMessage(data.agentId, data.sessionId, data.message);
+    socket.on("codeagent:message", (data) => {
+      addCodingAgentMessage(data.agentId, data.sessionId, data.message);
     });
 
-    socket.on("opencode:part-delta", (data) => {
-      appendOpenCodePartDelta(
+    socket.on("codeagent:part-delta", (data) => {
+      appendCodingAgentPartDelta(
         data.agentId,
         data.sessionId,
         data.messageId,
@@ -176,11 +176,11 @@ export function useSocket() {
       );
     });
 
-    socket.on("opencode:awaiting-input", (data) => {
+    socket.on("codeagent:awaiting-input", (data) => {
       setAwaitingInput(data.agentId, { sessionId: data.sessionId, prompt: data.prompt });
     });
 
-    socket.on("opencode:permission-request", (data) => {
+    socket.on("codeagent:permission-request", (data) => {
       setPendingPermission(data.agentId, { sessionId: data.sessionId, permission: data.permission });
     });
 
@@ -207,12 +207,12 @@ export function useSocket() {
       socket.off("agent:tool-call");
       socket.off("world:zone-added");
       socket.off("world:zone-removed");
-      socket.off("opencode:session-start");
-      socket.off("opencode:session-end");
-      socket.off("opencode:message");
-      socket.off("opencode:part-delta");
-      socket.off("opencode:awaiting-input");
-      socket.off("opencode:permission-request");
+      socket.off("codeagent:session-start");
+      socket.off("codeagent:session-end");
+      socket.off("codeagent:message");
+      socket.off("codeagent:part-delta");
+      socket.off("codeagent:awaiting-input");
+      socket.off("codeagent:permission-request");
     };
   }, []);
 

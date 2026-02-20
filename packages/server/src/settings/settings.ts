@@ -1070,6 +1070,178 @@ export async function testOpenCodeConnection(): Promise<TestResult> {
 }
 
 // ---------------------------------------------------------------------------
+// Claude Code settings
+// ---------------------------------------------------------------------------
+
+export interface ClaudeCodeSettingsResponse {
+  enabled: boolean;
+  authMode: "api-key" | "oauth";
+  apiKeySet: boolean;
+  model: string;
+  approvalMode: "full-auto" | "auto-edit";
+  timeoutMs: number;
+  maxTurns: number;
+}
+
+export function getClaudeCodeSettings(): ClaudeCodeSettingsResponse {
+  return {
+    enabled: getConfig("claude-code:enabled") === "true",
+    authMode: (getConfig("claude-code:auth_mode") ?? "api-key") as "api-key" | "oauth",
+    apiKeySet: !!getConfig("claude-code:api_key"),
+    model: getConfig("claude-code:model") ?? "claude-sonnet-4-5-20250929",
+    approvalMode: (getConfig("claude-code:approval_mode") ?? "full-auto") as "full-auto" | "auto-edit",
+    timeoutMs: parseInt(getConfig("claude-code:timeout_ms") ?? "1200000", 10),
+    maxTurns: parseInt(getConfig("claude-code:max_turns") ?? "50", 10),
+  };
+}
+
+export async function updateClaudeCodeSettings(data: {
+  enabled?: boolean;
+  authMode?: "api-key" | "oauth";
+  apiKey?: string;
+  model?: string;
+  approvalMode?: "full-auto" | "auto-edit";
+  timeoutMs?: number;
+  maxTurns?: number;
+}): Promise<void> {
+  if (data.enabled !== undefined) {
+    setConfig("claude-code:enabled", data.enabled ? "true" : "false");
+  }
+  if (data.authMode !== undefined) {
+    setConfig("claude-code:auth_mode", data.authMode);
+  }
+  if (data.apiKey !== undefined) {
+    if (data.apiKey === "") {
+      deleteConfig("claude-code:api_key");
+    } else {
+      setConfig("claude-code:api_key", data.apiKey);
+    }
+  }
+  if (data.model !== undefined) {
+    setConfig("claude-code:model", data.model);
+  }
+  if (data.approvalMode !== undefined) {
+    setConfig("claude-code:approval_mode", data.approvalMode);
+  }
+  if (data.timeoutMs !== undefined) {
+    setConfig("claude-code:timeout_ms", String(data.timeoutMs));
+  }
+  if (data.maxTurns !== undefined) {
+    setConfig("claude-code:max_turns", String(data.maxTurns));
+  }
+}
+
+export async function testClaudeCodeConnection(): Promise<TestResult> {
+  const start = Date.now();
+
+  try {
+    const { isClaudeCodeInstalled, isClaudeCodeReady } = await import("../coding-agents/claude-code-manager.js");
+
+    if (!isClaudeCodeInstalled()) {
+      return { ok: false, error: "Claude Code CLI not found. Install with: npm install -g @anthropic-ai/claude-code" };
+    }
+
+    if (!isClaudeCodeReady()) {
+      const authMode = getConfig("claude-code:auth_mode") ?? "api-key";
+      if (authMode === "api-key") {
+        return { ok: false, error: "API key not configured." };
+      }
+      return { ok: false, error: "OAuth session not found. Run `claude login` to authenticate." };
+    }
+
+    return { ok: true, latencyMs: Date.now() - start };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "Unknown error",
+    };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Codex settings
+// ---------------------------------------------------------------------------
+
+export interface CodexSettingsResponse {
+  enabled: boolean;
+  authMode: "api-key" | "oauth";
+  apiKeySet: boolean;
+  model: string;
+  approvalMode: "full-auto" | "suggest" | "ask";
+  timeoutMs: number;
+}
+
+export function getCodexSettings(): CodexSettingsResponse {
+  return {
+    enabled: getConfig("codex:enabled") === "true",
+    authMode: (getConfig("codex:auth_mode") ?? "api-key") as "api-key" | "oauth",
+    apiKeySet: !!getConfig("codex:api_key"),
+    model: getConfig("codex:model") ?? "codex-mini",
+    approvalMode: (getConfig("codex:approval_mode") ?? "full-auto") as "full-auto" | "suggest" | "ask",
+    timeoutMs: parseInt(getConfig("codex:timeout_ms") ?? "1200000", 10),
+  };
+}
+
+export async function updateCodexSettings(data: {
+  enabled?: boolean;
+  authMode?: "api-key" | "oauth";
+  apiKey?: string;
+  model?: string;
+  approvalMode?: "full-auto" | "suggest" | "ask";
+  timeoutMs?: number;
+}): Promise<void> {
+  if (data.enabled !== undefined) {
+    setConfig("codex:enabled", data.enabled ? "true" : "false");
+  }
+  if (data.authMode !== undefined) {
+    setConfig("codex:auth_mode", data.authMode);
+  }
+  if (data.apiKey !== undefined) {
+    if (data.apiKey === "") {
+      deleteConfig("codex:api_key");
+    } else {
+      setConfig("codex:api_key", data.apiKey);
+    }
+  }
+  if (data.model !== undefined) {
+    setConfig("codex:model", data.model);
+  }
+  if (data.approvalMode !== undefined) {
+    setConfig("codex:approval_mode", data.approvalMode);
+  }
+  if (data.timeoutMs !== undefined) {
+    setConfig("codex:timeout_ms", String(data.timeoutMs));
+  }
+}
+
+export async function testCodexConnection(): Promise<TestResult> {
+  const start = Date.now();
+
+  try {
+    const { isCodexInstalled, isCodexReady } = await import("../coding-agents/codex-manager.js");
+
+    if (!isCodexInstalled()) {
+      return { ok: false, error: "Codex CLI not found. Install with: npm install -g @openai/codex" };
+    }
+
+    if (!isCodexReady()) {
+      const authMode = getConfig("codex:auth_mode") ?? "api-key";
+      if (authMode === "api-key") {
+        return { ok: false, error: "API key not configured." };
+      }
+      return { ok: false, error: "OAuth session not found. Run `codex login` to authenticate." };
+    }
+
+    return { ok: true, latencyMs: Date.now() - start };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "Unknown error",
+    };
+  }
+}
+
+// ---------------------------------------------------------------------------
 // GitHub settings
 // ---------------------------------------------------------------------------
 

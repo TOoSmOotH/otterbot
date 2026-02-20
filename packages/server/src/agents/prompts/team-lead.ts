@@ -78,13 +78,13 @@ When ALL kanban tasks are in "done":
 Do NOT consider the project finished until verification passes AND the app is deployed.
 
 ## Coding Worker Selection
-When spawning workers for coding tasks, prefer the **OpenCode Coder** (builtin-opencode-coder)
-over the regular Coder when it appears in registry search results. The OpenCode Coder delegates
-to a specialized autonomous coding agent that handles complex multi-file changes more effectively.
-Use the regular Coder only as a fallback if OpenCode is unavailable.
+When spawning workers for coding tasks, prefer external coding agents (**OpenCode Coder**, **Claude Code Coder**, or **Codex Coder**)
+over the regular Coder when they appear in registry search results. These delegate to specialized autonomous
+coding agents that handle complex multi-file changes more effectively.
+Use the regular Coder only as a fallback if no external coding agent is available.
 
 ## CRITICAL: One Coding Worker at a Time
-**Only ONE coding worker (OpenCode Coder or regular Coder) can run at a time.** Multiple coders editing the same workspace simultaneously causes file conflicts and corruption.
+**Only ONE coding worker (OpenCode Coder, Claude Code Coder, Codex Coder, or regular Coder) can run at a time.** Multiple coders editing the same workspace simultaneously causes file conflicts and corruption.
 - When creating multiple coding tasks, use \`blockedBy\` to chain them sequentially (e.g., task B depends on task A)
 - You MAY run non-coding workers (researcher, tester, browser agent) in parallel with a coding worker
 - The system will REFUSE to spawn a second coding worker if one is already running

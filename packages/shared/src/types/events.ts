@@ -3,7 +3,7 @@ import type { BusMessage, Conversation } from "./message.js";
 import type { RegistryEntry, Project } from "./registry.js";
 import type { KanbanTask } from "./kanban.js";
 import type { SceneZone } from "./environment.js";
-import type { OpenCodeSession, OpenCodeMessage, OpenCodeFileDiff, OpenCodePermission } from "./opencode.js";
+import type { CodingAgentSession, CodingAgentMessage, CodingAgentFileDiff, CodingAgentPermission } from "./coding-agent.js";
 
 /** Events emitted from server to client */
 export interface ServerToClientEvents {
@@ -33,13 +33,13 @@ export interface ServerToClientEvents {
   "admin-assistant:stream": (data: { token: string; messageId: string }) => void;
   "admin-assistant:thinking": (data: { token: string; messageId: string }) => void;
   "admin-assistant:thinking-end": (data: { messageId: string }) => void;
-  "opencode:session-start": (data: OpenCodeSession) => void;
-  "opencode:session-end": (data: { agentId: string; sessionId: string; status: string; diff: OpenCodeFileDiff[] | null }) => void;
-  "opencode:event": (data: { agentId: string; sessionId: string; type: string; properties: Record<string, unknown> }) => void;
-  "opencode:message": (data: { agentId: string; sessionId: string; message: OpenCodeMessage }) => void;
-  "opencode:part-delta": (data: { agentId: string; sessionId: string; messageId: string; partId: string; type: string; delta: string; toolName?: string; toolState?: string }) => void;
-  "opencode:awaiting-input": (data: { agentId: string; sessionId: string; prompt: string }) => void;
-  "opencode:permission-request": (data: { agentId: string; sessionId: string; permission: OpenCodePermission }) => void;
+  "codeagent:session-start": (data: CodingAgentSession) => void;
+  "codeagent:session-end": (data: { agentId: string; sessionId: string; status: string; diff: CodingAgentFileDiff[] | null }) => void;
+  "codeagent:event": (data: { agentId: string; sessionId: string; type: string; properties: Record<string, unknown> }) => void;
+  "codeagent:message": (data: { agentId: string; sessionId: string; message: CodingAgentMessage }) => void;
+  "codeagent:part-delta": (data: { agentId: string; sessionId: string; messageId: string; partId: string; type: string; delta: string; toolName?: string; toolState?: string }) => void;
+  "codeagent:awaiting-input": (data: { agentId: string; sessionId: string; prompt: string }) => void;
+  "codeagent:permission-request": (data: { agentId: string; sessionId: string; permission: CodingAgentPermission }) => void;
 }
 
 /** Events emitted from client to server */
@@ -93,11 +93,11 @@ export interface ClientToServerEvents {
     data: { agentId: string },
     callback: (result: { messages: BusMessage[]; activity: AgentActivityRecord[] }) => void,
   ) => void;
-  "opencode:respond": (
+  "codeagent:respond": (
     data: { agentId: string; sessionId: string; content: string },
     callback?: (ack: { ok: boolean; error?: string }) => void,
   ) => void;
-  "opencode:permission-respond": (
+  "codeagent:permission-respond": (
     data: { agentId: string; sessionId: string; permissionId: string; response: "once" | "always" | "reject" },
     callback?: (ack: { ok: boolean; error?: string }) => void,
   ) => void;

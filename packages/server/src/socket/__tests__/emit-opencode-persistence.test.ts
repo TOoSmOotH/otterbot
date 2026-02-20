@@ -54,7 +54,7 @@ describe("emitOpenCodeEvent — DB persistence", () => {
       });
 
       const db = getDb();
-      const rows = db.select().from(schema.opencodeSessions).all();
+      const rows = db.select().from(schema.codingAgentSessions).all();
       expect(rows).toHaveLength(1);
       expect(rows[0].agentId).toBe("agent-1");
       expect(rows[0].task).toBe("Build feature X");
@@ -69,7 +69,7 @@ describe("emitOpenCodeEvent — DB persistence", () => {
         properties: { task: "Do stuff" },
       });
 
-      expect(io.emit).toHaveBeenCalledWith("opencode:session-start", expect.objectContaining({
+      expect(io.emit).toHaveBeenCalledWith("codeagent:session-start", expect.objectContaining({
         agentId: "agent-1",
         task: "Do stuff",
       }));
@@ -91,7 +91,7 @@ describe("emitOpenCodeEvent — DB persistence", () => {
       });
 
       const db = getDb();
-      const rows = db.select().from(schema.opencodeSessions).all();
+      const rows = db.select().from(schema.codingAgentSessions).all();
       expect(rows).toHaveLength(1);
       expect(rows[0].status).toBe("completed");
       expect(rows[0].completedAt).toBeDefined();
@@ -114,7 +114,7 @@ describe("emitOpenCodeEvent — DB persistence", () => {
       });
 
       const db = getDb();
-      const diffRows = db.select().from(schema.opencodeDiffs).all();
+      const diffRows = db.select().from(schema.codingAgentDiffs).all();
       expect(diffRows).toHaveLength(2);
       expect(diffRows.map((r) => r.path).sort()).toEqual(["src/a.ts", "src/b.ts"]);
       expect(diffRows.find((r) => r.path === "src/a.ts")!.additions).toBe(10);
@@ -132,7 +132,7 @@ describe("emitOpenCodeEvent — DB persistence", () => {
       });
 
       const db = getDb();
-      const diffRows = db.select().from(schema.opencodeDiffs).all();
+      const diffRows = db.select().from(schema.codingAgentDiffs).all();
       expect(diffRows).toHaveLength(0);
     });
   });
@@ -168,7 +168,7 @@ describe("emitOpenCodeEvent — DB persistence", () => {
       });
 
       const db = getDb();
-      const msgs = db.select().from(schema.opencodeMessages).all();
+      const msgs = db.select().from(schema.codingAgentMessages).all();
       expect(msgs).toHaveLength(1);
       expect(msgs[0].parts).toHaveLength(1);
       expect((msgs[0].parts as any[])[0].content).toBe("Hello world");
@@ -201,7 +201,7 @@ describe("emitOpenCodeEvent — DB persistence", () => {
       });
 
       const db = getDb();
-      const msgs = db.select().from(schema.opencodeMessages).all();
+      const msgs = db.select().from(schema.codingAgentMessages).all();
       expect(msgs).toHaveLength(1);
       expect(msgs[0].id).toBe("msg-1");
       expect(msgs[0].sessionId).toBe("sess-1");
@@ -251,7 +251,7 @@ describe("emitOpenCodeEvent — DB persistence", () => {
       });
 
       const db = getDb();
-      const msgs = db.select().from(schema.opencodeMessages).all();
+      const msgs = db.select().from(schema.codingAgentMessages).all();
       expect(msgs).toHaveLength(1); // upserted, not duplicated
       expect((msgs[0].parts as any[])[0].content).toBe("Hello world");
     });
@@ -264,7 +264,7 @@ describe("emitOpenCodeEvent — DB persistence", () => {
       });
 
       const db = getDb();
-      let rows = db.select().from(schema.opencodeSessions).all();
+      let rows = db.select().from(schema.codingAgentSessions).all();
       expect(rows[0].sessionId).toBe("");
 
       // message.updated with real sessionId
@@ -275,7 +275,7 @@ describe("emitOpenCodeEvent — DB persistence", () => {
         },
       });
 
-      rows = db.select().from(schema.opencodeSessions).all();
+      rows = db.select().from(schema.codingAgentSessions).all();
       expect(rows[0].sessionId).toBe("sess-real");
     });
 
@@ -293,7 +293,7 @@ describe("emitOpenCodeEvent — DB persistence", () => {
       });
 
       const db = getDb();
-      const msgs = db.select().from(schema.opencodeMessages).all();
+      const msgs = db.select().from(schema.codingAgentMessages).all();
       expect(msgs).toHaveLength(1);
       expect(msgs[0].role).toBe("user");
     });
@@ -350,7 +350,7 @@ describe("emitOpenCodeEvent — DB persistence", () => {
       const db = getDb();
 
       // Verify session
-      const sessions = db.select().from(schema.opencodeSessions).all();
+      const sessions = db.select().from(schema.codingAgentSessions).all();
       expect(sessions).toHaveLength(1);
       expect(sessions[0].task).toBe("Implement feature");
       expect(sessions[0].projectId).toBe("proj-1");
@@ -359,7 +359,7 @@ describe("emitOpenCodeEvent — DB persistence", () => {
       expect(sessions[0].completedAt).toBeDefined();
 
       // Verify messages
-      const msgs = db.select().from(schema.opencodeMessages).all();
+      const msgs = db.select().from(schema.codingAgentMessages).all();
       expect(msgs).toHaveLength(1);
       expect(msgs[0].parts).toHaveLength(2);
       const parts = msgs[0].parts as any[];
@@ -367,7 +367,7 @@ describe("emitOpenCodeEvent — DB persistence", () => {
       expect(parts.find((p: any) => p.id === "p2").toolName).toBe("file_write");
 
       // Verify diffs
-      const diffs = db.select().from(schema.opencodeDiffs).all();
+      const diffs = db.select().from(schema.codingAgentDiffs).all();
       expect(diffs).toHaveLength(1);
       expect(diffs[0].path).toBe("src/feature.ts");
       expect(diffs[0].additions).toBe(20);
@@ -394,7 +394,7 @@ describe("emitOpenCodeEvent — DB persistence", () => {
       });
 
       const db = getDb();
-      const sessions = db.select().from(schema.opencodeSessions).all();
+      const sessions = db.select().from(schema.codingAgentSessions).all();
       expect(sessions).toHaveLength(2);
       const a = sessions.find((s) => s.agentId === "agent-1")!;
       const b = sessions.find((s) => s.agentId === "agent-2")!;

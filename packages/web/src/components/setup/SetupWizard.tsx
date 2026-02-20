@@ -1230,11 +1230,11 @@ export function SetupWizard() {
           {step === 8 && (
             <div className="space-y-4">
               <h2 className="text-sm font-medium">
-                8. Configure OpenCode coding agent
+                8. Configure Coding Agents
               </h2>
               <p className="text-xs text-muted-foreground">
-                OpenCode is an autonomous coding agent that handles multi-file edits, refactoring, and complex code changes.
-                When enabled, the team lead will prefer OpenCode for coding tasks.
+                Coding agents are autonomous tools that handle multi-file edits, refactoring, and complex code changes.
+                Configure OpenCode below. Claude Code and Codex can be configured later in Settings &gt; Coding Agents.
               </p>
 
               {/* Enable toggle */}

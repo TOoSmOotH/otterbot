@@ -1,16 +1,30 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from "react";
-import { useOpenCodeStore } from "../../stores/opencode-store";
+import { useCodingAgentStore } from "../../stores/coding-agent-store";
 import { useAgentStore } from "../../stores/agent-store";
 import { getSocket } from "../../lib/socket";
 import { MarkdownContent } from "../chat/MarkdownContent";
-import type { OpenCodeSession, OpenCodeMessage, OpenCodeFileDiff, OpenCodePermission } from "@otterbot/shared";
+import type { CodingAgentSession, CodingAgentMessage, CodingAgentFileDiff, CodingAgentPermission, CodingAgentType } from "@otterbot/shared";
 
 type PartBuffer = { type: string; content: string; toolName?: string; toolState?: string };
 
-const EMPTY_MESSAGES: OpenCodeMessage[] = [];
-const EMPTY_DIFFS: OpenCodeFileDiff[] = [];
+const EMPTY_MESSAGES: CodingAgentMessage[] = [];
+const EMPTY_DIFFS: CodingAgentFileDiff[] = [];
 
-function StatusDot({ status }: { status: OpenCodeSession["status"] }) {
+/** Display labels for coding agent types */
+const AGENT_TYPE_LABELS: Record<CodingAgentType, string> = {
+  opencode: "OpenCode",
+  "claude-code": "Claude Code",
+  codex: "Codex",
+};
+
+/** Accent colors per agent type */
+const AGENT_TYPE_COLORS: Record<CodingAgentType, string> = {
+  opencode: "bg-blue-500",
+  "claude-code": "bg-orange-500",
+  codex: "bg-green-500",
+};
+
+function StatusDot({ status }: { status: CodingAgentSession["status"] }) {
   const colors: Record<string, string> = {
     active: "bg-green-400 animate-pulse",
     idle: "bg-yellow-400",
@@ -27,7 +41,7 @@ function SessionSidebar({
   selectedAgentId,
   onSelect,
 }: {
-  sessions: Map<string, OpenCodeSession>;
+  sessions: Map<string, CodingAgentSession>;
   selectedAgentId: string | null;
   onSelect: (agentId: string) => void;
 }) {
@@ -39,7 +53,7 @@ function SessionSidebar({
   if (entries.length === 0) {
     return (
       <div className="p-3 text-xs text-muted-foreground">
-        No active OpenCode sessions. Start a coding task to see live output here.
+        No active coding sessions. Start a coding task to see live output here.
       </div>
     );
   }
@@ -187,7 +201,7 @@ function PartContent({
   );
 }
 
-function DiffSummary({ diffs }: { diffs: OpenCodeFileDiff[] }) {
+function DiffSummary({ diffs }: { diffs: CodingAgentFileDiff[] }) {
   if (diffs.length === 0) return null;
   return (
     <div className="border-t border-border mt-2 pt-2">
@@ -206,7 +220,7 @@ function DiffSummary({ diffs }: { diffs: OpenCodeFileDiff[] }) {
 }
 
 function InputPrompt({ agentId }: { agentId: string }) {
-  const awaiting = useOpenCodeStore((s) => s.awaitingInput.get(agentId));
+  const awaiting = useCodingAgentStore((s) => s.awaitingInput.get(agentId));
   const [value, setValue] = useState("");
   const [sending, setSending] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -222,7 +236,7 @@ function InputPrompt({ agentId }: { agentId: string }) {
   const handleSubmit = useCallback(() => {
     if (!awaiting || !value.trim() || sending) return;
     setSending(true);
-    getSocket().emit("opencode:respond", {
+    getSocket().emit("codeagent:respond", {
       agentId,
       sessionId: awaiting.sessionId,
       content: value.trim(),
@@ -239,7 +253,7 @@ function InputPrompt({ agentId }: { agentId: string }) {
     <div className="border-t border-yellow-500/30 bg-yellow-500/5 px-3 py-2">
       <div className="flex items-center gap-2 mb-1.5">
         <span className="inline-block w-1.5 h-1.5 rounded-full bg-yellow-400 animate-pulse" />
-        <span className="text-xs text-yellow-400 font-medium">OpenCode is waiting for your input</span>
+        <span className="text-xs text-yellow-400 font-medium">Coding agent is waiting for your input</span>
       </div>
       <div className="flex gap-2">
         <input
@@ -270,8 +284,8 @@ function InputPrompt({ agentId }: { agentId: string }) {
 }
 
 function PermissionPrompt({ agentId }: { agentId: string }) {
-  const pending = useOpenCodeStore((s) => s.pendingPermission.get(agentId));
-  const clearPendingPermission = useOpenCodeStore((s) => s.clearPendingPermission);
+  const pending = useCodingAgentStore((s) => s.pendingPermission.get(agentId));
+  const clearPendingPermission = useCodingAgentStore((s) => s.clearPendingPermission);
   const [sending, setSending] = useState(false);
 
   useEffect(() => {
@@ -281,7 +295,7 @@ function PermissionPrompt({ agentId }: { agentId: string }) {
   const handleRespond = useCallback((response: "once" | "always" | "reject") => {
     if (!pending || sending) return;
     setSending(true);
-    getSocket().emit("opencode:permission-respond", {
+    getSocket().emit("codeagent:permission-respond", {
       agentId,
       sessionId: pending.sessionId,
       permissionId: pending.permission.id,
@@ -341,12 +355,12 @@ function PermissionPrompt({ agentId }: { agentId: string }) {
 }
 
 function SessionContent({ agentId }: { agentId: string }) {
-  const session = useOpenCodeStore((s) => s.sessions.get(agentId));
+  const session = useCodingAgentStore((s) => s.sessions.get(agentId));
   const agent = useAgentStore((s) => s.agents.get(agentId));
   const sessionId = session?.id || "";
-  const sessionMessages = useOpenCodeStore((s) => s.messages.get(sessionId) ?? EMPTY_MESSAGES);
-  const partBuffers = useOpenCodeStore((s) => s.partBuffers);
-  const sessionDiffs = useOpenCodeStore((s) => s.diffs.get(sessionId) ?? EMPTY_DIFFS);
+  const sessionMessages = useCodingAgentStore((s) => s.messages.get(sessionId) ?? EMPTY_MESSAGES);
+  const partBuffers = useCodingAgentStore((s) => s.partBuffers);
+  const sessionDiffs = useCodingAgentStore((s) => s.diffs.get(sessionId) ?? EMPTY_DIFFS);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const autoScrollRef = useRef(true);
@@ -515,9 +529,9 @@ function SessionContent({ agentId }: { agentId: string }) {
 }
 
 export function CodeView() {
-  const sessions = useOpenCodeStore((s) => s.sessions);
-  const selectedAgentId = useOpenCodeStore((s) => s.selectedAgentId);
-  const selectAgent = useOpenCodeStore((s) => s.selectAgent);
+  const sessions = useCodingAgentStore((s) => s.sessions);
+  const selectedAgentId = useCodingAgentStore((s) => s.selectedAgentId);
+  const selectAgent = useCodingAgentStore((s) => s.selectAgent);
 
   return (
     <div className="h-full flex bg-[#0d1117] text-foreground">

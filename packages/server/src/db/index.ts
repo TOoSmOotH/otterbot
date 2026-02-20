@@ -355,18 +355,20 @@ export async function migrateDb() {
     // Column already exists — ignore
   }
 
-  db.run(sql`CREATE TABLE IF NOT EXISTS opencode_sessions (
+  // Coding agent session tables (renamed from opencode_*)
+  db.run(sql`CREATE TABLE IF NOT EXISTS coding_agent_sessions (
     id TEXT PRIMARY KEY,
     agent_id TEXT NOT NULL,
     session_id TEXT NOT NULL DEFAULT '',
     project_id TEXT,
     task TEXT NOT NULL DEFAULT '',
+    agent_type TEXT NOT NULL DEFAULT 'opencode',
     status TEXT NOT NULL DEFAULT 'active',
     started_at TEXT NOT NULL,
     completed_at TEXT
   )`);
 
-  db.run(sql`CREATE TABLE IF NOT EXISTS opencode_messages (
+  db.run(sql`CREATE TABLE IF NOT EXISTS coding_agent_messages (
     id TEXT PRIMARY KEY,
     session_id TEXT NOT NULL,
     agent_id TEXT NOT NULL,
@@ -375,13 +377,35 @@ export async function migrateDb() {
     created_at TEXT NOT NULL
   )`);
 
-  db.run(sql`CREATE TABLE IF NOT EXISTS opencode_diffs (
+  db.run(sql`CREATE TABLE IF NOT EXISTS coding_agent_diffs (
     id TEXT PRIMARY KEY,
     session_id TEXT NOT NULL,
     path TEXT NOT NULL,
     additions INTEGER NOT NULL DEFAULT 0,
     deletions INTEGER NOT NULL DEFAULT 0
   )`);
+
+  // Idempotent migration: rename old opencode_* tables to coding_agent_*
+  try {
+    // Check if old tables exist and new ones are empty (migration needed)
+    const oldExists = db.get(sql`SELECT name FROM sqlite_master WHERE type='table' AND name='opencode_sessions'`);
+    if (oldExists) {
+      // Copy data from old tables to new ones
+      db.run(sql`INSERT OR IGNORE INTO coding_agent_sessions (id, agent_id, session_id, project_id, task, agent_type, status, started_at, completed_at)
+        SELECT id, agent_id, session_id, project_id, task, 'opencode', status, started_at, completed_at FROM opencode_sessions`);
+      db.run(sql`INSERT OR IGNORE INTO coding_agent_messages (id, session_id, agent_id, role, parts, created_at)
+        SELECT id, session_id, agent_id, role, parts, created_at FROM opencode_messages`);
+      db.run(sql`INSERT OR IGNORE INTO coding_agent_diffs (id, session_id, path, additions, deletions)
+        SELECT id, session_id, path, additions, deletions FROM opencode_diffs`);
+      // Drop old tables
+      db.run(sql`DROP TABLE IF EXISTS opencode_sessions`);
+      db.run(sql`DROP TABLE IF EXISTS opencode_messages`);
+      db.run(sql`DROP TABLE IF EXISTS opencode_diffs`);
+      console.log("[DB] Migrated opencode_* tables to coding_agent_*");
+    }
+  } catch (err) {
+    console.warn("[DB] opencode → coding_agent table migration (non-fatal):", err);
+  }
 
   // Seed built-in registry entries on every startup (dynamic import to avoid circular dep)
   const { seedBuiltIns } = await import("./seed.js");

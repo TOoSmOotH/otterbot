@@ -51,7 +51,7 @@ import {
   emitAgentThinkingEnd,
   emitAgentToolCall,
   emitAgentDestroyed,
-  emitOpenCodeEvent,
+  emitCodingAgentEvent,
 } from "./socket/handlers.js";
 import {
   isSetupComplete,
@@ -119,6 +119,12 @@ import {
   getOpenCodeSettings,
   updateOpenCodeSettings,
   testOpenCodeConnection,
+  getClaudeCodeSettings,
+  updateClaudeCodeSettings,
+  testClaudeCodeConnection,
+  getCodexSettings,
+  updateCodexSettings,
+  testCodexConnection,
   getGitHubSettings,
   updateGitHubSettings,
   testGitHubConnection,
@@ -363,33 +369,33 @@ async function main() {
 
   let coo: COO | null = null;
 
-  // Resolver map for interactive OpenCode sessions: when a Worker awaits human
+  // Resolver map for interactive coding agent sessions: when a Worker awaits human
   // input, a promise is stored here keyed by `${agentId}:${sessionId}`. The
-  // frontend sends `opencode:respond` which resolves it.
-  const openCodeResponseResolvers = new Map<string, (response: string | null) => void>();
+  // frontend sends `codeagent:respond` which resolves it.
+  const codingAgentResponseResolvers = new Map<string, (response: string | null) => void>();
 
-  function resolveOpenCodeResponse(agentId: string, sessionId: string, content: string): boolean {
+  function resolveCodingAgentResponse(agentId: string, sessionId: string, content: string): boolean {
     const key = `${agentId}:${sessionId}`;
-    const resolver = openCodeResponseResolvers.get(key);
+    const resolver = codingAgentResponseResolvers.get(key);
     if (!resolver) return false;
-    openCodeResponseResolvers.delete(key);
+    codingAgentResponseResolvers.delete(key);
     resolver(content);
     return true;
   }
 
-  // Resolver map for OpenCode permission requests: when a Worker receives a
+  // Resolver map for coding agent permission requests: when a Worker receives a
   // permission.updated event, a promise is stored here keyed by
-  // `${agentId}:${permissionId}`. The frontend sends `opencode:permission-respond`
+  // `${agentId}:${permissionId}`. The frontend sends `codeagent:permission-respond`
   // which resolves it. Auto-approves after 5 minutes to prevent session hang.
   const PERMISSION_TIMEOUT_MS = 5 * 60 * 1000;
-  const openCodePermissionResolvers = new Map<string, { resolve: (response: "once" | "always" | "reject") => void; timeout: ReturnType<typeof setTimeout> }>();
+  const codingAgentPermissionResolvers = new Map<string, { resolve: (response: "once" | "always" | "reject") => void; timeout: ReturnType<typeof setTimeout> }>();
 
-  function resolveOpenCodePermission(agentId: string, permissionId: string, response: "once" | "always" | "reject"): boolean {
+  function resolveCodingAgentPermission(agentId: string, permissionId: string, response: "once" | "always" | "reject"): boolean {
     const key = `${agentId}:${permissionId}`;
-    const entry = openCodePermissionResolvers.get(key);
+    const entry = codingAgentPermissionResolvers.get(key);
     if (!entry) return false;
     clearTimeout(entry.timeout);
-    openCodePermissionResolvers.delete(key);
+    codingAgentPermissionResolvers.delete(key);
     entry.resolve(response);
     // Clear active permission if it matches
     if (activePermissionRequest?.permissionId === permissionId) {
@@ -456,8 +462,8 @@ async function main() {
         onAgentToolCall: (agentId, toolName, args) => {
           emitAgentToolCall(io, agentId, toolName, args);
         },
-        onOpenCodeEvent: (agentId, sessionId, event) => {
-          emitOpenCodeEvent(io, agentId, sessionId, event);
+        onCodingAgentEvent: (agentId, sessionId, event) => {
+          emitCodingAgentEvent(io, agentId, sessionId, event);
           // Emit a chat message for permission requests so users can approve from chat
           if (event.type === "__permission-request") {
             const permission = event.properties.permission as { id: string; type: string; title: string; pattern?: string | string[] } | undefined;
@@ -470,7 +476,7 @@ async function main() {
                 fromAgentId: "coo",
                 toAgentId: null,
                 type: "chat" as any,
-                content: `**Permission Required** — OpenCode wants to **${permission.title || permission.type}**${pattern}\n\nReply **allow**, **always allow**, or **deny**.`,
+                content: `**Permission Required** — Coding agent wants to **${permission.title || permission.type}**${pattern}\n\nReply **allow**, **always allow**, or **deny**.`,
                 conversationId: coo.getCurrentConversationId() ?? undefined,
               });
               io.emit("coo:response", permissionMsg);
@@ -480,16 +486,16 @@ async function main() {
           // Clean up pending resolvers when session ends
           if (event.type === "__session-end") {
             const key = `${agentId}:${sessionId}`;
-            const resolver = openCodeResponseResolvers.get(key);
+            const resolver = codingAgentResponseResolvers.get(key);
             if (resolver) {
-              openCodeResponseResolvers.delete(key);
+              codingAgentResponseResolvers.delete(key);
               resolver(null);
             }
             // Clean up any pending permission resolvers for this agent
-            for (const [pKey, entry] of openCodePermissionResolvers) {
+            for (const [pKey, entry] of codingAgentPermissionResolvers) {
               if (pKey.startsWith(`${agentId}:`)) {
                 clearTimeout(entry.timeout);
-                openCodePermissionResolvers.delete(pKey);
+                codingAgentPermissionResolvers.delete(pKey);
                 entry.resolve("reject");
               }
             }
@@ -498,22 +504,22 @@ async function main() {
             }
           }
         },
-        onOpenCodeAwaitingInput: (agentId, sessionId, prompt) => {
+        onCodingAgentAwaitingInput: (agentId, sessionId, prompt) => {
           return new Promise<string | null>((resolve) => {
             const key = `${agentId}:${sessionId}`;
-            openCodeResponseResolvers.set(key, resolve);
+            codingAgentResponseResolvers.set(key, resolve);
           });
         },
-        onOpenCodePermissionRequest: (agentId, sessionId, permission) => {
+        onCodingAgentPermissionRequest: (agentId, sessionId, permission) => {
           return new Promise<"once" | "always" | "reject">((resolve) => {
             const key = `${agentId}:${permission.id}`;
             const timeout = setTimeout(() => {
               // Auto-approve on timeout to prevent indefinite session hang
-              openCodePermissionResolvers.delete(key);
-              console.warn(`[OpenCode] Permission ${permission.id} timed out — auto-approving`);
+              codingAgentPermissionResolvers.delete(key);
+              console.warn(`[CodingAgent] Permission ${permission.id} timed out — auto-approving`);
               resolve("once");
             }, PERMISSION_TIMEOUT_MS);
-            openCodePermissionResolvers.set(key, { resolve, timeout });
+            codingAgentPermissionResolvers.set(key, { resolve, timeout });
           });
         },
         onAgentDestroyed: (agentId) => {
@@ -539,7 +545,7 @@ async function main() {
           if (!response) return false; // Not a permission response — let normal chat flow handle it
 
           const { agentId, permissionId } = activePermissionRequest;
-          const resolved = resolveOpenCodePermission(agentId, permissionId, response);
+          const resolved = resolveCodingAgentPermission(agentId, permissionId, response);
           if (!resolved) return false;
 
           // Emit confirmation message to chat
@@ -578,7 +584,7 @@ async function main() {
       emitAgentSpawned(io, adminAssistant);
       console.log("AdminAssistant agent started.");
 
-      // Handle admin-assistant messages and opencode:respond from the client
+      // Handle admin-assistant messages and codeagent:respond from the client
       io.on("connection", (socket) => {
         socket.on("admin-assistant:message" as any, async (data: { content: string }) => {
           if (!data?.content) return;
@@ -590,13 +596,13 @@ async function main() {
           });
         });
 
-        socket.on("opencode:respond", (data, callback) => {
-          const resolved = resolveOpenCodeResponse(data.agentId, data.sessionId, data.content);
+        socket.on("codeagent:respond", (data, callback) => {
+          const resolved = resolveCodingAgentResponse(data.agentId, data.sessionId, data.content);
           callback?.({ ok: resolved, error: resolved ? undefined : "No pending request" });
         });
 
-        socket.on("opencode:permission-respond", (data, callback) => {
-          const resolved = resolveOpenCodePermission(data.agentId, data.permissionId, data.response);
+        socket.on("codeagent:permission-respond", (data, callback) => {
+          const resolved = resolveCodingAgentPermission(data.agentId, data.permissionId, data.response);
           callback?.({ ok: resolved, error: resolved ? undefined : "No pending permission request" });
         });
       });
@@ -2155,9 +2161,78 @@ async function main() {
   });
 
   // =========================================================================
-  // OpenCode session history routes
+  // Claude Code settings routes
   // =========================================================================
 
+  app.get("/api/settings/claude-code", async () => {
+    return getClaudeCodeSettings();
+  });
+
+  app.put<{
+    Body: {
+      enabled?: boolean;
+      authMode?: "api-key" | "oauth";
+      apiKey?: string;
+      model?: string;
+      approvalMode?: "full-auto" | "auto-edit";
+      timeoutMs?: number;
+      maxTurns?: number;
+    };
+  }>("/api/settings/claude-code", async (req) => {
+    await updateClaudeCodeSettings(req.body);
+    return { ok: true };
+  });
+
+  app.post("/api/settings/claude-code/test", async () => {
+    return testClaudeCodeConnection();
+  });
+
+  // =========================================================================
+  // Codex settings routes
+  // =========================================================================
+
+  app.get("/api/settings/codex", async () => {
+    return getCodexSettings();
+  });
+
+  app.put<{
+    Body: {
+      enabled?: boolean;
+      authMode?: "api-key" | "oauth";
+      apiKey?: string;
+      model?: string;
+      approvalMode?: "full-auto" | "suggest" | "ask";
+      timeoutMs?: number;
+    };
+  }>("/api/settings/codex", async (req) => {
+    await updateCodexSettings(req.body);
+    return { ok: true };
+  });
+
+  app.post("/api/settings/codex/test", async () => {
+    return testCodexConnection();
+  });
+
+  // =========================================================================
+  // Coding agent session history routes
+  // =========================================================================
+
+  app.get<{
+    Querystring: { limit?: string };
+  }>("/api/codeagent/sessions", async (req) => {
+    const { getDb, schema } = await import("./db/index.js");
+    const { desc } = await import("drizzle-orm");
+    const db = getDb();
+    const limit = Math.min(parseInt(req.query.limit ?? "50", 10) || 50, 200);
+    return db
+      .select()
+      .from(schema.codingAgentSessions)
+      .orderBy(desc(schema.codingAgentSessions.startedAt))
+      .limit(limit)
+      .all();
+  });
+
+  // Keep old route for backwards compatibility
   app.get<{
     Querystring: { limit?: string };
   }>("/api/opencode/sessions", async (req) => {
@@ -2167,22 +2242,22 @@ async function main() {
     const limit = Math.min(parseInt(req.query.limit ?? "50", 10) || 50, 200);
     return db
       .select()
-      .from(schema.opencodeSessions)
-      .orderBy(desc(schema.opencodeSessions.startedAt))
+      .from(schema.codingAgentSessions)
+      .orderBy(desc(schema.codingAgentSessions.startedAt))
       .limit(limit)
       .all();
   });
 
   app.get<{
     Params: { id: string };
-  }>("/api/opencode/sessions/:id", async (req, reply) => {
+  }>("/api/codeagent/sessions/:id", async (req, reply) => {
     const { getDb, schema } = await import("./db/index.js");
     const { eq } = await import("drizzle-orm");
     const db = getDb();
     const session = db
       .select()
-      .from(schema.opencodeSessions)
-      .where(eq(schema.opencodeSessions.id, req.params.id))
+      .from(schema.codingAgentSessions)
+      .where(eq(schema.codingAgentSessions.id, req.params.id))
       .get();
     if (!session) {
       reply.code(404);
@@ -2190,13 +2265,13 @@ async function main() {
     }
     const messages = db
       .select()
-      .from(schema.opencodeMessages)
-      .where(eq(schema.opencodeMessages.sessionId, session.sessionId))
+      .from(schema.codingAgentMessages)
+      .where(eq(schema.codingAgentMessages.sessionId, session.sessionId))
       .all();
     const diffs = db
       .select()
-      .from(schema.opencodeDiffs)
-      .where(eq(schema.opencodeDiffs.sessionId, session.sessionId))
+      .from(schema.codingAgentDiffs)
+      .where(eq(schema.codingAgentDiffs.sessionId, session.sessionId))
       .all();
     return { session, messages, diffs };
   });

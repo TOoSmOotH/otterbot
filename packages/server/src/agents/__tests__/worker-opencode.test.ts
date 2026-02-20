@@ -23,6 +23,22 @@ vi.mock("../../tools/opencode-client.js", () => ({
   })),
 }));
 
+// Mock claude-code-client
+const mockClaudeCodeExecuteTask = vi.fn();
+vi.mock("../../coding-agents/claude-code-client.js", () => ({
+  ClaudeCodeClient: vi.fn().mockImplementation(() => ({
+    executeTask: mockClaudeCodeExecuteTask,
+  })),
+}));
+
+// Mock codex-client
+const mockCodexExecuteTask = vi.fn();
+vi.mock("../../coding-agents/codex-client.js", () => ({
+  CodexClient: vi.fn().mockImplementation(() => ({
+    executeTask: mockCodexExecuteTask,
+  })),
+}));
+
 // Mock opencode-task (formatOpenCodeResult — also dynamic import target)
 vi.mock("../../tools/opencode-task.js", async (importOriginal) => {
   const original = await importOriginal<typeof import("../../tools/opencode-task.js")>();
@@ -275,5 +291,81 @@ describe("Worker — OpenCode delegation", () => {
     await worker.handleMessage(makeDirective(worker.id, "Task"));
 
     expect((worker as any).status).toBe(AgentStatus.Done);
+  });
+
+  // ─── Claude Code dispatch ──────────────────────────────────
+
+  it("calls ClaudeCodeClient for builtin-claude-code-coder", async () => {
+    mockedGetConfig.mockImplementation((key: string) => {
+      if (key === "claude-code:api_key") return "sk-test-key";
+      if (key === "claude-code:auth_mode") return "api-key";
+      return undefined;
+    });
+    mockClaudeCodeExecuteTask.mockResolvedValue({
+      success: true,
+      sessionId: "cc-sess-1",
+      summary: "Created feature Y",
+      diff: { files: [{ path: "src/y.ts", additions: 5, deletions: 0 }] },
+    });
+
+    const worker = createWorker({ registryEntryId: "builtin-claude-code-coder" });
+    await worker.handleMessage(makeDirective(worker.id, "Implement feature Y"));
+
+    expect(mockClaudeCodeExecuteTask).toHaveBeenCalledOnce();
+  });
+
+  // ─── Codex dispatch ────────────────────────────────────────
+
+  it("calls CodexClient for builtin-codex-coder", async () => {
+    mockedGetConfig.mockImplementation((key: string) => {
+      if (key === "codex:api_key") return "sk-codex-key";
+      if (key === "codex:auth_mode") return "api-key";
+      return undefined;
+    });
+    mockCodexExecuteTask.mockResolvedValue({
+      success: true,
+      sessionId: "cx-sess-1",
+      summary: "Implemented feature Z",
+      diff: { files: [{ path: "src/z.ts", additions: 3, deletions: 0 }] },
+    });
+
+    const worker = createWorker({ registryEntryId: "builtin-codex-coder" });
+    await worker.handleMessage(makeDirective(worker.id, "Implement feature Z"));
+
+    expect(mockCodexExecuteTask).toHaveBeenCalledOnce();
+  });
+
+  // ─── Fallback to think() ───────────────────────────────────
+
+  it("falls back to think() for builtin-claude-code-coder when not configured", async () => {
+    mockedGetConfig.mockReturnValue(undefined);
+
+    const worker = createWorker({ registryEntryId: "builtin-claude-code-coder" });
+    const thinkSpy = vi.spyOn(worker as any, "think").mockResolvedValue({
+      text: "think() result",
+      thinking: undefined,
+      hadToolCalls: false,
+    });
+
+    await worker.handleMessage(makeDirective(worker.id, "Do something"));
+
+    expect(mockClaudeCodeExecuteTask).not.toHaveBeenCalled();
+    expect(thinkSpy).toHaveBeenCalled();
+  });
+
+  it("falls back to think() for builtin-codex-coder when not configured", async () => {
+    mockedGetConfig.mockReturnValue(undefined);
+
+    const worker = createWorker({ registryEntryId: "builtin-codex-coder" });
+    const thinkSpy = vi.spyOn(worker as any, "think").mockResolvedValue({
+      text: "think() result",
+      thinking: undefined,
+      hadToolCalls: false,
+    });
+
+    await worker.handleMessage(makeDirective(worker.id, "Do something"));
+
+    expect(mockCodexExecuteTask).not.toHaveBeenCalled();
+    expect(thinkSpy).toHaveBeenCalled();
   });
 });

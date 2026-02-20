@@ -1,44 +1,11 @@
-/** Types for the OpenCode live coding view */
-
-export interface OpenCodeSession {
-  id: string;
-  agentId: string;
-  projectId: string | null;
-  task: string;
-  status: "active" | "idle" | "completed" | "error" | "awaiting-input" | "awaiting-permission";
-  startedAt: string;
-  completedAt?: string;
-}
-
-export interface OpenCodePart {
-  id: string;
-  messageId: string;
-  type: "text" | "reasoning" | "tool-invocation" | "step-start" | "file" | "source-url";
-  content: string;
-  toolName?: string;
-  toolArgs?: Record<string, unknown>;
-  toolState?: "call" | "partial-call" | "result";
-  toolResult?: string;
-}
-
-export interface OpenCodeMessage {
-  id: string;
-  sessionId: string;
-  role: "user" | "assistant";
-  parts: OpenCodePart[];
-  createdAt: string;
-}
-
-export interface OpenCodeFileDiff {
-  path: string;
-  additions: number;
-  deletions: number;
-}
-
-export interface OpenCodePermission {
-  id: string;
-  type: string;       // "edit" | "bash" | "webfetch" etc.
-  title: string;
-  pattern?: string | string[];
-  metadata: Record<string, unknown>;
-}
+/**
+ * @deprecated Use types from ./coding-agent.ts instead.
+ * These aliases exist for backwards compatibility during the transition.
+ */
+export type {
+  CodingAgentSession as OpenCodeSession,
+  CodingAgentMessage as OpenCodeMessage,
+  CodingAgentPart as OpenCodePart,
+  CodingAgentFileDiff as OpenCodeFileDiff,
+  CodingAgentPermission as OpenCodePermission,
+} from "./coding-agent.js";

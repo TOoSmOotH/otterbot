@@ -23,9 +23,10 @@ describe("emitOpenCodeEvent", () => {
       });
 
       expect(io.emit).toHaveBeenCalledTimes(1);
-      expect(io.emit).toHaveBeenCalledWith("opencode:session-start", {
+      expect(io.emit).toHaveBeenCalledWith("codeagent:session-start", {
         id: "",
         agentId: "agent-1",
+        agentType: "opencode",
         projectId: "proj-1",
         task: "Build feature X",
         status: "active",
@@ -52,7 +53,7 @@ describe("emitOpenCodeEvent", () => {
       });
 
       expect(io.emit).toHaveBeenCalledTimes(1);
-      expect(io.emit).toHaveBeenCalledWith("opencode:awaiting-input", {
+      expect(io.emit).toHaveBeenCalledWith("codeagent:awaiting-input", {
         agentId: "agent-1",
         sessionId: "sess-1",
         prompt: "Which approach should I use?",
@@ -65,7 +66,7 @@ describe("emitOpenCodeEvent", () => {
         properties: {},
       });
 
-      expect(io.emit).toHaveBeenCalledWith("opencode:awaiting-input", {
+      expect(io.emit).toHaveBeenCalledWith("codeagent:awaiting-input", {
         agentId: "agent-1",
         sessionId: "sess-1",
         prompt: "",
@@ -82,7 +83,7 @@ describe("emitOpenCodeEvent", () => {
       });
 
       expect(io.emit).toHaveBeenCalledTimes(1);
-      expect(io.emit).toHaveBeenCalledWith("opencode:session-end", {
+      expect(io.emit).toHaveBeenCalledWith("codeagent:session-end", {
         agentId: "agent-1",
         sessionId: "sess-1",
         status: "completed",
@@ -118,8 +119,8 @@ describe("emitOpenCodeEvent", () => {
         },
       });
 
-      expect(io.emit).toHaveBeenCalledWith("opencode:event", expect.any(Object));
-      expect(io.emit).toHaveBeenCalledWith("opencode:part-delta", {
+      expect(io.emit).toHaveBeenCalledWith("codeagent:event", expect.any(Object));
+      expect(io.emit).toHaveBeenCalledWith("codeagent:part-delta", {
         agentId: "agent-1",
         sessionId: "sess-1",
         messageId: "msg-1",
@@ -161,7 +162,7 @@ describe("emitOpenCodeEvent", () => {
       });
 
       const partDeltaCalls = io.emit.mock.calls.filter(
-        (c: any[]) => c[0] === "opencode:part-delta",
+        (c: any[]) => c[0] === "codeagent:part-delta",
       );
       // Should not emit any part-delta since content is already delivered
       expect(partDeltaCalls).toHaveLength(0);
@@ -197,7 +198,7 @@ describe("emitOpenCodeEvent", () => {
       });
 
       const partDeltaCalls = io.emit.mock.calls.filter(
-        (c: any[]) => c[0] === "opencode:part-delta",
+        (c: any[]) => c[0] === "codeagent:part-delta",
       );
       expect(partDeltaCalls).toHaveLength(1);
       expect(partDeltaCalls[0][1].delta).toBe("world");
@@ -226,7 +227,7 @@ describe("emitOpenCodeEvent", () => {
         },
       });
 
-      expect(io.emit).toHaveBeenCalledWith("opencode:part-delta", {
+      expect(io.emit).toHaveBeenCalledWith("codeagent:part-delta", {
         agentId: "agent-1",
         sessionId: "sess-1",
         messageId: "msg-1",
@@ -277,7 +278,7 @@ describe("emitOpenCodeEvent", () => {
       });
 
       const partDeltaCalls = io.emit.mock.calls.filter(
-        (c: any[]) => c[0] === "opencode:part-delta",
+        (c: any[]) => c[0] === "codeagent:part-delta",
       );
       // Should emit a state-change delta with empty content
       expect(partDeltaCalls).toHaveLength(1);
@@ -298,7 +299,7 @@ describe("emitOpenCodeEvent", () => {
       });
 
       const partDeltaCalls = io.emit.mock.calls.filter(
-        (c: any[]) => c[0] === "opencode:part-delta",
+        (c: any[]) => c[0] === "codeagent:part-delta",
       );
       expect(partDeltaCalls).toHaveLength(0);
     });
@@ -318,7 +319,7 @@ describe("emitOpenCodeEvent", () => {
         },
       });
 
-      expect(io.emit).toHaveBeenCalledWith("opencode:part-delta", expect.objectContaining({
+      expect(io.emit).toHaveBeenCalledWith("codeagent:part-delta", expect.objectContaining({
         type: "reasoning",
         delta: "Thinking about this...",
       }));
@@ -347,7 +348,7 @@ describe("emitOpenCodeEvent", () => {
         },
       });
 
-      expect(io.emit).toHaveBeenCalledWith("opencode:message", {
+      expect(io.emit).toHaveBeenCalledWith("codeagent:message", {
         agentId: "agent-1",
         sessionId: "sess-1",
         message: {
@@ -367,7 +368,7 @@ describe("emitOpenCodeEvent", () => {
       });
 
       const messageCalls = io.emit.mock.calls.filter(
-        (c: any[]) => c[0] === "opencode:message",
+        (c: any[]) => c[0] === "codeagent:message",
       );
       expect(messageCalls).toHaveLength(0);
     });
@@ -408,7 +409,7 @@ describe("emitOpenCodeEvent", () => {
       });
 
       const msgCall = io.emit.mock.calls.find(
-        (c: any[]) => c[0] === "opencode:message" && c[1].message.id === "msg-2",
+        (c: any[]) => c[0] === "codeagent:message" && c[1].message.id === "msg-2",
       );
       expect(msgCall).toBeDefined();
       expect(msgCall![1].message.parts).toHaveLength(1);
@@ -437,7 +438,7 @@ describe("emitOpenCodeEvent", () => {
         },
       });
 
-      const msgCall = io.emit.mock.calls.find((c: any[]) => c[0] === "opencode:message");
+      const msgCall = io.emit.mock.calls.find((c: any[]) => c[0] === "codeagent:message");
       expect(msgCall).toBeDefined();
       expect(msgCall![1].message.role).toBe("user");
     });
@@ -450,7 +451,7 @@ describe("emitOpenCodeEvent", () => {
         properties: { sessionID: "sess-1", status: "active" },
       });
 
-      expect(io.emit).toHaveBeenCalledWith("opencode:event", {
+      expect(io.emit).toHaveBeenCalledWith("codeagent:event", {
         agentId: "agent-1",
         sessionId: "sess-1",
         type: "session.status",
@@ -464,7 +465,7 @@ describe("emitOpenCodeEvent", () => {
         properties: { files: [] },
       });
 
-      expect(io.emit).toHaveBeenCalledWith("opencode:event", {
+      expect(io.emit).toHaveBeenCalledWith("codeagent:event", {
         agentId: "agent-1",
         sessionId: "sess-1",
         type: "session.diff",

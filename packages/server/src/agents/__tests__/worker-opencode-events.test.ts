@@ -99,7 +99,7 @@ function createMockBus(): MessageBus {
   } as unknown as MessageBus;
 }
 
-describe("Worker — onOpenCodeEvent callback", () => {
+describe("Worker — onCodingAgentEvent callback", () => {
   let tmpDir: string;
   let bus: MessageBus;
 
@@ -121,7 +121,7 @@ describe("Worker — onOpenCodeEvent callback", () => {
     rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  function createWorker(onOpenCodeEvent?: any) {
+  function createWorker(onCodingAgentEvent?: any) {
     return new Worker({
       bus,
       projectId: "proj-1",
@@ -132,7 +132,7 @@ describe("Worker — onOpenCodeEvent callback", () => {
       systemPrompt: "You are a worker.",
       workspacePath: "/workspace/project",
       toolNames: [],
-      onOpenCodeEvent,
+      onCodingAgentEvent,
     });
   }
 
@@ -143,7 +143,7 @@ describe("Worker — onOpenCodeEvent callback", () => {
     });
 
     const events: Array<{ agentId: string; sessionId: string; event: any }> = [];
-    const onOpenCodeEvent = vi.fn((agentId: string, sessionId: string, event: any) => {
+    const onCodingAgentEvent = vi.fn((agentId: string, sessionId: string, event: any) => {
       events.push({ agentId, sessionId, event });
     });
 
@@ -154,7 +154,7 @@ describe("Worker — onOpenCodeEvent callback", () => {
       diff: null,
     });
 
-    const worker = createWorker(onOpenCodeEvent);
+    const worker = createWorker(onCodingAgentEvent);
     await worker.handleMessage(makeDirective(worker.id, "Build it"));
 
     // First event should be __session-start
@@ -172,7 +172,7 @@ describe("Worker — onOpenCodeEvent callback", () => {
     });
 
     const events: Array<{ agentId: string; sessionId: string; event: any }> = [];
-    const onOpenCodeEvent = vi.fn((agentId: string, sessionId: string, event: any) => {
+    const onCodingAgentEvent = vi.fn((agentId: string, sessionId: string, event: any) => {
       events.push({ agentId, sessionId, event });
     });
 
@@ -183,7 +183,7 @@ describe("Worker — onOpenCodeEvent callback", () => {
       diff: { files: [{ path: "src/x.ts", additions: 5, deletions: 0 }] },
     });
 
-    const worker = createWorker(onOpenCodeEvent);
+    const worker = createWorker(onCodingAgentEvent);
     await worker.handleMessage(makeDirective(worker.id, "Build it"));
 
     // Last event should be __session-end
@@ -203,7 +203,7 @@ describe("Worker — onOpenCodeEvent callback", () => {
     });
 
     const events: Array<{ agentId: string; sessionId: string; event: any }> = [];
-    const onOpenCodeEvent = vi.fn((agentId: string, sessionId: string, event: any) => {
+    const onCodingAgentEvent = vi.fn((agentId: string, sessionId: string, event: any) => {
       events.push({ agentId, sessionId, event });
     });
 
@@ -215,7 +215,7 @@ describe("Worker — onOpenCodeEvent callback", () => {
       error: "compilation_error",
     });
 
-    const worker = createWorker(onOpenCodeEvent);
+    const worker = createWorker(onCodingAgentEvent);
     await worker.handleMessage(makeDirective(worker.id, "Build it"));
 
     const lastEvent = events[events.length - 1];
@@ -229,7 +229,7 @@ describe("Worker — onOpenCodeEvent callback", () => {
       return undefined;
     });
 
-    const onOpenCodeEvent = vi.fn();
+    const onCodingAgentEvent = vi.fn();
 
     mockExecuteTask.mockResolvedValue({
       success: true,
@@ -238,7 +238,7 @@ describe("Worker — onOpenCodeEvent callback", () => {
       diff: null,
     });
 
-    const worker = createWorker(onOpenCodeEvent);
+    const worker = createWorker(onCodingAgentEvent);
     await worker.handleMessage(makeDirective(worker.id, "Build it"));
 
     // The captured onEvent should be a function
@@ -252,7 +252,7 @@ describe("Worker — onOpenCodeEvent callback", () => {
     });
 
     const events: Array<{ agentId: string; sessionId: string; event: any }> = [];
-    const onOpenCodeEvent = vi.fn((agentId: string, sessionId: string, event: any) => {
+    const onCodingAgentEvent = vi.fn((agentId: string, sessionId: string, event: any) => {
       events.push({ agentId, sessionId, event });
     });
 
@@ -277,7 +277,7 @@ describe("Worker — onOpenCodeEvent callback", () => {
       };
     });
 
-    const worker = createWorker(onOpenCodeEvent);
+    const worker = createWorker(onCodingAgentEvent);
     await worker.handleMessage(makeDirective(worker.id, "Build it"));
 
     // Should have: __session-start, 2 SSE events forwarded, __session-end
@@ -288,7 +288,7 @@ describe("Worker — onOpenCodeEvent callback", () => {
     expect(events[2].event.type).toBe("session.status");
   });
 
-  it("does not emit events when onOpenCodeEvent is not provided", async () => {
+  it("does not emit events when onCodingAgentEvent is not provided", async () => {
     mockedGetConfig.mockImplementation((key: string) => {
       if (key === "opencode:api_url") return "http://localhost:3333";
       return undefined;
@@ -301,7 +301,7 @@ describe("Worker — onOpenCodeEvent callback", () => {
       diff: null,
     });
 
-    // Create worker without onOpenCodeEvent
+    // Create worker without onCodingAgentEvent
     const worker = createWorker(undefined);
     // Should complete without errors
     await expect(

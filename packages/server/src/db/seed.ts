@@ -135,6 +135,34 @@ const SEED_ENTRIES = [
     role: "worker" as const,
   },
   {
+    id: "builtin-claude-code-coder",
+    name: "Claude Code Coder",
+    description:
+      "Delegates coding tasks to Claude Code, Anthropic's autonomous AI coding agent. " +
+      "Ideal for complex implementations, refactoring, and code review.",
+    systemPrompt: "See assigned skills for instructions.",
+    capabilities: [] as string[],
+    defaultModel: "claude-sonnet-4-5-20250929",
+    defaultProvider: "anthropic",
+    tools: [] as string[],
+    builtIn: true,
+    role: "worker" as const,
+  },
+  {
+    id: "builtin-codex-coder",
+    name: "Codex Coder",
+    description:
+      "Delegates coding tasks to Codex CLI, OpenAI's autonomous AI coding agent. " +
+      "Ideal for code generation, refactoring, and implementation tasks.",
+    systemPrompt: "See assigned skills for instructions.",
+    capabilities: [] as string[],
+    defaultModel: "codex-mini",
+    defaultProvider: "openai",
+    tools: [] as string[],
+    builtIn: true,
+    role: "worker" as const,
+  },
+  {
     id: "builtin-browser-agent",
     name: "Browser Agent",
     description:
