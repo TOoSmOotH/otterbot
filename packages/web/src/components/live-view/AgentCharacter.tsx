@@ -116,6 +116,7 @@ function CharacterModel({ pack, status, gearConfig }: { pack: ModelPack; status:
   const { scene } = useGLTF(pack.characterUrl);
   const { animations: idleAnims } = useGLTF(pack.animations.idle);
   const { animations: actionAnims } = useGLTF(pack.animations.action);
+  const { animations: workingAnims } = useGLTF(pack.animations.working ?? pack.animations.idle);
 
   // Properly clone the scene with skeleton bindings intact
   const clone = useMemo(() => skeletonClone(scene), [scene]);
@@ -129,13 +130,13 @@ function CharacterModel({ pack, status, gearConfig }: { pack: ModelPack; status:
   const clips = useMemo(() => {
     const seen = new Set<string>();
     const result: THREE.AnimationClip[] = [];
-    for (const clip of [...idleAnims, ...actionAnims]) {
+    for (const clip of [...idleAnims, ...actionAnims, ...workingAnims]) {
       if (seen.has(clip.name) || clip.name === "T-Pose") continue;
       seen.add(clip.name);
       result.push(clip);
     }
     return result;
-  }, [idleAnims, actionAnims]);
+  }, [idleAnims, actionAnims, workingAnims]);
 
   // Manually manage AnimationMixer on the cloned scene so bone paths resolve correctly
   const mixerRef = useRef<THREE.AnimationMixer | null>(null);
@@ -183,9 +184,14 @@ function CharacterModel({ pack, status, gearConfig }: { pack: ModelPack; status:
         findClip(actions, /walk|run/i);
     } else if (status === "acting") {
       targetName =
-        findClip(actions, /Walking_A/i) ??
-        findClip(actions, /Running_A/i) ??
-        findClip(actions, /walk|run/i);
+        findClip(actions, /Working/i) ??
+        findClip(actions, /GenericWorking/i) ??
+        findClip(actions, /Interact/i) ??
+        findClip(actions, /Use_Item/i) ??
+        findClip(actions, /PickUp/i) ??
+        // Fallback to idle if no working animation found
+        findClip(actions, /Idle_B/i) ??
+        findClip(actions, /idle/i);
     } else if (status === "thinking") {
       targetName =
         findClip(actions, /Idle_B/i) ??
