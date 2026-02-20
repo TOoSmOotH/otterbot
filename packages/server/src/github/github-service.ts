@@ -1,5 +1,7 @@
 import { execSync } from "node:child_process";
 import { existsSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { getConfig } from "../auth/auth.js";
 
 export interface GitHubIssue {
@@ -15,38 +17,136 @@ export interface GitHubIssue {
 }
 
 /**
- * Clone a GitHub repo via SSH into targetDir, optionally checking out a branch.
- * Relies on SSH key already configured by `configureGitSSH()` in settings.ts.
+ * Build environment variables for git commands that use a PAT for authentication.
+ * The PAT is passed via GIT_PAT env var and consumed by the inline credential helper.
+ */
+function gitEnvWithPAT(token: string): Record<string, string> {
+  return {
+    ...(process.env as Record<string, string>),
+    GIT_TERMINAL_PROMPT: "0",
+    GIT_PAT: token,
+  };
+}
+
+/**
+ * Build git config args for an inline credential helper that uses the GIT_PAT env var.
+ * This keeps the token out of .git/config and remote URLs.
+ */
+function gitCredentialArgs(): string {
+  return `-c credential.helper="!f() { echo username=x-access-token; echo password=$GIT_PAT; }; f"`;
+}
+
+/**
+ * Configure git user identity in a cloned repo.
+ */
+function configureGitUser(targetDir: string): void {
+  const userName = getConfig("github:username") ?? "otterbot";
+  const userEmail =
+    getConfig("github:email") ?? `${userName}@users.noreply.github.com`;
+  execSync(`git -C ${targetDir} config user.name "${userName}"`, {
+    stdio: "pipe",
+  });
+  execSync(`git -C ${targetDir} config user.email "${userEmail}"`, {
+    stdio: "pipe",
+  });
+}
+
+/**
+ * Clone a GitHub repo into targetDir, optionally checking out a branch.
+ * Tries HTTPS+PAT first (if a token is configured), then falls back to SSH
+ * (if ~/.ssh/otterbot_github exists).
  */
 export function cloneRepo(
   repoFullName: string,
   targetDir: string,
   branch?: string,
 ): void {
-  const url = `git@github.com:${repoFullName}.git`;
+  const token = getConfig("github:token") as string | undefined;
+  const sshKeyPath = join(homedir(), ".ssh", "otterbot_github");
+  const sshKeyExists = existsSync(sshKeyPath);
 
   if (existsSync(targetDir + "/.git")) {
-    // Already cloned — fetch and checkout
-    execSync(`git -C ${targetDir} fetch --all`, { stdio: "pipe", timeout: 120_000 });
+    // Already cloned — fetch and checkout using whatever remote is configured
+    const fetchOpts: { stdio: "pipe"; timeout: number; env?: Record<string, string> } = {
+      stdio: "pipe",
+      timeout: 120_000,
+    };
+    if (token) {
+      fetchOpts.env = gitEnvWithPAT(token);
+    }
+    execSync(
+      token
+        ? `git ${gitCredentialArgs()} -C ${targetDir} fetch --all`
+        : `git -C ${targetDir} fetch --all`,
+      fetchOpts,
+    );
     if (branch) {
-      execSync(`git -C ${targetDir} checkout ${branch}`, { stdio: "pipe", timeout: 30_000 });
-      execSync(`git -C ${targetDir} pull origin ${branch}`, { stdio: "pipe", timeout: 120_000 });
+      execSync(`git -C ${targetDir} checkout ${branch}`, {
+        stdio: "pipe",
+        timeout: 30_000,
+      });
+      const pullOpts: { stdio: "pipe"; timeout: number; env?: Record<string, string> } = {
+        stdio: "pipe",
+        timeout: 120_000,
+      };
+      if (token) {
+        pullOpts.env = gitEnvWithPAT(token);
+      }
+      execSync(
+        token
+          ? `git ${gitCredentialArgs()} -C ${targetDir} pull origin ${branch}`
+          : `git -C ${targetDir} pull origin ${branch}`,
+        pullOpts,
+      );
     }
     return;
   }
 
   const branchArg = branch ? `--branch ${branch}` : "";
-  execSync(`git clone ${branchArg} ${url} ${targetDir}`, {
-    stdio: "pipe",
-    timeout: 300_000, // 5 min for large repos
-    env: { ...process.env },
-  });
+  let httpsErr: unknown;
 
-  // Configure git user from settings
-  const userName = getConfig("github:username") ?? "otterbot";
-  const userEmail = getConfig("github:email") ?? `${userName}@users.noreply.github.com`;
-  execSync(`git -C ${targetDir} config user.name "${userName}"`, { stdio: "pipe" });
-  execSync(`git -C ${targetDir} config user.email "${userEmail}"`, { stdio: "pipe" });
+  // Try HTTPS+PAT first
+  if (token) {
+    const httpsUrl = `https://github.com/${repoFullName}.git`;
+    try {
+      execSync(
+        `git clone ${gitCredentialArgs()} ${branchArg} ${httpsUrl} ${targetDir}`,
+        {
+          stdio: "pipe",
+          timeout: 300_000,
+          env: gitEnvWithPAT(token),
+        },
+      );
+      configureGitUser(targetDir);
+      return;
+    } catch (err) {
+      httpsErr = err;
+      // HTTPS failed — fall through to SSH
+    }
+  }
+
+  // Fall back to SSH
+  if (sshKeyExists) {
+    const sshUrl = `git@github.com:${repoFullName}.git`;
+    execSync(`git clone ${branchArg} ${sshUrl} ${targetDir}`, {
+      stdio: "pipe",
+      timeout: 300_000,
+      env: { ...process.env },
+    });
+    configureGitUser(targetDir);
+    return;
+  }
+
+  // Neither method worked
+  if (httpsErr) {
+    const msg = httpsErr instanceof Error ? httpsErr.message : String(httpsErr);
+    throw new Error(
+      `Could not clone ${repoFullName}: HTTPS+PAT failed (${msg}), and no SSH key found at ${sshKeyPath}`,
+    );
+  }
+  throw new Error(
+    `Could not clone ${repoFullName}: no GitHub PAT configured and no SSH key found at ${sshKeyPath}`,
+  );
 }
 
 /**

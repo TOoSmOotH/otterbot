@@ -32,25 +32,28 @@ describe("github-service", () => {
   });
 
   describe("cloneRepo", () => {
-    it("clones a repo via SSH when target does not exist", () => {
+    it("clones a repo via HTTPS+PAT when token is configured", () => {
       const targetDir = join(tmpDir, "my-repo");
       configStore.set("github:username", "testuser");
+      configStore.set("github:token", "ghp_test123");
 
       cloneRepo("owner/repo", targetDir);
 
-      // Should call git clone
+      // Should call git clone with HTTPS URL
       expect(mockExecSync).toHaveBeenCalledWith(
         expect.stringContaining("git clone"),
         expect.objectContaining({ timeout: 300_000 }),
       );
       const cloneCall = mockExecSync.mock.calls[0];
-      expect(cloneCall[0]).toContain("git@github.com:owner/repo.git");
+      expect(cloneCall[0]).toContain("https://github.com/owner/repo.git");
+      expect(cloneCall[0]).toContain("credential.helper");
       expect(cloneCall[0]).toContain(targetDir);
     });
 
     it("clones with a specific branch when provided", () => {
       const targetDir = join(tmpDir, "my-repo-branch");
       configStore.set("github:username", "testuser");
+      configStore.set("github:token", "ghp_test123");
 
       cloneRepo("owner/repo", targetDir, "dev");
 
@@ -83,6 +86,7 @@ describe("github-service", () => {
       const targetDir = join(tmpDir, "user-config-repo");
       configStore.set("github:username", "myuser");
       configStore.set("github:email", "myuser@example.com");
+      configStore.set("github:token", "ghp_test123");
 
       cloneRepo("owner/repo", targetDir);
 
@@ -94,11 +98,19 @@ describe("github-service", () => {
     it("uses default email when github:email is not set", () => {
       const targetDir = join(tmpDir, "default-email-repo");
       configStore.set("github:username", "myuser");
+      configStore.set("github:token", "ghp_test123");
 
       cloneRepo("owner/repo", targetDir);
 
       const calls = mockExecSync.mock.calls.map((c: any[]) => c[0]);
       expect(calls.some((c: string) => c.includes("myuser@users.noreply.github.com"))).toBe(true);
+    });
+
+    it("throws descriptive error when no PAT or SSH key configured", () => {
+      const targetDir = join(tmpDir, "no-auth-repo");
+      expect(() => cloneRepo("owner/repo", targetDir)).toThrow(
+        /no GitHub PAT configured and no SSH key found/,
+      );
     });
   });
 
