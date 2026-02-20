@@ -6,7 +6,8 @@ import fastifyStatic from "@fastify/static";
 import multipart from "@fastify/multipart";
 import { Server } from "socket.io";
 import { resolve, dirname, join, sep } from "node:path";
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync, mkdirSync, createReadStream, createWriteStream, copyFileSync, unlinkSync } from "node:fs";
+import { pipeline } from "node:stream/promises";
 import { execSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import type {
@@ -18,7 +19,7 @@ import type {
   SkillCreate,
   SkillUpdate,
 } from "@otterbot/shared";
-import { migrateDb } from "./db/index.js";
+import { migrateDb, backupDatabase, verifyDatabase, closeDatabase, getDbPath, getDb } from "./db/index.js";
 import { MessageBus } from "./bus/message-bus.js";
 import { WorkspaceManager } from "./workspace/workspace.js";
 import { Registry } from "./registry/registry.js";
@@ -1835,6 +1836,88 @@ async function main() {
     const { ne } = await import("drizzle-orm");
     const db = getDb();
     return db.select().from(schema.agents).where(ne(schema.agents.status, "done")).all();
+  });
+
+  // =========================================================================
+  // Backup & Restore routes
+  // =========================================================================
+
+  app.get("/api/settings/backup", async (req, reply) => {
+    const { nanoid } = await import("nanoid");
+    const id = nanoid();
+    const tempPath = resolve(dataDir, `backup-${id}.db`);
+
+    try {
+      await backupDatabase(tempPath);
+
+      const stream = createReadStream(tempPath);
+      stream.on("close", () => {
+        try {
+          unlinkSync(tempPath);
+        } catch {}
+      });
+
+      reply.header("Content-Disposition", `attachment; filename="otterbot-backup-${new Date().toISOString().split("T")[0]}.db"`);
+      reply.header("Content-Type", "application/x-sqlite3");
+
+      return reply.send(stream);
+    } catch (err) {
+      try {
+        unlinkSync(tempPath);
+      } catch {}
+      reply.code(500);
+      return { error: err instanceof Error ? err.message : "Backup failed" };
+    }
+  });
+
+  app.post("/api/settings/restore", async (req, reply) => {
+    const data = await req.file();
+    if (!data) {
+      reply.code(400);
+      return { error: "No file uploaded" };
+    }
+
+    const { nanoid } = await import("nanoid");
+    const id = nanoid();
+    const tempPath = resolve(dataDir, `restore-${id}.db`);
+
+    try {
+      await pipeline(data.file, createWriteStream(tempPath));
+
+      // Verify
+      const dbKey = process.env.OTTERBOT_DB_KEY;
+      if (!dbKey) throw new Error("OTTERBOT_DB_KEY not set");
+
+      if (!verifyDatabase(tempPath, dbKey)) {
+        throw new Error("Invalid database file or incorrect encryption key");
+      }
+
+      // Perform restore
+      closeDatabase();
+
+      const targetDbPath = resolve(getDbPath());
+
+      if (existsSync(targetDbPath)) {
+        copyFileSync(targetDbPath, targetDbPath + ".bak");
+      }
+
+      copyFileSync(tempPath, targetDbPath);
+
+      // Re-init DB
+      // We call getDb() to re-open the connection
+      getDb();
+      await migrateDb();
+
+      unlinkSync(tempPath);
+
+      return { ok: true };
+    } catch (err) {
+      try {
+        unlinkSync(tempPath);
+      } catch {}
+      reply.code(500);
+      return { error: err instanceof Error ? err.message : "Restore failed" };
+    }
   });
 
   // =========================================================================
