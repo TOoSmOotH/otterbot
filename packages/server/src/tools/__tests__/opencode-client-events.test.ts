@@ -243,7 +243,7 @@ describe("OpenCodeClient — onEvent callback", () => {
     const controller = new AbortController();
 
     const result = await (client as any).monitorViaSse("sess-1", controller, Date.now(), Date.now());
-    expect(result).toBe("idle");
+    expect(result).toBe("completed");
     // Should have processed only 2 events (message.updated + session.idle)
     expect(eventIdx).toBe(2);
     expect(controller.signal.aborted).toBe(true);
@@ -276,7 +276,7 @@ describe("OpenCodeClient — onEvent callback", () => {
     const controller = new AbortController();
 
     const result = await (client as any).monitorViaSse("sess-1", controller, Date.now(), Date.now());
-    expect(result).toBe("idle");
+    expect(result).toBe("completed");
     expect(eventIdx).toBe(2);
     expect(controller.signal.aborted).toBe(true);
   });

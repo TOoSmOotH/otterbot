@@ -309,7 +309,7 @@ export class OpenCodeClient {
   private async monitorActivity(
     sessionId: string,
     controller: AbortController,
-  ): Promise<"idle" | "hard_cap" | "error"> {
+  ): Promise<"idle" | "hard_cap" | "error" | "completed"> {
     const startTime = Date.now();
     let lastActivityTime = Date.now();
 
@@ -328,7 +328,7 @@ export class OpenCodeClient {
     controller: AbortController,
     startTime: number,
     lastActivityTime: number,
-  ): Promise<"idle" | "hard_cap" | "error"> {
+  ): Promise<"idle" | "hard_cap" | "error" | "completed"> {
     const events = await this.client.event.subscribe({
       signal: controller.signal,
     });
@@ -401,7 +401,7 @@ export class OpenCodeClient {
                 console.log(`[OpenCode Client] Completion sentinel detected in streaming output — task complete.`);
                 clearInterval(checkInterval);
                 controller.abort();
-                return "idle";
+                return "completed";
               }
             }
           }
@@ -418,7 +418,7 @@ export class OpenCodeClient {
               console.log(`[OpenCode Client] Session idle event — task complete.`);
               clearInterval(checkInterval);
               controller.abort();
-              return "idle";
+              return "completed";
             }
             if (eventType === "session.status") {
               const statusObj = props?.status as { type?: string } | undefined;
@@ -426,7 +426,7 @@ export class OpenCodeClient {
                 console.log(`[OpenCode Client] Session status=idle — task complete.`);
                 clearInterval(checkInterval);
                 controller.abort();
-                return "idle";
+                return "completed";
               }
             }
             if (eventType === "session.updated") {
@@ -435,7 +435,7 @@ export class OpenCodeClient {
                 console.log(`[OpenCode Client] Session updated status=${statusObj.type} — task complete.`);
                 clearInterval(checkInterval);
                 controller.abort();
-                return "idle";
+                return "completed";
               }
             }
           }
@@ -670,9 +670,25 @@ export class OpenCodeClient {
           continue;
         }
 
-        // Timeout
+        // Timeout or completion detected by monitor
         timedOut = true;
         timeoutReason = result.reason;
+
+        // If completion was detected via SSE/events (monitorActivity won the race),
+        // treat it as success, not timeout.
+        if (result.type === "timeout" && result.reason === "completed") {
+          console.log(`[OpenCode Client] Monitor detected completion — finalizing session.`);
+          timedOut = false;
+          // Fetch full history since prompt() was aborted
+          try {
+            const messages = await this.getMessages(session.id);
+            lastSummary = this.extractContent(messages);
+          } catch (err) {
+            console.warn(`[OpenCode Client] Failed to fetch final messages:`, err);
+          }
+          break; // Exit loop with success
+        }
+
         break;
       } catch (err) {
         console.error(`[OpenCode Client] executeTask turn error:`, err);
