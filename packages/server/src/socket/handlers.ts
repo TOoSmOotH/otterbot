@@ -603,10 +603,16 @@ export function emitOpenCodeEvent(
   }
 
   // SDK shape: EventMessagePartUpdated = { type, properties: { part: Part, delta?: string } }
-  // Part has: id, sessionID, messageID, type, and type-specific fields
+  // Part has: id, sessionID, messageID, type, and type-specific fields.
+  //
+  // Two modes:
+  // 1. properties.delta is present → incremental delta (append to buffer, emit as delta)
+  // 2. properties.delta is absent → full snapshot in part.text / toolState.output
+  //    Use replacement semantics to avoid doubling content already delivered via
+  //    message.part.delta events. Only emit the portion the frontend hasn't seen.
   if (type === "message.part.updated") {
     const part = properties.part as Record<string, unknown> | undefined;
-    const delta = properties.delta as string | undefined;
+    const explicitDelta = properties.delta as string | undefined;
 
     if (part) {
       const partId = (part.id ?? "") as string;
@@ -621,44 +627,84 @@ export function emitOpenCodeEvent(
         ? (toolStateObj.status as string | undefined)
         : undefined;
 
-      // Build delta text: use explicit delta if present, else extract from part type
-      let deltaText = delta;
-      if (!deltaText) {
-        // For text/reasoning parts, use the text field as initial content
-        if (typeof part.text === "string") {
-          deltaText = part.text;
-        }
-        // For tool parts, stringify the input or output
-        if (partType === "tool" && toolStateObj) {
-          if (typeof toolStateObj.output === "string") {
-            deltaText = toolStateObj.output;
-          } else if (toolStateObj.input) {
-            deltaText = JSON.stringify(toolStateObj.input);
-          }
-        }
-      }
-
-      if (deltaText && partId && messageId) {
-        io.emit("opencode:part-delta", {
-          agentId,
-          sessionId,
-          messageId,
-          partId,
-          type: partType,
-          delta: deltaText,
-          toolName: toolName || undefined,
-          toolState,
-        });
-
-        // Accumulate into server-side buffer (no DB write — too high frequency)
+      if (partId && messageId) {
         const bufKey = `${agentId}:${messageId}:${partId}`;
         const existing = serverPartBuffers.get(bufKey);
-        serverPartBuffers.set(bufKey, {
-          type: partType,
-          content: (existing?.content ?? "") + deltaText,
-          toolName: toolName || existing?.toolName,
-          toolState: toolState ?? existing?.toolState,
-        });
+
+        if (explicitDelta) {
+          // Mode 1: explicit delta — append like message.part.delta does
+          io.emit("opencode:part-delta", {
+            agentId,
+            sessionId,
+            messageId,
+            partId,
+            type: partType,
+            delta: explicitDelta,
+            toolName: toolName || undefined,
+            toolState,
+          });
+
+          serverPartBuffers.set(bufKey, {
+            type: partType,
+            content: (existing?.content ?? "") + explicitDelta,
+            toolName: toolName || existing?.toolName,
+            toolState: toolState ?? existing?.toolState,
+          });
+        } else {
+          // Mode 2: no explicit delta — part.text / tool output is a FULL snapshot
+          let fullContent = "";
+          if (typeof part.text === "string") {
+            fullContent = part.text;
+          }
+          if (partType === "tool" && toolStateObj) {
+            if (typeof toolStateObj.output === "string") {
+              fullContent = toolStateObj.output;
+            } else if (toolStateObj.input) {
+              fullContent = JSON.stringify(toolStateObj.input);
+            }
+          }
+
+          // Replace the buffer with the snapshot content, but keep existing
+          // content if it's already longer (deltas may have delivered more)
+          const newContent = (existing?.content && existing.content.length >= fullContent.length)
+            ? existing.content
+            : fullContent;
+
+          serverPartBuffers.set(bufKey, {
+            type: partType,
+            content: newContent,
+            toolName: toolName || existing?.toolName,
+            toolState: toolState ?? existing?.toolState,
+          });
+
+          // Emit a part-delta ONLY for content the frontend hasn't seen yet
+          const existingLen = existing?.content?.length ?? 0;
+          if (fullContent.length > existingLen) {
+            const missingDelta = fullContent.slice(existingLen);
+            io.emit("opencode:part-delta", {
+              agentId,
+              sessionId,
+              messageId,
+              partId,
+              type: partType,
+              delta: missingDelta,
+              toolName: toolName || undefined,
+              toolState,
+            });
+          } else if (toolState && toolState !== existing?.toolState) {
+            // Tool state changed but no new content — emit empty delta for state update
+            io.emit("opencode:part-delta", {
+              agentId,
+              sessionId,
+              messageId,
+              partId,
+              type: partType,
+              delta: "",
+              toolName: toolName || undefined,
+              toolState,
+            });
+          }
+        }
       }
     }
   }

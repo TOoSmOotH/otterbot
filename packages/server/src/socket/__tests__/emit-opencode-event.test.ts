@@ -102,8 +102,9 @@ describe("emitOpenCodeEvent", () => {
   });
 
   describe("message.part.updated events (SDK format)", () => {
-    it("emits part-delta for text parts with delta", () => {
-      // SDK EventMessagePartUpdated: { part: TextPart, delta?: string }
+    it("emits full content as delta when no prior deltas exist", () => {
+      // message.part.updated with no prior message.part.delta events
+      // should emit the full content as a delta (frontend hasn't seen it yet)
       emitOpenCodeEvent(io, "agent-1", "sess-1", {
         type: "message.part.updated",
         properties: {
@@ -112,9 +113,8 @@ describe("emitOpenCodeEvent", () => {
             sessionID: "sess-1",
             messageID: "msg-1",
             type: "text",
-            text: "Full text so far",
+            text: "Full text content",
           },
-          delta: "Hello world",
         },
       });
 
@@ -125,13 +125,28 @@ describe("emitOpenCodeEvent", () => {
         messageId: "msg-1",
         partId: "part-1",
         type: "text",
-        delta: "Hello world",
+        delta: "Full text content",
         toolName: undefined,
         toolState: undefined,
       });
     });
 
-    it("extracts text from part when no explicit delta", () => {
+    it("does NOT re-emit content already delivered via message.part.delta", () => {
+      // First, send streaming deltas
+      emitOpenCodeEvent(io, "agent-1", "sess-1", {
+        type: "message.part.delta",
+        properties: {
+          sessionID: "sess-1",
+          messageID: "msg-1",
+          partID: "part-2",
+          field: "text",
+          delta: "Hello world",
+        },
+      });
+
+      io.emit.mockClear();
+
+      // Now message.part.updated arrives with the same content — should NOT emit a duplicate delta
       emitOpenCodeEvent(io, "agent-1", "sess-1", {
         type: "message.part.updated",
         properties: {
@@ -140,31 +155,60 @@ describe("emitOpenCodeEvent", () => {
             sessionID: "sess-1",
             messageID: "msg-1",
             type: "text",
-            text: "Some accumulated text",
+            text: "Hello world",
           },
-          // no delta
         },
       });
 
-      expect(io.emit).toHaveBeenCalledWith("opencode:part-delta", {
-        agentId: "agent-1",
-        sessionId: "sess-1",
-        messageId: "msg-1",
-        partId: "part-2",
-        type: "text",
-        delta: "Some accumulated text",
-        toolName: undefined,
-        toolState: undefined,
-      });
+      const partDeltaCalls = io.emit.mock.calls.filter(
+        (c: any[]) => c[0] === "opencode:part-delta",
+      );
+      // Should not emit any part-delta since content is already delivered
+      expect(partDeltaCalls).toHaveLength(0);
     });
 
-    it("handles tool parts with state object", () => {
-      // SDK ToolPart: { type: "tool", tool: "shell_exec", state: { status: "completed", input: {...}, output: "..." } }
+    it("emits only the missing portion when snapshot has more content than deltas", () => {
+      // Send a partial delta first
+      emitOpenCodeEvent(io, "agent-1", "sess-1", {
+        type: "message.part.delta",
+        properties: {
+          sessionID: "sess-1",
+          messageID: "msg-1",
+          partID: "part-3",
+          field: "text",
+          delta: "Hello ",
+        },
+      });
+
+      io.emit.mockClear();
+
+      // Snapshot arrives with more content than the delta delivered
       emitOpenCodeEvent(io, "agent-1", "sess-1", {
         type: "message.part.updated",
         properties: {
           part: {
             id: "part-3",
+            sessionID: "sess-1",
+            messageID: "msg-1",
+            type: "text",
+            text: "Hello world",
+          },
+        },
+      });
+
+      const partDeltaCalls = io.emit.mock.calls.filter(
+        (c: any[]) => c[0] === "opencode:part-delta",
+      );
+      expect(partDeltaCalls).toHaveLength(1);
+      expect(partDeltaCalls[0][1].delta).toBe("world");
+    });
+
+    it("handles tool parts with state object", () => {
+      emitOpenCodeEvent(io, "agent-1", "sess-1", {
+        type: "message.part.updated",
+        properties: {
+          part: {
+            id: "part-4",
             sessionID: "sess-1",
             messageID: "msg-1",
             type: "tool",
@@ -179,7 +223,6 @@ describe("emitOpenCodeEvent", () => {
               time: { start: 1, end: 2 },
             },
           },
-          delta: "File written successfully",
         },
       });
 
@@ -187,7 +230,7 @@ describe("emitOpenCodeEvent", () => {
         agentId: "agent-1",
         sessionId: "sess-1",
         messageId: "msg-1",
-        partId: "part-3",
+        partId: "part-4",
         type: "tool",
         delta: "File written successfully",
         toolName: "file_write",
@@ -195,12 +238,27 @@ describe("emitOpenCodeEvent", () => {
       });
     });
 
-    it("uses tool output when no delta for tool parts", () => {
+    it("emits tool state change with empty delta when content already delivered", () => {
+      // Send tool content via deltas first
+      emitOpenCodeEvent(io, "agent-1", "sess-1", {
+        type: "message.part.delta",
+        properties: {
+          sessionID: "sess-1",
+          messageID: "msg-1",
+          partID: "part-5",
+          field: "text",
+          delta: "file1.ts\nfile2.ts",
+        },
+      });
+
+      io.emit.mockClear();
+
+      // Tool state changes to completed but content is the same
       emitOpenCodeEvent(io, "agent-1", "sess-1", {
         type: "message.part.updated",
         properties: {
           part: {
-            id: "part-4",
+            id: "part-5",
             sessionID: "sess-1",
             messageID: "msg-1",
             type: "tool",
@@ -215,12 +273,16 @@ describe("emitOpenCodeEvent", () => {
               time: { start: 1, end: 2 },
             },
           },
-          // no delta
         },
       });
 
-      expect(io.emit).toHaveBeenCalledWith("opencode:part-delta", expect.objectContaining({
-        delta: "file1.ts\nfile2.ts",
+      const partDeltaCalls = io.emit.mock.calls.filter(
+        (c: any[]) => c[0] === "opencode:part-delta",
+      );
+      // Should emit a state-change delta with empty content
+      expect(partDeltaCalls).toHaveLength(1);
+      expect(partDeltaCalls[0][1]).toEqual(expect.objectContaining({
+        delta: "",
         toolName: "shell_exec",
         toolState: "completed",
       }));
@@ -241,25 +303,24 @@ describe("emitOpenCodeEvent", () => {
       expect(partDeltaCalls).toHaveLength(0);
     });
 
-    it("handles reasoning parts", () => {
+    it("handles reasoning parts with no prior deltas", () => {
       emitOpenCodeEvent(io, "agent-1", "sess-1", {
         type: "message.part.updated",
         properties: {
           part: {
-            id: "part-5",
+            id: "part-6",
             sessionID: "sess-1",
             messageID: "msg-1",
             type: "reasoning",
             text: "Thinking about this...",
             time: { start: 1 },
           },
-          delta: "more thinking",
         },
       });
 
       expect(io.emit).toHaveBeenCalledWith("opencode:part-delta", expect.objectContaining({
         type: "reasoning",
-        delta: "more thinking",
+        delta: "Thinking about this...",
       }));
     });
   });
