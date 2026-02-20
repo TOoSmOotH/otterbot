@@ -1522,6 +1522,14 @@ export function removeSSHKey(): { ok: boolean; error?: string } {
   }
 }
 
+/**
+ * Public wrapper around configureGitSSH() — called after restoring SSH keys
+ * from a backup archive so that ~/.ssh/config and git signing config are set up.
+ */
+export function applyGitSSHConfig(): void {
+  configureGitSSH();
+}
+
 export function testSSHConnection(): { ok: boolean; username?: string; error?: string } {
   try {
     // ssh -T git@github.com exits with code 1 on success (it prints "Hi username!")

@@ -137,9 +137,11 @@ import {
   listCustomModels,
   createCustomModel,
   deleteCustomModel,
+  applyGitSSHConfig,
   type TierDefaults,
 } from "./settings/settings.js";
 import type { ProviderType } from "@otterbot/shared";
+import { createBackupArchive, restoreFromArchive, looksLikeZip } from "./backup/backup.js";
 import { writeOpenCodeConfig, startOpenCodeServer, stopOpenCodeServer } from "./opencode/opencode-manager.js";
 import { GitHubIssueMonitor } from "./github/issue-monitor.js";
 
@@ -1843,28 +1845,22 @@ async function main() {
   // =========================================================================
 
   app.get("/api/settings/backup", async (req, reply) => {
-    const { nanoid } = await import("nanoid");
-    const id = nanoid();
-    const tempPath = resolve(dataDir, `backup-${id}.db`);
-
+    let zipPath: string | undefined;
     try {
-      await backupDatabase(tempPath);
+      zipPath = await createBackupArchive(dataDir, assetsRoot);
 
-      const stream = createReadStream(tempPath);
+      const stream = createReadStream(zipPath);
       stream.on("close", () => {
-        try {
-          unlinkSync(tempPath);
-        } catch {}
+        try { if (zipPath) unlinkSync(zipPath); } catch {}
       });
 
-      reply.header("Content-Disposition", `attachment; filename="otterbot-backup-${new Date().toISOString().split("T")[0]}.db"`);
-      reply.header("Content-Type", "application/x-sqlite3");
+      const datestamp = new Date().toISOString().split("T")[0];
+      reply.header("Content-Disposition", `attachment; filename="otterbot-backup-${datestamp}.zip"`);
+      reply.header("Content-Type", "application/zip");
 
       return reply.send(stream);
     } catch (err) {
-      try {
-        unlinkSync(tempPath);
-      } catch {}
+      try { if (zipPath) unlinkSync(zipPath); } catch {}
       reply.code(500);
       return { error: err instanceof Error ? err.message : "Backup failed" };
     }
@@ -1879,44 +1875,55 @@ async function main() {
 
     const { nanoid } = await import("nanoid");
     const id = nanoid();
-    const tempPath = resolve(dataDir, `restore-${id}.db`);
+    const tempPath = resolve(dataDir, `restore-${id}.tmp`);
 
     try {
       await pipeline(data.file, createWriteStream(tempPath));
 
-      // Verify
       const dbKey = process.env.OTTERBOT_DB_KEY;
       if (!dbKey) throw new Error("OTTERBOT_DB_KEY not set");
 
-      if (!verifyDatabase(tempPath, dbKey)) {
-        throw new Error("Invalid database file or incorrect encryption key");
-      }
-
-      // Perform restore
-      closeDatabase();
-
       const targetDbPath = resolve(getDbPath());
 
-      if (existsSync(targetDbPath)) {
-        copyFileSync(targetDbPath, targetDbPath + ".bak");
+      if (looksLikeZip(tempPath)) {
+        // --- ZIP archive path ---
+        closeDatabase();
+        const { sshKeyRestored } = await restoreFromArchive(
+          tempPath,
+          dbKey,
+          targetDbPath,
+          assetsRoot,
+        );
+
+        getDb();
+        await migrateDb();
+
+        if (sshKeyRestored) {
+          applyGitSSHConfig();
+        }
+      } else {
+        // --- Legacy .db path ---
+        if (!verifyDatabase(tempPath, dbKey)) {
+          throw new Error("Invalid database file or incorrect encryption key");
+        }
+
+        closeDatabase();
+
+        if (existsSync(targetDbPath)) {
+          copyFileSync(targetDbPath, targetDbPath + ".bak");
+        }
+        copyFileSync(tempPath, targetDbPath);
+
+        getDb();
+        await migrateDb();
       }
-
-      copyFileSync(tempPath, targetDbPath);
-
-      // Re-init DB
-      // We call getDb() to re-open the connection
-      getDb();
-      await migrateDb();
-
-      unlinkSync(tempPath);
 
       return { ok: true };
     } catch (err) {
-      try {
-        unlinkSync(tempPath);
-      } catch {}
       reply.code(500);
       return { error: err instanceof Error ? err.message : "Restore failed" };
+    } finally {
+      try { unlinkSync(tempPath); } catch {}
     }
   });
 
