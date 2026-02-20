@@ -55,7 +55,7 @@ export const SETTINGS_NAV: NavGroup[] = [
       { id: "search", label: "Search" },
       { id: "speech", label: "Speech" },
       { id: "liveview", label: "Live View" },
-      { id: "opencode", label: "OpenCode" },
+      { id: "opencode", label: "Coding Agents" },
       { id: "scheduled", label: "Scheduled Tasks" },
     ],
   },

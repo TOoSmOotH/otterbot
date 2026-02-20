@@ -8,7 +8,7 @@ import { AgentWorkshopTab } from "./AgentWorkshopTab";
 import { SearchTab } from "./SearchTab";
 import { SpeechTab } from "./SpeechTab";
 import { LiveViewTab } from "./LiveViewTab";
-import { OpenCodeTab } from "./OpenCodeTab";
+import { CodingAgentsTab } from "./CodingAgentsTab";
 import { PricingTab } from "./PricingTab";
 import { ProfileSection } from "./ProfileSection";
 import { SystemSection } from "./SystemSection";
@@ -75,7 +75,7 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
       case "liveview":
         return <LiveViewTab />;
       case "opencode":
-        return <OpenCodeTab />;
+        return <CodingAgentsTab />;
       default:
         return null;
     }
