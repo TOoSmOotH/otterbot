@@ -243,6 +243,10 @@ interface SettingsState {
   }) => Promise<void>;
   beginGoogleOAuth: () => Promise<string | null>;
   disconnectGoogle: () => Promise<void>;
+
+  // Backup & Restore
+  backupDatabase: () => Promise<void>;
+  restoreDatabase: (file: File) => Promise<{ ok: boolean; error?: string }>;
 }
 
 // ---------------------------------------------------------------------------
@@ -1254,6 +1258,54 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       await get().loadGoogleSettings();
     } catch (err) {
       set({ error: err instanceof Error ? err.message : "Unknown error" });
+    }
+  },
+
+  backupDatabase: async () => {
+    try {
+      const res = await fetch("/api/settings/backup");
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || "Backup failed");
+      }
+
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `otterbot-backup-${new Date().toISOString().split("T")[0]}.db`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "Unknown error" });
+    }
+  },
+
+  restoreDatabase: async (file: File) => {
+    set({ error: null });
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+
+      const res = await fetch("/api/settings/restore", {
+        method: "POST",
+        body: formData,
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        return { ok: false, error: data.error || "Restore failed" };
+      }
+
+      // Reload settings as DB changed
+      await get().loadSettings();
+      return { ok: true };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Unknown error";
+      set({ error: msg });
+      return { ok: false, error: msg };
     }
   },
 }));

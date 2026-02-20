@@ -5,18 +5,19 @@ import * as schema from "./schema.js";
 import { resolve, dirname } from "node:path";
 import { mkdirSync } from "node:fs";
 
-function getDbPath(): string {
+export function getDbPath(): string {
   const url = process.env.DATABASE_URL ?? "file:./data/otterbot.db";
   return url.replace(/^file:/, "");
 }
 
+let _sqlite: Database.Database | null = null;
 let _db: ReturnType<typeof drizzle<typeof schema>> | null = null;
 
 export function getDb() {
   if (!_db) {
     const dbPath = resolve(getDbPath());
     mkdirSync(dirname(dbPath), { recursive: true });
-    const sqlite = new Database(dbPath);
+    _sqlite = new Database(dbPath);
 
     // Encrypt the database
     const dbKey = process.env.OTTERBOT_DB_KEY;
@@ -25,13 +26,42 @@ export function getDb() {
         "OTTERBOT_DB_KEY environment variable is required. Set it in your .env file.",
       );
     }
-    sqlite.pragma(`key='${dbKey.replace(/'/g, "''")}'`);
+    _sqlite.pragma(`key='${dbKey.replace(/'/g, "''")}'`);
 
-    sqlite.pragma("journal_mode = WAL");
-    sqlite.pragma("foreign_keys = ON");
-    _db = drizzle(sqlite, { schema });
+    _sqlite.pragma("journal_mode = WAL");
+    _sqlite.pragma("foreign_keys = ON");
+    _db = drizzle(_sqlite, { schema });
   }
   return _db;
+}
+
+export async function backupDatabase(destination: string): Promise<void> {
+  // Ensure DB is initialized
+  getDb();
+  if (!_sqlite) throw new Error("Database not initialized");
+  _sqlite.prepare("VACUUM INTO ?").run(destination);
+}
+
+export function closeDatabase() {
+  if (_sqlite) {
+    _sqlite.close();
+    _sqlite = null;
+    _db = null;
+  }
+}
+
+export function verifyDatabase(path: string, key: string): boolean {
+  try {
+    const testDb = new Database(path, { readonly: true });
+    testDb.pragma(`key='${key.replace(/'/g, "''")}'`);
+    // Try to read from the master table to verify decryption works
+    testDb.prepare("SELECT count(*) FROM sqlite_master").get();
+    testDb.close();
+    return true;
+  } catch (err) {
+    console.error("Database verification failed:", err);
+    return false;
+  }
 }
 
 /** Create all tables if they don't exist */
@@ -528,7 +558,7 @@ async function migrateProviders(db: ReturnType<typeof drizzle<typeof schema>>) {
 
 /** Reset the DB singleton (for testing) */
 export function resetDb() {
-  _db = null;
+  closeDatabase();
 }
 
 export { schema };

@@ -1,4 +1,38 @@
+import { useRef, useState } from "react";
+import { useSettingsStore } from "../../stores/settings-store";
+
 export function SystemSection() {
+  const backupDatabase = useSettingsStore((s) => s.backupDatabase);
+  const restoreDatabase = useSettingsStore((s) => s.restoreDatabase);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [restoring, setRestoring] = useState(false);
+
+  const handleRestore = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (
+      !window.confirm(
+        "WARNING: This will overwrite your current database with the backup. All current data will be lost. Are you sure?",
+      )
+    ) {
+      e.target.value = ""; // Reset
+      return;
+    }
+
+    setRestoring(true);
+    const res = await restoreDatabase(file);
+    setRestoring(false);
+    e.target.value = ""; // Reset
+
+    if (res.ok) {
+      window.alert("Database restored successfully. The page will reload.");
+      window.location.reload();
+    } else {
+      window.alert(`Restore failed: ${res.error}`);
+    }
+  };
+
   return (
     <div className="p-5 space-y-6">
       <div>
@@ -69,9 +103,28 @@ export function SystemSection() {
                 Export and import your data
               </p>
             </div>
-            <span className="text-[10px] text-muted-foreground bg-muted px-2 py-0.5 rounded">
-              Coming Soon
-            </span>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => backupDatabase()}
+                className="text-[10px] bg-primary text-primary-foreground px-2 py-1 rounded hover:bg-primary/90 transition-colors cursor-pointer"
+              >
+                Download Backup
+              </button>
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                disabled={restoring}
+                className="text-[10px] bg-destructive text-destructive-foreground px-2 py-1 rounded hover:bg-destructive/90 transition-colors cursor-pointer disabled:opacity-50"
+              >
+                {restoring ? "Restoring..." : "Restore Backup"}
+              </button>
+              <input
+                type="file"
+                accept=".db,.sqlite,application/x-sqlite3"
+                className="hidden"
+                ref={fileInputRef}
+                onChange={handleRestore}
+              />
+            </div>
           </div>
         </div>
       </div>
