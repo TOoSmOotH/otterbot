@@ -185,9 +185,11 @@ export class Worker extends BaseAgent {
       properties: { task, projectId: this.projectId ?? "", agentType: "opencode" },
     });
 
-    // Always wire up getHumanResponse so OpenCode can ask the user questions
-    // even when running in YOLO mode (no tool-permission prompts).
-    const getHumanResponse = this._onCodingAgentAwaitingInput
+    const interactiveMode = getConfig("opencode:interactive") === "true";
+
+    // Only wire up getHumanResponse when interactive mode is on.
+    // In YOLO mode, OpenCode runs single-turn (no follow-up prompts).
+    const getHumanResponse = interactiveMode && this._onCodingAgentAwaitingInput
       ? async (sessionId: string, assistantText: string) => {
           this.setStatus(AgentStatus.AwaitingInput);
           // Emit awaiting-input event so the frontend shows the prompt
@@ -202,8 +204,7 @@ export class Worker extends BaseAgent {
       : undefined;
 
     // Only wire up permission request callback when interactive mode is on.
-    // In YOLO mode, permissions auto-approve via the default "once" in opencode-client.
-    const interactiveMode = getConfig("opencode:interactive") === "true";
+    // In YOLO mode, permissions auto-approve via the default "always" in opencode-client.
     const onPermissionRequest = interactiveMode && this._onCodingAgentPermissionRequest
       ? async (sid: string, permission: { id: string; type: string; title: string; pattern?: string | string[]; metadata: Record<string, unknown> }) => {
           this.setStatus(AgentStatus.AwaitingInput);

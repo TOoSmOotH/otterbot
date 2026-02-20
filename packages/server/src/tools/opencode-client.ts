@@ -360,6 +360,12 @@ export class OpenCodeClient {
     let recentText = "";
     const SENTINEL_BUF_SIZE = 100;
 
+    // Track consecutive tool errors to detect infinite error loops.
+    // After MAX_CONSECUTIVE_TOOL_ERRORS, abort the session instead of waiting
+    // for the 30-minute hard cap.
+    let consecutiveToolErrors = 0;
+    const MAX_CONSECUTIVE_TOOL_ERRORS = 10;
+
     try {
       for await (const event of events.stream) {
         if (controller.signal.aborted) break;
@@ -404,6 +410,27 @@ export class OpenCodeClient {
             }
           }
 
+          // Detect consecutive tool errors (infinite error loops)
+          if (eventType === "message.part.updated") {
+            const part = props?.part as Record<string, unknown> | undefined;
+            if (part?.type === "tool") {
+              const stateObj = part.state as Record<string, unknown> | undefined;
+              const status = stateObj?.status as string | undefined;
+              if (status === "error") {
+                consecutiveToolErrors++;
+                console.warn(`[OpenCode Client] Tool error #${consecutiveToolErrors}: ${(part.tool as string) ?? "unknown"}`);
+                if (consecutiveToolErrors >= MAX_CONSECUTIVE_TOOL_ERRORS) {
+                  console.warn(`[OpenCode Client] ${MAX_CONSECUTIVE_TOOL_ERRORS} consecutive tool errors — aborting.`);
+                  clearInterval(checkInterval);
+                  controller.abort();
+                  return "error";
+                }
+              } else if (status === "completed" || status === "running") {
+                consecutiveToolErrors = 0;
+              }
+            }
+          }
+
           // Check for completion events
           if (isOurSession) {
             if (eventType === "session.error") {
@@ -420,6 +447,7 @@ export class OpenCodeClient {
             }
             if (eventType === "session.status") {
               const statusObj = props?.status as { type?: string } | undefined;
+              console.log(`[OpenCode Client] session.status: ${JSON.stringify(statusObj)}`);
               if (statusObj?.type === "idle") {
                 console.log(`[OpenCode Client] Session status=idle — task complete.`);
                 clearInterval(checkInterval);
@@ -429,6 +457,7 @@ export class OpenCodeClient {
             }
             if (eventType === "session.updated") {
               const statusObj = props?.status as { type?: string } | undefined;
+              console.log(`[OpenCode Client] session.updated status: ${JSON.stringify(statusObj)}`);
               if (statusObj?.type === "idle" || statusObj?.type === "completed") {
                 console.log(`[OpenCode Client] Session updated status=${statusObj.type} — task complete.`);
                 clearInterval(checkInterval);
@@ -450,7 +479,7 @@ export class OpenCodeClient {
               console.log(`[OpenCode Client] Permission requested: ${permissionTitle} (${permissionId})`);
               this.permissionPending = true;
               try {
-                let response: "once" | "always" | "reject" = "once";
+                let response: "once" | "always" | "reject" = this.onPermissionRequest ? "once" : "always";
                 if (this.onPermissionRequest) {
                   response = await this.onPermissionRequest(sessionId, {
                     id: permissionId,
