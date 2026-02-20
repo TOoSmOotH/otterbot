@@ -260,35 +260,33 @@ export class OpenCodeClient {
   /**
    * Extract text content from an OpenCode message/response.
    */
-  private extractContent(response: Record<string, unknown>): string {
+  private extractContent(response: Record<string, unknown> | Array<Record<string, unknown>>): string {
     let text: string;
 
     // Direct content field
-    if (typeof response.content === "string") {
-      text = response.content;
+    if ("content" in response && typeof (response as any).content === "string") {
+      text = (response as any).content;
     }
     // Message with parts array (OpenCode v2 format)
-    else {
-      const parts = response.parts as Array<{ type?: string; text?: string }> | undefined;
-      if (Array.isArray(parts)) {
-        const textParts = parts.filter((p) => p.type === "text" && p.text);
-        text = textParts.map((p) => p.text).join("\n");
-      }
-      // Array of messages — extract from last assistant message
-      else if (Array.isArray(response)) {
-        text = "";
-        for (let i = response.length - 1; i >= 0; i--) {
-          const msg = response[i] as Record<string, unknown>;
-          if (msg.role === "assistant") {
-            text = this.extractContent(msg);
-            break;
-          }
+    else if ("parts" in response && Array.isArray((response as any).parts)) {
+      const parts = (response as any).parts as Array<{ type?: string; text?: string }>;
+      const textParts = parts.filter((p) => p.type === "text" && p.text);
+      text = textParts.map((p) => p.text).join("\n");
+    }
+    // Array of messages — extract from last assistant message
+    else if (Array.isArray(response)) {
+      text = "";
+      for (let i = response.length - 1; i >= 0; i--) {
+        const msg = response[i] as Record<string, unknown>;
+        if (msg.role === "assistant") {
+          text = this.extractContent(msg);
+          break;
         }
       }
-      // Fallback: stringify
-      else {
-        text = JSON.stringify(response).slice(0, 2000);
-      }
+    }
+    // Fallback: stringify
+    else {
+      text = JSON.stringify(response).slice(0, 2000);
     }
 
     // Strip the completion sentinel so it doesn't pollute summaries
