@@ -1,4 +1,4 @@
-import { nanoid } from "nanoid";
+import { makeProjectId } from "../utils/slugify.js";
 import { tool } from "ai";
 import { z } from "zod";
 import {
@@ -680,7 +680,7 @@ The user can see everything on the desktop in real-time.`;
       return `There are ${activeProjects.length} active project(s). Call get_project_status first to see if this work fits an existing project, then use send_directive or create_project as appropriate.`;
     }
 
-    const projectId = nanoid();
+    const projectId = makeProjectId(name);
 
     // Create project record
     db.insert(schema.projects)

@@ -5,6 +5,7 @@ import type {
 } from "@otterbot/shared";
 import { MessageType, type Agent, type AgentActivityRecord, type BusMessage, type Conversation, type Project, type KanbanTask, type CodingAgentSession, type CodingAgentMessage, type CodingAgentPart, type CodingAgentFileDiff, type CodingAgentType } from "@otterbot/shared";
 import { nanoid } from "nanoid";
+import { makeProjectId } from "../utils/slugify.js";
 import { eq, or, desc, isNull } from "drizzle-orm";
 import type { MessageBus } from "../bus/message-bus.js";
 import type { COO } from "../agents/coo.js";
@@ -365,7 +366,7 @@ export function setupSocketHandlers(
         const rules = data.rules ?? [];
         const issueMonitor = data.issueMonitor ?? false;
 
-        const projectId = nanoid();
+        const projectId = makeProjectId(name);
         const db = getDb();
 
         // Create project record
