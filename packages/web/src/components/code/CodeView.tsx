@@ -96,22 +96,64 @@ function PartContent({
   }
 
   if (type === "tool" || type === "tool-invocation") {
+    // Try to parse JSON tool input/output for nicer display
+    let parsed: Record<string, unknown> | null = null;
+    try {
+      if (content.startsWith("{")) parsed = JSON.parse(content);
+    } catch { /* not JSON, render as-is */ }
+
+    const isError = toolState === "error" || parsed?.error;
+    const borderColor = isError ? "border-red-500" : "border-yellow-500";
+
+    // Extract display-friendly fields from parsed tool data
+    const command = parsed?.command as string | undefined;
+    const description = parsed?.description as string | undefined;
+    const output = parsed?.output as string | undefined;
+    const error = parsed?.error as string | undefined;
+    const path = parsed?.path as string | undefined;
+
+    // Build a header label: "# bash" or "# Wrote hello.py"
+    const headerLabel = toolName || "tool";
+    const headerDetail = description || path || "";
+
     return (
-      <div className="border-l-2 border-yellow-500 pl-3 py-1 my-1">
-        <div className="text-xs text-muted-foreground mb-1">
-          <span className="text-yellow-400/80">#</span>{" "}
-          {toolName || "tool"}
+      <div className={`border-l-2 ${borderColor} pl-3 py-1 my-1`}>
+        <div className="text-xs text-muted-foreground mb-0.5">
+          <span className={isError ? "text-red-400/80" : "text-yellow-400/80"}>#</span>{" "}
+          <span className="text-foreground/70">{headerLabel}</span>
+          {headerDetail && (
+            <span className="ml-1.5 text-muted-foreground/70">{headerDetail}</span>
+          )}
           {toolState && toolState !== "pending" && (
             <span className={`ml-1.5 ${
               toolState === "completed" || toolState === "result"
                 ? "text-emerald-400/70"
-                : "text-yellow-400/70"
+                : isError
+                  ? "text-red-400/70"
+                  : "text-yellow-400/70"
             }`}>
               ({toolState})
             </span>
           )}
         </div>
-        {content && (
+        {/* Show command for bash/shell tools */}
+        {command && (
+          <pre className="text-xs text-foreground/80 bg-white/5 rounded px-2 py-1 my-0.5 overflow-x-auto">
+            <code>{command}</code>
+          </pre>
+        )}
+        {/* Show error message */}
+        {error && (
+          <div className="text-xs text-red-400/90 mt-0.5">{error}</div>
+        )}
+        {/* Show output */}
+        {output && (
+          <pre className="text-xs text-foreground/70 bg-white/5 rounded px-2 py-1 my-0.5 max-h-[200px] overflow-y-auto overflow-x-auto whitespace-pre-wrap">
+            <code>{output}</code>
+          </pre>
+        )}
+        {/* Non-JSON content or content without recognized fields — render as markdown */}
+        {!parsed && content && (
           <div className="text-xs [&_.prose]:text-xs [&_.prose_pre]:my-1 [&_.prose_pre]:text-xs [&_.prose_code]:text-xs">
             <MarkdownContent content={content} />
           </div>
