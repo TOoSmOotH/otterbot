@@ -563,6 +563,7 @@ export function emitOpenCodeEvent(
   }
 
   // Forward raw event for debugging / generic listeners
+  console.log(`[emitOpenCodeEvent] type=${type} agentId=${agentId} sessionId=${sessionId} propKeys=${Object.keys(properties).join(",")}`);
   io.emit("opencode:event", { agentId, sessionId, type, properties });
 
   // Parse specific event types into structured events
@@ -570,6 +571,7 @@ export function emitOpenCodeEvent(
   // Handle streaming deltas — message.part.delta carries incremental text chunks
   // Shape: { sessionID, messageID, partID, field: "text"|"reasoning"|..., delta: "chunk" }
   if (type === "message.part.delta") {
+    console.log(`[emitOpenCodeEvent] message.part.delta raw properties:`, JSON.stringify(properties).slice(0, 500));
     const delta = properties.delta as string | undefined;
     const partId = (properties.partID || "") as string;
     const messageId = (properties.messageID || "") as string;
@@ -578,7 +580,10 @@ export function emitOpenCodeEvent(
     // Map field names to our part types
     const partType = field === "reasoning" ? "reasoning" : "text";
 
+    console.log(`[emitOpenCodeEvent] part.delta parsed: delta=${delta?.slice(0, 50)} partId=${partId} messageId=${messageId} field=${field} partType=${partType}`);
+
     if (delta && partId && messageId) {
+      console.log(`[emitOpenCodeEvent] EMITTING opencode:part-delta sessionId=${sessionId} msgId=${messageId} partId=${partId}`);
       io.emit("opencode:part-delta", {
         agentId,
         sessionId,
@@ -599,12 +604,15 @@ export function emitOpenCodeEvent(
         toolName: existing?.toolName,
         toolState: existing?.toolState,
       });
+    } else {
+      console.warn(`[emitOpenCodeEvent] SKIPPED part.delta — missing: delta=${!!delta} partId=${!!partId} messageId=${!!messageId}`);
     }
   }
 
   // SDK shape: EventMessagePartUpdated = { type, properties: { part: Part, delta?: string } }
   // Part has: id, sessionID, messageID, type, and type-specific fields
   if (type === "message.part.updated") {
+    console.log(`[emitOpenCodeEvent] message.part.updated raw properties:`, JSON.stringify(properties).slice(0, 500));
     const part = properties.part as Record<string, unknown> | undefined;
     const delta = properties.delta as string | undefined;
 
@@ -612,6 +620,7 @@ export function emitOpenCodeEvent(
       const partId = (part.id ?? "") as string;
       const messageId = (part.messageID ?? "") as string;
       const partType = (part.type ?? "text") as string;
+      console.log(`[emitOpenCodeEvent] part.updated parsed: partId=${partId} messageId=${messageId} partType=${partType} hasDelta=${!!delta}`);
 
       // Extract tool name from ToolPart (type: "tool")
       const toolName = (part.tool ?? "") as string;
@@ -666,6 +675,7 @@ export function emitOpenCodeEvent(
   // SDK shape: EventMessageUpdated = { type, properties: { info: Message } }
   // Message = UserMessage | AssistantMessage (has role, id, sessionID, but NO parts)
   if (type === "message.updated") {
+    console.log(`[emitOpenCodeEvent] message.updated raw properties:`, JSON.stringify(properties).slice(0, 500));
     const info = properties.info as Record<string, unknown> | undefined;
 
     if (info) {
