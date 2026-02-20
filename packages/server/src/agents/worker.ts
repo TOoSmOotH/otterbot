@@ -159,8 +159,8 @@ export class Worker extends BaseAgent {
     const preInstalledContext =
       `IMPORTANT — Pre-installed tools (do NOT install these, they are already available):\n` +
       `- Node.js (v22), npm, pnpm (via corepack)\n` +
-      `- Playwright with Chromium — already installed, do NOT run \`npx playwright install\` or install browsers\n` +
-      `- Puppeteer — already installed with shared Chromium, do NOT reinstall\n` +
+      `- Playwright with Chromium — already installed globally, do NOT run \`npx playwright install\` or install browsers\n` +
+      `- Puppeteer — already installed globally with shared Chromium (PUPPETEER_EXECUTABLE_PATH is set), do NOT reinstall. Just \`import puppeteer from 'puppeteer'\`.\n` +
       `- Go, Rust, Python 3, Java, Ruby, git, gh (GitHub CLI), SQLite 3, build-essential\n`;
 
     const completionInstruction =

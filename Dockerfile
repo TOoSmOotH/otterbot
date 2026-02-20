@@ -78,6 +78,10 @@ RUN npm install -g opencode-ai@latest
 RUN npm install -g @anthropic-ai/claude-code@latest
 RUN npm install -g @openai/codex@latest
 
+# Install puppeteer globally so coding agents can import it from any workspace.
+# Skip bundled Chromium download — we reuse Playwright's Chromium via PUPPETEER_EXECUTABLE_PATH.
+RUN PUPPETEER_SKIP_DOWNLOAD=true npm install -g puppeteer
+
 # Create non-root user with configurable UID/GID
 ARG OTTERBOT_UID=1000
 ARG OTTERBOT_GID=1000
@@ -302,6 +306,7 @@ ENV PATH="/otterbot/home/go/bin:$PATH"
 ENV VIRTUAL_ENV=/otterbot/home/.venv
 ENV PATH="/otterbot/home/.venv/bin:$PATH"
 ENV BROWSER=/usr/local/bin/chromium-browser
+ENV PUPPETEER_EXECUTABLE_PATH=/usr/local/bin/chromium-browser
 ENV ENABLE_DESKTOP=true
 ENV DESKTOP_RESOLUTION=1280x720x24
 ENV VNC_PORT=5900
