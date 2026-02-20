@@ -260,35 +260,33 @@ export class OpenCodeClient {
   /**
    * Extract text content from an OpenCode message/response.
    */
-  private extractContent(response: Record<string, unknown>): string {
+  private extractContent(response: Record<string, unknown> | Array<Record<string, unknown>>): string {
     let text: string;
 
     // Direct content field
-    if (typeof response.content === "string") {
-      text = response.content;
+    if ("content" in response && typeof (response as any).content === "string") {
+      text = (response as any).content;
     }
     // Message with parts array (OpenCode v2 format)
-    else {
-      const parts = response.parts as Array<{ type?: string; text?: string }> | undefined;
-      if (Array.isArray(parts)) {
-        const textParts = parts.filter((p) => p.type === "text" && p.text);
-        text = textParts.map((p) => p.text).join("\n");
-      }
-      // Array of messages — extract from last assistant message
-      else if (Array.isArray(response)) {
-        text = "";
-        for (let i = response.length - 1; i >= 0; i--) {
-          const msg = response[i] as Record<string, unknown>;
-          if (msg.role === "assistant") {
-            text = this.extractContent(msg);
-            break;
-          }
+    else if ("parts" in response && Array.isArray((response as any).parts)) {
+      const parts = (response as any).parts as Array<{ type?: string; text?: string }>;
+      const textParts = parts.filter((p) => p.type === "text" && p.text);
+      text = textParts.map((p) => p.text).join("\n");
+    }
+    // Array of messages — extract from last assistant message
+    else if (Array.isArray(response)) {
+      text = "";
+      for (let i = response.length - 1; i >= 0; i--) {
+        const msg = response[i] as Record<string, unknown>;
+        if (msg.role === "assistant") {
+          text = this.extractContent(msg);
+          break;
         }
       }
-      // Fallback: stringify
-      else {
-        text = JSON.stringify(response).slice(0, 2000);
-      }
+    }
+    // Fallback: stringify
+    else {
+      text = JSON.stringify(response).slice(0, 2000);
     }
 
     // Strip the completion sentinel so it doesn't pollute summaries
@@ -309,7 +307,7 @@ export class OpenCodeClient {
   private async monitorActivity(
     sessionId: string,
     controller: AbortController,
-  ): Promise<"idle" | "hard_cap" | "error"> {
+  ): Promise<"idle" | "hard_cap" | "error" | "completed"> {
     const startTime = Date.now();
     let lastActivityTime = Date.now();
 
@@ -328,7 +326,7 @@ export class OpenCodeClient {
     controller: AbortController,
     startTime: number,
     lastActivityTime: number,
-  ): Promise<"idle" | "hard_cap" | "error"> {
+  ): Promise<"idle" | "hard_cap" | "error" | "completed"> {
     const events = await this.client.event.subscribe({
       signal: controller.signal,
     });
@@ -401,7 +399,7 @@ export class OpenCodeClient {
                 console.log(`[OpenCode Client] Completion sentinel detected in streaming output — task complete.`);
                 clearInterval(checkInterval);
                 controller.abort();
-                return "idle";
+                return "completed";
               }
             }
           }
@@ -418,7 +416,7 @@ export class OpenCodeClient {
               console.log(`[OpenCode Client] Session idle event — task complete.`);
               clearInterval(checkInterval);
               controller.abort();
-              return "idle";
+              return "completed";
             }
             if (eventType === "session.status") {
               const statusObj = props?.status as { type?: string } | undefined;
@@ -426,7 +424,7 @@ export class OpenCodeClient {
                 console.log(`[OpenCode Client] Session status=idle — task complete.`);
                 clearInterval(checkInterval);
                 controller.abort();
-                return "idle";
+                return "completed";
               }
             }
             if (eventType === "session.updated") {
@@ -435,7 +433,7 @@ export class OpenCodeClient {
                 console.log(`[OpenCode Client] Session updated status=${statusObj.type} — task complete.`);
                 clearInterval(checkInterval);
                 controller.abort();
-                return "idle";
+                return "completed";
               }
             }
           }
@@ -670,9 +668,25 @@ export class OpenCodeClient {
           continue;
         }
 
-        // Timeout
+        // Timeout or completion detected by monitor
         timedOut = true;
         timeoutReason = result.reason;
+
+        // If completion was detected via SSE/events (monitorActivity won the race),
+        // treat it as success, not timeout.
+        if (result.type === "timeout" && result.reason === "completed") {
+          console.log(`[OpenCode Client] Monitor detected completion — finalizing session.`);
+          timedOut = false;
+          // Fetch full history since prompt() was aborted
+          try {
+            const messages = await this.getMessages(session.id);
+            lastSummary = this.extractContent(messages);
+          } catch (err) {
+            console.warn(`[OpenCode Client] Failed to fetch final messages:`, err);
+          }
+          break; // Exit loop with success
+        }
+
         break;
       } catch (err) {
         console.error(`[OpenCode Client] executeTask turn error:`, err);
