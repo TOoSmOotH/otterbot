@@ -218,7 +218,7 @@ The user can see everything on the desktop in real-time.`;
     const lines = projects.map(
       (p) => `- [${p.id}] "${p.name}": ${p.description}`,
     );
-    return `\n\n[ACTIVE PROJECTS]\n${lines.join("\n")}\n[/ACTIVE PROJECTS]\n\nConsider the active projects above before deciding whether to create a new one.`;
+    return `\n\n[ACTIVE PROJECTS]\n${lines.join("\n")}\n[/ACTIVE PROJECTS]\n\nRoute related work to an existing project with send_directive, or create a new project if this is a distinct area of work.`;
   }
 
   private async handleCeoMessage(message: BusMessage) {
@@ -487,7 +487,7 @@ The user can see everything on the desktop in real-time.`;
         }),
         execute: async ({ projectId }) => {
           if (this.projectStatusCheckedThisTurn) {
-            return "ALREADY CHECKED. Do NOT call get_project_status again. Use the status you already have and respond to the CEO now.";
+            return "You already checked project status this turn. Use the information you have to proceed — either send_directive to an existing project or create_project for new work.";
           }
           this.projectStatusCheckedThisTurn = true;
           return this.getProjectStatus(projectId);
@@ -634,7 +634,7 @@ The user can see everything on the desktop in real-time.`;
     };
   }
 
-  private static readonly PROJECT_COOLDOWN_MS = 300_000; // 5 minutes
+  private static readonly PROJECT_COOLDOWN_MS = 30_000; // 30 seconds
 
   private async sendDirectiveToTeamLead(
     projectId: string,
@@ -666,7 +666,7 @@ The user can see everything on the desktop in real-time.`;
     const elapsed = Date.now() - this.lastProjectCreatedAt;
     if (elapsed < COO.PROJECT_COOLDOWN_MS) {
       const waitSec = Math.ceil((COO.PROJECT_COOLDOWN_MS - elapsed) / 1000);
-      return `Blocked: a project was created ${Math.floor(elapsed / 1000)}s ago. Wait ${waitSec}s or use get_project_status to check existing projects.`;
+      return `A project was just created ${Math.floor(elapsed / 1000)}s ago. Please wait ${waitSec}s before creating another, or use send_directive to add work to an existing project.`;
     }
 
     // Guard: require checking active projects before creating a new one
@@ -677,7 +677,7 @@ The user can see everything on the desktop in real-time.`;
       .where(eq(schema.projects.status, "active"))
       .all();
     if (activeProjects.length > 0 && !this.projectStatusCheckedThisTurn) {
-      return `Blocked: there are ${activeProjects.length} active project(s). Use send_directive to add work to an existing project, or use get_project_status to check them first. Only create a new project if this is genuinely unrelated work.`;
+      return `There are ${activeProjects.length} active project(s). Call get_project_status first to see if this work fits an existing project, then use send_directive or create_project as appropriate.`;
     }
 
     const projectId = nanoid();
