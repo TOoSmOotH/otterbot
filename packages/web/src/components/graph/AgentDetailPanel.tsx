@@ -29,6 +29,7 @@ export function AgentDetailPanel() {
   const loadAgentActivity = useAgentActivityStore((s) => s.loadAgentActivity);
   const agents = useAgentStore((s) => s.agents);
   const [activeTab, setActiveTab] = useState<"activity" | "tools" | "messages">("activity");
+  const [stopping, setStopping] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const [panelHeight, setPanelHeight] = useState(280);
   const dragging = useRef(false);
@@ -111,16 +112,43 @@ export function AgentDetailPanel() {
             <span className="text-[10px] text-muted-foreground capitalize">{agent.status}</span>
           )}
         </div>
-        <button
-          onClick={clearSelection}
-          className="text-muted-foreground hover:text-foreground transition-colors p-1 rounded hover:bg-secondary"
-          title="Close"
-        >
-          <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <line x1="18" y1="6" x2="6" y2="18" />
-            <line x1="6" y1="6" x2="18" y2="18" />
-          </svg>
-        </button>
+        <div className="flex items-center gap-1">
+          {agent?.role === "worker" && ["acting", "thinking", "awaiting_input"].includes(agent.status) && (
+            <button
+              onClick={() => {
+                if (stopping) return;
+                setStopping(true);
+                const socket = getSocket();
+                socket.emit("agent:stop", { agentId: selectedAgentId! }, (ack) => {
+                  setStopping(false);
+                  if (!ack?.ok) {
+                    console.warn("Failed to stop worker:", ack?.error);
+                  }
+                });
+              }}
+              disabled={stopping}
+              className={cn(
+                "text-[10px] font-medium px-2 py-0.5 rounded transition-colors",
+                stopping
+                  ? "bg-zinc-700 text-zinc-400 cursor-not-allowed"
+                  : "bg-red-500/20 text-red-400 hover:bg-red-500/30 hover:text-red-300",
+              )}
+              title="Stop this worker"
+            >
+              {stopping ? "Stopping..." : "Stop"}
+            </button>
+          )}
+          <button
+            onClick={clearSelection}
+            className="text-muted-foreground hover:text-foreground transition-colors p-1 rounded hover:bg-secondary"
+            title="Close"
+          >
+            <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <line x1="18" y1="6" x2="6" y2="18" />
+              <line x1="6" y1="6" x2="18" y2="18" />
+            </svg>
+          </button>
+        </div>
       </div>
 
       {/* Tabs */}

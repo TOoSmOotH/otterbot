@@ -1612,6 +1612,41 @@ export class TeamLead extends BaseAgent {
     return lines.join("\n");
   }
 
+  /**
+   * Stop a specific worker by ID. Called by COO.stopWorker() when the user
+   * clicks stop in the UI. Aborts the worker, moves its kanban task back to
+   * backlog, and removes it from the workers map.
+   * Returns true if the worker was found and stopped.
+   */
+  stopWorker(workerId: string): boolean {
+    const worker = this.workers.get(workerId);
+    if (!worker) return false;
+
+    console.log(`[TeamLead ${this.id}] Stopping worker ${workerId} (manual stop)`);
+
+    // Find and unassign the worker's kanban task
+    if (this.projectId) {
+      const db = getDb();
+      const task = db
+        .select()
+        .from(schema.kanbanTasks)
+        .where(eq(schema.kanbanTasks.projectId, this.projectId))
+        .all()
+        .find((t) => t.assigneeAgentId === workerId && t.column === "in_progress");
+
+      if (task) {
+        console.log(`[TeamLead ${this.id}] Moving task "${task.title}" (${task.id}) back to backlog`);
+        this.updateKanbanTask(task.id, { column: "backlog", assigneeAgentId: "" });
+      }
+    }
+
+    // Abort the worker (sends report, emits session-end, calls destroy)
+    worker.abort();
+    this.workers.delete(workerId);
+
+    return true;
+  }
+
   getWorkers(): Map<string, Worker> {
     return this.workers;
   }

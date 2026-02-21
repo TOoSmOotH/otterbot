@@ -69,6 +69,9 @@ export abstract class BaseAgent {
   /** Set by tool guards to signal that the current think() stream should abort after the current step */
   protected _shouldAbortThink = false;
 
+  /** External abort signal — set by Worker.abort() to cancel running think()/runStream() */
+  protected _externalAbortController: AbortController | null = null;
+
   private messageQueue: BusMessage[] = [];
   private processing = false;
 
@@ -338,6 +341,16 @@ export abstract class BaseAgent {
   ): Promise<{ text: string; thinking: string | undefined; hadToolCalls: boolean; timedOut?: boolean }> {
     // Create an AbortController so tool guards can stop the stream mid-think
     const abortController = new AbortController();
+
+    // If an external abort signal fires (e.g. from Worker.abort()), propagate to our controller
+    if (this._externalAbortController) {
+      const externalSignal = this._externalAbortController.signal;
+      if (externalSignal.aborted) {
+        abortController.abort();
+      } else {
+        externalSignal.addEventListener("abort", () => abortController.abort(), { once: true });
+      }
+    }
 
     const result = await stream(
       this.llmConfig,

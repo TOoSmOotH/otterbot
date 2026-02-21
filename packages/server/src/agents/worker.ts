@@ -53,6 +53,13 @@ export class Worker extends BaseAgent {
   private _onCodingAgentAwaitingInput?: (agentId: string, sessionId: string, prompt: string) => Promise<string | null>;
   private _onCodingAgentPermissionRequest?: (agentId: string, sessionId: string, permission: { id: string; type: string; title: string; pattern?: string | string[]; metadata: Record<string, unknown> }) => Promise<"once" | "always" | "reject">;
 
+  /** Abort controller for the current task — used by abort() to cancel running work */
+  private _taskAbortController: AbortController | null = null;
+  /** Reference to the Claude Code AbortController (stored in executeExternalCodingAgent) */
+  private _codingAgentAbortController: AbortController | null = null;
+  /** Reference to the OpenCode client (for abort) */
+  private _openCodeClient: { abort: (sessionId: string) => Promise<void>; sessionId?: string } | null = null;
+
   constructor(deps: WorkerDependencies) {
     const options: AgentOptions = {
       id: deps.id,
@@ -79,6 +86,42 @@ export class Worker extends BaseAgent {
     this._onCodingAgentEvent = deps.onCodingAgentEvent;
     this._onCodingAgentAwaitingInput = deps.onCodingAgentAwaitingInput;
     this._onCodingAgentPermissionRequest = deps.onCodingAgentPermissionRequest;
+  }
+
+  /**
+   * Abort the currently running task. Called by TeamLead.stopWorker().
+   * Cancels the coding agent or LLM stream, emits session-end, sends report, and destroys.
+   */
+  abort(): void {
+    console.log(`[Worker ${this.id}] abort() called — cancelling running task`);
+
+    // 1. Cancel the task-level abort controller (causes handleTask to throw)
+    if (this._taskAbortController) {
+      this._taskAbortController.abort();
+      this._taskAbortController = null;
+    }
+
+    // 2. Cancel the external coding agent if running
+    if (this._codingAgentAbortController) {
+      this._codingAgentAbortController.abort();
+      this._codingAgentAbortController = null;
+    }
+
+    // 3. Emit session-end with cancelled status for coding agents
+    if (CODING_AGENT_REGISTRY_IDS.has(this.registryEntryId!) && this.registryEntryId !== "builtin-coder") {
+      this._onCodingAgentEvent?.(this.id, "", {
+        type: "__session-end",
+        properties: { status: "cancelled", diff: null, error: "Manually stopped by user" },
+      });
+    }
+
+    // 4. Report cancellation to the parent TeamLead
+    if (this.parentId) {
+      this.sendMessage(this.parentId, MessageType.Report, "WORKER CANCELLED: Task was manually stopped by user.");
+    }
+
+    // 5. Clean up
+    this.destroy();
   }
 
   async handleMessage(message: BusMessage): Promise<void> {
@@ -300,10 +343,15 @@ export class Worker extends BaseAgent {
     const timeoutMs = parseInt(getConfig(`${configPrefix}:timeout_ms`) ?? "1200000", 10);
     const maxTurns = parseInt(getConfig(`${configPrefix}:max_turns`) ?? "50", 10);
 
+    // Create a shared abort controller for the coding agent subprocess
+    const codingAbortController = new AbortController();
+    this._codingAgentAbortController = codingAbortController;
+
     const clientConfig: Record<string, unknown> = {
       workspacePath: this.workspacePath,
       timeoutMs,
       maxTurns,
+      abortController: codingAbortController,
       onEvent: (event: { type: string; properties: Record<string, unknown> }) => {
         this._onCodingAgentEvent?.(this.id, "", event);
       },
@@ -407,6 +455,11 @@ export class Worker extends BaseAgent {
 
   private async handleTask(message: BusMessage) {
     console.log(`[Worker ${this.id}] handleTask starting (registry=${this.registryEntryId})`);
+
+    // Set up abort controller for this task
+    this._taskAbortController = new AbortController();
+    this._externalAbortController = this._taskAbortController;
+
     let text: string;
     try {
       if (CODING_AGENT_REGISTRY_IDS.has(this.registryEntryId!) && this.registryEntryId !== "builtin-coder" && this.workspacePath) {
@@ -454,6 +507,11 @@ export class Worker extends BaseAgent {
     } else {
       console.warn(`[Worker ${this.id}] No parentId — report not sent!`);
     }
+
+    // Clean up abort controllers
+    this._taskAbortController = null;
+    this._externalAbortController = null;
+    this._codingAgentAbortController = null;
 
     // Worker is a one-shot agent — mark as done after completing the task
     this.setStatus(AgentStatus.Done);

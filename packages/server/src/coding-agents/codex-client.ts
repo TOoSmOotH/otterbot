@@ -26,6 +26,8 @@ export interface CodexConfig {
   timeoutMs?: number;
   maxTurns?: number;
   onEvent?: OnEvent;
+  /** External abort controller — if provided, aborting it kills the child process */
+  abortController?: AbortController;
 }
 
 export class CodexClient implements CodingAgentClient {
@@ -129,6 +131,18 @@ export class CodexClient implements CodingAgentClient {
         cwd,
         stdio: ["ignore", "pipe", "pipe"],
       });
+
+      // Wire external abort controller to kill the child process
+      if (this.config.abortController) {
+        const signal = this.config.abortController.signal;
+        if (signal.aborted) {
+          try { child.kill("SIGTERM"); } catch { /* best-effort */ }
+        } else {
+          signal.addEventListener("abort", () => {
+            try { child.kill("SIGTERM"); } catch { /* best-effort */ }
+          }, { once: true });
+        }
+      }
 
       let stdout = "";
       let stderr = "";

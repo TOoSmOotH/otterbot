@@ -25,6 +25,8 @@ export interface ClaudeCodeConfig {
   timeoutMs?: number;
   maxTurns?: number;
   onEvent?: OnEvent;
+  /** External abort controller — if provided, used instead of creating a new one */
+  abortController?: AbortController;
 }
 
 export class ClaudeCodeClient implements CodingAgentClient {
@@ -50,7 +52,7 @@ export class ClaudeCodeClient implements CodingAgentClient {
 
       const options: Record<string, unknown> = {
         prompt: task,
-        abortController: new AbortController(),
+        abortController: this.config.abortController ?? new AbortController(),
       };
 
       if (this.config.workspacePath) {

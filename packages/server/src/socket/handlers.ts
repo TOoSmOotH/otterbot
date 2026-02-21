@@ -433,6 +433,13 @@ export function setupSocketHandlers(
       }
     });
 
+    // Stop a running worker agent
+    socket.on("agent:stop", (data, callback) => {
+      console.log(`[Socket] agent:stop received for ${data.agentId}`);
+      const result = coo.stopWorker(data.agentId);
+      callback?.({ ok: result, error: result ? undefined : "Worker not found" });
+    });
+
     // Retrieve agent activity (bus messages + persisted activity records)
     socket.on("agent:activity", (data, callback) => {
       const db = getDb();

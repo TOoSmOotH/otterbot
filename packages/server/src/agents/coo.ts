@@ -1461,6 +1461,20 @@ The user can see everything on the desktop in real-time.`;
     return this.currentConversationId;
   }
 
+  /**
+   * Stop a specific worker by ID. Iterates team leads to find the owner
+   * and delegates to TeamLead.stopWorker().
+   * Returns true if the worker was found and stopped.
+   */
+  stopWorker(workerId: string): boolean {
+    for (const [, teamLead] of this.teamLeads) {
+      if (teamLead.getWorkers().has(workerId)) {
+        return teamLead.stopWorker(workerId);
+      }
+    }
+    return false;
+  }
+
   getTeamLeads(): Map<string, TeamLead> {
     return this.teamLeads;
   }
