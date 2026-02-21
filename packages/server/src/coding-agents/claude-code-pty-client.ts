@@ -156,7 +156,7 @@ export class ClaudeCodePtyClient implements CodingAgentClient {
     return this.ringBuffer;
   }
 
-  /** Kill the PTY process */
+  /** Kill the PTY process (marks result as failed) */
   kill(): void {
     if (!this.ptyProcess) return;
     this._killed = true;
@@ -168,6 +168,26 @@ export class ClaudeCodePtyClient implements CodingAgentClient {
     }
 
     // Force kill after 3 seconds
+    setTimeout(() => {
+      try {
+        this.ptyProcess?.kill("SIGKILL");
+      } catch {
+        // Already dead
+      }
+    }, 3000);
+  }
+
+  /** Gracefully terminate the PTY process (marks result as successful) */
+  gracefulExit(): void {
+    if (!this.ptyProcess) return;
+    // Don't set _killed so the exit is treated as successful
+    try {
+      this.ptyProcess.kill("SIGTERM");
+    } catch {
+      // Already dead
+    }
+
+    // Force kill after 3 seconds if SIGTERM didn't work
     setTimeout(() => {
       try {
         this.ptyProcess?.kill("SIGKILL");

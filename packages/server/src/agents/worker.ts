@@ -598,7 +598,7 @@ ${cleanOutput.slice(-2000)}`,
     }
   }
 
-  /** Handle task completion — send /exit to close the REPL */
+  /** Handle task completion — terminate the PTY process gracefully */
   private handleTerminalComplete(
     summary: string,
     ptyClient: import("../coding-agents/claude-code-pty-client.js").ClaudeCodePtyClient,
@@ -606,12 +606,9 @@ ${cleanOutput.slice(-2000)}`,
     if (this._terminalExiting) return;
     this._terminalExiting = true;
     console.log(`[Worker ${this.id}] Terminal session appears complete: ${summary}`);
-    // Send Escape to dismiss any autocomplete menu, then /exit + Enter.
-    // Small delay between to let the REPL process the escape before receiving input.
-    ptyClient.writeInput("\x1b");
-    setTimeout(() => {
-      ptyClient.writeInput("/exit\r");
-    }, 200);
+    // Kill the process directly — typing /exit doesn't work reliably because
+    // Claude Code's REPL autocomplete menu intercepts the input.
+    ptyClient.gracefulExit();
   }
 
   /**

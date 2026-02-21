@@ -727,9 +727,9 @@ export function setupSocketHandlers(
     socket.on("terminal:end", (data, callback) => {
       const client = activePtySessions.get(data.agentId);
       if (client) {
-        // Send Escape to dismiss autocomplete, then /exit + Enter
-        client.writeInput("\x1b");
-        setTimeout(() => client.writeInput("/exit\r"), 200);
+        // Gracefully terminate the process (typing /exit doesn't work reliably
+        // because Claude Code's REPL autocomplete intercepts the input)
+        client.gracefulExit();
         callback?.({ ok: true });
       } else {
         callback?.({ ok: false, error: "No active PTY session" });
