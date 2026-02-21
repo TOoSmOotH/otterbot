@@ -1167,13 +1167,18 @@ const EMPTY_USAGE: ClaudeCodeOAuthUsage = {
   sessionResetsAt: null,
   weeklyPercent: 0,
   weeklyResetsAt: null,
-  weeklyOpusPercent: 0,
-  weeklyOpusResetsAt: null,
   errorMessage: null,
   needsAuth: false,
 };
 
+let usageCache: { data: ClaudeCodeOAuthUsage; fetchedAt: number } | null = null;
+const USAGE_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
 export async function getClaudeCodeOAuthUsage(): Promise<ClaudeCodeOAuthUsage> {
+  // Return cached result if fresh
+  if (usageCache && Date.now() - usageCache.fetchedAt < USAGE_CACHE_TTL_MS) {
+    return usageCache.data;
+  }
   const authMode = getConfig("claude-code:auth_mode") ?? "api-key";
   if (authMode !== "oauth") {
     return { ...EMPTY_USAGE, errorMessage: "Not using OAuth" };
@@ -1225,19 +1230,19 @@ export async function getClaudeCodeOAuthUsage(): Promise<ClaudeCodeOAuthUsage> {
     const data = await res.json() as {
       five_hour?: { utilization: number; resets_at: string };
       seven_day?: { utilization: number; resets_at: string };
-      seven_day_opus?: { utilization: number; resets_at: string };
     };
 
-    return {
-      sessionPercent: Math.round((data.five_hour?.utilization ?? 0) * 100),
+    // utilization is already a percentage (e.g. 39 = 39%)
+    const result: ClaudeCodeOAuthUsage = {
+      sessionPercent: Math.round(data.five_hour?.utilization ?? 0),
       sessionResetsAt: data.five_hour?.resets_at ?? null,
-      weeklyPercent: Math.round((data.seven_day?.utilization ?? 0) * 100),
+      weeklyPercent: Math.round(data.seven_day?.utilization ?? 0),
       weeklyResetsAt: data.seven_day?.resets_at ?? null,
-      weeklyOpusPercent: Math.round((data.seven_day_opus?.utilization ?? 0) * 100),
-      weeklyOpusResetsAt: data.seven_day_opus?.resets_at ?? null,
       errorMessage: null,
       needsAuth: false,
     };
+    usageCache = { data: result, fetchedAt: Date.now() };
+    return result;
   } catch (error) {
     return {
       ...EMPTY_USAGE,

@@ -118,10 +118,9 @@ function ClaudeCodeUsageCard() {
   return (
     <div className="rounded-lg border border-border bg-card p-4">
       <div className="text-xs font-medium text-muted-foreground mb-3">Claude Code Usage</div>
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <UsageBar label="5h Session" percent={usage.sessionPercent} resetsAt={usage.sessionResetsAt} />
         <UsageBar label="Weekly" percent={usage.weeklyPercent} resetsAt={usage.weeklyResetsAt} />
-        <UsageBar label="Weekly Opus" percent={usage.weeklyOpusPercent} resetsAt={usage.weeklyOpusResetsAt} />
       </div>
     </div>
   );
