@@ -12,6 +12,8 @@ import type {
   CodingAgentDiff,
 } from "./coding-agent-client.js";
 import { execSync } from "node:child_process";
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { join } from "node:path";
 import { getConfig } from "../auth/auth.js";
 
 /** Ring buffer size for late-joining clients (~100KB) */
@@ -57,9 +59,8 @@ export class ClaudeCodePtyClient implements CodingAgentClient {
         env.GITHUB_TOKEN = ghToken;
       }
 
-      // Build args: pass task as the first positional argument (non-interactive start)
-      // Claude CLI: `claude "task text"` starts with the task then drops to REPL
-      const args: string[] = [task];
+      // Build args: use -p (print/non-interactive) mode so claude exits after the task
+      const args: string[] = ["-p", task];
 
       // Add model flag if configured
       const model = getConfig("claude-code:model");
@@ -72,6 +73,10 @@ export class ClaudeCodePtyClient implements CodingAgentClient {
       if (approvalMode === "full-auto") {
         args.unshift("--dangerously-skip-permissions");
       }
+
+      // Ensure the "are you sure?" confirmation for --dangerously-skip-permissions
+      // is suppressed. Claude CLI checks ~/.claude/settings.json for this flag.
+      this.ensureSkipPermissionPrompt();
 
       const cwd = this.config.workspacePath || process.cwd();
 
@@ -168,6 +173,36 @@ export class ClaudeCodePtyClient implements CodingAgentClient {
         // Already dead
       }
     }, 3000);
+  }
+
+  /**
+   * Ensure the Claude CLI settings have skipDangerousModePermissionPrompt: true
+   * so the one-time "are you sure?" dialog is suppressed in non-interactive PTY usage.
+   */
+  private ensureSkipPermissionPrompt(): void {
+    try {
+      const home = process.env.HOME || process.env.USERPROFILE || "";
+      const settingsDir = join(home, ".claude");
+      const settingsPath = join(settingsDir, "settings.json");
+
+      let settings: Record<string, unknown> = {};
+      if (existsSync(settingsPath)) {
+        try {
+          settings = JSON.parse(readFileSync(settingsPath, "utf-8"));
+        } catch {
+          // Corrupted file — overwrite
+        }
+      }
+
+      if (settings.skipDangerousModePermissionPrompt === true) return;
+
+      settings.skipDangerousModePermissionPrompt = true;
+      mkdirSync(settingsDir, { recursive: true });
+      writeFileSync(settingsPath, JSON.stringify(settings, null, 2), "utf-8");
+      console.log("[Claude Code PTY] Set skipDangerousModePermissionPrompt in ~/.claude/settings.json");
+    } catch (err) {
+      console.warn("[Claude Code PTY] Failed to set skipDangerousModePermissionPrompt:", err);
+    }
   }
 
   /** Compute file diffs via git in the workspace directory */
