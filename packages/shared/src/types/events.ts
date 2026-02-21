@@ -42,6 +42,8 @@ export interface ServerToClientEvents {
   "codeagent:part-delta": (data: { agentId: string; sessionId: string; messageId: string; partId: string; type: string; delta: string; toolName?: string; toolState?: string }) => void;
   "codeagent:awaiting-input": (data: { agentId: string; sessionId: string; prompt: string }) => void;
   "codeagent:permission-request": (data: { agentId: string; sessionId: string; permission: CodingAgentPermission }) => void;
+  "terminal:data": (data: { agentId: string; data: string }) => void;
+  "terminal:replay": (data: { agentId: string; data: string }) => void;
   "todo:created": (todo: Todo) => void;
   "todo:updated": (todo: Todo) => void;
   "todo:deleted": (data: { todoId: string }) => void;
@@ -105,6 +107,22 @@ export interface ClientToServerEvents {
   ) => void;
   "codeagent:permission-respond": (
     data: { agentId: string; sessionId: string; permissionId: string; response: "once" | "always" | "reject" },
+    callback?: (ack: { ok: boolean; error?: string }) => void,
+  ) => void;
+  "terminal:input": (
+    data: { agentId: string; data: string },
+    callback?: (ack: { ok: boolean; error?: string }) => void,
+  ) => void;
+  "terminal:resize": (
+    data: { agentId: string; cols: number; rows: number },
+    callback?: (ack: { ok: boolean; error?: string }) => void,
+  ) => void;
+  "terminal:subscribe": (
+    data: { agentId: string },
+    callback?: (ack: { ok: boolean; error?: string }) => void,
+  ) => void;
+  "terminal:end": (
+    data: { agentId: string },
     callback?: (ack: { ok: boolean; error?: string }) => void,
   ) => void;
   "project:create-manual": (

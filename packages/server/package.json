@@ -13,7 +13,6 @@
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^1.1.9",
-    "@anthropic-ai/claude-agent-sdk": "^0.1.0",
     "@ai-sdk/openai": "^1.1.14",
     "@ai-sdk/openai-compatible": "^0.1.8",
     "@andresaya/edge-tts": "^1.8.0",
@@ -33,6 +32,7 @@
     "gray-matter": "^4.0.3",
     "kokoro-js": "^1.1.0",
     "nanoid": "^5.0.9",
+    "node-pty": "^1.1.0",
     "ollama-ai-provider": "^1.2.0",
     "playwright": "^1.50.0",
     "puppeteer": "^24.2.0",

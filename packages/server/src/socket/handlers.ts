@@ -23,6 +23,7 @@ import { cloneRepo, getRepoDefaultBranch } from "../github/github-service.js";
 import { NO_REPORT_SENTINEL } from "../schedulers/custom-task-scheduler.js";
 import { ProjectStatus, CharterStatus } from "@otterbot/shared";
 import { existsSync, rmSync } from "node:fs";
+import type { ClaudeCodePtyClient } from "../coding-agents/claude-code-pty-client.js";
 
 type TypedSocket = Socket<ClientToServerEvents, ServerToClientEvents>;
 type TypedServer = Server<ClientToServerEvents, ServerToClientEvents>;
@@ -32,6 +33,19 @@ type TypedServer = Server<ClientToServerEvents, ServerToClientEvents>;
 const serverPartBuffers = new Map<string, { type: string; content: string; toolName?: string; toolState?: string }>();
 // Track agentId → DB row ID for session updates
 const sessionRowIds = new Map<string, string>();
+
+/** Active PTY sessions keyed by agentId — registered by workers, used by socket handlers */
+const activePtySessions = new Map<string, ClaudeCodePtyClient>();
+
+/** Register a PTY session so socket handlers can route terminal events to it */
+export function registerPtySession(agentId: string, client: ClaudeCodePtyClient): void {
+  activePtySessions.set(agentId, client);
+}
+
+/** Unregister a PTY session (called when process exits) */
+export function unregisterPtySession(agentId: string): void {
+  activePtySessions.delete(agentId);
+}
 
 /** Reset module-level persistence state (for testing) */
 export function resetCodingAgentPersistence() {
@@ -641,6 +655,51 @@ export function setupSocketHandlers(
       }
     });
 
+    // ─── Terminal events (PTY sessions) ──────────────────────────
+    socket.on("terminal:input", (data, callback) => {
+      const client = activePtySessions.get(data.agentId);
+      if (client) {
+        client.writeInput(data.data);
+        callback?.({ ok: true });
+      } else {
+        callback?.({ ok: false, error: "No active PTY session" });
+      }
+    });
+
+    socket.on("terminal:resize", (data, callback) => {
+      const client = activePtySessions.get(data.agentId);
+      if (client) {
+        client.resize(data.cols, data.rows);
+        callback?.({ ok: true });
+      } else {
+        callback?.({ ok: false, error: "No active PTY session" });
+      }
+    });
+
+    socket.on("terminal:subscribe", (data, callback) => {
+      const client = activePtySessions.get(data.agentId);
+      if (client) {
+        const replay = client.getReplayBuffer();
+        if (replay) {
+          socket.emit("terminal:replay", { agentId: data.agentId, data: replay });
+        }
+        callback?.({ ok: true });
+      } else {
+        callback?.({ ok: false, error: "No active PTY session" });
+      }
+    });
+
+    socket.on("terminal:end", (data, callback) => {
+      const client = activePtySessions.get(data.agentId);
+      if (client) {
+        // Send /exit to gracefully end the Claude session
+        client.writeInput("/exit\n");
+        callback?.({ ok: true });
+      } else {
+        callback?.({ ok: false, error: "No active PTY session" });
+      }
+    });
+
     socket.on("disconnect", () => {
       console.log(`Client disconnected: ${socket.id}`);
     });
@@ -1097,3 +1156,8 @@ export function emitCodingAgentEvent(
 
 /** @deprecated Use emitCodingAgentEvent instead */
 export const emitOpenCodeEvent = emitCodingAgentEvent;
+
+/** Emit raw terminal data from a PTY session to all connected clients */
+export function emitTerminalData(io: TypedServer, agentId: string, data: string) {
+  io.emit("terminal:data", { agentId, data });
+}

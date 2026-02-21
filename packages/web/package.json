@@ -13,6 +13,8 @@
     "@otterbot/shared": "workspace:*",
     "@react-three/drei": "^10.7.7",
     "@react-three/fiber": "^9.5.0",
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
     "@xyflow/react": "^12.4.3",
     "clsx": "^2.1.1",
     "gray-matter": "^4.0.3",

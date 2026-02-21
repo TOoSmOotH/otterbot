@@ -54,6 +54,9 @@ import {
   emitAgentToolCall,
   emitAgentDestroyed,
   emitCodingAgentEvent,
+  emitTerminalData,
+  registerPtySession,
+  unregisterPtySession,
 } from "./socket/handlers.js";
 import {
   isSetupComplete,
@@ -537,6 +540,15 @@ async function main() {
             }, PERMISSION_TIMEOUT_MS);
             codingAgentPermissionResolvers.set(key, { resolve, timeout });
           });
+        },
+        onTerminalData: (agentId, data) => {
+          emitTerminalData(io, agentId, data);
+        },
+        onPtySessionRegistered: (agentId, client) => {
+          registerPtySession(agentId, client);
+        },
+        onPtySessionUnregistered: (agentId) => {
+          unregisterPtySession(agentId);
         },
         onAgentDestroyed: (agentId) => {
           emitAgentDestroyed(io, agentId);

@@ -74,6 +74,9 @@ export interface COODependencies {
   onCodingAgentEvent?: (agentId: string, sessionId: string, event: { type: string; properties: Record<string, unknown> }) => void;
   onCodingAgentAwaitingInput?: (agentId: string, sessionId: string, prompt: string) => Promise<string | null>;
   onCodingAgentPermissionRequest?: (agentId: string, sessionId: string, permission: { id: string; type: string; title: string; pattern?: string | string[]; metadata: Record<string, unknown> }) => Promise<"once" | "always" | "reject">;
+  onTerminalData?: (agentId: string, data: string) => void;
+  onPtySessionRegistered?: (agentId: string, client: import("../coding-agents/claude-code-pty-client.js").ClaudeCodePtyClient) => void;
+  onPtySessionUnregistered?: (agentId: string) => void;
   onAgentDestroyed?: (agentId: string) => void;
 }
 
@@ -96,6 +99,9 @@ export class COO extends BaseAgent {
   private _onCodingAgentEvent?: (agentId: string, sessionId: string, event: { type: string; properties: Record<string, unknown> }) => void;
   private _onCodingAgentAwaitingInput?: (agentId: string, sessionId: string, prompt: string) => Promise<string | null>;
   private _onCodingAgentPermissionRequest?: (agentId: string, sessionId: string, permission: { id: string; type: string; title: string; pattern?: string | string[]; metadata: Record<string, unknown> }) => Promise<"once" | "always" | "reject">;
+  private _onTerminalData?: (agentId: string, data: string) => void;
+  private _onPtySessionRegistered?: (agentId: string, client: import("../coding-agents/claude-code-pty-client.js").ClaudeCodePtyClient) => void;
+  private _onPtySessionUnregistered?: (agentId: string) => void;
   private onAgentDestroyed?: (agentId: string) => void;
   private allowedToolNames: Set<string>;
   private contextManager!: ConversationContextManager;
@@ -198,6 +204,9 @@ The user can see everything on the desktop in real-time.`;
     this._onCodingAgentEvent = deps.onCodingAgentEvent;
     this._onCodingAgentAwaitingInput = deps.onCodingAgentAwaitingInput;
     this._onCodingAgentPermissionRequest = deps.onCodingAgentPermissionRequest;
+    this._onTerminalData = deps.onTerminalData;
+    this._onPtySessionRegistered = deps.onPtySessionRegistered;
+    this._onPtySessionUnregistered = deps.onPtySessionUnregistered;
     this.onAgentDestroyed = deps.onAgentDestroyed;
     this.contextManager = new ConversationContextManager(systemPrompt);
   }
@@ -965,6 +974,9 @@ The user can see everything on the desktop in real-time.`;
       onCodingAgentEvent: this._onCodingAgentEvent,
       onCodingAgentAwaitingInput: this._onCodingAgentAwaitingInput,
       onCodingAgentPermissionRequest: this._onCodingAgentPermissionRequest,
+      onTerminalData: this._onTerminalData,
+      onPtySessionRegistered: this._onPtySessionRegistered,
+      onPtySessionUnregistered: this._onPtySessionUnregistered,
     });
 
     this.teamLeads.set(projectId, teamLead);
@@ -1420,6 +1432,9 @@ The user can see everything on the desktop in real-time.`;
       onCodingAgentEvent: this._onCodingAgentEvent,
       onCodingAgentAwaitingInput: this._onCodingAgentAwaitingInput,
       onCodingAgentPermissionRequest: this._onCodingAgentPermissionRequest,
+      onTerminalData: this._onTerminalData,
+      onPtySessionRegistered: this._onPtySessionRegistered,
+      onPtySessionUnregistered: this._onPtySessionUnregistered,
     });
 
     this.teamLeads.set(projectId, teamLead);
@@ -1539,6 +1554,9 @@ The user can see everything on the desktop in real-time.`;
       onCodingAgentEvent: this._onCodingAgentEvent,
       onCodingAgentAwaitingInput: this._onCodingAgentAwaitingInput,
       onCodingAgentPermissionRequest: this._onCodingAgentPermissionRequest,
+      onTerminalData: this._onTerminalData,
+      onPtySessionRegistered: this._onPtySessionRegistered,
+      onPtySessionUnregistered: this._onPtySessionUnregistered,
     });
 
     this.teamLeads.set(project.id, teamLead);

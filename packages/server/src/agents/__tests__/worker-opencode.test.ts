@@ -25,12 +25,16 @@ vi.mock("../../tools/opencode-client.js", () => {
   };
 });
 
-// Mock claude-code-client
+// Mock claude-code-pty-client
 const mockClaudeCodeExecuteTask = vi.fn();
-vi.mock("../../coding-agents/claude-code-client.js", () => {
+vi.mock("../../coding-agents/claude-code-pty-client.js", () => {
   return {
-    ClaudeCodeClient: class {
+    ClaudeCodePtyClient: class {
       executeTask = mockClaudeCodeExecuteTask;
+      writeInput = vi.fn();
+      resize = vi.fn();
+      kill = vi.fn();
+      getReplayBuffer = vi.fn(() => "");
     },
   };
 });

@@ -3,6 +3,7 @@ import { useCodingAgentStore } from "../../stores/coding-agent-store";
 import { useAgentStore } from "../../stores/agent-store";
 import { getSocket } from "../../lib/socket";
 import { MarkdownContent } from "../chat/MarkdownContent";
+import { TerminalView } from "./TerminalView";
 import type { CodingAgentSession, CodingAgentMessage, CodingAgentFileDiff, CodingAgentPermission, CodingAgentType } from "@otterbot/shared";
 
 type PartBuffer = { type: string; content: string; toolName?: string; toolState?: string };
@@ -354,7 +355,81 @@ function PermissionPrompt({ agentId }: { agentId: string }) {
   );
 }
 
-function SessionContent({ agentId }: { agentId: string }) {
+/** Terminal-based session content for Claude Code PTY sessions */
+function TerminalSessionContent({ agentId }: { agentId: string }) {
+  const session = useCodingAgentStore((s) => s.sessions.get(agentId));
+  const agent = useAgentStore((s) => s.agents.get(agentId));
+  const sessionId = session?.id || "";
+  const sessionDiffs = useCodingAgentStore((s) => s.diffs.get(sessionId) ?? EMPTY_DIFFS);
+
+  const handleCompleteTask = useCallback(() => {
+    getSocket().emit("terminal:end", { agentId });
+  }, [agentId]);
+
+  if (!session) {
+    return (
+      <div className="flex-1 flex items-center justify-center text-xs text-muted-foreground">
+        Select a session to view
+      </div>
+    );
+  }
+
+  const isActive = session.status === "active";
+
+  return (
+    <div className="flex-1 flex flex-col min-h-0">
+      {/* Session header */}
+      <div className="flex items-center gap-2 px-3 py-2 border-b border-border bg-card/50">
+        <StatusDot status={session.status} />
+        <span className="text-xs font-mono text-foreground/80">{agent?.name ?? session.agentId.slice(0, 12)}</span>
+        <span className="text-xs text-muted-foreground truncate flex-1">{session.task.slice(0, 100)}</span>
+        {isActive && (
+          <button
+            onClick={handleCompleteTask}
+            className="px-2.5 py-1 rounded text-xs font-medium bg-orange-500/20 text-orange-400 hover:bg-orange-500/30 transition-colors shrink-0"
+          >
+            Complete Task
+          </button>
+        )}
+      </div>
+
+      {/* Terminal */}
+      {isActive ? (
+        <TerminalView agentId={agentId} />
+      ) : (
+        <div className="flex-1 flex flex-col items-center justify-center gap-3 text-xs text-muted-foreground">
+          {session.status === "completed" && (
+            <>
+              <span className="inline-block w-3 h-3 rounded-sm bg-emerald-500" />
+              <span>Session completed</span>
+              {session.completedAt && (
+                <span className="text-border">
+                  {Math.round((new Date(session.completedAt).getTime() - new Date(session.startedAt).getTime()) / 1000)}s
+                </span>
+              )}
+            </>
+          )}
+          {session.status === "error" && (
+            <>
+              <span className="inline-block w-3 h-3 rounded-sm bg-red-500" />
+              <span className="text-red-400">Session ended with error</span>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* Diff summary at bottom */}
+      {sessionDiffs.length > 0 && (
+        <div className="px-3 py-2 border-t border-border bg-card/30">
+          <DiffSummary diffs={sessionDiffs} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Message-based session content for OpenCode/Codex sessions */
+function MessageSessionContent({ agentId }: { agentId: string }) {
   const session = useCodingAgentStore((s) => s.sessions.get(agentId));
   const agent = useAgentStore((s) => s.agents.get(agentId));
   const sessionId = session?.id || "";
@@ -528,6 +603,27 @@ function SessionContent({ agentId }: { agentId: string }) {
   );
 }
 
+/** Route to the appropriate session content based on agent type */
+function SessionContent({ agentId }: { agentId: string }) {
+  const session = useCodingAgentStore((s) => s.sessions.get(agentId));
+
+  if (!session) {
+    return (
+      <div className="flex-1 flex items-center justify-center text-xs text-muted-foreground">
+        Select a session to view
+      </div>
+    );
+  }
+
+  // Claude Code uses terminal-based rendering
+  if (session.agentType === "claude-code") {
+    return <TerminalSessionContent agentId={agentId} />;
+  }
+
+  // OpenCode/Codex use message-based rendering
+  return <MessageSessionContent agentId={agentId} />;
+}
+
 export function CodeView({ projectId }: { projectId?: string | null }) {
   const allSessions = useCodingAgentStore((s) => s.sessions);
   const selectedAgentId = useCodingAgentStore((s) => s.selectedAgentId);
@@ -560,7 +656,7 @@ export function CodeView({ projectId }: { projectId?: string | null }) {
             <div className="text-lg mb-2 opacity-30">{"</>"}</div>
             <div>Live coding view</div>
             <div className="mt-1 opacity-70">
-              OpenCode sessions will appear here when workers execute coding tasks
+              Coding sessions will appear here when workers execute tasks
             </div>
           </div>
         </div>

@@ -38,6 +38,11 @@ export interface WorkerDependencies {
   onCodingAgentEvent?: (agentId: string, sessionId: string, event: { type: string; properties: Record<string, unknown> }) => void;
   onCodingAgentAwaitingInput?: (agentId: string, sessionId: string, prompt: string) => Promise<string | null>;
   onCodingAgentPermissionRequest?: (agentId: string, sessionId: string, permission: { id: string; type: string; title: string; pattern?: string | string[]; metadata: Record<string, unknown> }) => Promise<"once" | "always" | "reject">;
+  /** Callback for raw terminal data from PTY sessions (Claude Code) */
+  onTerminalData?: (agentId: string, data: string) => void;
+  /** Called when a PTY session is registered/unregistered for socket routing */
+  onPtySessionRegistered?: (agentId: string, client: import("../coding-agents/claude-code-pty-client.js").ClaudeCodePtyClient) => void;
+  onPtySessionUnregistered?: (agentId: string) => void;
 }
 
 /** Set of registry entry IDs that are coding agents */
@@ -54,6 +59,9 @@ export class Worker extends BaseAgent {
   private _onCodingAgentEvent?: (agentId: string, sessionId: string, event: { type: string; properties: Record<string, unknown> }) => void;
   private _onCodingAgentAwaitingInput?: (agentId: string, sessionId: string, prompt: string) => Promise<string | null>;
   private _onCodingAgentPermissionRequest?: (agentId: string, sessionId: string, permission: { id: string; type: string; title: string; pattern?: string | string[]; metadata: Record<string, unknown> }) => Promise<"once" | "always" | "reject">;
+  private _onTerminalData?: (agentId: string, data: string) => void;
+  private _onPtySessionRegistered?: (agentId: string, client: import("../coding-agents/claude-code-pty-client.js").ClaudeCodePtyClient) => void;
+  private _onPtySessionUnregistered?: (agentId: string) => void;
 
   /** Abort controller for the current task — used by abort() to cancel running work */
   private _taskAbortController: AbortController | null = null;
@@ -61,6 +69,8 @@ export class Worker extends BaseAgent {
   private _codingAgentAbortController: AbortController | null = null;
   /** Reference to the OpenCode client (for abort) */
   private _openCodeClient: { abort: (sessionId: string) => Promise<void>; sessionId?: string } | null = null;
+  /** Reference to the PTY client (for abort/input routing) */
+  private _ptyClient: import("../coding-agents/claude-code-pty-client.js").ClaudeCodePtyClient | null = null;
 
   constructor(deps: WorkerDependencies) {
     const options: AgentOptions = {
@@ -88,6 +98,9 @@ export class Worker extends BaseAgent {
     this._onCodingAgentEvent = deps.onCodingAgentEvent;
     this._onCodingAgentAwaitingInput = deps.onCodingAgentAwaitingInput;
     this._onCodingAgentPermissionRequest = deps.onCodingAgentPermissionRequest;
+    this._onTerminalData = deps.onTerminalData;
+    this._onPtySessionRegistered = deps.onPtySessionRegistered;
+    this._onPtySessionUnregistered = deps.onPtySessionUnregistered;
   }
 
   /**
@@ -104,6 +117,11 @@ export class Worker extends BaseAgent {
     }
 
     // 2. Cancel the external coding agent if running
+    if (this._ptyClient) {
+      this._ptyClient.kill();
+      this._onPtySessionUnregistered?.(this.id);
+      this._ptyClient = null;
+    }
     if (this._codingAgentAbortController) {
       this._codingAgentAbortController.abort();
       this._codingAgentAbortController = null;
@@ -334,8 +352,7 @@ export class Worker extends BaseAgent {
       case "opencode":
         return this.executeOpenCodeTask(task);
       case "claude-code": {
-        const { ClaudeCodeClient } = await import("../coding-agents/claude-code-client.js");
-        return this.executeExternalCodingAgent(task, agentType, ClaudeCodeClient);
+        return this.executeClaudeCodePtyTask(task);
       }
       case "codex": {
         const { CodexClient } = await import("../coding-agents/codex-client.js");
@@ -344,6 +361,64 @@ export class Worker extends BaseAgent {
       default:
         return "";
     }
+  }
+
+  /**
+   * Execute a task using Claude Code via PTY (terminal passthrough).
+   * Spawns the `claude` CLI in a pseudo-terminal and streams raw output.
+   */
+  private async executeClaudeCodePtyTask(task: string): Promise<string> {
+    // Bail out early if no API key is configured (for api-key auth mode)
+    const authMode = getConfig("claude-code:auth_mode") ?? "api-key";
+    if (authMode === "api-key" && !getConfig("claude-code:api_key")) {
+      console.warn(`[Worker ${this.id}] Claude Code not configured (no api_key), falling back to think()`);
+      return "";
+    }
+
+    const { ClaudeCodePtyClient } = await import("../coding-agents/claude-code-pty-client.js");
+
+    const ptyClient = new ClaudeCodePtyClient({
+      workspacePath: this.workspacePath,
+      onData: (data) => {
+        this._onTerminalData?.(this.id, data);
+      },
+    });
+
+    this._ptyClient = ptyClient;
+
+    // Register PTY session for socket routing
+    this._onPtySessionRegistered?.(this.id, ptyClient);
+
+    this.setStatus(AgentStatus.Acting);
+
+    // Emit session-start event
+    this._onCodingAgentEvent?.(this.id, "", {
+      type: "__session-start",
+      properties: { task, projectId: this.projectId ?? "", agentType: "claude-code" },
+    });
+
+    console.log(`[Worker ${this.id}] Sending task to Claude Code PTY (${task.length} chars)...`);
+
+    const result = await ptyClient.executeTask(task);
+    console.log(`[Worker ${this.id}] Claude Code PTY result: success=${result.success}, diff=${result.diff?.files?.length ?? 0} files`);
+
+    // Unregister PTY session
+    this._onPtySessionUnregistered?.(this.id);
+    this._ptyClient = null;
+
+    // Emit session-end event
+    this._onCodingAgentEvent?.(this.id, result.sessionId, {
+      type: "__session-end",
+      properties: {
+        status: result.success ? "completed" : "error",
+        diff: result.diff?.files ?? null,
+        error: result.error,
+      },
+    });
+
+    return result.success
+      ? `Claude Code completed successfully.\n\nSummary: ${result.summary}\n\nFiles changed: ${result.diff?.files?.length ?? 0}`
+      : `Claude Code failed: ${result.error ?? "Unknown error"}\n\n${result.summary}`;
   }
 
   /**
