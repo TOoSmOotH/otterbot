@@ -74,11 +74,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Install coding agents
-# OpenCode + Codex go into /otterbot/tools via NPM_CONFIG_PREFIX
-# Claude Code uses the native installer → /otterbot/home/.local/bin/claude
-ENV NPM_CONFIG_PREFIX=/otterbot/tools
-ENV PATH="/otterbot/tools/bin:$PATH"
-RUN mkdir -p /otterbot/tools /otterbot/home
+# OpenCode + Codex go into /usr/local/lib/otterbot-tools via NPM_CONFIG_PREFIX
+# (NOT /otterbot/tools — that path is overlaid by bind-mounted volumes at runtime)
+# Claude Code uses the native installer → /usr/local/lib/otterbot-tools/claude-home/.local/bin/claude
+ENV NPM_CONFIG_PREFIX=/usr/local/lib/otterbot-tools
+ENV PATH="/usr/local/lib/otterbot-tools/bin:$PATH"
+RUN mkdir -p /usr/local/lib/otterbot-tools /otterbot/home
 RUN npm install -g opencode-ai@latest
 RUN npm install -g @openai/codex@latest
 RUN HOME=/otterbot/home curl -fsSL https://claude.ai/install.sh | HOME=/otterbot/home bash
