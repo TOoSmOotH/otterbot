@@ -78,6 +78,9 @@ RUN npm install -g opencode-ai@latest
 RUN npm install -g @anthropic-ai/claude-code@latest
 RUN npm install -g @openai/codex@latest
 
+# Allow dynamic import() to resolve globally-installed packages (e.g. @anthropic-ai/claude-code)
+ENV NODE_PATH=/usr/local/lib/node_modules
+
 # Install puppeteer globally so coding agents can import it from any workspace.
 # Skip bundled Chromium download — we reuse Playwright's Chromium via PUPPETEER_EXECUTABLE_PATH.
 RUN PUPPETEER_SKIP_DOWNLOAD=true npm install -g puppeteer
