@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "maestro-status": {
+      "args": [],
+      "command": "/home/mreeves/maestro/target/debug/maestro-mcp-server",
+      "env": {
+        "MAESTRO_INSTANCE_ID": "088c0ed0-f982-49b7-9e43-8b8c48895885",
+        "MAESTRO_SESSION_ID": "2",
+        "MAESTRO_STATUS_URL": "http://127.0.0.1:9900/status"
+      },
+      "type": "stdio"
+    }
+  }
+}

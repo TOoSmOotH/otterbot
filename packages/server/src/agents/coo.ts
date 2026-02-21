@@ -1426,7 +1426,7 @@ The user can see everything on the desktop in real-time.`;
       "",
       "INSTRUCTIONS:",
       "- Pick up unblocked backlog tasks by spawning workers.",
-      "- If all tasks are done, run verification and deployment as normal.",
+      "- If all tasks are done, run verification and report completion to the COO.",
       "- Do NOT create duplicate tasks for work already on the board.",
     );
 

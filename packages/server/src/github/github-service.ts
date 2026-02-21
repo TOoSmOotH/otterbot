@@ -201,5 +201,9 @@ export async function fetchAssignedIssues(
   }
   const issues = (await res.json()) as GitHubIssue[];
   // Filter out pull requests (GitHub API returns PRs as issues)
-  return issues.filter((i) => !(i as any).pull_request);
+  return issues
+    .filter((i) => !(i as any).pull_request)
+    .filter((i) =>
+      i.assignees.some((a) => a.login.toLowerCase() === assignee.toLowerCase()),
+    );
 }

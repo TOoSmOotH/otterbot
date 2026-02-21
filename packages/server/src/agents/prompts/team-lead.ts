@@ -44,7 +44,6 @@ When decomposing a project into tasks, you MUST define proper execution order us
 4. **Integration** (wiring frontend to backend, config) — blocked by both core and secondary
 5. **Tests** (unit tests, E2E tests) — blocked by the code they test
 6. **Verification** (build, run tests, check output) — blocked by tests AND implementation
-7. **Deployment** (start the app, confirm accessible) — blocked by verification
 
 **Example:** For a todo app with Go backend + React frontend:
 \`\`\`
@@ -53,10 +52,10 @@ Task B: "Build Go backend API"              → blockedBy: [A]
 Task C: "Build React frontend"              → blockedBy: [A]  (can parallel with B since not coding-conflicting)
 Task D: "Wire frontend to backend"          → blockedBy: [B, C]
 Task E: "Write and run tests"               → blockedBy: [D]
-Task F: "Deploy and verify"                 → blockedBy: [E]
+Task F: "Final verification and report"      → blockedBy: [E]
 \`\`\`
 
-**Remember:** Since only one coding worker runs at a time, coding tasks will execute sequentially even if they don't have explicit \`blockedBy\` between them. But you MUST still use \`blockedBy\` for logical dependencies (tests depend on code, deployment depends on tests, etc.).
+**Remember:** Since only one coding worker runs at a time, coding tasks will execute sequentially even if they don't have explicit \`blockedBy\` between them. But you MUST still use \`blockedBy\` for logical dependencies (tests depend on code, verification depends on tests, etc.).
 
 ## Kanban Workflow
 - **Create ALL task cards FIRST** with proper \`blockedBy\` dependencies before spawning any workers
@@ -73,9 +72,8 @@ Task F: "Deploy and verify"                 → blockedBy: [E]
 When ALL kanban tasks are in "done":
 1. **Verify deliverables** — spawn a tester worker to build, install deps, and run tests
 2. If verification fails, create fix tasks and re-verify
-3. **Deploy the application** — spawn a coder worker to start the app as a persistent background process (nohup/&) and confirm it's accessible
-4. **Report completion** to the COO via \`report_to_coo\` — include what was built, verification results, deployment URL/port, and the workspace path
-Do NOT consider the project finished until verification passes AND the app is deployed.
+3. **Report completion** to the COO via \`report_to_coo\` — include what was built, verification results, and the workspace path
+Do NOT deploy the application unless explicitly instructed to do so by the COO.
 
 ## Coding Worker Selection
 When spawning workers for coding tasks, prefer external coding agents (**OpenCode Coder**, **Claude Code Coder**, or **Codex Coder**)

@@ -179,7 +179,6 @@ export class TeamLead extends BaseAgent {
   private workers: Map<string, Worker> = new Map();
   private workspace: WorkspaceManager;
   private verificationRequested = false;
-  private deploymentRequested = false;
   /** Per-think-cycle call counts — prevents tools from being called repeatedly within a single streamText run */
   private _toolCallCounts = new Map<string, number>();
   private _pendingWorkerReport = new Map<string, string>();
@@ -260,11 +259,10 @@ export class TeamLead extends BaseAgent {
 
     // Restore persisted flags from previous runs
     this.verificationRequested = this.loadFlag("verification");
-    this.deploymentRequested = this.loadFlag("deployment");
   }
 
   /** Persist a flag to the config KV table so it survives restarts */
-  private persistFlag(flag: "verification" | "deployment", value: boolean): void {
+  private persistFlag(flag: "verification", value: boolean): void {
     const key = `project:${this.projectId}:${flag}_requested`;
     if (value) {
       setConfig(key, "true");
@@ -274,7 +272,7 @@ export class TeamLead extends BaseAgent {
   }
 
   /** Load a persisted flag from the config KV table */
-  private loadFlag(flag: "verification" | "deployment"): boolean {
+  private loadFlag(flag: "verification"): boolean {
     if (!this.projectId) return false;
     const key = `project:${this.projectId}:${flag}_requested`;
     return getConfig(key) === "true";
@@ -292,9 +290,7 @@ export class TeamLead extends BaseAgent {
 
   private async handleDirective(message: BusMessage) {
     this.verificationRequested = false;
-    this.deploymentRequested = false;
     this.persistFlag("verification", false);
-    this.persistFlag("deployment", false);
     const { text } = await this.thinkWithContinuation(
       message.content,
       (token, messageId) => this.onAgentStream?.(this.id, token, messageId),
@@ -478,26 +474,11 @@ export class TeamLead extends BaseAgent {
           `4. Give it clear instructions: install dependencies, build the project, start the app, and run tests\n` +
           `5. Wait for the verification results — do NOT report to COO yet\n` +
           `The project repo is at: ${repoPath}`;
-      } else if (!this.deploymentRequested) {
-        this.deploymentRequested = true;
-        this.persistFlag("deployment", true);
-        instructions =
-          `ALL tasks done and verification passed. Now DEPLOY the application:\n` +
-          `1. Create a "Deploy application" task using create_task\n` +
-          `2. Search the registry for a coder worker (search_registry with capability "code")\n` +
-          `3. Spawn the worker so it runs in the project codebase\n` +
-          `4. Give it instructions to:\n` +
-          `   - Start the application as a persistent background process (use nohup and & so it survives after the worker exits)\n` +
-          `   - Wait a few seconds, then verify the app is accessible (curl/wget the health endpoint or main URL)\n` +
-          `   - Report back what URL/port the app is running on\n` +
-          `5. Wait for the deployment results — do NOT report to COO yet\n` +
-          `The project repo is at: ${repoPath}`;
       } else {
         instructions =
-          `ALL tasks done, verification passed, and deployment complete.\n` +
-          `Review the deployment results in the worker report above.\n` +
-          `If the app is running: report success to the COO using report_to_coo — include what was built, verification results, deployment URL/port, and workspace path: ${repoPath}\n` +
-          `If deployment failed: create fix tasks, spawn workers to address the issues, then re-deploy`;
+          `ALL tasks done and verification passed.\n` +
+          `Report completion to the COO using report_to_coo — include what was built, verification results, and workspace path: ${repoPath}\n` +
+          `Do NOT deploy the application unless the COO explicitly instructs you to do so.`;
       }
     } else if (livingWorkers > 0 && !board.hasUnblockedBacklog && orphans.length === 0) {
       // Workers still running, nothing spawnable — evaluate the report and return.

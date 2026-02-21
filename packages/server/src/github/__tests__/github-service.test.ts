@@ -195,7 +195,7 @@ describe("github-service", () => {
           title: "Real issue",
           body: null,
           labels: [],
-          assignees: [],
+          assignees: [{ login: "testuser" }],
           state: "open",
           html_url: "https://github.com/owner/repo/issues/1",
           created_at: "2026-01-01T00:00:00Z",
