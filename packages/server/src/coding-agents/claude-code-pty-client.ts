@@ -62,11 +62,10 @@ export class ClaudeCodePtyClient implements CodingAgentClient {
       // Determine approval mode
       const approvalMode = getConfig("claude-code:approval_mode") ?? "full-auto";
 
-      // full-auto: use -p (print/non-interactive) mode so claude exits after the task
-      // interactive: use positional arg so claude drops to REPL for user interaction
-      const args: string[] = approvalMode === "full-auto"
-        ? ["-p", task]
-        : [task];
+      // Always use positional arg (REPL mode) so the terminal renders
+      // Claude Code's full interactive TUI. The -p flag produces plain text
+      // output which defeats the purpose of the PTY terminal.
+      const args: string[] = [task];
 
       // Add model flag if configured
       const model = getConfig("claude-code:model");
