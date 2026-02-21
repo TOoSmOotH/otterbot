@@ -73,13 +73,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ruby-full \
     && rm -rf /var/lib/apt/lists/*
 
-# Install coding agents into /otterbot/tools so the runtime user can find them
+# Install coding agents
+# OpenCode + Codex go into /otterbot/tools via NPM_CONFIG_PREFIX
+# Claude Code uses the native installer → /otterbot/home/.local/bin/claude
 ENV NPM_CONFIG_PREFIX=/otterbot/tools
 ENV PATH="/otterbot/tools/bin:$PATH"
-RUN mkdir -p /otterbot/tools
+RUN mkdir -p /otterbot/tools /otterbot/home
 RUN npm install -g opencode-ai@latest
-RUN npm install -g @anthropic-ai/claude-code@latest
 RUN npm install -g @openai/codex@latest
+RUN HOME=/otterbot/home curl -fsSL https://claude.ai/install.sh | HOME=/otterbot/home bash
 
 # Install puppeteer globally so coding agents can import it from any workspace.
 # Skip bundled Chromium download — we reuse Playwright's Chromium via PUPPETEER_EXECUTABLE_PATH.
@@ -299,6 +301,7 @@ ENV HOST=0.0.0.0
 ENV DATABASE_URL=file:/otterbot/data/otterbot.db
 ENV WORKSPACE_ROOT=/otterbot
 ENV HOME=/otterbot/home
+ENV PATH="/otterbot/home/.local/bin:$PATH"
 
 ENV GOPATH=/otterbot/home/go
 ENV PATH="/otterbot/home/go/bin:$PATH"
