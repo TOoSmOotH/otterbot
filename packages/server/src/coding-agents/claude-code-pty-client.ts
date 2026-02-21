@@ -59,8 +59,14 @@ export class ClaudeCodePtyClient implements CodingAgentClient {
         env.GITHUB_TOKEN = ghToken;
       }
 
-      // Build args: use -p (print/non-interactive) mode so claude exits after the task
-      const args: string[] = ["-p", task];
+      // Determine approval mode
+      const approvalMode = getConfig("claude-code:approval_mode") ?? "full-auto";
+
+      // full-auto: use -p (print/non-interactive) mode so claude exits after the task
+      // interactive: use positional arg so claude drops to REPL for user interaction
+      const args: string[] = approvalMode === "full-auto"
+        ? ["-p", task]
+        : [task];
 
       // Add model flag if configured
       const model = getConfig("claude-code:model");
@@ -68,15 +74,12 @@ export class ClaudeCodePtyClient implements CodingAgentClient {
         args.unshift("--model", model);
       }
 
-      // Add approval mode
-      const approvalMode = getConfig("claude-code:approval_mode") ?? "full-auto";
       if (approvalMode === "full-auto") {
         args.unshift("--dangerously-skip-permissions");
+        // Ensure the "are you sure?" confirmation for --dangerously-skip-permissions
+        // is suppressed. Claude CLI checks ~/.claude/settings.json for this flag.
+        this.ensureSkipPermissionPrompt();
       }
-
-      // Ensure the "are you sure?" confirmation for --dangerously-skip-permissions
-      // is suppressed. Claude CLI checks ~/.claude/settings.json for this flag.
-      this.ensureSkipPermissionPrompt();
 
       const cwd = this.config.workspacePath || process.cwd();
 

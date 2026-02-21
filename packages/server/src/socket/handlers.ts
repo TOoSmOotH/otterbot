@@ -37,13 +37,24 @@ const sessionRowIds = new Map<string, string>();
 /** Active PTY sessions keyed by agentId — registered by workers, used by socket handlers */
 const activePtySessions = new Map<string, ClaudeCodePtyClient>();
 
+/** Saved replay buffers from completed PTY sessions — allows viewing terminal output after session ends */
+const completedPtyBuffers = new Map<string, string>();
+
 /** Register a PTY session so socket handlers can route terminal events to it */
 export function registerPtySession(agentId: string, client: ClaudeCodePtyClient): void {
+  completedPtyBuffers.delete(agentId); // Clear any stale completed buffer
   activePtySessions.set(agentId, client);
 }
 
-/** Unregister a PTY session (called when process exits) */
+/** Unregister a PTY session (called when process exits) — saves replay buffer for later viewing */
 export function unregisterPtySession(agentId: string): void {
+  const client = activePtySessions.get(agentId);
+  if (client) {
+    const buffer = client.getReplayBuffer();
+    if (buffer) {
+      completedPtyBuffers.set(agentId, buffer);
+    }
+  }
   activePtySessions.delete(agentId);
 }
 
@@ -685,7 +696,14 @@ export function setupSocketHandlers(
         }
         callback?.({ ok: true });
       } else {
-        callback?.({ ok: false, error: "No active PTY session" });
+        // Check completed session buffers for replay
+        const completedBuffer = completedPtyBuffers.get(data.agentId);
+        if (completedBuffer) {
+          socket.emit("terminal:replay", { agentId: data.agentId, data: completedBuffer });
+          callback?.({ ok: true });
+        } else {
+          callback?.({ ok: false, error: "No active PTY session" });
+        }
       }
     });
 

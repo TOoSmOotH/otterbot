@@ -154,7 +154,7 @@ function MainApp() {
     // Hydrate OpenCode session history
     fetch("/api/opencode/sessions?limit=50")
       .then((r) => r.json())
-      .then(async (sessions: Array<{ id: string; sessionId: string; agentId: string; projectId: string | null; task: string; status: string; startedAt: string; completedAt?: string }>) => {
+      .then(async (sessions: Array<{ id: string; sessionId: string; agentId: string; projectId: string | null; task: string; agentType?: string; status: string; startedAt: string; completedAt?: string }>) => {
         const messagesMap: Record<string, import("@otterbot/shared").OpenCodeMessage[]> = {};
         const diffsMap: Record<string, import("@otterbot/shared").OpenCodeFileDiff[]> = {};
         await Promise.all(
@@ -175,6 +175,7 @@ function MainApp() {
           agentId: s.agentId,
           projectId: s.projectId,
           task: s.task,
+          agentType: (s.agentType || "opencode") as import("@otterbot/shared").CodingAgentType,
           status: s.status as import("@otterbot/shared").OpenCodeSession["status"],
           startedAt: s.startedAt,
           completedAt: s.completedAt,

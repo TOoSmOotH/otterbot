@@ -393,30 +393,32 @@ function TerminalSessionContent({ agentId }: { agentId: string }) {
         )}
       </div>
 
-      {/* Terminal */}
-      {isActive ? (
-        <TerminalView agentId={agentId} />
-      ) : (
-        <div className="flex-1 flex flex-col items-center justify-center gap-3 text-xs text-muted-foreground">
-          {session.status === "completed" && (
-            <>
-              <span className="inline-block w-3 h-3 rounded-sm bg-emerald-500" />
-              <span>Session completed</span>
-              {session.completedAt && (
-                <span className="text-border">
-                  {Math.round((new Date(session.completedAt).getTime() - new Date(session.startedAt).getTime()) / 1000)}s
-                </span>
-              )}
-            </>
-          )}
-          {session.status === "error" && (
-            <>
-              <span className="inline-block w-3 h-3 rounded-sm bg-red-500" />
-              <span className="text-red-400">Session ended with error</span>
-            </>
-          )}
-        </div>
-      )}
+      {/* Terminal — always shown so output is visible even after completion */}
+      <div className="flex-1 flex flex-col min-h-0 relative">
+        <TerminalView agentId={agentId} readOnly={!isActive} />
+        {/* Completion/error banner overlay */}
+        {!isActive && (
+          <div className="absolute bottom-0 left-0 right-0 flex items-center gap-2 px-3 py-1.5 text-xs bg-card/90 border-t border-border">
+            {session.status === "completed" && (
+              <>
+                <span className="inline-block w-2 h-2 rounded-full bg-emerald-500" />
+                <span className="text-muted-foreground">Session completed</span>
+                {session.completedAt && (
+                  <span className="text-border">
+                    {Math.round((new Date(session.completedAt).getTime() - new Date(session.startedAt).getTime()) / 1000)}s
+                  </span>
+                )}
+              </>
+            )}
+            {session.status === "error" && (
+              <>
+                <span className="inline-block w-2 h-2 rounded-full bg-red-500" />
+                <span className="text-red-400">Session ended with error</span>
+              </>
+            )}
+          </div>
+        )}
+      </div>
 
       {/* Diff summary at bottom */}
       {sessionDiffs.length > 0 && (

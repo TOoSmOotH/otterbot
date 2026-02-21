@@ -6,9 +6,11 @@ import "@xterm/xterm/css/xterm.css";
 
 interface TerminalViewProps {
   agentId: string;
+  /** When true, terminal is display-only — no user input forwarded */
+  readOnly?: boolean;
 }
 
-export function TerminalView({ agentId }: TerminalViewProps) {
+export function TerminalView({ agentId, readOnly = false }: TerminalViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
@@ -17,7 +19,8 @@ export function TerminalView({ agentId }: TerminalViewProps) {
     if (!containerRef.current) return;
 
     const term = new Terminal({
-      cursorBlink: true,
+      cursorBlink: !readOnly,
+      disableStdin: readOnly,
       fontSize: 13,
       fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', Menlo, Monaco, 'Courier New', monospace",
       theme: {
@@ -78,8 +81,8 @@ export function TerminalView({ agentId }: TerminalViewProps) {
     // Subscribe to get replay buffer
     socket.emit("terminal:subscribe", { agentId });
 
-    // Forward user input to server
-    const inputDisposable = term.onData((data) => {
+    // Forward user input to server (skip in read-only mode)
+    const inputDisposable = readOnly ? null : term.onData((data) => {
       socket.emit("terminal:input", { agentId, data });
     });
 
@@ -101,13 +104,13 @@ export function TerminalView({ agentId }: TerminalViewProps) {
     return () => {
       socket.off("terminal:data", handleData);
       socket.off("terminal:replay", handleReplay);
-      inputDisposable.dispose();
+      inputDisposable?.dispose();
       resizeObserver.disconnect();
       term.dispose();
       termRef.current = null;
       fitAddonRef.current = null;
     };
-  }, [agentId]);
+  }, [agentId, readOnly]);
 
   return (
     <div

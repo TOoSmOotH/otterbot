@@ -16,6 +16,12 @@ import { getConfig } from "../auth/auth.js";
 import { getDb, schema } from "../db/index.js";
 import { TASK_COMPLETE_SENTINEL } from "../tools/opencode-client.js";
 
+/** Strip ANSI escape codes from terminal output for LLM analysis */
+function stripAnsi(str: string): string {
+  // eslint-disable-next-line no-control-regex
+  return str.replace(/\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g, "");
+}
+
 export interface WorkerDependencies {
   id?: string;
   name?: string | null;
@@ -71,6 +77,8 @@ export class Worker extends BaseAgent {
   private _openCodeClient: { abort: (sessionId: string) => Promise<void>; sessionId?: string } | null = null;
   /** Reference to the PTY client (for abort/input routing) */
   private _ptyClient: import("../coding-agents/claude-code-pty-client.js").ClaudeCodePtyClient | null = null;
+  /** Guard against re-entrant terminal analysis */
+  private _analyzingTerminal = false;
 
   constructor(deps: WorkerDependencies) {
     const options: AgentOptions = {
@@ -377,10 +385,33 @@ export class Worker extends BaseAgent {
 
     const { ClaudeCodePtyClient } = await import("../coding-agents/claude-code-pty-client.js");
 
+    // Terminal output buffer and idle detection for monitoring
+    let terminalBuffer = "";
+    let idleTimer: NodeJS.Timeout | null = null;
+    const IDLE_TIMEOUT_MS = 5000;     // 5 seconds of no output = Claude is waiting
+    const MAX_BUFFER_CHARS = 8000;    // Keep last ~8KB for LLM analysis
+
     const ptyClient = new ClaudeCodePtyClient({
       workspacePath: this.workspacePath,
       onData: (data) => {
         this._onTerminalData?.(this.id, data);
+
+        // Accumulate output for monitoring
+        terminalBuffer += data;
+        if (terminalBuffer.length > MAX_BUFFER_CHARS) {
+          terminalBuffer = terminalBuffer.slice(-MAX_BUFFER_CHARS);
+        }
+
+        // Reset idle timer on each chunk
+        if (idleTimer) clearTimeout(idleTimer);
+        idleTimer = setTimeout(() => this.analyzeTerminalState(terminalBuffer, ptyClient), IDLE_TIMEOUT_MS);
+      },
+      onExit: () => {
+        // Clear idle timer to avoid dangling analysis after exit
+        if (idleTimer) {
+          clearTimeout(idleTimer);
+          idleTimer = null;
+        }
       },
     });
 
@@ -419,6 +450,120 @@ export class Worker extends BaseAgent {
     return result.success
       ? `Claude Code completed successfully.\n\nSummary: ${result.summary}\n\nFiles changed: ${result.diff?.files?.length ?? 0}`
       : `Claude Code failed: ${result.error ?? "Unknown error"}\n\n${result.summary}`;
+  }
+
+  /**
+   * Analyze terminal output when idle to detect permission prompts, questions, or task completion.
+   * Uses the Worker's LLM to classify the terminal state and responds appropriately.
+   */
+  private async analyzeTerminalState(
+    terminalOutput: string,
+    ptyClient: import("../coding-agents/claude-code-pty-client.js").ClaudeCodePtyClient,
+  ): Promise<void> {
+    if (this._analyzingTerminal) return;
+    this._analyzingTerminal = true;
+
+    try {
+      const cleanOutput = stripAnsi(terminalOutput);
+
+      const { text } = await this.think(
+        `You are monitoring a Claude Code terminal session. The terminal has been idle for 5 seconds.
+
+Analyze the terminal output below and determine what state Claude is in:
+
+1. WAITING_FOR_PERMISSION — Claude is asking to approve a file edit, command execution, or tool use
+2. WAITING_FOR_INPUT — Claude is asking a question and waiting for user response
+3. TASK_COMPLETE — Claude has finished the task and is showing the REPL prompt (>) with no pending work
+4. STILL_WORKING — Claude is still processing (e.g., loading, thinking)
+
+Respond with EXACTLY one of these formats:
+- PERMISSION: <what Claude is asking permission for>
+- INPUT: <the question Claude is asking>
+- COMPLETE: <brief summary of what was done>
+- WORKING: <what Claude appears to be doing>
+
+TERMINAL OUTPUT (last portion):
+${cleanOutput.slice(-4000)}`,
+      );
+
+      if (text.startsWith("PERMISSION:")) {
+        await this.handleTerminalPermission(text.slice(11).trim(), ptyClient);
+      } else if (text.startsWith("INPUT:")) {
+        await this.handleTerminalInput(text.slice(6).trim(), ptyClient);
+      } else if (text.startsWith("COMPLETE:")) {
+        this.handleTerminalComplete(text.slice(9).trim(), ptyClient);
+      }
+      // WORKING: do nothing, wait for more output
+    } finally {
+      this._analyzingTerminal = false;
+    }
+  }
+
+  /** Handle permission prompts from Claude Code */
+  private async handleTerminalPermission(
+    description: string,
+    ptyClient: import("../coding-agents/claude-code-pty-client.js").ClaudeCodePtyClient,
+  ): Promise<void> {
+    const approvalMode = getConfig("claude-code:approval_mode") ?? "full-auto";
+
+    if (approvalMode === "full-auto") {
+      // Auto-approve: send "y" + Enter
+      ptyClient.writeInput("y\n");
+      return;
+    }
+
+    // Interactive mode: relay to user via the awaiting-input callback
+    if (this._onCodingAgentAwaitingInput) {
+      this.setStatus(AgentStatus.AwaitingInput);
+      this._onCodingAgentEvent?.(this.id, "", {
+        type: "__awaiting-input",
+        properties: { prompt: `Claude Code is asking for permission:\n\n${description}` },
+      });
+
+      const response = await this._onCodingAgentAwaitingInput(
+        this.id, "",
+        `Claude Code is asking for permission:\n\n${description}\n\nRespond with: yes, no, or always`,
+      );
+
+      this.setStatus(AgentStatus.Acting);
+
+      if (response) {
+        ptyClient.writeInput(response + "\n");
+      }
+    } else {
+      // No callback — auto-approve
+      ptyClient.writeInput("y\n");
+    }
+  }
+
+  /** Handle general input prompts from Claude Code */
+  private async handleTerminalInput(
+    question: string,
+    ptyClient: import("../coding-agents/claude-code-pty-client.js").ClaudeCodePtyClient,
+  ): Promise<void> {
+    if (this._onCodingAgentAwaitingInput) {
+      this.setStatus(AgentStatus.AwaitingInput);
+      this._onCodingAgentEvent?.(this.id, "", {
+        type: "__awaiting-input",
+        properties: { prompt: question },
+      });
+
+      const response = await this._onCodingAgentAwaitingInput(this.id, "", question);
+      this.setStatus(AgentStatus.Acting);
+
+      if (response) {
+        ptyClient.writeInput(response + "\n");
+      }
+    }
+  }
+
+  /** Handle task completion — send /exit to close the REPL */
+  private handleTerminalComplete(
+    summary: string,
+    ptyClient: import("../coding-agents/claude-code-pty-client.js").ClaudeCodePtyClient,
+  ): void {
+    console.log(`[Worker ${this.id}] Terminal session appears complete: ${summary}`);
+    ptyClient.writeInput("/exit\n");
   }
 
   /**
