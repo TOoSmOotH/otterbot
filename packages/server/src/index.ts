@@ -300,6 +300,9 @@ async function main() {
     });
   }
 
+  // Initialize world layout for office area management
+  const worldLayout = new WorldLayoutManager(assetsRoot);
+
   // Serve noVNC ES module source (for the desktop VNC viewer)
   // In Docker: /app/novnc/ (downloaded from GitHub during build)
   // Locally: check both relative to dist/ and relative to project root
@@ -412,7 +415,7 @@ async function main() {
   // Track the most recent permission request so chat replies can resolve it
   let activePermissionRequest: { agentId: string; permissionId: string; sessionId: string } | null = null;
 
-  function startCoo() {
+   async function startCoo() {
     if (coo) return;
     try {
       const cooRegistryId = getConfig("coo_registry_id");
@@ -616,9 +619,34 @@ async function main() {
       });
 
       // Recover active projects from previous run (non-blocking)
-      coo.recoverActiveProjects().catch((err) => {
+      try {
+        await coo.recoverActiveProjects();
+      } catch (err) {
         console.error("Failed to recover active projects:", err);
-      });
+      }
+
+      // Restore office area zones for recovered active projects
+      const zoneConfigs = worldLayout.loadAllZoneConfigs();
+      const recoveredProjectIds = zoneConfigs.map((zc) => zc.zones?.[0]?.projectId).filter((id): id is string => !!id);
+      const { getDb, schema } = await import("./db/index.js");
+      const { eq } = await import("drizzle-orm");
+      const db = getDb();
+      const activeProjects = db
+        .select()
+        .from(schema.projects)
+        .where(eq(schema.projects.status, "active"))
+        .all() as Array<{ id: string; name: string }>;
+      
+      for (const project of activeProjects) {
+        if (!recoveredProjectIds.includes(project.id)) {
+          // Zone doesn't exist for this project, create it
+          const zone = worldLayout.addZone(project.id);
+          if (zone) {
+            io.emit("world:zone-added", { zone });
+            console.log(`[COO] Restored zone for recovered project "${project.name}" (${project.id})`);
+          }
+        }
+      }
 
       // Start GitHub issue monitor
       if (issueMonitor) {
@@ -631,7 +659,7 @@ async function main() {
   }
 
   if (isSetupComplete()) {
-    startCoo();
+    await startCoo();
     startOpenCodeServer();
   } else {
     console.log("Setup not complete. Waiting for setup wizard...");
@@ -1750,9 +1778,6 @@ async function main() {
     writeFileSync(scenePath, JSON.stringify(config, null, 2));
     return { ok: true };
   });
-
-  // World layout API
-  const worldLayout = new WorldLayoutManager(assetsRoot);
 
   app.get("/api/world", async () => {
     const composite = worldLayout.getCompositeWorld();
