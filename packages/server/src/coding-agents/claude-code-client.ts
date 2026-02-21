@@ -50,28 +50,26 @@ export class ClaudeCodeClient implements CodingAgentClient {
       // Dynamic import to avoid loading SDK at module init
       const { query } = await import("@anthropic-ai/claude-agent-sdk");
 
-      const options: Record<string, unknown> = {
-        prompt: task,
+      // Build the options object (everything except prompt goes inside options)
+      const sdkOptions: Record<string, unknown> = {
         abortController: this.config.abortController ?? new AbortController(),
-        options: {
-          systemPrompt: { type: "preset", preset: "claude_code" },
-          settingSources: ["user", "project", "local"],
-        },
+        systemPrompt: { type: "preset", preset: "claude_code" },
+        settingSources: ["user", "project", "local"],
       };
 
       if (this.config.workspacePath) {
-        options.cwd = this.config.workspacePath;
+        sdkOptions.cwd = this.config.workspacePath;
       }
       if (this.config.model) {
-        options.model = this.config.model;
+        sdkOptions.model = this.config.model;
       }
       if (this.config.maxTurns) {
-        options.maxTurns = this.config.maxTurns;
+        sdkOptions.maxTurns = this.config.maxTurns;
       }
 
       // Set approval mode
       if (this.config.approvalMode === "full-auto") {
-        options.permissionMode = "acceptEdits";
+        sdkOptions.permissionMode = "acceptEdits";
       }
 
       // Set up environment with API key if provided
@@ -79,7 +77,7 @@ export class ClaudeCodeClient implements CodingAgentClient {
       if (this.config.apiKey) {
         env.ANTHROPIC_API_KEY = this.config.apiKey;
       }
-      options.env = env;
+      sdkOptions.env = env;
 
       let fullText = "";
       let inputTokens = 0;
@@ -87,7 +85,7 @@ export class ClaudeCodeClient implements CodingAgentClient {
       let model = this.config.model ?? "unknown";
 
       // Stream events from Claude Code
-      const stream = query(options as Parameters<typeof query>[0]);
+      const stream = query({ prompt: task, options: sdkOptions } as Parameters<typeof query>[0]);
 
       for await (const event of stream) {
         const eventObj = event as Record<string, unknown>;

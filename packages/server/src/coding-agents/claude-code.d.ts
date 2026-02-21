@@ -1,16 +1,3 @@
-declare module "@anthropic-ai/claude-agent-sdk" {
-  export function query(options: {
-    prompt: string;
-    cwd?: string;
-    model?: string;
-    maxTurns?: number;
-    permissionMode?: string;
-    env?: Record<string, string>;
-    abortController?: AbortController;
-    options?: {
-      systemPrompt?: string | { type: string; preset: string };
-      settingSources?: string[];
-    };
-    [key: string]: unknown;
-  }): AsyncIterable<Record<string, unknown>>;
-}
+// Type declarations for @anthropic-ai/claude-agent-sdk are provided by the
+// package itself (sdk.d.ts). This file is kept as a placeholder for any
+// local augmentations needed.
