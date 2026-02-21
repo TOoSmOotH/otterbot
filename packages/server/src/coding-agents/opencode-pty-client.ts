@@ -68,8 +68,10 @@ export class OpenCodePtyClient implements CodingAgentClient {
         env.GITHUB_TOKEN = ghToken;
       }
 
-      // Build args: `opencode run <task>`
-      const args: string[] = ["run", task];
+      // Spawn bare `opencode` (the full interactive TUI), then type the task
+      // into the input prompt. `opencode run` produces plain output without
+      // the rich Bubble Tea TUI.
+      const args: string[] = [];
 
       const cwd = this.config.workspacePath || process.cwd();
 
@@ -81,8 +83,22 @@ export class OpenCodePtyClient implements CodingAgentClient {
         env,
       });
 
+      // Track whether we've sent the task to the TUI input prompt
+      let taskSent = false;
+
       return await new Promise<CodingAgentTaskResult>((resolve) => {
         this.ptyProcess!.onData((data: string) => {
+          // Once the TUI renders, type the task into the input prompt.
+          // We detect readiness by watching for initial output, then send
+          // after a short delay to let the TUI fully initialize.
+          if (!taskSent) {
+            taskSent = true;
+            setTimeout(() => {
+              // Type the task and press Enter to submit
+              this.ptyProcess?.write(task + "\r");
+            }, 1500);
+          }
+
           // Append to ring buffer (trim to size)
           this.ringBuffer += data;
           if (this.ringBuffer.length > RING_BUFFER_SIZE) {
