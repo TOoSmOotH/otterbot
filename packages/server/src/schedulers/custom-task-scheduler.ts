@@ -5,6 +5,7 @@ import { MessageType } from "@otterbot/shared";
 import type { Server } from "socket.io";
 
 export const MIN_CUSTOM_TASK_INTERVAL_MS = 60_000;
+export const NO_REPORT_SENTINEL = "[NO_REPORT]";
 
 export type CustomTaskRow = typeof schema.customScheduledTasks.$inferSelect;
 
@@ -90,6 +91,8 @@ export class CustomTaskScheduler {
       .where(eq(schema.customScheduledTasks.id, task.id))
       .run();
 
+    const baseMeta = { source: "custom-scheduled-task", taskId: task.id, taskName: task.name };
+
     if (task.mode === "coo-prompt") {
       // Send as a user message to COO — it will process it like a user message
       this.bus.send({
@@ -97,7 +100,26 @@ export class CustomTaskScheduler {
         toAgentId: "coo",
         type: MessageType.Chat,
         content: task.message,
-        metadata: { source: "custom-scheduled-task", taskId: task.id, taskName: task.name },
+        metadata: baseMeta,
+      });
+    } else if (task.mode === "coo-background") {
+      // Send to COO but suppress from chat. COO only responds if there's
+      // something to report — otherwise it replies with [NO_REPORT] which
+      // the broadcast handler filters out.
+      const wrappedMessage = [
+        task.message,
+        "",
+        "---",
+        "IMPORTANT: This is an automated background check. Perform the requested task using your tools.",
+        `If there is nothing meaningful to report, respond with exactly: ${NO_REPORT_SENTINEL}`,
+        "Only provide a substantive response if you found something worth telling the user about.",
+      ].join("\n");
+      this.bus.send({
+        fromAgentId: null,
+        toAgentId: "coo",
+        type: MessageType.Chat,
+        content: wrappedMessage,
+        metadata: { ...baseMeta, backgroundTask: true },
       });
     } else {
       // notification mode: post as a COO message to the chat (no agent processing)
@@ -106,7 +128,7 @@ export class CustomTaskScheduler {
         toAgentId: null,
         type: MessageType.Chat,
         content: task.message,
-        metadata: { source: "custom-scheduled-task", taskId: task.id, taskName: task.name },
+        metadata: baseMeta,
       });
     }
 

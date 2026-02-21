@@ -34,7 +34,7 @@ export interface CustomTaskInfo {
   name: string;
   description: string;
   message: string;
-  mode: "coo-prompt" | "notification";
+  mode: "coo-prompt" | "coo-background" | "notification";
   intervalMs: number;
   enabled: boolean;
   lastRunAt: string | null;
@@ -189,7 +189,7 @@ interface SettingsState {
     name: string;
     description?: string;
     message: string;
-    mode?: "coo-prompt" | "notification";
+    mode?: "coo-prompt" | "coo-background" | "notification";
     intervalMs: number;
     enabled?: boolean;
   }) => Promise<void>;
@@ -197,7 +197,7 @@ interface SettingsState {
     name?: string;
     description?: string;
     message?: string;
-    mode?: "coo-prompt" | "notification";
+    mode?: "coo-prompt" | "coo-background" | "notification";
     intervalMs?: number;
     enabled?: boolean;
   }) => Promise<void>;

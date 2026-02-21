@@ -2034,7 +2034,7 @@ async function main() {
       name: string;
       description?: string;
       message: string;
-      mode?: "coo-prompt" | "notification";
+      mode?: "coo-prompt" | "coo-background" | "notification";
       intervalMs: number;
       enabled?: boolean;
     };
@@ -2054,7 +2054,7 @@ async function main() {
       name,
       description: description ?? "",
       message,
-      mode: (mode ?? "notification") as "coo-prompt" | "notification",
+      mode: (mode ?? "notification") as "coo-prompt" | "coo-background" | "notification",
       intervalMs: clampedInterval,
       enabled: enabled ?? true,
       lastRunAt: null,
@@ -2074,7 +2074,7 @@ async function main() {
       name?: string;
       description?: string;
       message?: string;
-      mode?: "coo-prompt" | "notification";
+      mode?: "coo-prompt" | "coo-background" | "notification";
       intervalMs?: number;
       enabled?: boolean;
     };

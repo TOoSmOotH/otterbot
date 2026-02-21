@@ -20,6 +20,7 @@ import { SoulAdvisor } from "../memory/soul-advisor.js";
 import type { WorkspaceManager } from "../workspace/workspace.js";
 import type { GitHubIssueMonitor } from "../github/issue-monitor.js";
 import { cloneRepo, getRepoDefaultBranch } from "../github/github-service.js";
+import { NO_REPORT_SENTINEL } from "../schedulers/custom-task-scheduler.js";
 import { ProjectStatus, CharterStatus } from "@otterbot/shared";
 import { existsSync, rmSync } from "node:fs";
 
@@ -59,8 +60,48 @@ export function setupSocketHandlers(
   hooks?: SocketHooks,
   deps?: { workspace?: WorkspaceManager; issueMonitor?: GitHubIssueMonitor },
 ) {
+  // Track conversation IDs used by background tasks so we can suppress
+  // the COO's response in that same conversation.
+  const backgroundConversationIds = new Set<string>();
+
   // Broadcast all bus messages to connected clients
   bus.onBroadcast(async (message: BusMessage) => {
+    // Suppress background task inbound messages from chat
+    if (message.metadata?.backgroundTask) {
+      if (message.conversationId) {
+        backgroundConversationIds.add(message.conversationId);
+      }
+      // Still deliver to COO (routing already happened), just don't emit to UI
+      return;
+    }
+
+    // Suppress COO [NO_REPORT] responses from background checks
+    if (
+      message.fromAgentId === "coo" &&
+      message.toAgentId === null &&
+      message.content.trim() === NO_REPORT_SENTINEL
+    ) {
+      if (message.conversationId) {
+        backgroundConversationIds.delete(message.conversationId);
+      }
+      return;
+    }
+
+    // Suppress COO responses to background conversations that contain nothing useful
+    if (
+      message.fromAgentId === "coo" &&
+      message.toAgentId === null &&
+      message.conversationId &&
+      backgroundConversationIds.has(message.conversationId)
+    ) {
+      backgroundConversationIds.delete(message.conversationId);
+      // If the response contains the sentinel anywhere, suppress it
+      if (message.content.includes(NO_REPORT_SENTINEL)) {
+        return;
+      }
+      // Otherwise fall through — COO found something to report
+    }
+
     io.emit("bus:message", message);
 
     // If the message is from COO to CEO (null), also emit as coo:response

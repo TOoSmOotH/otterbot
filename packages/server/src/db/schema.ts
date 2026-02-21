@@ -426,7 +426,7 @@ export const customScheduledTasks = sqliteTable("custom_scheduled_tasks", {
   name: text("name").notNull(),
   description: text("description").notNull().default(""),
   message: text("message").notNull(),
-  mode: text("mode", { enum: ["coo-prompt", "notification"] }).notNull().default("notification"),
+  mode: text("mode", { enum: ["coo-prompt", "coo-background", "notification"] }).notNull().default("notification"),
   intervalMs: integer("interval_ms").notNull(),
   enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),
   lastRunAt: text("last_run_at"),

@@ -116,7 +116,7 @@ interface CustomTaskFormData {
   name: string;
   description: string;
   message: string;
-  mode: "coo-prompt" | "notification";
+  mode: "coo-prompt" | "coo-background" | "notification";
   intervalValue: string;
   intervalUnit: number; // ms per unit
 }
@@ -186,10 +186,11 @@ function CustomTaskForm({
           </label>
           <select
             value={form.mode}
-            onChange={(e) => setForm({ ...form, mode: e.target.value as "coo-prompt" | "notification" })}
+            onChange={(e) => setForm({ ...form, mode: e.target.value as "coo-prompt" | "coo-background" | "notification" })}
             className="bg-secondary rounded-md px-2 py-1 text-xs outline-none focus:ring-1 ring-primary"
           >
             <option value="coo-prompt">Send to COO</option>
+            <option value="coo-background">Background check</option>
             <option value="notification">Notification only</option>
           </select>
         </div>
@@ -297,9 +298,11 @@ function CustomTaskCard({ task }: { task: CustomTaskInfo }) {
           <span className={`text-[9px] px-1.5 py-0.5 rounded-full ${
             task.mode === "coo-prompt"
               ? "bg-blue-500/20 text-blue-400"
-              : "bg-amber-500/20 text-amber-400"
+              : task.mode === "coo-background"
+                ? "bg-purple-500/20 text-purple-400"
+                : "bg-amber-500/20 text-amber-400"
           }`}>
-            {task.mode === "coo-prompt" ? "COO Prompt" : "Notification"}
+            {task.mode === "coo-prompt" ? "COO Prompt" : task.mode === "coo-background" ? "Background Check" : "Notification"}
           </span>
         </div>
         <div className="flex items-center gap-2">
