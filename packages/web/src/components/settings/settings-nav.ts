@@ -6,6 +6,8 @@ export type SettingsSection =
   | "models"
   | "workshop"
   | "pricing"
+  | "soul"
+  | "memory"
   | "search"
   | "speech"
   | "liveview"
@@ -45,6 +47,8 @@ export const SETTINGS_NAV: NavGroup[] = [
       { id: "providers", label: "Providers" },
       { id: "models", label: "Models" },
       { id: "workshop", label: "Agent Workshop" },
+      { id: "soul", label: "Soul" },
+      { id: "memory", label: "Memory" },
       { id: "pricing", label: "Pricing" },
     ],
   },

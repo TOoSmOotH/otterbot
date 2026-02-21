@@ -10,6 +10,8 @@ import { SpeechTab } from "./SpeechTab";
 import { LiveViewTab } from "./LiveViewTab";
 import { CodingAgentsTab } from "./CodingAgentsTab";
 import { PricingTab } from "./PricingTab";
+import { SoulTab } from "./SoulTab";
+import { MemoryTab } from "./MemoryTab";
 import { ProfileSection } from "./ProfileSection";
 import { SystemSection } from "./SystemSection";
 import { ChannelsSection } from "./ChannelsSection";
@@ -49,6 +51,8 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
     if (activeSection === "google") return <GoogleSection />;
     if (activeSection === "github") return <GitHubTab />;
     if (activeSection === "security") return <SecuritySection />;
+    if (activeSection === "soul") return <SoulTab />;
+    if (activeSection === "memory") return <MemoryTab />;
 
     // AI & Features tabs need settings loaded first
     if (loading) {

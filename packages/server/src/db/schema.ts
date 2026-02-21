@@ -1,5 +1,5 @@
-import { sqliteTable, text, integer, primaryKey } from "drizzle-orm/sqlite-core";
-import type { ScanFinding, SkillScanStatus, CodingAgentPart, CodingAgentType } from "@otterbot/shared";
+import { sqliteTable, text, integer, primaryKey, unique } from "drizzle-orm/sqlite-core";
+import type { ScanFinding, SkillScanStatus, CodingAgentPart, CodingAgentType, MemoryCategory, MemorySource } from "@otterbot/shared";
 
 export const agents = sqliteTable("agents", {
   id: text("id").primaryKey(),
@@ -377,5 +377,60 @@ export const codingAgentDiffs = sqliteTable("coding_agent_diffs", {
   path: text("path").notNull(),
   additions: integer("additions").notNull().default(0),
   deletions: integer("deletions").notNull().default(0),
+});
+
+export const soulDocuments = sqliteTable(
+  "soul_documents",
+  {
+    id: text("id").primaryKey(),
+    agentRole: text("agent_role").notNull(), // 'coo', 'team_lead', 'worker', 'admin_assistant', 'global'
+    registryEntryId: text("registry_entry_id"), // NULL for role-level defaults
+    content: text("content").notNull(),
+    createdAt: text("created_at")
+      .notNull()
+      .$defaultFn(() => new Date().toISOString()),
+    updatedAt: text("updated_at")
+      .notNull()
+      .$defaultFn(() => new Date().toISOString()),
+  },
+  (table) => [unique().on(table.agentRole, table.registryEntryId)],
+);
+
+export const memories = sqliteTable("memories", {
+  id: text("id").primaryKey(),
+  category: text("category")
+    .$type<MemoryCategory>()
+    .notNull()
+    .default("general"),
+  content: text("content").notNull(),
+  source: text("source")
+    .$type<MemorySource>()
+    .notNull()
+    .default("user"),
+  agentScope: text("agent_scope"), // NULL = all agents, or specific role
+  projectId: text("project_id"),   // NULL = global, or project-scoped
+  importance: integer("importance").notNull().default(5),
+  accessCount: integer("access_count").notNull().default(0),
+  lastAccessedAt: text("last_accessed_at"),
+  createdAt: text("created_at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+  updatedAt: text("updated_at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+});
+
+export const memoryEpisodes = sqliteTable("memory_episodes", {
+  id: text("id").primaryKey(),
+  date: text("date").notNull(), // YYYY-MM-DD
+  projectId: text("project_id"),
+  summary: text("summary").notNull(),
+  keyDecisions: text("key_decisions", { mode: "json" })
+    .$type<string[]>()
+    .notNull()
+    .default([]),
+  createdAt: text("created_at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
 });
 

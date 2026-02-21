@@ -437,6 +437,54 @@ export async function migrateDb() {
     deletions INTEGER NOT NULL DEFAULT 0
   )`);
 
+  // Soul documents table
+  db.run(sql`CREATE TABLE IF NOT EXISTS soul_documents (
+    id TEXT PRIMARY KEY,
+    agent_role TEXT NOT NULL,
+    registry_entry_id TEXT,
+    content TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE(agent_role, registry_entry_id)
+  )`);
+
+  // Memories table
+  db.run(sql`CREATE TABLE IF NOT EXISTS memories (
+    id TEXT PRIMARY KEY,
+    category TEXT NOT NULL DEFAULT 'general',
+    content TEXT NOT NULL,
+    source TEXT NOT NULL DEFAULT 'user',
+    agent_scope TEXT,
+    project_id TEXT,
+    importance INTEGER NOT NULL DEFAULT 5,
+    access_count INTEGER NOT NULL DEFAULT 0,
+    last_accessed_at TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  )`);
+
+  // Memory episodes table (daily logs)
+  db.run(sql`CREATE TABLE IF NOT EXISTS memory_episodes (
+    id TEXT PRIMARY KEY,
+    date TEXT NOT NULL,
+    project_id TEXT,
+    summary TEXT NOT NULL,
+    key_decisions TEXT NOT NULL DEFAULT '[]',
+    created_at TEXT NOT NULL
+  )`);
+
+  // FTS5 full-text search index for memories
+  try {
+    db.run(sql`CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(
+      id UNINDEXED,
+      content,
+      category,
+      tokenize='porter unicode61'
+    )`);
+  } catch (err) {
+    console.warn("[DB] FTS5 table creation (non-fatal):", err);
+  }
+
   // Idempotent migration: rename old opencode_* tables to coding_agent_*
   try {
     // Check if old tables exist and new ones are empty (migration needed)

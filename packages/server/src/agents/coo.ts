@@ -40,6 +40,7 @@ import {
   setActiveSearchProvider,
   testSearchProvider,
 } from "../settings/settings.js";
+import { createMemorySaveTool } from "../tools/memory-save.js";
 import { getConfiguredSearchProvider } from "../tools/search/providers.js";
 import { getRandomModelPackId } from "../models3d/model-packs.js";
 import { isDesktopEnabled } from "../desktop/desktop.js";
@@ -583,6 +584,7 @@ The user can see everything on the desktop in real-time.`;
           }
         },
       }),
+      memory_save: createMemorySaveTool(),
       manage_packages: tool({
         description:
           "Manage system packages and apt repositories in the Docker container. " +

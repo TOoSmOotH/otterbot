@@ -34,6 +34,7 @@ import {
 import { SkillService } from "../skills/skill-service.js";
 import { CustomToolService } from "./custom-tool-service.js";
 import { executeCustomTool } from "./custom-tool-executor.js";
+import { createMemorySaveTool } from "./memory-save.js";
 
 type ToolCreator = (ctx: ToolContext) => unknown;
 
@@ -76,6 +77,8 @@ const CONTEXTLESS_TOOL_REGISTRY: Record<string, () => unknown> = {
   list_custom_tools: createListCustomToolsTool,
   update_custom_tool: createUpdateCustomToolTool,
   test_custom_tool: createTestCustomToolTool,
+  // Memory tools
+  memory_save: createMemorySaveTool,
 };
 
 /**

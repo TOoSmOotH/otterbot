@@ -23,6 +23,10 @@ import { eq } from "drizzle-orm";
 import { calculateCost } from "../settings/model-pricing.js";
 import { getCircuitBreaker, isProviderAvailable } from "../llm/circuit-breaker.js";
 import { debug } from "../utils/debug.js";
+import { SoulService } from "../memory/soul-service.js";
+import { MemoryService } from "../memory/memory-service.js";
+import { MemoryExtractor } from "../memory/memory-extractor.js";
+import { MemoryCompactor } from "../memory/memory-compactor.js";
 
 export interface AgentOptions {
   id?: string;
@@ -86,6 +90,18 @@ export abstract class BaseAgent {
     this.gearConfig = options.gearConfig ?? null;
     this.bus = bus;
     this.systemPrompt = options.systemPrompt;
+
+    // Resolve and inject soul document into system prompt
+    try {
+      const soulService = new SoulService();
+      const soulContent = soulService.resolve(this.role, this.registryEntryId);
+      if (soulContent) {
+        this.systemPrompt = `[SOUL]\n${soulContent}\n[/SOUL]\n\n${this.systemPrompt}`;
+      }
+    } catch (err) {
+      // Soul resolution is non-critical — continue without it
+      console.warn(`[Agent ${this.id}] Failed to resolve soul document:`, err);
+    }
 
     this.onStatusChange = options.onStatusChange;
     this.onAgentStream = options.onAgentStream;
@@ -200,6 +216,45 @@ export abstract class BaseAgent {
       };
     }
 
+    // Inject relevant memories and recent episodes before the user message
+    try {
+      const memoryService = new MemoryService();
+      const memories = memoryService.search({
+        query: userMessage,
+        agentScope: this.role,
+        projectId: this.projectId,
+        limit: 10,
+      });
+
+      const compactor = new MemoryCompactor();
+      const episodes = compactor.getRecentEpisodes(3, this.projectId);
+
+      const blocks: string[] = [];
+
+      if (memories.length > 0) {
+        const memoryBlock = memories
+          .map((m) => `- [${m.category}] ${m.content}`)
+          .join("\n");
+        blocks.push(`Relevant memories:\n${memoryBlock}`);
+      }
+
+      if (episodes.length > 0) {
+        const episodeBlock = episodes
+          .map((e) => `[${e.date}] ${e.summary}`)
+          .join("\n");
+        blocks.push(`Recent activity:\n${episodeBlock}`);
+      }
+
+      if (blocks.length > 0) {
+        this.conversationHistory.push({
+          role: "system",
+          content: `[MEMORY]\n${blocks.join("\n\n")}\n[/MEMORY]`,
+        });
+      }
+    } catch (err) {
+      console.warn(`[Agent ${this.id}] Failed to inject memories:`, err);
+    }
+
     this.conversationHistory.push({ role: "user", content: userMessage });
     this.setStatus(AgentStatus.Thinking);
     console.log(`[Agent ${this.id}] think() — provider=${this.llmConfig.provider} model=${this.llmConfig.model}`);
@@ -305,6 +360,14 @@ export abstract class BaseAgent {
         content: finalText,
       });
       this.setStatus(AgentStatus.Idle);
+
+      // Fire-and-forget: extract memories from this conversation turn
+      if (finalText && !hadToolCalls) {
+        new MemoryExtractor()
+          .extract(userMessage, finalText, this.role, this.projectId)
+          .catch(() => {}); // swallow errors silently
+      }
+
       return { text: finalText, thinking, hadToolCalls, timedOut: timedOut || undefined };
     } catch (error) {
       this.setStatus(AgentStatus.Error);
@@ -664,7 +727,8 @@ export abstract class BaseAgent {
     };
   }
 
-  /** Prune conversation history to keep it within bounds */
+  /** Prune conversation history to keep it within bounds.
+   * Uses LLM-based summarization when possible, falling back to truncation. */
   protected pruneConversationHistory(maxMessages: number = 40): void {
     if (this.conversationHistory.length <= maxMessages) return;
 
@@ -673,8 +737,16 @@ export abstract class BaseAgent {
     const recent = this.conversationHistory.slice(-keepRecent);
     const pruned = this.conversationHistory.slice(1, -keepRecent);
 
-    // Compress pruned messages into a summary
-    const summary = pruned
+    // Build a text representation of pruned messages for summarization
+    const prunedText = pruned
+      .map((m) => {
+        const content = typeof m.content === "string" ? m.content : JSON.stringify(m.content);
+        return `[${m.role}]: ${content.slice(0, 300)}`;
+      })
+      .join("\n");
+
+    // Fire-and-forget: try LLM summarization, use truncation as immediate result
+    const truncatedSummary = pruned
       .map((m) => {
         const content = typeof m.content === "string" ? m.content : JSON.stringify(m.content);
         return `[${m.role}]: ${content.slice(0, 150)}`;
@@ -683,11 +755,85 @@ export abstract class BaseAgent {
 
     this.conversationHistory = [
       system,
-      { role: "system", content: `[History summary — ${pruned.length} older messages condensed]\n${summary}` },
+      { role: "system", content: `[History summary — ${pruned.length} older messages condensed]\n${truncatedSummary}` },
       ...recent,
     ];
 
     console.log(`[Agent ${this.id}] Pruned conversation history: ${pruned.length + keepRecent + 1} → ${this.conversationHistory.length} messages`);
+
+    // Async: generate a proper LLM summary and replace the truncated one
+    this.generatePruneSummary(prunedText, pruned.length)
+      .then((llmSummary) => {
+        if (llmSummary && this.conversationHistory.length > 1) {
+          // Replace the truncated summary with the LLM-generated one
+          const summaryIdx = this.conversationHistory.findIndex(
+            (m) => m.role === "system" && typeof m.content === "string" && m.content.includes("[History summary —"),
+          );
+          if (summaryIdx !== -1) {
+            this.conversationHistory[summaryIdx] = {
+              role: "system",
+              content: `[History summary — ${pruned.length} older messages condensed]\n${llmSummary}`,
+            };
+          }
+        }
+      })
+      .catch(() => {}); // swallow errors — truncation is already applied
+
+    // Also extract memories from pruned messages
+    this.extractMemoriesFromPruned(pruned).catch(() => {});
+  }
+
+  /** Generate an LLM summary of pruned conversation messages */
+  private async generatePruneSummary(prunedText: string, messageCount: number): Promise<string | null> {
+    try {
+      const { generate } = await import("../llm/adapter.js");
+      const { getConfig } = await import("../auth/auth.js");
+
+      const provider = getConfig("worker_provider") ?? getConfig("coo_provider");
+      const model = getConfig("worker_model") ?? getConfig("coo_model");
+      if (!provider || !model) return null;
+
+      const result = await generate(
+        { provider, model, temperature: 0, maxRetries: 2 },
+        [
+          {
+            role: "system",
+            content: "Summarize the following conversation history into 3-5 concise bullet points. Focus on key decisions, tasks, and important context. Be brief.",
+          },
+          {
+            role: "user",
+            content: `Summarize these ${messageCount} messages:\n\n${prunedText.slice(0, 4000)}`,
+          },
+        ],
+      );
+
+      return result.text || null;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Extract important facts from pruned messages and save as memories */
+  private async extractMemoriesFromPruned(pruned: ChatMessage[]): Promise<void> {
+    const userMessages = pruned
+      .filter((m) => m.role === "user" && typeof m.content === "string")
+      .map((m) => m.content as string)
+      .join("\n");
+
+    const assistantMessages = pruned
+      .filter((m) => m.role === "assistant" && typeof m.content === "string")
+      .map((m) => m.content as string)
+      .join("\n");
+
+    if (!userMessages && !assistantMessages) return;
+
+    const extractor = new MemoryExtractor();
+    await extractor.extract(
+      userMessages.slice(0, 2000),
+      assistantMessages.slice(0, 2000),
+      this.role,
+      this.projectId,
+    );
   }
 
   /** Reset conversation history to just the system prompt */
