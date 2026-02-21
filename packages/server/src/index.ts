@@ -616,7 +616,27 @@ async function main() {
       });
 
       // Recover active projects from previous run (non-blocking)
-      coo.recoverActiveProjects().catch((err) => {
+      coo.recoverActiveProjects().then(async () => {
+        // Ensure office zones exist for all active projects
+        const { eq } = await import("drizzle-orm");
+        const { getDb, schema } = await import("./db/index.js");
+        const db = getDb();
+        const activeProjects = db
+          .select()
+          .from(schema.projects)
+          .where(eq(schema.projects.status, "active"))
+          .all();
+        for (const project of activeProjects) {
+          const existing = worldLayout.loadZoneConfig(project.id);
+          if (!existing) {
+            const zone = worldLayout.addZone(project.id);
+            if (zone) {
+              io.emit("world:zone-added", { zone });
+              console.log(`[world] Recreated office zone for project "${project.name}" (${project.id})`);
+            }
+          }
+        }
+      }).catch((err) => {
         console.error("Failed to recover active projects:", err);
       });
 
