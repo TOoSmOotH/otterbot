@@ -29,6 +29,7 @@ import { ProjectSettings } from "./components/project/ProjectSettings";
 import { DetachedLiveView } from "./components/live-view/DetachedLiveView";
 import { useDesktopStore } from "./stores/desktop-store";
 import { useOpenCodeStore } from "./stores/opencode-store";
+import { useSettingsStore } from "./stores/settings-store";
 import { initMovementTriggers } from "./lib/movement-triggers";
 import { getCenterTabs, centerViewLabels } from "./lib/get-center-tabs";
 import type { CenterView } from "./lib/get-center-tabs";
@@ -146,6 +147,9 @@ function MainApp() {
 
     // Pre-load model packs so Live View has them ready
     loadPacks();
+
+    // Load Claude Code settings so the dashboard can show usage limits
+    useSettingsStore.getState().loadClaudeCodeSettings();
 
     // Hydrate OpenCode session history
     fetch("/api/opencode/sessions?limit=50")
