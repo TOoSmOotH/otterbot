@@ -331,8 +331,33 @@ export class TeamLead extends BaseAgent {
    * Detect whether a worker report indicates failure.
    * Returns true if the report contains clear failure signals.
    */
+  /** Count how many active workers are coding agents */
+  private countActiveCodingWorkers(): number {
+    let count = 0;
+    for (const worker of this.workers.values()) {
+      if (CODING_AGENT_IDS.has(worker.registryEntryId ?? "")) count++;
+    }
+    return count;
+  }
+
+  /** Detect whether a worker report indicates a PR was created — definitive success signal */
+  private isPRCreated(report: string): boolean {
+    const lower = report.toLowerCase();
+    return (
+      lower.includes("gh pr create") ||
+      lower.includes("pull request") ||
+      /github\.com\/[^\s]+\/pull\/\d+/.test(lower) ||
+      lower.includes("created pull request") ||
+      lower.includes("opened a pull request") ||
+      lower.includes("pr created") ||
+      lower.includes("created a pr")
+    );
+  }
+
   private isFailureReport(report: string): boolean {
     if (!report.trim()) return true;
+    // PR creation is a definitive success signal — overrides any false-positive failure matches
+    if (this.isPRCreated(report)) return false;
     const lower = report.toLowerCase();
     const failureSignals = [
       "worker error:",
@@ -670,19 +695,21 @@ export class TeamLead extends BaseAgent {
 
     // Auto-spawn fallback: if the LLM failed to spawn workers for unblocked tasks,
     // do it programmatically. Bounded by MAX_TASK_RETRIES (tasks eventually move to
-    // "done" as FAILED) and single-coding-worker rule (spawnWorker refuses duplicates).
+    // "done" as FAILED) and max-coding-workers cap (spawnWorker refuses excess).
     await this.autoSpawnUnblockedTasks();
   }
 
   /**
    * Programmatically spawn workers for unblocked backlog tasks that the LLM missed.
-   * Only spawns one coding worker at a time. Non-coding tasks are skipped (rare).
+   * Spawns up to the configured max concurrent coding workers. Non-coding tasks are skipped (rare).
    */
   private async autoSpawnUnblockedTasks(): Promise<void> {
     if (!this.projectId) return;
 
+    const maxCoders = parseInt(getConfig("max_coding_workers") ?? "2", 10) || 2;
+    const activeCoders = this.countActiveCodingWorkers();
     const finalBoard = this.getKanbanBoardState();
-    if (!finalBoard.hasUnblockedBacklog || this.workers.size > 0) return;
+    if (!finalBoard.hasUnblockedBacklog || activeCoders >= maxCoders) return;
 
     const db = getDb();
     const tasks = db
@@ -701,38 +728,44 @@ export class TeamLead extends BaseAgent {
 
     if (unblockedBacklog.length === 0) return;
 
-    // Pick the first unblocked task
-    const task = unblockedBacklog[0];
+    // Spawn up to (maxCoders - activeCoders) workers
+    const slotsAvailable = maxCoders - activeCoders;
+    const toSpawn = unblockedBacklog.slice(0, slotsAvailable);
 
-    // Check if task is browser/desktop-related — sandboxed coding agents can't do these
-    const taskText = `${task.title} ${task.description ?? ""}`.toLowerCase();
-    const isBrowserTask = /\b(browser|chrome|chromium|firefox|launch.*browser|open.*url|browse.*web|headless|puppeteer|playwright|selenium|desktop.*app)\b/.test(taskText);
+    for (const task of toSpawn) {
+      // Check if task is browser/desktop-related — sandboxed coding agents can't do these
+      const taskText = `${task.title} ${task.description ?? ""}`.toLowerCase();
+      const isBrowserTask = /\b(browser|chrome|chromium|firefox|launch.*browser|open.*url|browse.*web|headless|puppeteer|playwright|selenium|desktop.*app)\b/.test(taskText);
 
-    // Find the right registry entry — check project assignments first, then global fallback
-    let registryEntryId = "builtin-coder";
-    const assignments = this.getProjectAgentAssignments();
-    if (isBrowserTask) {
-      registryEntryId = "builtin-browser-agent";
-    } else if (assignments.coder && isCodingAgentEnabled(assignments.coder)) {
-      registryEntryId = assignments.coder;
-    } else if (getConfig("opencode:enabled") === "true") {
-      registryEntryId = "builtin-opencode-coder";
-    } else if (getConfig("claude-code:enabled") === "true") {
-      registryEntryId = "builtin-claude-code-coder";
-    } else if (getConfig("codex:enabled") === "true") {
-      registryEntryId = "builtin-codex-coder";
+      // Find the right registry entry — check project assignments first, then global fallback
+      let registryEntryId = "builtin-coder";
+      const assignments = this.getProjectAgentAssignments();
+      if (isBrowserTask) {
+        registryEntryId = "builtin-browser-agent";
+      } else if (assignments.coder && isCodingAgentEnabled(assignments.coder)) {
+        registryEntryId = assignments.coder;
+      } else if (getConfig("opencode:enabled") === "true") {
+        registryEntryId = "builtin-opencode-coder";
+      } else if (getConfig("claude-code:enabled") === "true") {
+        registryEntryId = "builtin-claude-code-coder";
+      } else if (getConfig("codex:enabled") === "true") {
+        registryEntryId = "builtin-codex-coder";
+      }
+
+      console.log(
+        `[TeamLead ${this.id}] Auto-spawn: LLM failed to spawn worker for "${task.title}" (${task.id}) — spawning ${registryEntryId} programmatically.`,
+      );
+
+      const taskDescription = task.description
+        ? `${task.title}\n\n${task.description}`
+        : task.title;
+
+      const result = await this.spawnWorker(registryEntryId, taskDescription, task.id);
+      console.log(`[TeamLead ${this.id}] Auto-spawn result: ${result.slice(0, 200)}`);
+
+      // Re-check slots after each spawn (spawnWorker may have been refused)
+      if (this.countActiveCodingWorkers() >= maxCoders) break;
     }
-
-    console.log(
-      `[TeamLead ${this.id}] Auto-spawn: LLM failed to spawn worker for "${task.title}" (${task.id}) — spawning ${registryEntryId} programmatically.`,
-    );
-
-    const taskDescription = task.description
-      ? `${task.title}\n\n${task.description}`
-      : task.title;
-
-    const result = await this.spawnWorker(registryEntryId, taskDescription, task.id);
-    console.log(`[TeamLead ${this.id}] Auto-spawn result: ${result.slice(0, 200)}`);
   }
 
   private async handleStatusRequest(message: BusMessage) {
@@ -1181,6 +1214,14 @@ export class TeamLead extends BaseAgent {
         console.log(
           `[TeamLead ${this.id}] spawnWorker: requested=${originalRequestedId}, resolved=${registryEntryId}`,
         );
+      }
+
+      // Enforce max concurrent coding workers
+      if (CODING_AGENT_IDS.has(registryEntryId)) {
+        const maxCoders = parseInt(getConfig("max_coding_workers") ?? "2", 10) || 2;
+        if (this.countActiveCodingWorkers() >= maxCoders) {
+          return `REFUSED: ${maxCoders} coding worker(s) already running. Wait for one to finish.`;
+        }
       }
 
       // Reject spawning disabled external coding agents — fall back to builtin-coder

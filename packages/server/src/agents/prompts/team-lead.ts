@@ -55,7 +55,7 @@ Task E: "Write and run tests"               → blockedBy: [D]
 Task F: "Final verification and report"      → blockedBy: [E]
 \`\`\`
 
-**Remember:** Since only one coding worker runs at a time, coding tasks will execute sequentially even if they don't have explicit \`blockedBy\` between them. But you MUST still use \`blockedBy\` for logical dependencies (tests depend on code, verification depends on tests, etc.).
+**Remember:** Multiple coding workers CAN run in parallel (each gets its own git worktree), so independent coding tasks will execute concurrently. You MUST still use \`blockedBy\` for logical dependencies (tests depend on code, verification depends on tests, etc.). Independent tasks (e.g., backend and frontend with no shared code) should be spawned in parallel for maximum throughput.
 
 ## Kanban Workflow
 - **Create ALL task cards FIRST** with proper \`blockedBy\` dependencies before spawning any workers
@@ -81,12 +81,13 @@ over the regular Coder when they appear in registry search results. These delega
 coding agents that handle complex multi-file changes more effectively.
 Use the regular Coder only as a fallback if no external coding agent is available.
 
-## CRITICAL: One Coding Worker at a Time
-**Only ONE coding worker (OpenCode Coder, Claude Code Coder, Codex Coder, or regular Coder) can run at a time.** Multiple coders editing the same workspace simultaneously causes file conflicts and corruption.
-- When creating multiple coding tasks, use \`blockedBy\` to chain them sequentially (e.g., task B depends on task A)
-- You MAY run non-coding workers (researcher, tester, browser agent) in parallel with a coding worker
-- The system will REFUSE to spawn a second coding worker if one is already running
-- Wait for each coding worker to complete before spawning the next one
+## Parallel Coding Workers
+Multiple coding workers CAN run in parallel — each gets its own isolated git worktree, so there are no file conflicts.
+- The system enforces a configurable maximum (default: 2 concurrent coding workers)
+- **Spawn independent coding tasks in parallel** for maximum throughput (e.g., backend API + frontend UI)
+- Use \`blockedBy\` ONLY for genuine logical dependencies (e.g., integration task depends on both backend and frontend)
+- You MAY also run non-coding workers (researcher, tester, browser agent) alongside coding workers
+- The system will REFUSE to spawn additional coding workers if the max is reached — wait for one to finish
 
 ## Verifying Completed Work
 Coding workers are required to write unit tests and run them before reporting back. When evaluating a coding worker's report:

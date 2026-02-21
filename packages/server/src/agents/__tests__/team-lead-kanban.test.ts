@@ -373,8 +373,9 @@ describe("TeamLead — Kanban logic", () => {
   // ─── autoSpawnUnblockedTasks ────────────────────────────────
 
   describe("autoSpawnUnblockedTasks", () => {
-    it("skips when workers are already running", async () => {
+    it("skips when max coding workers are already running", async () => {
       (tl as any).workers.set("w-1", { id: "w-1", destroy: vi.fn(), registryEntryId: "builtin-coder" });
+      (tl as any).workers.set("w-2", { id: "w-2", destroy: vi.fn(), registryEntryId: "builtin-coder" });
       insertTask({ column: "backlog" });
 
       const spawnSpy = vi.spyOn(tl as any, "spawnWorker");
@@ -400,16 +401,17 @@ describe("TeamLead — Kanban logic", () => {
       expect(spawnSpy).not.toHaveBeenCalled();
     });
 
-    it("spawns worker for first unblocked backlog task by position", async () => {
+    it("spawns workers for unblocked backlog tasks in position order", async () => {
       insertTask({ id: "task-a", title: "Task A", column: "backlog", position: 1 });
       insertTask({ id: "task-b", title: "Task B", column: "backlog", position: 0 }); // lower position
 
       const spawnSpy = vi.spyOn(tl as any, "spawnWorker").mockResolvedValue("Spawned");
       await (tl as any).autoSpawnUnblockedTasks();
 
-      expect(spawnSpy).toHaveBeenCalledOnce();
-      // Should spawn for task-b (position 0), not task-a (position 1)
+      expect(spawnSpy).toHaveBeenCalledTimes(2);
+      // First spawn should be task-b (position 0), then task-a (position 1)
       expect(spawnSpy.mock.calls[0][1]).toContain("Task B");
+      expect(spawnSpy.mock.calls[1][1]).toContain("Task A");
     });
 
     it("uses opencode-coder when opencode:enabled is true", async () => {
