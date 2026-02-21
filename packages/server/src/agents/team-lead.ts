@@ -158,6 +158,7 @@ export interface TeamLeadDependencies {
   workspace: WorkspaceManager;
   projectId: string;
   parentId: string;
+  name?: string;
   modelPackId?: string | null;
   onAgentSpawned?: (agent: BaseAgent) => void;
   onStatusChange?: (agentId: string, status: AgentStatus) => void;
@@ -221,6 +222,7 @@ export class TeamLead extends BaseAgent {
 
     const options: AgentOptions = {
       role: AgentRole.TeamLead,
+      name: deps.name ?? null,
       parentId: deps.parentId,
       projectId: deps.projectId,
       modelPackId: deps.modelPackId ?? null,

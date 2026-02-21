@@ -704,6 +704,7 @@ The user can see everything on the desktop in real-time.`;
       workspace: this.workspace,
       projectId,
       parentId: this.id,
+      name,
       modelPackId: getRandomModelPackId(),
       onAgentSpawned: this.onAgentSpawned,
       onStatusChange: this.onStatusChange,
@@ -1151,11 +1152,14 @@ The user can see everything on the desktop in real-time.`;
     branch: string,
     rules: string[],
   ): Promise<void> {
+    const db = getDb();
+    const project = db.select().from(schema.projects).where(eq(schema.projects.id, projectId)).get();
     const teamLead = new TeamLead({
       bus: this.bus,
       workspace: this.workspace,
       projectId,
       parentId: this.id,
+      name: project?.name ?? projectId,
       modelPackId: getRandomModelPackId(),
       onAgentSpawned: this.onAgentSpawned,
       onStatusChange: this.onStatusChange,
@@ -1274,6 +1278,7 @@ The user can see everything on the desktop in real-time.`;
       workspace: this.workspace,
       projectId: project.id,
       parentId: this.id,
+      name: project.name,
       modelPackId: getRandomModelPackId(),
       onAgentSpawned: this.onAgentSpawned,
       onStatusChange: this.onStatusChange,
