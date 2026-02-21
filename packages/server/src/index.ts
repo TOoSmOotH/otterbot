@@ -19,7 +19,7 @@ import type {
   SkillCreate,
   SkillUpdate,
 } from "@otterbot/shared";
-import { migrateDb, backupDatabase, verifyDatabase, closeDatabase, getDbPath, getDb } from "./db/index.js";
+import { migrateDb, backupDatabase, verifyDatabase, closeDatabase, getDbPath, getDb, schema } from "./db/index.js";
 import { MessageBus } from "./bus/message-bus.js";
 import { WorkspaceManager } from "./workspace/workspace.js";
 import { Registry } from "./registry/registry.js";
@@ -149,6 +149,7 @@ import { GitHubIssueMonitor } from "./github/issue-monitor.js";
 import { ReminderScheduler } from "./reminders/reminder-scheduler.js";
 import { MemoryCompactor } from "./memory/memory-compactor.js";
 import { SchedulerRegistry } from "./schedulers/scheduler-registry.js";
+import { CustomTaskScheduler, MIN_CUSTOM_TASK_INTERVAL_MS } from "./schedulers/custom-task-scheduler.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -382,6 +383,7 @@ async function main() {
   let coo: COO | null = null;
   let issueMonitor: GitHubIssueMonitor | null = null;
   const schedulerRegistry = new SchedulerRegistry();
+  let customTaskScheduler: CustomTaskScheduler | null = null;
 
   // Resolver map for interactive coding agent sessions: when a Worker awaits human
   // input, a promise is stored here keyed by `${agentId}:${sessionId}`. The
@@ -677,6 +679,10 @@ async function main() {
       }
 
       schedulerRegistry.startAll();
+
+      // Start custom scheduled tasks
+      customTaskScheduler = new CustomTaskScheduler(bus, io);
+      customTaskScheduler.loadAndStart();
 
       // Initialize vector store and backfill embeddings (non-blocking)
       import("./memory/vector-store.js").then(async ({ getVectorStore }) => {
@@ -2010,6 +2016,127 @@ async function main() {
         return { error: "Unknown scheduler" };
       }
       return { ok: true, task: result };
+    },
+  );
+
+  // =========================================================================
+  // Custom Scheduled Tasks CRUD
+  // =========================================================================
+
+  app.get("/api/settings/custom-tasks", async () => {
+    const db = getDb();
+    const tasks = db.select().from(schema.customScheduledTasks).all();
+    return { tasks };
+  });
+
+  app.post<{
+    Body: {
+      name: string;
+      description?: string;
+      message: string;
+      mode?: "coo-prompt" | "notification";
+      intervalMs: number;
+      enabled?: boolean;
+    };
+  }>("/api/settings/custom-tasks", async (req, reply) => {
+    const { name, description, message, mode, intervalMs, enabled } = req.body;
+    if (!name || !message || !intervalMs) {
+      reply.code(400);
+      return { error: "name, message, and intervalMs are required" };
+    }
+    const clampedInterval = Math.max(intervalMs, MIN_CUSTOM_TASK_INTERVAL_MS);
+    const { nanoid } = await import("nanoid");
+    const now = new Date().toISOString();
+    const id = nanoid();
+    const db = getDb();
+    const task = {
+      id,
+      name,
+      description: description ?? "",
+      message,
+      mode: (mode ?? "notification") as "coo-prompt" | "notification",
+      intervalMs: clampedInterval,
+      enabled: enabled ?? true,
+      lastRunAt: null,
+      createdAt: now,
+      updatedAt: now,
+    };
+    db.insert(schema.customScheduledTasks).values(task).run();
+    if (task.enabled && customTaskScheduler) {
+      customTaskScheduler.startTask(task);
+    }
+    return { ok: true, task };
+  });
+
+  app.put<{
+    Params: { id: string };
+    Body: {
+      name?: string;
+      description?: string;
+      message?: string;
+      mode?: "coo-prompt" | "notification";
+      intervalMs?: number;
+      enabled?: boolean;
+    };
+  }>("/api/settings/custom-tasks/:id", async (req, reply) => {
+    const { eq } = await import("drizzle-orm");
+    const { id } = req.params;
+    const db = getDb();
+    const existing = db
+      .select()
+      .from(schema.customScheduledTasks)
+      .where(eq(schema.customScheduledTasks.id, id))
+      .get();
+    if (!existing) {
+      reply.code(404);
+      return { error: "Custom task not found" };
+    }
+    const patch: Record<string, unknown> = { updatedAt: new Date().toISOString() };
+    if (req.body.name !== undefined) patch.name = req.body.name;
+    if (req.body.description !== undefined) patch.description = req.body.description;
+    if (req.body.message !== undefined) patch.message = req.body.message;
+    if (req.body.mode !== undefined) patch.mode = req.body.mode;
+    if (req.body.intervalMs !== undefined) {
+      patch.intervalMs = Math.max(req.body.intervalMs, MIN_CUSTOM_TASK_INTERVAL_MS);
+    }
+    if (req.body.enabled !== undefined) patch.enabled = req.body.enabled;
+    db.update(schema.customScheduledTasks)
+      .set(patch)
+      .where(eq(schema.customScheduledTasks.id, id))
+      .run();
+    if (customTaskScheduler) {
+      customTaskScheduler.restartTask(id);
+    }
+    const updated = db
+      .select()
+      .from(schema.customScheduledTasks)
+      .where(eq(schema.customScheduledTasks.id, id))
+      .get();
+    return { ok: true, task: updated };
+  });
+
+  app.delete<{ Params: { id: string } }>(
+    "/api/settings/custom-tasks/:id",
+    async (req, reply) => {
+      const { eq } = await import("drizzle-orm");
+      const { id } = req.params;
+      const db = getDb();
+      const existing = db
+        .select()
+        .from(schema.customScheduledTasks)
+        .where(eq(schema.customScheduledTasks.id, id))
+        .get();
+      if (!existing) {
+        reply.code(404);
+        return { error: "Custom task not found" };
+      }
+      if (customTaskScheduler) {
+        customTaskScheduler.stopTask(id);
+      }
+      db.delete(schema.customScheduledTasks)
+        .where(eq(schema.customScheduledTasks.id, id))
+        .run();
+      return { ok: true };
     },
   );
 

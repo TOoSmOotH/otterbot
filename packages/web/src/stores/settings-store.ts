@@ -29,6 +29,19 @@ export interface ScheduledTaskInfo {
   intervalMs: number;
 }
 
+export interface CustomTaskInfo {
+  id: string;
+  name: string;
+  description: string;
+  message: string;
+  mode: "coo-prompt" | "notification";
+  intervalMs: number;
+  enabled: boolean;
+  lastRunAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface SearchProviderConfig {
   id: string;
   name: string;
@@ -73,6 +86,10 @@ interface SettingsState {
   // Scheduled Tasks
   scheduledTasks: ScheduledTaskInfo[];
   scheduledTasksLoading: boolean;
+
+  // Custom Scheduled Tasks
+  customTasks: CustomTaskInfo[];
+  customTasksLoading: boolean;
 
   // Search
   searchProviders: SearchProviderConfig[];
@@ -165,6 +182,26 @@ interface SettingsState {
   // Scheduled Tasks actions
   loadScheduledTasks: () => Promise<void>;
   updateScheduledTask: (taskId: string, data: { enabled?: boolean; intervalMs?: number }) => Promise<void>;
+
+  // Custom Tasks actions
+  loadCustomTasks: () => Promise<void>;
+  createCustomTask: (data: {
+    name: string;
+    description?: string;
+    message: string;
+    mode?: "coo-prompt" | "notification";
+    intervalMs: number;
+    enabled?: boolean;
+  }) => Promise<void>;
+  updateCustomTask: (id: string, data: {
+    name?: string;
+    description?: string;
+    message?: string;
+    mode?: "coo-prompt" | "notification";
+    intervalMs?: number;
+    enabled?: boolean;
+  }) => Promise<void>;
+  deleteCustomTask: (id: string) => Promise<void>;
 
   // Search actions
   loadSearchSettings: () => Promise<void>;
@@ -286,6 +323,8 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   testResults: {},
   scheduledTasks: [],
   scheduledTasksLoading: false,
+  customTasks: [],
+  customTasksLoading: false,
   searchProviders: [],
   activeSearchProvider: null,
   searchTestResults: {},
@@ -553,6 +592,63 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       });
       if (!res.ok) throw new Error("Failed to update scheduled task");
       await get().loadScheduledTasks();
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "Unknown error" });
+    }
+  },
+
+  loadCustomTasks: async () => {
+    set({ customTasksLoading: true });
+    try {
+      const res = await fetch("/api/settings/custom-tasks");
+      if (!res.ok) return;
+      const data = await res.json();
+      set({ customTasks: data.tasks });
+    } catch {
+      // Silently fail
+    } finally {
+      set({ customTasksLoading: false });
+    }
+  },
+
+  createCustomTask: async (data) => {
+    set({ error: null });
+    try {
+      const res = await fetch("/api/settings/custom-tasks", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) throw new Error("Failed to create custom task");
+      await get().loadCustomTasks();
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "Unknown error" });
+    }
+  },
+
+  updateCustomTask: async (id, data) => {
+    set({ error: null });
+    try {
+      const res = await fetch(`/api/settings/custom-tasks/${id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) throw new Error("Failed to update custom task");
+      await get().loadCustomTasks();
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "Unknown error" });
+    }
+  },
+
+  deleteCustomTask: async (id) => {
+    set({ error: null });
+    try {
+      const res = await fetch(`/api/settings/custom-tasks/${id}`, {
+        method: "DELETE",
+      });
+      if (!res.ok) throw new Error("Failed to delete custom task");
+      await get().loadCustomTasks();
     } catch (err) {
       set({ error: err instanceof Error ? err.message : "Unknown error" });
     }

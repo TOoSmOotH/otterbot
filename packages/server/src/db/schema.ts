@@ -421,6 +421,19 @@ export const memories = sqliteTable("memories", {
     .$defaultFn(() => new Date().toISOString()),
 });
 
+export const customScheduledTasks = sqliteTable("custom_scheduled_tasks", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  description: text("description").notNull().default(""),
+  message: text("message").notNull(),
+  mode: text("mode", { enum: ["coo-prompt", "notification"] }).notNull().default("notification"),
+  intervalMs: integer("interval_ms").notNull(),
+  enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),
+  lastRunAt: text("last_run_at"),
+  createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
+  updatedAt: text("updated_at").notNull().$defaultFn(() => new Date().toISOString()),
+});
+
 export const memoryEpisodes = sqliteTable("memory_episodes", {
   id: text("id").primaryKey(),
   date: text("date").notNull(), // YYYY-MM-DD

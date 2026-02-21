@@ -480,6 +480,20 @@ export async function migrateDb() {
     created_at TEXT NOT NULL
   )`);
 
+  // Custom scheduled tasks
+  db.run(sql`CREATE TABLE IF NOT EXISTS custom_scheduled_tasks (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    message TEXT NOT NULL,
+    mode TEXT NOT NULL DEFAULT 'notification',
+    interval_ms INTEGER NOT NULL,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    last_run_at TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  )`);
+
   // FTS5 full-text search index for memories
   try {
     db.run(sql`CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(
