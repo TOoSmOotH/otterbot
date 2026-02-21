@@ -28,8 +28,9 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.58.2",
+    "@vitest/coverage-v8": "^4.0.18",
     "typescript": "^5.7.3",
-    "vitest": "^3.0.5"
+    "vitest": "^4.0.18"
   },
   "pnpm": {
     "onlyBuiltDependencies": [

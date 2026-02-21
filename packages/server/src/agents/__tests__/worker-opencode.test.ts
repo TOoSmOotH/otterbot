@@ -16,28 +16,34 @@ vi.mock("../../auth/auth.js", () => ({
 
 // Mock opencode-client (dynamic import target)
 const mockExecuteTask = vi.fn();
-vi.mock("../../tools/opencode-client.js", () => ({
-  TASK_COMPLETE_SENTINEL: "◊◊TASK_COMPLETE_9f8e7d◊◊",
-  OpenCodeClient: vi.fn().mockImplementation(() => ({
-    executeTask: mockExecuteTask,
-  })),
-}));
+vi.mock("../../tools/opencode-client.js", () => {
+  return {
+    TASK_COMPLETE_SENTINEL: "◊◊TASK_COMPLETE_9f8e7d◊◊",
+    OpenCodeClient: class {
+      executeTask = mockExecuteTask;
+    },
+  };
+});
 
 // Mock claude-code-client
 const mockClaudeCodeExecuteTask = vi.fn();
-vi.mock("../../coding-agents/claude-code-client.js", () => ({
-  ClaudeCodeClient: vi.fn().mockImplementation(() => ({
-    executeTask: mockClaudeCodeExecuteTask,
-  })),
-}));
+vi.mock("../../coding-agents/claude-code-client.js", () => {
+  return {
+    ClaudeCodeClient: class {
+      executeTask = mockClaudeCodeExecuteTask;
+    },
+  };
+});
 
 // Mock codex-client
 const mockCodexExecuteTask = vi.fn();
-vi.mock("../../coding-agents/codex-client.js", () => ({
-  CodexClient: vi.fn().mockImplementation(() => ({
-    executeTask: mockCodexExecuteTask,
-  })),
-}));
+vi.mock("../../coding-agents/codex-client.js", () => {
+  return {
+    CodexClient: class {
+      executeTask = mockCodexExecuteTask;
+    },
+  };
+});
 
 // Mock opencode-task (formatOpenCodeResult — also dynamic import target)
 vi.mock("../../tools/opencode-task.js", async (importOriginal) => {

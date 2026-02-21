@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 // Mock undici Agent to prevent actual network connections
 vi.mock("undici", () => ({
-  Agent: vi.fn().mockImplementation(() => ({})),
+  Agent: class {},
 }));
 
 // Mock the SDK client
