@@ -32,6 +32,13 @@ import {
   uninstallRepo,
 } from "../packages/packages.js";
 import {
+  fetchIssue,
+  fetchIssues,
+  fetchIssueComments,
+  fetchPullRequest,
+  fetchPullRequests,
+} from "../github/github-service.js";
+import {
   getSettings,
   updateTierDefaults,
   testProvider,
@@ -610,6 +617,188 @@ The user can see everything on the desktop in real-time.`;
           return reply.content;
         },
       }),
+      github_list_issues: tool({
+        description:
+          "List GitHub issues for a repository. Returns issue number, title, state, labels, and assignees.",
+        parameters: z.object({
+          projectId: z
+            .string()
+            .optional()
+            .describe("Project ID — resolves repo from project config"),
+          repo: z
+            .string()
+            .optional()
+            .describe("Repository in owner/repo format (alternative to projectId)"),
+          state: z
+            .enum(["open", "closed", "all"])
+            .optional()
+            .describe("Filter by state (default: open)"),
+          labels: z
+            .string()
+            .optional()
+            .describe("Comma-separated label names to filter by"),
+          assignee: z
+            .string()
+            .optional()
+            .describe("Filter by assignee login"),
+          per_page: z
+            .number()
+            .int()
+            .min(1)
+            .max(100)
+            .optional()
+            .describe("Number of results per page (default: 30, max: 100)"),
+        }),
+        execute: async ({ projectId, repo, state, labels, assignee, per_page }) => {
+          try {
+            const { repoFullName, token } = this.resolveGitHubRepo(projectId, repo);
+            const issues = await fetchIssues(repoFullName, token, {
+              state: state ?? "open",
+              labels,
+              assignee,
+              per_page,
+            });
+            if (issues.length === 0) return "No issues found matching the filters.";
+            const lines = issues.map((i) => {
+              const lbls = i.labels.map((l) => l.name).join(", ");
+              const assigned = i.assignees.map((a) => a.login).join(", ");
+              return `- #${i.number} [${i.state}] ${i.title}${lbls ? ` (${lbls})` : ""}${assigned ? ` → ${assigned}` : ""}`;
+            });
+            return `Found ${issues.length} issue(s) in ${repoFullName}:\n${lines.join("\n")}`;
+          } catch (err) {
+            return `Error listing issues: ${err instanceof Error ? err.message : String(err)}`;
+          }
+        },
+      }),
+      github_get_issue: tool({
+        description:
+          "Fetch a GitHub issue by number, including its comments.",
+        parameters: z.object({
+          issue_number: z.number().int().describe("The issue number to fetch"),
+          projectId: z
+            .string()
+            .optional()
+            .describe("Project ID — resolves repo from project config"),
+          repo: z
+            .string()
+            .optional()
+            .describe("Repository in owner/repo format (alternative to projectId)"),
+        }),
+        execute: async ({ issue_number, projectId, repo }) => {
+          try {
+            const { repoFullName, token } = this.resolveGitHubRepo(projectId, repo);
+            const [issue, comments] = await Promise.all([
+              fetchIssue(repoFullName, token, issue_number),
+              fetchIssueComments(repoFullName, token, issue_number),
+            ]);
+            let result = `# Issue #${issue.number}: ${issue.title}\n`;
+            result += `State: ${issue.state}\n`;
+            result += `URL: ${issue.html_url}\n`;
+            result += `Labels: ${issue.labels.map((l) => l.name).join(", ") || "none"}\n`;
+            result += `Assignees: ${issue.assignees.map((a) => a.login).join(", ") || "unassigned"}\n`;
+            result += `Created: ${issue.created_at}\n`;
+            result += `Updated: ${issue.updated_at}\n`;
+            result += `\n## Body\n${issue.body ?? "(no description)"}\n`;
+            if (comments.length > 0) {
+              result += `\n## Comments (${comments.length})\n`;
+              for (const c of comments) {
+                result += `\n### @${c.user.login} (${c.created_at})\n${c.body}\n`;
+              }
+            }
+            return result;
+          } catch (err) {
+            return `Error fetching issue: ${err instanceof Error ? err.message : String(err)}`;
+          }
+        },
+      }),
+      github_list_prs: tool({
+        description:
+          "List GitHub pull requests for a repository. Returns PR number, title, state, and branches.",
+        parameters: z.object({
+          projectId: z
+            .string()
+            .optional()
+            .describe("Project ID — resolves repo from project config"),
+          repo: z
+            .string()
+            .optional()
+            .describe("Repository in owner/repo format (alternative to projectId)"),
+          state: z
+            .enum(["open", "closed", "all"])
+            .optional()
+            .describe("Filter by state (default: open)"),
+          per_page: z
+            .number()
+            .int()
+            .min(1)
+            .max(100)
+            .optional()
+            .describe("Number of results per page (default: 30, max: 100)"),
+        }),
+        execute: async ({ projectId, repo, state, per_page }) => {
+          try {
+            const { repoFullName, token } = this.resolveGitHubRepo(projectId, repo);
+            const prs = await fetchPullRequests(repoFullName, token, {
+              state: state ?? "open",
+              per_page,
+            });
+            if (prs.length === 0) return "No pull requests found matching the filters.";
+            const lines = prs.map((pr) => {
+              const merged = pr.merged ? " [merged]" : "";
+              return `- #${pr.number} [${pr.state}${merged}] ${pr.title} (${pr.head.ref} → ${pr.base.ref}) by @${pr.user.login}`;
+            });
+            return `Found ${prs.length} PR(s) in ${repoFullName}:\n${lines.join("\n")}`;
+          } catch (err) {
+            return `Error listing PRs: ${err instanceof Error ? err.message : String(err)}`;
+          }
+        },
+      }),
+      github_get_pr: tool({
+        description:
+          "Fetch a GitHub pull request by number, including its comments.",
+        parameters: z.object({
+          pr_number: z.number().int().describe("The pull request number to fetch"),
+          projectId: z
+            .string()
+            .optional()
+            .describe("Project ID — resolves repo from project config"),
+          repo: z
+            .string()
+            .optional()
+            .describe("Repository in owner/repo format (alternative to projectId)"),
+        }),
+        execute: async ({ pr_number, projectId, repo }) => {
+          try {
+            const { repoFullName, token } = this.resolveGitHubRepo(projectId, repo);
+            const [pr, comments] = await Promise.all([
+              fetchPullRequest(repoFullName, token, pr_number),
+              fetchIssueComments(repoFullName, token, pr_number),
+            ]);
+            let result = `# PR #${pr.number}: ${pr.title}\n`;
+            result += `State: ${pr.state}${pr.merged ? " (merged)" : ""}\n`;
+            result += `URL: ${pr.html_url}\n`;
+            result += `Branches: ${pr.head.ref} → ${pr.base.ref}\n`;
+            result += `Author: @${pr.user.login}\n`;
+            result += `Labels: ${pr.labels.map((l) => l.name).join(", ") || "none"}\n`;
+            result += `Assignees: ${pr.assignees.map((a) => a.login).join(", ") || "unassigned"}\n`;
+            result += `Created: ${pr.created_at}\n`;
+            result += `Updated: ${pr.updated_at}\n`;
+            if (pr.mergeable !== null) {
+              result += `Mergeable: ${pr.mergeable}\n`;
+            }
+            result += `\n## Body\n${pr.body ?? "(no description)"}\n`;
+            if (comments.length > 0) {
+              result += `\n## Comments (${comments.length})\n`;
+              for (const c of comments) {
+                result += `\n### @${c.user.login} (${c.created_at})\n${c.body}\n`;
+              }
+            }
+            return result;
+          } catch (err) {
+            return `Error fetching PR: ${err instanceof Error ? err.message : String(err)}`;
+          }
+        },
+      }),
       memory_save: createMemorySaveTool(),
       manage_packages: tool({
         description:
@@ -663,6 +852,34 @@ The user can see everything on the desktop in real-time.`;
   }
 
   private static readonly PROJECT_COOLDOWN_MS = 30_000; // 30 seconds
+
+  /**
+   * Resolve a GitHub repository from either a direct `repo` param (owner/repo)
+   * or a `projectId` (looks up project config). Returns the repo full name and token.
+   */
+  private resolveGitHubRepo(
+    projectId?: string,
+    repo?: string,
+  ): { repoFullName: string; token: string } {
+    const token = getConfig("github:token");
+    if (!token) {
+      throw new Error("GitHub token not configured. Ask the CEO to set github:token in Settings.");
+    }
+    if (repo) {
+      if (!repo.includes("/")) {
+        throw new Error(`Invalid repo format "${repo}". Expected owner/repo (e.g. "octocat/hello-world").`);
+      }
+      return { repoFullName: repo, token };
+    }
+    if (projectId) {
+      const configuredRepo = getConfig(`project:${projectId}:github:repo`);
+      if (!configuredRepo) {
+        throw new Error(`No GitHub repo configured for project "${projectId}". Set it in project settings.`);
+      }
+      return { repoFullName: configuredRepo, token };
+    }
+    throw new Error("Either repo (owner/repo) or projectId must be provided.");
+  }
 
   private async sendDirectiveToTeamLead(
     projectId: string,
