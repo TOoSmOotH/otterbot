@@ -25,6 +25,7 @@ import { TodoView } from "./components/todos/TodoView";
 import { InboxView } from "./components/inbox/InboxView";
 import { CalendarView } from "./components/calendar/CalendarView";
 import { CodeView } from "./components/code/CodeView";
+import { ProjectSettings } from "./components/project/ProjectSettings";
 import { DetachedLiveView } from "./components/live-view/DetachedLiveView";
 import { useDesktopStore } from "./stores/desktop-store";
 import { useOpenCodeStore } from "./stores/opencode-store";
@@ -377,7 +378,7 @@ function ResizableLayout({
 
   // Reset to graph from project-only views when no project is active
   useEffect(() => {
-    if (!activeProjectId && (centerView === "charter" || centerView === "kanban" || centerView === "files")) {
+    if (!activeProjectId && (centerView === "charter" || centerView === "kanban" || centerView === "files" || centerView === "settings")) {
       setCenterView("dashboard");
     }
   }, [activeProjectId, centerView]);
@@ -414,6 +415,10 @@ function ResizableLayout({
         return <DesktopView />;
       case "code":
         return <CodeView projectId={activeProjectId} />;
+      case "settings":
+        return activeProjectId ? (
+          <ProjectSettings projectId={activeProjectId} />
+        ) : null;
       case "live3d":
         return (
           <LiveView userProfile={userProfile} onToggleView={() => setCenterView("graph")} />

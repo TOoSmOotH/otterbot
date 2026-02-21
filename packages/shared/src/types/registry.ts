@@ -65,6 +65,9 @@ export interface Project {
   createdAt: string;
 }
 
+/** Per-project role → registry entry ID mapping for agent assignments */
+export type ProjectAgentAssignments = Record<string, string>;
+
 export enum ProjectStatus {
   Active = "active",
   Completed = "completed",

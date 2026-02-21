@@ -13,7 +13,7 @@ import type { Registry } from "../registry/registry.js";
 import type { BaseAgent } from "../agents/agent.js";
 import { getDb, schema } from "../db/index.js";
 import { isTTSEnabled, getConfiguredTTSProvider, stripMarkdown } from "../tts/tts.js";
-import { getConfig, setConfig } from "../auth/auth.js";
+import { getConfig, setConfig, deleteConfig } from "../auth/auth.js";
 import type { WorkspaceManager } from "../workspace/workspace.js";
 import type { GitHubIssueMonitor } from "../github/issue-monitor.js";
 import { cloneRepo, getRepoDefaultBranch } from "../github/github-service.js";
@@ -438,6 +438,49 @@ export function setupSocketHandlers(
       console.log(`[Socket] agent:stop received for ${data.agentId}`);
       const result = coo.stopAgent(data.agentId);
       callback?.({ ok: result, error: result ? undefined : "Agent not found" });
+    });
+
+    // Get per-project agent assignments
+    socket.on("project:get-agent-assignments", (data, callback) => {
+      const raw = getConfig(`project:${data.projectId}:agent-assignments`);
+      try {
+        callback(raw ? JSON.parse(raw) : {});
+      } catch {
+        callback({});
+      }
+    });
+
+    // Set per-project agent assignments
+    socket.on("project:set-agent-assignments", (data, callback) => {
+      const allowedAgentIds = new Set([
+        "builtin-coder",
+        "builtin-opencode-coder",
+        "builtin-claude-code-coder",
+        "builtin-codex-coder",
+      ]);
+
+      // Validate all agent IDs
+      for (const [role, agentId] of Object.entries(data.assignments)) {
+        if (agentId && !allowedAgentIds.has(agentId)) {
+          callback?.({ ok: false, error: `Invalid agent ID "${agentId}" for role "${role}"` });
+          return;
+        }
+      }
+
+      // Remove empty assignments, then persist
+      const cleaned: Record<string, string> = {};
+      for (const [role, agentId] of Object.entries(data.assignments)) {
+        if (agentId) cleaned[role] = agentId;
+      }
+
+      if (Object.keys(cleaned).length === 0) {
+        // No assignments — delete the key
+        deleteConfig(`project:${data.projectId}:agent-assignments`);
+      } else {
+        setConfig(`project:${data.projectId}:agent-assignments`, JSON.stringify(cleaned));
+      }
+
+      callback?.({ ok: true });
     });
 
     // Retrieve agent activity (bus messages + persisted activity records)

@@ -1,6 +1,6 @@
 import type { Agent, AgentStatus, AgentActivityRecord } from "./agent.js";
 import type { BusMessage, Conversation } from "./message.js";
-import type { RegistryEntry, Project } from "./registry.js";
+import type { RegistryEntry, Project, ProjectAgentAssignments } from "./registry.js";
 import type { KanbanTask } from "./kanban.js";
 import type { SceneZone } from "./environment.js";
 import type { CodingAgentSession, CodingAgentMessage, CodingAgentFileDiff, CodingAgentPermission } from "./coding-agent.js";
@@ -114,6 +114,14 @@ export interface ClientToServerEvents {
   ) => void;
   "agent:stop": (
     data: { agentId: string },
+    callback?: (ack: { ok: boolean; error?: string }) => void,
+  ) => void;
+  "project:get-agent-assignments": (
+    data: { projectId: string },
+    callback: (assignments: ProjectAgentAssignments) => void,
+  ) => void;
+  "project:set-agent-assignments": (
+    data: { projectId: string; assignments: ProjectAgentAssignments },
     callback?: (ack: { ok: boolean; error?: string }) => void,
   ) => void;
 }

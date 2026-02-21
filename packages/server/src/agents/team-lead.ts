@@ -221,6 +221,25 @@ export class TeamLead extends BaseAgent {
       systemPrompt += sections.join("\n");
     }
 
+    // Inject per-project agent assignments into system prompt
+    const assignmentsRaw = getConfig(`project:${deps.projectId}:agent-assignments`);
+    if (assignmentsRaw) {
+      try {
+        const assignments = JSON.parse(assignmentsRaw) as Record<string, string>;
+        if (Object.keys(assignments).length > 0) {
+          const lines = Object.entries(assignments).map(
+            ([role, agentId]) => `- ${role}: ${agentId}`,
+          );
+          systemPrompt +=
+            `\n\n## Agent Assignments\n` +
+            `This project has specific agent assignments configured by the user. ` +
+            `When spawning workers, prefer these agents for the corresponding roles:\n` +
+            lines.join("\n") +
+            `\nUse the assigned agent ID when calling spawn_worker for matching task types.`;
+        }
+      } catch { /* ignore parse errors */ }
+    }
+
     const options: AgentOptions = {
       role: AgentRole.TeamLead,
       name: deps.name ?? null,
@@ -676,10 +695,13 @@ export class TeamLead extends BaseAgent {
     const taskText = `${task.title} ${task.description ?? ""}`.toLowerCase();
     const isBrowserTask = /\b(browser|chrome|chromium|firefox|launch.*browser|open.*url|browse.*web|headless|puppeteer|playwright|selenium|desktop.*app)\b/.test(taskText);
 
-    // Find the right registry entry — pick the first enabled coding agent
+    // Find the right registry entry — check project assignments first, then global fallback
     let registryEntryId = "builtin-coder";
+    const assignments = this.getProjectAgentAssignments();
     if (isBrowserTask) {
       registryEntryId = "builtin-browser-agent";
+    } else if (assignments.coder) {
+      registryEntryId = assignments.coder;
     } else if (getConfig("opencode:enabled") === "true") {
       registryEntryId = "builtin-opencode-coder";
     } else if (getConfig("claude-code:enabled") === "true") {
@@ -1110,12 +1132,33 @@ export class TeamLead extends BaseAgent {
       .join("\n");
   }
 
+  /** Read per-project agent assignments from config KV */
+  private getProjectAgentAssignments(): Record<string, string> {
+    if (!this.projectId) return {};
+    const raw = getConfig(`project:${this.projectId}:agent-assignments`);
+    if (!raw) return {};
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return {};
+    }
+  }
+
   private async spawnWorker(
     registryEntryId: string,
     task: string,
     taskId?: string,
   ): Promise<string> {
     try {
+      // Remap to project-preferred agent if applicable
+      const assignments = this.getProjectAgentAssignments();
+      if (assignments.coder && CODING_AGENT_IDS.has(registryEntryId) && registryEntryId !== assignments.coder) {
+        console.log(
+          `[TeamLead ${this.id}] Remapping agent ${registryEntryId} → ${assignments.coder} (project assignment)`,
+        );
+        registryEntryId = assignments.coder;
+      }
+
       const db = getDb();
       const entry = db
         .select()
