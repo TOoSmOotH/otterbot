@@ -83,20 +83,32 @@ export class OpenCodePtyClient implements CodingAgentClient {
         env,
       });
 
-      // Track whether we've sent the task to the TUI input prompt
+      // Track whether we've sent the task to the TUI input prompt.
+      // We accumulate output bytes and wait for the TUI to fully render
+      // before typing the task. OpenCode's Bubble Tea TUI needs time to
+      // initialize its layout, input field, and status bar.
       let taskSent = false;
+      let accumulatedBytes = 0;
+      const TUI_READY_THRESHOLD = 500; // bytes — enough for initial TUI render
+      let readyTimer: NodeJS.Timeout | null = null;
 
       return await new Promise<CodingAgentTaskResult>((resolve) => {
         this.ptyProcess!.onData((data: string) => {
-          // Once the TUI renders, type the task into the input prompt.
-          // We detect readiness by watching for initial output, then send
-          // after a short delay to let the TUI fully initialize.
+          // Wait for enough TUI output before submitting the task.
+          // Each data chunk resets the timer — we want a quiet period
+          // after the initial render burst before typing.
           if (!taskSent) {
-            taskSent = true;
-            setTimeout(() => {
-              // Type the task and press Enter to submit
-              this.ptyProcess?.write(task + "\r");
-            }, 1500);
+            accumulatedBytes += data.length;
+            if (accumulatedBytes >= TUI_READY_THRESHOLD) {
+              if (readyTimer) clearTimeout(readyTimer);
+              readyTimer = setTimeout(() => {
+                if (taskSent) return;
+                taskSent = true;
+                console.log(`[OpenCode (PTY)] TUI ready (${accumulatedBytes} bytes received), submitting task...`);
+                // Type the task and press Enter to submit
+                this.ptyProcess?.write(task + "\r");
+              }, 500); // 500ms quiet period after last output
+            }
           }
 
           // Append to ring buffer (trim to size)
