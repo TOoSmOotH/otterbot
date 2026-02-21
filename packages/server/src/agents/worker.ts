@@ -390,7 +390,10 @@ export class Worker extends BaseAgent {
     // Terminal output buffer and idle detection for monitoring
     let terminalBuffer = "";
     let idleTimer: NodeJS.Timeout | null = null;
-    const IDLE_TIMEOUT_MS = 5000;     // 5 seconds of no output = Claude is waiting
+    const approvalMode = getConfig("claude-code:approval_mode") ?? "full-auto";
+    // In full-auto, only need to detect completion (longer timeout is fine).
+    // In interactive mode, need to detect prompts faster.
+    const IDLE_TIMEOUT_MS = approvalMode === "full-auto" ? 15000 : 8000;
     const MAX_BUFFER_CHARS = 8000;    // Keep last ~8KB for LLM analysis
 
     const ptyClient = new ClaudeCodePtyClient({
@@ -469,32 +472,36 @@ export class Worker extends BaseAgent {
     try {
       const cleanOutput = stripAnsi(terminalOutput);
 
+      const approvalMode = getConfig("claude-code:approval_mode") ?? "full-auto";
       const { text } = await this.think(
-        `You are monitoring a Claude Code terminal session. The terminal has been idle for 5 seconds.
+        `You are monitoring a Claude Code terminal session. The terminal has stopped producing output.
 
-Analyze the terminal output below and determine what state Claude is in:
+Analyze the VERY END of the terminal output below and determine what state Claude is in.
+IMPORTANT: When in doubt, respond WORKING. Only respond with another state if you are VERY confident.
 
-1. WAITING_FOR_PERMISSION — Claude is asking to approve a file edit, command execution, or tool use
-2. WAITING_FOR_INPUT — Claude is asking a question and waiting for user response
-3. TASK_COMPLETE — Claude has finished the task and is showing the REPL prompt (>) with no pending work
-4. STILL_WORKING — Claude is still processing (e.g., loading, thinking)
+States:
+1. TASK_COMPLETE — Claude has clearly finished ALL work and is showing an idle REPL prompt (">") at the very end with no pending operations. The task summary or final output should be visible above the prompt.
+2. WAITING_FOR_PERMISSION — The terminal is EXPLICITLY showing a yes/no permission prompt (e.g., "Allow?", "Approve?", "Do you want to allow"). There must be a clear interactive prompt waiting for y/n input.${approvalMode === "full-auto" ? " NOTE: This session uses --dangerously-skip-permissions so permission prompts should NOT appear." : ""}
+3. WAITING_FOR_INPUT — Claude is EXPLICITLY asking the user a question and waiting for a typed response. There must be a clear question with an input cursor.
+4. STILL_WORKING — Claude is thinking, executing commands, writing files, or between operations. This is the DEFAULT — use this if there is ANY ambiguity.
 
-Respond with EXACTLY one of these formats:
-- PERMISSION: <what Claude is asking permission for>
-- INPUT: <the question Claude is asking>
-- COMPLETE: <brief summary of what was done>
-- WORKING: <what Claude appears to be doing>
+Respond with EXACTLY one line in one of these formats:
+- COMPLETE: <brief summary>
+- PERMISSION: <what is being asked>
+- INPUT: <the question>
+- WORKING: <description>
 
 TERMINAL OUTPUT (last portion):
 ${cleanOutput.slice(-4000)}`,
       );
 
-      if (text.startsWith("PERMISSION:")) {
+      if (text.startsWith("COMPLETE:")) {
+        this.handleTerminalComplete(text.slice(9).trim(), ptyClient);
+      } else if (text.startsWith("PERMISSION:") && approvalMode !== "full-auto") {
+        // Only handle permissions in interactive mode — full-auto uses --dangerously-skip-permissions
         await this.handleTerminalPermission(text.slice(11).trim(), ptyClient);
       } else if (text.startsWith("INPUT:")) {
         await this.handleTerminalInput(text.slice(6).trim(), ptyClient);
-      } else if (text.startsWith("COMPLETE:")) {
-        this.handleTerminalComplete(text.slice(9).trim(), ptyClient);
       }
       // WORKING: do nothing, wait for more output
     } finally {
