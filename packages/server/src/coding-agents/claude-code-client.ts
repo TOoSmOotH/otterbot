@@ -16,6 +16,7 @@ import type {
 } from "./coding-agent-client.js";
 import { TASK_COMPLETE_SENTINEL } from "./coding-agent-client.js";
 import { execSync } from "node:child_process";
+import { getConfig } from "../auth/auth.js";
 
 export interface ClaudeCodeConfig {
   workspacePath?: string | null;
@@ -98,10 +99,15 @@ export class ClaudeCodeClient implements CodingAgentClient {
         };
       }
 
-      // Set up environment with API key if provided
+      // Set up environment with API key and GitHub token
       const env: Record<string, string> = { ...process.env as Record<string, string> };
       if (this.config.apiKey) {
         env.ANTHROPIC_API_KEY = this.config.apiKey;
+      }
+      const ghToken = getConfig("github:token");
+      if (ghToken) {
+        env.GH_TOKEN = ghToken;
+        env.GITHUB_TOKEN = ghToken;
       }
       sdkOptions.env = env;
 

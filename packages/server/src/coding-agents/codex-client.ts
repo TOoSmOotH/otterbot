@@ -17,6 +17,7 @@ import type {
 import { TASK_COMPLETE_SENTINEL } from "./coding-agent-client.js";
 import { spawn } from "node:child_process";
 import { execSync } from "node:child_process";
+import { getConfig } from "../auth/auth.js";
 
 export interface CodexConfig {
   workspacePath?: string | null;
@@ -67,6 +68,11 @@ export class CodexClient implements CodingAgentClient {
       const env: Record<string, string> = { ...process.env as Record<string, string> };
       if (this.config.apiKey) {
         env.OPENAI_API_KEY = this.config.apiKey;
+      }
+      const ghToken = getConfig("github:token");
+      if (ghToken) {
+        env.GH_TOKEN = ghToken;
+        env.GITHUB_TOKEN = ghToken;
       }
 
       const cwd = this.config.workspacePath ?? process.cwd();

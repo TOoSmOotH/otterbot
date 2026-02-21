@@ -223,11 +223,13 @@ export function startOpenCodeServer(): void {
   const password = getConfig("opencode:password") ?? "";
   const { apiKey } = resolveProviderInfo();
 
+  const ghToken = getConfig("github:token");
   const env: Record<string, string> = {
     ...process.env as Record<string, string>,
     OPENCODE_SERVER_USERNAME: username,
     OPENCODE_SERVER_PASSWORD: password,
     OPENCODE_PROVIDER_API_KEY: apiKey ?? "",
+    ...(ghToken ? { GH_TOKEN: ghToken, GITHUB_TOKEN: ghToken } : {}),
   };
 
   console.log("[OpenCode] Starting `opencode serve`...");
