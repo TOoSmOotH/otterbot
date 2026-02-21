@@ -13,6 +13,16 @@ import { Worker, CODING_AGENT_REGISTRY_IDS } from "./worker.js";
 
 /** All coding agent IDs including the fallback builtin-coder */
 const CODING_AGENT_IDS = CODING_AGENT_REGISTRY_IDS;
+
+/** Check whether an external coding agent is currently enabled in settings */
+function isCodingAgentEnabled(registryEntryId: string): boolean {
+  switch (registryEntryId) {
+    case "builtin-opencode-coder": return getConfig("opencode:enabled") === "true";
+    case "builtin-claude-code-coder": return getConfig("claude-code:enabled") === "true";
+    case "builtin-codex-coder": return getConfig("codex:enabled") === "true";
+    default: return true;
+  }
+}
 import { getDb, schema } from "../db/index.js";
 import { Registry } from "../registry/registry.js";
 import { SkillService } from "../skills/skill-service.js";
@@ -221,24 +231,12 @@ export class TeamLead extends BaseAgent {
       systemPrompt += sections.join("\n");
     }
 
-    // Inject per-project agent assignments into system prompt
-    const assignmentsRaw = getConfig(`project:${deps.projectId}:agent-assignments`);
-    if (assignmentsRaw) {
-      try {
-        const assignments = JSON.parse(assignmentsRaw) as Record<string, string>;
-        if (Object.keys(assignments).length > 0) {
-          const lines = Object.entries(assignments).map(
-            ([role, agentId]) => `- ${role}: ${agentId}`,
-          );
-          systemPrompt +=
-            `\n\n## Agent Assignments\n` +
-            `This project has specific agent assignments configured by the user. ` +
-            `When spawning workers, prefer these agents for the corresponding roles:\n` +
-            lines.join("\n") +
-            `\nUse the assigned agent ID when calling spawn_worker for matching task types.`;
-        }
-      } catch { /* ignore parse errors */ }
-    }
+    // Agent assignments are resolved dynamically at spawn time (not baked into the
+    // system prompt) so that config changes take effect without restarting the TL.
+    systemPrompt +=
+      `\n\n## Agent Assignments\n` +
+      `This project may have per-project agent assignments. ` +
+      `Always call search_registry("code") before spawning coding workers to see which agents are currently available.`;
 
     const options: AgentOptions = {
       role: AgentRole.TeamLead,
@@ -704,7 +702,7 @@ export class TeamLead extends BaseAgent {
     const assignments = this.getProjectAgentAssignments();
     if (isBrowserTask) {
       registryEntryId = "builtin-browser-agent";
-    } else if (assignments.coder) {
+    } else if (assignments.coder && isCodingAgentEnabled(assignments.coder)) {
       registryEntryId = assignments.coder;
     } else if (getConfig("opencode:enabled") === "true") {
       registryEntryId = "builtin-opencode-coder";
@@ -1156,11 +1154,19 @@ export class TeamLead extends BaseAgent {
     try {
       // Remap to project-preferred agent if applicable
       const assignments = this.getProjectAgentAssignments();
-      if (assignments.coder && CODING_AGENT_IDS.has(registryEntryId) && registryEntryId !== assignments.coder) {
+      if (assignments.coder && isCodingAgentEnabled(assignments.coder) && CODING_AGENT_IDS.has(registryEntryId) && registryEntryId !== assignments.coder) {
         console.log(
           `[TeamLead ${this.id}] Remapping agent ${registryEntryId} → ${assignments.coder} (project assignment)`,
         );
         registryEntryId = assignments.coder;
+      }
+
+      // Reject spawning disabled external coding agents — fall back to builtin-coder
+      if (!isCodingAgentEnabled(registryEntryId)) {
+        console.warn(
+          `[TeamLead ${this.id}] Agent ${registryEntryId} is disabled — falling back to builtin-coder`,
+        );
+        registryEntryId = "builtin-coder";
       }
 
       const db = getDb();
