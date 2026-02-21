@@ -1319,6 +1319,7 @@ The user can see everything on the desktop in real-time.`;
     this.sendMessage(teamLead.id, MessageType.Directive, directive, {
       projectId: project.id,
       projectName: project.name,
+      isRecovery: true,
     });
   }
 
@@ -1422,13 +1423,27 @@ The user can see everything on the desktop in real-time.`;
       }
     }
 
-    lines.push(
-      "",
-      "INSTRUCTIONS:",
-      "- Pick up unblocked backlog tasks by spawning workers.",
-      "- If all tasks are done, run verification and report completion to the COO.",
-      "- Do NOT create duplicate tasks for work already on the board.",
-    );
+    const allDone = tasks.length > 0 && backlog.length === 0;
+    const verificationAlreadyDone = !!getConfig(`project:${project.id}:verification_requested`);
+
+    lines.push("", "INSTRUCTIONS:");
+    if (allDone && verificationAlreadyDone) {
+      lines.push(
+        "- All tasks are already done and verification was completed before the restart.",
+        "- Do NOT create new verification tasks or re-verify. Simply report completion to the COO.",
+      );
+    } else if (allDone) {
+      lines.push(
+        "- All tasks are done. Run verification and report completion to the COO.",
+        "- Do NOT create duplicate tasks for work already on the board.",
+      );
+    } else {
+      lines.push(
+        "- Pick up unblocked backlog tasks by spawning workers.",
+        "- If all tasks are done, run verification and report completion to the COO.",
+        "- Do NOT create duplicate tasks for work already on the board.",
+      );
+    }
 
     return lines.join("\n");
   }

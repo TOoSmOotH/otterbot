@@ -310,8 +310,12 @@ export class TeamLead extends BaseAgent {
   }
 
   private async handleDirective(message: BusMessage) {
-    this.verificationRequested = false;
-    this.persistFlag("verification", false);
+    // Only reset verification flag for new directives, not recovery restarts.
+    // On recovery the flag is already correct from the previous run.
+    if (!message.metadata?.isRecovery) {
+      this.verificationRequested = false;
+      this.persistFlag("verification", false);
+    }
     const { text } = await this.thinkWithContinuation(
       message.content,
       (token, messageId) => this.onAgentStream?.(this.id, token, messageId),
