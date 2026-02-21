@@ -1145,6 +1145,8 @@ export class TeamLead extends BaseAgent {
     taskId?: string,
   ): Promise<string> {
     try {
+      const originalRequestedId = registryEntryId;
+
       // Remap to project-preferred agent if applicable
       const assignments = this.getProjectAgentAssignments();
       if (assignments.coder && isCodingAgentEnabled(assignments.coder) && CODING_AGENT_IDS.has(registryEntryId) && registryEntryId !== assignments.coder) {
@@ -1152,6 +1154,25 @@ export class TeamLead extends BaseAgent {
           `[TeamLead ${this.id}] Remapping agent ${registryEntryId} → ${assignments.coder} (project assignment)`,
         );
         registryEntryId = assignments.coder;
+      }
+
+      // If LLM requested builtin-coder but an external coding agent is enabled globally, prefer it
+      if (registryEntryId === "builtin-coder") {
+        if (assignments.coder && isCodingAgentEnabled(assignments.coder)) {
+          registryEntryId = assignments.coder;
+        } else if (getConfig("opencode:enabled") === "true") {
+          registryEntryId = "builtin-opencode-coder";
+        } else if (getConfig("claude-code:enabled") === "true") {
+          registryEntryId = "builtin-claude-code-coder";
+        } else if (getConfig("codex:enabled") === "true") {
+          registryEntryId = "builtin-codex-coder";
+        }
+      }
+
+      if (registryEntryId !== originalRequestedId) {
+        console.log(
+          `[TeamLead ${this.id}] spawnWorker: requested=${originalRequestedId}, resolved=${registryEntryId}`,
+        );
       }
 
       // Reject spawning disabled external coding agents — fall back to builtin-coder

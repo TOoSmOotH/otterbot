@@ -110,6 +110,13 @@ export class ClaudeCodeClient implements CodingAgentClient {
       let outputTokens = 0;
       let model = this.config.model ?? "unknown";
 
+      // State tracking for transforming SDK events → OpenCode-compatible events
+      let currentMessageId = "";
+      let messageSeq = 0;
+      const contentBlockParts = new Map<number, { partId: string; type: string; text: string }>();
+
+      const emit = this.config.onEvent;
+
       // Stream events from Claude Code
       const stream = query({ prompt: task, options: sdkOptions } as Parameters<typeof query>[0]);
 
@@ -117,26 +124,169 @@ export class ClaudeCodeClient implements CodingAgentClient {
         const eventObj = event as Record<string, unknown>;
         const eventType = (eventObj.type as string) ?? "unknown";
 
-        // Forward events for streaming display
-        if (this.config.onEvent) {
-          this.config.onEvent({
-            type: eventType,
-            properties: eventObj,
-          });
-        }
+        // --- Transform SDK events into OpenCode-compatible format ---
 
-        // Accumulate text from assistant messages
-        if (eventType === "assistant" && typeof eventObj.content === "string") {
-          fullText += eventObj.content;
-        } else if (eventType === "assistant" && Array.isArray(eventObj.content)) {
-          for (const part of eventObj.content as Array<{ type?: string; text?: string }>) {
-            if (part.type === "text" && part.text) {
-              fullText += part.text;
+        if (eventType === "stream_event" && emit) {
+          const rawEvent = eventObj.event as Record<string, unknown> | undefined;
+          if (!rawEvent) continue;
+          const rawType = rawEvent.type as string;
+
+          if (rawType === "message_start") {
+            const msg = rawEvent.message as Record<string, unknown> | undefined;
+            currentMessageId = (msg?.id as string) ?? `cc-msg-${++messageSeq}`;
+            contentBlockParts.clear();
+          } else if (rawType === "content_block_start") {
+            const index = rawEvent.index as number ?? 0;
+            const contentBlock = rawEvent.content_block as Record<string, unknown> | undefined;
+            const blockType = (contentBlock?.type as string) ?? "text";
+            const partId = `${sessionId}-${currentMessageId}-${index}`;
+
+            let mappedType = "text";
+            if (blockType === "thinking") mappedType = "reasoning";
+            else if (blockType === "tool_use") mappedType = "tool";
+
+            contentBlockParts.set(index, { partId, type: mappedType, text: "" });
+
+            // For tool_use blocks, emit an initial delta with the tool name
+            if (blockType === "tool_use" && contentBlock?.name) {
+              emit({
+                type: "message.part.delta",
+                properties: {
+                  sessionID: sessionId,
+                  messageID: currentMessageId,
+                  partID: partId,
+                  field: "text",
+                  delta: `Tool: ${contentBlock.name as string}\n`,
+                },
+              });
+            }
+          } else if (rawType === "content_block_delta") {
+            const index = rawEvent.index as number ?? 0;
+            const delta = rawEvent.delta as Record<string, unknown> | undefined;
+            const deltaType = delta?.type as string;
+            const part = contentBlockParts.get(index);
+
+            if (delta && part) {
+              let deltaText = "";
+              let field = "text";
+
+              if (deltaType === "text_delta") {
+                deltaText = (delta.text as string) ?? "";
+                field = "text";
+              } else if (deltaType === "thinking_delta") {
+                deltaText = (delta.thinking as string) ?? "";
+                field = "reasoning";
+              } else if (deltaType === "input_json_delta") {
+                deltaText = (delta.partial_json as string) ?? "";
+                field = "text";
+              }
+
+              if (deltaText) {
+                part.text += deltaText;
+                emit({
+                  type: "message.part.delta",
+                  properties: {
+                    sessionID: sessionId,
+                    messageID: currentMessageId,
+                    partID: part.partId,
+                    field,
+                    delta: deltaText,
+                  },
+                });
+              }
+            }
+          } else if (rawType === "content_block_stop") {
+            const index = rawEvent.index as number ?? 0;
+            const part = contentBlockParts.get(index);
+            if (part) {
+              emit({
+                type: "message.part.updated",
+                properties: {
+                  part: {
+                    id: part.partId,
+                    messageID: currentMessageId,
+                    sessionID: sessionId,
+                    type: part.type === "reasoning" ? "reasoning" : part.type === "tool" ? "tool" : "text",
+                    text: part.text,
+                  },
+                },
+              });
+            }
+          } else if (rawType === "message_stop") {
+            // Emit message.updated so emitCodingAgentEvent can build the full message
+            emit({
+              type: "message.updated",
+              properties: {
+                info: {
+                  id: currentMessageId,
+                  role: "assistant",
+                  sessionID: sessionId,
+                },
+              },
+            });
+          }
+
+          // Also extract usage from message_delta events
+          if (rawType === "message_delta") {
+            const usage = rawEvent.usage as Record<string, number> | undefined;
+            if (usage) {
+              inputTokens += usage.input_tokens ?? 0;
+              outputTokens += usage.output_tokens ?? 0;
+            }
+          }
+        } else if (eventType === "assistant") {
+          // Complete assistant message — accumulate text
+          if (typeof eventObj.content === "string") {
+            fullText += eventObj.content;
+          } else if (Array.isArray(eventObj.content)) {
+            for (const part of eventObj.content as Array<{ type?: string; text?: string }>) {
+              if (part.type === "text" && part.text) {
+                fullText += part.text;
+              }
+            }
+          }
+
+          // Also emit message.updated for the complete message if no stream events did
+          if (emit) {
+            const msgObj = eventObj.message as Record<string, unknown> | undefined;
+            const msgId = (msgObj?.id as string) ?? currentMessageId || `cc-msg-${++messageSeq}`;
+            emit({
+              type: "message.updated",
+              properties: {
+                info: {
+                  id: msgId,
+                  role: "assistant",
+                  sessionID: sessionId,
+                },
+              },
+            });
+          }
+        } else if (eventType === "tool_progress" && emit) {
+          // Tool progress — emit as a delta on the current tool part
+          const progressText = (eventObj.text as string) ?? (eventObj.output as string) ?? "";
+          if (progressText && currentMessageId) {
+            // Find the most recent tool part
+            let toolPart: { partId: string; type: string; text: string } | undefined;
+            for (const p of contentBlockParts.values()) {
+              if (p.type === "tool") toolPart = p;
+            }
+            if (toolPart) {
+              toolPart.text += progressText;
+              emit({
+                type: "message.part.delta",
+                properties: {
+                  sessionID: sessionId,
+                  messageID: currentMessageId,
+                  partID: toolPart.partId,
+                  field: "text",
+                  delta: progressText,
+                },
+              });
             }
           }
         }
 
-        // Accumulate token usage
+        // Accumulate token usage from top-level usage field
         if (eventObj.usage) {
           const usage = eventObj.usage as Record<string, number>;
           inputTokens += usage.input_tokens ?? 0;
