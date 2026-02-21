@@ -59,12 +59,17 @@ vi.mock("../../coding-agents/claude-code-pty-client.js", () => {
   };
 });
 
-// Mock codex-client
+// Mock codex-pty-client
 const mockCodexExecuteTask = vi.fn();
-vi.mock("../../coding-agents/codex-client.js", () => {
+vi.mock("../../coding-agents/codex-pty-client.js", () => {
   return {
-    CodexClient: class {
+    CodexPtyClient: class {
       executeTask = mockCodexExecuteTask;
+      writeInput = vi.fn();
+      resize = vi.fn();
+      kill = vi.fn();
+      gracefulExit = vi.fn();
+      getReplayBuffer = vi.fn(() => "");
     },
   };
 });

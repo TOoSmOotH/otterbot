@@ -1,4 +1,3 @@
-import { nanoid } from "nanoid";
 import {
   type GearConfig,
   AgentRole,
@@ -11,7 +10,6 @@ import type { MessageBus } from "../bus/message-bus.js";
 import { createTools } from "../tools/tool-factory.js";
 import { debug } from "../utils/debug.js";
 import { getConfig } from "../auth/auth.js";
-import { getDb, schema } from "../db/index.js";
 
 /** Strip ANSI escape codes from terminal output for LLM analysis */
 function stripAnsi(str: string): string {
@@ -77,8 +75,6 @@ export class Worker extends BaseAgent {
 
   /** Abort controller for the current task — used by abort() to cancel running work */
   private _taskAbortController: AbortController | null = null;
-  /** Reference to the Claude Code AbortController (stored in executeExternalCodingAgent) */
-  private _codingAgentAbortController: AbortController | null = null;
   /** Reference to the PTY client (for abort/input routing) */
   private _ptyClient: PtyClient | null = null;
   /** Guard against re-entrant terminal analysis */
@@ -136,11 +132,6 @@ export class Worker extends BaseAgent {
       this._onPtySessionUnregistered?.(this.id);
       this._ptyClient = null;
     }
-    if (this._codingAgentAbortController) {
-      this._codingAgentAbortController.abort();
-      this._codingAgentAbortController = null;
-    }
-
     // 3. Emit session-end with cancelled status for coding agents
     if (CODING_AGENT_REGISTRY_IDS.has(this.registryEntryId!) && this.registryEntryId !== "builtin-coder") {
       this._onCodingAgentEvent?.(this.id, "", {
@@ -282,6 +273,85 @@ export class Worker extends BaseAgent {
       : `OpenCode failed: ${result.error ?? "Unknown error"}\n\n${result.summary}`;
   }
 
+  /**
+   * Execute a task using Codex via PTY (terminal passthrough).
+   * Spawns the `codex` CLI in a pseudo-terminal and streams raw output.
+   */
+  private async executeCodexPtyTask(task: string): Promise<string> {
+    // Bail out early if no API key is configured
+    const authMode = getConfig("codex:auth_mode") ?? "api-key";
+    if (authMode === "api-key" && !getConfig("codex:api_key")) {
+      console.warn(`[Worker ${this.id}] Codex not configured (no api_key), falling back to think()`);
+      return "";
+    }
+
+    const { CodexPtyClient } = await import("../coding-agents/codex-pty-client.js");
+
+    // Terminal output buffer and idle detection for monitoring
+    let terminalBuffer = "";
+    let idleTimer: NodeJS.Timeout | null = null;
+    const IDLE_TIMEOUT_MS = 10000;
+    const MAX_BUFFER_CHARS = 8000;
+
+    const ptyClient = new CodexPtyClient({
+      workspacePath: this.workspacePath,
+      onData: (data) => {
+        this._onTerminalData?.(this.id, data);
+
+        terminalBuffer += data;
+        if (terminalBuffer.length > MAX_BUFFER_CHARS) {
+          terminalBuffer = terminalBuffer.slice(-MAX_BUFFER_CHARS);
+        }
+
+        if (idleTimer) clearTimeout(idleTimer);
+        idleTimer = setTimeout(() => this.analyzeTerminalState(terminalBuffer, ptyClient), IDLE_TIMEOUT_MS);
+      },
+      onExit: () => {
+        if (idleTimer) {
+          clearTimeout(idleTimer);
+          idleTimer = null;
+        }
+      },
+    });
+
+    this._ptyClient = ptyClient;
+    this._terminalExiting = false;
+
+    // Register PTY session for socket routing
+    this._onPtySessionRegistered?.(this.id, ptyClient);
+
+    this.setStatus(AgentStatus.Acting);
+
+    // Emit session-start event
+    this._onCodingAgentEvent?.(this.id, "", {
+      type: "__session-start",
+      properties: { task, projectId: this.projectId ?? "", agentType: "codex" },
+    });
+
+    console.log(`[Worker ${this.id}] Sending task to Codex PTY (${task.length} chars)...`);
+
+    const result = await ptyClient.executeTask(task);
+    console.log(`[Worker ${this.id}] Codex PTY result: success=${result.success}, diff=${result.diff?.files?.length ?? 0} files`);
+
+    // Unregister PTY session
+    this._onPtySessionUnregistered?.(this.id);
+    this._ptyClient = null;
+
+    // Emit session-end event
+    this._onCodingAgentEvent?.(this.id, result.sessionId, {
+      type: "__session-end",
+      properties: {
+        status: result.success ? "completed" : "error",
+        diff: result.diff?.files ?? null,
+        error: result.error,
+      },
+    });
+
+    return result.success
+      ? `Codex completed successfully.\n\nSummary: ${result.summary}\n\nFiles changed: ${result.diff?.files?.length ?? 0}`
+      : `Codex failed: ${result.error ?? "Unknown error"}\n\n${result.summary}`;
+  }
+
   private async executeCodingAgentTask(task: string): Promise<string> {
     const agentType = this.getCodingAgentType();
 
@@ -291,10 +361,8 @@ export class Worker extends BaseAgent {
       case "claude-code": {
         return this.executeClaudeCodePtyTask(task);
       }
-      case "codex": {
-        const { CodexClient } = await import("../coding-agents/codex-client.js");
-        return this.executeExternalCodingAgent(task, agentType, CodexClient);
-      }
+      case "codex":
+        return this.executeCodexPtyTask(task);
       default:
         return "";
     }
@@ -538,136 +606,6 @@ ${cleanOutput.slice(-2000)}`,
     ptyClient.gracefulExit();
   }
 
-  /**
-   * Generic execution method for external coding agents (Claude Code, Codex).
-   * Uses the CodingAgentClient interface for unified handling.
-   */
-  private async executeExternalCodingAgent(
-    task: string,
-    agentType: "claude-code" | "codex",
-    ClientClass: { new(config: any): any },
-  ): Promise<string> {
-    const configPrefix = agentType === "claude-code" ? "claude-code" : "codex";
-
-    // Bail out early if no API key is configured (for api-key auth mode)
-    const authMode = getConfig(`${configPrefix}:auth_mode`) ?? "api-key";
-    if (authMode === "api-key" && !getConfig(`${configPrefix}:api_key`)) {
-      const label = agentType === "claude-code" ? "Claude Code" : "Codex";
-      console.warn(`[Worker ${this.id}] ${label} not configured (no api_key), falling back to think()`);
-      return "";
-    }
-    const timeoutMs = parseInt(getConfig(`${configPrefix}:timeout_ms`) ?? "1200000", 10);
-    const maxTurns = parseInt(getConfig(`${configPrefix}:max_turns`) ?? "50", 10);
-
-    // Create a shared abort controller for the coding agent subprocess
-    const codingAbortController = new AbortController();
-    this._codingAgentAbortController = codingAbortController;
-
-    const clientConfig: Record<string, unknown> = {
-      workspacePath: this.workspacePath,
-      timeoutMs,
-      maxTurns,
-      abortController: codingAbortController,
-      onEvent: (event: { type: string; properties: Record<string, unknown> }) => {
-        this._onCodingAgentEvent?.(this.id, "", event);
-      },
-    };
-
-    // Add agent-specific config
-    if (agentType === "claude-code") {
-      clientConfig.model = getConfig("claude-code:model") ?? undefined;
-      clientConfig.approvalMode = getConfig("claude-code:approval_mode") ?? "full-auto";
-      const authMode = getConfig("claude-code:auth_mode") ?? "api-key";
-      if (authMode === "api-key") {
-        clientConfig.apiKey = getConfig("claude-code:api_key") ?? undefined;
-      }
-    } else {
-      clientConfig.model = getConfig("codex:model") ?? undefined;
-      clientConfig.approvalMode = getConfig("codex:approval_mode") ?? "full-auto";
-      const authMode = getConfig("codex:auth_mode") ?? "api-key";
-      if (authMode === "api-key") {
-        clientConfig.apiKey = getConfig("codex:api_key") ?? undefined;
-      }
-    }
-
-    const client = new ClientClass(clientConfig);
-
-    this.setStatus(AgentStatus.Acting);
-
-    // Emit session-start event
-    this._onCodingAgentEvent?.(this.id, "", {
-      type: "__session-start",
-      properties: { task, projectId: this.projectId ?? "", agentType },
-    });
-
-    const getHumanResponse = this._onCodingAgentAwaitingInput
-      ? async (sessionId: string, assistantText: string) => {
-          this.setStatus(AgentStatus.AwaitingInput);
-          this._onCodingAgentEvent?.(this.id, sessionId, {
-            type: "__awaiting-input",
-            properties: { prompt: assistantText },
-          });
-          const response = await this._onCodingAgentAwaitingInput!(this.id, sessionId, assistantText);
-          this.setStatus(AgentStatus.Acting);
-          return response;
-        }
-      : undefined;
-
-    const onPermissionRequest = this._onCodingAgentPermissionRequest
-      ? async (sid: string, permission: { id: string; type: string; title: string; pattern?: string | string[]; metadata: Record<string, unknown> }) => {
-          this.setStatus(AgentStatus.AwaitingInput);
-          this._onCodingAgentEvent?.(this.id, sid, {
-            type: "__permission-request",
-            properties: { permission },
-          });
-          const response = await this._onCodingAgentPermissionRequest!(this.id, sid, permission);
-          this.setStatus(AgentStatus.Acting);
-          return response;
-        }
-      : undefined;
-
-    const label = agentType === "claude-code" ? "Claude Code" : "Codex";
-    console.log(`[Worker ${this.id}] Sending task to ${label} (${task.length} chars)...`);
-
-    const result = await client.executeTask(task, getHumanResponse, onPermissionRequest);
-    console.log(`[Worker ${this.id}] ${label} result: success=${result.success}, diff=${result.diff?.files?.length ?? 0} files`);
-
-    // Persist token usage
-    if (result.usage) {
-      try {
-        const db = getDb();
-        db.insert(schema.tokenUsage)
-          .values({
-            id: nanoid(),
-            agentId: this.id,
-            provider: result.usage.provider,
-            model: result.usage.model,
-            inputTokens: result.usage.inputTokens,
-            outputTokens: result.usage.outputTokens,
-            cost: result.usage.cost,
-            projectId: this.projectId,
-            timestamp: new Date().toISOString(),
-          })
-          .run();
-      } catch (err) {
-        console.error(`[Worker ${this.id}] Failed to persist ${label} token usage:`, err);
-      }
-    }
-
-    // Emit session-end event
-    this._onCodingAgentEvent?.(this.id, result.sessionId, {
-      type: "__session-end",
-      properties: {
-        status: result.success ? "completed" : "error",
-        diff: result.diff?.files ?? null,
-        error: result.error,
-      },
-    });
-
-    return result.success
-      ? `${label} completed successfully.\n\nSummary: ${result.summary}\n\nFiles changed: ${result.diff?.files?.length ?? 0}`
-      : `${label} failed: ${result.error ?? "Unknown error"}\n\n${result.summary}`;
-  }
 
   private async handleTask(message: BusMessage) {
     console.log(`[Worker ${this.id}] handleTask starting (registry=${this.registryEntryId})`);
@@ -727,7 +665,6 @@ ${cleanOutput.slice(-2000)}`,
     // Clean up abort controllers
     this._taskAbortController = null;
     this._externalAbortController = null;
-    this._codingAgentAbortController = null;
 
     // Worker is a one-shot agent — mark as done after completing the task
     this.setStatus(AgentStatus.Done);
