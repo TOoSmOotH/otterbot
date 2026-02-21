@@ -2,30 +2,16 @@ import { useProjectStore } from "../../stores/project-store";
 import { useAgentStore } from "../../stores/agent-store";
 import { KanbanColumn } from "@otterbot/shared";
 import type { KanbanTask, Agent } from "@otterbot/shared";
+import { formatRelative } from "../../lib/format-relative";
+import { deriveProjectDashboardData } from "../../lib/project-dashboard-data";
 
 export function ProjectDashboard({ projectId }: { projectId: string }) {
   const tasks = useProjectStore((s) => s.tasks);
   const project = useProjectStore((s) => s.activeProject);
   const agentsMap = useAgentStore((s) => s.agents);
 
-  const backlog = tasks.filter((t) => t.column === KanbanColumn.Backlog);
-  const inProgress = tasks.filter((t) => t.column === KanbanColumn.InProgress);
-  const done = tasks.filter((t) => t.column === KanbanColumn.Done);
-  const total = tasks.length;
-  const progressPct = total > 0 ? Math.round((done.length / total) * 100) : 0;
-
-  const githubTasks = tasks.filter((t) =>
-    t.labels.some((l) => l.startsWith("github-issue")),
-  );
-
-  const projectAgents: Agent[] = [];
-  agentsMap.forEach((agent) => {
-    if (agent.projectId === projectId) projectAgents.push(agent);
-  });
-
-  const recentTasks = [...tasks]
-    .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
-    .slice(0, 5);
+  const { backlog, inProgress, done, total, progressPct, githubTasks, projectAgents, recentTasks } =
+    deriveProjectDashboardData(tasks, agentsMap, projectId);
 
   return (
     <div className="h-full overflow-y-auto p-4">
@@ -195,13 +181,3 @@ function StatusDot({ status }: { status: string }) {
   return <span className={`inline-block w-2 h-2 rounded-full shrink-0 ${color}`} />;
 }
 
-function formatRelative(dateStr: string): string {
-  const diff = Date.now() - new Date(dateStr).getTime();
-  const mins = Math.floor(diff / 60000);
-  if (mins < 1) return "just now";
-  if (mins < 60) return `${mins}m ago`;
-  const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  return `${days}d ago`;
-}

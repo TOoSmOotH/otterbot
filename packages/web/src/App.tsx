@@ -28,6 +28,8 @@ import { DetachedLiveView } from "./components/live-view/DetachedLiveView";
 import { useDesktopStore } from "./stores/desktop-store";
 import { useOpenCodeStore } from "./stores/opencode-store";
 import { initMovementTriggers } from "./lib/movement-triggers";
+import { getCenterTabs, centerViewLabels } from "./lib/get-center-tabs";
+import type { CenterView } from "./lib/get-center-tabs";
 import { Group, Panel, Separator, useDefaultLayout, usePanelRef } from "react-resizable-panels";
 import { disconnectSocket, getSocket } from "./lib/socket";
 
@@ -94,8 +96,6 @@ interface UserProfile {
   gearConfig?: Record<string, boolean> | null;
   cooName?: string;
 }
-
-type CenterView = "graph" | "live3d" | "charter" | "kanban" | "desktop" | "files" | "usage" | "todos" | "inbox" | "calendar" | "code" | "dashboard";
 
 function MainApp() {
   const socket = useSocket();
@@ -439,26 +439,7 @@ function ResizableLayout({
         <div className="h-full flex flex-col">
           {/* Tab bar */}
           <div className="flex items-center gap-1 px-3 py-1.5 border-b border-border bg-card">
-              {(
-                activeProjectId
-                  ? (["dashboard", "kanban", "charter", "files", "code"] as CenterView[])
-                  : (["graph", "todos", "inbox", "calendar", "code", "usage", "desktop"] as CenterView[])
-              ).map((tab) => {
-                const labels: Record<CenterView, string> = {
-                  graph: "Graph",
-                  live3d: "Live",
-                  dashboard: "Dashboard",
-                  charter: "Charter",
-                  kanban: "Board",
-                  files: "Files",
-                  todos: "Todos",
-                  inbox: "Inbox",
-                  calendar: "Calendar",
-                  code: "Code",
-                  usage: "Usage",
-                  desktop: "Desktop",
-                };
-                return (
+              {getCenterTabs(activeProjectId).map((tab) => (
                   <button
                     key={tab}
                     onClick={() => setCenterView(tab)}
@@ -468,10 +449,9 @@ function ResizableLayout({
                         : "text-muted-foreground hover:text-foreground hover:bg-secondary"
                     }`}
                   >
-                    {labels[tab]}
+                    {centerViewLabels[tab]}
                   </button>
-                );
-              })}
+              ))}
           </div>
           <div className="flex-1 overflow-hidden">
             {renderCenterContent()}
