@@ -696,10 +696,27 @@ export function setupSocketHandlers(
         }
         callback?.({ ok: true });
       } else {
-        // Check completed session buffers for replay
-        const completedBuffer = completedPtyBuffers.get(data.agentId);
-        if (completedBuffer) {
-          socket.emit("terminal:replay", { agentId: data.agentId, data: completedBuffer });
+        // Check in-memory completed buffers first, then fall back to DB
+        let replayBuffer = completedPtyBuffers.get(data.agentId);
+        if (!replayBuffer) {
+          // Look up persisted terminal buffer from DB
+          try {
+            const db = getDb();
+            const row = db.select({ terminalBuffer: schema.codingAgentSessions.terminalBuffer })
+              .from(schema.codingAgentSessions)
+              .where(eq(schema.codingAgentSessions.agentId, data.agentId))
+              .get();
+            if (row?.terminalBuffer) {
+              replayBuffer = row.terminalBuffer;
+              // Cache in memory for subsequent requests
+              completedPtyBuffers.set(data.agentId, replayBuffer);
+            }
+          } catch {
+            // DB lookup failed — ignore
+          }
+        }
+        if (replayBuffer) {
+          socket.emit("terminal:replay", { agentId: data.agentId, data: replayBuffer });
           callback?.({ ok: true });
         } else {
           callback?.({ ok: false, error: "No active PTY session" });
@@ -904,11 +921,15 @@ export function emitCodingAgentEvent(
       const db = getDb();
       const rowId = sessionRowIds.get(agentId);
       if (rowId) {
+        // Save terminal buffer from PTY sessions for replay after restart
+        const terminalBuffer = completedPtyBuffers.get(agentId) ?? null;
+
         db.update(schema.codingAgentSessions)
           .set({
             status: endStatus as CodingAgentSession["status"],
             completedAt: new Date().toISOString(),
             sessionId: sessionId || undefined,
+            terminalBuffer,
           })
           .where(eq(schema.codingAgentSessions.id, rowId))
           .run();

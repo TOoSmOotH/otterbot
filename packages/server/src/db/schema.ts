@@ -358,6 +358,8 @@ export const codingAgentSessions = sqliteTable("coding_agent_sessions", {
     .default("active"),
   startedAt: text("started_at").notNull(),
   completedAt: text("completed_at"),
+  /** Raw terminal output buffer for PTY sessions — allows replaying terminal after restart */
+  terminalBuffer: text("terminal_buffer"),
 });
 
 export const codingAgentMessages = sqliteTable("coding_agent_messages", {

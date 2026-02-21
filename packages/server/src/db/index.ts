@@ -424,8 +424,16 @@ export async function migrateDb() {
     agent_type TEXT NOT NULL DEFAULT 'opencode',
     status TEXT NOT NULL DEFAULT 'active',
     started_at TEXT NOT NULL,
-    completed_at TEXT
+    completed_at TEXT,
+    terminal_buffer TEXT
   )`);
+
+  // Idempotent migration: add terminal_buffer column to coding_agent_sessions
+  try {
+    db.run(sql`ALTER TABLE coding_agent_sessions ADD COLUMN terminal_buffer TEXT`);
+  } catch {
+    // Column already exists — ignore
+  }
 
   db.run(sql`CREATE TABLE IF NOT EXISTS coding_agent_messages (
     id TEXT PRIMARY KEY,
