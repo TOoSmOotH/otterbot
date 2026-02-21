@@ -22,7 +22,7 @@ import { execSync } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync, unlinkSync, mkdirSync, chmodSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import type { NamedProvider, ProviderType, ProviderTypeMeta, CustomModel, ModelOption } from "@otterbot/shared";
+import type { NamedProvider, ProviderType, ProviderTypeMeta, CustomModel, ModelOption, ClaudeCodeOAuthUsage } from "@otterbot/shared";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -1154,6 +1154,94 @@ export async function testClaudeCodeConnection(): Promise<TestResult> {
     return {
       ok: false,
       error: error instanceof Error ? error.message : "Unknown error",
+    };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Claude Code OAuth usage
+// ---------------------------------------------------------------------------
+
+const EMPTY_USAGE: ClaudeCodeOAuthUsage = {
+  sessionPercent: 0,
+  sessionResetsAt: null,
+  weeklyPercent: 0,
+  weeklyResetsAt: null,
+  weeklyOpusPercent: 0,
+  weeklyOpusResetsAt: null,
+  errorMessage: null,
+  needsAuth: false,
+};
+
+export async function getClaudeCodeOAuthUsage(): Promise<ClaudeCodeOAuthUsage> {
+  const authMode = getConfig("claude-code:auth_mode") ?? "api-key";
+  if (authMode !== "oauth") {
+    return { ...EMPTY_USAGE, errorMessage: "Not using OAuth" };
+  }
+
+  const credPath = join(homedir(), ".claude", ".credentials.json");
+  if (!existsSync(credPath)) {
+    return { ...EMPTY_USAGE, errorMessage: "Credentials file not found", needsAuth: true };
+  }
+
+  let accessToken: string;
+  try {
+    const raw = JSON.parse(readFileSync(credPath, "utf-8"));
+    const oauth = raw?.claudeAiOauth;
+    if (!oauth?.accessToken) {
+      return { ...EMPTY_USAGE, errorMessage: "No OAuth token found", needsAuth: true };
+    }
+
+    // Check expiry (with 60s buffer)
+    if (oauth.expiresAt) {
+      const expiresAt = new Date(oauth.expiresAt).getTime();
+      if (Date.now() > expiresAt - 60_000) {
+        return { ...EMPTY_USAGE, errorMessage: "OAuth token expired", needsAuth: true };
+      }
+    }
+
+    accessToken = oauth.accessToken;
+  } catch {
+    return { ...EMPTY_USAGE, errorMessage: "Failed to read credentials file", needsAuth: true };
+  }
+
+  try {
+    const res = await fetch("https://api.anthropic.com/api/oauth/usage", {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "anthropic-beta": "oauth-2025-04-20",
+        "User-Agent": "claude-code/2.0.32",
+      },
+      signal: AbortSignal.timeout(10_000),
+    });
+
+    if (res.status === 401 || res.status === 403) {
+      return { ...EMPTY_USAGE, errorMessage: "OAuth token rejected", needsAuth: true };
+    }
+    if (!res.ok) {
+      return { ...EMPTY_USAGE, errorMessage: `API error: ${res.status}` };
+    }
+
+    const data = await res.json() as {
+      five_hour?: { utilization: number; resets_at: string };
+      seven_day?: { utilization: number; resets_at: string };
+      seven_day_opus?: { utilization: number; resets_at: string };
+    };
+
+    return {
+      sessionPercent: Math.round((data.five_hour?.utilization ?? 0) * 100),
+      sessionResetsAt: data.five_hour?.resets_at ?? null,
+      weeklyPercent: Math.round((data.seven_day?.utilization ?? 0) * 100),
+      weeklyResetsAt: data.seven_day?.resets_at ?? null,
+      weeklyOpusPercent: Math.round((data.seven_day_opus?.utilization ?? 0) * 100),
+      weeklyOpusResetsAt: data.seven_day_opus?.resets_at ?? null,
+      errorMessage: null,
+      needsAuth: false,
+    };
+  } catch (error) {
+    return {
+      ...EMPTY_USAGE,
+      errorMessage: error instanceof Error ? error.message : "Failed to fetch usage",
     };
   }
 }

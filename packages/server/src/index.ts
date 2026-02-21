@@ -138,6 +138,7 @@ import {
   createCustomModel,
   deleteCustomModel,
   applyGitSSHConfig,
+  getClaudeCodeOAuthUsage,
   type TierDefaults,
 } from "./settings/settings.js";
 import type { ProviderType } from "@otterbot/shared";
@@ -2306,6 +2307,10 @@ async function main() {
 
   app.post("/api/settings/claude-code/test", async () => {
     return testClaudeCodeConnection();
+  });
+
+  app.get("/api/settings/claude-code/usage", async () => {
+    return getClaudeCodeOAuthUsage();
   });
 
   // =========================================================================

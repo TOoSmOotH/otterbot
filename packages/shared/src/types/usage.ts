@@ -47,3 +47,14 @@ export interface ModelPriceInfo {
   outputPerMillion: number;
   isCustom: boolean;
 }
+
+export interface ClaudeCodeOAuthUsage {
+  sessionPercent: number;       // 5-hour window (0-100)
+  sessionResetsAt: string | null;
+  weeklyPercent: number;        // 7-day window (0-100)
+  weeklyResetsAt: string | null;
+  weeklyOpusPercent: number;    // 7-day Opus window (0-100)
+  weeklyOpusResetsAt: string | null;
+  errorMessage: string | null;
+  needsAuth: boolean;
+}
