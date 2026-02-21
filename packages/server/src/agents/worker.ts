@@ -391,9 +391,7 @@ export class Worker extends BaseAgent {
     let terminalBuffer = "";
     let idleTimer: NodeJS.Timeout | null = null;
     const approvalMode = getConfig("claude-code:approval_mode") ?? "full-auto";
-    // In full-auto, only need to detect completion (longer timeout is fine).
-    // In interactive mode, need to detect prompts faster.
-    const IDLE_TIMEOUT_MS = approvalMode === "full-auto" ? 15000 : 8000;
+    const IDLE_TIMEOUT_MS = 10000; // 10 seconds of no output = Claude is waiting
     const MAX_BUFFER_CHARS = 8000;    // Keep last ~8KB for LLM analysis
 
     const ptyClient = new ClaudeCodePtyClient({
@@ -460,7 +458,7 @@ export class Worker extends BaseAgent {
 
   /**
    * Analyze terminal output when idle to detect permission prompts, questions, or task completion.
-   * Uses the Worker's LLM to classify the terminal state and responds appropriately.
+   * Uses fast regex checks first, falls back to LLM only in interactive mode for ambiguous cases.
    */
   private async analyzeTerminalState(
     terminalOutput: string,
@@ -471,39 +469,67 @@ export class Worker extends BaseAgent {
 
     try {
       const cleanOutput = stripAnsi(terminalOutput);
-
+      const lastChunk = cleanOutput.slice(-2000);
       const approvalMode = getConfig("claude-code:approval_mode") ?? "full-auto";
+
+      // --- Fast regex-based detection ---
+
+      // Detect REPL prompt: Claude Code shows ">" or "> " at the end when waiting for next command.
+      // Also detect cost summary lines (e.g., "Total cost: $0.12") which appear right before the prompt.
+      const trimmedEnd = lastChunk.trimEnd();
+      const lastLines = trimmedEnd.split("\n").slice(-5).map(l => l.trim());
+      const lastLine = lastLines[lastLines.length - 1] ?? "";
+
+      // Claude Code REPL prompt patterns: bare ">", or a line ending with "> " cursor
+      const isReplPrompt = /^>?\s*$/.test(lastLine) || lastLine === ">";
+      // Cost summary is a strong signal the task just finished
+      const hasCostSummary = lastLines.some(l => /total\s*(cost|tokens|input|output)/i.test(l) || /\$\d+\.\d+/.test(l));
+
+      if (isReplPrompt || hasCostSummary) {
+        console.log(`[Worker ${this.id}] Terminal idle — detected completion (prompt=${isReplPrompt}, cost=${hasCostSummary})`);
+        this.handleTerminalComplete("Task finished (detected REPL prompt)", ptyClient);
+        return;
+      }
+
+      // In full-auto mode, only completion detection matters — permissions are handled by CLI flag
+      if (approvalMode === "full-auto") {
+        return;
+      }
+
+      // --- Interactive mode: detect permission/input prompts via regex first ---
+
+      // Permission prompts typically contain "Allow" or "Yes/No" patterns
+      const permissionMatch = lastLines.some(l =>
+        /\b(allow|approve|permit|accept)\b.*\?\s*$/i.test(l) ||
+        /\b(y\/n|yes\/no)\b/i.test(l),
+      );
+      if (permissionMatch) {
+        const promptLine = lastLines.find(l => /\b(allow|approve|permit|accept|y\/n|yes\/no)\b/i.test(l)) ?? "";
+        await this.handleTerminalPermission(promptLine, ptyClient);
+        return;
+      }
+
+      // For anything ambiguous in interactive mode, use LLM analysis
       const { text } = await this.think(
-        `You are monitoring a Claude Code terminal session. The terminal has stopped producing output.
+        `You are monitoring a Claude Code terminal session running in interactive mode. The terminal has been idle for 10+ seconds.
 
-Analyze the VERY END of the terminal output below and determine what state Claude is in.
-IMPORTANT: When in doubt, respond WORKING. Only respond with another state if you are VERY confident.
+Look at the VERY END of the terminal output. Is Claude:
+1. Asking the user a QUESTION and waiting for typed input? (There must be an explicit question with cursor)
+2. Still working / thinking / between operations?
 
-States:
-1. TASK_COMPLETE — Claude has clearly finished ALL work and is showing an idle REPL prompt (">") at the very end with no pending operations. The task summary or final output should be visible above the prompt.
-2. WAITING_FOR_PERMISSION — The terminal is EXPLICITLY showing a yes/no permission prompt (e.g., "Allow?", "Approve?", "Do you want to allow"). There must be a clear interactive prompt waiting for y/n input.${approvalMode === "full-auto" ? " NOTE: This session uses --dangerously-skip-permissions so permission prompts should NOT appear." : ""}
-3. WAITING_FOR_INPUT — Claude is EXPLICITLY asking the user a question and waiting for a typed response. There must be a clear question with an input cursor.
-4. STILL_WORKING — Claude is thinking, executing commands, writing files, or between operations. This is the DEFAULT — use this if there is ANY ambiguity.
+Respond with EXACTLY one line:
+- INPUT: <the question being asked>
+- WORKING: <what Claude appears to be doing>
 
-Respond with EXACTLY one line in one of these formats:
-- COMPLETE: <brief summary>
-- PERMISSION: <what is being asked>
-- INPUT: <the question>
-- WORKING: <description>
+Default to WORKING unless there is a clear, explicit question.
 
-TERMINAL OUTPUT (last portion):
-${cleanOutput.slice(-4000)}`,
+TERMINAL OUTPUT (last lines):
+${cleanOutput.slice(-2000)}`,
       );
 
-      if (text.startsWith("COMPLETE:")) {
-        this.handleTerminalComplete(text.slice(9).trim(), ptyClient);
-      } else if (text.startsWith("PERMISSION:") && approvalMode !== "full-auto") {
-        // Only handle permissions in interactive mode — full-auto uses --dangerously-skip-permissions
-        await this.handleTerminalPermission(text.slice(11).trim(), ptyClient);
-      } else if (text.startsWith("INPUT:")) {
+      if (text.startsWith("INPUT:")) {
         await this.handleTerminalInput(text.slice(6).trim(), ptyClient);
       }
-      // WORKING: do nothing, wait for more output
     } finally {
       this._analyzingTerminal = false;
     }
