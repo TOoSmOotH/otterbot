@@ -474,24 +474,24 @@ export class Worker extends BaseAgent {
 
       // --- Fast regex-based detection ---
 
-      // Detect REPL prompt: Claude Code shows ">" or "> " at the end when waiting for next command.
-      // Also detect cost summary lines (e.g., "Total cost: $0.12") which appear right before the prompt.
-      const trimmedEnd = lastChunk.trimEnd();
-      const lastLines = trimmedEnd.split("\n").slice(-10).map(l => l.trim());
+      // Terminal output uses \r within lines for cursor movement, so split on both \n and \r
+      // to get individual visual lines, then filter out blanks.
+      const segments = lastChunk.split(/[\r\n]+/).map(l => l.trim()).filter(Boolean);
+      const tailSegments = segments.slice(-20);
 
-      // Claude Code REPL prompt: "❯" (U+276F) or ">" at end of output, possibly with status line below
-      const isReplPrompt = lastLines.some(l => /^[❯>]\s*$/.test(l));
-      // "Cogitated for Xs" or cost summary = task just finished
-      const hasCostSummary = lastLines.some(l =>
+      // Claude Code REPL prompt: "❯" (U+276F) or ">" alone on a segment
+      const isReplPrompt = tailSegments.some(l => /^[❯>⏵]\s*$/.test(l) || l === "❯" || l === ">");
+      // Completion phrases: "Cogitated for Xs", "Baked for Xs", "Thought for Xs", cost summaries
+      const hasCompletionSignal = tailSegments.some(l =>
         /total\s*(cost|tokens|input|output)/i.test(l) ||
         /\$\d+\.\d+/.test(l) ||
-        /cogitated\s+for/i.test(l),
+        /(cogitated|baked|thought|pondered|brewed)\s+for\s+\d+/i.test(l),
       );
 
-      console.log(`[Worker ${this.id}] Terminal idle check — last lines: ${JSON.stringify(lastLines)}, prompt=${isReplPrompt}, cost=${hasCostSummary}`);
+      console.log(`[Worker ${this.id}] Terminal idle check — tail segments: ${JSON.stringify(tailSegments.slice(-8))}, prompt=${isReplPrompt}, completion=${hasCompletionSignal}`);
 
-      if (isReplPrompt || hasCostSummary) {
-        console.log(`[Worker ${this.id}] Terminal idle — detected completion (prompt=${isReplPrompt}, cost=${hasCostSummary})`);
+      if (isReplPrompt || hasCompletionSignal) {
+        console.log(`[Worker ${this.id}] Terminal idle — detected completion (prompt=${isReplPrompt}, signal=${hasCompletionSignal})`);
         this.handleTerminalComplete("Task finished (detected REPL prompt)", ptyClient);
         return;
       }
@@ -504,12 +504,12 @@ export class Worker extends BaseAgent {
       // --- Interactive mode: detect permission/input prompts via regex first ---
 
       // Permission prompts typically contain "Allow" or "Yes/No" patterns
-      const permissionMatch = lastLines.some(l =>
+      const permissionMatch = tailSegments.some(l =>
         /\b(allow|approve|permit|accept)\b.*\?\s*$/i.test(l) ||
         /\b(y\/n|yes\/no)\b/i.test(l),
       );
       if (permissionMatch) {
-        const promptLine = lastLines.find(l => /\b(allow|approve|permit|accept|y\/n|yes\/no)\b/i.test(l)) ?? "";
+        const promptLine = tailSegments.find(l => /\b(allow|approve|permit|accept|y\/n|yes\/no)\b/i.test(l)) ?? "";
         await this.handleTerminalPermission(promptLine, ptyClient);
         return;
       }
