@@ -186,8 +186,13 @@ function MainApp() {
     initMovementTriggers();
   }, []);
 
+  const clearChat = useMessageStore((s) => s.clearChat);
+  const loadConversationMessages = useMessageStore((s) => s.loadConversationMessages);
+  const setCurrentConversation = useMessageStore((s) => s.setCurrentConversation);
+
   const handleEnterProject = useCallback(
     (projectId: string) => {
+      clearChat();
       // Optimistically switch view using the already-loaded project data
       // so the UI responds immediately even if the server event loop is busy.
       const cached = useProjectStore.getState().projects.find((p) => p.id === projectId);
@@ -201,21 +206,37 @@ function MainApp() {
         if (result.project) {
           enterProject(projectId, result.project, result.conversations, result.tasks);
           if (!cached) setCenterView("dashboard");
+          // Auto-load most recent project conversation
+          if (result.conversations.length > 0) {
+            const latest = result.conversations[0];
+            socket.emit("ceo:load-conversation", { conversationId: latest.id }, (convResult) => {
+              loadConversationMessages(convResult.messages);
+              setCurrentConversation(latest.id);
+            });
+          }
         }
       });
     },
-    [enterProject, setCenterView],
+    [enterProject, setCenterView, clearChat, loadConversationMessages, setCurrentConversation],
   );
 
   const handleExitProject = useCallback(() => {
+    clearChat();
     exitProject();
     setCenterView("dashboard");
-    // Reload global conversations
+    // Reload global conversations and auto-load the most recent one
     const socket = getSocket();
     socket.emit("ceo:list-conversations", undefined, (conversations) => {
       setConversations(conversations);
+      if (conversations.length > 0) {
+        const latest = conversations[0];
+        socket.emit("ceo:load-conversation", { conversationId: latest.id }, (result) => {
+          loadConversationMessages(result.messages);
+          setCurrentConversation(latest.id);
+        });
+      }
     });
-  }, [exitProject, setConversations]);
+  }, [exitProject, setConversations, clearChat, loadConversationMessages, setCurrentConversation]);
 
   const handleSettingsClose = () => {
     setSettingsOpen(false);

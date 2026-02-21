@@ -111,9 +111,8 @@ export function CeoChat({ cooName }: { cooName?: string }) {
       },
     });
 
-  // Clear chat when project context changes
+  // Reset history panel when project context changes
   useEffect(() => {
-    clearChat();
     setShowHistory(false);
   }, [activeProjectId]);
 
