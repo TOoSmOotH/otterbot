@@ -147,6 +147,8 @@ import { createBackupArchive, restoreFromArchive, looksLikeZip } from "./backup/
 import { writeOpenCodeConfig, startOpenCodeServer, stopOpenCodeServer } from "./opencode/opencode-manager.js";
 import { GitHubIssueMonitor } from "./github/issue-monitor.js";
 import { ReminderScheduler } from "./reminders/reminder-scheduler.js";
+import { MemoryCompactor } from "./memory/memory-compactor.js";
+import { SchedulerRegistry } from "./schedulers/scheduler-registry.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -379,6 +381,7 @@ async function main() {
 
   let coo: COO | null = null;
   let issueMonitor: GitHubIssueMonitor | null = null;
+  const schedulerRegistry = new SchedulerRegistry();
 
   // Resolver map for interactive coding agent sessions: when a Worker awaits human
   // input, a promise is stored here keyed by `${agentId}:${sessionId}`. The
@@ -646,14 +649,34 @@ async function main() {
         console.error("Failed to recover active projects:", err);
       });
 
-      // Start memory compactor for daily episode generation
-      import("./memory/memory-compactor.js").then(({ MemoryCompactor }) => {
-        const compactor = new MemoryCompactor();
-        compactor.start();
-        console.log("[memory] Daily episode compactor started.");
-      }).catch((err) => {
-        console.warn("[memory] Failed to start memory compactor:", err);
+      // Register schedulers
+      const reminderScheduler = new ReminderScheduler(bus, io);
+      schedulerRegistry.register("reminder", reminderScheduler, {
+        name: "Reminder Scheduler",
+        description: "Checks for due reminders and fires notifications.",
+        defaultIntervalMs: 30_000,
+        minIntervalMs: 5_000,
       });
+
+      const compactor = new MemoryCompactor();
+      schedulerRegistry.register("memory-compactor", compactor, {
+        name: "Memory Compactor",
+        description: "Summarizes daily conversations into episodic memory logs.",
+        defaultIntervalMs: 6 * 60 * 60 * 1000,
+        minIntervalMs: 60_000,
+      });
+
+      if (issueMonitor) {
+        issueMonitor.loadFromDb();
+        schedulerRegistry.register("github-issues", issueMonitor, {
+          name: "GitHub Issue Monitor",
+          description: "Polls GitHub for new and updated issues on watched projects.",
+          defaultIntervalMs: 60_000,
+          minIntervalMs: 5_000,
+        });
+      }
+
+      schedulerRegistry.startAll();
 
       // Initialize vector store and backfill embeddings (non-blocking)
       import("./memory/vector-store.js").then(async ({ getVectorStore }) => {
@@ -667,15 +690,6 @@ async function main() {
       }).catch((err) => {
         console.warn("[memory] Failed to initialize vector store:", err);
       });
-
-      // Start GitHub issue monitor
-      if (issueMonitor) {
-        issueMonitor.loadFromDb();
-        issueMonitor.start();
-      }
-
-      // Start reminder scheduler
-      new ReminderScheduler(bus, io).start();
     } catch (err) {
       console.error("Failed to start COO agent:", err);
     }
@@ -1977,6 +1991,27 @@ async function main() {
       try { unlinkSync(tempPath); } catch {}
     }
   });
+
+  // =========================================================================
+  // Scheduled Tasks routes
+  // =========================================================================
+
+  app.get("/api/settings/scheduled-tasks", async () => {
+    return { tasks: schedulerRegistry.getAll() };
+  });
+
+  app.put<{ Params: { taskId: string }; Body: { enabled?: boolean; intervalMs?: number } }>(
+    "/api/settings/scheduled-tasks/:taskId",
+    async (req, reply) => {
+      const { taskId } = req.params;
+      const result = schedulerRegistry.update(taskId, req.body);
+      if (!result) {
+        reply.code(404);
+        return { error: "Unknown scheduler" };
+      }
+      return { ok: true, task: result };
+    },
+  );
 
   // =========================================================================
   // Settings routes

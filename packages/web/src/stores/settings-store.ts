@@ -19,6 +19,16 @@ export interface TestResult {
   testing: boolean;
 }
 
+export interface ScheduledTaskInfo {
+  id: string;
+  name: string;
+  description: string;
+  defaultIntervalMs: number;
+  minIntervalMs: number;
+  enabled: boolean;
+  intervalMs: number;
+}
+
 export interface SearchProviderConfig {
   id: string;
   name: string;
@@ -59,6 +69,10 @@ interface SettingsState {
   loading: boolean;
   error: string | null;
   testResults: Record<string, TestResult>;
+
+  // Scheduled Tasks
+  scheduledTasks: ScheduledTaskInfo[];
+  scheduledTasksLoading: boolean;
 
   // Search
   searchProviders: SearchProviderConfig[];
@@ -147,6 +161,10 @@ interface SettingsState {
   loadCustomModels: (providerId?: string) => Promise<void>;
   createCustomModel: (data: { providerId: string; modelId: string; label?: string }) => Promise<CustomModel | null>;
   deleteCustomModel: (id: string) => Promise<void>;
+
+  // Scheduled Tasks actions
+  loadScheduledTasks: () => Promise<void>;
+  updateScheduledTask: (taskId: string, data: { enabled?: boolean; intervalMs?: number }) => Promise<void>;
 
   // Search actions
   loadSearchSettings: () => Promise<void>;
@@ -266,6 +284,8 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   loading: false,
   error: null,
   testResults: {},
+  scheduledTasks: [],
+  scheduledTasksLoading: false,
   searchProviders: [],
   activeSearchProvider: null,
   searchTestResults: {},
@@ -506,6 +526,35 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       }
     } catch {
       // Silently fail
+    }
+  },
+
+  loadScheduledTasks: async () => {
+    set({ scheduledTasksLoading: true });
+    try {
+      const res = await fetch("/api/settings/scheduled-tasks");
+      if (!res.ok) return;
+      const data = await res.json();
+      set({ scheduledTasks: data.tasks });
+    } catch {
+      // Silently fail
+    } finally {
+      set({ scheduledTasksLoading: false });
+    }
+  },
+
+  updateScheduledTask: async (taskId, data) => {
+    set({ error: null });
+    try {
+      const res = await fetch(`/api/settings/scheduled-tasks/${taskId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) throw new Error("Failed to update scheduled task");
+      await get().loadScheduledTasks();
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "Unknown error" });
     }
   },
 
