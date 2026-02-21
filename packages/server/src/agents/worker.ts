@@ -79,6 +79,8 @@ export class Worker extends BaseAgent {
   private _ptyClient: import("../coding-agents/claude-code-pty-client.js").ClaudeCodePtyClient | null = null;
   /** Guard against re-entrant terminal analysis */
   private _analyzingTerminal = false;
+  /** Set to true after sending /exit to prevent repeated analysis */
+  private _terminalExiting = false;
 
   constructor(deps: WorkerDependencies) {
     const options: AgentOptions = {
@@ -416,6 +418,7 @@ export class Worker extends BaseAgent {
     });
 
     this._ptyClient = ptyClient;
+    this._terminalExiting = false;
 
     // Register PTY session for socket routing
     this._onPtySessionRegistered?.(this.id, ptyClient);
@@ -460,7 +463,7 @@ export class Worker extends BaseAgent {
     terminalOutput: string,
     ptyClient: import("../coding-agents/claude-code-pty-client.js").ClaudeCodePtyClient,
   ): Promise<void> {
-    if (this._analyzingTerminal) return;
+    if (this._analyzingTerminal || this._terminalExiting) return;
     this._analyzingTerminal = true;
 
     try {
@@ -508,7 +511,7 @@ ${cleanOutput.slice(-4000)}`,
 
     if (approvalMode === "full-auto") {
       // Auto-approve: send "y" + Enter
-      ptyClient.writeInput("y\n");
+      ptyClient.writeInput("y\r");
       return;
     }
 
@@ -528,11 +531,11 @@ ${cleanOutput.slice(-4000)}`,
       this.setStatus(AgentStatus.Acting);
 
       if (response) {
-        ptyClient.writeInput(response + "\n");
+        ptyClient.writeInput(response + "\r");
       }
     } else {
       // No callback — auto-approve
-      ptyClient.writeInput("y\n");
+      ptyClient.writeInput("y\r");
     }
   }
 
@@ -552,7 +555,7 @@ ${cleanOutput.slice(-4000)}`,
       this.setStatus(AgentStatus.Acting);
 
       if (response) {
-        ptyClient.writeInput(response + "\n");
+        ptyClient.writeInput(response + "\r");
       }
     }
   }
@@ -562,8 +565,10 @@ ${cleanOutput.slice(-4000)}`,
     summary: string,
     ptyClient: import("../coding-agents/claude-code-pty-client.js").ClaudeCodePtyClient,
   ): void {
+    if (this._terminalExiting) return;
+    this._terminalExiting = true;
     console.log(`[Worker ${this.id}] Terminal session appears complete: ${summary}`);
-    ptyClient.writeInput("/exit\n");
+    ptyClient.writeInput("/exit\r");
   }
 
   /**
