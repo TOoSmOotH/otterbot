@@ -606,7 +606,12 @@ ${cleanOutput.slice(-2000)}`,
     if (this._terminalExiting) return;
     this._terminalExiting = true;
     console.log(`[Worker ${this.id}] Terminal session appears complete: ${summary}`);
-    ptyClient.writeInput("/exit\r");
+    // Send Escape to dismiss any autocomplete menu, then /exit + Enter.
+    // Small delay between to let the REPL process the escape before receiving input.
+    ptyClient.writeInput("\x1b");
+    setTimeout(() => {
+      ptyClient.writeInput("/exit\r");
+    }, 200);
   }
 
   /**
