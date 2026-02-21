@@ -13,7 +13,7 @@
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^1.1.9",
-    "@anthropic-ai/claude-code": "latest",
+    "@anthropic-ai/claude-agent-sdk": "^0.1.0",
     "@ai-sdk/openai": "^1.1.14",
     "@ai-sdk/openai-compatible": "^0.1.8",
     "@andresaya/edge-tts": "^1.8.0",

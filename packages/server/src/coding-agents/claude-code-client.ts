@@ -1,7 +1,7 @@
 /**
- * Claude Code CLI client — implements the CodingAgentClient interface.
+ * Claude Code client — implements the CodingAgentClient interface.
  *
- * Uses the @anthropic-ai/claude-code SDK to spawn Claude Code as a subprocess
+ * Uses the @anthropic-ai/claude-agent-sdk to spawn Claude Code as a subprocess
  * and stream structured JSON events for real-time display.
  */
 
@@ -48,11 +48,15 @@ export class ClaudeCodeClient implements CodingAgentClient {
 
     try {
       // Dynamic import to avoid loading SDK at module init
-      const { claude } = await import("@anthropic-ai/claude-code");
+      const { query } = await import("@anthropic-ai/claude-agent-sdk");
 
       const options: Record<string, unknown> = {
         prompt: task,
         abortController: this.config.abortController ?? new AbortController(),
+        options: {
+          systemPrompt: { type: "preset", preset: "claude_code" },
+          settingSources: ["user", "project", "local"],
+        },
       };
 
       if (this.config.workspacePath) {
@@ -83,7 +87,7 @@ export class ClaudeCodeClient implements CodingAgentClient {
       let model = this.config.model ?? "unknown";
 
       // Stream events from Claude Code
-      const stream = claude(options as Parameters<typeof claude>[0]);
+      const stream = query(options as Parameters<typeof query>[0]);
 
       for await (const event of stream) {
         const eventObj = event as Record<string, unknown>;

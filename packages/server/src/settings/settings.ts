@@ -1138,7 +1138,7 @@ export async function testClaudeCodeConnection(): Promise<TestResult> {
     const { isClaudeCodeInstalled, isClaudeCodeReady } = await import("../coding-agents/claude-code-manager.js");
 
     if (!isClaudeCodeInstalled()) {
-      return { ok: false, error: "Claude Code CLI not found. Install with: npm install -g @anthropic-ai/claude-code" };
+      return { ok: false, error: "Claude Code CLI not found. Install with: curl -fsSL https://claude.ai/install.sh | bash" };
     }
 
     if (!isClaudeCodeReady()) {
