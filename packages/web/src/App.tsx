@@ -17,6 +17,7 @@ import { CharterView } from "./components/project/CharterView";
 import { ProjectList } from "./components/project/ProjectList";
 import { KanbanBoard } from "./components/kanban/KanbanBoard";
 import { FileBrowser } from "./components/project/FileBrowser";
+import { ProjectDashboard } from "./components/project/ProjectDashboard";
 import { DesktopView } from "./components/desktop/DesktopView";
 import { UsageDashboard } from "./components/usage/UsageDashboard";
 import { TodoView } from "./components/todos/TodoView";
@@ -94,7 +95,7 @@ interface UserProfile {
   cooName?: string;
 }
 
-type CenterView = "graph" | "live3d" | "charter" | "kanban" | "desktop" | "files" | "usage" | "todos" | "inbox" | "calendar" | "code";
+type CenterView = "graph" | "live3d" | "charter" | "kanban" | "desktop" | "files" | "usage" | "todos" | "inbox" | "calendar" | "code" | "dashboard";
 
 function MainApp() {
   const socket = useSocket();
@@ -190,14 +191,14 @@ function MainApp() {
       const cached = useProjectStore.getState().projects.find((p) => p.id === projectId);
       if (cached) {
         enterProject(projectId, cached, [], []);
-        setCenterView("kanban");
+        setCenterView("dashboard");
       }
       // Then fetch full data (conversations + tasks) from the server
       const socket = getSocket();
       socket.emit("project:enter", { projectId }, (result) => {
         if (result.project) {
           enterProject(projectId, result.project, result.conversations, result.tasks);
-          if (!cached) setCenterView("kanban");
+          if (!cached) setCenterView("dashboard");
         }
       });
     },
@@ -362,13 +363,17 @@ function ResizableLayout({
 
   // Reset to graph from project-only views when no project is active
   useEffect(() => {
-    if (!activeProjectId && (centerView === "charter" || centerView === "kanban" || centerView === "files")) {
+    if (!activeProjectId && (centerView === "charter" || centerView === "kanban" || centerView === "files" || centerView === "dashboard")) {
       setCenterView("graph");
     }
   }, [activeProjectId, centerView]);
 
   const renderCenterContent = () => {
     switch (centerView) {
+      case "dashboard":
+        return activeProjectId ? (
+          <ProjectDashboard projectId={activeProjectId} />
+        ) : null;
       case "charter":
         return activeProject ? (
           <CharterView project={activeProject} />
@@ -435,20 +440,14 @@ function ResizableLayout({
           {/* Tab bar */}
           <div className="flex items-center gap-1 px-3 py-1.5 border-b border-border bg-card">
               {(
-                [
-                  "graph",
-                  ...(activeProjectId ? (["charter", "kanban", "files"] as CenterView[]) : []),
-                  "todos" as CenterView,
-                  "inbox" as CenterView,
-                  "calendar" as CenterView,
-                  "code" as CenterView,
-                  "usage" as CenterView,
-                  "desktop" as CenterView,
-                ] as CenterView[]
+                activeProjectId
+                  ? (["dashboard", "kanban", "charter", "files", "code"] as CenterView[])
+                  : (["graph", "todos", "inbox", "calendar", "code", "usage", "desktop"] as CenterView[])
               ).map((tab) => {
                 const labels: Record<CenterView, string> = {
                   graph: "Graph",
                   live3d: "Live",
+                  dashboard: "Dashboard",
                   charter: "Charter",
                   kanban: "Board",
                   files: "Files",
