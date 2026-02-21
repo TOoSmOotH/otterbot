@@ -314,8 +314,18 @@ export class TeamLead extends BaseAgent {
       this.verificationRequested = false;
       this.persistFlag("verification", false);
     }
+
+    // Inject current board state so the TL knows what's already done
+    const board = this.getKanbanBoardState();
+    let enrichedDirective = message.content;
+    if (board.summary && board.summary !== "No tasks." && board.summary !== "No project context.") {
+      enrichedDirective =
+        `[CURRENT KANBAN BOARD]\n${board.summary}\n[/CURRENT KANBAN BOARD]\n\n` +
+        `New directive: ${message.content}`;
+    }
+
     const { text } = await this.thinkWithContinuation(
-      message.content,
+      enrichedDirective,
       (token, messageId) => this.onAgentStream?.(this.id, token, messageId),
       (token, messageId) => this.onAgentThinking?.(this.id, token, messageId),
       (messageId) => this.onAgentThinkingEnd?.(this.id, messageId),
@@ -851,6 +861,10 @@ export class TeamLead extends BaseAgent {
         if (col === "backlog" && t.description && t.description.includes("PREVIOUS ATTEMPT FAILED")) {
           lines.push(`    ${t.description.slice(t.description.lastIndexOf("--- PREVIOUS ATTEMPT FAILED ---")).slice(0, 300)}`);
         }
+        // Show completion reports for done tasks so TL knows what was accomplished
+        if (col === "done" && t.completionReport) {
+          lines.push(`    Report: ${t.completionReport.slice(0, 200)}`);
+        }
       }
     }
 
@@ -1303,6 +1317,30 @@ export class TeamLead extends BaseAgent {
         }
       }
 
+      // Check git state in the workspace before spawning so the worker knows what's already done
+      let gitStateContext = "";
+      if (workspacePath) {
+        try {
+          const gitLog = execSync(
+            `git -C "${workspacePath}" log --oneline -10 2>/dev/null || true`,
+            { encoding: "utf-8", timeout: 5000 },
+          ).trim();
+          const gitStatus = execSync(
+            `git -C "${workspacePath}" status --short 2>/dev/null || true`,
+            { encoding: "utf-8", timeout: 5000 },
+          ).trim();
+          if (gitLog) {
+            gitStateContext = `\n\n## Existing Code State\nRecent commits on this branch:\n${gitLog}\n`;
+            if (gitStatus) {
+              gitStateContext += `\nUncommitted changes:\n${gitStatus}\n`;
+            } else {
+              gitStateContext += `\nWorking directory is clean (no uncommitted changes).\n`;
+            }
+            gitStateContext += `\nIMPORTANT: If the code for your task has already been committed (see above), do NOT redo the work. Just proceed with remaining steps (e.g., creating a PR).`;
+          }
+        } catch { /* ignore — fresh workspace */ }
+      }
+
       const worker = new Worker({
         id: workerId,
         name: workerName,
@@ -1325,7 +1363,8 @@ export class TeamLead extends BaseAgent {
           (workspacePath
             ? `\n\n## Your Workspace\nYour workspace directory is: \`${workspacePath}\`\n` +
               `All file paths should be relative to this directory (e.g. \`src/main.go\`, not \`/workspace/src/main.go\`).\n` +
-              `Do NOT write to /workspace, /usr, /etc, /opt, /var, or any other location outside your workspace.`
+              `Do NOT write to /workspace, /usr, /etc, /opt, /var, or any other location outside your workspace.` +
+              gitStateContext
             : ""),
         workspacePath,
         toolNames: entryTools,
@@ -1699,6 +1738,10 @@ export class TeamLead extends BaseAgent {
         const blocked = col === "backlog" && this.isTaskBlocked(blockedBy);
         const blockedTag = blocked ? ` [BLOCKED by: ${blockedBy.join(", ")}]` : "";
         lines.push(`  - ${t.title} (${t.id})${assignee}${blockedTag}`);
+        // Show completion reports for done tasks so TL knows what was accomplished
+        if (col === "done" && t.completionReport) {
+          lines.push(`    Report: ${t.completionReport.slice(0, 200)}`);
+        }
       }
     }
     return lines.join("\n");
