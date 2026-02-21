@@ -73,7 +73,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ruby-full \
     && rm -rf /var/lib/apt/lists/*
 
-# Install coding agents (OpenCode, Claude Code, Codex)
+# Install coding agents into /otterbot/tools so the runtime user can find them
+ENV NPM_CONFIG_PREFIX=/otterbot/tools
+ENV PATH="/otterbot/tools/bin:$PATH"
+RUN mkdir -p /otterbot/tools
 RUN npm install -g opencode-ai@latest
 RUN npm install -g @anthropic-ai/claude-code@latest
 RUN npm install -g @openai/codex@latest
@@ -296,10 +299,6 @@ ENV HOST=0.0.0.0
 ENV DATABASE_URL=file:/otterbot/data/otterbot.db
 ENV WORKSPACE_ROOT=/otterbot
 ENV HOME=/otterbot/home
-
-# Runtime tools installed via bootstrap.sh persist on the bind-mounted volume
-ENV NPM_CONFIG_PREFIX=/otterbot/tools
-ENV PATH="/otterbot/tools/bin:$PATH"
 
 ENV GOPATH=/otterbot/home/go
 ENV PATH="/otterbot/home/go/bin:$PATH"
