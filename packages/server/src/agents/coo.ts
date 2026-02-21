@@ -319,6 +319,7 @@ The user can see everything on the desktop in real-time.`;
       MessageType.Chat,
       relay,
       thinking ? { thinking } : undefined,
+      this.currentConversationId ?? undefined,
     );
   }
 
