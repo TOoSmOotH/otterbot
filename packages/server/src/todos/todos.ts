@@ -1,6 +1,7 @@
 import { nanoid } from "nanoid";
 import { getDb, schema } from "../db/index.js";
 import { eq } from "drizzle-orm";
+import { emitTodoEvent } from "../tools/todo-emitter.js";
 
 export interface TodoInput {
   title: string;
@@ -61,6 +62,7 @@ export function createTodo(input: TodoInput) {
     updatedAt: now,
   };
   db.insert(schema.todos).values(todo).run();
+  emitTodoEvent("created", todo);
   return todo;
 }
 
@@ -89,7 +91,9 @@ export function updateTodo(id: string, updates: TodoUpdate) {
     .where(eq(schema.todos.id, id))
     .run();
 
-  return db.select().from(schema.todos).where(eq(schema.todos.id, id)).get();
+  const updated = db.select().from(schema.todos).where(eq(schema.todos.id, id)).get();
+  if (updated) emitTodoEvent("updated", updated as any);
+  return updated;
 }
 
 export function deleteTodo(id: string): boolean {
@@ -103,5 +107,6 @@ export function deleteTodo(id: string): boolean {
   if (!existing) return false;
 
   db.delete(schema.todos).where(eq(schema.todos.id, id)).run();
+  emitTodoEvent("deleted", { todoId: id });
   return true;
 }

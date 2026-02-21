@@ -6,6 +6,7 @@ import { useProjectStore } from "../stores/project-store";
 import { useAgentActivityStore } from "../stores/agent-activity-store";
 import { useEnvironmentStore } from "../stores/environment-store";
 import { useCodingAgentStore } from "../stores/coding-agent-store";
+import { useTodoStore } from "../stores/todo-store";
 
 export function useSocket() {
   const initialized = useRef(false);
@@ -38,6 +39,9 @@ export function useSocket() {
   const clearAwaitingInput = useCodingAgentStore((s) => s.clearAwaitingInput);
   const setPendingPermission = useCodingAgentStore((s) => s.setPendingPermission);
   const clearPendingPermission = useCodingAgentStore((s) => s.clearPendingPermission);
+  const addTodo = useTodoStore((s) => s.addTodo);
+  const patchTodo = useTodoStore((s) => s.patchTodo);
+  const removeTodo = useTodoStore((s) => s.removeTodo);
 
   useEffect(() => {
     if (initialized.current) return;
@@ -125,6 +129,18 @@ export function useSocket() {
       removeTask(taskId);
     });
 
+    socket.on("todo:created", (todo) => {
+      addTodo(todo);
+    });
+
+    socket.on("todo:updated", (todo) => {
+      patchTodo(todo);
+    });
+
+    socket.on("todo:deleted", ({ todoId }) => {
+      removeTodo(todoId);
+    });
+
     socket.on("agent:stream", ({ agentId, token, messageId }) => {
       appendAgentStream(agentId, token, messageId);
     });
@@ -201,6 +217,9 @@ export function useSocket() {
       socket.off("kanban:task-created");
       socket.off("kanban:task-updated");
       socket.off("kanban:task-deleted");
+      socket.off("todo:created");
+      socket.off("todo:updated");
+      socket.off("todo:deleted");
       socket.off("agent:stream");
       socket.off("agent:thinking");
       socket.off("agent:thinking-end");

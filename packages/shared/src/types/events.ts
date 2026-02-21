@@ -4,6 +4,8 @@ import type { RegistryEntry, Project, ProjectAgentAssignments } from "./registry
 import type { KanbanTask } from "./kanban.js";
 import type { SceneZone } from "./environment.js";
 import type { CodingAgentSession, CodingAgentMessage, CodingAgentFileDiff, CodingAgentPermission } from "./coding-agent.js";
+import type { SoulDocument, Memory, MemoryEpisode, SoulSuggestion } from "./memory.js";
+import type { Todo } from "./todo.js";
 
 /** Events emitted from server to client */
 export interface ServerToClientEvents {
@@ -40,6 +42,9 @@ export interface ServerToClientEvents {
   "codeagent:part-delta": (data: { agentId: string; sessionId: string; messageId: string; partId: string; type: string; delta: string; toolName?: string; toolState?: string }) => void;
   "codeagent:awaiting-input": (data: { agentId: string; sessionId: string; prompt: string }) => void;
   "codeagent:permission-request": (data: { agentId: string; sessionId: string; permission: CodingAgentPermission }) => void;
+  "todo:created": (todo: Todo) => void;
+  "todo:updated": (todo: Todo) => void;
+  "todo:deleted": (data: { todoId: string }) => void;
 }
 
 /** Events emitted from client to server */
@@ -123,5 +128,45 @@ export interface ClientToServerEvents {
   "project:set-agent-assignments": (
     data: { projectId: string; assignments: ProjectAgentAssignments },
     callback?: (ack: { ok: boolean; error?: string }) => void,
+  ) => void;
+
+  // Soul document CRUD
+  "soul:list": (
+    callback: (docs: SoulDocument[]) => void,
+  ) => void;
+  "soul:get": (
+    data: { agentRole: string; registryEntryId?: string | null },
+    callback: (doc: SoulDocument | null) => void,
+  ) => void;
+  "soul:save": (
+    data: { agentRole: string; registryEntryId?: string | null; content: string },
+    callback?: (ack: { ok: boolean; doc?: SoulDocument; error?: string }) => void,
+  ) => void;
+  "soul:delete": (
+    data: { id: string },
+    callback?: (ack: { ok: boolean; error?: string }) => void,
+  ) => void;
+
+  // Memory CRUD
+  "memory:list": (
+    data?: { category?: string; agentScope?: string; projectId?: string; search?: string },
+    callback?: (memories: Memory[]) => void,
+  ) => void;
+  "memory:save": (
+    data: { id?: string; category: string; content: string; source?: string; agentScope?: string | null; projectId?: string | null; importance?: number },
+    callback?: (ack: { ok: boolean; memory?: Memory; error?: string }) => void,
+  ) => void;
+  "memory:delete": (
+    data: { id: string },
+    callback?: (ack: { ok: boolean; error?: string }) => void,
+  ) => void;
+  "memory:search": (
+    data: { query: string; agentScope?: string; projectId?: string; limit?: number },
+    callback: (memories: Memory[]) => void,
+  ) => void;
+
+  // Soul advisor
+  "soul:suggest": (
+    callback: (ack: { ok: boolean; suggestions?: SoulSuggestion[]; error?: string }) => void,
   ) => void;
 }

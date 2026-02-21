@@ -5,6 +5,8 @@ interface TodoState {
   todos: Todo[];
   loading: boolean;
   error: string | null;
+  searchQuery: string;
+  filterPriority: string;
 
   loadTodos: (filters?: { status?: string; priority?: string }) => Promise<void>;
   createTodo: (data: {
@@ -26,12 +28,22 @@ interface TodoState {
     },
   ) => Promise<Todo | null>;
   deleteTodo: (id: string) => Promise<boolean>;
+
+  // Socket-driven state updaters
+  addTodo: (todo: Todo) => void;
+  patchTodo: (todo: Todo) => void;
+  removeTodo: (todoId: string) => void;
+
+  setSearchQuery: (query: string) => void;
+  setFilterPriority: (priority: string) => void;
 }
 
 export const useTodoStore = create<TodoState>((set, get) => ({
   todos: [],
   loading: false,
   error: null,
+  searchQuery: "",
+  filterPriority: "",
 
   loadTodos: async (filters) => {
     set({ loading: true, error: null });
@@ -62,7 +74,7 @@ export const useTodoStore = create<TodoState>((set, get) => ({
       });
       if (!res.ok) throw new Error("Failed to create todo");
       const todo = await res.json();
-      await get().loadTodos();
+      // Socket event will handle state update via addTodo
       return todo as Todo;
     } catch (err) {
       set({ error: err instanceof Error ? err.message : "Unknown error" });
@@ -80,7 +92,7 @@ export const useTodoStore = create<TodoState>((set, get) => ({
       });
       if (!res.ok) throw new Error("Failed to update todo");
       const todo = await res.json();
-      await get().loadTodos();
+      // Socket event will handle state update via patchTodo
       return todo as Todo;
     } catch (err) {
       set({ error: err instanceof Error ? err.message : "Unknown error" });
@@ -93,11 +105,33 @@ export const useTodoStore = create<TodoState>((set, get) => ({
     try {
       const res = await fetch(`/api/todos/${id}`, { method: "DELETE" });
       if (!res.ok) throw new Error("Failed to delete todo");
-      await get().loadTodos();
+      // Socket event will handle state update via removeTodo
       return true;
     } catch (err) {
       set({ error: err instanceof Error ? err.message : "Unknown error" });
       return false;
     }
   },
+
+  addTodo: (todo) => {
+    set((state) => {
+      if (state.todos.some((t) => t.id === todo.id)) return state;
+      return { todos: [...state.todos, todo] };
+    });
+  },
+
+  patchTodo: (todo) => {
+    set((state) => ({
+      todos: state.todos.map((t) => (t.id === todo.id ? todo : t)),
+    }));
+  },
+
+  removeTodo: (todoId) => {
+    set((state) => ({
+      todos: state.todos.filter((t) => t.id !== todoId),
+    }));
+  },
+
+  setSearchQuery: (query) => set({ searchQuery: query }),
+  setFilterPriority: (priority) => set({ filterPriority: priority }),
 }));

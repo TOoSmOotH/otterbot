@@ -3,7 +3,7 @@ import type {
   ServerToClientEvents,
   ClientToServerEvents,
 } from "@otterbot/shared";
-import { MessageType, type Agent, type AgentActivityRecord, type BusMessage, type Conversation, type Project, type KanbanTask, type CodingAgentSession, type CodingAgentMessage, type CodingAgentPart, type CodingAgentFileDiff, type CodingAgentType } from "@otterbot/shared";
+import { MessageType, type Agent, type AgentActivityRecord, type BusMessage, type Conversation, type Project, type KanbanTask, type Todo, type CodingAgentSession, type CodingAgentMessage, type CodingAgentPart, type CodingAgentFileDiff, type CodingAgentType } from "@otterbot/shared";
 import { nanoid } from "nanoid";
 import { makeProjectId } from "../utils/slugify.js";
 import { eq, or, desc, isNull } from "drizzle-orm";
@@ -14,6 +14,9 @@ import type { BaseAgent } from "../agents/agent.js";
 import { getDb, schema } from "../db/index.js";
 import { isTTSEnabled, getConfiguredTTSProvider, stripMarkdown } from "../tts/tts.js";
 import { getConfig, setConfig, deleteConfig } from "../auth/auth.js";
+import { SoulService } from "../memory/soul-service.js";
+import { MemoryService } from "../memory/memory-service.js";
+import { SoulAdvisor } from "../memory/soul-advisor.js";
 import type { WorkspaceManager } from "../workspace/workspace.js";
 import type { GitHubIssueMonitor } from "../github/issue-monitor.js";
 import { cloneRepo, getRepoDefaultBranch } from "../github/github-service.js";
@@ -516,6 +519,87 @@ export function setupSocketHandlers(
       });
     });
 
+    // ─── Soul Document CRUD ───────────────────────────────────────
+    const soulService = new SoulService();
+
+    socket.on("soul:list", (callback) => {
+      callback(soulService.list());
+    });
+
+    socket.on("soul:get", (data, callback) => {
+      callback(soulService.get(data.agentRole, data.registryEntryId));
+    });
+
+    socket.on("soul:save", (data, callback) => {
+      try {
+        const doc = soulService.save(data.agentRole, data.registryEntryId ?? null, data.content);
+        callback?.({ ok: true, doc });
+      } catch (err) {
+        callback?.({ ok: false, error: err instanceof Error ? err.message : String(err) });
+      }
+    });
+
+    socket.on("soul:delete", (data, callback) => {
+      const ok = soulService.delete(data.id);
+      callback?.({ ok });
+    });
+
+    // ─── Memory CRUD ────────────────────────────────────────────
+    const memoryService = new MemoryService();
+
+    socket.on("memory:list", (data, callback) => {
+      const memories = memoryService.list(data ? {
+        category: data.category as any,
+        agentScope: data.agentScope,
+        projectId: data.projectId,
+        search: data.search,
+      } : undefined);
+      callback?.(memories);
+    });
+
+    socket.on("memory:save", (data, callback) => {
+      try {
+        const memory = memoryService.save({
+          id: data.id,
+          category: data.category as any,
+          content: data.content,
+          source: (data.source as any) ?? "user",
+          agentScope: data.agentScope,
+          projectId: data.projectId,
+          importance: data.importance,
+        });
+        callback?.({ ok: true, memory });
+      } catch (err) {
+        callback?.({ ok: false, error: err instanceof Error ? err.message : String(err) });
+      }
+    });
+
+    socket.on("memory:delete", (data, callback) => {
+      const ok = memoryService.delete(data.id);
+      callback?.({ ok });
+    });
+
+    socket.on("memory:search", async (data, callback) => {
+      const memories = await memoryService.searchWithVectors({
+        query: data.query,
+        agentScope: data.agentScope,
+        projectId: data.projectId,
+        limit: data.limit,
+      });
+      callback(memories);
+    });
+
+    // ─── Soul Advisor ───────────────────────────────────────────
+    socket.on("soul:suggest", async (callback) => {
+      try {
+        const advisor = new SoulAdvisor();
+        const suggestions = await advisor.analyze();
+        callback({ ok: true, suggestions });
+      } catch (err) {
+        callback({ ok: false, error: err instanceof Error ? err.message : String(err) });
+      }
+    });
+
     socket.on("disconnect", () => {
       console.log(`Client disconnected: ${socket.id}`);
     });
@@ -586,6 +670,18 @@ export function emitKanbanTaskUpdated(io: TypedServer, task: KanbanTask) {
 
 export function emitKanbanTaskDeleted(io: TypedServer, taskId: string, projectId: string) {
   io.emit("kanban:task-deleted", { taskId, projectId });
+}
+
+export function emitTodoCreated(io: TypedServer, todo: Todo) {
+  io.emit("todo:created", todo);
+}
+
+export function emitTodoUpdated(io: TypedServer, todo: Todo) {
+  io.emit("todo:updated", todo);
+}
+
+export function emitTodoDeleted(io: TypedServer, todoId: string) {
+  io.emit("todo:deleted", { todoId });
 }
 
 export function emitAgentStream(io: TypedServer, agentId: string, token: string, messageId: string) {

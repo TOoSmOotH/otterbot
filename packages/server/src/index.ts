@@ -32,6 +32,7 @@ import { TOOL_EXAMPLES } from "./tools/tool-examples.js";
 import { COO } from "./agents/coo.js";
 import { AdminAssistant } from "./agents/admin-assistant.js";
 import { closeBrowser } from "./tools/browser-pool.js";
+import { setTodoEmitterIO } from "./tools/todo-emitter.js";
 import { getConfiguredTTSProvider } from "./tts/tts.js";
 import { getConfiguredSTTProvider } from "./stt/stt.js";
 import {
@@ -352,6 +353,9 @@ async function main() {
     },
   );
 
+  // Allow service-layer modules to emit socket events without passing io around
+  setTodoEmitterIO(io);
+
   // Register VNC WebSocket proxy (must be before Socket.IO starts listening)
   registerDesktopProxy(app, corsOrigin);
 
@@ -639,6 +643,28 @@ async function main() {
         }
       }).catch((err) => {
         console.error("Failed to recover active projects:", err);
+      });
+
+      // Start memory compactor for daily episode generation
+      import("./memory/memory-compactor.js").then(({ MemoryCompactor }) => {
+        const compactor = new MemoryCompactor();
+        compactor.start();
+        console.log("[memory] Daily episode compactor started.");
+      }).catch((err) => {
+        console.warn("[memory] Failed to start memory compactor:", err);
+      });
+
+      // Initialize vector store and backfill embeddings (non-blocking)
+      import("./memory/vector-store.js").then(async ({ getVectorStore }) => {
+        const store = getVectorStore();
+        await store.load();
+        // Backfill embeddings for any memories that don't have them yet
+        const count = await store.backfillEmbeddings();
+        if (count > 0) {
+          console.log(`[memory] Backfilled ${count} memory embeddings.`);
+        }
+      }).catch((err) => {
+        console.warn("[memory] Failed to initialize vector store:", err);
       });
 
       // Start GitHub issue monitor
