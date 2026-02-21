@@ -7,11 +7,19 @@ import type { PairedUser, PendingPairing } from "./pairing.js";
 // Types
 // ---------------------------------------------------------------------------
 
+export interface DiscordAvailableChannel {
+  id: string;
+  name: string;
+  guildName: string;
+}
+
 export interface DiscordSettingsResponse {
   enabled: boolean;
   tokenSet: boolean;
   requireMention: boolean;
   botUsername: string | null;
+  allowedChannels: string[];
+  availableChannels: DiscordAvailableChannel[];
   pairedUsers: PairedUser[];
   pendingPairings: PendingPairing[];
 }
@@ -27,12 +35,20 @@ export interface DiscordTestResult {
 // Settings CRUD
 // ---------------------------------------------------------------------------
 
-export function getDiscordSettings(): DiscordSettingsResponse {
+export function getDiscordSettings(availableChannels: DiscordAvailableChannel[] = []): DiscordSettingsResponse {
+  const raw = getConfig("discord:allowed_channels");
+  let allowedChannels: string[] = [];
+  if (raw) {
+    try { allowedChannels = JSON.parse(raw); } catch { /* ignore */ }
+  }
+
   return {
     enabled: getConfig("discord:enabled") === "true",
     tokenSet: !!getConfig("discord:bot_token"),
     requireMention: getConfig("discord:require_mention") !== "false", // default true
     botUsername: getConfig("discord:bot_username") ?? null,
+    allowedChannels,
+    availableChannels,
     pairedUsers: listPairedUsers(),
     pendingPairings: listPendingPairings(),
   };
@@ -42,6 +58,7 @@ export function updateDiscordSettings(data: {
   enabled?: boolean;
   botToken?: string;
   requireMention?: boolean;
+  allowedChannels?: string[];
 }): void {
   if (data.enabled !== undefined) {
     setConfig("discord:enabled", data.enabled ? "true" : "false");
@@ -56,6 +73,9 @@ export function updateDiscordSettings(data: {
   }
   if (data.requireMention !== undefined) {
     setConfig("discord:require_mention", data.requireMention ? "true" : "false");
+  }
+  if (data.allowedChannels !== undefined) {
+    setConfig("discord:allowed_channels", JSON.stringify(data.allowedChannels));
   }
 }
 

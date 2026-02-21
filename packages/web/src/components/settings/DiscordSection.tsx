@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { cn } from "../../lib/utils";
 import { useSettingsStore } from "../../stores/settings-store";
 import { getSocket } from "../../lib/socket";
@@ -8,6 +8,8 @@ export function DiscordSection() {
   const tokenSet = useSettingsStore((s) => s.discordTokenSet);
   const requireMention = useSettingsStore((s) => s.discordRequireMention);
   const botUsername = useSettingsStore((s) => s.discordBotUsername);
+  const allowedChannels = useSettingsStore((s) => s.discordAllowedChannels);
+  const availableChannels = useSettingsStore((s) => s.discordAvailableChannels);
   const pairedUsers = useSettingsStore((s) => s.discordPairedUsers);
   const pendingPairings = useSettingsStore((s) => s.discordPendingPairings);
   const testResult = useSettingsStore((s) => s.discordTestResult);
@@ -20,6 +22,8 @@ export function DiscordSection() {
 
   const [localToken, setLocalToken] = useState("");
   const [saving, setSaving] = useState(false);
+  const [savingChannels, setSavingChannels] = useState(false);
+  const [selectedChannels, setSelectedChannels] = useState<Set<string>>(new Set());
   const [botStatus, setBotStatus] = useState<"connected" | "disconnected" | "error">("disconnected");
 
   useEffect(() => {
@@ -49,6 +53,52 @@ export function DiscordSection() {
       socket.off("discord:pairing-request", handlePairingRequest);
     };
   }, []);
+
+  // Sync local selectedChannels when allowedChannels loads
+  useEffect(() => {
+    setSelectedChannels(new Set(allowedChannels));
+  }, [allowedChannels]);
+
+  // Group available channels by guild
+  const channelsByGuild = useMemo(() => {
+    const groups = new Map<string, Array<{ id: string; name: string }>>();
+    for (const ch of availableChannels) {
+      let list = groups.get(ch.guildName);
+      if (!list) {
+        list = [];
+        groups.set(ch.guildName, list);
+      }
+      list.push({ id: ch.id, name: ch.name });
+    }
+    // Sort channels within each guild
+    for (const list of groups.values()) {
+      list.sort((a, b) => a.name.localeCompare(b.name));
+    }
+    return groups;
+  }, [availableChannels]);
+
+  const handleToggleChannel = (channelId: string) => {
+    setSelectedChannels((prev) => {
+      const next = new Set(prev);
+      if (next.has(channelId)) {
+        next.delete(channelId);
+      } else {
+        next.add(channelId);
+      }
+      return next;
+    });
+  };
+
+  const handleSaveChannels = async () => {
+    setSavingChannels(true);
+    await updateDiscordSettings({ allowedChannels: [...selectedChannels] });
+    setSavingChannels(false);
+  };
+
+  const channelsChanged = useMemo(() => {
+    if (selectedChannels.size !== allowedChannels.length) return true;
+    return allowedChannels.some((id) => !selectedChannels.has(id));
+  }, [selectedChannels, allowedChannels]);
 
   const handleSave = async () => {
     setSaving(true);
@@ -225,6 +275,63 @@ export function DiscordSection() {
             </p>
           </div>
         </label>
+      </div>
+
+      {/* Allowed Channels section */}
+      <div className="border border-border rounded-lg p-4 space-y-3">
+        <label className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1 block">
+          Allowed Channels
+          {selectedChannels.size > 0 && (
+            <span className="ml-2 normal-case tracking-normal text-foreground">
+              {selectedChannels.size}
+            </span>
+          )}
+        </label>
+        <p className="text-[10px] text-muted-foreground">
+          When set, the bot only responds in these channels. DMs are always allowed.
+        </p>
+
+        {availableChannels.length === 0 ? (
+          <p className="text-[10px] text-muted-foreground italic">
+            Connect the bot to see available channels.
+          </p>
+        ) : (
+          <div className="space-y-3 max-h-64 overflow-y-auto">
+            {[...channelsByGuild.entries()].map(([guildName, channels]) => (
+              <div key={guildName}>
+                <div className="text-[10px] text-muted-foreground font-medium mb-1">
+                  {guildName}
+                </div>
+                <div className="space-y-1">
+                  {channels.map((ch) => (
+                    <label
+                      key={ch.id}
+                      className="flex items-center gap-2 cursor-pointer hover:bg-secondary/50 rounded px-2 py-1"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={selectedChannels.has(ch.id)}
+                        onChange={() => handleToggleChannel(ch.id)}
+                        className="rounded border-border"
+                      />
+                      <span className="text-xs">#{ch.name}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {availableChannels.length > 0 && channelsChanged && (
+          <button
+            onClick={handleSaveChannels}
+            disabled={savingChannels}
+            className="text-xs bg-primary text-primary-foreground px-3 py-1.5 rounded-md hover:bg-primary/90 disabled:opacity-50"
+          >
+            {savingChannels ? "Saving..." : "Save"}
+          </button>
+        )}
       </div>
 
       {/* Paired Users section */}

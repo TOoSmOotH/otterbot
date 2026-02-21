@@ -161,6 +161,8 @@ interface SettingsState {
   discordTokenSet: boolean;
   discordRequireMention: boolean;
   discordBotUsername: string | null;
+  discordAllowedChannels: string[];
+  discordAvailableChannels: Array<{ id: string; name: string; guildName: string }>;
   discordPairedUsers: Array<{ discordUserId: string; discordUsername: string; pairedAt: string }>;
   discordPendingPairings: Array<{ code: string; discordUserId: string; discordUsername: string; createdAt: string }>;
   discordTestResult: TestResult | null;
@@ -304,6 +306,7 @@ interface SettingsState {
     enabled?: boolean;
     botToken?: string;
     requireMention?: boolean;
+    allowedChannels?: string[];
   }) => Promise<void>;
   testDiscordConnection: () => Promise<void>;
   approveDiscordPairing: (code: string) => Promise<void>;
@@ -399,6 +402,8 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   discordTokenSet: false,
   discordRequireMention: true,
   discordBotUsername: null,
+  discordAllowedChannels: [],
+  discordAvailableChannels: [],
   discordPairedUsers: [],
   discordPendingPairings: [],
   discordTestResult: null,
@@ -1382,6 +1387,8 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
         discordTokenSet: data.tokenSet,
         discordRequireMention: data.requireMention,
         discordBotUsername: data.botUsername,
+        discordAllowedChannels: data.allowedChannels ?? [],
+        discordAvailableChannels: data.availableChannels ?? [],
         discordPairedUsers: data.pairedUsers,
         discordPendingPairings: data.pendingPairings,
       });

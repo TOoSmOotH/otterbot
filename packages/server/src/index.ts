@@ -2927,7 +2927,8 @@ async function main() {
   // =========================================================================
 
   app.get("/api/settings/discord", async () => {
-    return getDiscordSettings();
+    const availableChannels = discordBridge?.getAvailableChannels() ?? [];
+    return getDiscordSettings(availableChannels);
   });
 
   app.put<{
@@ -2935,6 +2936,7 @@ async function main() {
       enabled?: boolean;
       botToken?: string;
       requireMention?: boolean;
+      allowedChannels?: string[];
     };
   }>("/api/settings/discord", async (req) => {
     const wasEnabled = getDiscordSettings().enabled && getDiscordSettings().tokenSet;

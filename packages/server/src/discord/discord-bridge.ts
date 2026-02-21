@@ -8,6 +8,7 @@ import {
   type TextChannel,
   type DMChannel,
 } from "discord.js";
+import type { DiscordAvailableChannel } from "./discord-settings.js";
 import { nanoid } from "nanoid";
 import { eq } from "drizzle-orm";
 import { Server } from "socket.io";
@@ -115,6 +116,23 @@ export class DiscordBridge {
     }
   }
 
+  getAvailableChannels(): DiscordAvailableChannel[] {
+    if (!this.client) return [];
+    const channels: DiscordAvailableChannel[] = [];
+    for (const guild of this.client.guilds.cache.values()) {
+      for (const channel of guild.channels.cache.values()) {
+        if (channel.type === ChannelType.GuildText) {
+          channels.push({
+            id: channel.id,
+            name: channel.name,
+            guildName: guild.name,
+          });
+        }
+      }
+    }
+    return channels;
+  }
+
   // -------------------------------------------------------------------------
   // Inbound: Discord → COO
   // -------------------------------------------------------------------------
@@ -130,6 +148,19 @@ export class DiscordBridge {
     if (!isDM && requireMention) {
       if (!this.client?.user || !message.mentions.has(this.client.user)) {
         return;
+      }
+    }
+
+    // Channel whitelist: if set, only respond in allowed guild channels (DMs always allowed)
+    if (!isDM) {
+      const raw = getConfig("discord:allowed_channels");
+      if (raw) {
+        try {
+          const allowed: string[] = JSON.parse(raw);
+          if (allowed.length > 0 && !allowed.includes(message.channel.id)) {
+            return;
+          }
+        } catch { /* ignore parse errors */ }
       }
     }
 
