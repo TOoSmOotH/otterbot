@@ -249,7 +249,7 @@ export class ClaudeCodeClient implements CodingAgentClient {
           // Also emit message.updated for the complete message if no stream events did
           if (emit) {
             const msgObj = eventObj.message as Record<string, unknown> | undefined;
-            const msgId = (msgObj?.id as string) ?? currentMessageId || `cc-msg-${++messageSeq}`;
+            const msgId = (msgObj?.id as string) ?? (currentMessageId || `cc-msg-${++messageSeq}`);
             emit({
               type: "message.updated",
               properties: {
