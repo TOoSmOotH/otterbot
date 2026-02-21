@@ -345,6 +345,13 @@ export async function migrateDb() {
     updated_at TEXT NOT NULL
   )`);
 
+  // Idempotent migration: add reminder_at to todos
+  try {
+    db.run(sql`ALTER TABLE todos ADD COLUMN reminder_at TEXT`);
+  } catch {
+    // Column already exists — ignore
+  }
+
   db.run(sql`CREATE TABLE IF NOT EXISTS calendar_events (
     id TEXT PRIMARY KEY,
     title TEXT NOT NULL,

@@ -328,6 +328,7 @@ export function getToolsWithMeta(): {
         { name: "priority", type: "string", required: false, description: "Priority: low, medium, high" },
         { name: "dueDate", type: "string", required: false, description: "Due date in ISO format" },
         { name: "tags", type: "string[]", required: false, description: "Tags for categorization" },
+        { name: "reminderAt", type: "string", required: false, description: "ISO datetime for reminder notification" },
       ],
     },
     todo_update: {
@@ -338,6 +339,7 @@ export function getToolsWithMeta(): {
         { name: "title", type: "string", required: false, description: "New title" },
         { name: "status", type: "string", required: false, description: "New status: todo, in_progress, done" },
         { name: "priority", type: "string", required: false, description: "New priority: low, medium, high" },
+        { name: "reminderAt", type: "string", required: false, description: "ISO datetime for reminder, or null to clear" },
       ],
     },
     todo_delete: {

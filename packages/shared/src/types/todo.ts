@@ -5,6 +5,7 @@ export interface Todo {
   status: "todo" | "in_progress" | "done";
   priority: "low" | "medium" | "high";
   dueDate: string | null;
+  reminderAt: string | null;
   tags: string[];
   createdAt: string;
   updatedAt: string;

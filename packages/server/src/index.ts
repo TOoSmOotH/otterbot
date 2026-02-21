@@ -146,6 +146,7 @@ import type { ProviderType } from "@otterbot/shared";
 import { createBackupArchive, restoreFromArchive, looksLikeZip } from "./backup/backup.js";
 import { writeOpenCodeConfig, startOpenCodeServer, stopOpenCodeServer } from "./opencode/opencode-manager.js";
 import { GitHubIssueMonitor } from "./github/issue-monitor.js";
+import { ReminderScheduler } from "./reminders/reminder-scheduler.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -672,6 +673,9 @@ async function main() {
         issueMonitor.loadFromDb();
         issueMonitor.start();
       }
+
+      // Start reminder scheduler
+      new ReminderScheduler(bus, io).start();
     } catch (err) {
       console.error("Failed to start COO agent:", err);
     }
@@ -2753,7 +2757,7 @@ async function main() {
   });
 
   app.post<{
-    Body: { title: string; description?: string; priority?: string; dueDate?: string; tags?: string[] };
+    Body: { title: string; description?: string; priority?: string; dueDate?: string; reminderAt?: string; tags?: string[] };
   }>("/api/todos", async (req, reply) => {
     const { createTodo } = await import("./todos/todos.js");
     if (!req.body.title) {
@@ -2765,7 +2769,7 @@ async function main() {
 
   app.put<{
     Params: { id: string };
-    Body: { title?: string; description?: string; status?: string; priority?: string; dueDate?: string | null; tags?: string[] };
+    Body: { title?: string; description?: string; status?: string; priority?: string; dueDate?: string | null; reminderAt?: string | null; tags?: string[] };
   }>("/api/todos/:id", async (req, reply) => {
     const { updateTodo } = await import("./todos/todos.js");
     const result = updateTodo(req.params.id, req.body);

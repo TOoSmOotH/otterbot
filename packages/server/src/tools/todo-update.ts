@@ -27,6 +27,11 @@ export function createTodoUpdateTool() {
         .array(z.string())
         .optional()
         .describe("New tags"),
+      reminderAt: z
+        .string()
+        .nullable()
+        .optional()
+        .describe("ISO datetime for reminder, or null to clear"),
     }),
     execute: async ({ id, ...updates }) => {
       const todo = updateTodo(id, updates);

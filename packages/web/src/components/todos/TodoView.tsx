@@ -335,6 +335,13 @@ function TodoItem({
     setAddingTag(false);
   };
 
+  // Sync reminderAt when todo prop changes
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    // Force re-render to show/hide countdown when reminderAt changes externally
+    setTick((t) => t + 1);
+  }, [todo.reminderAt]);
+
   return (
     <div
       className={`group flex items-start gap-2.5 px-3 py-2 rounded-md border border-border hover:bg-secondary/50 transition-colors ${
@@ -420,6 +427,11 @@ function TodoItem({
           >
             {todo.priority}
           </button>
+
+          {/* Reminder countdown */}
+          {todo.reminderAt && new Date(todo.reminderAt) > new Date() && (
+            <ReminderCountdown reminderAt={todo.reminderAt} />
+          )}
 
           {/* Due date — click to edit */}
           {editingDueDate ? (
@@ -517,5 +529,37 @@ function TodoItem({
         </svg>
       </button>
     </div>
+  );
+}
+
+function ReminderCountdown({ reminderAt }: { reminderAt: string }) {
+  const [remaining, setRemaining] = useState("");
+
+  useEffect(() => {
+    const update = () => {
+      const diff = new Date(reminderAt).getTime() - Date.now();
+      if (diff <= 0) {
+        setRemaining("now");
+        return;
+      }
+      const totalSec = Math.floor(diff / 1000);
+      const h = Math.floor(totalSec / 3600);
+      const m = Math.floor((totalSec % 3600) / 60);
+      const s = totalSec % 60;
+      if (h > 0) {
+        setRemaining(`${h}h ${m}m`);
+      } else {
+        setRemaining(`${m}m ${s}s`);
+      }
+    };
+    update();
+    const id = setInterval(update, 1000);
+    return () => clearInterval(id);
+  }, [reminderAt]);
+
+  return (
+    <span className="text-[9px] px-1.5 py-0.5 rounded text-orange-400 bg-orange-500/10">
+      {remaining}
+    </span>
   );
 }

@@ -221,6 +221,7 @@ export const todos = sqliteTable("todos", {
     .notNull()
     .default("medium"),
   dueDate: text("due_date"),
+  reminderAt: text("reminder_at"),
   tags: text("tags", { mode: "json" })
     .$type<string[]>()
     .notNull()

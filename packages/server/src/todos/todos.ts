@@ -8,6 +8,7 @@ export interface TodoInput {
   description?: string;
   priority?: string;
   dueDate?: string;
+  reminderAt?: string;
   tags?: string[];
 }
 
@@ -17,6 +18,7 @@ export interface TodoUpdate {
   status?: string;
   priority?: string;
   dueDate?: string | null;
+  reminderAt?: string | null;
   tags?: string[];
 }
 
@@ -57,6 +59,7 @@ export function createTodo(input: TodoInput) {
     status: "todo" as const,
     priority: (input.priority ?? "medium") as "low" | "medium" | "high",
     dueDate: input.dueDate ?? null,
+    reminderAt: input.reminderAt ?? null,
     tags: input.tags ?? [],
     createdAt: now,
     updatedAt: now,
@@ -84,6 +87,7 @@ export function updateTodo(id: string, updates: TodoUpdate) {
   if (updates.status !== undefined) values.status = updates.status;
   if (updates.priority !== undefined) values.priority = updates.priority;
   if (updates.dueDate !== undefined) values.dueDate = updates.dueDate;
+  if (updates.reminderAt !== undefined) values.reminderAt = updates.reminderAt;
   if (updates.tags !== undefined) values.tags = updates.tags;
 
   db.update(schema.todos)

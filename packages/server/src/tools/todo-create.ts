@@ -21,10 +21,14 @@ export function createTodoCreateTool() {
         .array(z.string())
         .optional()
         .describe("Tags for categorization"),
+      reminderAt: z
+        .string()
+        .optional()
+        .describe("ISO datetime for reminder notification (e.g. when to remind the user)"),
     }),
-    execute: async ({ title, description, priority, dueDate, tags }) => {
-      const todo = createTodo({ title, description, priority, dueDate, tags });
-      return `Todo created: "${todo.title}" (ID: ${todo.id}, priority: ${todo.priority}${todo.dueDate ? `, due: ${todo.dueDate}` : ""})`;
+    execute: async ({ title, description, priority, dueDate, tags, reminderAt }) => {
+      const todo = createTodo({ title, description, priority, dueDate, tags, reminderAt });
+      return `Todo created: "${todo.title}" (ID: ${todo.id}, priority: ${todo.priority}${todo.dueDate ? `, due: ${todo.dueDate}` : ""}${todo.reminderAt ? `, reminder: ${todo.reminderAt}` : ""})`;
     },
   });
 }

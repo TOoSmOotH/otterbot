@@ -141,6 +141,10 @@ export function useSocket() {
       removeTodo(todoId);
     });
 
+    socket.on("reminder:fired", () => {
+      // The COO chat message already shows via coo:response broadcast
+    });
+
     socket.on("agent:stream", ({ agentId, token, messageId }) => {
       appendAgentStream(agentId, token, messageId);
     });
@@ -220,6 +224,7 @@ export function useSocket() {
       socket.off("todo:created");
       socket.off("todo:updated");
       socket.off("todo:deleted");
+      socket.off("reminder:fired");
       socket.off("agent:stream");
       socket.off("agent:thinking");
       socket.off("agent:thinking-end");

@@ -45,6 +45,7 @@ export interface ServerToClientEvents {
   "todo:created": (todo: Todo) => void;
   "todo:updated": (todo: Todo) => void;
   "todo:deleted": (data: { todoId: string }) => void;
+  "reminder:fired": (data: { todoId: string; title: string }) => void;
 }
 
 /** Events emitted from client to server */
