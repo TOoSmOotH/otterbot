@@ -96,12 +96,24 @@ export class AdminAssistant extends BaseAgent {
       },
     );
 
-    // Send the response back through the bus
-    this.sendMessage(
-      null,
-      MessageType.Chat,
-      text,
-      thinking ? { thinking } : undefined,
-    );
+    // If delegated (has correlationId), reply to the sender with the correlationId
+    if (message.correlationId && message.fromAgentId) {
+      this.sendMessage(
+        message.fromAgentId,
+        MessageType.Chat,
+        text,
+        thinking ? { thinking } : undefined,
+        undefined,
+        message.correlationId,
+      );
+    } else {
+      // Direct from user — reply to CEO as usual
+      this.sendMessage(
+        null,
+        MessageType.Chat,
+        text,
+        thinking ? { thinking } : undefined,
+      );
+    }
   }
 }

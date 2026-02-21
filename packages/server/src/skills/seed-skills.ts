@@ -26,6 +26,7 @@ const SEED_SKILLS: Array<{ id: string; data: SkillCreate }> = [
           "manage_search",
           "web_search",
           "manage_packages",
+          "delegate_to_admin",
         ],
         capabilities: ["management", "delegation", "coordination"],
         parameters: {},

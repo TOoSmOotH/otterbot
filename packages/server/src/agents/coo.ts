@@ -584,6 +584,32 @@ The user can see everything on the desktop in real-time.`;
           }
         },
       }),
+      delegate_to_admin: tool({
+        description:
+          "Delegate a personal/administrative task to the Admin Assistant. " +
+          "Use this for: todos, reminders, email, calendar, and other personal productivity tasks. " +
+          "Do NOT create a project for these — they are personal tasks, not engineering work.",
+        parameters: z.object({
+          request: z.string().describe(
+            "The request to send to the Admin Assistant, in natural language"
+          ),
+        }),
+        execute: async ({ request }) => {
+          const reply = await this.bus.request(
+            {
+              fromAgentId: this.id,
+              toAgentId: "admin-assistant",
+              type: MessageType.Chat,
+              content: request,
+            },
+            30_000,
+          );
+          if (!reply) {
+            return "The Admin Assistant did not respond in time. Please try again.";
+          }
+          return reply.content;
+        },
+      }),
       memory_save: createMemorySaveTool(),
       manage_packages: tool({
         description:
