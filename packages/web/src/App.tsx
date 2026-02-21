@@ -18,6 +18,7 @@ import { ProjectList } from "./components/project/ProjectList";
 import { KanbanBoard } from "./components/kanban/KanbanBoard";
 import { FileBrowser } from "./components/project/FileBrowser";
 import { ProjectDashboard } from "./components/project/ProjectDashboard";
+import { GlobalDashboard } from "./components/dashboard/GlobalDashboard";
 import { DesktopView } from "./components/desktop/DesktopView";
 import { UsageDashboard } from "./components/usage/UsageDashboard";
 import { TodoView } from "./components/todos/TodoView";
@@ -112,7 +113,7 @@ function MainApp() {
   const projects = useProjectStore((s) => s.projects);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [userProfile, setUserProfile] = useState<UserProfile | undefined>();
-  const [centerView, setCenterView] = useState<CenterView>("graph");
+  const [centerView, setCenterView] = useState<CenterView>("dashboard");
 
   // Load initial data
   useEffect(() => {
@@ -207,7 +208,7 @@ function MainApp() {
 
   const handleExitProject = useCallback(() => {
     exitProject();
-    setCenterView("graph");
+    setCenterView("dashboard");
     // Reload global conversations
     const socket = getSocket();
     socket.emit("ceo:list-conversations", undefined, (conversations) => {
@@ -258,6 +259,19 @@ function MainApp() {
           )}
         </div>
         <div className="flex items-center gap-1">
+          <button
+            onClick={() => {
+              setCenterView("graph");
+              setSettingsOpen(false);
+            }}
+            className={`text-xs transition-colors px-2 py-1 rounded ${
+              !settingsOpen && centerView === "graph"
+                ? "text-primary bg-primary/10"
+                : "text-muted-foreground hover:text-foreground hover:bg-secondary"
+            }`}
+          >
+            Graph
+          </button>
           <button
             onClick={() => setSettingsOpen(!settingsOpen)}
             className={`text-xs transition-colors px-2 py-1 rounded ${
@@ -363,8 +377,8 @@ function ResizableLayout({
 
   // Reset to graph from project-only views when no project is active
   useEffect(() => {
-    if (!activeProjectId && (centerView === "charter" || centerView === "kanban" || centerView === "files" || centerView === "dashboard")) {
-      setCenterView("graph");
+    if (!activeProjectId && (centerView === "charter" || centerView === "kanban" || centerView === "files")) {
+      setCenterView("dashboard");
     }
   }, [activeProjectId, centerView]);
 
@@ -373,7 +387,9 @@ function ResizableLayout({
       case "dashboard":
         return activeProjectId ? (
           <ProjectDashboard projectId={activeProjectId} />
-        ) : null;
+        ) : (
+          <GlobalDashboard projects={projects} onEnterProject={onEnterProject} />
+        );
       case "charter":
         return activeProject ? (
           <CharterView project={activeProject} />
@@ -397,7 +413,7 @@ function ResizableLayout({
       case "desktop":
         return <DesktopView />;
       case "code":
-        return <CodeView />;
+        return <CodeView projectId={activeProjectId} />;
       case "live3d":
         return (
           <LiveView userProfile={userProfile} onToggleView={() => setCenterView("graph")} />

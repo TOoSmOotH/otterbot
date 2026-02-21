@@ -28,7 +28,7 @@ export const centerViewLabels: Record<CenterView, string> = {
 };
 
 const projectTabs: CenterView[] = ["dashboard", "kanban", "charter", "files", "code"];
-const globalTabs: CenterView[] = ["graph", "todos", "inbox", "calendar", "code", "usage", "desktop"];
+const globalTabs: CenterView[] = ["dashboard", "todos", "inbox", "calendar", "code", "usage", "desktop"];
 
 export function getCenterTabs(activeProjectId: string | null): CenterView[] {
   return activeProjectId ? projectTabs : globalTabs;
