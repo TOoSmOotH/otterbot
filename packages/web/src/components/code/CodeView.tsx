@@ -528,10 +528,14 @@ function SessionContent({ agentId }: { agentId: string }) {
   );
 }
 
-export function CodeView() {
-  const sessions = useCodingAgentStore((s) => s.sessions);
+export function CodeView({ projectId }: { projectId?: string | null }) {
+  const allSessions = useCodingAgentStore((s) => s.sessions);
   const selectedAgentId = useCodingAgentStore((s) => s.selectedAgentId);
   const selectAgent = useCodingAgentStore((s) => s.selectAgent);
+
+  const sessions = projectId
+    ? new Map([...allSessions].filter(([, s]) => s.projectId === projectId))
+    : allSessions;
 
   return (
     <div className="h-full flex bg-[#0d1117] text-foreground">

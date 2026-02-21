@@ -2339,34 +2339,40 @@ async function main() {
   // =========================================================================
 
   app.get<{
-    Querystring: { limit?: string };
+    Querystring: { limit?: string; projectId?: string };
   }>("/api/codeagent/sessions", async (req) => {
     const { getDb, schema } = await import("./db/index.js");
-    const { desc } = await import("drizzle-orm");
+    const { desc, eq } = await import("drizzle-orm");
     const db = getDb();
     const limit = Math.min(parseInt(req.query.limit ?? "50", 10) || 50, 200);
-    return db
+    const query = db
       .select()
       .from(schema.codingAgentSessions)
       .orderBy(desc(schema.codingAgentSessions.startedAt))
-      .limit(limit)
-      .all();
+      .limit(limit);
+    if (req.query.projectId) {
+      return query.where(eq(schema.codingAgentSessions.projectId, req.query.projectId)).all();
+    }
+    return query.all();
   });
 
   // Keep old route for backwards compatibility
   app.get<{
-    Querystring: { limit?: string };
+    Querystring: { limit?: string; projectId?: string };
   }>("/api/opencode/sessions", async (req) => {
     const { getDb, schema } = await import("./db/index.js");
-    const { desc } = await import("drizzle-orm");
+    const { desc, eq } = await import("drizzle-orm");
     const db = getDb();
     const limit = Math.min(parseInt(req.query.limit ?? "50", 10) || 50, 200);
-    return db
+    const query = db
       .select()
       .from(schema.codingAgentSessions)
       .orderBy(desc(schema.codingAgentSessions.startedAt))
-      .limit(limit)
-      .all();
+      .limit(limit);
+    if (req.query.projectId) {
+      return query.where(eq(schema.codingAgentSessions.projectId, req.query.projectId)).all();
+    }
+    return query.all();
   });
 
   app.get<{
