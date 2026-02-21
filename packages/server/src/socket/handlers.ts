@@ -705,14 +705,16 @@ export function setupSocketHandlers(
             const row = db.select({ terminalBuffer: schema.codingAgentSessions.terminalBuffer })
               .from(schema.codingAgentSessions)
               .where(eq(schema.codingAgentSessions.agentId, data.agentId))
+              .orderBy(desc(schema.codingAgentSessions.startedAt))
               .get();
+            console.log(`[terminal:subscribe] DB lookup for ${data.agentId}: buffer=${row?.terminalBuffer ? `${row.terminalBuffer.length} chars` : "null"}`);
             if (row?.terminalBuffer) {
               replayBuffer = row.terminalBuffer;
               // Cache in memory for subsequent requests
               completedPtyBuffers.set(data.agentId, replayBuffer);
             }
-          } catch {
-            // DB lookup failed — ignore
+          } catch (err) {
+            console.error("[terminal:subscribe] DB lookup failed:", err);
           }
         }
         if (replayBuffer) {
@@ -924,6 +926,7 @@ export function emitCodingAgentEvent(
       if (rowId) {
         // Save terminal buffer from PTY sessions for replay after restart
         const terminalBuffer = completedPtyBuffers.get(agentId) ?? null;
+        console.log(`[session-end] Saving terminal buffer for ${agentId}: ${terminalBuffer ? `${terminalBuffer.length} chars` : "null"}`);
 
         db.update(schema.codingAgentSessions)
           .set({
