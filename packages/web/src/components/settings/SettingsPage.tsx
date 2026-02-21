@@ -18,6 +18,7 @@ import { ChannelsSection } from "./ChannelsSection";
 import { ScheduledTasksSection } from "./ScheduledTasksSection";
 import { EmailSection } from "./EmailSection";
 import { GitHubTab } from "./GitHubTab";
+import { DiscordSection } from "./DiscordSection";
 import { GoogleSection } from "./GoogleSection";
 import { SecuritySection } from "./SecuritySection";
 import type { SettingsSection } from "./settings-nav";
@@ -50,6 +51,7 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
     if (activeSection === "email") return <EmailSection />;
     if (activeSection === "google") return <GoogleSection />;
     if (activeSection === "github") return <GitHubTab />;
+    if (activeSection === "discord") return <DiscordSection />;
     if (activeSection === "security") return <SecuritySection />;
     if (activeSection === "soul") return <SoulTab />;
     if (activeSection === "memory") return <MemoryTab />;

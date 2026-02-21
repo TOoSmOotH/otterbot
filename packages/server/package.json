@@ -25,6 +25,7 @@
     "@otterbot/shared": "workspace:*",
     "ai": "^4.1.61",
     "better-sqlite3-multiple-ciphers": "^11.8.1",
+    "discord.js": "^14.16.0",
     "dotenv": "^16.4.7",
     "drizzle-orm": "^0.38.4",
     "fastify": "^5.2.1",

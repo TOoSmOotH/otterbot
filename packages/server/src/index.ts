@@ -153,6 +153,17 @@ import { ReminderScheduler } from "./reminders/reminder-scheduler.js";
 import { MemoryCompactor } from "./memory/memory-compactor.js";
 import { SchedulerRegistry } from "./schedulers/scheduler-registry.js";
 import { CustomTaskScheduler, MIN_CUSTOM_TASK_INTERVAL_MS } from "./schedulers/custom-task-scheduler.js";
+import { DiscordBridge } from "./discord/discord-bridge.js";
+import {
+  getDiscordSettings,
+  updateDiscordSettings,
+  testDiscordConnection,
+} from "./discord/discord-settings.js";
+import {
+  approvePairing,
+  rejectPairing,
+  revokePairing,
+} from "./discord/pairing.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -425,6 +436,29 @@ async function main() {
 
   // Track the most recent permission request so chat replies can resolve it
   let activePermissionRequest: { agentId: string; permissionId: string; sessionId: string } | null = null;
+
+  // Discord bridge (initialized when enabled + token set)
+  let discordBridge: DiscordBridge | null = null;
+
+  function startDiscordBridge() {
+    if (discordBridge || !coo) return;
+    const settings = getDiscordSettings();
+    if (!settings.enabled || !settings.tokenSet) return;
+    const token = getConfig("discord:bot_token");
+    if (!token) return;
+    discordBridge = new DiscordBridge({ bus, coo, io });
+    discordBridge.start(token).catch((err) => {
+      console.error("[Discord] Failed to start bridge:", err);
+      discordBridge = null;
+    });
+  }
+
+  async function stopDiscordBridge() {
+    if (discordBridge) {
+      await discordBridge.stop();
+      discordBridge = null;
+    }
+  }
 
   function startCoo() {
     if (coo) return;
@@ -715,6 +749,7 @@ async function main() {
 
   if (isSetupComplete()) {
     startCoo();
+    startDiscordBridge();
     startOpenCodeServer();
   } else {
     console.log("Setup not complete. Waiting for setup wizard...");
@@ -1035,6 +1070,7 @@ async function main() {
     }
 
     startCoo();
+    startDiscordBridge();
     startOpenCodeServer();
 
     return { ok: true };
@@ -2887,6 +2923,72 @@ async function main() {
   });
 
   // =========================================================================
+  // Discord settings routes
+  // =========================================================================
+
+  app.get("/api/settings/discord", async () => {
+    return getDiscordSettings();
+  });
+
+  app.put<{
+    Body: {
+      enabled?: boolean;
+      botToken?: string;
+      requireMention?: boolean;
+    };
+  }>("/api/settings/discord", async (req) => {
+    const wasEnabled = getDiscordSettings().enabled && getDiscordSettings().tokenSet;
+    updateDiscordSettings(req.body);
+    const nowEnabled = getDiscordSettings().enabled && getDiscordSettings().tokenSet;
+
+    // Start or stop bridge based on state change
+    if (nowEnabled && !wasEnabled) {
+      startDiscordBridge();
+    } else if (!nowEnabled && wasEnabled) {
+      await stopDiscordBridge();
+    }
+
+    return { ok: true };
+  });
+
+  app.post("/api/settings/discord/test", async () => {
+    return testDiscordConnection();
+  });
+
+  app.post<{
+    Body: { code: string };
+  }>("/api/settings/discord/pair/approve", async (req, reply) => {
+    const result = approvePairing(req.body.code);
+    if (!result) {
+      reply.code(400);
+      return { ok: false, error: "Invalid or expired pairing code" };
+    }
+    return { ok: true, user: result };
+  });
+
+  app.post<{
+    Body: { code: string };
+  }>("/api/settings/discord/pair/reject", async (req, reply) => {
+    const ok = rejectPairing(req.body.code);
+    if (!ok) {
+      reply.code(400);
+      return { ok: false, error: "Pairing code not found" };
+    }
+    return { ok: true };
+  });
+
+  app.delete<{
+    Params: { userId: string };
+  }>("/api/settings/discord/pair/:userId", async (req, reply) => {
+    const ok = revokePairing(req.params.userId);
+    if (!ok) {
+      reply.code(400);
+      return { ok: false, error: "User not found" };
+    }
+    return { ok: true };
+  });
+
+  // =========================================================================
   // Google settings routes
   // =========================================================================
 
@@ -3463,6 +3565,7 @@ Respond with ONLY a JSON object (no markdown, no explanation) with these fields:
 
   // Graceful shutdown
   const shutdown = async () => {
+    await stopDiscordBridge();
     await stopOpenCodeServer();
     await closeBrowser();
     process.exit(0);

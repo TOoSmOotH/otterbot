@@ -48,6 +48,8 @@ export interface ServerToClientEvents {
   "todo:updated": (todo: Todo) => void;
   "todo:deleted": (data: { todoId: string }) => void;
   "reminder:fired": (data: { todoId: string; title: string }) => void;
+  "discord:pairing-request": (data: { code: string; discordUserId: string; discordUsername: string }) => void;
+  "discord:status": (data: { status: "connected" | "disconnected" | "error"; botUsername?: string }) => void;
 }
 
 /** Events emitted from client to server */

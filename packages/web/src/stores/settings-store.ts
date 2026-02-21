@@ -156,6 +156,15 @@ interface SettingsState {
   sshPublicKey: string | null;
   sshTestResult: TestResult & { username?: string } | null;
 
+  // Discord
+  discordEnabled: boolean;
+  discordTokenSet: boolean;
+  discordRequireMention: boolean;
+  discordBotUsername: string | null;
+  discordPairedUsers: Array<{ discordUserId: string; discordUsername: string; pairedAt: string }>;
+  discordPendingPairings: Array<{ code: string; discordUserId: string; discordUsername: string; createdAt: string }>;
+  discordTestResult: TestResult | null;
+
   // Google
   googleConnected: boolean;
   googleConnectedEmail: string | null;
@@ -289,6 +298,18 @@ interface SettingsState {
   removeSSHKey: () => Promise<void>;
   testSSHConnection: () => Promise<void>;
 
+  // Discord actions
+  loadDiscordSettings: () => Promise<void>;
+  updateDiscordSettings: (data: {
+    enabled?: boolean;
+    botToken?: string;
+    requireMention?: boolean;
+  }) => Promise<void>;
+  testDiscordConnection: () => Promise<void>;
+  approveDiscordPairing: (code: string) => Promise<void>;
+  rejectDiscordPairing: (code: string) => Promise<void>;
+  revokeDiscordUser: (userId: string) => Promise<void>;
+
   // Google actions
   loadGoogleSettings: () => Promise<void>;
   updateGoogleCredentials: (data: {
@@ -374,6 +395,13 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   sshKeyType: null,
   sshPublicKey: null,
   sshTestResult: null,
+  discordEnabled: false,
+  discordTokenSet: false,
+  discordRequireMention: true,
+  discordBotUsername: null,
+  discordPairedUsers: [],
+  discordPendingPairings: [],
+  discordTestResult: null,
   googleConnected: false,
   googleConnectedEmail: null,
   googleClientIdSet: false,
@@ -1339,6 +1367,112 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
           testing: false,
         },
       });
+    }
+  },
+
+  // Discord actions
+
+  loadDiscordSettings: async () => {
+    try {
+      const res = await fetch("/api/settings/discord");
+      if (!res.ok) return;
+      const data = await res.json();
+      set({
+        discordEnabled: data.enabled,
+        discordTokenSet: data.tokenSet,
+        discordRequireMention: data.requireMention,
+        discordBotUsername: data.botUsername,
+        discordPairedUsers: data.pairedUsers,
+        discordPendingPairings: data.pendingPairings,
+      });
+    } catch {
+      // Silently fail
+    }
+  },
+
+  updateDiscordSettings: async (data) => {
+    set({ error: null });
+    try {
+      const res = await fetch("/api/settings/discord", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) throw new Error("Failed to update Discord settings");
+      await get().loadDiscordSettings();
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "Unknown error" });
+    }
+  },
+
+  testDiscordConnection: async () => {
+    set({ discordTestResult: { ok: false, testing: true } });
+    try {
+      const res = await fetch("/api/settings/discord/test", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      const data = await res.json();
+      set({
+        discordTestResult: {
+          ok: data.ok,
+          error: data.error,
+          testing: false,
+        },
+        discordBotUsername: data.ok ? data.botUsername : get().discordBotUsername,
+      });
+    } catch (err) {
+      set({
+        discordTestResult: {
+          ok: false,
+          error: err instanceof Error ? err.message : "Unknown error",
+          testing: false,
+        },
+      });
+    }
+  },
+
+  approveDiscordPairing: async (code) => {
+    set({ error: null });
+    try {
+      const res = await fetch("/api/settings/discord/pair/approve", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code }),
+      });
+      if (!res.ok) throw new Error("Failed to approve pairing");
+      await get().loadDiscordSettings();
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "Unknown error" });
+    }
+  },
+
+  rejectDiscordPairing: async (code) => {
+    set({ error: null });
+    try {
+      const res = await fetch("/api/settings/discord/pair/reject", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code }),
+      });
+      if (!res.ok) throw new Error("Failed to reject pairing");
+      await get().loadDiscordSettings();
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "Unknown error" });
+    }
+  },
+
+  revokeDiscordUser: async (userId) => {
+    set({ error: null });
+    try {
+      const res = await fetch(`/api/settings/discord/pair/${userId}`, {
+        method: "DELETE",
+      });
+      if (!res.ok) throw new Error("Failed to revoke user");
+      await get().loadDiscordSettings();
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "Unknown error" });
     }
   },
 

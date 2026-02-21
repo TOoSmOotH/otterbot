@@ -1,3 +1,6 @@
+import { useEffect } from "react";
+import { useSettingsStore } from "../../stores/settings-store";
+
 const CHANNELS = [
   {
     name: "WhatsApp",
@@ -18,10 +21,21 @@ const CHANNELS = [
     name: "Discord",
     description: "Connect to Discord servers",
     icon: "D",
+    settingsSection: "discord" as const,
   },
 ];
 
 export function ChannelsSection() {
+  const discordEnabled = useSettingsStore((s) => s.discordEnabled);
+  const discordTokenSet = useSettingsStore((s) => s.discordTokenSet);
+  const loadDiscordSettings = useSettingsStore((s) => s.loadDiscordSettings);
+
+  useEffect(() => {
+    loadDiscordSettings();
+  }, []);
+
+  const isDiscordConnected = discordEnabled && discordTokenSet;
+
   return (
     <div className="p-5 space-y-4">
       <div>
@@ -32,29 +46,38 @@ export function ChannelsSection() {
       </div>
 
       <div className="grid grid-cols-2 gap-3">
-        {CHANNELS.map((channel) => (
-          <div
-            key={channel.name}
-            className="flex items-start gap-3 rounded-lg border border-border p-4 bg-secondary"
-          >
-            <div className="w-8 h-8 rounded-md bg-muted flex items-center justify-center shrink-0">
-              <span className="text-xs font-bold text-muted-foreground">
-                {channel.icon}
-              </span>
-            </div>
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2">
-                <p className="text-xs font-medium">{channel.name}</p>
-                <span className="text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
-                  Coming Soon
+        {CHANNELS.map((channel) => {
+          const connected = channel.name === "Discord" && isDiscordConnected;
+          return (
+            <div
+              key={channel.name}
+              className="flex items-start gap-3 rounded-lg border border-border p-4 bg-secondary"
+            >
+              <div className="w-8 h-8 rounded-md bg-muted flex items-center justify-center shrink-0">
+                <span className="text-xs font-bold text-muted-foreground">
+                  {channel.icon}
                 </span>
               </div>
-              <p className="text-[10px] text-muted-foreground mt-0.5">
-                {channel.description}
-              </p>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2">
+                  <p className="text-xs font-medium">{channel.name}</p>
+                  {connected ? (
+                    <span className="text-[10px] text-green-500 bg-green-500/10 px-1.5 py-0.5 rounded">
+                      Connected
+                    </span>
+                  ) : (
+                    <span className="text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
+                      Coming Soon
+                    </span>
+                  )}
+                </div>
+                <p className="text-[10px] text-muted-foreground mt-0.5">
+                  {channel.description}
+                </p>
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
