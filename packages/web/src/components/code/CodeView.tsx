@@ -617,12 +617,12 @@ function SessionContent({ agentId }: { agentId: string }) {
     );
   }
 
-  // Claude Code uses terminal-based rendering
-  if (session.agentType === "claude-code") {
+  // Claude Code and OpenCode use terminal-based rendering (PTY)
+  if (session.agentType === "claude-code" || session.agentType === "opencode") {
     return <TerminalSessionContent agentId={agentId} />;
   }
 
-  // OpenCode/Codex use message-based rendering
+  // Codex and others use message-based rendering
   return <MessageSessionContent agentId={agentId} />;
 }
 
