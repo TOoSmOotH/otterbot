@@ -1,4 +1,6 @@
 import { nanoid } from "nanoid";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import {
   type GearConfig,
   AgentRole,
@@ -199,6 +201,28 @@ export class Worker extends BaseAgent {
       },
     });
 
+    // Read project guidelines (AGENTS.md or CLAUDE.md) from the workspace
+    let projectGuidelines = "";
+    if (this.workspacePath) {
+      const MAX_GUIDELINES_CHARS = 4000;
+      for (const filename of ["AGENTS.md", "CLAUDE.md"]) {
+        const filepath = join(this.workspacePath, filename);
+        try {
+          if (existsSync(filepath)) {
+            let content = readFileSync(filepath, "utf-8");
+            if (content.length > MAX_GUIDELINES_CHARS) {
+              content = content.slice(0, MAX_GUIDELINES_CHARS) + "\n... (truncated)";
+            }
+            projectGuidelines = `[PROJECT_GUIDELINES]\n${content}\n[/PROJECT_GUIDELINES]\n\n`;
+            console.log(`[Worker ${this.id}] Loaded project guidelines from ${filename} (${content.length} chars)`);
+            break;
+          }
+        } catch {
+          // Silently skip if file can't be read
+        }
+      }
+    }
+
     const preInstalledContext =
       `IMPORTANT — Pre-installed tools (do NOT install these, they are already available):\n` +
       `- Node.js (v22), npm, pnpm (via corepack)\n` +
@@ -216,7 +240,7 @@ export class Worker extends BaseAgent {
       ? `IMPORTANT: All files must be created/edited inside this directory: ${this.workspacePath}\n` +
         `Use absolute paths rooted at ${this.workspacePath} (e.g. ${this.workspacePath}/src/main.go).\n` +
         `Do NOT use /home/user, /app, or any other directory.\n\n` +
-        preInstalledContext + completionInstruction + `\n${task}`
+        projectGuidelines + preInstalledContext + completionInstruction + `\n${task}`
       : preInstalledContext + completionInstruction + `\n${task}`;
 
     // Mark worker as actively working on the graph
