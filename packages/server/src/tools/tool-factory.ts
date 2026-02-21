@@ -23,6 +23,14 @@ import { createCalendarCreateEventTool } from "./calendar-create-event.js";
 import { createCalendarUpdateEventTool } from "./calendar-update-event.js";
 import { createCalendarDeleteEventTool } from "./calendar-delete-event.js";
 import { createCalendarListCalendarsTool } from "./calendar-list-calendars.js";
+import {
+  createGitHubGetIssueTool,
+  createGitHubListIssuesTool,
+  createGitHubGetPRTool,
+  createGitHubListPRsTool,
+  createGitHubCommentTool,
+  createGitHubCreatePRTool,
+} from "./github.js";
 import { SkillService } from "../skills/skill-service.js";
 import { CustomToolService } from "./custom-tool-service.js";
 import { executeCustomTool } from "./custom-tool-executor.js";
@@ -38,6 +46,12 @@ const TOOL_REGISTRY: Record<string, ToolCreator> = {
   web_browse: createWebBrowseTool,
   install_package: createInstallPackageTool,
   opencode_task: createOpenCodeTaskTool,
+  github_get_issue: createGitHubGetIssueTool,
+  github_list_issues: createGitHubListIssuesTool,
+  github_get_pr: createGitHubGetPRTool,
+  github_list_prs: createGitHubListPRsTool,
+  github_comment: createGitHubCommentTool,
+  github_create_pr: createGitHubCreatePRTool,
 };
 
 /** Tools that don't require a workspace context (admin/personal tools) */
@@ -243,6 +257,56 @@ export function getToolsWithMeta(): {
       category: "Workspace",
       parameters: [
         { name: "task", type: "string", required: true, description: "Detailed description of the coding task" },
+      ],
+    },
+    github_get_issue: {
+      description: "Fetch a GitHub issue by number, including its comments.",
+      category: "GitHub",
+      parameters: [
+        { name: "issue_number", type: "number", required: true, description: "The issue number to fetch" },
+      ],
+    },
+    github_list_issues: {
+      description: "List GitHub issues for the project repository. Defaults to issues assigned to you.",
+      category: "GitHub",
+      parameters: [
+        { name: "state", type: "string", required: false, description: "Filter by state: open, closed, all (default: open)" },
+        { name: "labels", type: "string", required: false, description: "Comma-separated label names to filter by" },
+        { name: "assignee", type: "string", required: false, description: "Filter by assignee login (defaults to configured username)" },
+        { name: "per_page", type: "number", required: false, description: "Number of results (default: 30, max: 100)" },
+      ],
+    },
+    github_get_pr: {
+      description: "Fetch a GitHub pull request by number, including its comments.",
+      category: "GitHub",
+      parameters: [
+        { name: "pr_number", type: "number", required: true, description: "The pull request number to fetch" },
+      ],
+    },
+    github_list_prs: {
+      description: "List GitHub pull requests for the project repository.",
+      category: "GitHub",
+      parameters: [
+        { name: "state", type: "string", required: false, description: "Filter by state: open, closed, all (default: open)" },
+        { name: "per_page", type: "number", required: false, description: "Number of results (default: 30, max: 100)" },
+      ],
+    },
+    github_comment: {
+      description: "Post a comment on a GitHub issue or pull request.",
+      category: "GitHub",
+      parameters: [
+        { name: "issue_number", type: "number", required: true, description: "The issue or PR number to comment on" },
+        { name: "body", type: "string", required: true, description: "The comment text (Markdown supported)" },
+      ],
+    },
+    github_create_pr: {
+      description: "Create a new GitHub pull request.",
+      category: "GitHub",
+      parameters: [
+        { name: "title", type: "string", required: true, description: "PR title" },
+        { name: "head", type: "string", required: true, description: "The branch containing your changes" },
+        { name: "base", type: "string", required: false, description: "The branch to merge into (defaults to project branch)" },
+        { name: "body", type: "string", required: false, description: "PR description (Markdown supported)" },
       ],
     },
     todo_list: {

@@ -427,6 +427,33 @@ When browsing:
     },
   },
   {
+    id: "builtin-skill-github-tools",
+    data: {
+      meta: {
+        name: "GitHub Tools",
+        description:
+          "GitHub issue and PR management via the GitHub API.",
+        version: "1.0.0",
+        author: "otterbot",
+        tools: [
+          "github_get_issue",
+          "github_list_issues",
+          "github_get_pr",
+          "github_list_prs",
+          "github_comment",
+          "github_create_pr",
+        ],
+        capabilities: ["github", "issues", "pull-requests"],
+        parameters: {},
+        tags: ["built-in", "github"],
+      },
+      body: `You have access to GitHub tools for interacting with the project's repository.
+Use these tools instead of the web browser when working with GitHub issues and pull requests.
+IMPORTANT: You should only work on issues that are assigned to you. The list issues tool
+automatically filters to your assigned issues. Do not pick up unassigned issues.`,
+    },
+  },
+  {
     id: "builtin-skill-tool-building",
     data: {
       meta: {
@@ -485,17 +512,17 @@ When creating tools:
  */
 const ENTRY_SKILL_ASSIGNMENTS: Record<string, string[]> = {
   "builtin-coo": ["builtin-skill-coo-operations"],
-  "builtin-team-lead": ["builtin-skill-team-lead-operations"],
-  "builtin-coder": ["builtin-skill-coding-tools"],
+  "builtin-team-lead": ["builtin-skill-team-lead-operations", "builtin-skill-github-tools"],
+  "builtin-coder": ["builtin-skill-coding-tools", "builtin-skill-github-tools"],
   "builtin-researcher": ["builtin-skill-research-tools"],
   "builtin-reviewer": ["builtin-skill-review-tools"],
   "builtin-writer": ["builtin-skill-writing-tools"],
   "builtin-planner": ["builtin-skill-planning-tools"],
   "builtin-security-reviewer": ["builtin-skill-security-review-tools"],
   "builtin-tester": ["builtin-skill-testing-tools"],
-  "builtin-opencode-coder": ["builtin-skill-opencode-delegation"],
-  "builtin-claude-code-coder": ["builtin-skill-claude-code-delegation"],
-  "builtin-codex-coder": ["builtin-skill-codex-delegation"],
+  "builtin-opencode-coder": ["builtin-skill-opencode-delegation", "builtin-skill-github-tools"],
+  "builtin-claude-code-coder": ["builtin-skill-claude-code-delegation", "builtin-skill-github-tools"],
+  "builtin-codex-coder": ["builtin-skill-codex-delegation", "builtin-skill-github-tools"],
   "builtin-browser-agent": ["builtin-skill-browser-automation"],
   "builtin-tool-builder": ["builtin-skill-tool-building"],
 };
