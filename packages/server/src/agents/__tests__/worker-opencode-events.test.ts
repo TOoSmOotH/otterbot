@@ -17,13 +17,20 @@ vi.mock("../../auth/auth.js", () => ({
 let capturedOnEvent: ((event: { type: string; properties: Record<string, unknown> }) => void) | undefined;
 
 const mockExecuteTask = vi.fn();
-vi.mock("../../tools/opencode-client.js", () => ({
-  TASK_COMPLETE_SENTINEL: "◊◊TASK_COMPLETE_9f8e7d◊◊",
-  OpenCodeClient: vi.fn().mockImplementation((config: any) => {
-    capturedOnEvent = config.onEvent;
-    return { executeTask: mockExecuteTask };
-  }),
-}));
+
+vi.mock("../../tools/opencode-client.js", () => {
+  return {
+    TASK_COMPLETE_SENTINEL: "◊◊TASK_COMPLETE_9f8e7d◊◊",
+    OpenCodeClient: class {
+      constructor(config: any) {
+        if (typeof (globalThis as any).__captureOnEvent === "function") {
+          (globalThis as any).__captureOnEvent(config.onEvent);
+        }
+      }
+      executeTask = mockExecuteTask;
+    },
+  };
+});
 
 vi.mock("../../tools/opencode-task.js", async (importOriginal) => {
   const original = await importOriginal<typeof import("../../tools/opencode-task.js")>();
@@ -112,6 +119,9 @@ describe("Worker — onCodingAgentEvent callback", () => {
     bus = createMockBus();
     vi.clearAllMocks();
     capturedOnEvent = undefined;
+    (globalThis as any).__captureOnEvent = (cb: any) => {
+      capturedOnEvent = cb;
+    };
   });
 
   afterEach(() => {
@@ -119,10 +129,11 @@ describe("Worker — onCodingAgentEvent callback", () => {
     delete process.env.DATABASE_URL;
     delete process.env.OTTERBOT_DB_KEY;
     rmSync(tmpDir, { recursive: true, force: true });
+    delete (globalThis as any).__captureOnEvent;
   });
 
   function createWorker(onCodingAgentEvent?: any) {
-    return new Worker({
+    const worker = new Worker({
       bus,
       projectId: "proj-1",
       parentId: "parent-1",
@@ -134,6 +145,7 @@ describe("Worker — onCodingAgentEvent callback", () => {
       toolNames: [],
       onCodingAgentEvent,
     });
+    return worker;
   }
 
   it("emits __session-start before executeTask", async () => {
