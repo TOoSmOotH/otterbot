@@ -445,6 +445,9 @@ export class TeamLead extends BaseAgent {
     if (message.fromAgentId) {
       const worker = this.workers.get(message.fromAgentId);
       if (worker) {
+        if (this.projectId) {
+          this.workspace.cleanupAgentWorktree(this.projectId, message.fromAgentId);
+        }
         worker.destroy();
         this.workers.delete(message.fromAgentId);
         console.log(`[TeamLead ${this.id}] Cleaned up finished worker ${message.fromAgentId}`);
@@ -861,16 +864,6 @@ export class TeamLead extends BaseAgent {
         break;
       }
 
-      // If a coding worker is already running, don't continue just for coding tasks
-      // that would be refused anyway — this prevents the spam-retry loop
-      const hasCodingWorkerRunning = [...this.workers.values()].some(
-        (w) => CODING_AGENT_IDS.has(w.registryEntryId!),
-      );
-      if (hasCodingWorkerRunning && board.hasInProgress) {
-        console.log(`[TeamLead ${this.id}] Coding worker running with tasks in progress — waiting for reports.`);
-        break;
-      }
-
       const prompt =
         `[CONTINUATION] ${board.unblockedBacklogCount} unblocked task(s) remain in backlog:\n${board.summary}\n\n` +
         `Spawn workers for unblocked backlog tasks. Do NOT spawn workers for [BLOCKED] tasks — they will become available when their blockers complete. ` +
@@ -1186,26 +1179,12 @@ export class TeamLead extends BaseAgent {
       const entryTools = [...new Set(entrySkills.flatMap((s) => s.meta.tools as string[]))];
       const skillPromptContent = entrySkills.map((s) => s.body.trim()).filter(Boolean).join("\n\n");
 
-      // Enforce single-coding-worker rule: only one coding agent
-      // can run at a time to prevent file conflicts in the shared workspace
-      const isCodingWorker = CODING_AGENT_IDS.has(registryEntryId);
-      if (isCodingWorker) {
-        for (const [existingId, existingWorker] of this.workers) {
-          if (CODING_AGENT_IDS.has(existingWorker.registryEntryId!)) {
-            console.warn(
-              `[TeamLead ${this.id}] Refused to spawn coding worker — another coding worker (${existingId}) is already running. Use blockedBy to sequence coding tasks.`,
-            );
-            return `REFUSED: Another coding worker (${existingId}) is already running. Only one coding worker can run at a time to avoid file conflicts. STOP trying to spawn coding workers — you will be notified when the current one finishes. Do NOT call spawn_worker again until you receive a worker report.`;
-          }
-        }
-      }
-
       const workerId = nanoid();
       let workspacePath: string | null = null;
 
       if (this.projectId) {
-        // All workers with a project get the repo path
-        workspacePath = this.workspace.repoPath(this.projectId);
+        // Prepare a git worktree for the worker to avoid file conflicts
+        workspacePath = this.workspace.prepareAgentWorktree(this.projectId, workerId);
       }
 
       // Derive human-readable name from kanban task title or task description
@@ -1684,6 +1663,9 @@ export class TeamLead extends BaseAgent {
     }
 
     // Abort the worker (sends report, emits session-end, calls destroy)
+    if (this.projectId) {
+      this.workspace.cleanupAgentWorktree(this.projectId, workerId);
+    }
     worker.abort();
     this.workers.delete(workerId);
 
