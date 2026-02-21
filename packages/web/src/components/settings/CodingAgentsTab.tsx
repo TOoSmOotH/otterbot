@@ -186,7 +186,7 @@ function ClaudeCodeSection() {
   const handleSave = async () => {
     setSaving(true);
     const data: Record<string, unknown> = {
-      model: localModel,
+      ...(authMode === "api-key" ? { model: localModel } : {}),
       approvalMode: localApprovalMode,
       timeoutMs: parseInt(localTimeoutMs, 10) || 1200000,
       maxTurns: parseInt(localMaxTurns, 10) || 50,
@@ -221,7 +221,9 @@ function ClaudeCodeSection() {
           </p>
         )}
 
-        <InputField label="Model" value={localModel} onChange={setLocalModel} placeholder="claude-sonnet-4-5-20250929" />
+        {authMode === "api-key" && (
+          <InputField label="Model" value={localModel} onChange={setLocalModel} placeholder="claude-sonnet-4-5-20250929" />
+        )}
         <SelectField label="Approval Mode" value={localApprovalMode} onChange={(v) => setLocalApprovalMode(v as "full-auto" | "auto-edit")}
           options={[{ value: "full-auto", label: "Full Auto (YOLO)" }, { value: "auto-edit", label: "Auto Edit (ask for tool use)" }]} />
         <InputField label="Timeout (ms)" value={localTimeoutMs} onChange={setLocalTimeoutMs} placeholder="1200000" type="number" />
