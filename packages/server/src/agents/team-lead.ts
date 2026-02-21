@@ -504,7 +504,8 @@ export class TeamLead extends BaseAgent {
         instructions =
           `ALL tasks done and verification passed.\n` +
           `Report completion to the COO using report_to_coo — include what was built, verification results, and workspace path: ${repoPath}\n` +
-          `Do NOT deploy the application unless the COO explicitly instructs you to do so.`;
+          `Do NOT deploy the application unless the COO explicitly instructs you to do so.\n` +
+          `CRITICAL: Do NOT create new tasks, do NOT call create_task, do NOT call spawn_worker. The project is COMPLETE. Just report to COO and stop.`;
       }
     } else if (livingWorkers > 0 && !board.hasUnblockedBacklog && orphans.length === 0) {
       // Workers still running, nothing spawnable — evaluate the report and return.
@@ -637,6 +638,13 @@ export class TeamLead extends BaseAgent {
     // Relay significant updates to COO
     if (this.parentId && text.trim()) {
       this.sendMessage(this.parentId, MessageType.Report, text);
+    }
+
+    // Once all tasks are done and verification has been attempted, stop — do NOT
+    // auto-spawn any tasks the LLM may have rogue-created during the final think().
+    if (board.allDone && this.verificationRequested && orphans.length === 0) {
+      console.log(`[TeamLead ${this.id}] Project complete (allDone + verified) — stopping.`);
+      return;
     }
 
     // If the safety net force-moved a task after thinkWithContinuation already
