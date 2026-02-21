@@ -14,7 +14,7 @@ import { getConfiguredSearchProvider } from "../tools/search/providers.js";
 import { getConfiguredTTSProvider } from "../tts/tts.js";
 import { getConfiguredSTTProvider } from "../stt/stt.js";
 import { OpenCodeClient } from "../tools/opencode-client.js";
-import { startOpenCodeServer, stopOpenCodeServer } from "../opencode/opencode-manager.js";
+import { ensureOpenCodeConfig } from "../opencode/opencode-manager.js";
 import { getDb, schema } from "../db/index.js";
 import { eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
@@ -1036,15 +1036,9 @@ export async function updateOpenCodeSettings(data: {
   const configChanged =
     newModel !== oldModel || newProviderId !== oldProviderId || newInteractive !== oldInteractive;
 
-  // Manage OpenCode process lifecycle
-  if (!wasEnabled && isNowEnabled) {
-    startOpenCodeServer();
-  } else if (wasEnabled && !isNowEnabled) {
-    await stopOpenCodeServer();
-  } else if (isNowEnabled && configChanged) {
-    // Model, provider, or interactive mode changed — rewrite config and restart
-    await stopOpenCodeServer();
-    startOpenCodeServer();
+  // Rewrite OpenCode config file when settings change (PTY client reads it on spawn)
+  if (isNowEnabled && configChanged) {
+    ensureOpenCodeConfig();
   }
 }
 

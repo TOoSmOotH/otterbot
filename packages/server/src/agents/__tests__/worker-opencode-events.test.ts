@@ -13,32 +13,33 @@ vi.mock("../../auth/auth.js", () => ({
   deleteConfig: vi.fn(),
 }));
 
-// Capture the onEvent callback when OpenCodeClient is constructed
-let capturedOnEvent: ((event: { type: string; properties: Record<string, unknown> }) => void) | undefined;
-
-const mockExecuteTask = vi.fn();
-
-vi.mock("../../tools/opencode-client.js", () => {
+// Mock opencode-pty-client (dynamic import target)
+const mockOpenCodePtyExecuteTask = vi.fn();
+vi.mock("../../coding-agents/opencode-pty-client.js", () => {
   return {
-    TASK_COMPLETE_SENTINEL: "◊◊TASK_COMPLETE_9f8e7d◊◊",
-    OpenCodeClient: class {
-      constructor(config: any) {
-        if (typeof (globalThis as any).__captureOnEvent === "function") {
-          (globalThis as any).__captureOnEvent(config.onEvent);
-        }
-      }
-      executeTask = mockExecuteTask;
+    OpenCodePtyClient: class {
+      executeTask = mockOpenCodePtyExecuteTask;
+      writeInput = vi.fn();
+      resize = vi.fn();
+      kill = vi.fn();
+      gracefulExit = vi.fn();
+      getReplayBuffer = vi.fn(() => "");
     },
   };
 });
 
-vi.mock("../../tools/opencode-task.js", async (importOriginal) => {
-  const original = await importOriginal<typeof import("../../tools/opencode-task.js")>();
+// Mock opencode-manager
+vi.mock("../../opencode/opencode-manager.js", () => ({
+  ensureOpenCodeConfig: vi.fn(),
+  writeOpenCodeConfig: vi.fn(),
+}));
+
+// Mock settings (getProviderRow)
+vi.mock("../../settings/settings.js", async (importOriginal) => {
+  const original = await importOriginal<typeof import("../../settings/settings.js")>();
   return {
     ...original,
-    formatOpenCodeResult: vi.fn((result: any) =>
-      result.success ? `Done: ${result.summary}` : `Failed: ${result.summary}`,
-    ),
+    getProviderRow: vi.fn(() => ({ apiKey: "test-key", type: "anthropic", baseUrl: null })),
   };
 });
 
@@ -106,7 +107,7 @@ function createMockBus(): MessageBus {
   } as unknown as MessageBus;
 }
 
-describe("Worker — onCodingAgentEvent callback", () => {
+describe("Worker — OpenCode PTY onCodingAgentEvent callback", () => {
   let tmpDir: string;
   let bus: MessageBus;
 
@@ -118,10 +119,6 @@ describe("Worker — onCodingAgentEvent callback", () => {
     await migrateDb();
     bus = createMockBus();
     vi.clearAllMocks();
-    capturedOnEvent = undefined;
-    (globalThis as any).__captureOnEvent = (cb: any) => {
-      capturedOnEvent = cb;
-    };
   });
 
   afterEach(() => {
@@ -129,7 +126,6 @@ describe("Worker — onCodingAgentEvent callback", () => {
     delete process.env.DATABASE_URL;
     delete process.env.OTTERBOT_DB_KEY;
     rmSync(tmpDir, { recursive: true, force: true });
-    delete (globalThis as any).__captureOnEvent;
   });
 
   function createWorker(onCodingAgentEvent?: any) {
@@ -150,7 +146,8 @@ describe("Worker — onCodingAgentEvent callback", () => {
 
   it("emits __session-start before executeTask", async () => {
     mockedGetConfig.mockImplementation((key: string) => {
-      if (key === "opencode:api_url") return "http://localhost:3333";
+      if (key === "opencode:provider_id") return "provider-1";
+      if (key === "opencode:model") return "some-model";
       return undefined;
     });
 
@@ -159,11 +156,12 @@ describe("Worker — onCodingAgentEvent callback", () => {
       events.push({ agentId, sessionId, event });
     });
 
-    mockExecuteTask.mockResolvedValue({
+    mockOpenCodePtyExecuteTask.mockResolvedValue({
       success: true,
-      sessionId: "sess-1",
-      summary: "Done",
+      sessionId: "opencode-pty-1",
+      summary: "Task completed.",
       diff: null,
+      usage: null,
     });
 
     const worker = createWorker(onCodingAgentEvent);
@@ -174,12 +172,14 @@ describe("Worker — onCodingAgentEvent callback", () => {
     expect(events[0].event.type).toBe("__session-start");
     expect(events[0].event.properties.task).toBe("Build it");
     expect(events[0].event.properties.projectId).toBe("proj-1");
+    expect(events[0].event.properties.agentType).toBe("opencode");
     expect(events[0].agentId).toBe(worker.id);
   });
 
   it("emits __session-end after executeTask completes successfully", async () => {
     mockedGetConfig.mockImplementation((key: string) => {
-      if (key === "opencode:api_url") return "http://localhost:3333";
+      if (key === "opencode:provider_id") return "provider-1";
+      if (key === "opencode:model") return "some-model";
       return undefined;
     });
 
@@ -188,11 +188,12 @@ describe("Worker — onCodingAgentEvent callback", () => {
       events.push({ agentId, sessionId, event });
     });
 
-    mockExecuteTask.mockResolvedValue({
+    mockOpenCodePtyExecuteTask.mockResolvedValue({
       success: true,
-      sessionId: "sess-1",
-      summary: "Done",
+      sessionId: "opencode-pty-1",
+      summary: "Task completed.",
       diff: { files: [{ path: "src/x.ts", additions: 5, deletions: 0 }] },
+      usage: null,
     });
 
     const worker = createWorker(onCodingAgentEvent);
@@ -201,7 +202,7 @@ describe("Worker — onCodingAgentEvent callback", () => {
     // Last event should be __session-end
     const lastEvent = events[events.length - 1];
     expect(lastEvent.event.type).toBe("__session-end");
-    expect(lastEvent.sessionId).toBe("sess-1");
+    expect(lastEvent.sessionId).toBe("opencode-pty-1");
     expect(lastEvent.event.properties.status).toBe("completed");
     expect(lastEvent.event.properties.diff).toEqual([
       { path: "src/x.ts", additions: 5, deletions: 0 },
@@ -210,7 +211,8 @@ describe("Worker — onCodingAgentEvent callback", () => {
 
   it("emits __session-end with error status on failure", async () => {
     mockedGetConfig.mockImplementation((key: string) => {
-      if (key === "opencode:api_url") return "http://localhost:3333";
+      if (key === "opencode:provider_id") return "provider-1";
+      if (key === "opencode:model") return "some-model";
       return undefined;
     });
 
@@ -219,12 +221,13 @@ describe("Worker — onCodingAgentEvent callback", () => {
       events.push({ agentId, sessionId, event });
     });
 
-    mockExecuteTask.mockResolvedValue({
+    mockOpenCodePtyExecuteTask.mockResolvedValue({
       success: false,
-      sessionId: "sess-2",
-      summary: "Build failed",
+      sessionId: "opencode-pty-2",
+      summary: "Process exited with code 1",
       diff: null,
-      error: "compilation_error",
+      usage: null,
+      error: "exit_code_1",
     });
 
     const worker = createWorker(onCodingAgentEvent);
@@ -235,82 +238,19 @@ describe("Worker — onCodingAgentEvent callback", () => {
     expect(lastEvent.event.properties.status).toBe("error");
   });
 
-  it("passes onEvent callback to OpenCodeClient constructor", async () => {
-    mockedGetConfig.mockImplementation((key: string) => {
-      if (key === "opencode:api_url") return "http://localhost:3333";
-      return undefined;
-    });
-
-    const onCodingAgentEvent = vi.fn();
-
-    mockExecuteTask.mockResolvedValue({
-      success: true,
-      sessionId: "sess-1",
-      summary: "Done",
-      diff: null,
-    });
-
-    const worker = createWorker(onCodingAgentEvent);
-    await worker.handleMessage(makeDirective(worker.id, "Build it"));
-
-    // The captured onEvent should be a function
-    expect(capturedOnEvent).toBeInstanceOf(Function);
-  });
-
-  it("forwards SSE events through the callback chain", async () => {
-    mockedGetConfig.mockImplementation((key: string) => {
-      if (key === "opencode:api_url") return "http://localhost:3333";
-      return undefined;
-    });
-
-    const events: Array<{ agentId: string; sessionId: string; event: any }> = [];
-    const onCodingAgentEvent = vi.fn((agentId: string, sessionId: string, event: any) => {
-      events.push({ agentId, sessionId, event });
-    });
-
-    // Simulate executeTask calling the onEvent callback during execution
-    mockExecuteTask.mockImplementation(async () => {
-      // Simulate SSE events being fired during task execution
-      if (capturedOnEvent) {
-        capturedOnEvent({
-          type: "message.part.updated",
-          properties: { sessionID: "sess-1", delta: "Hello", partID: "p1", messageID: "m1", type: "text" },
-        });
-        capturedOnEvent({
-          type: "session.status",
-          properties: { sessionID: "sess-1", status: "active" },
-        });
-      }
-      return {
-        success: true,
-        sessionId: "sess-1",
-        summary: "Done",
-        diff: null,
-      };
-    });
-
-    const worker = createWorker(onCodingAgentEvent);
-    await worker.handleMessage(makeDirective(worker.id, "Build it"));
-
-    // Should have: __session-start, 2 SSE events forwarded, __session-end
-    expect(events.length).toBe(4);
-
-    // SSE events (in the middle)
-    expect(events[1].event.type).toBe("message.part.updated");
-    expect(events[2].event.type).toBe("session.status");
-  });
-
   it("does not emit events when onCodingAgentEvent is not provided", async () => {
     mockedGetConfig.mockImplementation((key: string) => {
-      if (key === "opencode:api_url") return "http://localhost:3333";
+      if (key === "opencode:provider_id") return "provider-1";
+      if (key === "opencode:model") return "some-model";
       return undefined;
     });
 
-    mockExecuteTask.mockResolvedValue({
+    mockOpenCodePtyExecuteTask.mockResolvedValue({
       success: true,
-      sessionId: "sess-1",
-      summary: "Done",
+      sessionId: "opencode-pty-1",
+      summary: "Task completed.",
       diff: null,
+      usage: null,
     });
 
     // Create worker without onCodingAgentEvent

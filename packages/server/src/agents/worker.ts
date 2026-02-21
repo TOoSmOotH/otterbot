@@ -1,6 +1,4 @@
 import { nanoid } from "nanoid";
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
 import {
   type GearConfig,
   AgentRole,
@@ -14,7 +12,6 @@ import { createTools } from "../tools/tool-factory.js";
 import { debug } from "../utils/debug.js";
 import { getConfig } from "../auth/auth.js";
 import { getDb, schema } from "../db/index.js";
-import { TASK_COMPLETE_SENTINEL } from "../tools/opencode-client.js";
 
 /** Strip ANSI escape codes from terminal output for LLM analysis */
 function stripAnsi(str: string): string {
@@ -44,11 +41,20 @@ export interface WorkerDependencies {
   onCodingAgentEvent?: (agentId: string, sessionId: string, event: { type: string; properties: Record<string, unknown> }) => void;
   onCodingAgentAwaitingInput?: (agentId: string, sessionId: string, prompt: string) => Promise<string | null>;
   onCodingAgentPermissionRequest?: (agentId: string, sessionId: string, permission: { id: string; type: string; title: string; pattern?: string | string[]; metadata: Record<string, unknown> }) => Promise<"once" | "always" | "reject">;
-  /** Callback for raw terminal data from PTY sessions (Claude Code) */
+  /** Callback for raw terminal data from PTY sessions */
   onTerminalData?: (agentId: string, data: string) => void;
   /** Called when a PTY session is registered/unregistered for socket routing */
-  onPtySessionRegistered?: (agentId: string, client: import("../coding-agents/claude-code-pty-client.js").ClaudeCodePtyClient) => void;
+  onPtySessionRegistered?: (agentId: string, client: PtyClient) => void;
   onPtySessionUnregistered?: (agentId: string) => void;
+}
+
+/** Common interface for PTY clients (ClaudeCodePtyClient, OpenCodePtyClient) */
+export interface PtyClient {
+  writeInput(data: string): void;
+  resize(cols: number, rows: number): void;
+  getReplayBuffer(): string;
+  kill(): void;
+  gracefulExit(): void;
 }
 
 /** Set of registry entry IDs that are coding agents */
@@ -66,17 +72,15 @@ export class Worker extends BaseAgent {
   private _onCodingAgentAwaitingInput?: (agentId: string, sessionId: string, prompt: string) => Promise<string | null>;
   private _onCodingAgentPermissionRequest?: (agentId: string, sessionId: string, permission: { id: string; type: string; title: string; pattern?: string | string[]; metadata: Record<string, unknown> }) => Promise<"once" | "always" | "reject">;
   private _onTerminalData?: (agentId: string, data: string) => void;
-  private _onPtySessionRegistered?: (agentId: string, client: import("../coding-agents/claude-code-pty-client.js").ClaudeCodePtyClient) => void;
+  private _onPtySessionRegistered?: (agentId: string, client: PtyClient) => void;
   private _onPtySessionUnregistered?: (agentId: string) => void;
 
   /** Abort controller for the current task — used by abort() to cancel running work */
   private _taskAbortController: AbortController | null = null;
   /** Reference to the Claude Code AbortController (stored in executeExternalCodingAgent) */
   private _codingAgentAbortController: AbortController | null = null;
-  /** Reference to the OpenCode client (for abort) */
-  private _openCodeClient: { abort: (sessionId: string) => Promise<void>; sessionId?: string } | null = null;
   /** Reference to the PTY client (for abort/input routing) */
-  private _ptyClient: import("../coding-agents/claude-code-pty-client.js").ClaudeCodePtyClient | null = null;
+  private _ptyClient: PtyClient | null = null;
   /** Guard against re-entrant terminal analysis */
   private _analyzingTerminal = false;
   /** Set to true after sending /exit to prevent repeated analysis */
@@ -195,83 +199,57 @@ export class Worker extends BaseAgent {
     }
   }
 
-  private async executeOpenCodeTask(task: string): Promise<string> {
-    const apiUrl = getConfig("opencode:api_url");
-    if (!apiUrl) {
-      console.warn(`[Worker ${this.id}] OpenCode not configured (no api_url), falling back to think()`);
+  /**
+   * Execute a task using OpenCode via PTY (terminal passthrough).
+   * Spawns the `opencode run` CLI in a pseudo-terminal and streams raw output.
+   */
+  private async executeOpenCodePtyTask(task: string): Promise<string> {
+    // Bail out early if no provider is configured
+    const providerId = getConfig("opencode:provider_id");
+    const model = getConfig("opencode:model");
+    if (!providerId && !model) {
+      console.warn(`[Worker ${this.id}] OpenCode not configured (no provider/model), falling back to think()`);
       return "";
     }
 
-    // Dynamic imports to avoid loading @opencode-ai/sdk at module init
-    // (the SDK uses CommonJS require() which fails in ESM context at top-level)
-    const { OpenCodeClient } = await import("../tools/opencode-client.js");
+    const { OpenCodePtyClient } = await import("../coding-agents/opencode-pty-client.js");
 
-    const username = getConfig("opencode:username") ?? undefined;
-    const password = getConfig("opencode:password") ?? undefined;
-    const timeoutMs = parseInt(getConfig("opencode:timeout_ms") ?? "1200000", 10);
-    const maxIterations = parseInt(getConfig("opencode:max_iterations") ?? "50", 10);
+    // Terminal output buffer and idle detection for monitoring
+    let terminalBuffer = "";
+    let idleTimer: NodeJS.Timeout | null = null;
+    const IDLE_TIMEOUT_MS = 10000; // 10 seconds of no output = agent is waiting
+    const MAX_BUFFER_CHARS = 8000;    // Keep last ~8KB for LLM analysis
 
-    let currentSessionId = "";
-    const client = new OpenCodeClient({
-      apiUrl,
-      username,
-      password,
-      timeoutMs,
-      maxIterations,
-      onEvent: (event) => {
-        // Extract session ID from event properties if we don't have it yet
-        const eventSessionId = event.properties?.sessionID as string | undefined;
-        if (eventSessionId && !currentSessionId) {
-          currentSessionId = eventSessionId;
+    const ptyClient = new OpenCodePtyClient({
+      workspacePath: this.workspacePath,
+      onData: (data) => {
+        this._onTerminalData?.(this.id, data);
+
+        // Accumulate output for monitoring
+        terminalBuffer += data;
+        if (terminalBuffer.length > MAX_BUFFER_CHARS) {
+          terminalBuffer = terminalBuffer.slice(-MAX_BUFFER_CHARS);
         }
-        const sid = currentSessionId || eventSessionId || "";
-        this._onCodingAgentEvent?.(this.id, sid, event);
+
+        // Reset idle timer on each chunk
+        if (idleTimer) clearTimeout(idleTimer);
+        idleTimer = setTimeout(() => this.analyzeTerminalState(terminalBuffer, ptyClient), IDLE_TIMEOUT_MS);
+      },
+      onExit: () => {
+        // Clear idle timer to avoid dangling analysis after exit
+        if (idleTimer) {
+          clearTimeout(idleTimer);
+          idleTimer = null;
+        }
       },
     });
 
-    // Read project guidelines (AGENTS.md or CLAUDE.md) from the workspace
-    let projectGuidelines = "";
-    if (this.workspacePath) {
-      const MAX_GUIDELINES_CHARS = 4000;
-      for (const filename of ["AGENTS.md", "CLAUDE.md"]) {
-        const filepath = join(this.workspacePath, filename);
-        try {
-          if (existsSync(filepath)) {
-            let content = readFileSync(filepath, "utf-8");
-            if (content.length > MAX_GUIDELINES_CHARS) {
-              content = content.slice(0, MAX_GUIDELINES_CHARS) + "\n... (truncated)";
-            }
-            projectGuidelines = `[PROJECT_GUIDELINES]\n${content}\n[/PROJECT_GUIDELINES]\n\n`;
-            console.log(`[Worker ${this.id}] Loaded project guidelines from ${filename} (${content.length} chars)`);
-            break;
-          }
-        } catch {
-          // Silently skip if file can't be read
-        }
-      }
-    }
+    this._ptyClient = ptyClient;
+    this._terminalExiting = false;
 
-    const preInstalledContext =
-      `IMPORTANT — Pre-installed tools (do NOT install these, they are already available):\n` +
-      `- Node.js (v22), npm, pnpm (via corepack)\n` +
-      `- Playwright with Chromium — already installed globally, do NOT run \`npx playwright install\` or install browsers\n` +
-      `- Puppeteer — already installed globally with shared Chromium (PUPPETEER_EXECUTABLE_PATH is set), do NOT reinstall. Just \`import puppeteer from 'puppeteer'\`.\n` +
-      `- Go, Rust, Python 3, Java, Ruby, git, gh (GitHub CLI), SQLite 3, build-essential\n`;
+    // Register PTY session for socket routing
+    this._onPtySessionRegistered?.(this.id, ptyClient);
 
-    const completionInstruction =
-      `\nIMPORTANT — Completion signal: When you have fully completed ALL tasks and have no more work to do, ` +
-      `you MUST output the following exact string on its own line as the very last thing you write:\n` +
-      `${TASK_COMPLETE_SENTINEL}\n` +
-      `This signals to the system that your work is finished. Do not output this string until everything is done.\n`;
-
-    const taskWithContext = this.workspacePath
-      ? `IMPORTANT: All files must be created/edited inside this directory: ${this.workspacePath}\n` +
-        `Use absolute paths rooted at ${this.workspacePath} (e.g. ${this.workspacePath}/src/main.go).\n` +
-        `Do NOT use /home/user, /app, or any other directory.\n\n` +
-        projectGuidelines + preInstalledContext + completionInstruction + `\n${task}`
-      : preInstalledContext + completionInstruction + `\n${task}`;
-
-    // Mark worker as actively working on the graph
     this.setStatus(AgentStatus.Acting);
 
     // Emit session-start event
@@ -280,66 +258,14 @@ export class Worker extends BaseAgent {
       properties: { task, projectId: this.projectId ?? "", agentType: "opencode" },
     });
 
-    const interactiveMode = getConfig("opencode:interactive") === "true";
+    console.log(`[Worker ${this.id}] Sending task to OpenCode PTY (${task.length} chars)...`);
 
-    // Only wire up getHumanResponse when interactive mode is on.
-    // In YOLO mode, OpenCode runs single-turn (no follow-up prompts).
-    const getHumanResponse = interactiveMode && this._onCodingAgentAwaitingInput
-      ? async (sessionId: string, assistantText: string) => {
-          this.setStatus(AgentStatus.AwaitingInput);
-          // Emit awaiting-input event so the frontend shows the prompt
-          this._onCodingAgentEvent?.(this.id, sessionId, {
-            type: "__awaiting-input",
-            properties: { prompt: assistantText },
-          });
-          const response = await this._onCodingAgentAwaitingInput!(this.id, sessionId, assistantText);
-          this.setStatus(AgentStatus.Acting);
-          return response;
-        }
-      : undefined;
+    const result = await ptyClient.executeTask(task);
+    console.log(`[Worker ${this.id}] OpenCode PTY result: success=${result.success}, diff=${result.diff?.files?.length ?? 0} files`);
 
-    // Only wire up permission request callback when interactive mode is on.
-    // In YOLO mode, permissions auto-approve via the default "always" in opencode-client.
-    const onPermissionRequest = interactiveMode && this._onCodingAgentPermissionRequest
-      ? async (sid: string, permission: { id: string; type: string; title: string; pattern?: string | string[]; metadata: Record<string, unknown> }) => {
-          this.setStatus(AgentStatus.AwaitingInput);
-          // Emit permission-request event so the frontend shows the prompt
-          this._onCodingAgentEvent?.(this.id, sid, {
-            type: "__permission-request",
-            properties: { permission },
-          });
-          const response = await this._onCodingAgentPermissionRequest!(this.id, sid, permission);
-          this.setStatus(AgentStatus.Acting);
-          return response;
-        }
-      : undefined;
-
-    console.log(`[Worker ${this.id}] Sending task directly to OpenCode (${taskWithContext.length} chars)...`);
-    const result = await client.executeTask(taskWithContext, getHumanResponse, onPermissionRequest);
-    console.log(`[Worker ${this.id}] OpenCode result: success=${result.success}, sessionId=${result.sessionId}, diff=${result.diff?.files?.length ?? 0} files`);
-
-    // Persist token usage from OpenCode
-    if (result.usage) {
-      try {
-        const db = getDb();
-        db.insert(schema.tokenUsage)
-          .values({
-            id: nanoid(),
-            agentId: this.id,
-            provider: result.usage.provider,
-            model: result.usage.model,
-            inputTokens: result.usage.inputTokens,
-            outputTokens: result.usage.outputTokens,
-            cost: result.usage.cost,
-            projectId: this.projectId,
-            timestamp: new Date().toISOString(),
-          })
-          .run();
-        console.log(`[Worker ${this.id}] OpenCode token usage persisted: ${result.usage.inputTokens} in / ${result.usage.outputTokens} out, cost=${result.usage.cost} microcents`);
-      } catch (err) {
-        console.error(`[Worker ${this.id}] Failed to persist OpenCode token usage:`, err);
-      }
-    }
+    // Unregister PTY session
+    this._onPtySessionUnregistered?.(this.id);
+    this._ptyClient = null;
 
     // Emit session-end event
     this._onCodingAgentEvent?.(this.id, result.sessionId, {
@@ -351,8 +277,9 @@ export class Worker extends BaseAgent {
       },
     });
 
-    const { formatOpenCodeResult } = await import("../tools/opencode-task.js");
-    return formatOpenCodeResult(result);
+    return result.success
+      ? `OpenCode completed successfully.\n\nSummary: ${result.summary}\n\nFiles changed: ${result.diff?.files?.length ?? 0}`
+      : `OpenCode failed: ${result.error ?? "Unknown error"}\n\n${result.summary}`;
   }
 
   private async executeCodingAgentTask(task: string): Promise<string> {
@@ -360,7 +287,7 @@ export class Worker extends BaseAgent {
 
     switch (agentType) {
       case "opencode":
-        return this.executeOpenCodeTask(task);
+        return this.executeOpenCodePtyTask(task);
       case "claude-code": {
         return this.executeClaudeCodePtyTask(task);
       }
@@ -462,7 +389,7 @@ export class Worker extends BaseAgent {
    */
   private async analyzeTerminalState(
     terminalOutput: string,
-    ptyClient: import("../coding-agents/claude-code-pty-client.js").ClaudeCodePtyClient,
+    ptyClient: PtyClient,
   ): Promise<void> {
     if (this._analyzingTerminal || this._terminalExiting) return;
     this._analyzingTerminal = true;
@@ -543,7 +470,7 @@ ${cleanOutput.slice(-2000)}`,
   /** Handle permission prompts from Claude Code */
   private async handleTerminalPermission(
     description: string,
-    ptyClient: import("../coding-agents/claude-code-pty-client.js").ClaudeCodePtyClient,
+    ptyClient: PtyClient,
   ): Promise<void> {
     const approvalMode = getConfig("claude-code:approval_mode") ?? "full-auto";
 
@@ -580,7 +507,7 @@ ${cleanOutput.slice(-2000)}`,
   /** Handle general input prompts from Claude Code */
   private async handleTerminalInput(
     question: string,
-    ptyClient: import("../coding-agents/claude-code-pty-client.js").ClaudeCodePtyClient,
+    ptyClient: PtyClient,
   ): Promise<void> {
     if (this._onCodingAgentAwaitingInput) {
       this.setStatus(AgentStatus.AwaitingInput);
@@ -601,7 +528,7 @@ ${cleanOutput.slice(-2000)}`,
   /** Handle task completion — terminate the PTY process gracefully */
   private handleTerminalComplete(
     summary: string,
-    ptyClient: import("../coding-agents/claude-code-pty-client.js").ClaudeCodePtyClient,
+    ptyClient: PtyClient,
   ): void {
     if (this._terminalExiting) return;
     this._terminalExiting = true;

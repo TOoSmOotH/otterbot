@@ -181,7 +181,7 @@ export interface TeamLeadDependencies {
   onCodingAgentAwaitingInput?: (agentId: string, sessionId: string, prompt: string) => Promise<string | null>;
   onCodingAgentPermissionRequest?: (agentId: string, sessionId: string, permission: { id: string; type: string; title: string; pattern?: string | string[]; metadata: Record<string, unknown> }) => Promise<"once" | "always" | "reject">;
   onTerminalData?: (agentId: string, data: string) => void;
-  onPtySessionRegistered?: (agentId: string, client: import("../coding-agents/claude-code-pty-client.js").ClaudeCodePtyClient) => void;
+  onPtySessionRegistered?: (agentId: string, client: import("./worker.js").PtyClient) => void;
   onPtySessionUnregistered?: (agentId: string) => void;
 }
 
@@ -204,7 +204,7 @@ export class TeamLead extends BaseAgent {
   private _onCodingAgentAwaitingInput?: (agentId: string, sessionId: string, prompt: string) => Promise<string | null>;
   private _onCodingAgentPermissionRequest?: (agentId: string, sessionId: string, permission: { id: string; type: string; title: string; pattern?: string | string[]; metadata: Record<string, unknown> }) => Promise<"once" | "always" | "reject">;
   private _onTerminalData?: (agentId: string, data: string) => void;
-  private _onPtySessionRegistered?: (agentId: string, client: import("../coding-agents/claude-code-pty-client.js").ClaudeCodePtyClient) => void;
+  private _onPtySessionRegistered?: (agentId: string, client: import("./worker.js").PtyClient) => void;
   private _onPtySessionUnregistered?: (agentId: string) => void;
 
   constructor(deps: TeamLeadDependencies) {

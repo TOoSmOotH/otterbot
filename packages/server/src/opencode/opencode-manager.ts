@@ -1,20 +1,16 @@
 /**
- * OpenCode process manager — writes config and manages the `opencode serve` child process.
+ * OpenCode config manager — writes the `opencode.json` config file
+ * that `opencode run` reads at startup.
  *
- * Two modes:
- *  - **Managed mode**: We write the config file and spawn/manage the process.
- *    Indicated by `opencode:api_url` pointing to 127.0.0.1 (local).
- *  - **External mode**: The user runs `opencode serve` themselves (remote URL).
- *    We don't touch the process.
+ * The PTY client calls `ensureOpenCodeConfig()` before spawning to make
+ * sure the config reflects the current provider/model/permission settings.
  */
 
-import { spawn, type ChildProcess } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { getConfig, setConfig } from "../auth/auth.js";
+import { getConfig } from "../auth/auth.js";
 import { getProviderRow } from "../settings/settings.js";
-import { nanoid } from "nanoid";
 
 // ---------------------------------------------------------------------------
 // Provider type mapping: Otterbot provider type -> OpenCode provider ID
@@ -85,10 +81,6 @@ export function writeOpenCodeConfig(opts: OpenCodeConfigOptions): void {
     model: `${openCodeProvider}/${opts.model}`,
     // When interactive mode is on, require permission for tool use; otherwise auto-approve
     permission: opts.interactive ? "ask" : "allow",
-    server: {
-      port: 4096,
-      hostname: "127.0.0.1",
-    },
   };
 
   writeFileSync(
@@ -101,21 +93,15 @@ export function writeOpenCodeConfig(opts: OpenCodeConfigOptions): void {
 }
 
 // ---------------------------------------------------------------------------
-// Process manager
+// Provider resolution
 // ---------------------------------------------------------------------------
 
-let openCodeProcess: ChildProcess | null = null;
-let restartTimer: ReturnType<typeof setTimeout> | null = null;
-let restartAttempts = 0;
-const MAX_RESTART_ATTEMPTS = 5;
-const BASE_BACKOFF_MS = 2000;
-
 /**
- * Resolve the API key for OpenCode. Tries:
+ * Resolve the provider info for OpenCode. Tries:
  *  1. Explicit `opencode:provider_id` (set by wizard)
  *  2. Fallback to COO provider (for pre-wizard setups)
  */
-function resolveProviderInfo(): {
+export function resolveProviderInfo(): {
   apiKey: string | undefined;
   providerType: string | undefined;
   baseUrl: string | undefined;
@@ -149,33 +135,16 @@ function resolveProviderInfo(): {
   return { apiKey: undefined, providerType: undefined, baseUrl: undefined };
 }
 
-/** Check if we should manage the OpenCode process (local URL) vs external mode */
-function isManagedMode(): boolean {
-  const apiUrl = getConfig("opencode:api_url") ?? "";
-  // Managed if URL points to localhost/127.0.0.1 or isn't set yet (we'll set it)
-  return !apiUrl || apiUrl.includes("127.0.0.1") || apiUrl.includes("localhost");
-}
+// ---------------------------------------------------------------------------
+// Config ensurer (called by PTY client before each spawn)
+// ---------------------------------------------------------------------------
 
 /**
- * Ensure the OpenCode config file and auth credentials exist.
- * Auto-generates them from stored settings or COO provider if missing.
+ * Ensure the OpenCode config file is up-to-date.
+ * Reads current settings and writes `~/.config/opencode/opencode.json`.
+ * Returns true if config was successfully written.
  */
-function ensureConfigAndCredentials(): boolean {
-  // Ensure auth credentials exist
-  if (!getConfig("opencode:username")) {
-    const username = nanoid(32);
-    const password = nanoid(32);
-    setConfig("opencode:username", username);
-    setConfig("opencode:password", password);
-    console.log("[OpenCode] Auto-generated auth credentials.");
-  }
-
-  // Ensure api_url is set
-  if (!getConfig("opencode:api_url")) {
-    setConfig("opencode:api_url", "http://127.0.0.1:4096");
-  }
-
-  // Always (re)write config file to pick up provider/model changes and fixes
+export function ensureOpenCodeConfig(): boolean {
   const model = getConfig("opencode:model") ?? getConfig("coo_model");
   if (!model) {
     console.warn("[OpenCode] No model configured — cannot write config file.");
@@ -195,142 +164,4 @@ function ensureConfigAndCredentials(): boolean {
   });
 
   return true;
-}
-
-export function startOpenCodeServer(): void {
-  if (getConfig("opencode:enabled") !== "true") {
-    console.log("[OpenCode] Not enabled — skipping server start.");
-    return;
-  }
-
-  if (!isManagedMode()) {
-    console.log("[OpenCode] External mode (remote URL) — not managing process.");
-    return;
-  }
-
-  if (openCodeProcess && !openCodeProcess.killed) {
-    console.log("[OpenCode] Server already running (pid=%d).", openCodeProcess.pid);
-    return;
-  }
-
-  // Ensure config file and credentials exist before spawning
-  if (!ensureConfigAndCredentials()) {
-    console.error("[OpenCode] Cannot start — missing config. Configure via Settings or re-run setup wizard.");
-    return;
-  }
-
-  const username = getConfig("opencode:username") ?? "";
-  const password = getConfig("opencode:password") ?? "";
-  const { apiKey } = resolveProviderInfo();
-
-  const ghToken = getConfig("github:token");
-  const env: Record<string, string> = {
-    ...process.env as Record<string, string>,
-    OPENCODE_SERVER_USERNAME: username,
-    OPENCODE_SERVER_PASSWORD: password,
-    OPENCODE_PROVIDER_API_KEY: apiKey ?? "",
-    ...(ghToken ? { GH_TOKEN: ghToken, GITHUB_TOKEN: ghToken } : {}),
-  };
-
-  console.log("[OpenCode] Starting `opencode serve`...");
-
-  const child = spawn("opencode", ["serve"], {
-    env,
-    stdio: ["ignore", "pipe", "pipe"],
-    detached: false,
-  });
-
-  openCodeProcess = child;
-  restartAttempts = 0;
-
-  child.stdout?.on("data", (chunk: Buffer) => {
-    const line = chunk.toString().trim();
-    if (line) console.log(`[OpenCode stdout] ${line}`);
-  });
-
-  child.stderr?.on("data", (chunk: Buffer) => {
-    const line = chunk.toString().trim();
-    if (line) console.error(`[OpenCode stderr] ${line}`);
-  });
-
-  child.on("exit", (code, signal) => {
-    console.warn(`[OpenCode] Process exited (code=${code}, signal=${signal}).`);
-    openCodeProcess = null;
-
-    // Auto-restart with backoff if it wasn't intentionally stopped
-    if (getConfig("opencode:enabled") === "true" && !signal) {
-      scheduleRestart();
-    }
-  });
-
-  child.on("error", (err) => {
-    console.error("[OpenCode] Failed to spawn process:", err.message);
-    openCodeProcess = null;
-  });
-}
-
-function scheduleRestart(): void {
-  if (restartAttempts >= MAX_RESTART_ATTEMPTS) {
-    console.error(
-      `[OpenCode] Reached max restart attempts (${MAX_RESTART_ATTEMPTS}). Giving up.`,
-    );
-    return;
-  }
-
-  restartAttempts++;
-  const delay = BASE_BACKOFF_MS * Math.pow(2, restartAttempts - 1);
-  console.log(
-    `[OpenCode] Scheduling restart attempt ${restartAttempts}/${MAX_RESTART_ATTEMPTS} in ${delay}ms...`,
-  );
-
-  restartTimer = setTimeout(() => {
-    restartTimer = null;
-    startOpenCodeServer();
-  }, delay);
-}
-
-export function stopOpenCodeServer(): Promise<void> {
-  if (restartTimer) {
-    clearTimeout(restartTimer);
-    restartTimer = null;
-  }
-
-  if (!openCodeProcess) {
-    return Promise.resolve();
-  }
-
-  const proc = openCodeProcess;
-  console.log("[OpenCode] Stopping server (pid=%d)...", proc.pid);
-
-  return new Promise<void>((resolve) => {
-    const killTimeout = setTimeout(() => {
-      // Force kill if SIGTERM didn't work after 5s
-      try {
-        proc.kill("SIGKILL");
-      } catch {
-        // already dead
-      }
-      openCodeProcess = null;
-      resolve();
-    }, 5000);
-
-    proc.once("exit", () => {
-      clearTimeout(killTimeout);
-      openCodeProcess = null;
-      resolve();
-    });
-
-    try {
-      proc.kill("SIGTERM");
-    } catch {
-      // Process may have already exited
-      clearTimeout(killTimeout);
-      openCodeProcess = null;
-      resolve();
-    }
-  });
-}
-
-export function isOpenCodeRunning(): boolean {
-  return openCodeProcess !== null && !openCodeProcess.killed;
 }

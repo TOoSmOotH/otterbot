@@ -147,7 +147,7 @@ import {
 } from "./settings/settings.js";
 import type { ProviderType } from "@otterbot/shared";
 import { createBackupArchive, restoreFromArchive, looksLikeZip } from "./backup/backup.js";
-import { writeOpenCodeConfig, startOpenCodeServer, stopOpenCodeServer } from "./opencode/opencode-manager.js";
+import { writeOpenCodeConfig } from "./opencode/opencode-manager.js";
 import { GitHubIssueMonitor } from "./github/issue-monitor.js";
 import { ReminderScheduler } from "./reminders/reminder-scheduler.js";
 import { MemoryCompactor } from "./memory/memory-compactor.js";
@@ -750,7 +750,6 @@ async function main() {
   if (isSetupComplete()) {
     startCoo();
     startDiscordBridge();
-    startOpenCodeServer();
   } else {
     console.log("Setup not complete. Waiting for setup wizard...");
   }
@@ -1071,7 +1070,6 @@ async function main() {
 
     startCoo();
     startDiscordBridge();
-    startOpenCodeServer();
 
     return { ok: true };
   });
@@ -3568,7 +3566,6 @@ Respond with ONLY a JSON object (no markdown, no explanation) with these fields:
   // Graceful shutdown
   const shutdown = async () => {
     await stopDiscordBridge();
-    await stopOpenCodeServer();
     await closeBrowser();
     process.exit(0);
   };

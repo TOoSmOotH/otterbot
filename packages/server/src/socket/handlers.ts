@@ -23,7 +23,7 @@ import { cloneRepo, getRepoDefaultBranch } from "../github/github-service.js";
 import { NO_REPORT_SENTINEL } from "../schedulers/custom-task-scheduler.js";
 import { ProjectStatus, CharterStatus } from "@otterbot/shared";
 import { existsSync, rmSync } from "node:fs";
-import type { ClaudeCodePtyClient } from "../coding-agents/claude-code-pty-client.js";
+import type { PtyClient } from "../agents/worker.js";
 
 type TypedSocket = Socket<ClientToServerEvents, ServerToClientEvents>;
 type TypedServer = Server<ClientToServerEvents, ServerToClientEvents>;
@@ -35,13 +35,13 @@ const serverPartBuffers = new Map<string, { type: string; content: string; toolN
 const sessionRowIds = new Map<string, string>();
 
 /** Active PTY sessions keyed by agentId — registered by workers, used by socket handlers */
-const activePtySessions = new Map<string, ClaudeCodePtyClient>();
+const activePtySessions = new Map<string, PtyClient>();
 
 /** Saved replay buffers from completed PTY sessions — allows viewing terminal output after session ends */
 const completedPtyBuffers = new Map<string, string>();
 
 /** Register a PTY session so socket handlers can route terminal events to it */
-export function registerPtySession(agentId: string, client: ClaudeCodePtyClient): void {
+export function registerPtySession(agentId: string, client: PtyClient): void {
   completedPtyBuffers.delete(agentId); // Clear any stale completed buffer
   activePtySessions.set(agentId, client);
 }

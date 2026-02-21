@@ -14,14 +14,33 @@ vi.mock("../../auth/auth.js", () => ({
   deleteConfig: vi.fn(),
 }));
 
-// Mock opencode-client (dynamic import target)
-const mockExecuteTask = vi.fn();
-vi.mock("../../tools/opencode-client.js", () => {
+// Mock opencode-pty-client (dynamic import target)
+const mockOpenCodePtyExecuteTask = vi.fn();
+vi.mock("../../coding-agents/opencode-pty-client.js", () => {
   return {
-    TASK_COMPLETE_SENTINEL: "◊◊TASK_COMPLETE_9f8e7d◊◊",
-    OpenCodeClient: class {
-      executeTask = mockExecuteTask;
+    OpenCodePtyClient: class {
+      executeTask = mockOpenCodePtyExecuteTask;
+      writeInput = vi.fn();
+      resize = vi.fn();
+      kill = vi.fn();
+      gracefulExit = vi.fn();
+      getReplayBuffer = vi.fn(() => "");
     },
+  };
+});
+
+// Mock opencode-manager (ensureOpenCodeConfig — called by PTY client)
+vi.mock("../../opencode/opencode-manager.js", () => ({
+  ensureOpenCodeConfig: vi.fn(),
+  writeOpenCodeConfig: vi.fn(),
+}));
+
+// Mock settings (getProviderRow — called by PTY client for API key resolution)
+vi.mock("../../settings/settings.js", async (importOriginal) => {
+  const original = await importOriginal<typeof import("../../settings/settings.js")>();
+  return {
+    ...original,
+    getProviderRow: vi.fn(() => ({ apiKey: "test-key", type: "anthropic", baseUrl: null })),
   };
 });
 
@@ -34,6 +53,7 @@ vi.mock("../../coding-agents/claude-code-pty-client.js", () => {
       writeInput = vi.fn();
       resize = vi.fn();
       kill = vi.fn();
+      gracefulExit = vi.fn();
       getReplayBuffer = vi.fn(() => "");
     },
   };
@@ -46,19 +66,6 @@ vi.mock("../../coding-agents/codex-client.js", () => {
     CodexClient: class {
       executeTask = mockCodexExecuteTask;
     },
-  };
-});
-
-// Mock opencode-task (formatOpenCodeResult — also dynamic import target)
-vi.mock("../../tools/opencode-task.js", async (importOriginal) => {
-  const original = await importOriginal<typeof import("../../tools/opencode-task.js")>();
-  return {
-    ...original,
-    formatOpenCodeResult: vi.fn((result: any) =>
-      result.success
-        ? `OpenCode task completed successfully.\n\n**Summary:**\n${result.summary}`
-        : `OpenCode task failed: ${result.summary}`,
-    ),
   };
 });
 
@@ -166,29 +173,30 @@ describe("Worker — OpenCode delegation", () => {
     });
   }
 
-  it("calls OpenCode directly for builtin-opencode-coder with workspace", async () => {
+  it("calls OpenCode PTY for builtin-opencode-coder with workspace", async () => {
     mockedGetConfig.mockImplementation((key: string) => {
-      if (key === "opencode:api_url") return "http://localhost:3333";
+      if (key === "opencode:provider_id") return "provider-1";
+      if (key === "opencode:model") return "claude-sonnet-4-5-20250929";
       return undefined;
     });
-    mockExecuteTask.mockResolvedValue({
+    mockOpenCodePtyExecuteTask.mockResolvedValue({
       success: true,
-      sessionId: "sess-1",
-      summary: "Created feature X",
+      sessionId: "opencode-pty-1",
+      summary: "Task completed.",
       diff: { files: [{ path: "src/x.ts", additions: 10, deletions: 0 }] },
+      usage: null,
     });
 
     const worker = createWorker();
     await worker.handleMessage(makeDirective(worker.id, "Implement feature X"));
 
-    expect(mockExecuteTask).toHaveBeenCalledOnce();
-    // Task should include workspace path context
-    const taskArg = mockExecuteTask.mock.calls[0][0] as string;
-    expect(taskArg).toContain("/workspace/project");
-    expect(taskArg).toContain("Implement feature X");
+    expect(mockOpenCodePtyExecuteTask).toHaveBeenCalledOnce();
+    // Task should be passed directly (no context wrapping — PTY handles task as-is)
+    const taskArg = mockOpenCodePtyExecuteTask.mock.calls[0][0] as string;
+    expect(taskArg).toBe("Implement feature X");
   });
 
-  it("falls back to think() when api_url not configured", async () => {
+  it("falls back to think() when OpenCode not configured", async () => {
     mockedGetConfig.mockReturnValue(undefined);
 
     const worker = createWorker();
@@ -200,13 +208,14 @@ describe("Worker — OpenCode delegation", () => {
 
     await worker.handleMessage(makeDirective(worker.id, "Do something"));
 
-    expect(mockExecuteTask).not.toHaveBeenCalled();
+    expect(mockOpenCodePtyExecuteTask).not.toHaveBeenCalled();
     expect(thinkSpy).toHaveBeenCalled();
   });
 
   it("falls back to think() for non-opencode workers", async () => {
     mockedGetConfig.mockImplementation((key: string) => {
-      if (key === "opencode:api_url") return "http://localhost:3333";
+      if (key === "opencode:provider_id") return "provider-1";
+      if (key === "opencode:model") return "some-model";
       return undefined;
     });
 
@@ -219,36 +228,17 @@ describe("Worker — OpenCode delegation", () => {
 
     await worker.handleMessage(makeDirective(worker.id, "Do something"));
 
-    expect(mockExecuteTask).not.toHaveBeenCalled();
+    expect(mockOpenCodePtyExecuteTask).not.toHaveBeenCalled();
     expect(thinkSpy).toHaveBeenCalled();
   });
 
-  it("prepends workspace path to task context", async () => {
+  it("catches OpenCode PTY errors and reports them", async () => {
     mockedGetConfig.mockImplementation((key: string) => {
-      if (key === "opencode:api_url") return "http://localhost:3333";
+      if (key === "opencode:provider_id") return "provider-1";
+      if (key === "opencode:model") return "some-model";
       return undefined;
     });
-    mockExecuteTask.mockResolvedValue({
-      success: true,
-      sessionId: "sess-2",
-      summary: "Done",
-      diff: null,
-    });
-
-    const worker = createWorker({ workspacePath: "/my/project" });
-    await worker.handleMessage(makeDirective(worker.id, "Build it"));
-
-    const taskArg = mockExecuteTask.mock.calls[0][0] as string;
-    expect(taskArg).toContain("IMPORTANT: All files must be created/edited inside this directory: /my/project");
-    expect(taskArg).toContain("Build it");
-  });
-
-  it("catches OpenCode client errors and reports them", async () => {
-    mockedGetConfig.mockImplementation((key: string) => {
-      if (key === "opencode:api_url") return "http://localhost:3333";
-      return undefined;
-    });
-    mockExecuteTask.mockRejectedValue(new Error("Connection refused"));
+    mockOpenCodePtyExecuteTask.mockRejectedValue(new Error("spawn opencode ENOENT"));
 
     const worker = createWorker();
     await worker.handleMessage(makeDirective(worker.id, "Do task"));
@@ -260,19 +250,21 @@ describe("Worker — OpenCode delegation", () => {
     );
     expect(reportCall).toBeDefined();
     expect(reportCall![0].content).toContain("WORKER ERROR");
-    expect(reportCall![0].content).toContain("Connection refused");
+    expect(reportCall![0].content).toContain("spawn opencode ENOENT");
   });
 
   it("always sends report to parent", async () => {
     mockedGetConfig.mockImplementation((key: string) => {
-      if (key === "opencode:api_url") return "http://localhost:3333";
+      if (key === "opencode:provider_id") return "provider-1";
+      if (key === "opencode:model") return "some-model";
       return undefined;
     });
-    mockExecuteTask.mockResolvedValue({
+    mockOpenCodePtyExecuteTask.mockResolvedValue({
       success: true,
-      sessionId: "sess-3",
-      summary: "Done",
+      sessionId: "opencode-pty-2",
+      summary: "Task completed.",
       diff: null,
+      usage: null,
     });
 
     const worker = createWorker();
@@ -287,14 +279,16 @@ describe("Worker — OpenCode delegation", () => {
 
   it("sets status to Done after task", async () => {
     mockedGetConfig.mockImplementation((key: string) => {
-      if (key === "opencode:api_url") return "http://localhost:3333";
+      if (key === "opencode:provider_id") return "provider-1";
+      if (key === "opencode:model") return "some-model";
       return undefined;
     });
-    mockExecuteTask.mockResolvedValue({
+    mockOpenCodePtyExecuteTask.mockResolvedValue({
       success: true,
-      sessionId: "sess-4",
-      summary: "Done",
+      sessionId: "opencode-pty-3",
+      summary: "Task completed.",
       diff: null,
+      usage: null,
     });
 
     const worker = createWorker();

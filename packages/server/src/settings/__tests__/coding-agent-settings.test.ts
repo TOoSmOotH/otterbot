@@ -11,8 +11,8 @@ vi.mock("../../auth/auth.js", () => ({
 
 // Mock opencode-manager (imported by settings.ts)
 vi.mock("../../opencode/opencode-manager.js", () => ({
-  startOpenCodeServer: vi.fn(),
-  stopOpenCodeServer: vi.fn(),
+  ensureOpenCodeConfig: vi.fn(),
+  writeOpenCodeConfig: vi.fn(),
 }));
 
 // Mock opencode-client
