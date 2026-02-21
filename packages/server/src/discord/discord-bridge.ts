@@ -45,6 +45,8 @@ export class DiscordBridge {
   private broadcastHandler: ((message: BusMessage) => void) | null = null;
   /** Map of `{discordUserId}:{channelId}` → conversationId */
   private conversationMap = new Map<string, string>();
+  /** Map of conversationId → Discord channel (for sending unsolicited messages) */
+  private channelMap = new Map<string, TextChannel | DMChannel>();
 
   constructor(deps: { bus: MessageBus; coo: COO; io: TypedServer }) {
     this.bus = deps.bus;
@@ -229,6 +231,7 @@ export class DiscordBridge {
 
     // Start typing indicator
     const channel = discordMessage.channel as TextChannel | DMChannel;
+    this.channelMap.set(conversationId, channel);
     const sendTyping = () => {
       channel.sendTyping().catch(() => { /* ignore */ });
     };
@@ -269,15 +272,23 @@ export class DiscordBridge {
     if (!conversationId) return;
 
     const pending = this.pendingResponses.get(conversationId);
-    if (!pending) return;
+    if (pending) {
+      // Direct reply to a user message — clean up typing indicator
+      clearInterval(pending.typingTimer);
+      this.pendingResponses.delete(conversationId);
 
-    // Clean up
-    clearInterval(pending.typingTimer);
-    this.pendingResponses.delete(conversationId);
+      this.sendDiscordReply(pending.discordMessage, message.content).catch((err) => {
+        console.error("[Discord] Error sending reply:", err);
+      });
+      return;
+    }
 
-    // Send reply to Discord
-    this.sendDiscordReply(pending.discordMessage, message.content).catch((err) => {
-      console.error("[Discord] Error sending reply:", err);
+    // Unsolicited message (e.g. Team Lead report) — send to the channel directly
+    const channel = this.channelMap.get(conversationId);
+    if (!channel) return;
+
+    this.sendToChannel(channel, message.content).catch((err) => {
+      console.error("[Discord] Error sending unsolicited message:", err);
     });
   }
 
@@ -292,6 +303,16 @@ export class DiscordBridge {
       } else if ("send" in originalMessage.channel) {
         await originalMessage.channel.send(chunks[i]!);
       }
+    }
+  }
+
+  private async sendToChannel(
+    channel: TextChannel | DMChannel,
+    content: string,
+  ): Promise<void> {
+    const chunks = splitMessage(content, DISCORD_MAX_LENGTH);
+    for (const chunk of chunks) {
+      await channel.send(chunk);
     }
   }
 }
