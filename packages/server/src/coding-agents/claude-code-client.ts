@@ -70,6 +70,32 @@ export class ClaudeCodeClient implements CodingAgentClient {
       // Set approval mode
       if (this.config.approvalMode === "full-auto") {
         sdkOptions.permissionMode = "acceptEdits";
+      } else if (onPermissionRequest) {
+        // Interactive mode — route permission requests through the UI/chat
+        let permSeq = 0;
+        sdkOptions.canUseTool = async (
+          toolName: string,
+          input: Record<string, unknown>,
+          ctx: { signal: AbortSignal; suggestions?: Array<{ type: string; [k: string]: unknown }>; toolUseID: string; decisionReason?: string },
+        ) => {
+          const permissionId = `cc-perm-${++permSeq}-${ctx.toolUseID}`;
+          const response = await onPermissionRequest(sessionId, {
+            id: permissionId,
+            type: toolName,
+            title: `${toolName}${ctx.decisionReason ? ` — ${ctx.decisionReason}` : ""}`,
+            pattern: input.command as string | undefined,
+            metadata: input,
+          });
+
+          if (response === "reject") {
+            return { behavior: "deny" as const, message: "User denied permission" };
+          }
+          return {
+            behavior: "allow" as const,
+            updatedInput: input,
+            ...(response === "always" && ctx.suggestions ? { updatedPermissions: ctx.suggestions } : {}),
+          };
+        };
       }
 
       // Set up environment with API key if provided
