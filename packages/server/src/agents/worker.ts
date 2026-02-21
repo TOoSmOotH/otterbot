@@ -477,13 +477,18 @@ export class Worker extends BaseAgent {
       // Detect REPL prompt: Claude Code shows ">" or "> " at the end when waiting for next command.
       // Also detect cost summary lines (e.g., "Total cost: $0.12") which appear right before the prompt.
       const trimmedEnd = lastChunk.trimEnd();
-      const lastLines = trimmedEnd.split("\n").slice(-5).map(l => l.trim());
-      const lastLine = lastLines[lastLines.length - 1] ?? "";
+      const lastLines = trimmedEnd.split("\n").slice(-10).map(l => l.trim());
 
-      // Claude Code REPL prompt patterns: bare ">", or a line ending with "> " cursor
-      const isReplPrompt = /^>?\s*$/.test(lastLine) || lastLine === ">";
-      // Cost summary is a strong signal the task just finished
-      const hasCostSummary = lastLines.some(l => /total\s*(cost|tokens|input|output)/i.test(l) || /\$\d+\.\d+/.test(l));
+      // Claude Code REPL prompt: "❯" (U+276F) or ">" at end of output, possibly with status line below
+      const isReplPrompt = lastLines.some(l => /^[❯>]\s*$/.test(l));
+      // "Cogitated for Xs" or cost summary = task just finished
+      const hasCostSummary = lastLines.some(l =>
+        /total\s*(cost|tokens|input|output)/i.test(l) ||
+        /\$\d+\.\d+/.test(l) ||
+        /cogitated\s+for/i.test(l),
+      );
+
+      console.log(`[Worker ${this.id}] Terminal idle check — last lines: ${JSON.stringify(lastLines)}, prompt=${isReplPrompt}, cost=${hasCostSummary}`);
 
       if (isReplPrompt || hasCostSummary) {
         console.log(`[Worker ${this.id}] Terminal idle — detected completion (prompt=${isReplPrompt}, cost=${hasCostSummary})`);
