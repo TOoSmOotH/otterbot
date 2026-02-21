@@ -1475,6 +1475,22 @@ The user can see everything on the desktop in real-time.`;
     return false;
   }
 
+  /**
+   * Stop any agent by ID — handles both TeamLeads and Workers.
+   * Returns true if the agent was found and stopped.
+   */
+  stopAgent(agentId: string): boolean {
+    // Check if it's a TeamLead
+    for (const [, teamLead] of this.teamLeads) {
+      if (teamLead.id === agentId) {
+        teamLead.stop();
+        return true;
+      }
+    }
+    // Fall through to worker stop
+    return this.stopWorker(agentId);
+  }
+
   getTeamLeads(): Map<string, TeamLead> {
     return this.teamLeads;
   }

@@ -179,6 +179,8 @@ export class TeamLead extends BaseAgent {
   private workers: Map<string, Worker> = new Map();
   private workspace: WorkspaceManager;
   private verificationRequested = false;
+  /** AbortController for the current LLM call — allows stop() to cancel in-flight inference */
+  private _abortController: AbortController | null = null;
   /** Per-think-cycle call counts — prevents tools from being called repeatedly within a single streamText run */
   private _toolCallCounts = new Map<string, number>();
   private _pendingWorkerReport = new Map<string, string>();
@@ -890,7 +892,14 @@ export class TeamLead extends BaseAgent {
   ): Promise<{ text: string; thinking: string | undefined; hadToolCalls: boolean; isError?: boolean }> {
     this._toolCallCounts.clear();
     this.pruneConversationHistory(40);
-    return super.think(userMessage, onToken, onReasoning, onReasoningEnd);
+    this._abortController = new AbortController();
+    this._externalAbortController = this._abortController;
+    try {
+      return await super.think(userMessage, onToken, onReasoning, onReasoningEnd);
+    } finally {
+      this._abortController = null;
+      this._externalAbortController = null;
+    }
   }
 
   override getStatusSummary(): string {
@@ -1626,6 +1635,26 @@ export class TeamLead extends BaseAgent {
     this.workers.delete(workerId);
 
     return true;
+  }
+
+  /**
+   * Stop this TeamLead: abort any in-progress LLM call and stop all active workers.
+   * The TeamLead instance stays alive so it can receive future directives.
+   */
+  stop(): void {
+    console.log(`[TeamLead ${this.id}] Stopping — aborting LLM call and ${this.workers.size} worker(s)`);
+
+    // Abort any in-flight LLM call
+    if (this._abortController) {
+      this._abortController.abort();
+      this._abortController = null;
+      this._externalAbortController = null;
+    }
+
+    // Stop all active workers
+    for (const [workerId] of this.workers) {
+      this.stopWorker(workerId);
+    }
   }
 
   getWorkers(): Map<string, Worker> {

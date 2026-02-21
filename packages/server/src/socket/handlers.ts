@@ -433,11 +433,11 @@ export function setupSocketHandlers(
       }
     });
 
-    // Stop a running worker agent
+    // Stop a running agent (worker or team lead)
     socket.on("agent:stop", (data, callback) => {
       console.log(`[Socket] agent:stop received for ${data.agentId}`);
-      const result = coo.stopWorker(data.agentId);
-      callback?.({ ok: result, error: result ? undefined : "Worker not found" });
+      const result = coo.stopAgent(data.agentId);
+      callback?.({ ok: result, error: result ? undefined : "Agent not found" });
     });
 
     // Retrieve agent activity (bus messages + persisted activity records)

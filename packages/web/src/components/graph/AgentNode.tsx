@@ -56,7 +56,7 @@ export const AgentNode = memo(function AgentNode({
     <div
       onClick={onClick}
       className={cn(
-        "rounded-lg border-2 px-3 py-2 min-w-[120px] transition-all duration-300 cursor-pointer hover:brightness-125",
+        "rounded-lg border-2 px-3 py-2 min-w-[120px] max-w-[180px] transition-all duration-300 cursor-pointer hover:brightness-125",
         STATUS_COLORS[status] ?? STATUS_COLORS.idle,
       )}
     >
@@ -90,7 +90,7 @@ export const AgentNode = memo(function AgentNode({
           </div>
         )}
         <div className="flex flex-col">
-          <span className="text-xs font-medium leading-none">{label}</span>
+          <span className="text-xs font-medium leading-none truncate" title={label}>{label}</span>
           <span className="text-[10px] text-muted-foreground capitalize">
             {role.replace("_", " ")}
           </span>

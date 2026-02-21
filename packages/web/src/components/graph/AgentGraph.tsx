@@ -74,9 +74,9 @@ function buildLayout(
   for (const agent of activeAgents) {
     const count = levelCounts[agent.role] || 1;
     const idx = levelIndex[agent.role]++;
-    const totalWidth = count * 180;
-    const startX = 300 - totalWidth / 2 + 90;
-    const x = startX + idx * 180;
+    const totalWidth = count * 220;
+    const startX = 300 - totalWidth / 2 + 110;
+    const x = startX + idx * 220;
 
     nodes.push({
       id: agent.id,
@@ -108,7 +108,7 @@ function buildLayout(
 
 function getRoleLabel(agent: Agent, cooName?: string): string {
   if (agent.role === "coo") return cooName ?? "COO";
-  if (agent.role === "team_lead") return `Team Lead`;
+  if (agent.role === "team_lead") return agent.name ?? "Team Lead";
   return agent.name ?? `Worker ${agent.id.slice(0, 6)}`;
 }
 

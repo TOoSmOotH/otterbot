@@ -113,7 +113,7 @@ export function AgentDetailPanel() {
           )}
         </div>
         <div className="flex items-center gap-1">
-          {agent?.role === "worker" && ["acting", "thinking", "awaiting_input"].includes(agent.status) && (
+          {(agent?.role === "worker" || agent?.role === "team_lead") && ["acting", "thinking", "awaiting_input"].includes(agent.status) && (
             <button
               onClick={() => {
                 if (stopping) return;
@@ -122,7 +122,7 @@ export function AgentDetailPanel() {
                 socket.emit("agent:stop", { agentId: selectedAgentId! }, (ack) => {
                   setStopping(false);
                   if (!ack?.ok) {
-                    console.warn("Failed to stop worker:", ack?.error);
+                    console.warn("Failed to stop agent:", ack?.error);
                   }
                 });
               }}
@@ -133,7 +133,7 @@ export function AgentDetailPanel() {
                   ? "bg-zinc-700 text-zinc-400 cursor-not-allowed"
                   : "bg-red-500/20 text-red-400 hover:bg-red-500/30 hover:text-red-300",
               )}
-              title="Stop this worker"
+              title="Stop"
             >
               {stopping ? "Stopping..." : "Stop"}
             </button>
