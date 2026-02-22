@@ -175,7 +175,13 @@ export class ModuleLoader {
   async toggle(id: string, enabled: boolean): Promise<void> {
     updateModule(id, { enabled });
     if (enabled) {
-      await this.load(id);
+      try {
+        await this.load(id);
+      } catch (err) {
+        // Revert enabled flag so the UI doesn't show "enabled but not loaded"
+        updateModule(id, { enabled: false });
+        throw err;
+      }
     } else {
       await this.unload(id);
     }

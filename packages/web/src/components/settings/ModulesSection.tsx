@@ -26,6 +26,7 @@ export function ModulesSection() {
   const [installing, setInstalling] = useState(false);
   const [installError, setInstallError] = useState<string | null>(null);
   const [togglingId, setTogglingId] = useState<string | null>(null);
+  const [toggleError, setToggleError] = useState<string | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
@@ -78,15 +79,20 @@ export function ModulesSection() {
 
   const handleToggle = async (id: string, enabled: boolean) => {
     setTogglingId(id);
+    setToggleError(null);
     try {
-      await fetch(`/api/modules/${id}/toggle`, {
+      const res = await fetch(`/api/modules/${id}/toggle`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ enabled }),
       });
+      if (!res.ok) {
+        const data = await res.json();
+        setToggleError(data.error ?? "Toggle failed");
+      }
       await loadModules();
-    } catch {
-      /* ignore */
+    } catch (err) {
+      setToggleError(err instanceof Error ? err.message : "Toggle failed");
     } finally {
       setTogglingId(null);
     }
@@ -199,6 +205,18 @@ export function ModulesSection() {
               <span className="text-xs text-red-500">{installError}</span>
             )}
           </div>
+        </div>
+      )}
+
+      {toggleError && (
+        <div className="border border-red-500/30 bg-red-500/10 rounded-lg p-3 flex items-center justify-between">
+          <span className="text-xs text-red-500">{toggleError}</span>
+          <button
+            onClick={() => setToggleError(null)}
+            className="text-xs text-red-500 hover:text-red-400 ml-2"
+          >
+            Dismiss
+          </button>
         </div>
       )}
 

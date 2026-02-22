@@ -3,8 +3,11 @@
  * Call initModules() after COO creation to wire everything together.
  */
 
-import { resolve } from "node:path";
+import { resolve, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import { existsSync, readFileSync } from "node:fs";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
 import type { FastifyInstance } from "fastify";
 import type { COO } from "../agents/coo.js";
 import { ModuleLoader } from "./module-loader.js";
@@ -26,8 +29,8 @@ export function getModuleScheduler(): ModuleScheduler | null {
 
 /** Known built-in module directories (checked in order). */
 const BUILTIN_MODULE_DIRS = [
-  "/app/modules",   // Docker
-  "./modules",      // dev / local
+  "/app/modules",                              // Docker
+  resolve(__dirname, "../../../../modules"),    // dev (relative to packages/server/src/modules/)
 ];
 
 /**
