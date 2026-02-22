@@ -260,7 +260,9 @@ describe("TeamLead — Kanban logic", () => {
         column: "backlog",
         assigneeAgentId: "",
       });
-      expect(result).toContain("updated");
+      expect(result).toContain("AUTO-CORRECTED");
+      expect(result).toContain("in_review");
+      expect(result).toContain("Do NOT spawn");
       const updated = getTask(task.id);
       expect(updated?.column).toBe("in_review");
       expect(updated?.completionReport).toContain("PR created");

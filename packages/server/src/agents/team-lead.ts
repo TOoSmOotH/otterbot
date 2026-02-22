@@ -654,8 +654,9 @@ export class TeamLead extends BaseAgent {
       this.updateKanbanTask(orphan.id, { column: "backlog", assigneeAgentId: "" });
     }
 
-    // Re-check orphans after cleanup (should be 0 now)
-    const orphans = this.getOrphanedTasks();
+    // Re-check orphans after cleanup — exclude the reporting task since its
+    // worker was legitimately cleaned up and we're about to evaluate its report.
+    const orphans = this.getOrphanedTasks().filter((o) => o.id !== reportingTaskId);
     const livingWorkers = this.workers.size;
 
     const board = this.getKanbanBoardState();
@@ -1196,7 +1197,7 @@ export class TeamLead extends BaseAgent {
             this._shouldAbortThink = true;
             return "STOP. Already refused. Wait for current worker to finish.";
           }
-          // Early rejection: refuse to spawn for tasks already in "done"
+          // Early rejection: refuse to spawn for tasks already in "done" or "in_review"
           if (taskId) {
             const db = getDb();
             const existingTask = db
@@ -1208,6 +1209,11 @@ export class TeamLead extends BaseAgent {
               this._toolCallCounts.set("spawn_worker_refused", (refusals) + 1);
               this._shouldAbortThink = true;
               return `REFUSED: Task "${existingTask.title}" (${taskId}) is already DONE. Do not re-spawn workers for completed tasks.`;
+            }
+            if (existingTask?.column === "in_review") {
+              this._toolCallCounts.set("spawn_worker_refused", (refusals) + 1);
+              this._shouldAbortThink = true;
+              return `REFUSED: Task "${existingTask.title}" (${taskId}) is IN REVIEW — PR #${(existingTask as any).prNumber ?? "?"} is awaiting reviewer approval. Do NOT spawn a worker. The PR monitor handles this automatically.`;
             }
           }
           const result = await this.spawnWorker(registryEntryId, task, taskId);
@@ -1651,6 +1657,12 @@ export class TeamLead extends BaseAgent {
       return false;
     }
 
+    // Guard: refuse if task is in review (PR awaiting approval — PR monitor handles this)
+    if (task.column === "in_review") {
+      console.warn(`[TeamLead ${this.id}] autoAssignTask: task "${task.title}" (${taskId}) is IN REVIEW — refusing assignment`);
+      return false;
+    }
+
     // Guard: refuse if task has been spawned too many times (hard cap to prevent infinite loops)
     const currentSpawnCount = (task as any).spawnCount ?? 0;
     if (currentSpawnCount >= MAX_TASK_SPAWNS) {
@@ -1820,6 +1832,28 @@ export class TeamLead extends BaseAgent {
           setValues.prNumber = detectedPR;
         }
         this._pendingWorkerReport.delete(taskId);
+
+        if (correctedColumn === "in_review") {
+          // Perform the DB update now, emit the event, and return a hard stop message.
+          db.update(schema.kanbanTasks)
+            .set(setValues)
+            .where(eq(schema.kanbanTasks.id, taskId))
+            .run();
+          const updatedRow = db.select().from(schema.kanbanTasks).where(eq(schema.kanbanTasks.id, taskId)).get();
+          if (updatedRow) this.onKanbanChange?.("updated", updatedRow as unknown as KanbanTask);
+          // Fire-and-forget PR comment + re-request review
+          if ((existing as any).prNumber || detectedPR) {
+            this.postReviewUpdateAndReRequest(
+              existing.projectId,
+              detectedPR ?? (existing as any).prNumber,
+              pendingReport,
+            ).catch(() => {});
+          }
+          return (
+            `AUTO-CORRECTED: Task "${existing.title}" moved to "in_review" — PR #${detectedPR ?? (existing as any).prNumber} is awaiting reviewer approval. ` +
+            `STOP. Do NOT spawn a worker for this task. The PR monitor will handle it automatically when the review is complete.`
+          );
+        }
       }
     }
 
