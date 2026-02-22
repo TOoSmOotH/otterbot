@@ -167,6 +167,12 @@ import {
   rejectPairing,
   revokePairing,
 } from "./discord/pairing.js";
+import { IrcBridge } from "./irc/irc-bridge.js";
+import {
+  getIrcSettings,
+  updateIrcSettings,
+  getIrcConfig,
+} from "./irc/irc-settings.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -460,6 +466,27 @@ async function main() {
     if (discordBridge) {
       await discordBridge.stop();
       discordBridge = null;
+    }
+  }
+
+  // IRC bridge (initialized when enabled + config set)
+  let ircBridge: IrcBridge | null = null;
+
+  function startIrcBridge() {
+    if (ircBridge || !coo) return;
+    const config = getIrcConfig();
+    if (!config) return;
+    ircBridge = new IrcBridge({ bus, coo, io });
+    ircBridge.start(config).catch((err) => {
+      console.error("[IRC] Failed to start bridge:", err);
+      ircBridge = null;
+    });
+  }
+
+  async function stopIrcBridge() {
+    if (ircBridge) {
+      await ircBridge.stop();
+      ircBridge = null;
     }
   }
 
@@ -760,6 +787,7 @@ async function main() {
   if (isSetupComplete()) {
     startCoo();
     startDiscordBridge();
+    startIrcBridge();
   } else {
     console.log("Setup not complete. Waiting for setup wizard...");
   }
@@ -1080,6 +1108,7 @@ async function main() {
 
     startCoo();
     startDiscordBridge();
+    startIrcBridge();
 
     return { ok: true };
   });
@@ -3019,6 +3048,38 @@ async function main() {
   });
 
   // =========================================================================
+  // IRC settings routes
+  // =========================================================================
+
+  app.get("/api/settings/irc", async () => {
+    return getIrcSettings();
+  });
+
+  app.put<{
+    Body: {
+      enabled?: boolean;
+      server?: string;
+      port?: number;
+      nickname?: string;
+      channels?: string[];
+      tls?: boolean;
+      password?: string;
+    };
+  }>("/api/settings/irc", async (req) => {
+    const wasEnabled = !!getIrcConfig();
+    updateIrcSettings(req.body);
+    const nowEnabled = !!getIrcConfig();
+
+    if (nowEnabled && !wasEnabled) {
+      startIrcBridge();
+    } else if (!nowEnabled && wasEnabled) {
+      await stopIrcBridge();
+    }
+
+    return { ok: true };
+  });
+
+  // =========================================================================
   // Google settings routes
   // =========================================================================
 
@@ -3704,6 +3765,7 @@ Respond with ONLY a JSON object (no markdown, no explanation) with these fields:
   // Graceful shutdown
   const shutdown = async () => {
     await stopDiscordBridge();
+    await stopIrcBridge();
     await closeBrowser();
     process.exit(0);
   };
