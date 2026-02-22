@@ -1,4 +1,4 @@
-import { useRef, useState, useEffect } from "react";
+import { useRef, useEffect } from "react";
 import { useFrame } from "@react-three/fiber";
 import { Html, Sparkles } from "@react-three/drei";
 import type { Mesh } from "three";
@@ -35,7 +35,6 @@ export function FallbackAgent({ position, label, role, status, agentId, rotation
   const groupRef = useRef<THREE.Group>(null);
   const currentRotationRef = useRef(rotationY);
   const targetPosRef = useRef(new THREE.Vector3(...position));
-  const [isMoving, setIsMoving] = useState(false);
   const color = ROLE_COLORS[role] ?? ROLE_COLORS.worker;
 
   // Set initial position once on mount so the group starts at the right spot
@@ -57,8 +56,6 @@ export function FallbackAgent({ position, label, role, status, agentId, rotation
 
     const ms = agentId ? useMovementStore.getState().getAgentPosition(agentId) : null;
     const moving = ms?.isMoving ?? false;
-
-    if (moving !== isMoving) setIsMoving(moving);
 
     // Update group position/rotation for movement
     if (groupRef.current) {

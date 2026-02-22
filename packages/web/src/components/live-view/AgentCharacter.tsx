@@ -1,4 +1,4 @@
-import { Suspense, useMemo, useRef, useEffect, useState } from "react";
+import { Suspense, useMemo, useRef, useEffect } from "react";
 import { useFrame } from "@react-three/fiber";
 import { useGLTF, Html, Sparkles } from "@react-three/drei";
 import { clone as skeletonClone } from "three/examples/jsm/utils/SkeletonUtils.js";
@@ -29,7 +29,6 @@ const STATUS_COLORS: Record<string, string> = {
 export function AgentCharacter({ pack, position, label, role, status, agentId, gearConfig, rotationY = 0 }: AgentCharacterProps) {
   const groupRef = useRef<THREE.Group>(null);
   const currentRotationRef = useRef(rotationY);
-  const [isMoving, setIsMoving] = useState(false);
   const targetPosRef = useRef(new THREE.Vector3(...position));
 
   // Set initial position once on mount so the group starts at the right spot
@@ -53,9 +52,6 @@ export function AgentCharacter({ pack, position, label, role, status, agentId, g
     const ms = agentId ? useMovementStore.getState().getAgentPosition(agentId) : null;
     const moving = ms?.isMoving ?? false;
 
-    // Track moving state for animation switching (triggers re-render)
-    if (moving !== isMoving) setIsMoving(moving);
-
     if (moving && ms) {
       groupRef.current.position.set(...ms.position);
       currentRotationRef.current = THREE.MathUtils.lerp(currentRotationRef.current, ms.rotationY, delta * 8);
@@ -68,12 +64,10 @@ export function AgentCharacter({ pack, position, label, role, status, agentId, g
     groupRef.current.rotation.y = currentRotationRef.current;
   });
 
-  const effectiveStatus = isMoving ? "walking" : status;
-
   return (
     <group ref={groupRef}>
       <Suspense fallback={<FallbackMesh role={role} />}>
-        <CharacterModel pack={pack} status={effectiveStatus} gearConfig={gearConfig} />
+        <CharacterModel pack={pack} status={status} agentId={agentId} gearConfig={gearConfig} />
       </Suspense>
 
       {/* Status ring on ground */}
@@ -121,7 +115,7 @@ export function AgentCharacter({ pack, position, label, role, status, agentId, g
   );
 }
 
-function CharacterModel({ pack, status, gearConfig }: { pack: ModelPack; status: string; gearConfig?: GearConfig | null }) {
+function CharacterModel({ pack, status, agentId, gearConfig }: { pack: ModelPack; status: string; agentId?: string; gearConfig?: GearConfig | null }) {
   const { scene } = useGLTF(pack.characterUrl);
   const { animations: idleAnims } = useGLTF(pack.animations.idle);
   const { animations: actionAnims } = useGLTF(pack.animations.action);
@@ -179,63 +173,71 @@ function CharacterModel({ pack, status, gearConfig }: { pack: ModelPack; status:
     };
   }, [clone, clips]);
 
-  // Switch animation when status changes
-  useEffect(() => {
-    const actions = actionsRef.current;
-    if (actions.size === 0) return;
+  // Track the last effective status so we only switch animations on change
+  const prevEffectiveStatusRef = useRef<string>(status);
 
-    let targetName: string | undefined;
-
-    if (status === "walking") {
-      targetName =
-        findClip(actions, /Walking_A/i) ??
-        findClip(actions, /Running_A/i) ??
-        findClip(actions, /walk|run/i);
-    } else if (status === "acting") {
-      targetName =
-        findClip(actions, /Working/i) ??
-        findClip(actions, /GenericWorking/i) ??
-        findClip(actions, /Interact/i) ??
-        findClip(actions, /Use_Item/i) ??
-        findClip(actions, /PickUp/i) ??
-        // Fallback to idle if no working animation found
-        findClip(actions, /Idle_B/i) ??
-        findClip(actions, /idle/i);
-    } else if (status === "thinking") {
-      targetName =
-        findClip(actions, /Idle_B/i) ??
-        findClip(actions, /Interact/i) ??
-        findClip(actions, /idle/i);
-    } else if (status === "error") {
-      targetName =
-        findClip(actions, /Hit_A/i) ??
-        findClip(actions, /hit/i);
-    }
-
-    // Default to Idle_A
-    if (!targetName) {
-      targetName =
-        findClip(actions, /Idle_A/i) ??
-        findClip(actions, /idle/i) ??
-        [...actions.keys()][0];
-    }
-
-    if (!targetName || targetName === currentClipRef.current) return;
-
-    const prev = currentClipRef.current ? actions.get(currentClipRef.current) : null;
-    const next = actions.get(targetName);
-    if (next) {
-      if (prev) prev.fadeOut(0.3);
-      next.reset().fadeIn(0.3).play();
-      currentClipRef.current = targetName;
-    }
-  }, [status]);
-
-  // Tick the mixer and add subtle thinking bob
+  // Tick the mixer, detect walking from movement store, and switch animations — all in the animation loop
   useFrame((_, delta) => {
     mixerRef.current?.update(delta);
 
-    if (status === "thinking") {
+    // Determine effective status: walking overrides when movement store is active
+    const ms = agentId ? useMovementStore.getState().getAgentPosition(agentId) : null;
+    const effectiveStatus = ms?.isMoving ? "walking" : status;
+
+    // Switch animation when effective status changes
+    if (effectiveStatus !== prevEffectiveStatusRef.current) {
+      prevEffectiveStatusRef.current = effectiveStatus;
+
+      const actions = actionsRef.current;
+      if (actions.size > 0) {
+        let targetName: string | undefined;
+
+        if (effectiveStatus === "walking") {
+          targetName =
+            findClip(actions, /Walking_A/i) ??
+            findClip(actions, /Running_A/i) ??
+            findClip(actions, /walk|run/i);
+        } else if (effectiveStatus === "acting") {
+          targetName =
+            findClip(actions, /Working/i) ??
+            findClip(actions, /GenericWorking/i) ??
+            findClip(actions, /Interact/i) ??
+            findClip(actions, /Use_Item/i) ??
+            findClip(actions, /PickUp/i) ??
+            findClip(actions, /Idle_B/i) ??
+            findClip(actions, /idle/i);
+        } else if (effectiveStatus === "thinking") {
+          targetName =
+            findClip(actions, /Idle_B/i) ??
+            findClip(actions, /Interact/i) ??
+            findClip(actions, /idle/i);
+        } else if (effectiveStatus === "error") {
+          targetName =
+            findClip(actions, /Hit_A/i) ??
+            findClip(actions, /hit/i);
+        }
+
+        if (!targetName) {
+          targetName =
+            findClip(actions, /Idle_A/i) ??
+            findClip(actions, /idle/i) ??
+            [...actions.keys()][0];
+        }
+
+        if (targetName && targetName !== currentClipRef.current) {
+          const prev = currentClipRef.current ? actions.get(currentClipRef.current) : null;
+          const next = actions.get(targetName);
+          if (next) {
+            if (prev) prev.fadeOut(0.3);
+            next.reset().fadeIn(0.3).play();
+            currentClipRef.current = targetName;
+          }
+        }
+      }
+    }
+
+    // Thinking bob
+    if (effectiveStatus === "thinking") {
       clone.position.y = Math.sin(Date.now() * 0.003) * 0.03;
     } else {
       clone.position.y = THREE.MathUtils.lerp(clone.position.y, 0, delta * 5);
