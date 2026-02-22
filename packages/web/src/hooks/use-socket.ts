@@ -4,6 +4,9 @@ import { useMessageStore } from "../stores/message-store";
 import { useAgentStore } from "../stores/agent-store";
 import { useProjectStore } from "../stores/project-store";
 import { useAgentActivityStore } from "../stores/agent-activity-store";
+import { useEnvironmentStore } from "../stores/environment-store";
+import { useCodingAgentStore } from "../stores/coding-agent-store";
+import { useTodoStore } from "../stores/todo-store";
 
 export function useSocket() {
   const initialized = useRef(false);
@@ -27,6 +30,18 @@ export function useSocket() {
   const appendAgentThinking = useAgentActivityStore((s) => s.appendThinking);
   const endAgentThinking = useAgentActivityStore((s) => s.endThinking);
   const addAgentToolCall = useAgentActivityStore((s) => s.addToolCall);
+  const loadWorld = useEnvironmentStore((s) => s.loadWorld);
+  const startCodingAgentSession = useCodingAgentStore((s) => s.startSession);
+  const endCodingAgentSession = useCodingAgentStore((s) => s.endSession);
+  const addCodingAgentMessage = useCodingAgentStore((s) => s.addMessage);
+  const appendCodingAgentPartDelta = useCodingAgentStore((s) => s.appendPartDelta);
+  const setAwaitingInput = useCodingAgentStore((s) => s.setAwaitingInput);
+  const clearAwaitingInput = useCodingAgentStore((s) => s.clearAwaitingInput);
+  const setPendingPermission = useCodingAgentStore((s) => s.setPendingPermission);
+  const clearPendingPermission = useCodingAgentStore((s) => s.clearPendingPermission);
+  const addTodo = useTodoStore((s) => s.addTodo);
+  const patchTodo = useTodoStore((s) => s.patchTodo);
+  const removeTodo = useTodoStore((s) => s.removeTodo);
 
   useEffect(() => {
     if (initialized.current) return;
@@ -114,6 +129,22 @@ export function useSocket() {
       removeTask(taskId);
     });
 
+    socket.on("todo:created", (todo) => {
+      addTodo(todo);
+    });
+
+    socket.on("todo:updated", (todo) => {
+      patchTodo(todo);
+    });
+
+    socket.on("todo:deleted", ({ todoId }) => {
+      removeTodo(todoId);
+    });
+
+    socket.on("reminder:fired", () => {
+      // The COO chat message already shows via coo:response broadcast
+    });
+
     socket.on("agent:stream", ({ agentId, token, messageId }) => {
       appendAgentStream(agentId, token, messageId);
     });
@@ -128,6 +159,49 @@ export function useSocket() {
 
     socket.on("agent:tool-call", ({ agentId, toolName, args }) => {
       addAgentToolCall(agentId, toolName, args);
+    });
+
+    socket.on("world:zone-added", () => {
+      loadWorld();
+    });
+
+    socket.on("world:zone-removed", () => {
+      loadWorld();
+    });
+
+    socket.on("codeagent:session-start", (data) => {
+      startCodingAgentSession(data);
+    });
+
+    socket.on("codeagent:session-end", (data) => {
+      endCodingAgentSession(data.agentId, data.sessionId, data.status, data.diff);
+      clearAwaitingInput(data.agentId);
+      clearPendingPermission(data.agentId);
+    });
+
+    socket.on("codeagent:message", (data) => {
+      addCodingAgentMessage(data.agentId, data.sessionId, data.message);
+    });
+
+    socket.on("codeagent:part-delta", (data) => {
+      appendCodingAgentPartDelta(
+        data.agentId,
+        data.sessionId,
+        data.messageId,
+        data.partId,
+        data.type,
+        data.delta,
+        data.toolName,
+        data.toolState,
+      );
+    });
+
+    socket.on("codeagent:awaiting-input", (data) => {
+      setAwaitingInput(data.agentId, { sessionId: data.sessionId, prompt: data.prompt });
+    });
+
+    socket.on("codeagent:permission-request", (data) => {
+      setPendingPermission(data.agentId, { sessionId: data.sessionId, permission: data.permission });
     });
 
     return () => {
@@ -147,10 +221,22 @@ export function useSocket() {
       socket.off("kanban:task-created");
       socket.off("kanban:task-updated");
       socket.off("kanban:task-deleted");
+      socket.off("todo:created");
+      socket.off("todo:updated");
+      socket.off("todo:deleted");
+      socket.off("reminder:fired");
       socket.off("agent:stream");
       socket.off("agent:thinking");
       socket.off("agent:thinking-end");
       socket.off("agent:tool-call");
+      socket.off("world:zone-added");
+      socket.off("world:zone-removed");
+      socket.off("codeagent:session-start");
+      socket.off("codeagent:session-end");
+      socket.off("codeagent:message");
+      socket.off("codeagent:part-delta");
+      socket.off("codeagent:awaiting-input");
+      socket.off("codeagent:permission-request");
     };
   }, []);
 

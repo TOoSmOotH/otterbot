@@ -132,3 +132,11 @@ export function isSetupComplete(): boolean {
     getConfig("coo_model") !== undefined
   );
 }
+
+export function isPassphraseSet(): boolean {
+  return getConfig("passphrase_hash") !== undefined;
+}
+
+export function isPassphraseTemporary(): boolean {
+  return getConfig("passphrase_is_temporary") === "true";
+}

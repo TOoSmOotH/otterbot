@@ -3,6 +3,7 @@ import { useGLTF, TransformControls } from "@react-three/drei";
 import * as THREE from "three";
 import { useEnvironmentStore } from "../../stores/environment-store";
 import { useRoomBuilderStore, type EditableProp } from "../../stores/room-builder-store";
+import { WaypointEditor } from "./WaypointEditor";
 
 export function EditableEnvironmentScene() {
   const editingProps = useRoomBuilderStore((s) => s.editingProps);
@@ -13,6 +14,7 @@ export function EditableEnvironmentScene() {
   const selectProp = useRoomBuilderStore((s) => s.selectProp);
   const propRefs = useRoomBuilderStore((s) => s.propRefs);
   const resolveAssetUrl = useEnvironmentStore((s) => s.resolveAssetUrl);
+  const editorTool = useRoomBuilderStore((s) => s.editorTool);
 
   // Deduplicate URLs for preloading
   const uniqueUrls = useMemo(() => {
@@ -62,6 +64,9 @@ export function EditableEnvironmentScene() {
       {snapEnabled && (
         <gridHelper args={[100, 100 / snapSize, "#333355", "#222244"]} position={[0, 0.01, 0]} />
       )}
+
+      {/* Waypoint editor overlay */}
+      {editorTool === "waypoints" && <WaypointEditor />}
 
       {/* Invisible floor plane for raycasting */}
       <mesh

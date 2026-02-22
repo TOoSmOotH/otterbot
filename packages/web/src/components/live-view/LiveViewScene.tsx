@@ -1,14 +1,18 @@
 import { useMemo } from "react";
+import { useFrame } from "@react-three/fiber";
 import { OrbitControls } from "@react-three/drei";
 import { useAgentStore } from "../../stores/agent-store";
 import { useModelPackStore } from "../../stores/model-pack-store";
 import { useEnvironmentStore } from "../../stores/environment-store";
 import { useRoomBuilderStore } from "../../stores/room-builder-store";
+import { useMovementStore } from "../../stores/movement-store";
 import { AgentCharacter } from "./AgentCharacter";
 import { FallbackAgent } from "./FallbackAgent";
 import { EnvironmentScene } from "./EnvironmentScene";
+import { ZoneGroundMarkers } from "./ZoneGroundMarkers";
 import { EditableEnvironmentScene } from "../room-builder/EditableEnvironmentScene";
 import type { Agent } from "@otterbot/shared";
+import { findWaypointsByZoneAndTag } from "../../lib/pathfinding";
 
 interface LiveViewSceneProps {
   userProfile?: { name: string | null; avatar: string | null; modelPackId?: string | null; gearConfig?: Record<string, boolean> | null; cooName?: string };
@@ -21,6 +25,12 @@ export function LiveViewScene({ userProfile }: LiveViewSceneProps) {
   const getPackById = useModelPackStore((s) => s.getPackById);
   const activeScene = useEnvironmentStore((s) => s.getActiveScene());
   const builderActive = useRoomBuilderStore((s) => s.active);
+  const movementTick = useMovementStore((s) => s.tick);
+
+  // Tick movement interpolators every frame
+  useFrame((_, delta) => {
+    movementTick(delta);
+  });
 
   const { positions } = useMemo(() => {
     const activeAgents = Array.from(agents.values()).filter(
@@ -31,10 +41,136 @@ export function LiveViewScene({ userProfile }: LiveViewSceneProps) {
     const coos = activeAgents.filter((a) => a.role === "coo");
     const teamLeads = activeAgents.filter((a) => a.role === "team_lead");
     const workers = activeAgents.filter((a) => a.role === "worker");
+    const adminAssistants = activeAgents.filter((a) => a.role === "admin_assistant");
 
     const positions: { agent: Agent | null; role: string; x: number; z: number; label: string; modelPackId: string | null; gearConfig: Record<string, boolean> | null; rotationY: number }[] = [];
 
-    if (activeScene?.agentPositions) {
+    // Zone-aware positioning via waypoint graph
+    if (activeScene?.waypointGraph && activeScene?.zones) {
+      const graph = activeScene.waypointGraph;
+      const mainZone = activeScene.zones.find((z) => z.projectId === null);
+      const mainZoneId = mainZone?.id;
+
+      // Helper to get a waypoint position for a role within a zone
+      const getZoneWaypointPos = (zoneId: string | undefined, tag: string, index: number): { x: number; z: number; rotationY: number } | null => {
+        const wps = findWaypointsByZoneAndTag(graph, zoneId, tag);
+        if (wps.length === 0) return null;
+        const wp = wps[index % wps.length];
+        return { x: wp.position[0], z: wp.position[2], rotationY: 0 };
+      };
+
+      // Status-aware position: agents go to desk when thinking/acting, idle agents spread near center
+      const getStatusAwarePos = (agent: Agent | null, zoneId: string | undefined, deskIndex: number): { x: number; z: number; rotationY: number } => {
+        const status = agent?.status ?? "idle";
+        const isWorking = status === "thinking" || status === "acting";
+        if (isWorking) {
+          return getZoneWaypointPos(zoneId, "desk", deskIndex) ?? getZoneWaypointPos(zoneId, "center", 0) ?? { x: 0, z: 0, rotationY: 0 };
+        }
+        // Idle: spread agents around center so they don't stack
+        const centerPos = getZoneWaypointPos(zoneId, "center", 0) ?? { x: 0, z: 0, rotationY: 0 };
+        const angle = (deskIndex / 8) * Math.PI * 2;
+        const radius = 1.5;
+        return { x: centerPos.x + Math.cos(angle) * radius, z: centerPos.z + Math.sin(angle) * radius, rotationY: 0 };
+      };
+
+      // Global desk index counter — each agent in the main office gets a unique desk
+      let nextDeskIndex = 0;
+      // Per-zone desk counters for project offices
+      const zoneDeskCounters = new Map<string, number>();
+      const getZoneDeskIndex = (zoneId: string): number => {
+        const idx = zoneDeskCounters.get(zoneId) ?? 0;
+        zoneDeskCounters.set(zoneId, idx + 1);
+        return idx;
+      };
+
+      // CEO always at its desk (deskIndex 0)
+      const ceoDeskIndex = nextDeskIndex++;
+      const ceoPos = getZoneWaypointPos(mainZoneId, "desk", ceoDeskIndex) ?? { x: 0, z: 0, rotationY: 0 };
+      positions.push({
+        agent: null,
+        role: "ceo",
+        x: ceoPos.x,
+        z: ceoPos.z,
+        label: userProfile?.name ?? "CEO (You)",
+        modelPackId: userProfile?.modelPackId ?? null,
+        gearConfig: userProfile?.gearConfig ?? null,
+        rotationY: ceoPos.rotationY,
+      });
+
+      // COOs — status-aware: idle spread near center, thinking/acting at desk
+      for (let i = 0; i < coos.length; i++) {
+        const deskIdx = nextDeskIndex++;
+        const pos = getStatusAwarePos(coos[i], mainZoneId, deskIdx);
+        positions.push({
+          agent: coos[i],
+          role: "coo",
+          x: pos.x,
+          z: pos.z,
+          label: userProfile?.cooName ?? "COO",
+          modelPackId: coos[i].modelPackId ?? null,
+          gearConfig: coos[i].gearConfig ?? null,
+          rotationY: pos.rotationY,
+        });
+      }
+
+      // Admin Assistants — status-aware
+      for (let i = 0; i < adminAssistants.length; i++) {
+        const deskIdx = nextDeskIndex++;
+        const pos = getStatusAwarePos(adminAssistants[i], mainZoneId, deskIdx);
+        positions.push({
+          agent: adminAssistants[i],
+          role: "admin_assistant",
+          x: pos.x,
+          z: pos.z,
+          label: "Admin Assistant",
+          modelPackId: adminAssistants[i].modelPackId ?? null,
+          gearConfig: adminAssistants[i].gearConfig ?? null,
+          rotationY: pos.rotationY,
+        });
+      }
+
+      // Team Leads — status-aware, go to project zone or main office
+      for (let i = 0; i < teamLeads.length; i++) {
+        const tl = teamLeads[i];
+        const projectZone = tl.projectId
+          ? activeScene.zones.find((z) => z.projectId === tl.projectId)
+          : null;
+        const zoneId = projectZone?.id ?? mainZoneId;
+        const deskIdx = projectZone ? getZoneDeskIndex(projectZone.id) : nextDeskIndex++;
+        const pos = getStatusAwarePos(tl, zoneId, deskIdx);
+        positions.push({
+          agent: tl,
+          role: "team_lead",
+          x: pos.x,
+          z: pos.z,
+          label: "Team Lead",
+          modelPackId: tl.modelPackId ?? null,
+          gearConfig: tl.gearConfig ?? null,
+          rotationY: pos.rotationY,
+        });
+      }
+
+      // Workers — status-aware, go to project zone
+      for (let i = 0; i < workers.length; i++) {
+        const w = workers[i];
+        const projectZone = w.projectId
+          ? activeScene.zones.find((z) => z.projectId === w.projectId)
+          : null;
+        const zoneId = projectZone?.id ?? mainZoneId;
+        const deskIdx = projectZone ? getZoneDeskIndex(projectZone.id) : nextDeskIndex++;
+        const pos = getStatusAwarePos(w, zoneId, deskIdx);
+        positions.push({
+          agent: w,
+          role: "worker",
+          x: pos.x,
+          z: pos.z,
+          label: `Worker ${w.id.slice(0, 6)}`,
+          modelPackId: w.modelPackId ?? null,
+          gearConfig: w.gearConfig ?? null,
+          rotationY: pos.rotationY,
+        });
+      }
+    } else if (activeScene?.agentPositions) {
       const ap = activeScene.agentPositions;
 
       // CEO
@@ -178,7 +314,10 @@ export function LiveViewScene({ userProfile }: LiveViewSceneProps) {
       {builderActive ? (
         <EditableEnvironmentScene />
       ) : activeScene ? (
-        <EnvironmentScene scene={activeScene} />
+        <>
+          <EnvironmentScene scene={activeScene} />
+          {activeScene.zones && <ZoneGroundMarkers zones={activeScene.zones} />}
+        </>
       ) : (
         <>
           <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.01, -4]} receiveShadow>
@@ -204,6 +343,7 @@ export function LiveViewScene({ userProfile }: LiveViewSceneProps) {
                 label={pos.label}
                 role={pos.role}
                 status={status}
+                agentId={pos.agent?.id}
                 gearConfig={pos.gearConfig}
                 rotationY={pos.rotationY}
               />
@@ -217,6 +357,7 @@ export function LiveViewScene({ userProfile }: LiveViewSceneProps) {
               label={pos.label}
               role={pos.role}
               status={status}
+              agentId={pos.agent?.id}
               rotationY={pos.rotationY}
             />
           );
@@ -226,7 +367,7 @@ export function LiveViewScene({ userProfile }: LiveViewSceneProps) {
       <OrbitControls
         target={camera?.target ?? [0, 1, -4]}
         minDistance={5}
-        maxDistance={25}
+        maxDistance={activeScene?.zones ? 60 : 25}
         minPolarAngle={0.3}
         maxPolarAngle={Math.PI / 2.1}
       />

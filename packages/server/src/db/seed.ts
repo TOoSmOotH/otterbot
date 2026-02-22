@@ -9,10 +9,10 @@ const SEED_ENTRIES = [
     description:
       "Chief Operating Officer. Receives goals from the CEO and delegates to Team Leads.",
     systemPrompt: COO_SYSTEM_PROMPT,
-    capabilities: ["management", "delegation", "coordination"],
+    capabilities: [] as string[],
     defaultModel: "claude-sonnet-4-5-20250929",
     defaultProvider: "anthropic",
-    tools: [],
+    tools: [] as string[],
     builtIn: true,
     role: "coo" as const,
   },
@@ -22,10 +22,10 @@ const SEED_ENTRIES = [
     description:
       "Manages a team of workers for a project. Breaks directives into tasks and assigns them.",
     systemPrompt: TEAM_LEAD_PROMPT,
-    capabilities: ["management", "planning", "coordination"],
+    capabilities: [] as string[],
     defaultModel: "claude-sonnet-4-5-20250929",
     defaultProvider: "anthropic",
-    tools: [],
+    tools: [] as string[],
     builtIn: true,
     role: "team_lead" as const,
   },
@@ -34,19 +34,11 @@ const SEED_ENTRIES = [
     name: "Coder",
     description:
       "Writes and edits code. Proficient in multiple languages with a focus on clean, well-structured implementations.",
-    systemPrompt: `You are a skilled software developer. You write clean, well-tested code.
-
-Your responsibilities:
-- Write code based on specifications provided by your Team Lead
-- Follow existing patterns and conventions in the codebase
-- Write tests for your code when appropriate
-- Report progress and blockers to your Team Lead
-
-Be concise in your communication. Focus on delivering working code.`,
-    capabilities: ["code", "typescript", "python", "debugging"],
+    systemPrompt: "See assigned skills for instructions.",
+    capabilities: [] as string[],
     defaultModel: "claude-sonnet-4-5-20250929",
     defaultProvider: "anthropic",
-    tools: ["file_read", "file_write", "shell_exec", "install_package"],
+    tools: [] as string[],
     builtIn: true,
     role: "worker" as const,
   },
@@ -55,19 +47,11 @@ Be concise in your communication. Focus on delivering working code.`,
     name: "Researcher",
     description:
       "Gathers information, analyzes options, and provides well-structured findings and recommendations.",
-    systemPrompt: `You are a thorough researcher. You gather information, analyze options, and provide clear recommendations.
-
-Your responsibilities:
-- Research topics as directed by your Team Lead
-- Provide structured findings with sources and reasoning
-- Compare options with pros/cons when relevant
-- Be objective and flag uncertainties
-
-Present findings clearly and concisely. Lead with the key takeaway.`,
-    capabilities: ["research", "analysis", "summarization"],
+    systemPrompt: "See assigned skills for instructions.",
+    capabilities: [] as string[],
     defaultModel: "claude-sonnet-4-5-20250929",
     defaultProvider: "anthropic",
-    tools: ["web_search", "web_browse", "file_read"],
+    tools: [] as string[],
     builtIn: true,
     role: "worker" as const,
   },
@@ -76,19 +60,11 @@ Present findings clearly and concisely. Lead with the key takeaway.`,
     name: "Reviewer",
     description:
       "Reviews code and plans for quality, correctness, and potential issues.",
-    systemPrompt: `You are a meticulous code and plan reviewer. You catch bugs, suggest improvements, and ensure quality.
-
-Your responsibilities:
-- Review code for bugs, security issues, and style problems
-- Review plans for feasibility and completeness
-- Provide specific, actionable feedback
-- Approve or request changes with clear reasoning
-
-Be constructive but honest. Prioritize issues by severity.`,
-    capabilities: ["code-review", "testing", "quality"],
+    systemPrompt: "See assigned skills for instructions.",
+    capabilities: [] as string[],
     defaultModel: "claude-sonnet-4-5-20250929",
     defaultProvider: "anthropic",
-    tools: ["file_read"],
+    tools: [] as string[],
     builtIn: true,
     role: "worker" as const,
   },
@@ -97,19 +73,11 @@ Be constructive but honest. Prioritize issues by severity.`,
     name: "Writer",
     description:
       "Writes documentation, specifications, and prose. Clear, well-structured technical writing.",
-    systemPrompt: `You are a clear technical writer. You produce well-structured documentation and specifications.
-
-Your responsibilities:
-- Write documentation, specs, and prose as directed
-- Ensure clarity and accuracy
-- Follow the project's existing documentation style
-- Keep documentation concise and useful
-
-Write for your audience. Avoid jargon unless the audience expects it.`,
-    capabilities: ["writing", "documentation", "specs"],
+    systemPrompt: "See assigned skills for instructions.",
+    capabilities: [] as string[],
     defaultModel: "claude-sonnet-4-5-20250929",
     defaultProvider: "anthropic",
-    tools: ["file_read", "file_write"],
+    tools: [] as string[],
     builtIn: true,
     role: "worker" as const,
   },
@@ -118,19 +86,11 @@ Write for your audience. Avoid jargon unless the audience expects it.`,
     name: "Planner",
     description:
       "Breaks down goals into tasks and milestones. Designs project architecture and task dependencies.",
-    systemPrompt: `You are a project planner and architect. You break down complex goals into actionable tasks.
-
-Your responsibilities:
-- Decompose high-level goals into specific, actionable tasks
-- Identify dependencies between tasks
-- Estimate relative complexity
-- Design system architecture when needed
-
-Focus on clarity and completeness. Every task should be actionable by a single agent.`,
-    capabilities: ["planning", "architecture", "decomposition"],
+    systemPrompt: "See assigned skills for instructions.",
+    capabilities: [] as string[],
     defaultModel: "claude-sonnet-4-5-20250929",
     defaultProvider: "anthropic",
-    tools: ["file_read", "file_write"],
+    tools: [] as string[],
     builtIn: true,
     role: "worker" as const,
   },
@@ -139,19 +99,11 @@ Focus on clarity and completeness. Every task should be actionable by a single a
     name: "Security Reviewer",
     description:
       "Audits code for vulnerabilities, OWASP top 10 issues, and dependency risks.",
-    systemPrompt: `You are a security specialist. You audit code and systems for vulnerabilities.
-
-Your responsibilities:
-- Review code for security vulnerabilities (OWASP top 10, injection, auth issues)
-- Assess dependency risks
-- Recommend security improvements
-- Verify fixes address the identified vulnerabilities
-
-Be specific about risks and provide concrete remediation steps. Rate severity.`,
-    capabilities: ["security", "code-review", "vulnerability-analysis"],
+    systemPrompt: "See assigned skills for instructions.",
+    capabilities: [] as string[],
     defaultModel: "claude-sonnet-4-5-20250929",
     defaultProvider: "anthropic",
-    tools: ["file_read", "shell_exec"],
+    tools: [] as string[],
     builtIn: true,
     role: "worker" as const,
   },
@@ -160,19 +112,11 @@ Be specific about risks and provide concrete remediation steps. Rate severity.`,
     name: "Tester",
     description:
       "Writes and runs tests, identifies edge cases, and validates behavior against specifications.",
-    systemPrompt: `You are a quality assurance specialist. You write tests and validate behavior.
-
-Your responsibilities:
-- Write unit, integration, and e2e tests as needed
-- Identify edge cases and boundary conditions
-- Validate behavior against specifications
-- Report test results clearly
-
-Focus on meaningful test coverage. Test behavior, not implementation details.`,
-    capabilities: ["testing", "test-writing", "qa", "edge-cases"],
+    systemPrompt: "See assigned skills for instructions.",
+    capabilities: [] as string[],
     defaultModel: "claude-sonnet-4-5-20250929",
     defaultProvider: "anthropic",
-    tools: ["file_read", "file_write", "shell_exec", "install_package"],
+    tools: [] as string[],
     builtIn: true,
     role: "worker" as const,
   },
@@ -182,31 +126,39 @@ Focus on meaningful test coverage. Test behavior, not implementation details.`,
     description:
       "Delegates complex coding tasks to OpenCode, an autonomous AI coding agent. " +
       "Ideal for multi-file implementations, refactoring, and large code changes.",
-    systemPrompt: `You are a coding specialist that delegates implementation work to OpenCode, an autonomous AI coding agent.
-
-Your responsibilities:
-- Inspect the codebase with file_read to understand context before delegating
-- Formulate clear, detailed coding directives for OpenCode
-- Delegate implementation via opencode_task with precise instructions
-- Verify the results by reading key files after OpenCode completes
-- If the result is incorrect or incomplete, refine your instructions and retry
-- Report results (what was changed, files modified, any issues) to your Team Lead
-
-When delegating to OpenCode:
-- Be specific: include file paths, function names, and expected behavior
-- Provide context: mention relevant patterns, conventions, or constraints
-- One task at a time: break large changes into focused, sequential tasks
-- Verify after each task: read modified files to confirm correctness
-
-If OpenCode fails or produces incorrect results:
-- Read the error output carefully
-- Adjust your instructions to address the specific issue
-- Retry with more explicit guidance
-- If repeated failures occur, report the issue to your Team Lead with details`,
-    capabilities: ["code", "opencode", "autonomous-coding", "refactoring"],
+    systemPrompt: "See assigned skills for instructions.",
+    capabilities: [] as string[],
     defaultModel: "claude-sonnet-4-5-20250929",
     defaultProvider: "anthropic",
-    tools: ["opencode_task", "file_read"],
+    tools: [] as string[],
+    builtIn: true,
+    role: "worker" as const,
+  },
+  {
+    id: "builtin-claude-code-coder",
+    name: "Claude Code Coder",
+    description:
+      "Delegates coding tasks to Claude Code, Anthropic's autonomous AI coding agent. " +
+      "Ideal for complex implementations, refactoring, and code review.",
+    systemPrompt: "See assigned skills for instructions.",
+    capabilities: [] as string[],
+    defaultModel: "claude-sonnet-4-5-20250929",
+    defaultProvider: "anthropic",
+    tools: [] as string[],
+    builtIn: true,
+    role: "worker" as const,
+  },
+  {
+    id: "builtin-codex-coder",
+    name: "Codex Coder",
+    description:
+      "Delegates coding tasks to Codex CLI, OpenAI's autonomous AI coding agent. " +
+      "Ideal for code generation, refactoring, and implementation tasks.",
+    systemPrompt: "See assigned skills for instructions.",
+    capabilities: [] as string[],
+    defaultModel: "codex-mini",
+    defaultProvider: "openai",
+    tools: [] as string[],
     builtIn: true,
     role: "worker" as const,
   },
@@ -215,29 +167,24 @@ If OpenCode fails or produces incorrect results:
     name: "Browser Agent",
     description:
       "Interacts with web pages using a headless browser. Can navigate, fill forms, click buttons, extract text, and evaluate JavaScript.",
-    systemPrompt: `You are a browser automation specialist. You interact with web pages using a headless browser.
-
-Your responsibilities:
-- Navigate to URLs and extract information
-- Fill out forms and click buttons as directed
-- Extract structured data from web pages
-- Report findings clearly and concisely
-
-When browsing:
-- Always start by navigating to the URL
-- Use get_text to read page content
-- Use CSS selectors for click and fill actions
-- Close the browser session when done
-- Report what you found, not the raw HTML`,
-    capabilities: [
-      "browser",
-      "web-scraping",
-      "form-filling",
-      "web-interaction",
-    ],
+    systemPrompt: "See assigned skills for instructions.",
+    capabilities: [] as string[],
     defaultModel: "claude-sonnet-4-5-20250929",
     defaultProvider: "anthropic",
-    tools: ["web_browse", "file_read", "file_write"],
+    tools: [] as string[],
+    builtIn: true,
+    role: "worker" as const,
+  },
+  {
+    id: "builtin-tool-builder",
+    name: "Tool Builder",
+    description:
+      "Creates custom JavaScript tools that extend agent capabilities. Can design, implement, and test new tools.",
+    systemPrompt: "See assigned skills for instructions.",
+    capabilities: [] as string[],
+    defaultModel: "claude-sonnet-4-5-20250929",
+    defaultProvider: "anthropic",
+    tools: [] as string[],
     builtIn: true,
     role: "worker" as const,
   },

@@ -14,10 +14,15 @@ import { getConfiguredSearchProvider } from "../tools/search/providers.js";
 import { getConfiguredTTSProvider } from "../tts/tts.js";
 import { getConfiguredSTTProvider } from "../stt/stt.js";
 import { OpenCodeClient } from "../tools/opencode-client.js";
+import { ensureOpenCodeConfig } from "../opencode/opencode-manager.js";
 import { getDb, schema } from "../db/index.js";
 import { eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
-import type { NamedProvider, ProviderType, ProviderTypeMeta, CustomModel, ModelOption } from "@otterbot/shared";
+import { execSync } from "node:child_process";
+import { existsSync, readFileSync, writeFileSync, unlinkSync, mkdirSync, chmodSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
+import type { NamedProvider, ProviderType, ProviderTypeMeta, CustomModel, ModelOption, ClaudeCodeOAuthUsage } from "@otterbot/shared";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -48,6 +53,7 @@ export interface TestResult {
 export const PROVIDER_TYPE_META: ProviderTypeMeta[] = [
   { type: "anthropic", label: "Anthropic", needsApiKey: true, needsBaseUrl: false },
   { type: "openai", label: "OpenAI", needsApiKey: true, needsBaseUrl: false },
+  { type: "openrouter", label: "OpenRouter", needsApiKey: true, needsBaseUrl: false },
   { type: "ollama", label: "Ollama", needsApiKey: false, needsBaseUrl: true },
   { type: "openai-compatible", label: "OpenAI-Compatible", needsApiKey: true, needsBaseUrl: true },
 ];
@@ -61,6 +67,12 @@ const FALLBACK_MODELS: Record<string, string[]> = {
   ],
   openai: ["gpt-4o", "gpt-4o-mini", "gpt-4.1", "gpt-4.1-mini", "o3-mini"],
   ollama: ["llama3.1", "mistral", "codellama", "qwen2.5-coder"],
+  openrouter: [
+    "anthropic/claude-sonnet-4-5-20250929",
+    "openai/gpt-4o",
+    "google/gemini-2.0-flash-exp:free",
+    "meta-llama/llama-3.3-70b-instruct",
+  ],
   "openai-compatible": [],
 };
 
@@ -335,6 +347,17 @@ export async function fetchModelsWithCredentials(
         return (
           data.models?.map((m) => m.name) ?? FALLBACK_MODELS.ollama ?? []
         );
+      }
+
+      case "openrouter": {
+        if (!apiKey) return FALLBACK_MODELS.openrouter ?? [];
+        const res = await fetch("https://openrouter.ai/api/v1/models", {
+          headers: { Authorization: `Bearer ${apiKey}` },
+          signal: AbortSignal.timeout(10_000),
+        });
+        if (!res.ok) return FALLBACK_MODELS.openrouter ?? [];
+        const data = (await res.json()) as { data?: Array<{ id: string }> };
+        return data.data?.map((m) => m.id).sort() ?? FALLBACK_MODELS.openrouter ?? [];
       }
 
       case "openai-compatible": {
@@ -922,6 +945,9 @@ export interface OpenCodeSettingsResponse {
   passwordSet: boolean;
   timeoutMs: number;
   maxIterations: number;
+  model: string;
+  providerId: string;
+  interactive: boolean;
 }
 
 export function getOpenCodeSettings(): OpenCodeSettingsResponse {
@@ -932,17 +958,28 @@ export function getOpenCodeSettings(): OpenCodeSettingsResponse {
     passwordSet: !!getConfig("opencode:password"),
     timeoutMs: parseInt(getConfig("opencode:timeout_ms") ?? "180000", 10),
     maxIterations: parseInt(getConfig("opencode:max_iterations") ?? "50", 10),
+    model: getConfig("opencode:model") ?? "",
+    providerId: getConfig("opencode:provider_id") ?? "",
+    interactive: getConfig("opencode:interactive") === "true",
   };
 }
 
-export function updateOpenCodeSettings(data: {
+export async function updateOpenCodeSettings(data: {
   enabled?: boolean;
   apiUrl?: string;
   username?: string;
   password?: string;
   timeoutMs?: number;
   maxIterations?: number;
-}): void {
+  model?: string;
+  providerId?: string;
+  interactive?: boolean;
+}): Promise<void> {
+  const wasEnabled = getConfig("opencode:enabled") === "true";
+  const oldModel = getConfig("opencode:model") ?? "";
+  const oldProviderId = getConfig("opencode:provider_id") ?? "";
+  const oldInteractive = getConfig("opencode:interactive") === "true";
+
   if (data.enabled !== undefined) {
     setConfig("opencode:enabled", data.enabled ? "true" : "false");
   }
@@ -973,6 +1010,36 @@ export function updateOpenCodeSettings(data: {
   if (data.maxIterations !== undefined) {
     setConfig("opencode:max_iterations", String(data.maxIterations));
   }
+  if (data.model !== undefined) {
+    setConfig("opencode:model", data.model);
+  }
+  if (data.providerId !== undefined) {
+    setConfig("opencode:provider_id", data.providerId);
+    // Also store the provider type for config generation
+    const row = getProviderRow(data.providerId);
+    if (row) {
+      setConfig("opencode:provider_type", row.type);
+    }
+  }
+  if (data.interactive !== undefined) {
+    if (data.interactive) {
+      setConfig("opencode:interactive", "true");
+    } else {
+      deleteConfig("opencode:interactive");
+    }
+  }
+
+  const isNowEnabled = getConfig("opencode:enabled") === "true";
+  const newModel = getConfig("opencode:model") ?? "";
+  const newProviderId = getConfig("opencode:provider_id") ?? "";
+  const newInteractive = getConfig("opencode:interactive") === "true";
+  const configChanged =
+    newModel !== oldModel || newProviderId !== oldProviderId || newInteractive !== oldInteractive;
+
+  // Rewrite OpenCode config file when settings change (PTY client reads it on spawn)
+  if (isNowEnabled && configChanged) {
+    ensureOpenCodeConfig();
+  }
 }
 
 export async function testOpenCodeConnection(): Promise<TestResult> {
@@ -994,4 +1061,582 @@ export async function testOpenCodeConnection(): Promise<TestResult> {
     error: result.error,
     latencyMs: Date.now() - start,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Claude Code settings
+// ---------------------------------------------------------------------------
+
+export interface ClaudeCodeSettingsResponse {
+  enabled: boolean;
+  authMode: "api-key" | "oauth";
+  apiKeySet: boolean;
+  model: string;
+  approvalMode: "full-auto" | "auto-edit";
+  timeoutMs: number;
+  maxTurns: number;
+}
+
+export function getClaudeCodeSettings(): ClaudeCodeSettingsResponse {
+  return {
+    enabled: getConfig("claude-code:enabled") === "true",
+    authMode: (getConfig("claude-code:auth_mode") ?? "api-key") as "api-key" | "oauth",
+    apiKeySet: !!getConfig("claude-code:api_key"),
+    model: getConfig("claude-code:model") ?? "claude-sonnet-4-5-20250929",
+    approvalMode: (getConfig("claude-code:approval_mode") ?? "full-auto") as "full-auto" | "auto-edit",
+    timeoutMs: parseInt(getConfig("claude-code:timeout_ms") ?? "1200000", 10),
+    maxTurns: parseInt(getConfig("claude-code:max_turns") ?? "50", 10),
+  };
+}
+
+export async function updateClaudeCodeSettings(data: {
+  enabled?: boolean;
+  authMode?: "api-key" | "oauth";
+  apiKey?: string;
+  model?: string;
+  approvalMode?: "full-auto" | "auto-edit";
+  timeoutMs?: number;
+  maxTurns?: number;
+}): Promise<void> {
+  if (data.enabled !== undefined) {
+    setConfig("claude-code:enabled", data.enabled ? "true" : "false");
+  }
+  if (data.authMode !== undefined) {
+    setConfig("claude-code:auth_mode", data.authMode);
+  }
+  if (data.apiKey !== undefined) {
+    if (data.apiKey === "") {
+      deleteConfig("claude-code:api_key");
+    } else {
+      setConfig("claude-code:api_key", data.apiKey);
+    }
+  }
+  if (data.model !== undefined) {
+    setConfig("claude-code:model", data.model);
+  }
+  if (data.approvalMode !== undefined) {
+    setConfig("claude-code:approval_mode", data.approvalMode);
+  }
+  if (data.timeoutMs !== undefined) {
+    setConfig("claude-code:timeout_ms", String(data.timeoutMs));
+  }
+  if (data.maxTurns !== undefined) {
+    setConfig("claude-code:max_turns", String(data.maxTurns));
+  }
+}
+
+export async function testClaudeCodeConnection(): Promise<TestResult> {
+  const start = Date.now();
+
+  try {
+    const { isClaudeCodeInstalled, isClaudeCodeReady } = await import("../coding-agents/claude-code-manager.js");
+
+    if (!isClaudeCodeInstalled()) {
+      return { ok: false, error: "Claude Code CLI not found. Install with: curl -fsSL https://claude.ai/install.sh | bash" };
+    }
+
+    if (!isClaudeCodeReady()) {
+      const authMode = getConfig("claude-code:auth_mode") ?? "api-key";
+      if (authMode === "api-key") {
+        return { ok: false, error: "API key not configured." };
+      }
+      return { ok: false, error: "OAuth session not found. Run `claude login` to authenticate." };
+    }
+
+    return { ok: true, latencyMs: Date.now() - start };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "Unknown error",
+    };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Claude Code OAuth usage
+// ---------------------------------------------------------------------------
+
+const EMPTY_USAGE: ClaudeCodeOAuthUsage = {
+  sessionPercent: 0,
+  sessionResetsAt: null,
+  weeklyPercent: 0,
+  weeklyResetsAt: null,
+  errorMessage: null,
+  needsAuth: false,
+};
+
+let usageCache: { data: ClaudeCodeOAuthUsage; fetchedAt: number } | null = null;
+const USAGE_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
+export async function getClaudeCodeOAuthUsage(): Promise<ClaudeCodeOAuthUsage> {
+  // Return cached result if fresh
+  if (usageCache && Date.now() - usageCache.fetchedAt < USAGE_CACHE_TTL_MS) {
+    return usageCache.data;
+  }
+  const authMode = getConfig("claude-code:auth_mode") ?? "api-key";
+  if (authMode !== "oauth") {
+    return { ...EMPTY_USAGE, errorMessage: "Not using OAuth" };
+  }
+
+  const credPath = join(homedir(), ".claude", ".credentials.json");
+  if (!existsSync(credPath)) {
+    return { ...EMPTY_USAGE, errorMessage: "Credentials file not found", needsAuth: true };
+  }
+
+  let accessToken: string;
+  try {
+    const raw = JSON.parse(readFileSync(credPath, "utf-8"));
+    const oauth = raw?.claudeAiOauth;
+    if (!oauth?.accessToken) {
+      return { ...EMPTY_USAGE, errorMessage: "No OAuth token found", needsAuth: true };
+    }
+
+    // Check expiry (with 60s buffer)
+    if (oauth.expiresAt) {
+      const expiresAt = new Date(oauth.expiresAt).getTime();
+      if (Date.now() > expiresAt - 60_000) {
+        return { ...EMPTY_USAGE, errorMessage: "OAuth token expired", needsAuth: true };
+      }
+    }
+
+    accessToken = oauth.accessToken;
+  } catch {
+    return { ...EMPTY_USAGE, errorMessage: "Failed to read credentials file", needsAuth: true };
+  }
+
+  try {
+    const res = await fetch("https://api.anthropic.com/api/oauth/usage", {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "anthropic-beta": "oauth-2025-04-20",
+        "User-Agent": "claude-code/2.0.32",
+      },
+      signal: AbortSignal.timeout(10_000),
+    });
+
+    if (res.status === 401 || res.status === 403) {
+      return { ...EMPTY_USAGE, errorMessage: "OAuth token rejected", needsAuth: true };
+    }
+    if (!res.ok) {
+      return { ...EMPTY_USAGE, errorMessage: `API error: ${res.status}` };
+    }
+
+    const data = await res.json() as {
+      five_hour?: { utilization: number; resets_at: string };
+      seven_day?: { utilization: number; resets_at: string };
+    };
+
+    // utilization is already a percentage (e.g. 39 = 39%)
+    const result: ClaudeCodeOAuthUsage = {
+      sessionPercent: Math.round(data.five_hour?.utilization ?? 0),
+      sessionResetsAt: data.five_hour?.resets_at ?? null,
+      weeklyPercent: Math.round(data.seven_day?.utilization ?? 0),
+      weeklyResetsAt: data.seven_day?.resets_at ?? null,
+      errorMessage: null,
+      needsAuth: false,
+    };
+    usageCache = { data: result, fetchedAt: Date.now() };
+    return result;
+  } catch (error) {
+    return {
+      ...EMPTY_USAGE,
+      errorMessage: error instanceof Error ? error.message : "Failed to fetch usage",
+    };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Codex settings
+// ---------------------------------------------------------------------------
+
+export interface CodexSettingsResponse {
+  enabled: boolean;
+  authMode: "api-key" | "oauth";
+  apiKeySet: boolean;
+  model: string;
+  approvalMode: "full-auto" | "suggest" | "ask";
+  timeoutMs: number;
+}
+
+export function getCodexSettings(): CodexSettingsResponse {
+  return {
+    enabled: getConfig("codex:enabled") === "true",
+    authMode: (getConfig("codex:auth_mode") ?? "api-key") as "api-key" | "oauth",
+    apiKeySet: !!getConfig("codex:api_key"),
+    model: getConfig("codex:model") ?? "codex-mini",
+    approvalMode: (getConfig("codex:approval_mode") ?? "full-auto") as "full-auto" | "suggest" | "ask",
+    timeoutMs: parseInt(getConfig("codex:timeout_ms") ?? "1200000", 10),
+  };
+}
+
+export async function updateCodexSettings(data: {
+  enabled?: boolean;
+  authMode?: "api-key" | "oauth";
+  apiKey?: string;
+  model?: string;
+  approvalMode?: "full-auto" | "suggest" | "ask";
+  timeoutMs?: number;
+}): Promise<void> {
+  if (data.enabled !== undefined) {
+    setConfig("codex:enabled", data.enabled ? "true" : "false");
+  }
+  if (data.authMode !== undefined) {
+    setConfig("codex:auth_mode", data.authMode);
+  }
+  if (data.apiKey !== undefined) {
+    if (data.apiKey === "") {
+      deleteConfig("codex:api_key");
+    } else {
+      setConfig("codex:api_key", data.apiKey);
+    }
+  }
+  if (data.model !== undefined) {
+    setConfig("codex:model", data.model);
+  }
+  if (data.approvalMode !== undefined) {
+    setConfig("codex:approval_mode", data.approvalMode);
+  }
+  if (data.timeoutMs !== undefined) {
+    setConfig("codex:timeout_ms", String(data.timeoutMs));
+  }
+}
+
+export async function testCodexConnection(): Promise<TestResult> {
+  const start = Date.now();
+
+  try {
+    const { isCodexInstalled, isCodexReady } = await import("../coding-agents/codex-manager.js");
+
+    if (!isCodexInstalled()) {
+      return { ok: false, error: "Codex CLI not found. Install with: npm install -g @openai/codex" };
+    }
+
+    if (!isCodexReady()) {
+      const authMode = getConfig("codex:auth_mode") ?? "api-key";
+      if (authMode === "api-key") {
+        return { ok: false, error: "API key not configured." };
+      }
+      return { ok: false, error: "OAuth session not found. Run `codex login` to authenticate." };
+    }
+
+    return { ok: true, latencyMs: Date.now() - start };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "Unknown error",
+    };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// GitHub settings
+// ---------------------------------------------------------------------------
+
+export interface GitHubSettingsResponse {
+  enabled: boolean;
+  tokenSet: boolean;
+  username: string | null;
+  sshKeySet: boolean;
+  sshKeyFingerprint: string | null;
+  sshKeyType: string | null;
+}
+
+export function getGitHubSettings(): GitHubSettingsResponse {
+  return {
+    enabled: getConfig("github:enabled") === "true",
+    tokenSet: !!getConfig("github:token"),
+    username: getConfig("github:username") ?? null,
+    sshKeySet: existsSync(join(homedir(), ".ssh", "otterbot_github")),
+    sshKeyFingerprint: getConfig("github:ssh_fingerprint") ?? null,
+    sshKeyType: getConfig("github:ssh_key_type") ?? null,
+  };
+}
+
+export function updateGitHubSettings(data: {
+  enabled?: boolean;
+  token?: string;
+}): void {
+  if (data.enabled !== undefined) {
+    setConfig("github:enabled", data.enabled ? "true" : "false");
+  }
+  if (data.token !== undefined) {
+    if (data.token === "") {
+      deleteConfig("github:token");
+      deleteConfig("github:username");
+    } else {
+      setConfig("github:token", data.token);
+    }
+  }
+}
+
+export async function testGitHubConnection(): Promise<TestResult & { username?: string }> {
+  const token = getConfig("github:token");
+  if (!token) {
+    return { ok: false, error: "GitHub token not configured." };
+  }
+
+  const start = Date.now();
+
+  try {
+    const res = await fetch("https://api.github.com/user", {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: "application/vnd.github+json",
+        "User-Agent": "Otterbot",
+      },
+      signal: AbortSignal.timeout(10_000),
+    });
+
+    if (!res.ok) {
+      if (res.status === 401) {
+        return { ok: false, error: "Invalid token. Check scopes: repo, read:org, workflow" };
+      }
+      return { ok: false, error: `GitHub API error: ${res.status}` };
+    }
+
+    const data = (await res.json()) as { login?: string };
+    const username = data.login ?? null;
+
+    if (username) {
+      setConfig("github:username", username);
+    }
+
+    return { ok: true, latencyMs: Date.now() - start, username: username ?? undefined };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "Unknown error",
+    };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// GitHub SSH key management
+// ---------------------------------------------------------------------------
+
+const SSH_KEY_NAME = "otterbot_github";
+
+function sshDir(): string {
+  return join(homedir(), ".ssh");
+}
+
+function sshKeyPath(): string {
+  return join(sshDir(), SSH_KEY_NAME);
+}
+
+function sshPubKeyPath(): string {
+  return join(sshDir(), `${SSH_KEY_NAME}.pub`);
+}
+
+function getFingerprint(pubKeyPath: string): string {
+  const out = execSync(`ssh-keygen -lf ${pubKeyPath}`, { encoding: "utf-8" }).trim();
+  // Output format: "256 SHA256:xxxxx comment (ED25519)"
+  return out.split(" ")[1] ?? out;
+}
+
+function configureGitSSH(): void {
+  const keyPath = sshKeyPath();
+  const pubKeyPath = sshPubKeyPath();
+  const sshConfigPath = join(sshDir(), "config");
+
+  // --- ~/.ssh/config entry ---
+  const hostBlock = [
+    "",
+    "# Otterbot GitHub SSH",
+    "Host github.com",
+    `  IdentityFile ${keyPath}`,
+    "  IdentitiesOnly yes",
+    "",
+  ].join("\n");
+
+  let sshConfig = existsSync(sshConfigPath) ? readFileSync(sshConfigPath, "utf-8") : "";
+  // Remove any existing otterbot block
+  sshConfig = sshConfig.replace(/\n?# Otterbot GitHub SSH\nHost github\.com\n  IdentityFile [^\n]+\n  IdentitiesOnly yes\n?/g, "");
+  sshConfig = sshConfig.trimEnd() + hostBlock;
+  writeFileSync(sshConfigPath, sshConfig, { mode: 0o600 });
+
+  // --- git config for commit signing ---
+  const gitCmds = [
+    `git config --global gpg.format ssh`,
+    `git config --global user.signingkey "${pubKeyPath}"`,
+    `git config --global commit.gpgsign true`,
+    `git config --global tag.gpgsign true`,
+  ];
+  for (const cmd of gitCmds) {
+    execSync(cmd, { stdio: "pipe" });
+  }
+}
+
+function removeGitSSHConfig(): void {
+  // Remove ~/.ssh/config block
+  const sshConfigPath = join(sshDir(), "config");
+  if (existsSync(sshConfigPath)) {
+    let sshConfig = readFileSync(sshConfigPath, "utf-8");
+    sshConfig = sshConfig.replace(/\n?# Otterbot GitHub SSH\nHost github\.com\n  IdentityFile [^\n]+\n  IdentitiesOnly yes\n?/g, "");
+    writeFileSync(sshConfigPath, sshConfig, { mode: 0o600 });
+  }
+
+  // Unset git signing config
+  const gitCmds = [
+    "git config --global --unset gpg.format",
+    "git config --global --unset user.signingkey",
+    "git config --global --unset commit.gpgsign",
+    "git config --global --unset tag.gpgsign",
+  ];
+  for (const cmd of gitCmds) {
+    try { execSync(cmd, { stdio: "pipe" }); } catch { /* key may not exist */ }
+  }
+}
+
+export function generateSSHKey(data?: {
+  type?: "ed25519" | "rsa";
+  comment?: string;
+}): { ok: boolean; fingerprint?: string; publicKey?: string; error?: string } {
+  const keyType = data?.type ?? "ed25519";
+  const comment = data?.comment ?? "otterbot@github";
+  const keyPath = sshKeyPath();
+
+  // Ensure ~/.ssh exists
+  const dir = sshDir();
+  if (!existsSync(dir)) {
+    mkdirSync(dir, { recursive: true, mode: 0o700 });
+  }
+
+  // Don't overwrite existing key
+  if (existsSync(keyPath)) {
+    return { ok: false, error: "SSH key already exists. Remove it first." };
+  }
+
+  try {
+    execSync(
+      `ssh-keygen -t ${keyType} -C "${comment}" -f "${keyPath}" -N ""`,
+      { stdio: "pipe" },
+    );
+    chmodSync(keyPath, 0o600);
+    chmodSync(sshPubKeyPath(), 0o644);
+
+    const fingerprint = getFingerprint(sshPubKeyPath());
+    const publicKey = readFileSync(sshPubKeyPath(), "utf-8").trim();
+
+    setConfig("github:ssh_fingerprint", fingerprint);
+    setConfig("github:ssh_key_type", keyType);
+
+    configureGitSSH();
+
+    return { ok: true, fingerprint, publicKey };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "Failed to generate SSH key",
+    };
+  }
+}
+
+export function importSSHKey(privateKey: string): {
+  ok: boolean;
+  fingerprint?: string;
+  publicKey?: string;
+  error?: string;
+} {
+  const keyPath = sshKeyPath();
+  const pubKeyPath = sshPubKeyPath();
+
+  const dir = sshDir();
+  if (!existsSync(dir)) {
+    mkdirSync(dir, { recursive: true, mode: 0o700 });
+  }
+
+  if (existsSync(keyPath)) {
+    return { ok: false, error: "SSH key already exists. Remove it first." };
+  }
+
+  try {
+    // Ensure trailing newline
+    const normalized = privateKey.trimEnd() + "\n";
+    writeFileSync(keyPath, normalized, { mode: 0o600 });
+
+    // Derive public key
+    const pubKey = execSync(`ssh-keygen -y -f "${keyPath}"`, { encoding: "utf-8" }).trim();
+    writeFileSync(pubKeyPath, pubKey + "\n", { mode: 0o644 });
+
+    const fingerprint = getFingerprint(pubKeyPath);
+
+    // Detect key type from public key line
+    const keyType = pubKey.startsWith("ssh-ed25519") ? "ed25519" : "rsa";
+
+    setConfig("github:ssh_fingerprint", fingerprint);
+    setConfig("github:ssh_key_type", keyType);
+
+    configureGitSSH();
+
+    return { ok: true, fingerprint, publicKey: pubKey };
+  } catch (error) {
+    // Clean up on failure
+    try { if (existsSync(keyPath)) unlinkSync(keyPath); } catch { /* ignore */ }
+    try { if (existsSync(pubKeyPath)) unlinkSync(pubKeyPath); } catch { /* ignore */ }
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "Failed to import SSH key",
+    };
+  }
+}
+
+export function getSSHPublicKey(): { publicKey: string | null } {
+  const pubPath = sshPubKeyPath();
+  if (!existsSync(pubPath)) return { publicKey: null };
+  return { publicKey: readFileSync(pubPath, "utf-8").trim() };
+}
+
+export function removeSSHKey(): { ok: boolean; error?: string } {
+  try {
+    const keyPath = sshKeyPath();
+    const pubPath = sshPubKeyPath();
+
+    if (existsSync(keyPath)) unlinkSync(keyPath);
+    if (existsSync(pubPath)) unlinkSync(pubPath);
+
+    deleteConfig("github:ssh_fingerprint");
+    deleteConfig("github:ssh_key_type");
+
+    removeGitSSHConfig();
+
+    return { ok: true };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "Failed to remove SSH key",
+    };
+  }
+}
+
+/**
+ * Public wrapper around configureGitSSH() — called after restoring SSH keys
+ * from a backup archive so that ~/.ssh/config and git signing config are set up.
+ */
+export function applyGitSSHConfig(): void {
+  configureGitSSH();
+}
+
+export function testSSHConnection(): { ok: boolean; username?: string; error?: string } {
+  try {
+    // ssh -T git@github.com exits with code 1 on success (it prints "Hi username!")
+    const result = execSync(
+      `ssh -T -o StrictHostKeyChecking=accept-new -o BatchMode=yes git@github.com 2>&1`,
+      { encoding: "utf-8", timeout: 15_000 },
+    ).trim();
+
+    const match = result.match(/Hi (\S+)!/);
+    return { ok: true, username: match?.[1] };
+  } catch (error: unknown) {
+    // ssh -T returns exit code 1 on successful auth
+    const stderr = (error as { stdout?: string })?.stdout ?? String(error);
+    const match = stderr.match(/Hi (\S+)!/);
+    if (match) {
+      return { ok: true, username: match[1] };
+    }
+    return {
+      ok: false,
+      error: stderr.slice(0, 200) || "SSH connection failed",
+    };
+  }
 }

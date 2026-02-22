@@ -16,6 +16,7 @@ const STATUS_COLORS: Record<string, string> = {
   idle: "border-zinc-600 bg-zinc-800",
   thinking: "border-blue-500 bg-blue-500/10 shadow-[0_0_12px_rgba(59,130,246,0.3)]",
   acting: "border-emerald-500 bg-emerald-500/10 shadow-[0_0_12px_rgba(16,185,129,0.3)]",
+  awaiting_input: "border-orange-500 bg-orange-500/10 shadow-[0_0_12px_rgba(249,115,22,0.3)]",
   done: "border-zinc-600 bg-zinc-800/50",
   error: "border-red-500 bg-red-500/10 shadow-[0_0_12px_rgba(239,68,68,0.3)]",
 };
@@ -24,6 +25,7 @@ const STATUS_DOT: Record<string, string> = {
   idle: "bg-zinc-500",
   thinking: "bg-blue-500 animate-pulse",
   acting: "bg-emerald-500 animate-pulse",
+  awaiting_input: "bg-orange-500 animate-pulse",
   done: "bg-zinc-600",
   error: "bg-red-500",
 };
@@ -32,6 +34,7 @@ const STATUS_LABEL: Record<string, { text: string; className: string } | null> =
   idle: null,
   thinking: { text: "Thinking...", className: "text-blue-400" },
   acting: { text: "Executing tool...", className: "text-emerald-400" },
+  awaiting_input: { text: "Awaiting input...", className: "text-orange-400" },
   done: null,
   error: { text: "Error", className: "text-red-400" },
 };
@@ -53,7 +56,7 @@ export const AgentNode = memo(function AgentNode({
     <div
       onClick={onClick}
       className={cn(
-        "rounded-lg border-2 px-3 py-2 min-w-[120px] transition-all duration-300 cursor-pointer hover:brightness-125",
+        "rounded-lg border-2 px-3 py-2 min-w-[120px] max-w-[180px] transition-all duration-300 cursor-pointer hover:brightness-125",
         STATUS_COLORS[status] ?? STATUS_COLORS.idle,
       )}
     >
@@ -87,7 +90,7 @@ export const AgentNode = memo(function AgentNode({
           </div>
         )}
         <div className="flex flex-col">
-          <span className="text-xs font-medium leading-none">{label}</span>
+          <span className="text-xs font-medium leading-none truncate" title={label}>{label}</span>
           <span className="text-[10px] text-muted-foreground capitalize">
             {role.replace("_", " ")}
           </span>

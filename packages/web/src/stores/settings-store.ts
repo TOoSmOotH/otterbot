@@ -19,6 +19,29 @@ export interface TestResult {
   testing: boolean;
 }
 
+export interface ScheduledTaskInfo {
+  id: string;
+  name: string;
+  description: string;
+  defaultIntervalMs: number;
+  minIntervalMs: number;
+  enabled: boolean;
+  intervalMs: number;
+}
+
+export interface CustomTaskInfo {
+  id: string;
+  name: string;
+  description: string;
+  message: string;
+  mode: "coo-prompt" | "coo-background" | "notification";
+  intervalMs: number;
+  enabled: boolean;
+  lastRunAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface SearchProviderConfig {
   id: string;
   name: string;
@@ -60,6 +83,14 @@ interface SettingsState {
   error: string | null;
   testResults: Record<string, TestResult>;
 
+  // Scheduled Tasks
+  scheduledTasks: ScheduledTaskInfo[];
+  scheduledTasksLoading: boolean;
+
+  // Custom Scheduled Tasks
+  customTasks: CustomTaskInfo[];
+  customTasksLoading: boolean;
+
   // Search
   searchProviders: SearchProviderConfig[];
   activeSearchProvider: string | null;
@@ -88,7 +119,60 @@ interface SettingsState {
   openCodePasswordSet: boolean;
   openCodeTimeoutMs: number;
   openCodeMaxIterations: number;
+  openCodeModel: string;
+  openCodeProviderId: string;
+  openCodeInteractive: boolean;
   openCodeTestResult: TestResult | null;
+
+  // Claude Code
+  claudeCodeEnabled: boolean;
+  claudeCodeAuthMode: "api-key" | "oauth";
+  claudeCodeApiKeySet: boolean;
+  claudeCodeModel: string;
+  claudeCodeApprovalMode: "full-auto" | "auto-edit";
+  claudeCodeTimeoutMs: number;
+  claudeCodeMaxTurns: number;
+  claudeCodeTestResult: TestResult | null;
+
+  // Codex
+  codexEnabled: boolean;
+  codexAuthMode: "api-key" | "oauth";
+  codexApiKeySet: boolean;
+  codexModel: string;
+  codexApprovalMode: "full-auto" | "suggest" | "ask";
+  codexTimeoutMs: number;
+  codexTestResult: TestResult | null;
+
+  // GitHub
+  gitHubEnabled: boolean;
+  gitHubTokenSet: boolean;
+  gitHubUsername: string | null;
+  gitHubTestResult: TestResult | null;
+
+  // GitHub SSH
+  sshKeySet: boolean;
+  sshKeyFingerprint: string | null;
+  sshKeyType: string | null;
+  sshPublicKey: string | null;
+  sshTestResult: TestResult & { username?: string } | null;
+
+  // Discord
+  discordEnabled: boolean;
+  discordTokenSet: boolean;
+  discordRequireMention: boolean;
+  discordBotUsername: string | null;
+  discordAllowedChannels: string[];
+  discordAvailableChannels: Array<{ id: string; name: string; guildName: string }>;
+  discordPairedUsers: Array<{ discordUserId: string; discordUsername: string; pairedAt: string }>;
+  discordPendingPairings: Array<{ code: string; discordUserId: string; discordUsername: string; createdAt: string }>;
+  discordTestResult: TestResult | null;
+
+  // Google
+  googleConnected: boolean;
+  googleConnectedEmail: string | null;
+  googleClientIdSet: boolean;
+  googleClientSecretSet: boolean;
+  googleRedirectBaseUrl: string | null;
 
   loadSettings: () => Promise<void>;
   createProvider: (data: { name: string; type: ProviderType; apiKey?: string; baseUrl?: string }) => Promise<NamedProvider | null>;
@@ -105,6 +189,30 @@ interface SettingsState {
   loadCustomModels: (providerId?: string) => Promise<void>;
   createCustomModel: (data: { providerId: string; modelId: string; label?: string }) => Promise<CustomModel | null>;
   deleteCustomModel: (id: string) => Promise<void>;
+
+  // Scheduled Tasks actions
+  loadScheduledTasks: () => Promise<void>;
+  updateScheduledTask: (taskId: string, data: { enabled?: boolean; intervalMs?: number }) => Promise<void>;
+
+  // Custom Tasks actions
+  loadCustomTasks: () => Promise<void>;
+  createCustomTask: (data: {
+    name: string;
+    description?: string;
+    message: string;
+    mode?: "coo-prompt" | "coo-background" | "notification";
+    intervalMs: number;
+    enabled?: boolean;
+  }) => Promise<void>;
+  updateCustomTask: (id: string, data: {
+    name?: string;
+    description?: string;
+    message?: string;
+    mode?: "coo-prompt" | "coo-background" | "notification";
+    intervalMs?: number;
+    enabled?: boolean;
+  }) => Promise<void>;
+  deleteCustomTask: (id: string) => Promise<void>;
 
   // Search actions
   loadSearchSettings: () => Promise<void>;
@@ -148,8 +256,76 @@ interface SettingsState {
     password?: string;
     timeoutMs?: number;
     maxIterations?: number;
+    interactive?: boolean;
   }) => Promise<void>;
   testOpenCodeConnection: () => Promise<void>;
+
+  // Claude Code actions
+  loadClaudeCodeSettings: () => Promise<void>;
+  updateClaudeCodeSettings: (data: {
+    enabled?: boolean;
+    authMode?: "api-key" | "oauth";
+    apiKey?: string;
+    model?: string;
+    approvalMode?: "full-auto" | "auto-edit";
+    timeoutMs?: number;
+    maxTurns?: number;
+  }) => Promise<void>;
+  testClaudeCodeConnection: () => Promise<void>;
+
+  // Codex actions
+  loadCodexSettings: () => Promise<void>;
+  updateCodexSettings: (data: {
+    enabled?: boolean;
+    authMode?: "api-key" | "oauth";
+    apiKey?: string;
+    model?: string;
+    approvalMode?: "full-auto" | "suggest" | "ask";
+    timeoutMs?: number;
+  }) => Promise<void>;
+  testCodexConnection: () => Promise<void>;
+
+  // GitHub actions
+  loadGitHubSettings: () => Promise<void>;
+  updateGitHubSettings: (data: {
+    enabled?: boolean;
+    token?: string;
+  }) => Promise<void>;
+  testGitHubConnection: () => Promise<void>;
+
+  // GitHub SSH actions
+  generateSSHKey: (type?: "ed25519" | "rsa") => Promise<void>;
+  importSSHKey: (privateKey: string) => Promise<void>;
+  getSSHPublicKey: () => Promise<void>;
+  removeSSHKey: () => Promise<void>;
+  testSSHConnection: () => Promise<void>;
+
+  // Discord actions
+  loadDiscordSettings: () => Promise<void>;
+  updateDiscordSettings: (data: {
+    enabled?: boolean;
+    botToken?: string;
+    requireMention?: boolean;
+    allowedChannels?: string[];
+  }) => Promise<void>;
+  testDiscordConnection: () => Promise<void>;
+  approveDiscordPairing: (code: string) => Promise<void>;
+  rejectDiscordPairing: (code: string) => Promise<void>;
+  revokeDiscordUser: (userId: string) => Promise<void>;
+
+  // Google actions
+  loadGoogleSettings: () => Promise<void>;
+  updateGoogleCredentials: (data: {
+    clientId?: string;
+    clientSecret?: string;
+    redirectBaseUrl?: string;
+  }) => Promise<void>;
+  beginGoogleOAuth: () => Promise<string | null>;
+  disconnectGoogle: () => Promise<void>;
+
+  // Backup & Restore
+  backupDatabase: () => Promise<void>;
+  restoreDatabase: (file: File) => Promise<{ ok: boolean; error?: string }>;
 }
 
 // ---------------------------------------------------------------------------
@@ -169,6 +345,10 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   loading: false,
   error: null,
   testResults: {},
+  scheduledTasks: [],
+  scheduledTasksLoading: false,
+  customTasks: [],
+  customTasksLoading: false,
   searchProviders: [],
   activeSearchProvider: null,
   searchTestResults: {},
@@ -190,7 +370,48 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   openCodePasswordSet: false,
   openCodeTimeoutMs: 180000,
   openCodeMaxIterations: 50,
+  openCodeModel: "",
+  openCodeProviderId: "",
+  openCodeInteractive: false,
   openCodeTestResult: null,
+  claudeCodeEnabled: false,
+  claudeCodeAuthMode: "api-key",
+  claudeCodeApiKeySet: false,
+  claudeCodeModel: "claude-sonnet-4-5-20250929",
+  claudeCodeApprovalMode: "full-auto",
+  claudeCodeTimeoutMs: 1200000,
+  claudeCodeMaxTurns: 50,
+  claudeCodeTestResult: null,
+  codexEnabled: false,
+  codexAuthMode: "api-key",
+  codexApiKeySet: false,
+  codexModel: "codex-mini",
+  codexApprovalMode: "full-auto",
+  codexTimeoutMs: 1200000,
+  codexTestResult: null,
+  gitHubEnabled: false,
+  gitHubTokenSet: false,
+  gitHubUsername: null,
+  gitHubTestResult: null,
+  sshKeySet: false,
+  sshKeyFingerprint: null,
+  sshKeyType: null,
+  sshPublicKey: null,
+  sshTestResult: null,
+  discordEnabled: false,
+  discordTokenSet: false,
+  discordRequireMention: true,
+  discordBotUsername: null,
+  discordAllowedChannels: [],
+  discordAvailableChannels: [],
+  discordPairedUsers: [],
+  discordPendingPairings: [],
+  discordTestResult: null,
+  googleConnected: false,
+  googleConnectedEmail: null,
+  googleClientIdSet: false,
+  googleClientSecretSet: false,
+  googleRedirectBaseUrl: null,
 
   loadSettings: async () => {
     set({ loading: true, error: null });
@@ -377,6 +598,92 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       }
     } catch {
       // Silently fail
+    }
+  },
+
+  loadScheduledTasks: async () => {
+    set({ scheduledTasksLoading: true });
+    try {
+      const res = await fetch("/api/settings/scheduled-tasks");
+      if (!res.ok) return;
+      const data = await res.json();
+      set({ scheduledTasks: data.tasks });
+    } catch {
+      // Silently fail
+    } finally {
+      set({ scheduledTasksLoading: false });
+    }
+  },
+
+  updateScheduledTask: async (taskId, data) => {
+    set({ error: null });
+    try {
+      const res = await fetch(`/api/settings/scheduled-tasks/${taskId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) throw new Error("Failed to update scheduled task");
+      await get().loadScheduledTasks();
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "Unknown error" });
+    }
+  },
+
+  loadCustomTasks: async () => {
+    set({ customTasksLoading: true });
+    try {
+      const res = await fetch("/api/settings/custom-tasks");
+      if (!res.ok) return;
+      const data = await res.json();
+      set({ customTasks: data.tasks });
+    } catch {
+      // Silently fail
+    } finally {
+      set({ customTasksLoading: false });
+    }
+  },
+
+  createCustomTask: async (data) => {
+    set({ error: null });
+    try {
+      const res = await fetch("/api/settings/custom-tasks", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) throw new Error("Failed to create custom task");
+      await get().loadCustomTasks();
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "Unknown error" });
+    }
+  },
+
+  updateCustomTask: async (id, data) => {
+    set({ error: null });
+    try {
+      const res = await fetch(`/api/settings/custom-tasks/${id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) throw new Error("Failed to update custom task");
+      await get().loadCustomTasks();
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "Unknown error" });
+    }
+  },
+
+  deleteCustomTask: async (id) => {
+    set({ error: null });
+    try {
+      const res = await fetch(`/api/settings/custom-tasks/${id}`, {
+        method: "DELETE",
+      });
+      if (!res.ok) throw new Error("Failed to delete custom task");
+      await get().loadCustomTasks();
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "Unknown error" });
     }
   },
 
@@ -730,6 +1037,9 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
         openCodePasswordSet: data.passwordSet,
         openCodeTimeoutMs: data.timeoutMs,
         openCodeMaxIterations: data.maxIterations,
+        openCodeModel: data.model ?? "",
+        openCodeProviderId: data.providerId ?? "",
+        openCodeInteractive: data.interactive ?? false,
       });
     } catch {
       // Silently fail
@@ -775,6 +1085,513 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
           testing: false,
         },
       });
+    }
+  },
+
+  // Claude Code actions
+
+  loadClaudeCodeSettings: async () => {
+    try {
+      const res = await fetch("/api/settings/claude-code");
+      if (!res.ok) return;
+      const data = await res.json();
+      set({
+        claudeCodeEnabled: data.enabled,
+        claudeCodeAuthMode: data.authMode ?? "api-key",
+        claudeCodeApiKeySet: data.apiKeySet,
+        claudeCodeModel: data.model ?? "claude-sonnet-4-5-20250929",
+        claudeCodeApprovalMode: data.approvalMode ?? "full-auto",
+        claudeCodeTimeoutMs: data.timeoutMs ?? 1200000,
+        claudeCodeMaxTurns: data.maxTurns ?? 50,
+      });
+    } catch {
+      // Silently fail
+    }
+  },
+
+  updateClaudeCodeSettings: async (data) => {
+    set({ error: null });
+    try {
+      const res = await fetch("/api/settings/claude-code", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) throw new Error("Failed to update Claude Code settings");
+      await get().loadClaudeCodeSettings();
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "Unknown error" });
+    }
+  },
+
+  testClaudeCodeConnection: async () => {
+    set({ claudeCodeTestResult: { ok: false, testing: true } });
+    try {
+      const res = await fetch("/api/settings/claude-code/test", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      const data = await res.json();
+      set({
+        claudeCodeTestResult: {
+          ok: data.ok,
+          error: data.error,
+          testing: false,
+        },
+      });
+    } catch (err) {
+      set({
+        claudeCodeTestResult: {
+          ok: false,
+          error: err instanceof Error ? err.message : "Unknown error",
+          testing: false,
+        },
+      });
+    }
+  },
+
+  // Codex actions
+
+  loadCodexSettings: async () => {
+    try {
+      const res = await fetch("/api/settings/codex");
+      if (!res.ok) return;
+      const data = await res.json();
+      set({
+        codexEnabled: data.enabled,
+        codexAuthMode: data.authMode ?? "api-key",
+        codexApiKeySet: data.apiKeySet,
+        codexModel: data.model ?? "codex-mini",
+        codexApprovalMode: data.approvalMode ?? "full-auto",
+        codexTimeoutMs: data.timeoutMs ?? 1200000,
+      });
+    } catch {
+      // Silently fail
+    }
+  },
+
+  updateCodexSettings: async (data) => {
+    set({ error: null });
+    try {
+      const res = await fetch("/api/settings/codex", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) throw new Error("Failed to update Codex settings");
+      await get().loadCodexSettings();
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "Unknown error" });
+    }
+  },
+
+  testCodexConnection: async () => {
+    set({ codexTestResult: { ok: false, testing: true } });
+    try {
+      const res = await fetch("/api/settings/codex/test", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      const data = await res.json();
+      set({
+        codexTestResult: {
+          ok: data.ok,
+          error: data.error,
+          testing: false,
+        },
+      });
+    } catch (err) {
+      set({
+        codexTestResult: {
+          ok: false,
+          error: err instanceof Error ? err.message : "Unknown error",
+          testing: false,
+        },
+      });
+    }
+  },
+
+  // GitHub actions
+
+  loadGitHubSettings: async () => {
+    try {
+      const res = await fetch("/api/settings/github");
+      if (!res.ok) return;
+      const data = await res.json();
+      set({
+        gitHubEnabled: data.enabled,
+        gitHubTokenSet: data.tokenSet,
+        gitHubUsername: data.username,
+        sshKeySet: data.sshKeySet,
+        sshKeyFingerprint: data.sshKeyFingerprint,
+        sshKeyType: data.sshKeyType,
+      });
+    } catch {
+      // Silently fail
+    }
+  },
+
+  updateGitHubSettings: async (data) => {
+    set({ error: null });
+    try {
+      const res = await fetch("/api/settings/github", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) throw new Error("Failed to update GitHub settings");
+      await get().loadGitHubSettings();
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "Unknown error" });
+    }
+  },
+
+  testGitHubConnection: async () => {
+    set({ gitHubTestResult: { ok: false, testing: true } });
+    try {
+      const res = await fetch("/api/settings/github/test", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      const data = await res.json();
+      set({
+        gitHubTestResult: {
+          ok: data.ok,
+          error: data.error,
+          testing: false,
+        },
+        gitHubUsername: data.ok ? data.username : get().gitHubUsername,
+      });
+    } catch (err) {
+      set({
+        gitHubTestResult: {
+          ok: false,
+          error: err instanceof Error ? err.message : "Unknown error",
+          testing: false,
+        },
+      });
+    }
+  },
+
+  // GitHub SSH actions
+
+  generateSSHKey: async (type) => {
+    set({ error: null });
+    try {
+      const res = await fetch("/api/settings/github/ssh/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type: type ?? "ed25519" }),
+      });
+      const data = await res.json();
+      if (!data.ok) {
+        set({ error: data.error ?? "Failed to generate SSH key" });
+        return;
+      }
+      set({ sshPublicKey: data.publicKey });
+      await get().loadGitHubSettings();
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "Unknown error" });
+    }
+  },
+
+  importSSHKey: async (privateKey) => {
+    set({ error: null });
+    try {
+      const res = await fetch("/api/settings/github/ssh/import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ privateKey }),
+      });
+      const data = await res.json();
+      if (!data.ok) {
+        set({ error: data.error ?? "Failed to import SSH key" });
+        return;
+      }
+      set({ sshPublicKey: data.publicKey });
+      await get().loadGitHubSettings();
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "Unknown error" });
+    }
+  },
+
+  getSSHPublicKey: async () => {
+    try {
+      const res = await fetch("/api/settings/github/ssh/public-key");
+      if (!res.ok) return;
+      const data = await res.json();
+      set({ sshPublicKey: data.publicKey });
+    } catch {
+      // Silently fail
+    }
+  },
+
+  removeSSHKey: async () => {
+    set({ error: null });
+    try {
+      const res = await fetch("/api/settings/github/ssh", {
+        method: "DELETE",
+      });
+      const data = await res.json();
+      if (!data.ok) {
+        set({ error: data.error ?? "Failed to remove SSH key" });
+        return;
+      }
+      set({ sshPublicKey: null, sshTestResult: null });
+      await get().loadGitHubSettings();
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "Unknown error" });
+    }
+  },
+
+  testSSHConnection: async () => {
+    set({ sshTestResult: { ok: false, testing: true } });
+    try {
+      const res = await fetch("/api/settings/github/ssh/test", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      const data = await res.json();
+      set({
+        sshTestResult: {
+          ok: data.ok,
+          error: data.error,
+          username: data.username,
+          testing: false,
+        },
+      });
+    } catch (err) {
+      set({
+        sshTestResult: {
+          ok: false,
+          error: err instanceof Error ? err.message : "Unknown error",
+          testing: false,
+        },
+      });
+    }
+  },
+
+  // Discord actions
+
+  loadDiscordSettings: async () => {
+    try {
+      const res = await fetch("/api/settings/discord");
+      if (!res.ok) return;
+      const data = await res.json();
+      set({
+        discordEnabled: data.enabled,
+        discordTokenSet: data.tokenSet,
+        discordRequireMention: data.requireMention,
+        discordBotUsername: data.botUsername,
+        discordAllowedChannels: data.allowedChannels ?? [],
+        discordAvailableChannels: data.availableChannels ?? [],
+        discordPairedUsers: data.pairedUsers,
+        discordPendingPairings: data.pendingPairings,
+      });
+    } catch {
+      // Silently fail
+    }
+  },
+
+  updateDiscordSettings: async (data) => {
+    set({ error: null });
+    try {
+      const res = await fetch("/api/settings/discord", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) throw new Error("Failed to update Discord settings");
+      await get().loadDiscordSettings();
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "Unknown error" });
+    }
+  },
+
+  testDiscordConnection: async () => {
+    set({ discordTestResult: { ok: false, testing: true } });
+    try {
+      const res = await fetch("/api/settings/discord/test", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      const data = await res.json();
+      set({
+        discordTestResult: {
+          ok: data.ok,
+          error: data.error,
+          testing: false,
+        },
+        discordBotUsername: data.ok ? data.botUsername : get().discordBotUsername,
+      });
+    } catch (err) {
+      set({
+        discordTestResult: {
+          ok: false,
+          error: err instanceof Error ? err.message : "Unknown error",
+          testing: false,
+        },
+      });
+    }
+  },
+
+  approveDiscordPairing: async (code) => {
+    set({ error: null });
+    try {
+      const res = await fetch("/api/settings/discord/pair/approve", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code }),
+      });
+      if (!res.ok) throw new Error("Failed to approve pairing");
+      await get().loadDiscordSettings();
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "Unknown error" });
+    }
+  },
+
+  rejectDiscordPairing: async (code) => {
+    set({ error: null });
+    try {
+      const res = await fetch("/api/settings/discord/pair/reject", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code }),
+      });
+      if (!res.ok) throw new Error("Failed to reject pairing");
+      await get().loadDiscordSettings();
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "Unknown error" });
+    }
+  },
+
+  revokeDiscordUser: async (userId) => {
+    set({ error: null });
+    try {
+      const res = await fetch(`/api/settings/discord/pair/${userId}`, {
+        method: "DELETE",
+      });
+      if (!res.ok) throw new Error("Failed to revoke user");
+      await get().loadDiscordSettings();
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "Unknown error" });
+    }
+  },
+
+  // Google actions
+
+  loadGoogleSettings: async () => {
+    try {
+      const res = await fetch("/api/settings/google");
+      if (!res.ok) return;
+      const data = await res.json();
+      set({
+        googleConnected: data.connected,
+        googleConnectedEmail: data.connectedEmail,
+        googleClientIdSet: data.clientIdSet,
+        googleClientSecretSet: data.clientSecretSet,
+        googleRedirectBaseUrl: data.redirectBaseUrl,
+      });
+    } catch {
+      // Silently fail
+    }
+  },
+
+  updateGoogleCredentials: async (data) => {
+    set({ error: null });
+    try {
+      const res = await fetch("/api/settings/google", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) throw new Error("Failed to update Google credentials");
+      await get().loadGoogleSettings();
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "Unknown error" });
+    }
+  },
+
+  beginGoogleOAuth: async () => {
+    try {
+      const res = await fetch("/api/settings/google/oauth/begin", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      if (!res.ok) return null;
+      const data = await res.json();
+      return data.url ?? null;
+    } catch {
+      return null;
+    }
+  },
+
+  disconnectGoogle: async () => {
+    set({ error: null });
+    try {
+      const res = await fetch("/api/settings/google/disconnect", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      if (!res.ok) throw new Error("Failed to disconnect Google");
+      await get().loadGoogleSettings();
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "Unknown error" });
+    }
+  },
+
+  backupDatabase: async () => {
+    try {
+      const res = await fetch("/api/settings/backup");
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || "Backup failed");
+      }
+
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `otterbot-backup-${new Date().toISOString().split("T")[0]}.db`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "Unknown error" });
+    }
+  },
+
+  restoreDatabase: async (file: File) => {
+    set({ error: null });
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+
+      const res = await fetch("/api/settings/restore", {
+        method: "POST",
+        body: formData,
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        return { ok: false, error: data.error || "Restore failed" };
+      }
+
+      // Reload settings as DB changed
+      await get().loadSettings();
+      return { ok: true };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Unknown error";
+      set({ error: msg });
+      return { ok: false, error: msg };
     }
   },
 }));

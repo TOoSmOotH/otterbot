@@ -1,16 +1,10 @@
 import { test, expect } from "../fixtures";
+import { getStoredCookie } from "../helpers/api";
 
 test.describe("Kanban Board", () => {
   // Kanban requires a project context — we test via API + UI
   test("kanban API: create, update, and delete task", async ({ credentials }) => {
-    // First, login to get a session cookie
-    const loginRes = await fetch("https://localhost:62627/api/auth/login", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ passphrase: credentials.setup.passphrase }),
-    });
-    expect(loginRes.ok).toBe(true);
-    const cookie = loginRes.headers.get("set-cookie") ?? "";
+    const cookie = getStoredCookie();
 
     // Create a project first
     const projRes = await fetch("https://localhost:62627/api/projects", {

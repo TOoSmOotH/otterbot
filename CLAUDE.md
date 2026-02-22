@@ -45,6 +45,18 @@ npx pnpm dev
 
 **Note:** `packages/server` has a pre-existing type error in `src/tts/tts.ts` for the `kokoro-js` module — this is expected and can be ignored when type-checking.
 
+## Branching & CI/CD
+
+The repo uses a three-branch promotion model: `dev` → `beta` → `main`.
+
+- **dev**: Push freely. CI runs tests + build on push.
+- **beta**: PRs required. Merging triggers release-please (prerelease) and publishes `:beta` container to GHCR.
+- **main**: PRs required. Merging triggers release-please (stable) and publishes `:latest` container to GHCR.
+
+Use conventional commits (`feat:`, `fix:`, `chore:`, etc.) — release-please uses them for automated versioning and changelogs.
+
+When promoting `beta` → `main`, use **squash merge** with a conventional commit title so release-please can parse it.
+
 ## License
 
 MIT — Copyright 2026 Mike Reeves

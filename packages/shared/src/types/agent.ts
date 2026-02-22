@@ -4,18 +4,21 @@ export enum AgentRole {
   COO = "coo",
   TeamLead = "team_lead",
   Worker = "worker",
+  AdminAssistant = "admin_assistant",
 }
 
 export enum AgentStatus {
   Idle = "idle",
   Thinking = "thinking",
   Acting = "acting",
+  AwaitingInput = "awaiting_input",
   Done = "done",
   Error = "error",
 }
 
 export interface Agent {
   id: string;
+  name: string | null;
   registryEntryId: string | null;
   role: AgentRole;
   parentId: string | null;

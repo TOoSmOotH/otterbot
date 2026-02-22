@@ -9,18 +9,33 @@ import {
   type KanbanTask,
 } from "@otterbot/shared";
 import { BaseAgent, type AgentOptions } from "./agent.js";
-import { Worker } from "./worker.js";
+import { Worker, CODING_AGENT_REGISTRY_IDS } from "./worker.js";
+
+/** All coding agent IDs including the fallback builtin-coder */
+const CODING_AGENT_IDS = CODING_AGENT_REGISTRY_IDS;
+
+/** Check whether an external coding agent is currently enabled in settings */
+function isCodingAgentEnabled(registryEntryId: string): boolean {
+  switch (registryEntryId) {
+    case "builtin-opencode-coder": return getConfig("opencode:enabled") === "true";
+    case "builtin-claude-code-coder": return getConfig("claude-code:enabled") === "true";
+    case "builtin-codex-coder": return getConfig("codex:enabled") === "true";
+    default: return true;
+  }
+}
 import { getDb, schema } from "../db/index.js";
 import { Registry } from "../registry/registry.js";
+import { SkillService } from "../skills/skill-service.js";
 import type { MessageBus } from "../bus/message-bus.js";
 import type { WorkspaceManager } from "../workspace/workspace.js";
 import { eq } from "drizzle-orm";
-import { getConfig } from "../auth/auth.js";
+import { getConfig, setConfig, deleteConfig } from "../auth/auth.js";
 import { execSync } from "node:child_process";
 import { getConfiguredSearchProvider } from "../tools/search/providers.js";
 import { isDesktopEnabled } from "../desktop/desktop.js";
 import { TEAM_LEAD_PROMPT } from "./prompts/team-lead.js";
 import { getRandomModelPackId } from "../models3d/model-packs.js";
+import { debug } from "../utils/debug.js";
 
 /** Tool descriptions for environment context injection */
 const TOOL_DESCRIPTIONS: Record<string, string> = {
@@ -115,6 +130,23 @@ function buildEnvironmentContext(toolNames: string[]): string {
     );
 
     sections.push(
+      `## Pre-installed Tools\n` +
+      `The following are already installed system-wide — do NOT try to install them:\n` +
+      `- **Node.js** (v22), **npm**, **pnpm** (via corepack)\n` +
+      `- **Go** (${process.env.GOLANG_VERSION ?? "1.24"})\n` +
+      `- **Rust** (stable, via rustup)\n` +
+      `- **Python 3** with pip and venv\n` +
+      `- **Java** (OpenJDK headless)\n` +
+      `- **Ruby**\n` +
+      `- **git**, **gh** (GitHub CLI)\n` +
+      `- **Playwright** with Chromium — already installed, do NOT run \`npx playwright install\` or install browsers\n` +
+      `- **Puppeteer** — already installed with shared Chromium, do NOT reinstall\n` +
+      `- **SQLite 3**\n` +
+      `- **build-essential**, **pkg-config**, **curl**\n` +
+      `- **ss** (iproute2), **netstat** (net-tools)`,
+    );
+
+    sections.push(
       `## Software Installation\n` +
       `**IMPORTANT: Install language runtimes and tools into the home directory, NOT system paths.**\n` +
       `Do NOT write to \`/usr/local/\`, \`/opt/\`, or other system directories — use \`$HOME\` instead.\n` +
@@ -136,6 +168,7 @@ export interface TeamLeadDependencies {
   workspace: WorkspaceManager;
   projectId: string;
   parentId: string;
+  name?: string;
   modelPackId?: string | null;
   onAgentSpawned?: (agent: BaseAgent) => void;
   onStatusChange?: (agentId: string, status: AgentStatus) => void;
@@ -144,26 +177,76 @@ export interface TeamLeadDependencies {
   onAgentThinking?: (agentId: string, token: string, messageId: string) => void;
   onAgentThinkingEnd?: (agentId: string, messageId: string) => void;
   onAgentToolCall?: (agentId: string, toolName: string, args: Record<string, unknown>) => void;
+  onCodingAgentEvent?: (agentId: string, sessionId: string, event: { type: string; properties: Record<string, unknown> }) => void;
+  onCodingAgentAwaitingInput?: (agentId: string, sessionId: string, prompt: string) => Promise<string | null>;
+  onCodingAgentPermissionRequest?: (agentId: string, sessionId: string, permission: { id: string; type: string; title: string; pattern?: string | string[]; metadata: Record<string, unknown> }) => Promise<"once" | "always" | "reject">;
+  onTerminalData?: (agentId: string, data: string) => void;
+  onPtySessionRegistered?: (agentId: string, client: import("./worker.js").PtyClient) => void;
+  onPtySessionUnregistered?: (agentId: string) => void;
 }
 
 const MAX_CONTINUATION_CYCLES = 5;
+const MAX_TASK_RETRIES = 3;
 
 export class TeamLead extends BaseAgent {
   private workers: Map<string, Worker> = new Map();
   private workspace: WorkspaceManager;
   private verificationRequested = false;
-  private deploymentRequested = false;
+  /** AbortController for the current LLM call — allows stop() to cancel in-flight inference */
+  private _abortController: AbortController | null = null;
   /** Per-think-cycle call counts — prevents tools from being called repeatedly within a single streamText run */
   private _toolCallCounts = new Map<string, number>();
   private _pendingWorkerReport = new Map<string, string>();
+  private allowedToolNames: Set<string>;
   private onAgentSpawned?: (agent: BaseAgent) => void;
   private onKanbanChange?: (event: "created" | "updated" | "deleted", task: KanbanTask) => void;
+  private _onCodingAgentEvent?: (agentId: string, sessionId: string, event: { type: string; properties: Record<string, unknown> }) => void;
+  private _onCodingAgentAwaitingInput?: (agentId: string, sessionId: string, prompt: string) => Promise<string | null>;
+  private _onCodingAgentPermissionRequest?: (agentId: string, sessionId: string, permission: { id: string; type: string; title: string; pattern?: string | string[]; metadata: Record<string, unknown> }) => Promise<"once" | "always" | "reject">;
+  private _onTerminalData?: (agentId: string, data: string) => void;
+  private _onPtySessionRegistered?: (agentId: string, client: import("./worker.js").PtyClient) => void;
+  private _onPtySessionUnregistered?: (agentId: string) => void;
 
   constructor(deps: TeamLeadDependencies) {
     const registry = new Registry();
     const tlEntry = registry.get("builtin-team-lead");
+    // Build system prompt with optional GitHub context
+    let systemPrompt = tlEntry?.systemPrompt ?? TEAM_LEAD_PROMPT;
+
+    // Inject GitHub context if this project is linked to a repo
+    const ghRepo = getConfig(`project:${deps.projectId}:github:repo`);
+    const ghBranch = getConfig(`project:${deps.projectId}:github:branch`);
+    const ghRulesRaw = getConfig(`project:${deps.projectId}:github:rules`);
+    if (ghRepo) {
+      const sections: string[] = [
+        `\n\n## GitHub Integration`,
+        `Repository: ${ghRepo}`,
+        `Target branch: ${ghBranch ?? "main"}`,
+        `**PR Workflow:** Workers must create feature branches from \`${ghBranch ?? "main"}\`, commit, push, and open a PR targeting \`${ghBranch ?? "main"}\`.`,
+        `Use conventional commits and reference issue numbers.`,
+      ];
+      if (ghRulesRaw) {
+        try {
+          const rules = JSON.parse(ghRulesRaw) as string[];
+          if (rules.length > 0) {
+            sections.push(`\n**Project Rules:**`);
+            sections.push(...rules.map((r) => `- ${r}`));
+          }
+        } catch { /* ignore */ }
+      }
+      systemPrompt += sections.join("\n");
+    }
+
+    // Agent assignments are resolved dynamically at spawn time (not baked into the
+    // system prompt) so that config changes take effect without restarting the TL.
+    systemPrompt +=
+      `\n\n## Agent Assignments\n` +
+      `This project may have per-project agent assignments. ` +
+      `Always call search_registry("code") before spawning coding workers to see which agents are currently available.`;
+
     const options: AgentOptions = {
       role: AgentRole.TeamLead,
+      name: deps.name ?? null,
       parentId: deps.parentId,
       projectId: deps.projectId,
       modelPackId: deps.modelPackId ?? null,
@@ -175,7 +258,7 @@ export class TeamLead extends BaseAgent {
         getConfig("team_lead_provider") ??
         getConfig("coo_provider") ??
         "anthropic",
-      systemPrompt: tlEntry?.systemPrompt ?? TEAM_LEAD_PROMPT,
+      systemPrompt,
       onStatusChange: deps.onStatusChange,
       onAgentStream: deps.onAgentStream,
       onAgentThinking: deps.onAgentThinking,
@@ -183,10 +266,44 @@ export class TeamLead extends BaseAgent {
       onAgentToolCall: deps.onAgentToolCall,
     };
     super(options, deps.bus);
+
+    // Limit tool call rounds to prevent runaway loops with less capable models
+    this.llmConfig.maxSteps = 10;
+
+    // Derive allowed tools from assigned skills
+    const skillService = new SkillService();
+    const tlSkills = skillService.getForAgent("builtin-team-lead");
+    this.allowedToolNames = new Set(tlSkills.flatMap((s) => s.meta.tools));
+
     this.workspace = deps.workspace;
     this.onAgentSpawned = deps.onAgentSpawned;
     this.onKanbanChange = deps.onKanbanChange;
+    this._onCodingAgentEvent = deps.onCodingAgentEvent;
+    this._onCodingAgentAwaitingInput = deps.onCodingAgentAwaitingInput;
+    this._onCodingAgentPermissionRequest = deps.onCodingAgentPermissionRequest;
+    this._onTerminalData = deps.onTerminalData;
+    this._onPtySessionRegistered = deps.onPtySessionRegistered;
+    this._onPtySessionUnregistered = deps.onPtySessionUnregistered;
 
+    // Restore persisted flags from previous runs
+    this.verificationRequested = this.loadFlag("verification");
+  }
+
+  /** Persist a flag to the config KV table so it survives restarts */
+  private persistFlag(flag: "verification", value: boolean): void {
+    const key = `project:${this.projectId}:${flag}_requested`;
+    if (value) {
+      setConfig(key, "true");
+    } else {
+      deleteConfig(key);
+    }
+  }
+
+  /** Load a persisted flag from the config KV table */
+  private loadFlag(flag: "verification"): boolean {
+    if (!this.projectId) return false;
+    const key = `project:${this.projectId}:${flag}_requested`;
+    return getConfig(key) === "true";
   }
 
   async handleMessage(message: BusMessage): Promise<void> {
@@ -200,10 +317,24 @@ export class TeamLead extends BaseAgent {
   }
 
   private async handleDirective(message: BusMessage) {
-    this.verificationRequested = false;
-    this.deploymentRequested = false;
+    // Only reset verification flag for new directives, not recovery restarts.
+    // On recovery the flag is already correct from the previous run.
+    if (!message.metadata?.isRecovery) {
+      this.verificationRequested = false;
+      this.persistFlag("verification", false);
+    }
+
+    // Inject current board state so the TL knows what's already done
+    const board = this.getKanbanBoardState();
+    let enrichedDirective = message.content;
+    if (board.summary && board.summary !== "No tasks." && board.summary !== "No project context.") {
+      enrichedDirective =
+        `[CURRENT KANBAN BOARD]\n${board.summary}\n[/CURRENT KANBAN BOARD]\n\n` +
+        `New directive: ${message.content}`;
+    }
+
     const { text } = await this.thinkWithContinuation(
-      message.content,
+      enrichedDirective,
       (token, messageId) => this.onAgentStream?.(this.id, token, messageId),
       (token, messageId) => this.onAgentThinking?.(this.id, token, messageId),
       (messageId) => this.onAgentThinkingEnd?.(this.id, messageId),
@@ -219,7 +350,33 @@ export class TeamLead extends BaseAgent {
    * Detect whether a worker report indicates failure.
    * Returns true if the report contains clear failure signals.
    */
+  /** Count how many active workers are coding agents */
+  private countActiveCodingWorkers(): number {
+    let count = 0;
+    for (const worker of this.workers.values()) {
+      if (CODING_AGENT_IDS.has(worker.registryEntryId ?? "")) count++;
+    }
+    return count;
+  }
+
+  /** Detect whether a worker report indicates a PR was created — definitive success signal */
+  private isPRCreated(report: string): boolean {
+    const lower = report.toLowerCase();
+    return (
+      lower.includes("gh pr create") ||
+      lower.includes("pull request") ||
+      /github\.com\/[^\s]+\/pull\/\d+/.test(lower) ||
+      lower.includes("created pull request") ||
+      lower.includes("opened a pull request") ||
+      lower.includes("pr created") ||
+      lower.includes("created a pr")
+    );
+  }
+
   private isFailureReport(report: string): boolean {
+    if (!report.trim()) return true;
+    // PR creation is a definitive success signal — overrides any false-positive failure matches
+    if (this.isPRCreated(report)) return false;
     const lower = report.toLowerCase();
     const failureSignals = [
       "worker error:",
@@ -244,7 +401,7 @@ export class TeamLead extends BaseAgent {
    * For failed tasks, appends a failure summary to the description so the
    * next worker gets context about what went wrong.
    */
-  private ensureTaskMoved(taskId: string, workerReport: string): void {
+  private ensureTaskMoved(taskId: string, workerReport: string): boolean {
     const db = getDb();
     const task = db
       .select()
@@ -252,18 +409,25 @@ export class TeamLead extends BaseAgent {
       .where(eq(schema.kanbanTasks.id, taskId))
       .get();
 
-    if (!task || task.column !== "in_progress") return; // LLM already moved it
+    if (!task || task.column !== "in_progress") return false; // LLM already moved it
 
     const failed = this.isFailureReport(workerReport);
-    const targetColumn = failed ? "backlog" : "done";
     const assignee = failed ? "" : task.assigneeAgentId;
+
+    // Preview retry count to decide target column (updateKanbanTask handles the actual increment)
+    const currentRetries = (task as any).retryCount ?? 0;
+    const nextRetryCount = failed ? currentRetries + 1 : currentRetries;
+    const retriesExhausted = failed && nextRetryCount >= MAX_TASK_RETRIES;
+    // Always target "backlog" for failures — updateKanbanTask will force to "done" if retries exhausted
+    const targetColumn = failed ? "backlog" : "done";
 
     console.warn(
       `[TeamLead ${this.id}] Safety net: LLM did not move task "${task.title}" (${taskId}). ` +
-      `Force-moving to "${targetColumn}" (report ${failed ? "indicates failure" : "looks successful"}).`,
+      `Force-moving to "${targetColumn}" (report ${failed ? "indicates failure" : "looks successful"}` +
+      `${failed ? `, retry ${nextRetryCount}/${MAX_TASK_RETRIES}` : ""}).`,
     );
 
-    // For failures, enrich the task description with what went wrong
+    // Build updates — updateKanbanTask handles retry counting for backlog transitions
     const updates: { column: string; assigneeAgentId: string; description?: string; completionReport?: string } = {
       column: targetColumn,
       assigneeAgentId: assignee ?? "",
@@ -273,7 +437,7 @@ export class TeamLead extends BaseAgent {
       updates.completionReport = workerReport;
     }
 
-    if (failed) {
+    if (failed && !retriesExhausted) {
       const snippet = workerReport.length > 500
         ? workerReport.slice(-500)
         : workerReport;
@@ -285,10 +449,18 @@ export class TeamLead extends BaseAgent {
 
     this.updateKanbanTask(taskId, updates);
 
-    // If force-moved to done, check for newly unblocked tasks
-    if (targetColumn === "done") {
+    // Re-read the task to check if updateKanbanTask forced it to "done" (retries exhausted)
+    const updated = db
+      .select()
+      .from(schema.kanbanTasks)
+      .where(eq(schema.kanbanTasks.id, taskId))
+      .get();
+
+    if (updated?.column === "done") {
       this.checkUnblockedTasks(taskId);
     }
+
+    return true; // We did force-move
   }
 
   private async handleWorkerReport(message: BusMessage) {
@@ -310,17 +482,35 @@ export class TeamLead extends BaseAgent {
       }
     }
 
+    debug("team-lead", `handleWorkerReport from=${message.fromAgentId} taskId=${reportingTaskId} reportLen=${message.content.length} report="${message.content.slice(0, 200)}"`);
+    debug("team-lead", `isFailureReport=${reportingTaskId ? this.isFailureReport(message.content) : "N/A"}`);
+
     // Clean up the finished worker — it already set itself to Done
     if (message.fromAgentId) {
       const worker = this.workers.get(message.fromAgentId);
       if (worker) {
+        if (this.projectId) {
+          this.workspace.cleanupAgentWorktree(this.projectId, message.fromAgentId);
+        }
         worker.destroy();
         this.workers.delete(message.fromAgentId);
         console.log(`[TeamLead ${this.id}] Cleaned up finished worker ${message.fromAgentId}`);
       }
     }
 
-    // Detect orphaned tasks (in_progress but assigned to dead workers)
+    // Programmatically clean up orphaned tasks (in_progress but assigned to dead workers)
+    // Don't rely on the LLM — it consistently fails to handle orphans
+    // IMPORTANT: Skip the currently-reporting task — its worker was just cleaned up above,
+    // but the LLM still needs to evaluate its report before deciding where to move it.
+    for (const orphan of this.getOrphanedTasks()) {
+      if (orphan.id === reportingTaskId) continue;
+      console.log(
+        `[TeamLead ${this.id}] Auto-cleaning orphaned task "${orphan.title}" (${orphan.id}) — assigned to dead worker ${orphan.assigneeAgentId.slice(0, 6)}`,
+      );
+      this.updateKanbanTask(orphan.id, { column: "backlog", assigneeAgentId: "" });
+    }
+
+    // Re-check orphans after cleanup (should be 0 now)
     const orphans = this.getOrphanedTasks();
     const livingWorkers = this.workers.size;
 
@@ -348,6 +538,7 @@ export class TeamLead extends BaseAgent {
       // All tasks genuinely done and no orphans — final assembly phases
       if (!this.verificationRequested) {
         this.verificationRequested = true;
+        this.persistFlag("verification", true);
         instructions =
           `ALL tasks done. Now VERIFY the deliverables work:\n` +
           `1. Create a "Verify build and tests" task using create_task\n` +
@@ -356,25 +547,12 @@ export class TeamLead extends BaseAgent {
           `4. Give it clear instructions: install dependencies, build the project, start the app, and run tests\n` +
           `5. Wait for the verification results — do NOT report to COO yet\n` +
           `The project repo is at: ${repoPath}`;
-      } else if (!this.deploymentRequested) {
-        this.deploymentRequested = true;
-        instructions =
-          `ALL tasks done and verification passed. Now DEPLOY the application:\n` +
-          `1. Create a "Deploy application" task using create_task\n` +
-          `2. Search the registry for a coder worker (search_registry with capability "code")\n` +
-          `3. Spawn the worker so it runs in the project codebase\n` +
-          `4. Give it instructions to:\n` +
-          `   - Start the application as a persistent background process (use nohup and & so it survives after the worker exits)\n` +
-          `   - Wait a few seconds, then verify the app is accessible (curl/wget the health endpoint or main URL)\n` +
-          `   - Report back what URL/port the app is running on\n` +
-          `5. Wait for the deployment results — do NOT report to COO yet\n` +
-          `The project repo is at: ${repoPath}`;
       } else {
         instructions =
-          `ALL tasks done, verification passed, and deployment complete.\n` +
-          `Review the deployment results in the worker report above.\n` +
-          `If the app is running: report success to the COO using report_to_coo — include what was built, verification results, deployment URL/port, and workspace path: ${repoPath}\n` +
-          `If deployment failed: create fix tasks, spawn workers to address the issues, then re-deploy`;
+          `ALL tasks done and verification passed.\n` +
+          `Report completion to the COO using report_to_coo — include what was built, verification results, and workspace path: ${repoPath}\n` +
+          `Do NOT deploy the application unless the COO explicitly instructs you to do so.\n` +
+          `CRITICAL: Do NOT create new tasks, do NOT call create_task, do NOT call spawn_worker. The project is COMPLETE. Just report to COO and stop.`;
       }
     } else if (livingWorkers > 0 && !board.hasUnblockedBacklog && orphans.length === 0) {
       // Workers still running, nothing spawnable — evaluate the report and return.
@@ -403,12 +581,35 @@ export class TeamLead extends BaseAgent {
       );
 
       // Safety net: if the LLM didn't move the task, force-move it
+      let forceMoved = false;
       if (reportingTaskId) {
-        this.ensureTaskMoved(reportingTaskId, message.content);
+        forceMoved = this.ensureTaskMoved(reportingTaskId, message.content);
       }
 
       if (this.parentId && text.trim()) {
         this.sendMessage(this.parentId, MessageType.Report, text);
+      }
+
+      // If the safety net force-moved the task, check if there are now unblocked
+      // backlog tasks that need workers spawned. The original branch skipped
+      // thinkWithContinuation, so we need to trigger it explicitly.
+      if (forceMoved) {
+        const postBoard = this.getKanbanBoardState();
+        if (postBoard.hasUnblockedBacklog) {
+          console.log(
+            `[TeamLead ${this.id}] Safety net unblocked ${postBoard.unblockedBacklogCount} task(s) — triggering continuation to spawn workers.`,
+          );
+          const contPrompt =
+            `[CONTINUATION] The safety net moved a completed task to "done", unblocking ${postBoard.unblockedBacklogCount} task(s).\n` +
+            `[KANBAN BOARD]\n${postBoard.summary}\n[/KANBAN BOARD]\n\n` +
+            `Spawn workers for the unblocked backlog tasks. Do NOT spawn workers for [BLOCKED] tasks.`;
+          await this.thinkWithContinuation(
+            contPrompt,
+            (token, messageId) => this.onAgentStream?.(this.id, token, messageId),
+            (token, messageId) => this.onAgentThinking?.(this.id, token, messageId),
+            (messageId) => this.onAgentThinkingEnd?.(this.id, messageId),
+          );
+        }
       }
       return;
     } else if (livingWorkers > 0) {
@@ -425,9 +626,19 @@ export class TeamLead extends BaseAgent {
         `If a task was previously attempted and failed, its description will contain error details — ` +
         `analyze the failure and include specific fix instructions in the new worker's directive.` +
         actionRequired + orphanBlock;
+    } else if (board.hasBacklog && !board.hasUnblockedBacklog) {
+      // All remaining backlog tasks are blocked, no workers running, not all done.
+      // This is a deadlock or the blocked tasks' blockers just completed.
+      // Use single think() — there's nothing to spawn.
+      instructions =
+        `Evaluate the worker report and move the task accordingly (see ACTION REQUIRED below).` +
+        `\nAll remaining backlog tasks are BLOCKED — after evaluating the report, STOP. ` +
+        `Do NOT call any more tools. Blocked tasks will become available when their blockers complete.` +
+        actionRequired + orphanBlock;
     } else {
       instructions =
-        `Evaluate the worker report and proceed.` +
+        `Evaluate the worker report and move the task accordingly (see ACTION REQUIRED below).` +
+        `\nAfter evaluating the report, STOP. Do NOT call any more tools.` +
         actionRequired + orphanBlock;
     }
 
@@ -437,21 +648,145 @@ export class TeamLead extends BaseAgent {
       `[KANBAN BOARD]\n${board.summary}\n[/KANBAN BOARD]\n\n` +
       instructions;
 
-    const { text } = await this.thinkWithContinuation(
-      summary,
-      (token, messageId) => this.onAgentStream?.(this.id, token, messageId),
-      (token, messageId) => this.onAgentThinking?.(this.id, token, messageId),
-      (messageId) => this.onAgentThinkingEnd?.(this.id, messageId),
+    // Use a single think() when there's nothing to spawn — thinkWithContinuation
+    // would just loop the LLM pointlessly. This covers:
+    //  - all tasks done
+    //  - all backlog tasks are blocked (nothing to spawn)
+    //  - no backlog, no orphans, no workers (edge case)
+    const useSimpleThink = orphans.length === 0 && (
+      board.allDone ||
+      !board.hasUnblockedBacklog
     );
 
+    console.log(
+      `[TeamLead ${this.id}] handleWorkerReport: allDone=${board.allDone} backlog=${board.backlogCount} unblocked=${board.unblockedBacklogCount} inProgress=${board.inProgressCount} workers=${livingWorkers} orphans=${orphans.length} → ${useSimpleThink ? "think()" : "thinkWithContinuation()"}`,
+    );
+
+    const { text } = useSimpleThink
+      ? await this.think(
+          summary,
+          (token, messageId) => this.onAgentStream?.(this.id, token, messageId),
+          (token, messageId) => this.onAgentThinking?.(this.id, token, messageId),
+          (messageId) => this.onAgentThinkingEnd?.(this.id, messageId),
+        )
+      : await this.thinkWithContinuation(
+          summary,
+          (token, messageId) => this.onAgentStream?.(this.id, token, messageId),
+          (token, messageId) => this.onAgentThinking?.(this.id, token, messageId),
+          (messageId) => this.onAgentThinkingEnd?.(this.id, messageId),
+        );
+
     // Safety net: if the LLM didn't move the task, force-move it
+    let forceMoved = false;
     if (reportingTaskId) {
-      this.ensureTaskMoved(reportingTaskId, message.content);
+      forceMoved = this.ensureTaskMoved(reportingTaskId, message.content);
     }
 
     // Relay significant updates to COO
     if (this.parentId && text.trim()) {
       this.sendMessage(this.parentId, MessageType.Report, text);
+    }
+
+    // Once all tasks are done and verification has been attempted, stop — do NOT
+    // auto-spawn any tasks the LLM may have rogue-created during the final think().
+    if (board.allDone && this.verificationRequested && orphans.length === 0) {
+      console.log(`[TeamLead ${this.id}] Project complete (allDone + verified) — stopping.`);
+      return;
+    }
+
+    // If the safety net force-moved a task after thinkWithContinuation already
+    // finished, there may be newly unblocked tasks. Trigger one more continuation.
+    if (forceMoved) {
+      const postBoard = this.getKanbanBoardState();
+      if (postBoard.hasUnblockedBacklog) {
+        console.log(
+          `[TeamLead ${this.id}] Safety net unblocked ${postBoard.unblockedBacklogCount} task(s) after continuation — spawning workers.`,
+        );
+        const contPrompt =
+          `[CONTINUATION] The safety net moved a completed task to "done", unblocking ${postBoard.unblockedBacklogCount} task(s).\n` +
+          `[KANBAN BOARD]\n${postBoard.summary}\n[/KANBAN BOARD]\n\n` +
+          `Spawn workers for the unblocked backlog tasks. Do NOT spawn workers for [BLOCKED] tasks.`;
+        await this.thinkWithContinuation(
+          contPrompt,
+          (token, messageId) => this.onAgentStream?.(this.id, token, messageId),
+          (token, messageId) => this.onAgentThinking?.(this.id, token, messageId),
+          (messageId) => this.onAgentThinkingEnd?.(this.id, messageId),
+        );
+      }
+    }
+
+    // Auto-spawn fallback: if the LLM failed to spawn workers for unblocked tasks,
+    // do it programmatically. Bounded by MAX_TASK_RETRIES (tasks eventually move to
+    // "done" as FAILED) and max-coding-workers cap (spawnWorker refuses excess).
+    await this.autoSpawnUnblockedTasks();
+  }
+
+  /**
+   * Programmatically spawn workers for unblocked backlog tasks that the LLM missed.
+   * Spawns up to the configured max concurrent coding workers. Non-coding tasks are skipped (rare).
+   */
+  private async autoSpawnUnblockedTasks(): Promise<void> {
+    if (!this.projectId) return;
+
+    const maxCoders = parseInt(getConfig("max_coding_workers") ?? "2", 10) || 2;
+    const activeCoders = this.countActiveCodingWorkers();
+    const finalBoard = this.getKanbanBoardState();
+    if (!finalBoard.hasUnblockedBacklog || activeCoders >= maxCoders) return;
+
+    const db = getDb();
+    const tasks = db
+      .select()
+      .from(schema.kanbanTasks)
+      .where(eq(schema.kanbanTasks.projectId, this.projectId))
+      .all();
+
+    const unblockedBacklog = tasks
+      .filter(
+        (t) =>
+          t.column === "backlog" &&
+          !this.isTaskBlocked((t.blockedBy as string[]) ?? []),
+      )
+      .sort((a, b) => a.position - b.position);
+
+    if (unblockedBacklog.length === 0) return;
+
+    // Spawn up to (maxCoders - activeCoders) workers
+    const slotsAvailable = maxCoders - activeCoders;
+    const toSpawn = unblockedBacklog.slice(0, slotsAvailable);
+
+    for (const task of toSpawn) {
+      // Check if task is browser/desktop-related — sandboxed coding agents can't do these
+      const taskText = `${task.title} ${task.description ?? ""}`.toLowerCase();
+      const isBrowserTask = /\b(browser|chrome|chromium|firefox|launch.*browser|open.*url|browse.*web|headless|puppeteer|playwright|selenium|desktop.*app)\b/.test(taskText);
+
+      // Find the right registry entry — check project assignments first, then global fallback
+      let registryEntryId = "builtin-coder";
+      const assignments = this.getProjectAgentAssignments();
+      if (isBrowserTask) {
+        registryEntryId = "builtin-browser-agent";
+      } else if (assignments.coder && isCodingAgentEnabled(assignments.coder)) {
+        registryEntryId = assignments.coder;
+      } else if (getConfig("opencode:enabled") === "true") {
+        registryEntryId = "builtin-opencode-coder";
+      } else if (getConfig("claude-code:enabled") === "true") {
+        registryEntryId = "builtin-claude-code-coder";
+      } else if (getConfig("codex:enabled") === "true") {
+        registryEntryId = "builtin-codex-coder";
+      }
+
+      console.log(
+        `[TeamLead ${this.id}] Auto-spawn: LLM failed to spawn worker for "${task.title}" (${task.id}) — spawning ${registryEntryId} programmatically.`,
+      );
+
+      const taskDescription = task.description
+        ? `${task.title}\n\n${task.description}`
+        : task.title;
+
+      const result = await this.spawnWorker(registryEntryId, taskDescription, task.id);
+      console.log(`[TeamLead ${this.id}] Auto-spawn result: ${result.slice(0, 200)}`);
+
+      // Re-check slots after each spawn (spawnWorker may have been refused)
+      if (this.countActiveCodingWorkers() >= maxCoders) break;
     }
   }
 
@@ -531,10 +866,16 @@ export class TeamLead extends BaseAgent {
         const blockedBy = (t.blockedBy as string[]) ?? [];
         const blocked = col === "backlog" && this.isTaskBlocked(blockedBy);
         const blockedTag = blocked ? ` [BLOCKED by: ${blockedBy.join(", ")}]` : "";
-        lines.push(`  - ${t.title} (${t.id})${assignee}${blockedTag}`);
+        const retryCount = (t as any).retryCount ?? 0;
+        const retryTag = col === "backlog" && retryCount > 0 ? ` [retry ${retryCount}/${MAX_TASK_RETRIES}]` : "";
+        lines.push(`  - ${t.title} (${t.id})${assignee}${blockedTag}${retryTag}`);
         // Include descriptions for backlog tasks so the TL can see failure context from previous attempts
         if (col === "backlog" && t.description && t.description.includes("PREVIOUS ATTEMPT FAILED")) {
           lines.push(`    ${t.description.slice(t.description.lastIndexOf("--- PREVIOUS ATTEMPT FAILED ---")).slice(0, 300)}`);
+        }
+        // Show completion reports for done tasks so TL knows what was accomplished
+        if (col === "done" && t.completionReport) {
+          lines.push(`    Report: ${t.completionReport.slice(0, 200)}`);
         }
       }
     }
@@ -566,28 +907,29 @@ export class TeamLead extends BaseAgent {
     onReasoning?: (token: string, messageId: string) => void,
     onReasoningEnd?: (messageId: string) => void,
   ): Promise<{ text: string; thinking: string | undefined }> {
-    // Snapshot board state before first think() for stale-state detection
-    let prevBoard = this.getKanbanBoardState();
-
     let result = await this.think(initialMessage, onToken, onReasoning, onReasoningEnd);
 
     for (let i = 0; i < MAX_CONTINUATION_CYCLES; i++) {
-      if (!result.hadToolCalls) break;
+      if (!result.hadToolCalls) {
+        debug("team-lead", `thinkWithContinuation cycle=${i} — no tool calls, breaking`);
+        break;
+      }
 
       const board = this.getKanbanBoardState();
+      debug("team-lead", `thinkWithContinuation cycle=${i} board: backlog=${board.backlogCount} unblocked=${board.unblockedBacklogCount} inProgress=${board.inProgressCount} done=${board.doneCount} allDone=${board.allDone}`);
 
-      // Stale-state detection: if nothing changed since last cycle, stop looping
-      if (
-        board.backlogCount === prevBoard.backlogCount &&
-        board.inProgressCount === prevBoard.inProgressCount &&
-        board.doneCount === prevBoard.doneCount
-      ) {
-        console.warn(`[TeamLead ${this.id}] Stale state detected — board unchanged after cycle. Breaking continuation loop.`);
+      // If everything is done, stop — no point looping when there's nothing to spawn
+      if (board.allDone) {
+        console.log(`[TeamLead ${this.id}] All tasks done — exiting continuation loop.`);
+        debug("team-lead", `thinkWithContinuation cycle=${i} — allDone, breaking`);
         break;
       }
 
       // Continue only if there's unblocked backlog work
-      if (!board.hasUnblockedBacklog) break;
+      if (!board.hasUnblockedBacklog) {
+        debug("team-lead", `thinkWithContinuation cycle=${i} — no unblocked backlog, breaking`);
+        break;
+      }
 
       const prompt =
         `[CONTINUATION] ${board.unblockedBacklogCount} unblocked task(s) remain in backlog:\n${board.summary}\n\n` +
@@ -598,8 +940,8 @@ export class TeamLead extends BaseAgent {
 
       console.log(`[TeamLead ${this.id}] Continuation cycle ${i + 1}/${MAX_CONTINUATION_CYCLES} — ${board.backlogCount} backlog tasks remain`);
 
-      // Update snapshot for next iteration
-      prevBoard = board;
+      // Snapshot board BEFORE think() so we can detect no-progress cycles immediately
+      const boardBeforeThink = board;
 
       result = await this.think(
         prompt,
@@ -607,20 +949,41 @@ export class TeamLead extends BaseAgent {
         onReasoning,
         onReasoningEnd,
       );
+
+      // Zero-lag stale-state detection: if think() didn't change the board, stop
+      // immediately instead of waiting for the next cycle to notice
+      const boardAfterThink = this.getKanbanBoardState();
+      if (
+        boardAfterThink.backlogCount === boardBeforeThink.backlogCount &&
+        boardAfterThink.inProgressCount === boardBeforeThink.inProgressCount &&
+        boardAfterThink.doneCount === boardBeforeThink.doneCount
+      ) {
+        console.warn(`[TeamLead ${this.id}] No board progress in cycle ${i + 1} — breaking continuation loop.`);
+        debug("team-lead", `thinkWithContinuation cycle=${i} — board unchanged after think(), breaking`);
+        break;
+      }
     }
 
     return { text: result.text, thinking: result.thinking };
   }
 
-  /** Reset per-cycle tool call counters before each LLM invocation */
+  /** Reset per-cycle tool call counters and prune history before each LLM invocation */
   protected override async think(
     userMessage: string,
     onToken?: (token: string, messageId: string) => void,
     onReasoning?: (token: string, messageId: string) => void,
     onReasoningEnd?: (messageId: string) => void,
-  ): Promise<{ text: string; thinking: string | undefined; hadToolCalls: boolean }> {
+  ): Promise<{ text: string; thinking: string | undefined; hadToolCalls: boolean; isError?: boolean }> {
     this._toolCallCounts.clear();
-    return super.think(userMessage, onToken, onReasoning, onReasoningEnd);
+    this.pruneConversationHistory(40);
+    this._abortController = new AbortController();
+    this._externalAbortController = this._abortController;
+    try {
+      return await super.think(userMessage, onToken, onReasoning, onReasoningEnd);
+    } finally {
+      this._abortController = null;
+      this._externalAbortController = null;
+    }
   }
 
   override getStatusSummary(): string {
@@ -628,6 +991,24 @@ export class TeamLead extends BaseAgent {
   }
 
   protected getTools(): Record<string, unknown> {
+    const allTools: Record<string, unknown> = this.getAllTeamLeadTools();
+
+    // Filter to only the tools declared by assigned skills
+    if (this.allowedToolNames.size > 0) {
+      const filtered: Record<string, unknown> = {};
+      for (const [name, t] of Object.entries(allTools)) {
+        if (this.allowedToolNames.has(name)) {
+          filtered[name] = t;
+        }
+      }
+      return filtered;
+    }
+
+    return allTools;
+  }
+
+  /** All possible Team Lead tools — filtered by skills in getTools() */
+  private getAllTeamLeadTools(): Record<string, unknown> {
     return {
       search_registry: tool({
         description:
@@ -659,7 +1040,18 @@ export class TeamLead extends BaseAgent {
             .describe("The kanban task ID to auto-assign to this worker (moves task to in_progress)"),
         }),
         execute: async ({ registryEntryId, task, taskId }) => {
-          return this.spawnWorker(registryEntryId, task, taskId);
+          // After a spawn refusal, block all further spawn attempts in this think cycle
+          const refusals = this._toolCallCounts.get("spawn_worker_refused") ?? 0;
+          if (refusals > 0) {
+            this._shouldAbortThink = true;
+            return "STOP. Already refused. Wait for current worker to finish.";
+          }
+          const result = await this.spawnWorker(registryEntryId, task, taskId);
+          if (result.startsWith("REFUSED:")) {
+            this._toolCallCounts.set("spawn_worker_refused", refusals + 1);
+            this._shouldAbortThink = true;
+          }
+          return result;
         },
       }),
       web_search: tool({
@@ -715,7 +1107,7 @@ export class TeamLead extends BaseAgent {
           description: z.string().optional().describe("Detailed task description"),
           column: z.enum(["backlog", "in_progress", "done"]).optional().describe("Column to place the task in (default: backlog)"),
           labels: z.array(z.string()).optional().describe("Labels/tags for the task"),
-          blockedBy: z.array(z.string()).optional().describe("Task IDs that must complete before this task can start"),
+          blockedBy: z.array(z.string()).optional().describe("Actual task IDs (from create_task results) that must complete before this task can start. Do NOT use symbolic names like 'task-1'."),
         }),
         execute: async ({ title, description, column, labels, blockedBy }) => {
           return this.createKanbanTask(title, description, column, labels, blockedBy);
@@ -736,14 +1128,25 @@ export class TeamLead extends BaseAgent {
           return this.updateKanbanTask(taskId, { column, assigneeAgentId, description, title, blockedBy });
         },
       }),
+      delete_task: tool({
+        description:
+          "Delete a kanban task. Any tasks that had this task in their blockedBy will be automatically unblocked. " +
+          "Use this when a task is replaced by a new one, or is no longer needed.",
+        parameters: z.object({
+          taskId: z.string().describe("The task ID to delete"),
+        }),
+        execute: async ({ taskId }) => {
+          return this.deleteKanbanTask(taskId);
+        },
+      }),
       list_tasks: tool({
-        description: "List all kanban tasks for this project. Only call once — repeated calls return the same data.",
+        description: "List all kanban tasks for this project. Only call once per cycle — repeated calls return nothing.",
         parameters: z.object({}),
         execute: async () => {
           const count = (this._toolCallCounts.get("list_tasks") ?? 0) + 1;
           this._toolCallCounts.set("list_tasks", count);
           if (count > 1) {
-            return "REFUSED: You already called list_tasks. The board has not changed. STOP calling tools and return your response now.";
+            return "ALREADY LISTED — do not call again. Proceed with spawning workers.";
           }
           const result = this.listKanbanTasks();
           const board = this.getKanbanBoardState();
@@ -757,14 +1160,24 @@ export class TeamLead extends BaseAgent {
   }
 
   private searchRegistry(capability: string): string {
-    const db = getDb();
-    const allEntries = db.select().from(schema.registryEntries).all();
+    const registry = new Registry();
+    const allEntries = registry.list();
+    // Check which external coding agents are enabled
+    const hasExternalCodingAgent =
+      getConfig("opencode:enabled") === "true" ||
+      getConfig("claude-code:enabled") === "true" ||
+      getConfig("codex:enabled") === "true";
 
     const matches = allEntries.filter((entry) => {
       // Only return worker-role entries (not COO or Team Lead)
       if (entry.role !== "worker") return false;
-      const caps = entry.capabilities as string[];
-      return caps.some((c) =>
+      // Hide the regular coder when any external coding agent is enabled
+      if (hasExternalCodingAgent && entry.id === "builtin-coder") return false;
+      // Hide disabled external coding agents
+      if (entry.id === "builtin-opencode-coder" && getConfig("opencode:enabled") !== "true") return false;
+      if (entry.id === "builtin-claude-code-coder" && getConfig("claude-code:enabled") !== "true") return false;
+      if (entry.id === "builtin-codex-coder" && getConfig("codex:enabled") !== "true") return false;
+      return entry.capabilities.some((c) =>
         c.toLowerCase().includes(capability.toLowerCase()),
       );
     });
@@ -776,9 +1189,21 @@ export class TeamLead extends BaseAgent {
     return matches
       .map(
         (e) =>
-          `- ${e.name} (${e.id}): ${e.description} [capabilities: ${(e.capabilities as string[]).join(", ")}]`,
+          `- ${e.name} (${e.id}): ${e.description} [capabilities: ${e.capabilities.join(", ")}]`,
       )
       .join("\n");
+  }
+
+  /** Read per-project agent assignments from config KV */
+  private getProjectAgentAssignments(): Record<string, string> {
+    if (!this.projectId) return {};
+    const raw = getConfig(`project:${this.projectId}:agent-assignments`);
+    if (!raw) return {};
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return {};
+    }
   }
 
   private async spawnWorker(
@@ -787,6 +1212,52 @@ export class TeamLead extends BaseAgent {
     taskId?: string,
   ): Promise<string> {
     try {
+      const originalRequestedId = registryEntryId;
+
+      // Remap to project-preferred agent if applicable
+      const assignments = this.getProjectAgentAssignments();
+      if (assignments.coder && isCodingAgentEnabled(assignments.coder) && CODING_AGENT_IDS.has(registryEntryId) && registryEntryId !== assignments.coder) {
+        console.log(
+          `[TeamLead ${this.id}] Remapping agent ${registryEntryId} → ${assignments.coder} (project assignment)`,
+        );
+        registryEntryId = assignments.coder;
+      }
+
+      // If LLM requested builtin-coder but an external coding agent is enabled globally, prefer it
+      if (registryEntryId === "builtin-coder") {
+        if (assignments.coder && isCodingAgentEnabled(assignments.coder)) {
+          registryEntryId = assignments.coder;
+        } else if (getConfig("opencode:enabled") === "true") {
+          registryEntryId = "builtin-opencode-coder";
+        } else if (getConfig("claude-code:enabled") === "true") {
+          registryEntryId = "builtin-claude-code-coder";
+        } else if (getConfig("codex:enabled") === "true") {
+          registryEntryId = "builtin-codex-coder";
+        }
+      }
+
+      if (registryEntryId !== originalRequestedId) {
+        console.log(
+          `[TeamLead ${this.id}] spawnWorker: requested=${originalRequestedId}, resolved=${registryEntryId}`,
+        );
+      }
+
+      // Enforce max concurrent coding workers
+      if (CODING_AGENT_IDS.has(registryEntryId)) {
+        const maxCoders = parseInt(getConfig("max_coding_workers") ?? "2", 10) || 2;
+        if (this.countActiveCodingWorkers() >= maxCoders) {
+          return `REFUSED: ${maxCoders} coding worker(s) already running. Wait for one to finish.`;
+        }
+      }
+
+      // Reject spawning disabled external coding agents — fall back to builtin-coder
+      if (!isCodingAgentEnabled(registryEntryId)) {
+        console.warn(
+          `[TeamLead ${this.id}] Agent ${registryEntryId} is disabled — falling back to builtin-coder`,
+        );
+        registryEntryId = "builtin-coder";
+      }
+
       const db = getDb();
       const entry = db
         .select()
@@ -798,19 +1269,93 @@ export class TeamLead extends BaseAgent {
         return `Registry entry ${registryEntryId} not found.`;
       }
 
-      const entryTools = (entry.tools as string[]) ?? [];
+      // Derive tools and system prompt content from assigned skills
+      const skillService = new SkillService();
+      const entrySkills = skillService.getForAgent(entry.id);
+      const entryTools = [...new Set(entrySkills.flatMap((s) => s.meta.tools as string[]))];
+      const skillPromptContent = entrySkills.map((s) => s.body.trim()).filter(Boolean).join("\n\n");
+
       const workerId = nanoid();
       let workspacePath: string | null = null;
 
       if (this.projectId) {
-        // All workers with a project get the repo path
-        workspacePath = this.workspace.repoPath(this.projectId);
+        // Prepare a git worktree for the worker to avoid file conflicts
+        workspacePath = this.workspace.prepareAgentWorktree(this.projectId, workerId);
       }
 
-      console.log(`[TeamLead ${this.id}] Spawning worker ${workerId} from ${entry.name} (workspace=${workspacePath})`);
+      // Derive human-readable name from kanban task title or task description
+      let workerName: string | null = null;
+      if (taskId) {
+        const kanbanTask = db
+          .select({ title: schema.kanbanTasks.title })
+          .from(schema.kanbanTasks)
+          .where(eq(schema.kanbanTasks.id, taskId))
+          .get();
+        if (kanbanTask?.title) {
+          workerName = kanbanTask.title.slice(0, 60);
+        }
+      }
+      if (!workerName) {
+        // Fallback: first line of the task string, truncated
+        workerName = task.split("\n")[0].slice(0, 60) || null;
+      }
+
+      console.log(`[TeamLead ${this.id}] Spawning worker ${workerId} "${workerName}" from ${entry.name} (workspace=${workspacePath})`);
+
+      // Build GitHub context for worker system prompt if project is linked to a repo
+      let githubWorkerContext = "";
+      if (this.projectId) {
+        const wGhRepo = getConfig(`project:${this.projectId}:github:repo`);
+        const wGhBranch = getConfig(`project:${this.projectId}:github:branch`);
+        const wGhRulesRaw = getConfig(`project:${this.projectId}:github:rules`);
+        if (wGhRepo) {
+          const parts: string[] = [
+            `\n\n## GitHub Workflow`,
+            `Repository: ${wGhRepo}`,
+            `Create a feature branch from \`${wGhBranch ?? "main"}\`.`,
+            `After completing your work, push your branch and create a pull request targeting \`${wGhBranch ?? "main"}\`.`,
+            `Use conventional commits and reference issue numbers where applicable.`,
+          ];
+          if (wGhRulesRaw) {
+            try {
+              const rules = JSON.parse(wGhRulesRaw) as string[];
+              if (rules.length > 0) {
+                parts.push(`\n**Project Rules:**`);
+                parts.push(...rules.map((r) => `- ${r}`));
+              }
+            } catch { /* ignore */ }
+          }
+          githubWorkerContext = parts.join("\n");
+        }
+      }
+
+      // Check git state in the workspace before spawning so the worker knows what's already done
+      let gitStateContext = "";
+      if (workspacePath) {
+        try {
+          const gitLog = execSync(
+            `git -C "${workspacePath}" log --oneline -10 2>/dev/null || true`,
+            { encoding: "utf-8", timeout: 5000 },
+          ).trim();
+          const gitStatus = execSync(
+            `git -C "${workspacePath}" status --short 2>/dev/null || true`,
+            { encoding: "utf-8", timeout: 5000 },
+          ).trim();
+          if (gitLog) {
+            gitStateContext = `\n\n## Existing Code State\nRecent commits on this branch:\n${gitLog}\n`;
+            if (gitStatus) {
+              gitStateContext += `\nUncommitted changes:\n${gitStatus}\n`;
+            } else {
+              gitStateContext += `\nWorking directory is clean (no uncommitted changes).\n`;
+            }
+            gitStateContext += `\nIMPORTANT: If the code for your task has already been committed (see above), do NOT redo the work. Just proceed with remaining steps (e.g., creating a PR).`;
+          }
+        } catch { /* ignore — fresh workspace */ }
+      }
 
       const worker = new Worker({
         id: workerId,
+        name: workerName,
         bus: this.bus,
         projectId: this.projectId,
         parentId: this.id,
@@ -825,11 +1370,13 @@ export class TeamLead extends BaseAgent {
           getConfig("worker_provider") ??
           getConfig("coo_provider") ??
           entry.defaultProvider,
-        systemPrompt: entry.systemPrompt + buildEnvironmentContext(entryTools) +
+        systemPrompt: (skillPromptContent || entry.systemPrompt) + buildEnvironmentContext(entryTools) +
+          githubWorkerContext +
           (workspacePath
             ? `\n\n## Your Workspace\nYour workspace directory is: \`${workspacePath}\`\n` +
               `All file paths should be relative to this directory (e.g. \`src/main.go\`, not \`/workspace/src/main.go\`).\n` +
-              `Do NOT write to /workspace, /usr, /etc, /opt, /var, or any other location outside your workspace.`
+              `Do NOT write to /workspace, /usr, /etc, /opt, /var, or any other location outside your workspace.` +
+              gitStateContext
             : ""),
         workspacePath,
         toolNames: entryTools,
@@ -838,6 +1385,12 @@ export class TeamLead extends BaseAgent {
         onAgentThinking: this.onAgentThinking,
         onAgentThinkingEnd: this.onAgentThinkingEnd,
         onAgentToolCall: this.onAgentToolCall,
+        onCodingAgentEvent: this._onCodingAgentEvent,
+        onCodingAgentAwaitingInput: this._onCodingAgentAwaitingInput,
+        onCodingAgentPermissionRequest: this._onCodingAgentPermissionRequest,
+        onTerminalData: this._onTerminalData,
+        onPtySessionRegistered: this._onPtySessionRegistered,
+        onPtySessionUnregistered: this._onPtySessionUnregistered,
       });
 
       this.workers.set(worker.id, worker);
@@ -968,12 +1521,47 @@ export class TeamLead extends BaseAgent {
     const now = new Date().toISOString();
     const col = (column ?? "backlog") as "backlog" | "in_progress" | "done";
 
-    // Get max position in column
+    // Get existing tasks for position, blockedBy validation, and duplicate detection
     const existing = db
       .select()
       .from(schema.kanbanTasks)
       .where(eq(schema.kanbanTasks.projectId, this.projectId))
       .all();
+
+    // Duplicate detection: check if a task with the same title already exists
+    const normalizedTitle = title.trim().toLowerCase();
+    const duplicate = existing.find((t) => t.title.trim().toLowerCase() === normalizedTitle);
+    if (duplicate) {
+      if (duplicate.column === "done") {
+        return (
+          `DUPLICATE: A task with the same title already exists and is DONE: "${duplicate.title}" (${duplicate.id}).` +
+          (duplicate.completionReport ? ` Completion report: ${duplicate.completionReport.slice(0, 200)}` : "") +
+          ` Do NOT create duplicate tasks for work that is already completed.`
+        );
+      }
+      // Task exists but isn't done — warn and return the existing ID
+      return (
+        `DUPLICATE: A task with the same title already exists: "${duplicate.title}" (${duplicate.id}) in column "${duplicate.column}".` +
+        ` Use the existing task instead of creating a new one.`
+      );
+    }
+
+    // Validate blockedBy IDs — reject symbolic names like "task-1"
+    if (blockedBy && blockedBy.length > 0) {
+      const existingIds = new Set(existing.map((t) => t.id));
+      const invalid = blockedBy.filter((id) => !existingIds.has(id));
+      if (invalid.length > 0) {
+        // Build a lookup of existing tasks for the error message
+        const taskList = existing.map((t) => `  "${t.title}" → ${t.id}`).join("\n");
+        return (
+          `ERROR: blockedBy contains invalid task IDs: ${invalid.join(", ")}. ` +
+          `You must use the actual task IDs returned by create_task (the string in parentheses), ` +
+          `NOT symbolic names like "task-1". Existing tasks:\n${taskList}\n` +
+          `Re-create this task with the correct blockedBy IDs.`
+        );
+      }
+    }
+
     const colTasks = existing.filter((t) => t.column === col);
     const maxPos = colTasks.reduce((max, t) => Math.max(max, t.position), -1);
 
@@ -995,7 +1583,7 @@ export class TeamLead extends BaseAgent {
 
     this.onKanbanChange?.("created", task as unknown as KanbanTask);
     const blockedInfo = blockedBy?.length ? ` (blocked by: ${blockedBy.join(", ")})` : "";
-    return `Task "${title}" created (${taskId}) in ${col}.${blockedInfo}`;
+    return `Created task ID=${taskId} — "${title}" in ${col}.${blockedInfo} Use ID "${taskId}" when referencing this task in blockedBy.`;
   }
 
   private updateKanbanTask(
@@ -1010,12 +1598,44 @@ export class TeamLead extends BaseAgent {
       .get();
     if (!existing) return `Task ${taskId} not found.`;
 
+    // Guard: no-op if already in the target column (prevents redundant updates)
+    if (updates.column && updates.column === existing.column && !updates.description && !updates.title && updates.assigneeAgentId === undefined) {
+      return `Task "${existing.title}" is already in "${updates.column}" — no change needed.`;
+    }
+
+    // Guard: prevent moving tasks backwards out of "done"
+    // The LLM sometimes marks a task done then immediately reverts it to backlog in the same cycle.
+    // If a task needs to be redone, use delete_task + create_task instead.
+    if (updates.column && updates.column !== "done" && existing.column === "done") {
+      console.warn(
+        `[TeamLead ${this.id}] Blocked update_task: cannot move "${existing.title}" (${taskId}) from "done" back to "${updates.column}". Use delete_task + create_task to redo a completed task.`,
+      );
+      return `REJECTED: Task "${existing.title}" is already done. You cannot move a completed task back to "${updates.column}". If this task needs to be redone, use delete_task to remove it and create_task to create a new one.`;
+    }
+
     const setValues: Record<string, unknown> = { updatedAt: new Date().toISOString() };
     if (updates.column) setValues.column = updates.column;
     if (updates.assigneeAgentId !== undefined) setValues.assigneeAgentId = updates.assigneeAgentId;
     if (updates.description !== undefined) setValues.description = updates.description;
     if (updates.title !== undefined) setValues.title = updates.title;
     if (updates.blockedBy !== undefined) setValues.blockedBy = updates.blockedBy;
+
+    // Retry count enforcement: when LLM moves a task from in_progress back to backlog
+    if (updates.column === "backlog" && existing.column === "in_progress") {
+      const currentRetries = (existing as any).retryCount ?? 0;
+      const newRetryCount = currentRetries + 1;
+      setValues.retryCount = newRetryCount;
+
+      if (newRetryCount >= MAX_TASK_RETRIES) {
+        // Exceeded max retries — force to done with failure report
+        setValues.column = "done";
+        const snippet = (updates.description ?? existing.description ?? "").slice(-500);
+        setValues.completionReport = `FAILED: Exceeded maximum retry attempts (${MAX_TASK_RETRIES}). Last error: ${snippet}`;
+        console.warn(
+          `[TeamLead ${this.id}] Task "${existing.title}" (${taskId}) exceeded ${MAX_TASK_RETRIES} retries — marking as FAILED.`,
+        );
+      }
+    }
 
     // Attach completion report: explicit value takes priority, otherwise use pending worker report
     if (updates.completionReport !== undefined) {
@@ -1048,6 +1668,57 @@ export class TeamLead extends BaseAgent {
     }
 
     return `Task "${existing.title}" updated.`;
+  }
+
+  private deleteKanbanTask(taskId: string): string {
+    if (!this.projectId) return "No project context.";
+
+    const db = getDb();
+    const existing = db
+      .select()
+      .from(schema.kanbanTasks)
+      .where(eq(schema.kanbanTasks.id, taskId))
+      .get();
+    if (!existing) return `Task ${taskId} not found.`;
+
+    // Delete the task
+    db.delete(schema.kanbanTasks)
+      .where(eq(schema.kanbanTasks.id, taskId))
+      .run();
+
+    this.onKanbanChange?.("deleted", existing as unknown as KanbanTask);
+
+    // Remove this task from other tasks' blockedBy lists so they become unblocked
+    const allTasks = db
+      .select()
+      .from(schema.kanbanTasks)
+      .where(eq(schema.kanbanTasks.projectId, this.projectId))
+      .all();
+
+    let unblockedCount = 0;
+    for (const t of allTasks) {
+      const blockedBy = (t.blockedBy as string[]) ?? [];
+      if (blockedBy.includes(taskId)) {
+        const newBlockedBy = blockedBy.filter((id) => id !== taskId);
+        db.update(schema.kanbanTasks)
+          .set({ blockedBy: newBlockedBy, updatedAt: new Date().toISOString() })
+          .where(eq(schema.kanbanTasks.id, t.id))
+          .run();
+
+        if (!this.isTaskBlocked(newBlockedBy)) {
+          unblockedCount++;
+          console.log(`[TeamLead ${this.id}] Task "${t.title}" (${t.id}) unblocked after deletion of ${taskId}`);
+        }
+
+        const updated = db.select().from(schema.kanbanTasks).where(eq(schema.kanbanTasks.id, t.id)).get();
+        if (updated) {
+          this.onKanbanChange?.("updated", updated as unknown as KanbanTask);
+        }
+      }
+    }
+
+    const unblockedMsg = unblockedCount > 0 ? ` ${unblockedCount} task(s) unblocked.` : "";
+    return `Task "${existing.title}" deleted.${unblockedMsg}`;
   }
 
   /** Log which tasks become unblocked when a task completes. No auto-spawning — the continuation loop picks them up. */
@@ -1100,9 +1771,71 @@ export class TeamLead extends BaseAgent {
         const blocked = col === "backlog" && this.isTaskBlocked(blockedBy);
         const blockedTag = blocked ? ` [BLOCKED by: ${blockedBy.join(", ")}]` : "";
         lines.push(`  - ${t.title} (${t.id})${assignee}${blockedTag}`);
+        // Show completion reports for done tasks so TL knows what was accomplished
+        if (col === "done" && t.completionReport) {
+          lines.push(`    Report: ${t.completionReport.slice(0, 200)}`);
+        }
       }
     }
     return lines.join("\n");
+  }
+
+  /**
+   * Stop a specific worker by ID. Called by COO.stopWorker() when the user
+   * clicks stop in the UI. Aborts the worker, moves its kanban task back to
+   * backlog, and removes it from the workers map.
+   * Returns true if the worker was found and stopped.
+   */
+  stopWorker(workerId: string): boolean {
+    const worker = this.workers.get(workerId);
+    if (!worker) return false;
+
+    console.log(`[TeamLead ${this.id}] Stopping worker ${workerId} (manual stop)`);
+
+    // Find and unassign the worker's kanban task
+    if (this.projectId) {
+      const db = getDb();
+      const task = db
+        .select()
+        .from(schema.kanbanTasks)
+        .where(eq(schema.kanbanTasks.projectId, this.projectId))
+        .all()
+        .find((t) => t.assigneeAgentId === workerId && t.column === "in_progress");
+
+      if (task) {
+        console.log(`[TeamLead ${this.id}] Moving task "${task.title}" (${task.id}) back to backlog`);
+        this.updateKanbanTask(task.id, { column: "backlog", assigneeAgentId: "" });
+      }
+    }
+
+    // Abort the worker (sends report, emits session-end, calls destroy)
+    if (this.projectId) {
+      this.workspace.cleanupAgentWorktree(this.projectId, workerId);
+    }
+    worker.abort();
+    this.workers.delete(workerId);
+
+    return true;
+  }
+
+  /**
+   * Stop this TeamLead: abort any in-progress LLM call and stop all active workers.
+   * The TeamLead instance stays alive so it can receive future directives.
+   */
+  stop(): void {
+    console.log(`[TeamLead ${this.id}] Stopping — aborting LLM call and ${this.workers.size} worker(s)`);
+
+    // Abort any in-flight LLM call
+    if (this._abortController) {
+      this._abortController.abort();
+      this._abortController = null;
+      this._externalAbortController = null;
+    }
+
+    // Stop all active workers
+    for (const [workerId] of this.workers) {
+      this.stopWorker(workerId);
+    }
   }
 
   getWorkers(): Map<string, Worker> {

@@ -37,6 +37,16 @@ export const SETTINGS_TAB_TEMPLATES = 'button:has-text("Templates")';
 export const SETTINGS_TAB_SEARCH = 'button:has-text("Search")';
 export const SETTINGS_TAB_SPEECH = 'button:has-text("Speech")';
 export const SETTINGS_TAB_OPENCODE = 'button:has-text("OpenCode")';
+export const SETTINGS_TAB_PROFILE = 'button:has-text("Profile")';
+export const SETTINGS_TAB_APPEARANCE = 'button:has-text("Appearance")';
+export const SETTINGS_TAB_SYSTEM = 'button:has-text("System")';
+export const SETTINGS_TAB_PRICING = 'button:has-text("Pricing")';
+export const SETTINGS_TAB_LIVEVIEW = 'button:has-text("Live View")';
+export const SETTINGS_TAB_CHANNELS = 'button:has-text("Channels")';
+export const SETTINGS_TAB_AUTHENTICATION = 'button:has-text("Authentication")';
+
+// Tab bar (main layout)
+export const TAB_USAGE = 'button:has-text("Usage")';
 
 // Kanban
 export const KANBAN_COLUMN_BACKLOG = ':has-text("Backlog")';

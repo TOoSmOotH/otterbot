@@ -15,9 +15,14 @@ interface CharacterSelectProps {
   loading?: boolean;
   gearConfig?: GearConfig | null;
   onGearConfigChange?: (config: GearConfig | null) => void;
+  excludeIds?: string[];
 }
 
-export function CharacterSelect({ packs, selected, onSelect, loading, gearConfig, onGearConfigChange }: CharacterSelectProps) {
+export function CharacterSelect({ packs, selected, onSelect, loading, gearConfig, onGearConfigChange, excludeIds }: CharacterSelectProps) {
+  const filteredPacks = useMemo(
+    () => excludeIds?.length ? packs.filter((p) => !excludeIds.includes(p.id)) : packs,
+    [packs, excludeIds],
+  );
   const selectedPack = packs.find((p) => p.id === selected);
   const [discoveredGear, setDiscoveredGear] = useState<string[]>([]);
 
@@ -149,7 +154,7 @@ export function CharacterSelect({ packs, selected, onSelect, loading, gearConfig
         )}
 
         {/* Character cards */}
-        {packs.map((pack) => (
+        {filteredPacks.map((pack) => (
           <CharacterCard
             key={pack.id}
             pack={pack}

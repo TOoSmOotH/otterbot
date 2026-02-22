@@ -3,8 +3,9 @@ import type {
   ServerToClientEvents,
   ClientToServerEvents,
 } from "@otterbot/shared";
-import { MessageType, type Agent, type AgentActivityRecord, type BusMessage, type Conversation, type Project, type KanbanTask } from "@otterbot/shared";
+import { MessageType, type Agent, type AgentActivityRecord, type BusMessage, type Conversation, type Project, type KanbanTask, type Todo, type CodingAgentSession, type CodingAgentMessage, type CodingAgentPart, type CodingAgentFileDiff, type CodingAgentType } from "@otterbot/shared";
 import { nanoid } from "nanoid";
+import { makeProjectId } from "../utils/slugify.js";
 import { eq, or, desc, isNull } from "drizzle-orm";
 import type { MessageBus } from "../bus/message-bus.js";
 import type { COO } from "../agents/coo.js";
@@ -12,19 +13,120 @@ import type { Registry } from "../registry/registry.js";
 import type { BaseAgent } from "../agents/agent.js";
 import { getDb, schema } from "../db/index.js";
 import { isTTSEnabled, getConfiguredTTSProvider, stripMarkdown } from "../tts/tts.js";
-import { getConfig } from "../auth/auth.js";
+import { getConfig, setConfig, deleteConfig } from "../auth/auth.js";
+import { SoulService } from "../memory/soul-service.js";
+import { MemoryService } from "../memory/memory-service.js";
+import { SoulAdvisor } from "../memory/soul-advisor.js";
+import type { WorkspaceManager } from "../workspace/workspace.js";
+import type { GitHubIssueMonitor } from "../github/issue-monitor.js";
+import { cloneRepo, getRepoDefaultBranch } from "../github/github-service.js";
+import { NO_REPORT_SENTINEL } from "../schedulers/custom-task-scheduler.js";
+import { ProjectStatus, CharterStatus } from "@otterbot/shared";
+import { existsSync, rmSync } from "node:fs";
+import type { PtyClient } from "../agents/worker.js";
 
 type TypedSocket = Socket<ClientToServerEvents, ServerToClientEvents>;
 type TypedServer = Server<ClientToServerEvents, ServerToClientEvents>;
+
+// Server-side part accumulator (mirrors client's partBuffers)
+// Key: `${agentId}:${messageId}:${partId}`
+const serverPartBuffers = new Map<string, { type: string; content: string; toolName?: string; toolState?: string }>();
+// Track agentId → DB row ID for session updates
+const sessionRowIds = new Map<string, string>();
+
+/** Active PTY sessions keyed by agentId — registered by workers, used by socket handlers */
+const activePtySessions = new Map<string, PtyClient>();
+
+/** Saved replay buffers from completed PTY sessions — allows viewing terminal output after session ends */
+const completedPtyBuffers = new Map<string, string>();
+
+/** Register a PTY session so socket handlers can route terminal events to it */
+export function registerPtySession(agentId: string, client: PtyClient): void {
+  completedPtyBuffers.delete(agentId); // Clear any stale completed buffer
+  activePtySessions.set(agentId, client);
+}
+
+/** Unregister a PTY session (called when process exits) — saves replay buffer for later viewing */
+export function unregisterPtySession(agentId: string): void {
+  const client = activePtySessions.get(agentId);
+  if (client) {
+    const buffer = client.getReplayBuffer();
+    if (buffer) {
+      completedPtyBuffers.set(agentId, buffer);
+    }
+  }
+  activePtySessions.delete(agentId);
+}
+
+/** Reset module-level persistence state (for testing) */
+export function resetCodingAgentPersistence() {
+  serverPartBuffers.clear();
+  sessionRowIds.clear();
+}
+
+/** @deprecated Use resetCodingAgentPersistence instead */
+export const resetOpenCodePersistence = resetCodingAgentPersistence;
+
+export interface SocketHooks {
+  /** Intercept CEO messages before they reach the COO.
+   *  Return true if the message was handled (e.g. permission response). */
+  beforeCeoMessage?: (
+    content: string,
+    conversationId: string | undefined,
+    callback?: (ack: { messageId: string; conversationId: string }) => void,
+  ) => boolean;
+}
 
 export function setupSocketHandlers(
   io: TypedServer,
   bus: MessageBus,
   coo: COO,
   registry: Registry,
+  hooks?: SocketHooks,
+  deps?: { workspace?: WorkspaceManager; issueMonitor?: GitHubIssueMonitor },
 ) {
+  // Track conversation IDs used by background tasks so we can suppress
+  // the COO's response in that same conversation.
+  const backgroundConversationIds = new Set<string>();
+
   // Broadcast all bus messages to connected clients
   bus.onBroadcast(async (message: BusMessage) => {
+    // Suppress background task inbound messages from chat
+    if (message.metadata?.backgroundTask) {
+      if (message.conversationId) {
+        backgroundConversationIds.add(message.conversationId);
+      }
+      // Still deliver to COO (routing already happened), just don't emit to UI
+      return;
+    }
+
+    // Suppress COO [NO_REPORT] responses from background checks
+    if (
+      message.fromAgentId === "coo" &&
+      message.toAgentId === null &&
+      message.content.trim() === NO_REPORT_SENTINEL
+    ) {
+      if (message.conversationId) {
+        backgroundConversationIds.delete(message.conversationId);
+      }
+      return;
+    }
+
+    // Suppress COO responses to background conversations that contain nothing useful
+    if (
+      message.fromAgentId === "coo" &&
+      message.toAgentId === null &&
+      message.conversationId &&
+      backgroundConversationIds.has(message.conversationId)
+    ) {
+      backgroundConversationIds.delete(message.conversationId);
+      // If the response contains the sentinel anywhere, suppress it
+      if (message.content.includes(NO_REPORT_SENTINEL)) {
+        return;
+      }
+      // Otherwise fall through — COO found something to report
+    }
+
     io.emit("bus:message", message);
 
     // If the message is from COO to CEO (null), also emit as coo:response
@@ -65,6 +167,12 @@ export function setupSocketHandlers(
     // CEO sends a message to the COO
     socket.on("ceo:message", (data, callback) => {
       console.log(`[Socket] ceo:message received: "${data.content.slice(0, 80)}"`);
+
+      // Check if this message is a permission response (intercept before COO)
+      if (hooks?.beforeCeoMessage?.(data.content, data.conversationId, callback)) {
+        return;
+      }
+
       const db = getDb();
       const projectId = data.projectId ?? null;
       let conversationId = data.conversationId ?? coo.getCurrentConversationId();
@@ -253,6 +361,12 @@ export function setupSocketHandlers(
       callback(conversations as Conversation[]);
     });
 
+    // Recover a stuck project (tear down old TL + workers, spawn fresh one)
+    socket.on("project:recover", async (data, callback) => {
+      const result = await coo.recoverLiveProject(data.projectId);
+      callback?.(result);
+    });
+
     // Delete a project (cascading cleanup)
     socket.on("project:delete", (data, callback) => {
       const db = getDb();
@@ -279,6 +393,161 @@ export function setupSocketHandlers(
 
       // Broadcast deletion
       io.emit("project:deleted", { projectId: data.projectId });
+
+      callback?.({ ok: true });
+    });
+
+    // Manual project creation (GitHub-linked)
+    socket.on("project:create-manual", async (data, callback) => {
+      try {
+        // Validate GitHub is configured
+        const ghToken = getConfig("github:token");
+        const ghUsername = getConfig("github:username");
+        if (!ghToken || !ghUsername) {
+          callback?.({ ok: false, error: "GitHub is not configured. Set up your PAT and username in Settings first." });
+          return;
+        }
+
+        if (!data.githubRepo || !data.githubRepo.includes("/")) {
+          callback?.({ ok: false, error: "Invalid repo format. Use 'owner/repo'." });
+          return;
+        }
+
+        const workspace = deps?.workspace;
+        if (!workspace) {
+          callback?.({ ok: false, error: "Workspace not available." });
+          return;
+        }
+
+        // Determine branch — use provided, or fetch default from API
+        let branch = data.githubBranch?.trim();
+        if (!branch) {
+          try {
+            branch = await getRepoDefaultBranch(data.githubRepo, ghToken);
+          } catch {
+            branch = "main";
+          }
+        }
+
+        // Auto-fill name from repo if not provided
+        const name = data.name?.trim() || data.githubRepo.split("/")[1] || data.githubRepo;
+        const description = data.description?.trim() || `GitHub project: ${data.githubRepo}`;
+        const rules = data.rules ?? [];
+        const issueMonitor = data.issueMonitor ?? false;
+
+        const projectId = makeProjectId(name);
+        const db = getDb();
+
+        // Create project record
+        db.insert(schema.projects)
+          .values({
+            id: projectId,
+            name,
+            description,
+            status: ProjectStatus.Active,
+            charter: null,
+            charterStatus: CharterStatus.Gathering,
+            githubRepo: data.githubRepo,
+            githubBranch: branch,
+            githubIssueMonitor: issueMonitor,
+            rules,
+            createdAt: new Date().toISOString(),
+          })
+          .run();
+
+        // Create workspace
+        workspace.createProject(projectId);
+
+        // Clone repo
+        const repoPath = workspace.repoPath(projectId);
+        try {
+          cloneRepo(data.githubRepo, repoPath, branch);
+        } catch (cloneErr) {
+          // Clean up on failure
+          try { rmSync(workspace.projectPath(projectId), { recursive: true, force: true }); } catch { /* best effort */ }
+          db.delete(schema.projects).where(eq(schema.projects.id, projectId)).run();
+          const errMsg = cloneErr instanceof Error ? cloneErr.message : String(cloneErr);
+          callback?.({ ok: false, error: `Failed to clone repository: ${errMsg}` });
+          return;
+        }
+
+        // Store GitHub config in KV for recovery
+        setConfig(`project:${projectId}:github:repo`, data.githubRepo);
+        setConfig(`project:${projectId}:github:branch`, branch);
+        setConfig(`project:${projectId}:github:rules`, JSON.stringify(rules));
+
+        // Spawn TeamLead
+        await coo.spawnTeamLeadForManualProject(projectId, data.githubRepo, branch, rules);
+
+        // Emit project:created event
+        const project = db
+          .select()
+          .from(schema.projects)
+          .where(eq(schema.projects.id, projectId))
+          .get();
+        if (project) {
+          io.emit("project:created", project as unknown as Project);
+        }
+
+        // Register issue monitor if enabled
+        if (issueMonitor && deps?.issueMonitor) {
+          deps.issueMonitor.watchProject(projectId, data.githubRepo, ghUsername);
+        }
+
+        callback?.({ ok: true, projectId });
+      } catch (err) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        console.error("[project:create-manual] Error:", err);
+        callback?.({ ok: false, error: errMsg });
+      }
+    });
+
+    // Stop a running agent (worker or team lead)
+    socket.on("agent:stop", (data, callback) => {
+      console.log(`[Socket] agent:stop received for ${data.agentId}`);
+      const result = coo.stopAgent(data.agentId);
+      callback?.({ ok: result, error: result ? undefined : "Agent not found" });
+    });
+
+    // Get per-project agent assignments
+    socket.on("project:get-agent-assignments", (data, callback) => {
+      const raw = getConfig(`project:${data.projectId}:agent-assignments`);
+      try {
+        callback(raw ? JSON.parse(raw) : {});
+      } catch {
+        callback({});
+      }
+    });
+
+    // Set per-project agent assignments
+    socket.on("project:set-agent-assignments", (data, callback) => {
+      const allowedAgentIds = new Set([
+        "builtin-coder",
+        "builtin-opencode-coder",
+        "builtin-claude-code-coder",
+        "builtin-codex-coder",
+      ]);
+
+      // Validate all agent IDs
+      for (const [role, agentId] of Object.entries(data.assignments)) {
+        if (agentId && !allowedAgentIds.has(agentId)) {
+          callback?.({ ok: false, error: `Invalid agent ID "${agentId}" for role "${role}"` });
+          return;
+        }
+      }
+
+      // Remove empty assignments, then persist
+      const cleaned: Record<string, string> = {};
+      for (const [role, agentId] of Object.entries(data.assignments)) {
+        if (agentId) cleaned[role] = agentId;
+      }
+
+      if (Object.keys(cleaned).length === 0) {
+        // No assignments — delete the key
+        deleteConfig(`project:${data.projectId}:agent-assignments`);
+      } else {
+        setConfig(`project:${data.projectId}:agent-assignments`, JSON.stringify(cleaned));
+      }
 
       callback?.({ ok: true });
     });
@@ -314,6 +583,159 @@ export function setupSocketHandlers(
         messages: busMessages.reverse() as BusMessage[],
         activity: activity.reverse() as unknown as AgentActivityRecord[],
       });
+    });
+
+    // ─── Soul Document CRUD ───────────────────────────────────────
+    const soulService = new SoulService();
+
+    socket.on("soul:list", (callback) => {
+      callback(soulService.list());
+    });
+
+    socket.on("soul:get", (data, callback) => {
+      callback(soulService.get(data.agentRole, data.registryEntryId));
+    });
+
+    socket.on("soul:save", (data, callback) => {
+      try {
+        const doc = soulService.save(data.agentRole, data.registryEntryId ?? null, data.content);
+        callback?.({ ok: true, doc });
+      } catch (err) {
+        callback?.({ ok: false, error: err instanceof Error ? err.message : String(err) });
+      }
+    });
+
+    socket.on("soul:delete", (data, callback) => {
+      const ok = soulService.delete(data.id);
+      callback?.({ ok });
+    });
+
+    // ─── Memory CRUD ────────────────────────────────────────────
+    const memoryService = new MemoryService();
+
+    socket.on("memory:list", (data, callback) => {
+      const memories = memoryService.list(data ? {
+        category: data.category as any,
+        agentScope: data.agentScope,
+        projectId: data.projectId,
+        search: data.search,
+      } : undefined);
+      callback?.(memories);
+    });
+
+    socket.on("memory:save", (data, callback) => {
+      try {
+        const memory = memoryService.save({
+          id: data.id,
+          category: data.category as any,
+          content: data.content,
+          source: (data.source as any) ?? "user",
+          agentScope: data.agentScope,
+          projectId: data.projectId,
+          importance: data.importance,
+        });
+        callback?.({ ok: true, memory });
+      } catch (err) {
+        callback?.({ ok: false, error: err instanceof Error ? err.message : String(err) });
+      }
+    });
+
+    socket.on("memory:delete", (data, callback) => {
+      const ok = memoryService.delete(data.id);
+      callback?.({ ok });
+    });
+
+    socket.on("memory:search", async (data, callback) => {
+      const memories = await memoryService.searchWithVectors({
+        query: data.query,
+        agentScope: data.agentScope,
+        projectId: data.projectId,
+        limit: data.limit,
+      });
+      callback(memories);
+    });
+
+    // ─── Soul Advisor ───────────────────────────────────────────
+    socket.on("soul:suggest", async (callback) => {
+      try {
+        const advisor = new SoulAdvisor();
+        const suggestions = await advisor.analyze();
+        callback({ ok: true, suggestions });
+      } catch (err) {
+        callback({ ok: false, error: err instanceof Error ? err.message : String(err) });
+      }
+    });
+
+    // ─── Terminal events (PTY sessions) ──────────────────────────
+    socket.on("terminal:input", (data, callback) => {
+      const client = activePtySessions.get(data.agentId);
+      if (client) {
+        client.writeInput(data.data);
+        callback?.({ ok: true });
+      } else {
+        callback?.({ ok: false, error: "No active PTY session" });
+      }
+    });
+
+    socket.on("terminal:resize", (data, callback) => {
+      const client = activePtySessions.get(data.agentId);
+      if (client) {
+        client.resize(data.cols, data.rows);
+        callback?.({ ok: true });
+      } else {
+        callback?.({ ok: false, error: "No active PTY session" });
+      }
+    });
+
+    socket.on("terminal:subscribe", (data, callback) => {
+      const client = activePtySessions.get(data.agentId);
+      if (client) {
+        const replay = client.getReplayBuffer();
+        if (replay) {
+          socket.emit("terminal:replay", { agentId: data.agentId, data: replay });
+        }
+        callback?.({ ok: true });
+      } else {
+        // Check in-memory completed buffers first, then fall back to DB
+        let replayBuffer = completedPtyBuffers.get(data.agentId);
+        if (!replayBuffer) {
+          // Look up persisted terminal buffer from DB
+          try {
+            const db = getDb();
+            const row = db.select({ terminalBuffer: schema.codingAgentSessions.terminalBuffer })
+              .from(schema.codingAgentSessions)
+              .where(eq(schema.codingAgentSessions.agentId, data.agentId))
+              .orderBy(desc(schema.codingAgentSessions.startedAt))
+              .get();
+            console.log(`[terminal:subscribe] DB lookup for ${data.agentId}: buffer=${row?.terminalBuffer ? `${row.terminalBuffer.length} chars` : "null"}`);
+            if (row?.terminalBuffer) {
+              replayBuffer = row.terminalBuffer;
+              // Cache in memory for subsequent requests
+              completedPtyBuffers.set(data.agentId, replayBuffer);
+            }
+          } catch (err) {
+            console.error("[terminal:subscribe] DB lookup failed:", err);
+          }
+        }
+        if (replayBuffer) {
+          socket.emit("terminal:replay", { agentId: data.agentId, data: replayBuffer });
+          callback?.({ ok: true });
+        } else {
+          callback?.({ ok: false, error: "No active PTY session" });
+        }
+      }
+    });
+
+    socket.on("terminal:end", (data, callback) => {
+      const client = activePtySessions.get(data.agentId);
+      if (client) {
+        // Gracefully terminate the process (typing /exit doesn't work reliably
+        // because Claude Code's REPL autocomplete intercepts the input)
+        client.gracefulExit();
+        callback?.({ ok: true });
+      } else {
+        callback?.({ ok: false, error: "No active PTY session" });
+      }
     });
 
     socket.on("disconnect", () => {
@@ -388,6 +810,18 @@ export function emitKanbanTaskDeleted(io: TypedServer, taskId: string, projectId
   io.emit("kanban:task-deleted", { taskId, projectId });
 }
 
+export function emitTodoCreated(io: TypedServer, todo: Todo) {
+  io.emit("todo:created", todo);
+}
+
+export function emitTodoUpdated(io: TypedServer, todo: Todo) {
+  io.emit("todo:updated", todo);
+}
+
+export function emitTodoDeleted(io: TypedServer, todoId: string) {
+  io.emit("todo:deleted", { todoId });
+}
+
 export function emitAgentStream(io: TypedServer, agentId: string, token: string, messageId: string) {
   io.emit("agent:stream", { agentId, token, messageId });
 }
@@ -402,4 +836,371 @@ export function emitAgentThinkingEnd(io: TypedServer, agentId: string, messageId
 
 export function emitAgentToolCall(io: TypedServer, agentId: string, toolName: string, args: Record<string, unknown>) {
   io.emit("agent:tool-call", { agentId, toolName, args });
+}
+
+/**
+ * Parse and emit coding agent SSE events as structured Socket.IO events.
+ * Handles internal __session-start/__session-end markers plus raw events.
+ */
+export function emitCodingAgentEvent(
+  io: TypedServer,
+  agentId: string,
+  sessionId: string,
+  event: { type: string; properties: Record<string, unknown> },
+) {
+  const { type, properties } = event;
+
+  // Internal markers emitted by Worker
+  if (type === "__session-start") {
+    const now = new Date().toISOString();
+    const agentType = (properties.agentType as CodingAgentType) || "opencode";
+    const session: CodingAgentSession = {
+      id: sessionId,
+      agentId,
+      projectId: (properties.projectId as string) || null,
+      task: (properties.task as string) || "",
+      agentType,
+      status: "active",
+      startedAt: now,
+    };
+    io.emit("codeagent:session-start", session);
+
+    // Persist session row
+    try {
+      const db = getDb();
+      const rowId = nanoid();
+      db.insert(schema.codingAgentSessions)
+        .values({
+          id: rowId,
+          agentId,
+          sessionId: sessionId || "",
+          projectId: session.projectId,
+          task: session.task,
+          agentType,
+          status: "active",
+          startedAt: now,
+        })
+        .run();
+      sessionRowIds.set(agentId, rowId);
+    } catch (err) {
+      console.error("Failed to persist coding agent session:", err);
+    }
+    return;
+  }
+
+  if (type === "__awaiting-input") {
+    io.emit("codeagent:awaiting-input", {
+      agentId,
+      sessionId,
+      prompt: (properties.prompt as string) || "",
+    });
+    return;
+  }
+
+  if (type === "__permission-request") {
+    const permission = properties.permission as { id: string; type: string; title: string; pattern?: string | string[]; metadata: Record<string, unknown> } | undefined;
+    if (permission) {
+      io.emit("codeagent:permission-request", {
+        agentId,
+        sessionId,
+        permission,
+      });
+    }
+    return;
+  }
+
+  if (type === "__session-end") {
+    const rawDiff = properties.diff as Array<{ path: string; additions: number; deletions: number }> | null;
+    const endStatus = (properties.status as string) || "completed";
+    io.emit("codeagent:session-end", {
+      agentId,
+      sessionId,
+      status: endStatus,
+      diff: rawDiff?.map((f) => ({ path: f.path, additions: f.additions, deletions: f.deletions })) ?? null,
+    });
+
+    // Persist session end + diffs
+    try {
+      const db = getDb();
+      const rowId = sessionRowIds.get(agentId);
+      if (rowId) {
+        // Save terminal buffer from PTY sessions for replay after restart
+        const terminalBuffer = completedPtyBuffers.get(agentId) ?? null;
+        console.log(`[session-end] Saving terminal buffer for ${agentId}: ${terminalBuffer ? `${terminalBuffer.length} chars` : "null"}`);
+
+        db.update(schema.codingAgentSessions)
+          .set({
+            status: endStatus as CodingAgentSession["status"],
+            completedAt: new Date().toISOString(),
+            sessionId: sessionId || undefined,
+            terminalBuffer,
+          })
+          .where(eq(schema.codingAgentSessions.id, rowId))
+          .run();
+
+        // Insert diff rows
+        const resolvedSessionId = sessionId || db.select().from(schema.codingAgentSessions).where(eq(schema.codingAgentSessions.id, rowId)).get()?.sessionId || "";
+        if (rawDiff) {
+          for (const f of rawDiff) {
+            db.insert(schema.codingAgentDiffs)
+              .values({
+                id: nanoid(),
+                sessionId: resolvedSessionId,
+                path: f.path,
+                additions: f.additions,
+                deletions: f.deletions,
+              })
+              .run();
+          }
+        }
+
+        sessionRowIds.delete(agentId);
+      }
+
+      // Clean up serverPartBuffers for this agent
+      for (const key of serverPartBuffers.keys()) {
+        if (key.startsWith(`${agentId}:`)) {
+          serverPartBuffers.delete(key);
+        }
+      }
+    } catch (err) {
+      console.error("Failed to persist coding agent session end:", err);
+    }
+    return;
+  }
+
+  // Forward raw event for debugging / generic listeners
+  io.emit("codeagent:event", { agentId, sessionId, type, properties });
+
+  // Parse specific event types into structured events
+
+  // Handle streaming deltas — message.part.delta carries incremental text chunks
+  // Shape: { sessionID, messageID, partID, field: "text"|"reasoning"|..., delta: "chunk" }
+  if (type === "message.part.delta") {
+    const delta = properties.delta as string | undefined;
+    const partId = (properties.partID || "") as string;
+    const messageId = (properties.messageID || "") as string;
+    // "field" indicates which part field is being streamed (text, reasoning, etc.)
+    const field = (properties.field || "text") as string;
+    // Map field names to our part types
+    const partType = field === "reasoning" ? "reasoning" : "text";
+
+    if (delta && partId && messageId) {
+      io.emit("codeagent:part-delta", {
+        agentId,
+        sessionId,
+        messageId,
+        partId,
+        type: partType,
+        delta,
+        toolName: undefined,
+        toolState: undefined,
+      });
+
+      // Accumulate into server-side buffer
+      const bufKey = `${agentId}:${messageId}:${partId}`;
+      const existing = serverPartBuffers.get(bufKey);
+      serverPartBuffers.set(bufKey, {
+        type: partType,
+        content: (existing?.content ?? "") + delta,
+        toolName: existing?.toolName,
+        toolState: existing?.toolState,
+      });
+    }
+  }
+
+  // SDK shape: EventMessagePartUpdated = { type, properties: { part: Part, delta?: string } }
+  // Part has: id, sessionID, messageID, type, and type-specific fields.
+  //
+  // Two modes:
+  // 1. properties.delta is present → incremental delta (append to buffer, emit as delta)
+  // 2. properties.delta is absent → full snapshot in part.text / toolState.output
+  //    Use replacement semantics to avoid doubling content already delivered via
+  //    message.part.delta events. Only emit the portion the frontend hasn't seen.
+  if (type === "message.part.updated") {
+    const part = properties.part as Record<string, unknown> | undefined;
+    const explicitDelta = properties.delta as string | undefined;
+
+    if (part) {
+      const partId = (part.id ?? "") as string;
+      const messageId = (part.messageID ?? "") as string;
+      const partType = (part.type ?? "text") as string;
+
+      // Extract tool name from ToolPart (type: "tool")
+      const toolName = (part.tool ?? "") as string;
+      // ToolPart.state is an object { status, input, output, ... } — extract status string
+      const toolStateObj = part.state as Record<string, unknown> | undefined;
+      const toolState = (typeof toolStateObj === "object" && toolStateObj !== null)
+        ? (toolStateObj.status as string | undefined)
+        : undefined;
+
+      if (partId && messageId) {
+        const bufKey = `${agentId}:${messageId}:${partId}`;
+        const existing = serverPartBuffers.get(bufKey);
+
+        if (explicitDelta) {
+          // Mode 1: explicit delta — append like message.part.delta does
+          io.emit("codeagent:part-delta", {
+            agentId,
+            sessionId,
+            messageId,
+            partId,
+            type: partType,
+            delta: explicitDelta,
+            toolName: toolName || undefined,
+            toolState,
+          });
+
+          serverPartBuffers.set(bufKey, {
+            type: partType,
+            content: (existing?.content ?? "") + explicitDelta,
+            toolName: toolName || existing?.toolName,
+            toolState: toolState ?? existing?.toolState,
+          });
+        } else {
+          // Mode 2: no explicit delta — part.text / tool output is a FULL snapshot
+          let fullContent = "";
+          if (typeof part.text === "string") {
+            fullContent = part.text;
+          }
+          if (partType === "tool" && toolStateObj) {
+            if (typeof toolStateObj.output === "string") {
+              fullContent = toolStateObj.output;
+            } else if (toolStateObj.input) {
+              fullContent = JSON.stringify(toolStateObj.input);
+            }
+          }
+
+          // Replace the buffer with the snapshot content, but keep existing
+          // content if it's already longer (deltas may have delivered more)
+          const newContent = (existing?.content && existing.content.length >= fullContent.length)
+            ? existing.content
+            : fullContent;
+
+          serverPartBuffers.set(bufKey, {
+            type: partType,
+            content: newContent,
+            toolName: toolName || existing?.toolName,
+            toolState: toolState ?? existing?.toolState,
+          });
+
+          // Emit a part-delta ONLY for content the frontend hasn't seen yet
+          const existingLen = existing?.content?.length ?? 0;
+          if (fullContent.length > existingLen) {
+            const missingDelta = fullContent.slice(existingLen);
+            io.emit("codeagent:part-delta", {
+              agentId,
+              sessionId,
+              messageId,
+              partId,
+              type: partType,
+              delta: missingDelta,
+              toolName: toolName || undefined,
+              toolState,
+            });
+          } else if (toolState && toolState !== existing?.toolState) {
+            // Tool state changed but no new content — emit empty delta for state update
+            io.emit("codeagent:part-delta", {
+              agentId,
+              sessionId,
+              messageId,
+              partId,
+              type: partType,
+              delta: "",
+              toolName: toolName || undefined,
+              toolState,
+            });
+          }
+        }
+      }
+    }
+  }
+
+  // SDK shape: EventMessageUpdated = { type, properties: { info: Message } }
+  // Message = UserMessage | AssistantMessage (has role, id, sessionID, but NO parts)
+  if (type === "message.updated") {
+    const info = properties.info as Record<string, unknown> | undefined;
+
+    if (info) {
+      const msgId = (info.id ?? "") as string;
+      const role = info.role as string | undefined;
+      const msgSessionId = (info.sessionID ?? sessionId) as string;
+
+      if (msgId && role) {
+        // Build parts from accumulated serverPartBuffers so the full message includes them
+        const accumulatedParts: CodingAgentPart[] = [];
+        for (const [key, buf] of serverPartBuffers.entries()) {
+          if (key.startsWith(`${agentId}:${msgId}:`)) {
+            const partId = key.split(":").slice(2).join(":");
+            accumulatedParts.push({
+              id: partId,
+              messageId: msgId,
+              type: buf.type as CodingAgentPart["type"],
+              content: buf.content,
+              toolName: buf.toolName,
+              toolState: buf.toolState as CodingAgentPart["toolState"],
+            });
+          }
+        }
+
+        const message: CodingAgentMessage = {
+          id: msgId,
+          sessionId: msgSessionId,
+          role: role as "user" | "assistant",
+          parts: accumulatedParts,
+          createdAt: new Date().toISOString(),
+        };
+        io.emit("codeagent:message", { agentId, sessionId, message });
+
+        // Persist message with accumulated parts to DB
+        try {
+          const db = getDb();
+          const now = new Date().toISOString();
+          // Upsert: try insert, on conflict update parts
+          const existing = db.select().from(schema.codingAgentMessages).where(eq(schema.codingAgentMessages.id, msgId)).get();
+          if (existing) {
+            db.update(schema.codingAgentMessages)
+              .set({ parts: accumulatedParts, sessionId: msgSessionId })
+              .where(eq(schema.codingAgentMessages.id, msgId))
+              .run();
+          } else {
+            db.insert(schema.codingAgentMessages)
+              .values({
+                id: msgId,
+                sessionId: msgSessionId,
+                agentId,
+                role: role as "user" | "assistant",
+                parts: accumulatedParts,
+                createdAt: now,
+              })
+              .run();
+          }
+
+          // If this is the first event with a real sessionId, update session row
+          if (msgSessionId) {
+            const rowId = sessionRowIds.get(agentId);
+            if (rowId) {
+              const sessionRow = db.select().from(schema.codingAgentSessions).where(eq(schema.codingAgentSessions.id, rowId)).get();
+              if (sessionRow && !sessionRow.sessionId) {
+                db.update(schema.codingAgentSessions)
+                  .set({ sessionId: msgSessionId })
+                  .where(eq(schema.codingAgentSessions.id, rowId))
+                  .run();
+              }
+            }
+          }
+        } catch (err) {
+          console.error("Failed to persist coding agent message:", err);
+        }
+      }
+    }
+  }
+}
+
+/** @deprecated Use emitCodingAgentEvent instead */
+export const emitOpenCodeEvent = emitCodingAgentEvent;
+
+/** Emit raw terminal data from a PTY session to all connected clients */
+export function emitTerminalData(io: TypedServer, agentId: string, data: string) {
+  io.emit("terminal:data", { agentId, data });
 }

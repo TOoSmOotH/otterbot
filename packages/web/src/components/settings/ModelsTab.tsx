@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { useSettingsStore } from "../../stores/settings-store";
 import { ModelCombobox } from "./ModelCombobox";
+import { ModelPricingPrompt } from "./ModelPricingPrompt";
 
 const TIER_LABELS: Record<string, { label: string; hint: string; tip?: string }> = {
   coo: {
@@ -168,6 +169,8 @@ export function ModelsTab() {
                 />
               </div>
             </div>
+
+            {form[tier].model && <ModelPricingPrompt model={form[tier].model} />}
           </div>
         );
       })}
@@ -251,6 +254,8 @@ export function ModelsTab() {
             Add
           </button>
         </div>
+
+        {cmModelId.trim() && <ModelPricingPrompt model={cmModelId.trim()} />}
 
         {/* Custom models list */}
         {customModels.length > 0 && (

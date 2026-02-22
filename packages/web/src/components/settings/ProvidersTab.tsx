@@ -5,6 +5,7 @@ import { useSettingsStore, type NamedProvider, type ProviderType } from "../../s
 const TYPE_LABELS: Record<string, string> = {
   anthropic: "Anthropic",
   openai: "OpenAI",
+  openrouter: "OpenRouter",
   ollama: "Ollama",
   "openai-compatible": "OpenAI-Compatible",
 };

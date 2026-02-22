@@ -46,11 +46,13 @@ export function discoverModelPacks(assetsRoot: string): ModelPack[] {
     // Look for animation GLBs
     let idleAnim: string | null = null;
     let actionAnim: string | null = null;
+    let workingAnim: string | null = null;
     if (animDir) {
       const animFiles = readdirSync(animDir).filter((f) => f.endsWith(".glb"));
       for (const f of animFiles) {
         if (f.includes("General")) idleAnim = f;
         if (f.includes("Movement")) actionAnim = f;
+        if (f.includes("Working")) workingAnim = f;
       }
     }
 
@@ -83,6 +85,10 @@ export function discoverModelPacks(assetsRoot: string): ModelPack[] {
           actionAnim && animPrefix
             ? `${animPrefix}/${actionAnim}`
             : `${prefix}/characters/${characterFile}`,
+        working:
+          workingAnim && animPrefix
+            ? `${animPrefix}/${workingAnim}`
+            : undefined,
       },
     });
   }

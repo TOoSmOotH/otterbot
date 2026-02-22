@@ -12,6 +12,11 @@ test.describe("Authentication", () => {
   test("logout redirects to login screen", async ({ page }) => {
     await page.goto("/");
     await expect(page.locator("header")).toBeVisible({ timeout: 10_000 });
+    // Intercept the logout API call so it doesn't destroy the shared session
+    // token used by all other tests via stored auth state
+    await page.route("**/api/auth/logout", (route) =>
+      route.fulfill({ status: 200, contentType: "application/json", body: '{"ok":true}' }),
+    );
     await page.click('button:has-text("Logout")');
     await expect(page.locator('input[type="password"]')).toBeVisible({ timeout: 10_000 });
   });
@@ -26,7 +31,7 @@ test.describe("Authentication", () => {
 
 // Tests that use a fresh context (no stored auth)
 base.describe("Authentication (no auth)", () => {
-  base.use({ ignoreHTTPSErrors: true });
+  base.use({ ignoreHTTPSErrors: true, storageState: { cookies: [], origins: [] } });
 
   base("wrong passphrase shows error", async ({ page }) => {
     await page.goto("https://localhost:62627");

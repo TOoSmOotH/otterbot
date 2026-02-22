@@ -9,15 +9,30 @@ import { CeoChat } from "./components/chat/CeoChat";
 import { AgentGraph } from "./components/graph/AgentGraph";
 import { LiveView } from "./components/live-view/LiveView";
 import { MessageStream } from "./components/stream/MessageStream";
-import { SettingsPanel } from "./components/settings/SettingsPanel";
+import { SettingsPage } from "./components/settings/SettingsPage";
 import { LoginScreen } from "./components/auth/LoginScreen";
+import { ChangeTemporaryPassphraseScreen } from "./components/auth/ChangeTemporaryPassphraseScreen";
 import { SetupWizard } from "./components/setup/SetupWizard";
 import { CharterView } from "./components/project/CharterView";
 import { ProjectList } from "./components/project/ProjectList";
 import { KanbanBoard } from "./components/kanban/KanbanBoard";
 import { FileBrowser } from "./components/project/FileBrowser";
+import { ProjectDashboard } from "./components/project/ProjectDashboard";
+import { GlobalDashboard } from "./components/dashboard/GlobalDashboard";
 import { DesktopView } from "./components/desktop/DesktopView";
+import { UsageDashboard } from "./components/usage/UsageDashboard";
+import { TodoView } from "./components/todos/TodoView";
+import { InboxView } from "./components/inbox/InboxView";
+import { CalendarView } from "./components/calendar/CalendarView";
+import { CodeView } from "./components/code/CodeView";
+import { ProjectSettings } from "./components/project/ProjectSettings";
+import { DetachedLiveView } from "./components/live-view/DetachedLiveView";
 import { useDesktopStore } from "./stores/desktop-store";
+import { useOpenCodeStore } from "./stores/opencode-store";
+import { useSettingsStore } from "./stores/settings-store";
+import { initMovementTriggers } from "./lib/movement-triggers";
+import { getCenterTabs, centerViewLabels } from "./lib/get-center-tabs";
+import type { CenterView } from "./lib/get-center-tabs";
 import { Group, Panel, Separator, useDefaultLayout, usePanelRef } from "react-resizable-panels";
 import { disconnectSocket, getSocket } from "./lib/socket";
 
@@ -39,13 +54,17 @@ export default function App() {
     );
   }
 
+  // Detached 3D view mode
+  const isDetached3D = new URLSearchParams(window.location.search).has("detached-3d");
+  if (isDetached3D && screen === "app") {
+    return <DetachedLiveView />;
+  }
+
   if (screen === "loading") {
     return (
       <div className="h-screen flex items-center justify-center bg-background">
         <div className="flex items-center gap-2 text-muted-foreground">
-          <div className="w-6 h-6 rounded-md bg-primary/20 flex items-center justify-center animate-pulse">
-            <span className="text-primary text-xs font-bold">S</span>
-          </div>
+          <img src="/logo.jpeg" alt="Otterbot" className="w-6 h-6 rounded-md animate-pulse" />
           <span className="text-sm">Loading...</span>
         </div>
       </div>
@@ -54,6 +73,10 @@ export default function App() {
 
   if (screen === "setup") {
     return <SetupWizard />;
+  }
+
+  if (screen === "change-passphrase") {
+    return <ChangeTemporaryPassphraseScreen />;
   }
 
   if (screen === "login") {
@@ -75,8 +98,6 @@ interface UserProfile {
   cooName?: string;
 }
 
-type CenterView = "graph" | "live3d" | "charter" | "kanban" | "desktop" | "files";
-
 function MainApp() {
   const socket = useSocket();
   const loadHistory = useMessageStore((s) => s.loadHistory);
@@ -92,7 +113,7 @@ function MainApp() {
   const projects = useProjectStore((s) => s.projects);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [userProfile, setUserProfile] = useState<UserProfile | undefined>();
-  const [centerView, setCenterView] = useState<CenterView>("graph");
+  const [centerView, setCenterView] = useState<CenterView>("dashboard");
 
   // Load initial data
   useEffect(() => {
@@ -125,40 +146,100 @@ function MainApp() {
     // Pre-load model packs so Live View has them ready
     loadPacks();
 
+    // Load Claude Code settings so the dashboard can show usage limits
+    useSettingsStore.getState().loadClaudeCodeSettings();
+
+    // Hydrate OpenCode session history
+    fetch("/api/opencode/sessions?limit=50")
+      .then((r) => r.json())
+      .then(async (sessions: Array<{ id: string; sessionId: string; agentId: string; projectId: string | null; task: string; agentType?: string; status: string; startedAt: string; completedAt?: string }>) => {
+        const messagesMap: Record<string, import("@otterbot/shared").OpenCodeMessage[]> = {};
+        const diffsMap: Record<string, import("@otterbot/shared").OpenCodeFileDiff[]> = {};
+        await Promise.all(
+          sessions.map(async (s) => {
+            if (!s.sessionId) return;
+            try {
+              const detail = await fetch(`/api/opencode/sessions/${s.id}`).then((r) => r.json());
+              messagesMap[s.sessionId] = detail.messages;
+              diffsMap[s.sessionId] = detail.diffs;
+            } catch {
+              // ignore individual fetch failures
+            }
+          }),
+        );
+        // Map DB rows to store types: session.id in the store = DB row.sessionId
+        const mapped = sessions.map((s) => ({
+          id: s.sessionId || s.id,
+          agentId: s.agentId,
+          projectId: s.projectId,
+          task: s.task,
+          agentType: (s.agentType || "opencode") as import("@otterbot/shared").CodingAgentType,
+          status: s.status as import("@otterbot/shared").OpenCodeSession["status"],
+          startedAt: s.startedAt,
+          completedAt: s.completedAt,
+        }));
+        useOpenCodeStore.getState().loadSessions({ sessions: mapped, messages: messagesMap, diffs: diffsMap });
+      })
+      .catch(console.error);
+
     // Check desktop environment status
     useDesktopStore.getState().checkStatus();
+
+    // Initialize movement trigger system
+    initMovementTriggers();
   }, []);
+
+  const clearChat = useMessageStore((s) => s.clearChat);
+  const loadConversationMessages = useMessageStore((s) => s.loadConversationMessages);
+  const setCurrentConversation = useMessageStore((s) => s.setCurrentConversation);
 
   const handleEnterProject = useCallback(
     (projectId: string) => {
+      clearChat();
       // Optimistically switch view using the already-loaded project data
       // so the UI responds immediately even if the server event loop is busy.
       const cached = useProjectStore.getState().projects.find((p) => p.id === projectId);
       if (cached) {
         enterProject(projectId, cached, [], []);
-        setCenterView("kanban");
+        setCenterView("dashboard");
       }
       // Then fetch full data (conversations + tasks) from the server
       const socket = getSocket();
       socket.emit("project:enter", { projectId }, (result) => {
         if (result.project) {
           enterProject(projectId, result.project, result.conversations, result.tasks);
-          if (!cached) setCenterView("kanban");
+          if (!cached) setCenterView("dashboard");
+          // Auto-load most recent project conversation
+          if (result.conversations.length > 0) {
+            const latest = result.conversations[0];
+            socket.emit("ceo:load-conversation", { conversationId: latest.id }, (convResult) => {
+              loadConversationMessages(convResult.messages);
+              setCurrentConversation(latest.id);
+            });
+          }
         }
       });
     },
-    [enterProject, setCenterView],
+    [enterProject, setCenterView, clearChat, loadConversationMessages, setCurrentConversation],
   );
 
   const handleExitProject = useCallback(() => {
+    clearChat();
     exitProject();
-    setCenterView("graph");
-    // Reload global conversations
+    setCenterView("dashboard");
+    // Reload global conversations and auto-load the most recent one
     const socket = getSocket();
     socket.emit("ceo:list-conversations", undefined, (conversations) => {
       setConversations(conversations);
+      if (conversations.length > 0) {
+        const latest = conversations[0];
+        socket.emit("ceo:load-conversation", { conversationId: latest.id }, (result) => {
+          loadConversationMessages(result.messages);
+          setCurrentConversation(latest.id);
+        });
+      }
     });
-  }, [exitProject, setConversations]);
+  }, [exitProject, setConversations, clearChat, loadConversationMessages, setCurrentConversation]);
 
   const handleSettingsClose = () => {
     setSettingsOpen(false);
@@ -180,9 +261,7 @@ function MainApp() {
       <header className="flex items-center justify-between px-4 py-2 border-b border-border bg-card">
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2">
-            <div className="w-6 h-6 rounded-md bg-primary/20 flex items-center justify-center">
-              <span className="text-primary text-xs font-bold">S</span>
-            </div>
+            <img src="/logo.jpeg" alt="Otterbot" className="w-6 h-6 rounded-md" />
             <h1 className="text-sm font-semibold tracking-tight">Otterbot</h1>
           </div>
           {/* Project breadcrumb */}
@@ -204,8 +283,38 @@ function MainApp() {
         </div>
         <div className="flex items-center gap-1">
           <button
+            onClick={() => {
+              setCenterView("graph");
+              setSettingsOpen(false);
+            }}
+            className={`text-xs transition-colors px-2 py-1 rounded ${
+              !settingsOpen && centerView === "graph"
+                ? "text-primary bg-primary/10"
+                : "text-muted-foreground hover:text-foreground hover:bg-secondary"
+            }`}
+          >
+            Graph
+          </button>
+          <button
+            onClick={() => {
+              setCenterView("live3d");
+              setSettingsOpen(false);
+            }}
+            className={`text-xs transition-colors px-2 py-1 rounded ${
+              !settingsOpen && centerView === "live3d"
+                ? "text-primary bg-primary/10"
+                : "text-muted-foreground hover:text-foreground hover:bg-secondary"
+            }`}
+          >
+            3D View
+          </button>
+          <button
             onClick={() => setSettingsOpen(!settingsOpen)}
-            className="text-xs text-muted-foreground hover:text-foreground transition-colors px-2 py-1 rounded hover:bg-secondary"
+            className={`text-xs transition-colors px-2 py-1 rounded ${
+              settingsOpen
+                ? "text-primary bg-primary/10"
+                : "text-muted-foreground hover:text-foreground hover:bg-secondary"
+            }`}
           >
             Settings
           </button>
@@ -218,23 +327,22 @@ function MainApp() {
         </div>
       </header>
 
-      {/* Three-panel layout */}
-      <main className="flex-1 overflow-hidden">
-        <ResizableLayout
-          userProfile={userProfile}
-          activeProjectId={activeProjectId}
-          activeProject={activeProject}
-          projects={projects}
-          centerView={centerView}
-          setCenterView={setCenterView}
-          onEnterProject={handleEnterProject}
-          cooName={userProfile?.cooName}
-        />
-      </main>
-
-      {/* Settings modal - rendered outside the resizable layout */}
-      {settingsOpen && (
-        <SettingsPanel onClose={handleSettingsClose} />
+      {/* Full-page settings or three-panel layout */}
+      {settingsOpen ? (
+        <SettingsPage onClose={handleSettingsClose} />
+      ) : (
+        <main className="flex-1 overflow-hidden">
+          <ResizableLayout
+            userProfile={userProfile}
+            activeProjectId={activeProjectId}
+            activeProject={activeProject}
+            projects={projects}
+            centerView={centerView}
+            setCenterView={setCenterView}
+            onEnterProject={handleEnterProject}
+            cooName={userProfile?.cooName}
+          />
+        </main>
       )}
     </div>
   );
@@ -305,13 +413,19 @@ function ResizableLayout({
 
   // Reset to graph from project-only views when no project is active
   useEffect(() => {
-    if (!activeProjectId && (centerView === "charter" || centerView === "kanban" || centerView === "files")) {
-      setCenterView("graph");
+    if (!activeProjectId && (centerView === "charter" || centerView === "kanban" || centerView === "files" || centerView === "settings")) {
+      setCenterView("dashboard");
     }
   }, [activeProjectId, centerView]);
 
   const renderCenterContent = () => {
     switch (centerView) {
+      case "dashboard":
+        return activeProjectId ? (
+          <ProjectDashboard projectId={activeProjectId} />
+        ) : (
+          <GlobalDashboard projects={projects} onEnterProject={onEnterProject} />
+        );
       case "charter":
         return activeProject ? (
           <CharterView project={activeProject} />
@@ -324,8 +438,22 @@ function ResizableLayout({
         return activeProjectId ? (
           <FileBrowser projectId={activeProjectId} />
         ) : null;
+      case "usage":
+        return <UsageDashboard />;
+      case "todos":
+        return <TodoView />;
+      case "inbox":
+        return <InboxView />;
+      case "calendar":
+        return <CalendarView />;
       case "desktop":
         return <DesktopView />;
+      case "code":
+        return <CodeView projectId={activeProjectId} />;
+      case "settings":
+        return activeProjectId ? (
+          <ProjectSettings projectId={activeProjectId} />
+        ) : null;
       case "live3d":
         return (
           <LiveView userProfile={userProfile} onToggleView={() => setCenterView("graph")} />
@@ -367,32 +495,18 @@ function ResizableLayout({
         <div className="h-full flex flex-col">
           {/* Tab bar */}
           <div className="flex items-center gap-1 px-3 py-1.5 border-b border-border bg-card">
-              {(
-                [
-                  "graph",
-                  ...(activeProjectId ? (["charter", "kanban", "files"] as CenterView[]) : []),
-                  "desktop" as CenterView,
-                ] as CenterView[]
-              ).map((tab) => (
-                <button
-                  key={tab}
-                  onClick={() => setCenterView(tab)}
-                  className={`text-xs px-2.5 py-1 rounded transition-colors ${
-                    centerView === tab
-                      ? "bg-primary/20 text-primary font-medium"
-                      : "text-muted-foreground hover:text-foreground hover:bg-secondary"
-                  }`}
-                >
-                  {tab === "graph"
-                    ? "Graph"
-                    : tab === "charter"
-                      ? "Charter"
-                      : tab === "kanban"
-                        ? "Board"
-                        : tab === "files"
-                          ? "Files"
-                          : "Desktop"}
-                </button>
+              {getCenterTabs(activeProjectId).map((tab) => (
+                  <button
+                    key={tab}
+                    onClick={() => setCenterView(tab)}
+                    className={`text-xs px-2.5 py-1 rounded transition-colors ${
+                      centerView === tab
+                        ? "bg-primary/20 text-primary font-medium"
+                        : "text-muted-foreground hover:text-foreground hover:bg-secondary"
+                    }`}
+                  >
+                    {centerViewLabels[tab]}
+                  </button>
               ))}
           </div>
           <div className="flex-1 overflow-hidden">
