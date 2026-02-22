@@ -202,6 +202,8 @@ function computeDeskIndex(
 
 /**
  * Trigger a movement for an agent from their current location to a target waypoint.
+ * Uses interruptAndMoveTo so that rapid status changes don't pile up in the queue —
+ * each new zone/status movement cancels any pending walks and starts fresh.
  */
 function triggerMovement(
   agentId: string,
@@ -210,7 +212,7 @@ function triggerMovement(
   toWaypointId: string,
 ) {
   if (fromWaypointId === toWaypointId) return;
-  useMovementStore.getState().enqueueMovement(agentId, graph, fromWaypointId, toWaypointId);
+  useMovementStore.getState().interruptAndMoveTo(agentId, graph, fromWaypointId, toWaypointId);
 }
 
 /**

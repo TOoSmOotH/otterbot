@@ -37,6 +37,20 @@ interface MovementState {
 
   cancelMovement: (agentId: string) => void;
 
+  /**
+   * Cancel all pending/active movements, then immediately start a new one.
+   * Preserves the agent's current visual position so the walk starts seamlessly.
+   * Use this for "important" movements like zone changes that should replace
+   * rather than append to the queue.
+   */
+  interruptAndMoveTo: (
+    agentId: string,
+    graph: WaypointGraph,
+    fromWaypointId: string,
+    toWaypointId: string,
+    speed?: number,
+  ) => void;
+
   /** Return the last resting position after a movement completed (or null). */
   getLastKnownPosition: (agentId: string) => [number, number, number] | null;
 
@@ -172,6 +186,26 @@ export const useMovementStore = create<MovementState>((set, get) => {
       const movements = new Map(get().movements);
       movements.delete(agentId);
       set({ movements });
+    },
+
+    interruptAndMoveTo: (agentId, graph, fromWaypointId, toWaypointId, speed) => {
+      // Save the current visual position before canceling
+      const existing = get().movements.get(agentId);
+      const currentPos = existing?.state.position ?? lastKnownPositions.get(agentId);
+
+      // Cancel everything (queue + active movement)
+      animationQueue.cancel(agentId);
+      const movements = new Map(get().movements);
+      movements.delete(agentId);
+      set({ movements });
+
+      // Preserve position so startMovement can prepend it to the new path
+      if (currentPos) {
+        lastKnownPositions.set(agentId, [...currentPos]);
+      }
+
+      // Start the new movement immediately (bypasses queue)
+      startMovement(agentId, graph, fromWaypointId, toWaypointId, speed);
     },
   };
 });
