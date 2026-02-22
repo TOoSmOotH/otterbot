@@ -84,6 +84,7 @@ export class COO extends BaseAgent {
   private teamLeads: Map<string, TeamLead> = new Map();
   private workspace: WorkspaceManager;
   private onAgentSpawned?: (agent: BaseAgent) => void;
+  private _moduleTools: Record<string, unknown> = {};
   private onStream?: (token: string, messageId: string, conversationId: string | null) => void;
   private onThinking?: (token: string, messageId: string, conversationId: string | null) => void;
   private onThinkingEnd?: (messageId: string, conversationId: string | null) => void;
@@ -209,6 +210,11 @@ The user can see everything on the desktop in real-time.`;
     this._onPtySessionUnregistered = deps.onPtySessionUnregistered;
     this.onAgentDestroyed = deps.onAgentDestroyed;
     this.contextManager = new ConversationContextManager(systemPrompt);
+  }
+
+  /** Register module tools so the COO can query installed modules. */
+  setModuleTools(tools: Record<string, unknown>): void {
+    this._moduleTools = tools;
   }
 
   async handleMessage(message: BusMessage): Promise<void> {
@@ -870,6 +876,9 @@ The user can see everything on the desktop in real-time.`;
           return this.managePackages(args);
         },
       }),
+
+      // Module tools (dynamically registered)
+      ...this._moduleTools,
     };
   }
 

@@ -1,0 +1,176 @@
+// ---------------------------------------------------------------------------
+// Module system types
+// ---------------------------------------------------------------------------
+
+/**
+ * Opaque type alias for the better-sqlite3 Database instance.
+ * Module authors who need raw DB access can cast to their preferred type.
+ * We avoid importing better-sqlite3 here to keep the shared package dependency-free.
+ */
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type
+export interface ModuleDatabase {
+  prepare(sql: string): { run(...params: unknown[]): unknown; get(...params: unknown[]): unknown; all(...params: unknown[]): unknown[] };
+  exec(sql: string): void;
+  transaction<T>(fn: () => T): () => T;
+}
+
+// ─── Manifest ────────────────────────────────────────────────────────────────
+
+export interface ModuleManifest {
+  id: string;
+  name: string;
+  version: string; // semver
+  description: string;
+  author?: string;
+}
+
+// ─── Config schema ───────────────────────────────────────────────────────────
+
+export interface ModuleConfigField {
+  type: "string" | "number" | "boolean" | "secret";
+  description: string;
+  required: boolean;
+  default?: string | number | boolean;
+}
+
+export type ModuleConfigSchema = Record<string, ModuleConfigField>;
+
+// ─── Triggers ────────────────────────────────────────────────────────────────
+
+export interface PollTrigger {
+  type: "poll";
+  intervalMs: number;
+  minIntervalMs?: number;
+}
+
+export interface WebhookTrigger {
+  type: "webhook";
+  path: string;
+}
+
+export type ModuleTrigger = PollTrigger | WebhookTrigger;
+
+// ─── Handler results ────────────────────────────────────────────────────────
+
+export interface PollResultItem {
+  id: string;
+  title: string;
+  content: string;
+  url?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface PollResult {
+  items: PollResultItem[];
+  summary?: string;
+}
+
+export interface WebhookRequest {
+  method: string;
+  headers: Record<string, string | string[] | undefined>;
+  body: unknown;
+  params: Record<string, string>;
+  query: Record<string, string>;
+}
+
+export interface WebhookResult {
+  status?: number;
+  body?: unknown;
+  items?: PollResultItem[];
+}
+
+// ─── Knowledge store ─────────────────────────────────────────────────────────
+
+export interface KnowledgeDocument {
+  id: string;
+  content: string;
+  metadata: Record<string, unknown> | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface KnowledgeStore {
+  db: ModuleDatabase;
+  upsert(id: string, content: string, metadata?: Record<string, unknown>): Promise<void>;
+  search(query: string, limit?: number): Promise<KnowledgeDocument[]>;
+  delete(id: string): void;
+  get(id: string): KnowledgeDocument | null;
+  count(): number;
+}
+
+// ─── Module context ──────────────────────────────────────────────────────────
+
+export interface ModuleContext {
+  knowledge: KnowledgeStore;
+  getConfig(key: string): string | undefined;
+  log(...args: unknown[]): void;
+  warn(...args: unknown[]): void;
+  error(...args: unknown[]): void;
+}
+
+// ─── Handlers ────────────────────────────────────────────────────────────────
+
+export type PollHandler = (ctx: ModuleContext) => Promise<PollResult>;
+export type WebhookHandler = (req: WebhookRequest, ctx: ModuleContext) => Promise<WebhookResult>;
+export type QueryHandler = (query: string, ctx: ModuleContext) => Promise<string>;
+
+// ─── Migrations ──────────────────────────────────────────────────────────────
+
+export interface ModuleMigration {
+  version: number;
+  description: string;
+  up(db: ModuleDatabase): void;
+  down?(db: ModuleDatabase): void;
+}
+
+// ─── Tools ───────────────────────────────────────────────────────────────────
+
+export interface ModuleToolDefinition {
+  name: string;
+  description: string;
+  parameters: Record<string, unknown>; // JSON Schema
+  execute(args: Record<string, unknown>, ctx: ModuleContext): Promise<string>;
+}
+
+// ─── Module definition ───────────────────────────────────────────────────────
+
+export interface ModuleDefinition {
+  manifest: ModuleManifest;
+  configSchema?: ModuleConfigSchema;
+  triggers?: ModuleTrigger[];
+  migrations?: ModuleMigration[];
+  tools?: ModuleToolDefinition[];
+  onPoll?: PollHandler;
+  onWebhook?: WebhookHandler;
+  onQuery?: QueryHandler;
+  onLoad?(ctx: ModuleContext): Promise<void>;
+  onUnload?(ctx: ModuleContext): Promise<void>;
+}
+
+// ─── Installed module tracking ───────────────────────────────────────────────
+
+export type ModuleSource = "git" | "npm" | "local";
+
+export interface InstalledModule {
+  id: string;
+  name: string;
+  version: string;
+  source: ModuleSource;
+  sourceUri: string;
+  enabled: boolean;
+  modulePath: string;
+  installedAt: string;
+  updatedAt: string;
+}
+
+export interface ModulesManifest {
+  version: 1;
+  modules: InstalledModule[];
+}
+
+// ─── defineModule() ──────────────────────────────────────────────────────────
+
+/** Identity function for type narrowing — module authors use this to define their module. */
+export function defineModule(def: ModuleDefinition): ModuleDefinition {
+  return def;
+}

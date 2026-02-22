@@ -67,6 +67,7 @@ interface BackupManifest {
     sshKey: boolean;
     packages: boolean;
     scenes: string[];
+    modules: string[];
   };
 }
 
@@ -82,7 +83,7 @@ export async function createBackupArchive(
   const manifest: BackupManifest = {
     version: 1,
     createdAt: new Date().toISOString(),
-    contents: { database: true, sshKey: false, packages: false, scenes: [] },
+    contents: { database: true, sshKey: false, packages: false, scenes: [], modules: [] },
   };
 
   // 1. Database
@@ -118,7 +119,25 @@ export async function createBackupArchive(
     }
   }
 
-  // 5. Manifest (added as buffer so it's always first in the listing)
+  // 5. Module knowledge databases
+  const modulesBaseDir = resolve(workspaceRoot(), "modules");
+  if (existsSync(modulesBaseDir)) {
+    for (const moduleDir of readdirSync(modulesBaseDir)) {
+      const knowledgeDbPath = resolve(modulesBaseDir, moduleDir, "knowledge.db");
+      if (existsSync(knowledgeDbPath)) {
+        zip.addFile(knowledgeDbPath, `modules/${moduleDir}/knowledge.db`);
+        manifest.contents.modules.push(moduleDir);
+      }
+    }
+  }
+
+  // 6. Modules manifest
+  const modulesManifestPath = resolve(workspaceRoot(), "config", "modules-manifest.json");
+  if (existsSync(modulesManifestPath)) {
+    zip.addFile(modulesManifestPath, "config/modules-manifest.json");
+  }
+
+  // 7. Manifest (added as buffer so it's always first in the listing)
   zip.addBuffer(
     Buffer.from(JSON.stringify(manifest, null, 2)),
     "manifest.json",
@@ -210,6 +229,30 @@ export async function restoreFromArchive(
     }
     const filename = basename(entryName);
     copyFileSync(tempPath, resolve(sDir, filename));
+  }
+
+  // Module knowledge databases
+  for (const [entryName, tempPath] of entries) {
+    if (!entryName.startsWith("modules/") || !entryName.endsWith("/knowledge.db")) continue;
+    // entryName: "modules/<id>/knowledge.db"
+    const parts = entryName.split("/");
+    if (parts.length !== 3) continue;
+    const moduleId = parts[1];
+    const moduleDataDir = resolve(workspaceRoot(), "modules", moduleId);
+    if (!existsSync(moduleDataDir)) {
+      mkdirSync(moduleDataDir, { recursive: true });
+    }
+    copyFileSync(tempPath, resolve(moduleDataDir, "knowledge.db"));
+  }
+
+  // Modules manifest
+  const modulesManifestEntry = entries.get("config/modules-manifest.json");
+  if (modulesManifestEntry) {
+    const configDir = resolve(workspaceRoot(), "config");
+    if (!existsSync(configDir)) {
+      mkdirSync(configDir, { recursive: true });
+    }
+    copyFileSync(modulesManifestEntry, resolve(configDir, "modules-manifest.json"));
   }
 
   // Clean up all temp files

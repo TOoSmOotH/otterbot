@@ -16,3 +16,4 @@ export * from "./types/custom-tool.js";
 export * from "./types/coding-agent.js";
 export * from "./types/opencode.js";
 export * from "./types/memory.js";
+export * from "./types/module.js";

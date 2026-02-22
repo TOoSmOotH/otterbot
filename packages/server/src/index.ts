@@ -742,6 +742,13 @@ async function main() {
       }).catch((err) => {
         console.warn("[memory] Failed to initialize vector store:", err);
       });
+
+      // Initialize module system (non-blocking)
+      import("./modules/index.js").then(async ({ initModules }) => {
+        await initModules(coo!, app);
+      }).catch((err) => {
+        console.warn("[modules] Failed to initialize module system:", err);
+      });
     } catch (err) {
       console.error("Failed to start COO agent:", err);
     }
@@ -3539,6 +3546,114 @@ Respond with ONLY a JSON object (no markdown, no explanation) with these fields:
       }
       skillService.setAgentSkills(req.params.id, req.body.skillIds);
       return { ok: true };
+    },
+  );
+
+  // ─── Module REST API ────────────────────────────────────────────────────────
+
+  app.get("/api/modules", async () => {
+    const { getModuleLoader } = await import("./modules/index.js");
+    const { listModules } = await import("./modules/module-manifest.js");
+    const loader = getModuleLoader();
+    const installed = listModules();
+
+    return installed.map((m) => {
+      const loaded = loader?.get(m.id);
+      return {
+        ...m,
+        loaded: !!loaded,
+        documents: loaded ? loaded.knowledgeStore.count() : 0,
+        hasQuery: loaded ? !!loaded.definition.onQuery : false,
+      };
+    });
+  });
+
+  app.post<{ Body: { source: string; uri: string } }>(
+    "/api/modules/install",
+    async (req, reply) => {
+      const { source, uri } = req.body;
+      const { installFromGit, installFromLocal, installFromNpm } = await import(
+        "./modules/module-installer.js"
+      );
+      const { getModuleLoader, getModuleScheduler } = await import("./modules/index.js");
+
+      try {
+        let entry;
+        switch (source) {
+          case "git":
+            entry = await installFromGit(uri);
+            break;
+          case "npm":
+            entry = await installFromNpm(uri);
+            break;
+          case "local":
+            entry = await installFromLocal(uri);
+            break;
+          default:
+            return reply.status(400).send({ error: `Invalid source: ${source}` });
+        }
+
+        const loader = getModuleLoader();
+        const scheduler = getModuleScheduler();
+        if (loader) {
+          const loaded = await loader.load(entry.id);
+          if (scheduler) scheduler.startModule(entry.id, loaded);
+        }
+
+        return entry;
+      } catch (err) {
+        return reply
+          .status(500)
+          .send({ error: err instanceof Error ? err.message : String(err) });
+      }
+    },
+  );
+
+  app.post<{ Params: { id: string }; Body: { enabled: boolean } }>(
+    "/api/modules/:id/toggle",
+    async (req, reply) => {
+      const { getModuleLoader, getModuleScheduler } = await import("./modules/index.js");
+      const loader = getModuleLoader();
+      const scheduler = getModuleScheduler();
+      if (!loader) return reply.status(503).send({ error: "Module system not initialized" });
+
+      try {
+        const { enabled } = req.body;
+        if (enabled) {
+          await loader.toggle(req.params.id, true);
+          const loaded = loader.get(req.params.id);
+          if (loaded && scheduler) scheduler.startModule(req.params.id, loaded);
+        } else {
+          if (scheduler) scheduler.stopModule(req.params.id);
+          await loader.toggle(req.params.id, false);
+        }
+        return { ok: true, enabled };
+      } catch (err) {
+        return reply
+          .status(500)
+          .send({ error: err instanceof Error ? err.message : String(err) });
+      }
+    },
+  );
+
+  app.delete<{ Params: { id: string } }>(
+    "/api/modules/:id",
+    async (req, reply) => {
+      const { getModuleLoader, getModuleScheduler } = await import("./modules/index.js");
+      const { uninstallModule } = await import("./modules/module-installer.js");
+      const loader = getModuleLoader();
+      const scheduler = getModuleScheduler();
+
+      try {
+        if (scheduler) scheduler.stopModule(req.params.id);
+        if (loader) await loader.unload(req.params.id);
+        await uninstallModule(req.params.id);
+        return { ok: true };
+      } catch (err) {
+        return reply
+          .status(500)
+          .send({ error: err instanceof Error ? err.message : String(err) });
+      }
     },
   );
 
