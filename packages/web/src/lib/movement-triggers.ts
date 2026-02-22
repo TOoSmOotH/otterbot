@@ -166,8 +166,8 @@ export function processAgentMovement(agent: Agent, prevStatus?: string) {
       const fromWps = findWaypointsByZoneAndTag(graph, targetZoneId, prevTag);
       const toWps = findWaypointsByZoneAndTag(graph, targetZoneId, targetTag);
       if (fromWps.length > 0 && toWps.length > 0) {
-        const fromWp = fromWps[0]; // center has one waypoint
-        const toWp = toWps[deskIndex % toWps.length];
+        const fromWp = prevTag === "desk" ? fromWps[deskIndex % fromWps.length] : fromWps[0];
+        const toWp = targetTag === "desk" ? toWps[deskIndex % toWps.length] : toWps[0];
         triggerMovement(agent.id, graph, fromWp.id, toWp.id);
       }
     }

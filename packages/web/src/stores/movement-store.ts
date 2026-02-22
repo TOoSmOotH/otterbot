@@ -58,6 +58,9 @@ function createAnimationQueue(
   );
 }
 
+/** Tracks the last known position of each agent after a movement finishes */
+const lastKnownPositions = new Map<string, [number, number, number]>();
+
 export const useMovementStore = create<MovementState>((set, get) => {
   const startMovement: MovementState["startMovement"] = (
     agentId,
@@ -69,12 +72,12 @@ export const useMovementStore = create<MovementState>((set, get) => {
     const path = findPath(graph, fromWaypointId, toWaypointId);
     if (!path || path.length < 2) return false;
 
-    // If the agent has a recent position, prepend it so the walk starts
-    // seamlessly from where the agent visually is (no teleport to waypoint).
+    // If the agent has a recent position (active or last-known), prepend it
+    // so the walk starts seamlessly from where the agent visually is.
     const existing = get().movements.get(agentId);
+    const currentPos = existing?.state.position ?? lastKnownPositions.get(agentId);
     let fullPath = path;
-    if (existing) {
-      const currentPos = existing.state.position;
+    if (currentPos) {
       const startNode: PathNode = {
         waypointId: "__current__",
         position: [...currentPos],
@@ -120,6 +123,7 @@ export const useMovementStore = create<MovementState>((set, get) => {
 
         for (const [agentId, entry] of next) {
           if (entry.interpolator.finished) {
+            lastKnownPositions.set(agentId, [...entry.state.position]);
             next.delete(agentId);
             changed = true;
             continue;
@@ -130,6 +134,7 @@ export const useMovementStore = create<MovementState>((set, get) => {
           changed = true;
 
           if (entry.interpolator.finished) {
+            lastKnownPositions.set(agentId, [...state.position]);
             next.delete(agentId);
           }
         }
@@ -156,6 +161,7 @@ export const useMovementStore = create<MovementState>((set, get) => {
 
     cancelMovement: (agentId) => {
       animationQueue.cancel(agentId);
+      lastKnownPositions.delete(agentId);
       const movements = new Map(get().movements);
       movements.delete(agentId);
       set({ movements });
