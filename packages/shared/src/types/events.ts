@@ -54,6 +54,8 @@ export interface ServerToClientEvents {
   "matrix:status": (data: { status: "connected" | "disconnected" | "error"; userId?: string }) => void;
   "irc:status": (data: { status: "connected" | "disconnected" | "error"; nickname?: string }) => void;
   "teams:status": (data: { status: "connected" | "disconnected" | "error" }) => void;
+  "slack:pairing-request": (data: { code: string; slackUserId: string; slackUsername: string }) => void;
+  "slack:status": (data: { status: "connected" | "disconnected" | "error"; botUsername?: string }) => void;
 }
 
 /** Events emitted from client to server */

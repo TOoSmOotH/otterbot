@@ -179,6 +179,17 @@ import {
   updateTeamsSettings,
   testTeamsConnection,
 } from "./teams/teams-settings.js";
+import { SlackBridge } from "./slack/slack-bridge.js";
+import {
+  getSlackSettings,
+  updateSlackSettings,
+  testSlackConnection,
+} from "./slack/slack-settings.js";
+import {
+  approvePairing as approveSlackPairing,
+  rejectPairing as rejectSlackPairing,
+  revokePairing as revokeSlackPairing,
+} from "./slack/pairing.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -521,6 +532,31 @@ async function main() {
     }
   }
 
+  // Slack bridge (initialized when enabled + credentials set)
+  let slackBridge: SlackBridge | null = null;
+
+  function startSlackBridge() {
+    if (slackBridge || !coo) return;
+    const settings = getSlackSettings();
+    if (!settings.enabled || !settings.botTokenSet || !settings.appTokenSet || !settings.signingSecretSet) return;
+    const botToken = getConfig("slack:bot_token");
+    const signingSecret = getConfig("slack:signing_secret");
+    const appToken = getConfig("slack:app_token");
+    if (!botToken || !signingSecret || !appToken) return;
+    slackBridge = new SlackBridge({ bus, coo, io });
+    slackBridge.start({ botToken, signingSecret, appToken }).catch((err) => {
+      console.error("[Slack] Failed to start bridge:", err);
+      slackBridge = null;
+    });
+  }
+
+  async function stopSlackBridge() {
+    if (slackBridge) {
+      await slackBridge.stop();
+      slackBridge = null;
+    }
+  }
+
   function startCoo() {
     if (coo) return;
     try {
@@ -832,6 +868,7 @@ async function main() {
     startDiscordBridge();
     startIrcBridge();
     startTeamsBridge();
+    startSlackBridge();
   } else {
     console.log("Setup not complete. Waiting for setup wizard...");
   }
@@ -1154,6 +1191,7 @@ async function main() {
     startDiscordBridge();
     startIrcBridge();
     startTeamsBridge();
+    startSlackBridge();
 
     return { ok: true };
   });
@@ -3237,6 +3275,75 @@ async function main() {
   });
 
   // =========================================================================
+  // Slack settings routes
+  // =========================================================================
+
+  app.get("/api/settings/slack", async () => {
+    const availableChannels = await slackBridge?.getAvailableChannels() ?? [];
+    return getSlackSettings(availableChannels);
+  });
+
+  app.put<{
+    Body: {
+      enabled?: boolean;
+      botToken?: string;
+      signingSecret?: string;
+      appToken?: string;
+      requireMention?: boolean;
+      allowedChannels?: string[];
+    };
+  }>("/api/settings/slack", async (req) => {
+    const wasEnabled = getSlackSettings().enabled && getSlackSettings().botTokenSet && getSlackSettings().appTokenSet && getSlackSettings().signingSecretSet;
+    updateSlackSettings(req.body);
+    const nowEnabled = getSlackSettings().enabled && getSlackSettings().botTokenSet && getSlackSettings().appTokenSet && getSlackSettings().signingSecretSet;
+
+    if (nowEnabled && !wasEnabled) {
+      startSlackBridge();
+    } else if (!nowEnabled && wasEnabled) {
+      await stopSlackBridge();
+    }
+
+    return { ok: true };
+  });
+
+  app.post("/api/settings/slack/test", async () => {
+    return testSlackConnection();
+  });
+
+  app.post<{
+    Body: { code: string };
+  }>("/api/settings/slack/pair/approve", async (req, reply) => {
+    const result = approveSlackPairing(req.body.code);
+    if (!result) {
+      reply.code(400);
+      return { ok: false, error: "Invalid or expired pairing code" };
+    }
+    return { ok: true, user: result };
+  });
+
+  app.post<{
+    Body: { code: string };
+  }>("/api/settings/slack/pair/reject", async (req, reply) => {
+    const ok = rejectSlackPairing(req.body.code);
+    if (!ok) {
+      reply.code(400);
+      return { ok: false, error: "Pairing code not found" };
+    }
+    return { ok: true };
+  });
+
+  app.delete<{
+    Params: { userId: string };
+  }>("/api/settings/slack/pair/:userId", async (req, reply) => {
+    const ok = revokeSlackPairing(req.params.userId);
+    if (!ok) {
+      reply.code(400);
+      return { ok: false, error: "User not found" };
+    }
+    return { ok: true };
+  });
+
+  // =========================================================================
   // Google settings routes
   // =========================================================================
 
@@ -3924,6 +4031,7 @@ Respond with ONLY a JSON object (no markdown, no explanation) with these fields:
     await stopDiscordBridge();
     await stopIrcBridge();
     await stopTeamsBridge();
+    await stopSlackBridge();
     await closeBrowser();
     process.exit(0);
   };
