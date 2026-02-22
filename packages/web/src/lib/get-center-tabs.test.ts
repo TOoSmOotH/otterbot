@@ -21,6 +21,11 @@ describe("getCenterTabs", () => {
     expect(getCenterTabs("proj-1")).not.toContain("graph");
   });
 
+  it("does not include live3d in project or global tabs (header-only navigation)", () => {
+    expect(getCenterTabs("proj-1")).not.toContain("live3d");
+    expect(getCenterTabs(null)).not.toContain("live3d");
+  });
+
   it("includes settings only in project tabs", () => {
     expect(getCenterTabs("proj-1")).toContain("settings");
     expect(getCenterTabs(null)).not.toContain("settings");
@@ -37,5 +42,18 @@ describe("centerViewLabels", () => {
       expect(centerViewLabels[view]).toBeDefined();
       expect(typeof centerViewLabels[view]).toBe("string");
     }
+  });
+
+  it("has a label for the live3d view used by the header 3D View link", () => {
+    expect(centerViewLabels.live3d).toBe("Live");
+  });
+});
+
+describe("header navigation views", () => {
+  it("graph and live3d are both valid CenterView values with labels", () => {
+    // The header provides direct navigation to graph and live3d views
+    // (outside the tab bar). Both must remain valid CenterView values.
+    expect(centerViewLabels["graph"]).toBeDefined();
+    expect(centerViewLabels["live3d"]).toBeDefined();
   });
 });
