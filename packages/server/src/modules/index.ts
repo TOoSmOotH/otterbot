@@ -4,7 +4,7 @@
  */
 
 import { resolve } from "node:path";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import type { FastifyInstance } from "fastify";
 import type { COO } from "../agents/coo.js";
 import { ModuleLoader } from "./module-loader.js";
@@ -12,7 +12,6 @@ import { ModuleScheduler } from "./module-scheduler.js";
 import { registerModuleWebhooks } from "./module-webhook.js";
 import { createModuleTools } from "./module-tools.js";
 import { getModule, addModule } from "./module-manifest.js";
-import { loadModuleDefinition } from "./module-installer.js";
 
 let _loader: ModuleLoader | null = null;
 let _scheduler: ModuleScheduler | null = null;
@@ -58,22 +57,27 @@ async function registerBuiltins(): Promise<void> {
 
   for (const name of entries) {
     const modulePath = resolve(builtinRoot, name);
-    // Skip if already registered under its manifest id
-    try {
-      const definition = await loadModuleDefinition(modulePath);
-      const moduleId = definition.manifest.id;
+    const pkgJsonPath = resolve(modulePath, "package.json");
+    if (!existsSync(pkgJsonPath)) continue;
 
-      // Check if any entry already has this moduleId
+    try {
+      const pkg = JSON.parse(readFileSync(pkgJsonPath, "utf-8"));
+      const moduleId: string | undefined = pkg.otterbot?.id;
+      if (!moduleId) continue;
+
+      // Skip if already registered
       const existing = getModule(moduleId);
       if (existing) continue;
 
-      console.log(`[Modules] Registering built-in module: ${definition.manifest.name}`);
+      const moduleName = pkg.description ?? pkg.name ?? moduleId;
+
+      console.log(`[Modules] Registering built-in module: ${moduleName}`);
 
       addModule({
         id: moduleId,
         moduleId,
-        name: definition.manifest.name,
-        version: definition.manifest.version,
+        name: moduleName,
+        version: pkg.version ?? "0.0.0",
         source: "local",
         sourceUri: modulePath,
         enabled: false,
