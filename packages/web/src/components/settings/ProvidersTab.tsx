@@ -9,6 +9,7 @@ const TYPE_LABELS: Record<string, string> = {
   ollama: "Ollama",
   "openai-compatible": "OpenAI-Compatible",
   huggingface: "Hugging Face",
+  nvidia: "NVIDIA",
 };
 
 export function ProvidersTab() {

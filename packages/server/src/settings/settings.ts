@@ -59,6 +59,7 @@ export const PROVIDER_TYPE_META: ProviderTypeMeta[] = [
   { type: "openai-compatible", label: "OpenAI-Compatible", needsApiKey: true, needsBaseUrl: true },
   { type: "github-copilot", label: "GitHub Copilot", needsApiKey: true, needsBaseUrl: false },
   { type: "huggingface", label: "Hugging Face", needsApiKey: true, needsBaseUrl: false },
+  { type: "nvidia", label: "NVIDIA", needsApiKey: true, needsBaseUrl: false },
 ];
 
 // Static fallback models per provider (used when API fetch fails)
@@ -89,6 +90,12 @@ const FALLBACK_MODELS: Record<string, string[]> = {
     "mistralai/Mistral-7B-Instruct-v0.3",
     "microsoft/Phi-3-mini-4k-instruct",
     "Qwen/Qwen2.5-72B-Instruct",
+  ],
+  nvidia: [
+    "meta/llama-3.1-70b-instruct",
+    "meta/llama-3.1-8b-instruct",
+    "mistralai/mistral-7b-instruct-v0.3",
+    "mistralai/mixtral-8x22b-instruct-v0.1",
   ],
 };
 
@@ -487,6 +494,18 @@ export async function fetchModelsWithCredentials(
         return Array.isArray(hfData)
           ? hfData.map((m) => m.id)
           : FALLBACK_MODELS.huggingface ?? [];
+      }
+
+      case "nvidia": {
+        if (!apiKey) return FALLBACK_MODELS.nvidia ?? [];
+        const nvidiaBase = baseUrl ?? "https://integrate.api.nvidia.com/v1";
+        const nvidiaRes = await fetch(`${nvidiaBase}/models`, {
+          headers: { Authorization: `Bearer ${apiKey}` },
+          signal: AbortSignal.timeout(10_000),
+        });
+        if (!nvidiaRes.ok) return FALLBACK_MODELS.nvidia ?? [];
+        const nvidiaData = (await nvidiaRes.json()) as { data?: Array<{ id: string }> };
+        return nvidiaData.data?.map((m) => m.id).sort() ?? FALLBACK_MODELS.nvidia ?? [];
       }
 
       default:

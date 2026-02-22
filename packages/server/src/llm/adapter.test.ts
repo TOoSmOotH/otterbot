@@ -164,6 +164,54 @@ describe("adapter – resolveModel", () => {
     });
   });
 
+  it("creates an OpenAI-based model for nvidia provider type", () => {
+    const config: LLMConfig = {
+      provider: "nvidia",
+      model: "meta/llama-3.1-70b-instruct",
+      apiKey: "nvapi-test-key",
+    };
+
+    const model = resolveModel(config);
+
+    expect(createOpenAI).toHaveBeenCalledWith({
+      baseURL: "https://integrate.api.nvidia.com/v1",
+      apiKey: "nvapi-test-key",
+    });
+    expect(mockOpenAIFactory).toHaveBeenCalledWith("meta/llama-3.1-70b-instruct");
+    expect(model).toBe(mockOpenAIModel);
+  });
+
+  it("allows overriding the nvidia baseUrl", () => {
+    const config: LLMConfig = {
+      provider: "nvidia",
+      model: "mistralai/mistral-7b-instruct-v0.3",
+      apiKey: "nvapi-custom",
+      baseUrl: "https://custom-nim.example.com/v1",
+    };
+
+    resolveModel(config);
+
+    expect(createOpenAI).toHaveBeenCalledWith({
+      baseURL: "https://custom-nim.example.com/v1",
+      apiKey: "nvapi-custom",
+    });
+    expect(mockOpenAIFactory).toHaveBeenCalledWith("mistralai/mistral-7b-instruct-v0.3");
+  });
+
+  it("uses empty string for apiKey when none provided for nvidia", () => {
+    const config: LLMConfig = {
+      provider: "nvidia",
+      model: "meta/llama-3.1-8b-instruct",
+    };
+
+    resolveModel(config);
+
+    expect(createOpenAI).toHaveBeenCalledWith({
+      baseURL: "https://integrate.api.nvidia.com/v1",
+      apiKey: "",
+    });
+  });
+
   it("throws for unknown provider type", () => {
     const config: LLMConfig = {
       provider: "nonexistent",
@@ -214,6 +262,12 @@ describe("adapter – isThinkingModel", () => {
   it("returns false for huggingface models", () => {
     expect(
       isThinkingModel({ provider: "huggingface", model: "meta-llama/Llama-3.1-8B-Instruct" }),
+    ).toBe(false);
+  });
+
+  it("returns false for nvidia models", () => {
+    expect(
+      isThinkingModel({ provider: "nvidia", model: "meta/llama-3.1-70b-instruct" }),
     ).toBe(false);
   });
 });
