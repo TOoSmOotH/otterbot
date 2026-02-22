@@ -38,4 +38,12 @@ describe("centerViewLabels", () => {
       expect(typeof centerViewLabels[view]).toBe("string");
     }
   });
+
+  it("has a label for the live3d view used by the header 3D View link", () => {
+    expect(centerViewLabels["live3d"]).toBe("Live");
+  });
+
+  it("has a label for the graph view used by the header Graph link", () => {
+    expect(centerViewLabels["graph"]).toBe("Graph");
+  });
 });
