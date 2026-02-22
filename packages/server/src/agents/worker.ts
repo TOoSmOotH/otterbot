@@ -465,7 +465,10 @@ export class Worker extends BaseAgent {
     try {
       const cleanOutput = stripAnsi(terminalOutput);
       const lastChunk = cleanOutput.slice(-2000);
-      const approvalMode = getConfig("claude-code:approval_mode") ?? "full-auto";
+      const agentType = this.getCodingAgentType();
+      const approvalMode = agentType === "opencode"
+        ? (getConfig("opencode:interactive") === "true" ? "interactive" : "full-auto")
+        : (getConfig("claude-code:approval_mode") ?? "full-auto");
 
       // --- Fast regex-based detection ---
 
@@ -483,11 +486,17 @@ export class Worker extends BaseAgent {
         /(cogitated|baked|thought|pondered|brewed)\s+for\s+\d+/i.test(l),
       );
 
-      console.log(`[Worker ${this.id}] Terminal idle check — tail segments: ${JSON.stringify(tailSegments.slice(-8))}, prompt=${isReplPrompt}, completion=${hasCompletionSignal}`);
+      // OpenCode completion: "Build · <model> · <duration>" or "Bake · <model> · <duration>"
+      // The TUI shows this status line when the agent finishes and returns to the input prompt.
+      const hasOpenCodeCompletion = tailSegments.some(l =>
+        /\b(Build|Bake|Think)\s+[·•]\s+\S+.*[·•]\s+\d+[ms]/i.test(l),
+      );
 
-      if (isReplPrompt || hasCompletionSignal) {
-        console.log(`[Worker ${this.id}] Terminal idle — detected completion (prompt=${isReplPrompt}, signal=${hasCompletionSignal})`);
-        this.handleTerminalComplete("Task finished (detected REPL prompt)", ptyClient);
+      console.log(`[Worker ${this.id}] Terminal idle check — tail segments: ${JSON.stringify(tailSegments.slice(-8))}, prompt=${isReplPrompt}, completion=${hasCompletionSignal}, opencode=${hasOpenCodeCompletion}`);
+
+      if (isReplPrompt || hasCompletionSignal || hasOpenCodeCompletion) {
+        console.log(`[Worker ${this.id}] Terminal idle — detected completion (prompt=${isReplPrompt}, signal=${hasCompletionSignal}, opencode=${hasOpenCodeCompletion})`);
+        this.handleTerminalComplete("Task finished (detected completion signal)", ptyClient);
         return;
       }
 
