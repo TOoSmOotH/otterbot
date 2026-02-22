@@ -405,7 +405,7 @@ async function main() {
 
   let coo: COO | null = null;
   let issueMonitor: GitHubIssueMonitor | null = null;
-  const schedulerRegistry = new SchedulerRegistry();
+  const schedulerRegistry = new SchedulerRegistry(io);
   let customTaskScheduler: CustomTaskScheduler | null = null;
 
   // Resolver map for interactive coding agent sessions: when a Worker awaits human
@@ -684,6 +684,9 @@ async function main() {
         // Send scheduler pseudo-agents to newly-connected clients so they
         // appear in the 3D view (they aren't in the DB and loadAndStart()
         // fires before clients connect).
+        for (const agent of schedulerRegistry.getActivePseudoAgents()) {
+          socket.emit("agent:spawned", agent);
+        }
         if (customTaskScheduler) {
           for (const agent of customTaskScheduler.getActivePseudoAgents()) {
             socket.emit("agent:spawned", agent);
@@ -2005,7 +2008,8 @@ async function main() {
     const db = getDb();
     const dbAgents = db.select().from(schema.agents).where(ne(schema.agents.status, "done")).all();
     const schedulerAgents = customTaskScheduler?.getActivePseudoAgents() ?? [];
-    return [...dbAgents, ...schedulerAgents];
+    const builtinSchedulerAgents = schedulerRegistry.getActivePseudoAgents();
+    return [...dbAgents, ...schedulerAgents, ...builtinSchedulerAgents];
   });
 
   // =========================================================================
