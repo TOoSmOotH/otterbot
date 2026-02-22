@@ -47,6 +47,10 @@ function SessionSidebar({
   onSelect: (agentId: string) => void;
 }) {
   const agents = useAgentStore((s) => s.agents);
+  const hasMore = useCodingAgentStore((s) => s.hasMore);
+  const loadingMore = useCodingAgentStore((s) => s.loadingMore);
+  const loadMoreSessions = useCodingAgentStore((s) => s.loadMoreSessions);
+  const deleteSession = useCodingAgentStore((s) => s.deleteSession);
   const entries = Array.from(sessions.values()).sort(
     (a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime(),
   );
@@ -68,7 +72,7 @@ function SessionSidebar({
           <button
             key={session.agentId}
             onClick={() => onSelect(session.agentId)}
-            className={`flex items-center gap-2 px-2 py-1.5 rounded text-left text-xs transition-colors ${
+            className={`group flex items-center gap-2 px-2 py-1.5 rounded text-left text-xs transition-colors ${
               selectedAgentId === session.agentId
                 ? "bg-primary/20 text-primary"
                 : "text-muted-foreground hover:text-foreground hover:bg-secondary"
@@ -79,9 +83,30 @@ function SessionSidebar({
               <div className="truncate font-mono">{displayName}</div>
               <div className="truncate opacity-70">{session.task.slice(0, 50)}</div>
             </div>
+            {session.dbId && (
+              <span
+                onClick={(e) => {
+                  e.stopPropagation();
+                  deleteSession(session.dbId!, session.agentId);
+                }}
+                className="hidden group-hover:inline-flex items-center justify-center w-4 h-4 rounded text-muted-foreground hover:text-red-400 hover:bg-red-500/10 shrink-0 cursor-pointer"
+                title="Delete session"
+              >
+                &times;
+              </span>
+            )}
           </button>
         );
       })}
+      {hasMore && (
+        <button
+          onClick={() => loadMoreSessions()}
+          disabled={loadingMore}
+          className="mt-1 px-2 py-1.5 text-xs text-muted-foreground hover:text-foreground hover:bg-secondary rounded transition-colors disabled:opacity-50"
+        >
+          {loadingMore ? "Loading..." : "Load more"}
+        </button>
+      )}
     </div>
   );
 }
@@ -630,28 +655,72 @@ export function CodeView({ projectId }: { projectId?: string | null }) {
   const allSessions = useCodingAgentStore((s) => s.sessions);
   const selectedAgentId = useCodingAgentStore((s) => s.selectedAgentId);
   const selectAgent = useCodingAgentStore((s) => s.selectAgent);
+  const loadSessionDetail = useCodingAgentStore((s) => s.loadSessionDetail);
+  const clearCompletedSessions = useCodingAgentStore((s) => s.clearCompletedSessions);
+  const detailLoading = useCodingAgentStore((s) => s.detailLoading);
 
   const sessions = projectId
     ? new Map([...allSessions].filter(([, s]) => s.projectId === projectId))
     : allSessions;
 
+  // Check if there are any completed/error sessions to clear
+  const hasCompletedSessions = useMemo(() => {
+    for (const s of sessions.values()) {
+      if (s.status === "completed" || s.status === "error") return true;
+    }
+    return false;
+  }, [sessions]);
+
+  const handleSelect = useCallback((agentId: string) => {
+    selectAgent(agentId);
+    // Lazy-load detail if not yet fetched
+    const session = allSessions.get(agentId);
+    if (session?.dbId && session.id) {
+      loadSessionDetail(session.dbId, session.id);
+    }
+  }, [selectAgent, allSessions, loadSessionDetail]);
+
+  // Check if selected session's detail is loading
+  const selectedSession = selectedAgentId ? allSessions.get(selectedAgentId) : null;
+  const isDetailLoading = selectedSession?.dbId ? detailLoading.has(selectedSession.dbId) : false;
+
   return (
     <div className="h-full flex bg-[#0d1117] text-foreground">
       {/* Left sidebar — session list */}
       <div className="w-48 shrink-0 border-r border-border overflow-y-auto bg-card/30">
-        <div className="px-2 py-1.5 text-[10px] font-medium text-muted-foreground uppercase tracking-wider border-b border-border">
-          Sessions
+        <div className="flex items-center justify-between px-2 py-1.5 border-b border-border">
+          <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
+            Sessions
+          </span>
+          {hasCompletedSessions && (
+            <button
+              onClick={() => clearCompletedSessions()}
+              className="text-[10px] text-muted-foreground hover:text-red-400 transition-colors"
+              title="Clear completed and errored sessions"
+            >
+              Clear
+            </button>
+          )}
         </div>
         <SessionSidebar
           sessions={sessions}
           selectedAgentId={selectedAgentId}
-          onSelect={selectAgent}
+          onSelect={handleSelect}
         />
       </div>
 
       {/* Main content */}
       {selectedAgentId ? (
-        <SessionContent key={selectedAgentId} agentId={selectedAgentId} />
+        isDetailLoading ? (
+          <div className="flex-1 flex items-center justify-center">
+            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+              <span className="inline-block w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
+              Loading session...
+            </div>
+          </div>
+        ) : (
+          <SessionContent key={selectedAgentId} agentId={selectedAgentId} />
+        )
       ) : (
         <div className="flex-1 flex items-center justify-center">
           <div className="text-center text-muted-foreground text-xs">

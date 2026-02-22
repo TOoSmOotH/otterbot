@@ -150,36 +150,22 @@ function MainApp() {
     // Load Claude Code settings so the dashboard can show usage limits
     useSettingsStore.getState().loadClaudeCodeSettings();
 
-    // Hydrate OpenCode session history
-    fetch("/api/opencode/sessions?limit=50")
+    // Hydrate coding agent session list (metadata only — details fetched on demand)
+    fetch("/api/codeagent/sessions?limit=20")
       .then((r) => r.json())
-      .then(async (sessions: Array<{ id: string; sessionId: string; agentId: string; projectId: string | null; task: string; agentType?: string; status: string; startedAt: string; completedAt?: string }>) => {
-        const messagesMap: Record<string, import("@otterbot/shared").OpenCodeMessage[]> = {};
-        const diffsMap: Record<string, import("@otterbot/shared").OpenCodeFileDiff[]> = {};
-        await Promise.all(
-          sessions.map(async (s) => {
-            if (!s.sessionId) return;
-            try {
-              const detail = await fetch(`/api/codeagent/sessions/${s.id}`).then((r) => r.json());
-              messagesMap[s.sessionId] = detail.messages;
-              diffsMap[s.sessionId] = detail.diffs;
-            } catch {
-              // ignore individual fetch failures
-            }
-          }),
-        );
-        // Map DB rows to store types: session.id in the store = DB row.sessionId
-        const mapped = sessions.map((s) => ({
+      .then((data: { sessions: Array<{ id: string; sessionId: string; agentId: string; projectId: string | null; task: string; agentType?: string; status: string; startedAt: string; completedAt?: string }>; hasMore: boolean }) => {
+        const mapped = data.sessions.map((s) => ({
           id: s.sessionId || s.id,
+          dbId: s.id,
           agentId: s.agentId,
           projectId: s.projectId,
           task: s.task,
           agentType: (s.agentType || "opencode") as import("@otterbot/shared").CodingAgentType,
-          status: s.status as import("@otterbot/shared").OpenCodeSession["status"],
+          status: s.status as import("@otterbot/shared").CodingAgentSession["status"],
           startedAt: s.startedAt,
           completedAt: s.completedAt,
         }));
-        useOpenCodeStore.getState().loadSessions({ sessions: mapped, messages: messagesMap, diffs: diffsMap });
+        useOpenCodeStore.getState().loadSessionList({ sessions: mapped, hasMore: data.hasMore });
       })
       .catch(console.error);
 

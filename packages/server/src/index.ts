@@ -2652,41 +2652,41 @@ async function main() {
   // Coding agent session history routes
   // =========================================================================
 
-  app.get<{
-    Querystring: { limit?: string; projectId?: string };
-  }>("/api/codeagent/sessions", async (req) => {
+  async function listCodingAgentSessions(query: { limit?: string; projectId?: string; before?: string }) {
     const { getDb, schema } = await import("./db/index.js");
-    const { desc, eq } = await import("drizzle-orm");
+    const { desc, eq, lt, and } = await import("drizzle-orm");
     const db = getDb();
-    const limit = Math.min(parseInt(req.query.limit ?? "50", 10) || 50, 200);
-    const query = db
+    const limit = Math.min(parseInt(query.limit ?? "20", 10) || 20, 200);
+    const conditions = [];
+    if (query.projectId) {
+      conditions.push(eq(schema.codingAgentSessions.projectId, query.projectId));
+    }
+    if (query.before) {
+      conditions.push(lt(schema.codingAgentSessions.startedAt, query.before));
+    }
+    const rows = db
       .select()
       .from(schema.codingAgentSessions)
+      .where(conditions.length > 0 ? and(...conditions) : undefined)
       .orderBy(desc(schema.codingAgentSessions.startedAt))
-      .limit(limit);
-    if (req.query.projectId) {
-      return query.where(eq(schema.codingAgentSessions.projectId, req.query.projectId)).all();
-    }
-    return query.all();
+      .limit(limit + 1)
+      .all();
+    const hasMore = rows.length > limit;
+    if (hasMore) rows.pop();
+    return { sessions: rows, hasMore };
+  }
+
+  app.get<{
+    Querystring: { limit?: string; projectId?: string; before?: string };
+  }>("/api/codeagent/sessions", async (req) => {
+    return listCodingAgentSessions(req.query);
   });
 
   // Keep old route for backwards compatibility
   app.get<{
-    Querystring: { limit?: string; projectId?: string };
+    Querystring: { limit?: string; projectId?: string; before?: string };
   }>("/api/opencode/sessions", async (req) => {
-    const { getDb, schema } = await import("./db/index.js");
-    const { desc, eq } = await import("drizzle-orm");
-    const db = getDb();
-    const limit = Math.min(parseInt(req.query.limit ?? "50", 10) || 50, 200);
-    const query = db
-      .select()
-      .from(schema.codingAgentSessions)
-      .orderBy(desc(schema.codingAgentSessions.startedAt))
-      .limit(limit);
-    if (req.query.projectId) {
-      return query.where(eq(schema.codingAgentSessions.projectId, req.query.projectId)).all();
-    }
-    return query.all();
+    return listCodingAgentSessions(req.query);
   });
 
   app.get<{
@@ -2715,6 +2715,64 @@ async function main() {
       .where(eq(schema.codingAgentDiffs.sessionId, session.sessionId))
       .all();
     return { session, messages, diffs };
+  });
+
+  // Delete a single coding agent session (cascade messages + diffs)
+  app.delete<{
+    Params: { id: string };
+  }>("/api/codeagent/sessions/:id", async (req, reply) => {
+    const { getDb, schema } = await import("./db/index.js");
+    const { eq } = await import("drizzle-orm");
+    const db = getDb();
+    const session = db
+      .select()
+      .from(schema.codingAgentSessions)
+      .where(eq(schema.codingAgentSessions.id, req.params.id))
+      .get();
+    if (!session) {
+      reply.code(404);
+      return { error: "Session not found" };
+    }
+    db.delete(schema.codingAgentMessages)
+      .where(eq(schema.codingAgentMessages.sessionId, session.sessionId))
+      .run();
+    db.delete(schema.codingAgentDiffs)
+      .where(eq(schema.codingAgentDiffs.sessionId, session.sessionId))
+      .run();
+    db.delete(schema.codingAgentSessions)
+      .where(eq(schema.codingAgentSessions.id, req.params.id))
+      .run();
+    return { ok: true };
+  });
+
+  // Bulk delete completed/error coding agent sessions
+  app.delete("/api/codeagent/sessions", async () => {
+    const { getDb, schema } = await import("./db/index.js");
+    const { eq, inArray } = await import("drizzle-orm");
+    const db = getDb();
+    // Find all completed/error sessions
+    const toDelete = db
+      .select({ id: schema.codingAgentSessions.id, sessionId: schema.codingAgentSessions.sessionId })
+      .from(schema.codingAgentSessions)
+      .where(
+        inArray(schema.codingAgentSessions.status, ["completed", "error"]),
+      )
+      .all();
+    if (toDelete.length === 0) return { ok: true, deleted: 0 };
+    const sessionIds = toDelete.map((s) => s.sessionId).filter(Boolean);
+    const ids = toDelete.map((s) => s.id);
+    if (sessionIds.length > 0) {
+      db.delete(schema.codingAgentMessages)
+        .where(inArray(schema.codingAgentMessages.sessionId, sessionIds))
+        .run();
+      db.delete(schema.codingAgentDiffs)
+        .where(inArray(schema.codingAgentDiffs.sessionId, sessionIds))
+        .run();
+    }
+    db.delete(schema.codingAgentSessions)
+      .where(inArray(schema.codingAgentSessions.id, ids))
+      .run();
+    return { ok: true, deleted: toDelete.length };
   });
 
   // =========================================================================
