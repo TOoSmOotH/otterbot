@@ -10,6 +10,9 @@ import { getDb, schema } from "../db/index.js";
 
 type TypedServer = Server<ClientToServerEvents, ServerToClientEvents>;
 
+// Teams messages can be up to ~28 KB, but we use a conservative limit for readability.
+const TEAMS_MAX_LENGTH = 4000;
+
 // ---------------------------------------------------------------------------
 // Teams Bridge
 // ---------------------------------------------------------------------------
@@ -70,10 +73,8 @@ export class TeamsBridge {
     }
 
     // Dynamic import so the rest of the codebase isn't affected when
-    // botbuilder is not installed.  The @ts-expect-error suppresses the
-    // "cannot find module" error when the SDK is absent at compile time.
+    // botbuilder is not installed.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    // @ts-expect-error -- botbuilder is an optional peer dependency
     const bb: any = await import("botbuilder");
     this.bb = bb;
 
@@ -230,13 +231,67 @@ export class TeamsBridge {
     const bb = this.bb;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const adapter = this.adapter as any;
+    const chunks = splitMessage(message.content, TEAMS_MAX_LENGTH);
     adapter
       .continueConversationAsync("", ref, async (ctx: unknown) => {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        await (ctx as any).sendActivity(bb.MessageFactory.text(message.content));
+        for (const chunk of chunks) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          await (ctx as any).sendActivity(bb.MessageFactory.text(chunk));
+        }
       })
       .catch((err: unknown) => {
         console.error("[Teams] Error sending reply:", err);
       });
   }
+}
+
+// ---------------------------------------------------------------------------
+// Message splitting
+// ---------------------------------------------------------------------------
+
+function splitMessage(text: string, maxLength: number): string[] {
+  if (text.length <= maxLength) return [text];
+
+  const chunks: string[] = [];
+  let remaining = text;
+
+  while (remaining.length > maxLength) {
+    let splitIdx = -1;
+
+    // Try to split at paragraph boundary
+    const paragraphIdx = remaining.lastIndexOf("\n\n", maxLength);
+    if (paragraphIdx > maxLength * 0.3) {
+      splitIdx = paragraphIdx;
+    }
+
+    // Try sentence boundary
+    if (splitIdx === -1) {
+      const sentenceMatch = remaining.slice(0, maxLength).match(/.*[.!?]\s/s);
+      if (sentenceMatch) {
+        splitIdx = sentenceMatch[0].length;
+      }
+    }
+
+    // Hard cut at newline
+    if (splitIdx === -1) {
+      const newlineIdx = remaining.lastIndexOf("\n", maxLength);
+      if (newlineIdx > maxLength * 0.3) {
+        splitIdx = newlineIdx;
+      }
+    }
+
+    // Final fallback: hard cut
+    if (splitIdx === -1) {
+      splitIdx = maxLength;
+    }
+
+    chunks.push(remaining.slice(0, splitIdx).trimEnd());
+    remaining = remaining.slice(splitIdx).trimStart();
+  }
+
+  if (remaining) {
+    chunks.push(remaining);
+  }
+
+  return chunks;
 }

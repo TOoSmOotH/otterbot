@@ -49,6 +49,14 @@
     "zod": "^3.24.1",
     "zod-to-json-schema": "^3.25.1"
   },
+  "peerDependencies": {
+    "botbuilder": "^4.23.0"
+  },
+  "peerDependenciesMeta": {
+    "botbuilder": {
+      "optional": true
+    }
+  },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^22.13.1",
