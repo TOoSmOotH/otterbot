@@ -38,6 +38,15 @@ export function FallbackAgent({ position, label, role, status, agentId, rotation
   const [isMoving, setIsMoving] = useState(false);
   const color = ROLE_COLORS[role] ?? ROLE_COLORS.worker;
 
+  // Set initial position once on mount so the group starts at the right spot
+  useEffect(() => {
+    if (groupRef.current) {
+      groupRef.current.position.set(...position);
+      groupRef.current.rotation.y = rotationY;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Update target position when prop changes
   useEffect(() => {
     targetPosRef.current.set(...position);
@@ -81,7 +90,7 @@ export function FallbackAgent({ position, label, role, status, agentId, rotation
   });
 
   return (
-    <group ref={groupRef} position={position} rotation={[0, rotationY, 0]}>
+    <group ref={groupRef}>
       {/* Capsule body */}
       <mesh ref={meshRef} position={[0, 0.75, 0]} castShadow>
         <capsuleGeometry args={[0.3, 0.8, 8, 16]} />

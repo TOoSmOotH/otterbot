@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import type { WaypointGraph } from "@otterbot/shared";
 import { findPath } from "../lib/pathfinding";
+import type { PathNode } from "../lib/pathfinding";
 import { PathInterpolator, type InterpolatorState } from "../lib/path-interpolator";
 import { AnimationQueue } from "../lib/animation-queue";
 
@@ -64,7 +65,20 @@ export const useMovementStore = create<MovementState>((set, get) => {
     const path = findPath(graph, fromWaypointId, toWaypointId);
     if (!path || path.length < 2) return false;
 
-    const interpolator = new PathInterpolator(path, speed);
+    // If the agent has a recent position, prepend it so the walk starts
+    // seamlessly from where the agent visually is (no teleport to waypoint).
+    const existing = get().movements.get(agentId);
+    let fullPath = path;
+    if (existing) {
+      const currentPos = existing.state.position;
+      const startNode: PathNode = {
+        waypointId: "__current__",
+        position: [...currentPos],
+      };
+      fullPath = [startNode, ...path];
+    }
+
+    const interpolator = new PathInterpolator(fullPath, speed);
     const state = interpolator.update(0);
 
     const movements = new Map(get().movements);

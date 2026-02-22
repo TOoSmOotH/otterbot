@@ -32,6 +32,15 @@ export function AgentCharacter({ pack, position, label, role, status, agentId, g
   const [isMoving, setIsMoving] = useState(false);
   const targetPosRef = useRef(new THREE.Vector3(...position));
 
+  // Set initial position once on mount so the group starts at the right spot
+  useEffect(() => {
+    if (groupRef.current) {
+      groupRef.current.position.set(...position);
+      groupRef.current.rotation.y = rotationY;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Update target position when prop changes
   useEffect(() => {
     targetPosRef.current.set(...position);
@@ -62,7 +71,7 @@ export function AgentCharacter({ pack, position, label, role, status, agentId, g
   const effectiveStatus = isMoving ? "walking" : status;
 
   return (
-    <group ref={groupRef} position={position} rotation={[0, rotationY, 0]}>
+    <group ref={groupRef}>
       <Suspense fallback={<FallbackMesh role={role} />}>
         <CharacterModel pack={pack} status={effectiveStatus} gearConfig={gearConfig} />
       </Suspense>
