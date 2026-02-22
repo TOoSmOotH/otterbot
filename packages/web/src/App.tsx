@@ -263,6 +263,7 @@ function MainApp() {
           <div className="flex items-center gap-2">
             <img src="/logo.jpeg" alt="Otterbot" className="w-6 h-6 rounded-md" />
             <h1 className="text-sm font-semibold tracking-tight">Otterbot</h1>
+            <span className="text-[10px] text-muted-foreground">v{__APP_VERSION__}</span>
           </div>
           {/* Project breadcrumb */}
           {activeProjectId && activeProject && (

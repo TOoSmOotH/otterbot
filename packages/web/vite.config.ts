@@ -2,9 +2,15 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import basicSsl from "@vitejs/plugin-basic-ssl";
 import { resolve } from "path";
+import rootPkg from "../../package.json";
 
-export default defineConfig({
+export default defineConfig(({ mode }) => ({
   plugins: [react(), basicSsl()],
+  define: {
+    __APP_VERSION__: JSON.stringify(
+      mode === "development" ? "dev" : rootPkg.version
+    ),
+  },
   resolve: {
     alias: {
       "@": resolve(__dirname, "./src"),
@@ -37,4 +43,4 @@ export default defineConfig({
       },
     },
   },
-});
+}));
