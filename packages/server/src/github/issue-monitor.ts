@@ -5,7 +5,7 @@ import type { ServerToClientEvents, ClientToServerEvents, KanbanTask } from "@ot
 import { MessageType } from "@otterbot/shared";
 import { getDb, schema } from "../db/index.js";
 import { getConfig, setConfig } from "../auth/auth.js";
-import { fetchAssignedIssues } from "./github-service.js";
+import { fetchAssignedIssues, createIssueComment } from "./github-service.js";
 import type { COO } from "../agents/coo.js";
 
 type TypedServer = Server<ClientToServerEvents, ServerToClientEvents>;
@@ -148,6 +148,18 @@ export class GitHubIssueMonitor {
 
       // Emit to UI
       this.io.emit("kanban:task-created", task as unknown as KanbanTask);
+
+      // Post acknowledgement comment on the GitHub issue
+      try {
+        await createIssueComment(
+          watched.repo,
+          token,
+          issue.number,
+          `👀 I'm looking at this issue now. A task has been created on the kanban board and a worker will be assigned shortly.`,
+        );
+      } catch (err) {
+        console.error(`[IssueMonitor] Failed to comment on issue #${issue.number}:`, err);
+      }
 
       // Send directive to TeamLead
       const teamLeads = this.coo.getTeamLeads();
