@@ -300,6 +300,19 @@ function MainApp() {
             Graph
           </button>
           <button
+            onClick={() => {
+              setCenterView("live3d");
+              setSettingsOpen(false);
+            }}
+            className={`text-xs transition-colors px-2 py-1 rounded ${
+              !settingsOpen && centerView === "live3d"
+                ? "text-primary bg-primary/10"
+                : "text-muted-foreground hover:text-foreground hover:bg-secondary"
+            }`}
+          >
+            3D View
+          </button>
+          <button
             onClick={() => setSettingsOpen(!settingsOpen)}
             className={`text-xs transition-colors px-2 py-1 rounded ${
               settingsOpen
