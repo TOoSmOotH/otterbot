@@ -597,10 +597,10 @@ async function main() {
           return new Promise<"once" | "always" | "reject">((resolve) => {
             const key = `${agentId}:${permission.id}`;
             const timeout = setTimeout(() => {
-              // Auto-approve on timeout to prevent indefinite session hang
+              // Reject on timeout — never auto-approve unattended permission requests
               codingAgentPermissionResolvers.delete(key);
-              console.warn(`[CodingAgent] Permission ${permission.id} timed out — auto-approving`);
-              resolve("once");
+              console.warn(`[CodingAgent] Permission ${permission.id} timed out — rejecting`);
+              resolve("reject");
             }, PERMISSION_TIMEOUT_MS);
             codingAgentPermissionResolvers.set(key, { resolve, timeout });
           });

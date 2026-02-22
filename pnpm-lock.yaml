@@ -99,6 +99,9 @@ importers:
       irc-framework:
         specifier: ^4.14.0
         version: 4.14.0
+      isolated-vm:
+        specifier: ^6.0.2
+        version: 6.0.2
       kokoro-js:
         specifier: ^1.1.0
         version: 1.2.1
@@ -3305,6 +3308,10 @@ packages:
   isexe@3.1.5:
     resolution: {integrity: sha512-6B3tLtFqtQS4ekarvLVMZ+X+VlvQekbe4taUkf/rhVO3d/h0M2rfARm/pXLcPEsjjMsFgrFgSrhQIxcSVrBz8w==}
     engines: {node: '>=18'}
+
+  isolated-vm@6.0.2:
+    resolution: {integrity: sha512-Qw6AJuagG/VJuh2AIcSWmQPsAArti/L+lKhjXU+lyhYkbt3J57XZr+ZjgfTnOr4NJcY1r3f8f0eePS7MRGp+pg==}
+    engines: {node: '>=22.0.0'}
 
   isomorphic-textencoder@1.0.1:
     resolution: {integrity: sha512-676hESgHullDdHDsj469hr+7t3i/neBKU9J7q1T4RHaWwLAsaQnywC0D1dIUId0YZ+JtVrShzuBk1soo0+GVcQ==}
@@ -7817,6 +7824,10 @@ snapshots:
   isexe@2.0.0: {}
 
   isexe@3.1.5: {}
+
+  isolated-vm@6.0.2:
+    dependencies:
+      prebuild-install: 7.1.3
 
   isomorphic-textencoder@1.0.1:
     dependencies:

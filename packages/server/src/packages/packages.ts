@@ -15,6 +15,28 @@ import { resolve, dirname } from "node:path";
 import { execFileSync } from "node:child_process";
 
 // ---------------------------------------------------------------------------
+// Sudo configuration
+// ---------------------------------------------------------------------------
+
+/** Whether to use sudo for system commands. Set OTTERBOT_USE_SUDO=false to disable. */
+const USE_SUDO = (process.env.OTTERBOT_USE_SUDO ?? "true").toLowerCase() !== "false";
+
+/**
+ * Execute a command with optional sudo prefix.
+ * When OTTERBOT_USE_SUDO is false, runs the command directly without sudo.
+ */
+function execWithOptionalSudo(
+  cmd: string,
+  args: string[],
+  opts: Parameters<typeof execFileSync>[2],
+): Buffer {
+  if (USE_SUDO) {
+    return execFileSync("sudo", [cmd, ...args], opts) as Buffer;
+  }
+  return execFileSync(cmd, args, opts) as Buffer;
+}
+
+// ---------------------------------------------------------------------------
 // Input validation helpers
 // ---------------------------------------------------------------------------
 
@@ -208,9 +230,9 @@ export function installAptPackage(name: string, addedBy?: string): InstallResult
   const alreadyInManifest = !addAptPackage(name, addedBy);
 
   try {
-    execFileSync("sudo", ["apt-get", "update"], { stdio: "pipe", timeout: 60_000 });
-    const output = execFileSync(
-      "sudo", ["apt-get", "install", "-y", "--no-install-recommends", name],
+    execWithOptionalSudo("apt-get", ["update"], { stdio: "pipe", timeout: 60_000 });
+    const output = execWithOptionalSudo(
+      "apt-get", ["install", "-y", "--no-install-recommends", name],
       { stdio: "pipe", timeout: 120_000 },
     );
     return {
@@ -243,7 +265,7 @@ export function installNpmPackage(
   const spec = version ? `${name}@${version}` : name;
 
   try {
-    const output = execFileSync("sudo", ["npm", "install", "-g", spec], {
+    const output = execWithOptionalSudo("npm", ["install", "-g", spec], {
       stdio: "pipe",
       timeout: 180_000,
       env: { ...process.env, NPM_CONFIG_PREFIX: process.env.NPM_CONFIG_PREFIX ?? "/otterbot/tools" },
@@ -272,8 +294,8 @@ export function uninstallAptPackage(name: string): InstallResult {
   const wasInManifest = removeAptPackage(name);
 
   try {
-    const output = execFileSync(
-      "sudo", ["apt-get", "remove", "-y", name],
+    const output = execWithOptionalSudo(
+      "apt-get", ["remove", "-y", name],
       { stdio: "pipe", timeout: 120_000 },
     );
     return {
@@ -296,7 +318,7 @@ export function uninstallNpmPackage(name: string): InstallResult {
   const wasInManifest = removeNpmPackage(name);
 
   try {
-    const output = execFileSync("sudo", ["npm", "uninstall", "-g", name], {
+    const output = execWithOptionalSudo("npm", ["uninstall", "-g", name], {
       stdio: "pipe",
       timeout: 60_000,
       env: { ...process.env, NPM_CONFIG_PREFIX: process.env.NPM_CONFIG_PREFIX ?? "/otterbot/tools" },
@@ -330,7 +352,7 @@ export function installRepo(
 
   try {
     // Create keyrings directory if needed
-    execFileSync("sudo", ["install", "-m", "0755", "-d", "/etc/apt/keyrings"], {
+    execWithOptionalSudo("install", ["-m", "0755", "-d", "/etc/apt/keyrings"], {
       stdio: "pipe",
       timeout: 30_000,
     });
@@ -341,7 +363,7 @@ export function installRepo(
       stdio: "pipe",
       timeout: 30_000,
     });
-    execFileSync("sudo", ["gpg", "--dearmor", "-o", repo.keyPath, tmpKeyPath], {
+    execWithOptionalSudo("gpg", ["--dearmor", "-o", repo.keyPath, tmpKeyPath], {
       stdio: "pipe",
       timeout: 30_000,
     });
@@ -350,13 +372,13 @@ export function installRepo(
     const sourcesPath = `/etc/apt/sources.list.d/${repo.name}.list`;
     const tmpSourcesPath = `/tmp/otterbot-sources-${repo.name}.list`;
     writeFileSync(tmpSourcesPath, repo.source + "\n", "utf-8");
-    execFileSync("sudo", ["cp", tmpSourcesPath, sourcesPath], {
+    execWithOptionalSudo("cp", [tmpSourcesPath, sourcesPath], {
       stdio: "pipe",
       timeout: 10_000,
     });
 
     // Update apt cache for the new repo
-    execFileSync("sudo", ["apt-get", "update"], { stdio: "pipe", timeout: 60_000 });
+    execWithOptionalSudo("apt-get", ["update"], { stdio: "pipe", timeout: 60_000 });
 
     return { success: true, alreadyInManifest };
   } catch (err) {
@@ -382,19 +404,19 @@ export function uninstallRepo(name: string): InstallResult {
     // Remove sources list file
     const sourcesPath = `/etc/apt/sources.list.d/${name}.list`;
     try {
-      execFileSync("sudo", ["rm", "-f", sourcesPath], { stdio: "pipe", timeout: 10_000 });
+      execWithOptionalSudo("rm", ["-f", sourcesPath], { stdio: "pipe", timeout: 10_000 });
     } catch { /* ignore if file doesn't exist */ }
 
     // Remove GPG key
     if (repo?.keyPath) {
       validateKeyPath(repo.keyPath);
       try {
-        execFileSync("sudo", ["rm", "-f", repo.keyPath], { stdio: "pipe", timeout: 10_000 });
+        execWithOptionalSudo("rm", ["-f", repo.keyPath], { stdio: "pipe", timeout: 10_000 });
       } catch { /* ignore if file doesn't exist */ }
     }
 
     // Update apt cache
-    execFileSync("sudo", ["apt-get", "update"], { stdio: "pipe", timeout: 60_000 });
+    execWithOptionalSudo("apt-get", ["update"], { stdio: "pipe", timeout: 60_000 });
 
     return { success: true, alreadyInManifest: !wasInManifest };
   } catch (err) {
