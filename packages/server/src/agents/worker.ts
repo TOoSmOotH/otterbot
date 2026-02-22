@@ -268,9 +268,15 @@ export class Worker extends BaseAgent {
       },
     });
 
-    return result.success
-      ? `OpenCode completed successfully.\n\nSummary: ${result.summary}\n\nFiles changed: ${result.diff?.files?.length ?? 0}`
-      : `OpenCode failed: ${result.error ?? "Unknown error"}\n\n${result.summary}`;
+    if (result.success) {
+      const filesChanged = result.diff?.files?.length ?? 0;
+      let report = `OpenCode completed successfully.\n\nSummary: ${result.summary}\n\nFiles changed: ${filesChanged}`;
+      if (filesChanged === 0) {
+        report += `\n\n⚠️ WARNING: Task reported success but produced zero file changes (no diff). This may indicate the task was already completed or the agent did not make any modifications.`;
+      }
+      return report;
+    }
+    return `OpenCode failed: ${result.error ?? "Unknown error"}\n\n${result.summary}`;
   }
 
   /**
@@ -347,9 +353,15 @@ export class Worker extends BaseAgent {
       },
     });
 
-    return result.success
-      ? `Codex completed successfully.\n\nSummary: ${result.summary}\n\nFiles changed: ${result.diff?.files?.length ?? 0}`
-      : `Codex failed: ${result.error ?? "Unknown error"}\n\n${result.summary}`;
+    if (result.success) {
+      const filesChanged = result.diff?.files?.length ?? 0;
+      let report = `Codex completed successfully.\n\nSummary: ${result.summary}\n\nFiles changed: ${filesChanged}`;
+      if (filesChanged === 0) {
+        report += `\n\n⚠️ WARNING: Task reported success but produced zero file changes (no diff). This may indicate the task was already completed or the agent did not make any modifications.`;
+      }
+      return report;
+    }
+    return `Codex failed: ${result.error ?? "Unknown error"}\n\n${result.summary}`;
   }
 
   private async executeCodingAgentTask(task: string): Promise<string> {
@@ -446,9 +458,15 @@ export class Worker extends BaseAgent {
       },
     });
 
-    return result.success
-      ? `Claude Code completed successfully.\n\nSummary: ${result.summary}\n\nFiles changed: ${result.diff?.files?.length ?? 0}`
-      : `Claude Code failed: ${result.error ?? "Unknown error"}\n\n${result.summary}`;
+    if (result.success) {
+      const filesChanged = result.diff?.files?.length ?? 0;
+      let report = `Claude Code completed successfully.\n\nSummary: ${result.summary}\n\nFiles changed: ${filesChanged}`;
+      if (filesChanged === 0) {
+        report += `\n\n⚠️ WARNING: Task reported success but produced zero file changes (no diff). This may indicate the task was already completed or the agent did not make any modifications.`;
+      }
+      return report;
+    }
+    return `Claude Code failed: ${result.error ?? "Unknown error"}\n\n${result.summary}`;
   }
 
   /**

@@ -140,6 +140,7 @@ export const kanbanTasks = sqliteTable("kanban_tasks", {
     .notNull()
     .default([]),
   retryCount: integer("retry_count").notNull().default(0),
+  spawnCount: integer("spawn_count").notNull().default(0),
   completionReport: text("completion_report"),
   createdAt: text("created_at")
     .notNull()

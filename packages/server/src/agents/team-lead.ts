@@ -188,6 +188,7 @@ export interface TeamLeadDependencies {
 
 const MAX_CONTINUATION_CYCLES = 5;
 const MAX_TASK_RETRIES = 3;
+const MAX_TASK_SPAWNS = 4;
 
 export class TeamLead extends BaseAgent {
   private workers: Map<string, Worker> = new Map();
@@ -886,7 +887,9 @@ export class TeamLead extends BaseAgent {
         const blockedTag = blocked ? ` [BLOCKED by: ${blockedBy.join(", ")}]` : "";
         const retryCount = (t as any).retryCount ?? 0;
         const retryTag = col === "backlog" && retryCount > 0 ? ` [retry ${retryCount}/${MAX_TASK_RETRIES}]` : "";
-        lines.push(`  - ${t.title} (${t.id})${assignee}${blockedTag}${retryTag}`);
+        const spawnCount = (t as any).spawnCount ?? 0;
+        const spawnTag = spawnCount > 1 ? ` [spawned ${spawnCount}x]` : "";
+        lines.push(`  - ${t.title} (${t.id})${assignee}${blockedTag}${retryTag}${spawnTag}`);
         // Include descriptions for backlog tasks so the TL can see failure context from previous attempts
         if (col === "backlog" && t.description && t.description.includes("PREVIOUS ATTEMPT FAILED")) {
           lines.push(`    ${t.description.slice(t.description.lastIndexOf("--- PREVIOUS ATTEMPT FAILED ---")).slice(0, 300)}`);
@@ -1063,6 +1066,20 @@ export class TeamLead extends BaseAgent {
           if (refusals > 0) {
             this._shouldAbortThink = true;
             return "STOP. Already refused. Wait for current worker to finish.";
+          }
+          // Early rejection: refuse to spawn for tasks already in "done"
+          if (taskId) {
+            const db = getDb();
+            const existingTask = db
+              .select()
+              .from(schema.kanbanTasks)
+              .where(eq(schema.kanbanTasks.id, taskId))
+              .get();
+            if (existingTask?.column === "done") {
+              this._toolCallCounts.set("spawn_worker_refused", (refusals) + 1);
+              this._shouldAbortThink = true;
+              return `REFUSED: Task "${existingTask.title}" (${taskId}) is already DONE. Do not re-spawn workers for completed tasks.`;
+            }
           }
           const result = await this.spawnWorker(registryEntryId, task, taskId);
           if (result.startsWith("REFUSED:")) {
@@ -1499,6 +1516,19 @@ export class TeamLead extends BaseAgent {
       return false;
     }
 
+    // Guard: refuse if task is already done (prevents re-work loops)
+    if (task.column === "done") {
+      console.warn(`[TeamLead ${this.id}] autoAssignTask: task "${task.title}" (${taskId}) is already DONE — refusing assignment`);
+      return false;
+    }
+
+    // Guard: refuse if task has been spawned too many times (hard cap to prevent infinite loops)
+    const currentSpawnCount = (task as any).spawnCount ?? 0;
+    if (currentSpawnCount >= MAX_TASK_SPAWNS) {
+      console.warn(`[TeamLead ${this.id}] autoAssignTask: task "${task.title}" (${taskId}) has reached spawn cap (${currentSpawnCount}/${MAX_TASK_SPAWNS}) — refusing assignment`);
+      return false;
+    }
+
     // Programmatic enforcement: refuse if task is blocked
     const blockedBy = (task.blockedBy as string[]) ?? [];
     if (this.isTaskBlocked(blockedBy)) {
@@ -1510,7 +1540,7 @@ export class TeamLead extends BaseAgent {
 
     const now = new Date().toISOString();
     db.update(schema.kanbanTasks)
-      .set({ column: "in_progress", assigneeAgentId: workerId, updatedAt: now })
+      .set({ column: "in_progress", assigneeAgentId: workerId, spawnCount: currentSpawnCount + 1, updatedAt: now })
       .where(eq(schema.kanbanTasks.id, taskId))
       .run();
 
@@ -1670,6 +1700,18 @@ export class TeamLead extends BaseAgent {
         console.warn(
           `[TeamLead ${this.id}] Task "${existing.title}" (${taskId}) exceeded ${MAX_TASK_RETRIES} retries — marking as FAILED.`,
         );
+
+        // Escalate to COO immediately so the user is notified
+        if (this.parentId) {
+          this.sendMessage(
+            this.parentId,
+            MessageType.Report,
+            `⚠️ TASK FAILED after ${MAX_TASK_RETRIES} attempts — manual intervention needed.\n` +
+            `Task: "${existing.title}" (${taskId})\n` +
+            `Last error: ${snippet.slice(0, 300)}\n` +
+            `This task has been marked as FAILED and will not be retried automatically.`,
+          );
+        }
       }
     }
 
