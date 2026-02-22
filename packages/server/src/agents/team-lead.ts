@@ -500,7 +500,10 @@ export class TeamLead extends BaseAgent {
 
     // Programmatically clean up orphaned tasks (in_progress but assigned to dead workers)
     // Don't rely on the LLM — it consistently fails to handle orphans
+    // IMPORTANT: Skip the currently-reporting task — its worker was just cleaned up above,
+    // but the LLM still needs to evaluate its report before deciding where to move it.
     for (const orphan of this.getOrphanedTasks()) {
+      if (orphan.id === reportingTaskId) continue;
       console.log(
         `[TeamLead ${this.id}] Auto-cleaning orphaned task "${orphan.title}" (${orphan.id}) — assigned to dead worker ${orphan.assigneeAgentId.slice(0, 6)}`,
       );
@@ -1518,12 +1521,30 @@ export class TeamLead extends BaseAgent {
     const now = new Date().toISOString();
     const col = (column ?? "backlog") as "backlog" | "in_progress" | "done";
 
-    // Get existing tasks for position and blockedBy validation
+    // Get existing tasks for position, blockedBy validation, and duplicate detection
     const existing = db
       .select()
       .from(schema.kanbanTasks)
       .where(eq(schema.kanbanTasks.projectId, this.projectId))
       .all();
+
+    // Duplicate detection: check if a task with the same title already exists
+    const normalizedTitle = title.trim().toLowerCase();
+    const duplicate = existing.find((t) => t.title.trim().toLowerCase() === normalizedTitle);
+    if (duplicate) {
+      if (duplicate.column === "done") {
+        return (
+          `DUPLICATE: A task with the same title already exists and is DONE: "${duplicate.title}" (${duplicate.id}).` +
+          (duplicate.completionReport ? ` Completion report: ${duplicate.completionReport.slice(0, 200)}` : "") +
+          ` Do NOT create duplicate tasks for work that is already completed.`
+        );
+      }
+      // Task exists but isn't done — warn and return the existing ID
+      return (
+        `DUPLICATE: A task with the same title already exists: "${duplicate.title}" (${duplicate.id}) in column "${duplicate.column}".` +
+        ` Use the existing task instead of creating a new one.`
+      );
+    }
 
     // Validate blockedBy IDs — reject symbolic names like "task-1"
     if (blockedBy && blockedBy.length > 0) {
