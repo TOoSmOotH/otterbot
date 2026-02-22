@@ -30,6 +30,7 @@ export function AgentCharacter({ pack, position, label, role, status, agentId, g
   const groupRef = useRef<THREE.Group>(null);
   const currentRotationRef = useRef(rotationY);
   const targetPosRef = useRef(new THREE.Vector3(...position));
+  const tempVec3 = useRef(new THREE.Vector3());
 
   // Set initial position once on mount so the group starts at the right spot
   useEffect(() => {
@@ -60,8 +61,15 @@ export function AgentCharacter({ pack, position, label, role, status, agentId, g
     } else if (busy) {
       // Hold current position — queue is about to start the next walk
     } else {
-      // Smoothly interpolate to home position
-      groupRef.current.position.lerp(targetPosRef.current, delta * 5);
+      // If the movement system placed this agent somewhere, stay there
+      // instead of sliding back to the prop position (prevents roaming snap-back).
+      const lastPos = agentId ? store.getLastKnownPosition(agentId) : null;
+      if (lastPos) {
+        groupRef.current.position.lerp(tempVec3.current.set(...lastPos), delta * 5);
+      } else {
+        // No movement history — smoothly interpolate to computed home position
+        groupRef.current.position.lerp(targetPosRef.current, delta * 5);
+      }
       currentRotationRef.current = THREE.MathUtils.lerp(currentRotationRef.current, rotationY, delta * 5);
     }
 
@@ -259,7 +267,7 @@ function findClip(actions: Map<string, THREE.AnimationAction>, pattern: RegExp):
 }
 
 function FallbackMesh({ role }: { role: string }) {
-  const color = role === "coo" ? "#8b5cf6" : role === "team_lead" ? "#f59e0b" : role === "admin_assistant" ? "#e879f9" : "#06b6d4";
+  const color = role === "coo" ? "#8b5cf6" : role === "team_lead" ? "#f59e0b" : role === "admin_assistant" ? "#e879f9" : role === "scheduler" ? "#f97316" : "#06b6d4";
   return (
     <mesh position={[0, 0.75, 0]}>
       <capsuleGeometry args={[0.3, 0.8, 8, 16]} />

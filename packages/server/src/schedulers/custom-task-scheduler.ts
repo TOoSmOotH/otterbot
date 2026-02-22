@@ -54,8 +54,6 @@ export class CustomTaskScheduler {
     for (const task of tasks) {
       if (task.enabled) {
         this.startTask(task);
-        // Emit pseudo-agent for 3D visualisation
-        this.io.emit("agent:spawned", this.buildPseudoAgent(task));
       }
     }
 
@@ -81,6 +79,7 @@ export class CustomTaskScheduler {
   }
 
   stopTask(taskId: string): void {
+    const hadTimer = this.timers.has(taskId);
     const timer = this.timers.get(taskId);
     if (timer) {
       clearInterval(timer);
@@ -91,8 +90,10 @@ export class CustomTaskScheduler {
       clearTimeout(actingTimeout);
       this.actingTimeouts.delete(taskId);
     }
-    // Emit pseudo-agent destroyed so it disappears from 3D view
-    this.io.emit("agent:destroyed", { agentId: `scheduler-${taskId}` });
+    // Only emit destroyed if there was actually a running task
+    if (hadTimer) {
+      this.io.emit("agent:destroyed", { agentId: `scheduler-${taskId}` });
+    }
   }
 
   restartTask(taskId: string): void {
@@ -108,6 +109,23 @@ export class CustomTaskScheduler {
     if (task && task.enabled) {
       this.startTask(task);
     }
+  }
+
+  /** Return pseudo-agent data for all currently-running scheduler tasks. */
+  getActivePseudoAgents(): Agent[] {
+    const db = getDb();
+    const agents: Agent[] = [];
+    for (const taskId of this.timers.keys()) {
+      const task = db
+        .select()
+        .from(schema.customScheduledTasks)
+        .where(eq(schema.customScheduledTasks.id, taskId))
+        .get();
+      if (task) {
+        agents.push(this.buildPseudoAgent(task));
+      }
+    }
+    return agents;
   }
 
   stopAll(): void {

@@ -679,8 +679,17 @@ async function main() {
       emitAgentSpawned(io, adminAssistant);
       console.log("AdminAssistant agent started.");
 
-      // Handle admin-assistant messages and codeagent:respond from the client
+      // Handle admin-assistant messages, codeagent:respond, and scheduler sync from the client
       io.on("connection", (socket) => {
+        // Send scheduler pseudo-agents to newly-connected clients so they
+        // appear in the 3D view (they aren't in the DB and loadAndStart()
+        // fires before clients connect).
+        if (customTaskScheduler) {
+          for (const agent of customTaskScheduler.getActivePseudoAgents()) {
+            socket.emit("agent:spawned", agent);
+          }
+        }
+
         socket.on("admin-assistant:message" as any, async (data: { content: string }) => {
           if (!data?.content) return;
           bus.send({
@@ -1989,11 +1998,14 @@ async function main() {
   });
 
   // Agent list endpoint (only active agents, not stale "done" ones)
+  // Includes scheduler pseudo-agents that aren't persisted in the DB.
   app.get("/api/agents", async () => {
     const { getDb, schema } = await import("./db/index.js");
     const { ne } = await import("drizzle-orm");
     const db = getDb();
-    return db.select().from(schema.agents).where(ne(schema.agents.status, "done")).all();
+    const dbAgents = db.select().from(schema.agents).where(ne(schema.agents.status, "done")).all();
+    const schedulerAgents = customTaskScheduler?.getActivePseudoAgents() ?? [];
+    return [...dbAgents, ...schedulerAgents];
   });
 
   // =========================================================================

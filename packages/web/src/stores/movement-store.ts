@@ -37,6 +37,9 @@ interface MovementState {
 
   cancelMovement: (agentId: string) => void;
 
+  /** Return the last resting position after a movement completed (or null). */
+  getLastKnownPosition: (agentId: string) => [number, number, number] | null;
+
   /** Check if an agent is actively moving or has pending queued movements */
   isAgentBusy: (agentId: string) => boolean;
 
@@ -151,6 +154,10 @@ export const useMovementStore = create<MovementState>((set, get) => {
     getAgentPosition: (agentId) => {
       const entry = get().movements.get(agentId);
       return entry?.state ?? null;
+    },
+
+    getLastKnownPosition: (agentId) => {
+      return lastKnownPositions.get(agentId) ?? null;
     },
 
     isAgentBusy: (agentId) => {
