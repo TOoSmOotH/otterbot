@@ -44,6 +44,7 @@ describe("Teams settings", () => {
         enabled: false,
         appIdSet: false,
         appPasswordSet: false,
+        tenantId: null,
       });
     });
 
@@ -75,16 +76,30 @@ describe("Teams settings", () => {
       expect(settings.appPasswordSet).toBe(true);
     });
 
+    it("returns tenantId when configured", () => {
+      configStore.set("teams:tenant_id", "my-tenant");
+
+      const settings = getTeamsSettings();
+      expect(settings.tenantId).toBe("my-tenant");
+    });
+
+    it("returns null tenantId when not configured", () => {
+      const settings = getTeamsSettings();
+      expect(settings.tenantId).toBeNull();
+    });
+
     it("returns full configured state", () => {
       configStore.set("teams:enabled", "true");
       configStore.set("teams:app_id", "my-id");
       configStore.set("teams:app_password", "my-pass");
+      configStore.set("teams:tenant_id", "my-tenant");
 
       const settings = getTeamsSettings();
       expect(settings).toEqual({
         enabled: true,
         appIdSet: true,
         appPasswordSet: true,
+        tenantId: "my-tenant",
       });
     });
   });
@@ -132,6 +147,20 @@ describe("Teams settings", () => {
       updateTeamsSettings({ appPassword: "" });
 
       expect(configStore.has("teams:app_password")).toBe(false);
+    });
+
+    it("sets tenantId", () => {
+      updateTeamsSettings({ tenantId: "my-tenant-id" });
+
+      expect(configStore.get("teams:tenant_id")).toBe("my-tenant-id");
+    });
+
+    it("deletes tenantId when set to empty string", () => {
+      configStore.set("teams:tenant_id", "old-tenant");
+
+      updateTeamsSettings({ tenantId: "" });
+
+      expect(configStore.has("teams:tenant_id")).toBe(false);
     });
 
     it("updates multiple fields at once", () => {
@@ -238,6 +267,41 @@ describe("Teams settings", () => {
       expect(body).toContain("client_secret=my-secret");
       expect(body).toContain("grant_type=client_credentials");
       expect(body).toContain("scope=https%3A%2F%2Fapi.botframework.com%2F.default");
+    });
+
+    it("uses configured tenant ID in token endpoint URL", async () => {
+      configStore.set("teams:app_id", "my-app-id");
+      configStore.set("teams:app_password", "my-secret");
+      configStore.set("teams:tenant_id", "my-tenant-id");
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ access_token: "t" }),
+      });
+
+      await testTeamsConnection();
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        "https://login.microsoftonline.com/my-tenant-id/oauth2/v2.0/token",
+        expect.objectContaining({ method: "POST" }),
+      );
+    });
+
+    it("uses botframework.com tenant when no tenant ID is configured", async () => {
+      configStore.set("teams:app_id", "my-app-id");
+      configStore.set("teams:app_password", "my-secret");
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ access_token: "t" }),
+      });
+
+      await testTeamsConnection();
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        "https://login.microsoftonline.com/botframework.com/oauth2/v2.0/token",
+        expect.objectContaining({ method: "POST" }),
+      );
     });
 
     it("returns error when token endpoint responds with failure", async () => {

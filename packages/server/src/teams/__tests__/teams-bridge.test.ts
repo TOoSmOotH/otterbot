@@ -200,12 +200,12 @@ describe("TeamsBridge", () => {
       );
     });
 
-    it("uses SingleTenant app type by default", async () => {
+    it("uses MultiTenant app type when no tenantId is provided", async () => {
       await bridge.start(testConfig);
 
       expect(mockConfigBotFrameworkAuth).toHaveBeenCalledWith(
         expect.objectContaining({
-          MicrosoftAppType: "SingleTenant",
+          MicrosoftAppType: "MultiTenant",
         }),
       );
     });
@@ -785,12 +785,28 @@ describe("TeamsBridge", () => {
   // -------------------------------------------------------------------------
 
   describe("tenant ID configuration", () => {
-    it("defaults to SingleTenant mode", async () => {
+    it("defaults to MultiTenant mode when no tenantId is provided", async () => {
       await bridge.start(testConfig);
 
       expect(mockConfigBotFrameworkAuth).toHaveBeenCalledWith(
         expect.objectContaining({
+          MicrosoftAppType: "MultiTenant",
+          MicrosoftAppTenantId: undefined,
+        }),
+      );
+    });
+
+    it("uses SingleTenant mode when tenantId is provided", async () => {
+      await bridge.start({
+        appId: "my-app-id",
+        appPassword: "my-secret",
+        tenantId: "my-tenant-id",
+      });
+
+      expect(mockConfigBotFrameworkAuth).toHaveBeenCalledWith(
+        expect.objectContaining({
           MicrosoftAppType: "SingleTenant",
+          MicrosoftAppTenantId: "my-tenant-id",
         }),
       );
     });
@@ -807,6 +823,88 @@ describe("TeamsBridge", () => {
           MicrosoftAppPassword: "my-secret",
         }),
       );
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Message splitting
+  // -------------------------------------------------------------------------
+
+  describe("message splitting", () => {
+    it("sends short messages as a single chunk", async () => {
+      await bridge.start(testConfig);
+
+      const ctx = makeTeamsContext({ text: "hello" });
+      await bridge.handleTurn(ctx);
+
+      const conversationId = bus._sent[0]?.conversationId;
+      const broadcastHandler = bus._broadcastHandlers[0]!;
+
+      const sentActivities: unknown[] = [];
+      mockContinueConversationAsync.mockImplementationOnce(
+        async (_id: string, _ref: unknown, callback: (ctx: unknown) => Promise<void>) => {
+          const fakeCtx = {
+            sendActivity: vi.fn().mockImplementation((activity: unknown) => {
+              sentActivities.push(activity);
+              return Promise.resolve();
+            }),
+          };
+          await callback(fakeCtx);
+        },
+      );
+
+      broadcastHandler({
+        id: "resp-1",
+        fromAgentId: "coo",
+        toAgentId: null,
+        type: MessageType.Chat,
+        content: "Short reply",
+        metadata: {},
+        conversationId,
+        timestamp: new Date().toISOString(),
+      });
+
+      await new Promise((r) => setTimeout(r, 50));
+      expect(sentActivities).toHaveLength(1);
+    });
+
+    it("splits long messages into multiple chunks", async () => {
+      await bridge.start(testConfig);
+
+      const ctx = makeTeamsContext({ text: "hello" });
+      await bridge.handleTurn(ctx);
+
+      const conversationId = bus._sent[0]?.conversationId;
+      const broadcastHandler = bus._broadcastHandlers[0]!;
+
+      const sentActivities: unknown[] = [];
+      mockContinueConversationAsync.mockImplementationOnce(
+        async (_id: string, _ref: unknown, callback: (ctx: unknown) => Promise<void>) => {
+          const fakeCtx = {
+            sendActivity: vi.fn().mockImplementation((activity: unknown) => {
+              sentActivities.push(activity);
+              return Promise.resolve();
+            }),
+          };
+          await callback(fakeCtx);
+        },
+      );
+
+      // 4000 chars is the Teams limit; send 10000 chars
+      const longMessage = "x".repeat(10000);
+      broadcastHandler({
+        id: "resp-1",
+        fromAgentId: "coo",
+        toAgentId: null,
+        type: MessageType.Chat,
+        content: longMessage,
+        metadata: {},
+        conversationId,
+        timestamp: new Date().toISOString(),
+      });
+
+      await new Promise((r) => setTimeout(r, 50));
+      expect(sentActivities.length).toBeGreaterThan(1);
     });
   });
 });
