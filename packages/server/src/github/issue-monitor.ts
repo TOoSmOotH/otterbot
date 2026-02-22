@@ -163,7 +163,8 @@ export class GitHubIssueMonitor {
               `New GitHub issue #${issue.number} assigned: "${issue.title}"\n\n` +
               `${issue.body ?? "(no description)"}\n\n` +
               `Task created on kanban board (${taskId}). ` +
-              `Spawn a worker to create a feature branch, implement the fix, and open a PR.`,
+              `Spawn a worker to create a feature branch, implement the fix, and open a PR.\n` +
+              `**Important:** The PR body MUST include \`Closes #${issue.number}\` so the issue is automatically closed on merge.`,
             projectId,
           });
         }

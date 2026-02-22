@@ -1473,7 +1473,8 @@ The user can see everything on the desktop in real-time.`;
       `Target branch: ${branch}\n` +
       `Repository is already cloned to your workspace.\n\n` +
       `**PR Workflow:** Workers must create feature branches from \`${branch}\`, commit their changes, push, and open a pull request targeting \`${branch}\`.\n` +
-      `Use conventional commits and reference issue numbers where applicable.${rulesBlock}\n\n` +
+      `Use conventional commits and reference issue numbers where applicable.\n` +
+      `**Important:** When a PR addresses a GitHub issue, the body MUST include \`Closes #<issue_number>\` so the issue is automatically closed on merge.${rulesBlock}\n\n` +
       `Await issue-triggered tasks or COO directives.`;
 
     this.sendMessage(teamLead.id, MessageType.Directive, directive, {

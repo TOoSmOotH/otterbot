@@ -241,7 +241,7 @@ export function createGitHubCommentTool(ctx: ToolContext) {
 export function createGitHubCreatePRTool(ctx: ToolContext) {
   return tool({
     description:
-      "Create a new GitHub pull request. Returns the PR URL and number.",
+      "Create a new GitHub pull request. Returns the PR URL and number. When the PR addresses a GitHub issue, include 'Closes #<number>' in the body to auto-close the issue on merge.",
     parameters: z.object({
       title: z.string().describe("PR title"),
       head: z.string().describe("The branch containing your changes"),
@@ -252,7 +252,7 @@ export function createGitHubCreatePRTool(ctx: ToolContext) {
       body: z
         .string()
         .optional()
-        .describe("PR description (Markdown supported)"),
+        .describe("PR description (Markdown supported). Include 'Closes #<issue_number>' when addressing a GitHub issue."),
     }),
     execute: async ({ title, head, base, body }) => {
       try {
