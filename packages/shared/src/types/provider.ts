@@ -37,3 +37,6 @@ export interface AgentModelOverride {
   provider: string;
   model: string;
 }
+
+/** Supported messaging-platform chat provider types. */
+export type ChatProviderType = "teams";
