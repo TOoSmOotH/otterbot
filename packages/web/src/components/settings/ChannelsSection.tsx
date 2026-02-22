@@ -16,6 +16,7 @@ const CHANNELS = [
     name: "Slack",
     description: "Integrate with Slack workspaces",
     icon: "S",
+    settingsSection: "slack" as const,
   },
   {
     name: "Discord",
@@ -29,12 +30,17 @@ export function ChannelsSection() {
   const discordEnabled = useSettingsStore((s) => s.discordEnabled);
   const discordTokenSet = useSettingsStore((s) => s.discordTokenSet);
   const loadDiscordSettings = useSettingsStore((s) => s.loadDiscordSettings);
+  const slackEnabled = useSettingsStore((s) => s.slackEnabled);
+  const slackBotTokenSet = useSettingsStore((s) => s.slackBotTokenSet);
+  const loadSlackSettings = useSettingsStore((s) => s.loadSlackSettings);
 
   useEffect(() => {
     loadDiscordSettings();
+    loadSlackSettings();
   }, []);
 
   const isDiscordConnected = discordEnabled && discordTokenSet;
+  const isSlackConnected = slackEnabled && slackBotTokenSet;
 
   return (
     <div className="p-5 space-y-4">
@@ -47,7 +53,7 @@ export function ChannelsSection() {
 
       <div className="grid grid-cols-2 gap-3">
         {CHANNELS.map((channel) => {
-          const connected = channel.name === "Discord" && isDiscordConnected;
+          const connected = (channel.name === "Discord" && isDiscordConnected) || (channel.name === "Slack" && isSlackConnected);
           return (
             <div
               key={channel.name}

@@ -167,6 +167,19 @@ interface SettingsState {
   discordPendingPairings: Array<{ code: string; discordUserId: string; discordUsername: string; createdAt: string }>;
   discordTestResult: TestResult | null;
 
+  // Slack
+  slackEnabled: boolean;
+  slackBotTokenSet: boolean;
+  slackSigningSecretSet: boolean;
+  slackAppTokenSet: boolean;
+  slackRequireMention: boolean;
+  slackBotUsername: string | null;
+  slackAllowedChannels: string[];
+  slackAvailableChannels: Array<{ id: string; name: string }>;
+  slackPairedUsers: Array<{ slackUserId: string; slackUsername: string; pairedAt: string }>;
+  slackPendingPairings: Array<{ code: string; slackUserId: string; slackUsername: string; createdAt: string }>;
+  slackTestResult: TestResult | null;
+
   // Google
   googleConnected: boolean;
   googleConnectedEmail: string | null;
@@ -319,6 +332,21 @@ interface SettingsState {
   rejectDiscordPairing: (code: string) => Promise<void>;
   revokeDiscordUser: (userId: string) => Promise<void>;
 
+  // Slack actions
+  loadSlackSettings: () => Promise<void>;
+  updateSlackSettings: (data: {
+    enabled?: boolean;
+    botToken?: string;
+    signingSecret?: string;
+    appToken?: string;
+    requireMention?: boolean;
+    allowedChannels?: string[];
+  }) => Promise<void>;
+  testSlackConnection: () => Promise<void>;
+  approveSlackPairing: (code: string) => Promise<void>;
+  rejectSlackPairing: (code: string) => Promise<void>;
+  revokeSlackUser: (userId: string) => Promise<void>;
+
   // Google actions
   loadGoogleSettings: () => Promise<void>;
   updateGoogleCredentials: (data: {
@@ -414,6 +442,17 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   discordPairedUsers: [],
   discordPendingPairings: [],
   discordTestResult: null,
+  slackEnabled: false,
+  slackBotTokenSet: false,
+  slackSigningSecretSet: false,
+  slackAppTokenSet: false,
+  slackRequireMention: true,
+  slackBotUsername: null,
+  slackAllowedChannels: [],
+  slackAvailableChannels: [],
+  slackPairedUsers: [],
+  slackPendingPairings: [],
+  slackTestResult: null,
   googleConnected: false,
   googleConnectedEmail: null,
   googleClientIdSet: false,
@@ -1520,6 +1559,112 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       });
       if (!res.ok) throw new Error("Failed to revoke user");
       await get().loadDiscordSettings();
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "Unknown error" });
+    }
+  },
+
+  // Slack actions
+
+  loadSlackSettings: async () => {
+    try {
+      const res = await fetch("/api/settings/slack");
+      if (!res.ok) return;
+      const data = await res.json();
+      set({
+        slackEnabled: data.enabled,
+        slackBotTokenSet: data.botTokenSet,
+        slackSigningSecretSet: data.signingSecretSet,
+        slackAppTokenSet: data.appTokenSet,
+        slackRequireMention: data.requireMention,
+        slackBotUsername: data.botUsername,
+        slackAllowedChannels: data.allowedChannels ?? [],
+        slackAvailableChannels: data.availableChannels ?? [],
+        slackPairedUsers: data.pairedUsers,
+        slackPendingPairings: data.pendingPairings,
+      });
+    } catch { /* ignore */ }
+  },
+
+  updateSlackSettings: async (data) => {
+    set({ error: null });
+    try {
+      const res = await fetch("/api/settings/slack", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) throw new Error("Failed to update Slack settings");
+      await get().loadSlackSettings();
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "Unknown error" });
+    }
+  },
+
+  testSlackConnection: async () => {
+    set({ slackTestResult: { ok: false, testing: true } });
+    try {
+      const res = await fetch("/api/settings/slack/test", {
+        method: "POST",
+      });
+      const data = await res.json();
+      set({
+        slackTestResult: {
+          ok: data.ok,
+          error: data.error,
+          testing: false,
+        },
+        slackBotUsername: data.ok ? data.botUsername : get().slackBotUsername,
+      });
+    } catch {
+      set({
+        slackTestResult: {
+          ok: false,
+          error: "Network error",
+          testing: false,
+        },
+      });
+    }
+  },
+
+  approveSlackPairing: async (code) => {
+    set({ error: null });
+    try {
+      const res = await fetch("/api/settings/slack/pair/approve", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code }),
+      });
+      if (!res.ok) throw new Error("Failed to approve pairing");
+      await get().loadSlackSettings();
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "Unknown error" });
+    }
+  },
+
+  rejectSlackPairing: async (code) => {
+    set({ error: null });
+    try {
+      const res = await fetch("/api/settings/slack/pair/reject", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code }),
+      });
+      if (!res.ok) throw new Error("Failed to reject pairing");
+      await get().loadSlackSettings();
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "Unknown error" });
+    }
+  },
+
+  revokeSlackUser: async (userId) => {
+    set({ error: null });
+    try {
+      const res = await fetch(`/api/settings/slack/pair/${userId}`, {
+        method: "DELETE",
+      });
+      if (!res.ok) throw new Error("Failed to revoke user");
+      await get().loadSlackSettings();
     } catch (err) {
       set({ error: err instanceof Error ? err.message : "Unknown error" });
     }
