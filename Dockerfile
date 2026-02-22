@@ -9,6 +9,7 @@ COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
 COPY packages/shared/package.json ./packages/shared/
 COPY packages/server/package.json ./packages/server/
 COPY packages/web/package.json ./packages/web/
+COPY modules/github-discussions/package.json ./modules/github-discussions/
 RUN pnpm install --frozen-lockfile
 
 # Build
@@ -110,6 +111,8 @@ COPY --from=build /app/packages/server/node_modules ./packages/server/node_modul
 COPY --from=build /app/packages/web/dist ./packages/web/dist
 COPY --from=build /app/packages/web/package.json ./packages/web/
 COPY --from=build /app/assets ./assets
+COPY --from=build /app/modules/github-discussions/dist ./modules/github-discussions/dist
+COPY --from=build /app/modules/github-discussions/package.json ./modules/github-discussions/
 
 # Install Playwright Chromium browser (headless, for agent web browsing)
 # Use a fixed path so both root (build) and otterbot (runtime) can find it
