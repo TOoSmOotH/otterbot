@@ -164,31 +164,38 @@ export class MemoryService {
 
     // LIKE fallback (or supplement FTS results)
     if (results.length < limit) {
+      // Cap keywords to avoid exceeding SQLite's expression tree depth limit (1000)
+      const MAX_KEYWORDS = 50;
       const keywords = options.query
         .toLowerCase()
         .split(/\s+/)
-        .filter((k) => k.length > 2);
+        .filter((k) => k.length > 2)
+        .slice(0, MAX_KEYWORDS);
 
       if (keywords.length > 0) {
         const keywordConditions = keywords.map((kw) =>
           like(schema.memories.content, `%${kw}%`),
         );
 
-        const keywordMatches = db.select().from(schema.memories)
-          .where(
-            scopeConditions
-              ? and(or(...keywordConditions), scopeConditions)
-              : or(...keywordConditions),
-          )
-          .orderBy(desc(schema.memories.importance))
-          .limit(limit)
-          .all();
+        try {
+          const keywordMatches = db.select().from(schema.memories)
+            .where(
+              scopeConditions
+                ? and(or(...keywordConditions), scopeConditions)
+                : or(...keywordConditions),
+            )
+            .orderBy(desc(schema.memories.importance))
+            .limit(limit)
+            .all();
 
-        for (const row of keywordMatches) {
-          if (!matchedIds.has(row.id)) {
-            matchedIds.add(row.id);
-            results.push(this.toMemory(row));
+          for (const row of keywordMatches) {
+            if (!matchedIds.has(row.id)) {
+              matchedIds.add(row.id);
+              results.push(this.toMemory(row));
+            }
           }
+        } catch (err) {
+          console.warn("[MemoryService] LIKE keyword search failed:", err);
         }
       }
     }
