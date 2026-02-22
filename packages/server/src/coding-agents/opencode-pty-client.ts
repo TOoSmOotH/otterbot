@@ -84,30 +84,32 @@ export class OpenCodePtyClient implements CodingAgentClient {
       });
 
       // Track whether we've sent the task to the TUI input prompt.
-      // We accumulate output bytes and wait for the TUI to fully render
-      // before typing the task. OpenCode's Bubble Tea TUI needs time to
-      // initialize its layout, input field, and status bar.
+      // We use a fixed delay after the first substantial output chunk
+      // rather than waiting for silence, because the Bubble Tea TUI
+      // continuously emits cursor blink sequences that would prevent
+      // a "quiet period" from ever occurring.
       let taskSent = false;
       let accumulatedBytes = 0;
       const TUI_READY_THRESHOLD = 500; // bytes — enough for initial TUI render
-      let readyTimer: NodeJS.Timeout | null = null;
 
       return await new Promise<CodingAgentTaskResult>((resolve) => {
         this.ptyProcess!.onData((data: string) => {
-          // Wait for enough TUI output before submitting the task.
-          // Each data chunk resets the timer — we want a quiet period
-          // after the initial render burst before typing.
+          // Once enough output has arrived (TUI rendered), submit the task
+          // after a fixed 2s delay to let the Bubble Tea TUI fully initialize.
           if (!taskSent) {
             accumulatedBytes += data.length;
             if (accumulatedBytes >= TUI_READY_THRESHOLD) {
-              if (readyTimer) clearTimeout(readyTimer);
-              readyTimer = setTimeout(() => {
-                if (taskSent) return;
-                taskSent = true;
-                console.log(`[OpenCode (PTY)] TUI ready (${accumulatedBytes} bytes received), submitting task...`);
-                // Type the task and press Enter to submit
-                this.ptyProcess?.write(task + "\r");
-              }, 500); // 500ms quiet period after last output
+              taskSent = true;
+              setTimeout(() => {
+                console.log(`[OpenCode (PTY)] TUI ready (${accumulatedBytes} bytes received), submitting task (${task.length} chars)...`);
+                // Type the task into the input field and press Enter to submit.
+                // Bubble Tea textarea uses Enter to submit single-line input.
+                this.ptyProcess?.write(task);
+                // Small delay before pressing Enter to let the textarea process the text
+                setTimeout(() => {
+                  this.ptyProcess?.write("\r");
+                }, 200);
+              }, 2000);
             }
           }
 
