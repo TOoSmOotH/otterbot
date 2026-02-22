@@ -113,6 +113,9 @@ COPY --from=build /app/packages/web/package.json ./packages/web/
 COPY --from=build /app/assets ./assets
 COPY --from=build /app/modules/github-discussions/dist ./modules/github-discussions/dist
 COPY --from=build /app/modules/github-discussions/package.json ./modules/github-discussions/
+# Link @otterbot/shared so built-in modules can resolve it at runtime
+RUN mkdir -p modules/github-discussions/node_modules/@otterbot \
+    && ln -s /app/packages/shared modules/github-discussions/node_modules/@otterbot/shared
 
 # Install Playwright Chromium browser (headless, for agent web browsing)
 # Use a fixed path so both root (build) and otterbot (runtime) can find it
