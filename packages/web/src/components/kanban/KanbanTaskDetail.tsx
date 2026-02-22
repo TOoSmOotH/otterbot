@@ -65,6 +65,29 @@ export function KanbanTaskDetail({
   const [deleting, setDeleting] = useState(false);
   const [moving, setMoving] = useState(false);
 
+  const handleRemoveBlocker = useCallback(
+    async (blockerId: string) => {
+      const newBlockedBy = task.blockedBy.filter((id) => id !== blockerId);
+      // Optimistic update
+      updateTask({ ...task, blockedBy: newBlockedBy });
+      try {
+        const res = await fetch(`/api/projects/${projectId}/tasks/${task.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ blockedBy: newBlockedBy }),
+        });
+        if (!res.ok) {
+          console.error("Failed to remove blocker:", res.statusText);
+          updateTask(task);
+        }
+      } catch (err) {
+        console.error("Failed to remove blocker:", err);
+        updateTask(task);
+      }
+    },
+    [projectId, task, updateTask],
+  );
+
   const handleDelete = useCallback(async () => {
     if (!window.confirm("Delete this task? This cannot be undone.")) return;
     setDeleting(true);
@@ -186,7 +209,7 @@ export function KanbanTaskDetail({
               </h3>
               <ul className="space-y-1">
                 {blockers.map((b) => (
-                  <li key={b.id} className="flex items-center gap-2 text-xs">
+                  <li key={b.id} className="flex items-center gap-2 text-xs group">
                     {b.done ? (
                       <span className="text-emerald-400" title="Done">&#10003;</span>
                     ) : (
@@ -195,6 +218,13 @@ export function KanbanTaskDetail({
                     <span className={b.done ? "text-muted-foreground line-through" : "text-foreground"}>
                       {b.title}
                     </span>
+                    <button
+                      onClick={() => handleRemoveBlocker(b.id)}
+                      title="Remove blocker"
+                      className="text-muted-foreground hover:text-red-400 hover:bg-red-500/10 rounded px-1 py-0.5 text-xs leading-none opacity-0 group-hover:opacity-100 transition-opacity ml-auto"
+                    >
+                      &times;
+                    </button>
                   </li>
                 ))}
               </ul>
