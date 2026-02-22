@@ -37,7 +37,12 @@ import { isDesktopEnabled } from "../desktop/desktop.js";
 import { TEAM_LEAD_PROMPT } from "./prompts/team-lead.js";
 import { getRandomModelPackId } from "../models3d/model-packs.js";
 import { debug } from "../utils/debug.js";
-import { fetchPullRequest } from "../github/github-service.js";
+import {
+  fetchPullRequest,
+  fetchPullRequestReviews,
+  requestPullRequestReviewers,
+  createIssueComment,
+} from "../github/github-service.js";
 
 /** Tool descriptions for environment context injection */
 const TOOL_DESCRIPTIONS: Record<string, string> = {
@@ -415,6 +420,57 @@ export class TeamLead extends BaseAgent {
       return pr.head.ref;
     } catch {
       return null;
+    }
+  }
+
+  /**
+   * After a worker addresses review feedback and the task returns to in_review:
+   * 1. Post a comment on the PR summarizing what was changed
+   * 2. Re-request review from whoever previously requested changes
+   */
+  private async postReviewUpdateAndReRequest(
+    projectId: string,
+    prNumber: number,
+    completionReport: string,
+  ): Promise<void> {
+    const db = getDb();
+    const project = db.select().from(schema.projects).where(eq(schema.projects.id, projectId)).get();
+    if (!project?.githubRepo) return;
+    const token = getConfig("github:token");
+    if (!token) return;
+    const botUsername = getConfig("github:username") ?? "otterbot";
+
+    // Post a comment summarizing the changes
+    const snippet = completionReport.length > 1500
+      ? completionReport.slice(0, 1500) + "\n\n_(truncated)_"
+      : completionReport;
+    const commentBody =
+      `I've addressed the review feedback and pushed updates to this PR.\n\n` +
+      `**Changes made:**\n${snippet}`;
+
+    try {
+      await createIssueComment(project.githubRepo, token, prNumber, commentBody);
+    } catch (err) {
+      console.error(`[TeamLead ${this.id}] Failed to post PR comment:`, err);
+    }
+
+    // Find reviewers who requested changes and re-request their review
+    try {
+      const reviews = await fetchPullRequestReviews(project.githubRepo, token, prNumber);
+      const changeRequesters = [
+        ...new Set(
+          reviews
+            .filter((r) => r.state === "CHANGES_REQUESTED")
+            .map((r) => r.user.login)
+            .filter((login) => login.toLowerCase() !== botUsername.toLowerCase()),
+        ),
+      ];
+      if (changeRequesters.length > 0) {
+        await requestPullRequestReviewers(project.githubRepo, token, prNumber, changeRequesters);
+        console.log(`[TeamLead ${this.id}] Re-requested review from: ${changeRequesters.join(", ")} on PR #${prNumber}`);
+      }
+    } catch (err) {
+      console.error(`[TeamLead ${this.id}] Failed to re-request reviewers:`, err);
     }
   }
 
@@ -1824,6 +1880,22 @@ export class TeamLead extends BaseAgent {
     // When a task moves to done, check for newly unblocked tasks
     if (setValues.column === "done") {
       this.checkUnblockedTasks(taskId);
+    }
+
+    // When a task moves to in_review from in_progress, post a comment on the PR
+    // summarizing what was done and re-request review from the original reviewers.
+    if (
+      setValues.column === "in_review" &&
+      existing.column === "in_progress" &&
+      (existing as any).prNumber
+    ) {
+      this.postReviewUpdateAndReRequest(
+        existing.projectId,
+        (existing as any).prNumber as number,
+        (setValues.completionReport as string) ?? updates.completionReport ?? "",
+      ).catch((err) => {
+        console.error(`[TeamLead ${this.id}] Failed to post PR review update:`, err);
+      });
     }
 
     return `Task "${existing.title}" updated.`;

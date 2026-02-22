@@ -448,6 +448,26 @@ export async function fetchPullRequestReviewComments(
 }
 
 /**
+ * Request reviewers on a pull request.
+ */
+export async function requestPullRequestReviewers(
+  repoFullName: string,
+  token: string,
+  prNumber: number,
+  reviewers: string[],
+): Promise<void> {
+  await ghFetch<unknown>(
+    `https://api.github.com/repos/${repoFullName}/pulls/${prNumber}/requested_reviewers`,
+    token,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ reviewers }),
+    },
+  );
+}
+
+/**
  * Create a pull request.
  */
 export async function createPullRequest(
