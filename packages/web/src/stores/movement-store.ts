@@ -37,6 +37,26 @@ interface MovementState {
 
   cancelMovement: (agentId: string) => void;
 
+  /**
+   * Cancel all pending/active movements, then immediately start a new one.
+   * Preserves the agent's current visual position so the walk starts seamlessly.
+   * Use this for "important" movements like zone changes that should replace
+   * rather than append to the queue.
+   */
+  interruptAndMoveTo: (
+    agentId: string,
+    graph: WaypointGraph,
+    fromWaypointId: string,
+    toWaypointId: string,
+    speed?: number,
+  ) => void;
+
+  /** Return the last resting position after a movement completed (or null). */
+  getLastKnownPosition: (agentId: string) => [number, number, number] | null;
+
+  /** Check if an agent is actively moving or has pending queued movements */
+  isAgentBusy: (agentId: string) => boolean;
+
   /** Exposed for testing / inspection */
   animationQueue: AnimationQueue;
 }
@@ -51,8 +71,12 @@ function createAnimationQueue(
       const entry = getMovements().get(agentId);
       return entry != null && !entry.interpolator.finished;
     },
+    0.15,
   );
 }
+
+/** Tracks the last known position of each agent after a movement finishes */
+const lastKnownPositions = new Map<string, [number, number, number]>();
 
 export const useMovementStore = create<MovementState>((set, get) => {
   const startMovement: MovementState["startMovement"] = (
@@ -65,12 +89,12 @@ export const useMovementStore = create<MovementState>((set, get) => {
     const path = findPath(graph, fromWaypointId, toWaypointId);
     if (!path || path.length < 2) return false;
 
-    // If the agent has a recent position, prepend it so the walk starts
-    // seamlessly from where the agent visually is (no teleport to waypoint).
+    // If the agent has a recent position (active or last-known), prepend it
+    // so the walk starts seamlessly from where the agent visually is.
     const existing = get().movements.get(agentId);
+    const currentPos = existing?.state.position ?? lastKnownPositions.get(agentId);
     let fullPath = path;
-    if (existing) {
-      const currentPos = existing.state.position;
+    if (currentPos) {
       const startNode: PathNode = {
         waypointId: "__current__",
         position: [...currentPos],
@@ -116,6 +140,7 @@ export const useMovementStore = create<MovementState>((set, get) => {
 
         for (const [agentId, entry] of next) {
           if (entry.interpolator.finished) {
+            lastKnownPositions.set(agentId, [...entry.state.position]);
             next.delete(agentId);
             changed = true;
             continue;
@@ -126,6 +151,7 @@ export const useMovementStore = create<MovementState>((set, get) => {
           changed = true;
 
           if (entry.interpolator.finished) {
+            lastKnownPositions.set(agentId, [...state.position]);
             next.delete(agentId);
           }
         }
@@ -144,11 +170,42 @@ export const useMovementStore = create<MovementState>((set, get) => {
       return entry?.state ?? null;
     },
 
+    getLastKnownPosition: (agentId) => {
+      return lastKnownPositions.get(agentId) ?? null;
+    },
+
+    isAgentBusy: (agentId) => {
+      const entry = get().movements.get(agentId);
+      const activelyMoving = entry != null && !entry.interpolator.finished;
+      return activelyMoving || animationQueue.isBusy(agentId);
+    },
+
     cancelMovement: (agentId) => {
+      animationQueue.cancel(agentId);
+      lastKnownPositions.delete(agentId);
+      const movements = new Map(get().movements);
+      movements.delete(agentId);
+      set({ movements });
+    },
+
+    interruptAndMoveTo: (agentId, graph, fromWaypointId, toWaypointId, speed) => {
+      // Save the current visual position before canceling
+      const existing = get().movements.get(agentId);
+      const currentPos = existing?.state.position ?? lastKnownPositions.get(agentId);
+
+      // Cancel everything (queue + active movement)
       animationQueue.cancel(agentId);
       const movements = new Map(get().movements);
       movements.delete(agentId);
       set({ movements });
+
+      // Preserve position so startMovement can prepend it to the new path
+      if (currentPos) {
+        lastKnownPositions.set(agentId, [...currentPos]);
+      }
+
+      // Start the new movement immediately (bypasses queue)
+      startMovement(agentId, graph, fromWaypointId, toWaypointId, speed);
     },
   };
 });

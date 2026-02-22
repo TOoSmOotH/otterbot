@@ -67,6 +67,10 @@ export class AdminAssistant extends BaseAgent {
     };
 
     super(options, deps.bus);
+    // Cap tool-call rounds — the admin assistant should never need more than
+    // a few tool calls per think(). The default maxSteps=20 lets models loop
+    // and re-call the same tool (e.g. todo_create) many times.
+    this.llmConfig.maxSteps = 5;
     this.onStream = deps.onStream;
     this.onThinking = deps.onThinking;
     this.onThinkingEnd = deps.onThinkingEnd;

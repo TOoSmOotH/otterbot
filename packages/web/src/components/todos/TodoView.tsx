@@ -264,6 +264,7 @@ function TodoItem({
   const [editDueDate, setEditDueDate] = useState(todo.dueDate ?? "");
   const [addingTag, setAddingTag] = useState(false);
   const [newTag, setNewTag] = useState("");
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
   const titleRef = useRef<HTMLInputElement>(null);
   const descRef = useRef<HTMLTextAreaElement>(null);
   const tagRef = useRef<HTMLInputElement>(null);
@@ -517,17 +518,42 @@ function TodoItem({
         </div>
       </div>
 
-      {/* Delete button */}
-      <button
-        onClick={onDelete}
-        className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-red-400 transition-all p-1"
-        title="Delete"
-      >
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-          <line x1="18" y1="6" x2="6" y2="18" />
-          <line x1="6" y1="6" x2="18" y2="18" />
-        </svg>
-      </button>
+      {/* Delete button / confirmation */}
+      {confirmingDelete ? (
+        <div className="flex items-center gap-1 flex-shrink-0">
+          <span className="text-[10px] text-red-400">Delete?</span>
+          <button
+            onClick={() => { onDelete(); setConfirmingDelete(false); }}
+            className="text-red-400 hover:text-red-300 bg-red-500/10 hover:bg-red-500/20 rounded p-0.5 transition-colors"
+            title="Confirm delete"
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+              <polyline points="20 6 9 17 4 12" />
+            </svg>
+          </button>
+          <button
+            onClick={() => setConfirmingDelete(false)}
+            className="text-muted-foreground hover:text-foreground bg-secondary hover:bg-secondary/80 rounded p-0.5 transition-colors"
+            title="Cancel"
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <line x1="18" y1="6" x2="6" y2="18" />
+              <line x1="6" y1="6" x2="18" y2="18" />
+            </svg>
+          </button>
+        </div>
+      ) : (
+        <button
+          onClick={() => setConfirmingDelete(true)}
+          className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-red-400 transition-all p-1"
+          title="Delete"
+        >
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <line x1="18" y1="6" x2="6" y2="18" />
+            <line x1="6" y1="6" x2="18" y2="18" />
+          </svg>
+        </button>
+      )}
     </div>
   );
 }

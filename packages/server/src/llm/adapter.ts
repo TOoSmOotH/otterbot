@@ -127,6 +127,14 @@ export function resolveModel(config: LLMConfig): LanguageModel {
       return compatible(config.model);
     }
 
+    case "github-copilot": {
+      const copilot = createOpenAI({
+        baseURL: config.baseUrl ?? resolved.baseUrl ?? "https://api.githubcopilot.com",
+        apiKey: config.apiKey ?? resolved.apiKey ?? "",
+      });
+      return copilot(config.model);
+    }
+
     default:
       throw new Error(`Unknown LLM provider: ${config.provider} (type: ${resolved.type})`);
   }

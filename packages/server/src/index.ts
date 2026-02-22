@@ -167,6 +167,12 @@ import {
   rejectPairing,
   revokePairing,
 } from "./discord/pairing.js";
+import { IrcBridge } from "./irc/irc-bridge.js";
+import {
+  getIrcSettings,
+  updateIrcSettings,
+  getIrcConfig,
+} from "./irc/irc-settings.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -463,6 +469,27 @@ async function main() {
     }
   }
 
+  // IRC bridge (initialized when enabled + config set)
+  let ircBridge: IrcBridge | null = null;
+
+  function startIrcBridge() {
+    if (ircBridge || !coo) return;
+    const config = getIrcConfig();
+    if (!config) return;
+    ircBridge = new IrcBridge({ bus, coo, io });
+    ircBridge.start(config).catch((err) => {
+      console.error("[IRC] Failed to start bridge:", err);
+      ircBridge = null;
+    });
+  }
+
+  async function stopIrcBridge() {
+    if (ircBridge) {
+      await ircBridge.stop();
+      ircBridge = null;
+    }
+  }
+
   function startCoo() {
     if (coo) return;
     try {
@@ -652,8 +679,17 @@ async function main() {
       emitAgentSpawned(io, adminAssistant);
       console.log("AdminAssistant agent started.");
 
-      // Handle admin-assistant messages and codeagent:respond from the client
+      // Handle admin-assistant messages, codeagent:respond, and scheduler sync from the client
       io.on("connection", (socket) => {
+        // Send scheduler pseudo-agents to newly-connected clients so they
+        // appear in the 3D view (they aren't in the DB and loadAndStart()
+        // fires before clients connect).
+        if (customTaskScheduler) {
+          for (const agent of customTaskScheduler.getActivePseudoAgents()) {
+            socket.emit("agent:spawned", agent);
+          }
+        }
+
         socket.on("admin-assistant:message" as any, async (data: { content: string }) => {
           if (!data?.content) return;
           bus.send({
@@ -760,6 +796,7 @@ async function main() {
   if (isSetupComplete()) {
     startCoo();
     startDiscordBridge();
+    startIrcBridge();
   } else {
     console.log("Setup not complete. Waiting for setup wizard...");
   }
@@ -1080,6 +1117,7 @@ async function main() {
 
     startCoo();
     startDiscordBridge();
+    startIrcBridge();
 
     return { ok: true };
   });
@@ -1960,11 +1998,14 @@ async function main() {
   });
 
   // Agent list endpoint (only active agents, not stale "done" ones)
+  // Includes scheduler pseudo-agents that aren't persisted in the DB.
   app.get("/api/agents", async () => {
     const { getDb, schema } = await import("./db/index.js");
     const { ne } = await import("drizzle-orm");
     const db = getDb();
-    return db.select().from(schema.agents).where(ne(schema.agents.status, "done")).all();
+    const dbAgents = db.select().from(schema.agents).where(ne(schema.agents.status, "done")).all();
+    const schedulerAgents = customTaskScheduler?.getActivePseudoAgents() ?? [];
+    return [...dbAgents, ...schedulerAgents];
   });
 
   // =========================================================================
@@ -2611,41 +2652,41 @@ async function main() {
   // Coding agent session history routes
   // =========================================================================
 
-  app.get<{
-    Querystring: { limit?: string; projectId?: string };
-  }>("/api/codeagent/sessions", async (req) => {
+  async function listCodingAgentSessions(query: { limit?: string; projectId?: string; before?: string }) {
     const { getDb, schema } = await import("./db/index.js");
-    const { desc, eq } = await import("drizzle-orm");
+    const { desc, eq, lt, and } = await import("drizzle-orm");
     const db = getDb();
-    const limit = Math.min(parseInt(req.query.limit ?? "50", 10) || 50, 200);
-    const query = db
+    const limit = Math.min(parseInt(query.limit ?? "20", 10) || 20, 200);
+    const conditions = [];
+    if (query.projectId) {
+      conditions.push(eq(schema.codingAgentSessions.projectId, query.projectId));
+    }
+    if (query.before) {
+      conditions.push(lt(schema.codingAgentSessions.startedAt, query.before));
+    }
+    const rows = db
       .select()
       .from(schema.codingAgentSessions)
+      .where(conditions.length > 0 ? and(...conditions) : undefined)
       .orderBy(desc(schema.codingAgentSessions.startedAt))
-      .limit(limit);
-    if (req.query.projectId) {
-      return query.where(eq(schema.codingAgentSessions.projectId, req.query.projectId)).all();
-    }
-    return query.all();
+      .limit(limit + 1)
+      .all();
+    const hasMore = rows.length > limit;
+    if (hasMore) rows.pop();
+    return { sessions: rows, hasMore };
+  }
+
+  app.get<{
+    Querystring: { limit?: string; projectId?: string; before?: string };
+  }>("/api/codeagent/sessions", async (req) => {
+    return listCodingAgentSessions(req.query);
   });
 
   // Keep old route for backwards compatibility
   app.get<{
-    Querystring: { limit?: string; projectId?: string };
+    Querystring: { limit?: string; projectId?: string; before?: string };
   }>("/api/opencode/sessions", async (req) => {
-    const { getDb, schema } = await import("./db/index.js");
-    const { desc, eq } = await import("drizzle-orm");
-    const db = getDb();
-    const limit = Math.min(parseInt(req.query.limit ?? "50", 10) || 50, 200);
-    const query = db
-      .select()
-      .from(schema.codingAgentSessions)
-      .orderBy(desc(schema.codingAgentSessions.startedAt))
-      .limit(limit);
-    if (req.query.projectId) {
-      return query.where(eq(schema.codingAgentSessions.projectId, req.query.projectId)).all();
-    }
-    return query.all();
+    return listCodingAgentSessions(req.query);
   });
 
   app.get<{
@@ -2674,6 +2715,64 @@ async function main() {
       .where(eq(schema.codingAgentDiffs.sessionId, session.sessionId))
       .all();
     return { session, messages, diffs };
+  });
+
+  // Delete a single coding agent session (cascade messages + diffs)
+  app.delete<{
+    Params: { id: string };
+  }>("/api/codeagent/sessions/:id", async (req, reply) => {
+    const { getDb, schema } = await import("./db/index.js");
+    const { eq } = await import("drizzle-orm");
+    const db = getDb();
+    const session = db
+      .select()
+      .from(schema.codingAgentSessions)
+      .where(eq(schema.codingAgentSessions.id, req.params.id))
+      .get();
+    if (!session) {
+      reply.code(404);
+      return { error: "Session not found" };
+    }
+    db.delete(schema.codingAgentMessages)
+      .where(eq(schema.codingAgentMessages.sessionId, session.sessionId))
+      .run();
+    db.delete(schema.codingAgentDiffs)
+      .where(eq(schema.codingAgentDiffs.sessionId, session.sessionId))
+      .run();
+    db.delete(schema.codingAgentSessions)
+      .where(eq(schema.codingAgentSessions.id, req.params.id))
+      .run();
+    return { ok: true };
+  });
+
+  // Bulk delete completed/error coding agent sessions
+  app.delete("/api/codeagent/sessions", async () => {
+    const { getDb, schema } = await import("./db/index.js");
+    const { eq, inArray } = await import("drizzle-orm");
+    const db = getDb();
+    // Find all completed/error sessions
+    const toDelete = db
+      .select({ id: schema.codingAgentSessions.id, sessionId: schema.codingAgentSessions.sessionId })
+      .from(schema.codingAgentSessions)
+      .where(
+        inArray(schema.codingAgentSessions.status, ["completed", "error"]),
+      )
+      .all();
+    if (toDelete.length === 0) return { ok: true, deleted: 0 };
+    const sessionIds = toDelete.map((s) => s.sessionId).filter(Boolean);
+    const ids = toDelete.map((s) => s.id);
+    if (sessionIds.length > 0) {
+      db.delete(schema.codingAgentMessages)
+        .where(inArray(schema.codingAgentMessages.sessionId, sessionIds))
+        .run();
+      db.delete(schema.codingAgentDiffs)
+        .where(inArray(schema.codingAgentDiffs.sessionId, sessionIds))
+        .run();
+    }
+    db.delete(schema.codingAgentSessions)
+      .where(inArray(schema.codingAgentSessions.id, ids))
+      .run();
+    return { ok: true, deleted: toDelete.length };
   });
 
   // =========================================================================
@@ -3015,6 +3114,38 @@ async function main() {
       reply.code(400);
       return { ok: false, error: "User not found" };
     }
+    return { ok: true };
+  });
+
+  // =========================================================================
+  // IRC settings routes
+  // =========================================================================
+
+  app.get("/api/settings/irc", async () => {
+    return getIrcSettings();
+  });
+
+  app.put<{
+    Body: {
+      enabled?: boolean;
+      server?: string;
+      port?: number;
+      nickname?: string;
+      channels?: string[];
+      tls?: boolean;
+      password?: string;
+    };
+  }>("/api/settings/irc", async (req) => {
+    const wasEnabled = !!getIrcConfig();
+    updateIrcSettings(req.body);
+    const nowEnabled = !!getIrcConfig();
+
+    if (nowEnabled && !wasEnabled) {
+      startIrcBridge();
+    } else if (!nowEnabled && wasEnabled) {
+      await stopIrcBridge();
+    }
+
     return { ok: true };
   });
 
@@ -3704,6 +3835,7 @@ Respond with ONLY a JSON object (no markdown, no explanation) with these fields:
   // Graceful shutdown
   const shutdown = async () => {
     await stopDiscordBridge();
+    await stopIrcBridge();
     await closeBrowser();
     process.exit(0);
   };

@@ -138,4 +138,14 @@ export class AnimationQueue {
   isWaiting(agentId: string): boolean {
     return this.agents.get(agentId)?.waiting ?? false;
   }
+
+  /**
+   * Returns true if the agent has queued movements OR is in the inter-movement delay.
+   * Use this to prevent idle lerping while the queue is about to start a walk.
+   */
+  isBusy(agentId: string): boolean {
+    const state = this.agents.get(agentId);
+    if (!state) return false;
+    return state.waiting || state.queue.length > 0;
+  }
 }

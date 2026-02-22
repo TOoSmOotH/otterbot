@@ -32,6 +32,7 @@
     "fastify": "^5.2.1",
     "googleapis": "^171.4.0",
     "gray-matter": "^4.0.3",
+    "irc-framework": "^4.14.0",
     "kokoro-js": "^1.1.0",
     "matrix-js-sdk": "^34.11.1",
     "nanoid": "^5.0.9",

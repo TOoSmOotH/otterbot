@@ -4,6 +4,8 @@ export type CodingAgentType = "opencode" | "claude-code" | "codex";
 
 export interface CodingAgentSession {
   id: string;
+  /** DB row primary key — used for detail-fetch and delete API calls */
+  dbId?: string;
   agentId: string;
   projectId: string | null;
   task: string;
