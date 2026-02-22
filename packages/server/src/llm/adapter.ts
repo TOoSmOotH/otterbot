@@ -135,6 +135,15 @@ export function resolveModel(config: LLMConfig): LanguageModel {
       return copilot(config.model);
     }
 
+    case "huggingface": {
+      const hf = createOpenAICompatible({
+        name: "huggingface",
+        baseURL: config.baseUrl ?? resolved.baseUrl ?? "https://api-inference.huggingface.co/v1",
+        apiKey: config.apiKey ?? resolved.apiKey ?? "",
+      });
+      return hf(config.model);
+    }
+
     default:
       throw new Error(`Unknown LLM provider: ${config.provider} (type: ${resolved.type})`);
   }

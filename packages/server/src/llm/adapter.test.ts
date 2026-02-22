@@ -50,6 +50,7 @@ vi.mock("@ai-sdk/openai-compatible", () => ({
 }));
 
 import { createOpenAI } from "@ai-sdk/openai";
+import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import { resolveModel, isThinkingModel, type LLMConfig } from "./adapter.js";
 
 // ---------------------------------------------------------------------------
@@ -112,6 +113,57 @@ describe("adapter – resolveModel", () => {
     });
   });
 
+  it("creates an OpenAI-compatible model for huggingface provider type", () => {
+    const config: LLMConfig = {
+      provider: "huggingface",
+      model: "meta-llama/Llama-3.1-8B-Instruct",
+      apiKey: "hf_test_token",
+    };
+
+    const model = resolveModel(config);
+
+    expect(createOpenAICompatible).toHaveBeenCalledWith({
+      name: "huggingface",
+      baseURL: "https://api-inference.huggingface.co/v1",
+      apiKey: "hf_test_token",
+    });
+    expect(mockCompatibleFactory).toHaveBeenCalledWith("meta-llama/Llama-3.1-8B-Instruct");
+    expect(model).toBe(mockCompatibleModel);
+  });
+
+  it("allows overriding the huggingface baseUrl", () => {
+    const config: LLMConfig = {
+      provider: "huggingface",
+      model: "mistralai/Mistral-7B-Instruct-v0.3",
+      apiKey: "hf_custom",
+      baseUrl: "https://my-hf-endpoint.example.com/v1",
+    };
+
+    resolveModel(config);
+
+    expect(createOpenAICompatible).toHaveBeenCalledWith({
+      name: "huggingface",
+      baseURL: "https://my-hf-endpoint.example.com/v1",
+      apiKey: "hf_custom",
+    });
+    expect(mockCompatibleFactory).toHaveBeenCalledWith("mistralai/Mistral-7B-Instruct-v0.3");
+  });
+
+  it("uses empty string for apiKey when none provided for huggingface", () => {
+    const config: LLMConfig = {
+      provider: "huggingface",
+      model: "Qwen/Qwen2.5-72B-Instruct",
+    };
+
+    resolveModel(config);
+
+    expect(createOpenAICompatible).toHaveBeenCalledWith({
+      name: "huggingface",
+      baseURL: "https://api-inference.huggingface.co/v1",
+      apiKey: "",
+    });
+  });
+
   it("throws for unknown provider type", () => {
     const config: LLMConfig = {
       provider: "nonexistent",
@@ -156,6 +208,12 @@ describe("adapter – isThinkingModel", () => {
   it("returns false for openrouter non-anthropic models", () => {
     expect(
       isThinkingModel({ provider: "openrouter", model: "openai/gpt-4o" }),
+    ).toBe(false);
+  });
+
+  it("returns false for huggingface models", () => {
+    expect(
+      isThinkingModel({ provider: "huggingface", model: "meta-llama/Llama-3.1-8B-Instruct" }),
     ).toBe(false);
   });
 });
