@@ -64,9 +64,7 @@ export default function App() {
     return (
       <div className="h-screen flex items-center justify-center bg-background">
         <div className="flex items-center gap-2 text-muted-foreground">
-          <div className="w-6 h-6 rounded-md bg-primary/20 flex items-center justify-center animate-pulse">
-            <span className="text-primary text-xs font-bold">S</span>
-          </div>
+          <img src="/logo.jpeg" alt="Otterbot" className="w-6 h-6 rounded-md animate-pulse" />
           <span className="text-sm">Loading...</span>
         </div>
       </div>
@@ -263,9 +261,7 @@ function MainApp() {
       <header className="flex items-center justify-between px-4 py-2 border-b border-border bg-card">
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2">
-            <div className="w-6 h-6 rounded-md bg-primary/20 flex items-center justify-center">
-              <span className="text-primary text-xs font-bold">S</span>
-            </div>
+            <img src="/logo.jpeg" alt="Otterbot" className="w-6 h-6 rounded-md" />
             <h1 className="text-sm font-semibold tracking-tight">Otterbot</h1>
           </div>
           {/* Project breadcrumb */}
