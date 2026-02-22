@@ -1813,6 +1813,16 @@ export class TeamLead extends BaseAgent {
     if (updates.prNumber !== undefined) setValues.prNumber = updates.prNumber;
     if (updates.prBranch !== undefined) setValues.prBranch = updates.prBranch;
 
+    // Guard: tasks with an open PR should go to in_review, not done.
+    // Only the PR monitor should move them to done (when the PR is actually merged).
+    if (updates.column === "done" && existing.column === "in_progress" && (existing as any).prNumber) {
+      console.warn(
+        `[TeamLead ${this.id}] Auto-correcting update_task: task "${existing.title}" (${taskId}) has PR #${(existing as any).prNumber} — ` +
+        `routing to "in_review" instead of "done". The PR monitor will move it to done when the PR is merged.`,
+      );
+      setValues.column = "in_review";
+    }
+
     // Guard: reject in_progress→backlog when the pending worker report indicates success.
     // The LLM sometimes misjudges a successful task as failed. Correcting here prevents
     // the LLM from spawning a duplicate worker in the same think cycle.
