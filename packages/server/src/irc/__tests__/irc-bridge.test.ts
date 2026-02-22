@@ -56,18 +56,27 @@ vi.mock("irc-framework", () => ({
 // Import after mocking
 const { IrcBridge } = await import("../irc-bridge.js");
 
+interface SendParams {
+  fromAgentId: string | null;
+  toAgentId: string | null;
+  type: string;
+  content: string;
+  metadata?: Record<string, unknown>;
+  conversationId?: string;
+}
+
 function createMockBus() {
   const broadcastHandlers: ((message: BusMessage) => void)[] = [];
-  const sent: Parameters<typeof bus.send>[0][] = [];
+  const sent: SendParams[] = [];
 
   const bus = {
-    send: vi.fn((params: Parameters<typeof bus.send>[0]) => {
+    send: vi.fn((params: SendParams) => {
       sent.push(params);
       const message: BusMessage = {
         id: "test-msg-id",
         fromAgentId: params.fromAgentId,
         toAgentId: params.toAgentId,
-        type: params.type,
+        type: params.type as BusMessage["type"],
         content: params.content,
         metadata: params.metadata ?? {},
         conversationId: params.conversationId,

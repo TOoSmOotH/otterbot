@@ -1,4 +1,4 @@
-import IrcFramework from "irc-framework";
+import { Client as IrcClient } from "irc-framework";
 import { nanoid } from "nanoid";
 import { eq } from "drizzle-orm";
 import type { Server } from "socket.io";
@@ -27,7 +27,7 @@ export interface IrcConfig {
 }
 
 export class IrcBridge {
-  private client: IrcFramework.Client | null = null;
+  private client: IrcClient | null = null;
   private bus: MessageBus;
   private coo: COO;
   private io: TypedServer;
@@ -51,7 +51,7 @@ export class IrcBridge {
 
     this.config = config;
 
-    this.client = new IrcFramework.Client();
+    this.client = new IrcClient();
 
     this.client.connect({
       host: config.server,

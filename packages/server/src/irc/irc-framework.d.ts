@@ -11,7 +11,7 @@ declare module "irc-framework" {
     gecos?: string;
   }
 
-  class Client extends EventEmitter {
+  export class Client extends EventEmitter {
     connect(options: ConnectOptions): void;
     join(channel: string): void;
     part(channel: string, message?: string): void;
@@ -19,7 +19,4 @@ declare module "irc-framework" {
     quit(message?: string): void;
     nick: string;
   }
-
-  export default { Client };
-  export { Client };
 }
