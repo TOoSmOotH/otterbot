@@ -173,6 +173,12 @@ import {
   updateIrcSettings,
   getIrcConfig,
 } from "./irc/irc-settings.js";
+import { TeamsBridge } from "./teams/teams-bridge.js";
+import {
+  getTeamsSettings,
+  updateTeamsSettings,
+  testTeamsConnection,
+} from "./teams/teams-settings.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -490,6 +496,31 @@ async function main() {
     }
   }
 
+  // Teams bridge (initialized when enabled + credentials set)
+  let teamsBridge: TeamsBridge | null = null;
+
+  function startTeamsBridge() {
+    if (teamsBridge || !coo) return;
+    const settings = getTeamsSettings();
+    if (!settings.enabled || !settings.appIdSet || !settings.appPasswordSet) return;
+    const appId = getConfig("teams:app_id");
+    const appPassword = getConfig("teams:app_password");
+    if (!appId || !appPassword) return;
+    const tenantId = getConfig("teams:tenant_id") || undefined;
+    teamsBridge = new TeamsBridge({ bus, coo, io });
+    teamsBridge.start({ appId, appPassword, tenantId }).catch((err) => {
+      console.error("[Teams] Failed to start bridge:", err);
+      teamsBridge = null;
+    });
+  }
+
+  async function stopTeamsBridge() {
+    if (teamsBridge) {
+      await teamsBridge.stop();
+      teamsBridge = null;
+    }
+  }
+
   function startCoo() {
     if (coo) return;
     try {
@@ -800,6 +831,7 @@ async function main() {
     startCoo();
     startDiscordBridge();
     startIrcBridge();
+    startTeamsBridge();
   } else {
     console.log("Setup not complete. Waiting for setup wizard...");
   }
@@ -1121,6 +1153,7 @@ async function main() {
     startCoo();
     startDiscordBridge();
     startIrcBridge();
+    startTeamsBridge();
 
     return { ok: true };
   });
@@ -3154,6 +3187,56 @@ async function main() {
   });
 
   // =========================================================================
+  // Teams settings routes
+  // =========================================================================
+
+  app.get("/api/settings/teams", async () => {
+    return getTeamsSettings();
+  });
+
+  app.put<{
+    Body: {
+      enabled?: boolean;
+      appId?: string;
+      appPassword?: string;
+      tenantId?: string;
+    };
+  }>("/api/settings/teams", async (req) => {
+    const wasEnabled = getTeamsSettings().enabled && getTeamsSettings().appIdSet && getTeamsSettings().appPasswordSet;
+    updateTeamsSettings(req.body);
+    const nowEnabled = getTeamsSettings().enabled && getTeamsSettings().appIdSet && getTeamsSettings().appPasswordSet;
+
+    if (nowEnabled && !wasEnabled) {
+      startTeamsBridge();
+    } else if (!nowEnabled && wasEnabled) {
+      await stopTeamsBridge();
+    }
+
+    return { ok: true };
+  });
+
+  app.post("/api/settings/teams/test", async () => {
+    return testTeamsConnection();
+  });
+
+  // Teams Bot Framework messaging endpoint
+  app.post("/api/teams/messages", async (req, reply) => {
+    if (!teamsBridge) {
+      reply.code(503);
+      return { error: "Teams bridge not started" };
+    }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const adapter = teamsBridge.getAdapter() as any;
+    if (!adapter) {
+      reply.code(503);
+      return { error: "Teams adapter not available" };
+    }
+    await adapter.process(req.raw, reply.raw, (context: unknown) =>
+      teamsBridge!.handleTurn(context),
+    );
+  });
+
+  // =========================================================================
   // Google settings routes
   // =========================================================================
 
@@ -3840,6 +3923,7 @@ Respond with ONLY a JSON object (no markdown, no explanation) with these fields:
   const shutdown = async () => {
     await stopDiscordBridge();
     await stopIrcBridge();
+    await stopTeamsBridge();
     await closeBrowser();
     process.exit(0);
   };

@@ -5,7 +5,7 @@ import { TeamsProvider } from "./teams/TeamsProvider.js";
 /**
  * Registry of available chat providers keyed by their type identifier.
  */
-const chatProviderFactories: Record<ChatProviderType, () => IChatProvider> = {
+const chatProviderFactories: Partial<Record<ChatProviderType, () => IChatProvider>> = {
   teams: () => new TeamsProvider(),
 };
 

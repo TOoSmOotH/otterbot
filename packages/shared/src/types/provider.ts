@@ -39,4 +39,18 @@ export interface AgentModelOverride {
 }
 
 /** Supported messaging-platform chat provider types. */
-export type ChatProviderType = "teams";
+export type ChatProviderType = "discord" | "matrix" | "irc" | "teams";
+
+/** Settings common to all chat provider bridges. */
+export interface ChatProviderSettings {
+  type: ChatProviderType;
+  enabled: boolean;
+}
+
+/** Teams-specific chat provider settings exposed to the client. */
+export interface TeamsChatProviderSettings extends ChatProviderSettings {
+  type: "teams";
+  appIdSet: boolean;
+  appPasswordSet: boolean;
+  tenantId: string | null;
+}
