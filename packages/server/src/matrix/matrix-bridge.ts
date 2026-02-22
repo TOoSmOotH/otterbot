@@ -293,7 +293,7 @@ export class MatrixBridge {
   ): Promise<ISendEventResponse | null> {
     if (!this.client) return null;
 
-    const upload = await this.client.uploadContent(buffer, {
+    const upload = await this.client.uploadContent(new Uint8Array(buffer) as unknown as XMLHttpRequestBodyInit, {
       name: filename,
       type: mimetype,
     });
@@ -306,12 +306,13 @@ export class MatrixBridge {
           ? MsgType.Audio
           : MsgType.File;
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return this.client.sendMessage(roomId, {
       msgtype,
       body: filename,
       url: upload.content_uri,
       info: { mimetype, size: buffer.length },
-    });
+    } as any);
   }
 
   // -------------------------------------------------------------------------

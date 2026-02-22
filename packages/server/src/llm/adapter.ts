@@ -91,7 +91,7 @@ export function resolveModel(config: LLMConfig): LanguageModel {
       const google = createGoogleGenerativeAI({
         apiKey: config.apiKey ?? resolved.apiKey ?? "",
       });
-      return google(config.model);
+      return google(config.model) as unknown as LanguageModel;
     }
 
     case "ollama": {

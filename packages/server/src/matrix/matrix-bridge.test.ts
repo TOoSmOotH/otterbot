@@ -494,7 +494,7 @@ describe("MatrixBridge", () => {
       const buffer = Buffer.from("fake image data");
       await bridge.sendMediaMessage("!room1:example.com", buffer, "test.png", "image/png");
 
-      expect(mockUploadContent).toHaveBeenCalledWith(buffer, {
+      expect(mockUploadContent).toHaveBeenCalledWith(new Uint8Array(buffer), {
         name: "test.png",
         type: "image/png",
       });
