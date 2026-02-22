@@ -52,6 +52,7 @@ export interface ServerToClientEvents {
   "discord:status": (data: { status: "connected" | "disconnected" | "error"; botUsername?: string }) => void;
   "matrix:pairing-request": (data: { code: string; matrixUserId: string }) => void;
   "matrix:status": (data: { status: "connected" | "disconnected" | "error"; userId?: string }) => void;
+  "irc:status": (data: { status: "connected" | "disconnected" | "error"; nickname?: string }) => void;
 }
 
 /** Events emitted from client to server */
