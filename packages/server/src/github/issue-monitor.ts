@@ -5,7 +5,7 @@ import type { ServerToClientEvents, ClientToServerEvents, KanbanTask } from "@ot
 import { MessageType } from "@otterbot/shared";
 import { getDb, schema } from "../db/index.js";
 import { getConfig, setConfig } from "../auth/auth.js";
-import { fetchAssignedIssues } from "./github-service.js";
+import { fetchAssignedIssues, createIssueComment } from "./github-service.js";
 import type { COO } from "../agents/coo.js";
 
 type TypedServer = Server<ClientToServerEvents, ServerToClientEvents>;
@@ -145,6 +145,21 @@ export class GitHubIssueMonitor {
         updatedAt: now,
       };
       db.insert(schema.kanbanTasks).values(task).run();
+
+      // Post acknowledgement comment on the GitHub issue
+      try {
+        await createIssueComment(
+          watched.repo,
+          token,
+          issue.number,
+          `👋 This issue is now being looked at by **Otterbot**. I'll provide updates as progress is made.`,
+        );
+      } catch (commentErr) {
+        console.error(
+          `[IssueMonitor] Failed to comment on issue #${issue.number}:`,
+          commentErr,
+        );
+      }
 
       // Emit to UI
       this.io.emit("kanban:task-created", task as unknown as KanbanTask);
