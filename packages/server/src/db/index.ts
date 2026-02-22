@@ -271,6 +271,20 @@ export async function migrateDb() {
     // Column already exists — ignore
   }
 
+  // Idempotent migration: add pr_number to kanban_tasks
+  try {
+    db.run(sql`ALTER TABLE kanban_tasks ADD COLUMN pr_number INTEGER`);
+  } catch {
+    // Column already exists — ignore
+  }
+
+  // Idempotent migration: add pr_branch to kanban_tasks
+  try {
+    db.run(sql`ALTER TABLE kanban_tasks ADD COLUMN pr_branch TEXT`);
+  } catch {
+    // Column already exists — ignore
+  }
+
   db.run(sql`CREATE TABLE IF NOT EXISTS sessions (
     token TEXT PRIMARY KEY,
     expires_at TEXT NOT NULL,

@@ -22,6 +22,7 @@ import { KanbanColumn, type KanbanTask } from "@otterbot/shared";
 const COLUMNS: { key: KanbanColumn; label: string }[] = [
   { key: KanbanColumn.Backlog, label: "Backlog" },
   { key: KanbanColumn.InProgress, label: "In Progress" },
+  { key: KanbanColumn.InReview, label: "In Review" },
   { key: KanbanColumn.Done, label: "Done" },
 ];
 

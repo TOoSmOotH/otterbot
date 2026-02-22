@@ -152,6 +152,7 @@ import type { ProviderType } from "@otterbot/shared";
 import { createBackupArchive, restoreFromArchive, looksLikeZip } from "./backup/backup.js";
 import { writeOpenCodeConfig } from "./opencode/opencode-manager.js";
 import { GitHubIssueMonitor } from "./github/issue-monitor.js";
+import { GitHubPRMonitor } from "./github/pr-monitor.js";
 import { ReminderScheduler } from "./reminders/reminder-scheduler.js";
 import { MemoryCompactor } from "./memory/memory-compactor.js";
 import { SchedulerRegistry } from "./schedulers/scheduler-registry.js";
@@ -422,6 +423,7 @@ async function main() {
 
   let coo: COO | null = null;
   let issueMonitor: GitHubIssueMonitor | null = null;
+  let prMonitor: GitHubPRMonitor | null = null;
   const schedulerRegistry = new SchedulerRegistry(io);
   let customTaskScheduler: CustomTaskScheduler | null = null;
 
@@ -686,8 +688,9 @@ async function main() {
         },
       });
       emitAgentSpawned(io, coo);
-      // Create issue monitor
+      // Create issue monitor and PR monitor
       issueMonitor = new GitHubIssueMonitor(coo, io);
+      prMonitor = new GitHubPRMonitor(coo, io);
 
       setupSocketHandlers(io, bus, coo, registry, {
         beforeCeoMessage: (content, conversationId, callback) => {
@@ -830,6 +833,15 @@ async function main() {
           description: "Polls GitHub for new and updated issues on watched projects.",
           defaultIntervalMs: 60_000,
           minIntervalMs: 5_000,
+        });
+      }
+
+      if (prMonitor) {
+        schedulerRegistry.register("github-prs", prMonitor, {
+          name: "GitHub PR Monitor",
+          description: "Monitors open PRs for merge status and review feedback.",
+          defaultIntervalMs: 120_000,
+          minIntervalMs: 30_000,
         });
       }
 
@@ -1779,7 +1791,7 @@ async function main() {
 
   app.patch<{
     Params: { projectId: string; taskId: string };
-    Body: { title?: string; description?: string; column?: string; position?: number; assigneeAgentId?: string | null; labels?: string[]; blockedBy?: string[] };
+    Body: { title?: string; description?: string; column?: string; position?: number; assigneeAgentId?: string | null; labels?: string[]; blockedBy?: string[]; prNumber?: number | null; prBranch?: string | null };
   }>(
     "/api/projects/:projectId/tasks/:taskId",
     async (req, reply) => {
@@ -1804,6 +1816,8 @@ async function main() {
       if (req.body.assigneeAgentId !== undefined) updates.assigneeAgentId = req.body.assigneeAgentId;
       if (req.body.labels !== undefined) updates.labels = req.body.labels;
       if (req.body.blockedBy !== undefined) updates.blockedBy = req.body.blockedBy;
+      if (req.body.prNumber !== undefined) updates.prNumber = req.body.prNumber;
+      if (req.body.prBranch !== undefined) updates.prBranch = req.body.prBranch;
 
       db.update(schema.kanbanTasks)
         .set(updates)
@@ -1866,7 +1880,7 @@ async function main() {
       for (let i = 0; i < taskIds.length; i++) {
         db.update(schema.kanbanTasks)
           .set({
-            column: column as "backlog" | "in_progress" | "done",
+            column: column as "backlog" | "in_progress" | "in_review" | "done",
             position: i,
             updatedAt: new Date().toISOString(),
           })

@@ -396,6 +396,57 @@ export async function fetchPullRequests(
   );
 }
 
+// ---------------------------------------------------------------------------
+// Pull Request Review APIs
+// ---------------------------------------------------------------------------
+
+export interface GitHubReview {
+  id: number;
+  user: { login: string };
+  body: string;
+  state: "APPROVED" | "CHANGES_REQUESTED" | "COMMENTED" | "DISMISSED" | "PENDING";
+  submitted_at: string;
+  html_url: string;
+}
+
+export interface GitHubReviewComment {
+  id: number;
+  user: { login: string };
+  body: string;
+  path: string;
+  line: number | null;
+  diff_hunk: string;
+  created_at: string;
+}
+
+/**
+ * Fetch reviews on a pull request.
+ */
+export async function fetchPullRequestReviews(
+  repoFullName: string,
+  token: string,
+  prNumber: number,
+): Promise<GitHubReview[]> {
+  return ghFetch<GitHubReview[]>(
+    `https://api.github.com/repos/${repoFullName}/pulls/${prNumber}/reviews?per_page=100`,
+    token,
+  );
+}
+
+/**
+ * Fetch review comments (inline/diff comments) on a pull request.
+ */
+export async function fetchPullRequestReviewComments(
+  repoFullName: string,
+  token: string,
+  prNumber: number,
+): Promise<GitHubReviewComment[]> {
+  return ghFetch<GitHubReviewComment[]>(
+    `https://api.github.com/repos/${repoFullName}/pulls/${prNumber}/comments?per_page=100`,
+    token,
+  );
+}
+
 /**
  * Create a pull request.
  */

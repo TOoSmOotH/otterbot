@@ -71,6 +71,11 @@ export function KanbanCard({
         </p>
       )}
       <div className="flex items-center gap-2 mt-2 flex-wrap">
+        {task.prNumber && (
+          <span className="text-[10px] bg-amber-500/15 text-amber-400 rounded px-1.5 py-0.5 font-medium">
+            PR #{task.prNumber}
+          </span>
+        )}
         {task.column === "backlog" && task.blockedBy?.length > 0 && (
           <span className="text-[10px] bg-destructive/15 text-destructive rounded px-1.5 py-0.5 font-medium">
             Blocked

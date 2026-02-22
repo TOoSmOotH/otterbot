@@ -124,13 +124,15 @@ export const kanbanTasks = sqliteTable("kanban_tasks", {
   title: text("title").notNull(),
   description: text("description").notNull().default(""),
   column: text("column", {
-    enum: ["backlog", "in_progress", "done"],
+    enum: ["backlog", "in_progress", "in_review", "done"],
   })
     .notNull()
     .default("backlog"),
   position: integer("position").notNull().default(0),
   assigneeAgentId: text("assignee_agent_id"),
   createdBy: text("created_by"),
+  prNumber: integer("pr_number"),
+  prBranch: text("pr_branch"),
   labels: text("labels", { mode: "json" })
     .$type<string[]>()
     .notNull()

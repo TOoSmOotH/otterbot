@@ -12,6 +12,10 @@ const STATUS_CONFIG: Record<KanbanColumn, { label: string; className: string }> 
     label: "In Progress",
     className: "bg-primary/15 text-primary",
   },
+  [KanbanColumn.InReview]: {
+    label: "In Review",
+    className: "bg-amber-500/15 text-amber-400",
+  },
   [KanbanColumn.Done]: {
     label: "Done",
     className: "bg-emerald-500/15 text-emerald-400",
@@ -21,6 +25,7 @@ const STATUS_CONFIG: Record<KanbanColumn, { label: string; className: string }> 
 const COLUMN_OPTIONS: { key: KanbanColumn; label: string }[] = [
   { key: KanbanColumn.Backlog, label: "Backlog" },
   { key: KanbanColumn.InProgress, label: "In Progress" },
+  { key: KanbanColumn.InReview, label: "In Review" },
   { key: KanbanColumn.Done, label: "Done" },
 ];
 

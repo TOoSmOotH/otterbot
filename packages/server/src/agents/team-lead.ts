@@ -37,6 +37,7 @@ import { isDesktopEnabled } from "../desktop/desktop.js";
 import { TEAM_LEAD_PROMPT } from "./prompts/team-lead.js";
 import { getRandomModelPackId } from "../models3d/model-packs.js";
 import { debug } from "../utils/debug.js";
+import { fetchPullRequest } from "../github/github-service.js";
 
 /** Tool descriptions for environment context injection */
 const TOOL_DESCRIPTIONS: Record<string, string> = {
@@ -375,6 +376,48 @@ export class TeamLead extends BaseAgent {
     );
   }
 
+  /** Extract a PR number from a worker report */
+  private extractPRNumber(report: string): number | null {
+    // Match github.com/{owner}/{repo}/pull/{number}
+    const urlMatch = report.match(/github\.com\/[^\s]+\/pull\/(\d+)/);
+    if (urlMatch) return parseInt(urlMatch[1], 10);
+    // Match "PR #123" or "Pull Request #123"
+    const prMatch = report.match(/(?:PR|Pull Request)\s*#(\d+)/i);
+    if (prMatch) return parseInt(prMatch[1], 10);
+    return null;
+  }
+
+  /** Extract a branch name from a worker report */
+  private extractPRBranch(report: string): string | null {
+    // Match common patterns for branch names in worker reports
+    const patterns = [
+      /branch[:\s]+([a-zA-Z0-9._\/-]+)/i,
+      /created branch\s+([a-zA-Z0-9._\/-]+)/i,
+      /git checkout -b\s+([a-zA-Z0-9._\/-]+)/i,
+      /pushed to\s+([a-zA-Z0-9._\/-]+)/i,
+    ];
+    for (const pattern of patterns) {
+      const match = report.match(pattern);
+      if (match) return match[1];
+    }
+    return null;
+  }
+
+  /** Fetch the authoritative branch name for a PR from the GitHub API */
+  private async resolvePRBranch(projectId: string, prNumber: number): Promise<string | null> {
+    try {
+      const db = getDb();
+      const project = db.select().from(schema.projects).where(eq(schema.projects.id, projectId)).get();
+      if (!project?.githubRepo) return null;
+      const token = getConfig("github:token");
+      if (!token) return null;
+      const pr = await fetchPullRequest(project.githubRepo, token, prNumber);
+      return pr.head.ref;
+    } catch {
+      return null;
+    }
+  }
+
   private isFailureReport(report: string): boolean {
     if (!report.trim()) return true;
     // PR creation is a definitive success signal — overrides any false-positive failure matches
@@ -413,18 +456,31 @@ export class TeamLead extends BaseAgent {
 
     if (!task) return false;
 
-    // If the LLM incorrectly moved a successful task to backlog, override to done
+    // If the LLM incorrectly moved a successful task to backlog, override
     if (task.column === "backlog" && !this.isFailureReport(workerReport)) {
+      // Detect PR in the report — route to in_review instead of done
+      const prNumber = this.extractPRNumber(workerReport) ?? task.prNumber;
+      const targetCol = prNumber ? "in_review" : "done";
       console.warn(
         `[TeamLead ${this.id}] Safety net: LLM moved task "${task.title}" (${taskId}) to backlog ` +
-        `but report looks successful. Overriding to "done".`,
+        `but report looks successful. Overriding to "${targetCol}".`,
       );
-      this.updateKanbanTask(taskId, {
-        column: "done",
+      const overrideUpdates: Record<string, unknown> = {
+        column: targetCol,
         assigneeAgentId: task.assigneeAgentId ?? "",
         completionReport: workerReport,
-      });
-      this.checkUnblockedTasks(taskId);
+      };
+      if (prNumber) {
+        overrideUpdates.prNumber = prNumber;
+        // Fetch authoritative branch name from GitHub API
+        this.resolvePRBranch(task.projectId, prNumber).then((branch) => {
+          if (branch) {
+            this.updateKanbanTask(taskId, { prBranch: branch } as any);
+          }
+        }).catch(() => {});
+      }
+      this.updateKanbanTask(taskId, overrideUpdates as any);
+      if (targetCol === "done") this.checkUnblockedTasks(taskId);
       return true;
     }
 
@@ -437,8 +493,12 @@ export class TeamLead extends BaseAgent {
     const currentRetries = (task as any).retryCount ?? 0;
     const nextRetryCount = failed ? currentRetries + 1 : currentRetries;
     const retriesExhausted = failed && nextRetryCount >= MAX_TASK_RETRIES;
+
+    // Detect PR in the report — route successful tasks to in_review if a PR was created
+    const prNumber = this.extractPRNumber(workerReport) ?? task.prNumber;
+    const hasExistingPR = !!task.prNumber;
     // Always target "backlog" for failures — updateKanbanTask will force to "done" if retries exhausted
-    const targetColumn = failed ? "backlog" : "done";
+    const targetColumn = failed ? "backlog" : (prNumber || hasExistingPR) ? "in_review" : "done";
 
     console.warn(
       `[TeamLead ${this.id}] Safety net: LLM did not move task "${task.title}" (${taskId}). ` +
@@ -447,13 +507,22 @@ export class TeamLead extends BaseAgent {
     );
 
     // Build updates — updateKanbanTask handles retry counting for backlog transitions
-    const updates: { column: string; assigneeAgentId: string; description?: string; completionReport?: string } = {
+    const updates: Record<string, unknown> = {
       column: targetColumn,
       assigneeAgentId: assignee ?? "",
     };
 
     if (!failed) {
       updates.completionReport = workerReport;
+      if (prNumber) {
+        updates.prNumber = prNumber;
+        // Fetch authoritative branch name from GitHub API (async, non-blocking)
+        this.resolvePRBranch(task.projectId, prNumber).then((branch) => {
+          if (branch) {
+            this.updateKanbanTask(taskId, { prBranch: branch } as any);
+          }
+        }).catch(() => {});
+      }
     }
 
     if (failed && !retriesExhausted) {
@@ -853,11 +922,12 @@ export class TeamLead extends BaseAgent {
     hasBacklog: boolean; backlogCount: number;
     hasUnblockedBacklog: boolean; unblockedBacklogCount: number;
     hasInProgress: boolean; inProgressCount: number;
+    hasInReview: boolean; inReviewCount: number;
     allDone: boolean; doneCount: number;
     summary: string;
   } {
     if (!this.projectId) {
-      return { hasBacklog: false, backlogCount: 0, hasUnblockedBacklog: false, unblockedBacklogCount: 0, hasInProgress: false, inProgressCount: 0, allDone: false, doneCount: 0, summary: "No project context." };
+      return { hasBacklog: false, backlogCount: 0, hasUnblockedBacklog: false, unblockedBacklogCount: 0, hasInProgress: false, inProgressCount: 0, hasInReview: false, inReviewCount: 0, allDone: false, doneCount: 0, summary: "No project context." };
     }
 
     const db = getDb();
@@ -868,10 +938,10 @@ export class TeamLead extends BaseAgent {
       .all();
 
     if (tasks.length === 0) {
-      return { hasBacklog: false, backlogCount: 0, hasUnblockedBacklog: false, unblockedBacklogCount: 0, hasInProgress: false, inProgressCount: 0, allDone: false, doneCount: 0, summary: "No tasks." };
+      return { hasBacklog: false, backlogCount: 0, hasUnblockedBacklog: false, unblockedBacklogCount: 0, hasInProgress: false, inProgressCount: 0, hasInReview: false, inReviewCount: 0, allDone: false, doneCount: 0, summary: "No tasks." };
     }
 
-    const byColumn: Record<string, typeof tasks> = { backlog: [], in_progress: [], done: [] };
+    const byColumn: Record<string, typeof tasks> = { backlog: [], in_progress: [], in_review: [], done: [] };
     for (const t of tasks) {
       (byColumn[t.column] ?? []).push(t);
     }
@@ -906,8 +976,9 @@ export class TeamLead extends BaseAgent {
       (t) => !this.isTaskBlocked((t.blockedBy as string[]) ?? []),
     ).length;
     const inProgressCount = byColumn.in_progress.length;
+    const inReviewCount = byColumn.in_review.length;
     const doneCount = byColumn.done.length;
-    const allDone = tasks.length > 0 && backlogCount === 0 && inProgressCount === 0;
+    const allDone = tasks.length > 0 && backlogCount === 0 && inProgressCount === 0 && inReviewCount === 0;
     return {
       hasBacklog: backlogCount > 0,
       backlogCount,
@@ -915,6 +986,8 @@ export class TeamLead extends BaseAgent {
       unblockedBacklogCount,
       hasInProgress: inProgressCount > 0,
       inProgressCount,
+      hasInReview: inReviewCount > 0,
+      inReviewCount,
       allDone,
       doneCount,
       summary: lines.join("\n"),
@@ -1140,7 +1213,7 @@ export class TeamLead extends BaseAgent {
         parameters: z.object({
           title: z.string().describe("Short task title"),
           description: z.string().optional().describe("Detailed task description"),
-          column: z.enum(["backlog", "in_progress", "done"]).optional().describe("Column to place the task in (default: backlog)"),
+          column: z.enum(["backlog", "in_progress", "in_review", "done"]).optional().describe("Column to place the task in (default: backlog)"),
           labels: z.array(z.string()).optional().describe("Labels/tags for the task"),
           blockedBy: z.array(z.string()).optional().describe("Actual task IDs (from create_task results) that must complete before this task can start. Do NOT use symbolic names like 'task-1'."),
         }),
@@ -1153,7 +1226,7 @@ export class TeamLead extends BaseAgent {
           "Update a kanban task card. Move tasks between columns, assign agents, or update details.",
         parameters: z.object({
           taskId: z.string().describe("The task ID to update"),
-          column: z.enum(["backlog", "in_progress", "done"]).optional().describe("Move task to this column"),
+          column: z.enum(["backlog", "in_progress", "in_review", "done"]).optional().describe("Move task to this column"),
           assigneeAgentId: z.string().optional().describe("Agent ID to assign the task to"),
           description: z.string().optional().describe("Updated description"),
           title: z.string().optional().describe("Updated title"),
@@ -1638,7 +1711,7 @@ export class TeamLead extends BaseAgent {
 
   private updateKanbanTask(
     taskId: string,
-    updates: { column?: string; assigneeAgentId?: string; description?: string; title?: string; blockedBy?: string[]; completionReport?: string },
+    updates: { column?: string; assigneeAgentId?: string; description?: string; title?: string; blockedBy?: string[]; completionReport?: string; prNumber?: number; prBranch?: string },
   ): string {
     const db = getDb();
     const existing = db
@@ -1669,6 +1742,8 @@ export class TeamLead extends BaseAgent {
     if (updates.description !== undefined) setValues.description = updates.description;
     if (updates.title !== undefined) setValues.title = updates.title;
     if (updates.blockedBy !== undefined) setValues.blockedBy = updates.blockedBy;
+    if (updates.prNumber !== undefined) setValues.prNumber = updates.prNumber;
+    if (updates.prBranch !== undefined) setValues.prBranch = updates.prBranch;
 
     // Guard: reject in_progress→backlog when the pending worker report indicates success.
     // The LLM sometimes misjudges a successful task as failed. Correcting here prevents
@@ -1676,12 +1751,18 @@ export class TeamLead extends BaseAgent {
     if (updates.column === "backlog" && existing.column === "in_progress") {
       const pendingReport = this._pendingWorkerReport.get(taskId);
       if (pendingReport && !this.isFailureReport(pendingReport)) {
+        // If a PR is detected, route to in_review instead of done
+        const detectedPR = this.extractPRNumber(pendingReport) ?? (existing as any).prNumber;
+        const correctedColumn = detectedPR ? "in_review" : "done";
         console.warn(
           `[TeamLead ${this.id}] Blocked update_task: LLM tried to move "${existing.title}" (${taskId}) to backlog ` +
-          `but pending worker report indicates success. Auto-correcting to "done".`,
+          `but pending worker report indicates success. Auto-correcting to "${correctedColumn}".`,
         );
-        setValues.column = "done";
+        setValues.column = correctedColumn;
         setValues.completionReport = pendingReport;
+        if (detectedPR) {
+          setValues.prNumber = detectedPR;
+        }
         this._pendingWorkerReport.delete(taskId);
       }
     }

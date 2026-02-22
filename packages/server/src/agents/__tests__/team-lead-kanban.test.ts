@@ -252,7 +252,7 @@ describe("TeamLead — Kanban logic", () => {
       expect(updated?.completionReport).toContain("FAILED");
     });
 
-    it("auto-corrects in_progress→backlog to done when pending report indicates success", () => {
+    it("auto-corrects in_progress→backlog to in_review when pending report contains PR URL", () => {
       const task = insertTask({ column: "in_progress", assigneeAgentId: "worker-1" });
       const successReport = "Task completed.\nPR created: https://github.com/org/repo/pull/123\nAll tests passing.";
       (tl as any)._pendingWorkerReport.set(task.id, successReport);
@@ -262,8 +262,9 @@ describe("TeamLead — Kanban logic", () => {
       });
       expect(result).toContain("updated");
       const updated = getTask(task.id);
-      expect(updated?.column).toBe("done");
+      expect(updated?.column).toBe("in_review");
       expect(updated?.completionReport).toContain("PR created");
+      expect(updated?.prNumber).toBe(123);
       // Should NOT have incremented retry count
       expect(updated?.retryCount ?? 0).toBe(0);
       // Pending report should be consumed
@@ -315,7 +316,7 @@ describe("TeamLead — Kanban logic", () => {
       expect(updated?.completionReport).toContain("FAILED");
     });
 
-    it("overrides backlog→done when LLM incorrectly moved a successful task", () => {
+    it("overrides backlog→in_review when LLM incorrectly moved a successful task with PR", () => {
       const task = insertTask({
         column: "backlog",
         assigneeAgentId: "worker-1",
@@ -326,8 +327,9 @@ describe("TeamLead — Kanban logic", () => {
       );
       expect(moved).toBe(true);
       const updated = getTask(task.id);
-      expect(updated?.column).toBe("done");
+      expect(updated?.column).toBe("in_review");
       expect(updated?.completionReport).toContain("PR created");
+      expect(updated?.prNumber).toBe(42);
     });
 
     it("does not double-increment retryCount", () => {
