@@ -486,7 +486,7 @@ async function main() {
         onProjectCreated: (project) => {
           emitProjectCreated(io, project);
           // Auto-create a zone for the new project
-          const zone = worldLayout.addZone(project.id);
+          const zone = worldLayout.addZone(project.id, undefined, project.name);
           if (zone) {
             io.emit("world:zone-added", { zone });
           }
@@ -686,7 +686,7 @@ async function main() {
         for (const project of activeProjects) {
           const existing = worldLayout.loadZoneConfig(project.id);
           if (!existing) {
-            const zone = worldLayout.addZone(project.id);
+            const zone = worldLayout.addZone(project.id, undefined, project.name);
             if (zone) {
               io.emit("world:zone-added", { zone });
               console.log(`[world] Recreated office zone for project "${project.name}" (${project.id})`);
