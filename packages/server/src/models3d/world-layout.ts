@@ -10,6 +10,20 @@ import type {
   SceneProp,
 } from "@otterbot/shared";
 
+/**
+ * Extract the human-readable prefix from a project ID.
+ * Project IDs have the form `slug-nanoid(6)`, e.g. "awesome-project-a7kh9d".
+ * Returns the slug portion ("awesome-project") or the full id if no suffix is found.
+ */
+export function extractProjectLabel(projectId: string): string {
+  // nanoid suffix is always 6 chars after the last hyphen
+  const lastDash = projectId.lastIndexOf("-");
+  if (lastDash > 0 && projectId.length - lastDash - 1 === 6) {
+    return projectId.slice(0, lastDash);
+  }
+  return projectId;
+}
+
 export class WorldLayoutManager {
   private assetsRoot: string;
 
@@ -129,6 +143,7 @@ export class WorldLayoutManager {
     template: OfficeTemplate,
     position: [number, number, number],
     projectId: string,
+    projectName?: string,
   ): { props: SceneProp[]; zone: SceneZone; waypoints: Waypoint[]; edges: WaypointEdge[] } {
     const zoneId = `zone-${projectId}`;
 
@@ -142,10 +157,10 @@ export class WorldLayoutManager {
       ] as [number, number, number],
     }));
 
-    // Create zone definition
+    // Create zone definition — use the provided project name, or extract prefix from ID
     const zone: SceneZone = {
       id: zoneId,
-      name: `Project Office`,
+      name: projectName ?? extractProjectLabel(projectId),
       projectId,
       position: [
         position[0] + template.size[0] / 2,
@@ -212,7 +227,7 @@ export class WorldLayoutManager {
   }
 
   /** Add a project zone to the world */
-  addZone(projectId: string, templateId: string = "default-project-office"): SceneZone | null {
+  addZone(projectId: string, templateId: string = "default-project-office", projectName?: string): SceneZone | null {
     const base = this.loadBaseScene();
     if (!base) return null;
 
@@ -230,7 +245,7 @@ export class WorldLayoutManager {
     const position = this.getNextZonePosition(allZones, template.size);
 
     // Instantiate
-    const { props, zone, waypoints, edges } = this.instantiateTemplate(template, position, projectId);
+    const { props, zone, waypoints, edges } = this.instantiateTemplate(template, position, projectId, projectName);
 
     // Connect to hallway
     const baseGraph = base.waypointGraph ?? { waypoints: [], edges: [] };
@@ -239,7 +254,7 @@ export class WorldLayoutManager {
     // Save as zone config
     const zoneConfig: SceneConfig = {
       id: `zone-${projectId}`,
-      name: `Project ${projectId} Office`,
+      name: `${projectName ?? extractProjectLabel(projectId)} Office`,
       props,
       zones: [zone],
       waypointGraph: {
