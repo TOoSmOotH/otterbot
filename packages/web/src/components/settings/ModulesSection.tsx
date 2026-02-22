@@ -27,6 +27,9 @@ export function ModulesSection() {
   const [installError, setInstallError] = useState<string | null>(null);
   const [togglingId, setTogglingId] = useState<string | null>(null);
   const [toggleError, setToggleError] = useState<string | null>(null);
+  const [duplicatingId, setDuplicatingId] = useState<string | null>(null);
+  const [duplicateInstanceId, setDuplicateInstanceId] = useState("");
+  const [duplicateError, setDuplicateError] = useState<string | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
@@ -95,6 +98,38 @@ export function ModulesSection() {
       setToggleError(err instanceof Error ? err.message : "Toggle failed");
     } finally {
       setTogglingId(null);
+    }
+  };
+
+  const handleDuplicate = async (mod: InstalledModule) => {
+    if (duplicatingId !== mod.id) {
+      setDuplicatingId(mod.id);
+      setDuplicateInstanceId(`${mod.moduleId ?? mod.id}-copy`);
+      setDuplicateError(null);
+      return;
+    }
+    if (!duplicateInstanceId.trim()) return;
+    setDuplicateError(null);
+    try {
+      const res = await fetch("/api/modules/install", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          source: mod.source,
+          uri: mod.sourceUri,
+          instanceId: duplicateInstanceId.trim(),
+        }),
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        setDuplicateError(data.error ?? "Duplicate failed");
+        return;
+      }
+      setDuplicatingId(null);
+      setDuplicateInstanceId("");
+      await loadModules();
+    } catch (err) {
+      setDuplicateError(err instanceof Error ? err.message : "Duplicate failed");
     }
   };
 
@@ -302,8 +337,45 @@ export function ModulesSection() {
                 </div>
               )}
 
+              {/* Duplicate inline form */}
+              {duplicatingId === mod.id && (
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={duplicateInstanceId}
+                    onChange={(e) => setDuplicateInstanceId(e.target.value)}
+                    placeholder="new-instance-id"
+                    className="flex-1 bg-secondary rounded-md px-2 py-1 text-xs outline-none focus:ring-1 ring-primary font-mono"
+                    onKeyDown={(e) => e.key === "Enter" && handleDuplicate(mod)}
+                  />
+                  <button
+                    onClick={() => handleDuplicate(mod)}
+                    disabled={!duplicateInstanceId.trim()}
+                    className="text-xs bg-primary text-primary-foreground px-2 py-1 rounded-md hover:bg-primary/90 disabled:opacity-50"
+                  >
+                    Create
+                  </button>
+                  <button
+                    onClick={() => { setDuplicatingId(null); setDuplicateError(null); }}
+                    className="text-xs text-muted-foreground hover:text-foreground px-2 py-1"
+                  >
+                    Cancel
+                  </button>
+                  {duplicateError && (
+                    <span className="text-xs text-red-500">{duplicateError}</span>
+                  )}
+                </div>
+              )}
+
               {/* Actions */}
               <div className="flex items-center gap-2">
+                <button
+                  onClick={() => handleDuplicate(mod)}
+                  disabled={duplicatingId === mod.id}
+                  className="text-xs text-muted-foreground hover:text-foreground px-2 py-1"
+                >
+                  Duplicate
+                </button>
                 <button
                   onClick={() => handleDelete(mod.id)}
                   disabled={deletingId === mod.id}
