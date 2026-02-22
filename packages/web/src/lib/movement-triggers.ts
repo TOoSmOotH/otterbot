@@ -114,7 +114,7 @@ function triggerMovement(
   toWaypointId: string,
 ) {
   if (fromWaypointId === toWaypointId) return;
-  useMovementStore.getState().startMovement(agentId, graph, fromWaypointId, toWaypointId);
+  useMovementStore.getState().enqueueMovement(agentId, graph, fromWaypointId, toWaypointId);
 }
 
 /**
