@@ -68,10 +68,9 @@ export class OpenCodePtyClient implements CodingAgentClient {
         env.GITHUB_TOKEN = ghToken;
       }
 
-      // Spawn bare `opencode` (the full interactive TUI), then type the task
-      // into the input prompt. `opencode run` produces plain output without
-      // the rich Bubble Tea TUI.
-      const args: string[] = [];
+      // Use `opencode run <task>` — runs the task and exits when done.
+      // The process exit signals completion, so no TUI completion detection needed.
+      const args: string[] = ["run", task];
 
       const cwd = this.config.workspacePath || process.cwd();
 
@@ -83,36 +82,8 @@ export class OpenCodePtyClient implements CodingAgentClient {
         env,
       });
 
-      // Track whether we've sent the task to the TUI input prompt.
-      // We use a fixed delay after the first substantial output chunk
-      // rather than waiting for silence, because the Bubble Tea TUI
-      // continuously emits cursor blink sequences that would prevent
-      // a "quiet period" from ever occurring.
-      let taskSent = false;
-      let accumulatedBytes = 0;
-      const TUI_READY_THRESHOLD = 500; // bytes — enough for initial TUI render
-
       return await new Promise<CodingAgentTaskResult>((resolve) => {
         this.ptyProcess!.onData((data: string) => {
-          // Once enough output has arrived (TUI rendered), submit the task
-          // after a fixed 2s delay to let the Bubble Tea TUI fully initialize.
-          if (!taskSent) {
-            accumulatedBytes += data.length;
-            if (accumulatedBytes >= TUI_READY_THRESHOLD) {
-              taskSent = true;
-              setTimeout(() => {
-                console.log(`[OpenCode (PTY)] TUI ready (${accumulatedBytes} bytes received), submitting task (${task.length} chars)...`);
-                // Type the task into the input field and press Enter to submit.
-                // Bubble Tea textarea uses Enter to submit single-line input.
-                this.ptyProcess?.write(task);
-                // Small delay before pressing Enter to let the textarea process the text
-                setTimeout(() => {
-                  this.ptyProcess?.write("\r");
-                }, 200);
-              }, 2000);
-            }
-          }
-
           // Append to ring buffer (trim to size)
           this.ringBuffer += data;
           if (this.ringBuffer.length > RING_BUFFER_SIZE) {
