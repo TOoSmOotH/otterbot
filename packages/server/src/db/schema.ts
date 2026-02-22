@@ -5,7 +5,7 @@ export const agents = sqliteTable("agents", {
   id: text("id").primaryKey(),
   name: text("name"),
   registryEntryId: text("registry_entry_id"),
-  role: text("role", { enum: ["coo", "team_lead", "worker", "admin_assistant"] }).notNull(),
+  role: text("role", { enum: ["coo", "team_lead", "worker", "admin_assistant", "scheduler"] }).notNull(),
   parentId: text("parent_id"),
   status: text("status", {
     enum: ["idle", "thinking", "acting", "awaiting_input", "done", "error"],
@@ -73,7 +73,7 @@ export const registryEntries = sqliteTable("registry_entries", {
     .notNull()
     .default([]),
   builtIn: integer("built_in", { mode: "boolean" }).notNull().default(false),
-  role: text("role", { enum: ["coo", "team_lead", "worker", "admin_assistant"] })
+  role: text("role", { enum: ["coo", "team_lead", "worker", "admin_assistant", "scheduler"] })
     .notNull()
     .default("worker"),
   modelPackId: text("model_pack_id"),

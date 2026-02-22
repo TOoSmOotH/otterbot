@@ -31,6 +31,7 @@ import { useDesktopStore } from "./stores/desktop-store";
 import { useOpenCodeStore } from "./stores/opencode-store";
 import { useSettingsStore } from "./stores/settings-store";
 import { initMovementTriggers } from "./lib/movement-triggers";
+import { initBreakRoomRoaming } from "./lib/break-room-roaming";
 import { getCenterTabs, centerViewLabels } from "./lib/get-center-tabs";
 import type { CenterView } from "./lib/get-center-tabs";
 import { Group, Panel, Separator, useDefaultLayout, usePanelRef } from "react-resizable-panels";
@@ -187,6 +188,7 @@ function MainApp() {
 
     // Initialize movement trigger system
     initMovementTriggers();
+    initBreakRoomRoaming();
   }, []);
 
   const clearChat = useMessageStore((s) => s.clearChat);
