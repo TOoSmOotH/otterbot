@@ -281,6 +281,21 @@ export function LiveViewScene({ userProfile }: LiveViewSceneProps) {
           rotationY: slot.rotation ?? 0,
         });
       }
+
+      // Schedulers — cycle through worker slots since there's no dedicated scheduler slot
+      for (let i = 0; i < schedulers.length; i++) {
+        const slot = ap.worker[(workers.length + i) % ap.worker.length];
+        positions.push({
+          agent: schedulers[i],
+          role: "scheduler",
+          x: slot.position[0],
+          z: slot.position[2],
+          label: schedulers[i].name ?? `Scheduler ${schedulers[i].id.slice(0, 6)}`,
+          modelPackId: schedulers[i].modelPackId ?? null,
+          gearConfig: schedulers[i].gearConfig ?? null,
+          rotationY: slot.rotation ?? 0,
+        });
+      }
     } else {
       // Fallback: original grid layout
       positions.push({
@@ -332,6 +347,20 @@ export function LiveViewScene({ userProfile }: LiveViewSceneProps) {
           label: `Worker ${workers[i].id.slice(0, 6)}`,
           modelPackId: workers[i].modelPackId ?? null,
           gearConfig: workers[i].gearConfig ?? null,
+          rotationY: 0,
+        });
+      }
+
+      for (let i = 0; i < schedulers.length; i++) {
+        const spread = (i - (schedulers.length - 1) / 2) * 3;
+        positions.push({
+          agent: schedulers[i],
+          role: "scheduler",
+          x: spread,
+          z: -12,
+          label: schedulers[i].name ?? `Scheduler ${schedulers[i].id.slice(0, 6)}`,
+          modelPackId: schedulers[i].modelPackId ?? null,
+          gearConfig: schedulers[i].gearConfig ?? null,
           rotationY: 0,
         });
       }

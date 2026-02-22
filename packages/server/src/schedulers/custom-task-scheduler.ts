@@ -4,6 +4,7 @@ import type { MessageBus } from "../bus/message-bus.js";
 import { MessageType, AgentRole, AgentStatus } from "@otterbot/shared";
 import type { Agent } from "@otterbot/shared";
 import type { Server } from "socket.io";
+import { getRandomModelPackId } from "../models3d/model-packs.js";
 
 export const MIN_CUSTOM_TASK_INTERVAL_MS = 60_000;
 export const NO_REPORT_SENTINEL = "[NO_REPORT]";
@@ -16,12 +17,21 @@ export class CustomTaskScheduler {
   private timers = new Map<string, ReturnType<typeof setInterval>>();
   /** Timeouts for reverting acting→idle after a task fires */
   private actingTimeouts = new Map<string, ReturnType<typeof setTimeout>>();
+  /** Stable model pack assignments per task */
+  private modelPackIds = new Map<string, string | null>();
   private bus: MessageBus;
   private io: Server;
 
   constructor(bus: MessageBus, io: Server) {
     this.bus = bus;
     this.io = io;
+  }
+
+  private getModelPackId(taskId: string): string | null {
+    if (!this.modelPackIds.has(taskId)) {
+      this.modelPackIds.set(taskId, getRandomModelPackId());
+    }
+    return this.modelPackIds.get(taskId) ?? null;
   }
 
   /** Build a pseudo-agent data object for a scheduled task (socket-only, no DB row). */
@@ -36,7 +46,7 @@ export class CustomTaskScheduler {
       model: "",
       provider: "",
       projectId: null,
-      modelPackId: null,
+      modelPackId: this.getModelPackId(task.id),
       gearConfig: null,
       workspacePath: null,
       createdAt: task.createdAt,
@@ -90,6 +100,7 @@ export class CustomTaskScheduler {
       clearTimeout(actingTimeout);
       this.actingTimeouts.delete(taskId);
     }
+    this.modelPackIds.delete(taskId);
     // Only emit destroyed if there was actually a running task
     if (hadTimer) {
       this.io.emit("agent:destroyed", { agentId: `scheduler-${taskId}` });
