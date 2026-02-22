@@ -1640,8 +1640,24 @@ export class TeamLead extends BaseAgent {
     if (updates.title !== undefined) setValues.title = updates.title;
     if (updates.blockedBy !== undefined) setValues.blockedBy = updates.blockedBy;
 
-    // Retry count enforcement: when LLM moves a task from in_progress back to backlog
+    // Guard: reject in_progress→backlog when the pending worker report indicates success.
+    // The LLM sometimes misjudges a successful task as failed. Correcting here prevents
+    // the LLM from spawning a duplicate worker in the same think cycle.
     if (updates.column === "backlog" && existing.column === "in_progress") {
+      const pendingReport = this._pendingWorkerReport.get(taskId);
+      if (pendingReport && !this.isFailureReport(pendingReport)) {
+        console.warn(
+          `[TeamLead ${this.id}] Blocked update_task: LLM tried to move "${existing.title}" (${taskId}) to backlog ` +
+          `but pending worker report indicates success. Auto-correcting to "done".`,
+        );
+        setValues.column = "done";
+        setValues.completionReport = pendingReport;
+        this._pendingWorkerReport.delete(taskId);
+      }
+    }
+
+    // Retry count enforcement: when LLM moves a task from in_progress back to backlog
+    if (setValues.column === "backlog" && existing.column === "in_progress") {
       const currentRetries = (existing as any).retryCount ?? 0;
       const newRetryCount = currentRetries + 1;
       setValues.retryCount = newRetryCount;
@@ -1683,7 +1699,7 @@ export class TeamLead extends BaseAgent {
     }
 
     // When a task moves to done, check for newly unblocked tasks
-    if (updates.column === "done") {
+    if (setValues.column === "done") {
       this.checkUnblockedTasks(taskId);
     }
 

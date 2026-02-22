@@ -251,6 +251,24 @@ describe("TeamLead — Kanban logic", () => {
       expect(updated?.column).toBe("done");
       expect(updated?.completionReport).toContain("FAILED");
     });
+
+    it("auto-corrects in_progress→backlog to done when pending report indicates success", () => {
+      const task = insertTask({ column: "in_progress", assigneeAgentId: "worker-1" });
+      const successReport = "Task completed.\nPR created: https://github.com/org/repo/pull/123\nAll tests passing.";
+      (tl as any)._pendingWorkerReport.set(task.id, successReport);
+      const result = (tl as any).updateKanbanTask(task.id, {
+        column: "backlog",
+        assigneeAgentId: "",
+      });
+      expect(result).toContain("updated");
+      const updated = getTask(task.id);
+      expect(updated?.column).toBe("done");
+      expect(updated?.completionReport).toContain("PR created");
+      // Should NOT have incremented retry count
+      expect(updated?.retryCount ?? 0).toBe(0);
+      // Pending report should be consumed
+      expect((tl as any)._pendingWorkerReport.has(task.id)).toBe(false);
+    });
   });
 
   // ─── ensureTaskMoved safety net ─────────────────────────────
