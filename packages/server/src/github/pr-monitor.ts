@@ -170,31 +170,17 @@ export class GitHubPRMonitor {
     const db = getDb();
     const now = new Date().toISOString();
 
-    // Move task to in_progress
-    db.update(schema.kanbanTasks)
-      .set({
-        column: "in_progress",
-        updatedAt: now,
-      })
-      .where(eq(schema.kanbanTasks.id, task.id))
-      .run();
-
-    const updated = db.select().from(schema.kanbanTasks).where(eq(schema.kanbanTasks.id, task.id)).get();
-    if (updated) {
-      this.io.emit("kanban:task-updated", updated as unknown as KanbanTask);
-    }
-
     // Build feedback string from reviews
     const feedbackParts: string[] = [];
 
     const changeRequests = reviews.filter((r) => r.state === "CHANGES_REQUESTED");
     for (const review of changeRequests) {
-      feedbackParts.push(`**Review by ${review.user.login}** (CHANGES_REQUESTED):\n${review.body || "(no body)"}`);
+      feedbackParts.push(`Review by ${review.user.login} (CHANGES_REQUESTED):\n${review.body || "(no body)"}`);
     }
 
     // Add inline comments
     if (reviewComments.length > 0) {
-      feedbackParts.push("\n**Inline review comments:**");
+      feedbackParts.push("\nInline review comments:");
       for (const c of reviewComments) {
         const location = c.line ? `${c.path}:${c.line}` : c.path;
         feedbackParts.push(`- ${c.user.login} on \`${location}\`:\n  ${c.body}\n  \`\`\`diff\n  ${c.diff_hunk.slice(-200)}\n  \`\`\``);
@@ -206,7 +192,34 @@ export class GitHubPRMonitor {
     // Determine branch name — prefer stored prBranch, fallback to PR API
     const branchName = task.prBranch || pr.head.ref;
 
-    // Send directive to TeamLead
+    // Replace the task description with review-cycle context so the TeamLead
+    // does NOT re-read the original description and redo the entire task.
+    const reviewDescription =
+      `[PR REVIEW CYCLE — PR #${task.prNumber} on branch \`${branchName}\`]\n\n` +
+      `This task already has an open PR. A reviewer requested changes.\n` +
+      `The worker must ONLY address the review feedback below — do NOT redo the original task.\n\n` +
+      `--- REVIEW FEEDBACK ---\n${feedback}\n--- END FEEDBACK ---\n\n` +
+      `Instructions: Check out branch \`${branchName}\`, make the requested fixes, commit, and push. ` +
+      `Do NOT create a new branch or PR — pushing to this branch auto-updates the existing PR #${task.prNumber}.`;
+
+    // Move task to in_progress with updated description and clear assignee
+    db.update(schema.kanbanTasks)
+      .set({
+        column: "in_progress",
+        description: reviewDescription,
+        assigneeAgentId: null,
+        updatedAt: now,
+      })
+      .where(eq(schema.kanbanTasks.id, task.id))
+      .run();
+
+    const updated = db.select().from(schema.kanbanTasks).where(eq(schema.kanbanTasks.id, task.id)).get();
+    if (updated) {
+      this.io.emit("kanban:task-updated", updated as unknown as KanbanTask);
+    }
+
+    // Send directive to TeamLead — explicitly reference the existing task
+    // so it spawns exactly one worker for that task, not a new one.
     const teamLeads = this.coo.getTeamLeads();
     const teamLead = teamLeads.get(task.projectId);
     if (teamLead) {
@@ -217,12 +230,13 @@ export class GitHubPRMonitor {
           toAgentId: teamLead.id,
           type: MessageType.Directive,
           content:
-            `PR #${task.prNumber} for task "${task.title}" has received CHANGES REQUESTED from reviewers.\n\n` +
-            `**Review feedback:**\n${feedback}\n\n` +
-            `**Instructions for the worker:**\n` +
-            `Check out branch \`${branchName}\`, make the requested fixes, commit, and push. ` +
-            `Do NOT create a new branch or PR — pushing to this branch auto-updates the existing PR #${task.prNumber}.\n\n` +
-            `Task ID: ${task.id}`,
+            `PR REVIEW FEEDBACK for existing task "${task.title}" (${task.id}) — this task is already in_progress on the kanban board.\n\n` +
+            `IMPORTANT: Do NOT create any new tasks. Do NOT redo the original work. ` +
+            `Spawn exactly ONE worker to address the review feedback on the EXISTING task (${task.id}). ` +
+            `The task description already contains the review feedback and branch instructions.\n\n` +
+            `Use update_task to assign the worker to task ${task.id}, then spawn_worker with the review feedback.\n\n` +
+            `Review summary: PR #${task.prNumber} on branch \`${branchName}\` received changes-requested.\n` +
+            `${feedback}`,
           projectId: task.projectId,
         });
       }

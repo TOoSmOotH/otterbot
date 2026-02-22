@@ -244,27 +244,30 @@ describe("GitHubPRMonitor", () => {
 
       await (monitor as any).poll();
 
-      // Task should move to in_progress
+      // Task should move to in_progress with updated description
       const task = db
         .select()
         .from(schema.kanbanTasks)
         .where(eq(schema.kanbanTasks.id, "task-3"))
         .get();
       expect(task?.column).toBe("in_progress");
+      expect(task?.description).toContain("PR REVIEW CYCLE");
+      expect(task?.description).toContain("Please fix the test assertions");
 
       // Directive should be sent
       expect(mockCoo.bus.send).toHaveBeenCalledWith(
         expect.objectContaining({
           fromAgentId: "coo",
           toAgentId: "tl-1",
-          content: expect.stringContaining("CHANGES REQUESTED"),
+          content: expect.stringContaining("Do NOT create any new tasks"),
         }),
       );
 
-      // Content should include branch name
+      // Content should include branch name and task ID
       const sentContent = (mockCoo.bus.send.mock.calls[0] as any[])[0].content as string;
       expect(sentContent).toContain("feat/fix-tests");
       expect(sentContent).toContain("PR #5");
+      expect(sentContent).toContain("task-3");
     });
   });
 
