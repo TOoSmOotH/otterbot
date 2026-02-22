@@ -181,6 +181,9 @@ export interface ClientToServerEvents {
     data: { id: string },
     callback?: (ack: { ok: boolean; error?: string }) => void,
   ) => void;
+  "memory:clear-all": (
+    callback?: (ack: { ok: boolean; deleted: number; error?: string }) => void,
+  ) => void;
   "memory:search": (
     data: { query: string; agentScope?: string; projectId?: string; limit?: number },
     callback: (memories: Memory[]) => void,

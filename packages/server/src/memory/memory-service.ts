@@ -318,6 +318,34 @@ export class MemoryService {
     return result.changes > 0;
   }
 
+  /** Delete all memories, clearing FTS index and vector store */
+  clearAll(): number {
+    const db = getDb();
+
+    // Get all IDs for vector store cleanup
+    const allIds = db.select({ id: schema.memories.id }).from(schema.memories).all();
+
+    // Delete all memories
+    const result = db.delete(schema.memories).run();
+
+    // Clear FTS index
+    if (this.hasFts()) {
+      try {
+        db.run(sql`DELETE FROM memories_fts`);
+      } catch (err) {
+        console.warn("[MemoryService] FTS clear failed:", err);
+      }
+    }
+
+    // Remove all from vector store
+    const vectorStore = getVectorStore();
+    for (const { id } of allIds) {
+      vectorStore.remove(id);
+    }
+
+    return result.changes;
+  }
+
   /** Get a single memory by ID */
   getById(id: string): Memory | null {
     const db = getDb();

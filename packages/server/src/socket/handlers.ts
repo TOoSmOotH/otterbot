@@ -645,6 +645,15 @@ export function setupSocketHandlers(
       callback?.({ ok });
     });
 
+    socket.on("memory:clear-all", (callback) => {
+      try {
+        const deleted = memoryService.clearAll();
+        callback?.({ ok: true, deleted });
+      } catch (err) {
+        callback?.({ ok: false, deleted: 0, error: err instanceof Error ? err.message : String(err) });
+      }
+    });
+
     socket.on("memory:search", async (data, callback) => {
       const memories = await memoryService.searchWithVectors({
         query: data.query,
