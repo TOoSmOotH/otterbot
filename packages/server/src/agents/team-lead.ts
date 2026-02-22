@@ -409,7 +409,24 @@ export class TeamLead extends BaseAgent {
       .where(eq(schema.kanbanTasks.id, taskId))
       .get();
 
-    if (!task || task.column !== "in_progress") return false; // LLM already moved it
+    if (!task) return false;
+
+    // If the LLM incorrectly moved a successful task to backlog, override to done
+    if (task.column === "backlog" && !this.isFailureReport(workerReport)) {
+      console.warn(
+        `[TeamLead ${this.id}] Safety net: LLM moved task "${task.title}" (${taskId}) to backlog ` +
+        `but report looks successful. Overriding to "done".`,
+      );
+      this.updateKanbanTask(taskId, {
+        column: "done",
+        assigneeAgentId: task.assigneeAgentId ?? "",
+        completionReport: workerReport,
+      });
+      this.checkUnblockedTasks(taskId);
+      return true;
+    }
+
+    if (task.column !== "in_progress") return false; // LLM already moved it
 
     const failed = this.isFailureReport(workerReport);
     const assignee = failed ? "" : task.assigneeAgentId;

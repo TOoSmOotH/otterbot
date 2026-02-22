@@ -297,6 +297,21 @@ describe("TeamLead — Kanban logic", () => {
       expect(updated?.completionReport).toContain("FAILED");
     });
 
+    it("overrides backlog→done when LLM incorrectly moved a successful task", () => {
+      const task = insertTask({
+        column: "backlog",
+        assigneeAgentId: "worker-1",
+      });
+      const moved = (tl as any).ensureTaskMoved(
+        task.id,
+        "Task completed.\nPR created: https://github.com/foo/bar/pull/42\n\nTerminal output (last 2000 chars):\nAll tests pass.",
+      );
+      expect(moved).toBe(true);
+      const updated = getTask(task.id);
+      expect(updated?.column).toBe("done");
+      expect(updated?.completionReport).toContain("PR created");
+    });
+
     it("does not double-increment retryCount", () => {
       // ensureTaskMoved calls updateKanbanTask which increments retryCount.
       // Verify it only increments once (not ensureTaskMoved + updateKanbanTask separately).
