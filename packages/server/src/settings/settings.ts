@@ -22,7 +22,7 @@ import { execSync } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync, unlinkSync, mkdirSync, chmodSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import type { NamedProvider, ProviderType, ProviderTypeMeta, CustomModel, ModelOption, ClaudeCodeOAuthUsage } from "@otterbot/shared";
+import type { NamedProvider, ProviderType, ProviderTypeMeta, CustomModel, ModelOption, ClaudeCodeOAuthUsage, AgentModelOverride } from "@otterbot/shared";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -239,6 +239,56 @@ export function updateTierDefaults(
     setConfig("worker_provider", defaults.worker.provider);
     setConfig("worker_model", defaults.worker.model);
   }
+}
+
+// ---------------------------------------------------------------------------
+// Per-agent model overrides
+// ---------------------------------------------------------------------------
+
+const AGENT_OVERRIDE_PREFIX = "agent_override:";
+
+export function getAgentModelOverrides(): AgentModelOverride[] {
+  const db = getDb();
+  const rows = db.select().from(schema.config).all();
+  const overrideMap = new Map<string, { provider?: string; model?: string }>();
+
+  for (const row of rows) {
+    if (!row.key.startsWith(AGENT_OVERRIDE_PREFIX)) continue;
+    const rest = row.key.slice(AGENT_OVERRIDE_PREFIX.length);
+    const lastColon = rest.lastIndexOf(":");
+    if (lastColon === -1) continue;
+    const registryEntryId = rest.slice(0, lastColon);
+    const field = rest.slice(lastColon + 1);
+    if (field !== "provider" && field !== "model") continue;
+    const existing = overrideMap.get(registryEntryId) ?? {};
+    existing[field] = row.value;
+    overrideMap.set(registryEntryId, existing);
+  }
+
+  const result: AgentModelOverride[] = [];
+  for (const [registryEntryId, fields] of overrideMap) {
+    if (fields.provider && fields.model) {
+      result.push({ registryEntryId, provider: fields.provider, model: fields.model });
+    }
+  }
+  return result;
+}
+
+export function getAgentModelOverride(registryEntryId: string): AgentModelOverride | null {
+  const provider = getConfig(`${AGENT_OVERRIDE_PREFIX}${registryEntryId}:provider`);
+  const model = getConfig(`${AGENT_OVERRIDE_PREFIX}${registryEntryId}:model`);
+  if (!provider || !model) return null;
+  return { registryEntryId, provider, model };
+}
+
+export function setAgentModelOverride(registryEntryId: string, provider: string, model: string): void {
+  setConfig(`${AGENT_OVERRIDE_PREFIX}${registryEntryId}:provider`, provider);
+  setConfig(`${AGENT_OVERRIDE_PREFIX}${registryEntryId}:model`, model);
+}
+
+export function clearAgentModelOverride(registryEntryId: string): void {
+  deleteConfig(`${AGENT_OVERRIDE_PREFIX}${registryEntryId}:provider`);
+  deleteConfig(`${AGENT_OVERRIDE_PREFIX}${registryEntryId}:model`);
 }
 
 // ---------------------------------------------------------------------------

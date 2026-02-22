@@ -143,6 +143,9 @@ import {
   deleteCustomModel,
   applyGitSSHConfig,
   getClaudeCodeOAuthUsage,
+  getAgentModelOverrides,
+  setAgentModelOverride,
+  clearAgentModelOverride,
   type TierDefaults,
 } from "./settings/settings.js";
 import type { ProviderType } from "@otterbot/shared";
@@ -2279,6 +2282,26 @@ async function main() {
     Body: Partial<TierDefaults>;
   }>("/api/settings/defaults", async (req) => {
     updateTierDefaults(req.body);
+    return { ok: true };
+  });
+
+  // Per-agent model overrides
+  app.get("/api/settings/agent-model-overrides", async () => {
+    return { overrides: getAgentModelOverrides() };
+  });
+
+  app.put<{
+    Params: { registryEntryId: string };
+    Body: { provider: string; model: string };
+  }>("/api/settings/agent-model-overrides/:registryEntryId", async (req) => {
+    setAgentModelOverride(req.params.registryEntryId, req.body.provider, req.body.model);
+    return { ok: true };
+  });
+
+  app.delete<{
+    Params: { registryEntryId: string };
+  }>("/api/settings/agent-model-overrides/:registryEntryId", async (req) => {
+    clearAgentModelOverride(req.params.registryEntryId);
     return { ok: true };
   });
 

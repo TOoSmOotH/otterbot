@@ -30,3 +30,10 @@ export interface ModelOption {
   label?: string;
   source: "discovered" | "custom";
 }
+
+/** Per-agent-type model/provider override (stored in config table) */
+export interface AgentModelOverride {
+  registryEntryId: string;
+  provider: string;
+  model: string;
+}

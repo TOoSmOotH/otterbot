@@ -31,6 +31,7 @@ import type { WorkspaceManager } from "../workspace/workspace.js";
 import { eq } from "drizzle-orm";
 import { getConfig, setConfig, deleteConfig } from "../auth/auth.js";
 import { execSync } from "node:child_process";
+import { getAgentModelOverride } from "../settings/settings.js";
 import { getConfiguredSearchProvider } from "../tools/search/providers.js";
 import { isDesktopEnabled } from "../desktop/desktop.js";
 import { TEAM_LEAD_PROMPT } from "./prompts/team-lead.js";
@@ -1380,10 +1381,12 @@ export class TeamLead extends BaseAgent {
         modelPackId: (entry as any).modelPackId ?? getRandomModelPackId(),
         gearConfig: (entry as any).gearConfig ? JSON.parse((entry as any).gearConfig) : null,
         model:
+          getAgentModelOverride(entry.id)?.model ??
           getConfig("worker_model") ??
           getConfig("coo_model") ??
           entry.defaultModel,
         provider:
+          getAgentModelOverride(entry.id)?.provider ??
           getConfig("worker_provider") ??
           getConfig("coo_provider") ??
           entry.defaultProvider,

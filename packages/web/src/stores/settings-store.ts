@@ -1,11 +1,11 @@
 import { create } from "zustand";
-import type { NamedProvider, ProviderTypeMeta, ProviderType, CustomModel, ModelOption } from "@otterbot/shared";
+import type { NamedProvider, ProviderTypeMeta, ProviderType, CustomModel, ModelOption, AgentModelOverride } from "@otterbot/shared";
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
-export type { NamedProvider, ProviderTypeMeta, ProviderType, CustomModel, ModelOption };
+export type { NamedProvider, ProviderTypeMeta, ProviderType, CustomModel, ModelOption, AgentModelOverride };
 
 export interface TierDefaults {
   coo: { provider: string; model: string };
@@ -190,6 +190,12 @@ interface SettingsState {
   createCustomModel: (data: { providerId: string; modelId: string; label?: string }) => Promise<CustomModel | null>;
   deleteCustomModel: (id: string) => Promise<void>;
 
+  // Agent model overrides
+  agentModelOverrides: AgentModelOverride[];
+  loadAgentModelOverrides: () => Promise<void>;
+  setAgentModelOverride: (registryEntryId: string, provider: string, model: string) => Promise<void>;
+  clearAgentModelOverride: (registryEntryId: string) => Promise<void>;
+
   // Scheduled Tasks actions
   loadScheduledTasks: () => Promise<void>;
   updateScheduledTask: (taskId: string, data: { enabled?: boolean; intervalMs?: number }) => Promise<void>;
@@ -342,6 +348,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   },
   models: {},
   customModels: [],
+  agentModelOverrides: [],
   loading: false,
   error: null,
   testResults: {},
@@ -596,6 +603,41 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       if (cm) {
         await get().fetchModels(cm.providerId);
       }
+    } catch {
+      // Silently fail
+    }
+  },
+
+  loadAgentModelOverrides: async () => {
+    try {
+      const res = await fetch("/api/settings/agent-model-overrides");
+      if (!res.ok) return;
+      const data = await res.json();
+      set({ agentModelOverrides: data.overrides ?? [] });
+    } catch {
+      // Silently fail
+    }
+  },
+
+  setAgentModelOverride: async (registryEntryId, provider, model) => {
+    try {
+      await fetch(`/api/settings/agent-model-overrides/${registryEntryId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ provider, model }),
+      });
+      await get().loadAgentModelOverrides();
+    } catch {
+      // Silently fail
+    }
+  },
+
+  clearAgentModelOverride: async (registryEntryId) => {
+    try {
+      await fetch(`/api/settings/agent-model-overrides/${registryEntryId}`, {
+        method: "DELETE",
+      });
+      await get().loadAgentModelOverrides();
     } catch {
       // Silently fail
     }
