@@ -25,7 +25,9 @@ const mockCreateIssueComment = vi.fn().mockResolvedValue({
 });
 vi.mock("../github-service.js", () => ({
   fetchAssignedIssues: (...args: any[]) => mockFetchAssignedIssues(...args),
+  fetchOpenIssues: vi.fn().mockResolvedValue([]),
   createIssueComment: (...args: any[]) => mockCreateIssueComment(...args),
+  addLabelsToIssue: vi.fn().mockResolvedValue(undefined),
   cloneRepo: vi.fn(),
   getRepoDefaultBranch: vi.fn().mockResolvedValue("main"),
 }));
@@ -95,13 +97,13 @@ describe("GitHubIssueMonitor", () => {
   });
 
   describe("watchProject / unwatchProject", () => {
-    it("registers a project for watching", () => {
+    it("registers a project for watching", async () => {
       monitor.watchProject("proj-1", "owner/repo", "testuser");
       // Verify by triggering a poll — the project should be polled
       configStore.set("github:token", "ghp_test");
       mockFetchAssignedIssues.mockResolvedValue([]);
       // Access private poll method via prototype
-      (monitor as any).poll();
+      await (monitor as any).poll();
       expect(mockFetchAssignedIssues).toHaveBeenCalledWith(
         "owner/repo",
         "ghp_test",
@@ -123,7 +125,7 @@ describe("GitHubIssueMonitor", () => {
   });
 
   describe("loadFromDb", () => {
-    it("loads projects with githubIssueMonitor enabled", () => {
+    it("loads projects with githubIssueMonitor enabled", async () => {
       const db = getDb();
       configStore.set("github:username", "testuser");
 
@@ -161,7 +163,7 @@ describe("GitHubIssueMonitor", () => {
 
       // Verify only the monitored project is watched
       configStore.set("github:token", "ghp_test");
-      (monitor as any).poll();
+      await (monitor as any).poll();
       expect(mockFetchAssignedIssues).toHaveBeenCalledTimes(1);
       expect(mockFetchAssignedIssues).toHaveBeenCalledWith(
         "owner/repo",

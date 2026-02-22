@@ -5,8 +5,9 @@ import type { ServerToClientEvents, ClientToServerEvents, KanbanTask } from "@ot
 import { MessageType } from "@otterbot/shared";
 import { getDb, schema } from "../db/index.js";
 import { getConfig, setConfig } from "../auth/auth.js";
-import { fetchAssignedIssues, createIssueComment } from "./github-service.js";
+import { fetchAssignedIssues, fetchOpenIssues, createIssueComment } from "./github-service.js";
 import type { COO } from "../agents/coo.js";
+import type { PipelineManager } from "../pipeline/pipeline-manager.js";
 
 type TypedServer = Server<ClientToServerEvents, ServerToClientEvents>;
 
@@ -21,10 +22,16 @@ export class GitHubIssueMonitor {
   private intervalId: ReturnType<typeof setInterval> | null = null;
   private coo: COO;
   private io: TypedServer;
+  private pipelineManager: PipelineManager | null = null;
 
   constructor(coo: COO, io: TypedServer) {
     this.coo = coo;
     this.io = io;
+  }
+
+  /** Inject the pipeline manager (avoids circular dependency) */
+  setPipelineManager(pm: PipelineManager): void {
+    this.pipelineManager = pm;
   }
 
   /** Register a project for issue monitoring */
@@ -82,14 +89,55 @@ export class GitHubIssueMonitor {
 
     for (const [projectId, watched] of this.watched) {
       try {
-        await this.pollProject(projectId, watched, token);
+        // Run triage on all new issues (if pipeline is enabled)
+        await this.pollForTriage(projectId, watched, token);
+        // Process assigned issues (create tasks + start implementation)
+        await this.pollForAssigned(projectId, watched, token);
       } catch (err) {
         console.error(`[IssueMonitor] Error polling ${watched.repo}:`, err);
       }
     }
   }
 
-  private async pollProject(
+  /**
+   * Poll for ALL new open issues and run triage on untriaged ones.
+   * Only runs if pipeline is enabled and triage stage is enabled.
+   */
+  private async pollForTriage(
+    projectId: string,
+    watched: WatchedProject,
+    token: string,
+  ): Promise<void> {
+    if (!this.pipelineManager?.isEnabled(projectId)) return;
+
+    const config = this.pipelineManager.getConfig(projectId);
+    if (!config?.stages?.triage?.enabled) return;
+
+    const triageSinceKey = `project:${projectId}:github:triage_last_polled_at`;
+    const since = getConfig(triageSinceKey) ?? undefined;
+
+    const issues = await fetchOpenIssues(watched.repo, token, since);
+
+    for (const issue of issues) {
+      // Skip if already triaged (has "triaged" label)
+      if (issue.labels.some((l) => l.name === "triaged")) continue;
+
+      // Run triage
+      try {
+        await this.pipelineManager.runTriage(projectId, watched.repo, issue);
+      } catch (err) {
+        console.error(`[IssueMonitor] Triage failed for issue #${issue.number}:`, err);
+      }
+    }
+
+    setConfig(triageSinceKey, new Date().toISOString());
+  }
+
+  /**
+   * Poll for issues assigned to the configured user — existing behavior.
+   * Creates kanban tasks and starts implementation (via pipeline or direct directive).
+   */
+  private async pollForAssigned(
     projectId: string,
     watched: WatchedProject,
     token: string,
@@ -140,7 +188,10 @@ export class GitHubIssueMonitor {
         labels: [label],
         blockedBy: [] as string[],
         retryCount: 0,
+        spawnCount: 0,
         completionReport: null,
+        pipelineStage: null,
+        pipelineAttempt: 0,
         createdAt: now,
         updatedAt: now,
       };
@@ -149,23 +200,33 @@ export class GitHubIssueMonitor {
       // Emit to UI
       this.io.emit("kanban:task-created", task as unknown as KanbanTask);
 
-      // Send directive to TeamLead
-      const teamLeads = this.coo.getTeamLeads();
-      const teamLead = teamLeads.get(projectId);
-      if (teamLead) {
-        const bus = (this.coo as any).bus;
-        if (bus) {
-          bus.send({
-            fromAgentId: "coo",
-            toAgentId: teamLead.id,
-            type: MessageType.Directive,
-            content:
-              `New GitHub issue #${issue.number} assigned: "${issue.title}"\n\n` +
-              `${issue.body ?? "(no description)"}\n\n` +
-              `Task created on kanban board (${taskId}). ` +
-              `Spawn a worker to create a feature branch, implement the fix, and open a PR.`,
-            projectId,
-          });
+      // Route through pipeline if enabled, otherwise use direct directive
+      if (this.pipelineManager?.isEnabled(projectId)) {
+        await this.pipelineManager.startImplementation(
+          taskId,
+          projectId,
+          issue.number,
+          watched.repo,
+        );
+      } else {
+        // Existing direct directive behavior
+        const teamLeads = this.coo.getTeamLeads();
+        const teamLead = teamLeads.get(projectId);
+        if (teamLead) {
+          const bus = (this.coo as any).bus;
+          if (bus) {
+            bus.send({
+              fromAgentId: "coo",
+              toAgentId: teamLead.id,
+              type: MessageType.Directive,
+              content:
+                `New GitHub issue #${issue.number} assigned: "${issue.title}"\n\n` +
+                `${issue.body ?? "(no description)"}\n\n` +
+                `Task created on kanban board (${taskId}). ` +
+                `Spawn a worker to create a feature branch, implement the fix, and open a PR.`,
+              projectId,
+            });
+          }
         }
       }
 

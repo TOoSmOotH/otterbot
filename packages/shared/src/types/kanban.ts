@@ -19,6 +19,8 @@ export interface KanbanTask {
   prBranch: string | null;
   labels: string[];
   blockedBy: string[];
+  pipelineStage: string | null;
+  pipelineAttempt: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -42,4 +44,6 @@ export interface KanbanTaskUpdate {
   prBranch?: string | null;
   labels?: string[];
   blockedBy?: string[];
+  pipelineStage?: string | null;
+  pipelineAttempt?: number;
 }

@@ -153,6 +153,7 @@ import { createBackupArchive, restoreFromArchive, looksLikeZip } from "./backup/
 import { writeOpenCodeConfig } from "./opencode/opencode-manager.js";
 import { GitHubIssueMonitor } from "./github/issue-monitor.js";
 import { GitHubPRMonitor } from "./github/pr-monitor.js";
+import { PipelineManager } from "./pipeline/pipeline-manager.js";
 import { ReminderScheduler } from "./reminders/reminder-scheduler.js";
 import { MemoryCompactor } from "./memory/memory-compactor.js";
 import { SchedulerRegistry } from "./schedulers/scheduler-registry.js";
@@ -688,9 +689,13 @@ async function main() {
         },
       });
       emitAgentSpawned(io, coo);
-      // Create issue monitor and PR monitor
+      // Create issue monitor, PR monitor, and pipeline manager
       issueMonitor = new GitHubIssueMonitor(coo, io);
       prMonitor = new GitHubPRMonitor(coo, io);
+      const pipelineManager = new PipelineManager(coo, io);
+      issueMonitor.setPipelineManager(pipelineManager);
+      prMonitor.setPipelineManager(pipelineManager);
+      coo.setPipelineManager(pipelineManager);
 
       setupSocketHandlers(io, bus, coo, registry, {
         beforeCeoMessage: (content, conversationId, callback) => {

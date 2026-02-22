@@ -355,6 +355,49 @@ export async function createIssueComment(
   );
 }
 
+/**
+ * Add labels to an issue (creates labels if they don't exist).
+ */
+export async function addLabelsToIssue(
+  repoFullName: string,
+  token: string,
+  issueNumber: number,
+  labels: string[],
+): Promise<void> {
+  if (labels.length === 0) return;
+  await ghFetch<unknown>(
+    `https://api.github.com/repos/${repoFullName}/issues/${issueNumber}/labels`,
+    token,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ labels }),
+    },
+  );
+}
+
+/**
+ * Fetch open issues with optional filters (no assignee filter by default).
+ */
+export async function fetchOpenIssues(
+  repoFullName: string,
+  token: string,
+  since?: string,
+): Promise<GitHubIssue[]> {
+  const params = new URLSearchParams({
+    state: "open",
+    per_page: "100",
+  });
+  if (since) params.set("since", since);
+
+  const issues = await ghFetch<(GitHubIssue & { pull_request?: unknown })[]>(
+    `https://api.github.com/repos/${repoFullName}/issues?${params}`,
+    token,
+  );
+  // Filter out pull requests (GitHub API returns PRs as issues)
+  return issues.filter((i) => !i.pull_request);
+}
+
 // ---------------------------------------------------------------------------
 // Pull Request APIs
 // ---------------------------------------------------------------------------

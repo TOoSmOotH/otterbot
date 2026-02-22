@@ -1,6 +1,6 @@
 import type { Agent, AgentStatus, AgentActivityRecord } from "./agent.js";
 import type { BusMessage, Conversation } from "./message.js";
-import type { RegistryEntry, Project, ProjectAgentAssignments } from "./registry.js";
+import type { RegistryEntry, Project, ProjectAgentAssignments, ProjectPipelineConfig } from "./registry.js";
 import type { KanbanTask } from "./kanban.js";
 import type { SceneZone } from "./environment.js";
 import type { CodingAgentSession, CodingAgentMessage, CodingAgentFileDiff, CodingAgentPermission } from "./coding-agent.js";
@@ -154,6 +154,16 @@ export interface ClientToServerEvents {
   ) => void;
   "project:set-agent-assignments": (
     data: { projectId: string; assignments: ProjectAgentAssignments },
+    callback?: (ack: { ok: boolean; error?: string }) => void,
+  ) => void;
+
+  // Pipeline configuration
+  "project:get-pipeline-config": (
+    data: { projectId: string },
+    callback: (config: ProjectPipelineConfig | null) => void,
+  ) => void;
+  "project:set-pipeline-config": (
+    data: { projectId: string; config: ProjectPipelineConfig },
     callback?: (ack: { ok: boolean; error?: string }) => void,
   ) => void;
 

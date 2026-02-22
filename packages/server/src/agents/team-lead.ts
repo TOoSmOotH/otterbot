@@ -43,6 +43,7 @@ import {
   requestPullRequestReviewers,
   createIssueComment,
 } from "../github/github-service.js";
+import type { PipelineManager } from "../pipeline/pipeline-manager.js";
 
 /** Tool descriptions for environment context injection */
 const TOOL_DESCRIPTIONS: Record<string, string> = {
@@ -214,6 +215,12 @@ export class TeamLead extends BaseAgent {
   private _onTerminalData?: (agentId: string, data: string) => void;
   private _onPtySessionRegistered?: (agentId: string, client: import("./worker.js").PtyClient) => void;
   private _onPtySessionUnregistered?: (agentId: string) => void;
+  private _pipelineManager: PipelineManager | null = null;
+
+  /** Inject the pipeline manager (avoids circular dependency at construction) */
+  setPipelineManager(pm: PipelineManager): void {
+    this._pipelineManager = pm;
+  }
 
   constructor(deps: TeamLeadDependencies) {
     const registry = new Registry();
@@ -640,6 +647,14 @@ export class TeamLead extends BaseAgent {
         this.workers.delete(message.fromAgentId);
         console.log(`[TeamLead ${this.id}] Cleaned up finished worker ${message.fromAgentId}`);
       }
+    }
+
+    // Pipeline intercept: if this task is managed by the pipeline, let PipelineManager
+    // handle the next step instead of the LLM evaluation. Still clean up the worker above.
+    if (reportingTaskId && this._pipelineManager?.isPipelineTask(reportingTaskId)) {
+      console.log(`[TeamLead ${this.id}] Pipeline-managed task ${reportingTaskId} — routing to PipelineManager`);
+      await this._pipelineManager.advancePipeline(reportingTaskId, message.content);
+      return;
     }
 
     // Programmatically clean up orphaned tasks (in_progress but assigned to dead workers)

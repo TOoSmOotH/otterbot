@@ -552,6 +552,29 @@ export function setupSocketHandlers(
       callback?.({ ok: true });
     });
 
+    // Get per-project pipeline configuration
+    socket.on("project:get-pipeline-config", (data, callback) => {
+      const raw = getConfig(`project:${data.projectId}:pipeline-config`);
+      try {
+        callback(raw ? JSON.parse(raw) : null);
+      } catch {
+        callback(null);
+      }
+    });
+
+    // Set per-project pipeline configuration
+    socket.on("project:set-pipeline-config", (data, callback) => {
+      try {
+        setConfig(
+          `project:${data.projectId}:pipeline-config`,
+          JSON.stringify(data.config),
+        );
+        callback?.({ ok: true });
+      } catch (err) {
+        callback?.({ ok: false, error: err instanceof Error ? err.message : "Failed to save" });
+      }
+    });
+
     // Retrieve agent activity (bus messages + persisted activity records)
     socket.on("agent:activity", (data, callback) => {
       const db = getDb();

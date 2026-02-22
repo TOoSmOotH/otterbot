@@ -285,6 +285,20 @@ export async function migrateDb() {
     // Column already exists — ignore
   }
 
+  // Idempotent migration: add pipeline_stage to kanban_tasks
+  try {
+    db.run(sql`ALTER TABLE kanban_tasks ADD COLUMN pipeline_stage TEXT`);
+  } catch {
+    // Column already exists — ignore
+  }
+
+  // Idempotent migration: add pipeline_attempt to kanban_tasks
+  try {
+    db.run(sql`ALTER TABLE kanban_tasks ADD COLUMN pipeline_attempt INTEGER NOT NULL DEFAULT 0`);
+  } catch {
+    // Column already exists — ignore
+  }
+
   db.run(sql`CREATE TABLE IF NOT EXISTS sessions (
     token TEXT PRIMARY KEY,
     expires_at TEXT NOT NULL,

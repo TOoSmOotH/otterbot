@@ -15,6 +15,7 @@ import { BaseAgent, type AgentOptions } from "./agent.js";
 import { COO_SYSTEM_PROMPT } from "./prompts/coo.js";
 import { ConversationContextManager } from "./conversation-context.js";
 import { TeamLead } from "./team-lead.js";
+import type { PipelineManager } from "../pipeline/pipeline-manager.js";
 import { getDb, schema } from "../db/index.js";
 import { Registry } from "../registry/registry.js";
 import { SkillService } from "../skills/skill-service.js";
@@ -104,6 +105,7 @@ export class COO extends BaseAgent {
   private _onPtySessionRegistered?: (agentId: string, client: import("./worker.js").PtyClient) => void;
   private _onPtySessionUnregistered?: (agentId: string) => void;
   private onAgentDestroyed?: (agentId: string) => void;
+  private _pipelineManager: PipelineManager | null = null;
   private allowedToolNames: Set<string>;
   private contextManager!: ConversationContextManager;
   private activeContextId: string | null = null;
@@ -1002,6 +1004,7 @@ The user can see everything on the desktop in real-time.`;
     });
 
     this.teamLeads.set(projectId, teamLead);
+    if (this._pipelineManager) teamLead.setPipelineManager(this._pipelineManager);
 
     if (this.onAgentSpawned) {
       this.onAgentSpawned(teamLead);
@@ -1460,6 +1463,7 @@ The user can see everything on the desktop in real-time.`;
     });
 
     this.teamLeads.set(projectId, teamLead);
+    if (this._pipelineManager) teamLead.setPipelineManager(this._pipelineManager);
     this.onAgentSpawned?.(teamLead);
 
     // Build GitHub-aware initial directive
@@ -1582,6 +1586,7 @@ The user can see everything on the desktop in real-time.`;
     });
 
     this.teamLeads.set(project.id, teamLead);
+    if (this._pipelineManager) teamLead.setPipelineManager(this._pipelineManager);
     this.onAgentSpawned?.(teamLead);
 
     // Build and send recovery directive
@@ -1793,6 +1798,15 @@ The user can see everything on the desktop in real-time.`;
 
   getTeamLeads(): Map<string, TeamLead> {
     return this.teamLeads;
+  }
+
+  /** Inject pipeline manager — it will be wired into all existing and future TeamLeads */
+  setPipelineManager(pm: PipelineManager): void {
+    this._pipelineManager = pm;
+    // Inject into existing TeamLeads
+    for (const tl of this.teamLeads.values()) {
+      tl.setPipelineManager(pm);
+    }
   }
 
   /** Destroy the TeamLead (and its workers) for a project, remove workspace, and clean up */

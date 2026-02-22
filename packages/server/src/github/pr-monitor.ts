@@ -10,6 +10,7 @@ import {
   fetchPullRequestReviewComments,
 } from "./github-service.js";
 import type { COO } from "../agents/coo.js";
+import type { PipelineManager } from "../pipeline/pipeline-manager.js";
 
 type TypedServer = Server<ClientToServerEvents, ServerToClientEvents>;
 
@@ -19,10 +20,16 @@ export class GitHubPRMonitor {
   private io: TypedServer;
   /** Track processed review IDs to avoid re-triggering on the same review */
   private processedReviewIds = new Set<number>();
+  private pipelineManager: PipelineManager | null = null;
 
   constructor(coo: COO, io: TypedServer) {
     this.coo = coo;
     this.io = io;
+  }
+
+  /** Inject the pipeline manager (avoids circular dependency) */
+  setPipelineManager(pm: PipelineManager): void {
+    this.pipelineManager = pm;
   }
 
   /** Start the polling loop */
@@ -156,6 +163,48 @@ export class GitHubPRMonitor {
       token,
       task.prNumber,
     );
+
+    // Route through pipeline if the task is pipeline-managed
+    if (this.pipelineManager?.isEnabled(task.projectId)) {
+      const branchName = task.prBranch || pr.head.ref;
+
+      // Build feedback string
+      const feedbackParts: string[] = [];
+      const changeRequests = reviews.filter((r) => r.state === "CHANGES_REQUESTED");
+      for (const review of changeRequests) {
+        feedbackParts.push(`Review by ${review.user.login} (CHANGES_REQUESTED):\n${review.body || "(no body)"}`);
+      }
+      if (reviewComments.length > 0) {
+        feedbackParts.push("\nInline review comments:");
+        for (const c of reviewComments) {
+          const location = c.line ? `${c.path}:${c.line}` : c.path;
+          feedbackParts.push(`- ${c.user.login} on \`${location}\`:\n  ${c.body}\n  \`\`\`diff\n  ${c.diff_hunk.slice(-200)}\n  \`\`\``);
+        }
+      }
+      const feedback = feedbackParts.join("\n\n");
+
+      // Move task to in_progress
+      const db = getDb();
+      const now = new Date().toISOString();
+      db.update(schema.kanbanTasks)
+        .set({ column: "in_progress", assigneeAgentId: null, updatedAt: now })
+        .where(eq(schema.kanbanTasks.id, task.id))
+        .run();
+      const updated = db.select().from(schema.kanbanTasks).where(eq(schema.kanbanTasks.id, task.id)).get();
+      if (updated) {
+        this.io.emit("kanban:task-updated", updated as unknown as KanbanTask);
+      }
+
+      await this.pipelineManager.handleReviewFeedback(
+        task.id,
+        feedback,
+        branchName,
+        task.prNumber!,
+      );
+
+      console.log(`[PRMonitor] Routed PR #${task.prNumber} review feedback through pipeline for task ${task.id}`);
+      return;
+    }
 
     await this.requestChangesWorker(task, project, pr, reviews, reviewComments);
   }
