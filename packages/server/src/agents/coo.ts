@@ -293,6 +293,11 @@ The user can see everything on the desktop in real-time.`;
     // Reset per-turn guards for this new think cycle
     this.projectStatusCheckedThisTurn = false;
 
+    // Temporarily swap to an empty history so the LLM only sees the report,
+    // not stale conversation context from an unrelated chat.
+    const savedHistory = this.conversationHistory;
+    this.conversationHistory = [];
+
     // Process the Team Lead's report with a strong instruction to relay.
     // Use thinkWithoutTools so the COO just summarises instead of looping
     // on get_project_status or other tools — it only needs to relay.
@@ -310,10 +315,17 @@ The user can see everything on the desktop in real-time.`;
       },
     );
 
+    // Restore original history (don't pollute it with the report exchange)
+    this.conversationHistory = savedHistory;
+
     // Always relay to CEO — fall back to a raw snippet if LLM returns empty
-    const relay = text.trim()
-      ? text
-      : `Update from Team Lead: ${message.content.slice(0, 500)}${message.content.length > 500 ? "..." : ""}`;
+    // or if it asks for the report instead of summarizing it (LLM confusion)
+    const raw = `Update from Team Lead: ${message.content.slice(0, 500)}${message.content.length > 500 ? "..." : ""}`;
+    const trimmed = text.trim();
+    const looksConfused = !trimmed
+      || /don'?t have the report/i.test(trimmed)
+      || /could you (please )?(provide|share|send)/i.test(trimmed);
+    const relay = looksConfused ? raw : trimmed;
     this.sendMessage(
       null,
       MessageType.Chat,
