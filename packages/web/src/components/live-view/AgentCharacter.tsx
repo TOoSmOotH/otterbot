@@ -49,12 +49,16 @@ export function AgentCharacter({ pack, position, label, role, status, agentId, g
   useFrame((_, delta) => {
     if (!groupRef.current) return;
 
-    const ms = agentId ? useMovementStore.getState().getAgentPosition(agentId) : null;
+    const store = useMovementStore.getState();
+    const ms = agentId ? store.getAgentPosition(agentId) : null;
     const moving = ms?.isMoving ?? false;
+    const busy = agentId ? store.isAgentBusy(agentId) : false;
 
     if (moving && ms) {
       groupRef.current.position.set(...ms.position);
       currentRotationRef.current = THREE.MathUtils.lerp(currentRotationRef.current, ms.rotationY, delta * 8);
+    } else if (busy) {
+      // Hold current position — queue is about to start the next walk
     } else {
       // Smoothly interpolate to home position
       groupRef.current.position.lerp(targetPosRef.current, delta * 5);

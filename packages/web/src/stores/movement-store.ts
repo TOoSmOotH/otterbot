@@ -37,6 +37,9 @@ interface MovementState {
 
   cancelMovement: (agentId: string) => void;
 
+  /** Check if an agent is actively moving or has pending queued movements */
+  isAgentBusy: (agentId: string) => boolean;
+
   /** Exposed for testing / inspection */
   animationQueue: AnimationQueue;
 }
@@ -51,6 +54,7 @@ function createAnimationQueue(
       const entry = getMovements().get(agentId);
       return entry != null && !entry.interpolator.finished;
     },
+    0.15,
   );
 }
 
@@ -142,6 +146,12 @@ export const useMovementStore = create<MovementState>((set, get) => {
     getAgentPosition: (agentId) => {
       const entry = get().movements.get(agentId);
       return entry?.state ?? null;
+    },
+
+    isAgentBusy: (agentId) => {
+      const entry = get().movements.get(agentId);
+      const activelyMoving = entry != null && !entry.interpolator.finished;
+      return activelyMoving || animationQueue.isBusy(agentId);
     },
 
     cancelMovement: (agentId) => {

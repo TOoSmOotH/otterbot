@@ -54,14 +54,18 @@ export function FallbackAgent({ position, label, role, status, agentId, rotation
   useFrame((_, delta) => {
     if (!meshRef.current) return;
 
-    const ms = agentId ? useMovementStore.getState().getAgentPosition(agentId) : null;
+    const store = useMovementStore.getState();
+    const ms = agentId ? store.getAgentPosition(agentId) : null;
     const moving = ms?.isMoving ?? false;
+    const busy = agentId ? store.isAgentBusy(agentId) : false;
 
     // Update group position/rotation for movement
     if (groupRef.current) {
       if (moving && ms) {
         groupRef.current.position.set(...ms.position);
         currentRotationRef.current = THREE.MathUtils.lerp(currentRotationRef.current, ms.rotationY, delta * 8);
+      } else if (busy) {
+        // Hold current position — queue is about to start the next walk
       } else {
         groupRef.current.position.lerp(targetPosRef.current, delta * 5);
         currentRotationRef.current = THREE.MathUtils.lerp(currentRotationRef.current, rotationY, delta * 5);
