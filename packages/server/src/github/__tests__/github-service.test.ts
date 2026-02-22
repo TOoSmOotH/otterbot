@@ -10,10 +10,10 @@ vi.mock("../../auth/auth.js", () => ({
   setConfig: vi.fn((key: string, value: string) => configStore.set(key, value)),
 }));
 
-// Mock child_process execSync
-const mockExecSync = vi.fn();
+// Mock child_process execFileSync
+const mockExecFileSync = vi.fn();
 vi.mock("node:child_process", () => ({
-  execSync: (...args: any[]) => mockExecSync(...args),
+  execFileSync: (...args: any[]) => mockExecFileSync(...args),
 }));
 
 import { cloneRepo, getRepoDefaultBranch, fetchAssignedIssues } from "../github-service.js";
@@ -24,7 +24,7 @@ describe("github-service", () => {
   beforeEach(() => {
     tmpDir = mkdtempSync(join(tmpdir(), "otterbot-gh-test-"));
     configStore.clear();
-    mockExecSync.mockReset();
+    mockExecFileSync.mockReset();
   });
 
   afterEach(() => {
@@ -39,15 +39,18 @@ describe("github-service", () => {
 
       cloneRepo("owner/repo", targetDir);
 
-      // Should call git clone with HTTPS URL
-      expect(mockExecSync).toHaveBeenCalledWith(
-        expect.stringContaining("git clone"),
+      // Should call execFileSync with "git" and args array containing clone
+      expect(mockExecFileSync).toHaveBeenCalledWith(
+        "git",
+        expect.arrayContaining(["clone"]),
         expect.objectContaining({ timeout: 300_000 }),
       );
-      const cloneCall = mockExecSync.mock.calls[0];
-      expect(cloneCall[0]).toContain("https://github.com/owner/repo.git");
-      expect(cloneCall[0]).toContain("credential.helper");
-      expect(cloneCall[0]).toContain(targetDir);
+      const cloneCall = mockExecFileSync.mock.calls[0];
+      const args = cloneCall[1] as string[];
+      expect(args).toContain("clone");
+      expect(args.some((a: string) => a.includes("https://github.com/owner/repo.git"))).toBe(true);
+      expect(args.some((a: string) => a.includes("credential.helper"))).toBe(true);
+      expect(args).toContain(targetDir);
     });
 
     it("clones with a specific branch when provided", () => {
@@ -57,8 +60,10 @@ describe("github-service", () => {
 
       cloneRepo("owner/repo", targetDir, "dev");
 
-      const cloneCall = mockExecSync.mock.calls[0];
-      expect(cloneCall[0]).toContain("--branch dev");
+      const cloneCall = mockExecFileSync.mock.calls[0];
+      const args = cloneCall[1] as string[];
+      expect(args).toContain("--branch");
+      expect(args).toContain("dev");
     });
 
     it("fetches and checks out when .git already exists", () => {
@@ -69,17 +74,14 @@ describe("github-service", () => {
 
       cloneRepo("owner/repo", targetDir, "main");
 
-      // Should call fetch, not clone
-      expect(mockExecSync).toHaveBeenCalledWith(
-        expect.stringContaining("git -C"),
-        expect.any(Object),
-      );
-      const calls = mockExecSync.mock.calls.map((c: any[]) => c[0]);
-      expect(calls.some((c: string) => c.includes("fetch --all"))).toBe(true);
-      expect(calls.some((c: string) => c.includes("checkout main"))).toBe(true);
-      expect(calls.some((c: string) => c.includes("pull origin main"))).toBe(true);
+      // All calls should be execFileSync("git", [...args], opts)
+      const calls = mockExecFileSync.mock.calls;
+      const argArrays = calls.map((c: any[]) => c[1] as string[]);
+      expect(argArrays.some((a: string[]) => a.includes("fetch") && a.includes("--all"))).toBe(true);
+      expect(argArrays.some((a: string[]) => a.includes("checkout") && a.includes("main"))).toBe(true);
+      expect(argArrays.some((a: string[]) => a.includes("pull") && a.includes("main"))).toBe(true);
       // Should NOT have called git clone
-      expect(calls.some((c: string) => c.includes("git clone"))).toBe(false);
+      expect(argArrays.some((a: string[]) => a.includes("clone"))).toBe(false);
     });
 
     it("configures git user after clone", () => {
@@ -90,9 +92,9 @@ describe("github-service", () => {
 
       cloneRepo("owner/repo", targetDir);
 
-      const calls = mockExecSync.mock.calls.map((c: any[]) => c[0]);
-      expect(calls.some((c: string) => c.includes('config user.name "myuser"'))).toBe(true);
-      expect(calls.some((c: string) => c.includes('config user.email "myuser@example.com"'))).toBe(true);
+      const argArrays = mockExecFileSync.mock.calls.map((c: any[]) => c[1] as string[]);
+      expect(argArrays.some((a: string[]) => a.includes("user.name") && a.includes("myuser"))).toBe(true);
+      expect(argArrays.some((a: string[]) => a.includes("user.email") && a.includes("myuser@example.com"))).toBe(true);
     });
 
     it("uses default email when github:email is not set", () => {
@@ -102,8 +104,8 @@ describe("github-service", () => {
 
       cloneRepo("owner/repo", targetDir);
 
-      const calls = mockExecSync.mock.calls.map((c: any[]) => c[0]);
-      expect(calls.some((c: string) => c.includes("myuser@users.noreply.github.com"))).toBe(true);
+      const argArrays = mockExecFileSync.mock.calls.map((c: any[]) => c[1] as string[]);
+      expect(argArrays.some((a: string[]) => a.includes("myuser@users.noreply.github.com"))).toBe(true);
     });
 
     it("throws descriptive error when no PAT or SSH key configured", () => {

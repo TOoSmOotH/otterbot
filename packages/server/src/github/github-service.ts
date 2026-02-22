@@ -1,8 +1,12 @@
-import { execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { getConfig } from "../auth/auth.js";
+
+// Input validation patterns
+const REPO_NAME_RE = /^[a-zA-Z0-9._-]+\/[a-zA-Z0-9._-]+$/;
+const BRANCH_NAME_RE = /^[a-zA-Z0-9._\/-]+$/;
 
 export interface GitHubIssue {
   number: number;
@@ -57,9 +61,22 @@ function gitEnvWithPAT(token: string): Record<string, string> {
 /**
  * Build git config args for an inline credential helper that uses the GIT_PAT env var.
  * This keeps the token out of .git/config and remote URLs.
+ * Returns an array of arguments for use with execFileSync.
  */
-function gitCredentialArgs(): string {
-  return `-c credential.helper="!f() { echo username=x-access-token; echo password=$GIT_PAT; }; f"`;
+function gitCredentialArgs(): string[] {
+  return ["-c", `credential.helper=!f() { echo username=x-access-token; echo password=$GIT_PAT; }; f`];
+}
+
+function validateRepoName(name: string): void {
+  if (!REPO_NAME_RE.test(name)) {
+    throw new Error(`Invalid repository name: ${name}`);
+  }
+}
+
+function validateBranchName(name: string): void {
+  if (!BRANCH_NAME_RE.test(name)) {
+    throw new Error(`Invalid branch name: ${name}`);
+  }
 }
 
 /**
@@ -69,10 +86,10 @@ function configureGitUser(targetDir: string): void {
   const userName = getConfig("github:username") ?? "otterbot";
   const userEmail =
     getConfig("github:email") ?? `${userName}@users.noreply.github.com`;
-  execSync(`git -C ${targetDir} config user.name "${userName}"`, {
+  execFileSync("git", ["-C", targetDir, "config", "user.name", userName], {
     stdio: "pipe",
   });
-  execSync(`git -C ${targetDir} config user.email "${userEmail}"`, {
+  execFileSync("git", ["-C", targetDir, "config", "user.email", userEmail], {
     stdio: "pipe",
   });
 }
@@ -87,6 +104,9 @@ export function cloneRepo(
   targetDir: string,
   branch?: string,
 ): void {
+  validateRepoName(repoFullName);
+  if (branch) validateBranchName(branch);
+
   const token = getConfig("github:token") as string | undefined;
   const sshKeyPath = join(homedir(), ".ssh", "otterbot_github");
   const sshKeyExists = existsSync(sshKeyPath);
@@ -100,14 +120,13 @@ export function cloneRepo(
     if (token) {
       fetchOpts.env = gitEnvWithPAT(token);
     }
-    execSync(
-      token
-        ? `git ${gitCredentialArgs()} -C ${targetDir} fetch --all`
-        : `git -C ${targetDir} fetch --all`,
-      fetchOpts,
-    );
+    const fetchArgs = [
+      ...(token ? gitCredentialArgs() : []),
+      "-C", targetDir, "fetch", "--all",
+    ];
+    execFileSync("git", fetchArgs, fetchOpts);
     if (branch) {
-      execSync(`git -C ${targetDir} checkout ${branch}`, {
+      execFileSync("git", ["-C", targetDir, "checkout", branch], {
         stdio: "pipe",
         timeout: 30_000,
       });
@@ -118,25 +137,25 @@ export function cloneRepo(
       if (token) {
         pullOpts.env = gitEnvWithPAT(token);
       }
-      execSync(
-        token
-          ? `git ${gitCredentialArgs()} -C ${targetDir} pull origin ${branch}`
-          : `git -C ${targetDir} pull origin ${branch}`,
-        pullOpts,
-      );
+      const pullArgs = [
+        ...(token ? gitCredentialArgs() : []),
+        "-C", targetDir, "pull", "origin", branch,
+      ];
+      execFileSync("git", pullArgs, pullOpts);
     }
     return;
   }
 
-  const branchArg = branch ? `--branch ${branch}` : "";
+  const branchArgs = branch ? ["--branch", branch] : [];
   let httpsErr: unknown;
 
   // Try HTTPS+PAT first
   if (token) {
     const httpsUrl = `https://github.com/${repoFullName}.git`;
     try {
-      execSync(
-        `git clone ${gitCredentialArgs()} ${branchArg} ${httpsUrl} ${targetDir}`,
+      execFileSync(
+        "git",
+        ["clone", ...gitCredentialArgs(), ...branchArgs, httpsUrl, targetDir],
         {
           stdio: "pipe",
           timeout: 300_000,
@@ -154,7 +173,7 @@ export function cloneRepo(
   // Fall back to SSH
   if (sshKeyExists) {
     const sshUrl = `git@github.com:${repoFullName}.git`;
-    execSync(`git clone ${branchArg} ${sshUrl} ${targetDir}`, {
+    execFileSync("git", ["clone", ...branchArgs, sshUrl, targetDir], {
       stdio: "pipe",
       timeout: 300_000,
       env: { ...process.env },
