@@ -4,6 +4,14 @@ import { getSocket } from "../../lib/socket";
 import type { ProjectAgentAssignments, ProjectPipelineConfig, PipelineStageConfig } from "@otterbot/shared";
 import { PIPELINE_STAGES } from "@otterbot/shared";
 
+/** Roles that can be assigned a specific coding agent (non-pipeline mode) */
+const ASSIGNABLE_ROLES = [
+  { key: "coder", label: "Coder" },
+  { key: "reviewer", label: "Reviewer" },
+  { key: "security", label: "Security Reviewer" },
+  { key: "tester", label: "Tester" },
+] as const;
+
 /** Available coding agents with their config keys */
 const CODING_AGENTS = [
   { id: "builtin-opencode-coder", label: "OpenCode", enabledKey: "openCodeEnabled" as const },
@@ -22,6 +30,7 @@ const STAGE_SPECIFIC_AGENTS: Record<string, { id: string; label: string }[]> = {
 };
 
 export function ProjectSettings({ projectId }: { projectId: string }) {
+  const [assignments, setAssignments] = useState<ProjectAgentAssignments>({});
   const [pipelineConfig, setPipelineConfig] = useState<ProjectPipelineConfig | null>(null);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -32,13 +41,18 @@ export function ProjectSettings({ projectId }: { projectId: string }) {
   const claudeCodeEnabled = useSettingsStore((s) => s.claudeCodeEnabled);
   const codexEnabled = useSettingsStore((s) => s.codexEnabled);
 
-  // Load pipeline config and project info
+  // Load pipeline config, agent assignments, and project info
   useEffect(() => {
     const socket = getSocket();
 
     // Check if project has GitHub integration
     socket.emit("project:get", { projectId }, (project) => {
       setIsGitHubProject(!!project?.githubRepo);
+    });
+
+    // Load agent assignments (for non-pipeline mode)
+    socket.emit("project:get-agent-assignments", { projectId }, (result) => {
+      setAssignments(result ?? {});
     });
 
     // Load pipeline config
@@ -73,6 +87,21 @@ export function ProjectSettings({ projectId }: { projectId: string }) {
 
   const enabledCodingAgents = CODING_AGENTS.filter(isAgentEnabled);
 
+  // --- Agent assignment handlers (non-pipeline mode) ---
+  const handleAssignmentChange = (role: string, agentId: string) => {
+    setAssignments((prev) => {
+      const next = { ...prev };
+      if (agentId === "") {
+        delete next[role];
+      } else {
+        next[role] = agentId;
+      }
+      return next;
+    });
+    setSaved(false);
+  };
+
+  // --- Pipeline handlers ---
   const handleTogglePipeline = (enabled: boolean) => {
     setPipelineConfig((prev) => prev ? { ...prev, enabled } : null);
     setSaved(false);
@@ -111,13 +140,24 @@ export function ProjectSettings({ projectId }: { projectId: string }) {
     setSaving(true);
     setError(null);
     const socket = getSocket();
+
+    // Save pipeline config
     socket.emit("project:set-pipeline-config", { projectId, config: pipelineConfig }, (ack) => {
-      setSaving(false);
-      if (ack?.ok) {
-        setSaved(true);
-      } else {
+      if (!ack?.ok) {
+        setSaving(false);
         setError(ack?.error ?? "Failed to save pipeline configuration");
+        return;
       }
+
+      // Also save agent assignments (for non-pipeline mode)
+      socket.emit("project:set-agent-assignments", { projectId, assignments }, (ack2) => {
+        setSaving(false);
+        if (ack2?.ok) {
+          setSaved(true);
+        } else {
+          setError(ack2?.error ?? "Failed to save agent assignments");
+        }
+      });
     });
   };
 
@@ -153,7 +193,57 @@ export function ProjectSettings({ projectId }: { projectId: string }) {
           </div>
         </div>
 
-        {/* Pipeline stages */}
+        {/* Agent Assignments (shown when pipeline is OFF) */}
+        {!pipelineConfig.enabled && (
+          <div className="space-y-3">
+            <div>
+              <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                Agent Assignments
+              </h3>
+              <p className="text-xs text-muted-foreground mt-1">
+                Configure which coding agent handles each type of task for this project.
+                Leave as "System Default" to use the global fallback.
+              </p>
+            </div>
+            <div className="space-y-1">
+              {ASSIGNABLE_ROLES.map(({ key, label }) => {
+                const selectedId = assignments[key] ?? "";
+                const selectedAgent = CODING_AGENTS.find((a) => a.id === selectedId);
+                const isDisabled = selectedAgent && !isAgentEnabled(selectedAgent);
+
+                return (
+                  <div
+                    key={key}
+                    className="flex items-center justify-between gap-4 py-2.5 px-3 rounded border border-border bg-secondary/30"
+                  >
+                    <label className="text-sm font-medium min-w-[140px]">{label}</label>
+                    <div className="flex items-center gap-2">
+                      <select
+                        value={selectedId}
+                        onChange={(e) => handleAssignmentChange(key, e.target.value)}
+                        className="text-xs bg-secondary border border-border rounded px-2 py-1 min-w-[180px] focus:outline-none focus:ring-1 focus:ring-primary"
+                      >
+                        <option value="">System Default</option>
+                        {enabledCodingAgents.map((agent) => (
+                          <option key={agent.id} value={agent.id}>
+                            {agent.label}
+                          </option>
+                        ))}
+                      </select>
+                      {isDisabled && (
+                        <span className="text-xs text-yellow-500" title="This agent is currently disabled globally">
+                          (disabled)
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Pipeline stages (shown when pipeline is ON) */}
         {pipelineConfig.enabled && (
           <div className="space-y-2">
             <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
