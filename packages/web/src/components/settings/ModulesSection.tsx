@@ -3,6 +3,7 @@ import { cn } from "../../lib/utils";
 
 interface InstalledModule {
   id: string;
+  moduleId?: string;
   name: string;
   version: string;
   source: "git" | "npm" | "local";
@@ -21,6 +22,7 @@ export function ModulesSection() {
   const [showInstall, setShowInstall] = useState(false);
   const [installSource, setInstallSource] = useState<"git" | "npm" | "local">("local");
   const [installUri, setInstallUri] = useState("");
+  const [instanceId, setInstanceId] = useState("");
   const [installing, setInstalling] = useState(false);
   const [installError, setInstallError] = useState<string | null>(null);
   const [togglingId, setTogglingId] = useState<string | null>(null);
@@ -52,13 +54,18 @@ export function ModulesSection() {
       const res = await fetch("/api/modules/install", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ source: installSource, uri: installUri }),
+        body: JSON.stringify({
+          source: installSource,
+          uri: installUri,
+          ...(instanceId.trim() ? { instanceId: instanceId.trim() } : {}),
+        }),
       });
       if (!res.ok) {
         const data = await res.json();
         setInstallError(data.error ?? "Installation failed");
       } else {
         setInstallUri("");
+        setInstanceId("");
         setShowInstall(false);
         await loadModules();
       }
@@ -167,6 +174,19 @@ export function ModulesSection() {
             />
           </div>
 
+          <div>
+            <label className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1 block">
+              Instance ID <span className="normal-case">(optional, for multi-instance)</span>
+            </label>
+            <input
+              type="text"
+              value={instanceId}
+              onChange={(e) => setInstanceId(e.target.value)}
+              placeholder="auto-generated from module name"
+              className="w-full bg-secondary rounded-md px-3 py-1.5 text-sm outline-none focus:ring-1 ring-primary font-mono"
+            />
+          </div>
+
           <div className="flex items-center gap-2">
             <button
               onClick={handleInstall}
@@ -224,7 +244,14 @@ export function ModulesSection() {
                         v{mod.version}
                       </span>
                     </div>
-                    <span className="text-[10px] text-muted-foreground">{mod.id}</span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] text-muted-foreground">{mod.id}</span>
+                      {mod.moduleId && mod.moduleId !== mod.id && (
+                        <span className="text-[10px] text-muted-foreground/60">
+                          (type: {mod.moduleId})
+                        </span>
+                      )}
+                    </div>
                   </div>
                 </div>
 

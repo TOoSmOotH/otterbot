@@ -35,6 +35,7 @@ export function createModuleTools(
 
           return {
             id: m.id,
+            moduleId: m.moduleId ?? m.id,
             name: m.name,
             version: m.version,
             source: m.source,
@@ -100,19 +101,23 @@ export function createModuleTools(
           .describe(
             "The source URI: git clone URL, npm package name, or local filesystem path",
           ),
+        instanceId: z
+          .string()
+          .optional()
+          .describe("Optional instance ID for multi-instance modules. Defaults to the module's manifest ID."),
       }),
-      execute: async ({ source, uri }) => {
+      execute: async ({ source, uri, instanceId }) => {
         try {
           let entry;
           switch (source) {
             case "git":
-              entry = await installFromGit(uri);
+              entry = await installFromGit(uri, instanceId);
               break;
             case "npm":
-              entry = await installFromNpm(uri);
+              entry = await installFromNpm(uri, instanceId);
               break;
             case "local":
-              entry = await installFromLocal(uri);
+              entry = await installFromLocal(uri, instanceId);
               break;
           }
 

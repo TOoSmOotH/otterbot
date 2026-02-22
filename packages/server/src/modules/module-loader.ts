@@ -16,6 +16,8 @@ import { getConfig } from "../auth/auth.js";
 
 export interface LoadedModule {
   id: string;
+  /** Module type ID from manifest (e.g. "github-discussions") */
+  moduleId: string;
   definition: ModuleDefinition;
   context: ModuleContext;
   knowledgeStore: ModuleKnowledgeStore;
@@ -115,6 +117,7 @@ export class ModuleLoader {
 
     const loaded: LoadedModule = {
       id,
+      moduleId: entry.moduleId ?? definition.manifest.id,
       definition,
       context,
       knowledgeStore,

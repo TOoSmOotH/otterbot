@@ -3568,10 +3568,10 @@ Respond with ONLY a JSON object (no markdown, no explanation) with these fields:
     });
   });
 
-  app.post<{ Body: { source: string; uri: string } }>(
+  app.post<{ Body: { source: string; uri: string; instanceId?: string } }>(
     "/api/modules/install",
     async (req, reply) => {
-      const { source, uri } = req.body;
+      const { source, uri, instanceId } = req.body;
       const { installFromGit, installFromLocal, installFromNpm } = await import(
         "./modules/module-installer.js"
       );
@@ -3581,13 +3581,13 @@ Respond with ONLY a JSON object (no markdown, no explanation) with these fields:
         let entry;
         switch (source) {
           case "git":
-            entry = await installFromGit(uri);
+            entry = await installFromGit(uri, instanceId);
             break;
           case "npm":
-            entry = await installFromNpm(uri);
+            entry = await installFromNpm(uri, instanceId);
             break;
           case "local":
-            entry = await installFromLocal(uri);
+            entry = await installFromLocal(uri, instanceId);
             break;
           default:
             return reply.status(400).send({ error: `Invalid source: ${source}` });

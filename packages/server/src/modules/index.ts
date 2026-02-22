@@ -3,12 +3,16 @@
  * Call initModules() after COO creation to wire everything together.
  */
 
+import { resolve } from "node:path";
+import { existsSync } from "node:fs";
 import type { FastifyInstance } from "fastify";
 import type { COO } from "../agents/coo.js";
 import { ModuleLoader } from "./module-loader.js";
 import { ModuleScheduler } from "./module-scheduler.js";
 import { registerModuleWebhooks } from "./module-webhook.js";
 import { createModuleTools } from "./module-tools.js";
+import { getModule, addModule } from "./module-manifest.js";
+import { loadModuleDefinition } from "./module-installer.js";
 
 let _loader: ModuleLoader | null = null;
 let _scheduler: ModuleScheduler | null = null;
@@ -21,11 +25,76 @@ export function getModuleScheduler(): ModuleScheduler | null {
   return _scheduler;
 }
 
+/** Known built-in module directories (checked in order). */
+const BUILTIN_MODULE_DIRS = [
+  "/app/modules",   // Docker
+  "./modules",      // dev / local
+];
+
+/**
+ * Register built-in modules that ship with the app.
+ * Creates disabled manifest entries for any built-in modules not yet tracked.
+ */
+async function registerBuiltins(): Promise<void> {
+  // Find the first existing built-in modules directory
+  let builtinRoot: string | null = null;
+  for (const dir of BUILTIN_MODULE_DIRS) {
+    const abs = resolve(dir);
+    if (existsSync(abs)) {
+      builtinRoot = abs;
+      break;
+    }
+  }
+  if (!builtinRoot) return;
+
+  // Scan for module subdirectories with a package.json
+  const { readdirSync } = await import("node:fs");
+  let entries: string[];
+  try {
+    entries = readdirSync(builtinRoot);
+  } catch {
+    return;
+  }
+
+  for (const name of entries) {
+    const modulePath = resolve(builtinRoot, name);
+    // Skip if already registered under its manifest id
+    try {
+      const definition = await loadModuleDefinition(modulePath);
+      const moduleId = definition.manifest.id;
+
+      // Check if any entry already has this moduleId
+      const existing = getModule(moduleId);
+      if (existing) continue;
+
+      console.log(`[Modules] Registering built-in module: ${definition.manifest.name}`);
+
+      addModule({
+        id: moduleId,
+        moduleId,
+        name: definition.manifest.name,
+        version: definition.manifest.version,
+        source: "local",
+        sourceUri: modulePath,
+        enabled: false,
+        modulePath,
+        installedAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      });
+    } catch {
+      // Not a valid module directory, skip
+    }
+  }
+}
+
 export async function initModules(
   coo: COO,
   app: FastifyInstance,
 ): Promise<void> {
   console.log("[Modules] Initializing module system...");
+
+  // Register built-in modules before loading
+  await registerBuiltins();
 
   const loader = new ModuleLoader();
   const scheduler = new ModuleScheduler();

@@ -153,6 +153,8 @@ export type ModuleSource = "git" | "npm" | "local";
 
 export interface InstalledModule {
   id: string;
+  /** Module type ID from manifest.id (e.g. "github-discussions"). Multiple instances can share the same moduleId. */
+  moduleId: string;
   name: string;
   version: string;
   source: ModuleSource;

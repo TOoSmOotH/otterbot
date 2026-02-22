@@ -78,10 +78,12 @@ async function loadModuleDefinition(
  */
 export async function installFromGit(
   sourceUri: string,
+  instanceId?: string,
 ): Promise<InstalledModule> {
   // Clone the repo
   const repoName = basename(sourceUri, ".git").replace(/^otterbot-module-/, "");
-  const targetDir = moduleDataDir(repoName);
+  const id = instanceId ?? repoName;
+  const targetDir = moduleDataDir(id);
 
   if (existsSync(targetDir)) {
     throw new Error(`Module directory already exists: ${targetDir}`);
@@ -116,7 +118,8 @@ export async function installFromGit(
     const definition = await loadModuleDefinition(targetDir);
 
     const entry: InstalledModule = {
-      id: definition.manifest.id,
+      id: instanceId ?? definition.manifest.id,
+      moduleId: definition.manifest.id,
       name: definition.manifest.name,
       version: definition.manifest.version,
       source: "git",
@@ -141,6 +144,7 @@ export async function installFromGit(
  */
 export async function installFromLocal(
   sourcePath: string,
+  instanceId?: string,
 ): Promise<InstalledModule> {
   const absPath = resolve(sourcePath);
   if (!existsSync(absPath)) {
@@ -148,7 +152,8 @@ export async function installFromLocal(
   }
 
   const definition = await loadModuleDefinition(absPath);
-  const targetDir = moduleDataDir(definition.manifest.id);
+  const id = instanceId ?? definition.manifest.id;
+  const targetDir = moduleDataDir(id);
 
   // Create data dir and symlink for the module code
   mkdirSync(resolve(modulesDir()), { recursive: true });
@@ -165,13 +170,14 @@ export async function installFromLocal(
   }
 
   const entry: InstalledModule = {
-    id: definition.manifest.id,
+    id,
+    moduleId: definition.manifest.id,
     name: definition.manifest.name,
     version: definition.manifest.version,
     source: "local",
     sourceUri: absPath,
     enabled: true,
-    modulePath: targetDir,
+    modulePath: absPath,
     installedAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   };
@@ -185,6 +191,7 @@ export async function installFromLocal(
  */
 export async function installFromNpm(
   packageName: string,
+  instanceId?: string,
 ): Promise<InstalledModule> {
   // Install the package into the server
   const serverRoot = resolve(import.meta.dirname, "../..");
@@ -202,8 +209,10 @@ export async function installFromNpm(
     throw new Error(`Package ${packageName} does not export a valid ModuleDefinition`);
   }
 
+  const id = instanceId ?? definition.manifest.id;
+
   // Create data directory for the module's knowledge DB
-  const dataDir = moduleDataDir(definition.manifest.id);
+  const dataDir = moduleDataDir(id);
   mkdirSync(dataDir, { recursive: true });
 
   // Resolve the installed module path via require.resolve
@@ -223,7 +232,8 @@ export async function installFromNpm(
   }
 
   const entry: InstalledModule = {
-    id: definition.manifest.id,
+    id,
+    moduleId: definition.manifest.id,
     name: definition.manifest.name,
     version: definition.manifest.version,
     source: "npm",
