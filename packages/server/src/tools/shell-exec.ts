@@ -2,6 +2,7 @@ import { tool } from "ai";
 import { z } from "zod";
 import { execSync } from "node:child_process";
 import type { ToolContext } from "./tool-context.js";
+import { getConfig } from "../auth/auth.js";
 
 const DEFAULT_TIMEOUT = 30_000; // 30 seconds
 const MAX_TIMEOUT = 120_000; // 2 minutes
@@ -115,6 +116,10 @@ export function createShellExecTool(ctx: ToolContext) {
           env: {
             ...process.env,
             HOME: ctx.workspacePath,
+            ...(() => {
+              const ghToken = getConfig("github:token");
+              return ghToken ? { GH_TOKEN: ghToken, GITHUB_TOKEN: ghToken } : {};
+            })(),
           },
         });
         const text = output.toString();

@@ -5,18 +5,19 @@ import * as schema from "./schema.js";
 import { resolve, dirname } from "node:path";
 import { mkdirSync } from "node:fs";
 
-function getDbPath(): string {
+export function getDbPath(): string {
   const url = process.env.DATABASE_URL ?? "file:./data/otterbot.db";
   return url.replace(/^file:/, "");
 }
 
+let _sqlite: Database.Database | null = null;
 let _db: ReturnType<typeof drizzle<typeof schema>> | null = null;
 
 export function getDb() {
   if (!_db) {
     const dbPath = resolve(getDbPath());
     mkdirSync(dirname(dbPath), { recursive: true });
-    const sqlite = new Database(dbPath);
+    _sqlite = new Database(dbPath);
 
     // Encrypt the database
     const dbKey = process.env.OTTERBOT_DB_KEY;
@@ -25,13 +26,42 @@ export function getDb() {
         "OTTERBOT_DB_KEY environment variable is required. Set it in your .env file.",
       );
     }
-    sqlite.pragma(`key='${dbKey.replace(/'/g, "''")}'`);
+    _sqlite.pragma(`key='${dbKey.replace(/'/g, "''")}'`);
 
-    sqlite.pragma("journal_mode = WAL");
-    sqlite.pragma("foreign_keys = ON");
-    _db = drizzle(sqlite, { schema });
+    _sqlite.pragma("journal_mode = WAL");
+    _sqlite.pragma("foreign_keys = ON");
+    _db = drizzle(_sqlite, { schema });
   }
   return _db;
+}
+
+export async function backupDatabase(destination: string): Promise<void> {
+  // Ensure DB is initialized
+  getDb();
+  if (!_sqlite) throw new Error("Database not initialized");
+  _sqlite.prepare("VACUUM INTO ?").run(destination);
+}
+
+export function closeDatabase() {
+  if (_sqlite) {
+    _sqlite.close();
+    _sqlite = null;
+    _db = null;
+  }
+}
+
+export function verifyDatabase(path: string, key: string): boolean {
+  try {
+    const testDb = new Database(path, { readonly: true });
+    testDb.pragma(`key='${key.replace(/'/g, "''")}'`);
+    // Try to read from the master table to verify decryption works
+    testDb.prepare("SELECT count(*) FROM sqlite_master").get();
+    testDb.close();
+    return true;
+  } catch (err) {
+    console.error("Database verification failed:", err);
+    return false;
+  }
 }
 
 /** Create all tables if they don't exist */
@@ -40,6 +70,7 @@ export async function migrateDb() {
 
   db.run(sql`CREATE TABLE IF NOT EXISTS agents (
     id TEXT PRIMARY KEY,
+    name TEXT,
     registry_entry_id TEXT,
     role TEXT NOT NULL,
     parent_id TEXT,
@@ -112,6 +143,13 @@ export async function migrateDb() {
     created_at TEXT NOT NULL
   )`);
 
+  // Idempotent migration: add name to agents
+  try {
+    db.run(sql`ALTER TABLE agents ADD COLUMN name TEXT`);
+  } catch {
+    // Column already exists — ignore
+  }
+
   // Idempotent migration: add model_pack_id to registry_entries
   try {
     db.run(sql`ALTER TABLE registry_entries ADD COLUMN model_pack_id TEXT`);
@@ -169,6 +207,28 @@ export async function migrateDb() {
     // Column already exists — ignore
   }
 
+  // Idempotent migration: add GitHub fields to projects
+  try {
+    db.run(sql`ALTER TABLE projects ADD COLUMN github_repo TEXT`);
+  } catch {
+    // Column already exists — ignore
+  }
+  try {
+    db.run(sql`ALTER TABLE projects ADD COLUMN github_branch TEXT`);
+  } catch {
+    // Column already exists — ignore
+  }
+  try {
+    db.run(sql`ALTER TABLE projects ADD COLUMN github_issue_monitor INTEGER NOT NULL DEFAULT 0`);
+  } catch {
+    // Column already exists — ignore
+  }
+  try {
+    db.run(sql`ALTER TABLE projects ADD COLUMN rules TEXT NOT NULL DEFAULT '[]'`);
+  } catch {
+    // Column already exists — ignore
+  }
+
   db.run(sql`CREATE TABLE IF NOT EXISTS kanban_tasks (
     id TEXT PRIMARY KEY,
     project_id TEXT NOT NULL,
@@ -193,6 +253,13 @@ export async function migrateDb() {
   // Idempotent migration: add completion_report to kanban_tasks
   try {
     db.run(sql`ALTER TABLE kanban_tasks ADD COLUMN completion_report TEXT`);
+  } catch {
+    // Column already exists — ignore
+  }
+
+  // Idempotent migration: add retry_count to kanban_tasks
+  try {
+    db.run(sql`ALTER TABLE kanban_tasks ADD COLUMN retry_count INTEGER NOT NULL DEFAULT 0`);
   } catch {
     // Column already exists — ignore
   }
@@ -230,6 +297,20 @@ export async function migrateDb() {
     created_at TEXT NOT NULL
   )`);
 
+  db.run(sql`CREATE TABLE IF NOT EXISTS token_usage (
+    id TEXT PRIMARY KEY,
+    agent_id TEXT NOT NULL,
+    provider TEXT NOT NULL,
+    model TEXT NOT NULL,
+    input_tokens INTEGER NOT NULL DEFAULT 0,
+    output_tokens INTEGER NOT NULL DEFAULT 0,
+    cost INTEGER,
+    project_id TEXT,
+    conversation_id TEXT,
+    message_id TEXT,
+    timestamp TEXT NOT NULL
+  )`);
+
   db.run(sql`CREATE TABLE IF NOT EXISTS agent_activity (
     id TEXT PRIMARY KEY,
     agent_id TEXT NOT NULL,
@@ -241,9 +322,227 @@ export async function migrateDb() {
     timestamp TEXT NOT NULL
   )`);
 
+  db.run(sql`CREATE TABLE IF NOT EXISTS oauth_tokens (
+    provider TEXT NOT NULL,
+    account_id TEXT NOT NULL,
+    access_token TEXT NOT NULL,
+    refresh_token TEXT,
+    expires_at TEXT,
+    scopes TEXT,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (provider, account_id)
+  )`);
+
+  db.run(sql`CREATE TABLE IF NOT EXISTS todos (
+    id TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'todo',
+    priority TEXT NOT NULL DEFAULT 'medium',
+    due_date TEXT,
+    tags TEXT NOT NULL DEFAULT '[]',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  )`);
+
+  // Idempotent migration: add reminder_at to todos
+  try {
+    db.run(sql`ALTER TABLE todos ADD COLUMN reminder_at TEXT`);
+  } catch {
+    // Column already exists — ignore
+  }
+
+  db.run(sql`CREATE TABLE IF NOT EXISTS calendar_events (
+    id TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    location TEXT,
+    start TEXT NOT NULL,
+    end TEXT NOT NULL,
+    all_day INTEGER NOT NULL DEFAULT 0,
+    recurrence TEXT,
+    color TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  )`);
+
+  db.run(sql`CREATE TABLE IF NOT EXISTS skills (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    version TEXT NOT NULL DEFAULT '1.0.0',
+    author TEXT NOT NULL DEFAULT '',
+    tools TEXT NOT NULL DEFAULT '[]',
+    capabilities TEXT NOT NULL DEFAULT '[]',
+    parameters TEXT NOT NULL DEFAULT '{}',
+    tags TEXT NOT NULL DEFAULT '[]',
+    body TEXT NOT NULL DEFAULT '',
+    scan_status TEXT NOT NULL DEFAULT 'unscanned',
+    scan_findings TEXT NOT NULL DEFAULT '[]',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  )`);
+
+  db.run(sql`CREATE TABLE IF NOT EXISTS agent_skills (
+    registry_entry_id TEXT NOT NULL,
+    skill_id TEXT NOT NULL,
+    PRIMARY KEY (registry_entry_id, skill_id)
+  )`);
+
+  db.run(sql`CREATE TABLE IF NOT EXISTS custom_tools (
+    id TEXT PRIMARY KEY,
+    name TEXT UNIQUE NOT NULL,
+    description TEXT NOT NULL,
+    parameters TEXT NOT NULL DEFAULT '[]',
+    code TEXT NOT NULL,
+    timeout INTEGER NOT NULL DEFAULT 30000,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  )`);
+
+  // Idempotent migration: add source column to skills
+  try {
+    db.run(sql`ALTER TABLE skills ADD COLUMN source TEXT NOT NULL DEFAULT 'created'`);
+  } catch {
+    // Column already exists — ignore
+  }
+
+  // Idempotent migration: add cloned_from_id column to skills
+  try {
+    db.run(sql`ALTER TABLE skills ADD COLUMN cloned_from_id TEXT`);
+  } catch {
+    // Column already exists — ignore
+  }
+
+  // Coding agent session tables (renamed from opencode_*)
+  db.run(sql`CREATE TABLE IF NOT EXISTS coding_agent_sessions (
+    id TEXT PRIMARY KEY,
+    agent_id TEXT NOT NULL,
+    session_id TEXT NOT NULL DEFAULT '',
+    project_id TEXT,
+    task TEXT NOT NULL DEFAULT '',
+    agent_type TEXT NOT NULL DEFAULT 'opencode',
+    status TEXT NOT NULL DEFAULT 'active',
+    started_at TEXT NOT NULL,
+    completed_at TEXT,
+    terminal_buffer TEXT
+  )`);
+
+  // Idempotent migration: add terminal_buffer column to coding_agent_sessions
+  try {
+    db.run(sql`ALTER TABLE coding_agent_sessions ADD COLUMN terminal_buffer TEXT`);
+  } catch {
+    // Column already exists — ignore
+  }
+
+  db.run(sql`CREATE TABLE IF NOT EXISTS coding_agent_messages (
+    id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    agent_id TEXT NOT NULL,
+    role TEXT NOT NULL,
+    parts TEXT NOT NULL DEFAULT '[]',
+    created_at TEXT NOT NULL
+  )`);
+
+  db.run(sql`CREATE TABLE IF NOT EXISTS coding_agent_diffs (
+    id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    path TEXT NOT NULL,
+    additions INTEGER NOT NULL DEFAULT 0,
+    deletions INTEGER NOT NULL DEFAULT 0
+  )`);
+
+  // Soul documents table
+  db.run(sql`CREATE TABLE IF NOT EXISTS soul_documents (
+    id TEXT PRIMARY KEY,
+    agent_role TEXT NOT NULL,
+    registry_entry_id TEXT,
+    content TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE(agent_role, registry_entry_id)
+  )`);
+
+  // Memories table
+  db.run(sql`CREATE TABLE IF NOT EXISTS memories (
+    id TEXT PRIMARY KEY,
+    category TEXT NOT NULL DEFAULT 'general',
+    content TEXT NOT NULL,
+    source TEXT NOT NULL DEFAULT 'user',
+    agent_scope TEXT,
+    project_id TEXT,
+    importance INTEGER NOT NULL DEFAULT 5,
+    access_count INTEGER NOT NULL DEFAULT 0,
+    last_accessed_at TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  )`);
+
+  // Memory episodes table (daily logs)
+  db.run(sql`CREATE TABLE IF NOT EXISTS memory_episodes (
+    id TEXT PRIMARY KEY,
+    date TEXT NOT NULL,
+    project_id TEXT,
+    summary TEXT NOT NULL,
+    key_decisions TEXT NOT NULL DEFAULT '[]',
+    created_at TEXT NOT NULL
+  )`);
+
+  // Custom scheduled tasks
+  db.run(sql`CREATE TABLE IF NOT EXISTS custom_scheduled_tasks (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    message TEXT NOT NULL,
+    mode TEXT NOT NULL DEFAULT 'notification',
+    interval_ms INTEGER NOT NULL,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    last_run_at TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  )`);
+
+  // FTS5 full-text search index for memories
+  try {
+    db.run(sql`CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(
+      id UNINDEXED,
+      content,
+      category,
+      tokenize='porter unicode61'
+    )`);
+  } catch (err) {
+    console.warn("[DB] FTS5 table creation (non-fatal):", err);
+  }
+
+  // Idempotent migration: rename old opencode_* tables to coding_agent_*
+  try {
+    // Check if old tables exist and new ones are empty (migration needed)
+    const oldExists = db.get(sql`SELECT name FROM sqlite_master WHERE type='table' AND name='opencode_sessions'`);
+    if (oldExists) {
+      // Copy data from old tables to new ones
+      db.run(sql`INSERT OR IGNORE INTO coding_agent_sessions (id, agent_id, session_id, project_id, task, agent_type, status, started_at, completed_at)
+        SELECT id, agent_id, session_id, project_id, task, 'opencode', status, started_at, completed_at FROM opencode_sessions`);
+      db.run(sql`INSERT OR IGNORE INTO coding_agent_messages (id, session_id, agent_id, role, parts, created_at)
+        SELECT id, session_id, agent_id, role, parts, created_at FROM opencode_messages`);
+      db.run(sql`INSERT OR IGNORE INTO coding_agent_diffs (id, session_id, path, additions, deletions)
+        SELECT id, session_id, path, additions, deletions FROM opencode_diffs`);
+      // Drop old tables
+      db.run(sql`DROP TABLE IF EXISTS opencode_sessions`);
+      db.run(sql`DROP TABLE IF EXISTS opencode_messages`);
+      db.run(sql`DROP TABLE IF EXISTS opencode_diffs`);
+      console.log("[DB] Migrated opencode_* tables to coding_agent_*");
+    }
+  } catch (err) {
+    console.warn("[DB] opencode → coding_agent table migration (non-fatal):", err);
+  }
+
   // Seed built-in registry entries on every startup (dynamic import to avoid circular dep)
   const { seedBuiltIns } = await import("./seed.js");
   seedBuiltIns();
+
+  // Seed built-in skills and their assignments on every startup
+  const { seedBuiltInSkills } = await import("../skills/seed-skills.js");
+  seedBuiltInSkills();
 
   // One-time migration: move provider credentials from config KV to providers table
   await migrateProviders(db);
@@ -336,7 +635,7 @@ async function migrateProviders(db: ReturnType<typeof drizzle<typeof schema>>) {
 
 /** Reset the DB singleton (for testing) */
 export function resetDb() {
-  _db = null;
+  closeDatabase();
 }
 
 export { schema };

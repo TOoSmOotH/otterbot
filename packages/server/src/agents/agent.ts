@@ -10,12 +10,27 @@ import {
 import { getDb, schema } from "../db/index.js";
 import type { MessageBus } from "../bus/message-bus.js";
 import type { ChatMessage, LLMConfig } from "../llm/adapter.js";
-import { stream } from "../llm/adapter.js";
+import { stream, resolveProviderCredentials } from "../llm/adapter.js";
 import { RetryError } from "ai";
+import {
+  containsKimiToolMarkup,
+  findToolMarkupStart,
+  formatToolsForPrompt,
+  parseKimiToolCalls,
+  usesTextToolCalling,
+} from "../llm/kimi-tool-parser.js";
 import { eq } from "drizzle-orm";
+import { calculateCost } from "../settings/model-pricing.js";
+import { getCircuitBreaker, isProviderAvailable } from "../llm/circuit-breaker.js";
+import { debug } from "../utils/debug.js";
+import { SoulService } from "../memory/soul-service.js";
+import { MemoryService } from "../memory/memory-service.js";
+import { MemoryExtractor } from "../memory/memory-extractor.js";
+import { MemoryCompactor } from "../memory/memory-compactor.js";
 
 export interface AgentOptions {
   id?: string;
+  name?: string | null;
   role: AgentRole;
   parentId: string | null;
   projectId: string | null;
@@ -37,6 +52,7 @@ export interface AgentOptions {
 
 export abstract class BaseAgent {
   readonly id: string;
+  readonly name: string | null;
   readonly role: AgentRole;
   readonly parentId: string | null;
   readonly projectId: string | null;
@@ -54,11 +70,18 @@ export abstract class BaseAgent {
   protected onAgentThinkingEnd?: (agentId: string, messageId: string) => void;
   protected onAgentToolCall?: (agentId: string, toolName: string, args: Record<string, unknown>) => void;
 
+  /** Set by tool guards to signal that the current think() stream should abort after the current step */
+  protected _shouldAbortThink = false;
+
+  /** External abort signal — set by Worker.abort() to cancel running think()/runStream() */
+  protected _externalAbortController: AbortController | null = null;
+
   private messageQueue: BusMessage[] = [];
   private processing = false;
 
   constructor(options: AgentOptions, bus: MessageBus) {
     this.id = options.id ?? nanoid();
+    this.name = options.name ?? null;
     this.role = options.role;
     this.parentId = options.parentId;
     this.projectId = options.projectId;
@@ -67,6 +90,18 @@ export abstract class BaseAgent {
     this.gearConfig = options.gearConfig ?? null;
     this.bus = bus;
     this.systemPrompt = options.systemPrompt;
+
+    // Resolve and inject soul document into system prompt
+    try {
+      const soulService = new SoulService();
+      const soulContent = soulService.resolve(this.role, this.registryEntryId);
+      if (soulContent) {
+        this.systemPrompt = `[SOUL]\n${soulContent}\n[/SOUL]\n\n${this.systemPrompt}`;
+      }
+    } catch (err) {
+      // Soul resolution is non-critical — continue without it
+      console.warn(`[Agent ${this.id}] Failed to resolve soul document:`, err);
+    }
 
     this.onStatusChange = options.onStatusChange;
     this.onAgentStream = options.onAgentStream;
@@ -164,7 +199,62 @@ export abstract class BaseAgent {
     onToken?: (token: string, messageId: string) => void,
     onReasoning?: (token: string, messageId: string) => void,
     onReasoningEnd?: (messageId: string) => void,
-  ): Promise<{ text: string; thinking: string | undefined; hadToolCalls: boolean }> {
+  ): Promise<{ text: string; thinking: string | undefined; hadToolCalls: boolean; isError?: boolean; timedOut?: boolean }> {
+    // Reset abort flag at the start of each think cycle
+    this._shouldAbortThink = false;
+
+    // Circuit breaker: reject immediately if provider is known to be down
+    if (!isProviderAvailable(this.llmConfig.provider)) {
+      const breaker = getCircuitBreaker(this.llmConfig.provider);
+      const cooldown = Math.ceil(breaker.remainingCooldownMs / 1000);
+      console.warn(`[Agent ${this.id}] Circuit breaker OPEN for provider ${this.llmConfig.provider} — rejecting (${cooldown}s remaining)`);
+      return {
+        text: `Error: LLM provider "${this.llmConfig.provider}" temporarily unavailable (circuit breaker open, ${cooldown}s cooldown remaining). Retries will resume automatically.`,
+        thinking: undefined,
+        hadToolCalls: false,
+        isError: true,
+      };
+    }
+
+    // Inject relevant memories and recent episodes before the user message
+    try {
+      const memoryService = new MemoryService();
+      const memories = memoryService.search({
+        query: userMessage,
+        agentScope: this.role,
+        projectId: this.projectId,
+        limit: 10,
+      });
+
+      const compactor = new MemoryCompactor();
+      const episodes = compactor.getRecentEpisodes(3, this.projectId);
+
+      const blocks: string[] = [];
+
+      if (memories.length > 0) {
+        const memoryBlock = memories
+          .map((m) => `- [${m.category}] ${m.content}`)
+          .join("\n");
+        blocks.push(`Relevant memories:\n${memoryBlock}`);
+      }
+
+      if (episodes.length > 0) {
+        const episodeBlock = episodes
+          .map((e) => `[${e.date}] ${e.summary}`)
+          .join("\n");
+        blocks.push(`Recent activity:\n${episodeBlock}`);
+      }
+
+      if (blocks.length > 0) {
+        this.conversationHistory.push({
+          role: "system",
+          content: `[MEMORY]\n${blocks.join("\n\n")}\n[/MEMORY]`,
+        });
+      }
+    } catch (err) {
+      console.warn(`[Agent ${this.id}] Failed to inject memories:`, err);
+    }
+
     this.conversationHistory.push({ role: "user", content: userMessage });
     this.setStatus(AgentStatus.Thinking);
     console.log(`[Agent ${this.id}] think() — provider=${this.llmConfig.provider} model=${this.llmConfig.model}`);
@@ -172,26 +262,87 @@ export abstract class BaseAgent {
     try {
       const tools = this.getTools();
       const hasTools = Object.keys(tools).length > 0;
+      const textToolMode = hasTools && usesTextToolCalling(this.llmConfig.model);
 
-      const { text, thinking, hadToolCalls } = await this.runStream(
-        hasTools ? tools : undefined,
-        onToken,
-        onReasoning,
-        onReasoningEnd,
-      );
+      // For models that use text-based tool calling (e.g. Kimi K2.5), skip the
+      // SDK-tools call entirely — it always returns empty. Go straight to text injection.
+      let text: string;
+      let thinking: string | undefined;
+      let hadToolCalls: boolean;
+      let timedOut: boolean | undefined;
 
-      // If tools were sent and the stream produced NO text AND NO tool calls,
-      // the provider likely doesn't support function calling — retry without tools.
+      if (textToolMode) {
+        text = "";
+        thinking = undefined;
+        hadToolCalls = false;
+        timedOut = false;
+        console.log(`[Agent ${this.id}] Text-tool-calling model detected — skipping SDK tools`);
+      } else {
+        ({ text, thinking, hadToolCalls, timedOut } = await this.runStream(
+          hasTools ? tools : undefined,
+          onToken,
+          onReasoning,
+          onReasoningEnd,
+        ));
+        getCircuitBreaker(this.llmConfig.provider).recordSuccess();
+      }
+
+      // If tools were available but the stream produced NO text AND NO tool calls,
+      // the provider likely doesn't support function calling — use text injection.
       // IMPORTANT: If tool calls were made (hadToolCalls), do NOT retry — the SDK
       // already executed the tools via their `execute` callbacks during the stream.
       if (hasTools && !text && !hadToolCalls) {
-        console.warn(`[Agent ${this.id}] Empty response with tools and no tool calls — retrying without tools`);
+        if (!textToolMode) {
+          console.warn(`[Agent ${this.id}] Empty response with tools and no tool calls — retrying without tools`);
+        }
+
+        // Inject tool descriptions as a system message so models that don't
+        // support structured function calling (e.g. Kimi K2.5) can still
+        // see what tools are available and emit proprietary markup.
+        const toolPrompt = formatToolsForPrompt(tools);
+        if (toolPrompt) {
+          this.conversationHistory.push({ role: "system", content: toolPrompt });
+        }
+
         const retry = await this.runStream(
           undefined,
           onToken,
           onReasoning,
           onReasoningEnd,
         );
+
+        // Remove the injected system message — it was a one-shot injection
+        if (toolPrompt) {
+          const idx = this.conversationHistory.lastIndexOf(
+            this.conversationHistory.find(
+              (m) => m.role === "system" && m.content === toolPrompt,
+            )!,
+          );
+          if (idx !== -1) {
+            this.conversationHistory.splice(idx, 1);
+          }
+        }
+
+        // Check for Kimi tool markup in the retry response
+        if (containsKimiToolMarkup(retry.text)) {
+          console.log(`[Agent ${this.id}] Kimi tool markup detected in retry — executing tool calls`);
+          const result = await this.executeKimiToolCalls(
+            retry.text,
+            retry.thinking,
+            tools,
+            onToken,
+            onReasoning,
+            onReasoningEnd,
+            0,
+          );
+          this.conversationHistory.push({
+            role: "assistant",
+            content: result.text,
+          });
+          this.setStatus(AgentStatus.Idle);
+          return result;
+        }
+
         this.conversationHistory.push({
           role: "assistant",
           content: retry.text,
@@ -209,17 +360,26 @@ export abstract class BaseAgent {
         content: finalText,
       });
       this.setStatus(AgentStatus.Idle);
-      return { text: finalText, thinking, hadToolCalls };
+
+      // Fire-and-forget: extract memories from this conversation turn
+      if (finalText && !hadToolCalls) {
+        new MemoryExtractor()
+          .extract(userMessage, finalText, this.role, this.projectId)
+          .catch(() => {}); // swallow errors silently
+      }
+
+      return { text: finalText, thinking, hadToolCalls, timedOut: timedOut || undefined };
     } catch (error) {
       this.setStatus(AgentStatus.Error);
+      getCircuitBreaker(this.llmConfig.provider).recordFailure();
       if (error instanceof RetryError) {
         console.error(`[Agent ${this.id}] Rate limited by provider — retries exhausted`);
-        return { text: "Error: Rate limited by provider — retries exhausted", thinking: undefined, hadToolCalls: false };
+        return { text: "Error: Rate limited by provider — retries exhausted", thinking: undefined, hadToolCalls: false, isError: true };
       }
       const errMsg =
         error instanceof Error ? error.message : "Unknown LLM error";
       console.error(`Agent ${this.id} LLM error:`, errMsg);
-      return { text: `Error: ${errMsg}`, thinking: undefined, hadToolCalls: false };
+      return { text: `Error: ${errMsg}`, thinking: undefined, hadToolCalls: false, isError: true };
     }
   }
 
@@ -241,11 +401,33 @@ export abstract class BaseAgent {
     onToken?: (token: string, messageId: string) => void,
     onReasoning?: (token: string, messageId: string) => void,
     onReasoningEnd?: (messageId: string) => void,
-  ): Promise<{ text: string; thinking: string | undefined; hadToolCalls: boolean }> {
+  ): Promise<{ text: string; thinking: string | undefined; hadToolCalls: boolean; timedOut?: boolean }> {
+    // Create an AbortController so tool guards can stop the stream mid-think
+    const abortController = new AbortController();
+
+    // If an external abort signal fires (e.g. from Worker.abort()), propagate to our controller
+    if (this._externalAbortController) {
+      const externalSignal = this._externalAbortController.signal;
+      if (externalSignal.aborted) {
+        abortController.abort();
+      } else {
+        externalSignal.addEventListener("abort", () => abortController.abort(), { once: true });
+      }
+    }
+
     const result = await stream(
       this.llmConfig,
       this.conversationHistory,
       tools,
+      {
+        abortSignal: abortController.signal,
+        onStepFinish: () => {
+          if (this._shouldAbortThink) {
+            console.log(`[Agent ${this.id}] _shouldAbortThink is set — aborting stream after step`);
+            abortController.abort();
+          }
+        },
+      },
     );
 
     const messageId = nanoid();
@@ -258,22 +440,31 @@ export abstract class BaseAgent {
     const iterator = result.fullStream[Symbol.asyncIterator]();
     const FIRST_CHUNK_TIMEOUT = 30_000;
     const CHUNK_TIMEOUT = 120_000; // 2 min per-chunk timeout for slow models
+    const TOOL_EXEC_TIMEOUT = 25 * 60_000; // 25 min for long-running tool calls (e.g. opencode_task)
 
+    const TIMEOUT_SENTINEL = Symbol("timeout");
     const nextWithTimeout = (timeoutMs: number) =>
       Promise.race([
         iterator.next(),
-        new Promise<{ done: true; value: undefined }>((resolve) =>
-          setTimeout(() => resolve({ done: true, value: undefined }), timeoutMs),
+        new Promise<{ done: true; value: typeof TIMEOUT_SENTINEL }>((resolve) =>
+          setTimeout(() => resolve({ done: true, value: TIMEOUT_SENTINEL }), timeoutMs),
         ),
       ]);
 
     const first = await nextWithTimeout(FIRST_CHUNK_TIMEOUT);
 
     if (first.done) {
-      // Timed out or empty stream
-      console.warn(`[Agent ${this.id}] Stream produced no data within ${FIRST_CHUNK_TIMEOUT / 1000}s (tools=${!!tools})`);
-      return { text: "", thinking: undefined, hadToolCalls: false };
+      const wasTimeout = first.value === TIMEOUT_SENTINEL;
+      console.warn(`[Agent ${this.id}] Stream produced no data within ${FIRST_CHUNK_TIMEOUT / 1000}s (tools=${!!tools}, timeout=${wasTimeout})`);
+      debug("runStream", `First-chunk timeout after ${FIRST_CHUNK_TIMEOUT / 1000}s — agent=${this.id} tools=${!!tools}`);
+      return { text: "", thinking: undefined, hadToolCalls: false, timedOut: wasTimeout };
     }
+
+    // Track whether we've entered Kimi tool-call markup so we can
+    // suppress streaming those tokens to the user.
+    let kimiMarkupDetected = false;
+    // Track pending tool calls — use longer timeout while tools are executing
+    let pendingToolCalls = 0;
 
     // Process first part
     const processPart = (part: any) => {
@@ -286,10 +477,29 @@ export abstract class BaseAgent {
           wasReasoning = false;
           onReasoningEnd?.(messageId);
         }
+
+        // Always accumulate the full response (needed for parsing later)
         fullResponse += part.textDelta;
-        onToken?.(part.textDelta, messageId);
+
+        if (!kimiMarkupDetected) {
+          // Check if we've hit the start of Kimi tool markup
+          const markupIdx = findToolMarkupStart(fullResponse);
+          if (markupIdx !== -1) {
+            kimiMarkupDetected = true;
+            // Emit only the portion of this token that falls before the markup
+            const alreadyEmitted = fullResponse.length - part.textDelta.length;
+            const safeEnd = markupIdx - alreadyEmitted;
+            if (safeEnd > 0) {
+              onToken?.(part.textDelta.slice(0, safeEnd), messageId);
+            }
+          } else {
+            onToken?.(part.textDelta, messageId);
+          }
+        }
+        // If kimiMarkupDetected, swallow the token (don't forward to onToken)
       } else if (part.type === "tool-call") {
         hadToolCalls = true;
+        pendingToolCalls++;
         console.log(`[Agent ${this.id}] Tool call: ${part.toolName}(${JSON.stringify(part.args ?? {}).slice(0, 200)})`);
         this.onAgentToolCall?.(this.id, part.toolName, (part.args ?? {}) as Record<string, unknown>);
         this.persistActivity("tool_call", JSON.stringify(part.args ?? {}), {
@@ -297,6 +507,7 @@ export abstract class BaseAgent {
           args: part.args ?? {},
         }, messageId);
       } else if (part.type === "tool-result") {
+        pendingToolCalls = Math.max(0, pendingToolCalls - 1);
         const resultStr = typeof part.result === "string" ? part.result : JSON.stringify(part.result ?? "");
         console.log(`[Agent ${this.id}] Tool result (${part.toolName}): ${resultStr.slice(0, 300)}`);
       }
@@ -304,11 +515,30 @@ export abstract class BaseAgent {
 
     processPart(first.value);
 
-    // Process remaining parts with per-chunk timeout
-    while (true) {
-      const next = await nextWithTimeout(CHUNK_TIMEOUT);
-      if (next.done) break;
-      processPart(next.value);
+    // Process remaining parts — use longer timeout while tools are executing
+    let midStreamTimedOut = false;
+    try {
+      while (true) {
+        const timeout = pendingToolCalls > 0 ? TOOL_EXEC_TIMEOUT : CHUNK_TIMEOUT;
+        const next = await nextWithTimeout(timeout);
+        if (next.done) {
+          if (next.value === TIMEOUT_SENTINEL) {
+            midStreamTimedOut = true;
+            const timeoutLabel = pendingToolCalls > 0 ? "tool-exec" : "chunk";
+            console.warn(`[Agent ${this.id}] Mid-stream ${timeoutLabel} timeout after ${timeout / 1000}s (accumulated ${fullResponse.length} chars)`);
+            debug("runStream", `Mid-stream ${timeoutLabel} timeout after ${timeout / 1000}s — agent=${this.id} chars=${fullResponse.length}`);
+          }
+          break;
+        }
+        processPart(next.value);
+      }
+    } catch (err: unknown) {
+      // AbortError is expected when _shouldAbortThink fires — treat as stream-done
+      if (err instanceof Error && err.name === "AbortError") {
+        console.log(`[Agent ${this.id}] Stream aborted by tool guard — returning accumulated text`);
+      } else {
+        throw err; // Re-throw unexpected errors
+      }
     }
 
     if (wasReasoning) {
@@ -327,13 +557,159 @@ export abstract class BaseAgent {
     }
 
     console.log(`[Agent ${this.id}] runStream complete — text=${fullResponse.length} chars, thinking=${reasoning.length} chars, toolCalls=${hadToolCalls}`);
-    return { text: fullResponse, thinking: reasoning || undefined, hadToolCalls };
+
+    // Capture token usage from the stream result (fire-and-forget)
+    this.captureTokenUsage(result as any, messageId);
+
+    // Detect Kimi K2.5 proprietary tool-call markup in the response.
+    // If found, execute the tools and recurse for the follow-up response.
+    if (tools && containsKimiToolMarkup(fullResponse)) {
+      console.log(`[Agent ${this.id}] Kimi tool markup detected — executing tool calls`);
+      return this.executeKimiToolCalls(
+        fullResponse,
+        reasoning || undefined,
+        tools,
+        onToken,
+        onReasoning,
+        onReasoningEnd,
+        0,
+      );
+    }
+
+    return { text: fullResponse, thinking: reasoning || undefined, hadToolCalls, timedOut: midStreamTimedOut || undefined };
+  }
+
+  /**
+   * Handle Kimi K2.5 proprietary tool-call markup.
+   *
+   * Parses the markup, executes each tool, pushes assistant + tool messages
+   * into conversation history, and recurses via runStream() so the model
+   * can see the tool results and produce a follow-up response.
+   */
+  private async executeKimiToolCalls(
+    rawResponse: string,
+    thinking: string | undefined,
+    tools: Record<string, unknown>,
+    onToken?: (token: string, messageId: string) => void,
+    onReasoning?: (token: string, messageId: string) => void,
+    onReasoningEnd?: (messageId: string) => void,
+    depth: number = 0,
+  ): Promise<{ text: string; thinking: string | undefined; hadToolCalls: boolean; timedOut?: boolean }> {
+    const MAX_DEPTH = 5;
+    if (depth >= MAX_DEPTH) {
+      console.warn(`[Agent ${this.id}] Kimi tool recursion depth limit (${MAX_DEPTH}) reached — returning as-is`);
+      const { cleanText } = parseKimiToolCalls(rawResponse);
+      return { text: cleanText || rawResponse, thinking, hadToolCalls: true };
+    }
+
+    const { cleanText, toolCalls } = parseKimiToolCalls(rawResponse);
+
+    if (toolCalls.length === 0) {
+      // Markup was malformed — treat as a normal response
+      return { text: rawResponse, thinking, hadToolCalls: false };
+    }
+
+    // Log each tool call
+    for (const tc of toolCalls) {
+      console.log(`[Agent ${this.id}] Kimi tool call: ${tc.name}(${JSON.stringify(tc.args).slice(0, 200)})`);
+      this.onAgentToolCall?.(this.id, tc.name, tc.args);
+    }
+
+    // Execute each tool and collect results
+    const toolResults: { toolCallId: string; toolName: string; result: unknown }[] = [];
+    for (const tc of toolCalls) {
+      const toolDef = tools[tc.name] as { execute?: (args: Record<string, unknown>) => Promise<unknown> } | undefined;
+      let result: unknown;
+      if (toolDef?.execute) {
+        try {
+          result = await toolDef.execute(tc.args);
+        } catch (err) {
+          result = `Error: ${err instanceof Error ? err.message : String(err)}`;
+        }
+      } else {
+        result = `Error: Tool "${tc.name}" not found or has no execute method`;
+      }
+      toolResults.push({ toolCallId: tc.toolCallId, toolName: tc.name, result });
+
+      const resultStr = typeof result === "string" ? result : JSON.stringify(result ?? "");
+      console.log(`[Agent ${this.id}] Kimi tool result (${tc.name}): ${resultStr.slice(0, 300)}`);
+    }
+
+    // Push assistant message with tool-call parts into conversation history
+    this.conversationHistory.push({
+      role: "assistant" as const,
+      content: [
+        ...(cleanText ? [{ type: "text" as const, text: cleanText }] : []),
+        ...toolCalls.map((tc) => ({
+          type: "tool-call" as const,
+          toolCallId: tc.toolCallId,
+          toolName: tc.name,
+          args: tc.args,
+        })),
+      ],
+    });
+
+    // Push tool-result message
+    this.conversationHistory.push({
+      role: "tool" as const,
+      content: toolResults.map((tr) => ({
+        type: "tool-result" as const,
+        toolCallId: tr.toolCallId,
+        toolName: tr.toolName,
+        result: typeof tr.result === "string" ? tr.result : JSON.stringify(tr.result ?? ""),
+      })),
+    });
+
+    // Recurse: let the model see tool results and produce a follow-up.
+    // Inject tool descriptions as text (the model doesn't support SDK tools,
+    // which is why we're in this Kimi-markup path in the first place).
+    const toolPrompt = formatToolsForPrompt(tools);
+    if (toolPrompt) {
+      this.conversationHistory.push({ role: "system", content: toolPrompt });
+    }
+
+    const followUp = await this.runStream(undefined, onToken, onReasoning, onReasoningEnd);
+
+    // Remove the injected tool-description system message
+    if (toolPrompt) {
+      const idx = this.conversationHistory.lastIndexOf(
+        this.conversationHistory.find(
+          (m) => m.role === "system" && m.content === toolPrompt,
+        )!,
+      );
+      if (idx !== -1) {
+        this.conversationHistory.splice(idx, 1);
+      }
+    }
+
+    // Combine thinking from both rounds
+    const combinedThinking = [thinking, followUp.thinking].filter(Boolean).join("\n\n");
+
+    // If the follow-up also contains Kimi markup, recurse
+    if (containsKimiToolMarkup(followUp.text)) {
+      return this.executeKimiToolCalls(
+        followUp.text,
+        combinedThinking || undefined,
+        tools,
+        onToken,
+        onReasoning,
+        onReasoningEnd,
+        depth + 1,
+      );
+    }
+
+    return {
+      text: followUp.text,
+      thinking: combinedThinking || undefined,
+      hadToolCalls: true,
+    };
   }
 
   /** Get the agent's data representation */
   toData(): AgentData {
     return {
       id: this.id,
+      name: this.name,
       registryEntryId: this.registryEntryId,
       role: this.role,
       parentId: this.parentId,
@@ -349,6 +725,115 @@ export abstract class BaseAgent {
       workspacePath: null,
       createdAt: new Date().toISOString(),
     };
+  }
+
+  /** Prune conversation history to keep it within bounds.
+   * Uses LLM-based summarization when possible, falling back to truncation. */
+  protected pruneConversationHistory(maxMessages: number = 40): void {
+    if (this.conversationHistory.length <= maxMessages) return;
+
+    const keepRecent = 20;
+    const system = this.conversationHistory[0]; // system prompt
+    const recent = this.conversationHistory.slice(-keepRecent);
+    const pruned = this.conversationHistory.slice(1, -keepRecent);
+
+    // Build a text representation of pruned messages for summarization
+    const prunedText = pruned
+      .map((m) => {
+        const content = typeof m.content === "string" ? m.content : JSON.stringify(m.content);
+        return `[${m.role}]: ${content.slice(0, 300)}`;
+      })
+      .join("\n");
+
+    // Fire-and-forget: try LLM summarization, use truncation as immediate result
+    const truncatedSummary = pruned
+      .map((m) => {
+        const content = typeof m.content === "string" ? m.content : JSON.stringify(m.content);
+        return `[${m.role}]: ${content.slice(0, 150)}`;
+      })
+      .join("\n");
+
+    this.conversationHistory = [
+      system,
+      { role: "system", content: `[History summary — ${pruned.length} older messages condensed]\n${truncatedSummary}` },
+      ...recent,
+    ];
+
+    console.log(`[Agent ${this.id}] Pruned conversation history: ${pruned.length + keepRecent + 1} → ${this.conversationHistory.length} messages`);
+
+    // Async: generate a proper LLM summary and replace the truncated one
+    this.generatePruneSummary(prunedText, pruned.length)
+      .then((llmSummary) => {
+        if (llmSummary && this.conversationHistory.length > 1) {
+          // Replace the truncated summary with the LLM-generated one
+          const summaryIdx = this.conversationHistory.findIndex(
+            (m) => m.role === "system" && typeof m.content === "string" && m.content.includes("[History summary —"),
+          );
+          if (summaryIdx !== -1) {
+            this.conversationHistory[summaryIdx] = {
+              role: "system",
+              content: `[History summary — ${pruned.length} older messages condensed]\n${llmSummary}`,
+            };
+          }
+        }
+      })
+      .catch(() => {}); // swallow errors — truncation is already applied
+
+    // Also extract memories from pruned messages
+    this.extractMemoriesFromPruned(pruned).catch(() => {});
+  }
+
+  /** Generate an LLM summary of pruned conversation messages */
+  private async generatePruneSummary(prunedText: string, messageCount: number): Promise<string | null> {
+    try {
+      const { generate } = await import("../llm/adapter.js");
+      const { getConfig } = await import("../auth/auth.js");
+
+      const provider = getConfig("worker_provider") ?? getConfig("coo_provider");
+      const model = getConfig("worker_model") ?? getConfig("coo_model");
+      if (!provider || !model) return null;
+
+      const result = await generate(
+        { provider, model, temperature: 0, maxRetries: 2 },
+        [
+          {
+            role: "system",
+            content: "Summarize the following conversation history into 3-5 concise bullet points. Focus on key decisions, tasks, and important context. Be brief.",
+          },
+          {
+            role: "user",
+            content: `Summarize these ${messageCount} messages:\n\n${prunedText.slice(0, 4000)}`,
+          },
+        ],
+      );
+
+      return result.text || null;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Extract important facts from pruned messages and save as memories */
+  private async extractMemoriesFromPruned(pruned: ChatMessage[]): Promise<void> {
+    const userMessages = pruned
+      .filter((m) => m.role === "user" && typeof m.content === "string")
+      .map((m) => m.content as string)
+      .join("\n");
+
+    const assistantMessages = pruned
+      .filter((m) => m.role === "assistant" && typeof m.content === "string")
+      .map((m) => m.content as string)
+      .join("\n");
+
+    if (!userMessages && !assistantMessages) return;
+
+    const extractor = new MemoryExtractor();
+    await extractor.extract(
+      userMessages.slice(0, 2000),
+      assistantMessages.slice(0, 2000),
+      this.role,
+      this.projectId,
+    );
   }
 
   /** Reset conversation history to just the system prompt */
@@ -396,10 +881,50 @@ export abstract class BaseAgent {
     }
   }
 
+  /** Fire-and-forget: read usage from the stream result and persist */
+  private captureTokenUsage(result: { usage: Promise<{ promptTokens: number; completionTokens: number }> }, messageId: string) {
+    result.usage
+      .then((usage) => {
+        if (usage.promptTokens > 0 || usage.completionTokens > 0) {
+          this.persistTokenUsage(usage.promptTokens, usage.completionTokens, messageId);
+        }
+      })
+      .catch((err) => {
+        console.error(`[Agent ${this.id}] Failed to read usage:`, err);
+      });
+  }
+
+  /** Insert a token usage record into the database */
+  private persistTokenUsage(inputTokens: number, outputTokens: number, messageId: string) {
+    try {
+      const db = getDb();
+      const resolved = resolveProviderCredentials(this.llmConfig.provider);
+      const cost = calculateCost(this.llmConfig.model, inputTokens, outputTokens);
+      db.insert(schema.tokenUsage)
+        .values({
+          id: nanoid(),
+          agentId: this.id,
+          provider: resolved.type,
+          model: this.llmConfig.model,
+          inputTokens,
+          outputTokens,
+          cost,
+          projectId: this.projectId,
+          messageId,
+          timestamp: new Date().toISOString(),
+        })
+        .run();
+      console.log(`[Agent ${this.id}] Token usage: ${inputTokens} in / ${outputTokens} out, cost=${cost} microcents`);
+    } catch (err) {
+      console.error(`[Agent ${this.id}] Failed to persist token usage:`, err);
+    }
+  }
+
   private persistAgent(options: AgentOptions) {
     const db = getDb();
     const values = {
       id: this.id,
+      name: this.name,
       registryEntryId: this.registryEntryId,
       role: this.role,
       parentId: this.parentId,

@@ -1,11 +1,9 @@
-import { useMemo, useEffect, useCallback } from "react";
+import { useMemo, useCallback, useRef, useEffect } from "react";
 import {
   ReactFlow,
-  Background,
+  Controls,
   type Node,
   type Edge,
-  useNodesState,
-  useEdgesState,
   useReactFlow,
   ReactFlowProvider,
 } from "@xyflow/react";
@@ -76,9 +74,9 @@ function buildLayout(
   for (const agent of activeAgents) {
     const count = levelCounts[agent.role] || 1;
     const idx = levelIndex[agent.role]++;
-    const totalWidth = count * 180;
-    const startX = 300 - totalWidth / 2 + 90;
-    const x = startX + idx * 180;
+    const totalWidth = count * 220;
+    const startX = 300 - totalWidth / 2 + 110;
+    const x = startX + idx * 220;
 
     nodes.push({
       id: agent.id,
@@ -99,7 +97,7 @@ function buildLayout(
         id: `${parentId}-${agent.id}`,
         source: parentId,
         target: agent.id,
-        animated: agent.status === "thinking" || agent.status === "acting",
+        animated: agent.status === "thinking" || agent.status === "acting" || agent.status === "awaiting_input",
         style: { stroke: "hsl(var(--muted-foreground))" },
       });
     }
@@ -110,8 +108,8 @@ function buildLayout(
 
 function getRoleLabel(agent: Agent, cooName?: string): string {
   if (agent.role === "coo") return cooName ?? "COO";
-  if (agent.role === "team_lead") return `Team Lead`;
-  return `Worker ${agent.id.slice(0, 6)}`;
+  if (agent.role === "team_lead") return agent.name ?? "Team Lead";
+  return agent.name ?? `Worker ${agent.id.slice(0, 6)}`;
 }
 
 export function AgentGraph({
@@ -143,21 +141,29 @@ function AgentGraphInner({
     selectAgent(agentId);
   }, [selectAgent]);
 
-  const { nodes: layoutNodes, edges: layoutEdges } = useMemo(
+  const { nodes, edges } = useMemo(
     () => buildLayout(agents, userProfile, handleNodeClick),
     [agents, userProfile, handleNodeClick],
   );
 
-  const [nodes, setNodes, onNodesChange] = useNodesState(layoutNodes);
-  const [edges, setEdges, onEdgesChange] = useEdgesState(layoutEdges);
   const { fitView } = useReactFlow();
+  const initializedRef = useRef(false);
+  const prevAgentCountRef = useRef(-1);
+
+  const handleInit = useCallback(() => {
+    initializedRef.current = true;
+    prevAgentCountRef.current = agents.size;
+    fitView();
+  }, [fitView, agents.size]);
 
   useEffect(() => {
-    setNodes(layoutNodes);
-    setEdges(layoutEdges);
-    // Re-fit the view after nodes change so all agents are visible
-    requestAnimationFrame(() => fitView());
-  }, [layoutNodes, layoutEdges, setNodes, setEdges, fitView]);
+    if (!initializedRef.current) return;
+    const currentCount = agents.size;
+    if (prevAgentCountRef.current !== currentCount) {
+      prevAgentCountRef.current = currentCount;
+      requestAnimationFrame(() => fitView());
+    }
+  }, [agents.size, fitView]);
 
   return (
     <div className="flex flex-col h-full">
@@ -185,24 +191,26 @@ function AgentGraphInner({
       </div>
 
       {/* Graph */}
-      <div className="flex-1 relative">
-        <ReactFlow
-          nodes={nodes}
-          edges={edges}
-          onNodesChange={onNodesChange}
-          onEdgesChange={onEdgesChange}
-          nodeTypes={nodeTypes}
-          fitView
-          proOptions={{ hideAttribution: true }}
-          nodesDraggable={false}
-          nodesConnectable={false}
-          zoomOnScroll={false}
-          panOnScroll
-          minZoom={0.5}
-          maxZoom={1.5}
-        >
-          <Background color="hsl(var(--secondary))" gap={20} size={1} />
-        </ReactFlow>
+      <div className="flex-1 relative min-h-0">
+        <div className="absolute inset-0">
+          <ReactFlow
+            nodes={nodes}
+            edges={edges}
+            nodeTypes={nodeTypes}
+            defaultViewport={{ x: 0, y: 0, zoom: 1 }}
+            proOptions={{ hideAttribution: true }}
+            nodesDraggable={false}
+            nodesConnectable={false}
+            onInit={handleInit}
+            zoomOnScroll={true}
+            panOnScroll={false}
+            panOnDrag={true}
+            minZoom={0.5}
+            maxZoom={1.5}
+          >
+            <Controls showInteractive={false} />
+          </ReactFlow>
+        </div>
         {selectedAgentId && <AgentDetailPanel />}
       </div>
     </div>

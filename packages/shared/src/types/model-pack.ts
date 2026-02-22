@@ -6,6 +6,7 @@ export interface ModelPack {
   animations: {
     idle: string;
     action: string;
+    working?: string;
   };
 }
 

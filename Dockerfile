@@ -9,6 +9,7 @@ COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
 COPY packages/shared/package.json ./packages/shared/
 COPY packages/server/package.json ./packages/server/
 COPY packages/web/package.json ./packages/web/
+COPY modules/github-discussions/package.json ./modules/github-discussions/
 RUN pnpm install --frozen-lockfile
 
 # Build
@@ -20,7 +21,7 @@ RUN pnpm build
 FROM base AS production
 RUN apt-get update && apt-get install -y --no-install-recommends \
     tini git curl sudo gnupg apt-transport-https ca-certificates ffmpeg sqlite3 \
-    build-essential pkg-config \
+    build-essential pkg-config iproute2 net-tools \
     # Playwright/Chromium system dependencies
     libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 libcups2 \
     libdrm2 libdbus-1-3 libxkbcommon0 libatspi2.0-0 libxcomposite1 \
@@ -73,6 +74,21 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ruby-full \
     && rm -rf /var/lib/apt/lists/*
 
+# Install coding agents
+# OpenCode + Codex go into /usr/local/lib/otterbot-tools via NPM_CONFIG_PREFIX
+# (NOT /otterbot/tools — that path is overlaid by bind-mounted volumes at runtime)
+# Claude Code uses the native installer → /usr/local/lib/otterbot-tools/claude-home/.local/bin/claude
+ENV NPM_CONFIG_PREFIX=/usr/local/lib/otterbot-tools
+ENV PATH="/usr/local/lib/otterbot-tools/bin:$PATH"
+RUN mkdir -p /usr/local/lib/otterbot-tools /otterbot/home
+RUN npm install -g opencode-ai@latest
+RUN npm install -g @openai/codex@latest
+RUN HOME=/otterbot/home curl -fsSL https://claude.ai/install.sh | HOME=/otterbot/home bash
+
+# Install puppeteer globally so coding agents can import it from any workspace.
+# Skip bundled Chromium download — we reuse Playwright's Chromium via PUPPETEER_EXECUTABLE_PATH.
+RUN PUPPETEER_SKIP_DOWNLOAD=true npm install -g puppeteer
+
 # Create non-root user with configurable UID/GID
 ARG OTTERBOT_UID=1000
 ARG OTTERBOT_GID=1000
@@ -95,6 +111,11 @@ COPY --from=build /app/packages/server/node_modules ./packages/server/node_modul
 COPY --from=build /app/packages/web/dist ./packages/web/dist
 COPY --from=build /app/packages/web/package.json ./packages/web/
 COPY --from=build /app/assets ./assets
+COPY --from=build /app/modules/github-discussions/dist ./modules/github-discussions/dist
+COPY --from=build /app/modules/github-discussions/package.json ./modules/github-discussions/
+# Link @otterbot/shared so built-in modules can resolve it at runtime
+RUN mkdir -p modules/github-discussions/node_modules/@otterbot \
+    && ln -s /app/packages/shared modules/github-discussions/node_modules/@otterbot/shared
 
 # Install Playwright Chromium browser (headless, for agent web browsing)
 # Use a fixed path so both root (build) and otterbot (runtime) can find it
@@ -287,16 +308,14 @@ ENV HOST=0.0.0.0
 ENV DATABASE_URL=file:/otterbot/data/otterbot.db
 ENV WORKSPACE_ROOT=/otterbot
 ENV HOME=/otterbot/home
-
-# Runtime tools installed via bootstrap.sh persist on the bind-mounted volume
-ENV NPM_CONFIG_PREFIX=/otterbot/tools
-ENV PATH="/otterbot/tools/bin:$PATH"
+ENV PATH="/otterbot/home/.local/bin:$PATH"
 
 ENV GOPATH=/otterbot/home/go
 ENV PATH="/otterbot/home/go/bin:$PATH"
 ENV VIRTUAL_ENV=/otterbot/home/.venv
 ENV PATH="/otterbot/home/.venv/bin:$PATH"
 ENV BROWSER=/usr/local/bin/chromium-browser
+ENV PUPPETEER_EXECUTABLE_PATH=/usr/local/bin/chromium-browser
 ENV ENABLE_DESKTOP=true
 ENV DESKTOP_RESOLUTION=1280x720x24
 ENV VNC_PORT=5900

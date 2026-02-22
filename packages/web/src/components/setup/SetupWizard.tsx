@@ -4,11 +4,29 @@ import { useModelPackStore } from "../../stores/model-pack-store";
 import { CharacterSelect } from "../character-select/CharacterSelect";
 import { DEFAULT_AVATARS } from "./default-avatars";
 import type { GearConfig } from "@otterbot/shared";
+import { ModelPricingPrompt } from "../settings/ModelPricingPrompt";
 
 const SUGGESTED_MODELS: Record<string, string[]> = {
   anthropic: ["claude-sonnet-4-5-20250929", "claude-haiku-4-20250414"],
   openai: ["gpt-4o", "gpt-4o-mini"],
   ollama: ["llama3.1", "mistral", "codellama"],
+  openrouter: [
+    "anthropic/claude-sonnet-4-5-20250929",
+    "openai/gpt-4o",
+    "google/gemini-2.0-flash-exp:free",
+  ],
+  "openai-compatible": [],
+};
+
+const CODING_SUGGESTED_MODELS: Record<string, string[]> = {
+  anthropic: ["claude-sonnet-4-5-20250929", "claude-opus-4-20250514"],
+  openai: ["gpt-4.1", "gpt-4o", "o3-mini"],
+  ollama: ["qwen2.5-coder", "codellama", "deepseek-coder-v2"],
+  openrouter: [
+    "anthropic/claude-sonnet-4-5-20250929",
+    "openai/gpt-4.1",
+    "deepseek/deepseek-coder",
+  ],
   "openai-compatible": [],
 };
 
@@ -16,11 +34,12 @@ const PROVIDER_DESCRIPTIONS: Record<string, string> = {
   anthropic: "Claude models from Anthropic. Requires an API key.",
   openai: "GPT models from OpenAI. Requires an API key.",
   ollama: "Run local models with Ollama. Requires a base URL.",
+  openrouter: "Access 200+ models through one API. Requires an OpenRouter API key.",
   "openai-compatible":
     "Any OpenAI-compatible API endpoint. Requires a base URL and optionally an API key.",
 };
 
-const NEEDS_API_KEY = new Set(["anthropic", "openai", "openai-compatible"]);
+const NEEDS_API_KEY = new Set(["anthropic", "openai", "openrouter", "openai-compatible"]);
 const NEEDS_BASE_URL = new Set(["ollama", "openai-compatible"]);
 
 const IANA_TIMEZONES = Intl.supportedValuesOf("timeZone");
@@ -95,7 +114,7 @@ function VoiceButton({
 }
 
 export function SetupWizard() {
-  const { providerTypes, completeSetup, error, setError } = useAuthStore();
+  const { providerTypes, setSetupPassphrase, completeSetup, error, setError } = useAuthStore();
 
   const [step, setStep] = useState(1);
   const [provider, setProvider] = useState("");
@@ -109,6 +128,9 @@ export function SetupWizard() {
   const [fetchedModels, setFetchedModels] = useState<string[]>([]);
   const [fetchingModels, setFetchingModels] = useState(false);
   const probeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [modelDropdownOpen, setModelDropdownOpen] = useState(false);
+  const [modelFilter, setModelFilter] = useState("");
+  const modelComboRef = useRef<HTMLDivElement>(null);
 
   // Step 3: Profile
   const [displayName, setDisplayName] = useState("");
@@ -128,6 +150,11 @@ export function SetupWizard() {
   const [cooName, setCooName] = useState("");
   const [cooModelPackId, setCooModelPackId] = useState<string | null>(null);
   const [cooGearConfig, setCooGearConfig] = useState<GearConfig | null>(null);
+
+  // Step 6: Admin Assistant customization
+  const [adminName, setAdminName] = useState("");
+  const [adminModelPackId, setAdminModelPackId] = useState<string | null>(null);
+  const [adminGearConfig, setAdminGearConfig] = useState<GearConfig | null>(null);
   const modelPacks = useModelPackStore((s) => s.packs);
   const modelPacksLoading = useModelPackStore((s) => s.loading);
   const loadPacks = useModelPackStore((s) => s.loadPacks);
@@ -148,6 +175,21 @@ export function SetupWizard() {
   // OpenAI-compatible TTS fields (shown when that provider is selected)
   const [ttsApiKey, setTtsApiKey] = useState("");
   const [ttsBaseUrl, setTtsBaseUrl] = useState("");
+
+  // Step 8: OpenCode coding agent
+  const [openCodeEnabled, setOpenCodeEnabled] = useState(true);
+  const [openCodeInteractive, setOpenCodeInteractive] = useState(false);
+  const [openCodeUseSameProvider, setOpenCodeUseSameProvider] = useState(true);
+  const [openCodeProvider, setOpenCodeProvider] = useState("");
+  const [openCodeModel, setOpenCodeModel] = useState("");
+  const [openCodeApiKey, setOpenCodeApiKey] = useState("");
+  const [openCodeBaseUrl, setOpenCodeBaseUrl] = useState("");
+  const [openCodeFetchedModels, setOpenCodeFetchedModels] = useState<string[]>([]);
+  const [openCodeFetchingModels, setOpenCodeFetchingModels] = useState(false);
+  const openCodeProbeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [openCodeModelDropdownOpen, setOpenCodeModelDropdownOpen] = useState(false);
+  const [openCodeModelFilter, setOpenCodeModelFilter] = useState("");
+  const openCodeModelComboRef = useRef<HTMLDivElement>(null);
 
   const probeModels = useCallback(async (prov: string, key: string, url: string) => {
     const needsKey = NEEDS_API_KEY.has(prov);
@@ -193,9 +235,80 @@ export function SetupWizard() {
     };
   }, [provider, apiKey, baseUrl, probeModels]);
 
+  // Close model dropdown on click outside
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (modelComboRef.current && !modelComboRef.current.contains(e.target as Node)) {
+        setModelDropdownOpen(false);
+      }
+      if (openCodeModelComboRef.current && !openCodeModelComboRef.current.contains(e.target as Node)) {
+        setOpenCodeModelDropdownOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  // OpenCode model probing when credentials change
+  const effectiveOpenCodeProvider = openCodeUseSameProvider ? provider : openCodeProvider;
+  const effectiveOpenCodeApiKey = openCodeUseSameProvider ? apiKey : openCodeApiKey;
+  const effectiveOpenCodeBaseUrl = openCodeUseSameProvider ? baseUrl : openCodeBaseUrl;
+
+  useEffect(() => {
+    if (!effectiveOpenCodeProvider || !openCodeEnabled) return;
+
+    if (openCodeProbeTimerRef.current) clearTimeout(openCodeProbeTimerRef.current);
+    openCodeProbeTimerRef.current = setTimeout(async () => {
+      const needsKey = NEEDS_API_KEY.has(effectiveOpenCodeProvider);
+      const needsUrl = NEEDS_BASE_URL.has(effectiveOpenCodeProvider);
+      if (needsKey && !effectiveOpenCodeApiKey) return;
+      if (needsUrl && !effectiveOpenCodeBaseUrl) return;
+
+      setOpenCodeFetchingModels(true);
+      try {
+        const res = await fetch("/api/setup/probe-models", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            provider: effectiveOpenCodeProvider,
+            apiKey: effectiveOpenCodeApiKey || undefined,
+            baseUrl: effectiveOpenCodeBaseUrl || undefined,
+          }),
+        });
+        if (res.ok) {
+          const data = (await res.json()) as { models: string[] };
+          setOpenCodeFetchedModels(data.models);
+          if (data.models.length > 0) {
+            setOpenCodeModel((prev) => prev || data.models[0]);
+          }
+        }
+      } catch {
+        // Silently fail
+      } finally {
+        setOpenCodeFetchingModels(false);
+      }
+    }, 600);
+
+    return () => {
+      if (openCodeProbeTimerRef.current) clearTimeout(openCodeProbeTimerRef.current);
+    };
+  }, [effectiveOpenCodeProvider, effectiveOpenCodeApiKey, effectiveOpenCodeBaseUrl, openCodeEnabled]);
+
+  // Auto-set default coding model when "same provider" is used
+  useEffect(() => {
+    if (openCodeUseSameProvider && provider && !openCodeModel) {
+      const suggestions = CODING_SUGGESTED_MODELS[provider];
+      if (suggestions && suggestions.length > 0) {
+        setOpenCodeModel(suggestions[0]);
+      }
+    }
+  }, [openCodeUseSameProvider, provider, openCodeModel]);
+
   const handleSelectProvider = (id: string) => {
     setProvider(id);
     setFetchedModels([]);
+    setModelFilter("");
+    setModelDropdownOpen(false);
     // Set default provider name from type label
     const typeMeta = providerTypes.find((pt) => pt.type === id);
     setProviderName(typeMeta?.label || id);
@@ -213,7 +326,23 @@ export function SetupWizard() {
     setError(null);
   };
 
-  const handleNext = () => {
+  const handleNextFromPassphrase = async () => {
+    if (passphrase.length < 8) {
+      setError("Passphrase must be at least 8 characters");
+      return;
+    }
+    if (passphrase !== confirmPassphrase) {
+      setError("Passphrases do not match");
+      return;
+    }
+    const success = await setSetupPassphrase(passphrase);
+    if (success) {
+      setError(null);
+      setStep(2);
+    }
+  };
+
+  const handleNextToProfile = () => {
     if (!provider) {
       setError("Please select a provider");
       return;
@@ -228,19 +357,6 @@ export function SetupWizard() {
     }
     if (NEEDS_BASE_URL.has(provider) && !baseUrl) {
       setError("A base URL is required for this provider");
-      return;
-    }
-    setError(null);
-    setStep(2);
-  };
-
-  const handleNextToProfile = () => {
-    if (passphrase.length < 8) {
-      setError("Passphrase must be at least 8 characters");
-      return;
-    }
-    if (passphrase !== confirmPassphrase) {
-      setError("Passphrases do not match");
       return;
     }
     setError(null);
@@ -280,7 +396,7 @@ export function SetupWizard() {
     setStep(5);
   };
 
-  const handleNextToSearch = () => {
+  const handleNextToAdmin = () => {
     if (!cooName.trim()) {
       setError("A name for your COO is required");
       return;
@@ -289,15 +405,35 @@ export function SetupWizard() {
     setStep(6);
   };
 
-  const handleNextToVoice = () => {
+  const handleNextToSearch = () => {
+    if (!adminName.trim()) {
+      setError("A name for your Admin Assistant is required");
+      return;
+    }
     setError(null);
     setStep(7);
+  };
+
+  const handleNextToOpenCode = () => {
+    setError(null);
+    // Auto-set default coding model if using same provider and no model selected
+    if (openCodeUseSameProvider && provider && !openCodeModel) {
+      const suggestions = CODING_SUGGESTED_MODELS[provider];
+      if (suggestions && suggestions.length > 0) {
+        setOpenCodeModel(suggestions[0]);
+      }
+    }
+    setStep(8);
+  };
+
+  const handleNextToVoice = () => {
+    setError(null);
+    setStep(9);
   };
 
   const handleComplete = async () => {
     setSubmitting(true);
     await completeSetup({
-      passphrase,
       provider,
       providerName: providerName || undefined,
       model,
@@ -317,6 +453,21 @@ export function SetupWizard() {
       searchProvider: searchProvider || undefined,
       searchApiKey: searchApiKey || undefined,
       searchBaseUrl: searchBaseUrl || undefined,
+      adminName: adminName.trim(),
+      adminModelPackId: adminModelPackId || undefined,
+      adminGearConfig: adminGearConfig || undefined,
+      openCodeEnabled: openCodeEnabled || undefined,
+      openCodeInteractive: openCodeEnabled ? openCodeInteractive : undefined,
+      openCodeProvider: openCodeEnabled
+        ? (openCodeUseSameProvider ? provider : openCodeProvider) || undefined
+        : undefined,
+      openCodeModel: openCodeEnabled ? openCodeModel || undefined : undefined,
+      openCodeApiKey: openCodeEnabled && !openCodeUseSameProvider
+        ? openCodeApiKey || undefined
+        : undefined,
+      openCodeBaseUrl: openCodeEnabled && !openCodeUseSameProvider
+        ? openCodeBaseUrl || undefined
+        : undefined,
     });
     setSubmitting(false);
   };
@@ -380,7 +531,7 @@ export function SetupWizard() {
 
           {/* Step indicator */}
           <div className="flex items-center justify-center gap-2 mb-6">
-            {[1, 2, 3, 4, 5, 6, 7].map((s, i) => (
+            {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((s, i) => (
               <div key={s} className="flex items-center gap-2">
                 {i > 0 && (
                   <div className={`w-6 h-px ${step >= s ? "bg-primary" : "bg-muted"}`} />
@@ -393,7 +544,59 @@ export function SetupWizard() {
           {step === 1 && (
             <div className="space-y-4">
               <h2 className="text-sm font-medium">
-                1. Configure your LLM provider
+                1. Set a passphrase to protect the UI
+              </h2>
+              <p className="text-xs text-muted-foreground">
+                You will need this passphrase to access Otterbot. Minimum 8
+                characters.
+              </p>
+
+              <div>
+                <label className="block text-sm text-muted-foreground mb-1.5">
+                  Passphrase
+                </label>
+                <input
+                  type="password"
+                  value={passphrase}
+                  onChange={(e) => setPassphrase(e.target.value)}
+                  placeholder="Enter a passphrase"
+                  autoFocus
+                  className="w-full px-3 py-2 bg-background border border-input rounded-md text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm text-muted-foreground mb-1.5">
+                  Confirm Passphrase
+                </label>
+                <input
+                  type="password"
+                  value={confirmPassphrase}
+                  onChange={(e) => setConfirmPassphrase(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") handleNextFromPassphrase();
+                  }}
+                  placeholder="Confirm your passphrase"
+                  className="w-full px-3 py-2 bg-background border border-input rounded-md text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                />
+              </div>
+
+              {error && <p className="text-sm text-destructive">{error}</p>}
+
+              <button
+                onClick={handleNextFromPassphrase}
+                disabled={!passphrase || !confirmPassphrase}
+                className="w-full px-4 py-2 bg-primary text-primary-foreground text-sm font-medium rounded-md hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              >
+                Next
+              </button>
+            </div>
+          )}
+
+          {step === 2 && (
+            <div className="space-y-4">
+              <h2 className="text-sm font-medium">
+                2. Configure your LLM provider
               </h2>
 
               {/* Provider type cards */}
@@ -476,22 +679,20 @@ export function SetupWizard() {
                   <label className="block text-sm text-muted-foreground mb-1.5">
                     Model
                   </label>
-                  <input
-                    type="text"
-                    value={model}
-                    onChange={(e) => setModel(e.target.value)}
-                    placeholder="Model name"
-                    className="w-full px-3 py-2 bg-background border border-input rounded-md text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-                  />
+
+                  {/* Suggested model chips */}
                   {(() => {
                     const suggested = SUGGESTED_MODELS[provider] ?? [];
-                    const merged = [...new Set([...suggested, ...fetchedModels])];
-                    return merged.length > 0 || fetchingModels ? (
-                      <div className="flex gap-1.5 mt-1.5 flex-wrap items-center">
-                        {merged.map((m) => (
+                    return suggested.length > 0 ? (
+                      <div className="flex gap-1.5 mb-2 flex-wrap">
+                        {suggested.map((m) => (
                           <button
                             key={m}
-                            onClick={() => setModel(m)}
+                            onClick={() => {
+                              setModel(m);
+                              setModelFilter("");
+                              setModelDropdownOpen(false);
+                            }}
                             className={`text-xs px-2 py-0.5 rounded border transition-colors ${
                               model === m
                                 ? "border-primary text-primary"
@@ -501,16 +702,76 @@ export function SetupWizard() {
                             {m}
                           </button>
                         ))}
-                        {fetchingModels && (
-                          <span className="text-xs text-muted-foreground">
-                            Loading models...
-                          </span>
-                        )}
                       </div>
                     ) : null;
                   })()}
+
+                  {/* Searchable model combobox */}
+                  <div ref={modelComboRef} className="relative">
+                    <input
+                      type="text"
+                      value={modelDropdownOpen ? modelFilter : model}
+                      onChange={(e) => {
+                        setModelFilter(e.target.value);
+                        setModel(e.target.value);
+                        setModelDropdownOpen(true);
+                      }}
+                      onFocus={() => {
+                        setModelFilter(model);
+                        setModelDropdownOpen(true);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === "Escape") {
+                          setModelDropdownOpen(false);
+                          (e.target as HTMLInputElement).blur();
+                        }
+                      }}
+                      placeholder="Search or type a model name"
+                      className="w-full px-3 py-2 bg-background border border-input rounded-md text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                    />
+                    {fetchingModels && (
+                      <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">
+                        Loading...
+                      </span>
+                    )}
+                    {!fetchingModels && fetchedModels.length > 0 && !modelDropdownOpen && (
+                      <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">
+                        {fetchedModels.length} models
+                      </span>
+                    )}
+
+                    {/* Dropdown */}
+                    {modelDropdownOpen && fetchedModels.length > 0 && (() => {
+                      const filtered = fetchedModels.filter((m) =>
+                        m.toLowerCase().includes(modelFilter.toLowerCase()),
+                      );
+                      return filtered.length > 0 ? (
+                        <div className="absolute z-50 mt-1 w-full bg-card border border-border rounded-md shadow-md max-h-[300px] overflow-y-auto">
+                          {filtered.map((m) => (
+                            <button
+                              key={m}
+                              onMouseDown={(e) => e.preventDefault()}
+                              onClick={() => {
+                                setModel(m);
+                                setModelFilter("");
+                                setModelDropdownOpen(false);
+                              }}
+                              className={`w-full text-left px-4 py-2.5 text-sm hover:bg-accent transition-colors ${
+                                model === m ? "bg-accent text-accent-foreground" : "text-foreground"
+                              }`}
+                            >
+                              {m}
+                            </button>
+                          ))}
+                        </div>
+                      ) : null;
+                    })()}
+                  </div>
                 </div>
               )}
+
+              {/* Model pricing check */}
+              {provider && model && <ModelPricingPrompt model={model} />}
 
               {/* Model strategy tip */}
               {provider && model && (
@@ -522,58 +783,6 @@ export function SetupWizard() {
                   detailed plans.
                 </div>
               )}
-
-              {error && <p className="text-sm text-destructive">{error}</p>}
-
-              <button
-                onClick={handleNext}
-                disabled={!provider || !model}
-                className="w-full px-4 py-2 bg-primary text-primary-foreground text-sm font-medium rounded-md hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-              >
-                Next
-              </button>
-            </div>
-          )}
-
-          {step === 2 && (
-            <div className="space-y-4">
-              <h2 className="text-sm font-medium">
-                2. Set a passphrase to protect the UI
-              </h2>
-              <p className="text-xs text-muted-foreground">
-                You will need this passphrase to access Otterbot. Minimum 8
-                characters.
-              </p>
-
-              <div>
-                <label className="block text-sm text-muted-foreground mb-1.5">
-                  Passphrase
-                </label>
-                <input
-                  type="password"
-                  value={passphrase}
-                  onChange={(e) => setPassphrase(e.target.value)}
-                  placeholder="Enter a passphrase"
-                  autoFocus
-                  className="w-full px-3 py-2 bg-background border border-input rounded-md text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm text-muted-foreground mb-1.5">
-                  Confirm Passphrase
-                </label>
-                <input
-                  type="password"
-                  value={confirmPassphrase}
-                  onChange={(e) => setConfirmPassphrase(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") handleNextToProfile();
-                  }}
-                  placeholder="Confirm your passphrase"
-                  className="w-full px-3 py-2 bg-background border border-input rounded-md text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-                />
-              </div>
 
               {error && <p className="text-sm text-destructive">{error}</p>}
 
@@ -589,7 +798,7 @@ export function SetupWizard() {
                 </button>
                 <button
                   onClick={handleNextToProfile}
-                  disabled={!passphrase || !confirmPassphrase}
+                  disabled={!provider || !model}
                   className="flex-1 px-4 py-2 bg-primary text-primary-foreground text-sm font-medium rounded-md hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                 >
                   Next
@@ -832,6 +1041,7 @@ export function SetupWizard() {
                 loading={modelPacksLoading}
                 gearConfig={cooGearConfig}
                 onGearConfigChange={setCooGearConfig}
+                excludeIds={[characterPackId].filter(Boolean) as string[]}
               />
 
               {error && <p className="text-sm text-destructive">{error}</p>}
@@ -847,7 +1057,7 @@ export function SetupWizard() {
                   Back
                 </button>
                 <button
-                  onClick={handleNextToSearch}
+                  onClick={handleNextToAdmin}
                   disabled={!cooName.trim()}
                   className="flex-1 px-4 py-2 bg-primary text-primary-foreground text-sm font-medium rounded-md hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                 >
@@ -860,7 +1070,65 @@ export function SetupWizard() {
           {step === 6 && (
             <div className="space-y-4">
               <h2 className="text-sm font-medium">
-                6. Set up web search
+                6. Customize your Admin Assistant
+              </h2>
+              <p className="text-xs text-muted-foreground">
+                Your Admin Assistant handles personal productivity — managing your todos, email (Gmail), and calendar. Give them a name and optionally pick a 3D character.
+              </p>
+
+              {/* Admin Assistant Name */}
+              <div>
+                <label className="block text-sm text-muted-foreground mb-1.5">
+                  Name <span className="text-destructive">*</span>
+                </label>
+                <input
+                  type="text"
+                  value={adminName}
+                  onChange={(e) => setAdminName(e.target.value)}
+                  placeholder="e.g. Pepper, Friday, Sage..."
+                  autoFocus
+                  className="w-full px-3 py-2 bg-background border border-input rounded-md text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                />
+              </div>
+
+              {/* Admin Assistant 3D Character */}
+              <CharacterSelect
+                packs={modelPacks}
+                selected={adminModelPackId}
+                onSelect={(id) => { setAdminModelPackId(id); setAdminGearConfig(null); }}
+                loading={modelPacksLoading}
+                gearConfig={adminGearConfig}
+                onGearConfigChange={setAdminGearConfig}
+                excludeIds={[characterPackId, cooModelPackId].filter(Boolean) as string[]}
+              />
+
+              {error && <p className="text-sm text-destructive">{error}</p>}
+
+              <div className="flex gap-2">
+                <button
+                  onClick={() => {
+                    setStep(5);
+                    setError(null);
+                  }}
+                  className="px-4 py-2 bg-secondary text-secondary-foreground text-sm font-medium rounded-md hover:bg-secondary/80 transition-colors"
+                >
+                  Back
+                </button>
+                <button
+                  onClick={handleNextToSearch}
+                  disabled={!adminName.trim()}
+                  className="flex-1 px-4 py-2 bg-primary text-primary-foreground text-sm font-medium rounded-md hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                  Next
+                </button>
+              </div>
+            </div>
+          )}
+
+          {step === 7 && (
+            <div className="space-y-4">
+              <h2 className="text-sm font-medium">
+                7. Set up web search
               </h2>
               <p className="text-xs text-muted-foreground">
                 Give your agents the ability to search the web. DuckDuckGo works
@@ -932,7 +1200,7 @@ export function SetupWizard() {
               <div className="flex gap-2">
                 <button
                   onClick={() => {
-                    setStep(5);
+                    setStep(6);
                     setError(null);
                   }}
                   className="px-4 py-2 bg-secondary text-secondary-foreground text-sm font-medium rounded-md hover:bg-secondary/80 transition-colors"
@@ -940,7 +1208,7 @@ export function SetupWizard() {
                   Back
                 </button>
                 <button
-                  onClick={handleNextToVoice}
+                  onClick={handleNextToOpenCode}
                   className="flex-1 px-4 py-2 bg-primary text-primary-foreground text-sm font-medium rounded-md hover:bg-primary/90 transition-colors"
                 >
                   Next
@@ -950,7 +1218,7 @@ export function SetupWizard() {
               <button
                 onClick={() => {
                   setSearchProvider("");
-                  handleNextToVoice();
+                  handleNextToOpenCode();
                 }}
                 className="w-full text-xs text-muted-foreground hover:text-foreground transition-colors"
               >
@@ -959,10 +1227,271 @@ export function SetupWizard() {
             </div>
           )}
 
-          {step === 7 && (
+          {step === 8 && (
             <div className="space-y-4">
               <h2 className="text-sm font-medium">
-                7. Choose a voice for your assistant
+                8. Configure Coding Agents
+              </h2>
+              <p className="text-xs text-muted-foreground">
+                Coding agents are autonomous tools that handle multi-file edits, refactoring, and complex code changes.
+                Configure OpenCode below. Claude Code and Codex can be configured later in Settings &gt; Coding Agents.
+              </p>
+
+              {/* Enable toggle */}
+              <label className="flex items-center gap-3 cursor-pointer">
+                <div
+                  onClick={() => setOpenCodeEnabled(!openCodeEnabled)}
+                  className={`relative w-10 h-5 rounded-full transition-colors ${
+                    openCodeEnabled ? "bg-primary" : "bg-muted"
+                  }`}
+                >
+                  <div
+                    className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${
+                      openCodeEnabled ? "translate-x-5" : "translate-x-0.5"
+                    }`}
+                  />
+                </div>
+                <span className="text-sm">Enable OpenCode for coding tasks</span>
+              </label>
+
+              {openCodeEnabled && (
+                <>
+                  {/* Interactive mode toggle */}
+                  <label className="flex items-center gap-3 cursor-pointer">
+                    <div
+                      onClick={() => setOpenCodeInteractive(!openCodeInteractive)}
+                      className={`relative w-10 h-5 rounded-full transition-colors ${
+                        openCodeInteractive ? "bg-primary" : "bg-muted"
+                      }`}
+                    >
+                      <div
+                        className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${
+                          openCodeInteractive ? "translate-x-5" : "translate-x-0.5"
+                        }`}
+                      />
+                    </div>
+                    <div>
+                      <span className="text-sm">Interactive mode</span>
+                      <p className="text-[10px] text-muted-foreground">
+                        Pause and ask for your input instead of running fully autonomously.
+                      </p>
+                    </div>
+                  </label>
+
+                  {/* Same provider checkbox */}
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={openCodeUseSameProvider}
+                      onChange={(e) => {
+                        setOpenCodeUseSameProvider(e.target.checked);
+                        if (e.target.checked) {
+                          setOpenCodeProvider("");
+                          setOpenCodeApiKey("");
+                          setOpenCodeBaseUrl("");
+                          setOpenCodeFetchedModels([]);
+                        }
+                      }}
+                      className="rounded border-border"
+                    />
+                    <span className="text-sm text-muted-foreground">Use same provider as COO</span>
+                  </label>
+
+                  {/* Different provider selection */}
+                  {!openCodeUseSameProvider && (
+                    <>
+                      <div className="grid grid-cols-2 gap-2">
+                        {providerTypes.map((pt) => (
+                          <button
+                            key={pt.type}
+                            onClick={() => {
+                              setOpenCodeProvider(pt.type);
+                              setOpenCodeFetchedModels([]);
+                              setOpenCodeModelFilter("");
+                              setOpenCodeModelDropdownOpen(false);
+                              const suggestions = CODING_SUGGESTED_MODELS[pt.type];
+                              if (suggestions && suggestions.length > 0) {
+                                setOpenCodeModel(suggestions[0]);
+                              } else {
+                                setOpenCodeModel("");
+                              }
+                              if (pt.type === "ollama" && !openCodeBaseUrl) {
+                                setOpenCodeBaseUrl("http://localhost:11434/api");
+                              }
+                            }}
+                            className={`p-3 rounded-md border text-left text-sm transition-colors ${
+                              openCodeProvider === pt.type
+                                ? "border-primary bg-primary/10 text-foreground"
+                                : "border-border bg-background text-muted-foreground hover:border-muted-foreground"
+                            }`}
+                          >
+                            <div className="font-medium">{pt.label}</div>
+                          </button>
+                        ))}
+                      </div>
+
+                      {openCodeProvider && NEEDS_API_KEY.has(openCodeProvider) && (
+                        <div>
+                          <label className="block text-sm text-muted-foreground mb-1.5">API Key</label>
+                          <input
+                            type="password"
+                            value={openCodeApiKey}
+                            onChange={(e) => setOpenCodeApiKey(e.target.value)}
+                            placeholder="sk-..."
+                            className="w-full px-3 py-2 bg-background border border-input rounded-md text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                          />
+                        </div>
+                      )}
+
+                      {openCodeProvider && NEEDS_BASE_URL.has(openCodeProvider) && (
+                        <div>
+                          <label className="block text-sm text-muted-foreground mb-1.5">Base URL</label>
+                          <input
+                            type="text"
+                            value={openCodeBaseUrl}
+                            onChange={(e) => setOpenCodeBaseUrl(e.target.value)}
+                            placeholder="http://localhost:11434/api"
+                            className="w-full px-3 py-2 bg-background border border-input rounded-md text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                          />
+                        </div>
+                      )}
+                    </>
+                  )}
+
+                  {/* Model selector */}
+                  <div>
+                    <label className="block text-sm text-muted-foreground mb-1.5">
+                      Coding Model
+                    </label>
+
+                    {/* Suggested coding model chips */}
+                    {(() => {
+                      const prov = openCodeUseSameProvider ? provider : openCodeProvider;
+                      const suggested = CODING_SUGGESTED_MODELS[prov] ?? [];
+                      return suggested.length > 0 ? (
+                        <div className="flex gap-1.5 mb-2 flex-wrap">
+                          {suggested.map((m) => (
+                            <button
+                              key={m}
+                              onClick={() => {
+                                setOpenCodeModel(m);
+                                setOpenCodeModelFilter("");
+                                setOpenCodeModelDropdownOpen(false);
+                              }}
+                              className={`text-xs px-2 py-0.5 rounded border transition-colors ${
+                                openCodeModel === m
+                                  ? "border-primary text-primary"
+                                  : "border-border text-muted-foreground hover:text-foreground"
+                              }`}
+                            >
+                              {m}
+                            </button>
+                          ))}
+                        </div>
+                      ) : null;
+                    })()}
+
+                    {/* Searchable model combobox */}
+                    <div ref={openCodeModelComboRef} className="relative">
+                      <input
+                        type="text"
+                        value={openCodeModelDropdownOpen ? openCodeModelFilter : openCodeModel}
+                        onChange={(e) => {
+                          setOpenCodeModelFilter(e.target.value);
+                          setOpenCodeModel(e.target.value);
+                          setOpenCodeModelDropdownOpen(true);
+                        }}
+                        onFocus={() => {
+                          setOpenCodeModelFilter(openCodeModel);
+                          setOpenCodeModelDropdownOpen(true);
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === "Escape") {
+                            setOpenCodeModelDropdownOpen(false);
+                            (e.target as HTMLInputElement).blur();
+                          }
+                        }}
+                        placeholder="Search or type a model name"
+                        className="w-full px-3 py-2 bg-background border border-input rounded-md text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                      />
+                      {openCodeFetchingModels && (
+                        <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">
+                          Loading...
+                        </span>
+                      )}
+                      {!openCodeFetchingModels && openCodeFetchedModels.length > 0 && !openCodeModelDropdownOpen && (
+                        <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">
+                          {openCodeFetchedModels.length} models
+                        </span>
+                      )}
+
+                      {openCodeModelDropdownOpen && openCodeFetchedModels.length > 0 && (() => {
+                        const filtered = openCodeFetchedModels.filter((m) =>
+                          m.toLowerCase().includes(openCodeModelFilter.toLowerCase()),
+                        );
+                        return filtered.length > 0 ? (
+                        <div className="absolute z-50 mt-1 w-full bg-card border border-border rounded-md shadow-md max-h-[300px] overflow-y-auto">
+                            {filtered.map((m) => (
+                              <button
+                                key={m}
+                                onMouseDown={(e) => e.preventDefault()}
+                                onClick={() => {
+                                  setOpenCodeModel(m);
+                                  setOpenCodeModelFilter("");
+                                  setOpenCodeModelDropdownOpen(false);
+                                }}
+                              className={`w-full text-left px-4 py-2.5 text-sm hover:bg-accent transition-colors ${
+                                  openCodeModel === m ? "bg-accent text-accent-foreground" : "text-foreground"
+                                }`}
+                              >
+                                {m}
+                              </button>
+                            ))}
+                          </div>
+                        ) : null;
+                      })()}
+                    </div>
+                  </div>
+                </>
+              )}
+
+              {error && <p className="text-sm text-destructive">{error}</p>}
+
+              <div className="flex gap-2">
+                <button
+                  onClick={() => {
+                    setStep(7);
+                    setError(null);
+                  }}
+                  className="px-4 py-2 bg-secondary text-secondary-foreground text-sm font-medium rounded-md hover:bg-secondary/80 transition-colors"
+                >
+                  Back
+                </button>
+                <button
+                  onClick={handleNextToVoice}
+                  disabled={openCodeEnabled && !openCodeModel}
+                  className="flex-1 px-4 py-2 bg-primary text-primary-foreground text-sm font-medium rounded-md hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                  Next
+                </button>
+              </div>
+
+              <button
+                onClick={() => {
+                  setOpenCodeEnabled(false);
+                  handleNextToVoice();
+                }}
+                className="w-full text-xs text-muted-foreground hover:text-foreground transition-colors"
+              >
+                Skip — disable OpenCode
+              </button>
+            </div>
+          )}
+
+          {step === 9 && (
+            <div className="space-y-4">
+              <h2 className="text-sm font-medium">
+                9. Choose a voice for your assistant
               </h2>
               <p className="text-xs text-muted-foreground">
                 Your assistant can speak its responses aloud. Pick a TTS
@@ -1114,7 +1643,7 @@ export function SetupWizard() {
               <div className="flex gap-2">
                 <button
                   onClick={() => {
-                    setStep(6);
+                    setStep(8);
                     setError(null);
                   }}
                   className="px-4 py-2 bg-secondary text-secondary-foreground text-sm font-medium rounded-md hover:bg-secondary/80 transition-colors"

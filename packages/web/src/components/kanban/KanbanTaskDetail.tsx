@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { KanbanTask } from "@otterbot/shared";
 import { KanbanColumn } from "@otterbot/shared";
 import { useProjectStore } from "../../stores/project-store";
@@ -53,6 +53,21 @@ export function KanbanTaskDetail({
     return { id, title: found?.title ?? "(deleted task)", done: found?.column === KanbanColumn.Done };
   });
 
+  const [deleting, setDeleting] = useState(false);
+
+  const handleDelete = useCallback(async () => {
+    if (!window.confirm("Delete this task? This cannot be undone.")) return;
+    setDeleting(true);
+    try {
+      const res = await fetch(`/api/projects/${task.projectId}/tasks/${task.id}`, {
+        method: "DELETE",
+      });
+      if (res.ok) onClose();
+    } finally {
+      setDeleting(false);
+    }
+  }, [task.projectId, task.id, onClose]);
+
   return (
     <div
       className="fixed inset-0 z-50 bg-background/80 backdrop-blur-sm flex items-center justify-center"
@@ -72,12 +87,21 @@ export function KanbanTaskDetail({
               {status.label}
             </span>
           </div>
-          <button
-            onClick={onClose}
-            className="text-muted-foreground hover:text-foreground text-lg leading-none shrink-0 mt-0.5"
-          >
-            &times;
-          </button>
+          <div className="flex items-center gap-1 shrink-0 mt-0.5">
+            <button
+              onClick={handleDelete}
+              disabled={deleting}
+              className="text-xs text-muted-foreground hover:text-red-400 disabled:opacity-50 px-1.5 py-0.5 rounded hover:bg-red-500/10 transition-colors"
+            >
+              {deleting ? "Deleting…" : "Delete"}
+            </button>
+            <button
+              onClick={onClose}
+              className="text-muted-foreground hover:text-foreground text-lg leading-none"
+            >
+              &times;
+            </button>
+          </div>
         </div>
 
         {/* Body */}

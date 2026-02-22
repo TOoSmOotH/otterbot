@@ -1,6 +1,7 @@
 import { mkdirSync, existsSync } from "node:fs";
 import { resolve, normalize, relative } from "node:path";
 import type { AgentRole } from "@otterbot/shared";
+import { createWorktree, removeWorktree } from "../utils/git.js";
 
 export class WorkspaceManager {
   private root: string;
@@ -22,6 +23,7 @@ export class WorkspaceManager {
       resolve(projectPath, "shared", "artifacts"),
       resolve(projectPath, "agents"),
       resolve(projectPath, "repo"),
+      resolve(projectPath, "worktrees"),
     ];
     for (const dir of dirs) {
       mkdirSync(dir, { recursive: true });
@@ -34,6 +36,40 @@ export class WorkspaceManager {
     const agentPath = this.agentPath(projectId, agentId);
     mkdirSync(agentPath, { recursive: true });
     return agentPath;
+  }
+
+  /**
+   * Prepare a git worktree for a coding agent.
+   * Ensures the main repo is initialized and creates a worktree for the agent.
+   */
+  prepareAgentWorktree(projectId: string, agentId: string): string {
+    const repoPath = this.repoPath(projectId);
+    const worktreesPath = this.worktreesPath(projectId);
+
+    // Create worktrees directory if not exists
+    if (!existsSync(worktreesPath)) {
+        mkdirSync(worktreesPath, { recursive: true });
+    }
+
+    const agentWorktreePath = resolve(worktreesPath, agentId);
+
+    // We use a branch name convention "agent/<agentId>"
+    const branchName = `agent/${agentId}`;
+
+    createWorktree(repoPath, agentWorktreePath, branchName);
+
+    return agentWorktreePath;
+  }
+
+  /**
+   * cleanup a git worktree for a coding agent.
+   */
+  cleanupAgentWorktree(projectId: string, agentId: string): void {
+    const repoPath = this.repoPath(projectId);
+    const worktreesPath = this.worktreesPath(projectId);
+    const agentWorktreePath = resolve(worktreesPath, agentId);
+
+    removeWorktree(repoPath, agentWorktreePath);
   }
 
   /** Validate that a path is allowed for the given agent/role */
@@ -70,11 +106,19 @@ export class WorkspaceManager {
     const repo = this.repoPath(projectId);
     if (this.isUnder(normalized, repo)) return true;
 
+    // Agents can access their own worktree
+    const worktree = resolve(this.worktreesPath(projectId), agentId);
+    if (this.isUnder(normalized, worktree)) return true;
+
     // Team leads can read their workers' workspaces
     if (role === "team_lead" && childAgentIds) {
       for (const childId of childAgentIds) {
         const childDir = this.agentPath(projectId, childId);
         if (this.isUnder(normalized, childDir)) return true;
+
+        // Also allow access to child agent worktrees
+        const childWorktree = resolve(this.worktreesPath(projectId), childId);
+        if (this.isUnder(normalized, childWorktree)) return true;
       }
     }
 
@@ -105,6 +149,10 @@ export class WorkspaceManager {
 
   repoPath(projectId: string): string {
     return resolve(this.root, "projects", projectId, "repo");
+  }
+
+  worktreesPath(projectId: string): string {
+    return resolve(this.root, "projects", projectId, "worktrees");
   }
 
   private isUnder(child: string, parent: string): boolean {

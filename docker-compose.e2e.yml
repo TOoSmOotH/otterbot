@@ -10,6 +10,8 @@ services:
       - OTTERBOT_DB_KEY=e2e-test-key-not-secret
       - ENABLE_DESKTOP=false
       - SUDO_MODE=restricted
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     healthcheck:
       test: ["CMD", "curl", "-fk", "https://localhost:62626/api/setup/status"]
       interval: 3s

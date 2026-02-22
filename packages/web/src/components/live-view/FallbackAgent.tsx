@@ -1,14 +1,16 @@
-import { useRef } from "react";
+import { useRef, useState, useEffect } from "react";
 import { useFrame } from "@react-three/fiber";
 import { Html, Sparkles } from "@react-three/drei";
 import type { Mesh } from "three";
 import * as THREE from "three";
+import { useMovementStore } from "../../stores/movement-store";
 
 interface FallbackAgentProps {
   position: [number, number, number];
   label: string;
   role: string;
   status: string;
+  agentId?: string;
   rotationY?: number;
 }
 
@@ -17,6 +19,7 @@ const ROLE_COLORS: Record<string, string> = {
   coo: "#8b5cf6",     // violet
   team_lead: "#f59e0b", // amber
   worker: "#06b6d4",   // cyan
+  admin_assistant: "#e879f9", // pink
 };
 
 const STATUS_COLORS: Record<string, string> = {
@@ -27,16 +30,45 @@ const STATUS_COLORS: Record<string, string> = {
   error: "#ef4444",
 };
 
-export function FallbackAgent({ position, label, role, status, rotationY = 0 }: FallbackAgentProps) {
+export function FallbackAgent({ position, label, role, status, agentId, rotationY = 0 }: FallbackAgentProps) {
   const meshRef = useRef<Mesh>(null);
+  const groupRef = useRef<THREE.Group>(null);
+  const currentRotationRef = useRef(rotationY);
+  const targetPosRef = useRef(new THREE.Vector3(...position));
+  const [isMoving, setIsMoving] = useState(false);
   const color = ROLE_COLORS[role] ?? ROLE_COLORS.worker;
+
+  // Update target position when prop changes
+  useEffect(() => {
+    targetPosRef.current.set(...position);
+  }, [position[0], position[1], position[2]]);
 
   useFrame((_, delta) => {
     if (!meshRef.current) return;
 
+    const ms = agentId ? useMovementStore.getState().getAgentPosition(agentId) : null;
+    const moving = ms?.isMoving ?? false;
+
+    if (moving !== isMoving) setIsMoving(moving);
+
+    // Update group position/rotation for movement
+    if (groupRef.current) {
+      if (moving && ms) {
+        groupRef.current.position.set(...ms.position);
+        currentRotationRef.current = THREE.MathUtils.lerp(currentRotationRef.current, ms.rotationY, delta * 8);
+      } else {
+        groupRef.current.position.lerp(targetPosRef.current, delta * 5);
+        currentRotationRef.current = THREE.MathUtils.lerp(currentRotationRef.current, rotationY, delta * 5);
+      }
+      groupRef.current.rotation.y = currentRotationRef.current;
+    }
+
     // Gentle hover animation
     const baseY = 0.75;
-    if (status === "thinking") {
+    if (moving) {
+      // Bobbing while walking
+      meshRef.current.position.y = baseY + Math.sin(Date.now() * 0.008) * 0.05;
+    } else if (status === "thinking") {
       meshRef.current.position.y = baseY + Math.sin(Date.now() * 0.003) * 0.08;
       meshRef.current.rotation.y += delta * 0.5;
     } else if (status === "acting") {
@@ -49,7 +81,7 @@ export function FallbackAgent({ position, label, role, status, rotationY = 0 }: 
   });
 
   return (
-    <group position={position} rotation={[0, rotationY, 0]}>
+    <group ref={groupRef} position={position} rotation={[0, rotationY, 0]}>
       {/* Capsule body */}
       <mesh ref={meshRef} position={[0, 0.75, 0]} castShadow>
         <capsuleGeometry args={[0.3, 0.8, 8, 16]} />

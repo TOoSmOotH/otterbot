@@ -15,6 +15,7 @@ export function EnvironmentScene({ scene }: EnvironmentSceneProps) {
   const uniqueUrls = useMemo(() => {
     const urls = new Set<string>();
     for (const prop of scene.props) {
+      if (!prop.asset) continue;
       const url = resolveAssetUrl(prop.asset);
       if (url) urls.add(url);
     }

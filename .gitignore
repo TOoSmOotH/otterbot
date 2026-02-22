@@ -14,6 +14,9 @@ dist/
 *.db
 *.db-journal
 
+# MCP
+.mcp.json
+
 # IDE
 .vscode/
 .idea/

@@ -1,4 +1,4 @@
-import { nanoid } from "nanoid";
+import { makeProjectId } from "../utils/slugify.js";
 import { tool } from "ai";
 import { z } from "zod";
 import {
@@ -17,6 +17,7 @@ import { ConversationContextManager } from "./conversation-context.js";
 import { TeamLead } from "./team-lead.js";
 import { getDb, schema } from "../db/index.js";
 import { Registry } from "../registry/registry.js";
+import { SkillService } from "../skills/skill-service.js";
 import type { MessageBus } from "../bus/message-bus.js";
 import type { WorkspaceManager } from "../workspace/workspace.js";
 import { eq, and } from "drizzle-orm";
@@ -31,6 +32,13 @@ import {
   uninstallRepo,
 } from "../packages/packages.js";
 import {
+  fetchIssue,
+  fetchIssues,
+  fetchIssueComments,
+  fetchPullRequest,
+  fetchPullRequests,
+} from "../github/github-service.js";
+import {
   getSettings,
   updateTierDefaults,
   testProvider,
@@ -39,6 +47,7 @@ import {
   setActiveSearchProvider,
   testSearchProvider,
 } from "../settings/settings.js";
+import { createMemorySaveTool } from "../tools/memory-save.js";
 import { getConfiguredSearchProvider } from "../tools/search/providers.js";
 import { getRandomModelPackId } from "../models3d/model-packs.js";
 import { isDesktopEnabled } from "../desktop/desktop.js";
@@ -62,12 +71,20 @@ export interface COODependencies {
   onAgentThinking?: (agentId: string, token: string, messageId: string) => void;
   onAgentThinkingEnd?: (agentId: string, messageId: string) => void;
   onAgentToolCall?: (agentId: string, toolName: string, args: Record<string, unknown>) => void;
+  onCodingAgentEvent?: (agentId: string, sessionId: string, event: { type: string; properties: Record<string, unknown> }) => void;
+  onCodingAgentAwaitingInput?: (agentId: string, sessionId: string, prompt: string) => Promise<string | null>;
+  onCodingAgentPermissionRequest?: (agentId: string, sessionId: string, permission: { id: string; type: string; title: string; pattern?: string | string[]; metadata: Record<string, unknown> }) => Promise<"once" | "always" | "reject">;
+  onTerminalData?: (agentId: string, data: string) => void;
+  onPtySessionRegistered?: (agentId: string, client: import("./worker.js").PtyClient) => void;
+  onPtySessionUnregistered?: (agentId: string) => void;
+  onAgentDestroyed?: (agentId: string) => void;
 }
 
 export class COO extends BaseAgent {
   private teamLeads: Map<string, TeamLead> = new Map();
   private workspace: WorkspaceManager;
   private onAgentSpawned?: (agent: BaseAgent) => void;
+  private _moduleTools: Record<string, unknown> = {};
   private onStream?: (token: string, messageId: string, conversationId: string | null) => void;
   private onThinking?: (token: string, messageId: string, conversationId: string | null) => void;
   private onThinkingEnd?: (messageId: string, conversationId: string | null) => void;
@@ -80,6 +97,14 @@ export class COO extends BaseAgent {
   private _onAgentThinking?: (agentId: string, token: string, messageId: string) => void;
   private _onAgentThinkingEnd?: (agentId: string, messageId: string) => void;
   private _onAgentToolCall?: (agentId: string, toolName: string, args: Record<string, unknown>) => void;
+  private _onCodingAgentEvent?: (agentId: string, sessionId: string, event: { type: string; properties: Record<string, unknown> }) => void;
+  private _onCodingAgentAwaitingInput?: (agentId: string, sessionId: string, prompt: string) => Promise<string | null>;
+  private _onCodingAgentPermissionRequest?: (agentId: string, sessionId: string, permission: { id: string; type: string; title: string; pattern?: string | string[]; metadata: Record<string, unknown> }) => Promise<"once" | "always" | "reject">;
+  private _onTerminalData?: (agentId: string, data: string) => void;
+  private _onPtySessionRegistered?: (agentId: string, client: import("./worker.js").PtyClient) => void;
+  private _onPtySessionUnregistered?: (agentId: string) => void;
+  private onAgentDestroyed?: (agentId: string) => void;
+  private allowedToolNames: Set<string>;
   private contextManager!: ConversationContextManager;
   private activeContextId: string | null = null;
   private currentConversationId: string | null = null;
@@ -156,6 +181,13 @@ The user can see everything on the desktop in real-time.`;
     // tool calls per think(). The default maxSteps=20 lets smaller models
     // loop endlessly between blocked tools.
     this.llmConfig.maxSteps = 5;
+
+    // Derive allowed tools from assigned skills
+    const skillService = new SkillService();
+    const cooEntryId = cooRegistryId ?? "builtin-coo";
+    const skills = skillService.getForAgent(cooEntryId);
+    this.allowedToolNames = new Set(skills.flatMap((s) => s.meta.tools));
+
     this.workspace = deps.workspace;
     this.onAgentSpawned = deps.onAgentSpawned;
     this.onStream = deps.onStream;
@@ -170,7 +202,19 @@ The user can see everything on the desktop in real-time.`;
     this._onAgentThinking = deps.onAgentThinking;
     this._onAgentThinkingEnd = deps.onAgentThinkingEnd;
     this._onAgentToolCall = deps.onAgentToolCall;
+    this._onCodingAgentEvent = deps.onCodingAgentEvent;
+    this._onCodingAgentAwaitingInput = deps.onCodingAgentAwaitingInput;
+    this._onCodingAgentPermissionRequest = deps.onCodingAgentPermissionRequest;
+    this._onTerminalData = deps.onTerminalData;
+    this._onPtySessionRegistered = deps.onPtySessionRegistered;
+    this._onPtySessionUnregistered = deps.onPtySessionUnregistered;
+    this.onAgentDestroyed = deps.onAgentDestroyed;
     this.contextManager = new ConversationContextManager(systemPrompt);
+  }
+
+  /** Register module tools so the COO can query installed modules. */
+  setModuleTools(tools: Record<string, unknown>): void {
+    this._moduleTools = tools;
   }
 
   async handleMessage(message: BusMessage): Promise<void> {
@@ -197,7 +241,7 @@ The user can see everything on the desktop in real-time.`;
     const lines = projects.map(
       (p) => `- [${p.id}] "${p.name}": ${p.description}`,
     );
-    return `\n\n[ACTIVE PROJECTS]\n${lines.join("\n")}\n[/ACTIVE PROJECTS]\n\nConsider the active projects above before deciding whether to create a new one.`;
+    return `\n\n[ACTIVE PROJECTS]\n${lines.join("\n")}\n[/ACTIVE PROJECTS]\n\nRoute related work to an existing project with send_directive, or create a new project if this is a distinct area of work.`;
   }
 
   private async handleCeoMessage(message: BusMessage) {
@@ -255,6 +299,11 @@ The user can see everything on the desktop in real-time.`;
     // Reset per-turn guards for this new think cycle
     this.projectStatusCheckedThisTurn = false;
 
+    // Temporarily swap to an empty history so the LLM only sees the report,
+    // not stale conversation context from an unrelated chat.
+    const savedHistory = this.conversationHistory;
+    this.conversationHistory = [];
+
     // Process the Team Lead's report with a strong instruction to relay.
     // Use thinkWithoutTools so the COO just summarises instead of looping
     // on get_project_status or other tools — it only needs to relay.
@@ -272,15 +321,23 @@ The user can see everything on the desktop in real-time.`;
       },
     );
 
+    // Restore original history (don't pollute it with the report exchange)
+    this.conversationHistory = savedHistory;
+
     // Always relay to CEO — fall back to a raw snippet if LLM returns empty
-    const relay = text.trim()
-      ? text
-      : `Update from Team Lead: ${message.content.slice(0, 500)}${message.content.length > 500 ? "..." : ""}`;
+    // or if it asks for the report instead of summarizing it (LLM confusion)
+    const raw = `Update from Team Lead: ${message.content.slice(0, 500)}${message.content.length > 500 ? "..." : ""}`;
+    const trimmed = text.trim();
+    const looksConfused = !trimmed
+      || /don'?t have the report/i.test(trimmed)
+      || /could you (please )?(provide|share|send)/i.test(trimmed);
+    const relay = looksConfused ? raw : trimmed;
     this.sendMessage(
       null,
       MessageType.Chat,
       relay,
       thinking ? { thinking } : undefined,
+      this.currentConversationId ?? undefined,
     );
   }
 
@@ -316,13 +373,31 @@ The user can see everything on the desktop in real-time.`;
   }
 
   protected getTools(): Record<string, unknown> {
+    const allTools: Record<string, unknown> = this.getAllCooTools();
+
+    // Filter to only the tools declared by assigned skills
+    if (this.allowedToolNames.size > 0) {
+      const filtered: Record<string, unknown> = {};
+      for (const [name, t] of Object.entries(allTools)) {
+        if (this.allowedToolNames.has(name)) {
+          filtered[name] = t;
+        }
+      }
+      return filtered;
+    }
+
+    return allTools;
+  }
+
+  /** All possible COO tools — filtered by skills in getTools() */
+  private getAllCooTools(): Record<string, unknown> {
     return {
       run_command: tool({
         description:
-          "Run a shell command for quick, one-off checks (ls, git log, curl, system status). " +
-          "NEVER use this to create files, write code, or build projects — delegate that to a Team Lead. " +
-          "Output is capped at 50KB. Default timeout: 30s, max: 120s. " +
-          "Pass projectId to run the command inside that project's repo directory.",
+          "Run ONE quick shell command for system-level checks only (e.g. docker ps, uptime, df). " +
+          "NEVER use this to explore project files, list directories, check services, or inspect code — " +
+          "that is the Team Lead's job. Use send_directive to tell the Team Lead what to do. " +
+          "You get at most 1 command per turn. Output is capped at 50KB. Default timeout: 30s, max: 120s.",
         parameters: z.object({
           command: z.string().describe("The shell command to execute"),
           projectId: z.string().optional().describe("Project ID — sets working directory to the project's repo"),
@@ -333,9 +408,9 @@ The user can see everything on the desktop in real-time.`;
         }),
         execute: async ({ command, projectId, timeout }) => {
           this._runCommandCalls++;
-          if (this._runCommandCalls > 3) {
-            return "REFUSED: Too many commands. STOP using run_command and return your response to the CEO now. " +
-              "If you need something built, tested, or started, delegate to a Team Lead — do NOT do it yourself.";
+          if (this._runCommandCalls > 1) {
+            return "REFUSED: You already used your one command this turn. " +
+              "STOP and use send_directive to delegate work to the Team Lead. Do NOT run more commands.";
           }
           const effectiveTimeout = Math.min(timeout ?? 30_000, 120_000);
           let cwd: string | undefined;
@@ -448,7 +523,7 @@ The user can see everything on the desktop in real-time.`;
         }),
         execute: async ({ projectId }) => {
           if (this.projectStatusCheckedThisTurn) {
-            return "ALREADY CHECKED. Do NOT call get_project_status again. Use the status you already have and respond to the CEO now.";
+            return "You already checked project status this turn. Use the information you have to proceed — either send_directive to an existing project or create_project for new work.";
           }
           this.projectStatusCheckedThisTurn = true;
           return this.getProjectStatus(projectId);
@@ -544,6 +619,215 @@ The user can see everything on the desktop in real-time.`;
           }
         },
       }),
+      delegate_to_admin: tool({
+        description:
+          "Delegate a personal/administrative task to the Admin Assistant. " +
+          "Use this for: todos, reminders, email, calendar, and other personal productivity tasks. " +
+          "Do NOT create a project for these — they are personal tasks, not engineering work.",
+        parameters: z.object({
+          request: z.string().describe(
+            "The request to send to the Admin Assistant, in natural language"
+          ),
+        }),
+        execute: async ({ request }) => {
+          const reply = await this.bus.request(
+            {
+              fromAgentId: this.id,
+              toAgentId: "admin-assistant",
+              type: MessageType.Chat,
+              content: request,
+            },
+            30_000,
+          );
+          if (!reply) {
+            return "The Admin Assistant did not respond in time. Please try again.";
+          }
+          return reply.content;
+        },
+      }),
+      github_list_issues: tool({
+        description:
+          "List GitHub issues for a repository. Returns issue number, title, state, labels, and assignees.",
+        parameters: z.object({
+          projectId: z
+            .string()
+            .optional()
+            .describe("Project ID — resolves repo from project config"),
+          repo: z
+            .string()
+            .optional()
+            .describe("Repository in owner/repo format (alternative to projectId)"),
+          state: z
+            .enum(["open", "closed", "all"])
+            .optional()
+            .describe("Filter by state (default: open)"),
+          labels: z
+            .string()
+            .optional()
+            .describe("Comma-separated label names to filter by"),
+          assignee: z
+            .string()
+            .optional()
+            .describe("Filter by assignee login"),
+          per_page: z
+            .number()
+            .int()
+            .min(1)
+            .max(100)
+            .optional()
+            .describe("Number of results per page (default: 30, max: 100)"),
+        }),
+        execute: async ({ projectId, repo, state, labels, assignee, per_page }) => {
+          try {
+            const { repoFullName, token } = this.resolveGitHubRepo(projectId, repo);
+            const issues = await fetchIssues(repoFullName, token, {
+              state: state ?? "open",
+              labels,
+              assignee,
+              per_page,
+            });
+            if (issues.length === 0) return "No issues found matching the filters.";
+            const lines = issues.map((i) => {
+              const lbls = i.labels.map((l) => l.name).join(", ");
+              const assigned = i.assignees.map((a) => a.login).join(", ");
+              return `- #${i.number} [${i.state}] ${i.title}${lbls ? ` (${lbls})` : ""}${assigned ? ` → ${assigned}` : ""}`;
+            });
+            return `Found ${issues.length} issue(s) in ${repoFullName}:\n${lines.join("\n")}`;
+          } catch (err) {
+            return `Error listing issues: ${err instanceof Error ? err.message : String(err)}`;
+          }
+        },
+      }),
+      github_get_issue: tool({
+        description:
+          "Fetch a GitHub issue by number, including its comments.",
+        parameters: z.object({
+          issue_number: z.number().int().describe("The issue number to fetch"),
+          projectId: z
+            .string()
+            .optional()
+            .describe("Project ID — resolves repo from project config"),
+          repo: z
+            .string()
+            .optional()
+            .describe("Repository in owner/repo format (alternative to projectId)"),
+        }),
+        execute: async ({ issue_number, projectId, repo }) => {
+          try {
+            const { repoFullName, token } = this.resolveGitHubRepo(projectId, repo);
+            const [issue, comments] = await Promise.all([
+              fetchIssue(repoFullName, token, issue_number),
+              fetchIssueComments(repoFullName, token, issue_number),
+            ]);
+            let result = `# Issue #${issue.number}: ${issue.title}\n`;
+            result += `State: ${issue.state}\n`;
+            result += `URL: ${issue.html_url}\n`;
+            result += `Labels: ${issue.labels.map((l) => l.name).join(", ") || "none"}\n`;
+            result += `Assignees: ${issue.assignees.map((a) => a.login).join(", ") || "unassigned"}\n`;
+            result += `Created: ${issue.created_at}\n`;
+            result += `Updated: ${issue.updated_at}\n`;
+            result += `\n## Body\n${issue.body ?? "(no description)"}\n`;
+            if (comments.length > 0) {
+              result += `\n## Comments (${comments.length})\n`;
+              for (const c of comments) {
+                result += `\n### @${c.user.login} (${c.created_at})\n${c.body}\n`;
+              }
+            }
+            return result;
+          } catch (err) {
+            return `Error fetching issue: ${err instanceof Error ? err.message : String(err)}`;
+          }
+        },
+      }),
+      github_list_prs: tool({
+        description:
+          "List GitHub pull requests for a repository. Returns PR number, title, state, and branches.",
+        parameters: z.object({
+          projectId: z
+            .string()
+            .optional()
+            .describe("Project ID — resolves repo from project config"),
+          repo: z
+            .string()
+            .optional()
+            .describe("Repository in owner/repo format (alternative to projectId)"),
+          state: z
+            .enum(["open", "closed", "all"])
+            .optional()
+            .describe("Filter by state (default: open)"),
+          per_page: z
+            .number()
+            .int()
+            .min(1)
+            .max(100)
+            .optional()
+            .describe("Number of results per page (default: 30, max: 100)"),
+        }),
+        execute: async ({ projectId, repo, state, per_page }) => {
+          try {
+            const { repoFullName, token } = this.resolveGitHubRepo(projectId, repo);
+            const prs = await fetchPullRequests(repoFullName, token, {
+              state: state ?? "open",
+              per_page,
+            });
+            if (prs.length === 0) return "No pull requests found matching the filters.";
+            const lines = prs.map((pr) => {
+              const merged = pr.merged ? " [merged]" : "";
+              return `- #${pr.number} [${pr.state}${merged}] ${pr.title} (${pr.head.ref} → ${pr.base.ref}) by @${pr.user.login}`;
+            });
+            return `Found ${prs.length} PR(s) in ${repoFullName}:\n${lines.join("\n")}`;
+          } catch (err) {
+            return `Error listing PRs: ${err instanceof Error ? err.message : String(err)}`;
+          }
+        },
+      }),
+      github_get_pr: tool({
+        description:
+          "Fetch a GitHub pull request by number, including its comments.",
+        parameters: z.object({
+          pr_number: z.number().int().describe("The pull request number to fetch"),
+          projectId: z
+            .string()
+            .optional()
+            .describe("Project ID — resolves repo from project config"),
+          repo: z
+            .string()
+            .optional()
+            .describe("Repository in owner/repo format (alternative to projectId)"),
+        }),
+        execute: async ({ pr_number, projectId, repo }) => {
+          try {
+            const { repoFullName, token } = this.resolveGitHubRepo(projectId, repo);
+            const [pr, comments] = await Promise.all([
+              fetchPullRequest(repoFullName, token, pr_number),
+              fetchIssueComments(repoFullName, token, pr_number),
+            ]);
+            let result = `# PR #${pr.number}: ${pr.title}\n`;
+            result += `State: ${pr.state}${pr.merged ? " (merged)" : ""}\n`;
+            result += `URL: ${pr.html_url}\n`;
+            result += `Branches: ${pr.head.ref} → ${pr.base.ref}\n`;
+            result += `Author: @${pr.user.login}\n`;
+            result += `Labels: ${pr.labels.map((l) => l.name).join(", ") || "none"}\n`;
+            result += `Assignees: ${pr.assignees.map((a) => a.login).join(", ") || "unassigned"}\n`;
+            result += `Created: ${pr.created_at}\n`;
+            result += `Updated: ${pr.updated_at}\n`;
+            if (pr.mergeable !== null) {
+              result += `Mergeable: ${pr.mergeable}\n`;
+            }
+            result += `\n## Body\n${pr.body ?? "(no description)"}\n`;
+            if (comments.length > 0) {
+              result += `\n## Comments (${comments.length})\n`;
+              for (const c of comments) {
+                result += `\n### @${c.user.login} (${c.created_at})\n${c.body}\n`;
+              }
+            }
+            return result;
+          } catch (err) {
+            return `Error fetching PR: ${err instanceof Error ? err.message : String(err)}`;
+          }
+        },
+      }),
+      memory_save: createMemorySaveTool(),
       manage_packages: tool({
         description:
           "Manage system packages and apt repositories in the Docker container. " +
@@ -592,10 +876,41 @@ The user can see everything on the desktop in real-time.`;
           return this.managePackages(args);
         },
       }),
+
+      // Module tools (dynamically registered)
+      ...this._moduleTools,
     };
   }
 
-  private static readonly PROJECT_COOLDOWN_MS = 300_000; // 5 minutes
+  private static readonly PROJECT_COOLDOWN_MS = 30_000; // 30 seconds
+
+  /**
+   * Resolve a GitHub repository from either a direct `repo` param (owner/repo)
+   * or a `projectId` (looks up project config). Returns the repo full name and token.
+   */
+  private resolveGitHubRepo(
+    projectId?: string,
+    repo?: string,
+  ): { repoFullName: string; token: string } {
+    const token = getConfig("github:token");
+    if (!token) {
+      throw new Error("GitHub token not configured. Ask the CEO to set github:token in Settings.");
+    }
+    if (repo) {
+      if (!repo.includes("/")) {
+        throw new Error(`Invalid repo format "${repo}". Expected owner/repo (e.g. "octocat/hello-world").`);
+      }
+      return { repoFullName: repo, token };
+    }
+    if (projectId) {
+      const configuredRepo = getConfig(`project:${projectId}:github:repo`);
+      if (!configuredRepo) {
+        throw new Error(`No GitHub repo configured for project "${projectId}". Set it in project settings.`);
+      }
+      return { repoFullName: configuredRepo, token };
+    }
+    throw new Error("Either repo (owner/repo) or projectId must be provided.");
+  }
 
   private async sendDirectiveToTeamLead(
     projectId: string,
@@ -627,7 +942,7 @@ The user can see everything on the desktop in real-time.`;
     const elapsed = Date.now() - this.lastProjectCreatedAt;
     if (elapsed < COO.PROJECT_COOLDOWN_MS) {
       const waitSec = Math.ceil((COO.PROJECT_COOLDOWN_MS - elapsed) / 1000);
-      return `Blocked: a project was created ${Math.floor(elapsed / 1000)}s ago. Wait ${waitSec}s or use get_project_status to check existing projects.`;
+      return `A project was just created ${Math.floor(elapsed / 1000)}s ago. Please wait ${waitSec}s before creating another, or use send_directive to add work to an existing project.`;
     }
 
     // Guard: require checking active projects before creating a new one
@@ -638,10 +953,10 @@ The user can see everything on the desktop in real-time.`;
       .where(eq(schema.projects.status, "active"))
       .all();
     if (activeProjects.length > 0 && !this.projectStatusCheckedThisTurn) {
-      return `Blocked: there are ${activeProjects.length} active project(s). Use send_directive to add work to an existing project, or use get_project_status to check them first. Only create a new project if this is genuinely unrelated work.`;
+      return `There are ${activeProjects.length} active project(s). Call get_project_status first to see if this work fits an existing project, then use send_directive or create_project as appropriate.`;
     }
 
-    const projectId = nanoid();
+    const projectId = makeProjectId(name);
 
     // Create project record
     db.insert(schema.projects)
@@ -665,6 +980,7 @@ The user can see everything on the desktop in real-time.`;
       workspace: this.workspace,
       projectId,
       parentId: this.id,
+      name,
       modelPackId: getRandomModelPackId(),
       onAgentSpawned: this.onAgentSpawned,
       onStatusChange: this.onStatusChange,
@@ -677,6 +993,12 @@ The user can see everything on the desktop in real-time.`;
       onAgentThinking: this._onAgentThinking,
       onAgentThinkingEnd: this._onAgentThinkingEnd,
       onAgentToolCall: this._onAgentToolCall,
+      onCodingAgentEvent: this._onCodingAgentEvent,
+      onCodingAgentAwaitingInput: this._onCodingAgentAwaitingInput,
+      onCodingAgentPermissionRequest: this._onCodingAgentPermissionRequest,
+      onTerminalData: this._onTerminalData,
+      onPtySessionRegistered: this._onPtySessionRegistered,
+      onPtySessionUnregistered: this._onPtySessionUnregistered,
     });
 
     this.teamLeads.set(projectId, teamLead);
@@ -1099,6 +1421,66 @@ The user can see everything on the desktop in real-time.`;
     }
   }
 
+  /**
+   * Spawn a TeamLead for a manually-created (user-initiated) project.
+   * Skips LLM guards (cooldown, duplicate check) since this is user-initiated via the UI.
+   */
+  async spawnTeamLeadForManualProject(
+    projectId: string,
+    githubRepo: string,
+    branch: string,
+    rules: string[],
+  ): Promise<void> {
+    const db = getDb();
+    const project = db.select().from(schema.projects).where(eq(schema.projects.id, projectId)).get();
+    const teamLead = new TeamLead({
+      bus: this.bus,
+      workspace: this.workspace,
+      projectId,
+      parentId: this.id,
+      name: project?.name ?? projectId,
+      modelPackId: getRandomModelPackId(),
+      onAgentSpawned: this.onAgentSpawned,
+      onStatusChange: this.onStatusChange,
+      onKanbanChange: (event, task) => {
+        if (event === "created") this.onKanbanTaskCreated?.(task);
+        else if (event === "updated") this.onKanbanTaskUpdated?.(task);
+        else if (event === "deleted") this.onKanbanTaskDeleted?.(task.id, task.projectId);
+      },
+      onAgentStream: this._onAgentStream,
+      onAgentThinking: this._onAgentThinking,
+      onAgentThinkingEnd: this._onAgentThinkingEnd,
+      onAgentToolCall: this._onAgentToolCall,
+      onCodingAgentEvent: this._onCodingAgentEvent,
+      onCodingAgentAwaitingInput: this._onCodingAgentAwaitingInput,
+      onCodingAgentPermissionRequest: this._onCodingAgentPermissionRequest,
+      onTerminalData: this._onTerminalData,
+      onPtySessionRegistered: this._onPtySessionRegistered,
+      onPtySessionUnregistered: this._onPtySessionUnregistered,
+    });
+
+    this.teamLeads.set(projectId, teamLead);
+    this.onAgentSpawned?.(teamLead);
+
+    // Build GitHub-aware initial directive
+    const rulesBlock = rules.length > 0
+      ? `\nProject rules:\n${rules.map((r) => `- ${r}`).join("\n")}`
+      : "";
+
+    const directive =
+      `You are the Team Lead for a GitHub-linked project.\n\n` +
+      `Repository: ${githubRepo}\n` +
+      `Target branch: ${branch}\n` +
+      `Repository is already cloned to your workspace.\n\n` +
+      `**PR Workflow:** Workers must create feature branches from \`${branch}\`, commit their changes, push, and open a pull request targeting \`${branch}\`.\n` +
+      `Use conventional commits and reference issue numbers where applicable.${rulesBlock}\n\n` +
+      `Await issue-triggered tasks or COO directives.`;
+
+    this.sendMessage(teamLead.id, MessageType.Directive, directive, {
+      projectId,
+    });
+  }
+
   /** Re-spawn TeamLeads for any projects that are still active in the DB */
   async recoverActiveProjects(): Promise<void> {
     const db = getDb();
@@ -1178,6 +1560,7 @@ The user can see everything on the desktop in real-time.`;
       workspace: this.workspace,
       projectId: project.id,
       parentId: this.id,
+      name: project.name,
       modelPackId: getRandomModelPackId(),
       onAgentSpawned: this.onAgentSpawned,
       onStatusChange: this.onStatusChange,
@@ -1190,6 +1573,12 @@ The user can see everything on the desktop in real-time.`;
       onAgentThinking: this._onAgentThinking,
       onAgentThinkingEnd: this._onAgentThinkingEnd,
       onAgentToolCall: this._onAgentToolCall,
+      onCodingAgentEvent: this._onCodingAgentEvent,
+      onCodingAgentAwaitingInput: this._onCodingAgentAwaitingInput,
+      onCodingAgentPermissionRequest: this._onCodingAgentPermissionRequest,
+      onTerminalData: this._onTerminalData,
+      onPtySessionRegistered: this._onPtySessionRegistered,
+      onPtySessionUnregistered: this._onPtySessionUnregistered,
     });
 
     this.teamLeads.set(project.id, teamLead);
@@ -1202,15 +1591,25 @@ The user can see everything on the desktop in real-time.`;
       .where(eq(schema.kanbanTasks.projectId, project.id))
       .all();
 
-    const directive = this.buildRecoveryDirective(project, tasks);
+    // Query recent agent activity for richer recovery context
+    const recentActivity = db
+      .select()
+      .from(schema.agentActivity)
+      .where(eq(schema.agentActivity.projectId, project.id))
+      .all()
+      .filter((a) => a.type === "response")
+      .slice(-10);
+
+    const directive = this.buildRecoveryDirective(project, tasks, recentActivity);
     this.sendMessage(teamLead.id, MessageType.Directive, directive, {
       projectId: project.id,
       projectName: project.name,
+      isRecovery: true,
     });
   }
 
   private buildRecoveryDirective(
-    project: { name: string; description: string; charter: string | null },
+    project: { id: string; name: string; description: string; charter: string | null },
     tasks: Array<{
       id: string;
       title: string;
@@ -1218,6 +1617,11 @@ The user can see everything on the desktop in real-time.`;
       column: string;
       blockedBy: string[];
       completionReport: string | null;
+    }>,
+    recentActivity?: Array<{
+      agentId: string;
+      content: string;
+      timestamp: string;
     }>,
   ): string {
     const lines: string[] = [
@@ -1231,6 +1635,24 @@ The user can see everything on the desktop in real-time.`;
       lines.push(`CHARTER: ${project.charter}`);
     }
 
+    // Include GitHub context if available
+    const ghRepo = getConfig(`project:${project.id}:github:repo`);
+    const ghBranch = getConfig(`project:${project.id}:github:branch`);
+    const ghRulesRaw = getConfig(`project:${project.id}:github:rules`);
+    if (ghRepo) {
+      lines.push(`GITHUB REPO: ${ghRepo}`);
+      lines.push(`TARGET BRANCH: ${ghBranch ?? "main"}`);
+      lines.push(`PR WORKFLOW: Workers must create feature branches from \`${ghBranch ?? "main"}\`, commit, push, and open a PR targeting \`${ghBranch ?? "main"}\`.`);
+      if (ghRulesRaw) {
+        try {
+          const rules = JSON.parse(ghRulesRaw) as string[];
+          if (rules.length > 0) {
+            lines.push(`RULES: ${rules.map((r) => `- ${r}`).join("\n")}`);
+          }
+        } catch { /* ignore parse errors */ }
+      }
+    }
+
     const backlog = tasks.filter((t) => t.column === "backlog");
     const done = tasks.filter((t) => t.column === "done");
 
@@ -1241,9 +1663,20 @@ The user can see everything on the desktop in real-time.`;
         lines.push(`BACKLOG (${backlog.length}):`);
         for (const t of backlog) {
           const blocked = t.blockedBy.length > 0 ? ` [blockedBy: ${t.blockedBy.join(", ")}]` : "";
-          lines.push(`  - ${t.title} (${t.id})${blocked}`);
+          const retryCount = (t as any).retryCount ?? 0;
+          const retryTag = retryCount > 0 ? ` [retry ${retryCount}/3]` : "";
+          lines.push(`  - ${t.title} (${t.id})${blocked}${retryTag}`);
           if (t.description) {
-            lines.push(`    ${t.description.slice(0, 200)}${t.description.length > 200 ? "..." : ""}`);
+            // Show full description up to 500 chars (increased from 200)
+            lines.push(`    ${t.description.slice(0, 500)}${t.description.length > 500 ? "..." : ""}`);
+          }
+          // Include full PREVIOUS ATTEMPT FAILED blocks for context
+          if (t.description && t.description.includes("PREVIOUS ATTEMPT FAILED")) {
+            const failBlock = t.description.slice(t.description.lastIndexOf("--- PREVIOUS ATTEMPT FAILED ---"));
+            if (failBlock.length > 500) {
+              // Only add the extra block if it wasn't already covered by the description above
+              lines.push(`    ${failBlock}`);
+            }
           }
         }
       }
@@ -1256,22 +1689,46 @@ The user can see everything on the desktop in real-time.`;
       }
     }
 
-    // Include completion reports from done tasks
+    // Include completion reports from done tasks (increased from 300 to 1500 chars)
     const reports = tasks.filter((t) => t.completionReport);
     if (reports.length > 0) {
       lines.push("", "COMPLETED TASK REPORTS:");
       for (const t of reports) {
-        lines.push(`  "${t.title}": ${t.completionReport!.slice(0, 300)}${t.completionReport!.length > 300 ? "..." : ""}`);
+        lines.push(`  "${t.title}": ${t.completionReport!.slice(0, 1500)}${t.completionReport!.length > 1500 ? "..." : ""}`);
       }
     }
 
-    lines.push(
-      "",
-      "INSTRUCTIONS:",
-      "- Pick up unblocked backlog tasks by spawning workers.",
-      "- If all tasks are done, run verification and deployment as normal.",
-      "- Do NOT create duplicate tasks for work already on the board.",
-    );
+    // Include recent agent activity for approach/methodology context
+    if (recentActivity && recentActivity.length > 0) {
+      lines.push("", "RECENT AGENT ACTIVITY (last responses before restart):");
+      for (const a of recentActivity) {
+        const snippet = a.content.slice(0, 300);
+        const truncated = a.content.length > 300 ? "..." : "";
+        lines.push(`  [${a.timestamp}] Agent ${a.agentId.slice(0, 8)}: ${snippet}${truncated}`);
+      }
+    }
+
+    const allDone = tasks.length > 0 && backlog.length === 0;
+    const verificationAlreadyDone = !!getConfig(`project:${project.id}:verification_requested`);
+
+    lines.push("", "INSTRUCTIONS:");
+    if (allDone && verificationAlreadyDone) {
+      lines.push(
+        "- All tasks are already done and verification was completed before the restart.",
+        "- Do NOT create new verification tasks or re-verify. Simply report completion to the COO.",
+      );
+    } else if (allDone) {
+      lines.push(
+        "- All tasks are done. Run verification and report completion to the COO.",
+        "- Do NOT create duplicate tasks for work already on the board.",
+      );
+    } else {
+      lines.push(
+        "- Pick up unblocked backlog tasks by spawning workers.",
+        "- If all tasks are done, run verification and report completion to the COO.",
+        "- Do NOT create duplicate tasks for work already on the board.",
+      );
+    }
 
     return lines.join("\n");
   }
@@ -1304,6 +1761,36 @@ The user can see everything on the desktop in real-time.`;
     return this.currentConversationId;
   }
 
+  /**
+   * Stop a specific worker by ID. Iterates team leads to find the owner
+   * and delegates to TeamLead.stopWorker().
+   * Returns true if the worker was found and stopped.
+   */
+  stopWorker(workerId: string): boolean {
+    for (const [, teamLead] of this.teamLeads) {
+      if (teamLead.getWorkers().has(workerId)) {
+        return teamLead.stopWorker(workerId);
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Stop any agent by ID — handles both TeamLeads and Workers.
+   * Returns true if the agent was found and stopped.
+   */
+  stopAgent(agentId: string): boolean {
+    // Check if it's a TeamLead
+    for (const [, teamLead] of this.teamLeads) {
+      if (teamLead.id === agentId) {
+        teamLead.stop();
+        return true;
+      }
+    }
+    // Fall through to worker stop
+    return this.stopWorker(agentId);
+  }
+
   getTeamLeads(): Map<string, TeamLead> {
     return this.teamLeads;
   }
@@ -1312,7 +1799,14 @@ The user can see everything on the desktop in real-time.`;
   destroyProject(projectId: string) {
     const teamLead = this.teamLeads.get(projectId);
     if (teamLead) {
+      // Collect worker IDs before destroy clears them
+      const workerIds = [...teamLead.getWorkers().keys()];
       teamLead.destroy();
+      // Notify UI about destroyed agents
+      for (const wid of workerIds) {
+        this.onAgentDestroyed?.(wid);
+      }
+      this.onAgentDestroyed?.(teamLead.id);
       this.teamLeads.delete(projectId);
     }
 
@@ -1322,5 +1816,37 @@ The user can see everything on the desktop in real-time.`;
     } catch {
       // Best-effort filesystem cleanup
     }
+  }
+
+  /** Tear down the existing TeamLead + workers and spawn a fresh one, preserving all project data */
+  async recoverLiveProject(projectId: string): Promise<{ ok: boolean; error?: string }> {
+    const db = getDb();
+    const project = db
+      .select()
+      .from(schema.projects)
+      .where(eq(schema.projects.id, projectId))
+      .get();
+
+    if (!project) {
+      return { ok: false, error: "Project not found" };
+    }
+
+    // Tear down existing TeamLead if present
+    const teamLead = this.teamLeads.get(projectId);
+    if (teamLead) {
+      const workerIds = [...teamLead.getWorkers().keys()];
+      teamLead.destroy();
+      for (const wid of workerIds) {
+        this.onAgentDestroyed?.(wid);
+      }
+      this.onAgentDestroyed?.(teamLead.id);
+      this.teamLeads.delete(projectId);
+    }
+
+    // Delegate to existing recovery logic (resets orphaned tasks, spawns fresh TL, sends recovery directive)
+    await this.recoverProject(project as { id: string; name: string; description: string; charter: string | null });
+
+    console.log(`[COO] Live-recovered project "${project.name}" (${projectId})`);
+    return { ok: true };
   }
 }

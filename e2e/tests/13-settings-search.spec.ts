@@ -1,4 +1,5 @@
 import { test, expect } from "../fixtures";
+import { getStoredCookie } from "../helpers/api";
 
 test.describe("Settings - Search (UI)", () => {
   test.beforeEach(async ({ page }) => {
@@ -45,12 +46,7 @@ test.describe("Settings - Search (UI)", () => {
 
 test.describe("Settings - Search (API)", () => {
   test("search API returns settings", async ({ credentials }) => {
-    const loginRes = await fetch("https://localhost:62627/api/auth/login", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ passphrase: credentials.setup.passphrase }),
-    });
-    const cookie = loginRes.headers.get("set-cookie") ?? "";
+    const cookie = getStoredCookie();
 
     const res = await fetch("https://localhost:62627/api/settings/search", {
       headers: { Cookie: cookie },

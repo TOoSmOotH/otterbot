@@ -1,5 +1,5 @@
 import { test, expect } from "../fixtures";
-import { getSetupStatus } from "../helpers/api";
+import { getSetupStatus, getStoredCookie } from "../helpers/api";
 
 test.describe("Setup Wizard", () => {
   test("setup status API returns complete", async () => {
@@ -15,11 +15,11 @@ test.describe("Setup Wizard", () => {
   });
 
   test("re-setup returns 400", async () => {
+    const cookie = getStoredCookie();
     const res = await fetch("https://localhost:62627/api/setup/complete", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", Cookie: cookie },
       body: JSON.stringify({
-        passphrase: "another-passphrase",
         provider: "openai",
         model: "gpt-4",
         userName: "Test",

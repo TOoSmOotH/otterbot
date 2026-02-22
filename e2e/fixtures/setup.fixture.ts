@@ -1,6 +1,6 @@
 import { chromium, type FullConfig } from "@playwright/test";
 import { loadCredentials } from "../credentials";
-import { waitForServer, completeSetup } from "../helpers/api";
+import { waitForServer, setSetupPassphrase, completeSetup } from "../helpers/api";
 import { resolve } from "node:path";
 
 const AUTH_STATE_PATH = resolve(__dirname, "../.auth-state.json");
@@ -12,9 +12,23 @@ export default async function globalSetup(_config: FullConfig) {
 
   const creds = loadCredentials();
 
-  // Complete setup wizard via API
+  // Step 1: Set passphrase (creates session)
+  console.log("[e2e setup] Setting passphrase...");
+  const { cookie, response: passphraseRes } = await setSetupPassphrase(creds.setup.passphrase);
+  if (!passphraseRes.ok) {
+    const body = await passphraseRes.json().catch(() => ({}));
+    // If passphrase is already set, that's fine — login to get a cookie instead
+    if (passphraseRes.status !== 400 || !(body as any).error?.includes("already")) {
+      throw new Error(`Set passphrase failed (${passphraseRes.status}): ${JSON.stringify(body)}`);
+    }
+    console.log("[e2e setup] Passphrase was already set.");
+  }
+
+  // Step 2: Complete setup wizard via API (needs auth cookie)
   console.log("[e2e setup] Completing setup wizard...");
-  const setupRes = await completeSetup(creds.setup);
+  const { passphrase: _passphrase, ...setupWithoutPassphrase } = creds.setup;
+  const setupCookie = cookie || "";
+  const setupRes = await completeSetup(setupCookie, setupWithoutPassphrase);
   if (!setupRes.ok) {
     const body = await setupRes.json().catch(() => ({}));
     // If setup is already complete, that's fine

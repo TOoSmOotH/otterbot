@@ -2,7 +2,7 @@ import { createAnthropic } from "@ai-sdk/anthropic";
 import { createOpenAI } from "@ai-sdk/openai";
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import { createOllama } from "ollama-ai-provider";
-import { streamText, generateText, type LanguageModel } from "ai";
+import { streamText, generateText, type LanguageModel, type CoreMessage } from "ai";
 import { getConfig } from "../auth/auth.js";
 import { getDb, schema } from "../db/index.js";
 import { eq } from "drizzle-orm";
@@ -56,8 +56,13 @@ export function resolveProviderCredentials(providerIdOrType: string): ResolvedCr
 /** Returns true for Anthropic models that support extended thinking */
 export function isThinkingModel(config: LLMConfig): boolean {
   const resolved = resolveProviderCredentials(config.provider);
-  if (resolved.type !== "anthropic") return false;
-  return /^claude-(sonnet-4-5|opus-4)/.test(config.model);
+  if (resolved.type === "anthropic") {
+    return /^claude-(sonnet-4-5|opus-4)/.test(config.model);
+  }
+  if (resolved.type === "openrouter") {
+    return /^anthropic\/claude-(sonnet-4-5|opus-4)/.test(config.model);
+  }
+  return false;
 }
 
 /** Resolve a Vercel AI SDK language model from agent config */
@@ -91,6 +96,14 @@ export function resolveModel(config: LLMConfig): LanguageModel {
       return ollama(config.model);
     }
 
+    case "openrouter": {
+      const openrouter = createOpenAI({
+        baseURL: "https://openrouter.ai/api/v1",
+        apiKey: config.apiKey ?? resolved.apiKey ?? "",
+      });
+      return openrouter(config.model);
+    }
+
     case "openai-compatible": {
       const baseUrl = config.baseUrl ?? resolved.baseUrl;
       if (!baseUrl) {
@@ -111,10 +124,14 @@ export function resolveModel(config: LLMConfig): LanguageModel {
   }
 }
 
-export interface ChatMessage {
-  role: "system" | "user" | "assistant";
-  content: string;
-}
+/**
+ * ChatMessage is an alias for the Vercel AI SDK's CoreMessage type.
+ * This supports the standard system/user/assistant roles with string content,
+ * as well as richer message types needed for tool-call and tool-result
+ * round-trips (e.g. assistant messages with tool-call parts, tool messages
+ * with results).
+ */
+export type ChatMessage = CoreMessage;
 
 /** Generate a complete response (non-streaming) */
 export async function generate(
@@ -138,6 +155,10 @@ export async function stream(
   config: LLMConfig,
   messages: ChatMessage[],
   tools?: Record<string, unknown>,
+  options?: {
+    abortSignal?: AbortSignal;
+    onStepFinish?: (event: { toolCalls: unknown[] }) => void | Promise<void>;
+  },
 ) {
   const model = resolveModel(config);
   const thinking = isThinkingModel(config);
@@ -147,6 +168,8 @@ export async function stream(
     temperature: config.temperature,
     maxRetries: config.maxRetries ?? 8,
     ...(tools ? { tools: tools as any, maxSteps: config.maxSteps ?? 20 } : {}),
+    ...(options?.abortSignal ? { abortSignal: options.abortSignal } : {}),
+    ...(options?.onStepFinish ? { onStepFinish: options.onStepFinish } : {}),
     ...(thinking
       ? {
           providerOptions: {

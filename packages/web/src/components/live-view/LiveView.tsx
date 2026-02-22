@@ -7,6 +7,7 @@ import { LiveViewScene } from "./LiveViewScene";
 import { RoomBuilderToolbar } from "../room-builder/RoomBuilderToolbar";
 import { AssetPalette } from "../room-builder/AssetPalette";
 import { PropInspector } from "../room-builder/PropInspector";
+import { WaypointInspector } from "../room-builder/WaypointInspector";
 import { useRoomBuilderKeys } from "../../hooks/use-room-builder-keys";
 
 interface LiveViewProps {
@@ -128,7 +129,8 @@ export function LiveView({ userProfile, onToggleView }: LiveViewProps) {
             onChange={handleSceneChange}
             className="text-xs bg-secondary border border-border rounded px-2 py-1 text-foreground outline-none focus:ring-1 focus:ring-primary"
           >
-            {scenes.map((s) => (
+            <option value="world-base">Office World</option>
+            {scenes.filter((s) => s.id !== "default-office" && s.id !== "world-base").map((s) => (
               <option key={s.id} value={s.id}>
                 {s.name}
               </option>
@@ -171,17 +173,30 @@ export function LiveView({ userProfile, onToggleView }: LiveViewProps) {
           )}
 
           {onToggleView && (
-            <button
-              onClick={onToggleView}
-              title="Switch to Agent Graph"
-              className="text-muted-foreground hover:text-foreground transition-colors p-1 rounded hover:bg-secondary"
-            >
-              <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="12" cy="12" r="10" />
-                <line x1="2" y1="12" x2="22" y2="12" />
-                <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
-              </svg>
-            </button>
+            <>
+              <button
+                onClick={() => window.open(window.location.origin + "?detached-3d=true", "Detached3D", "width=1200,height=800")}
+                title="Pop out 3D View"
+                className="text-muted-foreground hover:text-foreground transition-colors p-1 rounded hover:bg-secondary"
+              >
+                <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+                  <polyline points="15 3 21 3 21 9" />
+                  <line x1="10" y1="14" x2="21" y2="3" />
+                </svg>
+              </button>
+              <button
+                onClick={onToggleView}
+                title="Switch to Agent Graph"
+                className="text-muted-foreground hover:text-foreground transition-colors p-1 rounded hover:bg-secondary"
+              >
+                <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="12" cy="12" r="10" />
+                  <line x1="2" y1="12" x2="22" y2="12" />
+                  <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+                </svg>
+              </button>
+            </>
           )}
         </div>
       </div>
@@ -204,10 +219,20 @@ export function LiveView({ userProfile, onToggleView }: LiveViewProps) {
           <>
             <RoomBuilderToolbar />
             <AssetPalette />
-            <PropInspector />
+            <RoomBuilderInspector />
           </>
         )}
       </div>
     </div>
   );
+}
+
+function RoomBuilderInspector() {
+  const editorTool = useRoomBuilderStore((s) => s.editorTool);
+
+  if (editorTool === "waypoints") {
+    return <WaypointInspector />;
+  }
+
+  return <PropInspector />;
 }

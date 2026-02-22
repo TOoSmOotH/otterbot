@@ -1,4 +1,5 @@
 import { test, expect } from "../fixtures";
+import { getStoredCookie } from "../helpers/api";
 
 test.describe("Settings - OpenCode (UI)", () => {
   test.beforeEach(async ({ page }) => {
@@ -44,12 +45,7 @@ test.describe("Settings - OpenCode (UI)", () => {
 
 test.describe("Settings - OpenCode (API)", () => {
   test("OpenCode API returns settings", async ({ credentials }) => {
-    const loginRes = await fetch("https://localhost:62627/api/auth/login", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ passphrase: credentials.setup.passphrase }),
-    });
-    const cookie = loginRes.headers.get("set-cookie") ?? "";
+    const cookie = getStoredCookie();
 
     const res = await fetch("https://localhost:62627/api/settings/opencode", {
       headers: { Cookie: cookie },
