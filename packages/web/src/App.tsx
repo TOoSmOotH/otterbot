@@ -160,7 +160,7 @@ function MainApp() {
           sessions.map(async (s) => {
             if (!s.sessionId) return;
             try {
-              const detail = await fetch(`/api/opencode/sessions/${s.id}`).then((r) => r.json());
+              const detail = await fetch(`/api/codeagent/sessions/${s.id}`).then((r) => r.json());
               messagesMap[s.sessionId] = detail.messages;
               diffsMap[s.sessionId] = detail.diffs;
             } catch {
