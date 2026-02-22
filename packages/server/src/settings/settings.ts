@@ -53,6 +53,7 @@ export interface TestResult {
 export const PROVIDER_TYPE_META: ProviderTypeMeta[] = [
   { type: "anthropic", label: "Anthropic", needsApiKey: true, needsBaseUrl: false },
   { type: "openai", label: "OpenAI", needsApiKey: true, needsBaseUrl: false },
+  { type: "google", label: "Google Gemini", needsApiKey: true, needsBaseUrl: false },
   { type: "openrouter", label: "OpenRouter", needsApiKey: true, needsBaseUrl: false },
   { type: "ollama", label: "Ollama", needsApiKey: false, needsBaseUrl: true },
   { type: "openai-compatible", label: "OpenAI-Compatible", needsApiKey: true, needsBaseUrl: true },
@@ -66,6 +67,12 @@ const FALLBACK_MODELS: Record<string, string[]> = {
     "claude-opus-4-20250514",
   ],
   openai: ["gpt-4o", "gpt-4o-mini", "gpt-4.1", "gpt-4.1-mini", "o3-mini"],
+  google: [
+    "gemini-2.5-flash",
+    "gemini-2.5-pro",
+    "gemini-2.0-flash",
+    "gemini-2.0-flash-lite",
+  ],
   ollama: ["llama3.1", "mistral", "codellama", "qwen2.5-coder"],
   openrouter: [
     "anthropic/claude-sonnet-4-5-20250929",
@@ -380,6 +387,26 @@ export async function fetchModelsWithCredentials(
           data?: Array<{ id: string }>;
         };
         return data.data?.map((m) => m.id).sort() ?? FALLBACK_MODELS.openai ?? [];
+      }
+
+      case "google": {
+        if (!apiKey) return FALLBACK_MODELS.google ?? [];
+        const res = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`,
+          { signal: AbortSignal.timeout(10_000) },
+        );
+        if (!res.ok) return FALLBACK_MODELS.google ?? [];
+        const data = (await res.json()) as {
+          models?: Array<{ name: string; supportedGenerationMethods?: string[] }>;
+        };
+        return (
+          data.models
+            ?.filter((m) =>
+              m.supportedGenerationMethods?.includes("generateContent"),
+            )
+            .map((m) => m.name.replace("models/", ""))
+            .sort() ?? FALLBACK_MODELS.google ?? []
+        );
       }
 
       case "ollama": {

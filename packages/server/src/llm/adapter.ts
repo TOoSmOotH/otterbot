@@ -1,4 +1,5 @@
 import { createAnthropic } from "@ai-sdk/anthropic";
+import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { createOpenAI } from "@ai-sdk/openai";
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import { createOllama } from "ollama-ai-provider";
@@ -84,6 +85,13 @@ export function resolveModel(config: LLMConfig): LanguageModel {
         ...(baseUrl ? { baseURL: baseUrl } : {}),
       });
       return openai(config.model);
+    }
+
+    case "google": {
+      const google = createGoogleGenerativeAI({
+        apiKey: config.apiKey ?? resolved.apiKey ?? "",
+      });
+      return google(config.model);
     }
 
     case "ollama": {
