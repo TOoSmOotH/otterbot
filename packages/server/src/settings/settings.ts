@@ -58,6 +58,7 @@ export const PROVIDER_TYPE_META: ProviderTypeMeta[] = [
   { type: "ollama", label: "Ollama", needsApiKey: false, needsBaseUrl: true },
   { type: "openai-compatible", label: "OpenAI-Compatible", needsApiKey: true, needsBaseUrl: true },
   { type: "github-copilot", label: "GitHub Copilot", needsApiKey: true, needsBaseUrl: false },
+  { type: "huggingface", label: "Hugging Face", needsApiKey: true, needsBaseUrl: false },
 ];
 
 // Static fallback models per provider (used when API fetch fails)
@@ -83,6 +84,12 @@ const FALLBACK_MODELS: Record<string, string[]> = {
   ],
   "openai-compatible": [],
   "github-copilot": ["gpt-4o", "gpt-4.1", "claude-sonnet-4-5-20250929", "o3-mini"],
+  huggingface: [
+    "meta-llama/Llama-3.1-8B-Instruct",
+    "mistralai/Mistral-7B-Instruct-v0.3",
+    "microsoft/Phi-3-mini-4k-instruct",
+    "Qwen/Qwen2.5-72B-Instruct",
+  ],
 };
 
 // ---------------------------------------------------------------------------
@@ -464,6 +471,18 @@ export async function fetchModelsWithCredentials(
         if (!res.ok) return FALLBACK_MODELS["github-copilot"] ?? [];
         const data = (await res.json()) as { data?: Array<{ id: string }> };
         return data.data?.map((m) => m.id).sort() ?? FALLBACK_MODELS["github-copilot"] ?? [];
+      }
+
+      case "huggingface": {
+        if (!apiKey) return FALLBACK_MODELS.huggingface ?? [];
+        const hfBase = baseUrl ?? "https://api-inference.huggingface.co/v1";
+        const res = await fetch(`${hfBase}/models`, {
+          headers: { Authorization: `Bearer ${apiKey}` },
+          signal: AbortSignal.timeout(10_000),
+        });
+        if (!res.ok) return FALLBACK_MODELS.huggingface ?? [];
+        const hfData = (await res.json()) as { data?: Array<{ id: string }> };
+        return hfData.data?.map((m) => m.id).sort() ?? FALLBACK_MODELS.huggingface ?? [];
       }
 
       default:
