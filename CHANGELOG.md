@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.0-beta.0](https://github.com/TOoSmOotH/otterbot/compare/otterbot-v0.5.0-beta.0...otterbot-v0.6.0-beta.0) (2026-02-22)
+
+
+### Features
+
+* promote beta to main ([95ed1fd](https://github.com/TOoSmOotH/otterbot/commit/95ed1fd12cfd99cac573b92e8d47adb754217c97))
+
 ## [0.5.0-beta.0](https://github.com/TOoSmOotH/otterbot/compare/otterbot-v0.4.0-beta.0...otterbot-v0.5.0-beta.0) (2026-02-22)
 
 
