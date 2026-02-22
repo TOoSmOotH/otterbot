@@ -475,14 +475,18 @@ export async function fetchModelsWithCredentials(
 
       case "huggingface": {
         if (!apiKey) return FALLBACK_MODELS.huggingface ?? [];
-        const hfBase = baseUrl ?? "https://api-inference.huggingface.co/v1";
-        const res = await fetch(`${hfBase}/models`, {
-          headers: { Authorization: `Bearer ${apiKey}` },
-          signal: AbortSignal.timeout(10_000),
-        });
-        if (!res.ok) return FALLBACK_MODELS.huggingface ?? [];
-        const hfData = (await res.json()) as { data?: Array<{ id: string }> };
-        return hfData.data?.map((m) => m.id).sort() ?? FALLBACK_MODELS.huggingface ?? [];
+        const hfRes = await fetch(
+          "https://huggingface.co/api/models?pipeline_tag=text-generation&sort=likes&direction=-1&limit=50&filter=conversational",
+          {
+            headers: { Authorization: `Bearer ${apiKey}` },
+            signal: AbortSignal.timeout(10_000),
+          },
+        );
+        if (!hfRes.ok) return FALLBACK_MODELS.huggingface ?? [];
+        const hfData = (await hfRes.json()) as Array<{ id: string }>;
+        return Array.isArray(hfData)
+          ? hfData.map((m) => m.id)
+          : FALLBACK_MODELS.huggingface ?? [];
       }
 
       default:

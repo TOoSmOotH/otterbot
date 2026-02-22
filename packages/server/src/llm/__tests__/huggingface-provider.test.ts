@@ -38,23 +38,23 @@ vi.mock("../../auth/auth.js", () => ({
 // ---------------------------------------------------------------------------
 
 const mockHuggingFaceModel = { modelId: "meta-llama/Llama-3.1-8B-Instruct", provider: "huggingface" };
-const mockCreateOpenAI = vi.fn(() =>
+const mockCreateOpenAICompatible = vi.fn(() =>
   vi.fn((model: string) => ({ ...mockHuggingFaceModel, modelId: model })),
 );
 
-vi.mock("@ai-sdk/openai", () => ({
-  createOpenAI: mockCreateOpenAI,
+vi.mock("@ai-sdk/openai-compatible", () => ({
+  createOpenAICompatible: mockCreateOpenAICompatible,
 }));
 
 // Also mock other providers that are imported at module level
 vi.mock("@ai-sdk/anthropic", () => ({
   createAnthropic: vi.fn(() => vi.fn()),
 }));
+vi.mock("@ai-sdk/openai", () => ({
+  createOpenAI: vi.fn(() => vi.fn()),
+}));
 vi.mock("@ai-sdk/google", () => ({
   createGoogleGenerativeAI: vi.fn(() => vi.fn()),
-}));
-vi.mock("@ai-sdk/openai-compatible", () => ({
-  createOpenAICompatible: vi.fn(() => vi.fn()),
 }));
 vi.mock("ollama-ai-provider", () => ({
   createOllama: vi.fn(() => vi.fn()),
@@ -75,7 +75,8 @@ describe("Hugging Face provider", () => {
         apiKey: "hf_test_token_123",
       });
 
-      expect(mockCreateOpenAI).toHaveBeenCalledWith({
+      expect(mockCreateOpenAICompatible).toHaveBeenCalledWith({
+        name: "huggingface",
         baseURL: "https://api-inference.huggingface.co/v1",
         apiKey: "hf_test_token_123",
       });
@@ -102,7 +103,8 @@ describe("Hugging Face provider", () => {
         model: "meta-llama/Llama-3.1-8B-Instruct",
       });
 
-      expect(mockCreateOpenAI).toHaveBeenCalledWith({
+      expect(mockCreateOpenAICompatible).toHaveBeenCalledWith({
+        name: "huggingface",
         baseURL: "https://api-inference.huggingface.co/v1",
         apiKey: "",
       });
@@ -118,7 +120,8 @@ describe("Hugging Face provider", () => {
         baseUrl: "https://custom-hf-endpoint.example.com/v1",
       });
 
-      expect(mockCreateOpenAI).toHaveBeenCalledWith({
+      expect(mockCreateOpenAICompatible).toHaveBeenCalledWith({
+        name: "huggingface",
         baseURL: "https://custom-hf-endpoint.example.com/v1",
         apiKey: "hf_key",
       });

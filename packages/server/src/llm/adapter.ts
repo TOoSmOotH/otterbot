@@ -136,7 +136,8 @@ export function resolveModel(config: LLMConfig): LanguageModel {
     }
 
     case "huggingface": {
-      const hf = createOpenAI({
+      const hf = createOpenAICompatible({
+        name: "huggingface",
         baseURL: config.baseUrl ?? resolved.baseUrl ?? "https://api-inference.huggingface.co/v1",
         apiKey: config.apiKey ?? resolved.apiKey ?? "",
       });
