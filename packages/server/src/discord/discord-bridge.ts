@@ -19,7 +19,7 @@ import { MessageBus } from "../bus/message-bus.js";
 import { COO } from "../agents/coo.js";
 import { getDb, schema } from "../db/index.js";
 import { getConfig } from "../auth/auth.js";
-import { isPaired, generatePairingCode } from "./pairing.js";
+import { isPaired, generatePairingCode, listPairedUsers } from "./pairing.js";
 
 type TypedServer = Server<ClientToServerEvents, ServerToClientEvents>;
 
@@ -47,6 +47,8 @@ export class DiscordBridge {
   private conversationMap = new Map<string, string>();
   /** Map of conversationId → Discord channel (for sending unsolicited messages) */
   private channelMap = new Map<string, TextChannel | DMChannel>();
+  /** Cached DM channel for the first paired user (fallback delivery) */
+  private defaultDMChannel: DMChannel | null = null;
 
   constructor(deps: { bus: MessageBus; coo: COO; io: TypedServer }) {
     this.bus = deps.bus;
@@ -109,6 +111,9 @@ export class DiscordBridge {
       this.bus.offBroadcast(this.broadcastHandler);
       this.broadcastHandler = null;
     }
+
+    // Clear cached DM channel
+    this.defaultDMChannel = null;
 
     // Destroy client
     if (this.client) {
@@ -269,27 +274,62 @@ export class DiscordBridge {
     if (message.fromAgentId !== "coo" || message.toAgentId !== null) return;
 
     const conversationId = message.conversationId;
-    if (!conversationId) return;
 
-    const pending = this.pendingResponses.get(conversationId);
-    if (pending) {
-      // Direct reply to a user message — clean up typing indicator
-      clearInterval(pending.typingTimer);
-      this.pendingResponses.delete(conversationId);
+    // Direct reply to a Discord-originated message
+    if (conversationId) {
+      const pending = this.pendingResponses.get(conversationId);
+      if (pending) {
+        clearInterval(pending.typingTimer);
+        this.pendingResponses.delete(conversationId);
 
-      this.sendDiscordReply(pending.discordMessage, message.content).catch((err) => {
-        console.error("[Discord] Error sending reply:", err);
-      });
-      return;
+        this.sendDiscordReply(pending.discordMessage, message.content).catch((err) => {
+          console.error("[Discord] Error sending reply:", err);
+        });
+        return;
+      }
+
+      // Unsolicited message to a known Discord channel
+      const channel = this.channelMap.get(conversationId);
+      if (channel) {
+        this.sendToChannel(channel, message.content).catch((err) => {
+          console.error("[Discord] Error sending unsolicited message:", err);
+        });
+        return;
+      }
     }
 
-    // Unsolicited message (e.g. Team Lead report) — send to the channel directly
-    const channel = this.channelMap.get(conversationId);
-    if (!channel) return;
+    // Fallback: mirror to first paired user's DM
+    console.log(
+      `[Discord] DM fallback: conversationId=${conversationId ?? "(none)"}, content="${message.content.slice(0, 80)}"`,
+    );
+    this.getDefaultDMChannel()
+      .then((dm) => {
+        if (!dm) {
+          console.warn("[Discord] DM fallback: no DM channel available (no paired users or client not ready)");
+          return;
+        }
+        return this.sendToChannel(dm, message.content);
+      })
+      .catch((err) => {
+        console.error("[Discord] Error sending DM fallback:", err);
+      });
+  }
 
-    this.sendToChannel(channel, message.content).catch((err) => {
-      console.error("[Discord] Error sending unsolicited message:", err);
-    });
+  private async getDefaultDMChannel(): Promise<DMChannel | null> {
+    if (this.defaultDMChannel) return this.defaultDMChannel;
+    if (!this.client) return null;
+
+    const paired = listPairedUsers();
+    if (paired.length === 0) return null;
+
+    try {
+      const user = await this.client.users.fetch(paired[0]!.discordUserId);
+      this.defaultDMChannel = await user.createDM();
+      return this.defaultDMChannel;
+    } catch (err) {
+      console.error("[Discord] Failed to open DM channel:", err);
+      return null;
+    }
   }
 
   private async sendDiscordReply(
