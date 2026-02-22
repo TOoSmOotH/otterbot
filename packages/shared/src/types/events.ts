@@ -50,6 +50,8 @@ export interface ServerToClientEvents {
   "reminder:fired": (data: { todoId: string; title: string }) => void;
   "discord:pairing-request": (data: { code: string; discordUserId: string; discordUsername: string }) => void;
   "discord:status": (data: { status: "connected" | "disconnected" | "error"; botUsername?: string }) => void;
+  "matrix:pairing-request": (data: { code: string; matrixUserId: string }) => void;
+  "matrix:status": (data: { status: "connected" | "disconnected" | "error"; userId?: string }) => void;
 }
 
 /** Events emitted from client to server */
