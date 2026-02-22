@@ -122,11 +122,15 @@ export class GitHubIssueMonitor {
       // Skip if already triaged (has "triaged" label)
       if (issue.labels.some((l) => l.name === "triaged")) continue;
 
-      // Run triage
+      // Run triage (this also creates a triage task when pipeline is enabled)
       try {
         await this.pipelineManager.runTriage(projectId, watched.repo, issue);
       } catch (err) {
         console.error(`[IssueMonitor] Triage failed for issue #${issue.number}:`, err);
+        // Even if triage LLM fails, create a triage task so the issue is visible
+        this.pipelineManager.createTriageTask(
+          projectId, issue.number, issue.title, "", issue.body ?? "",
+        );
       }
     }
 
@@ -164,41 +168,78 @@ export class GitHubIssueMonitor {
         .where(eq(schema.kanbanTasks.projectId, projectId))
         .all();
 
-      const alreadyTracked = existingTasks.some(
-        (t) => (t.labels as string[]).includes(label),
+      // Check if a triage task already exists for this issue
+      const existingTriageTask = existingTasks.find(
+        (t) => (t.labels as string[]).includes(label) && t.column === "triage",
       );
-      if (alreadyTracked) continue;
 
-      // Create kanban task
-      const taskId = nanoid();
-      const now = new Date().toISOString();
-      const maxPos = existingTasks
-        .filter((t) => t.column === "backlog")
-        .reduce((max, t) => Math.max(max, t.position), -1);
+      // Check if already tracked in a non-triage column (backlog, in_progress, etc.)
+      const alreadyInProgress = existingTasks.some(
+        (t) => (t.labels as string[]).includes(label) && t.column !== "triage",
+      );
+      if (alreadyInProgress) continue;
 
-      const task = {
-        id: taskId,
-        projectId,
-        title: `#${issue.number}: ${issue.title}`,
-        description: issue.body ?? "",
-        column: "backlog" as const,
-        position: maxPos + 1,
-        assigneeAgentId: null,
-        createdBy: "issue-monitor",
-        labels: [label],
-        blockedBy: [] as string[],
-        retryCount: 0,
-        spawnCount: 0,
-        completionReport: null,
-        pipelineStage: null,
-        pipelineAttempt: 0,
-        createdAt: now,
-        updatedAt: now,
-      };
-      db.insert(schema.kanbanTasks).values(task).run();
+      let taskId: string;
 
-      // Emit to UI
-      this.io.emit("kanban:task-created", task as unknown as KanbanTask);
+      if (existingTriageTask) {
+        // Promote triage task to backlog
+        taskId = existingTriageTask.id;
+        const now = new Date().toISOString();
+        const maxPos = existingTasks
+          .filter((t) => t.column === "backlog")
+          .reduce((max, t) => Math.max(max, t.position), -1);
+
+        db.update(schema.kanbanTasks)
+          .set({
+            column: "backlog",
+            position: maxPos + 1,
+            description: issue.body ?? existingTriageTask.description,
+            updatedAt: now,
+          })
+          .where(eq(schema.kanbanTasks.id, taskId))
+          .run();
+
+        const updated = db
+          .select()
+          .from(schema.kanbanTasks)
+          .where(eq(schema.kanbanTasks.id, taskId))
+          .get();
+        if (updated) {
+          this.io.emit("kanban:task-updated", updated as unknown as KanbanTask);
+        }
+        console.log(`[IssueMonitor] Promoted triage task to backlog for issue #${issue.number}`);
+      } else {
+        // Create new kanban task in backlog
+        taskId = nanoid();
+        const now = new Date().toISOString();
+        const maxPos = existingTasks
+          .filter((t) => t.column === "backlog")
+          .reduce((max, t) => Math.max(max, t.position), -1);
+
+        const task = {
+          id: taskId,
+          projectId,
+          title: `#${issue.number}: ${issue.title}`,
+          description: issue.body ?? "",
+          column: "backlog" as const,
+          position: maxPos + 1,
+          assigneeAgentId: null,
+          createdBy: "issue-monitor",
+          labels: [label],
+          blockedBy: [] as string[],
+          retryCount: 0,
+          spawnCount: 0,
+          completionReport: null,
+          pipelineStage: null,
+          pipelineAttempt: 0,
+          createdAt: now,
+          updatedAt: now,
+        };
+        db.insert(schema.kanbanTasks).values(task).run();
+
+        // Emit to UI
+        this.io.emit("kanban:task-created", task as unknown as KanbanTask);
+      }
 
       // Route through pipeline if enabled, otherwise use direct directive
       if (this.pipelineManager?.isEnabled(projectId)) {

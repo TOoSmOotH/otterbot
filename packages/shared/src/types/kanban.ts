@@ -1,4 +1,5 @@
 export enum KanbanColumn {
+  Triage = "triage",
   Backlog = "backlog",
   InProgress = "in_progress",
   InReview = "in_review",

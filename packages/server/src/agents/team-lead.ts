@@ -1013,7 +1013,7 @@ export class TeamLead extends BaseAgent {
       return { hasBacklog: false, backlogCount: 0, hasUnblockedBacklog: false, unblockedBacklogCount: 0, hasInProgress: false, inProgressCount: 0, hasInReview: false, inReviewCount: 0, allDone: false, doneCount: 0, summary: "No tasks." };
     }
 
-    const byColumn: Record<string, typeof tasks> = { backlog: [], in_progress: [], in_review: [], done: [] };
+    const byColumn: Record<string, typeof tasks> = { triage: [], backlog: [], in_progress: [], in_review: [], done: [] };
     for (const t of tasks) {
       (byColumn[t.column] ?? []).push(t);
     }
@@ -1050,7 +1050,9 @@ export class TeamLead extends BaseAgent {
     const inProgressCount = byColumn.in_progress.length;
     const inReviewCount = byColumn.in_review.length;
     const doneCount = byColumn.done.length;
-    const allDone = tasks.length > 0 && backlogCount === 0 && inProgressCount === 0 && inReviewCount === 0;
+    // Triage tasks are unassigned GitHub issues — they should NOT block allDone
+    const nonTriageTasks = tasks.filter((t) => t.column !== "triage");
+    const allDone = nonTriageTasks.length > 0 && backlogCount === 0 && inProgressCount === 0 && inReviewCount === 0;
     return {
       hasBacklog: backlogCount > 0,
       backlogCount,
@@ -1290,7 +1292,7 @@ export class TeamLead extends BaseAgent {
         parameters: z.object({
           title: z.string().describe("Short task title"),
           description: z.string().optional().describe("Detailed task description"),
-          column: z.enum(["backlog", "in_progress", "in_review", "done"]).optional().describe("Column to place the task in (default: backlog)"),
+          column: z.enum(["triage", "backlog", "in_progress", "in_review", "done"]).optional().describe("Column to place the task in (default: backlog). The 'triage' column is for unassigned GitHub issues — do not place manually created tasks there."),
           labels: z.array(z.string()).optional().describe("Labels/tags for the task"),
           blockedBy: z.array(z.string()).optional().describe("Actual task IDs (from create_task results) that must complete before this task can start. Do NOT use symbolic names like 'task-1'."),
         }),
@@ -1303,7 +1305,7 @@ export class TeamLead extends BaseAgent {
           "Update a kanban task card. Move tasks between columns, assign agents, or update details.",
         parameters: z.object({
           taskId: z.string().describe("The task ID to update"),
-          column: z.enum(["backlog", "in_progress", "in_review", "done"]).optional().describe("Move task to this column"),
+          column: z.enum(["triage", "backlog", "in_progress", "in_review", "done"]).optional().describe("Move task to this column. The 'triage' column is for unassigned GitHub issues — do not move tasks there."),
           assigneeAgentId: z.string().optional().describe("Agent ID to assign the task to"),
           description: z.string().optional().describe("Updated description"),
           title: z.string().optional().describe("Updated title"),

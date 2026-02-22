@@ -550,6 +550,139 @@ describe("GitHubIssueMonitor", () => {
 
       expect(mockFetchAssignedIssues).not.toHaveBeenCalled();
     });
+
+    it("promotes a triage task to backlog when an assigned issue matches", async () => {
+      const db = getDb();
+
+      db.insert(schema.projects)
+        .values({
+          id: "proj-promo",
+          name: "Promo Project",
+          description: "test",
+          status: "active",
+          githubRepo: "owner/repo",
+          githubBranch: "main",
+          githubIssueMonitor: true,
+          rules: [],
+          createdAt: new Date().toISOString(),
+        })
+        .run();
+
+      // Pre-existing triage task for issue #55
+      db.insert(schema.kanbanTasks)
+        .values({
+          id: "triage-task-55",
+          projectId: "proj-promo",
+          title: "#55: Triage issue",
+          description: "Triage: bug",
+          column: "triage",
+          position: 0,
+          labels: ["github-issue-55"],
+          blockedBy: [],
+          retryCount: 0,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        })
+        .run();
+
+      monitor.watchProject("proj-promo", "owner/repo", "testuser");
+      configStore.set("github:token", "ghp_test");
+
+      mockFetchAssignedIssues.mockResolvedValue([
+        {
+          number: 55,
+          title: "Triage issue",
+          body: "Issue body here",
+          labels: [],
+          assignees: [{ login: "testuser" }],
+          state: "open",
+          html_url: "https://github.com/owner/repo/issues/55",
+          created_at: "2026-01-01T00:00:00Z",
+          updated_at: "2026-01-02T00:00:00Z",
+        },
+      ]);
+
+      await (monitor as any).poll();
+
+      // Should have promoted the existing triage task to backlog, not created a new one
+      const tasks = db
+        .select()
+        .from(schema.kanbanTasks)
+        .where(eq(schema.kanbanTasks.projectId, "proj-promo"))
+        .all();
+      expect(tasks).toHaveLength(1);
+      expect(tasks[0].id).toBe("triage-task-55");
+      expect(tasks[0].column).toBe("backlog");
+
+      // Should have emitted an update event
+      expect(mockIo.emit).toHaveBeenCalledWith(
+        "kanban:task-updated",
+        expect.objectContaining({ id: "triage-task-55", column: "backlog" }),
+      );
+    });
+
+    it("does not create duplicate when issue already in backlog", async () => {
+      const db = getDb();
+
+      db.insert(schema.projects)
+        .values({
+          id: "proj-nodup",
+          name: "No Dup Project",
+          description: "test",
+          status: "active",
+          githubRepo: "owner/repo",
+          githubBranch: "main",
+          githubIssueMonitor: true,
+          rules: [],
+          createdAt: new Date().toISOString(),
+        })
+        .run();
+
+      // Pre-existing backlog task for issue #60
+      db.insert(schema.kanbanTasks)
+        .values({
+          id: "backlog-task-60",
+          projectId: "proj-nodup",
+          title: "#60: Existing backlog issue",
+          description: "",
+          column: "backlog",
+          position: 0,
+          labels: ["github-issue-60"],
+          blockedBy: [],
+          retryCount: 0,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        })
+        .run();
+
+      monitor.watchProject("proj-nodup", "owner/repo", "testuser");
+      configStore.set("github:token", "ghp_test");
+
+      mockFetchAssignedIssues.mockResolvedValue([
+        {
+          number: 60,
+          title: "Existing backlog issue",
+          body: "Already tracked",
+          labels: [],
+          assignees: [{ login: "testuser" }],
+          state: "open",
+          html_url: "https://github.com/owner/repo/issues/60",
+          created_at: "2026-01-01T00:00:00Z",
+          updated_at: "2026-01-02T00:00:00Z",
+        },
+      ]);
+
+      await (monitor as any).poll();
+
+      // Should still only have one task
+      const tasks = db
+        .select()
+        .from(schema.kanbanTasks)
+        .where(eq(schema.kanbanTasks.projectId, "proj-nodup"))
+        .all();
+      expect(tasks).toHaveLength(1);
+      expect(tasks[0].id).toBe("backlog-task-60");
+    });
   });
 
   describe("start / stop", () => {

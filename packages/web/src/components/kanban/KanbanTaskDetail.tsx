@@ -4,6 +4,10 @@ import { KanbanColumn } from "@otterbot/shared";
 import { useProjectStore } from "../../stores/project-store";
 
 const STATUS_CONFIG: Record<KanbanColumn, { label: string; className: string }> = {
+  [KanbanColumn.Triage]: {
+    label: "Triage",
+    className: "bg-violet-500/15 text-violet-400",
+  },
   [KanbanColumn.Backlog]: {
     label: "Backlog",
     className: "bg-secondary text-secondary-foreground",
@@ -23,6 +27,7 @@ const STATUS_CONFIG: Record<KanbanColumn, { label: string; className: string }> 
 };
 
 const COLUMN_OPTIONS: { key: KanbanColumn; label: string }[] = [
+  { key: KanbanColumn.Triage, label: "Triage" },
   { key: KanbanColumn.Backlog, label: "Backlog" },
   { key: KanbanColumn.InProgress, label: "In Progress" },
   { key: KanbanColumn.InReview, label: "In Review" },

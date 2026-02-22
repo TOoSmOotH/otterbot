@@ -89,6 +89,42 @@ describe("deriveProjectDashboardData", () => {
     });
   });
 
+  describe("triage column handling", () => {
+    it("filters triage tasks separately", () => {
+      const tasks = [
+        makeTask({ id: "1", column: KanbanColumn.Triage }),
+        makeTask({ id: "2", column: KanbanColumn.Backlog }),
+        makeTask({ id: "3", column: KanbanColumn.Done }),
+      ];
+      const result = deriveProjectDashboardData(tasks, new Map(), "proj-1");
+      expect(result.triage).toHaveLength(1);
+      expect(result.triage[0].id).toBe("1");
+    });
+
+    it("excludes triage tasks from total and progress calculation", () => {
+      const tasks = [
+        makeTask({ id: "1", column: KanbanColumn.Triage }),
+        makeTask({ id: "2", column: KanbanColumn.Triage }),
+        makeTask({ id: "3", column: KanbanColumn.Done }),
+        makeTask({ id: "4", column: KanbanColumn.Backlog }),
+      ];
+      const result = deriveProjectDashboardData(tasks, new Map(), "proj-1");
+      // total should be 2 (done + backlog), not 4
+      expect(result.total).toBe(2);
+      // progress should be 1/2 = 50%
+      expect(result.progressPct).toBe(50);
+    });
+
+    it("returns 0% progress when only triage tasks exist", () => {
+      const tasks = [
+        makeTask({ id: "1", column: KanbanColumn.Triage }),
+      ];
+      const result = deriveProjectDashboardData(tasks, new Map(), "proj-1");
+      expect(result.total).toBe(0);
+      expect(result.progressPct).toBe(0);
+    });
+  });
+
   describe("in-progress task filtering", () => {
     it("returns only in-progress tasks", () => {
       const tasks = [

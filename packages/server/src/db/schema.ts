@@ -124,7 +124,7 @@ export const kanbanTasks = sqliteTable("kanban_tasks", {
   title: text("title").notNull(),
   description: text("description").notNull().default(""),
   column: text("column", {
-    enum: ["backlog", "in_progress", "in_review", "done"],
+    enum: ["triage", "backlog", "in_progress", "in_review", "done"],
   })
     .notNull()
     .default("backlog"),

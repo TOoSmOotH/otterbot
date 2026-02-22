@@ -1,3 +1,4 @@
+import { nanoid } from "nanoid";
 import { eq } from "drizzle-orm";
 import { generateText } from "ai";
 import type { Server } from "socket.io";
@@ -185,6 +186,9 @@ export class PipelineManager {
       }
 
       console.log(`[PipelineManager] Triaged issue #${issue.number} as "${parsed.classification}" (proceed=${parsed.shouldProceed})`);
+
+      // Create a kanban task in the Triage column (if one doesn't already exist)
+      this.createTriageTask(projectId, issue.number, issue.title, parsed.classification, issue.body ?? "");
     } catch (err) {
       console.error(`[PipelineManager] Triage LLM call failed for #${issue.number}:`, err);
     }
@@ -640,6 +644,63 @@ export class PipelineManager {
     } catch (err) {
       console.error(`[PipelineManager] Failed to post ${phase} comment for ${stage} on #${state.issueNumber}:`, err);
     }
+  }
+
+  // ─── Triage task helpers ─────────────────────────────────────
+
+  /**
+   * Create a kanban task in the Triage column for a triaged issue.
+   * Skips creation if a task for this issue already exists.
+   */
+  createTriageTask(
+    projectId: string,
+    issueNumber: number,
+    issueTitle: string,
+    classification: string,
+    body: string,
+  ): void {
+    const db = getDb();
+    const label = `github-issue-${issueNumber}`;
+
+    // Check if a task for this issue already exists
+    const existingTasks = db
+      .select()
+      .from(schema.kanbanTasks)
+      .where(eq(schema.kanbanTasks.projectId, projectId))
+      .all();
+
+    const alreadyTracked = existingTasks.some(
+      (t) => (t.labels as string[]).includes(label),
+    );
+    if (alreadyTracked) return;
+
+    const maxPos = existingTasks
+      .filter((t) => t.column === "triage")
+      .reduce((max, t) => Math.max(max, t.position), -1);
+
+    const now = new Date().toISOString();
+    const task = {
+      id: nanoid(),
+      projectId,
+      title: `#${issueNumber}: ${issueTitle}`,
+      description: classification ? `Triage: ${classification}\n\n${body}` : body,
+      column: "triage" as const,
+      position: maxPos + 1,
+      assigneeAgentId: null,
+      createdBy: "triage",
+      labels: [label],
+      blockedBy: [] as string[],
+      retryCount: 0,
+      spawnCount: 0,
+      completionReport: null,
+      pipelineStage: null,
+      pipelineAttempt: 0,
+      createdAt: now,
+      updatedAt: now,
+    };
+    db.insert(schema.kanbanTasks).values(task).run();
+    this.io.emit("kanban:task-created", task as unknown as KanbanTask);
+    console.log(`[PipelineManager] Created triage task for issue #${issueNumber}`);
   }
 
   // ─── Helpers ─────────────────────────────────────────────────────

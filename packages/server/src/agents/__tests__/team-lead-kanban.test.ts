@@ -116,7 +116,7 @@ function createTeamLead(bus: MessageBus) {
 function insertTask(overrides: Partial<{
   id: string;
   title: string;
-  column: "backlog" | "in_progress" | "done";
+  column: "triage" | "backlog" | "in_progress" | "in_review" | "done";
   description: string;
   assigneeAgentId: string | null;
   position: number;
@@ -132,7 +132,7 @@ function insertTask(overrides: Partial<{
     projectId: PROJECT_ID,
     title: overrides.title ?? "Test task",
     description: overrides.description ?? "",
-    column: column as "backlog" | "in_progress" | "done",
+    column: column as "triage" | "backlog" | "in_progress" | "in_review" | "done",
     position: overrides.position ?? 0,
     assigneeAgentId: overrides.assigneeAgentId ?? null,
     createdBy: "test",
