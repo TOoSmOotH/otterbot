@@ -57,6 +57,7 @@ export const PROVIDER_TYPE_META: ProviderTypeMeta[] = [
   { type: "openrouter", label: "OpenRouter", needsApiKey: true, needsBaseUrl: false },
   { type: "ollama", label: "Ollama", needsApiKey: false, needsBaseUrl: true },
   { type: "openai-compatible", label: "OpenAI-Compatible", needsApiKey: true, needsBaseUrl: true },
+  { type: "github-copilot", label: "GitHub Copilot", needsApiKey: true, needsBaseUrl: false },
 ];
 
 // Static fallback models per provider (used when API fetch fails)
@@ -81,6 +82,7 @@ const FALLBACK_MODELS: Record<string, string[]> = {
     "meta-llama/llama-3.3-70b-instruct",
   ],
   "openai-compatible": [],
+  "github-copilot": ["gpt-4o", "gpt-4.1", "claude-sonnet-4-5-20250929", "o3-mini"],
 };
 
 // ---------------------------------------------------------------------------
@@ -450,6 +452,18 @@ export async function fetchModelsWithCredentials(
           data?: Array<{ id: string }>;
         };
         return data.data?.map((m) => m.id).sort() ?? [];
+      }
+
+      case "github-copilot": {
+        if (!apiKey) return FALLBACK_MODELS["github-copilot"] ?? [];
+        const copilotBase = baseUrl ?? "https://api.githubcopilot.com";
+        const res = await fetch(`${copilotBase}/models`, {
+          headers: { Authorization: `Bearer ${apiKey}` },
+          signal: AbortSignal.timeout(10_000),
+        });
+        if (!res.ok) return FALLBACK_MODELS["github-copilot"] ?? [];
+        const data = (await res.json()) as { data?: Array<{ id: string }> };
+        return data.data?.map((m) => m.id).sort() ?? FALLBACK_MODELS["github-copilot"] ?? [];
       }
 
       default:
