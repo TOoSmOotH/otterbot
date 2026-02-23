@@ -511,6 +511,32 @@ export async function requestPullRequestReviewers(
 }
 
 /**
+ * Fetch the diff (changed files with patches) between two refs using the Compare API.
+ */
+export async function fetchCompareCommitsDiff(
+  repoFullName: string,
+  token: string,
+  base: string,
+  head: string,
+): Promise<{ filename: string; status: string; patch?: string }[]> {
+  validateRepoName(repoFullName);
+  validateBranchName(base);
+  validateBranchName(head);
+
+  const data = await ghFetch<{
+    files?: { filename: string; status: string; patch?: string }[];
+  }>(
+    `https://api.github.com/repos/${repoFullName}/compare/${encodeURIComponent(base)}...${encodeURIComponent(head)}`,
+    token,
+  );
+  return (data.files ?? []).map((f) => ({
+    filename: f.filename,
+    status: f.status,
+    patch: f.patch,
+  }));
+}
+
+/**
  * Create a pull request.
  */
 export async function createPullRequest(

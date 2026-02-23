@@ -18,6 +18,8 @@ import {
   createIssueComment,
   addLabelsToIssue,
   fetchIssue,
+  fetchCompareCommitsDiff,
+  getRepoDefaultBranch,
 } from "../github/github-service.js";
 import type { COO } from "../agents/coo.js";
 import type { GitHubIssue } from "../github/github-service.js";
@@ -536,11 +538,22 @@ export class PipelineManager {
         break;
       }
       case "security": {
-        parts.push(
-          `\nReview the code on branch \`${state.prBranch ?? "(see coder report)"}\` for security vulnerabilities.`,
-          `Check for: injection attacks, XSS, CSRF, auth issues, data exposure, dependency risks.`,
-          `If you find issues, describe them clearly. If no issues found, state that explicitly.`,
-        );
+        const diffSection = await this.fetchDiffSection(state);
+        if (diffSection) {
+          parts.push(
+            `\nReview the code on branch \`${state.prBranch ?? "(see coder report)"}\` for security vulnerabilities.`,
+            `Focus ONLY on the changes below — do not review unchanged code.`,
+            `Check for: injection attacks, XSS, CSRF, auth issues, data exposure, dependency risks.`,
+            `If you find issues, describe them clearly. If no issues found, state that explicitly.`,
+          );
+          parts.push(diffSection);
+        } else {
+          parts.push(
+            `\nReview the code on branch \`${state.prBranch ?? "(see coder report)"}\` for security vulnerabilities.`,
+            `Check for: injection attacks, XSS, CSRF, auth issues, data exposure, dependency risks.`,
+            `If you find issues, describe them clearly. If no issues found, state that explicitly.`,
+          );
+        }
         // Include coder's report for context
         const coderReport = state.stageReports.get("coder");
         if (coderReport) {
@@ -561,9 +574,18 @@ export class PipelineManager {
         break;
       }
       case "reviewer": {
-        parts.push(
-          `\nReview the code on branch \`${state.prBranch ?? "(see coder report)"}\` for quality and correctness.`,
-        );
+        const diffSection = await this.fetchDiffSection(state);
+        if (diffSection) {
+          parts.push(
+            `\nReview the code on branch \`${state.prBranch ?? "(see coder report)"}\` for quality and correctness.`,
+            `Focus your review on ONLY the changes shown below.`,
+          );
+          parts.push(diffSection);
+        } else {
+          parts.push(
+            `\nReview the code on branch \`${state.prBranch ?? "(see coder report)"}\` for quality and correctness.`,
+          );
+        }
         if (isLastStage) {
           parts.push(`After review, create a pull request for this branch.`);
         }
@@ -713,6 +735,46 @@ export class PipelineManager {
   }
 
   // ─── Helpers ─────────────────────────────────────────────────────
+
+  private async fetchDiffSection(state: PipelineState): Promise<string | null> {
+    if (!state.prBranch || !state.repo) return null;
+    const token = getConfig("github:token");
+    if (!token) return null;
+
+    try {
+      const defaultBranch = await getRepoDefaultBranch(state.repo, token);
+      const files = await fetchCompareCommitsDiff(
+        state.repo,
+        token,
+        defaultBranch,
+        state.prBranch,
+      );
+
+      if (files.length === 0) return null;
+
+      const MAX_DIFF_CHARS = 12_000;
+      let diffText = "";
+      let truncated = false;
+
+      for (const file of files) {
+        const entry = `## ${file.filename} (${file.status})\n${file.patch ?? "(binary or no patch)"}\n\n`;
+        if (diffText.length + entry.length > MAX_DIFF_CHARS) {
+          truncated = true;
+          break;
+        }
+        diffText += entry;
+      }
+
+      if (truncated) {
+        diffText += `\n... (diff truncated — ${files.length} files total)\n`;
+      }
+
+      return `\n--- CHANGED FILES ---\n${diffText}--- END CHANGED FILES ---`;
+    } catch (err) {
+      console.warn(`[PipelineManager] Failed to fetch diff for ${state.repo} ${state.prBranch}:`, err);
+      return null;
+    }
+  }
 
   private securityHasFindings(report: string): boolean {
     const lower = report.toLowerCase();
