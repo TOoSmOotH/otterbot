@@ -210,18 +210,13 @@ function CharacterModel({ pack, status, agentId, gearConfig }: { pack: ModelPack
             findClip(actions, /Running_A/i) ??
             findClip(actions, /walk|run/i);
         } else if (effectiveStatus === "acting") {
-          targetName =
-            findClip(actions, /Working/i) ??
-            findClip(actions, /GenericWorking/i) ??
-            findClip(actions, /Interact/i) ??
-            findClip(actions, /Use_Item/i) ??
-            findClip(actions, /PickUp/i) ??
+          const candidates = findAllClips(actions, /Working/i, /GenericWorking/i, /Interact/i, /Use_Item/i, /PickUp/i);
+          targetName = pickRandom(candidates) ??
             findClip(actions, /Idle_B/i) ??
             findClip(actions, /idle/i);
         } else if (effectiveStatus === "thinking") {
-          targetName =
-            findClip(actions, /Idle_B/i) ??
-            findClip(actions, /Interact/i) ??
+          const candidates = findAllClips(actions, /Idle_B/i, /Interact/i);
+          targetName = pickRandom(candidates) ??
             findClip(actions, /idle/i);
         } else if (effectiveStatus === "error") {
           targetName =
@@ -264,6 +259,19 @@ function findClip(actions: Map<string, THREE.AnimationAction>, pattern: RegExp):
     if (pattern.test(name)) return name;
   }
   return undefined;
+}
+
+function findAllClips(actions: Map<string, THREE.AnimationAction>, ...patterns: RegExp[]): string[] {
+  const results: string[] = [];
+  for (const name of actions.keys()) {
+    if (patterns.some((p) => p.test(name))) results.push(name);
+  }
+  return results;
+}
+
+function pickRandom<T>(arr: T[]): T | undefined {
+  if (arr.length === 0) return undefined;
+  return arr[Math.floor(Math.random() * arr.length)];
 }
 
 function FallbackMesh({ role }: { role: string }) {
