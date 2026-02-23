@@ -1430,8 +1430,8 @@ The user can see everything on the desktop in real-time.`;
    */
   async spawnTeamLeadForManualProject(
     projectId: string,
-    githubRepo: string,
-    branch: string,
+    githubRepo: string | null,
+    branch: string | null,
     rules: string[],
   ): Promise<void> {
     const db = getDb();
@@ -1466,19 +1466,28 @@ The user can see everything on the desktop in real-time.`;
     if (this._pipelineManager) teamLead.setPipelineManager(this._pipelineManager);
     this.onAgentSpawned?.(teamLead);
 
-    // Build GitHub-aware initial directive
+    // Build initial directive
     const rulesBlock = rules.length > 0
       ? `\nProject rules:\n${rules.map((r) => `- ${r}`).join("\n")}`
       : "";
 
-    const directive =
-      `You are the Team Lead for a GitHub-linked project.\n\n` +
-      `Repository: ${githubRepo}\n` +
-      `Target branch: ${branch}\n` +
-      `Repository is already cloned to your workspace.\n\n` +
-      `**PR Workflow:** Workers must create feature branches from \`${branch}\`, commit their changes, push, and open a pull request targeting \`${branch}\`.\n` +
-      `Use conventional commits and reference issue numbers where applicable.${rulesBlock}\n\n` +
-      `Await issue-triggered tasks or COO directives.`;
+    let directive: string;
+    if (githubRepo && branch) {
+      directive =
+        `You are the Team Lead for a GitHub-linked project.\n\n` +
+        `Repository: ${githubRepo}\n` +
+        `Target branch: ${branch}\n` +
+        `Repository is already cloned to your workspace.\n\n` +
+        `**PR Workflow:** Workers must create feature branches from \`${branch}\`, commit their changes, push, and open a pull request targeting \`${branch}\`.\n` +
+        `Use conventional commits and reference issue numbers where applicable.${rulesBlock}\n\n` +
+        `Await issue-triggered tasks or COO directives.`;
+    } else {
+      directive =
+        `You are the Team Lead for a local project.\n\n` +
+        `Repository is initialized in your workspace.\n` +
+        `Workers should create feature branches, commit their changes locally.${rulesBlock}\n\n` +
+        `Await COO directives.`;
+    }
 
     this.sendMessage(teamLead.id, MessageType.Directive, directive, {
       projectId,
