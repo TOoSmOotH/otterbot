@@ -720,6 +720,12 @@ export class PipelineManager {
     this.pipelines.set(taskId, state);
     this.updateTaskPipelineStage(taskId, "coder");
 
+    // Reset spawn count — PR feedback is a legitimate new cycle, not a failure loop
+    db.update(schema.kanbanTasks)
+      .set({ spawnCount: 0, updatedAt: new Date().toISOString() })
+      .where(eq(schema.kanbanTasks.id, taskId))
+      .run();
+
     // Post comment on issue
     if (issueNumber && state.repo) {
       const token = getConfig("github:token");
