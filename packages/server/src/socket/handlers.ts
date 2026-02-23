@@ -526,6 +526,7 @@ export function setupSocketHandlers(
         "builtin-opencode-coder",
         "builtin-claude-code-coder",
         "builtin-codex-coder",
+        "builtin-gemini-cli-coder",
       ]);
 
       // Validate all agent IDs
