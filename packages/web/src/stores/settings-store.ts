@@ -177,6 +177,14 @@ interface SettingsState {
   discordPendingPairings: Array<{ code: string; discordUserId: string; discordUsername: string; createdAt: string }>;
   discordTestResult: TestResult | null;
 
+  // Telegram
+  telegramEnabled: boolean;
+  telegramTokenSet: boolean;
+  telegramBotUsername: string | null;
+  telegramPairedUsers: Array<{ telegramUserId: string; telegramUsername: string; pairedAt: string }>;
+  telegramPendingPairings: Array<{ code: string; telegramUserId: string; telegramUsername: string; createdAt: string }>;
+  telegramTestResult: TestResult | null;
+
   // Slack
   slackEnabled: boolean;
   slackBotTokenSet: boolean;
@@ -355,6 +363,17 @@ interface SettingsState {
   rejectDiscordPairing: (code: string) => Promise<void>;
   revokeDiscordUser: (userId: string) => Promise<void>;
 
+  // Telegram actions
+  loadTelegramSettings: () => Promise<void>;
+  updateTelegramSettings: (data: {
+    enabled?: boolean;
+    botToken?: string;
+  }) => Promise<void>;
+  testTelegramConnection: () => Promise<void>;
+  approveTelegramPairing: (code: string) => Promise<void>;
+  rejectTelegramPairing: (code: string) => Promise<void>;
+  revokeTelegramUser: (userId: string) => Promise<void>;
+
   // Slack actions
   loadSlackSettings: () => Promise<void>;
   updateSlackSettings: (data: {
@@ -473,6 +492,12 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   discordPairedUsers: [],
   discordPendingPairings: [],
   discordTestResult: null,
+  telegramEnabled: false,
+  telegramTokenSet: false,
+  telegramBotUsername: null,
+  telegramPairedUsers: [],
+  telegramPendingPairings: [],
+  telegramTestResult: null,
   slackEnabled: false,
   slackBotTokenSet: false,
   slackSigningSecretSet: false,
@@ -1653,6 +1678,111 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       });
       if (!res.ok) throw new Error("Failed to revoke user");
       await get().loadDiscordSettings();
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "Unknown error" });
+    }
+  },
+
+  // Telegram actions
+
+  loadTelegramSettings: async () => {
+    try {
+      const res = await fetch("/api/settings/telegram");
+      if (!res.ok) return;
+      const data = await res.json();
+      set({
+        telegramEnabled: data.enabled,
+        telegramTokenSet: data.tokenSet,
+        telegramBotUsername: data.botUsername,
+        telegramPairedUsers: data.pairedUsers,
+        telegramPendingPairings: data.pendingPairings,
+      });
+    } catch {
+      // Silently fail
+    }
+  },
+
+  updateTelegramSettings: async (data) => {
+    set({ error: null });
+    try {
+      const res = await fetch("/api/settings/telegram", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) throw new Error("Failed to update Telegram settings");
+      await get().loadTelegramSettings();
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "Unknown error" });
+    }
+  },
+
+  testTelegramConnection: async () => {
+    set({ telegramTestResult: { ok: false, testing: true } });
+    try {
+      const res = await fetch("/api/settings/telegram/test", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      const data = await res.json();
+      set({
+        telegramTestResult: {
+          ok: data.ok,
+          error: data.error,
+          testing: false,
+        },
+        telegramBotUsername: data.ok ? data.botUsername : get().telegramBotUsername,
+      });
+    } catch (err) {
+      set({
+        telegramTestResult: {
+          ok: false,
+          error: err instanceof Error ? err.message : "Unknown error",
+          testing: false,
+        },
+      });
+    }
+  },
+
+  approveTelegramPairing: async (code) => {
+    set({ error: null });
+    try {
+      const res = await fetch("/api/settings/telegram/pair/approve", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code }),
+      });
+      if (!res.ok) throw new Error("Failed to approve pairing");
+      await get().loadTelegramSettings();
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "Unknown error" });
+    }
+  },
+
+  rejectTelegramPairing: async (code) => {
+    set({ error: null });
+    try {
+      const res = await fetch("/api/settings/telegram/pair/reject", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code }),
+      });
+      if (!res.ok) throw new Error("Failed to reject pairing");
+      await get().loadTelegramSettings();
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "Unknown error" });
+    }
+  },
+
+  revokeTelegramUser: async (userId) => {
+    set({ error: null });
+    try {
+      const res = await fetch(`/api/settings/telegram/pair/${userId}`, {
+        method: "DELETE",
+      });
+      if (!res.ok) throw new Error("Failed to revoke user");
+      await get().loadTelegramSettings();
     } catch (err) {
       set({ error: err instanceof Error ? err.message : "Unknown error" });
     }

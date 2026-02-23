@@ -39,7 +39,7 @@ export interface AgentModelOverride {
 }
 
 /** Supported messaging-platform chat provider types. */
-export type ChatProviderType = "discord" | "matrix" | "irc" | "teams";
+export type ChatProviderType = "discord" | "matrix" | "irc" | "teams" | "telegram";
 
 /** Settings common to all chat provider bridges. */
 export interface ChatProviderSettings {

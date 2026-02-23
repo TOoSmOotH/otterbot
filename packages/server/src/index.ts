@@ -195,6 +195,17 @@ import {
   rejectPairing as rejectSlackPairing,
   revokePairing as revokeSlackPairing,
 } from "./slack/pairing.js";
+import { TelegramBridge } from "./telegram/telegram-bridge.js";
+import {
+  getTelegramSettings,
+  updateTelegramSettings,
+  testTelegramConnection,
+} from "./telegram/telegram-settings.js";
+import {
+  approvePairing as approveTelegramPairing,
+  rejectPairing as rejectTelegramPairing,
+  revokePairing as revokeTelegramPairing,
+} from "./telegram/pairing.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -563,6 +574,29 @@ async function main() {
     }
   }
 
+  // Telegram bridge (initialized when enabled + token set)
+  let telegramBridge: TelegramBridge | null = null;
+
+  function startTelegramBridge() {
+    if (telegramBridge || !coo) return;
+    const settings = getTelegramSettings();
+    if (!settings.enabled || !settings.tokenSet) return;
+    const token = getConfig("telegram:bot_token");
+    if (!token) return;
+    telegramBridge = new TelegramBridge({ bus, coo, io });
+    telegramBridge.start(token).catch((err) => {
+      console.error("[Telegram] Failed to start bridge:", err);
+      telegramBridge = null;
+    });
+  }
+
+  async function stopTelegramBridge() {
+    if (telegramBridge) {
+      await telegramBridge.stop();
+      telegramBridge = null;
+    }
+  }
+
   function startCoo() {
     if (coo) return;
     try {
@@ -889,6 +923,7 @@ async function main() {
     startIrcBridge();
     startTeamsBridge();
     startSlackBridge();
+    startTelegramBridge();
   } else {
     console.log("Setup not complete. Waiting for setup wizard...");
   }
@@ -1212,6 +1247,7 @@ async function main() {
     startIrcBridge();
     startTeamsBridge();
     startSlackBridge();
+    startTelegramBridge();
 
     return { ok: true };
   });
@@ -3385,6 +3421,71 @@ async function main() {
     Params: { userId: string };
   }>("/api/settings/slack/pair/:userId", async (req, reply) => {
     const ok = revokeSlackPairing(req.params.userId);
+    if (!ok) {
+      reply.code(400);
+      return { ok: false, error: "User not found" };
+    }
+    return { ok: true };
+  });
+
+  // =========================================================================
+  // Telegram settings routes
+  // =========================================================================
+
+  app.get("/api/settings/telegram", async () => {
+    return getTelegramSettings();
+  });
+
+  app.put<{
+    Body: {
+      enabled?: boolean;
+      botToken?: string;
+    };
+  }>("/api/settings/telegram", async (req) => {
+    const wasEnabled = getTelegramSettings().enabled && getTelegramSettings().tokenSet;
+    updateTelegramSettings(req.body);
+    const nowEnabled = getTelegramSettings().enabled && getTelegramSettings().tokenSet;
+
+    // Start or stop bridge based on state change
+    if (nowEnabled && !wasEnabled) {
+      startTelegramBridge();
+    } else if (!nowEnabled && wasEnabled) {
+      await stopTelegramBridge();
+    }
+
+    return { ok: true };
+  });
+
+  app.post("/api/settings/telegram/test", async () => {
+    return testTelegramConnection();
+  });
+
+  app.post<{
+    Body: { code: string };
+  }>("/api/settings/telegram/pair/approve", async (req, reply) => {
+    const result = approveTelegramPairing(req.body.code);
+    if (!result) {
+      reply.code(400);
+      return { ok: false, error: "Invalid or expired pairing code" };
+    }
+    return { ok: true, user: result };
+  });
+
+  app.post<{
+    Body: { code: string };
+  }>("/api/settings/telegram/pair/reject", async (req, reply) => {
+    const ok = rejectTelegramPairing(req.body.code);
+    if (!ok) {
+      reply.code(400);
+      return { ok: false, error: "Pairing code not found" };
+    }
+    return { ok: true };
+  });
+
+  app.delete<{
+    Params: { userId: string };
+  }>("/api/settings/telegram/pair/:userId", async (req, reply) => {
+    const ok = revokeTelegramPairing(req.params.userId);
     if (!ok) {
       reply.code(400);
       return { ok: false, error: "User not found" };
