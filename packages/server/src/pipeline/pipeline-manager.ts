@@ -28,6 +28,53 @@ type TypedServer = Server<ClientToServerEvents, ServerToClientEvents>;
 
 const MAX_KICKBACKS = 2;
 
+interface TriageResult {
+  classification: string;
+  shouldProceed: boolean;
+  comment: string;
+  labels: string[];
+}
+
+/**
+ * Extract triage JSON from an LLM response. Handles:
+ * 1. Pure JSON
+ * 2. JSON inside code fences
+ * 3. JSON object embedded in free-form text
+ */
+function extractTriageJson(text: string): TriageResult {
+  // 1. Strip code fences and try direct parse
+  const stripped = text.replace(/```(?:json)?\n?|\n?```/g, "").trim();
+  try {
+    return JSON.parse(stripped) as TriageResult;
+  } catch { /* continue */ }
+
+  // 2. Find a JSON object anywhere in the text (greedy braces)
+  const jsonMatch = text.match(/\{[\s\S]*"classification"[\s\S]*\}/);
+  if (jsonMatch) {
+    try {
+      return JSON.parse(jsonMatch[0]) as TriageResult;
+    } catch { /* continue */ }
+  }
+
+  // 3. Infer from free-form text as last resort
+  const lower = text.toLowerCase();
+  const classifications = [
+    "bug", "feature", "enhancement", "user-error",
+    "duplicate", "question", "documentation",
+  ];
+  const classification =
+    classifications.find((c) => lower.includes(c)) ?? "question";
+  const shouldProceed = ["bug", "feature", "enhancement"].includes(classification);
+  // Use first ~300 chars of the response as the comment
+  const comment = text.slice(0, 300).replace(/\n+/g, " ").trim();
+  const labels = [classification];
+
+  console.warn(
+    `[PipelineManager] Triage response was not JSON — inferred classification="${classification}"`,
+  );
+  return { classification, shouldProceed, comment, labels };
+}
+
 /** Implementation-phase stages (excludes triage) */
 const IMPLEMENTATION_STAGE_KEYS = PIPELINE_STAGES
   .filter((s) => s.key !== "triage")
@@ -157,9 +204,7 @@ export class PipelineManager {
       };
 
       try {
-        // Strip code fences if present
-        const cleaned = result.text.replace(/```json\n?|\n?```/g, "").trim();
-        parsed = JSON.parse(cleaned);
+        parsed = extractTriageJson(result.text);
       } catch {
         console.error(`[PipelineManager] Failed to parse triage response for #${issue.number}:`, result.text);
         return;
