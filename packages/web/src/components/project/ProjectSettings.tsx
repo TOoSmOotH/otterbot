@@ -41,6 +41,7 @@ export function ProjectSettings({ projectId }: { projectId: string }) {
   const openCodeEnabled = useSettingsStore((s) => s.openCodeEnabled);
   const claudeCodeEnabled = useSettingsStore((s) => s.claudeCodeEnabled);
   const codexEnabled = useSettingsStore((s) => s.codexEnabled);
+  const geminiCliEnabled = useSettingsStore((s) => s.geminiCliEnabled);
 
   // Load pipeline config, agent assignments, and project info
   useEffect(() => {
@@ -82,9 +83,9 @@ export function ProjectSettings({ projectId }: { projectId: string }) {
 
   const isAgentEnabled = useCallback((agent: typeof CODING_AGENTS[number]): boolean => {
     if (agent.enabledKey === null) return true;
-    const map: Record<string, boolean> = { openCodeEnabled, claudeCodeEnabled, codexEnabled };
+    const map: Record<string, boolean> = { openCodeEnabled, claudeCodeEnabled, codexEnabled, geminiCliEnabled };
     return !!map[agent.enabledKey];
-  }, [openCodeEnabled, claudeCodeEnabled, codexEnabled]);
+  }, [openCodeEnabled, claudeCodeEnabled, codexEnabled, geminiCliEnabled]);
 
   const enabledCodingAgents = CODING_AGENTS.filter(isAgentEnabled);
 
