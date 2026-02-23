@@ -792,8 +792,12 @@ export function SetupWizard() {
                         }
                       }}
                       placeholder="Search or type a model name"
+                      aria-describedby="model-search-hint"
                       className="w-full px-3 py-2 bg-background border border-input rounded-md text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
                     />
+                    <p id="model-search-hint" data-testid="model-search-hint" className="mt-1.5 text-xs text-muted-foreground">
+                      Type to search and filter available models, or enter a custom model name.
+                    </p>
                     {fetchingModels && (
                       <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">
                         Loading...
@@ -1477,8 +1481,12 @@ export function SetupWizard() {
                           }
                         }}
                         placeholder="Search or type a model name"
+                        aria-describedby="opencode-model-search-hint"
                         className="w-full px-3 py-2 bg-background border border-input rounded-md text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
                       />
+                      <p id="opencode-model-search-hint" data-testid="model-search-hint" className="mt-1.5 text-xs text-muted-foreground">
+                        Type to search and filter available models, or enter a custom model name.
+                      </p>
                       {openCodeFetchingModels && (
                         <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">
                           Loading...
