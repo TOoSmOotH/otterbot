@@ -20,6 +20,7 @@ function isCodingAgentEnabled(registryEntryId: string): boolean {
     case "builtin-opencode-coder": return getConfig("opencode:enabled") === "true";
     case "builtin-claude-code-coder": return getConfig("claude-code:enabled") === "true";
     case "builtin-codex-coder": return getConfig("codex:enabled") === "true";
+    case "builtin-gemini-cli-coder": return getConfig("gemini-cli:enabled") === "true";
     default: return true;
   }
 }
@@ -932,6 +933,8 @@ export class TeamLead extends BaseAgent {
         registryEntryId = "builtin-claude-code-coder";
       } else if (getConfig("codex:enabled") === "true") {
         registryEntryId = "builtin-codex-coder";
+      } else if (getConfig("gemini-cli:enabled") === "true") {
+        registryEntryId = "builtin-gemini-cli-coder";
       }
 
       console.log(
@@ -1364,6 +1367,7 @@ export class TeamLead extends BaseAgent {
       if (entry.id === "builtin-opencode-coder" && getConfig("opencode:enabled") !== "true") return false;
       if (entry.id === "builtin-claude-code-coder" && getConfig("claude-code:enabled") !== "true") return false;
       if (entry.id === "builtin-codex-coder" && getConfig("codex:enabled") !== "true") return false;
+      if (entry.id === "builtin-gemini-cli-coder" && getConfig("gemini-cli:enabled") !== "true") return false;
       return entry.capabilities.some((c) =>
         c.toLowerCase().includes(capability.toLowerCase()),
       );
@@ -1420,6 +1424,8 @@ export class TeamLead extends BaseAgent {
           registryEntryId = "builtin-claude-code-coder";
         } else if (getConfig("codex:enabled") === "true") {
           registryEntryId = "builtin-codex-coder";
+        } else if (getConfig("gemini-cli:enabled") === "true") {
+          registryEntryId = "builtin-gemini-cli-coder";
         }
       }
 

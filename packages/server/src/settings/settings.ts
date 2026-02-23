@@ -1462,6 +1462,85 @@ export async function testCodexConnection(): Promise<TestResult> {
 }
 
 // ---------------------------------------------------------------------------
+// Gemini CLI settings
+// ---------------------------------------------------------------------------
+
+export interface GeminiCliSettingsResponse {
+  enabled: boolean;
+  apiKeySet: boolean;
+  model: string;
+  approvalMode: "full-auto" | "auto-edit" | "default";
+  timeoutMs: number;
+  sandbox: boolean;
+}
+
+export function getGeminiCliSettings(): GeminiCliSettingsResponse {
+  return {
+    enabled: getConfig("gemini-cli:enabled") === "true",
+    apiKeySet: !!getConfig("gemini-cli:api_key"),
+    model: getConfig("gemini-cli:model") ?? "gemini-2.5-flash",
+    approvalMode: (getConfig("gemini-cli:approval_mode") ?? "full-auto") as "full-auto" | "auto-edit" | "default",
+    timeoutMs: parseInt(getConfig("gemini-cli:timeout_ms") ?? "1200000", 10),
+    sandbox: getConfig("gemini-cli:sandbox") === "true",
+  };
+}
+
+export async function updateGeminiCliSettings(data: {
+  enabled?: boolean;
+  apiKey?: string;
+  model?: string;
+  approvalMode?: "full-auto" | "auto-edit" | "default";
+  timeoutMs?: number;
+  sandbox?: boolean;
+}): Promise<void> {
+  if (data.enabled !== undefined) {
+    setConfig("gemini-cli:enabled", data.enabled ? "true" : "false");
+  }
+  if (data.apiKey !== undefined) {
+    if (data.apiKey === "") {
+      deleteConfig("gemini-cli:api_key");
+    } else {
+      setConfig("gemini-cli:api_key", data.apiKey);
+    }
+  }
+  if (data.model !== undefined) {
+    setConfig("gemini-cli:model", data.model);
+  }
+  if (data.approvalMode !== undefined) {
+    setConfig("gemini-cli:approval_mode", data.approvalMode);
+  }
+  if (data.timeoutMs !== undefined) {
+    setConfig("gemini-cli:timeout_ms", String(data.timeoutMs));
+  }
+  if (data.sandbox !== undefined) {
+    setConfig("gemini-cli:sandbox", data.sandbox ? "true" : "false");
+  }
+}
+
+export async function testGeminiCliConnection(): Promise<TestResult> {
+  const start = Date.now();
+
+  try {
+    const { isGeminiCliInstalled, isGeminiCliReady } = await import("../coding-agents/gemini-cli-manager.js");
+
+    if (!isGeminiCliInstalled()) {
+      return { ok: false, error: "Gemini CLI not found. Install with: npm install -g @google/gemini-cli" };
+    }
+
+    if (!isGeminiCliReady()) {
+      return { ok: false, error: "API key not configured." };
+    }
+
+    return { ok: true, latencyMs: Date.now() - start };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "Unknown error",
+    };
+  }
+}
+
+// ---------------------------------------------------------------------------
 // GitHub settings
 // ---------------------------------------------------------------------------
 

@@ -60,6 +60,7 @@ export const CODING_AGENT_REGISTRY_IDS = new Set([
   "builtin-opencode-coder",
   "builtin-claude-code-coder",
   "builtin-codex-coder",
+  "builtin-gemini-cli-coder",
   "builtin-coder",
 ]);
 
@@ -182,10 +183,11 @@ export class Worker extends BaseAgent {
   }
 
   /** Determine the coding agent type from the registry entry ID */
-  private getCodingAgentType(): "opencode" | "claude-code" | "codex" {
+  private getCodingAgentType(): "opencode" | "claude-code" | "codex" | "gemini-cli" {
     switch (this.registryEntryId) {
       case "builtin-claude-code-coder": return "claude-code";
       case "builtin-codex-coder": return "codex";
+      case "builtin-gemini-cli-coder": return "gemini-cli";
       default: return "opencode";
     }
   }
@@ -364,6 +366,90 @@ export class Worker extends BaseAgent {
     return `Codex failed: ${result.error ?? "Unknown error"}\n\n${result.summary}`;
   }
 
+  /**
+   * Execute a task using Gemini CLI via PTY (terminal passthrough).
+   * Spawns the `gemini` CLI in a pseudo-terminal and streams raw output.
+   */
+  private async executeGeminiCliPtyTask(task: string): Promise<string> {
+    // Bail out early if no API key is configured
+    if (!getConfig("gemini-cli:api_key")) {
+      console.warn(`[Worker ${this.id}] Gemini CLI not configured (no api_key), falling back to think()`);
+      return "";
+    }
+
+    const { GeminiCliPtyClient } = await import("../coding-agents/gemini-cli-pty-client.js");
+
+    // Terminal output buffer and idle detection for monitoring
+    let terminalBuffer = "";
+    let idleTimer: NodeJS.Timeout | null = null;
+    const IDLE_TIMEOUT_MS = 10000;
+    const MAX_BUFFER_CHARS = 8000;
+
+    const ptyClient = new GeminiCliPtyClient({
+      workspacePath: this.workspacePath,
+      onData: (data) => {
+        this._onTerminalData?.(this.id, data);
+
+        terminalBuffer += data;
+        if (terminalBuffer.length > MAX_BUFFER_CHARS) {
+          terminalBuffer = terminalBuffer.slice(-MAX_BUFFER_CHARS);
+        }
+
+        if (idleTimer) clearTimeout(idleTimer);
+        idleTimer = setTimeout(() => this.analyzeTerminalState(terminalBuffer, ptyClient), IDLE_TIMEOUT_MS);
+      },
+      onExit: () => {
+        if (idleTimer) {
+          clearTimeout(idleTimer);
+          idleTimer = null;
+        }
+      },
+    });
+
+    this._ptyClient = ptyClient;
+    this._terminalExiting = false;
+
+    // Register PTY session for socket routing
+    this._onPtySessionRegistered?.(this.id, ptyClient);
+
+    this.setStatus(AgentStatus.Acting);
+
+    // Emit session-start event
+    this._onCodingAgentEvent?.(this.id, "", {
+      type: "__session-start",
+      properties: { task, projectId: this.projectId ?? "", agentType: "gemini-cli" },
+    });
+
+    console.log(`[Worker ${this.id}] Sending task to Gemini CLI PTY (${task.length} chars)...`);
+
+    const result = await ptyClient.executeTask(task);
+    console.log(`[Worker ${this.id}] Gemini CLI PTY result: success=${result.success}, diff=${result.diff?.files?.length ?? 0} files`);
+
+    // Unregister PTY session
+    this._onPtySessionUnregistered?.(this.id);
+    this._ptyClient = null;
+
+    // Emit session-end event
+    this._onCodingAgentEvent?.(this.id, result.sessionId, {
+      type: "__session-end",
+      properties: {
+        status: result.success ? "completed" : "error",
+        diff: result.diff?.files ?? null,
+        error: result.error,
+      },
+    });
+
+    if (result.success) {
+      const filesChanged = result.diff?.files?.length ?? 0;
+      let report = `Gemini CLI completed successfully.\n\nSummary: ${result.summary}\n\nFiles changed: ${filesChanged}`;
+      if (filesChanged === 0) {
+        report += `\n\n⚠️ WARNING: Task reported success but produced zero file changes (no diff). This may indicate the task was already completed or the agent did not make any modifications.`;
+      }
+      return report;
+    }
+    return `Gemini CLI failed: ${result.error ?? "Unknown error"}\n\n${result.summary}`;
+  }
+
   private async executeCodingAgentTask(task: string): Promise<string> {
     const agentType = this.getCodingAgentType();
 
@@ -375,6 +461,8 @@ export class Worker extends BaseAgent {
       }
       case "codex":
         return this.executeCodexPtyTask(task);
+      case "gemini-cli":
+        return this.executeGeminiCliPtyTask(task);
       default:
         return "";
     }

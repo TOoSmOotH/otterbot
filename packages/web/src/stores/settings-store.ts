@@ -143,6 +143,15 @@ interface SettingsState {
   codexTimeoutMs: number;
   codexTestResult: TestResult | null;
 
+  // Gemini CLI
+  geminiCliEnabled: boolean;
+  geminiCliApiKeySet: boolean;
+  geminiCliModel: string;
+  geminiCliApprovalMode: "full-auto" | "auto-edit" | "default";
+  geminiCliTimeoutMs: number;
+  geminiCliSandbox: boolean;
+  geminiCliTestResult: TestResult | null;
+
   // GitHub
   gitHubEnabled: boolean;
   gitHubTokenSet: boolean;
@@ -304,6 +313,18 @@ interface SettingsState {
   }) => Promise<void>;
   testCodexConnection: () => Promise<void>;
 
+  // Gemini CLI actions
+  loadGeminiCliSettings: () => Promise<void>;
+  updateGeminiCliSettings: (data: {
+    enabled?: boolean;
+    apiKey?: string;
+    model?: string;
+    approvalMode?: "full-auto" | "auto-edit" | "default";
+    timeoutMs?: number;
+    sandbox?: boolean;
+  }) => Promise<void>;
+  testGeminiCliConnection: () => Promise<void>;
+
   // GitHub actions
   loadGitHubSettings: () => Promise<void>;
   updateGitHubSettings: (data: {
@@ -424,6 +445,13 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   codexApprovalMode: "full-auto",
   codexTimeoutMs: 1200000,
   codexTestResult: null,
+  geminiCliEnabled: false,
+  geminiCliApiKeySet: false,
+  geminiCliModel: "gemini-2.5-flash",
+  geminiCliApprovalMode: "full-auto",
+  geminiCliTimeoutMs: 1200000,
+  geminiCliSandbox: false,
+  geminiCliTestResult: null,
   gitHubEnabled: false,
   gitHubTokenSet: false,
   gitHubUsername: null,
@@ -1286,6 +1314,68 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     } catch (err) {
       set({
         codexTestResult: {
+          ok: false,
+          error: err instanceof Error ? err.message : "Unknown error",
+          testing: false,
+        },
+      });
+    }
+  },
+
+  // Gemini CLI actions
+
+  loadGeminiCliSettings: async () => {
+    try {
+      const res = await fetch("/api/settings/gemini-cli");
+      if (!res.ok) return;
+      const data = await res.json();
+      set({
+        geminiCliEnabled: data.enabled,
+        geminiCliApiKeySet: data.apiKeySet,
+        geminiCliModel: data.model ?? "gemini-2.5-flash",
+        geminiCliApprovalMode: data.approvalMode ?? "full-auto",
+        geminiCliTimeoutMs: data.timeoutMs ?? 1200000,
+        geminiCliSandbox: data.sandbox ?? false,
+      });
+    } catch {
+      // Silently fail
+    }
+  },
+
+  updateGeminiCliSettings: async (data) => {
+    set({ error: null });
+    try {
+      const res = await fetch("/api/settings/gemini-cli", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) throw new Error("Failed to update Gemini CLI settings");
+      await get().loadGeminiCliSettings();
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "Unknown error" });
+    }
+  },
+
+  testGeminiCliConnection: async () => {
+    set({ geminiCliTestResult: { ok: false, testing: true } });
+    try {
+      const res = await fetch("/api/settings/gemini-cli/test", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      const data = await res.json();
+      set({
+        geminiCliTestResult: {
+          ok: data.ok,
+          error: data.error,
+          testing: false,
+        },
+      });
+    } catch (err) {
+      set({
+        geminiCliTestResult: {
           ok: false,
           error: err instanceof Error ? err.message : "Unknown error",
           testing: false,

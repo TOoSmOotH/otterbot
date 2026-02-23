@@ -1,6 +1,6 @@
 /** Types for the live coding agent view (OpenCode, Claude Code, Codex, etc.) */
 
-export type CodingAgentType = "opencode" | "claude-code" | "codex";
+export type CodingAgentType = "opencode" | "claude-code" | "codex" | "gemini-cli";
 
 export interface CodingAgentSession {
   id: string;

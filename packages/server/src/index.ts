@@ -130,6 +130,9 @@ import {
   getCodexSettings,
   updateCodexSettings,
   testCodexConnection,
+  getGeminiCliSettings,
+  updateGeminiCliSettings,
+  testGeminiCliConnection,
   getGitHubSettings,
   updateGitHubSettings,
   testGitHubConnection,
@@ -2740,6 +2743,32 @@ async function main() {
 
   app.post("/api/settings/codex/test", async () => {
     return testCodexConnection();
+  });
+
+  // =========================================================================
+  // Gemini CLI settings routes
+  // =========================================================================
+
+  app.get("/api/settings/gemini-cli", async () => {
+    return getGeminiCliSettings();
+  });
+
+  app.put<{
+    Body: {
+      enabled?: boolean;
+      apiKey?: string;
+      model?: string;
+      approvalMode?: "full-auto" | "auto-edit" | "default";
+      timeoutMs?: number;
+      sandbox?: boolean;
+    };
+  }>("/api/settings/gemini-cli", async (req) => {
+    await updateGeminiCliSettings(req.body);
+    return { ok: true };
+  });
+
+  app.post("/api/settings/gemini-cli/test", async () => {
+    return testGeminiCliConnection();
   });
 
   // =========================================================================

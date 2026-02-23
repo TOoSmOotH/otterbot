@@ -163,6 +163,19 @@ const SEED_ENTRIES = [
     role: "worker" as const,
   },
   {
+    id: "builtin-gemini-cli-coder",
+    name: "Gemini CLI Coder",
+    description:
+      "Delegates coding tasks to Gemini CLI, Google's autonomous AI coding agent.",
+    systemPrompt: "See assigned skills for instructions.",
+    capabilities: [] as string[],
+    defaultModel: "gemini-2.5-flash",
+    defaultProvider: "google",
+    tools: [] as string[],
+    builtIn: true,
+    role: "worker" as const,
+  },
+  {
     id: "builtin-browser-agent",
     name: "Browser Agent",
     description:
