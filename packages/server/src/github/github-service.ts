@@ -394,6 +394,8 @@ export async function removeLabelFromIssue(
 
 /**
  * Fetch open issues with optional filters (no assignee filter by default).
+ * Returns up to one page (100 issues). Use fetchAllOpenIssueNumbers()
+ * when you need an authoritative set of all open issue numbers.
  */
 export async function fetchOpenIssues(
   repoFullName: string,
@@ -412,6 +414,41 @@ export async function fetchOpenIssues(
   );
   // Filter out pull requests (GitHub API returns PRs as issues)
   return issues.filter((i) => !i.pull_request);
+}
+
+/**
+ * Fetch ALL open issue numbers via pagination.
+ * Only retrieves the minimal fields needed (number) to build an authoritative set.
+ * Much cheaper than fetching full issue bodies for every page.
+ */
+export async function fetchAllOpenIssueNumbers(
+  repoFullName: string,
+  token: string,
+): Promise<Set<number>> {
+  const numbers = new Set<number>();
+  let page = 1;
+
+  while (true) {
+    const params = new URLSearchParams({
+      state: "open",
+      per_page: "100",
+      page: String(page),
+    });
+
+    const issues = await ghFetch<{ number: number; pull_request?: unknown }[]>(
+      `https://api.github.com/repos/${repoFullName}/issues?${params}`,
+      token,
+    );
+
+    for (const issue of issues) {
+      if (!issue.pull_request) numbers.add(issue.number);
+    }
+
+    if (issues.length < 100) break;
+    page++;
+  }
+
+  return numbers;
 }
 
 // ---------------------------------------------------------------------------

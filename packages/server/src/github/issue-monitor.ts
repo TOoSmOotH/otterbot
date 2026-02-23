@@ -8,7 +8,7 @@ import { getConfig, setConfig } from "../auth/auth.js";
 import {
   fetchAssignedIssues,
   fetchOpenIssues,
-  fetchIssue,
+  fetchAllOpenIssueNumbers,
   fetchIssueComments,
   createIssueComment,
   removeLabelFromIssue,
@@ -131,10 +131,12 @@ export class GitHubIssueMonitor {
       const isTriaged = issue.labels.some((l) => l.name === "triaged");
 
       if (isTriaged) {
-        // Check if re-triage is needed due to new non-bot comments
-        const needsRetriage = await this.hasNewNonBotComments(
-          watched.repo, token, issue.number, projectId, botUsername,
-        );
+        // Quick check: does this issue have activity newer than the triage task?
+        // If not, skip the expensive fetchIssueComments call entirely.
+        const needsRetriage = this.issueUpdatedSinceTask(issue, projectId)
+          && await this.hasNewNonBotComments(
+            watched.repo, token, issue.number, projectId, botUsername,
+          );
         if (!needsRetriage) continue;
 
         // Remove "triaged" label so runTriage will re-apply it
@@ -166,21 +168,21 @@ export class GitHubIssueMonitor {
       }
     }
 
-    await this.syncTriageTasks(projectId, watched.repo, token, issues);
+    await this.syncTriageTasks(projectId, watched.repo, token);
 
     setConfig(triageSinceKey, new Date().toISOString());
   }
 
   /**
    * Remove triage tasks whose GitHub issues are no longer open.
+   * Fetches all open issue numbers once (paginated) and uses that
+   * as an authoritative set — no per-task API calls needed.
    */
   private async syncTriageTasks(
     projectId: string,
     repo: string,
     token: string,
-    openIssues: { number: number }[],
   ): Promise<void> {
-    const openNumbers = new Set(openIssues.map((i) => i.number));
     const db = getDb();
 
     const triageTasks = db
@@ -194,35 +196,60 @@ export class GitHubIssueMonitor {
       )
       .all();
 
+    // Only fetch the authoritative set if there are triage tasks to check
     const issueLabel = /^github-issue-(\d+)$/;
-
+    const tasksByIssue = new Map<number, typeof triageTasks[0]>();
     for (const task of triageTasks) {
       const labels = task.labels as string[];
       const match = labels.map((l) => issueLabel.exec(l)).find(Boolean);
-      if (!match) continue;
+      if (match) tasksByIssue.set(Number(match[1]), task);
+    }
 
-      const issueNum = Number(match[1]);
+    if (tasksByIssue.size === 0) return;
+
+    const openNumbers = await fetchAllOpenIssueNumbers(repo, token);
+
+    for (const [issueNum, task] of tasksByIssue) {
       if (openNumbers.has(issueNum)) continue;
 
-      // Issue wasn't in the fetched open list — confirm it's actually closed/deleted
-      let isOpen = false;
-      try {
-        const issue = await fetchIssue(repo, token, issueNum);
-        isOpen = issue.state === "open";
-      } catch {
-        // 404 or network error — treat as deleted
-      }
-
-      if (!isOpen) {
-        db.delete(schema.kanbanTasks)
-          .where(eq(schema.kanbanTasks.id, task.id))
-          .run();
-        this.io.emit("kanban:task-deleted", { taskId: task.id, projectId });
-        console.log(
-          `[IssueMonitor] Removed stale triage task for issue #${issueNum} (project ${projectId})`,
-        );
-      }
+      db.delete(schema.kanbanTasks)
+        .where(eq(schema.kanbanTasks.id, task.id))
+        .run();
+      this.io.emit("kanban:task-deleted", { taskId: task.id, projectId });
+      console.log(
+        `[IssueMonitor] Removed stale triage task for issue #${issueNum} (project ${projectId})`,
+      );
     }
+  }
+
+  /**
+   * Quick local check: is the issue's updated_at newer than the triage task's updatedAt?
+   * This avoids calling fetchIssueComments when nothing has changed.
+   */
+  private issueUpdatedSinceTask(
+    issue: { number: number; updated_at: string },
+    projectId: string,
+  ): boolean {
+    const db = getDb();
+    const label = `github-issue-${issue.number}`;
+
+    const triageTasks = db
+      .select()
+      .from(schema.kanbanTasks)
+      .where(
+        and(
+          eq(schema.kanbanTasks.projectId, projectId),
+          eq(schema.kanbanTasks.column, "triage"),
+        ),
+      )
+      .all();
+
+    const triageTask = triageTasks.find(
+      (t) => (t.labels as string[]).includes(label),
+    );
+    if (!triageTask) return false;
+
+    return new Date(issue.updated_at).getTime() > new Date(triageTask.updatedAt).getTime();
   }
 
   /**
