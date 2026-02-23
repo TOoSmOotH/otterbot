@@ -39,12 +39,20 @@ export interface AgentModelOverride {
 }
 
 /** Supported messaging-platform chat provider types. */
-export type ChatProviderType = "discord" | "matrix" | "irc" | "teams" | "telegram";
+export type ChatProviderType = "discord" | "matrix" | "irc" | "teams" | "telegram" | "tlon";
 
 /** Settings common to all chat provider bridges. */
 export interface ChatProviderSettings {
   type: ChatProviderType;
   enabled: boolean;
+}
+
+/** Tlon-specific chat provider settings exposed to the client. */
+export interface TlonChatProviderSettings extends ChatProviderSettings {
+  type: "tlon";
+  shipUrl: string | null;
+  accessCodeSet: boolean;
+  shipName: string | null;
 }
 
 /** Teams-specific chat provider settings exposed to the client. */
