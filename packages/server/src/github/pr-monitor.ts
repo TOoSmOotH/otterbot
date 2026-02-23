@@ -14,6 +14,9 @@ import type { PipelineManager } from "../pipeline/pipeline-manager.js";
 
 type TypedServer = Server<ClientToServerEvents, ServerToClientEvents>;
 
+/** Maximum number of review→fix cycles before marking a task as failed */
+export const MAX_REVIEW_CYCLES = 3;
+
 export class GitHubPRMonitor {
   private intervalId: ReturnType<typeof setInterval> | null = null;
   private coo: COO;
@@ -114,12 +117,16 @@ export class GitHubPRMonitor {
     }
 
     if (pr.state === "closed") {
-      // PR closed without merging → move task to backlog for retry
+      // PR closed without merging → increment retryCount and move to backlog for retry
       const now = new Date().toISOString();
+      const newRetryCount = (task.retryCount ?? 0) + 1;
       db.update(schema.kanbanTasks)
         .set({
           column: "backlog",
           assigneeAgentId: null,
+          retryCount: newRetryCount,
+          prNumber: null,
+          prBranch: null,
           updatedAt: now,
         })
         .where(eq(schema.kanbanTasks.id, task.id))
@@ -157,6 +164,40 @@ export class GitHubPRMonitor {
       this.processedReviewIds.add(r.id);
     }
 
+    // Increment review cycle counter (pipelineAttempt)
+    const newAttempt = (task.pipelineAttempt ?? 0) + 1;
+    db.update(schema.kanbanTasks)
+      .set({ pipelineAttempt: newAttempt, updatedAt: new Date().toISOString() })
+      .where(eq(schema.kanbanTasks.id, task.id))
+      .run();
+
+    // Check if max review cycles exceeded
+    if (newAttempt > MAX_REVIEW_CYCLES) {
+      const now = new Date().toISOString();
+      db.update(schema.kanbanTasks)
+        .set({
+          column: "done",
+          completionReport:
+            `FAILED: PR #${task.prNumber} exceeded maximum review cycles (${MAX_REVIEW_CYCLES}). ` +
+            `The PR could not satisfy reviewer requirements after ${MAX_REVIEW_CYCLES} attempts.`,
+          updatedAt: now,
+        })
+        .where(eq(schema.kanbanTasks.id, task.id))
+        .run();
+
+      this.cleanupReviewIds(task.prNumber);
+
+      const updated = db.select().from(schema.kanbanTasks).where(eq(schema.kanbanTasks.id, task.id)).get();
+      if (updated) {
+        this.io.emit("kanban:task-updated", updated as unknown as KanbanTask);
+      }
+
+      console.log(
+        `[PRMonitor] PR #${task.prNumber} exceeded ${MAX_REVIEW_CYCLES} review cycles — task ${task.id} → done (FAILED)`,
+      );
+      return;
+    }
+
     // Fetch inline review comments for additional context
     const reviewComments = await fetchPullRequestReviewComments(
       project.githubRepo,
@@ -184,7 +225,6 @@ export class GitHubPRMonitor {
       const feedback = feedbackParts.join("\n\n");
 
       // Move task to in_progress
-      const db = getDb();
       const now = new Date().toISOString();
       db.update(schema.kanbanTasks)
         .set({ column: "in_progress", assigneeAgentId: null, updatedAt: now })
@@ -202,7 +242,7 @@ export class GitHubPRMonitor {
         task.prNumber!,
       );
 
-      console.log(`[PRMonitor] Routed PR #${task.prNumber} review feedback through pipeline for task ${task.id}`);
+      console.log(`[PRMonitor] Routed PR #${task.prNumber} review feedback through pipeline for task ${task.id} (attempt ${newAttempt}/${MAX_REVIEW_CYCLES})`);
       return;
     }
 
@@ -291,7 +331,10 @@ export class GitHubPRMonitor {
       }
     }
 
-    console.log(`[PRMonitor] Changes requested on PR #${task.prNumber} — sent directive for task ${task.id}`);
+    // Re-read for the latest pipelineAttempt
+    const refreshed = db.select().from(schema.kanbanTasks).where(eq(schema.kanbanTasks.id, task.id)).get();
+    const attempt = refreshed?.pipelineAttempt ?? 1;
+    console.log(`[PRMonitor] Changes requested on PR #${task.prNumber} — sent directive for task ${task.id} (attempt ${attempt}/${MAX_REVIEW_CYCLES})`);
   }
 
   /** Remove tracked review IDs for a given PR when it leaves in_review */

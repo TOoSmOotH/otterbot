@@ -25,7 +25,7 @@ vi.mock("../github-service.js", () => ({
   getRepoDefaultBranch: vi.fn().mockResolvedValue("main"),
 }));
 
-import { GitHubPRMonitor } from "../pr-monitor.js";
+import { GitHubPRMonitor, MAX_REVIEW_CYCLES } from "../pr-monitor.js";
 
 // Create mock COO
 function createMockCoo() {
@@ -161,7 +161,7 @@ describe("GitHubPRMonitor", () => {
   });
 
   describe("closed PR (not merged)", () => {
-    it("moves task to backlog when PR is closed without merge", async () => {
+    it("moves task to backlog, increments retryCount, and clears PR fields", async () => {
       const db = getDb();
       insertProject(db, "proj-1", "owner/repo");
       insertTask(db, {
@@ -171,6 +171,7 @@ describe("GitHubPRMonitor", () => {
         column: "in_review",
         prNumber: 10,
         prBranch: "feat/feature-10",
+        retryCount: 1,
       });
 
       configStore.set("github:token", "ghp_test");
@@ -192,6 +193,9 @@ describe("GitHubPRMonitor", () => {
 
       expect(task?.column).toBe("backlog");
       expect(task?.assigneeAgentId).toBeNull();
+      expect(task?.retryCount).toBe(2);
+      expect(task?.prNumber).toBeNull();
+      expect(task?.prBranch).toBeNull();
     });
   });
 
@@ -373,6 +377,270 @@ describe("GitHubPRMonitor", () => {
       // No github:token set
       await (monitor as any).poll();
       expect(mockFetchPullRequest).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("review cycle tracking", () => {
+    it("increments pipelineAttempt on each changes-requested review", async () => {
+      const db = getDb();
+      insertProject(db, "proj-1", "owner/repo");
+      insertTask(db, {
+        id: "task-rc-1",
+        projectId: "proj-1",
+        title: "#20: Review cycle",
+        column: "in_review",
+        prNumber: 20,
+        prBranch: "feat/rc",
+        pipelineAttempt: 0,
+      });
+
+      mockCoo._teamLeads.set("proj-1", { id: "tl-1" });
+      configStore.set("github:token", "ghp_test");
+
+      mockFetchPullRequest.mockResolvedValue({
+        number: 20,
+        state: "open",
+        merged: false,
+        head: { ref: "feat/rc", sha: "abc" },
+        base: { ref: "main" },
+      });
+      mockFetchPullRequestReviews.mockResolvedValue([
+        {
+          id: 501,
+          user: { login: "reviewer" },
+          body: "Fix please",
+          state: "CHANGES_REQUESTED",
+          submitted_at: "2026-02-20T00:00:00Z",
+          html_url: "https://github.com/owner/repo/pull/20#pullrequestreview-501",
+        },
+      ]);
+      mockFetchPullRequestReviewComments.mockResolvedValue([]);
+
+      await (monitor as any).poll();
+
+      const task = db
+        .select()
+        .from(schema.kanbanTasks)
+        .where(eq(schema.kanbanTasks.id, "task-rc-1"))
+        .get();
+
+      expect(task?.pipelineAttempt).toBe(1);
+      expect(task?.column).toBe("in_progress");
+    });
+
+    it("marks task as failed when max review cycles exceeded", async () => {
+      const db = getDb();
+      insertProject(db, "proj-1", "owner/repo");
+      insertTask(db, {
+        id: "task-rc-2",
+        projectId: "proj-1",
+        title: "#21: Exhaust retries",
+        column: "in_review",
+        prNumber: 21,
+        prBranch: "feat/exhaust",
+        pipelineAttempt: MAX_REVIEW_CYCLES, // already at max
+      });
+
+      mockCoo._teamLeads.set("proj-1", { id: "tl-1" });
+      configStore.set("github:token", "ghp_test");
+
+      mockFetchPullRequest.mockResolvedValue({
+        number: 21,
+        state: "open",
+        merged: false,
+        head: { ref: "feat/exhaust", sha: "def" },
+        base: { ref: "main" },
+      });
+      mockFetchPullRequestReviews.mockResolvedValue([
+        {
+          id: 601,
+          user: { login: "reviewer" },
+          body: "Still broken",
+          state: "CHANGES_REQUESTED",
+          submitted_at: "2026-02-21T00:00:00Z",
+          html_url: "https://github.com/owner/repo/pull/21#pullrequestreview-601",
+        },
+      ]);
+
+      await (monitor as any).poll();
+
+      const task = db
+        .select()
+        .from(schema.kanbanTasks)
+        .where(eq(schema.kanbanTasks.id, "task-rc-2"))
+        .get();
+
+      expect(task?.column).toBe("done");
+      expect(task?.completionReport).toContain("FAILED");
+      expect(task?.completionReport).toContain("exceeded maximum review cycles");
+      expect(task?.pipelineAttempt).toBe(MAX_REVIEW_CYCLES + 1);
+
+      // Should NOT send a directive (task failed, no retry)
+      expect(mockCoo.bus.send).not.toHaveBeenCalled();
+      // Should NOT fetch review comments (bailed early)
+      expect(mockFetchPullRequestReviewComments).not.toHaveBeenCalled();
+    });
+
+    it("allows retry up to MAX_REVIEW_CYCLES before failing", async () => {
+      const db = getDb();
+      insertProject(db, "proj-1", "owner/repo");
+      insertTask(db, {
+        id: "task-rc-3",
+        projectId: "proj-1",
+        title: "#22: Last chance",
+        column: "in_review",
+        prNumber: 22,
+        prBranch: "feat/last-chance",
+        pipelineAttempt: MAX_REVIEW_CYCLES - 1, // one attempt left
+      });
+
+      mockCoo._teamLeads.set("proj-1", { id: "tl-1" });
+      configStore.set("github:token", "ghp_test");
+
+      mockFetchPullRequest.mockResolvedValue({
+        number: 22,
+        state: "open",
+        merged: false,
+        head: { ref: "feat/last-chance", sha: "ghi" },
+        base: { ref: "main" },
+      });
+      mockFetchPullRequestReviews.mockResolvedValue([
+        {
+          id: 701,
+          user: { login: "reviewer" },
+          body: "One more fix",
+          state: "CHANGES_REQUESTED",
+          submitted_at: "2026-02-22T00:00:00Z",
+          html_url: "https://github.com/owner/repo/pull/22#pullrequestreview-701",
+        },
+      ]);
+      mockFetchPullRequestReviewComments.mockResolvedValue([]);
+
+      await (monitor as any).poll();
+
+      const task = db
+        .select()
+        .from(schema.kanbanTasks)
+        .where(eq(schema.kanbanTasks.id, "task-rc-3"))
+        .get();
+
+      // Should still retry (pipelineAttempt = MAX_REVIEW_CYCLES, which is <= MAX)
+      expect(task?.pipelineAttempt).toBe(MAX_REVIEW_CYCLES);
+      expect(task?.column).toBe("in_progress");
+      expect(mockCoo.bus.send).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("pipeline-managed review cycles", () => {
+    it("increments pipelineAttempt and routes through pipeline", async () => {
+      const db = getDb();
+      insertProject(db, "proj-1", "owner/repo");
+      insertTask(db, {
+        id: "task-pm-1",
+        projectId: "proj-1",
+        title: "#30: Pipeline review",
+        column: "in_review",
+        prNumber: 30,
+        prBranch: "feat/pipeline-review",
+        pipelineAttempt: 0,
+      });
+
+      configStore.set("github:token", "ghp_test");
+
+      const mockPipelineManager = {
+        isEnabled: vi.fn().mockReturnValue(true),
+        handleReviewFeedback: vi.fn().mockResolvedValue(undefined),
+      };
+      monitor.setPipelineManager(mockPipelineManager as any);
+
+      mockFetchPullRequest.mockResolvedValue({
+        number: 30,
+        state: "open",
+        merged: false,
+        head: { ref: "feat/pipeline-review", sha: "xyz" },
+        base: { ref: "main" },
+      });
+      mockFetchPullRequestReviews.mockResolvedValue([
+        {
+          id: 801,
+          user: { login: "reviewer" },
+          body: "Needs changes",
+          state: "CHANGES_REQUESTED",
+          submitted_at: "2026-02-22T00:00:00Z",
+          html_url: "https://github.com/owner/repo/pull/30#pullrequestreview-801",
+        },
+      ]);
+      mockFetchPullRequestReviewComments.mockResolvedValue([]);
+
+      await (monitor as any).poll();
+
+      const task = db
+        .select()
+        .from(schema.kanbanTasks)
+        .where(eq(schema.kanbanTasks.id, "task-pm-1"))
+        .get();
+
+      expect(task?.pipelineAttempt).toBe(1);
+      expect(task?.column).toBe("in_progress");
+      expect(mockPipelineManager.handleReviewFeedback).toHaveBeenCalledWith(
+        "task-pm-1",
+        expect.stringContaining("Needs changes"),
+        "feat/pipeline-review",
+        30,
+      );
+    });
+
+    it("fails pipeline-managed task when max review cycles exceeded", async () => {
+      const db = getDb();
+      insertProject(db, "proj-1", "owner/repo");
+      insertTask(db, {
+        id: "task-pm-2",
+        projectId: "proj-1",
+        title: "#31: Pipeline exhaust",
+        column: "in_review",
+        prNumber: 31,
+        prBranch: "feat/pipeline-exhaust",
+        pipelineAttempt: MAX_REVIEW_CYCLES,
+      });
+
+      configStore.set("github:token", "ghp_test");
+
+      const mockPipelineManager = {
+        isEnabled: vi.fn().mockReturnValue(true),
+        handleReviewFeedback: vi.fn().mockResolvedValue(undefined),
+      };
+      monitor.setPipelineManager(mockPipelineManager as any);
+
+      mockFetchPullRequest.mockResolvedValue({
+        number: 31,
+        state: "open",
+        merged: false,
+        head: { ref: "feat/pipeline-exhaust", sha: "xyz" },
+        base: { ref: "main" },
+      });
+      mockFetchPullRequestReviews.mockResolvedValue([
+        {
+          id: 901,
+          user: { login: "reviewer" },
+          body: "Still broken",
+          state: "CHANGES_REQUESTED",
+          submitted_at: "2026-02-22T00:00:00Z",
+          html_url: "https://github.com/owner/repo/pull/31#pullrequestreview-901",
+        },
+      ]);
+
+      await (monitor as any).poll();
+
+      const task = db
+        .select()
+        .from(schema.kanbanTasks)
+        .where(eq(schema.kanbanTasks.id, "task-pm-2"))
+        .get();
+
+      expect(task?.column).toBe("done");
+      expect(task?.completionReport).toContain("FAILED");
+      // Pipeline should NOT be called
+      expect(mockPipelineManager.handleReviewFeedback).not.toHaveBeenCalled();
     });
   });
 
