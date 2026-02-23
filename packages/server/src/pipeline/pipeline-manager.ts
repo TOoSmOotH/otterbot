@@ -11,6 +11,7 @@ import type {
 import { MessageType, PIPELINE_STAGES } from "@otterbot/shared";
 import { getDb, schema } from "../db/index.js";
 import { getConfig, setConfig } from "../auth/auth.js";
+import { getAgentModelOverride } from "../settings/settings.js";
 import { resolveModel } from "../llm/adapter.js";
 import { Registry } from "../registry/registry.js";
 import {
@@ -126,8 +127,16 @@ export class PipelineManager {
 
     try {
       const model = resolveModel({
-        provider: entry.defaultProvider,
-        model: entry.defaultModel,
+        provider:
+          getAgentModelOverride(entry.id)?.provider ??
+          getConfig("worker_provider") ??
+          getConfig("coo_provider") ??
+          entry.defaultProvider,
+        model:
+          getAgentModelOverride(entry.id)?.model ??
+          getConfig("worker_model") ??
+          getConfig("coo_model") ??
+          entry.defaultModel,
       });
 
       const result = await generateText({
