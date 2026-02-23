@@ -17,6 +17,7 @@ const CODING_AGENTS = [
   { id: "builtin-opencode-coder", label: "OpenCode", enabledKey: "openCodeEnabled" as const },
   { id: "builtin-claude-code-coder", label: "Claude Code", enabledKey: "claudeCodeEnabled" as const },
   { id: "builtin-codex-coder", label: "Codex", enabledKey: "codexEnabled" as const },
+  { id: "builtin-gemini-cli-coder", label: "Gemini CLI", enabledKey: "geminiCliEnabled" as const },
   { id: "builtin-coder", label: "Standard Coder", enabledKey: null },
 ] as const;
 
