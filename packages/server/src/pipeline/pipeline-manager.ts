@@ -377,6 +377,9 @@ export class PipelineManager {
     const now = new Date().toISOString();
     db.update(schema.kanbanTasks)
       .set({
+        column: "triage",
+        assigneeAgentId: null,
+        pipelineStage: null,
         description: `Triage: ${parsed.classification}\n\n${issue.body ?? ""}`,
         updatedAt: now,
       })
