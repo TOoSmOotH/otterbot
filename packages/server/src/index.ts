@@ -457,17 +457,16 @@ async function main() {
   }
 
   // Resolver map for coding agent permission requests: when a Worker receives a
-  // permission.updated event, a promise is stored here keyed by
+  // permission event in interactive mode, a promise is stored here keyed by
   // `${agentId}:${permissionId}`. The frontend sends `codeagent:permission-respond`
-  // which resolves it. Auto-approves after 5 minutes to prevent session hang.
-  const PERMISSION_TIMEOUT_MS = 5 * 60 * 1000;
-  const codingAgentPermissionResolvers = new Map<string, { resolve: (response: "once" | "always" | "reject") => void; timeout: ReturnType<typeof setTimeout> }>();
+  // which resolves it. No timeout — interactive mode waits for the user to respond;
+  // pending permissions are cleaned up when the agent is destroyed.
+  const codingAgentPermissionResolvers = new Map<string, { resolve: (response: "once" | "always" | "reject") => void }>();
 
   function resolveCodingAgentPermission(agentId: string, permissionId: string, response: "once" | "always" | "reject"): boolean {
     const key = `${agentId}:${permissionId}`;
     const entry = codingAgentPermissionResolvers.get(key);
     if (!entry) return false;
-    clearTimeout(entry.timeout);
     codingAgentPermissionResolvers.delete(key);
     entry.resolve(response);
     // Clear active permission if it matches
@@ -706,13 +705,7 @@ async function main() {
         onCodingAgentPermissionRequest: (agentId, sessionId, permission) => {
           return new Promise<"once" | "always" | "reject">((resolve) => {
             const key = `${agentId}:${permission.id}`;
-            const timeout = setTimeout(() => {
-              // Reject on timeout — never auto-approve unattended permission requests
-              codingAgentPermissionResolvers.delete(key);
-              console.warn(`[CodingAgent] Permission ${permission.id} timed out — rejecting`);
-              resolve("reject");
-            }, PERMISSION_TIMEOUT_MS);
-            codingAgentPermissionResolvers.set(key, { resolve, timeout });
+            codingAgentPermissionResolvers.set(key, { resolve });
           });
         },
         onTerminalData: (agentId, data) => {
@@ -725,6 +718,16 @@ async function main() {
           unregisterPtySession(agentId);
         },
         onAgentDestroyed: (agentId) => {
+          // Clean up any pending permission requests for this agent to prevent leaked promises
+          for (const [key, entry] of codingAgentPermissionResolvers) {
+            if (key.startsWith(`${agentId}:`)) {
+              codingAgentPermissionResolvers.delete(key);
+              entry.resolve("reject");
+            }
+          }
+          if (activePermissionRequest?.agentId === agentId) {
+            activePermissionRequest = null;
+          }
           emitAgentDestroyed(io, agentId);
         },
       });
