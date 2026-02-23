@@ -16,6 +16,7 @@ const AGENT_TYPE_LABELS: Record<CodingAgentType, string> = {
   opencode: "OpenCode",
   "claude-code": "Claude Code",
   codex: "Codex",
+  "gemini-cli": "Gemini CLI",
 };
 
 /** Accent colors per agent type */
@@ -23,6 +24,7 @@ const AGENT_TYPE_COLORS: Record<CodingAgentType, string> = {
   opencode: "bg-blue-500",
   "claude-code": "bg-orange-500",
   codex: "bg-green-500",
+  "gemini-cli": "bg-purple-500",
 };
 
 function StatusDot({ status }: { status: CodingAgentSession["status"] }) {
@@ -643,7 +645,7 @@ function SessionContent({ agentId }: { agentId: string }) {
   }
 
   // All coding agents use terminal-based rendering (PTY)
-  if (session.agentType === "claude-code" || session.agentType === "opencode" || session.agentType === "codex") {
+  if (session.agentType === "claude-code" || session.agentType === "opencode" || session.agentType === "codex" || session.agentType === "gemini-cli") {
     return <TerminalSessionContent agentId={agentId} />;
   }
 
