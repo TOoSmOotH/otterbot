@@ -761,6 +761,7 @@ export class PipelineManager {
     // Security kickback logic
     if (currentStage === "security") {
       const hasFindings = this.securityHasFindings(workerReport);
+      console.log(`[PipelineManager] Security review for task ${taskId}: hasFindings=${hasFindings}, kickbackCount=${state.kickbackCount}/${state.maxKickbacks}`);
       if (hasFindings && state.kickbackCount < state.maxKickbacks) {
         state.kickbackCount++;
 
@@ -1260,15 +1261,39 @@ export class PipelineManager {
 
   private securityHasFindings(report: string): boolean {
     const lower = report.toLowerCase();
+
+    // Explicit "no issues" / "clean" signals override keyword matches
+    const cleanSignals = [
+      "no vulnerabilit",
+      "no security issue",
+      "no security risk",
+      "no issues found",
+      "no issues were found",
+      "no findings",
+      "no critical",
+      "no concerns",
+      "clean security",
+      "security review passed",
+      "passed security",
+      "looks good",
+      "lgtm",
+      "no problems",
+      "appears secure",
+      "no significant",
+    ];
+    if (cleanSignals.some((s) => lower.includes(s))) return false;
+
+    // Look for affirmative finding signals
     return (
-      lower.includes("vulnerability") ||
+      /\bvulnerabilit(y|ies)\b/.test(lower) ||
       lower.includes("security issue") ||
       lower.includes("security risk") ||
       lower.includes("found issue") ||
-      lower.includes("xss") ||
-      lower.includes("injection") ||
-      lower.includes("csrf") ||
-      (lower.includes("found") && lower.includes("issue"))
+      /\bxss\b/.test(lower) ||
+      /\bsql.?injection\b/.test(lower) ||
+      /\bcsrf\b/.test(lower) ||
+      /\binjection\b/.test(lower) ||
+      (lower.includes("found") && lower.includes("issue") && !lower.includes("no issue"))
     );
   }
 
