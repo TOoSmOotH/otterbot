@@ -26,6 +26,26 @@ const STATUS_COLORS: Record<string, string> = {
   error: "#ef4444",
 };
 
+export function findRandomClip(actions: Map<string, THREE.AnimationAction>, patterns: RegExp[]): string | undefined {
+  const candidates: string[] = [];
+  for (const pattern of patterns) {
+    for (const name of actions.keys()) {
+      if (pattern.test(name) && !candidates.includes(name)) {
+        candidates.push(name);
+      }
+    }
+  }
+  if (candidates.length === 0) return undefined;
+  return candidates[Math.floor(Math.random() * candidates.length)];
+}
+
+export function findClip(actions: Map<string, THREE.AnimationAction>, pattern: RegExp): string | undefined {
+  for (const name of actions.keys()) {
+    if (pattern.test(name)) return name;
+  }
+  return undefined;
+}
+
 export function AgentCharacter({ pack, position, label, role, status, agentId, gearConfig, rotationY = 0 }: AgentCharacterProps) {
   const groupRef = useRef<THREE.Group>(null);
   const currentRotationRef = useRef(rotationY);
@@ -210,14 +230,7 @@ function CharacterModel({ pack, status, agentId, gearConfig }: { pack: ModelPack
             findClip(actions, /Running_A/i) ??
             findClip(actions, /walk|run/i);
         } else if (effectiveStatus === "acting") {
-          targetName =
-            findClip(actions, /Working/i) ??
-            findClip(actions, /GenericWorking/i) ??
-            findClip(actions, /Interact/i) ??
-            findClip(actions, /Use_Item/i) ??
-            findClip(actions, /PickUp/i) ??
-            findClip(actions, /Idle_B/i) ??
-            findClip(actions, /idle/i);
+          targetName = findRandomClip(actions, [/Working/i, /GenericWorking/i, /Interact/i, /Use_Item/i, /PickUp/i, /Idle_B/i, /idle/i]);
         } else if (effectiveStatus === "thinking") {
           targetName =
             findClip(actions, /Idle_B/i) ??
@@ -257,13 +270,6 @@ function CharacterModel({ pack, status, agentId, gearConfig }: { pack: ModelPack
   });
 
   return <primitive object={clone} castShadow />;
-}
-
-function findClip(actions: Map<string, THREE.AnimationAction>, pattern: RegExp): string | undefined {
-  for (const name of actions.keys()) {
-    if (pattern.test(name)) return name;
-  }
-  return undefined;
 }
 
 function FallbackMesh({ role }: { role: string }) {
