@@ -1792,6 +1792,19 @@ The user can see everything on the desktop in real-time.`;
     this.activeContextId = null;
   }
 
+  /** Clear all conversation contexts (e.g., when memories are wiped) */
+  clearAllConversations(): void {
+    this.contextManager.evictAll();
+    this.resetConversation();
+    console.log("[COO] All conversation contexts cleared");
+  }
+
+  /** Clear conversation contexts for a specific project (e.g., on project deletion) */
+  clearProjectConversations(projectId: string): void {
+    this.contextManager.evictByProject(projectId);
+    console.log(`[COO] Conversation contexts cleared for project ${projectId}`);
+  }
+
   /** Get the current conversation ID */
   getCurrentConversationId(): string | null {
     return this.currentConversationId;
