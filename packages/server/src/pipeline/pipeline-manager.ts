@@ -567,7 +567,9 @@ export class PipelineManager {
 
     // Security kickback logic
     if (currentStage === "security") {
-      const hasFindings = this.securityHasFindings(workerReport);
+      // Strip zero-file-changes warning — review-only stages never produce file changes
+      const cleanedReport = workerReport.replace(/⚠️ WARNING: Task reported success but produced zero file changes[^\n]*/g, "").trim();
+      const hasFindings = this.securityHasFindings(cleanedReport);
       console.log(`[PipelineManager] Security review for task ${taskId}: hasFindings=${hasFindings}, kickbackCount=${state.kickbackCount}/${state.maxKickbacks}`);
       if (hasFindings && state.kickbackCount < state.maxKickbacks) {
         state.kickbackCount++;
@@ -1081,6 +1083,12 @@ export class PipelineManager {
       "no problems",
       "appears secure",
       "no significant",
+      "safe to merge",
+      "is safe to merge",
+      "safe to proceed",
+      "no issues identified",
+      "does not introduce",
+      "adheres to",
     ];
     if (cleanSignals.some((s) => lower.includes(s))) return false;
 
