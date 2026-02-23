@@ -32,6 +32,7 @@ import { TOOL_EXAMPLES } from "./tools/tool-examples.js";
 import { COO } from "./agents/coo.js";
 import { AdminAssistant } from "./agents/admin-assistant.js";
 import { closeBrowser } from "./tools/browser-pool.js";
+import { CodingAgentPermissionResolver } from "./coding-agents/permission-resolver.js";
 import { setTodoEmitterIO } from "./tools/todo-emitter.js";
 import { getConfiguredTTSProvider } from "./tts/tts.js";
 import { getConfiguredSTTProvider } from "./stt/stt.js";
@@ -456,25 +457,17 @@ async function main() {
     return true;
   }
 
-  // Resolver map for coding agent permission requests: when a Worker receives a
-  // permission.updated event, a promise is stored here keyed by
-  // `${agentId}:${permissionId}`. The frontend sends `codeagent:permission-respond`
-  // which resolves it. Auto-approves after 5 minutes to prevent session hang.
-  const PERMISSION_TIMEOUT_MS = 5 * 60 * 1000;
-  const codingAgentPermissionResolvers = new Map<string, { resolve: (response: "once" | "always" | "reject") => void; timeout: ReturnType<typeof setTimeout> }>();
+  // Resolver for coding agent permission requests: when a Worker receives a
+  // permission.updated event, the frontend sends `codeagent:permission-respond`
+  // which resolves it. Rejects after 15 seconds to prevent session hang.
+  const codingAgentPermissions = new CodingAgentPermissionResolver();
 
   function resolveCodingAgentPermission(agentId: string, permissionId: string, response: "once" | "always" | "reject"): boolean {
-    const key = `${agentId}:${permissionId}`;
-    const entry = codingAgentPermissionResolvers.get(key);
-    if (!entry) return false;
-    clearTimeout(entry.timeout);
-    codingAgentPermissionResolvers.delete(key);
-    entry.resolve(response);
-    // Clear active permission if it matches
-    if (activePermissionRequest?.permissionId === permissionId) {
+    const resolved = codingAgentPermissions.resolve(agentId, permissionId, response);
+    if (resolved && activePermissionRequest?.permissionId === permissionId) {
       activePermissionRequest = null;
     }
-    return true;
+    return resolved;
   }
 
   // Track the most recent permission request so chat replies can resolve it
@@ -685,13 +678,7 @@ async function main() {
               resolver(null);
             }
             // Clean up any pending permission resolvers for this agent
-            for (const [pKey, entry] of codingAgentPermissionResolvers) {
-              if (pKey.startsWith(`${agentId}:`)) {
-                clearTimeout(entry.timeout);
-                codingAgentPermissionResolvers.delete(pKey);
-                entry.resolve("reject");
-              }
-            }
+            codingAgentPermissions.rejectByAgent(agentId);
             if (activePermissionRequest?.agentId === agentId) {
               activePermissionRequest = null;
             }
@@ -703,17 +690,8 @@ async function main() {
             codingAgentResponseResolvers.set(key, resolve);
           });
         },
-        onCodingAgentPermissionRequest: (agentId, sessionId, permission) => {
-          return new Promise<"once" | "always" | "reject">((resolve) => {
-            const key = `${agentId}:${permission.id}`;
-            const timeout = setTimeout(() => {
-              // Reject on timeout — never auto-approve unattended permission requests
-              codingAgentPermissionResolvers.delete(key);
-              console.warn(`[CodingAgent] Permission ${permission.id} timed out — rejecting`);
-              resolve("reject");
-            }, PERMISSION_TIMEOUT_MS);
-            codingAgentPermissionResolvers.set(key, { resolve, timeout });
-          });
+        onCodingAgentPermissionRequest: (agentId, _sessionId, permission) => {
+          return codingAgentPermissions.register(agentId, permission.id);
         },
         onTerminalData: (agentId, data) => {
           emitTerminalData(io, agentId, data);
