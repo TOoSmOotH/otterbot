@@ -340,6 +340,22 @@ export class TeamLead extends BaseAgent {
       this.persistFlag("verification", false);
     }
 
+    // Pipeline directives carry structured metadata — spawn the worker directly
+    // instead of relying on LLM interpretation of the text hint.
+    const pipelineRegistryEntryId = message.metadata?.pipelineRegistryEntryId as string | undefined;
+    const pipelineTaskId = message.metadata?.pipelineTaskId as string | undefined;
+    if (pipelineRegistryEntryId && pipelineTaskId) {
+      // Extract the worker directive from the message content
+      const directiveMatch = message.content.match(/Worker directive:\n([\s\S]+)/);
+      const workerTask = directiveMatch?.[1]?.trim() ?? message.content;
+
+      const result = await this.spawnWorker(pipelineRegistryEntryId, workerTask, pipelineTaskId, { pipelineOverride: true });
+      if (this.parentId) {
+        this.sendMessage(this.parentId, MessageType.Report, result);
+      }
+      return;
+    }
+
     // Inject current board state so the TL knows what's already done
     const board = this.getKanbanBoardState();
     let enrichedDirective = message.content;
@@ -1401,38 +1417,42 @@ export class TeamLead extends BaseAgent {
     registryEntryId: string,
     task: string,
     taskId?: string,
+    options?: { pipelineOverride?: boolean },
   ): Promise<string> {
     try {
       const originalRequestedId = registryEntryId;
 
-      // Remap to project-preferred agent if applicable
-      const assignments = this.getProjectAgentAssignments();
-      if (assignments.coder && isCodingAgentEnabled(assignments.coder) && CODING_AGENT_IDS.has(registryEntryId) && registryEntryId !== assignments.coder) {
-        console.log(
-          `[TeamLead ${this.id}] Remapping agent ${registryEntryId} → ${assignments.coder} (project assignment)`,
-        );
-        registryEntryId = assignments.coder;
-      }
-
-      // If LLM requested builtin-coder but an external coding agent is enabled globally, prefer it
-      if (registryEntryId === "builtin-coder") {
-        if (assignments.coder && isCodingAgentEnabled(assignments.coder)) {
+      // Pipeline directives specify the exact agent — skip remapping
+      if (!options?.pipelineOverride) {
+        // Remap to project-preferred agent if applicable
+        const assignments = this.getProjectAgentAssignments();
+        if (assignments.coder && isCodingAgentEnabled(assignments.coder) && CODING_AGENT_IDS.has(registryEntryId) && registryEntryId !== assignments.coder) {
+          console.log(
+            `[TeamLead ${this.id}] Remapping agent ${registryEntryId} → ${assignments.coder} (project assignment)`,
+          );
           registryEntryId = assignments.coder;
-        } else if (getConfig("opencode:enabled") === "true") {
-          registryEntryId = "builtin-opencode-coder";
-        } else if (getConfig("claude-code:enabled") === "true") {
-          registryEntryId = "builtin-claude-code-coder";
-        } else if (getConfig("codex:enabled") === "true") {
-          registryEntryId = "builtin-codex-coder";
-        } else if (getConfig("gemini-cli:enabled") === "true") {
-          registryEntryId = "builtin-gemini-cli-coder";
         }
-      }
 
-      if (registryEntryId !== originalRequestedId) {
-        console.log(
-          `[TeamLead ${this.id}] spawnWorker: requested=${originalRequestedId}, resolved=${registryEntryId}`,
-        );
+        // If LLM requested builtin-coder but an external coding agent is enabled globally, prefer it
+        if (registryEntryId === "builtin-coder") {
+          if (assignments.coder && isCodingAgentEnabled(assignments.coder)) {
+            registryEntryId = assignments.coder;
+          } else if (getConfig("opencode:enabled") === "true") {
+            registryEntryId = "builtin-opencode-coder";
+          } else if (getConfig("claude-code:enabled") === "true") {
+            registryEntryId = "builtin-claude-code-coder";
+          } else if (getConfig("codex:enabled") === "true") {
+            registryEntryId = "builtin-codex-coder";
+          } else if (getConfig("gemini-cli:enabled") === "true") {
+            registryEntryId = "builtin-gemini-cli-coder";
+          }
+        }
+
+        if (registryEntryId !== originalRequestedId) {
+          console.log(
+            `[TeamLead ${this.id}] spawnWorker: requested=${originalRequestedId}, resolved=${registryEntryId}`,
+          );
+        }
       }
 
       // Enforce max concurrent coding workers

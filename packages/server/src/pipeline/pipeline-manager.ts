@@ -857,6 +857,10 @@ export class PipelineManager {
             `Use registry entry: ${registryEntryId}\n\n` +
             `Worker directive:\n${directiveContent}`,
           projectId: state.projectId,
+          metadata: {
+            pipelineRegistryEntryId: registryEntryId,
+            pipelineTaskId: state.taskId,
+          },
         });
       }
     }
