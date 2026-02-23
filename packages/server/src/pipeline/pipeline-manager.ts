@@ -605,6 +605,19 @@ export class PipelineManager {
       }
     }
 
+    // Extract PR number from the reviewer's report (needed for completeTask routing)
+    if (currentStage === "reviewer") {
+      const prNumber = this.extractPRNumber(workerReport);
+      if (prNumber) {
+        const db = getDb();
+        const now = new Date().toISOString();
+        db.update(schema.kanbanTasks)
+          .set({ prNumber, updatedAt: now })
+          .where(eq(schema.kanbanTasks.id, taskId))
+          .run();
+      }
+    }
+
     // Advance to next stage
     state.currentStageIndex++;
 
@@ -1075,6 +1088,17 @@ export class PipelineManager {
       /\binjection\b/.test(lower) ||
       (lower.includes("found") && lower.includes("issue") && !lower.includes("no issue"))
     );
+  }
+
+  /** Extract a PR number from a worker report */
+  private extractPRNumber(report: string): number | null {
+    // Match github.com/{owner}/{repo}/pull/{number}
+    const urlMatch = report.match(/github\.com\/[^\s]+\/pull\/(\d+)/);
+    if (urlMatch) return parseInt(urlMatch[1], 10);
+    // Match "PR #123" or "Pull Request #123"
+    const prMatch = report.match(/(?:PR|Pull Request)\s*#(\d+)/i);
+    if (prMatch) return parseInt(prMatch[1], 10);
+    return null;
   }
 
   private updateTaskPipelineStage(taskId: string, stage: string | null): void {
