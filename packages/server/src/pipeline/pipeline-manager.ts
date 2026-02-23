@@ -362,6 +362,7 @@ export class PipelineManager {
     projectId: string,
     repo: string,
     issue: GitHubIssue,
+    options?: { createTask?: boolean },
   ): Promise<void> {
     const token = getConfig("github:token");
     if (!token) return;
@@ -376,10 +377,19 @@ export class PipelineManager {
     const entry = registry.get(agentId) ?? registry.get("builtin-triage");
     if (!entry) return;
 
-    // If a coding agent is selected for triage, route through the worker pipeline
+    const shouldCreateTask = options?.createTask !== false;
+
+    // If a coding agent is selected for triage, route through the worker pipeline.
+    // Only spawn workers for issues that should get a kanban task (i.e., assigned issues).
     if (CODING_AGENT_REGISTRY_IDS.has(agentId) && agentId !== "builtin-coder") {
-      await this.runTriageViaCodingAgent(projectId, repo, issue, agentId);
-      return;
+      if (!shouldCreateTask) {
+        // Unassigned issue — skip the expensive coding-agent triage entirely.
+        // The lightweight LLM path below will still classify it on GitHub.
+        // Fall through to use the builtin-triage model instead.
+      } else {
+        await this.runTriageViaCodingAgent(projectId, repo, issue, agentId);
+        return;
+      }
     }
 
     // Post start comment
@@ -468,8 +478,10 @@ export class PipelineManager {
 
       console.log(`[PipelineManager] Triaged issue #${issue.number} as "${parsed.classification}" (proceed=${parsed.shouldProceed})`);
 
-      // Create a kanban task in the Triage column (if one doesn't already exist)
-      this.createTriageTask(projectId, issue.number, issue.title, parsed.classification, issue.body ?? "");
+      // Create a kanban task in the Triage column only for assigned issues
+      if (shouldCreateTask) {
+        this.createTriageTask(projectId, issue.number, issue.title, parsed.classification, issue.body ?? "");
+      }
     } catch (err) {
       console.error(`[PipelineManager] Triage LLM call failed for #${issue.number}:`, err);
     }
