@@ -43,6 +43,7 @@ import {
   fetchPullRequestReviews,
   requestPullRequestReviewers,
   createIssueComment,
+  ensureIssueLinkInPR,
 } from "../github/github-service.js";
 import type { PipelineManager } from "../pipeline/pipeline-manager.js";
 
@@ -449,6 +450,27 @@ export class TeamLead extends BaseAgent {
   }
 
   /**
+   * Programmatically ensure the PR body contains "Closes #N" for any linked
+   * GitHub issue, so the issue appears in the PR's Development sidebar.
+   */
+  private linkIssueToPR(projectId: string, prNumber: number, task: { labels?: unknown }): void {
+    const labels = Array.isArray(task.labels) ? task.labels as string[] : [];
+    const issueLabel = labels.find((l) => l.startsWith("github-issue-"));
+    if (!issueLabel) return;
+    const issueNumber = parseInt(issueLabel.replace("github-issue-", ""), 10);
+    if (!issueNumber) return;
+
+    const db = getDb();
+    const project = db.select().from(schema.projects).where(eq(schema.projects.id, projectId)).get();
+    if (!project?.githubRepo) return;
+    const token = getConfig("github:token");
+    if (!token) return;
+
+    ensureIssueLinkInPR(project.githubRepo, token, prNumber, issueNumber)
+      .catch((err) => console.error(`[TeamLead ${this.id}] Failed to link issue #${issueNumber} to PR #${prNumber}:`, err));
+  }
+
+  /**
    * After a worker addresses review feedback and the task returns to in_review:
    * 1. Post a comment on the PR summarizing what was changed
    * 2. Re-request review from whoever previously requested changes
@@ -559,6 +581,8 @@ export class TeamLead extends BaseAgent {
             this.updateKanbanTask(taskId, { prBranch: branch } as any);
           }
         }).catch(() => {});
+        // Link the GitHub issue to the PR in the Development sidebar
+        this.linkIssueToPR(task.projectId, prNumber, task);
       }
       this.updateKanbanTask(taskId, overrideUpdates as any);
       if (targetCol === "done") this.checkUnblockedTasks(taskId);
@@ -603,6 +627,8 @@ export class TeamLead extends BaseAgent {
             this.updateKanbanTask(taskId, { prBranch: branch } as any);
           }
         }).catch(() => {});
+        // Link the GitHub issue to the PR in the Development sidebar
+        this.linkIssueToPR(task.projectId, prNumber, task);
       }
     }
 

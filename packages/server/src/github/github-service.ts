@@ -611,3 +611,44 @@ export async function createPullRequest(
     },
   );
 }
+
+/**
+ * Update a pull request (title, body, state).
+ */
+export async function updatePullRequest(
+  repoFullName: string,
+  token: string,
+  pullNumber: number,
+  updates: { title?: string; body?: string; state?: "open" | "closed" },
+): Promise<GitHubPullRequest> {
+  if (!REPO_NAME_RE.test(repoFullName)) throw new Error("Invalid repo name");
+  return ghFetch<GitHubPullRequest>(
+    `https://api.github.com/repos/${repoFullName}/pulls/${pullNumber}`,
+    token,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(updates),
+    },
+  );
+}
+
+/**
+ * Ensure a PR body contains "Closes #<issueNumber>" so GitHub links the issue
+ * in the Development sidebar. If the keyword is already present, this is a no-op.
+ */
+export async function ensureIssueLinkInPR(
+  repoFullName: string,
+  token: string,
+  pullNumber: number,
+  issueNumber: number,
+): Promise<void> {
+  const pr = await fetchPullRequest(repoFullName, token, pullNumber);
+  const body = pr.body ?? "";
+  const pattern = new RegExp(`(?:closes|fixes|resolves)\\s+#${issueNumber}\\b`, "i");
+  if (pattern.test(body)) return; // already linked
+
+  const separator = body.trim() ? "\n\n" : "";
+  const updatedBody = `${body}${separator}Closes #${issueNumber}`;
+  await updatePullRequest(repoFullName, token, pullNumber, { body: updatedBody });
+}

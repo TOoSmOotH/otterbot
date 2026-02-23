@@ -20,6 +20,7 @@ import {
   fetchIssue,
   fetchCompareCommitsDiff,
   getRepoDefaultBranch,
+  ensureIssueLinkInPR,
 } from "../github/github-service.js";
 import { CODING_AGENT_REGISTRY_IDS } from "../agents/worker.js";
 import type { COO } from "../agents/coo.js";
@@ -1096,6 +1097,15 @@ export class PipelineManager {
     console.log(
       `[PipelineManager] Task ${taskId} → ${targetColumn}${hasPR ? ` (PR #${task.prNumber})` : ""}`,
     );
+
+    // Programmatically link the GitHub issue to the PR via the PR body
+    if (hasPR && state.issueNumber && state.repo) {
+      const token = getConfig("github:token");
+      if (token) {
+        ensureIssueLinkInPR(state.repo, token, task.prNumber!, state.issueNumber)
+          .catch((err) => console.error(`[PipelineManager] Failed to link issue #${state.issueNumber} to PR #${task.prNumber}:`, err));
+      }
+    }
   }
 
   /** Fallback: send existing-style direct directive to TeamLead (no pipeline) */
