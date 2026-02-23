@@ -5,42 +5,15 @@ import { CharacterSelect } from "../character-select/CharacterSelect";
 import { DEFAULT_AVATARS } from "./default-avatars";
 import type { GearConfig } from "@otterbot/shared";
 import { ModelPricingPrompt } from "../settings/ModelPricingPrompt";
-
-const SUGGESTED_MODELS: Record<string, string[]> = {
-  anthropic: ["claude-sonnet-4-5-20250929", "claude-haiku-4-20250414"],
-  openai: ["gpt-4o", "gpt-4o-mini"],
-  ollama: ["llama3.1", "mistral", "codellama"],
-  openrouter: [
-    "anthropic/claude-sonnet-4-5-20250929",
-    "openai/gpt-4o",
-    "google/gemini-2.0-flash-exp:free",
-  ],
-  "openai-compatible": [],
-};
-
-const CODING_SUGGESTED_MODELS: Record<string, string[]> = {
-  anthropic: ["claude-sonnet-4-5-20250929", "claude-opus-4-20250514"],
-  openai: ["gpt-4.1", "gpt-4o", "o3-mini"],
-  ollama: ["qwen2.5-coder", "codellama", "deepseek-coder-v2"],
-  openrouter: [
-    "anthropic/claude-sonnet-4-5-20250929",
-    "openai/gpt-4.1",
-    "deepseek/deepseek-coder",
-  ],
-  "openai-compatible": [],
-};
-
-const PROVIDER_DESCRIPTIONS: Record<string, string> = {
-  anthropic: "Claude models from Anthropic. Requires an API key.",
-  openai: "GPT models from OpenAI. Requires an API key.",
-  ollama: "Run local models with Ollama. Requires a base URL.",
-  openrouter: "Access 200+ models through one API. Requires an OpenRouter API key.",
-  "openai-compatible":
-    "Any OpenAI-compatible API endpoint. Requires a base URL and optionally an API key.",
-};
-
-const NEEDS_API_KEY = new Set(["anthropic", "openai", "openrouter", "openai-compatible"]);
-const NEEDS_BASE_URL = new Set(["ollama", "openai-compatible"]);
+import {
+  SUGGESTED_MODELS,
+  CODING_SUGGESTED_MODELS,
+  PROVIDER_DESCRIPTIONS,
+  NEEDS_API_KEY,
+  NEEDS_BASE_URL,
+  MODEL_SEARCH_HINT,
+  filterModels,
+} from "./setup-wizard-utils";
 
 const IANA_TIMEZONES = Intl.supportedValuesOf("timeZone");
 
@@ -740,11 +713,15 @@ export function SetupWizard() {
                       </span>
                     )}
 
+                    {!modelDropdownOpen && !fetchingModels && (
+                      <p className="text-[10px] text-muted-foreground mt-1">
+                        {MODEL_SEARCH_HINT}
+                      </p>
+                    )}
+
                     {/* Dropdown */}
                     {modelDropdownOpen && fetchedModels.length > 0 && (() => {
-                      const filtered = fetchedModels.filter((m) =>
-                        m.toLowerCase().includes(modelFilter.toLowerCase()),
-                      );
+                      const filtered = filterModels(fetchedModels, modelFilter);
                       return filtered.length > 0 ? (
                         <div className="absolute z-50 mt-1 w-full bg-card border border-border rounded-md shadow-md max-h-[300px] overflow-y-auto">
                           {filtered.map((m) => (
@@ -1425,10 +1402,14 @@ export function SetupWizard() {
                         </span>
                       )}
 
+                      {!openCodeModelDropdownOpen && !openCodeFetchingModels && (
+                        <p className="text-[10px] text-muted-foreground mt-1">
+                          {MODEL_SEARCH_HINT}
+                        </p>
+                      )}
+
                       {openCodeModelDropdownOpen && openCodeFetchedModels.length > 0 && (() => {
-                        const filtered = openCodeFetchedModels.filter((m) =>
-                          m.toLowerCase().includes(openCodeModelFilter.toLowerCase()),
-                        );
+                        const filtered = filterModels(openCodeFetchedModels, openCodeModelFilter);
                         return filtered.length > 0 ? (
                         <div className="absolute z-50 mt-1 w-full bg-card border border-border rounded-md shadow-md max-h-[300px] overflow-y-auto">
                             {filtered.map((m) => (
