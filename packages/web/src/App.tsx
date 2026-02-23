@@ -147,8 +147,11 @@ function MainApp() {
     // Pre-load model packs so Live View has them ready
     loadPacks();
 
-    // Load Claude Code settings so the dashboard can show usage limits
+    // Load coding agent settings so project dropdowns reflect enabled state
+    useSettingsStore.getState().loadOpenCodeSettings();
     useSettingsStore.getState().loadClaudeCodeSettings();
+    useSettingsStore.getState().loadCodexSettings();
+    useSettingsStore.getState().loadGeminiCliSettings();
 
     // Hydrate coding agent session list (metadata only — details fetched on demand)
     fetch("/api/codeagent/sessions?limit=20")
