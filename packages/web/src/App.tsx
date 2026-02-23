@@ -276,6 +276,19 @@ function MainApp() {
         <div className="flex items-center gap-1">
           <button
             onClick={() => {
+              setCenterView("desktop");
+              setSettingsOpen(false);
+            }}
+            className={`text-xs transition-colors px-2 py-1 rounded ${
+              !settingsOpen && centerView === "desktop"
+                ? "text-primary bg-primary/10"
+                : "text-muted-foreground hover:text-foreground hover:bg-secondary"
+            }`}
+          >
+            Desktop
+          </button>
+          <button
+            onClick={() => {
               setCenterView("graph");
               setSettingsOpen(false);
             }}
