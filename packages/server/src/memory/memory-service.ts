@@ -325,7 +325,7 @@ export class MemoryService {
     return result.changes > 0;
   }
 
-  /** Delete all memories, clearing FTS index and vector store */
+  /** Delete all memories, clearing FTS index, vector store, and episodic logs */
   clearAll(): number {
     const db = getDb();
 
@@ -348,6 +348,13 @@ export class MemoryService {
     const vectorStore = getVectorStore();
     for (const { id } of allIds) {
       vectorStore.remove(id);
+    }
+
+    // Clear episodic memory logs (compacted daily summaries)
+    try {
+      db.delete(schema.memoryEpisodes).run();
+    } catch (err) {
+      console.warn("[MemoryService] Memory episodes clear failed:", err);
     }
 
     return result.changes;
