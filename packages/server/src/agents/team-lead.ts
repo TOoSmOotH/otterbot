@@ -196,7 +196,7 @@ export interface TeamLeadDependencies {
 
 const MAX_CONTINUATION_CYCLES = 5;
 const MAX_TASK_RETRIES = 3;
-const MAX_TASK_SPAWNS = 4;
+const MAX_TASK_SPAWNS = 10;
 
 export class TeamLead extends BaseAgent {
   private workers: Map<string, Worker> = new Map();
