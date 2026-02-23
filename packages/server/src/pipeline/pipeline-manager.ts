@@ -18,6 +18,7 @@ import {
   createIssueComment,
   addLabelsToIssue,
   fetchCompareCommitsDiff,
+  fetchPullRequests,
 } from "../github/github-service.js";
 import type { COO } from "../agents/coo.js";
 import type { GitHubIssue } from "../github/github-service.js";
@@ -531,26 +532,33 @@ export class PipelineManager {
     // Store the report
     state.stageReports.set(currentStage, workerReport);
 
-    // Extract branch name from coder's report if present
-    if (currentStage === "coder" && !state.prBranch) {
-      const branchMatch = workerReport.match(
-        /branch[:\s]+([a-zA-Z0-9._\/-]+)/i,
-      ) ?? workerReport.match(
-        /git checkout -b\s+([a-zA-Z0-9._\/-]+)/i,
-      ) ?? workerReport.match(
-        /pushed to\s+([a-zA-Z0-9._\/-]+)/i,
-      );
-      if (branchMatch) {
-        state.prBranch = branchMatch[1];
-      }
+    // Extract branch name from the worker report (any stage may mention it)
+    if (!state.prBranch) {
+      state.prBranch = this.extractBranchName(workerReport);
 
-      // Fallback: check if the task's prBranch was set in DB (e.g., by PR creation)
+      // Fallback: check if the task's prBranch was set in DB (e.g., by TeamLead's safety net)
       if (!state.prBranch) {
         const db = getDb();
         const task = db.select().from(schema.kanbanTasks).where(eq(schema.kanbanTasks.id, taskId)).get();
         if (task?.prBranch) {
           state.prBranch = task.prBranch;
         }
+      }
+
+      // Fallback: look for an open PR referencing this issue
+      if (!state.prBranch && state.issueNumber && state.repo) {
+        state.prBranch = await this.resolveIssueBranch(state.repo, state.issueNumber);
+      }
+
+      // Persist to DB so it survives server restarts and is available to later stages
+      if (state.prBranch) {
+        const db = getDb();
+        const now = new Date().toISOString();
+        db.update(schema.kanbanTasks)
+          .set({ prBranch: state.prBranch, updatedAt: now })
+          .where(eq(schema.kanbanTasks.id, taskId))
+          .run();
+        console.log(`[PipelineManager] Resolved branch "${state.prBranch}" for task ${taskId}`);
       }
     }
 
@@ -1088,6 +1096,47 @@ export class PipelineManager {
       /\binjection\b/.test(lower) ||
       (lower.includes("found") && lower.includes("issue") && !lower.includes("no issue"))
     );
+  }
+
+  /** Extract a branch name from a worker report */
+  private extractBranchName(report: string): string | null {
+    const patterns = [
+      /branch[:\s]+`?([a-zA-Z0-9._\/-]+)`?/i,
+      /created branch\s+`?([a-zA-Z0-9._\/-]+)`?/i,
+      /git checkout -b\s+`?([a-zA-Z0-9._\/-]+)`?/i,
+      /pushed to\s+`?([a-zA-Z0-9._\/-]+)`?/i,
+      /on branch\s+`?([a-zA-Z0-9._\/-]+)`?/i,
+    ];
+    for (const pattern of patterns) {
+      const match = report.match(pattern);
+      if (match) return match[1];
+    }
+    return null;
+  }
+
+  /**
+   * Find the feature branch for an issue by looking for open PRs that reference it.
+   * Falls back to the conventional feat/<issueNumber>-* branch naming pattern.
+   */
+  private async resolveIssueBranch(repo: string, issueNumber: number): Promise<string | null> {
+    const token = getConfig("github:token");
+    if (!token) return null;
+
+    try {
+      const prs = await fetchPullRequests(repo, token, { state: "open", per_page: 30 });
+      // Find a PR whose body references the issue or whose branch matches the issue number
+      for (const pr of prs) {
+        const branchMatchesIssue = pr.head.ref.includes(String(issueNumber));
+        const bodyReferencesIssue = pr.body?.includes(`#${issueNumber}`) ?? false;
+        if (branchMatchesIssue || bodyReferencesIssue) {
+          return pr.head.ref;
+        }
+      }
+    } catch (err) {
+      console.warn(`[PipelineManager] Failed to resolve branch for issue #${issueNumber}:`, err);
+    }
+
+    return null;
   }
 
   /** Extract a PR number from a worker report */
