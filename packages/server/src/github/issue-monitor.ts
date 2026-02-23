@@ -1,11 +1,18 @@
 import { nanoid } from "nanoid";
-import { eq } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import type { Server } from "socket.io";
 import type { ServerToClientEvents, ClientToServerEvents, KanbanTask } from "@otterbot/shared";
 import { MessageType } from "@otterbot/shared";
 import { getDb, schema } from "../db/index.js";
 import { getConfig, setConfig } from "../auth/auth.js";
-import { fetchAssignedIssues, fetchOpenIssues, createIssueComment } from "./github-service.js";
+import {
+  fetchAssignedIssues,
+  fetchOpenIssues,
+  fetchIssue,
+  fetchIssueComments,
+  createIssueComment,
+  removeLabelFromIssue,
+} from "./github-service.js";
 import type { COO } from "../agents/coo.js";
 import type { PipelineManager } from "../pipeline/pipeline-manager.js";
 
@@ -118,9 +125,29 @@ export class GitHubIssueMonitor {
 
     const issues = await fetchOpenIssues(watched.repo, token, since);
 
+    const botUsername = getConfig("github:username") ?? null;
+
     for (const issue of issues) {
-      // Skip if already triaged (has "triaged" label)
-      if (issue.labels.some((l) => l.name === "triaged")) continue;
+      const isTriaged = issue.labels.some((l) => l.name === "triaged");
+
+      if (isTriaged) {
+        // Check if re-triage is needed due to new non-bot comments
+        const needsRetriage = await this.hasNewNonBotComments(
+          watched.repo, token, issue.number, projectId, botUsername,
+        );
+        if (!needsRetriage) continue;
+
+        // Remove "triaged" label so runTriage will re-apply it
+        try {
+          await removeLabelFromIssue(watched.repo, token, issue.number, "triaged");
+          // Update the issue object so runTriage doesn't see the stale label
+          issue.labels = issue.labels.filter((l) => l.name !== "triaged");
+        } catch (err) {
+          console.error(`[IssueMonitor] Failed to remove triaged label from #${issue.number}:`, err);
+          continue;
+        }
+        console.log(`[IssueMonitor] Re-triaging issue #${issue.number} due to new comments`);
+      }
 
       // Run triage (this also creates a triage task when pipeline is enabled)
       try {
@@ -132,9 +159,159 @@ export class GitHubIssueMonitor {
           projectId, issue.number, issue.title, "", issue.body ?? "",
         );
       }
+
+      // For re-triaged issues, update the existing triage task description
+      if (isTriaged) {
+        this.updateTriageTaskDescription(projectId, issue.number, issue.body ?? "");
+      }
     }
 
+    await this.syncTriageTasks(projectId, watched.repo, token, issues);
+
     setConfig(triageSinceKey, new Date().toISOString());
+  }
+
+  /**
+   * Remove triage tasks whose GitHub issues are no longer open.
+   */
+  private async syncTriageTasks(
+    projectId: string,
+    repo: string,
+    token: string,
+    openIssues: { number: number }[],
+  ): Promise<void> {
+    const openNumbers = new Set(openIssues.map((i) => i.number));
+    const db = getDb();
+
+    const triageTasks = db
+      .select()
+      .from(schema.kanbanTasks)
+      .where(
+        and(
+          eq(schema.kanbanTasks.projectId, projectId),
+          eq(schema.kanbanTasks.column, "triage"),
+        ),
+      )
+      .all();
+
+    const issueLabel = /^github-issue-(\d+)$/;
+
+    for (const task of triageTasks) {
+      const labels = task.labels as string[];
+      const match = labels.map((l) => issueLabel.exec(l)).find(Boolean);
+      if (!match) continue;
+
+      const issueNum = Number(match[1]);
+      if (openNumbers.has(issueNum)) continue;
+
+      // Issue wasn't in the fetched open list — confirm it's actually closed/deleted
+      let isOpen = false;
+      try {
+        const issue = await fetchIssue(repo, token, issueNum);
+        isOpen = issue.state === "open";
+      } catch {
+        // 404 or network error — treat as deleted
+      }
+
+      if (!isOpen) {
+        db.delete(schema.kanbanTasks)
+          .where(eq(schema.kanbanTasks.id, task.id))
+          .run();
+        this.io.emit("kanban:task-deleted", { taskId: task.id, projectId });
+        console.log(
+          `[IssueMonitor] Removed stale triage task for issue #${issueNum} (project ${projectId})`,
+        );
+      }
+    }
+  }
+
+  /**
+   * Check if an issue has non-bot comments newer than the existing triage task.
+   */
+  private async hasNewNonBotComments(
+    repo: string,
+    token: string,
+    issueNumber: number,
+    projectId: string,
+    botUsername: string | null,
+  ): Promise<boolean> {
+    const db = getDb();
+    const label = `github-issue-${issueNumber}`;
+
+    // Find the existing triage task for this issue
+    const triageTasks = db
+      .select()
+      .from(schema.kanbanTasks)
+      .where(
+        and(
+          eq(schema.kanbanTasks.projectId, projectId),
+          eq(schema.kanbanTasks.column, "triage"),
+        ),
+      )
+      .all();
+
+    const triageTask = triageTasks.find(
+      (t) => (t.labels as string[]).includes(label),
+    );
+    if (!triageTask) return false;
+
+    const taskUpdatedAt = new Date(triageTask.updatedAt).getTime();
+
+    try {
+      const comments = await fetchIssueComments(repo, token, issueNumber);
+      return comments.some((c) => {
+        if (botUsername && c.user.login === botUsername) return false;
+        // Also skip bot accounts (login ending with [bot])
+        if (c.user.login.endsWith("[bot]")) return false;
+        return new Date(c.created_at).getTime() > taskUpdatedAt;
+      });
+    } catch (err) {
+      console.error(`[IssueMonitor] Failed to fetch comments for #${issueNumber}:`, err);
+      return false;
+    }
+  }
+
+  /**
+   * Update an existing triage task's description after re-triage.
+   * runTriage's createTriageTask call is a no-op when the task exists,
+   * so we update it here with refreshed content.
+   */
+  private updateTriageTaskDescription(
+    projectId: string,
+    issueNumber: number,
+    body: string,
+  ): void {
+    const db = getDb();
+    const label = `github-issue-${issueNumber}`;
+
+    const tasks = db
+      .select()
+      .from(schema.kanbanTasks)
+      .where(
+        and(
+          eq(schema.kanbanTasks.projectId, projectId),
+          eq(schema.kanbanTasks.column, "triage"),
+        ),
+      )
+      .all();
+
+    const task = tasks.find((t) => (t.labels as string[]).includes(label));
+    if (!task) return;
+
+    const now = new Date().toISOString();
+    db.update(schema.kanbanTasks)
+      .set({ description: body, updatedAt: now })
+      .where(eq(schema.kanbanTasks.id, task.id))
+      .run();
+
+    const updated = db
+      .select()
+      .from(schema.kanbanTasks)
+      .where(eq(schema.kanbanTasks.id, task.id))
+      .get();
+    if (updated) {
+      this.io.emit("kanban:task-updated", updated as unknown as KanbanTask);
+    }
   }
 
   /**
@@ -231,6 +408,7 @@ export class GitHubIssueMonitor {
           spawnCount: 0,
           completionReport: null,
           pipelineStage: null,
+          pipelineStages: [] as string[],
           pipelineAttempt: 0,
           createdAt: now,
           updatedAt: now,

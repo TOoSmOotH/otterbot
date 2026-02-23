@@ -145,6 +145,10 @@ export const kanbanTasks = sqliteTable("kanban_tasks", {
   spawnCount: integer("spawn_count").notNull().default(0),
   completionReport: text("completion_report"),
   pipelineStage: text("pipeline_stage"),
+  pipelineStages: text("pipeline_stages", { mode: "json" })
+    .$type<string[]>()
+    .notNull()
+    .default([]),
   pipelineAttempt: integer("pipeline_attempt").notNull().default(0),
   createdAt: text("created_at")
     .notNull()

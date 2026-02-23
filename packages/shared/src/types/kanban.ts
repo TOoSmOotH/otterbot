@@ -21,6 +21,7 @@ export interface KanbanTask {
   labels: string[];
   blockedBy: string[];
   pipelineStage: string | null;
+  pipelineStages: string[];
   pipelineAttempt: number;
   createdAt: string;
   updatedAt: string;
@@ -46,5 +47,6 @@ export interface KanbanTaskUpdate {
   labels?: string[];
   blockedBy?: string[];
   pipelineStage?: string | null;
+  pipelineStages?: string[];
   pipelineAttempt?: number;
 }

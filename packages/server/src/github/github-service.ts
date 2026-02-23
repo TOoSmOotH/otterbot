@@ -377,6 +377,22 @@ export async function addLabelsToIssue(
 }
 
 /**
+ * Remove a single label from an issue.
+ */
+export async function removeLabelFromIssue(
+  repoFullName: string,
+  token: string,
+  issueNumber: number,
+  label: string,
+): Promise<void> {
+  await ghFetch<unknown>(
+    `https://api.github.com/repos/${repoFullName}/issues/${issueNumber}/labels/${encodeURIComponent(label)}`,
+    token,
+    { method: "DELETE" },
+  );
+}
+
+/**
  * Fetch open issues with optional filters (no assignee filter by default).
  */
 export async function fetchOpenIssues(

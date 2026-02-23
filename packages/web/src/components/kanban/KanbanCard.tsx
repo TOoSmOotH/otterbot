@@ -1,6 +1,66 @@
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import type { KanbanTask } from "@otterbot/shared";
+import type { KanbanTask, KanbanColumn } from "@otterbot/shared";
+import { PIPELINE_STAGES } from "@otterbot/shared";
+
+const STAGE_LABELS: Record<string, string> = Object.fromEntries(
+  PIPELINE_STAGES.map((s) => [s.key, s.label]),
+);
+
+function PipelineProgress({
+  stages,
+  currentStage,
+  taskColumn,
+}: {
+  stages: string[];
+  currentStage: string | null;
+  taskColumn: KanbanColumn;
+}) {
+  const isDone = taskColumn === "done" || taskColumn === "in_review";
+  const currentIndex = currentStage ? stages.indexOf(currentStage) : -1;
+
+  return (
+    <div className="mt-2 space-y-0.5">
+      {stages.map((stage, i) => {
+        let status: "done" | "active" | "pending";
+        if (isDone && currentStage === null) {
+          status = "done";
+        } else if (currentIndex >= 0 && i < currentIndex) {
+          status = "done";
+        } else if (i === currentIndex) {
+          status = "active";
+        } else {
+          status = "pending";
+        }
+
+        return (
+          <div key={stage} className="flex items-center gap-1.5 text-[11px]">
+            {status === "done" && (
+              <svg className="w-3 h-3 text-emerald-400 shrink-0" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2">
+                <rect x="1" y="1" width="14" height="14" rx="2" />
+                <path d="M4.5 8l2.5 2.5 4.5-5" />
+              </svg>
+            )}
+            {status === "active" && (
+              <svg className="w-3 h-3 text-blue-400 shrink-0 animate-pulse" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2">
+                <rect x="1" y="1" width="14" height="14" rx="2" />
+                <circle cx="8" cy="8" r="2" fill="currentColor" />
+              </svg>
+            )}
+            {status === "pending" && (
+              <svg className="w-3 h-3 text-muted-foreground/40 shrink-0" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2">
+                <rect x="1" y="1" width="14" height="14" rx="2" />
+              </svg>
+            )}
+            <span className={status === "pending" ? "text-muted-foreground/40" : status === "active" ? "text-blue-400" : "text-muted-foreground"}>
+              {STAGE_LABELS[stage] ?? stage}
+            </span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
 
 export function KanbanCard({
   task,
@@ -69,6 +129,9 @@ export function KanbanCard({
         <p className="text-xs text-muted-foreground mt-1 line-clamp-2">
           {task.description}
         </p>
+      )}
+      {task.pipelineStages?.length > 0 && (
+        <PipelineProgress stages={task.pipelineStages} currentStage={task.pipelineStage} taskColumn={task.column} />
       )}
       <div className="flex items-center gap-2 mt-2 flex-wrap">
         {task.prNumber && (

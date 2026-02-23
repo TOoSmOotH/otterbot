@@ -447,8 +447,17 @@ export class PipelineManager {
     };
     this.pipelines.set(taskId, state);
 
-    // Update kanban task with pipeline stage
-    this.updateTaskPipelineStage(taskId, enabledStages[0]);
+    // Update kanban task with pipeline stage and stage list
+    const db = getDb();
+    const now = new Date().toISOString();
+    db.update(schema.kanbanTasks)
+      .set({ pipelineStages: enabledStages, pipelineStage: enabledStages[0], updatedAt: now })
+      .where(eq(schema.kanbanTasks.id, taskId))
+      .run();
+    const updated = db.select().from(schema.kanbanTasks).where(eq(schema.kanbanTasks.id, taskId)).get();
+    if (updated) {
+      this.io.emit("kanban:task-updated", updated as unknown as KanbanTask);
+    }
 
     // Post start comment on GitHub issue
     if (issueNumber && repo) {
@@ -565,6 +574,9 @@ export class PipelineManager {
       // Pipeline complete
       this.pipelines.delete(taskId);
       this.updateTaskPipelineStage(taskId, null);
+
+      // Move the task to done (or in_review if a PR exists)
+      this.completeTask(taskId, state, workerReport);
 
       // Post completion comment
       if (state.issueNumber && state.repo) {
@@ -948,6 +960,7 @@ export class PipelineManager {
       spawnCount: 0,
       completionReport: null,
       pipelineStage: null,
+      pipelineStages: [] as string[],
       pipelineAttempt: 0,
       createdAt: now,
       updatedAt: now,
@@ -1029,6 +1042,55 @@ export class PipelineManager {
     if (updated) {
       this.io.emit("kanban:task-updated", updated as unknown as KanbanTask);
     }
+  }
+
+  /**
+   * Move a pipeline task to its final column when all stages are done.
+   * If the task has a PR, move to in_review (PR monitor handles the rest).
+   * Otherwise move to done with a completion report.
+   */
+  private completeTask(
+    taskId: string,
+    state: PipelineState,
+    finalReport: string,
+  ): void {
+    const db = getDb();
+    const task = db
+      .select()
+      .from(schema.kanbanTasks)
+      .where(eq(schema.kanbanTasks.id, taskId))
+      .get();
+    if (!task) return;
+
+    const now = new Date().toISOString();
+    const hasPR = !!task.prNumber;
+    const targetColumn = hasPR ? "in_review" : "done";
+
+    const report = Array.from(state.stageReports.entries())
+      .map(([stage, r]) => `## ${stage}\n${r}`)
+      .join("\n\n");
+
+    db.update(schema.kanbanTasks)
+      .set({
+        column: targetColumn,
+        completionReport: report || finalReport,
+        updatedAt: now,
+      })
+      .where(eq(schema.kanbanTasks.id, taskId))
+      .run();
+
+    const updated = db
+      .select()
+      .from(schema.kanbanTasks)
+      .where(eq(schema.kanbanTasks.id, taskId))
+      .get();
+    if (updated) {
+      this.io.emit("kanban:task-updated", updated as unknown as KanbanTask);
+    }
+
+    console.log(
+      `[PipelineManager] Task ${taskId} → ${targetColumn}${hasPR ? ` (PR #${task.prNumber})` : ""}`,
+    );
   }
 
   /** Fallback: send existing-style direct directive to TeamLead (no pipeline) */

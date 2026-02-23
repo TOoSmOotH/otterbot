@@ -19,6 +19,7 @@ function makeTask(overrides: Partial<KanbanTask> = {}): KanbanTask {
     labels: [],
     blockedBy: [],
     pipelineStage: null,
+    pipelineStages: [],
     pipelineAttempt: 0,
     createdAt: "2026-02-20T10:00:00Z",
     updatedAt: "2026-02-20T10:00:00Z",
