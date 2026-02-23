@@ -11,11 +11,7 @@ const SUGGESTED_MODELS: Record<string, string[]> = {
   anthropic: ["claude-sonnet-4-5-20250929", "claude-haiku-4-20250414"],
   openai: ["gpt-4o", "gpt-4o-mini"],
   ollama: ["llama3.1", "mistral", "codellama"],
-  openrouter: [
-    "anthropic/claude-sonnet-4-5-20250929",
-    "openai/gpt-4o",
-    "google/gemini-2.0-flash-exp:free",
-  ],
+  openrouter: [],
   "openai-compatible": [],
 };
 
@@ -273,8 +269,8 @@ export function SetupWizard() {
       if (res.ok) {
         const data = (await res.json()) as { models: string[] };
         setFetchedModels(data.models);
-        // Auto-select first fetched model if no model is currently set
-        if (data.models.length > 0) {
+        // Auto-select first fetched model if no model is currently set (except for openrouter)
+        if (data.models.length > 0 && prov !== "openrouter") {
           setModel((prev) => prev || data.models[0]);
         }
       }
