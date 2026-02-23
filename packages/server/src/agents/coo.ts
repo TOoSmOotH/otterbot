@@ -240,10 +240,31 @@ The user can see everything on the desktop in real-time.`;
 
     if (projects.length === 0) return "";
 
-    const lines = projects.map(
-      (p) => `- [${p.id}] "${p.name}": ${p.description}`,
+    const lines = projects.map((p) => {
+      const charterLabel = p.charter ? "finalized" : "none";
+      return `- [${p.id}] "${p.name}": ${p.description} (charter: ${charterLabel})`;
+    });
+    return `\n\n[ACTIVE PROJECTS]\n${lines.join("\n")}\n[/ACTIVE PROJECTS]\n\nRoute related work to an existing project with send_directive, update a project's charter with update_charter, or create a new project if this is a distinct area of work.`;
+  }
+
+  private getCurrentProjectContext(projectId: string): string {
+    const db = getDb();
+    const project = db
+      .select()
+      .from(schema.projects)
+      .where(eq(schema.projects.id, projectId))
+      .get();
+    if (!project) return "";
+
+    const charterStatus = project.charter ? "has charter (finalized)" : "no charter";
+    return (
+      `\n\n[CURRENT PROJECT]\n` +
+      `The CEO is chatting from within project [${project.id}] "${project.name}".\n` +
+      `Description: ${project.description}\n` +
+      `Charter status: ${charterStatus}\n` +
+      `If the CEO asks you to write or update the charter, use the update_charter tool with this project's ID.\n` +
+      `[/CURRENT PROJECT]`
     );
-    return `\n\n[ACTIVE PROJECTS]\n${lines.join("\n")}\n[/ACTIVE PROJECTS]\n\nRoute related work to an existing project with send_directive, or create a new project if this is a distinct area of work.`;
   }
 
   private async handleCeoMessage(message: BusMessage) {
@@ -266,11 +287,12 @@ The user can see everything on the desktop in real-time.`;
       this.conversationHistory = ctx.history;
     }
 
+    // Inject current project context so the LLM knows which project the user is in
+    const currentProjectBlock = projectId ? this.getCurrentProjectContext(projectId) : "";
+
     // Inject active project context so the LLM can avoid duplicates
     const projectContext = this.getActiveProjectsSummary();
-    const enrichedContent = projectContext
-      ? message.content + projectContext
-      : message.content;
+    const enrichedContent = message.content + currentProjectBlock + projectContext;
 
     console.log(`[COO] Calling think() — model=${this.llmConfig.model} provider=${this.llmConfig.provider}`);
     const { text, thinking } = await this.think(
