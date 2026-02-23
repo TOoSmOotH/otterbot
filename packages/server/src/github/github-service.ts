@@ -15,6 +15,7 @@ export interface GitHubIssue {
   labels: { name: string }[];
   assignees: { login: string }[];
   state: string;
+  state_reason: string | null;
   html_url: string;
   created_at: string;
   updated_at: string;

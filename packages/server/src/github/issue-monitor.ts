@@ -9,6 +9,7 @@ import {
   fetchAssignedIssues,
   fetchOpenIssues,
   fetchAllOpenIssueNumbers,
+  fetchIssue,
   fetchIssueComments,
   createIssueComment,
   removeLabelFromIssue,
@@ -72,7 +73,7 @@ export class GitHubIssueMonitor {
   }
 
   /** Start the polling loop */
-  start(pollIntervalMs = 60_000): void {
+  start(pollIntervalMs = 300_000): void {
     if (this.intervalId) return;
     this.intervalId = setInterval(() => {
       this.poll().catch((err) => {
@@ -174,9 +175,10 @@ export class GitHubIssueMonitor {
   }
 
   /**
-   * Remove triage tasks whose GitHub issues are no longer open.
-   * Fetches all open issue numbers once (paginated) and uses that
-   * as an authoritative set — no per-task API calls needed.
+   * Sync triage tasks with GitHub issue state.
+   * - Issues closed as "completed" → move task to done
+   * - Issues closed as "not_planned" or deleted → delete task
+   * - Open issues stay in triage
    */
   private async syncTriageTasks(
     projectId: string,
@@ -212,13 +214,49 @@ export class GitHubIssueMonitor {
     for (const [issueNum, task] of tasksByIssue) {
       if (openNumbers.has(issueNum)) continue;
 
-      db.delete(schema.kanbanTasks)
-        .where(eq(schema.kanbanTasks.id, task.id))
-        .run();
-      this.io.emit("kanban:task-deleted", { taskId: task.id, projectId });
-      console.log(
-        `[IssueMonitor] Removed stale triage task for issue #${issueNum} (project ${projectId})`,
-      );
+      // Issue is not open — fetch it to determine close reason
+      let stateReason: string | null = null;
+      try {
+        const issue = await fetchIssue(repo, token, issueNum);
+        stateReason = issue.state_reason;
+      } catch {
+        // 404 or network error — treat as deleted
+      }
+
+      const now = new Date().toISOString();
+
+      if (stateReason === "completed") {
+        // Closed as completed → move to done
+        db.update(schema.kanbanTasks)
+          .set({
+            column: "done",
+            completionReport: `GitHub issue #${issueNum} closed as completed.`,
+            updatedAt: now,
+          })
+          .where(eq(schema.kanbanTasks.id, task.id))
+          .run();
+
+        const updated = db
+          .select()
+          .from(schema.kanbanTasks)
+          .where(eq(schema.kanbanTasks.id, task.id))
+          .get();
+        if (updated) {
+          this.io.emit("kanban:task-updated", updated as unknown as KanbanTask);
+        }
+        console.log(
+          `[IssueMonitor] Issue #${issueNum} closed as completed → task moved to done (project ${projectId})`,
+        );
+      } else {
+        // Not planned, deleted, or unknown → remove from board
+        db.delete(schema.kanbanTasks)
+          .where(eq(schema.kanbanTasks.id, task.id))
+          .run();
+        this.io.emit("kanban:task-deleted", { taskId: task.id, projectId });
+        console.log(
+          `[IssueMonitor] Issue #${issueNum} closed (${stateReason ?? "deleted"}) → task removed (project ${projectId})`,
+        );
+      }
     }
   }
 
