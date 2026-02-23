@@ -380,6 +380,7 @@ export class PipelineManager {
         column: "triage",
         assigneeAgentId: null,
         pipelineStage: null,
+        spawnCount: 0,
         description: `Triage: ${parsed.classification}\n\n${issue.body ?? ""}`,
         updatedAt: now,
       })

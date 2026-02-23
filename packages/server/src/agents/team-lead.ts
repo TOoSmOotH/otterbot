@@ -1616,13 +1616,13 @@ export class TeamLead extends BaseAgent {
 
       // Auto-assign kanban task if taskId provided
       if (taskId) {
-        const assigned = this.autoAssignTask(taskId, worker.id);
-        if (!assigned) {
-          // Task is blocked — clean up the worker and abort
+        const reason = this.autoAssignTask(taskId, worker.id);
+        if (reason) {
+          // Task cannot be assigned — clean up the worker and abort
           worker.destroy();
           this.workers.delete(worker.id);
           console.warn(`[TeamLead ${this.id}] Aborted spawn for blocked task ${taskId}`);
-          return `BLOCKED: Task ${taskId} cannot start — it depends on tasks that are not yet done. Wait for blockers to complete first.`;
+          return reason;
         }
       }
 
@@ -1678,9 +1678,9 @@ export class TeamLead extends BaseAgent {
     return false;
   }
 
-  /** Auto-assign a kanban task to a worker: move to in_progress and set assigneeAgentId. Returns false if blocked. */
-  private autoAssignTask(taskId: string, workerId: string): boolean {
-    if (!this.projectId) return false;
+  /** Auto-assign a kanban task to a worker: move to in_progress and set assigneeAgentId. Returns null on success, or a reason string on failure. */
+  private autoAssignTask(taskId: string, workerId: string): string | null {
+    if (!this.projectId) return "No project configured.";
 
     const db = getDb();
     const task = db
@@ -1691,26 +1691,26 @@ export class TeamLead extends BaseAgent {
 
     if (!task) {
       console.warn(`[TeamLead ${this.id}] autoAssignTask: task ${taskId} not found`);
-      return false;
+      return `Task ${taskId} not found.`;
     }
 
     // Guard: refuse if task is already done (prevents re-work loops)
     if (task.column === "done") {
       console.warn(`[TeamLead ${this.id}] autoAssignTask: task "${task.title}" (${taskId}) is already DONE — refusing assignment`);
-      return false;
+      return `REFUSED: Task "${task.title}" (${taskId}) is already DONE. Do not re-spawn workers for completed tasks.`;
     }
 
     // Guard: refuse if task is in review (PR awaiting approval — PR monitor handles this)
     if (task.column === "in_review") {
       console.warn(`[TeamLead ${this.id}] autoAssignTask: task "${task.title}" (${taskId}) is IN REVIEW — refusing assignment`);
-      return false;
+      return `REFUSED: Task "${task.title}" (${taskId}) is IN REVIEW — a PR is awaiting approval. Do not re-spawn workers.`;
     }
 
     // Guard: refuse if task has been spawned too many times (hard cap to prevent infinite loops)
     const currentSpawnCount = (task as any).spawnCount ?? 0;
     if (currentSpawnCount >= MAX_TASK_SPAWNS) {
       console.warn(`[TeamLead ${this.id}] autoAssignTask: task "${task.title}" (${taskId}) has reached spawn cap (${currentSpawnCount}/${MAX_TASK_SPAWNS}) — refusing assignment`);
-      return false;
+      return `REFUSED: Task "${task.title}" (${taskId}) has reached the maximum spawn attempts (${currentSpawnCount}/${MAX_TASK_SPAWNS}). This task has failed too many times and cannot be retried automatically.`;
     }
 
     // Programmatic enforcement: refuse if task is blocked
@@ -1719,7 +1719,7 @@ export class TeamLead extends BaseAgent {
       console.warn(
         `[TeamLead ${this.id}] autoAssignTask: task "${task.title}" (${taskId}) is BLOCKED by [${blockedBy.join(", ")}] — refusing assignment`,
       );
-      return false;
+      return `BLOCKED: Task ${taskId} cannot start — it depends on tasks that are not yet done. Wait for blockers to complete first.`;
     }
 
     const now = new Date().toISOString();
@@ -1738,7 +1738,7 @@ export class TeamLead extends BaseAgent {
     }
 
     console.log(`[TeamLead ${this.id}] Auto-assigned task "${task.title}" (${taskId}) to worker ${workerId}`);
-    return true;
+    return null;
   }
 
   private createKanbanTask(

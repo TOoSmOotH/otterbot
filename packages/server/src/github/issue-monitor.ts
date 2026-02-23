@@ -459,6 +459,7 @@ export class GitHubIssueMonitor {
           .set({
             column: "backlog",
             position: maxPos + 1,
+            spawnCount: 0,
             description: issue.body ?? existingTriageTask.description,
             updatedAt: now,
           })
