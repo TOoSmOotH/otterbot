@@ -879,7 +879,7 @@ export function SetupWizard() {
               <div className="flex gap-2">
                 <button
                   onClick={() => {
-                    setStep(6);
+                    setStep(2);
                     setError(null);
                   }}
                   className="px-4 py-2 bg-secondary text-secondary-foreground text-sm font-medium rounded-md hover:bg-secondary/80 transition-colors"
@@ -1041,7 +1041,7 @@ export function SetupWizard() {
               <div className="flex gap-2">
                 <button
                   onClick={() => {
-                    setStep(7);
+                    setStep(3);
                     setError(null);
                   }}
                   className="px-4 py-2 bg-secondary text-secondary-foreground text-sm font-medium rounded-md hover:bg-secondary/80 transition-colors"
@@ -1082,7 +1082,7 @@ export function SetupWizard() {
               <div className="flex gap-2">
                 <button
                   onClick={() => {
-                    setStep(8);
+                    setStep(4);
                     setError(null);
                   }}
                   className="px-4 py-2 bg-secondary text-secondary-foreground text-sm font-medium rounded-md hover:bg-secondary/80 transition-colors"
@@ -1197,7 +1197,7 @@ export function SetupWizard() {
               <div className="flex gap-2">
                 <button
                   onClick={() => {
-                    setStep(5);
+                    setStep(6);
                     setError(null);
                   }}
                   className="px-4 py-2 bg-secondary text-secondary-foreground text-sm font-medium rounded-md hover:bg-secondary/80 transition-colors"
@@ -1290,7 +1290,7 @@ export function SetupWizard() {
               <div className="flex gap-2">
                 <button
                   onClick={() => {
-                    setStep(6);
+                    setStep(7);
                     setError(null);
                   }}
                   className="px-4 py-2 bg-secondary text-secondary-foreground text-sm font-medium rounded-md hover:bg-secondary/80 transition-colors"
@@ -1554,7 +1554,7 @@ export function SetupWizard() {
               <div className="flex gap-2">
                 <button
                   onClick={() => {
-                    setStep(7);
+                    setStep(8);
                     setError(null);
                   }}
                   className="px-4 py-2 bg-secondary text-secondary-foreground text-sm font-medium rounded-md hover:bg-secondary/80 transition-colors"
