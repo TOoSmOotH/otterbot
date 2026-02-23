@@ -56,7 +56,7 @@ pnpm dev
 
 Open [http://localhost:5173](http://localhost:5173). On first launch, the **Setup Wizard** will walk you through:
 
-1. Choosing an LLM provider (Anthropic, OpenAI, Ollama, OpenRouter, Hugging Face, or OpenAI-compatible)
+1. Choosing an LLM provider (Anthropic, OpenAI, Ollama, OpenRouter, Hugging Face, Together AI, or OpenAI-compatible)
 2. Entering your API key and selecting a model
 3. Creating your user profile
 4. Optionally configuring TTS voice and 3D character model
@@ -191,7 +191,8 @@ Otterbot uses the [Vercel AI SDK](https://sdk.vercel.ai/) for multi-provider sup
 | **Ollama** | Local models (Llama, Mistral, etc.) |
 | **OpenRouter** | Aggregated access to 200+ models from multiple providers |
 | **Hugging Face** | Access models hosted on Hugging Face Inference API |
-| **OpenAI-Compatible** | Together, Groq, LM Studio, vLLM, etc. |
+| **Together AI** | Popular model aggregator with competitive pricing for open-source models (Llama, DeepSeek, Mixtral, Qwen, etc.) |
+| **OpenAI-Compatible** | Groq, LM Studio, vLLM, etc. |
 
 Each agent can use a different provider and model. Override at the template level or per-spawn.
 
@@ -423,7 +424,7 @@ otterbot/
 | 3D Rendering | Three.js + React Three Fiber + Drei |
 | Markdown | React Markdown + Mermaid diagrams |
 | State | Zustand |
-| LLM | Vercel AI SDK (Anthropic, OpenAI, Ollama, OpenRouter, Hugging Face, OpenAI-compatible) |
+| LLM | Vercel AI SDK (Anthropic, OpenAI, Ollama, OpenRouter, Hugging Face, Together AI, OpenAI-compatible) |
 | TTS | Kokoro.js (local) + Edge TTS + OpenAI-compatible |
 | STT | HuggingFace Transformers / Whisper (local) + OpenAI-compatible + Browser Web Speech API |
 | Browser Automation | Playwright (Chromium — headed or headless) |
