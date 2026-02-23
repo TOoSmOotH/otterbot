@@ -730,6 +730,9 @@ async function main() {
       issueMonitor = new GitHubIssueMonitor(coo, io);
       prMonitor = new GitHubPRMonitor(coo, io);
       const pipelineManager = new PipelineManager(coo, io);
+      pipelineManager.init().catch((err) => {
+        console.error("[PipelineManager] Init failed:", err);
+      });
       issueMonitor.setPipelineManager(pipelineManager);
       prMonitor.setPipelineManager(pipelineManager);
       coo.setPipelineManager(pipelineManager);

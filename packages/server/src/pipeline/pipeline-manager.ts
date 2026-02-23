@@ -1,5 +1,5 @@
 import { nanoid } from "nanoid";
-import { eq } from "drizzle-orm";
+import { eq, and, isNotNull, inArray } from "drizzle-orm";
 import { generateText } from "ai";
 import type { Server } from "socket.io";
 import type {
@@ -104,9 +104,223 @@ export class PipelineManager {
   /** Track in-flight coding-agent triage ops (keyed by kanban task ID) */
   private triageSessions = new Map<string, { projectId: string; repo: string; issue: GitHubIssue; taskId: string }>();
 
+  /** Timer for periodic stale pipeline sweep */
+  private sweepTimer: ReturnType<typeof setInterval> | null = null;
+  /** Stale pipeline threshold in milliseconds (30 minutes) */
+  private static readonly STALE_THRESHOLD_MS = 30 * 60 * 1000;
+  /** Sweep interval in milliseconds (10 minutes) */
+  private static readonly SWEEP_INTERVAL_MS = 10 * 60 * 1000;
+
   constructor(coo: COO, io: TypedServer) {
     this.coo = coo;
     this.io = io;
+  }
+
+  /**
+   * Initialize the pipeline manager: recover in-flight pipelines from DB
+   * and start the periodic stale pipeline sweep.
+   * Must be called after construction (DB must be ready).
+   */
+  async init(): Promise<void> {
+    this.recoverPipelines();
+    this.sweepTimer = setInterval(() => {
+      this.sweepStalePipelines().catch((err) => {
+        console.error("[PipelineManager] Stale pipeline sweep failed:", err);
+      });
+    }, PipelineManager.SWEEP_INTERVAL_MS);
+  }
+
+  /** Stop the periodic sweep timer. */
+  dispose(): void {
+    if (this.sweepTimer) {
+      clearInterval(this.sweepTimer);
+      this.sweepTimer = null;
+    }
+  }
+
+  /**
+   * Scan the DB for tasks with active pipeline state and reconstruct
+   * in-memory PipelineState objects so pipelines survive server restarts.
+   */
+  private recoverPipelines(): void {
+    const db = getDb();
+    const tasks = db
+      .select()
+      .from(schema.kanbanTasks)
+      .where(
+        and(
+          isNotNull(schema.kanbanTasks.pipelineStage),
+          inArray(schema.kanbanTasks.column, ["in_progress", "triage"]),
+        ),
+      )
+      .all();
+
+    for (const task of tasks) {
+      // Skip if already tracked (shouldn't happen on fresh startup)
+      if (this.pipelines.has(task.id)) continue;
+
+      const stages = (task.pipelineStages as string[]) ?? [];
+      const currentStage = task.pipelineStage!;
+      const currentStageIndex = stages.indexOf(currentStage);
+
+      if (currentStageIndex < 0) {
+        console.warn(
+          `[PipelineManager] Recovery: task ${task.id} has pipelineStage="${currentStage}" not found in stages [${stages.join(",")}] — skipping`,
+        );
+        continue;
+      }
+
+      // Extract issue number from labels
+      const issueLabel = (task.labels as string[]).find((l) => l.startsWith("github-issue-"));
+      const issueNumber = issueLabel ? parseInt(issueLabel.replace("github-issue-", ""), 10) : null;
+
+      // Look up project for repo info
+      const project = db
+        .select()
+        .from(schema.projects)
+        .where(eq(schema.projects.id, task.projectId))
+        .get();
+
+      const state: PipelineState = {
+        taskId: task.id,
+        projectId: task.projectId,
+        issueNumber,
+        repo: project?.githubRepo ?? null,
+        stages,
+        currentStageIndex,
+        kickbackCount: 0, // Reset on recovery — conservative
+        maxKickbacks: MAX_KICKBACKS,
+        stageReports: new Map(), // Reports lost on restart
+        prBranch: task.prBranch ?? null,
+        targetBranch: getConfig(`project:${task.projectId}:github:branch`) ?? "main",
+      };
+
+      this.pipelines.set(task.id, state);
+
+      // Reconstruct triage session if this is a triage-stage task
+      if (currentStage === "triage" && issueNumber && project?.githubRepo) {
+        this.triageInFlight.add(issueNumber);
+        // We don't have the full GitHubIssue object from DB, so fetch it async
+        this.recoverTriageSession(task, issueNumber, project.githubRepo).catch((err) => {
+          console.warn(`[PipelineManager] Failed to recover triage session for task ${task.id}:`, err);
+        });
+      }
+
+      console.log(
+        `[PipelineManager] Recovered pipeline for task ${task.id} at stage ${currentStage}`,
+      );
+    }
+
+    if (tasks.length > 0) {
+      console.log(`[PipelineManager] Recovered ${this.pipelines.size} pipeline(s) from DB`);
+    }
+  }
+
+  /**
+   * Recover a triage session by fetching the issue from GitHub.
+   * If fetch fails, the pipeline state is still present so advancePipeline will work,
+   * but handleTriageReport won't have the full issue context.
+   */
+  private async recoverTriageSession(
+    task: { id: string; projectId: string; title: string; description: string },
+    issueNumber: number,
+    repo: string,
+  ): Promise<void> {
+    const token = getConfig("github:token");
+    if (!token) return;
+
+    try {
+      const issue = await fetchIssue(repo, token, issueNumber);
+      if (issue) {
+        this.triageSessions.set(task.id, {
+          projectId: task.projectId,
+          repo,
+          issue,
+          taskId: task.id,
+        });
+      }
+    } catch (err) {
+      console.warn(`[PipelineManager] Could not fetch issue #${issueNumber} for triage recovery:`, err);
+    }
+  }
+
+  /**
+   * Try to recover a single pipeline from DB state.
+   * Used when advancePipeline() receives a report for a task with no in-memory state.
+   */
+  private tryRecoverPipeline(taskId: string): PipelineState | null {
+    const db = getDb();
+    const task = db
+      .select()
+      .from(schema.kanbanTasks)
+      .where(eq(schema.kanbanTasks.id, taskId))
+      .get();
+
+    if (!task || !task.pipelineStage) return null;
+
+    const stages = (task.pipelineStages as string[]) ?? [];
+    const currentStage = task.pipelineStage;
+    const currentStageIndex = stages.indexOf(currentStage);
+
+    if (currentStageIndex < 0) return null;
+
+    const issueLabel = (task.labels as string[]).find((l) => l.startsWith("github-issue-"));
+    const issueNumber = issueLabel ? parseInt(issueLabel.replace("github-issue-", ""), 10) : null;
+
+    const project = db
+      .select()
+      .from(schema.projects)
+      .where(eq(schema.projects.id, task.projectId))
+      .get();
+
+    const state: PipelineState = {
+      taskId: task.id,
+      projectId: task.projectId,
+      issueNumber,
+      repo: project?.githubRepo ?? null,
+      stages,
+      currentStageIndex,
+      kickbackCount: 0,
+      maxKickbacks: MAX_KICKBACKS,
+      stageReports: new Map(),
+      prBranch: task.prBranch ?? null,
+      targetBranch: getConfig(`project:${task.projectId}:github:branch`) ?? "main",
+    };
+
+    this.pipelines.set(taskId, state);
+    console.log(
+      `[PipelineManager] Recovered pipeline for task ${taskId} at stage ${currentStage} (on-demand)`,
+    );
+    return state;
+  }
+
+  /**
+   * Reset a task back to backlog when pipeline recovery fails.
+   * This prevents the task from being permanently stuck.
+   */
+  private resetTaskToBacklog(taskId: string): void {
+    const db = getDb();
+    const now = new Date().toISOString();
+    db.update(schema.kanbanTasks)
+      .set({
+        column: "backlog",
+        pipelineStage: null,
+        assigneeAgentId: null,
+        updatedAt: now,
+      })
+      .where(eq(schema.kanbanTasks.id, taskId))
+      .run();
+
+    const updated = db
+      .select()
+      .from(schema.kanbanTasks)
+      .where(eq(schema.kanbanTasks.id, taskId))
+      .get();
+    if (updated) {
+      this.io.emit("kanban:task-updated", updated as unknown as KanbanTask);
+    }
+
+    console.log(`[PipelineManager] Reset task ${taskId} to backlog`);
   }
 
   // ─── Config helpers ──────────────────────────────────────────────
@@ -491,8 +705,17 @@ export class PipelineManager {
     taskId: string,
     workerReport: string,
   ): Promise<void> {
-    const state = this.pipelines.get(taskId);
-    if (!state) return;
+    let state = this.pipelines.get(taskId);
+    if (!state) {
+      console.warn(`[PipelineManager] advancePipeline: no in-memory state for task ${taskId} — attempting recovery`);
+      const recovered = this.tryRecoverPipeline(taskId);
+      if (!recovered) {
+        console.error(`[PipelineManager] advancePipeline: cannot recover task ${taskId} — moving to backlog`);
+        this.resetTaskToBacklog(taskId);
+        return;
+      }
+      state = recovered;
+    }
 
     const currentStage = state.stages[state.currentStageIndex];
 
@@ -520,6 +743,15 @@ export class PipelineManager {
       );
       if (branchMatch) {
         state.prBranch = branchMatch[1];
+      }
+
+      // Fallback: check if the task's prBranch was set in DB (e.g., by PR creation)
+      if (!state.prBranch) {
+        const db = getDb();
+        const task = db.select().from(schema.kanbanTasks).where(eq(schema.kanbanTasks.id, taskId)).get();
+        if (task?.prBranch) {
+          state.prBranch = task.prBranch;
+        }
       }
     }
 
@@ -577,12 +809,10 @@ export class PipelineManager {
     state.currentStageIndex++;
 
     if (state.currentStageIndex >= state.stages.length) {
-      // Pipeline complete
-      this.pipelines.delete(taskId);
+      // Pipeline complete — update DB first, then clean up memory
       this.updateTaskPipelineStage(taskId, null);
-
-      // Move the task to done (or in_review if a PR exists)
       this.completeTask(taskId, state, workerReport);
+      this.pipelines.delete(taskId);
 
       // Post completion comment
       if (state.issueNumber && state.repo) {
@@ -869,10 +1099,16 @@ export class PipelineManager {
             pipelineTaskId: state.taskId,
           },
         });
+        console.log(`[PipelineManager] Sent ${currentStage} directive for task ${state.taskId}`);
       }
+    } else {
+      console.error(
+        `[PipelineManager] No TeamLead found for project ${state.projectId} — directive not sent for task ${state.taskId} stage ${currentStage}`,
+      );
+      // Move task back to backlog so it can be retried when TeamLead is available
+      this.resetTaskToBacklog(state.taskId);
+      this.pipelines.delete(state.taskId);
     }
-
-    console.log(`[PipelineManager] Sent ${currentStage} directive for task ${state.taskId}`);
   }
 
   // ─── GitHub comments ─────────────────────────────────────────────
@@ -1101,6 +1337,54 @@ export class PipelineManager {
     console.log(
       `[PipelineManager] Task ${taskId} → ${targetColumn}${hasPR ? ` (PR #${task.prNumber})` : ""}`,
     );
+  }
+
+  /**
+   * Periodic sweep for stale pipelines. If a task has been in_progress with a
+   * pipelineStage set for longer than the threshold, re-send the stage directive
+   * to dispatch a new worker (the original may have crashed).
+   */
+  private async sweepStalePipelines(): Promise<void> {
+    const db = getDb();
+    const tasks = db
+      .select()
+      .from(schema.kanbanTasks)
+      .where(
+        and(
+          eq(schema.kanbanTasks.column, "in_progress"),
+          isNotNull(schema.kanbanTasks.pipelineStage),
+        ),
+      )
+      .all();
+
+    const now = Date.now();
+
+    for (const task of tasks) {
+      const updatedAt = new Date(task.updatedAt).getTime();
+      if (now - updatedAt < PipelineManager.STALE_THRESHOLD_MS) continue;
+
+      const state = this.pipelines.get(task.id);
+      if (!state) {
+        // No in-memory state — try to recover first
+        const recovered = this.tryRecoverPipeline(task.id);
+        if (!recovered) {
+          console.warn(
+            `[PipelineManager] Sweep: stale task ${task.id} at stage ${task.pipelineStage} — cannot recover, moving to backlog`,
+          );
+          this.resetTaskToBacklog(task.id);
+          continue;
+        }
+        console.warn(
+          `[PipelineManager] Sweep: stale task ${task.id} at stage ${task.pipelineStage} — recovered and resending directive`,
+        );
+        await this.sendStageDirective(recovered);
+      } else {
+        console.warn(
+          `[PipelineManager] Sweep: stale task ${task.id} at stage ${task.pipelineStage} — resending directive`,
+        );
+        await this.sendStageDirective(state);
+      }
+    }
   }
 
   /** Fallback: send existing-style direct directive to TeamLead (no pipeline) */
