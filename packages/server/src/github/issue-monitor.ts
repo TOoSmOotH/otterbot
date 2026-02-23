@@ -132,6 +132,16 @@ export class GitHubIssueMonitor {
       const isTriaged = issue.labels.some((l) => l.name === "triaged");
 
       if (isTriaged) {
+        // Check if the kanban task still exists (may have been accidentally deleted)
+        if (!this.hasKanbanTask(projectId, issue.number)) {
+          // Recreate the triage task without re-running the LLM
+          this.pipelineManager.createTriageTask(
+            projectId, issue.number, issue.title, "", issue.body ?? "",
+          );
+          console.log(`[IssueMonitor] Recreated missing triage task for issue #${issue.number}`);
+          continue;
+        }
+
         // Quick check: does this issue have activity newer than the triage task?
         // If not, skip the expensive fetchIssueComments call entirely.
         const needsRetriage = this.issueUpdatedSinceTask(issue, projectId)
@@ -264,6 +274,20 @@ export class GitHubIssueMonitor {
    * Quick local check: is the issue's updated_at newer than the triage task's updatedAt?
    * This avoids calling fetchIssueComments when nothing has changed.
    */
+  /**
+   * Check if any kanban task (any column) exists for a given issue number.
+   */
+  private hasKanbanTask(projectId: string, issueNumber: number): boolean {
+    const db = getDb();
+    const label = `github-issue-${issueNumber}`;
+    const tasks = db
+      .select()
+      .from(schema.kanbanTasks)
+      .where(eq(schema.kanbanTasks.projectId, projectId))
+      .all();
+    return tasks.some((t) => (t.labels as string[]).includes(label));
+  }
+
   private issueUpdatedSinceTask(
     issue: { number: number; updated_at: string },
     projectId: string,
