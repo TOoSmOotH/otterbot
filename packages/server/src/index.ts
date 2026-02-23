@@ -206,6 +206,13 @@ import {
   rejectPairing as rejectTelegramPairing,
   revokePairing as revokeTelegramPairing,
 } from "./telegram/pairing.js";
+import { TlonBridge } from "./tlon/tlon-bridge.js";
+import {
+  getTlonSettings,
+  updateTlonSettings,
+  getTlonConfig,
+  testTlonConnection,
+} from "./tlon/tlon-settings.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -597,6 +604,27 @@ async function main() {
     }
   }
 
+  // Tlon bridge (initialized when enabled + config set)
+  let tlonBridge: TlonBridge | null = null;
+
+  function startTlonBridge() {
+    if (tlonBridge || !coo) return;
+    const config = getTlonConfig();
+    if (!config) return;
+    tlonBridge = new TlonBridge({ bus, coo, io });
+    tlonBridge.start(config).catch((err) => {
+      console.error("[Tlon] Failed to start bridge:", err);
+      tlonBridge = null;
+    });
+  }
+
+  async function stopTlonBridge() {
+    if (tlonBridge) {
+      await tlonBridge.stop();
+      tlonBridge = null;
+    }
+  }
+
   function startCoo() {
     if (coo) return;
     try {
@@ -930,6 +958,7 @@ async function main() {
     startTeamsBridge();
     startSlackBridge();
     startTelegramBridge();
+    startTlonBridge();
   } else {
     console.log("Setup not complete. Waiting for setup wizard...");
   }
@@ -1254,6 +1283,7 @@ async function main() {
     startTeamsBridge();
     startSlackBridge();
     startTelegramBridge();
+    startTlonBridge();
 
     return { ok: true };
   });
@@ -3500,6 +3530,41 @@ async function main() {
   });
 
   // =========================================================================
+  // Tlon settings routes
+  // =========================================================================
+
+  app.get("/api/settings/tlon", async () => {
+    return getTlonSettings();
+  });
+
+  app.put<{
+    Body: {
+      enabled?: boolean;
+      shipUrl?: string;
+      accessCode?: string;
+      shipName?: string;
+    };
+  }>("/api/settings/tlon", async (req) => {
+    const wasEnabled = !!getTlonConfig();
+    updateTlonSettings(req.body);
+    const nowEnabled = !!getTlonConfig();
+
+    if (nowEnabled && !wasEnabled) {
+      startTlonBridge();
+    } else if (!nowEnabled && wasEnabled) {
+      await stopTlonBridge();
+    }
+
+    return { ok: true };
+  });
+
+  app.post<{
+    Body: { shipUrl: string; accessCode: string };
+  }>("/api/settings/tlon/test", async (req) => {
+    return testTlonConnection(req.body.shipUrl, req.body.accessCode);
+  });
+
+  // =========================================================================
   // Google settings routes
   // =========================================================================
 
@@ -4188,6 +4253,7 @@ Respond with ONLY a JSON object (no markdown, no explanation) with these fields:
     await stopIrcBridge();
     await stopTeamsBridge();
     await stopSlackBridge();
+    await stopTlonBridge();
     await closeBrowser();
     process.exit(0);
   };
