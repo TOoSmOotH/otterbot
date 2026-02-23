@@ -19,7 +19,6 @@ import {
   addLabelsToIssue,
   fetchIssue,
   fetchCompareCommitsDiff,
-  getRepoDefaultBranch,
 } from "../github/github-service.js";
 import { CODING_AGENT_REGISTRY_IDS } from "../agents/worker.js";
 import type { COO } from "../agents/coo.js";
@@ -92,6 +91,7 @@ interface PipelineState {
   maxKickbacks: number;
   stageReports: Map<string, string>; // stage → report content
   prBranch: string | null;
+  targetBranch: string;             // project's configured branch (for diff base)
 }
 
 export class PipelineManager {
@@ -309,6 +309,7 @@ export class PipelineManager {
       maxKickbacks: 0,
       stageReports: new Map(),
       prBranch: null,
+      targetBranch: getConfig(`project:${projectId}:github:branch`) ?? "main",
     };
     this.pipelines.set(task.id, state);
 
@@ -444,6 +445,7 @@ export class PipelineManager {
       maxKickbacks: MAX_KICKBACKS,
       stageReports: new Map(),
       prBranch: null,
+      targetBranch: getConfig(`project:${projectId}:github:branch`) ?? "main",
     };
     this.pipelines.set(taskId, state);
 
@@ -652,6 +654,7 @@ export class PipelineManager {
       maxKickbacks: MAX_KICKBACKS,
       stageReports: new Map(),
       prBranch: branchName,
+      targetBranch: getConfig(`project:${task.projectId}:github:branch`) ?? "main",
     };
 
     // Store review feedback context
@@ -982,11 +985,10 @@ export class PipelineManager {
     if (!token) return null;
 
     try {
-      const defaultBranch = await getRepoDefaultBranch(state.repo, token);
       const files = await fetchCompareCommitsDiff(
         state.repo,
         token,
-        defaultBranch,
+        state.targetBranch,
         state.prBranch,
       );
 
