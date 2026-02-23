@@ -1479,7 +1479,8 @@ The user can see everything on the desktop in real-time.`;
         `Target branch: ${branch}\n` +
         `Repository is already cloned to your workspace.\n\n` +
         `**PR Workflow:** Workers must create feature branches from \`${branch}\`, commit their changes, push, and open a pull request targeting \`${branch}\`.\n` +
-        `Use conventional commits and reference issue numbers where applicable.${rulesBlock}\n\n` +
+        `Use conventional commits and reference issue numbers where applicable.\n` +
+        `PR bodies must include "Closes #<issue-number>" when the PR addresses a GitHub issue, so the issue auto-closes on merge.${rulesBlock}\n\n` +
         `Await issue-triggered tasks or COO directives.`;
     } else {
       directive =

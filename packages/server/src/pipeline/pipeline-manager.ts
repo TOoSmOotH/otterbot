@@ -801,7 +801,8 @@ export class PipelineManager {
           );
         }
         if (isLastStage) {
-          parts.push(`After review, create a pull request for this branch.`);
+          const closeRef = state.issueNumber ? ` Include "Closes #${state.issueNumber}" in the PR body so the issue auto-closes on merge.` : "";
+          parts.push(`After review, create a pull request for this branch.${closeRef}`);
         }
         // Include reports from prior stages
         for (const [stage, report] of state.stageReports) {

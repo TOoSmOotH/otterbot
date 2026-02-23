@@ -240,6 +240,7 @@ export class TeamLead extends BaseAgent {
         `Target branch: ${ghBranch ?? "main"}`,
         `**PR Workflow:** Workers must create feature branches from \`${ghBranch ?? "main"}\`, commit, push, and open a PR targeting \`${ghBranch ?? "main"}\`.`,
         `Use conventional commits and reference issue numbers.`,
+        `PR bodies must include "Closes #<issue-number>" when the PR addresses a GitHub issue, so the issue auto-closes on merge.`,
       ];
       if (ghRulesRaw) {
         try {
@@ -1528,6 +1529,7 @@ export class TeamLead extends BaseAgent {
             `Create a feature branch from \`${wGhBranch ?? "main"}\`.`,
             `After completing your work, push your branch and create a pull request targeting \`${wGhBranch ?? "main"}\`.`,
             `Use conventional commits and reference issue numbers where applicable.`,
+            `When creating a PR for a GitHub issue, always include "Closes #<issue-number>" in the PR body so the issue auto-closes on merge.`,
           ];
           if (wGhRulesRaw) {
             try {
