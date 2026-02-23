@@ -160,6 +160,14 @@ export function resolveModel(config: LLMConfig): LanguageModel {
       return perplexity(config.model);
     }
 
+    case "together": {
+      const together = createOpenAI({
+        baseURL: config.baseUrl ?? resolved.baseUrl ?? "https://api.together.xyz/v1",
+        apiKey: config.apiKey ?? resolved.apiKey ?? "",
+      });
+      return together(config.model);
+    }
+
     default:
       throw new Error(`Unknown LLM provider: ${config.provider} (type: ${resolved.type})`);
   }

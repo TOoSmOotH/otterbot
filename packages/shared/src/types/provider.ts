@@ -1,4 +1,4 @@
-export type ProviderType = "anthropic" | "openai" | "google" | "ollama" | "openai-compatible" | "openrouter" | "github-copilot" | "huggingface" | "nvidia" | "perplexity";
+export type ProviderType = "anthropic" | "openai" | "google" | "ollama" | "openai-compatible" | "openrouter" | "github-copilot" | "huggingface" | "nvidia" | "perplexity" | "together";
 
 export interface NamedProvider {
   id: string;

@@ -61,6 +61,7 @@ export const PROVIDER_TYPE_META: ProviderTypeMeta[] = [
   { type: "huggingface", label: "Hugging Face", needsApiKey: true, needsBaseUrl: false },
   { type: "nvidia", label: "NVIDIA", needsApiKey: true, needsBaseUrl: false },
   { type: "perplexity", label: "Perplexity Sonar", needsApiKey: true, needsBaseUrl: false },
+  { type: "together", label: "Together AI", needsApiKey: true, needsBaseUrl: false },
 ];
 
 // Static fallback models per provider (used when API fetch fails)
@@ -103,6 +104,13 @@ const FALLBACK_MODELS: Record<string, string[]> = {
     "sonar-pro",
     "sonar-reasoning",
     "sonar-reasoning-pro",
+  ],
+  together: [
+    "meta-llama/Llama-3.3-70B-Instruct-Turbo",
+    "meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo",
+    "deepseek-ai/DeepSeek-R1-Distill-Llama-70B",
+    "mistralai/Mixtral-8x22B-Instruct-v0.1",
+    "Qwen/Qwen2.5-72B-Instruct-Turbo",
   ],
 };
 
@@ -525,6 +533,21 @@ export async function fetchModelsWithCredentials(
         if (!pplxRes.ok) return FALLBACK_MODELS.perplexity ?? [];
         const pplxData = (await pplxRes.json()) as { data?: Array<{ id: string }> };
         return pplxData.data?.map((m) => m.id).sort() ?? FALLBACK_MODELS.perplexity ?? [];
+      }
+
+      case "together": {
+        if (!apiKey) return FALLBACK_MODELS.together ?? [];
+        const togetherBase = baseUrl ?? "https://api.together.xyz/v1";
+        const togetherRes = await fetch(`${togetherBase}/models`, {
+          headers: { Authorization: `Bearer ${apiKey}` },
+          signal: AbortSignal.timeout(10_000),
+        });
+        if (!togetherRes.ok) return FALLBACK_MODELS.together ?? [];
+        const togetherData = (await togetherRes.json()) as Array<{ id: string; type?: string }>;
+        const chatModels = Array.isArray(togetherData)
+          ? togetherData.filter((m) => m.type === "chat").map((m) => m.id).sort()
+          : [];
+        return chatModels.length > 0 ? chatModels : FALLBACK_MODELS.together ?? [];
       }
 
       default:
