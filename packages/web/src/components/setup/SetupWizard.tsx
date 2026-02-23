@@ -424,7 +424,7 @@ export function SetupWizard() {
       return;
     }
     setError(null);
-    setStep(3);
+    setStep(4);
   };
 
   const handleAvatarChange = async (file: File) => {
@@ -452,12 +452,12 @@ export function SetupWizard() {
     }
     setError(null);
     loadPacks();
-    setStep(4);
+    setStep(5);
   };
 
   const handleNextToCoo = () => {
     setError(null);
-    setStep(5);
+    setStep(6);
   };
 
   const handleNextToAdmin = () => {
@@ -466,7 +466,7 @@ export function SetupWizard() {
       return;
     }
     setError(null);
-    setStep(6);
+    setStep(7);
   };
 
   const handleNextToSearch = () => {
@@ -475,7 +475,7 @@ export function SetupWizard() {
       return;
     }
     setError(null);
-    setStep(7);
+    setStep(8);
   };
 
   const handleNextToOpenCode = () => {
@@ -487,12 +487,12 @@ export function SetupWizard() {
         setOpenCodeModel(suggestions[0]);
       }
     }
-    setStep(8);
+    setStep(9);
   };
 
   const handleNextToVoice = () => {
     setError(null);
-    setStep(9);
+    setStep(10);
   };
 
   const handleComplete = async () => {
@@ -596,7 +596,7 @@ export function SetupWizard() {
 
           {/* Step indicator */}
           <div className="flex items-center justify-center gap-2 mb-6">
-            {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((s, i) => (
+            {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((s, i) => (
               <div key={s} className="flex items-center gap-2">
                 {i > 0 && (
                   <div className={`w-6 h-px ${step >= s ? "bg-primary" : "bg-muted"}`} />
@@ -661,7 +661,32 @@ export function SetupWizard() {
           {step === 2 && (
             <div className="space-y-4">
               <h2 className="text-sm font-medium">
-                2. Configure your LLM provider
+                2. Welcome to OtterBot!
+              </h2>
+              <div className="text-xs text-muted-foreground space-y-3">
+                <p>Thanks for trying OtterBot! This is still experimental and is not feature complete. Things you should do:</p>
+                <ol className="list-decimal list-inside space-y-2 ml-1">
+                  <li>Use <strong>GPTOSS 120B</strong> or something similar for the main model. The assistant has several layers and it doesn&apos;t need a lot of smarts to communicate to you. Fast is what matters.</li>
+                  <li><strong>qwen3-coder-next</strong> inside of opencode works great for coding tasks.</li>
+                  <li>The way we use Claude Code, Gemini, and Codex is via a terminal so it shouldn&apos;t violate TOS. I am not a lawyer so I can&apos;t guarantee that so make your own judgement.</li>
+                  <li>If it breaks you get to keep both pieces. I am not responsible if something happens.</li>
+                  <li>Create accounts for your agents. <strong>DO NOT</strong> connect it to your email or github accounts. Create their own accounts and you can invite them to your projects.</li>
+                </ol>
+              </div>
+
+              <button
+                onClick={() => setStep(3)}
+                className="w-full px-4 py-2 bg-primary text-primary-foreground text-sm font-medium rounded-md hover:bg-primary/90 transition-colors"
+              >
+                OK, I understand
+              </button>
+            </div>
+          )}
+
+          {step === 3 && (
+            <div className="space-y-4">
+              <h2 className="text-sm font-medium">
+                3. Configure your LLM provider
               </h2>
 
               {/* Provider type cards */}
@@ -858,7 +883,7 @@ export function SetupWizard() {
               <div className="flex gap-2">
                 <button
                   onClick={() => {
-                    setStep(1);
+                    setStep(6);
                     setError(null);
                   }}
                   className="px-4 py-2 bg-secondary text-secondary-foreground text-sm font-medium rounded-md hover:bg-secondary/80 transition-colors"
@@ -876,10 +901,10 @@ export function SetupWizard() {
             </div>
           )}
 
-          {step === 3 && (
+          {step === 4 && (
             <div className="space-y-4">
               <h2 className="text-sm font-medium">
-                3. Tell the team about yourself
+                4. Tell the team about yourself
               </h2>
               <p className="text-xs text-muted-foreground">
                 Your AI agents will use this to personalize their interactions
@@ -1020,7 +1045,7 @@ export function SetupWizard() {
               <div className="flex gap-2">
                 <button
                   onClick={() => {
-                    setStep(2);
+                    setStep(7);
                     setError(null);
                   }}
                   className="px-4 py-2 bg-secondary text-secondary-foreground text-sm font-medium rounded-md hover:bg-secondary/80 transition-colors"
@@ -1038,10 +1063,10 @@ export function SetupWizard() {
             </div>
           )}
 
-          {step === 4 && (
+          {step === 5 && (
             <div className="space-y-4">
               <h2 className="text-sm font-medium">
-                4. Choose your character
+                5. Choose your character
               </h2>
               <p className="text-xs text-muted-foreground">
                 Pick a 3D character for the Live View. You can change this later in Settings.
@@ -1061,7 +1086,7 @@ export function SetupWizard() {
               <div className="flex gap-2">
                 <button
                   onClick={() => {
-                    setStep(3);
+                    setStep(8);
                     setError(null);
                   }}
                   className="px-4 py-2 bg-secondary text-secondary-foreground text-sm font-medium rounded-md hover:bg-secondary/80 transition-colors"
@@ -1078,10 +1103,10 @@ export function SetupWizard() {
             </div>
           )}
 
-          {step === 5 && (
+          {step === 6 && (
             <div className="space-y-4">
               <h2 className="text-sm font-medium">
-                5. Customize your COO
+                6. Customize your COO
               </h2>
               <p className="text-xs text-muted-foreground">
                 Your COO manages all operations and reports directly to you. Give them a name and optionally pick a 3D character.
@@ -1118,7 +1143,7 @@ export function SetupWizard() {
               <div className="flex gap-2">
                 <button
                   onClick={() => {
-                    setStep(4);
+                    setStep(5);
                     setError(null);
                   }}
                   className="px-4 py-2 bg-secondary text-secondary-foreground text-sm font-medium rounded-md hover:bg-secondary/80 transition-colors"
@@ -1136,10 +1161,10 @@ export function SetupWizard() {
             </div>
           )}
 
-          {step === 6 && (
+          {step === 7 && (
             <div className="space-y-4">
               <h2 className="text-sm font-medium">
-                6. Customize your Admin Assistant
+                7. Customize your Admin Assistant
               </h2>
               <p className="text-xs text-muted-foreground">
                 Your Admin Assistant handles personal productivity — managing your todos, email (Gmail), and calendar. Give them a name and optionally pick a 3D character.
@@ -1194,10 +1219,10 @@ export function SetupWizard() {
             </div>
           )}
 
-          {step === 7 && (
+          {step === 8 && (
             <div className="space-y-4">
               <h2 className="text-sm font-medium">
-                7. Set up web search
+                8. Set up web search
               </h2>
               <p className="text-xs text-muted-foreground">
                 Give your agents the ability to search the web. DuckDuckGo works
@@ -1296,10 +1321,10 @@ export function SetupWizard() {
             </div>
           )}
 
-          {step === 8 && (
+          {step === 9 && (
             <div className="space-y-4">
               <h2 className="text-sm font-medium">
-                8. Configure Coding Agents
+                9. Configure Coding Agents
               </h2>
               <p className="text-xs text-muted-foreground">
                 Coding agents are autonomous tools that handle multi-file edits, refactoring, and complex code changes.
@@ -1561,10 +1586,10 @@ export function SetupWizard() {
             </div>
           )}
 
-          {step === 9 && (
+          {step === 10 && (
             <div className="space-y-4">
               <h2 className="text-sm font-medium">
-                9. Choose a voice for your assistant
+                10. Choose a voice for your assistant
               </h2>
               <p className="text-xs text-muted-foreground">
                 Your assistant can speak its responses aloud. Pick a TTS
@@ -1716,7 +1741,7 @@ export function SetupWizard() {
               <div className="flex gap-2">
                 <button
                   onClick={() => {
-                    setStep(8);
+                    setStep(9);
                     setError(null);
                   }}
                   className="px-4 py-2 bg-secondary text-secondary-foreground text-sm font-medium rounded-md hover:bg-secondary/80 transition-colors"
