@@ -17,10 +17,8 @@ import { Registry } from "../registry/registry.js";
 import {
   createIssueComment,
   addLabelsToIssue,
-  fetchIssue,
   fetchCompareCommitsDiff,
 } from "../github/github-service.js";
-import { CODING_AGENT_REGISTRY_IDS } from "../agents/worker.js";
 import type { COO } from "../agents/coo.js";
 import type { GitHubIssue } from "../github/github-service.js";
 
@@ -99,11 +97,6 @@ export class PipelineManager {
   private io: TypedServer;
   /** In-memory pipeline states keyed by kanban task ID */
   private pipelines = new Map<string, PipelineState>();
-  /** Prevent duplicate coding-agent triage dispatches (keyed by issue number) */
-  private triageInFlight = new Set<number>();
-  /** Track in-flight coding-agent triage ops (keyed by kanban task ID) */
-  private triageSessions = new Map<string, { projectId: string; repo: string; issue: GitHubIssue; taskId: string }>();
-
   /** Timer for periodic stale pipeline sweep */
   private sweepTimer: ReturnType<typeof setInterval> | null = null;
   /** Stale pipeline threshold in milliseconds (30 minutes) */
@@ -150,7 +143,7 @@ export class PipelineManager {
       .where(
         and(
           isNotNull(schema.kanbanTasks.pipelineStage),
-          inArray(schema.kanbanTasks.column, ["in_progress", "triage"]),
+          inArray(schema.kanbanTasks.column, ["in_progress"]),
         ),
       )
       .all();
@@ -197,15 +190,6 @@ export class PipelineManager {
 
       this.pipelines.set(task.id, state);
 
-      // Reconstruct triage session if this is a triage-stage task
-      if (currentStage === "triage" && issueNumber && project?.githubRepo) {
-        this.triageInFlight.add(issueNumber);
-        // We don't have the full GitHubIssue object from DB, so fetch it async
-        this.recoverTriageSession(task, issueNumber, project.githubRepo).catch((err) => {
-          console.warn(`[PipelineManager] Failed to recover triage session for task ${task.id}:`, err);
-        });
-      }
-
       console.log(
         `[PipelineManager] Recovered pipeline for task ${task.id} at stage ${currentStage}`,
       );
@@ -213,34 +197,6 @@ export class PipelineManager {
 
     if (tasks.length > 0) {
       console.log(`[PipelineManager] Recovered ${this.pipelines.size} pipeline(s) from DB`);
-    }
-  }
-
-  /**
-   * Recover a triage session by fetching the issue from GitHub.
-   * If fetch fails, the pipeline state is still present so advancePipeline will work,
-   * but handleTriageReport won't have the full issue context.
-   */
-  private async recoverTriageSession(
-    task: { id: string; projectId: string; title: string; description: string },
-    issueNumber: number,
-    repo: string,
-  ): Promise<void> {
-    const token = getConfig("github:token");
-    if (!token) return;
-
-    try {
-      const issue = await fetchIssue(repo, token, issueNumber);
-      if (issue) {
-        this.triageSessions.set(task.id, {
-          projectId: task.projectId,
-          repo,
-          issue,
-          taskId: task.id,
-        });
-      }
-    } catch (err) {
-      console.warn(`[PipelineManager] Could not fetch issue #${issueNumber} for triage recovery:`, err);
     }
   }
 
@@ -362,7 +318,6 @@ export class PipelineManager {
     projectId: string,
     repo: string,
     issue: GitHubIssue,
-    options?: { createTask?: boolean },
   ): Promise<void> {
     const token = getConfig("github:token");
     if (!token) return;
@@ -371,26 +326,11 @@ export class PipelineManager {
     const triageStage = config?.stages?.triage;
     if (!triageStage?.enabled) return;
 
-    // Resolve the triage agent's model
+    // Resolve the triage agent's model (always use lightweight LLM, never coding-agent)
     const registry = new Registry();
     const agentId = triageStage.agentId || "builtin-triage";
     const entry = registry.get(agentId) ?? registry.get("builtin-triage");
     if (!entry) return;
-
-    const shouldCreateTask = options?.createTask !== false;
-
-    // If a coding agent is selected for triage, route through the worker pipeline.
-    // Only spawn workers for issues that should get a kanban task (i.e., assigned issues).
-    if (CODING_AGENT_REGISTRY_IDS.has(agentId) && agentId !== "builtin-coder") {
-      if (!shouldCreateTask) {
-        // Unassigned issue — skip the expensive coding-agent triage entirely.
-        // The lightweight LLM path below will still classify it on GitHub.
-        // Fall through to use the builtin-triage model instead.
-      } else {
-        await this.runTriageViaCodingAgent(projectId, repo, issue, agentId);
-        return;
-      }
-    }
 
     // Post start comment
     try {
@@ -478,154 +418,11 @@ export class PipelineManager {
 
       console.log(`[PipelineManager] Triaged issue #${issue.number} as "${parsed.classification}" (proceed=${parsed.shouldProceed})`);
 
-      // Create a kanban task in the Triage column only for assigned issues
-      if (shouldCreateTask) {
-        this.createTriageTask(projectId, issue.number, issue.title, parsed.classification, issue.body ?? "");
-      }
+      // Create a kanban task in the Triage column (read-only view of all open issues)
+      this.createTriageTask(projectId, issue.number, issue.title, parsed.classification, issue.body ?? "");
     } catch (err) {
       console.error(`[PipelineManager] Triage LLM call failed for #${issue.number}:`, err);
     }
-  }
-
-  /**
-   * Route triage through the worker pipeline when a coding agent is selected.
-   * Creates a kanban task, registers a single-stage pipeline, and delegates to sendStageDirective().
-   */
-  private async runTriageViaCodingAgent(
-    projectId: string,
-    repo: string,
-    issue: GitHubIssue,
-    agentId: string,
-  ): Promise<void> {
-    // Guard against duplicate dispatch
-    if (this.triageInFlight.has(issue.number)) {
-      console.log(`[PipelineManager] Triage already in flight for issue #${issue.number}, skipping`);
-      return;
-    }
-    this.triageInFlight.add(issue.number);
-
-    // Create kanban task in Triage column (idempotent)
-    this.createTriageTask(projectId, issue.number, issue.title, "", issue.body ?? "");
-
-    // Look up the created task by label
-    const db = getDb();
-    const label = `github-issue-${issue.number}`;
-    const allTasks = db
-      .select()
-      .from(schema.kanbanTasks)
-      .where(eq(schema.kanbanTasks.projectId, projectId))
-      .all();
-    const task = allTasks.find((t) => (t.labels as string[]).includes(label));
-    if (!task) {
-      console.error(`[PipelineManager] Could not find triage task for issue #${issue.number}`);
-      this.triageInFlight.delete(issue.number);
-      return;
-    }
-
-    // Register a single-stage pipeline so isPipelineTask() returns true
-    // and advancePipeline() will intercept the worker report
-    const state: PipelineState = {
-      taskId: task.id,
-      projectId,
-      issueNumber: issue.number,
-      repo,
-      stages: ["triage"],
-      currentStageIndex: 0,
-      kickbackCount: 0,
-      maxKickbacks: 0,
-      stageReports: new Map(),
-      prBranch: null,
-      targetBranch: getConfig(`project:${projectId}:github:branch`) ?? "main",
-    };
-    this.pipelines.set(task.id, state);
-
-    // Store triage metadata for completion handler
-    this.triageSessions.set(task.id, { projectId, repo, issue, taskId: task.id });
-
-    // Update kanban task pipeline stage
-    this.updateTaskPipelineStage(task.id, "triage");
-
-    // Send directive via the standard pipeline mechanism
-    await this.sendStageDirective(state);
-
-    console.log(`[PipelineManager] Dispatched coding-agent triage for issue #${issue.number} (task ${task.id})`);
-  }
-
-  /**
-   * Process the worker report from a coding-agent triage.
-   * Applies labels, posts classification comment, updates the kanban task.
-   */
-  private async handleTriageReport(
-    session: { projectId: string; repo: string; issue: GitHubIssue; taskId: string },
-    workerReport: string,
-  ): Promise<void> {
-    const { repo, issue, taskId } = session;
-    const token = getConfig("github:token");
-
-    // Parse the report using the same extractor as direct-LLM triage
-    const parsed = extractTriageJson(workerReport);
-
-    // Apply labels
-    if (token) {
-      if (parsed.labels && parsed.labels.length > 0) {
-        try {
-          await addLabelsToIssue(repo, token, issue.number, parsed.labels);
-        } catch (err) {
-          console.error(`[PipelineManager] Failed to apply labels to #${issue.number}:`, err);
-        }
-      }
-
-      // Apply "triaged" label so we don't re-process
-      try {
-        await addLabelsToIssue(repo, token, issue.number, ["triaged"]);
-      } catch (err) {
-        console.error(`[PipelineManager] Failed to apply triaged label to #${issue.number}:`, err);
-      }
-
-      // Post classification comment
-      const proceedText = parsed.shouldProceed
-        ? "Proceeding with implementation when assigned."
-        : "No implementation needed — labeling accordingly.";
-      const commentBody =
-        `**Triage:** ${parsed.classification}\n\n` +
-        `${parsed.comment}\n\n` +
-        `${proceedText}`;
-
-      try {
-        await createIssueComment(repo, token, issue.number, commentBody);
-      } catch (err) {
-        console.error(`[PipelineManager] Failed to post triage comment on #${issue.number}:`, err);
-      }
-    }
-
-    // Update kanban task description with classification
-    const db = getDb();
-    const now = new Date().toISOString();
-    db.update(schema.kanbanTasks)
-      .set({
-        column: "triage",
-        assigneeAgentId: null,
-        pipelineStage: null,
-        spawnCount: 0,
-        description: `Triage: ${parsed.classification}\n\n${issue.body ?? ""}`,
-        updatedAt: now,
-      })
-      .where(eq(schema.kanbanTasks.id, taskId))
-      .run();
-
-    const updated = db
-      .select()
-      .from(schema.kanbanTasks)
-      .where(eq(schema.kanbanTasks.id, taskId))
-      .get();
-    if (updated) {
-      this.io.emit("kanban:task-updated", updated as unknown as KanbanTask);
-    }
-
-    // Remove from in-flight set
-    this.triageInFlight.delete(issue.number);
-
-    console.log(`[PipelineManager] Coding-agent triaged issue #${issue.number} as "${parsed.classification}" (proceed=${parsed.shouldProceed})`);
   }
 
   // ─── Implementation pipeline ─────────────────────────────────────
@@ -733,16 +530,6 @@ export class PipelineManager {
 
     // Store the report
     state.stageReports.set(currentStage, workerReport);
-
-    // Handle coding-agent triage completion (single-stage pipeline, no "next stage")
-    if (currentStage === "triage" && this.triageSessions.has(taskId)) {
-      const session = this.triageSessions.get(taskId)!;
-      await this.handleTriageReport(session, workerReport);
-      this.triageSessions.delete(taskId);
-      this.pipelines.delete(taskId);
-      this.updateTaskPipelineStage(taskId, null);
-      return;
-    }
 
     // Extract branch name from coder's report if present
     if (currentStage === "coder" && !state.prBranch) {
@@ -1057,26 +844,6 @@ export class PipelineManager {
         for (const [stage, report] of state.stageReports) {
           if (stage === "review_feedback") continue;
           parts.push(`\n--- ${stage.toUpperCase()} REPORT ---\n${report.slice(0, 1500)}\n--- END ---`);
-        }
-        break;
-      }
-      case "triage": {
-        // Coding-agent triage — instruct the agent to analyze the issue with codebase context
-        const triageSession = this.triageSessions.get(state.taskId);
-        if (triageSession) {
-          const { issue } = triageSession;
-          parts.push(
-            `\nYou are triaging a GitHub issue. Read the codebase for context, then classify the issue.`,
-            `\nIssue #${issue.number}: ${issue.title}`,
-            `\n${issue.body ?? "(no description)"}`,
-            `\nLabels: ${issue.labels.map((l) => l.name).join(", ") || "none"}`,
-            `Assignees: ${issue.assignees.map((a) => a.login).join(", ") || "none"}`,
-            `\nAfter analyzing the issue and relevant code, respond with ONLY a JSON object:`,
-            `{"classification": "<bug|feature|enhancement|user-error|duplicate|question|documentation>",`,
-            ` "shouldProceed": <true if implementation is needed, false otherwise>,`,
-            ` "comment": "<your analysis and reasoning>",`,
-            ` "labels": ["<label1>", "<label2>"]}`,
-          );
         }
         break;
       }

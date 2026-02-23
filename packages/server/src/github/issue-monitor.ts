@@ -129,18 +129,9 @@ export class GitHubIssueMonitor {
     const botUsername = getConfig("github:username") ?? null;
 
     for (const issue of issues) {
-      // Only create kanban tasks and spawn triage workers for assigned issues.
-      // Unassigned issues still get classified on GitHub (labels/comments) via
-      // the lightweight LLM triage path, but don't appear on the board.
-      const isAssigned = botUsername
-        ? issue.assignees.some((a) => a.login.toLowerCase() === botUsername.toLowerCase())
-        : false;
-
       const isTriaged = issue.labels.some((l) => l.name === "triaged");
 
       if (isTriaged) {
-        if (!isAssigned) continue; // unassigned + already triaged → nothing to do
-
         // Check if the kanban task still exists (may have been accidentally deleted)
         if (!this.hasKanbanTask(projectId, issue.number)) {
           // Recreate the triage task without re-running the LLM
@@ -171,17 +162,14 @@ export class GitHubIssueMonitor {
         console.log(`[IssueMonitor] Re-triaging issue #${issue.number} due to new comments`);
       }
 
-      // Run triage — for unassigned issues, only classify on GitHub (no kanban task/worker)
+      // Run lightweight LLM triage — always creates a kanban task
       try {
-        await this.pipelineManager.runTriage(projectId, watched.repo, issue, { createTask: isAssigned });
+        await this.pipelineManager.runTriage(projectId, watched.repo, issue);
       } catch (err) {
         console.error(`[IssueMonitor] Triage failed for issue #${issue.number}:`, err);
-        // Only create fallback triage task for assigned issues
-        if (isAssigned) {
-          this.pipelineManager.createTriageTask(
-            projectId, issue.number, issue.title, "", issue.body ?? "",
-          );
-        }
+        this.pipelineManager.createTriageTask(
+          projectId, issue.number, issue.title, "", issue.body ?? "",
+        );
       }
 
       // For re-triaged issues, update the existing triage task description
