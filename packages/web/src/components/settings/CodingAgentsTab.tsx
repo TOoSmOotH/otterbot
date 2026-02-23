@@ -362,8 +362,9 @@ function GeminiCliSection() {
       <p className="text-xs text-muted-foreground">
         Use{" "}
         <a href="https://github.com/google-gemini/gemini-cli" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">Gemini CLI</a>{" "}
-        (Google's autonomous AI coding agent) to delegate coding tasks. Install with:{" "}
-        <code className="bg-secondary px-1 py-0.5 rounded text-[11px]">npm install -g @google/gemini-cli</code>
+        (Google's autonomous AI coding agent) to delegate coding tasks. To authenticate, run{" "}
+        <code className="bg-secondary px-1 py-0.5 rounded text-[11px]">gemini login</code>{" "}
+        in the terminal.
       </p>
 
       <ToggleSwitch checked={enabled} onChange={() => updateGeminiCliSettings({ enabled: !enabled })} label="Enable Gemini CLI integration" />

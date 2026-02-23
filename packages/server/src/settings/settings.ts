@@ -1530,7 +1530,7 @@ export async function testGeminiCliConnection(): Promise<TestResult> {
     const { isGeminiCliInstalled, isGeminiCliReady } = await import("../coding-agents/gemini-cli-manager.js");
 
     if (!isGeminiCliInstalled()) {
-      return { ok: false, error: "Gemini CLI not found. Install with: npm install -g @google/gemini-cli" };
+      return { ok: false, error: "Gemini CLI not found. It should be pre-installed — try restarting the container." };
     }
 
     if (!isGeminiCliReady()) {
