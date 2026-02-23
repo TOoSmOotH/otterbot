@@ -640,6 +640,9 @@ async function main() {
         onKanbanTaskDeleted: (taskId, projectId) => {
           emitKanbanTaskDeleted(io, taskId, projectId);
         },
+        onConversationSwitched: (conversationId, messages) => {
+          io.emit("conversation:switched", { conversationId, messages });
+        },
         onAgentStream: (agentId, token, messageId) => {
           emitAgentStream(io, agentId, token, messageId);
         },

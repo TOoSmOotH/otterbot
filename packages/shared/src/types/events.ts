@@ -19,6 +19,7 @@ export interface ServerToClientEvents {
   "coo:thinking-end": (data: { messageId: string; conversationId: string | null }) => void;
   "coo:audio": (data: { messageId: string; audio: string; contentType: string }) => void;
   "conversation:created": (conversation: Conversation) => void;
+  "conversation:switched": (data: { conversationId: string; messages: BusMessage[] }) => void;
   "project:created": (project: Project) => void;
   "project:updated": (project: Project) => void;
   "project:deleted": (data: { projectId: string }) => void;

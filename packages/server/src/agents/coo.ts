@@ -79,6 +79,7 @@ export interface COODependencies {
   onPtySessionRegistered?: (agentId: string, client: import("./worker.js").PtyClient) => void;
   onPtySessionUnregistered?: (agentId: string) => void;
   onAgentDestroyed?: (agentId: string) => void;
+  onConversationSwitched?: (conversationId: string, messages: BusMessage[]) => void;
 }
 
 export class COO extends BaseAgent {
@@ -105,6 +106,7 @@ export class COO extends BaseAgent {
   private _onPtySessionRegistered?: (agentId: string, client: import("./worker.js").PtyClient) => void;
   private _onPtySessionUnregistered?: (agentId: string) => void;
   private onAgentDestroyed?: (agentId: string) => void;
+  private onConversationSwitched?: (conversationId: string, messages: BusMessage[]) => void;
   private _pipelineManager: PipelineManager | null = null;
   private allowedToolNames: Set<string>;
   private contextManager!: ConversationContextManager;
@@ -211,6 +213,7 @@ The user can see everything on the desktop in real-time.`;
     this._onPtySessionRegistered = deps.onPtySessionRegistered;
     this._onPtySessionUnregistered = deps.onPtySessionUnregistered;
     this.onAgentDestroyed = deps.onAgentDestroyed;
+    this.onConversationSwitched = deps.onConversationSwitched;
     this.contextManager = new ConversationContextManager(systemPrompt);
   }
 
@@ -898,6 +901,74 @@ The user can see everything on the desktop in real-time.`;
         }),
         execute: async (args) => {
           return this.managePackages(args);
+        },
+      }),
+
+      list_conversations: tool({
+        description:
+          "List recent conversations. Use when the user asks about their chat history or wants to switch conversations.",
+        parameters: z.object({
+          projectId: z.string().optional().describe("Filter by project ID"),
+          limit: z.number().optional().describe("Max conversations to return (default 20)"),
+        }),
+        execute: async ({ projectId, limit }) => {
+          const db = getDb();
+          let rows = db.select().from(schema.conversations).all();
+          if (projectId) {
+            rows = rows.filter((c) => c.projectId === projectId);
+          }
+          const convs = rows
+            .sort((a, b) => (b.updatedAt ?? "").localeCompare(a.updatedAt ?? ""))
+            .slice(0, limit ?? 20);
+
+          if (convs.length === 0) return "No conversations found.";
+
+          return convs
+            .map(
+              (c) =>
+                `- "${c.title}" (id: ${c.id}, project: ${c.projectId ?? "global"}, updated: ${c.updatedAt ?? c.createdAt})`,
+            )
+            .join("\n");
+        },
+      }),
+      switch_conversation: tool({
+        description:
+          "Switch to a different conversation by ID. The frontend will auto-navigate to the selected conversation.",
+        parameters: z.object({
+          conversationId: z
+            .string()
+            .describe("The conversation ID to switch to"),
+        }),
+        execute: async ({ conversationId }) => {
+          const db = getDb();
+          const conversation = db
+            .select()
+            .from(schema.conversations)
+            .where(eq(schema.conversations.id, conversationId))
+            .get();
+          if (!conversation)
+            return `Conversation ${conversationId} not found.`;
+
+          const messages = this.bus.getConversationMessages(conversation.id);
+          let charter: string | null = null;
+          if (conversation.projectId) {
+            const project = db
+              .select()
+              .from(schema.projects)
+              .where(eq(schema.projects.id, conversation.projectId))
+              .get();
+            charter = project?.charter ?? null;
+          }
+
+          this.loadConversation(
+            conversation.id,
+            messages,
+            conversation.projectId,
+            charter,
+          );
+          this.onConversationSwitched?.(conversation.id, messages);
+
+          return `Switched to conversation: "${conversation.title}"`;
         },
       }),
 
