@@ -347,7 +347,7 @@ function GeminiCliSection() {
   const handleSave = async () => {
     setSaving(true);
     const data: Record<string, unknown> = {
-      model: localModel,
+      ...(authMode === "api-key" ? { model: localModel } : {}),
       approvalMode: localApprovalMode,
       timeoutMs: parseInt(localTimeoutMs, 10) || 1200000,
     };
@@ -381,7 +381,9 @@ function GeminiCliSection() {
           </p>
         )}
 
-        <InputField label="Model" value={localModel} onChange={setLocalModel} placeholder="gemini-2.5-flash" />
+        {authMode === "api-key" && (
+          <InputField label="Model" value={localModel} onChange={setLocalModel} placeholder="gemini-2.5-flash" />
+        )}
         <SelectField label="Approval Mode" value={localApprovalMode} onChange={(v) => setLocalApprovalMode(v as "full-auto" | "auto-edit" | "default")}
           options={[{ value: "full-auto", label: "YOLO (Full Auto)" }, { value: "auto-edit", label: "Auto Edit" }, { value: "default", label: "Default (Ask)" }]} />
         <ToggleSwitch checked={sandbox} onChange={() => updateGeminiCliSettings({ sandbox: !sandbox })} label="Sandbox mode" description="Run in Docker isolation for added safety." />

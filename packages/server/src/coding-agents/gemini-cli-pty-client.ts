@@ -65,10 +65,13 @@ export class GeminiCliPtyClient implements CodingAgentClient {
       // Set prompt (non-interactive mode)
       args.push("-p", task);
 
-      // Set model if configured
-      const model = getConfig("gemini-cli:model");
-      if (model) {
-        args.push("-m", model);
+      // Set model if configured (skip in OAuth mode — Gemini handles it)
+      const authMode = getConfig("gemini-cli:auth_mode") ?? "api-key";
+      if (authMode === "api-key") {
+        const model = getConfig("gemini-cli:model");
+        if (model) {
+          args.push("-m", model);
+        }
       }
 
       // Set approval mode
