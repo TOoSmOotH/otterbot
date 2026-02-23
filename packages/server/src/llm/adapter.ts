@@ -152,6 +152,14 @@ export function resolveModel(config: LLMConfig): LanguageModel {
       return nvidia(config.model);
     }
 
+    case "perplexity": {
+      const perplexity = createOpenAI({
+        baseURL: config.baseUrl ?? resolved.baseUrl ?? "https://api.perplexity.ai",
+        apiKey: config.apiKey ?? resolved.apiKey ?? "",
+      });
+      return perplexity(config.model);
+    }
+
     default:
       throw new Error(`Unknown LLM provider: ${config.provider} (type: ${resolved.type})`);
   }

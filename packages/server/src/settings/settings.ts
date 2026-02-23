@@ -60,6 +60,7 @@ export const PROVIDER_TYPE_META: ProviderTypeMeta[] = [
   { type: "github-copilot", label: "GitHub Copilot", needsApiKey: true, needsBaseUrl: false },
   { type: "huggingface", label: "Hugging Face", needsApiKey: true, needsBaseUrl: false },
   { type: "nvidia", label: "NVIDIA", needsApiKey: true, needsBaseUrl: false },
+  { type: "perplexity", label: "Perplexity Sonar", needsApiKey: true, needsBaseUrl: false },
 ];
 
 // Static fallback models per provider (used when API fetch fails)
@@ -96,6 +97,12 @@ const FALLBACK_MODELS: Record<string, string[]> = {
     "meta/llama-3.1-8b-instruct",
     "mistralai/mistral-7b-instruct-v0.3",
     "mistralai/mixtral-8x22b-instruct-v0.1",
+  ],
+  perplexity: [
+    "sonar",
+    "sonar-pro",
+    "sonar-reasoning",
+    "sonar-reasoning-pro",
   ],
 };
 
@@ -506,6 +513,18 @@ export async function fetchModelsWithCredentials(
         if (!nvidiaRes.ok) return FALLBACK_MODELS.nvidia ?? [];
         const nvidiaData = (await nvidiaRes.json()) as { data?: Array<{ id: string }> };
         return nvidiaData.data?.map((m) => m.id).sort() ?? FALLBACK_MODELS.nvidia ?? [];
+      }
+
+      case "perplexity": {
+        if (!apiKey) return FALLBACK_MODELS.perplexity ?? [];
+        const pplxBase = baseUrl ?? "https://api.perplexity.ai";
+        const pplxRes = await fetch(`${pplxBase}/models`, {
+          headers: { Authorization: `Bearer ${apiKey}` },
+          signal: AbortSignal.timeout(10_000),
+        });
+        if (!pplxRes.ok) return FALLBACK_MODELS.perplexity ?? [];
+        const pplxData = (await pplxRes.json()) as { data?: Array<{ id: string }> };
+        return pplxData.data?.map((m) => m.id).sort() ?? FALLBACK_MODELS.perplexity ?? [];
       }
 
       default:
