@@ -819,6 +819,9 @@ export class PipelineManager {
             `Focus ONLY on the changes below — do not review unchanged code.`,
             `Check for: injection attacks, XSS, CSRF, auth issues, data exposure, dependency risks.`,
             `If you find issues, describe them clearly. If no issues found, state that explicitly.`,
+            `\nIMPORTANT: End your review with exactly one of these verdicts on its own line:`,
+            `  VERDICT: PASS — if no actionable security issues were found`,
+            `  VERDICT: FAIL — if there are security issues that must be fixed before merging`,
           );
           parts.push(diffSection);
         } else {
@@ -826,6 +829,9 @@ export class PipelineManager {
             `\nReview the code on branch \`${state.prBranch ?? "(see coder report)"}\` for security vulnerabilities.`,
             `Check for: injection attacks, XSS, CSRF, auth issues, data exposure, dependency risks.`,
             `If you find issues, describe them clearly. If no issues found, state that explicitly.`,
+            `\nIMPORTANT: End your review with exactly one of these verdicts on its own line:`,
+            `  VERDICT: PASS — if no actionable security issues were found`,
+            `  VERDICT: FAIL — if there are security issues that must be fixed before merging`,
           );
         }
         // Include coder's report for context
@@ -1065,7 +1071,11 @@ export class PipelineManager {
   private securityHasFindings(report: string): boolean {
     const lower = report.toLowerCase();
 
-    // Explicit "no issues" / "clean" signals override keyword matches
+    // Prefer structured verdict (most reliable — injected via the stage prompt)
+    if (/verdict:\s*pass/i.test(report)) return false;
+    if (/verdict:\s*fail/i.test(report)) return true;
+
+    // Fallback: keyword heuristics for reports without a verdict line
     const cleanSignals = [
       "no vulnerabilit",
       "no security issue",
@@ -1089,6 +1099,7 @@ export class PipelineManager {
       "no issues identified",
       "does not introduce",
       "adheres to",
+      "found no",
     ];
     if (cleanSignals.some((s) => lower.includes(s))) return false;
 
