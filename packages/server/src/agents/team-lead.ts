@@ -394,14 +394,17 @@ export class TeamLead extends BaseAgent {
   /** Detect whether a worker report indicates a PR was created — definitive success signal */
   private isPRCreated(report: string): boolean {
     const lower = report.toLowerCase();
+    // Must match affirmative PR creation signals — NOT just mentioning "pull request"
+    // (a failure report like "I was unable to open a pull request" must not match)
     return (
       lower.includes("gh pr create") ||
-      lower.includes("pull request") ||
       /github\.com\/[^\s]+\/pull\/\d+/.test(lower) ||
       lower.includes("created pull request") ||
       lower.includes("opened a pull request") ||
       lower.includes("pr created") ||
-      lower.includes("created a pr")
+      lower.includes("created a pr") ||
+      lower.includes("opened a pr") ||
+      lower.includes("pull request #")
     );
   }
 
@@ -934,7 +937,9 @@ export class TeamLead extends BaseAgent {
     for (const task of toSpawn) {
       // Check if task is browser/desktop-related — sandboxed coding agents can't do these
       const taskText = `${task.title} ${task.description ?? ""}`.toLowerCase();
-      const isBrowserTask = /\b(browser|chrome|chromium|firefox|launch.*browser|open.*url|browse.*web|headless|puppeteer|playwright|selenium|desktop.*app)\b/.test(taskText);
+      // Tasks involving git/CI/PR work must go to a coding agent, never a browser agent
+      const isCIOrGitTask = /\b(ci\b|pipeline|pull.?request|\bpr\b|git push|git commit|open.?pr|create.?pr|merge|deploy)\b/.test(taskText);
+      const isBrowserTask = !isCIOrGitTask && /\b(browser|chrome|chromium|firefox|launch.*browser|open.*url|browse.*web|headless|puppeteer|playwright|selenium|desktop.*app)\b/.test(taskText);
 
       // Find the right registry entry — check project assignments first, then global fallback
       let registryEntryId = "builtin-coder";
