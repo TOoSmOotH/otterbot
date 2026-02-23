@@ -5,6 +5,7 @@ import { CharacterSelect } from "../character-select/CharacterSelect";
 import { DEFAULT_AVATARS } from "./default-avatars";
 import type { GearConfig } from "@otterbot/shared";
 import { ModelPricingPrompt } from "../settings/ModelPricingPrompt";
+import { saveWizardState, loadWizardState, clearWizardState } from "../../hooks/use-setup-persistence";
 
 const SUGGESTED_MODELS: Record<string, string[]> = {
   anthropic: ["claude-sonnet-4-5-20250929", "claude-haiku-4-20250414"],
@@ -190,6 +191,69 @@ export function SetupWizard() {
   const [openCodeModelDropdownOpen, setOpenCodeModelDropdownOpen] = useState(false);
   const [openCodeModelFilter, setOpenCodeModelFilter] = useState("");
   const openCodeModelComboRef = useRef<HTMLDivElement>(null);
+
+  // Restore wizard state from sessionStorage on mount
+  useEffect(() => {
+    const saved = loadWizardState();
+    if (!saved) return;
+    if (typeof saved.step === "number") setStep(saved.step);
+    if (typeof saved.provider === "string") setProvider(saved.provider);
+    if (typeof saved.providerName === "string") setProviderName(saved.providerName);
+    if (typeof saved.model === "string") setModel(saved.model);
+    if (typeof saved.apiKey === "string") setApiKey(saved.apiKey);
+    if (typeof saved.baseUrl === "string") setBaseUrl(saved.baseUrl);
+    if (typeof saved.displayName === "string") setDisplayName(saved.displayName);
+    if (typeof saved.avatar === "string") setAvatar(saved.avatar);
+    if (typeof saved.bio === "string") setBio(saved.bio);
+    if (typeof saved.timezone === "string") setTimezone(saved.timezone);
+    if (typeof saved.characterPackId === "string") setCharacterPackId(saved.characterPackId);
+    if (saved.characterGearConfig != null) setCharacterGearConfig(saved.characterGearConfig as GearConfig);
+    if (typeof saved.cooName === "string") setCooName(saved.cooName);
+    if (typeof saved.cooModelPackId === "string") setCooModelPackId(saved.cooModelPackId);
+    if (saved.cooGearConfig != null) setCooGearConfig(saved.cooGearConfig as GearConfig);
+    if (typeof saved.adminName === "string") setAdminName(saved.adminName);
+    if (typeof saved.adminModelPackId === "string") setAdminModelPackId(saved.adminModelPackId);
+    if (saved.adminGearConfig != null) setAdminGearConfig(saved.adminGearConfig as GearConfig);
+    if (typeof saved.searchProvider === "string") setSearchProvider(saved.searchProvider);
+    if (typeof saved.searchApiKey === "string") setSearchApiKey(saved.searchApiKey);
+    if (typeof saved.searchBaseUrl === "string") setSearchBaseUrl(saved.searchBaseUrl);
+    if (typeof saved.ttsProvider === "string") setTtsProvider(saved.ttsProvider);
+    if (typeof saved.ttsVoice === "string") setTtsVoice(saved.ttsVoice);
+    if (typeof saved.ttsApiKey === "string") setTtsApiKey(saved.ttsApiKey);
+    if (typeof saved.ttsBaseUrl === "string") setTtsBaseUrl(saved.ttsBaseUrl);
+    if (typeof saved.openCodeEnabled === "boolean") setOpenCodeEnabled(saved.openCodeEnabled);
+    if (typeof saved.openCodeInteractive === "boolean") setOpenCodeInteractive(saved.openCodeInteractive);
+    if (typeof saved.openCodeUseSameProvider === "boolean") setOpenCodeUseSameProvider(saved.openCodeUseSameProvider);
+    if (typeof saved.openCodeProvider === "string") setOpenCodeProvider(saved.openCodeProvider);
+    if (typeof saved.openCodeModel === "string") setOpenCodeModel(saved.openCodeModel);
+    if (typeof saved.openCodeApiKey === "string") setOpenCodeApiKey(saved.openCodeApiKey);
+    if (typeof saved.openCodeBaseUrl === "string") setOpenCodeBaseUrl(saved.openCodeBaseUrl);
+  }, []);
+
+  // Persist wizard state to sessionStorage on change
+  useEffect(() => {
+    saveWizardState({
+      step, provider, providerName, model, apiKey, baseUrl,
+      displayName, avatar, bio, timezone,
+      characterPackId, characterGearConfig,
+      cooName, cooModelPackId, cooGearConfig,
+      adminName, adminModelPackId, adminGearConfig,
+      searchProvider, searchApiKey, searchBaseUrl,
+      ttsProvider, ttsVoice, ttsApiKey, ttsBaseUrl,
+      openCodeEnabled, openCodeInteractive, openCodeUseSameProvider,
+      openCodeProvider, openCodeModel, openCodeApiKey, openCodeBaseUrl,
+    });
+  }, [
+    step, provider, providerName, model, apiKey, baseUrl,
+    displayName, avatar, bio, timezone,
+    characterPackId, characterGearConfig,
+    cooName, cooModelPackId, cooGearConfig,
+    adminName, adminModelPackId, adminGearConfig,
+    searchProvider, searchApiKey, searchBaseUrl,
+    ttsProvider, ttsVoice, ttsApiKey, ttsBaseUrl,
+    openCodeEnabled, openCodeInteractive, openCodeUseSameProvider,
+    openCodeProvider, openCodeModel, openCodeApiKey, openCodeBaseUrl,
+  ]);
 
   const probeModels = useCallback(async (prov: string, key: string, url: string) => {
     const needsKey = NEEDS_API_KEY.has(prov);
@@ -433,7 +497,7 @@ export function SetupWizard() {
 
   const handleComplete = async () => {
     setSubmitting(true);
-    await completeSetup({
+    const ok = await completeSetup({
       provider,
       providerName: providerName || undefined,
       model,
@@ -470,6 +534,7 @@ export function SetupWizard() {
         : undefined,
     });
     setSubmitting(false);
+    if (ok) clearWizardState();
   };
 
   const previewAudioRef = useRef<HTMLAudioElement | null>(null);
