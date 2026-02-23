@@ -1098,6 +1098,7 @@ export class PipelineManager {
           metadata: {
             pipelineRegistryEntryId: registryEntryId,
             pipelineTaskId: state.taskId,
+            pipelineBranch: state.prBranch ?? undefined,
           },
         });
         console.log(`[PipelineManager] Sent ${currentStage} directive for task ${state.taskId}`);

@@ -348,8 +348,9 @@ export class TeamLead extends BaseAgent {
       // Extract the worker directive from the message content
       const directiveMatch = message.content.match(/Worker directive:\n([\s\S]+)/);
       const workerTask = directiveMatch?.[1]?.trim() ?? message.content;
+      const pipelineBranch = message.metadata?.pipelineBranch as string | undefined;
 
-      const result = await this.spawnWorker(pipelineRegistryEntryId, workerTask, pipelineTaskId, { pipelineOverride: true });
+      const result = await this.spawnWorker(pipelineRegistryEntryId, workerTask, pipelineTaskId, { pipelineOverride: true, sourceBranch: pipelineBranch });
       if (this.parentId) {
         this.sendMessage(this.parentId, MessageType.Report, result);
       }
@@ -1422,7 +1423,7 @@ export class TeamLead extends BaseAgent {
     registryEntryId: string,
     task: string,
     taskId?: string,
-    options?: { pipelineOverride?: boolean },
+    options?: { pipelineOverride?: boolean; sourceBranch?: string },
   ): Promise<string> {
     try {
       const originalRequestedId = registryEntryId;
@@ -1498,7 +1499,8 @@ export class TeamLead extends BaseAgent {
 
       if (this.projectId) {
         // Prepare a git worktree for the worker to avoid file conflicts
-        workspacePath = this.workspace.prepareAgentWorktree(this.projectId, workerId);
+        // For pipeline kickbacks (security/review), start from the feature branch so the worker can find existing code
+        workspacePath = this.workspace.prepareAgentWorktree(this.projectId, workerId, options?.sourceBranch);
       }
 
       // Derive human-readable name from kanban task title or task description
