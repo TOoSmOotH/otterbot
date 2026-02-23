@@ -145,6 +145,7 @@ interface SettingsState {
 
   // Gemini CLI
   geminiCliEnabled: boolean;
+  geminiCliAuthMode: "api-key" | "oauth";
   geminiCliApiKeySet: boolean;
   geminiCliModel: string;
   geminiCliApprovalMode: "full-auto" | "auto-edit" | "default";
@@ -317,6 +318,7 @@ interface SettingsState {
   loadGeminiCliSettings: () => Promise<void>;
   updateGeminiCliSettings: (data: {
     enabled?: boolean;
+    authMode?: "api-key" | "oauth";
     apiKey?: string;
     model?: string;
     approvalMode?: "full-auto" | "auto-edit" | "default";
@@ -446,6 +448,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   codexTimeoutMs: 1200000,
   codexTestResult: null,
   geminiCliEnabled: false,
+  geminiCliAuthMode: "api-key",
   geminiCliApiKeySet: false,
   geminiCliModel: "gemini-2.5-flash",
   geminiCliApprovalMode: "full-auto",
@@ -1331,6 +1334,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       const data = await res.json();
       set({
         geminiCliEnabled: data.enabled,
+        geminiCliAuthMode: data.authMode ?? "api-key",
         geminiCliApiKeySet: data.apiKeySet,
         geminiCliModel: data.model ?? "gemini-2.5-flash",
         geminiCliApprovalMode: data.approvalMode ?? "full-auto",

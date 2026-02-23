@@ -371,8 +371,9 @@ export class Worker extends BaseAgent {
    * Spawns the `gemini` CLI in a pseudo-terminal and streams raw output.
    */
   private async executeGeminiCliPtyTask(task: string): Promise<string> {
-    // Bail out early if no API key is configured
-    if (!getConfig("gemini-cli:api_key")) {
+    // Bail out early if no API key is configured (for api-key auth mode)
+    const authMode = getConfig("gemini-cli:auth_mode") ?? "api-key";
+    if (authMode === "api-key" && !getConfig("gemini-cli:api_key")) {
       console.warn(`[Worker ${this.id}] Gemini CLI not configured (no api_key), falling back to think()`);
       return "";
     }

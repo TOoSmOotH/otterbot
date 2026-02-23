@@ -320,6 +320,7 @@ function CodexSection() {
 
 function GeminiCliSection() {
   const enabled = useSettingsStore((s) => s.geminiCliEnabled);
+  const authMode = useSettingsStore((s) => s.geminiCliAuthMode);
   const apiKeySet = useSettingsStore((s) => s.geminiCliApiKeySet);
   const model = useSettingsStore((s) => s.geminiCliModel);
   const approvalMode = useSettingsStore((s) => s.geminiCliApprovalMode);
@@ -368,7 +369,18 @@ function GeminiCliSection() {
       <ToggleSwitch checked={enabled} onChange={() => updateGeminiCliSettings({ enabled: !enabled })} label="Enable Gemini CLI integration" />
 
       <div className="border border-border rounded-lg p-4 space-y-3">
-        <InputField label={`API Key${apiKeySet ? " \u2713 Set" : ""}`} value={localApiKey} onChange={setLocalApiKey} placeholder={apiKeySet ? "Enter new key to change" : "GEMINI_API_KEY"} type="password" />
+        <SelectField label="Auth Mode" value={authMode} onChange={(v) => updateGeminiCliSettings({ authMode: v as "api-key" | "oauth" })}
+          options={[{ value: "api-key", label: "API Key" }, { value: "oauth", label: "OAuth (gemini login)" }]} />
+
+        {authMode === "api-key" && (
+          <InputField label={`API Key${apiKeySet ? " \u2713 Set" : ""}`} value={localApiKey} onChange={setLocalApiKey} placeholder={apiKeySet ? "Enter new key to change" : "GEMINI_API_KEY"} type="password" />
+        )}
+        {authMode === "oauth" && (
+          <p className="text-xs text-muted-foreground bg-secondary/50 p-2 rounded">
+            Run <code className="bg-secondary px-1 py-0.5 rounded text-[11px]">gemini login</code> in a terminal to authenticate with your Google account.
+          </p>
+        )}
+
         <InputField label="Model" value={localModel} onChange={setLocalModel} placeholder="gemini-2.5-flash" />
         <SelectField label="Approval Mode" value={localApprovalMode} onChange={(v) => setLocalApprovalMode(v as "full-auto" | "auto-edit" | "default")}
           options={[{ value: "full-auto", label: "YOLO (Full Auto)" }, { value: "auto-edit", label: "Auto Edit" }, { value: "default", label: "Default (Ask)" }]} />

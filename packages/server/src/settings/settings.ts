@@ -1467,6 +1467,7 @@ export async function testCodexConnection(): Promise<TestResult> {
 
 export interface GeminiCliSettingsResponse {
   enabled: boolean;
+  authMode: "api-key" | "oauth";
   apiKeySet: boolean;
   model: string;
   approvalMode: "full-auto" | "auto-edit" | "default";
@@ -1477,6 +1478,7 @@ export interface GeminiCliSettingsResponse {
 export function getGeminiCliSettings(): GeminiCliSettingsResponse {
   return {
     enabled: getConfig("gemini-cli:enabled") === "true",
+    authMode: (getConfig("gemini-cli:auth_mode") ?? "api-key") as "api-key" | "oauth",
     apiKeySet: !!getConfig("gemini-cli:api_key"),
     model: getConfig("gemini-cli:model") ?? "gemini-2.5-flash",
     approvalMode: (getConfig("gemini-cli:approval_mode") ?? "full-auto") as "full-auto" | "auto-edit" | "default",
@@ -1487,6 +1489,7 @@ export function getGeminiCliSettings(): GeminiCliSettingsResponse {
 
 export async function updateGeminiCliSettings(data: {
   enabled?: boolean;
+  authMode?: "api-key" | "oauth";
   apiKey?: string;
   model?: string;
   approvalMode?: "full-auto" | "auto-edit" | "default";
@@ -1495,6 +1498,9 @@ export async function updateGeminiCliSettings(data: {
 }): Promise<void> {
   if (data.enabled !== undefined) {
     setConfig("gemini-cli:enabled", data.enabled ? "true" : "false");
+  }
+  if (data.authMode !== undefined) {
+    setConfig("gemini-cli:auth_mode", data.authMode);
   }
   if (data.apiKey !== undefined) {
     if (data.apiKey === "") {
@@ -1528,7 +1534,11 @@ export async function testGeminiCliConnection(): Promise<TestResult> {
     }
 
     if (!isGeminiCliReady()) {
-      return { ok: false, error: "API key not configured." };
+      const authMode = getConfig("gemini-cli:auth_mode") ?? "api-key";
+      if (authMode === "api-key") {
+        return { ok: false, error: "API key not configured." };
+      }
+      return { ok: false, error: "OAuth session not found. Run `gemini login` in a terminal to authenticate." };
     }
 
     return { ok: true, latencyMs: Date.now() - start };

@@ -25,5 +25,12 @@ export function isGeminiCliInstalled(): boolean {
  */
 export function isGeminiCliReady(): boolean {
   if (!isGeminiCliInstalled()) return false;
-  return !!getConfig("gemini-cli:api_key");
+
+  const authMode = getConfig("gemini-cli:auth_mode") ?? "api-key";
+  if (authMode === "api-key") {
+    return !!getConfig("gemini-cli:api_key");
+  }
+
+  // OAuth mode — assume ready if CLI is installed (user ran `gemini login`)
+  return true;
 }

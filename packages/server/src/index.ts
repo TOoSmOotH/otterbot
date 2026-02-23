@@ -2756,6 +2756,7 @@ async function main() {
   app.put<{
     Body: {
       enabled?: boolean;
+      authMode?: "api-key" | "oauth";
       apiKey?: string;
       model?: string;
       approvalMode?: "full-auto" | "auto-edit" | "default";
