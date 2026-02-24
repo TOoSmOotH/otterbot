@@ -75,7 +75,7 @@ export function createInitialCommit(cwd: string): void {
  * @param worktreePath Path where the worktree should be created
  * @param branchName Name of the branch to create/checkout
  */
-export function createWorktree(repoPath: string, worktreePath: string, branchName: string): void {
+export function createWorktree(repoPath: string, worktreePath: string, branchName: string, sourceBranch?: string): void {
   // Ensure the repo is initialized and has commits
   createInitialCommit(repoPath);
 
@@ -91,15 +91,27 @@ export function createWorktree(repoPath: string, worktreePath: string, branchNam
     }
   }
 
+  // If a source branch is specified, fetch it first so the ref exists locally
+  if (sourceBranch) {
+    try {
+      execSync(`git fetch origin ${sourceBranch}`, { cwd: repoPath, stdio: "ignore" });
+    } catch { /* best effort — branch may be local-only */ }
+  }
+
+  // Determine the start point: source branch (for kickbacks/iterations) or HEAD
+  const startPoint = sourceBranch ? `origin/${sourceBranch}` : "HEAD";
+  // For source branches, try the remote ref first; fall back to local ref
+  const startPointFallback = sourceBranch ?? "HEAD";
+
   // Create worktree
   // -f: force creation
   // -B: create/reset branch
   try {
-    execSync(`git worktree add -f -B ${branchName} ${worktreePath} HEAD`, { cwd: repoPath, stdio: "ignore" });
+    execSync(`git worktree add -f -B ${branchName} ${worktreePath} ${startPoint}`, { cwd: repoPath, stdio: "ignore" });
   } catch (error) {
-    // Prune and retry once
+    // Prune and retry — also fall back to local ref if remote ref failed
     execSync("git worktree prune", { cwd: repoPath, stdio: "ignore" });
-    execSync(`git worktree add -f -B ${branchName} ${worktreePath} HEAD`, { cwd: repoPath, stdio: "ignore" });
+    execSync(`git worktree add -f -B ${branchName} ${worktreePath} ${startPointFallback}`, { cwd: repoPath, stdio: "ignore" });
   }
 }
 

@@ -107,6 +107,20 @@ export class ConversationContextManager {
     }
   }
 
+  /** Evict all contexts — used when memories are cleared to prevent stale references */
+  evictAll(): void {
+    this.contexts.clear();
+  }
+
+  /** Evict all contexts associated with a specific project */
+  evictByProject(projectId: string): void {
+    for (const [id, ctx] of this.contexts) {
+      if (ctx.projectId === projectId) {
+        this.contexts.delete(id);
+      }
+    }
+  }
+
   /** Update the system prompt (used if prompt changes) */
   updateSystemPrompt(systemPrompt: string): void {
     this.systemPrompt = systemPrompt;

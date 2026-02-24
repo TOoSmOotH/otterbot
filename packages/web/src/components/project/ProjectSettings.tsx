@@ -200,15 +200,16 @@ export function ProjectSettings({ projectId }: { projectId: string }) {
           <div className="space-y-3">
             <div>
               <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-                Agent Assignments
+                Coding Agent
               </h3>
               <p className="text-xs text-muted-foreground mt-1">
-                Configure which coding agent handles each type of task for this project.
+                Choose which agent handles coding tasks for this project.
                 Leave as "System Default" to use the global fallback.
+                Enable the agent pipeline above for role-specific assignments.
               </p>
             </div>
             <div className="space-y-1">
-              {ASSIGNABLE_ROLES.map(({ key, label }) => {
+              {ASSIGNABLE_ROLES.filter(r => r.key === "coder").map(({ key, label }) => {
                 const selectedId = assignments[key] ?? "";
                 const selectedAgent = CODING_AGENTS.find((a) => a.id === selectedId);
                 const isDisabled = selectedAgent && !isAgentEnabled(selectedAgent);

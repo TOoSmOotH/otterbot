@@ -1,4 +1,6 @@
 import { getConfig, setConfig, deleteConfig } from "../auth/auth.js";
+import { listPairedUsers, listPendingPairings } from "./pairing.js";
+import type { PairedUser, PendingPairing } from "./pairing.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -9,6 +11,8 @@ export interface TeamsSettingsResponse {
   appIdSet: boolean;
   appPasswordSet: boolean;
   tenantId: string | null;
+  pairedUsers: PairedUser[];
+  pendingPairings: PendingPairing[];
 }
 
 export interface TeamsTestResult {
@@ -26,6 +30,8 @@ export function getTeamsSettings(): TeamsSettingsResponse {
     appIdSet: !!getConfig("teams:app_id"),
     appPasswordSet: !!getConfig("teams:app_password"),
     tenantId: getConfig("teams:tenant_id") || null,
+    pairedUsers: listPairedUsers(),
+    pendingPairings: listPendingPairings(),
   };
 }
 

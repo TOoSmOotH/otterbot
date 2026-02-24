@@ -8,7 +8,7 @@ export function createGmailReplyTool() {
     parameters: z.object({
       messageId: z.string().describe("The message ID to reply to"),
       body: z.string().describe("Reply body (plain text)"),
-      cc: z.string().optional().describe("CC recipients (comma-separated)"),
+      cc: z.string().nullable().optional().describe("CC recipients (comma-separated)"),
     }),
     execute: async ({ messageId, body, cc }) => {
       try {
@@ -20,7 +20,7 @@ export function createGmailReplyTool() {
           to: original.from,
           subject: original.subject.startsWith("Re:") ? original.subject : `Re: ${original.subject}`,
           body,
-          cc,
+          cc: cc ?? undefined,
           inReplyTo: messageId,
           threadId: original.threadId,
         });

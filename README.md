@@ -56,7 +56,7 @@ pnpm dev
 
 Open [http://localhost:5173](http://localhost:5173). On first launch, the **Setup Wizard** will walk you through:
 
-1. Choosing an LLM provider (Anthropic, OpenAI, Ollama, OpenRouter, Hugging Face, or OpenAI-compatible)
+1. Choosing an LLM provider (Anthropic, OpenAI, Google Gemini, Ollama, OpenRouter, Hugging Face, GitHub Copilot, NVIDIA, or OpenAI-compatible)
 2. Entering your API key and selecting a model
 3. Creating your user profile
 4. Optionally configuring TTS voice and 3D character model
@@ -187,13 +187,28 @@ Otterbot uses the [Vercel AI SDK](https://sdk.vercel.ai/) for multi-provider sup
 | Provider | Use Case |
 |----------|----------|
 | **Anthropic** | Claude models (supports extended thinking on Sonnet 4.5+ / Opus 4+) |
-| **OpenAI** | GPT models |
-| **Ollama** | Local models (Llama, Mistral, etc.) |
+| **OpenAI** | GPT models (GPT-4o, o3, etc.) |
+| **Google Gemini** | Gemini models (Gemini 2.5, 2.0, etc.) |
+| **Ollama** | Local models (Llama, Mistral, Codellama, Qwen, etc.) |
 | **OpenRouter** | Aggregated access to 200+ models from multiple providers |
-| **Hugging Face** | Access models hosted on Hugging Face Inference API |
-| **OpenAI-Compatible** | Together, Groq, LM Studio, vLLM, etc. |
+| **GitHub Copilot** | Access Claude and OpenAI models via GitHub Copilot API |
+| **Hugging Face** | Access models hosted on Hugging Face Inference API (Llama, Mistral, Phi, Qwen) |
+| **NVIDIA** | Access models via NVIDIA API (Llama, Mistral) |
+| **OpenAI-Compatible** | Any OpenAI-compatible endpoint — Together, Groq, LM Studio, vLLM, etc. |
 
 Each agent can use a different provider and model. Override at the template level or per-spawn.
+
+### Chat Provider Support
+
+Otterbot bridges conversations from external messaging platforms to the COO. Configure providers in the **Settings UI**, pair users, and route messages seamlessly.
+
+| Provider | Description |
+|----------|-------------|
+| **Discord** | Bridge via Discord bot — pair users, route messages to/from the COO |
+| **Slack** | Bridge via Slack app (Bolt SDK) — thread support, user pairing |
+| **Matrix** | Federated chat bridge via matrix-js-sdk — supports end-to-end encryption (E2EE) |
+| **IRC** | Bridge to IRC networks via irc-framework — TLS support, multi-channel |
+| **Microsoft Teams** | Bridge via Bot Framework SDK — tenant-based configuration, user pairing |
 
 ### Workspace Isolation
 
@@ -258,14 +273,17 @@ Connect your Google account via OAuth in Settings. Once connected:
 - **Inbox panel** — browse, read, send, reply to, and archive Gmail messages
 - **Agent tools** — the Admin Assistant (and workers with the right skills) can read/send email, create/update calendar events, and manage labels
 
-### Discord
+### Chat Bridges (Discord, Slack, Matrix, IRC, Teams)
 
-Pair a Discord bot to bridge conversations between Discord and Otterbot:
+Bridge conversations from external messaging platforms to the COO:
 
-- Configure your bot token in Settings > Discord
-- Approve pairing requests from Discord users
-- Messages from paired Discord users are routed to the COO as if the CEO sent them
-- COO responses are relayed back to the Discord channel
+- **Discord** — configure your bot token, approve pairing requests, route messages to/from the COO
+- **Slack** — connect via Slack app with bot token and signing secret, supports threaded conversations
+- **Matrix** — connect to any Matrix homeserver with optional end-to-end encryption (E2EE)
+- **IRC** — connect to IRC networks with TLS support and multi-channel routing
+- **Microsoft Teams** — connect via Bot Framework with app ID/password and tenant configuration
+
+Each bridge supports user pairing — only approved users can interact with the COO through the platform.
 
 ### GitHub
 
@@ -352,9 +370,12 @@ otterbot/
 │   │       ├── coding-agents/ # Coding agent PTY management
 │   │       ├── db/          # Drizzle ORM schema + seed
 │   │       ├── desktop/     # Virtual desktop (XFCE/noVNC)
+│   │       ├── chat/         # Chat provider interface & registry
 │   │       ├── discord/     # Discord bot integration
 │   │       ├── github/      # GitHub API + issue monitoring
 │   │       ├── google/      # Google OAuth + Gmail/Calendar APIs
+│   │       ├── irc/         # IRC bridge integration
+│   │       ├── matrix/      # Matrix bridge integration
 │   │       ├── llm/         # Vercel AI SDK adapter (multi-provider)
 │   │       ├── memory/      # Episodic memory + semantic search
 │   │       ├── models3d/    # 3D model pack discovery
@@ -365,9 +386,11 @@ otterbot/
 │   │       ├── reminders/   # Todo reminder scheduler
 │   │       ├── schedulers/  # Scheduled task runners
 │   │       ├── settings/    # Provider & feature settings
+│   │       ├── slack/       # Slack bridge integration
 │   │       ├── skills/      # Skill management
 │   │       ├── socket/      # Socket.IO event handlers
 │   │       ├── stt/         # Speech-to-text providers
+│   │       ├── teams/       # Microsoft Teams bridge integration
 │   │       ├── todos/       # Todo management
 │   │       ├── tools/       # Agent tools (35+ built-in)
 │   │       │   └── search/  # Search provider implementations
@@ -423,7 +446,8 @@ otterbot/
 | 3D Rendering | Three.js + React Three Fiber + Drei |
 | Markdown | React Markdown + Mermaid diagrams |
 | State | Zustand |
-| LLM | Vercel AI SDK (Anthropic, OpenAI, Ollama, OpenRouter, Hugging Face, OpenAI-compatible) |
+| LLM | Vercel AI SDK (Anthropic, OpenAI, Google Gemini, Ollama, OpenRouter, GitHub Copilot, Hugging Face, NVIDIA, OpenAI-compatible) |
+| Chat Bridges | Discord, Slack, Matrix, IRC, Microsoft Teams |
 | TTS | Kokoro.js (local) + Edge TTS + OpenAI-compatible |
 | STT | HuggingFace Transformers / Whisper (local) + OpenAI-compatible + Browser Web Speech API |
 | Browser Automation | Playwright (Chromium — headed or headless) |

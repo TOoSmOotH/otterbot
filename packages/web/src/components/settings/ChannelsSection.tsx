@@ -11,6 +11,7 @@ const CHANNELS = [
     name: "Telegram",
     description: "Connect to Telegram bots and channels",
     icon: "T",
+    settingsSection: "telegram" as const,
   },
   {
     name: "Slack",
@@ -24,23 +25,39 @@ const CHANNELS = [
     icon: "D",
     settingsSection: "discord" as const,
   },
+  {
+    name: "Mattermost",
+    description: "Connect to Mattermost servers",
+    icon: "M",
+    settingsSection: "mattermost" as const,
+  },
 ];
 
 export function ChannelsSection() {
   const discordEnabled = useSettingsStore((s) => s.discordEnabled);
   const discordTokenSet = useSettingsStore((s) => s.discordTokenSet);
   const loadDiscordSettings = useSettingsStore((s) => s.loadDiscordSettings);
+  const telegramEnabled = useSettingsStore((s) => s.telegramEnabled);
+  const telegramTokenSet = useSettingsStore((s) => s.telegramTokenSet);
+  const loadTelegramSettings = useSettingsStore((s) => s.loadTelegramSettings);
   const slackEnabled = useSettingsStore((s) => s.slackEnabled);
   const slackBotTokenSet = useSettingsStore((s) => s.slackBotTokenSet);
   const loadSlackSettings = useSettingsStore((s) => s.loadSlackSettings);
+  const mattermostEnabled = useSettingsStore((s) => s.mattermostEnabled);
+  const mattermostTokenSet = useSettingsStore((s) => s.mattermostTokenSet);
+  const loadMattermostSettings = useSettingsStore((s) => s.loadMattermostSettings);
 
   useEffect(() => {
     loadDiscordSettings();
+    loadTelegramSettings();
     loadSlackSettings();
+    loadMattermostSettings();
   }, []);
 
   const isDiscordConnected = discordEnabled && discordTokenSet;
+  const isTelegramConnected = telegramEnabled && telegramTokenSet;
   const isSlackConnected = slackEnabled && slackBotTokenSet;
+  const isMattermostConnected = mattermostEnabled && mattermostTokenSet;
 
   return (
     <div className="p-5 space-y-4">
@@ -53,7 +70,7 @@ export function ChannelsSection() {
 
       <div className="grid grid-cols-2 gap-3">
         {CHANNELS.map((channel) => {
-          const connected = (channel.name === "Discord" && isDiscordConnected) || (channel.name === "Slack" && isSlackConnected);
+          const connected = (channel.name === "Discord" && isDiscordConnected) || (channel.name === "Telegram" && isTelegramConnected) || (channel.name === "Slack" && isSlackConnected) || (channel.name === "Mattermost" && isMattermostConnected);
           return (
             <div
               key={channel.name}

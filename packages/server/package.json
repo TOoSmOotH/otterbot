@@ -12,6 +12,7 @@
     "db:seed": "tsx src/db/seed.ts"
   },
   "dependencies": {
+    "@ai-sdk/amazon-bedrock": "^4.0.63",
     "@ai-sdk/anthropic": "^1.1.9",
     "@ai-sdk/google": "^3.0.30",
     "@ai-sdk/openai": "^1.1.14",
@@ -39,6 +40,7 @@
     "matrix-js-sdk": "^34.11.1",
     "nanoid": "^5.0.9",
     "node-pty": "^1.1.0",
+    "node-telegram-bot-api": "^0.67.0",
     "ollama-ai-provider": "^1.2.0",
     "playwright": "^1.50.0",
     "puppeteer": "^24.2.0",
@@ -61,6 +63,7 @@
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^22.13.1",
+    "@types/node-telegram-bot-api": "^0.64.13",
     "@types/ws": "^8.5.13",
     "@types/yauzl": "^2.10.3",
     "@types/yazl": "^3.3.0",

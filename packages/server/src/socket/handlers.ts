@@ -384,6 +384,9 @@ export function setupSocketHandlers(
       // Stop running agents and remove workspace
       coo.destroyProject(data.projectId);
 
+      // Clear conversation contexts that reference this project
+      coo.clearProjectConversations(data.projectId);
+
       // Cascade-delete related DB records
       db.delete(schema.kanbanTasks).where(eq(schema.kanbanTasks.projectId, data.projectId)).run();
       db.delete(schema.agentActivity).where(eq(schema.agentActivity.projectId, data.projectId)).run();
@@ -484,7 +487,7 @@ export function setupSocketHandlers(
             io.emit("project:created", project as unknown as Project);
           }
 
-          if (issueMonitor && deps?.issueMonitor) {
+          if (deps?.issueMonitor) {
             deps.issueMonitor.watchProject(projectId, data.githubRepo!, ghUsername);
           }
 
@@ -718,6 +721,8 @@ export function setupSocketHandlers(
     socket.on("memory:clear-all", (callback) => {
       try {
         const deleted = memoryService.clearAll();
+        // Also clear COO conversation contexts so the LLM doesn't reference stale data
+        coo.clearAllConversations();
         callback?.({ ok: true, deleted });
       } catch (err) {
         callback?.({ ok: false, deleted: 0, error: err instanceof Error ? err.message : String(err) });
