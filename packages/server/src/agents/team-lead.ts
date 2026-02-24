@@ -351,6 +351,14 @@ export class TeamLead extends BaseAgent {
       const pipelineBranch = message.metadata?.pipelineBranch as string | undefined;
 
       const result = await this.spawnWorker(pipelineRegistryEntryId, workerTask, pipelineTaskId, { pipelineOverride: true, sourceBranch: pipelineBranch });
+      const isSpawnSuccess = result.startsWith("Spawned ");
+
+      if (!isSpawnSuccess && this._pipelineManager?.isPipelineTask(pipelineTaskId)) {
+        console.warn(`[TeamLead ${this.id}] Pipeline spawn failure for task ${pipelineTaskId}: ${result}`);
+        await this._pipelineManager.handleSpawnFailure(pipelineTaskId, result);
+        return;
+      }
+
       if (this.parentId) {
         this.sendMessage(this.parentId, MessageType.Report, result);
       }

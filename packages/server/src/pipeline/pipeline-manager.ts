@@ -25,7 +25,7 @@ import type { GitHubIssue } from "../github/github-service.js";
 
 type TypedServer = Server<ClientToServerEvents, ServerToClientEvents>;
 
-const MAX_KICKBACKS = 2;
+const MAX_SPAWN_RETRIES = 3;
 
 interface TriageResult {
   classification: string;
@@ -86,8 +86,8 @@ interface PipelineState {
   repo: string | null;
   stages: string[];           // enabled stages in order (excluding triage)
   currentStageIndex: number;
-  kickbackCount: number;
-  maxKickbacks: number;
+  spawnRetryCount: number;
+  lastKickbackSource: string | null;
   stageReports: Map<string, string>; // stage → report content
   prBranch: string | null;
   targetBranch: string;             // project's configured branch (for diff base)
@@ -182,8 +182,8 @@ export class PipelineManager {
         repo: project?.githubRepo ?? null,
         stages,
         currentStageIndex,
-        kickbackCount: 0, // Reset on recovery — conservative
-        maxKickbacks: MAX_KICKBACKS,
+        spawnRetryCount: 0,
+        lastKickbackSource: null,
         stageReports: new Map(), // Reports lost on restart
         prBranch: task.prBranch ?? null,
         targetBranch: getConfig(`project:${task.projectId}:github:branch`) ?? "main",
@@ -237,8 +237,8 @@ export class PipelineManager {
       repo: project?.githubRepo ?? null,
       stages,
       currentStageIndex,
-      kickbackCount: 0,
-      maxKickbacks: MAX_KICKBACKS,
+      spawnRetryCount: 0,
+      lastKickbackSource: null,
       stageReports: new Map(),
       prBranch: task.prBranch ?? null,
       targetBranch: getConfig(`project:${task.projectId}:github:branch`) ?? "main",
@@ -469,8 +469,8 @@ export class PipelineManager {
       repo,
       stages: enabledStages,
       currentStageIndex: 0,
-      kickbackCount: 0,
-      maxKickbacks: MAX_KICKBACKS,
+      spawnRetryCount: 0,
+      lastKickbackSource: null,
       stageReports: new Map(),
       prBranch: null,
       targetBranch: getConfig(`project:${projectId}:github:branch`) ?? "main",
@@ -532,6 +532,12 @@ export class PipelineManager {
     // Store the report
     state.stageReports.set(currentStage, workerReport);
 
+    // Safety net: catch spawn failure strings that slipped through the normal report path
+    if (workerReport.startsWith("Error spawning worker") || workerReport.startsWith("REFUSED:")) {
+      await this.handleSpawnFailure(taskId, workerReport);
+      return;
+    }
+
     // Extract branch name from the worker report (any stage may mention it)
     if (!state.prBranch) {
       state.prBranch = this.extractBranchName(workerReport);
@@ -565,70 +571,123 @@ export class PipelineManager {
     // Post completion comment on GitHub issue
     await this.postStageComment(state, currentStage, workerReport, "complete");
 
-    // Security kickback logic
-    if (currentStage === "security") {
-      // Strip zero-file-changes warning — review-only stages never produce file changes
-      const cleanedReport = workerReport.replace(/⚠️ WARNING: Task reported success but produced zero file changes[^\n]*/g, "").trim();
-      const hasFindings = this.securityHasFindings(cleanedReport);
-      console.log(`[PipelineManager] Security review for task ${taskId}: hasFindings=${hasFindings}, kickbackCount=${state.kickbackCount}/${state.maxKickbacks}`);
-      if (hasFindings && state.kickbackCount < state.maxKickbacks) {
-        state.kickbackCount++;
+    // Parse structured verdict from report
+    const verdict = this.parseVerdict(workerReport);
+    const coderIndex = state.stages.indexOf("coder");
 
-        // Find coder stage index
-        const coderIndex = state.stages.indexOf("coder");
-        if (coderIndex >= 0) {
-          state.currentStageIndex = coderIndex;
-
-          // Update kanban task
-          this.updateTaskPipelineStage(taskId, "coder");
-
-          // Post kickback comment
+    // Stage-specific verdict handling with kickback support
+    switch (currentStage) {
+      case "coder": {
+        const failed = verdict === "fail";
+        if (failed) {
+          // Coder failed — move to backlog
+          console.warn(`[PipelineManager] Coder FAIL for task ${taskId} — moving to backlog`);
           if (state.issueNumber && state.repo) {
             const token = getConfig("github:token");
             if (token) {
               try {
                 await createIssueComment(
                   state.repo, token, state.issueNumber,
-                  `🔄 Security review found issues (attempt ${state.kickbackCount}/${state.maxKickbacks}). Sending back to coder for fixes.`,
+                  `❌ Implementation failed. Task moved to backlog for review.`,
                 );
               } catch { /* best effort */ }
             }
           }
-
-          // Send coder directive with security findings
+          this.resetTaskToBacklog(taskId);
+          this.pipelines.delete(taskId);
+          return;
+        }
+        break;
+      }
+      case "security": {
+        // Strip zero-file-changes warning — review-only stages never produce file changes
+        const cleanedReport = workerReport.replace(/⚠️ WARNING: Task reported success but produced zero file changes[^\n]*/g, "").trim();
+        const hasFindings = verdict === "fail" || (verdict === null && this.securityHasFindings(cleanedReport));
+        console.log(`[PipelineManager] Security review for task ${taskId}: hasFindings=${hasFindings}`);
+        if (hasFindings && coderIndex >= 0) {
+          state.currentStageIndex = coderIndex;
+          state.lastKickbackSource = "security";
+          state.spawnRetryCount = 0;
+          this.updateTaskPipelineStage(taskId, "coder");
+          if (state.issueNumber && state.repo) {
+            const token = getConfig("github:token");
+            if (token) {
+              try {
+                await createIssueComment(
+                  state.repo, token, state.issueNumber,
+                  `🔄 Security review found issues. Sending back to coder for fixes.`,
+                );
+              } catch { /* best effort */ }
+            }
+          }
           await this.sendStageDirective(state, workerReport);
           return;
         }
-      } else if (hasFindings) {
-        // Max kickbacks reached — proceed with a warning
-        if (state.issueNumber && state.repo) {
-          const token = getConfig("github:token");
-          if (token) {
-            try {
-              await createIssueComment(
-                state.repo, token, state.issueNumber,
-                `⚠️ Security review still has findings after ${state.maxKickbacks} attempts. Proceeding with remaining stages.`,
-              );
-            } catch { /* best effort */ }
+        break;
+      }
+      case "tester": {
+        const failed = verdict === "fail" || (verdict === null && this.testerHasFailed(workerReport));
+        console.log(`[PipelineManager] Tester review for task ${taskId}: failed=${failed}`);
+        if (failed && coderIndex >= 0) {
+          state.currentStageIndex = coderIndex;
+          state.lastKickbackSource = "tester";
+          state.spawnRetryCount = 0;
+          this.updateTaskPipelineStage(taskId, "coder");
+          if (state.issueNumber && state.repo) {
+            const token = getConfig("github:token");
+            if (token) {
+              try {
+                await createIssueComment(
+                  state.repo, token, state.issueNumber,
+                  `🔄 Tests failed. Sending back to coder for fixes.`,
+                );
+              } catch { /* best effort */ }
+            }
           }
+          await this.sendStageDirective(state, workerReport);
+          return;
         }
+        break;
+      }
+      case "reviewer": {
+        // Extract PR number from the reviewer's report (needed for completeTask routing)
+        const prNumber = this.extractPRNumber(workerReport);
+        if (prNumber) {
+          const db = getDb();
+          const now = new Date().toISOString();
+          db.update(schema.kanbanTasks)
+            .set({ prNumber, updatedAt: now })
+            .where(eq(schema.kanbanTasks.id, taskId))
+            .run();
+        }
+
+        const failed = verdict === "fail" || (verdict === null && this.reviewerHasIssues(workerReport));
+        console.log(`[PipelineManager] Reviewer review for task ${taskId}: failed=${failed}`);
+        if (failed && coderIndex >= 0) {
+          state.currentStageIndex = coderIndex;
+          state.lastKickbackSource = "reviewer";
+          state.spawnRetryCount = 0;
+          this.updateTaskPipelineStage(taskId, "coder");
+          if (state.issueNumber && state.repo) {
+            const token = getConfig("github:token");
+            if (token) {
+              try {
+                await createIssueComment(
+                  state.repo, token, state.issueNumber,
+                  `🔄 Code review found issues. Sending back to coder for fixes.`,
+                );
+              } catch { /* best effort */ }
+            }
+          }
+          await this.sendStageDirective(state, workerReport);
+          return;
+        }
+        break;
       }
     }
 
-    // Extract PR number from the reviewer's report (needed for completeTask routing)
-    if (currentStage === "reviewer") {
-      const prNumber = this.extractPRNumber(workerReport);
-      if (prNumber) {
-        const db = getDb();
-        const now = new Date().toISOString();
-        db.update(schema.kanbanTasks)
-          .set({ prNumber, updatedAt: now })
-          .where(eq(schema.kanbanTasks.id, taskId))
-          .run();
-      }
-    }
-
-    // Advance to next stage
+    // Stage passed — advance to next stage
+    state.spawnRetryCount = 0;
     state.currentStageIndex++;
 
     if (state.currentStageIndex >= state.stages.length) {
@@ -657,6 +716,79 @@ export class PipelineManager {
     const nextStage = state.stages[state.currentStageIndex];
     this.updateTaskPipelineStage(taskId, nextStage);
     await this.sendStageDirective(state);
+  }
+
+  /**
+   * Handle a spawn failure for a pipeline task.
+   * Retries with backoff up to MAX_SPAWN_RETRIES, then moves to backlog.
+   */
+  async handleSpawnFailure(taskId: string, errorMessage: string): Promise<void> {
+    const state = this.pipelines.get(taskId);
+    if (!state) {
+      console.warn(`[PipelineManager] handleSpawnFailure: no state for task ${taskId}`);
+      return;
+    }
+
+    state.spawnRetryCount++;
+    const currentStage = state.stages[state.currentStageIndex];
+    console.warn(
+      `[PipelineManager] Spawn failure for task ${taskId} at stage ${currentStage} ` +
+      `(attempt ${state.spawnRetryCount}/${MAX_SPAWN_RETRIES}): ${errorMessage}`,
+    );
+
+    if (state.spawnRetryCount <= MAX_SPAWN_RETRIES) {
+      // Determine backoff delay
+      const isConcurrencyRefusal = errorMessage.includes("REFUSED") && errorMessage.toLowerCase().includes("already running");
+      const delayMs = isConcurrencyRefusal
+        ? 30_000 * state.spawnRetryCount
+        : 10_000 * state.spawnRetryCount;
+
+      console.log(
+        `[PipelineManager] Retrying spawn for task ${taskId} in ${delayMs / 1000}s`,
+      );
+
+      setTimeout(() => {
+        // Guard: pipeline may have been cleaned up during the delay
+        if (!this.pipelines.has(taskId)) return;
+        this.sendStageDirective(state).catch((err) => {
+          console.error(`[PipelineManager] Retry directive failed for task ${taskId}:`, err);
+        });
+      }, delayMs);
+      return;
+    }
+
+    // Max retries exhausted — move to backlog
+    console.error(
+      `[PipelineManager] Max spawn retries exhausted for task ${taskId} — moving to backlog`,
+    );
+
+    // Append error note to task description
+    const db = getDb();
+    const task = db.select().from(schema.kanbanTasks).where(eq(schema.kanbanTasks.id, taskId)).get();
+    if (task) {
+      const errorNote = `\n\n---\n⚠️ Pipeline spawn failed after ${MAX_SPAWN_RETRIES} retries at stage "${currentStage}": ${errorMessage}`;
+      const updatedDesc = (task.description ?? "") + errorNote;
+      db.update(schema.kanbanTasks)
+        .set({ description: updatedDesc, updatedAt: new Date().toISOString() })
+        .where(eq(schema.kanbanTasks.id, taskId))
+        .run();
+    }
+
+    // Post GitHub comment
+    if (state.issueNumber && state.repo) {
+      const token = getConfig("github:token");
+      if (token) {
+        try {
+          await createIssueComment(
+            state.repo, token, state.issueNumber,
+            `⚠️ Pipeline spawn failed after ${MAX_SPAWN_RETRIES} retries at stage "${currentStage}". Task moved to backlog for review.\n\nError: ${errorMessage}`,
+          );
+        } catch { /* best effort */ }
+      }
+    }
+
+    this.resetTaskToBacklog(taskId);
+    this.pipelines.delete(taskId);
   }
 
   /**
@@ -707,8 +839,8 @@ export class PipelineManager {
       repo: project?.githubRepo ?? null,
       stages: enabledStages,
       currentStageIndex: enabledStages.indexOf("coder"),
-      kickbackCount: 0,
-      maxKickbacks: MAX_KICKBACKS,
+      spawnRetryCount: 0,
+      lastKickbackSource: null,
       stageReports: new Map(),
       prBranch: branchName,
       targetBranch: getConfig(`project:${task.projectId}:github:branch`) ?? "main",
@@ -797,7 +929,7 @@ export class PipelineManager {
           if (extraContext) {
             parts.push(`\n--- REVIEW FEEDBACK ---\n${extraContext}\n--- END FEEDBACK ---`);
           }
-        } else if (state.stageReports.has("security")) {
+        } else if (state.lastKickbackSource === "security") {
           // Security kickback — fix findings
           parts.push(
             `\n[SECURITY KICKBACK — Fix Required]`,
@@ -808,6 +940,28 @@ export class PipelineManager {
           if (extraContext) {
             parts.push(`\n--- SECURITY FINDINGS ---\n${extraContext}\n--- END FINDINGS ---`);
           }
+        } else if (state.lastKickbackSource === "tester") {
+          // Test failure kickback
+          parts.push(
+            `\n[TEST FAILURE KICKBACK — Fix Required]`,
+            `Tests failed on your implementation. Fix the code so tests pass.`,
+            state.prBranch ? `Work on branch \`${state.prBranch}\`.` : "",
+            `Do NOT create a PR — just fix and push.`,
+          );
+          if (extraContext) {
+            parts.push(`\n--- TEST RESULTS ---\n${extraContext}\n--- END TEST RESULTS ---`);
+          }
+        } else if (state.lastKickbackSource === "reviewer") {
+          // Review kickback
+          parts.push(
+            `\n[REVIEW KICKBACK — Fix Required]`,
+            `The code reviewer found quality issues. Address the findings below.`,
+            state.prBranch ? `Work on branch \`${state.prBranch}\`.` : "",
+            `Do NOT create a PR — just fix and push.`,
+          );
+          if (extraContext) {
+            parts.push(`\n--- REVIEW FINDINGS ---\n${extraContext}\n--- END REVIEW FINDINGS ---`);
+          }
         } else {
           // Initial implementation
           parts.push(
@@ -815,6 +969,11 @@ export class PipelineManager {
             `Do NOT create a pull request — a later stage will handle that.`,
           );
         }
+        parts.push(
+          `\nIMPORTANT: End your report with exactly one of these verdicts on its own line:`,
+          `  VERDICT: PASS — if you successfully implemented, committed, and pushed the changes`,
+          `  VERDICT: FAIL — if you could not complete the implementation (explain why above)`,
+        );
         break;
       }
       case "security": {
@@ -852,6 +1011,9 @@ export class PipelineManager {
           `\nRun tests on branch \`${state.prBranch ?? "(see coder report)"}\` to validate the implementation.`,
           `Install dependencies, build the project, and run the test suite.`,
           `Report test results clearly — pass/fail with details.`,
+          `\nIMPORTANT: End your report with exactly one of these verdicts on its own line:`,
+          `  VERDICT: PASS — if all tests pass`,
+          `  VERDICT: FAIL — if any tests fail (include failure details above)`,
         );
         const coderReport = state.stageReports.get("coder");
         if (coderReport) {
@@ -875,6 +1037,11 @@ export class PipelineManager {
         if (isLastStage) {
           parts.push(`After review, create a pull request for this branch.`);
         }
+        parts.push(
+          `\nIMPORTANT: End your report with exactly one of these verdicts on its own line:`,
+          `  VERDICT: PASS — if the code is acceptable quality and ready to merge`,
+          `  VERDICT: FAIL — if there are issues that must be fixed before merging (list them above)`,
+        );
         // Include reports from prior stages
         for (const [stage, report] of state.stageReports) {
           if (stage === "review_feedback") continue;
@@ -1074,14 +1241,20 @@ export class PipelineManager {
     }
   }
 
-  private securityHasFindings(report: string): boolean {
-    const lower = report.toLowerCase();
+  /** Parse a structured VERDICT: PASS/FAIL line from a worker report */
+  private parseVerdict(report: string): "pass" | "fail" | null {
+    if (/verdict:\s*pass/i.test(report)) return "pass";
+    if (/verdict:\s*fail/i.test(report)) return "fail";
+    return null;
+  }
 
-    // Prefer structured verdict (most reliable — injected via the stage prompt)
-    if (/verdict:\s*pass/i.test(report)) return false;
-    if (/verdict:\s*fail/i.test(report)) return true;
+  private securityHasFindings(report: string): boolean {
+    const verdict = this.parseVerdict(report);
+    if (verdict === "pass") return false;
+    if (verdict === "fail") return true;
 
     // Fallback: keyword heuristics for reports without a verdict line
+    const lower = report.toLowerCase();
     const cleanSignals = [
       "no vulnerabilit",
       "no security issue",
@@ -1120,6 +1293,55 @@ export class PipelineManager {
       /\bcsrf\b/.test(lower) ||
       /\binjection\b/.test(lower) ||
       (lower.includes("found") && lower.includes("issue") && !lower.includes("no issue"))
+    );
+  }
+
+  /** Heuristic fallback: detect test failures when tester doesn't include a verdict */
+  private testerHasFailed(report: string): boolean {
+    const lower = report.toLowerCase();
+
+    // Clean signals — tests passed
+    const passSignals = [
+      "all tests pass",
+      "tests passed",
+      "0 failed",
+      "no failures",
+      "test suite passed",
+      "all passing",
+    ];
+    if (passSignals.some((s) => lower.includes(s))) return false;
+
+    // Fail signals
+    return (
+      lower.includes("test failed") ||
+      lower.includes("tests failed") ||
+      /\bFAIL\b/.test(report) ||
+      lower.includes("exit code: 1") ||
+      lower.includes("failing")
+    );
+  }
+
+  /** Heuristic fallback: detect review issues when reviewer doesn't include a verdict */
+  private reviewerHasIssues(report: string): boolean {
+    const lower = report.toLowerCase();
+
+    // Clean signals — review passed
+    const passSignals = [
+      "lgtm",
+      "looks good",
+      "approved",
+      "no issues",
+      "ready to merge",
+      "no concerns",
+    ];
+    if (passSignals.some((s) => lower.includes(s))) return false;
+
+    // Issue signals
+    return (
+      lower.includes("request changes") ||
+      lower.includes("needs fix") ||
+      lower.includes("must be fixed") ||
+      lower.includes("reject")
     );
   }
 
