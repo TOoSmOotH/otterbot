@@ -10,12 +10,7 @@ import type { MessageBus } from "../bus/message-bus.js";
 import { createTools } from "../tools/tool-factory.js";
 import { debug } from "../utils/debug.js";
 import { getConfig } from "../auth/auth.js";
-
-/** Strip ANSI escape codes from terminal output for LLM analysis */
-function stripAnsi(str: string): string {
-  // eslint-disable-next-line no-control-regex
-  return str.replace(/\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g, "");
-}
+import { stripAnsi } from "../utils/terminal.js";
 
 export interface WorkerDependencies {
   id?: string;

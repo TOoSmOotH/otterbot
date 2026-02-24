@@ -23,6 +23,8 @@ import {
 import type { COO } from "../agents/coo.js";
 import type { GitHubIssue } from "../github/github-service.js";
 import { SECURITY_PREAMBLE } from "../agents/prompts/security-preamble.js";
+import { cleanTerminalOutput } from "../utils/terminal.js";
+import { formatBotComment, formatBotCommentWithDetails } from "../utils/github-comments.js";
 
 type TypedServer = Server<ClientToServerEvents, ServerToClientEvents>;
 
@@ -338,7 +340,7 @@ export class PipelineManager {
     try {
       await createIssueComment(
         repo, token, issue.number,
-        `🔍 Analyzing this issue...`,
+        formatBotComment("Analyzing Issue"),
       );
     } catch (err) {
       console.error(`[PipelineManager] Failed to post triage start comment on #${issue.number}:`, err);
@@ -431,10 +433,10 @@ export class PipelineManager {
       const proceedText = parsed.shouldProceed
         ? "Proceeding with implementation when assigned."
         : "No implementation needed — labeling accordingly.";
-      const commentBody =
-        `**Triage:** ${parsed.classification}\n\n` +
-        `${parsed.comment}\n\n` +
-        `${proceedText}`;
+      const commentBody = formatBotComment(
+        `Triage: ${parsed.classification}`,
+        `${parsed.comment}\n\n${proceedText}`,
+      );
 
       try {
         await createIssueComment(repo, token, issue.number, commentBody);
@@ -521,7 +523,7 @@ export class PipelineManager {
         try {
           await createIssueComment(
             repo, token, issueNumber,
-            `🚀 Starting implementation pipeline: ${enabledStages.join(" → ")}`,
+            formatBotComment("Pipeline Started", `Stages: ${enabledStages.map(s => `\`${s}\``).join(" → ")}`),
           );
         } catch (err) {
           console.error(`[PipelineManager] Failed to post pipeline start comment:`, err);
@@ -613,7 +615,7 @@ export class PipelineManager {
               try {
                 await createIssueComment(
                   state.repo, token, state.issueNumber,
-                  `❌ Implementation failed. Task moved to backlog for review.`,
+                  formatBotComment("Implementation Failed", "Task moved to backlog for review."),
                 );
               } catch { /* best effort */ }
             }
@@ -640,7 +642,7 @@ export class PipelineManager {
               try {
                 await createIssueComment(
                   state.repo, token, state.issueNumber,
-                  `🔄 Security review found issues. Sending back to coder for fixes.`,
+                  formatBotComment("Security Kickback", "Security review found issues. Sending back to coder for fixes."),
                 );
               } catch { /* best effort */ }
             }
@@ -664,7 +666,7 @@ export class PipelineManager {
               try {
                 await createIssueComment(
                   state.repo, token, state.issueNumber,
-                  `🔄 Tests failed. Sending back to coder for fixes.`,
+                  formatBotComment("Test Kickback", "Tests failed. Sending back to coder for fixes."),
                 );
               } catch { /* best effort */ }
             }
@@ -699,7 +701,7 @@ export class PipelineManager {
               try {
                 await createIssueComment(
                   state.repo, token, state.issueNumber,
-                  `🔄 Code review found issues. Sending back to coder for fixes.`,
+                  formatBotComment("Review Kickback", "Code review found issues. Sending back to coder for fixes."),
                 );
               } catch { /* best effort */ }
             }
@@ -728,7 +730,7 @@ export class PipelineManager {
           try {
             await createIssueComment(
               state.repo, token, state.issueNumber,
-              `✅ Implementation pipeline complete.`,
+              formatBotComment("Pipeline Complete"),
             );
           } catch { /* best effort */ }
         }
@@ -806,7 +808,10 @@ export class PipelineManager {
         try {
           await createIssueComment(
             state.repo, token, state.issueNumber,
-            `⚠️ Pipeline spawn failed after ${MAX_SPAWN_RETRIES} retries at stage "${currentStage}". Task moved to backlog for review.\n\nError: ${errorMessage}`,
+            formatBotComment(
+              "Pipeline Spawn Failed",
+              `Failed after ${MAX_SPAWN_RETRIES} retries at stage \`${currentStage}\`. Task moved to backlog for review.\n\nError: ${errorMessage}`,
+            ),
           );
         } catch { /* best effort */ }
       }
@@ -890,7 +895,7 @@ export class PipelineManager {
         try {
           await createIssueComment(
             state.repo, token, issueNumber,
-            `🔄 PR review feedback received. Re-entering pipeline at coder stage to address changes.`,
+            formatBotComment("PR Feedback Received", "Re-entering pipeline at `coder` stage to address changes."),
           );
         } catch { /* best effort */ }
       }
@@ -1133,31 +1138,34 @@ export class PipelineManager {
 
     let body: string;
     if (phase === "start") {
-      const startComments: Record<string, string> = {
-        triage: "🔍 Analyzing issue...",
-        coder: "🔨 Beginning implementation...",
-        security: "🔒 Running security review...",
-        tester: "🧪 Running tests...",
-        reviewer: "📝 Reviewing code...",
+      const startTitles: Record<string, string> = {
+        triage: "Analyzing Issue",
+        coder: "Beginning Implementation",
+        security: "Running Security Review",
+        tester: "Running Tests",
+        reviewer: "Reviewing Code",
       };
-      body = startComments[stage] ?? `Starting ${stage}...`;
+      body = formatBotComment(startTitles[stage] ?? `Starting ${stage}`);
     } else {
-      // Completion — summarize the report
-      const summary = report.length > 500
-        ? report.slice(0, 500) + "\n\n_(truncated)_"
-        : report;
+      // Completion — clean the report and put it in a collapsible section
+      const cleaned = cleanTerminalOutput(report);
+      const preview = cleaned.length > 500
+        ? cleaned.slice(0, 500) + "\n\n_(truncated)_"
+        : cleaned;
 
-      const completeComments: Record<string, (r: string) => string> = {
-        coder: (r) => `✅ Implementation complete.\n\n${r}`,
-        security: (r) =>
-          this.securityHasFindings(report)
-            ? `⚠️ Security issues found:\n\n${r}`
-            : `✅ No security issues found.\n\n${r}`,
-        tester: (r) => `🧪 Test results:\n\n${r}`,
-        reviewer: (r) => `📝 Review complete.\n\n${r}`,
+      const completeTitles: Record<string, string> = {
+        coder: "Implementation Complete",
+        security: this.securityHasFindings(report)
+          ? "Security Issues Found"
+          : "No Security Issues",
+        tester: "Test Results",
+        reviewer: "Review Complete",
       };
-      const formatter = completeComments[stage];
-      body = formatter ? formatter(summary) : `${stage} complete: ${summary}`;
+      const title = completeTitles[stage] ?? `${stage} Complete`;
+
+      body = cleaned.length > 500
+        ? formatBotCommentWithDetails(title, preview, cleaned)
+        : formatBotComment(title, preview);
     }
 
     try {

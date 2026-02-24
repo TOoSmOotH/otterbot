@@ -16,6 +16,7 @@ import {
 } from "./github-service.js";
 import type { COO } from "../agents/coo.js";
 import type { PipelineManager } from "../pipeline/pipeline-manager.js";
+import { formatBotComment } from "../utils/github-comments.js";
 
 type TypedServer = Server<ClientToServerEvents, ServerToClientEvents>;
 
@@ -544,7 +545,7 @@ export class GitHubIssueMonitor {
           watched.repo,
           token,
           issue.number,
-          `👀 I'm looking into this issue and will begin working on a fix shortly.`,
+          formatBotComment("Issue Acknowledged", "Looking into this issue and will begin working on a fix shortly."),
         );
       } catch (commentErr) {
         console.error(
