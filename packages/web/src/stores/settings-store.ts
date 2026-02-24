@@ -212,6 +212,12 @@ interface SettingsState {
   mattermostPendingPairings: Array<{ code: string; mattermostUserId: string; mattermostUsername: string; createdAt: string }>;
   mattermostTestResult: TestResult | null;
 
+  // WhatsApp
+  whatsappEnabled: boolean;
+  whatsappPhoneNumber: string | null;
+  whatsappPairedUsers: Array<{ whatsappJid: string; whatsappName: string; pairedAt: string }>;
+  whatsappPendingPairings: Array<{ code: string; whatsappJid: string; whatsappName: string; createdAt: string }>;
+
   // Google
   googleConnected: boolean;
   googleConnectedEmail: string | null;
@@ -418,6 +424,13 @@ interface SettingsState {
   rejectMattermostPairing: (code: string) => Promise<void>;
   revokeMattermostUser: (userId: string) => Promise<void>;
 
+  // WhatsApp actions
+  loadWhatsAppSettings: () => Promise<void>;
+  updateWhatsAppSettings: (data: { enabled?: boolean }) => Promise<void>;
+  approveWhatsAppPairing: (code: string) => Promise<void>;
+  rejectWhatsAppPairing: (code: string) => Promise<void>;
+  revokeWhatsAppUser: (jid: string) => Promise<void>;
+
   // Google actions
   loadGoogleSettings: () => Promise<void>;
   updateGoogleCredentials: (data: {
@@ -550,6 +563,10 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   mattermostPairedUsers: [],
   mattermostPendingPairings: [],
   mattermostTestResult: null,
+  whatsappEnabled: false,
+  whatsappPhoneNumber: null,
+  whatsappPairedUsers: [],
+  whatsappPendingPairings: [],
   googleConnected: false,
   googleConnectedEmail: null,
   googleClientIdSet: false,
@@ -2039,6 +2056,82 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       });
       if (!res.ok) throw new Error("Failed to revoke user");
       await get().loadMattermostSettings();
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "Unknown error" });
+    }
+  },
+
+  // WhatsApp actions
+
+  loadWhatsAppSettings: async () => {
+    try {
+      const res = await fetch("/api/settings/whatsapp");
+      if (!res.ok) return;
+      const data = await res.json();
+      set({
+        whatsappEnabled: data.enabled,
+        whatsappPhoneNumber: data.phoneNumber,
+        whatsappPairedUsers: data.pairedUsers ?? [],
+        whatsappPendingPairings: data.pendingPairings ?? [],
+      });
+    } catch {
+      // Silently fail
+    }
+  },
+
+  updateWhatsAppSettings: async (data) => {
+    set({ error: null });
+    try {
+      const res = await fetch("/api/settings/whatsapp", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) throw new Error("Failed to update WhatsApp settings");
+      await get().loadWhatsAppSettings();
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "Unknown error" });
+    }
+  },
+
+  approveWhatsAppPairing: async (code) => {
+    set({ error: null });
+    try {
+      const res = await fetch("/api/settings/whatsapp/pair/approve", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code }),
+      });
+      if (!res.ok) throw new Error("Failed to approve pairing");
+      await get().loadWhatsAppSettings();
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "Unknown error" });
+    }
+  },
+
+  rejectWhatsAppPairing: async (code) => {
+    set({ error: null });
+    try {
+      const res = await fetch("/api/settings/whatsapp/pair/reject", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code }),
+      });
+      if (!res.ok) throw new Error("Failed to reject pairing");
+      await get().loadWhatsAppSettings();
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "Unknown error" });
+    }
+  },
+
+  revokeWhatsAppUser: async (jid) => {
+    set({ error: null });
+    try {
+      const res = await fetch(`/api/settings/whatsapp/pair/${encodeURIComponent(jid)}`, {
+        method: "DELETE",
+      });
+      if (!res.ok) throw new Error("Failed to revoke user");
+      await get().loadWhatsAppSettings();
     } catch (err) {
       set({ error: err instanceof Error ? err.message : "Unknown error" });
     }

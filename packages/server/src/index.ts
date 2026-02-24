@@ -234,6 +234,17 @@ import {
   getTlonConfig,
   testTlonConnection,
 } from "./tlon/tlon-settings.js";
+import { WhatsAppBridge } from "./whatsapp/whatsapp-bridge.js";
+import {
+  getWhatsAppSettings,
+  updateWhatsAppSettings,
+  getAuthStatePath,
+} from "./whatsapp/whatsapp-settings.js";
+import {
+  approvePairing as approveWhatsAppPairing,
+  rejectPairing as rejectWhatsAppPairing,
+  revokePairing as revokeWhatsAppPairing,
+} from "./whatsapp/pairing.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -671,6 +682,28 @@ async function main() {
     }
   }
 
+  // WhatsApp bridge (initialized when enabled)
+  let whatsappBridge: WhatsAppBridge | null = null;
+
+  function startWhatsAppBridge() {
+    if (whatsappBridge || !coo) return;
+    const settings = getWhatsAppSettings();
+    if (!settings.enabled) return;
+    const authPath = getAuthStatePath();
+    whatsappBridge = new WhatsAppBridge({ bus, coo, io });
+    whatsappBridge.start(authPath).catch((err) => {
+      console.error("[WhatsApp] Failed to start bridge:", err);
+      whatsappBridge = null;
+    });
+  }
+
+  async function stopWhatsAppBridge() {
+    if (whatsappBridge) {
+      await whatsappBridge.stop();
+      whatsappBridge = null;
+    }
+  }
+
   function startCoo() {
     if (coo) return;
     try {
@@ -1006,6 +1039,7 @@ async function main() {
     startMattermostBridge();
     startTelegramBridge();
     startTlonBridge();
+    startWhatsAppBridge();
   } else {
     console.log("Setup not complete. Waiting for setup wizard...");
   }
@@ -1332,6 +1366,7 @@ async function main() {
     startMattermostBridge();
     startTelegramBridge();
     startTlonBridge();
+    startWhatsAppBridge();
 
     return { ok: true };
   });
@@ -3748,6 +3783,65 @@ async function main() {
   });
 
   // =========================================================================
+  // WhatsApp settings routes
+  // =========================================================================
+
+  app.get("/api/settings/whatsapp", async () => {
+    return getWhatsAppSettings();
+  });
+
+  app.put<{
+    Body: {
+      enabled?: boolean;
+    };
+  }>("/api/settings/whatsapp", async (req) => {
+    const wasEnabled = getWhatsAppSettings().enabled;
+    updateWhatsAppSettings(req.body);
+    const nowEnabled = getWhatsAppSettings().enabled;
+
+    if (nowEnabled && !wasEnabled) {
+      startWhatsAppBridge();
+    } else if (!nowEnabled && wasEnabled) {
+      await stopWhatsAppBridge();
+    }
+
+    return { ok: true };
+  });
+
+  app.post<{
+    Body: { code: string };
+  }>("/api/settings/whatsapp/pair/approve", async (req, reply) => {
+    const result = approveWhatsAppPairing(req.body.code);
+    if (!result) {
+      reply.code(400);
+      return { ok: false, error: "Invalid or expired pairing code" };
+    }
+    return { ok: true, user: result };
+  });
+
+  app.post<{
+    Body: { code: string };
+  }>("/api/settings/whatsapp/pair/reject", async (req, reply) => {
+    const ok = rejectWhatsAppPairing(req.body.code);
+    if (!ok) {
+      reply.code(400);
+      return { ok: false, error: "Pairing code not found" };
+    }
+    return { ok: true };
+  });
+
+  app.delete<{
+    Params: { jid: string };
+  }>("/api/settings/whatsapp/pair/:jid", async (req, reply) => {
+    const ok = revokeWhatsAppPairing(req.params.jid);
+    if (!ok) {
+      reply.code(400);
+      return { ok: false, error: "User not found" };
+    }
+    return { ok: true };
+  });
+
+  // =========================================================================
   // Google settings routes
   // =========================================================================
 
@@ -4437,6 +4531,7 @@ Respond with ONLY a JSON object (no markdown, no explanation) with these fields:
     await stopTeamsBridge();
     await stopSlackBridge();
     await stopTlonBridge();
+    await stopWhatsAppBridge();
     await stopMattermostBridge();
     await closeBrowser();
     process.exit(0);

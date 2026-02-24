@@ -1,12 +1,14 @@
 import type { IChatProvider } from "./IChatProvider.js";
 import type { ChatProviderType } from "@otterbot/shared";
 import { TeamsProvider } from "./teams/TeamsProvider.js";
+import { WhatsAppProvider } from "./whatsapp/WhatsAppProvider.js";
 
 /**
  * Registry of available chat providers keyed by their type identifier.
  */
 const chatProviderFactories: Partial<Record<ChatProviderType, () => IChatProvider>> = {
   teams: () => new TeamsProvider(),
+  whatsapp: () => new WhatsAppProvider(),
 };
 
 /** Create a chat provider instance by type. */

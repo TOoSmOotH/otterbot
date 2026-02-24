@@ -26,6 +26,7 @@
     "@opencode-ai/sdk": "^1.2.6",
     "@otterbot/shared": "workspace:*",
     "@slack/bolt": "^4.6.0",
+    "@whiskeysockets/baileys": "7.0.0-rc.9",
     "ai": "^4.1.61",
     "better-sqlite3-multiple-ciphers": "^11.8.1",
     "discord.js": "^14.16.0",

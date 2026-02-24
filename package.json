@@ -47,5 +47,8 @@
   "engines": {
     "node": ">=20",
     "pnpm": ">=9"
+  },
+  "dependencies": {
+    "@whiskeysockets/baileys": "7.0.0-rc.9"
   }
 }
