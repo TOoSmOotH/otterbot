@@ -684,6 +684,9 @@ export function SetupWizard() {
               <h2 className="text-sm font-medium">
                 3. Configure your LLM provider
               </h2>
+              <p className="text-xs text-muted-foreground">
+                Only <strong>OpenAI Compatible</strong> and <strong>OpenRouter</strong> have been tested.
+              </p>
 
               {/* Provider type cards */}
               <div className="grid grid-cols-2 gap-2">
