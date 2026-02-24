@@ -1,4 +1,6 @@
-import WAWebJS, { Client, LocalAuth } from "whatsapp-web.js";
+import type WAWebJS from "whatsapp-web.js";
+import pkg from "whatsapp-web.js";
+const { Client, LocalAuth } = pkg;
 import { nanoid } from "nanoid";
 import { eq } from "drizzle-orm";
 import type { Server } from "socket.io";
