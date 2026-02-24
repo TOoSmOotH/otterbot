@@ -156,92 +156,79 @@ export function AgentChatBubble({ agentId, status, yOffset }: AgentChatBubblePro
   if (!current) return null;
 
   const isThought = current.type === "thought";
+  const isFading = !bubble;
 
   return (
     <Html position={[0, yOffset, 0]} center distanceFactor={8}>
-      <style>{`
-        @keyframes bubble-in {
-          from {
-            opacity: 0;
-            transform: translateY(4px) scale(0.9);
-          }
-          to {
-            opacity: 1;
-            transform: translateY(0) scale(1);
-          }
-        }
-        @keyframes bubble-out {
-          from {
-            opacity: 1;
-            transform: translateY(0) scale(1);
-          }
-          to {
-            opacity: 0;
-            transform: translateY(4px) scale(0.9);
-          }
-        }
-        .chat-bubble {
-          animation: bubble-in 0.3s ease forwards;
-        }
-        .chat-bubble-exit {
-          animation: bubble-out 0.3s ease forwards;
-        }
-        .speech-tail::after {
-          content: '';
-          position: absolute;
-          bottom: -5px;
-          left: 50%;
-          transform: translateX(-50%);
-          width: 0;
-          height: 0;
-          border-left: 5px solid transparent;
-          border-right: 5px solid transparent;
-          border-top: 5px solid rgba(0, 0, 0, 0.7);
-        }
-        .thought-dots {
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          gap: 1px;
-          position: absolute;
-          bottom: -12px;
-          left: 50%;
-          transform: translateX(-50%);
-        }
-        .thought-dot {
-          border-radius: 50%;
-          background: rgba(0, 0, 0, 0.7);
-          backdrop-filter: blur(4px);
-        }
-        .thought-dot-1 {
-          width: 5px;
-          height: 5px;
-        }
-        .thought-dot-2 {
-          width: 3px;
-          height: 3px;
-        }
-        .thought-dot-3 {
-          width: 2px;
-          height: 2px;
-        }
-      `}</style>
       <div
-        className={`pointer-events-none select-none ${bubble ? "chat-bubble" : "chat-bubble-exit"}`}
-        style={{ position: "relative", display: "inline-flex", justifyContent: "center" }}
+        style={{
+          pointerEvents: "none",
+          userSelect: "none",
+          position: "relative",
+          display: "inline-flex",
+          justifyContent: "center",
+          opacity: isFading ? 0 : 1,
+          transform: isFading ? "translateY(4px) scale(0.9)" : "translateY(0) scale(1)",
+          transition: "opacity 0.3s ease, transform 0.3s ease",
+        }}
       >
         <div
-          className={`bg-black/70 backdrop-blur-sm rounded-lg px-2 py-1 ${!isThought ? "speech-tail" : ""}`}
-          style={{ maxWidth: 160, position: "relative" }}
+          style={{
+            background: "rgba(0, 0, 0, 0.75)",
+            backdropFilter: "blur(4px)",
+            borderRadius: 6,
+            paddingLeft: 8,
+            paddingRight: 8,
+            paddingTop: 4,
+            paddingBottom: 4,
+            maxWidth: 160,
+            position: "relative",
+          }}
         >
-          <span className="text-[9px] text-white whitespace-nowrap">
+          <span
+            style={{
+              fontSize: 9,
+              color: "white",
+              whiteSpace: "nowrap",
+              fontFamily: "system-ui, sans-serif",
+            }}
+          >
             {current.text}
           </span>
+
+          {/* Tail */}
+          {!isThought && (
+            <div
+              style={{
+                position: "absolute",
+                bottom: -5,
+                left: "50%",
+                transform: "translateX(-50%)",
+                width: 0,
+                height: 0,
+                borderLeft: "5px solid transparent",
+                borderRight: "5px solid transparent",
+                borderTop: "5px solid rgba(0, 0, 0, 0.75)",
+              }}
+            />
+          )}
+
+          {/* Thought dots */}
           {isThought && (
-            <div className="thought-dots">
-              <div className="thought-dot thought-dot-1" />
-              <div className="thought-dot thought-dot-2" />
-              <div className="thought-dot thought-dot-3" />
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                gap: 2,
+                position: "absolute",
+                bottom: -14,
+                left: "50%",
+                transform: "translateX(-50%)",
+              }}
+            >
+              <div style={{ width: 5, height: 5, borderRadius: "50%", background: "rgba(0,0,0,0.7)" }} />
+              <div style={{ width: 3, height: 3, borderRadius: "50%", background: "rgba(0,0,0,0.7)" }} />
             </div>
           )}
         </div>
