@@ -152,19 +152,19 @@ function OpenRouterBalanceCard() {
     <div className="rounded-lg border border-border bg-card p-4">
       <div className="text-xs font-medium text-muted-foreground mb-3">OpenRouter Balance</div>
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-        {balance.limit != null && (
+        {balance.balance != null && (
           <div>
-            <div className="text-xs text-muted-foreground mb-0.5">Remaining</div>
+            <div className="text-xs text-muted-foreground mb-0.5">Available</div>
             <div className="text-lg font-semibold tabular-nums text-green-400">${fmt(balance.balance)}</div>
           </div>
         )}
         <div>
-          <div className="text-xs text-muted-foreground mb-0.5">Total Usage</div>
+          <div className="text-xs text-muted-foreground mb-0.5">Used</div>
           <div className="text-lg font-semibold tabular-nums text-foreground">${fmt(balance.usage)}</div>
         </div>
         {balance.limit != null && (
           <div>
-            <div className="text-xs text-muted-foreground mb-0.5">Credit Limit</div>
+            <div className="text-xs text-muted-foreground mb-0.5">Limit</div>
             <div className="text-lg font-semibold tabular-nums text-foreground">${fmt(balance.limit)}</div>
           </div>
         )}

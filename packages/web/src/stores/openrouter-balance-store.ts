@@ -1,7 +1,7 @@
 import { create } from "zustand";
 
 interface OpenRouterBalance {
-  balance: number;
+  balance: number | null;
   limit: number | null;
   usage: number;
 }

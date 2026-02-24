@@ -1889,7 +1889,7 @@ export function applyGitSSHConfig(): void {
 // ---------------------------------------------------------------------------
 
 export interface OpenRouterBalance {
-  balance: number;
+  balance: number | null;
   limit: number | null;
   usage: number;
 }
@@ -1918,7 +1918,7 @@ export async function fetchOpenRouterBalance(): Promise<OpenRouterBalance | null
 
     const usage = data.data.usage;
     const limit = data.data.limit ?? null;
-    const balance = limit != null ? limit - usage : 0;
+    const balance = data.data.limit_remaining ?? (limit != null ? limit - usage : null);
 
     return { balance, limit, usage };
   } catch {
