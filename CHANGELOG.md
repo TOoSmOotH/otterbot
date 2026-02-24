@@ -1,5 +1,36 @@
 # Changelog
 
+## [0.7.0](https://github.com/TOoSmOotH/otterbot/compare/otterbot-v0.6.0...otterbot-v0.7.0) (2026-02-24)
+
+
+### Features
+
+* add AWS Bedrock LLM provider ([e737f09](https://github.com/TOoSmOotH/otterbot/commit/e737f09ccfc91c5ab26fa3c81df4db9ad71d73f6)), closes [#125](https://github.com/TOoSmOotH/otterbot/issues/125)
+* add Mattermost chat provider ([2ef29fd](https://github.com/TOoSmOotH/otterbot/commit/2ef29fd1f0ee1bfdd0b80499445d396391fb67d3))
+* add Mattermost chat provider ([b2c6427](https://github.com/TOoSmOotH/otterbot/commit/b2c642740bcbdc2e275579495a0659117c09f994))
+* add Sims-style chat bubbles above 3D agent characters ([d5a7921](https://github.com/TOoSmOotH/otterbot/commit/d5a7921fa56aba733b673b4cbf9b060da1723d18))
+* add WhatsApp chat provider ([4e8566d](https://github.com/TOoSmOotH/otterbot/commit/4e8566d37a8eb06ee30f1039fd30e45bd1166545))
+* add WhatsApp chat provider ([acd24e8](https://github.com/TOoSmOotH/otterbot/commit/acd24e8eedadd88f9aa45872a1c78b65704fcf46)), closes [#133](https://github.com/TOoSmOotH/otterbot/issues/133)
+* merge beta to main with conflict resolution ([c311d15](https://github.com/TOoSmOotH/otterbot/commit/c311d1568c8f17e59255cd6402380572b7bb292f))
+* show standby bubbles for scheduler agents ([6922919](https://github.com/TOoSmOotH/otterbot/commit/69229191000fb8eb81da603cd9458644856907e1))
+
+
+### Bug Fixes
+
+* add label-based duplicate detection to createKanbanTask ([aa89096](https://github.com/TOoSmOotH/otterbot/commit/aa8909635e60ae6a1be8744505373a461ac6aa71))
+* auto-handle Claude Code plan mode prompt in yolo mode ([140113b](https://github.com/TOoSmOotH/otterbot/commit/140113b311a2f9bc7bb1f6aeaa76acdae05f00a9))
+* cast Bedrock model to LanguageModel for SDK compatibility ([9334468](https://github.com/TOoSmOotH/otterbot/commit/9334468def99b9e558bb79eebdd4d0a6cc435b0a))
+* ensure chat bubbles show for thinking/acting agents ([006232a](https://github.com/TOoSmOotH/otterbot/commit/006232aec833467feb73e07cdb7c11cd71d06f17))
+* ensure chat bubbles show for thinking/acting agents ([3ef450f](https://github.com/TOoSmOotH/otterbot/commit/3ef450fe4887ca2d57fa7bc649762a03cf9ba53c))
+* git init branch naming for CI ([d2c82e8](https://github.com/TOoSmOotH/otterbot/commit/d2c82e8f5660b4bcbef4397705a3f51d448ea444))
+* resolve type errors in whatsapp-bridge for Docker build ([a149cd9](https://github.com/TOoSmOotH/otterbot/commit/a149cd9380d4ce714740a9f507f502a7e9df1e7a))
+* triple chat bubble size and raise position higher above characters ([3af3fc5](https://github.com/TOoSmOotH/otterbot/commit/3af3fc5f24e8904a2c7220bbc9901e8fdf6244c1))
+* unify pairing type across all chat providers ([dbf2c76](https://github.com/TOoSmOotH/otterbot/commit/dbf2c76fa6e174a5e9822043c2ad034c6ae75614))
+* unify pairing type across all chat providers to match Discord pattern ([4cb3c33](https://github.com/TOoSmOotH/otterbot/commit/4cb3c33439c8fa693bbb8aba381b62a2e3f322e4)), closes [#204](https://github.com/TOoSmOotH/otterbot/issues/204)
+* use default import for whatsapp-web.js CommonJS module ([3fd18fa](https://github.com/TOoSmOotH/otterbot/commit/3fd18fa9452ce7641f6f0bd698db476f9a22623d))
+* use git init -b main to ensure consistent branch naming in CI ([d6ecef8](https://github.com/TOoSmOotH/otterbot/commit/d6ecef8dfacb99667347a03fa60a174cd752ad16))
+* use inline styles for chat bubbles instead of CSS classes ([6985fb1](https://github.com/TOoSmOotH/otterbot/commit/6985fb1080a58f598e43e2a9b9d5b1a1c0868ca1))
+
 ## [0.7.0-beta.0](https://github.com/TOoSmOotH/otterbot/compare/otterbot-v0.6.0-beta.0...otterbot-v0.7.0-beta.0) (2026-02-24)
 
 
