@@ -217,6 +217,21 @@ The user can see everything on the desktop in real-time.`;
     this.contextManager = new ConversationContextManager(systemPrompt);
   }
 
+  /** Re-read model/provider from config so settings changes take effect without restart */
+  protected override refreshLlmConfig(): void {
+    const cooRegistryId = getConfig("coo_registry_id");
+    const customCoo = cooRegistryId ? new Registry().get(cooRegistryId) : null;
+
+    const newModel = customCoo?.defaultModel ?? getConfig("coo_model") ?? "claude-sonnet-4-5-20250929";
+    const newProvider = customCoo?.defaultProvider ?? getConfig("coo_provider") ?? "anthropic";
+
+    if (newModel !== this.llmConfig.model || newProvider !== this.llmConfig.provider) {
+      console.log(`[COO] LLM config changed: ${this.llmConfig.provider}/${this.llmConfig.model} → ${newProvider}/${newModel}`);
+      this.llmConfig.model = newModel;
+      this.llmConfig.provider = newProvider;
+    }
+  }
+
   /** Register module tools so the COO can query installed modules. */
   setModuleTools(tools: Record<string, unknown>): void {
     this._moduleTools = tools;

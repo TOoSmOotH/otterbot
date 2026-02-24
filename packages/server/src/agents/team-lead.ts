@@ -305,6 +305,24 @@ export class TeamLead extends BaseAgent {
     this.verificationRequested = this.loadFlag("verification");
   }
 
+  /** Re-read model/provider from config so settings changes take effect without restart */
+  protected override refreshLlmConfig(): void {
+    const newModel =
+      getConfig("team_lead_model") ??
+      getConfig("coo_model") ??
+      "claude-sonnet-4-5-20250929";
+    const newProvider =
+      getConfig("team_lead_provider") ??
+      getConfig("coo_provider") ??
+      "anthropic";
+
+    if (newModel !== this.llmConfig.model || newProvider !== this.llmConfig.provider) {
+      console.log(`[TeamLead ${this.id}] LLM config changed: ${this.llmConfig.provider}/${this.llmConfig.model} → ${newProvider}/${newModel}`);
+      this.llmConfig.model = newModel;
+      this.llmConfig.provider = newProvider;
+    }
+  }
+
   /** Persist a flag to the config KV table so it survives restarts */
   private persistFlag(flag: "verification", value: boolean): void {
     const key = `project:${this.projectId}:${flag}_requested`;

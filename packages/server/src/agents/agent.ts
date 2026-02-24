@@ -193,6 +193,9 @@ export abstract class BaseAgent {
     });
   }
 
+  /** Hook for long-lived agents (COO, TeamLead) to re-read model/provider from config before each think() call. */
+  protected refreshLlmConfig(): void {}
+
   /** Run LLM inference with the current conversation and stream the response */
   protected async think(
     userMessage: string,
@@ -200,6 +203,9 @@ export abstract class BaseAgent {
     onReasoning?: (token: string, messageId: string) => void,
     onReasoningEnd?: (messageId: string) => void,
   ): Promise<{ text: string; thinking: string | undefined; hadToolCalls: boolean; isError?: boolean; timedOut?: boolean }> {
+    // Re-read model/provider from config (no-op for short-lived workers)
+    this.refreshLlmConfig();
+
     // Reset abort flag at the start of each think cycle
     this._shouldAbortThink = false;
 
