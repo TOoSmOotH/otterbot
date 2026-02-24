@@ -55,6 +55,7 @@ vi.mock("irc-framework", () => ({
 
 // Import after mocking
 const { IrcBridge } = await import("../irc-bridge.js");
+import { setConfig } from "../../auth/auth.js";
 
 interface SendParams {
   fromAgentId: string | null;
@@ -140,6 +141,13 @@ describe("IrcBridge", () => {
       coo: coo as any,
       io: io as any,
     });
+
+    // Pair default test user "alice"
+    setConfig("irc:paired:alice", JSON.stringify({
+      ircUserId: "alice",
+      ircUsername: "alice",
+      pairedAt: new Date().toISOString(),
+    }));
   });
 
   afterEach(async () => {
@@ -372,6 +380,55 @@ describe("IrcBridge", () => {
       expect(coo.startNewConversation).toHaveBeenCalledOnce();
       // But send two messages
       expect(bus.send).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Pairing
+  // -------------------------------------------------------------------------
+
+  describe("pairing", () => {
+    it("sends pairing code to unpaired users", async () => {
+      await bridge.start(testConfig);
+      await new Promise((r) => setTimeout(r, 50));
+
+      const client = (bridge as any).client as MockIrcClient;
+      client.emit("privmsg", {
+        nick: "stranger",
+        target: "#general",
+        message: "otterbot: hello",
+      });
+
+      await new Promise((r) => setTimeout(r, 50));
+
+      // Should NOT route to COO
+      expect(bus.send).not.toHaveBeenCalled();
+      // Should send pairing message
+      expect(client.sentMessages).toHaveLength(1);
+      expect(client.sentMessages[0]!.message).toContain("approve this code");
+      // Should emit pairing request
+      expect(io.emit).toHaveBeenCalledWith(
+        "irc:pairing-request",
+        expect.objectContaining({
+          ircUserId: "stranger",
+          ircUsername: "stranger",
+        }),
+      );
+    });
+
+    it("routes messages from paired users to COO", async () => {
+      await bridge.start(testConfig);
+      await new Promise((r) => setTimeout(r, 50));
+
+      const client = (bridge as any).client as MockIrcClient;
+      client.emit("privmsg", {
+        nick: "alice",
+        target: "#general",
+        message: "otterbot: hello",
+      });
+
+      await new Promise((r) => setTimeout(r, 50));
+      expect(bus.send).toHaveBeenCalledOnce();
     });
   });
 

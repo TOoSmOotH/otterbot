@@ -12,6 +12,12 @@ vi.mock("../../auth/auth.js", () => ({
   deleteConfig: vi.fn((key: string) => configStore.delete(key)),
 }));
 
+// Mock the pairing module so settings tests don't need the database
+vi.mock("../pairing.js", () => ({
+  listPairedUsers: vi.fn(() => []),
+  listPendingPairings: vi.fn(() => []),
+}));
+
 // Mock global fetch for testTeamsConnection
 const mockFetch = vi.fn();
 vi.stubGlobal("fetch", mockFetch);
@@ -45,6 +51,8 @@ describe("Teams settings", () => {
         appIdSet: false,
         appPasswordSet: false,
         tenantId: null,
+        pairedUsers: [],
+        pendingPairings: [],
       });
     });
 
@@ -100,6 +108,8 @@ describe("Teams settings", () => {
         appIdSet: true,
         appPasswordSet: true,
         tenantId: "my-tenant",
+        pairedUsers: [],
+        pendingPairings: [],
       });
     });
   });
