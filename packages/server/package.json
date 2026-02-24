@@ -12,6 +12,7 @@
     "db:seed": "tsx src/db/seed.ts"
   },
   "dependencies": {
+    "@ai-sdk/amazon-bedrock": "^4.0.63",
     "@ai-sdk/anthropic": "^1.1.9",
     "@ai-sdk/google": "^3.0.30",
     "@ai-sdk/openai": "^1.1.14",
