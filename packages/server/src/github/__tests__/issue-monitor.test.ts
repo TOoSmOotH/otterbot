@@ -440,7 +440,7 @@ describe("GitHubIssueMonitor", () => {
         "owner/repo",
         "ghp_test",
         112,
-        expect.stringContaining("looking into this issue"),
+        expect.stringContaining("Looking into this issue"),
       );
     });
 
