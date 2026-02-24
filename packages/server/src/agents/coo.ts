@@ -735,8 +735,8 @@ The user can see everything on the desktop in real-time.`;
             const { repoFullName, token } = this.resolveGitHubRepo(projectId, repo);
             const issues = await fetchIssues(repoFullName, token, {
               state: state ?? "open",
-              labels,
-              assignee,
+              labels: labels ?? undefined,
+              assignee: assignee ?? undefined,
               per_page,
             });
             if (issues.length === 0) return "No issues found matching the filters.";
@@ -1022,8 +1022,8 @@ The user can see everything on the desktop in real-time.`;
    * or a `projectId` (looks up project config). Returns the repo full name and token.
    */
   private resolveGitHubRepo(
-    projectId?: string,
-    repo?: string,
+    projectId?: string | null,
+    repo?: string | null,
   ): { repoFullName: string; token: string } {
     const token = getConfig("github:token");
     if (!token) {
@@ -1164,7 +1164,7 @@ The user can see everything on the desktop in real-time.`;
     return `Project "${name}" created (${projectId}). Team Lead ${teamLead.id} assigned and directive sent.`;
   }
 
-  private async getProjectStatus(projectId?: string): Promise<string> {
+  private async getProjectStatus(projectId?: string | null): Promise<string> {
     const db = getDb();
 
     if (projectId) {
@@ -1315,8 +1315,8 @@ The user can see everything on the desktop in real-time.`;
   private async manageModels(args: {
     action: string;
     tier?: string;
-    provider?: string;
-    model?: string;
+    provider?: string | null;
+    model?: string | null;
   }): Promise<string> {
     const { action, tier, provider, model } = args;
 
@@ -1363,7 +1363,7 @@ The user can see everything on the desktop in real-time.`;
         if (!provider) {
           return "Error: provider is required for test_provider.";
         }
-        const result = await testProvider(provider, model);
+        const result = await testProvider(provider, model ?? undefined);
         if (result.ok) {
           return `Provider "${provider}" is working. Latency: ${result.latencyMs}ms.`;
         }
@@ -1377,9 +1377,9 @@ The user can see everything on the desktop in real-time.`;
 
   private async manageSearch(args: {
     action: string;
-    provider?: string;
-    api_key?: string;
-    base_url?: string;
+    provider?: string | null;
+    api_key?: string | null;
+    base_url?: string | null;
   }): Promise<string> {
     const { action, provider, api_key, base_url } = args;
 
@@ -1441,12 +1441,12 @@ The user can see everything on the desktop in real-time.`;
 
   private managePackages(args: {
     action: string;
-    package_name?: string;
-    version?: string;
-    repo_name?: string;
-    repo_source?: string;
-    repo_key_url?: string;
-    repo_key_path?: string;
+    package_name?: string | null;
+    version?: string | null;
+    repo_name?: string | null;
+    repo_source?: string | null;
+    repo_key_url?: string | null;
+    repo_key_path?: string | null;
   }): string {
     const { action, package_name: packageName, version } = args;
 
@@ -1534,7 +1534,7 @@ The user can see everything on the desktop in real-time.`;
         return `Removed apt package "${packageName}".`;
       }
       case "add_npm": {
-        const result = installNpmPackage(packageName, version, "coo");
+        const result = installNpmPackage(packageName, version ?? undefined, "coo");
         if (!result.success) {
           return `Failed to install npm package "${packageName}": ${result.error}`;
         }
