@@ -19,6 +19,11 @@ interface BubbleState {
 }
 
 const TOOL_CALL_STALE_MS = 10_000;
+const DEBUG_BUBBLES = true;
+
+function debugLog(...args: unknown[]) {
+  if (DEBUG_BUBBLES) console.log("[ChatBubble]", ...args);
+}
 
 function useBubbleState(agentId: string | undefined, status: string): BubbleState | null {
   const [bubble, setBubble] = useState<BubbleState | null>(null);
@@ -31,13 +36,17 @@ function useBubbleState(agentId: string | undefined, status: string): BubbleStat
       return;
     }
 
+    debugLog(`derive() called for agent=${agentId}, status=${status}`);
+
     // 1. Check for recent tool call
     const activityState = useAgentActivityStore.getState();
     const calls = activityState.agentToolCalls.get(agentId);
+    debugLog(`  toolCalls for ${agentId}:`, calls?.length ?? 0, calls?.length ? `latest=${calls[calls.length - 1].toolName}` : "");
     if (calls && calls.length > 0) {
       const latest = calls[calls.length - 1];
       const ts = new Date(latest.timestamp).getTime();
       const age = Date.now() - ts;
+      debugLog(`  latest tool age=${age}ms, stale=${TOOL_CALL_STALE_MS}ms`);
       if (age < TOOL_CALL_STALE_MS) {
         if (ts !== lastToolTimestampRef.current) {
           lastToolTimestampRef.current = ts;
@@ -47,7 +56,9 @@ function useBubbleState(agentId: string | undefined, status: string): BubbleStat
             derive();
           }, TOOL_CALL_STALE_MS - age);
         }
-        setBubble({ text: humanizeToolName(latest.toolName), type: "speech" });
+        const text = humanizeToolName(latest.toolName);
+        debugLog(`  -> showing tool bubble: "${text}"`);
+        setBubble({ text, type: "speech" });
         return;
       }
     }
@@ -55,8 +66,11 @@ function useBubbleState(agentId: string | undefined, status: string): BubbleStat
     // 2. Check coding session
     const codingState = useCodingAgentStore.getState();
     const session = codingState.sessions.get(agentId);
+    debugLog(`  codingSession for ${agentId}:`, session ? `status=${session.status}, task=${session.task}` : "none");
     if (session && session.status === "active") {
-      setBubble({ text: "Coding: " + truncateText(session.task, 22), type: "speech" });
+      const text = "Coding: " + truncateText(session.task, 22);
+      debugLog(`  -> showing coding bubble: "${text}"`);
+      setBubble({ text, type: "speech" });
       return;
     }
 
@@ -65,23 +79,29 @@ function useBubbleState(agentId: string | undefined, status: string): BubbleStat
     const assignedTask = projectState.tasks.find(
       (t) => t.assigneeAgentId === agentId && t.column === "in_progress",
     );
+    debugLog(`  kanbanTask for ${agentId}:`, assignedTask ? `title=${assignedTask.title}` : "none");
     if (assignedTask) {
-      setBubble({ text: "Working on: " + truncateText(assignedTask.title, 18), type: "speech" });
+      const text = "Working on: " + truncateText(assignedTask.title, 18);
+      debugLog(`  -> showing kanban bubble: "${text}"`);
+      setBubble({ text, type: "speech" });
       return;
     }
 
     // 4. Check thinking/acting status
     if (status === "thinking") {
+      debugLog(`  -> showing thought bubble`);
       setBubble({ text: "...", type: "thought" });
       return;
     }
 
     if (status === "acting") {
+      debugLog(`  -> showing acting bubble`);
       setBubble({ text: "Working...", type: "speech" });
       return;
     }
 
     // 5. Idle / done — no bubble
+    debugLog(`  -> no bubble (status=${status})`);
     setBubble(null);
   }, [agentId, status]);
 
@@ -115,16 +135,20 @@ export function AgentChatBubble({ agentId, status, yOffset }: AgentChatBubblePro
   const [visible, setVisible] = useState(false);
   const prevBubbleRef = useRef<BubbleState | null>(null);
 
+  debugLog(`render agent=${agentId} status=${status} bubble=${bubble ? JSON.stringify(bubble) : "null"} visible=${visible}`);
+
   useEffect(() => {
     if (bubble) {
+      debugLog(`bubble appeared for ${agentId}: ${JSON.stringify(bubble)}`);
       setVisible(true);
       prevBubbleRef.current = bubble;
     } else {
+      debugLog(`bubble cleared for ${agentId}, fading out`);
       // Delay hiding for fade-out
       const timer = setTimeout(() => setVisible(false), 300);
       return () => clearTimeout(timer);
     }
-  }, [bubble]);
+  }, [bubble, agentId]);
 
   if (!visible && !bubble) return null;
 
