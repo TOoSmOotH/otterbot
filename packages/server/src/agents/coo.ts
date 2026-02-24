@@ -442,9 +442,10 @@ The user can see everything on the desktop in real-time.`;
           "You get at most 1 command per turn. Output is capped at 50KB. Default timeout: 30s, max: 120s.",
         parameters: z.object({
           command: z.string().describe("The shell command to execute"),
-          projectId: z.string().optional().describe("Project ID — sets working directory to the project's repo"),
+          projectId: z.string().nullable().optional().describe("Project ID — sets working directory to the project's repo"),
           timeout: z
             .number()
+            .nullable()
             .optional()
             .describe("Timeout in milliseconds (default: 30000, max: 120000)"),
         }),
@@ -558,6 +559,7 @@ The user can see everything on the desktop in real-time.`;
         parameters: z.object({
           projectId: z
             .string()
+            .nullable()
             .optional()
             .describe(
               "Specific project ID to check. Leave empty for all projects.",
@@ -589,10 +591,12 @@ The user can see everything on the desktop in real-time.`;
             .describe("Agent tier (required for set_default)"),
           provider: z
             .string()
+            .nullable()
             .optional()
             .describe("Provider ID (required for set_default and test_provider)"),
           model: z
             .string()
+            .nullable()
             .optional()
             .describe("Model ID (required for set_default, optional for test_provider)"),
         }),
@@ -615,14 +619,17 @@ The user can see everything on the desktop in real-time.`;
             .describe("Action to perform"),
           provider: z
             .string()
+            .nullable()
             .optional()
             .describe("Search provider ID: searxng, brave, or tavily"),
           api_key: z
             .string()
+            .nullable()
             .optional()
             .describe("API key (for brave or tavily)"),
           base_url: z
             .string()
+            .nullable()
             .optional()
             .describe("Base URL (for searxng)"),
         }),
@@ -693,10 +700,12 @@ The user can see everything on the desktop in real-time.`;
         parameters: z.object({
           projectId: z
             .string()
+            .nullable()
             .optional()
             .describe("Project ID — resolves repo from project config"),
           repo: z
             .string()
+            .nullable()
             .optional()
             .describe("Repository in owner/repo format (alternative to projectId)"),
           state: z
@@ -705,10 +714,12 @@ The user can see everything on the desktop in real-time.`;
             .describe("Filter by state (default: open)"),
           labels: z
             .string()
+            .nullable()
             .optional()
             .describe("Comma-separated label names to filter by"),
           assignee: z
             .string()
+            .nullable()
             .optional()
             .describe("Filter by assignee login"),
           per_page: z
@@ -747,10 +758,12 @@ The user can see everything on the desktop in real-time.`;
           issue_number: z.number().int().describe("The issue number to fetch"),
           projectId: z
             .string()
+            .nullable()
             .optional()
             .describe("Project ID — resolves repo from project config"),
           repo: z
             .string()
+            .nullable()
             .optional()
             .describe("Repository in owner/repo format (alternative to projectId)"),
         }),
@@ -787,10 +800,12 @@ The user can see everything on the desktop in real-time.`;
         parameters: z.object({
           projectId: z
             .string()
+            .nullable()
             .optional()
             .describe("Project ID — resolves repo from project config"),
           repo: z
             .string()
+            .nullable()
             .optional()
             .describe("Repository in owner/repo format (alternative to projectId)"),
           state: z
@@ -830,10 +845,12 @@ The user can see everything on the desktop in real-time.`;
           pr_number: z.number().int().describe("The pull request number to fetch"),
           projectId: z
             .string()
+            .nullable()
             .optional()
             .describe("Project ID — resolves repo from project config"),
           repo: z
             .string()
+            .nullable()
             .optional()
             .describe("Repository in owner/repo format (alternative to projectId)"),
         }),
@@ -889,28 +906,34 @@ The user can see everything on the desktop in real-time.`;
             ),
           package_name: z
             .string()
+            .nullable()
             .optional()
             .describe("Package name (required for apt/npm add/remove actions)"),
           version: z
             .string()
+            .nullable()
             .optional()
             .describe("Version specifier for npm packages (e.g. 'latest', '^1.0.0')"),
           repo_name: z
             .string()
+            .nullable()
             .optional()
             .describe("Short repo identifier, e.g. 'nodesource' or 'docker' (required for repo actions)"),
           repo_source: z
             .string()
+            .nullable()
             .optional()
             .describe(
               "Full deb source line, e.g. 'deb [signed-by=/etc/apt/keyrings/example.gpg] https://example.com/apt stable main'",
             ),
           repo_key_url: z
             .string()
+            .nullable()
             .optional()
             .describe("URL to the GPG signing key, e.g. 'https://example.com/gpg-key.asc'"),
           repo_key_path: z
             .string()
+            .nullable()
             .optional()
             .describe("Path to store the dearmored key, e.g. '/etc/apt/keyrings/example.gpg'"),
         }),
@@ -923,7 +946,7 @@ The user can see everything on the desktop in real-time.`;
         description:
           "List recent conversations. Use when the user asks about their chat history or wants to switch conversations.",
         parameters: z.object({
-          projectId: z.string().optional().describe("Filter by project ID"),
+          projectId: z.string().nullable().optional().describe("Filter by project ID"),
           limit: z.number().optional().describe("Max conversations to return (default 20)"),
         }),
         execute: async ({ projectId, limit }) => {
