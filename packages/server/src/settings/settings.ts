@@ -1884,48 +1884,6 @@ export function applyGitSSHConfig(): void {
   configureGitSSH();
 }
 
-// ---------------------------------------------------------------------------
-// OpenRouter balance
-// ---------------------------------------------------------------------------
-
-export interface OpenRouterBalance {
-  balance: number | null;
-  limit: number | null;
-  usage: number;
-}
-
-export async function fetchOpenRouterBalance(): Promise<OpenRouterBalance | null> {
-  const db = getDb();
-  const rows = db.select().from(schema.providers).all();
-  const orProvider = rows.find((r) => r.type === "openrouter" && r.apiKey);
-  if (!orProvider) return null;
-
-  try {
-    const res = await fetch("https://openrouter.ai/api/v1/auth/key", {
-      headers: { Authorization: `Bearer ${orProvider.apiKey}` },
-      signal: AbortSignal.timeout(10_000),
-    });
-    if (!res.ok) return null;
-
-    const data = (await res.json()) as {
-      data?: {
-        limit: number | null;
-        usage: number;
-        limit_remaining: number | null;
-      };
-    };
-    if (!data.data) return null;
-
-    const usage = data.data.usage;
-    const limit = data.data.limit ?? null;
-    const balance = data.data.limit_remaining ?? (limit != null ? limit - usage : null);
-
-    return { balance, limit, usage };
-  } catch {
-    return null;
-  }
-}
-
 export function testSSHConnection(): { ok: boolean; username?: string; error?: string } {
   try {
     // ssh -T git@github.com exits with code 1 on success (it prints "Hi username!")
