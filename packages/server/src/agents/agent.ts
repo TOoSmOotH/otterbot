@@ -472,9 +472,16 @@ export abstract class BaseAgent {
     // Track pending tool calls — use longer timeout while tools are executing
     let pendingToolCalls = 0;
 
+    // Track stream errors surfaced by the provider
+    let streamError: string | undefined;
+
     // Process first part
     const processPart = (part: any) => {
-      if (part.type === "reasoning") {
+      if (part.type === "error") {
+        const errMsg = part.error instanceof Error ? part.error.message : JSON.stringify(part.error);
+        console.error(`[Agent ${this.id}] Stream error part: ${errMsg}`);
+        streamError = errMsg;
+      } else if (part.type === "reasoning") {
         reasoning += part.textDelta;
         wasReasoning = true;
         onReasoning?.(part.textDelta, messageId);
@@ -516,6 +523,10 @@ export abstract class BaseAgent {
         pendingToolCalls = Math.max(0, pendingToolCalls - 1);
         const resultStr = typeof part.result === "string" ? part.result : JSON.stringify(part.result ?? "");
         console.log(`[Agent ${this.id}] Tool result (${part.toolName}): ${resultStr.slice(0, 300)}`);
+      } else if (part.type === "finish") {
+        if (!fullResponse && !hadToolCalls) {
+          console.warn(`[Agent ${this.id}] Stream finished with 0 chars — finishReason=${part.finishReason}, usage=${JSON.stringify(part.usage ?? {})}`);
+        }
       }
     };
 
@@ -562,7 +573,12 @@ export abstract class BaseAgent {
       this.persistActivity("response", fullResponse, {}, messageId);
     }
 
-    console.log(`[Agent ${this.id}] runStream complete — text=${fullResponse.length} chars, thinking=${reasoning.length} chars, toolCalls=${hadToolCalls}`);
+    console.log(`[Agent ${this.id}] runStream complete — text=${fullResponse.length} chars, thinking=${reasoning.length} chars, toolCalls=${hadToolCalls}${streamError ? `, error=${streamError}` : ""}`);
+
+    // If the stream produced an error and no text, surface the error
+    if (streamError && !fullResponse && !hadToolCalls) {
+      return { text: `Error: ${streamError}`, thinking: undefined, hadToolCalls: false };
+    }
 
     // Capture token usage from the stream result (fire-and-forget)
     this.captureTokenUsage(result as any, messageId);

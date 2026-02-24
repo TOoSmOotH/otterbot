@@ -109,7 +109,7 @@ export function resolveModel(config: LLMConfig): LanguageModel {
         baseURL: "https://openrouter.ai/api/v1",
         apiKey: config.apiKey ?? resolved.apiKey ?? "",
       });
-      return openrouter(config.model);
+      return openrouter(config.model, { structuredOutputs: false });
     }
 
     case "openai-compatible": {
