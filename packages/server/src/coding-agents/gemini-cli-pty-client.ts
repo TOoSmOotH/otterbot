@@ -9,9 +9,8 @@
 import type {
   CodingAgentClient,
   CodingAgentTaskResult,
-  CodingAgentDiff,
 } from "./coding-agent-client.js";
-import { execSync } from "node:child_process";
+import { computeGitDiff } from "../utils/git.js";
 import { getConfig } from "../auth/auth.js";
 
 /** Ring buffer size for late-joining clients (~100KB) */
@@ -121,7 +120,7 @@ export class GeminiCliPtyClient implements CodingAgentClient {
           this.config.onExit?.(exitCode);
 
           // Compute diff via git
-          const diff = this.computeGitDiff();
+          const diff = this.config.workspacePath ? computeGitDiff(this.config.workspacePath) : null;
 
           const success = exitCode === 0 || !this._killed;
 
@@ -235,31 +234,4 @@ export class GeminiCliPtyClient implements CodingAgentClient {
     return parts.join("\n");
   }
 
-  /** Compute file diffs via git in the workspace directory */
-  private computeGitDiff(): CodingAgentDiff | null {
-    if (!this.config.workspacePath) return null;
-
-    try {
-      const output = execSync("git diff --stat --numstat HEAD", {
-        cwd: this.config.workspacePath,
-        encoding: "utf-8",
-        timeout: 10_000,
-      }).trim();
-
-      if (!output) return null;
-
-      const files = output.split("\n").map((line) => {
-        const parts = line.split("\t");
-        return {
-          path: parts[2] ?? parts[0] ?? "",
-          additions: parseInt(parts[0] ?? "0", 10) || 0,
-          deletions: parseInt(parts[1] ?? "0", 10) || 0,
-        };
-      }).filter((f) => f.path);
-
-      return { files };
-    } catch {
-      return null;
-    }
-  }
 }
