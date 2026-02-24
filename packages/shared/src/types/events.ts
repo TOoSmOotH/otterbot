@@ -63,6 +63,7 @@ export interface ServerToClientEvents {
   "mattermost:status": (data: { status: "connected" | "disconnected" | "error"; botUsername?: string }) => void;
   "telegram:pairing-request": (data: { code: string; telegramUserId: string; telegramUsername: string }) => void;
   "telegram:status": (data: { status: "connected" | "disconnected" | "error"; botUsername?: string }) => void;
+  "whatsapp:status": (data: { status: "connected" | "disconnected" | "qr" | "authenticated" | "auth_failure"; qr?: string }) => void;
 }
 
 /** Events emitted from client to server */
