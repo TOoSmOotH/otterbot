@@ -1,11 +1,11 @@
 import { create } from "zustand";
-import type { NamedProvider, ProviderTypeMeta, ProviderType, CustomModel, ModelOption } from "@otterbot/shared";
+import type { NamedProvider, ProviderTypeMeta, ProviderType, CustomModel, ModelOption, AgentModelOverride } from "@otterbot/shared";
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
-export type { NamedProvider, ProviderTypeMeta, ProviderType, CustomModel, ModelOption };
+export type { NamedProvider, ProviderTypeMeta, ProviderType, CustomModel, ModelOption, AgentModelOverride };
 
 export interface TierDefaults {
   coo: { provider: string; model: string };
@@ -143,6 +143,16 @@ interface SettingsState {
   codexTimeoutMs: number;
   codexTestResult: TestResult | null;
 
+  // Gemini CLI
+  geminiCliEnabled: boolean;
+  geminiCliAuthMode: "api-key" | "oauth";
+  geminiCliApiKeySet: boolean;
+  geminiCliModel: string;
+  geminiCliApprovalMode: "full-auto" | "auto-edit" | "default";
+  geminiCliTimeoutMs: number;
+  geminiCliSandbox: boolean;
+  geminiCliTestResult: TestResult | null;
+
   // GitHub
   gitHubEnabled: boolean;
   gitHubTokenSet: boolean;
@@ -167,6 +177,27 @@ interface SettingsState {
   discordPendingPairings: Array<{ code: string; discordUserId: string; discordUsername: string; createdAt: string }>;
   discordTestResult: TestResult | null;
 
+  // Telegram
+  telegramEnabled: boolean;
+  telegramTokenSet: boolean;
+  telegramBotUsername: string | null;
+  telegramPairedUsers: Array<{ telegramUserId: string; telegramUsername: string; pairedAt: string }>;
+  telegramPendingPairings: Array<{ code: string; telegramUserId: string; telegramUsername: string; createdAt: string }>;
+  telegramTestResult: TestResult | null;
+
+  // Slack
+  slackEnabled: boolean;
+  slackBotTokenSet: boolean;
+  slackSigningSecretSet: boolean;
+  slackAppTokenSet: boolean;
+  slackRequireMention: boolean;
+  slackBotUsername: string | null;
+  slackAllowedChannels: string[];
+  slackAvailableChannels: Array<{ id: string; name: string }>;
+  slackPairedUsers: Array<{ slackUserId: string; slackUsername: string; pairedAt: string }>;
+  slackPendingPairings: Array<{ code: string; slackUserId: string; slackUsername: string; createdAt: string }>;
+  slackTestResult: TestResult | null;
+
   // Google
   googleConnected: boolean;
   googleConnectedEmail: string | null;
@@ -189,6 +220,12 @@ interface SettingsState {
   loadCustomModels: (providerId?: string) => Promise<void>;
   createCustomModel: (data: { providerId: string; modelId: string; label?: string }) => Promise<CustomModel | null>;
   deleteCustomModel: (id: string) => Promise<void>;
+
+  // Agent model overrides
+  agentModelOverrides: AgentModelOverride[];
+  loadAgentModelOverrides: () => Promise<void>;
+  setAgentModelOverride: (registryEntryId: string, provider: string, model: string) => Promise<void>;
+  clearAgentModelOverride: (registryEntryId: string) => Promise<void>;
 
   // Scheduled Tasks actions
   loadScheduledTasks: () => Promise<void>;
@@ -285,6 +322,19 @@ interface SettingsState {
   }) => Promise<void>;
   testCodexConnection: () => Promise<void>;
 
+  // Gemini CLI actions
+  loadGeminiCliSettings: () => Promise<void>;
+  updateGeminiCliSettings: (data: {
+    enabled?: boolean;
+    authMode?: "api-key" | "oauth";
+    apiKey?: string;
+    model?: string;
+    approvalMode?: "full-auto" | "auto-edit" | "default";
+    timeoutMs?: number;
+    sandbox?: boolean;
+  }) => Promise<void>;
+  testGeminiCliConnection: () => Promise<void>;
+
   // GitHub actions
   loadGitHubSettings: () => Promise<void>;
   updateGitHubSettings: (data: {
@@ -312,6 +362,32 @@ interface SettingsState {
   approveDiscordPairing: (code: string) => Promise<void>;
   rejectDiscordPairing: (code: string) => Promise<void>;
   revokeDiscordUser: (userId: string) => Promise<void>;
+
+  // Telegram actions
+  loadTelegramSettings: () => Promise<void>;
+  updateTelegramSettings: (data: {
+    enabled?: boolean;
+    botToken?: string;
+  }) => Promise<void>;
+  testTelegramConnection: () => Promise<void>;
+  approveTelegramPairing: (code: string) => Promise<void>;
+  rejectTelegramPairing: (code: string) => Promise<void>;
+  revokeTelegramUser: (userId: string) => Promise<void>;
+
+  // Slack actions
+  loadSlackSettings: () => Promise<void>;
+  updateSlackSettings: (data: {
+    enabled?: boolean;
+    botToken?: string;
+    signingSecret?: string;
+    appToken?: string;
+    requireMention?: boolean;
+    allowedChannels?: string[];
+  }) => Promise<void>;
+  testSlackConnection: () => Promise<void>;
+  approveSlackPairing: (code: string) => Promise<void>;
+  rejectSlackPairing: (code: string) => Promise<void>;
+  revokeSlackUser: (userId: string) => Promise<void>;
 
   // Google actions
   loadGoogleSettings: () => Promise<void>;
@@ -342,6 +418,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   },
   models: {},
   customModels: [],
+  agentModelOverrides: [],
   loading: false,
   error: null,
   testResults: {},
@@ -389,6 +466,14 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   codexApprovalMode: "full-auto",
   codexTimeoutMs: 1200000,
   codexTestResult: null,
+  geminiCliEnabled: false,
+  geminiCliAuthMode: "api-key",
+  geminiCliApiKeySet: false,
+  geminiCliModel: "gemini-2.5-flash",
+  geminiCliApprovalMode: "full-auto",
+  geminiCliTimeoutMs: 1200000,
+  geminiCliSandbox: false,
+  geminiCliTestResult: null,
   gitHubEnabled: false,
   gitHubTokenSet: false,
   gitHubUsername: null,
@@ -407,6 +492,23 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   discordPairedUsers: [],
   discordPendingPairings: [],
   discordTestResult: null,
+  telegramEnabled: false,
+  telegramTokenSet: false,
+  telegramBotUsername: null,
+  telegramPairedUsers: [],
+  telegramPendingPairings: [],
+  telegramTestResult: null,
+  slackEnabled: false,
+  slackBotTokenSet: false,
+  slackSigningSecretSet: false,
+  slackAppTokenSet: false,
+  slackRequireMention: true,
+  slackBotUsername: null,
+  slackAllowedChannels: [],
+  slackAvailableChannels: [],
+  slackPairedUsers: [],
+  slackPendingPairings: [],
+  slackTestResult: null,
   googleConnected: false,
   googleConnectedEmail: null,
   googleClientIdSet: false,
@@ -596,6 +698,41 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       if (cm) {
         await get().fetchModels(cm.providerId);
       }
+    } catch {
+      // Silently fail
+    }
+  },
+
+  loadAgentModelOverrides: async () => {
+    try {
+      const res = await fetch("/api/settings/agent-model-overrides");
+      if (!res.ok) return;
+      const data = await res.json();
+      set({ agentModelOverrides: data.overrides ?? [] });
+    } catch {
+      // Silently fail
+    }
+  },
+
+  setAgentModelOverride: async (registryEntryId, provider, model) => {
+    try {
+      await fetch(`/api/settings/agent-model-overrides/${registryEntryId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ provider, model }),
+      });
+      await get().loadAgentModelOverrides();
+    } catch {
+      // Silently fail
+    }
+  },
+
+  clearAgentModelOverride: async (registryEntryId) => {
+    try {
+      await fetch(`/api/settings/agent-model-overrides/${registryEntryId}`, {
+        method: "DELETE",
+      });
+      await get().loadAgentModelOverrides();
     } catch {
       // Silently fail
     }
@@ -1213,6 +1350,69 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     }
   },
 
+  // Gemini CLI actions
+
+  loadGeminiCliSettings: async () => {
+    try {
+      const res = await fetch("/api/settings/gemini-cli");
+      if (!res.ok) return;
+      const data = await res.json();
+      set({
+        geminiCliEnabled: data.enabled,
+        geminiCliAuthMode: data.authMode ?? "api-key",
+        geminiCliApiKeySet: data.apiKeySet,
+        geminiCliModel: data.model ?? "gemini-2.5-flash",
+        geminiCliApprovalMode: data.approvalMode ?? "full-auto",
+        geminiCliTimeoutMs: data.timeoutMs ?? 1200000,
+        geminiCliSandbox: data.sandbox ?? false,
+      });
+    } catch {
+      // Silently fail
+    }
+  },
+
+  updateGeminiCliSettings: async (data) => {
+    set({ error: null });
+    try {
+      const res = await fetch("/api/settings/gemini-cli", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) throw new Error("Failed to update Gemini CLI settings");
+      await get().loadGeminiCliSettings();
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "Unknown error" });
+    }
+  },
+
+  testGeminiCliConnection: async () => {
+    set({ geminiCliTestResult: { ok: false, testing: true } });
+    try {
+      const res = await fetch("/api/settings/gemini-cli/test", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      const data = await res.json();
+      set({
+        geminiCliTestResult: {
+          ok: data.ok,
+          error: data.error,
+          testing: false,
+        },
+      });
+    } catch (err) {
+      set({
+        geminiCliTestResult: {
+          ok: false,
+          error: err instanceof Error ? err.message : "Unknown error",
+          testing: false,
+        },
+      });
+    }
+  },
+
   // GitHub actions
 
   loadGitHubSettings: async () => {
@@ -1478,6 +1678,217 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       });
       if (!res.ok) throw new Error("Failed to revoke user");
       await get().loadDiscordSettings();
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "Unknown error" });
+    }
+  },
+
+  // Telegram actions
+
+  loadTelegramSettings: async () => {
+    try {
+      const res = await fetch("/api/settings/telegram");
+      if (!res.ok) return;
+      const data = await res.json();
+      set({
+        telegramEnabled: data.enabled,
+        telegramTokenSet: data.tokenSet,
+        telegramBotUsername: data.botUsername,
+        telegramPairedUsers: data.pairedUsers,
+        telegramPendingPairings: data.pendingPairings,
+      });
+    } catch {
+      // Silently fail
+    }
+  },
+
+  updateTelegramSettings: async (data) => {
+    set({ error: null });
+    try {
+      const res = await fetch("/api/settings/telegram", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) throw new Error("Failed to update Telegram settings");
+      await get().loadTelegramSettings();
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "Unknown error" });
+    }
+  },
+
+  testTelegramConnection: async () => {
+    set({ telegramTestResult: { ok: false, testing: true } });
+    try {
+      const res = await fetch("/api/settings/telegram/test", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      const data = await res.json();
+      set({
+        telegramTestResult: {
+          ok: data.ok,
+          error: data.error,
+          testing: false,
+        },
+        telegramBotUsername: data.ok ? data.botUsername : get().telegramBotUsername,
+      });
+    } catch (err) {
+      set({
+        telegramTestResult: {
+          ok: false,
+          error: err instanceof Error ? err.message : "Unknown error",
+          testing: false,
+        },
+      });
+    }
+  },
+
+  approveTelegramPairing: async (code) => {
+    set({ error: null });
+    try {
+      const res = await fetch("/api/settings/telegram/pair/approve", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code }),
+      });
+      if (!res.ok) throw new Error("Failed to approve pairing");
+      await get().loadTelegramSettings();
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "Unknown error" });
+    }
+  },
+
+  rejectTelegramPairing: async (code) => {
+    set({ error: null });
+    try {
+      const res = await fetch("/api/settings/telegram/pair/reject", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code }),
+      });
+      if (!res.ok) throw new Error("Failed to reject pairing");
+      await get().loadTelegramSettings();
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "Unknown error" });
+    }
+  },
+
+  revokeTelegramUser: async (userId) => {
+    set({ error: null });
+    try {
+      const res = await fetch(`/api/settings/telegram/pair/${userId}`, {
+        method: "DELETE",
+      });
+      if (!res.ok) throw new Error("Failed to revoke user");
+      await get().loadTelegramSettings();
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "Unknown error" });
+    }
+  },
+
+  // Slack actions
+
+  loadSlackSettings: async () => {
+    try {
+      const res = await fetch("/api/settings/slack");
+      if (!res.ok) return;
+      const data = await res.json();
+      set({
+        slackEnabled: data.enabled,
+        slackBotTokenSet: data.botTokenSet,
+        slackSigningSecretSet: data.signingSecretSet,
+        slackAppTokenSet: data.appTokenSet,
+        slackRequireMention: data.requireMention,
+        slackBotUsername: data.botUsername,
+        slackAllowedChannels: data.allowedChannels ?? [],
+        slackAvailableChannels: data.availableChannels ?? [],
+        slackPairedUsers: data.pairedUsers,
+        slackPendingPairings: data.pendingPairings,
+      });
+    } catch { /* ignore */ }
+  },
+
+  updateSlackSettings: async (data) => {
+    set({ error: null });
+    try {
+      const res = await fetch("/api/settings/slack", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) throw new Error("Failed to update Slack settings");
+      await get().loadSlackSettings();
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "Unknown error" });
+    }
+  },
+
+  testSlackConnection: async () => {
+    set({ slackTestResult: { ok: false, testing: true } });
+    try {
+      const res = await fetch("/api/settings/slack/test", {
+        method: "POST",
+      });
+      const data = await res.json();
+      set({
+        slackTestResult: {
+          ok: data.ok,
+          error: data.error,
+          testing: false,
+        },
+        slackBotUsername: data.ok ? data.botUsername : get().slackBotUsername,
+      });
+    } catch {
+      set({
+        slackTestResult: {
+          ok: false,
+          error: "Network error",
+          testing: false,
+        },
+      });
+    }
+  },
+
+  approveSlackPairing: async (code) => {
+    set({ error: null });
+    try {
+      const res = await fetch("/api/settings/slack/pair/approve", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code }),
+      });
+      if (!res.ok) throw new Error("Failed to approve pairing");
+      await get().loadSlackSettings();
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "Unknown error" });
+    }
+  },
+
+  rejectSlackPairing: async (code) => {
+    set({ error: null });
+    try {
+      const res = await fetch("/api/settings/slack/pair/reject", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code }),
+      });
+      if (!res.ok) throw new Error("Failed to reject pairing");
+      await get().loadSlackSettings();
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "Unknown error" });
+    }
+  },
+
+  revokeSlackUser: async (userId) => {
+    set({ error: null });
+    try {
+      const res = await fetch(`/api/settings/slack/pair/${userId}`, {
+        method: "DELETE",
+      });
+      if (!res.ok) throw new Error("Failed to revoke user");
+      await get().loadSlackSettings();
     } catch (err) {
       set({ error: err instanceof Error ? err.message : "Unknown error" });
     }

@@ -8,6 +8,8 @@ const TYPE_LABELS: Record<string, string> = {
   openrouter: "OpenRouter",
   ollama: "Ollama",
   "openai-compatible": "OpenAI-Compatible",
+  huggingface: "Hugging Face",
+  nvidia: "NVIDIA",
 };
 
 export function ProvidersTab() {

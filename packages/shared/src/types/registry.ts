@@ -74,3 +74,25 @@ export enum ProjectStatus {
   Failed = "failed",
   Cancelled = "cancelled",
 }
+
+// ---------------------------------------------------------------------------
+// Pipeline configuration
+// ---------------------------------------------------------------------------
+
+export interface PipelineStageConfig {
+  agentId: string;   // registry entry ID
+  enabled: boolean;
+}
+
+export interface ProjectPipelineConfig {
+  enabled: boolean;  // master toggle — pipeline on/off for this project
+  stages: Record<string, PipelineStageConfig>;
+}
+
+export const PIPELINE_STAGES = [
+  { key: "triage", label: "Triage", description: "Analyzes incoming issues to classify them as bugs, features, or user error. Decides whether to proceed with implementation.", defaultAgentId: "builtin-triage" },
+  { key: "coder", label: "Coder", description: "Creates a feature branch, implements the solution, and commits changes.", defaultAgentId: "builtin-coder" },
+  { key: "security", label: "Security Reviewer", description: "Audits the implementation for vulnerabilities and security risks. Can send issues back to the Coder for fixes.", defaultAgentId: "builtin-security-reviewer" },
+  { key: "tester", label: "Tester", description: "Writes and runs tests to validate the implementation.", defaultAgentId: "builtin-tester" },
+  { key: "reviewer", label: "Code Reviewer", description: "Reviews code quality and correctness, then creates the pull request.", defaultAgentId: "builtin-reviewer" },
+] as const;

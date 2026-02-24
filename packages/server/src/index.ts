@@ -130,6 +130,9 @@ import {
   getCodexSettings,
   updateCodexSettings,
   testCodexConnection,
+  getGeminiCliSettings,
+  updateGeminiCliSettings,
+  testGeminiCliConnection,
   getGitHubSettings,
   updateGitHubSettings,
   testGitHubConnection,
@@ -143,12 +146,17 @@ import {
   deleteCustomModel,
   applyGitSSHConfig,
   getClaudeCodeOAuthUsage,
+  getAgentModelOverrides,
+  setAgentModelOverride,
+  clearAgentModelOverride,
   type TierDefaults,
 } from "./settings/settings.js";
 import type { ProviderType } from "@otterbot/shared";
 import { createBackupArchive, restoreFromArchive, looksLikeZip } from "./backup/backup.js";
 import { writeOpenCodeConfig } from "./opencode/opencode-manager.js";
 import { GitHubIssueMonitor } from "./github/issue-monitor.js";
+import { GitHubPRMonitor } from "./github/pr-monitor.js";
+import { PipelineManager } from "./pipeline/pipeline-manager.js";
 import { ReminderScheduler } from "./reminders/reminder-scheduler.js";
 import { MemoryCompactor } from "./memory/memory-compactor.js";
 import { SchedulerRegistry } from "./schedulers/scheduler-registry.js";
@@ -164,6 +172,47 @@ import {
   rejectPairing,
   revokePairing,
 } from "./discord/pairing.js";
+import { IrcBridge } from "./irc/irc-bridge.js";
+import {
+  getIrcSettings,
+  updateIrcSettings,
+  getIrcConfig,
+} from "./irc/irc-settings.js";
+import { TeamsBridge } from "./teams/teams-bridge.js";
+import {
+  getTeamsSettings,
+  updateTeamsSettings,
+  testTeamsConnection,
+} from "./teams/teams-settings.js";
+import { SlackBridge } from "./slack/slack-bridge.js";
+import {
+  getSlackSettings,
+  updateSlackSettings,
+  testSlackConnection,
+} from "./slack/slack-settings.js";
+import {
+  approvePairing as approveSlackPairing,
+  rejectPairing as rejectSlackPairing,
+  revokePairing as revokeSlackPairing,
+} from "./slack/pairing.js";
+import { TelegramBridge } from "./telegram/telegram-bridge.js";
+import {
+  getTelegramSettings,
+  updateTelegramSettings,
+  testTelegramConnection,
+} from "./telegram/telegram-settings.js";
+import {
+  approvePairing as approveTelegramPairing,
+  rejectPairing as rejectTelegramPairing,
+  revokePairing as revokeTelegramPairing,
+} from "./telegram/pairing.js";
+import { TlonBridge } from "./tlon/tlon-bridge.js";
+import {
+  getTlonSettings,
+  updateTlonSettings,
+  getTlonConfig,
+  testTlonConnection,
+} from "./tlon/tlon-settings.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -396,7 +445,8 @@ async function main() {
 
   let coo: COO | null = null;
   let issueMonitor: GitHubIssueMonitor | null = null;
-  const schedulerRegistry = new SchedulerRegistry();
+  let prMonitor: GitHubPRMonitor | null = null;
+  const schedulerRegistry = new SchedulerRegistry(io);
   let customTaskScheduler: CustomTaskScheduler | null = null;
 
   // Resolver map for interactive coding agent sessions: when a Worker awaits human
@@ -460,6 +510,121 @@ async function main() {
     }
   }
 
+  // IRC bridge (initialized when enabled + config set)
+  let ircBridge: IrcBridge | null = null;
+
+  function startIrcBridge() {
+    if (ircBridge || !coo) return;
+    const config = getIrcConfig();
+    if (!config) return;
+    ircBridge = new IrcBridge({ bus, coo, io });
+    ircBridge.start(config).catch((err) => {
+      console.error("[IRC] Failed to start bridge:", err);
+      ircBridge = null;
+    });
+  }
+
+  async function stopIrcBridge() {
+    if (ircBridge) {
+      await ircBridge.stop();
+      ircBridge = null;
+    }
+  }
+
+  // Teams bridge (initialized when enabled + credentials set)
+  let teamsBridge: TeamsBridge | null = null;
+
+  function startTeamsBridge() {
+    if (teamsBridge || !coo) return;
+    const settings = getTeamsSettings();
+    if (!settings.enabled || !settings.appIdSet || !settings.appPasswordSet) return;
+    const appId = getConfig("teams:app_id");
+    const appPassword = getConfig("teams:app_password");
+    if (!appId || !appPassword) return;
+    const tenantId = getConfig("teams:tenant_id") || undefined;
+    teamsBridge = new TeamsBridge({ bus, coo, io });
+    teamsBridge.start({ appId, appPassword, tenantId }).catch((err) => {
+      console.error("[Teams] Failed to start bridge:", err);
+      teamsBridge = null;
+    });
+  }
+
+  async function stopTeamsBridge() {
+    if (teamsBridge) {
+      await teamsBridge.stop();
+      teamsBridge = null;
+    }
+  }
+
+  // Slack bridge (initialized when enabled + credentials set)
+  let slackBridge: SlackBridge | null = null;
+
+  function startSlackBridge() {
+    if (slackBridge || !coo) return;
+    const settings = getSlackSettings();
+    if (!settings.enabled || !settings.botTokenSet || !settings.appTokenSet || !settings.signingSecretSet) return;
+    const botToken = getConfig("slack:bot_token");
+    const signingSecret = getConfig("slack:signing_secret");
+    const appToken = getConfig("slack:app_token");
+    if (!botToken || !signingSecret || !appToken) return;
+    slackBridge = new SlackBridge({ bus, coo, io });
+    slackBridge.start({ botToken, signingSecret, appToken }).catch((err) => {
+      console.error("[Slack] Failed to start bridge:", err);
+      slackBridge = null;
+    });
+  }
+
+  async function stopSlackBridge() {
+    if (slackBridge) {
+      await slackBridge.stop();
+      slackBridge = null;
+    }
+  }
+
+  // Telegram bridge (initialized when enabled + token set)
+  let telegramBridge: TelegramBridge | null = null;
+
+  function startTelegramBridge() {
+    if (telegramBridge || !coo) return;
+    const settings = getTelegramSettings();
+    if (!settings.enabled || !settings.tokenSet) return;
+    const token = getConfig("telegram:bot_token");
+    if (!token) return;
+    telegramBridge = new TelegramBridge({ bus, coo, io });
+    telegramBridge.start(token).catch((err) => {
+      console.error("[Telegram] Failed to start bridge:", err);
+      telegramBridge = null;
+    });
+  }
+
+  async function stopTelegramBridge() {
+    if (telegramBridge) {
+      await telegramBridge.stop();
+      telegramBridge = null;
+    }
+  }
+
+  // Tlon bridge (initialized when enabled + config set)
+  let tlonBridge: TlonBridge | null = null;
+
+  function startTlonBridge() {
+    if (tlonBridge || !coo) return;
+    const config = getTlonConfig();
+    if (!config) return;
+    tlonBridge = new TlonBridge({ bus, coo, io });
+    tlonBridge.start(config).catch((err) => {
+      console.error("[Tlon] Failed to start bridge:", err);
+      tlonBridge = null;
+    });
+  }
+
+  async function stopTlonBridge() {
+    if (tlonBridge) {
+      await tlonBridge.stop();
+      tlonBridge = null;
+    }
+  }
+
   function startCoo() {
     if (coo) return;
     try {
@@ -486,7 +651,7 @@ async function main() {
         onProjectCreated: (project) => {
           emitProjectCreated(io, project);
           // Auto-create a zone for the new project
-          const zone = worldLayout.addZone(project.id);
+          const zone = worldLayout.addZone(project.id, undefined, project.name);
           if (zone) {
             io.emit("world:zone-added", { zone });
           }
@@ -502,6 +667,9 @@ async function main() {
         },
         onKanbanTaskDeleted: (taskId, projectId) => {
           emitKanbanTaskDeleted(io, taskId, projectId);
+        },
+        onConversationSwitched: (conversationId, messages) => {
+          io.emit("conversation:switched", { conversationId, messages });
         },
         onAgentStream: (agentId, token, messageId) => {
           emitAgentStream(io, agentId, token, messageId);
@@ -567,10 +735,10 @@ async function main() {
           return new Promise<"once" | "always" | "reject">((resolve) => {
             const key = `${agentId}:${permission.id}`;
             const timeout = setTimeout(() => {
-              // Auto-approve on timeout to prevent indefinite session hang
+              // Reject on timeout — never auto-approve unattended permission requests
               codingAgentPermissionResolvers.delete(key);
-              console.warn(`[CodingAgent] Permission ${permission.id} timed out — auto-approving`);
-              resolve("once");
+              console.warn(`[CodingAgent] Permission ${permission.id} timed out — rejecting`);
+              resolve("reject");
             }, PERMISSION_TIMEOUT_MS);
             codingAgentPermissionResolvers.set(key, { resolve, timeout });
           });
@@ -589,8 +757,16 @@ async function main() {
         },
       });
       emitAgentSpawned(io, coo);
-      // Create issue monitor
+      // Create issue monitor, PR monitor, and pipeline manager
       issueMonitor = new GitHubIssueMonitor(coo, io);
+      prMonitor = new GitHubPRMonitor(coo, io);
+      const pipelineManager = new PipelineManager(coo, io);
+      pipelineManager.init().catch((err) => {
+        console.error("[PipelineManager] Init failed:", err);
+      });
+      issueMonitor.setPipelineManager(pipelineManager);
+      prMonitor.setPipelineManager(pipelineManager);
+      coo.setPipelineManager(pipelineManager);
 
       setupSocketHandlers(io, bus, coo, registry, {
         beforeCeoMessage: (content, conversationId, callback) => {
@@ -649,8 +825,20 @@ async function main() {
       emitAgentSpawned(io, adminAssistant);
       console.log("AdminAssistant agent started.");
 
-      // Handle admin-assistant messages and codeagent:respond from the client
+      // Handle admin-assistant messages, codeagent:respond, and scheduler sync from the client
       io.on("connection", (socket) => {
+        // Send scheduler pseudo-agents to newly-connected clients so they
+        // appear in the 3D view (they aren't in the DB and loadAndStart()
+        // fires before clients connect).
+        for (const agent of schedulerRegistry.getActivePseudoAgents()) {
+          socket.emit("agent:spawned", agent);
+        }
+        if (customTaskScheduler) {
+          for (const agent of customTaskScheduler.getActivePseudoAgents()) {
+            socket.emit("agent:spawned", agent);
+          }
+        }
+
         socket.on("admin-assistant:message" as any, async (data: { content: string }) => {
           if (!data?.content) return;
           bus.send({
@@ -686,7 +874,7 @@ async function main() {
         for (const project of activeProjects) {
           const existing = worldLayout.loadZoneConfig(project.id);
           if (!existing) {
-            const zone = worldLayout.addZone(project.id);
+            const zone = worldLayout.addZone(project.id, undefined, project.name);
             if (zone) {
               io.emit("world:zone-added", { zone });
               console.log(`[world] Recreated office zone for project "${project.name}" (${project.id})`);
@@ -724,6 +912,15 @@ async function main() {
         });
       }
 
+      if (prMonitor) {
+        schedulerRegistry.register("github-prs", prMonitor, {
+          name: "GitHub PR Monitor",
+          description: "Monitors open PRs for merge status and review feedback.",
+          defaultIntervalMs: 120_000,
+          minIntervalMs: 30_000,
+        });
+      }
+
       schedulerRegistry.startAll();
 
       // Start custom scheduled tasks
@@ -757,6 +954,11 @@ async function main() {
   if (isSetupComplete()) {
     startCoo();
     startDiscordBridge();
+    startIrcBridge();
+    startTeamsBridge();
+    startSlackBridge();
+    startTelegramBridge();
+    startTlonBridge();
   } else {
     console.log("Setup not complete. Waiting for setup wizard...");
   }
@@ -1077,6 +1279,11 @@ async function main() {
 
     startCoo();
     startDiscordBridge();
+    startIrcBridge();
+    startTeamsBridge();
+    startSlackBridge();
+    startTelegramBridge();
+    startTlonBridge();
 
     return { ok: true };
   });
@@ -1664,7 +1871,7 @@ async function main() {
 
   app.patch<{
     Params: { projectId: string; taskId: string };
-    Body: { title?: string; description?: string; column?: string; position?: number; assigneeAgentId?: string | null; labels?: string[]; blockedBy?: string[] };
+    Body: { title?: string; description?: string; column?: string; position?: number; assigneeAgentId?: string | null; labels?: string[]; blockedBy?: string[]; prNumber?: number | null; prBranch?: string | null };
   }>(
     "/api/projects/:projectId/tasks/:taskId",
     async (req, reply) => {
@@ -1689,6 +1896,8 @@ async function main() {
       if (req.body.assigneeAgentId !== undefined) updates.assigneeAgentId = req.body.assigneeAgentId;
       if (req.body.labels !== undefined) updates.labels = req.body.labels;
       if (req.body.blockedBy !== undefined) updates.blockedBy = req.body.blockedBy;
+      if (req.body.prNumber !== undefined) updates.prNumber = req.body.prNumber;
+      if (req.body.prBranch !== undefined) updates.prBranch = req.body.prBranch;
 
       db.update(schema.kanbanTasks)
         .set(updates)
@@ -1751,7 +1960,7 @@ async function main() {
       for (let i = 0; i < taskIds.length; i++) {
         db.update(schema.kanbanTasks)
           .set({
-            column: column as "backlog" | "in_progress" | "done",
+            column: column as "backlog" | "in_progress" | "in_review" | "done",
             position: i,
             updatedAt: new Date().toISOString(),
           })
@@ -1957,11 +2166,15 @@ async function main() {
   });
 
   // Agent list endpoint (only active agents, not stale "done" ones)
+  // Includes scheduler pseudo-agents that aren't persisted in the DB.
   app.get("/api/agents", async () => {
     const { getDb, schema } = await import("./db/index.js");
     const { ne } = await import("drizzle-orm");
     const db = getDb();
-    return db.select().from(schema.agents).where(ne(schema.agents.status, "done")).all();
+    const dbAgents = db.select().from(schema.agents).where(ne(schema.agents.status, "done")).all();
+    const schedulerAgents = customTaskScheduler?.getActivePseudoAgents() ?? [];
+    const builtinSchedulerAgents = schedulerRegistry.getActivePseudoAgents();
+    return [...dbAgents, ...schedulerAgents, ...builtinSchedulerAgents];
   });
 
   // =========================================================================
@@ -2282,6 +2495,26 @@ async function main() {
     return { ok: true };
   });
 
+  // Per-agent model overrides
+  app.get("/api/settings/agent-model-overrides", async () => {
+    return { overrides: getAgentModelOverrides() };
+  });
+
+  app.put<{
+    Params: { registryEntryId: string };
+    Body: { provider: string; model: string };
+  }>("/api/settings/agent-model-overrides/:registryEntryId", async (req) => {
+    setAgentModelOverride(req.params.registryEntryId, req.body.provider, req.body.model);
+    return { ok: true };
+  });
+
+  app.delete<{
+    Params: { registryEntryId: string };
+  }>("/api/settings/agent-model-overrides/:registryEntryId", async (req) => {
+    clearAgentModelOverride(req.params.registryEntryId);
+    return { ok: true };
+  });
+
   // Custom models CRUD
   app.get<{
     Querystring: { providerId?: string };
@@ -2585,44 +2818,71 @@ async function main() {
   });
 
   // =========================================================================
+  // Gemini CLI settings routes
+  // =========================================================================
+
+  app.get("/api/settings/gemini-cli", async () => {
+    return getGeminiCliSettings();
+  });
+
+  app.put<{
+    Body: {
+      enabled?: boolean;
+      authMode?: "api-key" | "oauth";
+      apiKey?: string;
+      model?: string;
+      approvalMode?: "full-auto" | "auto-edit" | "default";
+      timeoutMs?: number;
+      sandbox?: boolean;
+    };
+  }>("/api/settings/gemini-cli", async (req) => {
+    await updateGeminiCliSettings(req.body);
+    return { ok: true };
+  });
+
+  app.post("/api/settings/gemini-cli/test", async () => {
+    return testGeminiCliConnection();
+  });
+
+  // =========================================================================
   // Coding agent session history routes
   // =========================================================================
 
-  app.get<{
-    Querystring: { limit?: string; projectId?: string };
-  }>("/api/codeagent/sessions", async (req) => {
+  async function listCodingAgentSessions(query: { limit?: string; projectId?: string; before?: string }) {
     const { getDb, schema } = await import("./db/index.js");
-    const { desc, eq } = await import("drizzle-orm");
+    const { desc, eq, lt, and } = await import("drizzle-orm");
     const db = getDb();
-    const limit = Math.min(parseInt(req.query.limit ?? "50", 10) || 50, 200);
-    const query = db
+    const limit = Math.min(parseInt(query.limit ?? "20", 10) || 20, 200);
+    const conditions = [];
+    if (query.projectId) {
+      conditions.push(eq(schema.codingAgentSessions.projectId, query.projectId));
+    }
+    if (query.before) {
+      conditions.push(lt(schema.codingAgentSessions.startedAt, query.before));
+    }
+    const rows = db
       .select()
       .from(schema.codingAgentSessions)
+      .where(conditions.length > 0 ? and(...conditions) : undefined)
       .orderBy(desc(schema.codingAgentSessions.startedAt))
-      .limit(limit);
-    if (req.query.projectId) {
-      return query.where(eq(schema.codingAgentSessions.projectId, req.query.projectId)).all();
-    }
-    return query.all();
+      .limit(limit + 1)
+      .all();
+    const hasMore = rows.length > limit;
+    if (hasMore) rows.pop();
+    return { sessions: rows, hasMore };
+  }
+
+  app.get<{
+    Querystring: { limit?: string; projectId?: string; before?: string };
+  }>("/api/codeagent/sessions", async (req) => {
+    return listCodingAgentSessions(req.query);
   });
 
   // Keep old route for backwards compatibility
   app.get<{
-    Querystring: { limit?: string; projectId?: string };
+    Querystring: { limit?: string; projectId?: string; before?: string };
   }>("/api/opencode/sessions", async (req) => {
-    const { getDb, schema } = await import("./db/index.js");
-    const { desc, eq } = await import("drizzle-orm");
-    const db = getDb();
-    const limit = Math.min(parseInt(req.query.limit ?? "50", 10) || 50, 200);
-    const query = db
-      .select()
-      .from(schema.codingAgentSessions)
-      .orderBy(desc(schema.codingAgentSessions.startedAt))
-      .limit(limit);
-    if (req.query.projectId) {
-      return query.where(eq(schema.codingAgentSessions.projectId, req.query.projectId)).all();
-    }
-    return query.all();
+    return listCodingAgentSessions(req.query);
   });
 
   app.get<{
@@ -2651,6 +2911,64 @@ async function main() {
       .where(eq(schema.codingAgentDiffs.sessionId, session.sessionId))
       .all();
     return { session, messages, diffs };
+  });
+
+  // Delete a single coding agent session (cascade messages + diffs)
+  app.delete<{
+    Params: { id: string };
+  }>("/api/codeagent/sessions/:id", async (req, reply) => {
+    const { getDb, schema } = await import("./db/index.js");
+    const { eq } = await import("drizzle-orm");
+    const db = getDb();
+    const session = db
+      .select()
+      .from(schema.codingAgentSessions)
+      .where(eq(schema.codingAgentSessions.id, req.params.id))
+      .get();
+    if (!session) {
+      reply.code(404);
+      return { error: "Session not found" };
+    }
+    db.delete(schema.codingAgentMessages)
+      .where(eq(schema.codingAgentMessages.sessionId, session.sessionId))
+      .run();
+    db.delete(schema.codingAgentDiffs)
+      .where(eq(schema.codingAgentDiffs.sessionId, session.sessionId))
+      .run();
+    db.delete(schema.codingAgentSessions)
+      .where(eq(schema.codingAgentSessions.id, req.params.id))
+      .run();
+    return { ok: true };
+  });
+
+  // Bulk delete completed/error coding agent sessions
+  app.delete("/api/codeagent/sessions", async () => {
+    const { getDb, schema } = await import("./db/index.js");
+    const { eq, inArray } = await import("drizzle-orm");
+    const db = getDb();
+    // Find all completed/error sessions
+    const toDelete = db
+      .select({ id: schema.codingAgentSessions.id, sessionId: schema.codingAgentSessions.sessionId })
+      .from(schema.codingAgentSessions)
+      .where(
+        inArray(schema.codingAgentSessions.status, ["completed", "error"]),
+      )
+      .all();
+    if (toDelete.length === 0) return { ok: true, deleted: 0 };
+    const sessionIds = toDelete.map((s) => s.sessionId).filter(Boolean);
+    const ids = toDelete.map((s) => s.id);
+    if (sessionIds.length > 0) {
+      db.delete(schema.codingAgentMessages)
+        .where(inArray(schema.codingAgentMessages.sessionId, sessionIds))
+        .run();
+      db.delete(schema.codingAgentDiffs)
+        .where(inArray(schema.codingAgentDiffs.sessionId, sessionIds))
+        .run();
+    }
+    db.delete(schema.codingAgentSessions)
+      .where(inArray(schema.codingAgentSessions.id, ids))
+      .run();
+    return { ok: true, deleted: toDelete.length };
   });
 
   // =========================================================================
@@ -2993,6 +3311,257 @@ async function main() {
       return { ok: false, error: "User not found" };
     }
     return { ok: true };
+  });
+
+  // =========================================================================
+  // IRC settings routes
+  // =========================================================================
+
+  app.get("/api/settings/irc", async () => {
+    return getIrcSettings();
+  });
+
+  app.put<{
+    Body: {
+      enabled?: boolean;
+      server?: string;
+      port?: number;
+      nickname?: string;
+      channels?: string[];
+      tls?: boolean;
+      password?: string;
+    };
+  }>("/api/settings/irc", async (req) => {
+    const wasEnabled = !!getIrcConfig();
+    updateIrcSettings(req.body);
+    const nowEnabled = !!getIrcConfig();
+
+    if (nowEnabled && !wasEnabled) {
+      startIrcBridge();
+    } else if (!nowEnabled && wasEnabled) {
+      await stopIrcBridge();
+    }
+
+    return { ok: true };
+  });
+
+  // =========================================================================
+  // Teams settings routes
+  // =========================================================================
+
+  app.get("/api/settings/teams", async () => {
+    return getTeamsSettings();
+  });
+
+  app.put<{
+    Body: {
+      enabled?: boolean;
+      appId?: string;
+      appPassword?: string;
+      tenantId?: string;
+    };
+  }>("/api/settings/teams", async (req) => {
+    const wasEnabled = getTeamsSettings().enabled && getTeamsSettings().appIdSet && getTeamsSettings().appPasswordSet;
+    updateTeamsSettings(req.body);
+    const nowEnabled = getTeamsSettings().enabled && getTeamsSettings().appIdSet && getTeamsSettings().appPasswordSet;
+
+    if (nowEnabled && !wasEnabled) {
+      startTeamsBridge();
+    } else if (!nowEnabled && wasEnabled) {
+      await stopTeamsBridge();
+    }
+
+    return { ok: true };
+  });
+
+  app.post("/api/settings/teams/test", async () => {
+    return testTeamsConnection();
+  });
+
+  // Teams Bot Framework messaging endpoint
+  app.post("/api/teams/messages", async (req, reply) => {
+    if (!teamsBridge) {
+      reply.code(503);
+      return { error: "Teams bridge not started" };
+    }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const adapter = teamsBridge.getAdapter() as any;
+    if (!adapter) {
+      reply.code(503);
+      return { error: "Teams adapter not available" };
+    }
+    await adapter.process(req.raw, reply.raw, (context: unknown) =>
+      teamsBridge!.handleTurn(context),
+    );
+  });
+
+  // =========================================================================
+  // Slack settings routes
+  // =========================================================================
+
+  app.get("/api/settings/slack", async () => {
+    const availableChannels = await slackBridge?.getAvailableChannels() ?? [];
+    return getSlackSettings(availableChannels);
+  });
+
+  app.put<{
+    Body: {
+      enabled?: boolean;
+      botToken?: string;
+      signingSecret?: string;
+      appToken?: string;
+      requireMention?: boolean;
+      allowedChannels?: string[];
+    };
+  }>("/api/settings/slack", async (req) => {
+    const wasEnabled = getSlackSettings().enabled && getSlackSettings().botTokenSet && getSlackSettings().appTokenSet && getSlackSettings().signingSecretSet;
+    updateSlackSettings(req.body);
+    const nowEnabled = getSlackSettings().enabled && getSlackSettings().botTokenSet && getSlackSettings().appTokenSet && getSlackSettings().signingSecretSet;
+
+    if (nowEnabled && !wasEnabled) {
+      startSlackBridge();
+    } else if (!nowEnabled && wasEnabled) {
+      await stopSlackBridge();
+    }
+
+    return { ok: true };
+  });
+
+  app.post("/api/settings/slack/test", async () => {
+    return testSlackConnection();
+  });
+
+  app.post<{
+    Body: { code: string };
+  }>("/api/settings/slack/pair/approve", async (req, reply) => {
+    const result = approveSlackPairing(req.body.code);
+    if (!result) {
+      reply.code(400);
+      return { ok: false, error: "Invalid or expired pairing code" };
+    }
+    return { ok: true, user: result };
+  });
+
+  app.post<{
+    Body: { code: string };
+  }>("/api/settings/slack/pair/reject", async (req, reply) => {
+    const ok = rejectSlackPairing(req.body.code);
+    if (!ok) {
+      reply.code(400);
+      return { ok: false, error: "Pairing code not found" };
+    }
+    return { ok: true };
+  });
+
+  app.delete<{
+    Params: { userId: string };
+  }>("/api/settings/slack/pair/:userId", async (req, reply) => {
+    const ok = revokeSlackPairing(req.params.userId);
+    if (!ok) {
+      reply.code(400);
+      return { ok: false, error: "User not found" };
+    }
+    return { ok: true };
+  });
+
+  // =========================================================================
+  // Telegram settings routes
+  // =========================================================================
+
+  app.get("/api/settings/telegram", async () => {
+    return getTelegramSettings();
+  });
+
+  app.put<{
+    Body: {
+      enabled?: boolean;
+      botToken?: string;
+    };
+  }>("/api/settings/telegram", async (req) => {
+    const wasEnabled = getTelegramSettings().enabled && getTelegramSettings().tokenSet;
+    updateTelegramSettings(req.body);
+    const nowEnabled = getTelegramSettings().enabled && getTelegramSettings().tokenSet;
+
+    // Start or stop bridge based on state change
+    if (nowEnabled && !wasEnabled) {
+      startTelegramBridge();
+    } else if (!nowEnabled && wasEnabled) {
+      await stopTelegramBridge();
+    }
+
+    return { ok: true };
+  });
+
+  app.post("/api/settings/telegram/test", async () => {
+    return testTelegramConnection();
+  });
+
+  app.post<{
+    Body: { code: string };
+  }>("/api/settings/telegram/pair/approve", async (req, reply) => {
+    const result = approveTelegramPairing(req.body.code);
+    if (!result) {
+      reply.code(400);
+      return { ok: false, error: "Invalid or expired pairing code" };
+    }
+    return { ok: true, user: result };
+  });
+
+  app.post<{
+    Body: { code: string };
+  }>("/api/settings/telegram/pair/reject", async (req, reply) => {
+    const ok = rejectTelegramPairing(req.body.code);
+    if (!ok) {
+      reply.code(400);
+      return { ok: false, error: "Pairing code not found" };
+    }
+    return { ok: true };
+  });
+
+  app.delete<{
+    Params: { userId: string };
+  }>("/api/settings/telegram/pair/:userId", async (req, reply) => {
+    const ok = revokeTelegramPairing(req.params.userId);
+    if (!ok) {
+      reply.code(400);
+      return { ok: false, error: "User not found" };
+    }
+    return { ok: true };
+  });
+
+  // =========================================================================
+  // Tlon settings routes
+  // =========================================================================
+
+  app.get("/api/settings/tlon", async () => {
+    return getTlonSettings();
+  });
+
+  app.put<{
+    Body: {
+      enabled?: boolean;
+      shipUrl?: string;
+      accessCode?: string;
+      shipName?: string;
+    };
+  }>("/api/settings/tlon", async (req) => {
+    const wasEnabled = !!getTlonConfig();
+    updateTlonSettings(req.body);
+    const nowEnabled = !!getTlonConfig();
+
+    if (nowEnabled && !wasEnabled) {
+      startTlonBridge();
+    } else if (!nowEnabled && wasEnabled) {
+      await stopTlonBridge();
+    }
+
+    return { ok: true };
+  });
+
+  app.post<{
+    Body: { shipUrl: string; accessCode: string };
+  }>("/api/settings/tlon/test", async (req) => {
+    return testTlonConnection(req.body.shipUrl, req.body.accessCode);
   });
 
   // =========================================================================
@@ -3681,6 +4250,10 @@ Respond with ONLY a JSON object (no markdown, no explanation) with these fields:
   // Graceful shutdown
   const shutdown = async () => {
     await stopDiscordBridge();
+    await stopIrcBridge();
+    await stopTeamsBridge();
+    await stopSlackBridge();
+    await stopTlonBridge();
     await closeBrowser();
     process.exit(0);
   };

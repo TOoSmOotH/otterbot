@@ -5,7 +5,7 @@ export const agents = sqliteTable("agents", {
   id: text("id").primaryKey(),
   name: text("name"),
   registryEntryId: text("registry_entry_id"),
-  role: text("role", { enum: ["coo", "team_lead", "worker", "admin_assistant"] }).notNull(),
+  role: text("role", { enum: ["coo", "team_lead", "worker", "admin_assistant", "scheduler"] }).notNull(),
   parentId: text("parent_id"),
   status: text("status", {
     enum: ["idle", "thinking", "acting", "awaiting_input", "done", "error"],
@@ -73,7 +73,7 @@ export const registryEntries = sqliteTable("registry_entries", {
     .notNull()
     .default([]),
   builtIn: integer("built_in", { mode: "boolean" }).notNull().default(false),
-  role: text("role", { enum: ["coo", "team_lead", "worker", "admin_assistant"] })
+  role: text("role", { enum: ["coo", "team_lead", "worker", "admin_assistant", "scheduler"] })
     .notNull()
     .default("worker"),
   modelPackId: text("model_pack_id"),
@@ -124,13 +124,15 @@ export const kanbanTasks = sqliteTable("kanban_tasks", {
   title: text("title").notNull(),
   description: text("description").notNull().default(""),
   column: text("column", {
-    enum: ["backlog", "in_progress", "done"],
+    enum: ["triage", "backlog", "in_progress", "in_review", "done"],
   })
     .notNull()
     .default("backlog"),
   position: integer("position").notNull().default(0),
   assigneeAgentId: text("assignee_agent_id"),
   createdBy: text("created_by"),
+  prNumber: integer("pr_number"),
+  prBranch: text("pr_branch"),
   labels: text("labels", { mode: "json" })
     .$type<string[]>()
     .notNull()
@@ -140,7 +142,14 @@ export const kanbanTasks = sqliteTable("kanban_tasks", {
     .notNull()
     .default([]),
   retryCount: integer("retry_count").notNull().default(0),
+  spawnCount: integer("spawn_count").notNull().default(0),
   completionReport: text("completion_report"),
+  pipelineStage: text("pipeline_stage"),
+  pipelineStages: text("pipeline_stages", { mode: "json" })
+    .$type<string[]>()
+    .notNull()
+    .default([]),
+  pipelineAttempt: integer("pipeline_attempt").notNull().default(0),
   createdAt: text("created_at")
     .notNull()
     .$defaultFn(() => new Date().toISOString()),
@@ -258,7 +267,7 @@ export const providers = sqliteTable("providers", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
   type: text("type", {
-    enum: ["anthropic", "openai", "ollama", "openai-compatible", "openrouter"],
+    enum: ["anthropic", "openai", "google", "ollama", "openai-compatible", "openrouter", "github-copilot", "huggingface", "nvidia", "perplexity", "deepgram"],
   }).notNull(),
   apiKey: text("api_key"),
   baseUrl: text("base_url"),

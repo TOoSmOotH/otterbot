@@ -63,17 +63,22 @@ export class MessageBus {
     this.persist(message);
 
     // 2. Check if this is a correlated reply
+    let correlationHandled = false;
     if (message.correlationId) {
       const correlationHandler = this.correlationHandlers.get(
         message.correlationId,
       );
       if (correlationHandler) {
         correlationHandler(message);
+        // If the handler consumed the reply (deleted itself), skip agent routing
+        if (!this.correlationHandlers.has(message.correlationId)) {
+          correlationHandled = true;
+        }
       }
     }
 
-    // 3. Route to target agent
-    if (params.toAgentId) {
+    // 3. Route to target agent (skip if already handled as correlated reply)
+    if (params.toAgentId && !correlationHandled) {
       const handler = this.handlers.get(params.toAgentId);
       if (handler) {
         Promise.resolve(handler(message)).catch((err) => {

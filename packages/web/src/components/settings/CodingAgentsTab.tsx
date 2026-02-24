@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { cn } from "../../lib/utils";
 import { useSettingsStore } from "../../stores/settings-store";
 
-type SubTab = "opencode" | "claude-code" | "codex";
+type SubTab = "opencode" | "claude-code" | "codex" | "gemini-cli";
 
 export function CodingAgentsTab() {
   const [activeSubTab, setActiveSubTab] = useState<SubTab>("opencode");
@@ -20,6 +20,7 @@ export function CodingAgentsTab() {
           { id: "opencode" as const, label: "OpenCode" },
           { id: "claude-code" as const, label: "Claude Code" },
           { id: "codex" as const, label: "Codex" },
+          { id: "gemini-cli" as const, label: "Gemini CLI" },
         ]).map((tab) => (
           <button
             key={tab.id}
@@ -42,6 +43,7 @@ export function CodingAgentsTab() {
       {activeSubTab === "opencode" && <OpenCodeSection />}
       {activeSubTab === "claude-code" && <ClaudeCodeSection />}
       {activeSubTab === "codex" && <CodexSection />}
+      {activeSubTab === "gemini-cli" && <GeminiCliSection />}
     </div>
   );
 }
@@ -202,8 +204,8 @@ function ClaudeCodeSection() {
       <p className="text-xs text-muted-foreground">
         Use{" "}
         <a href="https://docs.anthropic.com/en/docs/claude-code" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">Claude Code</a>{" "}
-        (Anthropic's autonomous coding agent) to delegate coding tasks. Install with:{" "}
-        <code className="bg-secondary px-1 py-0.5 rounded text-[11px]">npm install -g @anthropic-ai/claude-code</code>
+        (Anthropic's autonomous coding agent) to delegate coding tasks. Connect to the desktop and log in with{" "}
+        <code className="bg-secondary px-1 py-0.5 rounded text-[11px]">claude login</code>
       </p>
 
       <ToggleSwitch checked={enabled} onChange={() => updateClaudeCodeSettings({ enabled: !enabled })} label="Enable Claude Code integration" />
@@ -217,7 +219,7 @@ function ClaudeCodeSection() {
         )}
         {authMode === "oauth" && (
           <p className="text-xs text-muted-foreground bg-secondary/50 p-2 rounded">
-            Run <code className="bg-secondary px-1 py-0.5 rounded text-[11px]">claude login</code> in a terminal to authenticate.
+            Connect to the desktop and run <code className="bg-secondary px-1 py-0.5 rounded text-[11px]">claude login</code> to authenticate.
           </p>
         )}
 
@@ -282,8 +284,8 @@ function CodexSection() {
       <p className="text-xs text-muted-foreground">
         Use{" "}
         <a href="https://github.com/openai/codex" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">Codex CLI</a>{" "}
-        (OpenAI's autonomous coding agent) to delegate coding tasks. Install with:{" "}
-        <code className="bg-secondary px-1 py-0.5 rounded text-[11px]">npm install -g @openai/codex</code>
+        (OpenAI's autonomous coding agent) to delegate coding tasks. Connect to the desktop and log in with{" "}
+        <code className="bg-secondary px-1 py-0.5 rounded text-[11px]">codex login</code>
       </p>
 
       <ToggleSwitch checked={enabled} onChange={() => updateCodexSettings({ enabled: !enabled })} label="Enable Codex integration" />
@@ -297,7 +299,7 @@ function CodexSection() {
         )}
         {authMode === "oauth" && (
           <p className="text-xs text-muted-foreground bg-secondary/50 p-2 rounded">
-            Run <code className="bg-secondary px-1 py-0.5 rounded text-[11px]">codex login</code> in a terminal to authenticate.
+            Connect to the desktop and run <code className="bg-secondary px-1 py-0.5 rounded text-[11px]">codex login</code> to authenticate.
           </p>
         )}
 
@@ -307,6 +309,87 @@ function CodexSection() {
         <InputField label="Timeout (ms)" value={localTimeoutMs} onChange={setLocalTimeoutMs} placeholder="1200000" type="number" />
 
         <ActionButtons saving={saving} onSave={handleSave} onTest={testCodexConnection} testResult={testResult} />
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Gemini CLI Section
+// ---------------------------------------------------------------------------
+
+function GeminiCliSection() {
+  const enabled = useSettingsStore((s) => s.geminiCliEnabled);
+  const authMode = useSettingsStore((s) => s.geminiCliAuthMode);
+  const apiKeySet = useSettingsStore((s) => s.geminiCliApiKeySet);
+  const model = useSettingsStore((s) => s.geminiCliModel);
+  const approvalMode = useSettingsStore((s) => s.geminiCliApprovalMode);
+  const timeoutMs = useSettingsStore((s) => s.geminiCliTimeoutMs);
+  const sandbox = useSettingsStore((s) => s.geminiCliSandbox);
+  const testResult = useSettingsStore((s) => s.geminiCliTestResult);
+  const loadGeminiCliSettings = useSettingsStore((s) => s.loadGeminiCliSettings);
+  const updateGeminiCliSettings = useSettingsStore((s) => s.updateGeminiCliSettings);
+  const testGeminiCliConnection = useSettingsStore((s) => s.testGeminiCliConnection);
+
+  const [localApiKey, setLocalApiKey] = useState("");
+  const [localModel, setLocalModel] = useState(model);
+  const [localApprovalMode, setLocalApprovalMode] = useState(approvalMode);
+  const [localTimeoutMs, setLocalTimeoutMs] = useState(String(timeoutMs));
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => { loadGeminiCliSettings(); }, []);
+  useEffect(() => {
+    setLocalModel(model);
+    setLocalApprovalMode(approvalMode);
+    setLocalTimeoutMs(String(timeoutMs));
+  }, [model, approvalMode, timeoutMs]);
+
+  const handleSave = async () => {
+    setSaving(true);
+    const data: Record<string, unknown> = {
+      ...(authMode === "api-key" ? { model: localModel } : {}),
+      approvalMode: localApprovalMode,
+      timeoutMs: parseInt(localTimeoutMs, 10) || 1200000,
+    };
+    if (localApiKey) data.apiKey = localApiKey;
+    await updateGeminiCliSettings(data);
+    setLocalApiKey("");
+    setSaving(false);
+  };
+
+  return (
+    <div className="space-y-3">
+      <p className="text-xs text-muted-foreground">
+        Use{" "}
+        <a href="https://github.com/google-gemini/gemini-cli" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">Gemini CLI</a>{" "}
+        (Google's autonomous AI coding agent) to delegate coding tasks. Connect to the desktop and log in with{" "}
+        <code className="bg-secondary px-1 py-0.5 rounded text-[11px]">gemini login</code>.
+      </p>
+
+      <ToggleSwitch checked={enabled} onChange={() => updateGeminiCliSettings({ enabled: !enabled })} label="Enable Gemini CLI integration" />
+
+      <div className="border border-border rounded-lg p-4 space-y-3">
+        <SelectField label="Auth Mode" value={authMode} onChange={(v) => updateGeminiCliSettings({ authMode: v as "api-key" | "oauth" })}
+          options={[{ value: "api-key", label: "API Key" }, { value: "oauth", label: "OAuth (gemini login)" }]} />
+
+        {authMode === "api-key" && (
+          <InputField label={`API Key${apiKeySet ? " \u2713 Set" : ""}`} value={localApiKey} onChange={setLocalApiKey} placeholder={apiKeySet ? "Enter new key to change" : "GEMINI_API_KEY"} type="password" />
+        )}
+        {authMode === "oauth" && (
+          <p className="text-xs text-muted-foreground bg-secondary/50 p-2 rounded">
+            Connect to the desktop and run <code className="bg-secondary px-1 py-0.5 rounded text-[11px]">gemini login</code> to authenticate with your Google account.
+          </p>
+        )}
+
+        {authMode === "api-key" && (
+          <InputField label="Model" value={localModel} onChange={setLocalModel} placeholder="gemini-2.5-flash" />
+        )}
+        <SelectField label="Approval Mode" value={localApprovalMode} onChange={(v) => setLocalApprovalMode(v as "full-auto" | "auto-edit" | "default")}
+          options={[{ value: "full-auto", label: "YOLO (Full Auto)" }, { value: "auto-edit", label: "Auto Edit" }, { value: "default", label: "Default (Ask)" }]} />
+        <ToggleSwitch checked={sandbox} onChange={() => updateGeminiCliSettings({ sandbox: !sandbox })} label="Sandbox mode" description="Run in Docker isolation for added safety." />
+        <InputField label="Timeout (ms)" value={localTimeoutMs} onChange={setLocalTimeoutMs} placeholder="1200000" type="number" />
+
+        <ActionButtons saving={saving} onSave={handleSave} onTest={testGeminiCliConnection} testResult={testResult} />
       </div>
     </div>
   );

@@ -3,28 +3,28 @@
   "name": "Project Office",
   "size": [12, 4, 12],
   "props": [
-    { "asset": "kaykit-prototype-bits/Floor", "position": [0, -0.5, 0], "receiveShadow": true },
-    { "asset": "kaykit-prototype-bits/Floor", "position": [4, -0.5, 0], "receiveShadow": true },
-    { "asset": "kaykit-prototype-bits/Floor", "position": [8, -0.5, 0], "receiveShadow": true },
-    { "asset": "kaykit-prototype-bits/Floor", "position": [0, -0.5, 4], "receiveShadow": true },
-    { "asset": "kaykit-prototype-bits/Floor", "position": [4, -0.5, 4], "receiveShadow": true },
-    { "asset": "kaykit-prototype-bits/Floor", "position": [8, -0.5, 4], "receiveShadow": true },
-    { "asset": "kaykit-prototype-bits/Floor", "position": [0, -0.5, 8], "receiveShadow": true },
-    { "asset": "kaykit-prototype-bits/Floor", "position": [4, -0.5, 8], "receiveShadow": true },
-    { "asset": "kaykit-prototype-bits/Floor", "position": [8, -0.5, 8], "receiveShadow": true },
+    { "asset": "kaykit-prototype-bits/Floor", "position": [2, -0.5, 2], "receiveShadow": true },
+    { "asset": "kaykit-prototype-bits/Floor", "position": [6, -0.5, 2], "receiveShadow": true },
+    { "asset": "kaykit-prototype-bits/Floor", "position": [10, -0.5, 2], "receiveShadow": true },
+    { "asset": "kaykit-prototype-bits/Floor", "position": [2, -0.5, 6], "receiveShadow": true },
+    { "asset": "kaykit-prototype-bits/Floor", "position": [6, -0.5, 6], "receiveShadow": true },
+    { "asset": "kaykit-prototype-bits/Floor", "position": [10, -0.5, 6], "receiveShadow": true },
+    { "asset": "kaykit-prototype-bits/Floor", "position": [2, -0.5, 10], "receiveShadow": true },
+    { "asset": "kaykit-prototype-bits/Floor", "position": [6, -0.5, 10], "receiveShadow": true },
+    { "asset": "kaykit-prototype-bits/Floor", "position": [10, -0.5, 10], "receiveShadow": true },
 
-    { "asset": "kaykit-prototype-bits/table_medium", "position": [3, 0, 1], "castShadow": true, "receiveShadow": true },
-    { "asset": "kaykit-prototype-bits/table_medium", "position": [7, 0, 1], "castShadow": true, "receiveShadow": true },
-    { "asset": "kaykit-prototype-bits/table_medium", "position": [3, 0, 6], "castShadow": true, "receiveShadow": true },
-    { "asset": "kaykit-prototype-bits/table_medium", "position": [7, 0, 6], "castShadow": true, "receiveShadow": true }
+    { "asset": "kaykit-prototype-bits/table_medium", "position": [5, 0, 3], "castShadow": true, "receiveShadow": true },
+    { "asset": "kaykit-prototype-bits/table_medium", "position": [9, 0, 3], "castShadow": true, "receiveShadow": true },
+    { "asset": "kaykit-prototype-bits/table_medium", "position": [5, 0, 8], "castShadow": true, "receiveShadow": true },
+    { "asset": "kaykit-prototype-bits/table_medium", "position": [9, 0, 8], "castShadow": true, "receiveShadow": true }
   ],
   "waypoints": [
-    { "id": "entrance", "position": [1, 0, -1], "tag": "entrance" },
-    { "id": "center", "position": [5, 0, 4], "tag": "center" },
-    { "id": "desk-1", "position": [3, 0, 2], "tag": "desk" },
-    { "id": "desk-2", "position": [7, 0, 2], "tag": "desk" },
-    { "id": "desk-3", "position": [3, 0, 7], "tag": "desk" },
-    { "id": "desk-4", "position": [7, 0, 7], "tag": "desk" }
+    { "id": "entrance", "position": [3, 0, 1], "tag": "entrance" },
+    { "id": "center", "position": [7, 0, 6], "tag": "center" },
+    { "id": "desk-1", "position": [5, 0, 4], "tag": "desk" },
+    { "id": "desk-2", "position": [9, 0, 4], "tag": "desk" },
+    { "id": "desk-3", "position": [5, 0, 9], "tag": "desk" },
+    { "id": "desk-4", "position": [9, 0, 9], "tag": "desk" }
   ],
   "edges": [
     { "from": "entrance", "to": "center" },

@@ -9,7 +9,7 @@ describe("getCenterTabs", () => {
 
   it("returns global tabs when no project is active (null)", () => {
     const tabs = getCenterTabs(null);
-    expect(tabs).toEqual(["dashboard", "todos", "inbox", "calendar", "code", "usage", "desktop"]);
+    expect(tabs).toEqual(["dashboard", "todos", "inbox", "calendar", "code", "usage"]);
   });
 
   it("includes 'code' in both project and global tabs", () => {
@@ -50,10 +50,16 @@ describe("centerViewLabels", () => {
 });
 
 describe("header navigation views", () => {
-  it("graph and live3d are both valid CenterView values with labels", () => {
-    // The header provides direct navigation to graph and live3d views
-    // (outside the tab bar). Both must remain valid CenterView values.
+  it("graph, live3d, and desktop are all valid CenterView values with labels", () => {
+    // The header provides direct navigation to graph, live3d, and desktop views
+    // (outside the tab bar). All must remain valid CenterView values.
     expect(centerViewLabels["graph"]).toBeDefined();
     expect(centerViewLabels["live3d"]).toBeDefined();
+    expect(centerViewLabels["desktop"]).toBeDefined();
+  });
+
+  it("desktop is not in the center tab bar (moved to header)", () => {
+    expect(getCenterTabs(null)).not.toContain("desktop");
+    expect(getCenterTabs("proj-1")).not.toContain("desktop");
   });
 });

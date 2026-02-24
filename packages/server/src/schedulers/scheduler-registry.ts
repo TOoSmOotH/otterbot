@@ -1,4 +1,8 @@
 import { getConfig, setConfig } from "../auth/auth.js";
+import { AgentRole, AgentStatus } from "@otterbot/shared";
+import type { Agent } from "@otterbot/shared";
+import type { Server } from "socket.io";
+import { getRandomModelPackId } from "../models3d/model-packs.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -31,6 +35,39 @@ export class SchedulerRegistry {
     string,
     { instance: Scheduler; meta: SchedulerMeta }
   >();
+  private io: Server;
+  /** Stable model pack assignments per built-in scheduler */
+  private modelPackIds = new Map<string, string | null>();
+
+  constructor(io: Server) {
+    this.io = io;
+  }
+
+  private getModelPackId(schedulerId: string): string | null {
+    if (!this.modelPackIds.has(schedulerId)) {
+      this.modelPackIds.set(schedulerId, getRandomModelPackId());
+    }
+    return this.modelPackIds.get(schedulerId) ?? null;
+  }
+
+  /** Build a pseudo-agent for a built-in scheduler (socket-only, no DB row). */
+  private buildPseudoAgent(meta: SchedulerMeta, status: AgentStatus = AgentStatus.Idle): Agent {
+    return {
+      id: `builtin-scheduler-${meta.id}`,
+      name: meta.name,
+      registryEntryId: null,
+      role: AgentRole.Scheduler,
+      parentId: null,
+      status,
+      model: "",
+      provider: "",
+      projectId: null,
+      modelPackId: this.getModelPackId(meta.id),
+      gearConfig: null,
+      workspacePath: null,
+      createdAt: new Date().toISOString(),
+    };
+  }
 
   register(id: string, instance: Scheduler, meta: Omit<SchedulerMeta, "id">): void {
     this.entries.set(id, { instance, meta: { id, ...meta } });
@@ -59,6 +96,10 @@ export class SchedulerRegistry {
 
     const { instance, meta } = entry;
 
+    // Read current enabled state before applying patch
+    const wasEnabledRaw = getConfig(`scheduler:${id}:enabled`);
+    const wasEnabled = wasEnabledRaw !== undefined ? wasEnabledRaw === "true" : true;
+
     // Persist and clamp interval
     if (patch.intervalMs !== undefined) {
       const clamped = Math.max(patch.intervalMs, meta.minIntervalMs);
@@ -78,6 +119,13 @@ export class SchedulerRegistry {
       instance.start(info.intervalMs);
     }
 
+    // Emit pseudo-agent events on enable/disable transitions
+    if (wasEnabled && !info.enabled) {
+      this.io.emit("agent:destroyed", { agentId: `builtin-scheduler-${id}` });
+    } else if (!wasEnabled && info.enabled) {
+      this.io.emit("agent:spawned", this.buildPseudoAgent(meta));
+    }
+
     return info;
   }
 
@@ -90,6 +138,7 @@ export class SchedulerRegistry {
 
       if (enabled) {
         instance.start(intervalMs);
+        this.io.emit("agent:spawned", this.buildPseudoAgent(meta));
         console.log(
           `[SchedulerRegistry] Started "${meta.name}" (every ${intervalMs / 1000}s)`,
         );
@@ -97,6 +146,19 @@ export class SchedulerRegistry {
         console.log(`[SchedulerRegistry] "${meta.name}" is disabled, skipping.`);
       }
     }
+  }
+
+  /** Return pseudo-agent data for all currently enabled built-in schedulers. */
+  getActivePseudoAgents(): Agent[] {
+    const agents: Agent[] = [];
+    for (const { meta } of this.entries.values()) {
+      const enabledRaw = getConfig(`scheduler:${meta.id}:enabled`);
+      const enabled = enabledRaw !== undefined ? enabledRaw === "true" : true;
+      if (enabled) {
+        agents.push(this.buildPseudoAgent(meta));
+      }
+    }
+    return agents;
   }
 
   private getOne(id: string): SchedulerInfo | null {

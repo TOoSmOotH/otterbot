@@ -1,9 +1,11 @@
 /** Types for the live coding agent view (OpenCode, Claude Code, Codex, etc.) */
 
-export type CodingAgentType = "opencode" | "claude-code" | "codex";
+export type CodingAgentType = "opencode" | "claude-code" | "codex" | "gemini-cli";
 
 export interface CodingAgentSession {
   id: string;
+  /** DB row primary key — used for detail-fetch and delete API calls */
+  dbId?: string;
   agentId: string;
   projectId: string | null;
   task: string;

@@ -24,6 +24,7 @@ export function MemoryTab() {
   const [newCategory, setNewCategory] = useState("general");
   const [newImportance, setNewImportance] = useState(5);
   const [saving, setSaving] = useState(false);
+  const [clearing, setClearing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const socket = getSocket();
@@ -96,6 +97,20 @@ export function MemoryTab() {
     if (!confirm("Delete this memory?")) return;
     socket.emit("memory:delete", { id }, (ack) => {
       if (ack?.ok) loadMemories();
+    });
+  };
+
+  const handleClearAll = () => {
+    if (!confirm("Delete all memories? This action cannot be undone.")) return;
+    setClearing(true);
+    setError(null);
+    socket.emit("memory:clear-all", (ack) => {
+      setClearing(false);
+      if (ack?.ok) {
+        loadMemories();
+      } else {
+        setError(ack?.error ?? "Failed to clear memories");
+      }
     });
   };
 
@@ -311,9 +326,18 @@ export function MemoryTab() {
       </div>
 
       {memories.length > 0 && (
-        <p className="text-[10px] text-muted-foreground">
-          {memories.length} memor{memories.length === 1 ? "y" : "ies"}
-        </p>
+        <div className="flex items-center justify-between">
+          <p className="text-[10px] text-muted-foreground">
+            {memories.length} memor{memories.length === 1 ? "y" : "ies"}
+          </p>
+          <button
+            onClick={handleClearAll}
+            disabled={clearing}
+            className="px-3 py-1.5 text-xs text-red-400 bg-secondary border border-red-400/20 rounded hover:bg-red-500/20 transition-colors disabled:opacity-50"
+          >
+            {clearing ? "Clearing..." : "Clear All Memories"}
+          </button>
+        </div>
       )}
     </div>
   );

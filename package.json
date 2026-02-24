@@ -37,6 +37,7 @@
       "better-sqlite3",
       "better-sqlite3-multiple-ciphers",
       "esbuild",
+      "isolated-vm",
       "node-pty",
       "onnxruntime-node",
       "puppeteer"

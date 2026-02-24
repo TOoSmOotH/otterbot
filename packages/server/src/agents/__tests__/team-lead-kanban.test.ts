@@ -116,7 +116,7 @@ function createTeamLead(bus: MessageBus) {
 function insertTask(overrides: Partial<{
   id: string;
   title: string;
-  column: "backlog" | "in_progress" | "done";
+  column: "triage" | "backlog" | "in_progress" | "in_review" | "done";
   description: string;
   assigneeAgentId: string | null;
   position: number;
@@ -132,7 +132,7 @@ function insertTask(overrides: Partial<{
     projectId: PROJECT_ID,
     title: overrides.title ?? "Test task",
     description: overrides.description ?? "",
-    column: column as "backlog" | "in_progress" | "done",
+    column: column as "triage" | "backlog" | "in_progress" | "in_review" | "done",
     position: overrides.position ?? 0,
     assigneeAgentId: overrides.assigneeAgentId ?? null,
     createdBy: "test",
@@ -251,6 +251,27 @@ describe("TeamLead — Kanban logic", () => {
       expect(updated?.column).toBe("done");
       expect(updated?.completionReport).toContain("FAILED");
     });
+
+    it("auto-corrects in_progress→backlog to in_review when pending report contains PR URL", () => {
+      const task = insertTask({ column: "in_progress", assigneeAgentId: "worker-1" });
+      const successReport = "Task completed.\nPR created: https://github.com/org/repo/pull/123\nAll tests passing.";
+      (tl as any)._pendingWorkerReport.set(task.id, successReport);
+      const result = (tl as any).updateKanbanTask(task.id, {
+        column: "backlog",
+        assigneeAgentId: "",
+      });
+      expect(result).toContain("AUTO-CORRECTED");
+      expect(result).toContain("in_review");
+      expect(result).toContain("Do NOT spawn");
+      const updated = getTask(task.id);
+      expect(updated?.column).toBe("in_review");
+      expect(updated?.completionReport).toContain("PR created");
+      expect(updated?.prNumber).toBe(123);
+      // Should NOT have incremented retry count
+      expect(updated?.retryCount ?? 0).toBe(0);
+      // Pending report should be consumed
+      expect((tl as any)._pendingWorkerReport.has(task.id)).toBe(false);
+    });
   });
 
   // ─── ensureTaskMoved safety net ─────────────────────────────
@@ -295,6 +316,22 @@ describe("TeamLead — Kanban logic", () => {
       const updated = getTask(task.id);
       expect(updated?.column).toBe("done");
       expect(updated?.completionReport).toContain("FAILED");
+    });
+
+    it("overrides backlog→in_review when LLM incorrectly moved a successful task with PR", () => {
+      const task = insertTask({
+        column: "backlog",
+        assigneeAgentId: "worker-1",
+      });
+      const moved = (tl as any).ensureTaskMoved(
+        task.id,
+        "Task completed.\nPR created: https://github.com/foo/bar/pull/42\n\nTerminal output (last 2000 chars):\nAll tests pass.",
+      );
+      expect(moved).toBe(true);
+      const updated = getTask(task.id);
+      expect(updated?.column).toBe("in_review");
+      expect(updated?.completionReport).toContain("PR created");
+      expect(updated?.prNumber).toBe(42);
     });
 
     it("does not double-increment retryCount", () => {

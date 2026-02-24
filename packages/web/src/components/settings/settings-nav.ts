@@ -19,6 +19,8 @@ export type SettingsSection =
   | "google"
   | "github"
   | "discord"
+  | "telegram"
+  | "slack"
   | "security";
 
 export interface NavItem {
@@ -75,6 +77,8 @@ export const SETTINGS_NAV: NavGroup[] = [
       { id: "email", label: "Email Setup" },
       { id: "github", label: "GitHub" },
       { id: "discord", label: "Discord" },
+      { id: "telegram", label: "Telegram" },
+      { id: "slack", label: "Slack" },
     ],
   },
   {

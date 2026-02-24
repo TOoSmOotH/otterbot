@@ -1,8 +1,12 @@
-import { execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { getConfig } from "../auth/auth.js";
+
+// Input validation patterns
+const REPO_NAME_RE = /^[a-zA-Z0-9._-]+\/[a-zA-Z0-9._-]+$/;
+const BRANCH_NAME_RE = /^[a-zA-Z0-9._\/-]+$/;
 
 export interface GitHubIssue {
   number: number;
@@ -11,6 +15,7 @@ export interface GitHubIssue {
   labels: { name: string }[];
   assignees: { login: string }[];
   state: string;
+  state_reason: string | null;
   html_url: string;
   created_at: string;
   updated_at: string;
@@ -57,9 +62,22 @@ function gitEnvWithPAT(token: string): Record<string, string> {
 /**
  * Build git config args for an inline credential helper that uses the GIT_PAT env var.
  * This keeps the token out of .git/config and remote URLs.
+ * Returns an array of arguments for use with execFileSync.
  */
-function gitCredentialArgs(): string {
-  return `-c credential.helper="!f() { echo username=x-access-token; echo password=$GIT_PAT; }; f"`;
+function gitCredentialArgs(): string[] {
+  return ["-c", `credential.helper=!f() { echo username=x-access-token; echo password=$GIT_PAT; }; f`];
+}
+
+function validateRepoName(name: string): void {
+  if (!REPO_NAME_RE.test(name)) {
+    throw new Error(`Invalid repository name: ${name}`);
+  }
+}
+
+function validateBranchName(name: string): void {
+  if (!BRANCH_NAME_RE.test(name)) {
+    throw new Error(`Invalid branch name: ${name}`);
+  }
 }
 
 /**
@@ -69,10 +87,10 @@ function configureGitUser(targetDir: string): void {
   const userName = getConfig("github:username") ?? "otterbot";
   const userEmail =
     getConfig("github:email") ?? `${userName}@users.noreply.github.com`;
-  execSync(`git -C ${targetDir} config user.name "${userName}"`, {
+  execFileSync("git", ["-C", targetDir, "config", "user.name", userName], {
     stdio: "pipe",
   });
-  execSync(`git -C ${targetDir} config user.email "${userEmail}"`, {
+  execFileSync("git", ["-C", targetDir, "config", "user.email", userEmail], {
     stdio: "pipe",
   });
 }
@@ -87,6 +105,9 @@ export function cloneRepo(
   targetDir: string,
   branch?: string,
 ): void {
+  validateRepoName(repoFullName);
+  if (branch) validateBranchName(branch);
+
   const token = getConfig("github:token") as string | undefined;
   const sshKeyPath = join(homedir(), ".ssh", "otterbot_github");
   const sshKeyExists = existsSync(sshKeyPath);
@@ -100,14 +121,13 @@ export function cloneRepo(
     if (token) {
       fetchOpts.env = gitEnvWithPAT(token);
     }
-    execSync(
-      token
-        ? `git ${gitCredentialArgs()} -C ${targetDir} fetch --all`
-        : `git -C ${targetDir} fetch --all`,
-      fetchOpts,
-    );
+    const fetchArgs = [
+      ...(token ? gitCredentialArgs() : []),
+      "-C", targetDir, "fetch", "--all",
+    ];
+    execFileSync("git", fetchArgs, fetchOpts);
     if (branch) {
-      execSync(`git -C ${targetDir} checkout ${branch}`, {
+      execFileSync("git", ["-C", targetDir, "checkout", branch], {
         stdio: "pipe",
         timeout: 30_000,
       });
@@ -118,25 +138,25 @@ export function cloneRepo(
       if (token) {
         pullOpts.env = gitEnvWithPAT(token);
       }
-      execSync(
-        token
-          ? `git ${gitCredentialArgs()} -C ${targetDir} pull origin ${branch}`
-          : `git -C ${targetDir} pull origin ${branch}`,
-        pullOpts,
-      );
+      const pullArgs = [
+        ...(token ? gitCredentialArgs() : []),
+        "-C", targetDir, "pull", "origin", branch,
+      ];
+      execFileSync("git", pullArgs, pullOpts);
     }
     return;
   }
 
-  const branchArg = branch ? `--branch ${branch}` : "";
+  const branchArgs = branch ? ["--branch", branch] : [];
   let httpsErr: unknown;
 
   // Try HTTPS+PAT first
   if (token) {
     const httpsUrl = `https://github.com/${repoFullName}.git`;
     try {
-      execSync(
-        `git clone ${gitCredentialArgs()} ${branchArg} ${httpsUrl} ${targetDir}`,
+      execFileSync(
+        "git",
+        ["clone", ...gitCredentialArgs(), ...branchArgs, httpsUrl, targetDir],
         {
           stdio: "pipe",
           timeout: 300_000,
@@ -154,7 +174,7 @@ export function cloneRepo(
   // Fall back to SSH
   if (sshKeyExists) {
     const sshUrl = `git@github.com:${repoFullName}.git`;
-    execSync(`git clone ${branchArg} ${sshUrl} ${targetDir}`, {
+    execFileSync("git", ["clone", ...branchArgs, sshUrl, targetDir], {
       stdio: "pipe",
       timeout: 300_000,
       env: { ...process.env },
@@ -336,6 +356,102 @@ export async function createIssueComment(
   );
 }
 
+/**
+ * Add labels to an issue (creates labels if they don't exist).
+ */
+export async function addLabelsToIssue(
+  repoFullName: string,
+  token: string,
+  issueNumber: number,
+  labels: string[],
+): Promise<void> {
+  if (labels.length === 0) return;
+  await ghFetch<unknown>(
+    `https://api.github.com/repos/${repoFullName}/issues/${issueNumber}/labels`,
+    token,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ labels }),
+    },
+  );
+}
+
+/**
+ * Remove a single label from an issue.
+ */
+export async function removeLabelFromIssue(
+  repoFullName: string,
+  token: string,
+  issueNumber: number,
+  label: string,
+): Promise<void> {
+  await ghFetch<unknown>(
+    `https://api.github.com/repos/${repoFullName}/issues/${issueNumber}/labels/${encodeURIComponent(label)}`,
+    token,
+    { method: "DELETE" },
+  );
+}
+
+/**
+ * Fetch open issues with optional filters (no assignee filter by default).
+ * Returns up to one page (100 issues). Use fetchAllOpenIssueNumbers()
+ * when you need an authoritative set of all open issue numbers.
+ */
+export async function fetchOpenIssues(
+  repoFullName: string,
+  token: string,
+  since?: string,
+): Promise<GitHubIssue[]> {
+  const params = new URLSearchParams({
+    state: "open",
+    per_page: "100",
+  });
+  if (since) params.set("since", since);
+
+  const issues = await ghFetch<(GitHubIssue & { pull_request?: unknown })[]>(
+    `https://api.github.com/repos/${repoFullName}/issues?${params}`,
+    token,
+  );
+  // Filter out pull requests (GitHub API returns PRs as issues)
+  return issues.filter((i) => !i.pull_request);
+}
+
+/**
+ * Fetch ALL open issue numbers via pagination.
+ * Only retrieves the minimal fields needed (number) to build an authoritative set.
+ * Much cheaper than fetching full issue bodies for every page.
+ */
+export async function fetchAllOpenIssueNumbers(
+  repoFullName: string,
+  token: string,
+): Promise<Set<number>> {
+  const numbers = new Set<number>();
+  let page = 1;
+
+  while (true) {
+    const params = new URLSearchParams({
+      state: "open",
+      per_page: "100",
+      page: String(page),
+    });
+
+    const issues = await ghFetch<{ number: number; pull_request?: unknown }[]>(
+      `https://api.github.com/repos/${repoFullName}/issues?${params}`,
+      token,
+    );
+
+    for (const issue of issues) {
+      if (!issue.pull_request) numbers.add(issue.number);
+    }
+
+    if (issues.length < 100) break;
+    page++;
+  }
+
+  return numbers;
+}
+
 // ---------------------------------------------------------------------------
 // Pull Request APIs
 // ---------------------------------------------------------------------------
@@ -375,6 +491,103 @@ export async function fetchPullRequests(
     `https://api.github.com/repos/${repoFullName}/pulls?${params}`,
     token,
   );
+}
+
+// ---------------------------------------------------------------------------
+// Pull Request Review APIs
+// ---------------------------------------------------------------------------
+
+export interface GitHubReview {
+  id: number;
+  user: { login: string };
+  body: string;
+  state: "APPROVED" | "CHANGES_REQUESTED" | "COMMENTED" | "DISMISSED" | "PENDING";
+  submitted_at: string;
+  html_url: string;
+}
+
+export interface GitHubReviewComment {
+  id: number;
+  user: { login: string };
+  body: string;
+  path: string;
+  line: number | null;
+  diff_hunk: string;
+  created_at: string;
+}
+
+/**
+ * Fetch reviews on a pull request.
+ */
+export async function fetchPullRequestReviews(
+  repoFullName: string,
+  token: string,
+  prNumber: number,
+): Promise<GitHubReview[]> {
+  return ghFetch<GitHubReview[]>(
+    `https://api.github.com/repos/${repoFullName}/pulls/${prNumber}/reviews?per_page=100`,
+    token,
+  );
+}
+
+/**
+ * Fetch review comments (inline/diff comments) on a pull request.
+ */
+export async function fetchPullRequestReviewComments(
+  repoFullName: string,
+  token: string,
+  prNumber: number,
+): Promise<GitHubReviewComment[]> {
+  return ghFetch<GitHubReviewComment[]>(
+    `https://api.github.com/repos/${repoFullName}/pulls/${prNumber}/comments?per_page=100`,
+    token,
+  );
+}
+
+/**
+ * Request reviewers on a pull request.
+ */
+export async function requestPullRequestReviewers(
+  repoFullName: string,
+  token: string,
+  prNumber: number,
+  reviewers: string[],
+): Promise<void> {
+  await ghFetch<unknown>(
+    `https://api.github.com/repos/${repoFullName}/pulls/${prNumber}/requested_reviewers`,
+    token,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ reviewers }),
+    },
+  );
+}
+
+/**
+ * Fetch the diff (changed files with patches) between two refs using the Compare API.
+ */
+export async function fetchCompareCommitsDiff(
+  repoFullName: string,
+  token: string,
+  base: string,
+  head: string,
+): Promise<{ filename: string; status: string; patch?: string }[]> {
+  validateRepoName(repoFullName);
+  validateBranchName(base);
+  validateBranchName(head);
+
+  const data = await ghFetch<{
+    files?: { filename: string; status: string; patch?: string }[];
+  }>(
+    `https://api.github.com/repos/${repoFullName}/compare/${encodeURIComponent(base)}...${encodeURIComponent(head)}`,
+    token,
+  );
+  return (data.files ?? []).map((f) => ({
+    filename: f.filename,
+    status: f.status,
+    patch: f.patch,
+  }));
 }
 
 /**

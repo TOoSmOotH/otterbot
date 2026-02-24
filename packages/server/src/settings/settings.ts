@@ -22,7 +22,7 @@ import { execSync } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync, unlinkSync, mkdirSync, chmodSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import type { NamedProvider, ProviderType, ProviderTypeMeta, CustomModel, ModelOption, ClaudeCodeOAuthUsage } from "@otterbot/shared";
+import type { NamedProvider, ProviderType, ProviderTypeMeta, CustomModel, ModelOption, ClaudeCodeOAuthUsage, AgentModelOverride } from "@otterbot/shared";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -53,9 +53,15 @@ export interface TestResult {
 export const PROVIDER_TYPE_META: ProviderTypeMeta[] = [
   { type: "anthropic", label: "Anthropic", needsApiKey: true, needsBaseUrl: false },
   { type: "openai", label: "OpenAI", needsApiKey: true, needsBaseUrl: false },
+  { type: "google", label: "Google Gemini", needsApiKey: true, needsBaseUrl: false },
   { type: "openrouter", label: "OpenRouter", needsApiKey: true, needsBaseUrl: false },
   { type: "ollama", label: "Ollama", needsApiKey: false, needsBaseUrl: true },
   { type: "openai-compatible", label: "OpenAI-Compatible", needsApiKey: true, needsBaseUrl: true },
+  { type: "github-copilot", label: "GitHub Copilot", needsApiKey: true, needsBaseUrl: false },
+  { type: "huggingface", label: "Hugging Face", needsApiKey: true, needsBaseUrl: false },
+  { type: "nvidia", label: "NVIDIA", needsApiKey: true, needsBaseUrl: false },
+  { type: "perplexity", label: "Perplexity Sonar", needsApiKey: true, needsBaseUrl: false },
+  { type: "deepgram", label: "Deepgram", needsApiKey: true, needsBaseUrl: false },
 ];
 
 // Static fallback models per provider (used when API fetch fails)
@@ -66,6 +72,12 @@ const FALLBACK_MODELS: Record<string, string[]> = {
     "claude-opus-4-20250514",
   ],
   openai: ["gpt-4o", "gpt-4o-mini", "gpt-4.1", "gpt-4.1-mini", "o3-mini"],
+  google: [
+    "gemini-2.5-flash",
+    "gemini-2.5-pro",
+    "gemini-2.0-flash",
+    "gemini-2.0-flash-lite",
+  ],
   ollama: ["llama3.1", "mistral", "codellama", "qwen2.5-coder"],
   openrouter: [
     "anthropic/claude-sonnet-4-5-20250929",
@@ -74,6 +86,26 @@ const FALLBACK_MODELS: Record<string, string[]> = {
     "meta-llama/llama-3.3-70b-instruct",
   ],
   "openai-compatible": [],
+  "github-copilot": ["gpt-4o", "gpt-4.1", "claude-sonnet-4-5-20250929", "o3-mini"],
+  huggingface: [
+    "meta-llama/Llama-3.1-8B-Instruct",
+    "mistralai/Mistral-7B-Instruct-v0.3",
+    "microsoft/Phi-3-mini-4k-instruct",
+    "Qwen/Qwen2.5-72B-Instruct",
+  ],
+  nvidia: [
+    "meta/llama-3.1-70b-instruct",
+    "meta/llama-3.1-8b-instruct",
+    "mistralai/mistral-7b-instruct-v0.3",
+    "mistralai/mixtral-8x22b-instruct-v0.1",
+  ],
+  perplexity: [
+    "sonar",
+    "sonar-pro",
+    "sonar-reasoning",
+    "sonar-reasoning-pro",
+  ],
+  deepgram: [],
 };
 
 // ---------------------------------------------------------------------------
@@ -242,6 +274,56 @@ export function updateTierDefaults(
 }
 
 // ---------------------------------------------------------------------------
+// Per-agent model overrides
+// ---------------------------------------------------------------------------
+
+const AGENT_OVERRIDE_PREFIX = "agent_override:";
+
+export function getAgentModelOverrides(): AgentModelOverride[] {
+  const db = getDb();
+  const rows = db.select().from(schema.config).all();
+  const overrideMap = new Map<string, { provider?: string; model?: string }>();
+
+  for (const row of rows) {
+    if (!row.key.startsWith(AGENT_OVERRIDE_PREFIX)) continue;
+    const rest = row.key.slice(AGENT_OVERRIDE_PREFIX.length);
+    const lastColon = rest.lastIndexOf(":");
+    if (lastColon === -1) continue;
+    const registryEntryId = rest.slice(0, lastColon);
+    const field = rest.slice(lastColon + 1);
+    if (field !== "provider" && field !== "model") continue;
+    const existing = overrideMap.get(registryEntryId) ?? {};
+    existing[field] = row.value;
+    overrideMap.set(registryEntryId, existing);
+  }
+
+  const result: AgentModelOverride[] = [];
+  for (const [registryEntryId, fields] of overrideMap) {
+    if (fields.provider && fields.model) {
+      result.push({ registryEntryId, provider: fields.provider, model: fields.model });
+    }
+  }
+  return result;
+}
+
+export function getAgentModelOverride(registryEntryId: string): AgentModelOverride | null {
+  const provider = getConfig(`${AGENT_OVERRIDE_PREFIX}${registryEntryId}:provider`);
+  const model = getConfig(`${AGENT_OVERRIDE_PREFIX}${registryEntryId}:model`);
+  if (!provider || !model) return null;
+  return { registryEntryId, provider, model };
+}
+
+export function setAgentModelOverride(registryEntryId: string, provider: string, model: string): void {
+  setConfig(`${AGENT_OVERRIDE_PREFIX}${registryEntryId}:provider`, provider);
+  setConfig(`${AGENT_OVERRIDE_PREFIX}${registryEntryId}:model`, model);
+}
+
+export function clearAgentModelOverride(registryEntryId: string): void {
+  deleteConfig(`${AGENT_OVERRIDE_PREFIX}${registryEntryId}:provider`);
+  deleteConfig(`${AGENT_OVERRIDE_PREFIX}${registryEntryId}:model`);
+}
+
+// ---------------------------------------------------------------------------
 // Test provider connection
 // ---------------------------------------------------------------------------
 
@@ -332,6 +414,26 @@ export async function fetchModelsWithCredentials(
         return data.data?.map((m) => m.id).sort() ?? FALLBACK_MODELS.openai ?? [];
       }
 
+      case "google": {
+        if (!apiKey) return FALLBACK_MODELS.google ?? [];
+        const res = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`,
+          { signal: AbortSignal.timeout(10_000) },
+        );
+        if (!res.ok) return FALLBACK_MODELS.google ?? [];
+        const data = (await res.json()) as {
+          models?: Array<{ name: string; supportedGenerationMethods?: string[] }>;
+        };
+        return (
+          data.models
+            ?.filter((m) =>
+              m.supportedGenerationMethods?.includes("generateContent"),
+            )
+            .map((m) => m.name.replace("models/", ""))
+            .sort() ?? FALLBACK_MODELS.google ?? []
+        );
+      }
+
       case "ollama": {
         const effectiveBase = baseUrl ?? "http://localhost:11434/api";
         const tagsUrl = effectiveBase.endsWith("/api")
@@ -373,6 +475,58 @@ export async function fetchModelsWithCredentials(
           data?: Array<{ id: string }>;
         };
         return data.data?.map((m) => m.id).sort() ?? [];
+      }
+
+      case "github-copilot": {
+        if (!apiKey) return FALLBACK_MODELS["github-copilot"] ?? [];
+        const copilotBase = baseUrl ?? "https://api.githubcopilot.com";
+        const res = await fetch(`${copilotBase}/models`, {
+          headers: { Authorization: `Bearer ${apiKey}` },
+          signal: AbortSignal.timeout(10_000),
+        });
+        if (!res.ok) return FALLBACK_MODELS["github-copilot"] ?? [];
+        const data = (await res.json()) as { data?: Array<{ id: string }> };
+        return data.data?.map((m) => m.id).sort() ?? FALLBACK_MODELS["github-copilot"] ?? [];
+      }
+
+      case "huggingface": {
+        if (!apiKey) return FALLBACK_MODELS.huggingface ?? [];
+        const hfRes = await fetch(
+          "https://huggingface.co/api/models?pipeline_tag=text-generation&sort=likes&direction=-1&limit=50&filter=conversational",
+          {
+            headers: { Authorization: `Bearer ${apiKey}` },
+            signal: AbortSignal.timeout(10_000),
+          },
+        );
+        if (!hfRes.ok) return FALLBACK_MODELS.huggingface ?? [];
+        const hfData = (await hfRes.json()) as Array<{ id: string }>;
+        return Array.isArray(hfData)
+          ? hfData.map((m) => m.id)
+          : FALLBACK_MODELS.huggingface ?? [];
+      }
+
+      case "nvidia": {
+        if (!apiKey) return FALLBACK_MODELS.nvidia ?? [];
+        const nvidiaBase = baseUrl ?? "https://integrate.api.nvidia.com/v1";
+        const nvidiaRes = await fetch(`${nvidiaBase}/models`, {
+          headers: { Authorization: `Bearer ${apiKey}` },
+          signal: AbortSignal.timeout(10_000),
+        });
+        if (!nvidiaRes.ok) return FALLBACK_MODELS.nvidia ?? [];
+        const nvidiaData = (await nvidiaRes.json()) as { data?: Array<{ id: string }> };
+        return nvidiaData.data?.map((m) => m.id).sort() ?? FALLBACK_MODELS.nvidia ?? [];
+      }
+
+      case "perplexity": {
+        if (!apiKey) return FALLBACK_MODELS.perplexity ?? [];
+        const pplxBase = baseUrl ?? "https://api.perplexity.ai";
+        const pplxRes = await fetch(`${pplxBase}/models`, {
+          headers: { Authorization: `Bearer ${apiKey}` },
+          signal: AbortSignal.timeout(10_000),
+        });
+        if (!pplxRes.ok) return FALLBACK_MODELS.perplexity ?? [];
+        const pplxData = (await pplxRes.json()) as { data?: Array<{ id: string }> };
+        return pplxData.data?.map((m) => m.id).sort() ?? FALLBACK_MODELS.perplexity ?? [];
       }
 
       default:
@@ -590,6 +744,11 @@ const TTS_PROVIDER_META: Record<
     needsApiKey: true,
     needsBaseUrl: true,
   },
+  deepgram: {
+    name: "Deepgram",
+    needsApiKey: true,
+    needsBaseUrl: false,
+  },
 };
 
 const TTS_VOICES: Record<string, string[]> = {
@@ -653,6 +812,20 @@ const TTS_VOICES: Record<string, string[]> = {
     "onyx",
     "nova",
     "shimmer",
+  ],
+  deepgram: [
+    "aura-asteria-en",
+    "aura-luna-en",
+    "aura-stella-en",
+    "aura-athena-en",
+    "aura-hera-en",
+    "aura-orion-en",
+    "aura-arcas-en",
+    "aura-perseus-en",
+    "aura-angus-en",
+    "aura-orpheus-en",
+    "aura-helios-en",
+    "aura-zeus-en",
   ],
 };
 
@@ -796,6 +969,11 @@ const STT_PROVIDER_META: Record<
   browser: {
     name: "Browser (Chrome/Edge)",
     needsApiKey: false,
+    needsBaseUrl: false,
+  },
+  deepgram: {
+    name: "Deepgram",
+    needsApiKey: true,
     needsBaseUrl: false,
   },
 };
@@ -1317,6 +1495,95 @@ export async function testCodexConnection(): Promise<TestResult> {
         return { ok: false, error: "API key not configured." };
       }
       return { ok: false, error: "OAuth session not found. Run `codex login` to authenticate." };
+    }
+
+    return { ok: true, latencyMs: Date.now() - start };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "Unknown error",
+    };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Gemini CLI settings
+// ---------------------------------------------------------------------------
+
+export interface GeminiCliSettingsResponse {
+  enabled: boolean;
+  authMode: "api-key" | "oauth";
+  apiKeySet: boolean;
+  model: string;
+  approvalMode: "full-auto" | "auto-edit" | "default";
+  timeoutMs: number;
+  sandbox: boolean;
+}
+
+export function getGeminiCliSettings(): GeminiCliSettingsResponse {
+  return {
+    enabled: getConfig("gemini-cli:enabled") === "true",
+    authMode: (getConfig("gemini-cli:auth_mode") ?? "api-key") as "api-key" | "oauth",
+    apiKeySet: !!getConfig("gemini-cli:api_key"),
+    model: getConfig("gemini-cli:model") ?? "gemini-2.5-flash",
+    approvalMode: (getConfig("gemini-cli:approval_mode") ?? "full-auto") as "full-auto" | "auto-edit" | "default",
+    timeoutMs: parseInt(getConfig("gemini-cli:timeout_ms") ?? "1200000", 10),
+    sandbox: getConfig("gemini-cli:sandbox") === "true",
+  };
+}
+
+export async function updateGeminiCliSettings(data: {
+  enabled?: boolean;
+  authMode?: "api-key" | "oauth";
+  apiKey?: string;
+  model?: string;
+  approvalMode?: "full-auto" | "auto-edit" | "default";
+  timeoutMs?: number;
+  sandbox?: boolean;
+}): Promise<void> {
+  if (data.enabled !== undefined) {
+    setConfig("gemini-cli:enabled", data.enabled ? "true" : "false");
+  }
+  if (data.authMode !== undefined) {
+    setConfig("gemini-cli:auth_mode", data.authMode);
+  }
+  if (data.apiKey !== undefined) {
+    if (data.apiKey === "") {
+      deleteConfig("gemini-cli:api_key");
+    } else {
+      setConfig("gemini-cli:api_key", data.apiKey);
+    }
+  }
+  if (data.model !== undefined) {
+    setConfig("gemini-cli:model", data.model);
+  }
+  if (data.approvalMode !== undefined) {
+    setConfig("gemini-cli:approval_mode", data.approvalMode);
+  }
+  if (data.timeoutMs !== undefined) {
+    setConfig("gemini-cli:timeout_ms", String(data.timeoutMs));
+  }
+  if (data.sandbox !== undefined) {
+    setConfig("gemini-cli:sandbox", data.sandbox ? "true" : "false");
+  }
+}
+
+export async function testGeminiCliConnection(): Promise<TestResult> {
+  const start = Date.now();
+
+  try {
+    const { isGeminiCliInstalled, isGeminiCliReady } = await import("../coding-agents/gemini-cli-manager.js");
+
+    if (!isGeminiCliInstalled()) {
+      return { ok: false, error: "Gemini CLI not found. It should be pre-installed — try restarting the container." };
+    }
+
+    if (!isGeminiCliReady()) {
+      const authMode = getConfig("gemini-cli:auth_mode") ?? "api-key";
+      if (authMode === "api-key") {
+        return { ok: false, error: "API key not configured." };
+      }
+      return { ok: false, error: "OAuth session not found. Run `gemini login` in a terminal to authenticate." };
     }
 
     return { ok: true, latencyMs: Date.now() - start };

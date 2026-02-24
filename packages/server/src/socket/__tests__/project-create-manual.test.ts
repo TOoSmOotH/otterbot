@@ -75,6 +75,14 @@ vi.mock("../../tools/tool-factory.js", () => ({
   createTools: vi.fn(() => ({})),
 }));
 
+// Mock git utils
+const mockInitGitRepo = vi.fn();
+const mockCreateInitialCommit = vi.fn();
+vi.mock("../../utils/git.js", () => ({
+  initGitRepo: (...args: any[]) => mockInitGitRepo(...args),
+  createInitialCommit: (...args: any[]) => mockCreateInitialCommit(...args),
+}));
+
 // Mock opencode-client
 vi.mock("../../tools/opencode-client.js", () => ({
   TASK_COMPLETE_SENTINEL: "◊◊TASK_COMPLETE_9f8e7d◊◊",
@@ -170,6 +178,8 @@ describe("project:create-manual socket handler", () => {
     socketHandlers.clear();
     mockCloneRepo.mockReset();
     mockGetRepoDefaultBranch.mockReset().mockResolvedValue("main");
+    mockInitGitRepo.mockReset();
+    mockCreateInitialCommit.mockReset();
     process.env.DATABASE_URL = `file:${join(tmpDir, "test.db")}`;
     process.env.OTTERBOT_DB_KEY = "test-key";
     await migrateDb();
@@ -361,6 +371,106 @@ describe("project:create-manual socket handler", () => {
     const db = getDb();
     const project = db.select().from(schema.projects).where(eq(schema.projects.id, projectId)).get();
     expect(project!.name).toBe("my-cool-repo");
+  });
+
+  // --- Local-only project tests ---
+
+  it("creates a local project successfully without GitHub repo", async () => {
+    const { mockCoo, mockIo, mockWorkspace } = setupHandler();
+    const handler = socketHandlers.get("project:create-manual");
+    const callback = vi.fn();
+
+    await handler!(
+      {
+        name: "My Local Project",
+        description: "A local project",
+        rules: ["Use TypeScript"],
+      },
+      callback,
+    );
+
+    // Should succeed
+    expect(callback).toHaveBeenCalledWith(
+      expect.objectContaining({ ok: true, projectId: expect.any(String) }),
+    );
+
+    // Verify project was created in DB with null GitHub fields
+    const projectId = callback.mock.calls[0][0].projectId;
+    const db = getDb();
+    const project = db
+      .select()
+      .from(schema.projects)
+      .where(eq(schema.projects.id, projectId))
+      .get();
+
+    expect(project).toBeDefined();
+    expect(project!.name).toBe("My Local Project");
+    expect(project!.githubRepo).toBeNull();
+    expect(project!.githubBranch).toBeNull();
+    expect(project!.githubIssueMonitor).toBe(false);
+    expect(project!.rules).toEqual(["Use TypeScript"]);
+
+    // Verify workspace was created
+    expect(mockWorkspace.createProject).toHaveBeenCalledWith(projectId);
+
+    // Verify local git repo was initialized (not cloned)
+    expect(mockCloneRepo).not.toHaveBeenCalled();
+    expect(mockInitGitRepo).toHaveBeenCalledWith(expect.stringContaining(projectId));
+    expect(mockCreateInitialCommit).toHaveBeenCalledWith(expect.stringContaining(projectId));
+
+    // Verify TeamLead was spawned with null GitHub params
+    expect(mockCoo.spawnTeamLeadForManualProject).toHaveBeenCalledWith(
+      projectId,
+      null,
+      null,
+      ["Use TypeScript"],
+    );
+
+    // Verify project:created was emitted
+    expect(mockIo.emit).toHaveBeenCalledWith(
+      "project:created",
+      expect.objectContaining({ id: projectId }),
+    );
+
+    // Verify no GitHub config was stored (only rules)
+    expect(configStore.has(`project:${projectId}:github:repo`)).toBe(false);
+    expect(configStore.has(`project:${projectId}:github:branch`)).toBe(false);
+    expect(configStore.get(`project:${projectId}:github:rules`)).toBe(JSON.stringify(["Use TypeScript"]));
+  });
+
+  it("rejects local project without name", async () => {
+    setupHandler();
+    const handler = socketHandlers.get("project:create-manual");
+    const callback = vi.fn();
+
+    await handler!(
+      { description: "No name provided" },
+      callback,
+    );
+
+    expect(callback).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ok: false,
+        error: expect.stringContaining("Project name is required"),
+      }),
+    );
+  });
+
+  it("does not require GitHub config for local project", async () => {
+    // No GitHub token/username set — should still work for local projects
+    const { mockCoo } = setupHandler();
+    const handler = socketHandlers.get("project:create-manual");
+    const callback = vi.fn();
+
+    await handler!(
+      { name: "local-only", description: "No GitHub needed" },
+      callback,
+    );
+
+    expect(callback).toHaveBeenCalledWith(
+      expect.objectContaining({ ok: true }),
+    );
+    expect(mockCoo.spawnTeamLeadForManualProject).toHaveBeenCalled();
   });
 
   it("cleans up on clone failure", async () => {
