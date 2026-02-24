@@ -22,6 +22,7 @@ import {
 } from "../github/github-service.js";
 import type { COO } from "../agents/coo.js";
 import type { GitHubIssue } from "../github/github-service.js";
+import { SECURITY_PREAMBLE } from "../agents/prompts/security-preamble.js";
 
 type TypedServer = Server<ClientToServerEvents, ServerToClientEvents>;
 
@@ -343,12 +344,14 @@ export class PipelineManager {
       console.error(`[PipelineManager] Failed to post triage start comment on #${issue.number}:`, err);
     }
 
-    // Build prompt
+    // Build prompt — wrap in XML delimiters to isolate untrusted content
     const issueText =
+      `<github-issue>\n` +
       `Issue #${issue.number}: ${issue.title}\n\n` +
       `${issue.body ?? "(no description)"}\n\n` +
       `Labels: ${issue.labels.map((l) => l.name).join(", ") || "none"}\n` +
-      `Assignees: ${issue.assignees.map((a) => a.login).join(", ") || "none"}`;
+      `Assignees: ${issue.assignees.map((a) => a.login).join(", ") || "none"}\n` +
+      `</github-issue>`;
 
     try {
       const model = resolveModel({
@@ -366,7 +369,7 @@ export class PipelineManager {
 
       const result = await generateText({
         model,
-        system: entry.systemPrompt,
+        system: `${SECURITY_PREAMBLE}\n${entry.systemPrompt}`,
         prompt: issueText,
         maxTokens: 1000,
       });
@@ -385,6 +388,28 @@ export class PipelineManager {
         console.error(`[PipelineManager] Failed to parse triage response for #${issue.number}:`, result.text);
         return;
       }
+
+      // Validate and sanitize triage output
+      const ALLOWED_CLASSIFICATIONS = [
+        "bug", "feature", "enhancement", "user-error",
+        "duplicate", "question", "documentation",
+      ];
+      if (!ALLOWED_CLASSIFICATIONS.includes(parsed.classification)) {
+        console.warn(`[PipelineManager] Invalid classification "${parsed.classification}" — defaulting to "question"`);
+        parsed.classification = "question";
+      }
+
+      const ALLOWED_LABELS = [
+        "bug", "feature", "enhancement", "user-error", "duplicate",
+        "question", "documentation", "good-first-issue", "help-wanted",
+      ];
+      parsed.labels = (parsed.labels ?? []).filter((l) => ALLOWED_LABELS.includes(l));
+
+      if (typeof parsed.comment === "string" && parsed.comment.length > 500) {
+        parsed.comment = parsed.comment.slice(0, 500);
+      }
+
+      parsed.shouldProceed = !!parsed.shouldProceed;
 
       // Apply labels
       if (parsed.labels && parsed.labels.length > 0) {
@@ -910,9 +935,9 @@ export class PipelineManager {
       parts.push(`GitHub Issue: #${state.issueNumber}`);
     }
 
-    // Include task description (original issue body)
+    // Include task description (original issue body) — wrapped in XML delimiters to isolate untrusted content
     if (task.description) {
-      parts.push(`\nTask Description:\n${task.description}`);
+      parts.push(`\n<issue-description>\n${task.description}\n</issue-description>`);
     }
 
     // Stage-specific instructions

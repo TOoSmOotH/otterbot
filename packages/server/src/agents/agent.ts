@@ -27,6 +27,7 @@ import { SoulService } from "../memory/soul-service.js";
 import { MemoryService } from "../memory/memory-service.js";
 import { MemoryExtractor } from "../memory/memory-extractor.js";
 import { MemoryCompactor } from "../memory/memory-compactor.js";
+import { SECURITY_PREAMBLE } from "./prompts/security-preamble.js";
 
 export interface AgentOptions {
   id?: string;
@@ -89,7 +90,7 @@ export abstract class BaseAgent {
     this.modelPackId = options.modelPackId ?? null;
     this.gearConfig = options.gearConfig ?? null;
     this.bus = bus;
-    this.systemPrompt = options.systemPrompt;
+    this.systemPrompt = `${SECURITY_PREAMBLE}\n${options.systemPrompt}`;
 
     // Resolve and inject soul document into system prompt
     try {
