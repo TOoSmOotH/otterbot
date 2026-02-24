@@ -123,6 +123,57 @@ class OpenAICompatibleSTTProvider implements STTProvider {
 }
 
 // ---------------------------------------------------------------------------
+// Deepgram STT provider (cloud)
+// ---------------------------------------------------------------------------
+
+class DeepgramSTTProvider implements STTProvider {
+  private apiKey: string;
+
+  constructor(apiKey: string) {
+    this.apiKey = apiKey;
+  }
+
+  async transcribe(
+    audio: Buffer,
+    opts?: { language?: string },
+  ): Promise<{ text: string }> {
+    const params = new URLSearchParams({ model: "nova-3" });
+    if (opts?.language) {
+      params.set("language", opts.language);
+    }
+
+    const url = `https://api.deepgram.com/v1/listen?${params.toString()}`;
+
+    const res = await fetch(url, {
+      method: "POST",
+      headers: {
+        Authorization: `Token ${this.apiKey}`,
+        "Content-Type": "audio/webm",
+      },
+      body: new Uint8Array(audio),
+      signal: AbortSignal.timeout(60_000),
+    });
+
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      throw new Error(`Deepgram STT API error ${res.status}: ${body}`);
+    }
+
+    const data = (await res.json()) as {
+      results?: {
+        channels?: Array<{
+          alternatives?: Array<{ transcript?: string }>;
+        }>;
+      };
+    };
+
+    const transcript =
+      data.results?.channels?.[0]?.alternatives?.[0]?.transcript ?? "";
+    return { text: transcript.trim() };
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Factory
 // ---------------------------------------------------------------------------
 
@@ -142,6 +193,12 @@ export function getConfiguredSTTProvider(): STTProvider | null {
       const apiKey = getConfig("stt:openai-compatible:api_key") ?? "";
       if (!baseUrl) return null;
       return new OpenAICompatibleSTTProvider(baseUrl, apiKey);
+    }
+
+    case "deepgram": {
+      const dgApiKey = getConfig("stt:deepgram:api_key");
+      if (!dgApiKey) return null;
+      return new DeepgramSTTProvider(dgApiKey);
     }
 
     default:

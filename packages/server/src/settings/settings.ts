@@ -61,6 +61,7 @@ export const PROVIDER_TYPE_META: ProviderTypeMeta[] = [
   { type: "huggingface", label: "Hugging Face", needsApiKey: true, needsBaseUrl: false },
   { type: "nvidia", label: "NVIDIA", needsApiKey: true, needsBaseUrl: false },
   { type: "perplexity", label: "Perplexity Sonar", needsApiKey: true, needsBaseUrl: false },
+  { type: "deepgram", label: "Deepgram", needsApiKey: true, needsBaseUrl: false },
 ];
 
 // Static fallback models per provider (used when API fetch fails)
@@ -104,6 +105,7 @@ const FALLBACK_MODELS: Record<string, string[]> = {
     "sonar-reasoning",
     "sonar-reasoning-pro",
   ],
+  deepgram: [],
 };
 
 // ---------------------------------------------------------------------------
@@ -742,6 +744,11 @@ const TTS_PROVIDER_META: Record<
     needsApiKey: true,
     needsBaseUrl: true,
   },
+  deepgram: {
+    name: "Deepgram",
+    needsApiKey: true,
+    needsBaseUrl: false,
+  },
 };
 
 const TTS_VOICES: Record<string, string[]> = {
@@ -805,6 +812,20 @@ const TTS_VOICES: Record<string, string[]> = {
     "onyx",
     "nova",
     "shimmer",
+  ],
+  deepgram: [
+    "aura-asteria-en",
+    "aura-luna-en",
+    "aura-stella-en",
+    "aura-athena-en",
+    "aura-hera-en",
+    "aura-orion-en",
+    "aura-arcas-en",
+    "aura-perseus-en",
+    "aura-angus-en",
+    "aura-orpheus-en",
+    "aura-helios-en",
+    "aura-zeus-en",
   ],
 };
 
@@ -948,6 +969,11 @@ const STT_PROVIDER_META: Record<
   browser: {
     name: "Browser (Chrome/Edge)",
     needsApiKey: false,
+    needsBaseUrl: false,
+  },
+  deepgram: {
+    name: "Deepgram",
+    needsApiKey: true,
     needsBaseUrl: false,
   },
 };

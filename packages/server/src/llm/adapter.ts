@@ -160,6 +160,12 @@ export function resolveModel(config: LLMConfig): LanguageModel {
       return perplexity(config.model);
     }
 
+    case "deepgram":
+      throw new Error(
+        "Deepgram is a speech provider (STT/TTS) and does not support text generation. " +
+        "Configure it under TTS or STT settings instead.",
+      );
+
     default:
       throw new Error(`Unknown LLM provider: ${config.provider} (type: ${resolved.type})`);
   }
