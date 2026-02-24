@@ -166,15 +166,15 @@ The user can see everything on the desktop in real-time.`;
       systemPrompt = lines.join("\n") + "\n\n" + systemPrompt;
     }
 
-    // Only use registry model/provider from a custom clone — the builtin's
-    // hardcoded values must not override the user's configured provider.
+    // Config DB (Settings page) takes precedence over registry entry defaults,
+    // so that runtime model changes are always respected.
     const options: AgentOptions = {
       id: "coo",
       role: AgentRole.COO,
       parentId: null,
       projectId: null,
-      model: customCoo?.defaultModel ?? getConfig("coo_model") ?? "claude-sonnet-4-5-20250929",
-      provider: customCoo?.defaultProvider ?? getConfig("coo_provider") ?? "anthropic",
+      model: getConfig("coo_model") ?? customCoo?.defaultModel ?? "claude-sonnet-4-5-20250929",
+      provider: getConfig("coo_provider") ?? customCoo?.defaultProvider ?? "anthropic",
       systemPrompt,
       modelPackId: cooEntry?.modelPackId ?? null,
       gearConfig: cooEntry?.gearConfig ?? null,
@@ -222,8 +222,8 @@ The user can see everything on the desktop in real-time.`;
     const cooRegistryId = getConfig("coo_registry_id");
     const customCoo = cooRegistryId ? new Registry().get(cooRegistryId) : null;
 
-    const newModel = customCoo?.defaultModel ?? getConfig("coo_model") ?? "claude-sonnet-4-5-20250929";
-    const newProvider = customCoo?.defaultProvider ?? getConfig("coo_provider") ?? "anthropic";
+    const newModel = getConfig("coo_model") ?? customCoo?.defaultModel ?? "claude-sonnet-4-5-20250929";
+    const newProvider = getConfig("coo_provider") ?? customCoo?.defaultProvider ?? "anthropic";
 
     if (newModel !== this.llmConfig.model || newProvider !== this.llmConfig.provider) {
       console.log(`[COO] LLM config changed: ${this.llmConfig.provider}/${this.llmConfig.model} → ${newProvider}/${newModel}`);
