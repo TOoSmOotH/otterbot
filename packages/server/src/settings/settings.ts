@@ -60,6 +60,7 @@ export const PROVIDER_TYPE_META: ProviderTypeMeta[] = [
   { type: "github-copilot", label: "GitHub Copilot", needsApiKey: true, needsBaseUrl: false },
   { type: "huggingface", label: "Hugging Face", needsApiKey: true, needsBaseUrl: false },
   { type: "nvidia", label: "NVIDIA", needsApiKey: true, needsBaseUrl: false },
+  { type: "xai", label: "xAI (Grok)", needsApiKey: true, needsBaseUrl: false },
 ];
 
 // Static fallback models per provider (used when API fetch fails)
@@ -96,6 +97,11 @@ const FALLBACK_MODELS: Record<string, string[]> = {
     "meta/llama-3.1-8b-instruct",
     "mistralai/mistral-7b-instruct-v0.3",
     "mistralai/mixtral-8x22b-instruct-v0.1",
+  ],
+  xai: [
+    "grok-3",
+    "grok-3-mini",
+    "grok-4",
   ],
 };
 
@@ -506,6 +512,18 @@ export async function fetchModelsWithCredentials(
         if (!nvidiaRes.ok) return FALLBACK_MODELS.nvidia ?? [];
         const nvidiaData = (await nvidiaRes.json()) as { data?: Array<{ id: string }> };
         return nvidiaData.data?.map((m) => m.id).sort() ?? FALLBACK_MODELS.nvidia ?? [];
+      }
+
+      case "xai": {
+        if (!apiKey) return FALLBACK_MODELS.xai ?? [];
+        const xaiBase = baseUrl ?? "https://api.x.ai/v1";
+        const xaiRes = await fetch(`${xaiBase}/models`, {
+          headers: { Authorization: `Bearer ${apiKey}` },
+          signal: AbortSignal.timeout(10_000),
+        });
+        if (!xaiRes.ok) return FALLBACK_MODELS.xai ?? [];
+        const xaiData = (await xaiRes.json()) as { data?: Array<{ id: string }> };
+        return xaiData.data?.map((m) => m.id).sort() ?? FALLBACK_MODELS.xai ?? [];
       }
 
       default:
