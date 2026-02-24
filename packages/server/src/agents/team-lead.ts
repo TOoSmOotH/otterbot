@@ -1824,6 +1824,26 @@ export class TeamLead extends BaseAgent {
       );
     }
 
+    // Duplicate detection: check if a task for the same GitHub issue already exists (by label)
+    const issueMatch = title.match(/#(\d+)/);
+    if (issueMatch) {
+      const issueLabel = `github-issue-${issueMatch[1]}`;
+      const labelDup = existing.find((t) => t.labels?.includes(issueLabel));
+      if (labelDup) {
+        if (labelDup.column === "done") {
+          return (
+            `DUPLICATE: A task for GitHub issue #${issueMatch[1]} already exists and is DONE: "${labelDup.title}" (${labelDup.id}).` +
+            (labelDup.completionReport ? ` Completion report: ${labelDup.completionReport.slice(0, 200)}` : "") +
+            ` Do NOT create duplicate tasks for work that is already completed.`
+          );
+        }
+        return (
+          `DUPLICATE: A task for GitHub issue #${issueMatch[1]} already exists: "${labelDup.title}" (${labelDup.id}) in column "${labelDup.column}".` +
+          ` Use the existing task instead of creating a new one.`
+        );
+      }
+    }
+
     // Validate blockedBy IDs — reject symbolic names like "task-1"
     if (blockedBy && blockedBy.length > 0) {
       const existingIds = new Set(existing.map((t) => t.id));

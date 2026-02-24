@@ -1,3 +1,4 @@
+import { createAmazonBedrock } from "@ai-sdk/amazon-bedrock";
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { createOpenAI } from "@ai-sdk/openai";
@@ -62,6 +63,9 @@ export function isThinkingModel(config: LLMConfig): boolean {
   }
   if (resolved.type === "openrouter") {
     return /^anthropic\/claude-(sonnet-4-5|opus-4)/.test(config.model);
+  }
+  if (resolved.type === "bedrock") {
+    return /^anthropic\.claude-(sonnet-4-5|opus-4)/.test(config.model);
   }
   return false;
 }
@@ -158,6 +162,22 @@ export function resolveModel(config: LLMConfig): LanguageModel {
         apiKey: config.apiKey ?? resolved.apiKey ?? "",
       });
       return perplexity(config.model);
+    }
+
+    case "bedrock": {
+      // apiKey is stored as "accessKeyId:secretAccessKey" for Bedrock
+      // baseUrl is used to store the AWS region (e.g. "us-east-1")
+      const bedrockApiKey = config.apiKey ?? resolved.apiKey ?? "";
+      const [accessKeyId, secretAccessKey] = bedrockApiKey.includes(":")
+        ? bedrockApiKey.split(":", 2)
+        : ["", ""];
+      const region = config.baseUrl ?? resolved.baseUrl ?? "us-east-1";
+      const bedrock = createAmazonBedrock({
+        region,
+        accessKeyId,
+        secretAccessKey,
+      });
+      return bedrock(config.model) as unknown as LanguageModel;
     }
 
     case "deepgram":

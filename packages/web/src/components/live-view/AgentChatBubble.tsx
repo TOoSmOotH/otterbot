@@ -3,7 +3,16 @@ import { Html } from "@react-three/drei";
 import { useAgentActivityStore } from "../../stores/agent-activity-store";
 import { useCodingAgentStore } from "../../stores/coding-agent-store";
 import { useProjectStore } from "../../stores/project-store";
+import { useAgentStore } from "../../stores/agent-store";
 import { humanizeToolName, truncateText } from "../../lib/humanize-tool-name";
+
+/** Friendly standby descriptions for known built-in schedulers */
+const SCHEDULER_LABELS: Record<string, string> = {
+  "builtin-scheduler-github-issues": "Monitoring issues",
+  "builtin-scheduler-github-prs": "Monitoring PRs",
+  "builtin-scheduler-reminder": "Watching reminders",
+  "builtin-scheduler-memory-compactor": "Compacting memory",
+};
 
 interface AgentChatBubbleProps {
   agentId: string | undefined;
@@ -19,6 +28,11 @@ interface BubbleState {
 }
 
 const TOOL_CALL_STALE_MS = 10_000;
+const DEBUG_BUBBLES = true;
+
+function debugLog(...args: unknown[]) {
+  if (DEBUG_BUBBLES) console.log("[ChatBubble]", ...args);
+}
 
 function useBubbleState(agentId: string | undefined, status: string): BubbleState | null {
   const [bubble, setBubble] = useState<BubbleState | null>(null);
@@ -31,13 +45,17 @@ function useBubbleState(agentId: string | undefined, status: string): BubbleStat
       return;
     }
 
+    debugLog(`derive() called for agent=${agentId}, status=${status}`);
+
     // 1. Check for recent tool call
     const activityState = useAgentActivityStore.getState();
     const calls = activityState.agentToolCalls.get(agentId);
+    debugLog(`  toolCalls for ${agentId}:`, calls?.length ?? 0, calls?.length ? `latest=${calls[calls.length - 1].toolName}` : "");
     if (calls && calls.length > 0) {
       const latest = calls[calls.length - 1];
       const ts = new Date(latest.timestamp).getTime();
       const age = Date.now() - ts;
+      debugLog(`  latest tool age=${age}ms, stale=${TOOL_CALL_STALE_MS}ms`);
       if (age < TOOL_CALL_STALE_MS) {
         if (ts !== lastToolTimestampRef.current) {
           lastToolTimestampRef.current = ts;
@@ -47,7 +65,9 @@ function useBubbleState(agentId: string | undefined, status: string): BubbleStat
             derive();
           }, TOOL_CALL_STALE_MS - age);
         }
-        setBubble({ text: humanizeToolName(latest.toolName), type: "speech" });
+        const text = humanizeToolName(latest.toolName);
+        debugLog(`  -> showing tool bubble: "${text}"`);
+        setBubble({ text, type: "speech" });
         return;
       }
     }
@@ -55,8 +75,11 @@ function useBubbleState(agentId: string | undefined, status: string): BubbleStat
     // 2. Check coding session
     const codingState = useCodingAgentStore.getState();
     const session = codingState.sessions.get(agentId);
+    debugLog(`  codingSession for ${agentId}:`, session ? `status=${session.status}, task=${session.task}` : "none");
     if (session && session.status === "active") {
-      setBubble({ text: "Coding: " + truncateText(session.task, 22), type: "speech" });
+      const text = "Coding: " + truncateText(session.task, 22);
+      debugLog(`  -> showing coding bubble: "${text}"`);
+      setBubble({ text, type: "speech" });
       return;
     }
 
@@ -65,23 +88,38 @@ function useBubbleState(agentId: string | undefined, status: string): BubbleStat
     const assignedTask = projectState.tasks.find(
       (t) => t.assigneeAgentId === agentId && t.column === "in_progress",
     );
+    debugLog(`  kanbanTask for ${agentId}:`, assignedTask ? `title=${assignedTask.title}` : "none");
     if (assignedTask) {
-      setBubble({ text: "Working on: " + truncateText(assignedTask.title, 18), type: "speech" });
+      const text = "Working on: " + truncateText(assignedTask.title, 18);
+      debugLog(`  -> showing kanban bubble: "${text}"`);
+      setBubble({ text, type: "speech" });
       return;
     }
 
     // 4. Check thinking/acting status
     if (status === "thinking") {
+      debugLog(`  -> showing thought bubble`);
       setBubble({ text: "...", type: "thought" });
       return;
     }
 
     if (status === "acting") {
+      debugLog(`  -> showing acting bubble`);
       setBubble({ text: "Working...", type: "speech" });
       return;
     }
 
-    // 5. Idle / done — no bubble
+    // 5. Check if this is a scheduler agent — show standby bubble
+    const agent = useAgentStore.getState().agents.get(agentId);
+    if (agent?.role === "scheduler") {
+      const label = SCHEDULER_LABELS[agentId] ?? (agent.name ? truncateText(agent.name, 25) : "Standby");
+      debugLog(`  -> showing scheduler bubble: "${label}"`);
+      setBubble({ text: label, type: "thought" });
+      return;
+    }
+
+    // 6. Idle / done — no bubble
+    debugLog(`  -> no bubble (status=${status})`);
     setBubble(null);
   }, [agentId, status]);
 
@@ -115,16 +153,20 @@ export function AgentChatBubble({ agentId, status, yOffset }: AgentChatBubblePro
   const [visible, setVisible] = useState(false);
   const prevBubbleRef = useRef<BubbleState | null>(null);
 
+  debugLog(`render agent=${agentId} status=${status} bubble=${bubble ? JSON.stringify(bubble) : "null"} visible=${visible}`);
+
   useEffect(() => {
     if (bubble) {
+      debugLog(`bubble appeared for ${agentId}: ${JSON.stringify(bubble)}`);
       setVisible(true);
       prevBubbleRef.current = bubble;
     } else {
+      debugLog(`bubble cleared for ${agentId}, fading out`);
       // Delay hiding for fade-out
       const timer = setTimeout(() => setVisible(false), 300);
       return () => clearTimeout(timer);
     }
-  }, [bubble]);
+  }, [bubble, agentId]);
 
   if (!visible && !bubble) return null;
 
@@ -132,92 +174,79 @@ export function AgentChatBubble({ agentId, status, yOffset }: AgentChatBubblePro
   if (!current) return null;
 
   const isThought = current.type === "thought";
+  const isFading = !bubble;
 
   return (
     <Html position={[0, yOffset, 0]} center distanceFactor={8}>
-      <style>{`
-        @keyframes bubble-in {
-          from {
-            opacity: 0;
-            transform: translateY(4px) scale(0.9);
-          }
-          to {
-            opacity: 1;
-            transform: translateY(0) scale(1);
-          }
-        }
-        @keyframes bubble-out {
-          from {
-            opacity: 1;
-            transform: translateY(0) scale(1);
-          }
-          to {
-            opacity: 0;
-            transform: translateY(4px) scale(0.9);
-          }
-        }
-        .chat-bubble {
-          animation: bubble-in 0.3s ease forwards;
-        }
-        .chat-bubble-exit {
-          animation: bubble-out 0.3s ease forwards;
-        }
-        .speech-tail::after {
-          content: '';
-          position: absolute;
-          bottom: -5px;
-          left: 50%;
-          transform: translateX(-50%);
-          width: 0;
-          height: 0;
-          border-left: 5px solid transparent;
-          border-right: 5px solid transparent;
-          border-top: 5px solid rgba(0, 0, 0, 0.7);
-        }
-        .thought-dots {
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          gap: 1px;
-          position: absolute;
-          bottom: -12px;
-          left: 50%;
-          transform: translateX(-50%);
-        }
-        .thought-dot {
-          border-radius: 50%;
-          background: rgba(0, 0, 0, 0.7);
-          backdrop-filter: blur(4px);
-        }
-        .thought-dot-1 {
-          width: 5px;
-          height: 5px;
-        }
-        .thought-dot-2 {
-          width: 3px;
-          height: 3px;
-        }
-        .thought-dot-3 {
-          width: 2px;
-          height: 2px;
-        }
-      `}</style>
       <div
-        className={`pointer-events-none select-none ${bubble ? "chat-bubble" : "chat-bubble-exit"}`}
-        style={{ position: "relative", display: "inline-flex", justifyContent: "center" }}
+        style={{
+          pointerEvents: "none",
+          userSelect: "none",
+          position: "relative",
+          display: "inline-flex",
+          justifyContent: "center",
+          opacity: isFading ? 0 : 1,
+          transform: isFading ? "translateY(4px) scale(0.9)" : "translateY(0) scale(1)",
+          transition: "opacity 0.3s ease, transform 0.3s ease",
+        }}
       >
         <div
-          className={`bg-black/70 backdrop-blur-sm rounded-lg px-2 py-1 ${!isThought ? "speech-tail" : ""}`}
-          style={{ maxWidth: 160, position: "relative" }}
+          style={{
+            background: "rgba(0, 0, 0, 0.75)",
+            backdropFilter: "blur(4px)",
+            borderRadius: 10,
+            paddingLeft: 14,
+            paddingRight: 14,
+            paddingTop: 8,
+            paddingBottom: 8,
+            maxWidth: 300,
+            position: "relative",
+          }}
         >
-          <span className="text-[9px] text-white whitespace-nowrap">
+          <span
+            style={{
+              fontSize: 24,
+              color: "white",
+              whiteSpace: "nowrap",
+              fontFamily: "system-ui, sans-serif",
+            }}
+          >
             {current.text}
           </span>
+
+          {/* Tail */}
+          {!isThought && (
+            <div
+              style={{
+                position: "absolute",
+                bottom: -12,
+                left: "50%",
+                transform: "translateX(-50%)",
+                width: 0,
+                height: 0,
+                borderLeft: "12px solid transparent",
+                borderRight: "12px solid transparent",
+                borderTop: "12px solid rgba(0, 0, 0, 0.75)",
+              }}
+            />
+          )}
+
+          {/* Thought dots */}
           {isThought && (
-            <div className="thought-dots">
-              <div className="thought-dot thought-dot-1" />
-              <div className="thought-dot thought-dot-2" />
-              <div className="thought-dot thought-dot-3" />
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                gap: 4,
+                position: "absolute",
+                bottom: -30,
+                left: "50%",
+                transform: "translateX(-50%)",
+              }}
+            >
+              <div style={{ width: 12, height: 12, borderRadius: "50%", background: "rgba(0,0,0,0.7)" }} />
+              <div style={{ width: 8, height: 8, borderRadius: "50%", background: "rgba(0,0,0,0.7)" }} />
             </div>
           )}
         </div>

@@ -1,4 +1,6 @@
-import { Client as IrcClient } from "irc-framework";
+import type WAWebJS from "whatsapp-web.js";
+import pkg from "whatsapp-web.js";
+const { Client, LocalAuth } = pkg;
 import { nanoid } from "nanoid";
 import { eq } from "drizzle-orm";
 import type { Server } from "socket.io";
@@ -8,36 +10,33 @@ import type { BusMessage, Conversation } from "@otterbot/shared";
 import { MessageBus } from "../bus/message-bus.js";
 import { COO } from "../agents/coo.js";
 import { getDb, schema } from "../db/index.js";
-import { isPaired, generatePairingCode } from "./pairing.js";
 
 type TypedServer = Server<ClientToServerEvents, ServerToClientEvents>;
 
 // ---------------------------------------------------------------------------
-// IRC Bridge
+// WhatsApp Bridge
 // ---------------------------------------------------------------------------
 
-const IRC_MAX_LENGTH = 450; // Safe limit for IRC messages
+const WHATSAPP_MAX_LENGTH = 4096; // WhatsApp message character limit
 
-export interface IrcConfig {
-  server: string;
-  port: number;
-  nickname: string;
-  channels: string[];
-  tls?: boolean;
-  password?: string;
+export interface WhatsAppConfig {
+  /** Directory to store WhatsApp session data for LocalAuth. */
+  dataPath: string;
+  /** Phone numbers allowed to interact with the bot (E.164 format without +). Empty = allow all. */
+  allowedNumbers: string[];
 }
 
-export class IrcBridge {
-  private client: IrcClient | null = null;
+export class WhatsAppBridge {
+  private client: InstanceType<typeof Client> | null = null;
   private bus: MessageBus;
   private coo: COO;
   private io: TypedServer;
   private broadcastHandler: ((message: BusMessage) => void) | null = null;
-  /** Map of `{nick}:{channel}` → conversationId */
+  /** Map of `{remoteJid}` → conversationId */
   private conversationMap = new Map<string, string>();
-  /** Map of conversationId → channel name (for sending responses) */
-  private channelMap = new Map<string, string>();
-  private config: IrcConfig | null = null;
+  /** Map of conversationId → chat ID (for sending responses) */
+  private chatMap = new Map<string, string>();
+  private config: WhatsAppConfig | null = null;
 
   constructor(deps: { bus: MessageBus; coo: COO; io: TypedServer }) {
     this.bus = deps.bus;
@@ -45,61 +44,47 @@ export class IrcBridge {
     this.io = deps.io;
   }
 
-  async start(config: IrcConfig): Promise<void> {
+  async start(config: WhatsAppConfig): Promise<void> {
     if (this.client) {
       await this.stop();
     }
 
     this.config = config;
 
-    this.client = new IrcClient();
-
-    this.client.connect({
-      host: config.server,
-      port: config.port,
-      nick: config.nickname,
-      tls: config.tls ?? false,
-      password: config.password,
+    this.client = new Client({
+      authStrategy: new LocalAuth({ dataPath: config.dataPath }),
+      puppeteer: { headless: true, args: ["--no-sandbox", "--disable-setuid-sandbox"] },
     });
 
-    this.client.on("registered", () => {
-      if (!this.client) return;
-      console.log(`[IRC] Connected as ${config.nickname} to ${config.server}`);
-      for (const channel of config.channels) {
-        this.client.join(channel);
-      }
-      this.io.emit("irc:status", {
-        status: "connected",
-        nickname: config.nickname,
+    this.client.on("qr", (qr: string) => {
+      console.log("[WhatsApp] QR code received, scan to authenticate");
+      this.io.emit("whatsapp:status", { status: "qr", qr });
+    });
+
+    this.client.on("authenticated", () => {
+      console.log("[WhatsApp] Authenticated");
+      this.io.emit("whatsapp:status", { status: "authenticated" });
+    });
+
+    this.client.on("ready", () => {
+      console.log("[WhatsApp] Client is ready");
+      this.io.emit("whatsapp:status", { status: "connected" });
+    });
+
+    this.client.on("message", (message: WAWebJS.Message) => {
+      this.handleMessage(message).catch((err) => {
+        console.error("[WhatsApp] Error handling message:", err);
       });
     });
 
-    this.client.on("join", (event: { channel: string; nick: string }) => {
-      if (event.nick === config.nickname) {
-        console.log(`[IRC] Joined ${event.channel}`);
-      }
+    this.client.on("auth_failure", (msg: string) => {
+      console.error("[WhatsApp] Authentication failure:", msg);
+      this.io.emit("whatsapp:status", { status: "auth_failure" });
     });
 
-    this.client.on("part", (event: { channel: string; nick: string }) => {
-      if (event.nick === config.nickname) {
-        console.log(`[IRC] Left ${event.channel}`);
-      }
-    });
-
-    this.client.on("privmsg", (event: { nick: string; target: string; message: string }) => {
-      this.handleMessage(event.nick, event.target, event.message).catch((err) => {
-        console.error("[IRC] Error handling message:", err);
-      });
-    });
-
-    this.client.on("close", () => {
-      console.log("[IRC] Connection closed");
-      this.io.emit("irc:status", { status: "disconnected" });
-    });
-
-    this.client.on("socket close", () => {
-      console.log("[IRC] Socket closed");
-      this.io.emit("irc:status", { status: "disconnected" });
+    this.client.on("disconnected", (reason: string) => {
+      console.log("[WhatsApp] Disconnected:", reason);
+      this.io.emit("whatsapp:status", { status: "disconnected" });
     });
 
     // Subscribe to bus broadcasts to intercept COO responses
@@ -107,6 +92,8 @@ export class IrcBridge {
       this.handleBusMessage(message);
     };
     this.bus.onBroadcast(this.broadcastHandler);
+
+    await this.client.initialize();
   }
 
   async stop(): Promise<void> {
@@ -118,74 +105,59 @@ export class IrcBridge {
 
     // Disconnect client
     if (this.client) {
-      this.client.quit("Shutting down");
+      try {
+        await this.client.destroy();
+      } catch {
+        // Ignore errors during cleanup
+      }
       this.client = null;
-      this.io.emit("irc:status", { status: "disconnected" });
+      this.io.emit("whatsapp:status", { status: "disconnected" });
     }
 
     this.config = null;
   }
 
-  getJoinedChannels(): string[] {
-    return this.config?.channels ?? [];
-  }
-
   // -------------------------------------------------------------------------
-  // Inbound: IRC → COO
+  // Inbound: WhatsApp → COO
   // -------------------------------------------------------------------------
 
-  private async handleMessage(
-    nick: string,
-    target: string,
-    content: string,
-  ): Promise<void> {
+  private async handleMessage(message: WAWebJS.Message): Promise<void> {
     // Ignore messages from self
-    if (nick === this.config?.nickname) return;
+    if (message.fromMe) return;
 
-    const isDM = target === this.config?.nickname;
-    const channel = isDM ? nick : target;
+    // Ignore non-text messages
+    if (message.type !== "chat") return;
 
-    // In channels, only respond when mentioned
-    if (!isDM && this.config?.nickname) {
-      if (!content.includes(this.config.nickname)) {
-        return;
-      }
-      // Strip the mention
-      content = content
-        .replace(new RegExp(`\\b${escapeRegex(this.config.nickname)}[:\\s,]*`, "g"), "")
-        .trim();
-    }
-
+    const content = message.body?.trim();
     if (!content) return;
 
-    // Check pairing
-    if (!isPaired(nick)) {
-      const ircUsername = nick;
-      const code = generatePairingCode(nick, ircUsername);
-      if (this.client) {
-        this.client.say(
-          isDM ? nick : channel,
-          `I don't recognize you yet. To pair with me, ask my owner to approve this code in the Otterbot dashboard: ${code} — This code expires in 1 hour.`,
-        );
-      }
-      this.io.emit("irc:pairing-request", {
-        code,
-        ircUserId: nick,
-        ircUsername,
-      });
+    const chatId = message.from;
+
+    // Extract phone number from JID (format: number@c.us or number@g.us)
+    const phoneNumber = chatId.split("@")[0];
+    if (!phoneNumber) return;
+
+    // Check allowlist
+    if (
+      this.config?.allowedNumbers &&
+      this.config.allowedNumbers.length > 0 &&
+      !this.config.allowedNumbers.includes(phoneNumber)
+    ) {
       return;
     }
 
-    await this.routeToCOO(nick, channel, content, isDM);
+    const isGroup = chatId.endsWith("@g.us");
+
+    await this.routeToCOO(phoneNumber, chatId, content, isGroup);
   }
 
   private async routeToCOO(
-    nick: string,
-    channel: string,
+    phoneNumber: string,
+    chatId: string,
     content: string,
-    isDM: boolean,
+    isGroup: boolean,
   ): Promise<void> {
-    const convKey = `${nick}:${channel}`;
+    const convKey = chatId;
 
     const db = getDb();
     let conversationId = this.conversationMap.get(convKey);
@@ -193,7 +165,8 @@ export class IrcBridge {
     if (!conversationId) {
       conversationId = nanoid();
       const now = new Date().toISOString();
-      const title = `IRC: ${nick} in ${channel} — ${content.slice(0, 60)}`;
+      const label = isGroup ? `group ${chatId}` : phoneNumber;
+      const title = `WhatsApp: ${label} — ${content.slice(0, 60)}`;
       const conversation: Conversation = {
         id: conversationId,
         title,
@@ -212,7 +185,7 @@ export class IrcBridge {
         .run();
     }
 
-    this.channelMap.set(conversationId, channel);
+    this.chatMap.set(conversationId, chatId);
 
     // Send to COO via bus
     this.bus.send({
@@ -222,16 +195,16 @@ export class IrcBridge {
       content,
       conversationId,
       metadata: {
-        source: "irc",
-        ircNick: nick,
-        ircChannel: channel,
-        ircIsDM: isDM,
+        source: "whatsapp",
+        whatsappPhone: phoneNumber,
+        whatsappChatId: chatId,
+        whatsappIsGroup: isGroup,
       },
     });
   }
 
   // -------------------------------------------------------------------------
-  // Outbound: COO → IRC
+  // Outbound: COO → WhatsApp
   // -------------------------------------------------------------------------
 
   private handleBusMessage(message: BusMessage): void {
@@ -240,18 +213,20 @@ export class IrcBridge {
     const conversationId = message.conversationId;
     if (!conversationId) return;
 
-    const channel = this.channelMap.get(conversationId);
-    if (!channel || !this.client) return;
+    const chatId = this.chatMap.get(conversationId);
+    if (!chatId || !this.client) return;
 
-    this.sendIrcMessage(channel, message.content);
+    this.sendWhatsAppMessage(chatId, message.content);
   }
 
-  private sendIrcMessage(target: string, content: string): void {
+  private sendWhatsAppMessage(chatId: string, content: string): void {
     if (!this.client) return;
 
-    const lines = splitMessage(content, IRC_MAX_LENGTH);
-    for (const line of lines) {
-      this.client.say(target, line);
+    const chunks = splitMessage(content, WHATSAPP_MAX_LENGTH);
+    for (const chunk of chunks) {
+      this.client.sendMessage(chatId, chunk).catch((err: unknown) => {
+        console.error("[WhatsApp] Failed to send message:", err);
+      });
     }
   }
 }
@@ -259,10 +234,6 @@ export class IrcBridge {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-function escapeRegex(str: string): string {
-  return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
 
 function splitMessage(text: string, maxLength: number): string[] {
   if (text.length <= maxLength) return [text];

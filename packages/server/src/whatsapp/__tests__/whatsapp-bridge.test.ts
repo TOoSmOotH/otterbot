@@ -8,45 +8,44 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 // ---------------------------------------------------------------------------
-// Mock irc-framework
+// Mock whatsapp-web.js
 // ---------------------------------------------------------------------------
 
-class MockIrcClient extends EventEmitter {
-  nick = "";
-  connectOptions: Record<string, unknown> = {};
-  joinedChannels: string[] = [];
-  sentMessages: { target: string; message: string }[] = [];
-  quitMessage: string | null = null;
+class MockWhatsAppClient extends EventEmitter {
+  initializeOptions: Record<string, unknown> = {};
+  sentMessages: { chatId: string; content: string }[] = [];
+  destroyed = false;
 
-  connect(options: Record<string, unknown>) {
-    this.connectOptions = options;
-    this.nick = options.nick as string;
-    // Simulate async registered event
-    setTimeout(() => this.emit("registered"), 0);
+  constructor(options?: Record<string, unknown>) {
+    super();
+    this.initializeOptions = options ?? {};
   }
 
-  join(channel: string) {
-    this.joinedChannels.push(channel);
-    this.emit("join", { channel, nick: this.nick });
+  async initialize() {
+    // Simulate async ready event
+    setTimeout(() => this.emit("ready"), 0);
   }
 
-  part(channel: string) {
-    this.joinedChannels = this.joinedChannels.filter((c) => c !== channel);
-    this.emit("part", { channel, nick: this.nick });
+  async sendMessage(chatId: string, content: string) {
+    this.sentMessages.push({ chatId, content });
   }
 
-  say(target: string, message: string) {
-    this.sentMessages.push({ target, message });
-  }
-
-  quit(message?: string) {
-    this.quitMessage = message ?? null;
+  async destroy() {
+    this.destroyed = true;
   }
 }
 
-vi.mock("irc-framework", () => ({
-  default: { Client: MockIrcClient },
-  Client: MockIrcClient,
+class MockLocalAuth {
+  dataPath: string;
+  constructor(opts?: { dataPath?: string }) {
+    this.dataPath = opts?.dataPath ?? ".wwebjs_auth";
+  }
+}
+
+vi.mock("whatsapp-web.js", () => ({
+  default: { Client: MockWhatsAppClient, LocalAuth: MockLocalAuth },
+  Client: MockWhatsAppClient,
+  LocalAuth: MockLocalAuth,
 }));
 
 // ---------------------------------------------------------------------------
@@ -54,8 +53,7 @@ vi.mock("irc-framework", () => ({
 // ---------------------------------------------------------------------------
 
 // Import after mocking
-const { IrcBridge } = await import("../irc-bridge.js");
-import { setConfig } from "../../auth/auth.js";
+const { WhatsAppBridge } = await import("../whatsapp-bridge.js");
 
 interface SendParams {
   fromAgentId: string | null;
@@ -111,22 +109,20 @@ function createMockIo() {
   };
 }
 
-describe("IrcBridge", () => {
+describe("WhatsAppBridge", () => {
   let tmpDir: string;
   let bus: ReturnType<typeof createMockBus>;
   let coo: ReturnType<typeof createMockCoo>;
   let io: ReturnType<typeof createMockIo>;
-  let bridge: InstanceType<typeof IrcBridge>;
+  let bridge: InstanceType<typeof WhatsAppBridge>;
 
   const testConfig = {
-    server: "irc.example.com",
-    port: 6667,
-    nickname: "otterbot",
-    channels: ["#general", "#dev"],
+    dataPath: "/tmp/whatsapp-test",
+    allowedNumbers: [] as string[],
   };
 
   beforeEach(async () => {
-    tmpDir = mkdtempSync(join(tmpdir(), "otterbot-irc-test-"));
+    tmpDir = mkdtempSync(join(tmpdir(), "otterbot-whatsapp-test-"));
     resetDb();
     process.env.DATABASE_URL = `file:${join(tmpDir, "test.db")}`;
     process.env.OTTERBOT_DB_KEY = "test-key";
@@ -136,18 +132,11 @@ describe("IrcBridge", () => {
     coo = createMockCoo();
     io = createMockIo();
 
-    bridge = new IrcBridge({
+    bridge = new WhatsAppBridge({
       bus: bus as any,
       coo: coo as any,
       io: io as any,
     });
-
-    // Pair default test user "alice"
-    setConfig("irc:paired:alice", JSON.stringify({
-      ircUserId: "alice",
-      ircUsername: "alice",
-      pairedAt: new Date().toISOString(),
-    }));
   });
 
   afterEach(async () => {
@@ -163,25 +152,13 @@ describe("IrcBridge", () => {
   // -------------------------------------------------------------------------
 
   describe("connection initialization", () => {
-    it("connects with the provided config", async () => {
+    it("emits ready status after initialization", async () => {
       await bridge.start(testConfig);
-      // Wait for the async "registered" event
       await new Promise((r) => setTimeout(r, 50));
 
-      expect(io.emit).toHaveBeenCalledWith("irc:status", {
+      expect(io.emit).toHaveBeenCalledWith("whatsapp:status", {
         status: "connected",
-        nickname: "otterbot",
       });
-    });
-
-    it("joins configured channels on connect", async () => {
-      await bridge.start(testConfig);
-      await new Promise((r) => setTimeout(r, 50));
-
-      // Access the internal client to check joined channels
-      const client = (bridge as any).client as MockIrcClient;
-      expect(client.joinedChannels).toContain("#general");
-      expect(client.joinedChannels).toContain("#dev");
     });
 
     it("subscribes to bus broadcasts", async () => {
@@ -189,25 +166,44 @@ describe("IrcBridge", () => {
       expect(bus.onBroadcast).toHaveBeenCalledOnce();
     });
 
-    it("passes TLS option when configured", async () => {
-      await bridge.start({ ...testConfig, tls: true });
-      const client = (bridge as any).client as MockIrcClient;
-      expect(client.connectOptions.tls).toBe(true);
+    it("emits qr status when QR is received", async () => {
+      await bridge.start(testConfig);
+      const client = (bridge as any).client as MockWhatsAppClient;
+      client.emit("qr", "test-qr-code");
+
+      expect(io.emit).toHaveBeenCalledWith("whatsapp:status", {
+        status: "qr",
+        qr: "test-qr-code",
+      });
     });
 
-    it("passes password when configured", async () => {
-      await bridge.start({ ...testConfig, password: "secret" });
-      const client = (bridge as any).client as MockIrcClient;
-      expect(client.connectOptions.password).toBe("secret");
+    it("emits authenticated status", async () => {
+      await bridge.start(testConfig);
+      const client = (bridge as any).client as MockWhatsAppClient;
+      client.emit("authenticated");
+
+      expect(io.emit).toHaveBeenCalledWith("whatsapp:status", {
+        status: "authenticated",
+      });
+    });
+
+    it("emits auth_failure status on authentication error", async () => {
+      await bridge.start(testConfig);
+      const client = (bridge as any).client as MockWhatsAppClient;
+      client.emit("auth_failure", "bad credentials");
+
+      expect(io.emit).toHaveBeenCalledWith("whatsapp:status", {
+        status: "auth_failure",
+      });
     });
   });
 
   describe("cleanup on stop", () => {
-    it("quits the IRC client", async () => {
+    it("destroys the client", async () => {
       await bridge.start(testConfig);
-      const client = (bridge as any).client as MockIrcClient;
+      const client = (bridge as any).client as MockWhatsAppClient;
       await bridge.stop();
-      expect(client.quitMessage).toBe("Shutting down");
+      expect(client.destroyed).toBe(true);
     });
 
     it("unsubscribes from bus broadcasts", async () => {
@@ -219,7 +215,7 @@ describe("IrcBridge", () => {
     it("emits disconnected status", async () => {
       await bridge.start(testConfig);
       await bridge.stop();
-      expect(io.emit).toHaveBeenCalledWith("irc:status", {
+      expect(io.emit).toHaveBeenCalledWith("whatsapp:status", {
         status: "disconnected",
       });
     });
@@ -237,30 +233,29 @@ describe("IrcBridge", () => {
       await new Promise((r) => setTimeout(r, 50));
 
       expect((bridge as any).client).not.toBeNull();
-      expect(io.emit).toHaveBeenCalledWith("irc:status", {
+      expect(io.emit).toHaveBeenCalledWith("whatsapp:status", {
         status: "connected",
-        nickname: "otterbot",
       });
     });
   });
 
   // -------------------------------------------------------------------------
-  // Inbound Messages (IRC → COO)
+  // Inbound Messages (WhatsApp → COO)
   // -------------------------------------------------------------------------
 
   describe("message handling", () => {
-    it("routes channel messages with bot mention to COO", async () => {
+    it("routes incoming messages to COO", async () => {
       await bridge.start(testConfig);
       await new Promise((r) => setTimeout(r, 50));
 
-      const client = (bridge as any).client as MockIrcClient;
-      client.emit("privmsg", {
-        nick: "alice",
-        target: "#general",
-        message: "otterbot: hello there",
+      const client = (bridge as any).client as MockWhatsAppClient;
+      client.emit("message", {
+        fromMe: false,
+        type: "chat",
+        body: "hello there",
+        from: "1234567890@c.us",
       });
 
-      // Wait for async handler
       await new Promise((r) => setTimeout(r, 50));
 
       expect(bus.send).toHaveBeenCalledWith(
@@ -270,48 +265,10 @@ describe("IrcBridge", () => {
           type: MessageType.Chat,
           content: "hello there",
           metadata: expect.objectContaining({
-            source: "irc",
-            ircNick: "alice",
-            ircChannel: "#general",
-          }),
-        }),
-      );
-    });
-
-    it("ignores channel messages without bot mention", async () => {
-      await bridge.start(testConfig);
-      await new Promise((r) => setTimeout(r, 50));
-
-      const client = (bridge as any).client as MockIrcClient;
-      client.emit("privmsg", {
-        nick: "alice",
-        target: "#general",
-        message: "just talking normally",
-      });
-
-      await new Promise((r) => setTimeout(r, 50));
-      expect(bus.send).not.toHaveBeenCalled();
-    });
-
-    it("routes DMs directly to COO without requiring mention", async () => {
-      await bridge.start(testConfig);
-      await new Promise((r) => setTimeout(r, 50));
-
-      const client = (bridge as any).client as MockIrcClient;
-      client.emit("privmsg", {
-        nick: "alice",
-        target: "otterbot",
-        message: "hello via DM",
-      });
-
-      await new Promise((r) => setTimeout(r, 50));
-
-      expect(bus.send).toHaveBeenCalledWith(
-        expect.objectContaining({
-          content: "hello via DM",
-          metadata: expect.objectContaining({
-            source: "irc",
-            ircIsDM: true,
+            source: "whatsapp",
+            whatsappPhone: "1234567890",
+            whatsappChatId: "1234567890@c.us",
+            whatsappIsGroup: false,
           }),
         }),
       );
@@ -321,26 +278,105 @@ describe("IrcBridge", () => {
       await bridge.start(testConfig);
       await new Promise((r) => setTimeout(r, 50));
 
-      const client = (bridge as any).client as MockIrcClient;
-      client.emit("privmsg", {
-        nick: "otterbot",
-        target: "#general",
-        message: "my own message",
+      const client = (bridge as any).client as MockWhatsAppClient;
+      client.emit("message", {
+        fromMe: true,
+        type: "chat",
+        body: "my own message",
+        from: "1234567890@c.us",
       });
 
       await new Promise((r) => setTimeout(r, 50));
       expect(bus.send).not.toHaveBeenCalled();
     });
 
+    it("ignores non-text messages", async () => {
+      await bridge.start(testConfig);
+      await new Promise((r) => setTimeout(r, 50));
+
+      const client = (bridge as any).client as MockWhatsAppClient;
+      client.emit("message", {
+        fromMe: false,
+        type: "image",
+        body: "",
+        from: "1234567890@c.us",
+      });
+
+      await new Promise((r) => setTimeout(r, 50));
+      expect(bus.send).not.toHaveBeenCalled();
+    });
+
+    it("ignores empty messages", async () => {
+      await bridge.start(testConfig);
+      await new Promise((r) => setTimeout(r, 50));
+
+      const client = (bridge as any).client as MockWhatsAppClient;
+      client.emit("message", {
+        fromMe: false,
+        type: "chat",
+        body: "   ",
+        from: "1234567890@c.us",
+      });
+
+      await new Promise((r) => setTimeout(r, 50));
+      expect(bus.send).not.toHaveBeenCalled();
+    });
+
+    it("filters messages by allowed numbers when configured", async () => {
+      await bridge.start({
+        ...testConfig,
+        allowedNumbers: ["1111111111"],
+      });
+      await new Promise((r) => setTimeout(r, 50));
+
+      const client = (bridge as any).client as MockWhatsAppClient;
+
+      // Blocked number
+      client.emit("message", {
+        fromMe: false,
+        type: "chat",
+        body: "hello",
+        from: "9999999999@c.us",
+      });
+      await new Promise((r) => setTimeout(r, 50));
+      expect(bus.send).not.toHaveBeenCalled();
+
+      // Allowed number
+      client.emit("message", {
+        fromMe: false,
+        type: "chat",
+        body: "hello",
+        from: "1111111111@c.us",
+      });
+      await new Promise((r) => setTimeout(r, 50));
+      expect(bus.send).toHaveBeenCalledOnce();
+    });
+
+    it("allows all numbers when allowedNumbers is empty", async () => {
+      await bridge.start({ ...testConfig, allowedNumbers: [] });
+      await new Promise((r) => setTimeout(r, 50));
+
+      const client = (bridge as any).client as MockWhatsAppClient;
+      client.emit("message", {
+        fromMe: false,
+        type: "chat",
+        body: "hello from anyone",
+        from: "5555555555@c.us",
+      });
+      await new Promise((r) => setTimeout(r, 50));
+      expect(bus.send).toHaveBeenCalledOnce();
+    });
+
     it("creates a conversation for new messages", async () => {
       await bridge.start(testConfig);
       await new Promise((r) => setTimeout(r, 50));
 
-      const client = (bridge as any).client as MockIrcClient;
-      client.emit("privmsg", {
-        nick: "alice",
-        target: "#general",
-        message: "otterbot: hi",
+      const client = (bridge as any).client as MockWhatsAppClient;
+      client.emit("message", {
+        fromMe: false,
+        type: "chat",
+        body: "hi",
+        from: "1234567890@c.us",
       });
 
       await new Promise((r) => setTimeout(r, 50));
@@ -349,30 +385,32 @@ describe("IrcBridge", () => {
       expect(io.emit).toHaveBeenCalledWith(
         "conversation:created",
         expect.objectContaining({
-          title: expect.stringContaining("IRC: alice"),
+          title: expect.stringContaining("WhatsApp: 1234567890"),
         }),
       );
     });
 
-    it("reuses conversation for same nick+channel", async () => {
+    it("reuses conversation for same chat", async () => {
       await bridge.start(testConfig);
       await new Promise((r) => setTimeout(r, 50));
 
-      const client = (bridge as any).client as MockIrcClient;
+      const client = (bridge as any).client as MockWhatsAppClient;
 
       // First message
-      client.emit("privmsg", {
-        nick: "alice",
-        target: "#general",
-        message: "otterbot: first",
+      client.emit("message", {
+        fromMe: false,
+        type: "chat",
+        body: "first",
+        from: "1234567890@c.us",
       });
       await new Promise((r) => setTimeout(r, 50));
 
       // Second message
-      client.emit("privmsg", {
-        nick: "alice",
-        target: "#general",
-        message: "otterbot: second",
+      client.emit("message", {
+        fromMe: false,
+        type: "chat",
+        body: "second",
+        from: "1234567890@c.us",
       });
       await new Promise((r) => setTimeout(r, 50));
 
@@ -381,73 +419,48 @@ describe("IrcBridge", () => {
       // But send two messages
       expect(bus.send).toHaveBeenCalledTimes(2);
     });
-  });
 
-  // -------------------------------------------------------------------------
-  // Pairing
-  // -------------------------------------------------------------------------
-
-  describe("pairing", () => {
-    it("sends pairing code to unpaired users", async () => {
+    it("identifies group messages", async () => {
       await bridge.start(testConfig);
       await new Promise((r) => setTimeout(r, 50));
 
-      const client = (bridge as any).client as MockIrcClient;
-      client.emit("privmsg", {
-        nick: "stranger",
-        target: "#general",
-        message: "otterbot: hello",
+      const client = (bridge as any).client as MockWhatsAppClient;
+      client.emit("message", {
+        fromMe: false,
+        type: "chat",
+        body: "hello group",
+        from: "120363001234567890@g.us",
       });
 
       await new Promise((r) => setTimeout(r, 50));
 
-      // Should NOT route to COO
-      expect(bus.send).not.toHaveBeenCalled();
-      // Should send pairing message
-      expect(client.sentMessages).toHaveLength(1);
-      expect(client.sentMessages[0]!.message).toContain("approve this code");
-      // Should emit pairing request
-      expect(io.emit).toHaveBeenCalledWith(
-        "irc:pairing-request",
+      expect(bus.send).toHaveBeenCalledWith(
         expect.objectContaining({
-          ircUserId: "stranger",
-          ircUsername: "stranger",
+          metadata: expect.objectContaining({
+            whatsappIsGroup: true,
+          }),
         }),
       );
     });
-
-    it("routes messages from paired users to COO", async () => {
-      await bridge.start(testConfig);
-      await new Promise((r) => setTimeout(r, 50));
-
-      const client = (bridge as any).client as MockIrcClient;
-      client.emit("privmsg", {
-        nick: "alice",
-        target: "#general",
-        message: "otterbot: hello",
-      });
-
-      await new Promise((r) => setTimeout(r, 50));
-      expect(bus.send).toHaveBeenCalledOnce();
-    });
   });
 
   // -------------------------------------------------------------------------
-  // Outbound Messages (COO → IRC)
+  // Outbound Messages (COO → WhatsApp)
   // -------------------------------------------------------------------------
 
   describe("outbound messages", () => {
-    it("sends COO responses back to IRC channel", async () => {
+    it("sends COO responses back to WhatsApp", async () => {
       await bridge.start(testConfig);
       await new Promise((r) => setTimeout(r, 50));
 
-      const client = (bridge as any).client as MockIrcClient;
+      const client = (bridge as any).client as MockWhatsAppClient;
 
       // Simulate inbound message to establish a conversation
-      client.emit("privmsg", {
-        nick: "alice",
-        target: "#general",
-        message: "otterbot: hello",
+      client.emit("message", {
+        fromMe: false,
+        type: "chat",
+        body: "hello",
+        from: "1234567890@c.us",
       });
       await new Promise((r) => setTimeout(r, 50));
 
@@ -468,10 +481,13 @@ describe("IrcBridge", () => {
         timestamp: new Date().toISOString(),
       });
 
+      // Allow async sendMessage to complete
+      await new Promise((r) => setTimeout(r, 50));
+
       expect(client.sentMessages).toHaveLength(1);
       expect(client.sentMessages[0]).toEqual({
-        target: "#general",
-        message: "Hello from COO!",
+        chatId: "1234567890@c.us",
+        content: "Hello from COO!",
       });
     });
 
@@ -479,7 +495,7 @@ describe("IrcBridge", () => {
       await bridge.start(testConfig);
       await new Promise((r) => setTimeout(r, 50));
 
-      const client = (bridge as any).client as MockIrcClient;
+      const client = (bridge as any).client as MockWhatsAppClient;
       const broadcastHandler = bus._broadcastHandlers[0]!;
 
       broadcastHandler({
@@ -500,7 +516,7 @@ describe("IrcBridge", () => {
       await bridge.start(testConfig);
       await new Promise((r) => setTimeout(r, 50));
 
-      const client = (bridge as any).client as MockIrcClient;
+      const client = (bridge as any).client as MockWhatsAppClient;
       const broadcastHandler = bus._broadcastHandlers[0]!;
 
       broadcastHandler({
@@ -521,19 +537,20 @@ describe("IrcBridge", () => {
       await bridge.start(testConfig);
       await new Promise((r) => setTimeout(r, 50));
 
-      const client = (bridge as any).client as MockIrcClient;
+      const client = (bridge as any).client as MockWhatsAppClient;
 
       // Establish conversation
-      client.emit("privmsg", {
-        nick: "alice",
-        target: "#general",
-        message: "otterbot: hi",
+      client.emit("message", {
+        fromMe: false,
+        type: "chat",
+        body: "hi",
+        from: "1234567890@c.us",
       });
       await new Promise((r) => setTimeout(r, 50));
 
       const conversationId = bus.send.mock.calls[0]?.[0]?.conversationId;
 
-      const longMessage = "x".repeat(1000);
+      const longMessage = "x".repeat(10000);
       const broadcastHandler = bus._broadcastHandlers[0]!;
       broadcastHandler({
         id: "resp-1",
@@ -546,24 +563,45 @@ describe("IrcBridge", () => {
         timestamp: new Date().toISOString(),
       });
 
+      // Allow async sendMessage calls to complete
+      await new Promise((r) => setTimeout(r, 50));
+
       expect(client.sentMessages.length).toBeGreaterThan(1);
-      const totalContent = client.sentMessages.map((m) => m.message).join("");
+      const totalContent = client.sentMessages.map((m) => m.content).join("");
       expect(totalContent).toBe(longMessage);
     });
   });
 
   // -------------------------------------------------------------------------
-  // getJoinedChannels
+  // Error handling
   // -------------------------------------------------------------------------
 
-  describe("getJoinedChannels", () => {
-    it("returns configured channels", async () => {
+  describe("error handling", () => {
+    it("emits disconnected status on WhatsApp disconnect event", async () => {
       await bridge.start(testConfig);
-      expect(bridge.getJoinedChannels()).toEqual(["#general", "#dev"]);
+      await new Promise((r) => setTimeout(r, 50));
+
+      const client = (bridge as any).client as MockWhatsAppClient;
+      client.emit("disconnected", "session expired");
+
+      expect(io.emit).toHaveBeenCalledWith("whatsapp:status", {
+        status: "disconnected",
+      });
     });
 
-    it("returns empty array when not started", () => {
-      expect(bridge.getJoinedChannels()).toEqual([]);
+    it("handles stop gracefully when not started", async () => {
+      // Should not throw
+      await bridge.stop();
+      expect((bridge as any).client).toBeNull();
+    });
+
+    it("stops existing client before restarting", async () => {
+      await bridge.start(testConfig);
+      const firstClient = (bridge as any).client as MockWhatsAppClient;
+
+      await bridge.start(testConfig);
+      expect(firstClient.destroyed).toBe(true);
+      expect((bridge as any).client).not.toBe(firstClient);
     });
   });
 });
