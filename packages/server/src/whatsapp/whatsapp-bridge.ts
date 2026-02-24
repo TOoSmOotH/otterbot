@@ -27,7 +27,7 @@ export interface WhatsAppConfig {
 }
 
 export class WhatsAppBridge {
-  private client: Client | null = null;
+  private client: InstanceType<typeof Client> | null = null;
   private bus: MessageBus;
   private coo: COO;
   private io: TypedServer;
@@ -224,7 +224,7 @@ export class WhatsAppBridge {
 
     const chunks = splitMessage(content, WHATSAPP_MAX_LENGTH);
     for (const chunk of chunks) {
-      this.client.sendMessage(chatId, chunk).catch((err) => {
+      this.client.sendMessage(chatId, chunk).catch((err: unknown) => {
         console.error("[WhatsApp] Failed to send message:", err);
       });
     }
