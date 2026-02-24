@@ -24,7 +24,7 @@ export function initGitRepo(cwd: string): void {
   }
 
   if (!isGitRepo(cwd)) {
-    execSync("git init", { cwd, stdio: "ignore" });
+    execSync("git init -b main", { cwd, stdio: "ignore" });
     // Set local config to ensure commits work even if global config is missing
     execSync("git config user.email 'otterbot@example.com'", { cwd, stdio: "ignore" });
     execSync("git config user.name 'OtterBot'", { cwd, stdio: "ignore" });
