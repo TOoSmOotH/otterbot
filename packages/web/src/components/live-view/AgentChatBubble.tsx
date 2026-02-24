@@ -3,7 +3,16 @@ import { Html } from "@react-three/drei";
 import { useAgentActivityStore } from "../../stores/agent-activity-store";
 import { useCodingAgentStore } from "../../stores/coding-agent-store";
 import { useProjectStore } from "../../stores/project-store";
+import { useAgentStore } from "../../stores/agent-store";
 import { humanizeToolName, truncateText } from "../../lib/humanize-tool-name";
+
+/** Friendly standby descriptions for known built-in schedulers */
+const SCHEDULER_LABELS: Record<string, string> = {
+  "builtin-scheduler-github-issues": "Monitoring issues",
+  "builtin-scheduler-github-prs": "Monitoring PRs",
+  "builtin-scheduler-reminder": "Watching reminders",
+  "builtin-scheduler-memory-compactor": "Compacting memory",
+};
 
 interface AgentChatBubbleProps {
   agentId: string | undefined;
@@ -100,7 +109,16 @@ function useBubbleState(agentId: string | undefined, status: string): BubbleStat
       return;
     }
 
-    // 5. Idle / done — no bubble
+    // 5. Check if this is a scheduler agent — show standby bubble
+    const agent = useAgentStore.getState().agents.get(agentId);
+    if (agent?.role === "scheduler") {
+      const label = SCHEDULER_LABELS[agentId] ?? (agent.name ? truncateText(agent.name, 25) : "Standby");
+      debugLog(`  -> showing scheduler bubble: "${label}"`);
+      setBubble({ text: label, type: "thought" });
+      return;
+    }
+
+    // 6. Idle / done — no bubble
     debugLog(`  -> no bubble (status=${status})`);
     setBubble(null);
   }, [agentId, status]);
