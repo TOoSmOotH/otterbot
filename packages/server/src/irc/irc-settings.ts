@@ -1,5 +1,7 @@
 import { getConfig, setConfig, deleteConfig } from "../auth/auth.js";
 import type { IrcConfig } from "./irc-bridge.js";
+import { listPairedUsers, listPendingPairings } from "./pairing.js";
+import type { PairedUser, PendingPairing } from "./pairing.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -13,6 +15,8 @@ export interface IrcSettingsResponse {
   channels: string[];
   tls: boolean;
   passwordSet: boolean;
+  pairedUsers: PairedUser[];
+  pendingPairings: PendingPairing[];
 }
 
 // ---------------------------------------------------------------------------
@@ -34,6 +38,8 @@ export function getIrcSettings(): IrcSettingsResponse {
     channels,
     tls: getConfig("irc:tls") === "true",
     passwordSet: !!getConfig("irc:password"),
+    pairedUsers: listPairedUsers(),
+    pendingPairings: listPendingPairings(),
   };
 }
 

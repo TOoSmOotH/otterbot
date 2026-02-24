@@ -178,12 +178,22 @@ import {
   updateIrcSettings,
   getIrcConfig,
 } from "./irc/irc-settings.js";
+import {
+  approvePairing as approveIrcPairing,
+  rejectPairing as rejectIrcPairing,
+  revokePairing as revokeIrcPairing,
+} from "./irc/pairing.js";
 import { TeamsBridge } from "./teams/teams-bridge.js";
 import {
   getTeamsSettings,
   updateTeamsSettings,
   testTeamsConnection,
 } from "./teams/teams-settings.js";
+import {
+  approvePairing as approveTeamsPairing,
+  rejectPairing as rejectTeamsPairing,
+  revokePairing as revokeTeamsPairing,
+} from "./teams/pairing.js";
 import { SlackBridge } from "./slack/slack-bridge.js";
 import {
   getSlackSettings,
@@ -3345,6 +3355,39 @@ async function main() {
     return { ok: true };
   });
 
+  app.post<{
+    Body: { code: string };
+  }>("/api/settings/irc/pair/approve", async (req, reply) => {
+    const result = approveIrcPairing(req.body.code);
+    if (!result) {
+      reply.code(400);
+      return { ok: false, error: "Invalid or expired pairing code" };
+    }
+    return { ok: true, user: result };
+  });
+
+  app.post<{
+    Body: { code: string };
+  }>("/api/settings/irc/pair/reject", async (req, reply) => {
+    const ok = rejectIrcPairing(req.body.code);
+    if (!ok) {
+      reply.code(400);
+      return { ok: false, error: "Pairing code not found" };
+    }
+    return { ok: true };
+  });
+
+  app.delete<{
+    Params: { userId: string };
+  }>("/api/settings/irc/pair/:userId", async (req, reply) => {
+    const ok = revokeIrcPairing(req.params.userId);
+    if (!ok) {
+      reply.code(400);
+      return { ok: false, error: "User not found" };
+    }
+    return { ok: true };
+  });
+
   // =========================================================================
   // Teams settings routes
   // =========================================================================
@@ -3376,6 +3419,39 @@ async function main() {
 
   app.post("/api/settings/teams/test", async () => {
     return testTeamsConnection();
+  });
+
+  app.post<{
+    Body: { code: string };
+  }>("/api/settings/teams/pair/approve", async (req, reply) => {
+    const result = approveTeamsPairing(req.body.code);
+    if (!result) {
+      reply.code(400);
+      return { ok: false, error: "Invalid or expired pairing code" };
+    }
+    return { ok: true, user: result };
+  });
+
+  app.post<{
+    Body: { code: string };
+  }>("/api/settings/teams/pair/reject", async (req, reply) => {
+    const ok = rejectTeamsPairing(req.body.code);
+    if (!ok) {
+      reply.code(400);
+      return { ok: false, error: "Pairing code not found" };
+    }
+    return { ok: true };
+  });
+
+  app.delete<{
+    Params: { userId: string };
+  }>("/api/settings/teams/pair/:userId", async (req, reply) => {
+    const ok = revokeTeamsPairing(req.params.userId);
+    if (!ok) {
+      reply.code(400);
+      return { ok: false, error: "User not found" };
+    }
+    return { ok: true };
   });
 
   // Teams Bot Framework messaging endpoint

@@ -51,9 +51,11 @@ export interface ServerToClientEvents {
   "reminder:fired": (data: { todoId: string; title: string }) => void;
   "discord:pairing-request": (data: { code: string; discordUserId: string; discordUsername: string }) => void;
   "discord:status": (data: { status: "connected" | "disconnected" | "error"; botUsername?: string }) => void;
-  "matrix:pairing-request": (data: { code: string; matrixUserId: string }) => void;
+  "matrix:pairing-request": (data: { code: string; matrixUserId: string; matrixUsername: string }) => void;
   "matrix:status": (data: { status: "connected" | "disconnected" | "error"; userId?: string }) => void;
+  "irc:pairing-request": (data: { code: string; ircUserId: string; ircUsername: string }) => void;
   "irc:status": (data: { status: "connected" | "disconnected" | "error"; nickname?: string }) => void;
+  "teams:pairing-request": (data: { code: string; teamsUserId: string; teamsUsername: string }) => void;
   "teams:status": (data: { status: "connected" | "disconnected" | "error" }) => void;
   "slack:pairing-request": (data: { code: string; slackUserId: string; slackUsername: string }) => void;
   "slack:status": (data: { status: "connected" | "disconnected" | "error"; botUsername?: string }) => void;
