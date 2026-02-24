@@ -1283,6 +1283,11 @@ export class TeamLead extends BaseAgent {
               this._shouldAbortThink = true;
               return `REFUSED: Task "${existingTask.title}" (${taskId}) is IN REVIEW — PR #${(existingTask as any).prNumber ?? "?"} is awaiting reviewer approval. Do NOT spawn a worker. The PR monitor handles this automatically.`;
             }
+            if (existingTask?.column === "triage") {
+              this._toolCallCounts.set("spawn_worker_refused", (refusals) + 1);
+              this._shouldAbortThink = true;
+              return `REFUSED: Task "${existingTask.title}" (${taskId}) is in TRIAGE — it has not been assigned yet. Only work on tasks in the backlog or in_progress columns.`;
+            }
           }
           const result = await this.spawnWorker(registryEntryId, task, taskId);
           if (result.startsWith("REFUSED:")) {
@@ -1731,6 +1736,12 @@ export class TeamLead extends BaseAgent {
     if (task.column === "done") {
       console.warn(`[TeamLead ${this.id}] autoAssignTask: task "${task.title}" (${taskId}) is already DONE — refusing assignment`);
       return `REFUSED: Task "${task.title}" (${taskId}) is already DONE. Do not re-spawn workers for completed tasks.`;
+    }
+
+    // Guard: refuse if task is in triage (not yet assigned — only backlog tasks can be worked on)
+    if (task.column === "triage") {
+      console.warn(`[TeamLead ${this.id}] autoAssignTask: task "${task.title}" (${taskId}) is in TRIAGE — refusing assignment`);
+      return `REFUSED: Task "${task.title}" (${taskId}) is in TRIAGE and has not been assigned. Only backlog tasks can be worked on.`;
     }
 
     // Guard: refuse if task is in review (PR awaiting approval — PR monitor handles this)
