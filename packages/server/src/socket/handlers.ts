@@ -487,7 +487,7 @@ export function setupSocketHandlers(
             io.emit("project:created", project as unknown as Project);
           }
 
-          if (issueMonitor && deps?.issueMonitor) {
+          if (deps?.issueMonitor) {
             deps.issueMonitor.watchProject(projectId, data.githubRepo!, ghUsername);
           }
 
