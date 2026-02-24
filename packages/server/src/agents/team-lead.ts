@@ -45,6 +45,8 @@ import {
   createIssueComment,
 } from "../github/github-service.js";
 import type { PipelineManager } from "../pipeline/pipeline-manager.js";
+import { cleanTerminalOutput } from "../utils/terminal.js";
+import { formatBotCommentWithDetails } from "../utils/github-comments.js";
 
 /** Tool descriptions for environment context injection */
 const TOOL_DESCRIPTIONS: Record<string, string> = {
@@ -495,12 +497,12 @@ export class TeamLead extends BaseAgent {
     const botUsername = getConfig("github:username") ?? "otterbot";
 
     // Post a comment summarizing the changes
-    const snippet = completionReport.length > 1500
-      ? completionReport.slice(0, 1500) + "\n\n_(truncated)_"
-      : completionReport;
-    const commentBody =
-      `I've addressed the review feedback and pushed updates to this PR.\n\n` +
-      `**Changes made:**\n${snippet}`;
+    const cleaned = cleanTerminalOutput(completionReport);
+    const commentBody = formatBotCommentWithDetails(
+      "Review Feedback Addressed",
+      "I've addressed the review feedback and pushed updates to this PR.",
+      cleaned,
+    );
 
     try {
       await createIssueComment(project.githubRepo, token, prNumber, commentBody);
