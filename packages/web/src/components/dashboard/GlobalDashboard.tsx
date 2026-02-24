@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { useAgentStore } from "../../stores/agent-store";
 import { useSettingsStore } from "../../stores/settings-store";
 import { useClaudeUsageStore } from "../../stores/claude-usage-store";
+import { useOpenRouterBalanceStore } from "../../stores/openrouter-balance-store";
 import { ProjectStatus } from "@otterbot/shared";
 import type { Project } from "@otterbot/shared";
 import { formatRelative } from "../../lib/format-relative";
@@ -35,6 +36,9 @@ export function GlobalDashboard({
 
         {/* Claude Code OAuth usage */}
         {showUsageCard && <ClaudeCodeUsageCard />}
+
+        {/* OpenRouter balance */}
+        <OpenRouterBalanceCard />
 
         {/* Project cards */}
         {projects.length === 0 ? (
@@ -121,6 +125,49 @@ function ClaudeCodeUsageCard() {
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <UsageBar label="5h Session" percent={usage.sessionPercent} resetsAt={usage.sessionResetsAt} />
         <UsageBar label="Weekly" percent={usage.weeklyPercent} resetsAt={usage.weeklyResetsAt} />
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// OpenRouter Balance Card
+// ---------------------------------------------------------------------------
+
+function OpenRouterBalanceCard() {
+  const balance = useOpenRouterBalanceStore((s) => s.balance);
+  const startPolling = useOpenRouterBalanceStore((s) => s.startPolling);
+
+  useEffect(() => {
+    const cleanup = startPolling();
+    return cleanup;
+  }, [startPolling]);
+
+  if (!balance) return null;
+
+  const fmt = (n: number) =>
+    n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+  return (
+    <div className="rounded-lg border border-border bg-card p-4">
+      <div className="text-xs font-medium text-muted-foreground mb-3">OpenRouter Balance</div>
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+        {balance.limit != null && (
+          <div>
+            <div className="text-xs text-muted-foreground mb-0.5">Remaining</div>
+            <div className="text-lg font-semibold tabular-nums text-green-400">${fmt(balance.balance)}</div>
+          </div>
+        )}
+        <div>
+          <div className="text-xs text-muted-foreground mb-0.5">Total Usage</div>
+          <div className="text-lg font-semibold tabular-nums text-foreground">${fmt(balance.usage)}</div>
+        </div>
+        {balance.limit != null && (
+          <div>
+            <div className="text-xs text-muted-foreground mb-0.5">Credit Limit</div>
+            <div className="text-lg font-semibold tabular-nums text-foreground">${fmt(balance.limit)}</div>
+          </div>
+        )}
       </div>
     </div>
   );

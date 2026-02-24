@@ -2792,6 +2792,17 @@ async function main() {
   });
 
   // =========================================================================
+  // OpenRouter balance
+  // =========================================================================
+
+  app.get("/api/settings/openrouter/balance", async () => {
+    const { fetchOpenRouterBalance } = await import("./settings/settings.js");
+    const result = await fetchOpenRouterBalance();
+    if (!result) return { available: false };
+    return { available: true, ...result };
+  });
+
+  // =========================================================================
   // Codex settings routes
   // =========================================================================
 
