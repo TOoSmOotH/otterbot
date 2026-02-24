@@ -160,6 +160,15 @@ export function resolveModel(config: LLMConfig): LanguageModel {
       return perplexity(config.model);
     }
 
+    case "deepgram": {
+      const deepgram = createOpenAICompatible({
+        name: "deepgram",
+        baseURL: config.baseUrl ?? resolved.baseUrl ?? "https://api.deepgram.com/v1",
+        apiKey: config.apiKey ?? resolved.apiKey ?? "",
+      });
+      return deepgram(config.model);
+    }
+
     default:
       throw new Error(`Unknown LLM provider: ${config.provider} (type: ${resolved.type})`);
   }
