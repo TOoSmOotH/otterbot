@@ -178,12 +178,22 @@ import {
   updateIrcSettings,
   getIrcConfig,
 } from "./irc/irc-settings.js";
+import {
+  approvePairing as approveIrcPairing,
+  rejectPairing as rejectIrcPairing,
+  revokePairing as revokeIrcPairing,
+} from "./irc/pairing.js";
 import { TeamsBridge } from "./teams/teams-bridge.js";
 import {
   getTeamsSettings,
   updateTeamsSettings,
   testTeamsConnection,
 } from "./teams/teams-settings.js";
+import {
+  approvePairing as approveTeamsPairing,
+  rejectPairing as rejectTeamsPairing,
+  revokePairing as revokeTeamsPairing,
+} from "./teams/pairing.js";
 import { SlackBridge } from "./slack/slack-bridge.js";
 import {
   getSlackSettings,
@@ -195,6 +205,17 @@ import {
   rejectPairing as rejectSlackPairing,
   revokePairing as revokeSlackPairing,
 } from "./slack/pairing.js";
+import { MattermostBridge } from "./mattermost/mattermost-bridge.js";
+import {
+  getMattermostSettings,
+  updateMattermostSettings,
+  testMattermostConnection,
+} from "./mattermost/mattermost-settings.js";
+import {
+  approvePairing as approveMattermostPairing,
+  rejectPairing as rejectMattermostPairing,
+  revokePairing as revokeMattermostPairing,
+} from "./mattermost/pairing.js";
 import { TelegramBridge } from "./telegram/telegram-bridge.js";
 import {
   getTelegramSettings,
@@ -213,6 +234,12 @@ import {
   getTlonConfig,
   testTlonConnection,
 } from "./tlon/tlon-settings.js";
+import { WhatsAppBridge } from "./whatsapp/whatsapp-bridge.js";
+import {
+  getWhatsAppSettings,
+  updateWhatsAppSettings,
+  getWhatsAppConfig,
+} from "./whatsapp/whatsapp-settings.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -581,6 +608,31 @@ async function main() {
     }
   }
 
+  // Mattermost bridge (initialized when enabled + credentials set)
+  let mattermostBridge: MattermostBridge | null = null;
+
+  function startMattermostBridge() {
+    if (mattermostBridge || !coo) return;
+    const settings = getMattermostSettings();
+    if (!settings.enabled || !settings.tokenSet || !settings.serverUrlSet) return;
+    const token = getConfig("mattermost:bot_token");
+    const serverUrl = getConfig("mattermost:server_url");
+    if (!token || !serverUrl) return;
+    const defaultTeam = getConfig("mattermost:default_team") || undefined;
+    mattermostBridge = new MattermostBridge({ bus, coo, io });
+    mattermostBridge.start({ serverUrl, token, defaultTeam }).catch((err) => {
+      console.error("[Mattermost] Failed to start bridge:", err);
+      mattermostBridge = null;
+    });
+  }
+
+  async function stopMattermostBridge() {
+    if (mattermostBridge) {
+      await mattermostBridge.stop();
+      mattermostBridge = null;
+    }
+  }
+
   // Telegram bridge (initialized when enabled + token set)
   let telegramBridge: TelegramBridge | null = null;
 
@@ -622,6 +674,27 @@ async function main() {
     if (tlonBridge) {
       await tlonBridge.stop();
       tlonBridge = null;
+    }
+  }
+
+  // WhatsApp bridge (initialized when enabled)
+  let whatsappBridge: WhatsAppBridge | null = null;
+
+  function startWhatsAppBridge() {
+    if (whatsappBridge || !coo) return;
+    const config = getWhatsAppConfig();
+    if (!config) return;
+    whatsappBridge = new WhatsAppBridge({ bus, coo, io });
+    whatsappBridge.start(config).catch((err) => {
+      console.error("[WhatsApp] Failed to start bridge:", err);
+      whatsappBridge = null;
+    });
+  }
+
+  async function stopWhatsAppBridge() {
+    if (whatsappBridge) {
+      await whatsappBridge.stop();
+      whatsappBridge = null;
     }
   }
 
@@ -957,8 +1030,10 @@ async function main() {
     startIrcBridge();
     startTeamsBridge();
     startSlackBridge();
+    startMattermostBridge();
     startTelegramBridge();
     startTlonBridge();
+    startWhatsAppBridge();
   } else {
     console.log("Setup not complete. Waiting for setup wizard...");
   }
@@ -1282,8 +1357,10 @@ async function main() {
     startIrcBridge();
     startTeamsBridge();
     startSlackBridge();
+    startMattermostBridge();
     startTelegramBridge();
     startTlonBridge();
+    startWhatsAppBridge();
 
     return { ok: true };
   });
@@ -3345,6 +3422,39 @@ async function main() {
     return { ok: true };
   });
 
+  app.post<{
+    Body: { code: string };
+  }>("/api/settings/irc/pair/approve", async (req, reply) => {
+    const result = approveIrcPairing(req.body.code);
+    if (!result) {
+      reply.code(400);
+      return { ok: false, error: "Invalid or expired pairing code" };
+    }
+    return { ok: true, user: result };
+  });
+
+  app.post<{
+    Body: { code: string };
+  }>("/api/settings/irc/pair/reject", async (req, reply) => {
+    const ok = rejectIrcPairing(req.body.code);
+    if (!ok) {
+      reply.code(400);
+      return { ok: false, error: "Pairing code not found" };
+    }
+    return { ok: true };
+  });
+
+  app.delete<{
+    Params: { userId: string };
+  }>("/api/settings/irc/pair/:userId", async (req, reply) => {
+    const ok = revokeIrcPairing(req.params.userId);
+    if (!ok) {
+      reply.code(400);
+      return { ok: false, error: "User not found" };
+    }
+    return { ok: true };
+  });
+
   // =========================================================================
   // Teams settings routes
   // =========================================================================
@@ -3376,6 +3486,39 @@ async function main() {
 
   app.post("/api/settings/teams/test", async () => {
     return testTeamsConnection();
+  });
+
+  app.post<{
+    Body: { code: string };
+  }>("/api/settings/teams/pair/approve", async (req, reply) => {
+    const result = approveTeamsPairing(req.body.code);
+    if (!result) {
+      reply.code(400);
+      return { ok: false, error: "Invalid or expired pairing code" };
+    }
+    return { ok: true, user: result };
+  });
+
+  app.post<{
+    Body: { code: string };
+  }>("/api/settings/teams/pair/reject", async (req, reply) => {
+    const ok = rejectTeamsPairing(req.body.code);
+    if (!ok) {
+      reply.code(400);
+      return { ok: false, error: "Pairing code not found" };
+    }
+    return { ok: true };
+  });
+
+  app.delete<{
+    Params: { userId: string };
+  }>("/api/settings/teams/pair/:userId", async (req, reply) => {
+    const ok = revokeTeamsPairing(req.params.userId);
+    if (!ok) {
+      reply.code(400);
+      return { ok: false, error: "User not found" };
+    }
+    return { ok: true };
   });
 
   // Teams Bot Framework messaging endpoint
@@ -3457,6 +3600,75 @@ async function main() {
     Params: { userId: string };
   }>("/api/settings/slack/pair/:userId", async (req, reply) => {
     const ok = revokeSlackPairing(req.params.userId);
+    if (!ok) {
+      reply.code(400);
+      return { ok: false, error: "User not found" };
+    }
+    return { ok: true };
+  });
+
+  // =========================================================================
+  // Mattermost settings routes
+  // =========================================================================
+
+  app.get("/api/settings/mattermost", async () => {
+    const availableChannels = await mattermostBridge?.getAvailableChannels() ?? [];
+    return getMattermostSettings(availableChannels);
+  });
+
+  app.put<{
+    Body: {
+      enabled?: boolean;
+      botToken?: string;
+      serverUrl?: string;
+      defaultTeam?: string;
+      requireMention?: boolean;
+      allowedChannels?: string[];
+    };
+  }>("/api/settings/mattermost", async (req) => {
+    const wasEnabled = getMattermostSettings().enabled && getMattermostSettings().tokenSet && getMattermostSettings().serverUrlSet;
+    updateMattermostSettings(req.body);
+    const nowEnabled = getMattermostSettings().enabled && getMattermostSettings().tokenSet && getMattermostSettings().serverUrlSet;
+
+    if (nowEnabled && !wasEnabled) {
+      startMattermostBridge();
+    } else if (!nowEnabled && wasEnabled) {
+      await stopMattermostBridge();
+    }
+
+    return { ok: true };
+  });
+
+  app.post("/api/settings/mattermost/test", async () => {
+    return testMattermostConnection();
+  });
+
+  app.post<{
+    Body: { code: string };
+  }>("/api/settings/mattermost/pair/approve", async (req, reply) => {
+    const result = approveMattermostPairing(req.body.code);
+    if (!result) {
+      reply.code(400);
+      return { ok: false, error: "Invalid or expired pairing code" };
+    }
+    return { ok: true, user: result };
+  });
+
+  app.post<{
+    Body: { code: string };
+  }>("/api/settings/mattermost/pair/reject", async (req, reply) => {
+    const ok = rejectMattermostPairing(req.body.code);
+    if (!ok) {
+      reply.code(400);
+      return { ok: false, error: "Pairing code not found" };
+    }
+    return { ok: true };
+  });
+
+  app.delete<{
+    Params: { userId: string };
+  }>("/api/settings/mattermost/pair/:userId", async (req, reply) => {
+    const ok = revokeMattermostPairing(req.params.userId);
     if (!ok) {
       reply.code(400);
       return { ok: false, error: "User not found" };
@@ -3562,6 +3774,34 @@ async function main() {
     Body: { shipUrl: string; accessCode: string };
   }>("/api/settings/tlon/test", async (req) => {
     return testTlonConnection(req.body.shipUrl, req.body.accessCode);
+  });
+
+  // =========================================================================
+  // WhatsApp settings routes
+  // =========================================================================
+
+  app.get("/api/settings/whatsapp", async () => {
+    return getWhatsAppSettings();
+  });
+
+  app.put<{
+    Body: {
+      enabled?: boolean;
+      allowedNumbers?: string[];
+      dataPath?: string;
+    };
+  }>("/api/settings/whatsapp", async (req) => {
+    const wasEnabled = !!getWhatsAppConfig();
+    updateWhatsAppSettings(req.body);
+    const nowEnabled = !!getWhatsAppConfig();
+
+    if (nowEnabled && !wasEnabled) {
+      startWhatsAppBridge();
+    } else if (!nowEnabled && wasEnabled) {
+      await stopWhatsAppBridge();
+    }
+
+    return { ok: true };
   });
 
   // =========================================================================
@@ -4254,6 +4494,8 @@ Respond with ONLY a JSON object (no markdown, no explanation) with these fields:
     await stopTeamsBridge();
     await stopSlackBridge();
     await stopTlonBridge();
+    await stopWhatsAppBridge();
+    await stopMattermostBridge();
     await closeBrowser();
     process.exit(0);
   };

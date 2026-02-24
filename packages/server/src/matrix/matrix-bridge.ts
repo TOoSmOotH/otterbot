@@ -149,7 +149,8 @@ export class MatrixBridge {
 
     // Check pairing
     if (!isPaired(senderId)) {
-      const code = generatePairingCode(senderId);
+      const matrixUsername = senderId;
+      const code = generatePairingCode(senderId, matrixUsername);
       await this.sendTextMessage(
         roomId,
         `I don't recognize you yet. To pair with me, ask my owner to approve this code in the Otterbot dashboard:\n\n**\`${code}\`**\n\nThis code expires in 1 hour.`,
@@ -157,6 +158,7 @@ export class MatrixBridge {
       this.io.emit("matrix:pairing-request", {
         code,
         matrixUserId: senderId,
+        matrixUsername,
       });
       return;
     }

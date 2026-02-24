@@ -148,3 +148,142 @@ export function getCommitHash(cwd: string): string {
     return "";
   }
 }
+
+// ---------------------------------------------------------------------------
+// Git diff utilities
+// ---------------------------------------------------------------------------
+
+export interface GitDiffFile {
+  path: string;
+  additions: number;
+  deletions: number;
+}
+
+export interface GitDiffResult {
+  files: GitDiffFile[];
+}
+
+/**
+ * Parse `git diff --numstat` output into structured file entries.
+ */
+export function parseNumstat(output: string): GitDiffFile[] {
+  if (!output) return [];
+
+  return output
+    .split("\n")
+    .filter((line) => line.trim())
+    .map((line) => {
+      const parts = line.split("\t");
+      if (parts.length < 3) return null;
+      const path = parts[2]!;
+      if (!path) return null;
+      return {
+        path,
+        additions: parseInt(parts[0] ?? "0", 10) || 0,
+        deletions: parseInt(parts[1] ?? "0", 10) || 0,
+      };
+    })
+    .filter((f): f is GitDiffFile => f !== null);
+}
+
+/**
+ * Find the merge-base (branch point) for the current branch.
+ * Tries upstream tracking ref first, then common default branches.
+ * Returns the merge-base commit hash, or null if it can't be determined.
+ */
+export function findMergeBase(cwd: string): string | null {
+  // Try upstream tracking ref first
+  try {
+    const upstream = execSync("git rev-parse --abbrev-ref @{u}", {
+      cwd,
+      encoding: "utf-8",
+      timeout: 10_000,
+      stdio: ["pipe", "pipe", "ignore"],
+    }).trim();
+    if (upstream) {
+      const base = execSync(`git merge-base ${upstream} HEAD`, {
+        cwd,
+        encoding: "utf-8",
+        timeout: 10_000,
+        stdio: ["pipe", "pipe", "ignore"],
+      }).trim();
+      if (base) return base;
+    }
+  } catch {
+    // No upstream tracking — fall through
+  }
+
+  // Try common remote default branches
+  for (const ref of ["origin/dev", "origin/main", "origin/master"]) {
+    try {
+      const base = execSync(`git merge-base ${ref} HEAD`, {
+        cwd,
+        encoding: "utf-8",
+        timeout: 10_000,
+        stdio: ["pipe", "pipe", "ignore"],
+      }).trim();
+      if (base) return base;
+    } catch {
+      // ref doesn't exist — try next
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Compute file diffs via git in a workspace directory.
+ * Checks both uncommitted changes (vs HEAD) and committed branch changes
+ * (vs the merge-base), merging and deduplicating the results.
+ */
+export function computeGitDiff(workspacePath: string): GitDiffResult | null {
+  const fileMap = new Map<string, GitDiffFile>();
+
+  // 1. Uncommitted changes (staged + unstaged) vs HEAD
+  try {
+    const uncommitted = execSync("git diff --numstat HEAD", {
+      cwd: workspacePath,
+      encoding: "utf-8",
+      timeout: 10_000,
+    }).trim();
+
+    for (const file of parseNumstat(uncommitted)) {
+      fileMap.set(file.path, file);
+    }
+  } catch {
+    // No HEAD or not a git repo — skip
+  }
+
+  // 2. Committed branch changes vs merge-base
+  try {
+    const mergeBase = findMergeBase(workspacePath);
+    if (mergeBase) {
+      const committed = execSync(`git diff --numstat ${mergeBase}..HEAD`, {
+        cwd: workspacePath,
+        encoding: "utf-8",
+        timeout: 10_000,
+      }).trim();
+
+      for (const file of parseNumstat(committed)) {
+        // Merge: if a file appears in both uncommitted and committed diffs,
+        // prefer the committed diff (it includes the full branch change)
+        const existing = fileMap.get(file.path);
+        if (existing) {
+          // Sum uncommitted on top of committed changes
+          fileMap.set(file.path, {
+            path: file.path,
+            additions: file.additions + existing.additions,
+            deletions: file.deletions + existing.deletions,
+          });
+        } else {
+          fileMap.set(file.path, file);
+        }
+      }
+    }
+  } catch {
+    // Could not determine merge-base — committed changes won't be counted
+  }
+
+  if (fileMap.size === 0) return null;
+  return { files: Array.from(fileMap.values()) };
+}

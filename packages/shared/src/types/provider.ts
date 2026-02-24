@@ -1,4 +1,4 @@
-export type ProviderType = "anthropic" | "openai" | "google" | "ollama" | "openai-compatible" | "openrouter" | "github-copilot" | "huggingface" | "nvidia" | "perplexity" | "deepgram";
+export type ProviderType = "anthropic" | "openai" | "google" | "ollama" | "openai-compatible" | "openrouter" | "github-copilot" | "huggingface" | "nvidia" | "perplexity" | "deepgram" | "bedrock";
 
 export interface NamedProvider {
   id: string;
@@ -39,7 +39,7 @@ export interface AgentModelOverride {
 }
 
 /** Supported messaging-platform chat provider types. */
-export type ChatProviderType = "discord" | "matrix" | "irc" | "teams" | "telegram" | "tlon";
+export type ChatProviderType = "discord" | "matrix" | "irc" | "teams" | "telegram" | "tlon" | "whatsapp";
 
 /** Settings common to all chat provider bridges. */
 export interface ChatProviderSettings {

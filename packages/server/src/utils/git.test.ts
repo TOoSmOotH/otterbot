@@ -11,6 +11,9 @@ import {
   createWorktree,
   removeWorktree,
   getCommitHash,
+  parseNumstat,
+  findMergeBase,
+  computeGitDiff,
 } from "./git.js";
 
 const TEST_DIR = join(process.cwd(), "test-git-utils");
@@ -104,5 +107,165 @@ describe("git utils", () => {
     createInitialCommit(REPO_DIR);
     const hash = getCommitHash(REPO_DIR);
     expect(hash).toMatch(/^[0-9a-f]{40}$/);
+  });
+});
+
+describe("parseNumstat", () => {
+  it("parses standard numstat output", () => {
+    const output = "10\t5\tsrc/index.ts\n3\t1\tREADME.md";
+    const files = parseNumstat(output);
+    expect(files).toEqual([
+      { path: "src/index.ts", additions: 10, deletions: 5 },
+      { path: "README.md", additions: 3, deletions: 1 },
+    ]);
+  });
+
+  it("returns empty array for empty output", () => {
+    expect(parseNumstat("")).toEqual([]);
+  });
+
+  it("skips malformed lines with fewer than 3 tab-separated parts", () => {
+    const output = "10\t5\tsrc/index.ts\nsome garbage line\n3\t1\tREADME.md";
+    const files = parseNumstat(output);
+    expect(files).toEqual([
+      { path: "src/index.ts", additions: 10, deletions: 5 },
+      { path: "README.md", additions: 3, deletions: 1 },
+    ]);
+  });
+
+  it("handles binary files (- markers)", () => {
+    const output = "-\t-\timage.png";
+    const files = parseNumstat(output);
+    expect(files).toEqual([
+      { path: "image.png", additions: 0, deletions: 0 },
+    ]);
+  });
+});
+
+describe("computeGitDiff", () => {
+  beforeEach(() => {
+    if (existsSync(TEST_DIR)) {
+      rmSync(TEST_DIR, { recursive: true, force: true });
+    }
+    mkdirSync(REPO_DIR, { recursive: true });
+  });
+
+  afterEach(() => {
+    if (existsSync(TEST_DIR)) {
+      rmSync(TEST_DIR, { recursive: true, force: true });
+    }
+  });
+
+  it("returns null when there are no changes", () => {
+    initGitRepo(REPO_DIR);
+    createInitialCommit(REPO_DIR);
+    const result = computeGitDiff(REPO_DIR);
+    expect(result).toBeNull();
+  });
+
+  it("detects uncommitted changes", () => {
+    initGitRepo(REPO_DIR);
+    createInitialCommit(REPO_DIR);
+    writeFileSync(join(REPO_DIR, "new-file.txt"), "hello world");
+    execSync("git add .", { cwd: REPO_DIR });
+
+    const result = computeGitDiff(REPO_DIR);
+    expect(result).not.toBeNull();
+    expect(result!.files.length).toBeGreaterThanOrEqual(1);
+    expect(result!.files.some((f) => f.path === "new-file.txt")).toBe(true);
+  });
+
+  it("detects committed changes on a branch", () => {
+    initGitRepo(REPO_DIR);
+    createInitialCommit(REPO_DIR);
+
+    // Create a branch and commit changes
+    execSync("git checkout -b feature-branch", { cwd: REPO_DIR, stdio: "ignore" });
+    writeFileSync(join(REPO_DIR, "feature.ts"), "export const x = 1;");
+    execSync("git add . && git commit -m 'add feature'", { cwd: REPO_DIR, stdio: "ignore" });
+
+    // Set up a fake remote so findMergeBase can find the branch point
+    // We simulate by creating a local ref that acts like origin/main
+    const mainHash = execSync("git rev-parse main", { cwd: REPO_DIR, encoding: "utf-8" }).trim();
+    execSync(`git update-ref refs/remotes/origin/main ${mainHash}`, { cwd: REPO_DIR, stdio: "ignore" });
+
+    const result = computeGitDiff(REPO_DIR);
+    expect(result).not.toBeNull();
+    expect(result!.files.some((f) => f.path === "feature.ts")).toBe(true);
+  });
+
+  it("detects both committed and uncommitted changes", () => {
+    initGitRepo(REPO_DIR);
+    createInitialCommit(REPO_DIR);
+
+    // Create a branch and commit
+    execSync("git checkout -b feature-branch", { cwd: REPO_DIR, stdio: "ignore" });
+    writeFileSync(join(REPO_DIR, "committed.ts"), "export const x = 1;");
+    execSync("git add . && git commit -m 'committed change'", { cwd: REPO_DIR, stdio: "ignore" });
+
+    // Also make an uncommitted change
+    writeFileSync(join(REPO_DIR, "uncommitted.ts"), "export const y = 2;");
+    execSync("git add .", { cwd: REPO_DIR, stdio: "ignore" });
+
+    // Set up fake origin/main ref
+    const mainHash = execSync("git rev-parse main", { cwd: REPO_DIR, encoding: "utf-8" }).trim();
+    execSync(`git update-ref refs/remotes/origin/main ${mainHash}`, { cwd: REPO_DIR, stdio: "ignore" });
+
+    const result = computeGitDiff(REPO_DIR);
+    expect(result).not.toBeNull();
+    const paths = result!.files.map((f) => f.path);
+    expect(paths).toContain("committed.ts");
+    expect(paths).toContain("uncommitted.ts");
+  });
+
+  it("falls back gracefully when no remote refs exist", () => {
+    initGitRepo(REPO_DIR);
+    createInitialCommit(REPO_DIR);
+
+    // Commit a change with no remote refs at all
+    writeFileSync(join(REPO_DIR, "local.ts"), "local only");
+    execSync("git add . && git commit -m 'local'", { cwd: REPO_DIR, stdio: "ignore" });
+
+    // findMergeBase will return null, but uncommitted diff should still work
+    // (no uncommitted changes here, and no merge-base, so result is null)
+    const result = computeGitDiff(REPO_DIR);
+    expect(result).toBeNull();
+  });
+});
+
+describe("findMergeBase", () => {
+  beforeEach(() => {
+    if (existsSync(TEST_DIR)) {
+      rmSync(TEST_DIR, { recursive: true, force: true });
+    }
+    mkdirSync(REPO_DIR, { recursive: true });
+  });
+
+  afterEach(() => {
+    if (existsSync(TEST_DIR)) {
+      rmSync(TEST_DIR, { recursive: true, force: true });
+    }
+  });
+
+  it("returns null when no remote refs exist", () => {
+    initGitRepo(REPO_DIR);
+    createInitialCommit(REPO_DIR);
+    const result = findMergeBase(REPO_DIR);
+    expect(result).toBeNull();
+  });
+
+  it("finds merge-base with origin/main", () => {
+    initGitRepo(REPO_DIR);
+    createInitialCommit(REPO_DIR);
+
+    const mainHash = execSync("git rev-parse HEAD", { cwd: REPO_DIR, encoding: "utf-8" }).trim();
+    execSync(`git update-ref refs/remotes/origin/main ${mainHash}`, { cwd: REPO_DIR, stdio: "ignore" });
+
+    execSync("git checkout -b feature", { cwd: REPO_DIR, stdio: "ignore" });
+    writeFileSync(join(REPO_DIR, "f.txt"), "f");
+    execSync("git add . && git commit -m 'f'", { cwd: REPO_DIR, stdio: "ignore" });
+
+    const base = findMergeBase(REPO_DIR);
+    expect(base).toBe(mainHash);
   });
 });

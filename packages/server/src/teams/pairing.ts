@@ -15,14 +15,14 @@ const PAIRING_TTL_MS = 60 * 60 * 1000; // 1 hour
 
 export interface PendingPairing {
   code: string;
-  matrixUserId: string;
-  matrixUsername: string;
+  teamsUserId: string;
+  teamsUsername: string;
   createdAt: string;
 }
 
 export interface PairedUser {
-  matrixUserId: string;
-  matrixUsername: string;
+  teamsUserId: string;
+  teamsUsername: string;
   pairedAt: string;
 }
 
@@ -44,16 +44,16 @@ function getConfigsByPrefix(prefix: string): Array<{ key: string; value: string 
 // ---------------------------------------------------------------------------
 
 /**
- * Generate a pairing code for a Matrix user.
+ * Generate a pairing code for a Teams user.
  * Only one active code per user — generating a new one deletes the old.
  */
-export function generatePairingCode(matrixUserId: string, matrixUsername: string): string {
+export function generatePairingCode(teamsUserId: string, teamsUsername: string): string {
   // Remove any existing code for this user
-  const existing = getConfigsByPrefix("matrix:pairing:");
+  const existing = getConfigsByPrefix("teams:pairing:");
   for (const row of existing) {
     try {
       const data = JSON.parse(row.value) as PendingPairing;
-      if (data.matrixUserId === matrixUserId) {
+      if (data.teamsUserId === teamsUserId) {
         deleteConfig(row.key);
       }
     } catch { /* ignore malformed */ }
@@ -62,26 +62,26 @@ export function generatePairingCode(matrixUserId: string, matrixUsername: string
   const code = generateCode();
   const data: PendingPairing = {
     code,
-    matrixUserId,
-    matrixUsername,
+    teamsUserId,
+    teamsUsername,
     createdAt: new Date().toISOString(),
   };
-  setConfig(`matrix:pairing:${code}`, JSON.stringify(data));
+  setConfig(`teams:pairing:${code}`, JSON.stringify(data));
   return code;
 }
 
 /**
- * Check whether a Matrix user is paired.
+ * Check whether a Teams user is paired.
  */
-export function isPaired(matrixUserId: string): boolean {
-  return !!getConfig(`matrix:paired:${matrixUserId}`);
+export function isPaired(teamsUserId: string): boolean {
+  return !!getConfig(`teams:paired:${teamsUserId}`);
 }
 
 /**
  * Get paired user info.
  */
-export function getPairedUser(matrixUserId: string): PairedUser | null {
-  const raw = getConfig(`matrix:paired:${matrixUserId}`);
+export function getPairedUser(teamsUserId: string): PairedUser | null {
+  const raw = getConfig(`teams:paired:${teamsUserId}`);
   if (!raw) return null;
   try {
     return JSON.parse(raw) as PairedUser;
@@ -95,7 +95,7 @@ export function getPairedUser(matrixUserId: string): PairedUser | null {
  * Returns the paired user info, or null if the code is invalid/expired.
  */
 export function approvePairing(code: string): PairedUser | null {
-  const raw = getConfig(`matrix:pairing:${code}`);
+  const raw = getConfig(`teams:pairing:${code}`);
   if (!raw) return null;
 
   let pending: PendingPairing;
@@ -107,18 +107,18 @@ export function approvePairing(code: string): PairedUser | null {
 
   // Check expiry
   if (Date.now() - new Date(pending.createdAt).getTime() > PAIRING_TTL_MS) {
-    deleteConfig(`matrix:pairing:${code}`);
+    deleteConfig(`teams:pairing:${code}`);
     return null;
   }
 
   const paired: PairedUser = {
-    matrixUserId: pending.matrixUserId,
-    matrixUsername: pending.matrixUsername,
+    teamsUserId: pending.teamsUserId,
+    teamsUsername: pending.teamsUsername,
     pairedAt: new Date().toISOString(),
   };
 
-  setConfig(`matrix:paired:${pending.matrixUserId}`, JSON.stringify(paired));
-  deleteConfig(`matrix:pairing:${code}`);
+  setConfig(`teams:paired:${pending.teamsUserId}`, JSON.stringify(paired));
+  deleteConfig(`teams:pairing:${code}`);
   return paired;
 }
 
@@ -126,19 +126,19 @@ export function approvePairing(code: string): PairedUser | null {
  * Reject (delete) a pending pairing code.
  */
 export function rejectPairing(code: string): boolean {
-  const raw = getConfig(`matrix:pairing:${code}`);
+  const raw = getConfig(`teams:pairing:${code}`);
   if (!raw) return false;
-  deleteConfig(`matrix:pairing:${code}`);
+  deleteConfig(`teams:pairing:${code}`);
   return true;
 }
 
 /**
  * Revoke a paired user's access.
  */
-export function revokePairing(matrixUserId: string): boolean {
-  const raw = getConfig(`matrix:paired:${matrixUserId}`);
+export function revokePairing(teamsUserId: string): boolean {
+  const raw = getConfig(`teams:paired:${teamsUserId}`);
   if (!raw) return false;
-  deleteConfig(`matrix:paired:${matrixUserId}`);
+  deleteConfig(`teams:paired:${teamsUserId}`);
   return true;
 }
 
@@ -146,7 +146,7 @@ export function revokePairing(matrixUserId: string): boolean {
  * List all paired users.
  */
 export function listPairedUsers(): PairedUser[] {
-  const rows = getConfigsByPrefix("matrix:paired:");
+  const rows = getConfigsByPrefix("teams:paired:");
   const users: PairedUser[] = [];
   for (const row of rows) {
     try {
@@ -160,7 +160,7 @@ export function listPairedUsers(): PairedUser[] {
  * List all pending (non-expired) pairing codes.
  */
 export function listPendingPairings(): PendingPairing[] {
-  const rows = getConfigsByPrefix("matrix:pairing:");
+  const rows = getConfigsByPrefix("teams:pairing:");
   const now = Date.now();
   const pending: PendingPairing[] = [];
   for (const row of rows) {

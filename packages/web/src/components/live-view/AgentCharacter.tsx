@@ -6,6 +6,7 @@ import type { ModelPack, GearConfig } from "@otterbot/shared";
 import * as THREE from "three";
 import { applyGearConfig } from "../../lib/gear-utils";
 import { useMovementStore } from "../../stores/movement-store";
+import { AgentChatBubble } from "./AgentChatBubble";
 
 interface AgentCharacterProps {
   pack: ModelPack;
@@ -123,6 +124,9 @@ export function AgentCharacter({ pack, position, label, role, status, agentId, g
           color="#3b82f6"
         />
       )}
+
+      {/* Chat bubble */}
+      <AgentChatBubble agentId={agentId} status={status} yOffset={3.5} />
 
       {/* Floating label */}
       <Html position={[0, 2.2, 0]} center distanceFactor={8}>

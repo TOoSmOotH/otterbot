@@ -12,6 +12,12 @@ vi.mock("../auth/auth.js", () => ({
   deleteConfig: vi.fn((key: string) => configStore.delete(key)),
 }));
 
+// Mock the pairing module so settings tests don't need the database
+vi.mock("./pairing.js", () => ({
+  listPairedUsers: vi.fn(() => []),
+  listPendingPairings: vi.fn(() => []),
+}));
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
