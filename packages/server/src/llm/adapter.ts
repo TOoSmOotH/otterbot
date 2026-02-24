@@ -177,7 +177,7 @@ export function resolveModel(config: LLMConfig): LanguageModel {
         accessKeyId,
         secretAccessKey,
       });
-      return bedrock(config.model);
+      return bedrock(config.model) as unknown as LanguageModel;
     }
 
     case "deepgram":
