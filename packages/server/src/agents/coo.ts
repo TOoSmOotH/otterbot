@@ -15,6 +15,7 @@ import { BaseAgent, type AgentOptions } from "./agent.js";
 import { COO_SYSTEM_PROMPT } from "./prompts/coo.js";
 import { ConversationContextManager } from "./conversation-context.js";
 import { TeamLead } from "./team-lead.js";
+import type { PipelineManager } from "../pipeline/pipeline-manager.js";
 import { getDb, schema } from "../db/index.js";
 import { Registry } from "../registry/registry.js";
 import { SkillService } from "../skills/skill-service.js";
@@ -78,6 +79,7 @@ export interface COODependencies {
   onPtySessionRegistered?: (agentId: string, client: import("./worker.js").PtyClient) => void;
   onPtySessionUnregistered?: (agentId: string) => void;
   onAgentDestroyed?: (agentId: string) => void;
+  onConversationSwitched?: (conversationId: string, messages: BusMessage[]) => void;
 }
 
 export class COO extends BaseAgent {
@@ -104,6 +106,8 @@ export class COO extends BaseAgent {
   private _onPtySessionRegistered?: (agentId: string, client: import("./worker.js").PtyClient) => void;
   private _onPtySessionUnregistered?: (agentId: string) => void;
   private onAgentDestroyed?: (agentId: string) => void;
+  private onConversationSwitched?: (conversationId: string, messages: BusMessage[]) => void;
+  private _pipelineManager: PipelineManager | null = null;
   private allowedToolNames: Set<string>;
   private contextManager!: ConversationContextManager;
   private activeContextId: string | null = null;
@@ -162,15 +166,15 @@ The user can see everything on the desktop in real-time.`;
       systemPrompt = lines.join("\n") + "\n\n" + systemPrompt;
     }
 
-    // Only use registry model/provider from a custom clone — the builtin's
-    // hardcoded values must not override the user's configured provider.
+    // Config DB (Settings page) takes precedence over registry entry defaults,
+    // so that runtime model changes are always respected.
     const options: AgentOptions = {
       id: "coo",
       role: AgentRole.COO,
       parentId: null,
       projectId: null,
-      model: customCoo?.defaultModel ?? getConfig("coo_model") ?? "claude-sonnet-4-5-20250929",
-      provider: customCoo?.defaultProvider ?? getConfig("coo_provider") ?? "anthropic",
+      model: getConfig("coo_model") ?? customCoo?.defaultModel ?? "claude-sonnet-4-5-20250929",
+      provider: getConfig("coo_provider") ?? customCoo?.defaultProvider ?? "anthropic",
       systemPrompt,
       modelPackId: cooEntry?.modelPackId ?? null,
       gearConfig: cooEntry?.gearConfig ?? null,
@@ -209,7 +213,23 @@ The user can see everything on the desktop in real-time.`;
     this._onPtySessionRegistered = deps.onPtySessionRegistered;
     this._onPtySessionUnregistered = deps.onPtySessionUnregistered;
     this.onAgentDestroyed = deps.onAgentDestroyed;
+    this.onConversationSwitched = deps.onConversationSwitched;
     this.contextManager = new ConversationContextManager(systemPrompt);
+  }
+
+  /** Re-read model/provider from config so settings changes take effect without restart */
+  protected override refreshLlmConfig(): void {
+    const cooRegistryId = getConfig("coo_registry_id");
+    const customCoo = cooRegistryId ? new Registry().get(cooRegistryId) : null;
+
+    const newModel = getConfig("coo_model") ?? customCoo?.defaultModel ?? "claude-sonnet-4-5-20250929";
+    const newProvider = getConfig("coo_provider") ?? customCoo?.defaultProvider ?? "anthropic";
+
+    if (newModel !== this.llmConfig.model || newProvider !== this.llmConfig.provider) {
+      console.log(`[COO] LLM config changed: ${this.llmConfig.provider}/${this.llmConfig.model} → ${newProvider}/${newModel}`);
+      this.llmConfig.model = newModel;
+      this.llmConfig.provider = newProvider;
+    }
   }
 
   /** Register module tools so the COO can query installed modules. */
@@ -238,10 +258,31 @@ The user can see everything on the desktop in real-time.`;
 
     if (projects.length === 0) return "";
 
-    const lines = projects.map(
-      (p) => `- [${p.id}] "${p.name}": ${p.description}`,
+    const lines = projects.map((p) => {
+      const charterLabel = p.charter ? "finalized" : "none";
+      return `- [${p.id}] "${p.name}": ${p.description} (charter: ${charterLabel})`;
+    });
+    return `\n\n[ACTIVE PROJECTS]\n${lines.join("\n")}\n[/ACTIVE PROJECTS]\n\nRoute related work to an existing project with send_directive, update a project's charter with update_charter, or create a new project if this is a distinct area of work.`;
+  }
+
+  private getCurrentProjectContext(projectId: string): string {
+    const db = getDb();
+    const project = db
+      .select()
+      .from(schema.projects)
+      .where(eq(schema.projects.id, projectId))
+      .get();
+    if (!project) return "";
+
+    const charterStatus = project.charter ? "has charter (finalized)" : "no charter";
+    return (
+      `\n\n[CURRENT PROJECT]\n` +
+      `The CEO is chatting from within project [${project.id}] "${project.name}".\n` +
+      `Description: ${project.description}\n` +
+      `Charter status: ${charterStatus}\n` +
+      `If the CEO asks you to write or update the charter, use the update_charter tool with this project's ID.\n` +
+      `[/CURRENT PROJECT]`
     );
-    return `\n\n[ACTIVE PROJECTS]\n${lines.join("\n")}\n[/ACTIVE PROJECTS]\n\nRoute related work to an existing project with send_directive, or create a new project if this is a distinct area of work.`;
   }
 
   private async handleCeoMessage(message: BusMessage) {
@@ -264,11 +305,12 @@ The user can see everything on the desktop in real-time.`;
       this.conversationHistory = ctx.history;
     }
 
+    // Inject current project context so the LLM knows which project the user is in
+    const currentProjectBlock = projectId ? this.getCurrentProjectContext(projectId) : "";
+
     // Inject active project context so the LLM can avoid duplicates
     const projectContext = this.getActiveProjectsSummary();
-    const enrichedContent = projectContext
-      ? message.content + projectContext
-      : message.content;
+    const enrichedContent = message.content + currentProjectBlock + projectContext;
 
     console.log(`[COO] Calling think() — model=${this.llmConfig.model} provider=${this.llmConfig.provider}`);
     const { text, thinking } = await this.think(
@@ -400,9 +442,10 @@ The user can see everything on the desktop in real-time.`;
           "You get at most 1 command per turn. Output is capped at 50KB. Default timeout: 30s, max: 120s.",
         parameters: z.object({
           command: z.string().describe("The shell command to execute"),
-          projectId: z.string().optional().describe("Project ID — sets working directory to the project's repo"),
+          projectId: z.string().nullable().optional().describe("Project ID — sets working directory to the project's repo"),
           timeout: z
             .number()
+            .nullable()
             .optional()
             .describe("Timeout in milliseconds (default: 30000, max: 120000)"),
         }),
@@ -516,6 +559,7 @@ The user can see everything on the desktop in real-time.`;
         parameters: z.object({
           projectId: z
             .string()
+            .nullable()
             .optional()
             .describe(
               "Specific project ID to check. Leave empty for all projects.",
@@ -547,10 +591,12 @@ The user can see everything on the desktop in real-time.`;
             .describe("Agent tier (required for set_default)"),
           provider: z
             .string()
+            .nullable()
             .optional()
             .describe("Provider ID (required for set_default and test_provider)"),
           model: z
             .string()
+            .nullable()
             .optional()
             .describe("Model ID (required for set_default, optional for test_provider)"),
         }),
@@ -573,14 +619,17 @@ The user can see everything on the desktop in real-time.`;
             .describe("Action to perform"),
           provider: z
             .string()
+            .nullable()
             .optional()
             .describe("Search provider ID: searxng, brave, or tavily"),
           api_key: z
             .string()
+            .nullable()
             .optional()
             .describe("API key (for brave or tavily)"),
           base_url: z
             .string()
+            .nullable()
             .optional()
             .describe("Base URL (for searxng)"),
         }),
@@ -651,10 +700,12 @@ The user can see everything on the desktop in real-time.`;
         parameters: z.object({
           projectId: z
             .string()
+            .nullable()
             .optional()
             .describe("Project ID — resolves repo from project config"),
           repo: z
             .string()
+            .nullable()
             .optional()
             .describe("Repository in owner/repo format (alternative to projectId)"),
           state: z
@@ -663,10 +714,12 @@ The user can see everything on the desktop in real-time.`;
             .describe("Filter by state (default: open)"),
           labels: z
             .string()
+            .nullable()
             .optional()
             .describe("Comma-separated label names to filter by"),
           assignee: z
             .string()
+            .nullable()
             .optional()
             .describe("Filter by assignee login"),
           per_page: z
@@ -682,8 +735,8 @@ The user can see everything on the desktop in real-time.`;
             const { repoFullName, token } = this.resolveGitHubRepo(projectId, repo);
             const issues = await fetchIssues(repoFullName, token, {
               state: state ?? "open",
-              labels,
-              assignee,
+              labels: labels ?? undefined,
+              assignee: assignee ?? undefined,
               per_page,
             });
             if (issues.length === 0) return "No issues found matching the filters.";
@@ -705,10 +758,12 @@ The user can see everything on the desktop in real-time.`;
           issue_number: z.number().int().describe("The issue number to fetch"),
           projectId: z
             .string()
+            .nullable()
             .optional()
             .describe("Project ID — resolves repo from project config"),
           repo: z
             .string()
+            .nullable()
             .optional()
             .describe("Repository in owner/repo format (alternative to projectId)"),
         }),
@@ -745,10 +800,12 @@ The user can see everything on the desktop in real-time.`;
         parameters: z.object({
           projectId: z
             .string()
+            .nullable()
             .optional()
             .describe("Project ID — resolves repo from project config"),
           repo: z
             .string()
+            .nullable()
             .optional()
             .describe("Repository in owner/repo format (alternative to projectId)"),
           state: z
@@ -788,10 +845,12 @@ The user can see everything on the desktop in real-time.`;
           pr_number: z.number().int().describe("The pull request number to fetch"),
           projectId: z
             .string()
+            .nullable()
             .optional()
             .describe("Project ID — resolves repo from project config"),
           repo: z
             .string()
+            .nullable()
             .optional()
             .describe("Repository in owner/repo format (alternative to projectId)"),
         }),
@@ -847,33 +906,107 @@ The user can see everything on the desktop in real-time.`;
             ),
           package_name: z
             .string()
+            .nullable()
             .optional()
             .describe("Package name (required for apt/npm add/remove actions)"),
           version: z
             .string()
+            .nullable()
             .optional()
             .describe("Version specifier for npm packages (e.g. 'latest', '^1.0.0')"),
           repo_name: z
             .string()
+            .nullable()
             .optional()
             .describe("Short repo identifier, e.g. 'nodesource' or 'docker' (required for repo actions)"),
           repo_source: z
             .string()
+            .nullable()
             .optional()
             .describe(
               "Full deb source line, e.g. 'deb [signed-by=/etc/apt/keyrings/example.gpg] https://example.com/apt stable main'",
             ),
           repo_key_url: z
             .string()
+            .nullable()
             .optional()
             .describe("URL to the GPG signing key, e.g. 'https://example.com/gpg-key.asc'"),
           repo_key_path: z
             .string()
+            .nullable()
             .optional()
             .describe("Path to store the dearmored key, e.g. '/etc/apt/keyrings/example.gpg'"),
         }),
         execute: async (args) => {
           return this.managePackages(args);
+        },
+      }),
+
+      list_conversations: tool({
+        description:
+          "List recent conversations. Use when the user asks about their chat history or wants to switch conversations.",
+        parameters: z.object({
+          projectId: z.string().nullable().optional().describe("Filter by project ID"),
+          limit: z.number().optional().describe("Max conversations to return (default 20)"),
+        }),
+        execute: async ({ projectId, limit }) => {
+          const db = getDb();
+          let rows = db.select().from(schema.conversations).all();
+          if (projectId) {
+            rows = rows.filter((c) => c.projectId === projectId);
+          }
+          const convs = rows
+            .sort((a, b) => (b.updatedAt ?? "").localeCompare(a.updatedAt ?? ""))
+            .slice(0, limit ?? 20);
+
+          if (convs.length === 0) return "No conversations found.";
+
+          return convs
+            .map(
+              (c) =>
+                `- "${c.title}" (id: ${c.id}, project: ${c.projectId ?? "global"}, updated: ${c.updatedAt ?? c.createdAt})`,
+            )
+            .join("\n");
+        },
+      }),
+      switch_conversation: tool({
+        description:
+          "Switch to a different conversation by ID. The frontend will auto-navigate to the selected conversation.",
+        parameters: z.object({
+          conversationId: z
+            .string()
+            .describe("The conversation ID to switch to"),
+        }),
+        execute: async ({ conversationId }) => {
+          const db = getDb();
+          const conversation = db
+            .select()
+            .from(schema.conversations)
+            .where(eq(schema.conversations.id, conversationId))
+            .get();
+          if (!conversation)
+            return `Conversation ${conversationId} not found.`;
+
+          const messages = this.bus.getConversationMessages(conversation.id);
+          let charter: string | null = null;
+          if (conversation.projectId) {
+            const project = db
+              .select()
+              .from(schema.projects)
+              .where(eq(schema.projects.id, conversation.projectId))
+              .get();
+            charter = project?.charter ?? null;
+          }
+
+          this.loadConversation(
+            conversation.id,
+            messages,
+            conversation.projectId,
+            charter,
+          );
+          this.onConversationSwitched?.(conversation.id, messages);
+
+          return `Switched to conversation: "${conversation.title}"`;
         },
       }),
 
@@ -889,8 +1022,8 @@ The user can see everything on the desktop in real-time.`;
    * or a `projectId` (looks up project config). Returns the repo full name and token.
    */
   private resolveGitHubRepo(
-    projectId?: string,
-    repo?: string,
+    projectId?: string | null,
+    repo?: string | null,
   ): { repoFullName: string; token: string } {
     const token = getConfig("github:token");
     if (!token) {
@@ -1002,6 +1135,7 @@ The user can see everything on the desktop in real-time.`;
     });
 
     this.teamLeads.set(projectId, teamLead);
+    if (this._pipelineManager) teamLead.setPipelineManager(this._pipelineManager);
 
     if (this.onAgentSpawned) {
       this.onAgentSpawned(teamLead);
@@ -1030,7 +1164,7 @@ The user can see everything on the desktop in real-time.`;
     return `Project "${name}" created (${projectId}). Team Lead ${teamLead.id} assigned and directive sent.`;
   }
 
-  private async getProjectStatus(projectId?: string): Promise<string> {
+  private async getProjectStatus(projectId?: string | null): Promise<string> {
     const db = getDb();
 
     if (projectId) {
@@ -1181,8 +1315,8 @@ The user can see everything on the desktop in real-time.`;
   private async manageModels(args: {
     action: string;
     tier?: string;
-    provider?: string;
-    model?: string;
+    provider?: string | null;
+    model?: string | null;
   }): Promise<string> {
     const { action, tier, provider, model } = args;
 
@@ -1229,7 +1363,7 @@ The user can see everything on the desktop in real-time.`;
         if (!provider) {
           return "Error: provider is required for test_provider.";
         }
-        const result = await testProvider(provider, model);
+        const result = await testProvider(provider, model ?? undefined);
         if (result.ok) {
           return `Provider "${provider}" is working. Latency: ${result.latencyMs}ms.`;
         }
@@ -1243,9 +1377,9 @@ The user can see everything on the desktop in real-time.`;
 
   private async manageSearch(args: {
     action: string;
-    provider?: string;
-    api_key?: string;
-    base_url?: string;
+    provider?: string | null;
+    api_key?: string | null;
+    base_url?: string | null;
   }): Promise<string> {
     const { action, provider, api_key, base_url } = args;
 
@@ -1307,12 +1441,12 @@ The user can see everything on the desktop in real-time.`;
 
   private managePackages(args: {
     action: string;
-    package_name?: string;
-    version?: string;
-    repo_name?: string;
-    repo_source?: string;
-    repo_key_url?: string;
-    repo_key_path?: string;
+    package_name?: string | null;
+    version?: string | null;
+    repo_name?: string | null;
+    repo_source?: string | null;
+    repo_key_url?: string | null;
+    repo_key_path?: string | null;
   }): string {
     const { action, package_name: packageName, version } = args;
 
@@ -1400,7 +1534,7 @@ The user can see everything on the desktop in real-time.`;
         return `Removed apt package "${packageName}".`;
       }
       case "add_npm": {
-        const result = installNpmPackage(packageName, version, "coo");
+        const result = installNpmPackage(packageName, version ?? undefined, "coo");
         if (!result.success) {
           return `Failed to install npm package "${packageName}": ${result.error}`;
         }
@@ -1427,8 +1561,8 @@ The user can see everything on the desktop in real-time.`;
    */
   async spawnTeamLeadForManualProject(
     projectId: string,
-    githubRepo: string,
-    branch: string,
+    githubRepo: string | null,
+    branch: string | null,
     rules: string[],
   ): Promise<void> {
     const db = getDb();
@@ -1460,21 +1594,31 @@ The user can see everything on the desktop in real-time.`;
     });
 
     this.teamLeads.set(projectId, teamLead);
+    if (this._pipelineManager) teamLead.setPipelineManager(this._pipelineManager);
     this.onAgentSpawned?.(teamLead);
 
-    // Build GitHub-aware initial directive
+    // Build initial directive
     const rulesBlock = rules.length > 0
       ? `\nProject rules:\n${rules.map((r) => `- ${r}`).join("\n")}`
       : "";
 
-    const directive =
-      `You are the Team Lead for a GitHub-linked project.\n\n` +
-      `Repository: ${githubRepo}\n` +
-      `Target branch: ${branch}\n` +
-      `Repository is already cloned to your workspace.\n\n` +
-      `**PR Workflow:** Workers must create feature branches from \`${branch}\`, commit their changes, push, and open a pull request targeting \`${branch}\`.\n` +
-      `Use conventional commits and reference issue numbers where applicable.${rulesBlock}\n\n` +
-      `Await issue-triggered tasks or COO directives.`;
+    let directive: string;
+    if (githubRepo && branch) {
+      directive =
+        `You are the Team Lead for a GitHub-linked project.\n\n` +
+        `Repository: ${githubRepo}\n` +
+        `Target branch: ${branch}\n` +
+        `Repository is already cloned to your workspace.\n\n` +
+        `**PR Workflow:** Workers must create feature branches from \`${branch}\`, commit their changes, push, and open a pull request targeting \`${branch}\`.\n` +
+        `Use conventional commits and reference issue numbers where applicable.${rulesBlock}\n\n` +
+        `Await issue-triggered tasks or COO directives.`;
+    } else {
+      directive =
+        `You are the Team Lead for a local project.\n\n` +
+        `Repository is initialized in your workspace.\n` +
+        `Workers should create feature branches, commit their changes locally.${rulesBlock}\n\n` +
+        `Await COO directives.`;
+    }
 
     this.sendMessage(teamLead.id, MessageType.Directive, directive, {
       projectId,
@@ -1582,6 +1726,7 @@ The user can see everything on the desktop in real-time.`;
     });
 
     this.teamLeads.set(project.id, teamLead);
+    if (this._pipelineManager) teamLead.setPipelineManager(this._pipelineManager);
     this.onAgentSpawned?.(teamLead);
 
     // Build and send recovery directive
@@ -1756,6 +1901,19 @@ The user can see everything on the desktop in real-time.`;
     this.activeContextId = null;
   }
 
+  /** Clear all conversation contexts (e.g., when memories are wiped) */
+  clearAllConversations(): void {
+    this.contextManager.evictAll();
+    this.resetConversation();
+    console.log("[COO] All conversation contexts cleared");
+  }
+
+  /** Clear conversation contexts for a specific project (e.g., on project deletion) */
+  clearProjectConversations(projectId: string): void {
+    this.contextManager.evictByProject(projectId);
+    console.log(`[COO] Conversation contexts cleared for project ${projectId}`);
+  }
+
   /** Get the current conversation ID */
   getCurrentConversationId(): string | null {
     return this.currentConversationId;
@@ -1793,6 +1951,15 @@ The user can see everything on the desktop in real-time.`;
 
   getTeamLeads(): Map<string, TeamLead> {
     return this.teamLeads;
+  }
+
+  /** Inject pipeline manager — it will be wired into all existing and future TeamLeads */
+  setPipelineManager(pm: PipelineManager): void {
+    this._pipelineManager = pm;
+    // Inject into existing TeamLeads
+    for (const tl of this.teamLeads.values()) {
+      tl.setPipelineManager(pm);
+    }
   }
 
   /** Destroy the TeamLead (and its workers) for a project, remove workspace, and clean up */

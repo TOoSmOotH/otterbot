@@ -5,6 +5,7 @@ export enum AgentRole {
   TeamLead = "team_lead",
   Worker = "worker",
   AdminAssistant = "admin_assistant",
+  Scheduler = "scheduler",
 }
 
 export enum AgentStatus {

@@ -8,8 +8,8 @@ export function createCalendarCreateEventTool() {
       'Create a new calendar event. Use source "local" for the internal calendar (default) or "google" for Google Calendar.',
     parameters: z.object({
       title: z.string().describe("Event title"),
-      description: z.string().optional().describe("Event description"),
-      location: z.string().optional().describe("Event location"),
+      description: z.string().nullable().optional().describe("Event description"),
+      location: z.string().nullable().optional().describe("Event location"),
       start: z.string().describe("Start time (ISO datetime)"),
       end: z.string().describe("End time (ISO datetime)"),
       allDay: z.boolean().optional().describe("Whether this is an all-day event"),
@@ -18,7 +18,9 @@ export function createCalendarCreateEventTool() {
         .optional()
         .describe('Which calendar to create in (default: "local")'),
     }),
-    execute: async ({ title, description, location, start, end, allDay, source }) => {
+    execute: async ({ title, description: rawDesc, location: rawLoc, start, end, allDay, source }) => {
+      const description = rawDesc ?? undefined;
+      const location = rawLoc ?? undefined;
       try {
         if (source === "google") {
           const { createGoogleEvent } = await import("../google/calendar-client.js");

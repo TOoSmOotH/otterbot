@@ -1,4 +1,4 @@
-import { Suspense, useMemo, useRef, useEffect, useState } from "react";
+import { Suspense, useMemo, useRef, useEffect } from "react";
 import { useFrame } from "@react-three/fiber";
 import { useGLTF, Html, Sparkles } from "@react-three/drei";
 import { clone as skeletonClone } from "three/examples/jsm/utils/SkeletonUtils.js";
@@ -26,11 +26,40 @@ const STATUS_COLORS: Record<string, string> = {
   error: "#ef4444",
 };
 
+export function findRandomClip(actions: Map<string, THREE.AnimationAction>, patterns: RegExp[]): string | undefined {
+  const candidates: string[] = [];
+  for (const pattern of patterns) {
+    for (const name of actions.keys()) {
+      if (pattern.test(name) && !candidates.includes(name)) {
+        candidates.push(name);
+      }
+    }
+  }
+  if (candidates.length === 0) return undefined;
+  return candidates[Math.floor(Math.random() * candidates.length)];
+}
+
+export function findClip(actions: Map<string, THREE.AnimationAction>, pattern: RegExp): string | undefined {
+  for (const name of actions.keys()) {
+    if (pattern.test(name)) return name;
+  }
+  return undefined;
+}
+
 export function AgentCharacter({ pack, position, label, role, status, agentId, gearConfig, rotationY = 0 }: AgentCharacterProps) {
   const groupRef = useRef<THREE.Group>(null);
   const currentRotationRef = useRef(rotationY);
-  const [isMoving, setIsMoving] = useState(false);
   const targetPosRef = useRef(new THREE.Vector3(...position));
+  const tempVec3 = useRef(new THREE.Vector3());
+
+  // Set initial position once on mount so the group starts at the right spot
+  useEffect(() => {
+    if (groupRef.current) {
+      groupRef.current.position.set(...position);
+      groupRef.current.rotation.y = rotationY;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Update target position when prop changes
   useEffect(() => {
@@ -41,30 +70,36 @@ export function AgentCharacter({ pack, position, label, role, status, agentId, g
   useFrame((_, delta) => {
     if (!groupRef.current) return;
 
-    const ms = agentId ? useMovementStore.getState().getAgentPosition(agentId) : null;
+    const store = useMovementStore.getState();
+    const ms = agentId ? store.getAgentPosition(agentId) : null;
     const moving = ms?.isMoving ?? false;
-
-    // Track moving state for animation switching (triggers re-render)
-    if (moving !== isMoving) setIsMoving(moving);
+    const busy = agentId ? store.isAgentBusy(agentId) : false;
 
     if (moving && ms) {
       groupRef.current.position.set(...ms.position);
       currentRotationRef.current = THREE.MathUtils.lerp(currentRotationRef.current, ms.rotationY, delta * 8);
+    } else if (busy) {
+      // Hold current position — queue is about to start the next walk
     } else {
-      // Smoothly interpolate to home position
-      groupRef.current.position.lerp(targetPosRef.current, delta * 5);
+      // If the movement system placed this agent somewhere, stay there
+      // instead of sliding back to the prop position (prevents roaming snap-back).
+      const lastPos = agentId ? store.getLastKnownPosition(agentId) : null;
+      if (lastPos) {
+        groupRef.current.position.lerp(tempVec3.current.set(...lastPos), delta * 5);
+      } else {
+        // No movement history — smoothly interpolate to computed home position
+        groupRef.current.position.lerp(targetPosRef.current, delta * 5);
+      }
       currentRotationRef.current = THREE.MathUtils.lerp(currentRotationRef.current, rotationY, delta * 5);
     }
 
     groupRef.current.rotation.y = currentRotationRef.current;
   });
 
-  const effectiveStatus = isMoving ? "walking" : status;
-
   return (
-    <group ref={groupRef} position={position} rotation={[0, rotationY, 0]}>
+    <group ref={groupRef}>
       <Suspense fallback={<FallbackMesh role={role} />}>
-        <CharacterModel pack={pack} status={effectiveStatus} gearConfig={gearConfig} />
+        <CharacterModel pack={pack} status={status} agentId={agentId} gearConfig={gearConfig} />
       </Suspense>
 
       {/* Status ring on ground */}
@@ -112,7 +147,7 @@ export function AgentCharacter({ pack, position, label, role, status, agentId, g
   );
 }
 
-function CharacterModel({ pack, status, gearConfig }: { pack: ModelPack; status: string; gearConfig?: GearConfig | null }) {
+function CharacterModel({ pack, status, agentId, gearConfig }: { pack: ModelPack; status: string; agentId?: string; gearConfig?: GearConfig | null }) {
   const { scene } = useGLTF(pack.characterUrl);
   const { animations: idleAnims } = useGLTF(pack.animations.idle);
   const { animations: actionAnims } = useGLTF(pack.animations.action);
@@ -170,63 +205,64 @@ function CharacterModel({ pack, status, gearConfig }: { pack: ModelPack; status:
     };
   }, [clone, clips]);
 
-  // Switch animation when status changes
-  useEffect(() => {
-    const actions = actionsRef.current;
-    if (actions.size === 0) return;
+  // Track the last effective status so we only switch animations on change
+  const prevEffectiveStatusRef = useRef<string>(status);
 
-    let targetName: string | undefined;
-
-    if (status === "walking") {
-      targetName =
-        findClip(actions, /Walking_A/i) ??
-        findClip(actions, /Running_A/i) ??
-        findClip(actions, /walk|run/i);
-    } else if (status === "acting") {
-      targetName =
-        findClip(actions, /Working/i) ??
-        findClip(actions, /GenericWorking/i) ??
-        findClip(actions, /Interact/i) ??
-        findClip(actions, /Use_Item/i) ??
-        findClip(actions, /PickUp/i) ??
-        // Fallback to idle if no working animation found
-        findClip(actions, /Idle_B/i) ??
-        findClip(actions, /idle/i);
-    } else if (status === "thinking") {
-      targetName =
-        findClip(actions, /Idle_B/i) ??
-        findClip(actions, /Interact/i) ??
-        findClip(actions, /idle/i);
-    } else if (status === "error") {
-      targetName =
-        findClip(actions, /Hit_A/i) ??
-        findClip(actions, /hit/i);
-    }
-
-    // Default to Idle_A
-    if (!targetName) {
-      targetName =
-        findClip(actions, /Idle_A/i) ??
-        findClip(actions, /idle/i) ??
-        [...actions.keys()][0];
-    }
-
-    if (!targetName || targetName === currentClipRef.current) return;
-
-    const prev = currentClipRef.current ? actions.get(currentClipRef.current) : null;
-    const next = actions.get(targetName);
-    if (next) {
-      if (prev) prev.fadeOut(0.3);
-      next.reset().fadeIn(0.3).play();
-      currentClipRef.current = targetName;
-    }
-  }, [status]);
-
-  // Tick the mixer and add subtle thinking bob
+  // Tick the mixer, detect walking from movement store, and switch animations — all in the animation loop
   useFrame((_, delta) => {
     mixerRef.current?.update(delta);
 
-    if (status === "thinking") {
+    // Determine effective status: walking overrides when movement store is active
+    const ms = agentId ? useMovementStore.getState().getAgentPosition(agentId) : null;
+    const effectiveStatus = ms?.isMoving ? "walking" : status;
+
+    // Switch animation when effective status changes
+    if (effectiveStatus !== prevEffectiveStatusRef.current) {
+      prevEffectiveStatusRef.current = effectiveStatus;
+
+      const actions = actionsRef.current;
+      if (actions.size > 0) {
+        let targetName: string | undefined;
+
+        if (effectiveStatus === "walking") {
+          targetName =
+            findClip(actions, /Walking_A/i) ??
+            findClip(actions, /Running_A/i) ??
+            findClip(actions, /walk|run/i);
+        } else if (effectiveStatus === "acting") {
+          targetName = findRandomClip(actions, [/Working/i, /GenericWorking/i, /Interact/i, /Use_Item/i, /PickUp/i, /Idle_B/i, /idle/i]);
+        } else if (effectiveStatus === "thinking") {
+          targetName =
+            findClip(actions, /Idle_B/i) ??
+            findClip(actions, /Interact/i) ??
+            findClip(actions, /idle/i);
+        } else if (effectiveStatus === "error") {
+          targetName =
+            findClip(actions, /Hit_A/i) ??
+            findClip(actions, /hit/i);
+        }
+
+        if (!targetName) {
+          targetName =
+            findClip(actions, /Idle_A/i) ??
+            findClip(actions, /idle/i) ??
+            [...actions.keys()][0];
+        }
+
+        if (targetName && targetName !== currentClipRef.current) {
+          const prev = currentClipRef.current ? actions.get(currentClipRef.current) : null;
+          const next = actions.get(targetName);
+          if (next) {
+            if (prev) prev.fadeOut(0.3);
+            next.reset().fadeIn(0.3).play();
+            currentClipRef.current = targetName;
+          }
+        }
+      }
+    }
+
+    // Thinking bob
+    if (effectiveStatus === "thinking") {
       clone.position.y = Math.sin(Date.now() * 0.003) * 0.03;
     } else {
       clone.position.y = THREE.MathUtils.lerp(clone.position.y, 0, delta * 5);
@@ -236,15 +272,8 @@ function CharacterModel({ pack, status, gearConfig }: { pack: ModelPack; status:
   return <primitive object={clone} castShadow />;
 }
 
-function findClip(actions: Map<string, THREE.AnimationAction>, pattern: RegExp): string | undefined {
-  for (const name of actions.keys()) {
-    if (pattern.test(name)) return name;
-  }
-  return undefined;
-}
-
 function FallbackMesh({ role }: { role: string }) {
-  const color = role === "coo" ? "#8b5cf6" : role === "team_lead" ? "#f59e0b" : role === "admin_assistant" ? "#e879f9" : "#06b6d4";
+  const color = role === "coo" ? "#8b5cf6" : role === "team_lead" ? "#f59e0b" : role === "admin_assistant" ? "#e879f9" : role === "scheduler" ? "#f97316" : "#06b6d4";
   return (
     <mesh position={[0, 0.75, 0]}>
       <capsuleGeometry args={[0.3, 0.8, 8, 16]} />

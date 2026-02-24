@@ -4,6 +4,10 @@ import { KanbanColumn } from "@otterbot/shared";
 import { useProjectStore } from "../../stores/project-store";
 
 const STATUS_CONFIG: Record<KanbanColumn, { label: string; className: string }> = {
+  [KanbanColumn.Triage]: {
+    label: "Triage",
+    className: "bg-violet-500/15 text-violet-400",
+  },
   [KanbanColumn.Backlog]: {
     label: "Backlog",
     className: "bg-secondary text-secondary-foreground",
@@ -12,11 +16,23 @@ const STATUS_CONFIG: Record<KanbanColumn, { label: string; className: string }> 
     label: "In Progress",
     className: "bg-primary/15 text-primary",
   },
+  [KanbanColumn.InReview]: {
+    label: "In Review",
+    className: "bg-amber-500/15 text-amber-400",
+  },
   [KanbanColumn.Done]: {
     label: "Done",
     className: "bg-emerald-500/15 text-emerald-400",
   },
 };
+
+const COLUMN_OPTIONS: { key: KanbanColumn; label: string }[] = [
+  { key: KanbanColumn.Triage, label: "Triage" },
+  { key: KanbanColumn.Backlog, label: "Backlog" },
+  { key: KanbanColumn.InProgress, label: "In Progress" },
+  { key: KanbanColumn.InReview, label: "In Review" },
+  { key: KanbanColumn.Done, label: "Done" },
+];
 
 function formatDate(iso: string): string {
   const d = new Date(iso);
@@ -31,12 +47,15 @@ function formatDate(iso: string): string {
 
 export function KanbanTaskDetail({
   task,
+  projectId,
   onClose,
 }: {
   task: KanbanTask;
+  projectId: string;
   onClose: () => void;
 }) {
   const tasks = useProjectStore((s) => s.tasks);
+  const updateTask = useProjectStore((s) => s.updateTask);
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -54,19 +73,66 @@ export function KanbanTaskDetail({
   });
 
   const [deleting, setDeleting] = useState(false);
+  const [moving, setMoving] = useState(false);
+
+  const handleRemoveBlocker = useCallback(
+    async (blockerId: string) => {
+      const newBlockedBy = task.blockedBy.filter((id) => id !== blockerId);
+      // Optimistic update
+      updateTask({ ...task, blockedBy: newBlockedBy });
+      try {
+        const res = await fetch(`/api/projects/${projectId}/tasks/${task.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ blockedBy: newBlockedBy }),
+        });
+        if (!res.ok) {
+          console.error("Failed to remove blocker:", res.statusText);
+          updateTask(task);
+        }
+      } catch (err) {
+        console.error("Failed to remove blocker:", err);
+        updateTask(task);
+      }
+    },
+    [projectId, task, updateTask],
+  );
 
   const handleDelete = useCallback(async () => {
     if (!window.confirm("Delete this task? This cannot be undone.")) return;
     setDeleting(true);
     try {
-      const res = await fetch(`/api/projects/${task.projectId}/tasks/${task.id}`, {
+      const res = await fetch(`/api/projects/${projectId}/tasks/${task.id}`, {
         method: "DELETE",
       });
       if (res.ok) onClose();
     } finally {
       setDeleting(false);
     }
-  }, [task.projectId, task.id, onClose]);
+  }, [projectId, task.id, onClose]);
+
+  const handleColumnChange = useCallback(
+    async (newColumn: KanbanColumn) => {
+      if (newColumn === task.column) return;
+      setMoving(true);
+      // Optimistic update
+      updateTask({ ...task, column: newColumn });
+      try {
+        await fetch(`/api/projects/${projectId}/tasks/${task.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ column: newColumn }),
+        });
+      } catch (err) {
+        console.error("Failed to move task:", err);
+        // Revert
+        updateTask(task);
+      } finally {
+        setMoving(false);
+      }
+    },
+    [projectId, task, updateTask],
+  );
 
   return (
     <div
@@ -81,11 +147,26 @@ export function KanbanTaskDetail({
         <div className="flex items-start justify-between gap-4 px-5 py-4 border-b border-border">
           <div className="min-w-0">
             <h2 className="text-base font-semibold leading-snug">{task.title}</h2>
-            <span
-              className={`inline-block mt-1.5 text-[11px] font-medium rounded px-2 py-0.5 ${status.className}`}
-            >
-              {status.label}
-            </span>
+            <div className="flex items-center gap-2 mt-1.5">
+              <span
+                className={`inline-block text-[11px] font-medium rounded px-2 py-0.5 ${status.className}`}
+              >
+                {status.label}
+              </span>
+              {/* Column move dropdown */}
+              <select
+                value={task.column}
+                onChange={(e) => handleColumnChange(e.target.value as KanbanColumn)}
+                disabled={moving}
+                className="text-[11px] bg-secondary text-secondary-foreground rounded px-1.5 py-0.5 border-none outline-none cursor-pointer disabled:opacity-50"
+              >
+                {COLUMN_OPTIONS.map((opt) => (
+                  <option key={opt.key} value={opt.key}>
+                    Move to {opt.label}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
           <div className="flex items-center gap-1 shrink-0 mt-0.5">
             <button
@@ -93,7 +174,7 @@ export function KanbanTaskDetail({
               disabled={deleting}
               className="text-xs text-muted-foreground hover:text-red-400 disabled:opacity-50 px-1.5 py-0.5 rounded hover:bg-red-500/10 transition-colors"
             >
-              {deleting ? "Deleting…" : "Delete"}
+              {deleting ? "Deleting..." : "Delete"}
             </button>
             <button
               onClick={onClose}
@@ -138,7 +219,7 @@ export function KanbanTaskDetail({
               </h3>
               <ul className="space-y-1">
                 {blockers.map((b) => (
-                  <li key={b.id} className="flex items-center gap-2 text-xs">
+                  <li key={b.id} className="flex items-center gap-2 text-xs group">
                     {b.done ? (
                       <span className="text-emerald-400" title="Done">&#10003;</span>
                     ) : (
@@ -147,6 +228,13 @@ export function KanbanTaskDetail({
                     <span className={b.done ? "text-muted-foreground line-through" : "text-foreground"}>
                       {b.title}
                     </span>
+                    <button
+                      onClick={() => handleRemoveBlocker(b.id)}
+                      title="Remove blocker"
+                      className="text-muted-foreground hover:text-red-400 hover:bg-red-500/10 rounded px-1 py-0.5 text-xs leading-none opacity-0 group-hover:opacity-100 transition-opacity ml-auto"
+                    >
+                      &times;
+                    </button>
                   </li>
                 ))}
               </ul>

@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { LiveView } from "./LiveView";
 import { useSocket } from "../../hooks/use-socket";
 import { useAgentStore } from "../../stores/agent-store";
+import { initMovementTriggers } from "../../lib/movement-triggers";
+import { initBreakRoomRoaming } from "../../lib/break-room-roaming";
 
 interface UserProfile {
   name: string | null;
@@ -29,6 +31,11 @@ export function DetachedLiveView() {
       .then((r) => r.json())
       .then(loadAgents)
       .catch(console.error);
+
+    // Initialize movement systems (these run in MainApp but the detached
+    // view is a separate window that skips MainApp entirely)
+    initMovementTriggers();
+    initBreakRoomRoaming();
   }, [loadAgents]);
 
   if (!userProfile) {

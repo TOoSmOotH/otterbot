@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { CodingAgentSession, CodingAgentMessage, CodingAgentPart, CodingAgentFileDiff, CodingAgentPermission } from "@otterbot/shared";
+import type { CodingAgentSession, CodingAgentMessage, CodingAgentFileDiff, CodingAgentPermission } from "@otterbot/shared";
 
 interface CodingAgentState {
   /** Active and recent sessions keyed by agentId */
@@ -16,17 +16,34 @@ interface CodingAgentState {
   awaitingInput: Map<string, { sessionId: string; prompt: string }>;
   /** Agents awaiting permission approval, keyed by agentId */
   pendingPermission: Map<string, { sessionId: string; permission: CodingAgentPermission }>;
+  /** Whether more sessions are available from the server */
+  hasMore: boolean;
+  /** Whether a "load more" fetch is in progress */
+  loadingMore: boolean;
+  /** Set of dbIds currently being detail-fetched */
+  detailLoading: Set<string>;
 
   selectAgent: (agentId: string | null) => void;
   setAwaitingInput: (agentId: string, data: { sessionId: string; prompt: string }) => void;
   clearAwaitingInput: (agentId: string) => void;
   setPendingPermission: (agentId: string, data: { sessionId: string; permission: CodingAgentPermission }) => void;
   clearPendingPermission: (agentId: string) => void;
+  /** @deprecated Use loadSessionList instead */
   loadSessions: (data: {
     sessions: CodingAgentSession[];
     messages: Record<string, CodingAgentMessage[]>;
     diffs: Record<string, CodingAgentFileDiff[]>;
   }) => void;
+  /** Load session metadata only (no messages/diffs) — used at startup */
+  loadSessionList: (data: { sessions: CodingAgentSession[]; hasMore: boolean }) => void;
+  /** Load next page of sessions using cursor pagination */
+  loadMoreSessions: () => Promise<void>;
+  /** Fetch session detail (messages + diffs) on demand */
+  loadSessionDetail: (dbId: string, sessionId: string) => Promise<void>;
+  /** Delete a single session from server and client */
+  deleteSession: (dbId: string, agentId: string) => Promise<void>;
+  /** Bulk delete all completed/error sessions */
+  clearCompletedSessions: () => Promise<void>;
   startSession: (session: CodingAgentSession) => void;
   endSession: (agentId: string, sessionId: string, status: string, diff: CodingAgentFileDiff[] | null) => void;
   addMessage: (agentId: string, sessionId: string, message: CodingAgentMessage) => void;
@@ -43,7 +60,7 @@ interface CodingAgentState {
   clearSession: (agentId: string) => void;
 }
 
-export const useCodingAgentStore = create<CodingAgentState>((set) => ({
+export const useCodingAgentStore = create<CodingAgentState>((set, get) => ({
   sessions: new Map(),
   messages: new Map(),
   partBuffers: new Map(),
@@ -51,12 +68,14 @@ export const useCodingAgentStore = create<CodingAgentState>((set) => ({
   selectedAgentId: null,
   awaitingInput: new Map(),
   pendingPermission: new Map(),
+  hasMore: false,
+  loadingMore: false,
+  detailLoading: new Set(),
 
   selectAgent: (agentId) => set({ selectedAgentId: agentId }),
 
   loadSessions: (data) =>
     set((state) => {
-      // Only create new Maps if we actually add something, to avoid unnecessary re-renders
       let sessionsChanged = false;
       let messagesChanged = false;
       let diffsChanged = false;
@@ -98,11 +117,117 @@ export const useCodingAgentStore = create<CodingAgentState>((set) => ({
       return result;
     }),
 
+  loadSessionList: (data) =>
+    set((state) => {
+      const sessions = new Map(state.sessions);
+      for (const s of data.sessions) {
+        if (!sessions.has(s.agentId)) sessions.set(s.agentId, s);
+      }
+      return { sessions, hasMore: data.hasMore };
+    }),
+
+  loadMoreSessions: async () => {
+    const state = get();
+    if (state.loadingMore || !state.hasMore) return;
+    set({ loadingMore: true });
+    try {
+      // Find the oldest startedAt as cursor
+      let oldest: string | undefined;
+      for (const s of state.sessions.values()) {
+        if (!oldest || s.startedAt < oldest) oldest = s.startedAt;
+      }
+      const params = new URLSearchParams({ limit: "20" });
+      if (oldest) params.set("before", oldest);
+      const res = await fetch(`/api/codeagent/sessions?${params}`);
+      const data = await res.json() as { sessions: Array<{ id: string; sessionId: string; agentId: string; projectId: string | null; task: string; agentType?: string; status: string; startedAt: string; completedAt?: string }>; hasMore: boolean };
+      const mapped: CodingAgentSession[] = data.sessions.map((s) => ({
+        id: s.sessionId || s.id,
+        dbId: s.id,
+        agentId: s.agentId,
+        projectId: s.projectId,
+        task: s.task,
+        agentType: (s.agentType || "opencode") as CodingAgentSession["agentType"],
+        status: s.status as CodingAgentSession["status"],
+        startedAt: s.startedAt,
+        completedAt: s.completedAt,
+      }));
+      set((prev) => {
+        const sessions = new Map(prev.sessions);
+        for (const s of mapped) {
+          if (!sessions.has(s.agentId)) sessions.set(s.agentId, s);
+        }
+        return { sessions, hasMore: data.hasMore, loadingMore: false };
+      });
+    } catch {
+      set({ loadingMore: false });
+    }
+  },
+
+  loadSessionDetail: async (dbId, sessionId) => {
+    const state = get();
+    // Skip if already loaded or currently loading
+    if (state.messages.has(sessionId) || state.detailLoading.has(dbId)) return;
+    set((prev) => ({ detailLoading: new Set(prev.detailLoading).add(dbId) }));
+    try {
+      const res = await fetch(`/api/codeagent/sessions/${dbId}`);
+      const detail = await res.json() as { messages: CodingAgentMessage[]; diffs: CodingAgentFileDiff[] };
+      set((prev) => {
+        const messages = new Map(prev.messages);
+        messages.set(sessionId, detail.messages ?? []);
+        const diffs = new Map(prev.diffs);
+        diffs.set(sessionId, detail.diffs ?? []);
+        const detailLoading = new Set(prev.detailLoading);
+        detailLoading.delete(dbId);
+        return { messages, diffs, detailLoading };
+      });
+    } catch {
+      set((prev) => {
+        const detailLoading = new Set(prev.detailLoading);
+        detailLoading.delete(dbId);
+        return { detailLoading };
+      });
+    }
+  },
+
+  deleteSession: async (dbId, agentId) => {
+    try {
+      await fetch(`/api/codeagent/sessions/${dbId}`, { method: "DELETE" });
+      get().clearSession(agentId);
+    } catch {
+      // ignore
+    }
+  },
+
+  clearCompletedSessions: async () => {
+    try {
+      await fetch("/api/codeagent/sessions", { method: "DELETE" });
+      set((state) => {
+        const sessions = new Map(state.sessions);
+        const messages = new Map(state.messages);
+        const diffs = new Map(state.diffs);
+        const partBuffers = new Map(state.partBuffers);
+        for (const [agentId, session] of state.sessions) {
+          if (session.status === "completed" || session.status === "error") {
+            sessions.delete(agentId);
+            messages.delete(session.id);
+            diffs.delete(session.id);
+            for (const key of partBuffers.keys()) {
+              if (key.startsWith(`${session.id}:`)) partBuffers.delete(key);
+            }
+          }
+        }
+        const selectedAgentId = sessions.has(state.selectedAgentId ?? "") ? state.selectedAgentId : null;
+        return { sessions, messages, diffs, partBuffers, selectedAgentId };
+      });
+    } catch {
+      // ignore
+    }
+  },
+
   setAwaitingInput: (agentId, data) =>
     set((state) => {
       const awaitingInput = new Map(state.awaitingInput);
       awaitingInput.set(agentId, data);
-      // Update session status to awaiting-input
       const sessions = new Map(state.sessions);
       const session = sessions.get(agentId);
       if (session) {
@@ -113,10 +238,9 @@ export const useCodingAgentStore = create<CodingAgentState>((set) => ({
 
   clearAwaitingInput: (agentId) =>
     set((state) => {
-      if (!state.awaitingInput.has(agentId)) return state; // no-op
+      if (!state.awaitingInput.has(agentId)) return state;
       const awaitingInput = new Map(state.awaitingInput);
       awaitingInput.delete(agentId);
-      // Restore session status to active
       const session = state.sessions.get(agentId);
       if (session && session.status === "awaiting-input") {
         const sessions = new Map(state.sessions);
@@ -130,7 +254,6 @@ export const useCodingAgentStore = create<CodingAgentState>((set) => ({
     set((state) => {
       const pendingPermission = new Map(state.pendingPermission);
       pendingPermission.set(agentId, data);
-      // Update session status to awaiting-permission
       const sessions = new Map(state.sessions);
       const session = sessions.get(agentId);
       if (session) {
@@ -144,7 +267,6 @@ export const useCodingAgentStore = create<CodingAgentState>((set) => ({
       if (!state.pendingPermission.has(agentId)) return state;
       const pendingPermission = new Map(state.pendingPermission);
       pendingPermission.delete(agentId);
-      // Restore session status to active
       const session = state.sessions.get(agentId);
       if (session && (session.status as string) === "awaiting-permission") {
         const sessions = new Map(state.sessions);
@@ -158,7 +280,6 @@ export const useCodingAgentStore = create<CodingAgentState>((set) => ({
     set((state) => {
       const sessions = new Map(state.sessions);
       sessions.set(session.agentId, session);
-      // Auto-select the first active session
       const selectedAgentId = state.selectedAgentId ?? session.agentId;
       return { sessions, selectedAgentId };
     }),
@@ -184,7 +305,6 @@ export const useCodingAgentStore = create<CodingAgentState>((set) => ({
 
   addMessage: (agentId, sessionId, message) =>
     set((state) => {
-      // Update the session's ID if it was empty
       const sessions = new Map(state.sessions);
       const session = sessions.get(agentId);
       if (session && !session.id && sessionId) {
@@ -193,7 +313,6 @@ export const useCodingAgentStore = create<CodingAgentState>((set) => ({
 
       const messages = new Map(state.messages);
       const existing = messages.get(sessionId) ?? [];
-      // Replace if message ID already exists, otherwise append
       const idx = existing.findIndex((m) => m.id === message.id);
       if (idx >= 0) {
         const updated = [...existing];
@@ -207,7 +326,6 @@ export const useCodingAgentStore = create<CodingAgentState>((set) => ({
 
   appendPartDelta: (agentId, sessionId, messageId, partId, type, delta, toolName, toolState) =>
     set((state) => {
-      // Update the session's ID if it was empty (started before session was created)
       const session = state.sessions.get(agentId);
       const needsSessionUpdate = session && !session.id && sessionId;
       const sessions = needsSessionUpdate ? new Map(state.sessions) : state.sessions;
@@ -242,7 +360,6 @@ export const useCodingAgentStore = create<CodingAgentState>((set) => ({
       if (session) {
         messages.delete(session.id);
         diffs.delete(session.id);
-        // Clean up part buffers for this session
         for (const key of partBuffers.keys()) {
           if (key.startsWith(`${session.id}:`)) {
             partBuffers.delete(key);

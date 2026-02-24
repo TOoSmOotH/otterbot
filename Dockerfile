@@ -83,6 +83,7 @@ ENV PATH="/usr/local/lib/otterbot-tools/bin:$PATH"
 RUN mkdir -p /usr/local/lib/otterbot-tools /otterbot/home
 RUN npm install -g opencode-ai@latest
 RUN npm install -g @openai/codex@latest
+RUN npm install -g @google/gemini-cli@latest
 RUN HOME=/otterbot/home curl -fsSL https://claude.ai/install.sh | HOME=/otterbot/home bash
 
 # Install puppeteer globally so coding agents can import it from any workspace.

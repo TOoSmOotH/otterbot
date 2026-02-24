@@ -153,13 +153,17 @@ function TaskRow({ task, showColumn }: { task: KanbanTask; showColumn?: boolean 
 
 function ColumnBadge({ column }: { column: KanbanColumn }) {
   const styles: Record<KanbanColumn, string> = {
+    [KanbanColumn.Triage]: "bg-violet-500/20 text-violet-400",
     [KanbanColumn.Backlog]: "bg-secondary text-muted-foreground",
     [KanbanColumn.InProgress]: "bg-blue-500/20 text-blue-400",
+    [KanbanColumn.InReview]: "bg-amber-500/20 text-amber-400",
     [KanbanColumn.Done]: "bg-green-500/20 text-green-400",
   };
   const labels: Record<KanbanColumn, string> = {
+    [KanbanColumn.Triage]: "Triage",
     [KanbanColumn.Backlog]: "Backlog",
     [KanbanColumn.InProgress]: "Active",
+    [KanbanColumn.InReview]: "Review",
     [KanbanColumn.Done]: "Done",
   };
   return (

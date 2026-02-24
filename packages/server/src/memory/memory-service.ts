@@ -164,31 +164,38 @@ export class MemoryService {
 
     // LIKE fallback (or supplement FTS results)
     if (results.length < limit) {
+      // Cap keywords to avoid exceeding SQLite's expression tree depth limit (1000)
+      const MAX_KEYWORDS = 50;
       const keywords = options.query
         .toLowerCase()
         .split(/\s+/)
-        .filter((k) => k.length > 2);
+        .filter((k) => k.length > 2)
+        .slice(0, MAX_KEYWORDS);
 
       if (keywords.length > 0) {
         const keywordConditions = keywords.map((kw) =>
           like(schema.memories.content, `%${kw}%`),
         );
 
-        const keywordMatches = db.select().from(schema.memories)
-          .where(
-            scopeConditions
-              ? and(or(...keywordConditions), scopeConditions)
-              : or(...keywordConditions),
-          )
-          .orderBy(desc(schema.memories.importance))
-          .limit(limit)
-          .all();
+        try {
+          const keywordMatches = db.select().from(schema.memories)
+            .where(
+              scopeConditions
+                ? and(or(...keywordConditions), scopeConditions)
+                : or(...keywordConditions),
+            )
+            .orderBy(desc(schema.memories.importance))
+            .limit(limit)
+            .all();
 
-        for (const row of keywordMatches) {
-          if (!matchedIds.has(row.id)) {
-            matchedIds.add(row.id);
-            results.push(this.toMemory(row));
+          for (const row of keywordMatches) {
+            if (!matchedIds.has(row.id)) {
+              matchedIds.add(row.id);
+              results.push(this.toMemory(row));
+            }
           }
+        } catch (err) {
+          console.warn("[MemoryService] LIKE keyword search failed:", err);
         }
       }
     }
@@ -316,6 +323,41 @@ export class MemoryService {
     getVectorStore().remove(id);
 
     return result.changes > 0;
+  }
+
+  /** Delete all memories, clearing FTS index, vector store, and episodic logs */
+  clearAll(): number {
+    const db = getDb();
+
+    // Get all IDs for vector store cleanup
+    const allIds = db.select({ id: schema.memories.id }).from(schema.memories).all();
+
+    // Delete all memories
+    const result = db.delete(schema.memories).run();
+
+    // Clear FTS index
+    if (this.hasFts()) {
+      try {
+        db.run(sql`DELETE FROM memories_fts`);
+      } catch (err) {
+        console.warn("[MemoryService] FTS clear failed:", err);
+      }
+    }
+
+    // Remove all from vector store
+    const vectorStore = getVectorStore();
+    for (const { id } of allIds) {
+      vectorStore.remove(id);
+    }
+
+    // Clear episodic memory logs (compacted daily summaries)
+    try {
+      db.delete(schema.memoryEpisodes).run();
+    } catch (err) {
+      console.warn("[MemoryService] Memory episodes clear failed:", err);
+    }
+
+    return result.changes;
   }
 
   /** Get a single memory by ID */

@@ -42,14 +42,25 @@ export function LiveViewScene({ userProfile }: LiveViewSceneProps) {
     const teamLeads = activeAgents.filter((a) => a.role === "team_lead");
     const workers = activeAgents.filter((a) => a.role === "worker");
     const adminAssistants = activeAgents.filter((a) => a.role === "admin_assistant");
+    const schedulers = activeAgents.filter((a) => a.role === "scheduler");
+
+    // Helper: does a project have any actively-working non-lead agents?
+    const hasActiveWorkersInProject = (projectId: string | null): boolean => {
+      if (!projectId) return false;
+      return activeAgents.some(
+        (a) => a.projectId === projectId && a.role !== "team_lead" && (a.status === "thinking" || a.status === "acting"),
+      );
+    };
 
     const positions: { agent: Agent | null; role: string; x: number; z: number; label: string; modelPackId: string | null; gearConfig: Record<string, boolean> | null; rotationY: number }[] = [];
 
     // Zone-aware positioning via waypoint graph
     if (activeScene?.waypointGraph && activeScene?.zones) {
       const graph = activeScene.waypointGraph;
-      const mainZone = activeScene.zones.find((z) => z.projectId === null);
+      const breakRoomZoneId = "break-room";
+      const mainZone = activeScene.zones.find((z) => z.projectId === null && z.id !== breakRoomZoneId);
       const mainZoneId = mainZone?.id;
+      const breakRoomZone = activeScene.zones.find((z) => z.id === breakRoomZoneId);
 
       // Helper to get a waypoint position for a role within a zone
       const getZoneWaypointPos = (zoneId: string | undefined, tag: string, index: number): { x: number; z: number; rotationY: number } | null => {
@@ -63,9 +74,17 @@ export function LiveViewScene({ userProfile }: LiveViewSceneProps) {
       const getStatusAwarePos = (agent: Agent | null, zoneId: string | undefined, deskIndex: number): { x: number; z: number; rotationY: number } => {
         const status = agent?.status ?? "idle";
         const isWorking = status === "thinking" || status === "acting";
+        const isBreakRoom = zoneId === breakRoomZoneId;
+
         if (isWorking) {
           return getZoneWaypointPos(zoneId, "desk", deskIndex) ?? getZoneWaypointPos(zoneId, "center", 0) ?? { x: 0, z: 0, rotationY: 0 };
         }
+
+        if (isBreakRoom) {
+          // In break room: idle agents sit at lounge waypoints
+          return getZoneWaypointPos(zoneId, "lounge", deskIndex) ?? getZoneWaypointPos(zoneId, "center", 0) ?? { x: 0, z: 0, rotationY: 0 };
+        }
+
         // Idle: spread agents around center so they don't stack
         const centerPos = getZoneWaypointPos(zoneId, "center", 0) ?? { x: 0, z: 0, rotationY: 0 };
         const angle = (deskIndex / 8) * Math.PI * 2;
@@ -113,30 +132,45 @@ export function LiveViewScene({ userProfile }: LiveViewSceneProps) {
         });
       }
 
-      // Admin Assistants — status-aware
+      // Admin Assistants — idle ones go to break room, working ones stay in main office
+      let breakRoomIdx = 0;
       for (let i = 0; i < adminAssistants.length; i++) {
-        const deskIdx = nextDeskIndex++;
-        const pos = getStatusAwarePos(adminAssistants[i], mainZoneId, deskIdx);
+        const aa = adminAssistants[i];
+        const isIdle = aa.status !== "thinking" && aa.status !== "acting";
+        const zoneId = isIdle && breakRoomZone ? breakRoomZoneId : mainZoneId;
+        const deskIdx = isIdle && breakRoomZone ? breakRoomIdx++ : nextDeskIndex++;
+        const pos = getStatusAwarePos(aa, zoneId, deskIdx);
         positions.push({
-          agent: adminAssistants[i],
+          agent: aa,
           role: "admin_assistant",
           x: pos.x,
           z: pos.z,
           label: "Admin Assistant",
-          modelPackId: adminAssistants[i].modelPackId ?? null,
-          gearConfig: adminAssistants[i].gearConfig ?? null,
+          modelPackId: aa.modelPackId ?? null,
+          gearConfig: aa.gearConfig ?? null,
           rotationY: pos.rotationY,
         });
       }
 
-      // Team Leads — status-aware, go to project zone or main office
+      // Team Leads — idle + project idle → break room, otherwise project zone or main office
       for (let i = 0; i < teamLeads.length; i++) {
         const tl = teamLeads[i];
-        const projectZone = tl.projectId
-          ? activeScene.zones.find((z) => z.projectId === tl.projectId)
-          : null;
-        const zoneId = projectZone?.id ?? mainZoneId;
-        const deskIdx = projectZone ? getZoneDeskIndex(projectZone.id) : nextDeskIndex++;
+        const isIdle = tl.status !== "thinking" && tl.status !== "acting";
+        const projectHasWork = hasActiveWorkersInProject(tl.projectId);
+        const goToBreakRoom = isIdle && !projectHasWork && breakRoomZone;
+
+        let zoneId: string | undefined;
+        let deskIdx: number;
+        if (goToBreakRoom) {
+          zoneId = breakRoomZoneId;
+          deskIdx = breakRoomIdx++;
+        } else {
+          const projectZone = tl.projectId
+            ? activeScene.zones.find((z) => z.projectId === tl.projectId)
+            : null;
+          zoneId = projectZone?.id ?? mainZoneId;
+          deskIdx = projectZone ? getZoneDeskIndex(projectZone.id) : nextDeskIndex++;
+        }
         const pos = getStatusAwarePos(tl, zoneId, deskIdx);
         positions.push({
           agent: tl,
@@ -167,6 +201,24 @@ export function LiveViewScene({ userProfile }: LiveViewSceneProps) {
           label: `Worker ${w.id.slice(0, 6)}`,
           modelPackId: w.modelPackId ?? null,
           gearConfig: w.gearConfig ?? null,
+          rotationY: pos.rotationY,
+        });
+      }
+
+      // Schedulers — always in break room, desk when acting, lounge when idle
+      for (let i = 0; i < schedulers.length; i++) {
+        const s = schedulers[i];
+        const zoneId = breakRoomZone ? breakRoomZoneId : mainZoneId;
+        const deskIdx = breakRoomZone ? breakRoomIdx++ : nextDeskIndex++;
+        const pos = getStatusAwarePos(s, zoneId, deskIdx);
+        positions.push({
+          agent: s,
+          role: "scheduler",
+          x: pos.x,
+          z: pos.z,
+          label: s.name ?? `Scheduler ${s.id.slice(0, 6)}`,
+          modelPackId: s.modelPackId ?? null,
+          gearConfig: s.gearConfig ?? null,
           rotationY: pos.rotationY,
         });
       }
@@ -229,6 +281,21 @@ export function LiveViewScene({ userProfile }: LiveViewSceneProps) {
           rotationY: slot.rotation ?? 0,
         });
       }
+
+      // Schedulers — cycle through worker slots since there's no dedicated scheduler slot
+      for (let i = 0; i < schedulers.length; i++) {
+        const slot = ap.worker[(workers.length + i) % ap.worker.length];
+        positions.push({
+          agent: schedulers[i],
+          role: "scheduler",
+          x: slot.position[0],
+          z: slot.position[2],
+          label: schedulers[i].name ?? `Scheduler ${schedulers[i].id.slice(0, 6)}`,
+          modelPackId: schedulers[i].modelPackId ?? null,
+          gearConfig: schedulers[i].gearConfig ?? null,
+          rotationY: slot.rotation ?? 0,
+        });
+      }
     } else {
       // Fallback: original grid layout
       positions.push({
@@ -280,6 +347,20 @@ export function LiveViewScene({ userProfile }: LiveViewSceneProps) {
           label: `Worker ${workers[i].id.slice(0, 6)}`,
           modelPackId: workers[i].modelPackId ?? null,
           gearConfig: workers[i].gearConfig ?? null,
+          rotationY: 0,
+        });
+      }
+
+      for (let i = 0; i < schedulers.length; i++) {
+        const spread = (i - (schedulers.length - 1) / 2) * 3;
+        positions.push({
+          agent: schedulers[i],
+          role: "scheduler",
+          x: spread,
+          z: -12,
+          label: schedulers[i].name ?? `Scheduler ${schedulers[i].id.slice(0, 6)}`,
+          modelPackId: schedulers[i].modelPackId ?? null,
+          gearConfig: schedulers[i].gearConfig ?? null,
           rotationY: 0,
         });
       }

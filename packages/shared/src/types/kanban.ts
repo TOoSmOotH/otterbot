@@ -1,6 +1,8 @@
 export enum KanbanColumn {
+  Triage = "triage",
   Backlog = "backlog",
   InProgress = "in_progress",
+  InReview = "in_review",
   Done = "done",
 }
 
@@ -14,8 +16,13 @@ export interface KanbanTask {
   assigneeAgentId: string | null;
   createdBy: string | null;
   completionReport: string | null;
+  prNumber: number | null;
+  prBranch: string | null;
   labels: string[];
   blockedBy: string[];
+  pipelineStage: string | null;
+  pipelineStages: string[];
+  pipelineAttempt: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -35,6 +42,11 @@ export interface KanbanTaskUpdate {
   position?: number;
   assigneeAgentId?: string | null;
   completionReport?: string;
+  prNumber?: number | null;
+  prBranch?: string | null;
   labels?: string[];
   blockedBy?: string[];
+  pipelineStage?: string | null;
+  pipelineStages?: string[];
+  pipelineAttempt?: number;
 }

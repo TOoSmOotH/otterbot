@@ -1,6 +1,6 @@
 import type { Agent, AgentStatus, AgentActivityRecord } from "./agent.js";
 import type { BusMessage, Conversation } from "./message.js";
-import type { RegistryEntry, Project, ProjectAgentAssignments } from "./registry.js";
+import type { RegistryEntry, Project, ProjectAgentAssignments, ProjectPipelineConfig } from "./registry.js";
 import type { KanbanTask } from "./kanban.js";
 import type { SceneZone } from "./environment.js";
 import type { CodingAgentSession, CodingAgentMessage, CodingAgentFileDiff, CodingAgentPermission } from "./coding-agent.js";
@@ -19,6 +19,7 @@ export interface ServerToClientEvents {
   "coo:thinking-end": (data: { messageId: string; conversationId: string | null }) => void;
   "coo:audio": (data: { messageId: string; audio: string; contentType: string }) => void;
   "conversation:created": (conversation: Conversation) => void;
+  "conversation:switched": (data: { conversationId: string; messages: BusMessage[] }) => void;
   "project:created": (project: Project) => void;
   "project:updated": (project: Project) => void;
   "project:deleted": (data: { projectId: string }) => void;
@@ -50,6 +51,14 @@ export interface ServerToClientEvents {
   "reminder:fired": (data: { todoId: string; title: string }) => void;
   "discord:pairing-request": (data: { code: string; discordUserId: string; discordUsername: string }) => void;
   "discord:status": (data: { status: "connected" | "disconnected" | "error"; botUsername?: string }) => void;
+  "matrix:pairing-request": (data: { code: string; matrixUserId: string }) => void;
+  "matrix:status": (data: { status: "connected" | "disconnected" | "error"; userId?: string }) => void;
+  "irc:status": (data: { status: "connected" | "disconnected" | "error"; nickname?: string }) => void;
+  "teams:status": (data: { status: "connected" | "disconnected" | "error" }) => void;
+  "slack:pairing-request": (data: { code: string; slackUserId: string; slackUsername: string }) => void;
+  "slack:status": (data: { status: "connected" | "disconnected" | "error"; botUsername?: string }) => void;
+  "telegram:pairing-request": (data: { code: string; telegramUserId: string; telegramUsername: string }) => void;
+  "telegram:status": (data: { status: "connected" | "disconnected" | "error"; botUsername?: string }) => void;
 }
 
 /** Events emitted from client to server */
@@ -151,6 +160,16 @@ export interface ClientToServerEvents {
     callback?: (ack: { ok: boolean; error?: string }) => void,
   ) => void;
 
+  // Pipeline configuration
+  "project:get-pipeline-config": (
+    data: { projectId: string },
+    callback: (config: ProjectPipelineConfig | null) => void,
+  ) => void;
+  "project:set-pipeline-config": (
+    data: { projectId: string; config: ProjectPipelineConfig },
+    callback?: (ack: { ok: boolean; error?: string }) => void,
+  ) => void;
+
   // Soul document CRUD
   "soul:list": (
     callback: (docs: SoulDocument[]) => void,
@@ -180,6 +199,9 @@ export interface ClientToServerEvents {
   "memory:delete": (
     data: { id: string },
     callback?: (ack: { ok: boolean; error?: string }) => void,
+  ) => void;
+  "memory:clear-all": (
+    callback?: (ack: { ok: boolean; deleted: number; error?: string }) => void,
   ) => void;
   "memory:search": (
     data: { query: string; agentScope?: string; projectId?: string; limit?: number },

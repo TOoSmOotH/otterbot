@@ -15,8 +15,19 @@ vi.mock("../../auth/auth.js", () => ({
 
 // Mock github-service
 const mockFetchAssignedIssues = vi.fn().mockResolvedValue([]);
+const mockCreateIssueComment = vi.fn().mockResolvedValue({
+  id: 1,
+  user: { login: "otterbot" },
+  body: "",
+  created_at: "2026-01-01T00:00:00Z",
+  updated_at: "2026-01-01T00:00:00Z",
+  html_url: "",
+});
 vi.mock("../github-service.js", () => ({
   fetchAssignedIssues: (...args: any[]) => mockFetchAssignedIssues(...args),
+  fetchOpenIssues: vi.fn().mockResolvedValue([]),
+  createIssueComment: (...args: any[]) => mockCreateIssueComment(...args),
+  addLabelsToIssue: vi.fn().mockResolvedValue(undefined),
   cloneRepo: vi.fn(),
   getRepoDefaultBranch: vi.fn().mockResolvedValue("main"),
 }));
@@ -60,6 +71,14 @@ describe("GitHubIssueMonitor", () => {
     resetDb();
     configStore.clear();
     mockFetchAssignedIssues.mockReset().mockResolvedValue([]);
+    mockCreateIssueComment.mockReset().mockResolvedValue({
+      id: 1,
+      user: { login: "otterbot" },
+      body: "",
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
+      html_url: "",
+    });
     process.env.DATABASE_URL = `file:${join(tmpDir, "test.db")}`;
     process.env.OTTERBOT_DB_KEY = "test-key";
     await migrateDb();
@@ -78,13 +97,13 @@ describe("GitHubIssueMonitor", () => {
   });
 
   describe("watchProject / unwatchProject", () => {
-    it("registers a project for watching", () => {
+    it("registers a project for watching", async () => {
       monitor.watchProject("proj-1", "owner/repo", "testuser");
       // Verify by triggering a poll — the project should be polled
       configStore.set("github:token", "ghp_test");
       mockFetchAssignedIssues.mockResolvedValue([]);
       // Access private poll method via prototype
-      (monitor as any).poll();
+      await (monitor as any).poll();
       expect(mockFetchAssignedIssues).toHaveBeenCalledWith(
         "owner/repo",
         "ghp_test",
@@ -106,7 +125,7 @@ describe("GitHubIssueMonitor", () => {
   });
 
   describe("loadFromDb", () => {
-    it("loads projects with githubIssueMonitor enabled", () => {
+    it("loads all projects with a githubRepo regardless of githubIssueMonitor flag", async () => {
       const db = getDb();
       configStore.set("github:username", "testuser");
 
@@ -125,7 +144,7 @@ describe("GitHubIssueMonitor", () => {
         })
         .run();
 
-      // Insert a project without issue monitoring
+      // Insert a project without issue monitoring — should still be watched
       db.insert(schema.projects)
         .values({
           id: "proj-no-monitor",
@@ -142,12 +161,18 @@ describe("GitHubIssueMonitor", () => {
 
       monitor.loadFromDb();
 
-      // Verify only the monitored project is watched
+      // Verify both projects are watched for assigned issues
       configStore.set("github:token", "ghp_test");
-      (monitor as any).poll();
-      expect(mockFetchAssignedIssues).toHaveBeenCalledTimes(1);
+      await (monitor as any).poll();
+      expect(mockFetchAssignedIssues).toHaveBeenCalledTimes(2);
       expect(mockFetchAssignedIssues).toHaveBeenCalledWith(
         "owner/repo",
+        "ghp_test",
+        "testuser",
+        undefined,
+      );
+      expect(mockFetchAssignedIssues).toHaveBeenCalledWith(
+        "owner/other",
         "ghp_test",
         "testuser",
         undefined,
@@ -375,6 +400,154 @@ describe("GitHubIssueMonitor", () => {
       );
     });
 
+    it("posts an acknowledgement comment on the GitHub issue", async () => {
+      const db = getDb();
+
+      db.insert(schema.projects)
+        .values({
+          id: "proj-comment",
+          name: "Comment Project",
+          description: "test",
+          status: "active",
+          githubRepo: "owner/repo",
+          githubBranch: "main",
+          githubIssueMonitor: true,
+          rules: [],
+          createdAt: new Date().toISOString(),
+        })
+        .run();
+
+      monitor.watchProject("proj-comment", "owner/repo", "testuser");
+      configStore.set("github:token", "ghp_test");
+
+      mockFetchAssignedIssues.mockResolvedValue([
+        {
+          number: 112,
+          title: "Comment on accepted issues",
+          body: "Bot should comment when it accepts an issue",
+          labels: [],
+          assignees: [{ login: "testuser" }],
+          state: "open",
+          html_url: "https://github.com/owner/repo/issues/112",
+          created_at: "2026-02-01T00:00:00Z",
+          updated_at: "2026-02-01T00:00:00Z",
+        },
+      ]);
+
+      await (monitor as any).poll();
+
+      expect(mockCreateIssueComment).toHaveBeenCalledWith(
+        "owner/repo",
+        "ghp_test",
+        112,
+        expect.stringContaining("looking into this issue"),
+      );
+    });
+
+    it("does not post a comment for already-tracked issues", async () => {
+      const db = getDb();
+
+      db.insert(schema.projects)
+        .values({
+          id: "proj-nocomment",
+          name: "No Comment Project",
+          description: "test",
+          status: "active",
+          githubRepo: "owner/repo",
+          githubBranch: "main",
+          githubIssueMonitor: true,
+          rules: [],
+          createdAt: new Date().toISOString(),
+        })
+        .run();
+
+      // Pre-existing task
+      db.insert(schema.kanbanTasks)
+        .values({
+          id: "existing-task-nc",
+          projectId: "proj-nocomment",
+          title: "#50: Already tracked",
+          description: "",
+          column: "backlog",
+          position: 0,
+          labels: ["github-issue-50"],
+          blockedBy: [],
+          retryCount: 0,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        })
+        .run();
+
+      monitor.watchProject("proj-nocomment", "owner/repo", "testuser");
+      configStore.set("github:token", "ghp_test");
+
+      mockFetchAssignedIssues.mockResolvedValue([
+        {
+          number: 50,
+          title: "Already tracked",
+          body: "This is already in the backlog",
+          labels: [],
+          assignees: [{ login: "testuser" }],
+          state: "open",
+          html_url: "https://github.com/owner/repo/issues/50",
+          created_at: "2026-01-01T00:00:00Z",
+          updated_at: "2026-01-02T00:00:00Z",
+        },
+      ]);
+
+      await (monitor as any).poll();
+
+      expect(mockCreateIssueComment).not.toHaveBeenCalled();
+    });
+
+    it("continues processing when comment posting fails", async () => {
+      const db = getDb();
+
+      db.insert(schema.projects)
+        .values({
+          id: "proj-commenterr",
+          name: "Comment Error Project",
+          description: "test",
+          status: "active",
+          githubRepo: "owner/repo",
+          githubBranch: "main",
+          githubIssueMonitor: true,
+          rules: [],
+          createdAt: new Date().toISOString(),
+        })
+        .run();
+
+      monitor.watchProject("proj-commenterr", "owner/repo", "testuser");
+      configStore.set("github:token", "ghp_test");
+
+      mockCreateIssueComment.mockRejectedValue(new Error("GitHub API error 403"));
+
+      mockFetchAssignedIssues.mockResolvedValue([
+        {
+          number: 77,
+          title: "Comment will fail",
+          body: "Test graceful error handling",
+          labels: [],
+          assignees: [{ login: "testuser" }],
+          state: "open",
+          html_url: "https://github.com/owner/repo/issues/77",
+          created_at: "2026-02-01T00:00:00Z",
+          updated_at: "2026-02-01T00:00:00Z",
+        },
+      ]);
+
+      await (monitor as any).poll();
+
+      // Task should still be created despite comment failure
+      const tasks = db
+        .select()
+        .from(schema.kanbanTasks)
+        .where(eq(schema.kanbanTasks.projectId, "proj-commenterr"))
+        .all();
+      expect(tasks).toHaveLength(1);
+      expect(tasks[0].title).toBe("#77: Comment will fail");
+    });
+
     it("skips polling when github:token is not set", async () => {
       monitor.watchProject("proj-notoken", "owner/repo", "testuser");
       // No github:token in configStore
@@ -382,6 +555,139 @@ describe("GitHubIssueMonitor", () => {
       await (monitor as any).poll();
 
       expect(mockFetchAssignedIssues).not.toHaveBeenCalled();
+    });
+
+    it("promotes a triage task to backlog when an assigned issue matches", async () => {
+      const db = getDb();
+
+      db.insert(schema.projects)
+        .values({
+          id: "proj-promo",
+          name: "Promo Project",
+          description: "test",
+          status: "active",
+          githubRepo: "owner/repo",
+          githubBranch: "main",
+          githubIssueMonitor: true,
+          rules: [],
+          createdAt: new Date().toISOString(),
+        })
+        .run();
+
+      // Pre-existing triage task for issue #55
+      db.insert(schema.kanbanTasks)
+        .values({
+          id: "triage-task-55",
+          projectId: "proj-promo",
+          title: "#55: Triage issue",
+          description: "Triage: bug",
+          column: "triage",
+          position: 0,
+          labels: ["github-issue-55"],
+          blockedBy: [],
+          retryCount: 0,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        })
+        .run();
+
+      monitor.watchProject("proj-promo", "owner/repo", "testuser");
+      configStore.set("github:token", "ghp_test");
+
+      mockFetchAssignedIssues.mockResolvedValue([
+        {
+          number: 55,
+          title: "Triage issue",
+          body: "Issue body here",
+          labels: [],
+          assignees: [{ login: "testuser" }],
+          state: "open",
+          html_url: "https://github.com/owner/repo/issues/55",
+          created_at: "2026-01-01T00:00:00Z",
+          updated_at: "2026-01-02T00:00:00Z",
+        },
+      ]);
+
+      await (monitor as any).poll();
+
+      // Should have promoted the existing triage task to backlog, not created a new one
+      const tasks = db
+        .select()
+        .from(schema.kanbanTasks)
+        .where(eq(schema.kanbanTasks.projectId, "proj-promo"))
+        .all();
+      expect(tasks).toHaveLength(1);
+      expect(tasks[0].id).toBe("triage-task-55");
+      expect(tasks[0].column).toBe("backlog");
+
+      // Should have emitted an update event
+      expect(mockIo.emit).toHaveBeenCalledWith(
+        "kanban:task-updated",
+        expect.objectContaining({ id: "triage-task-55", column: "backlog" }),
+      );
+    });
+
+    it("does not create duplicate when issue already in backlog", async () => {
+      const db = getDb();
+
+      db.insert(schema.projects)
+        .values({
+          id: "proj-nodup",
+          name: "No Dup Project",
+          description: "test",
+          status: "active",
+          githubRepo: "owner/repo",
+          githubBranch: "main",
+          githubIssueMonitor: true,
+          rules: [],
+          createdAt: new Date().toISOString(),
+        })
+        .run();
+
+      // Pre-existing backlog task for issue #60
+      db.insert(schema.kanbanTasks)
+        .values({
+          id: "backlog-task-60",
+          projectId: "proj-nodup",
+          title: "#60: Existing backlog issue",
+          description: "",
+          column: "backlog",
+          position: 0,
+          labels: ["github-issue-60"],
+          blockedBy: [],
+          retryCount: 0,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        })
+        .run();
+
+      monitor.watchProject("proj-nodup", "owner/repo", "testuser");
+      configStore.set("github:token", "ghp_test");
+
+      mockFetchAssignedIssues.mockResolvedValue([
+        {
+          number: 60,
+          title: "Existing backlog issue",
+          body: "Already tracked",
+          labels: [],
+          assignees: [{ login: "testuser" }],
+          state: "open",
+          html_url: "https://github.com/owner/repo/issues/60",
+          created_at: "2026-01-01T00:00:00Z",
+          updated_at: "2026-01-02T00:00:00Z",
+        },
+      ]);
+
+      await (monitor as any).poll();
+
+      // Should still only have one task
+      const tasks = db
+        .select()
+        .from(schema.kanbanTasks)
+        .where(eq(schema.kanbanTasks.projectId, "proj-nodup"))
+        .all();
+      expect(tasks).toHaveLength(1);
+      expect(tasks[0].id).toBe("backlog-task-60");
     });
   });
 

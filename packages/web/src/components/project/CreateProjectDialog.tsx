@@ -32,11 +32,17 @@ export function CreateProjectDialog({ open, onClose }: CreateProjectDialogProps)
     onClose();
   };
 
+  const hasRepo = githubRepo.trim().length > 0;
+
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
     const repo = githubRepo.trim();
-    if (!repo || !repo.includes("/")) {
+    if (repo && !repo.includes("/")) {
       setError("Enter a valid repo in owner/repo format.");
+      return;
+    }
+    if (!repo && !name.trim()) {
+      setError("Project name is required when no GitHub repo is provided.");
       return;
     }
 
@@ -49,10 +55,10 @@ export function CreateProjectDialog({ open, onClose }: CreateProjectDialogProps)
       {
         name: name.trim() || undefined,
         description: description.trim(),
-        githubRepo: repo,
-        githubBranch: branch.trim() || undefined,
+        githubRepo: repo || undefined,
+        githubBranch: repo ? (branch.trim() || undefined) : undefined,
         rules: rules.trim() ? rules.trim().split("\n").map((r) => r.trim()).filter(Boolean) : undefined,
-        issueMonitor,
+        issueMonitor: repo ? issueMonitor : false,
       } as any,
       (ack: { ok: boolean; projectId?: string; error?: string }) => {
         setLoading(false);
@@ -87,7 +93,7 @@ export function CreateProjectDialog({ open, onClose }: CreateProjectDialogProps)
       >
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-border">
-          <h3 className="text-sm font-semibold">Create Project from GitHub</h3>
+          <h3 className="text-sm font-semibold">Create Project</h3>
           <button
             onClick={handleClose}
             className="text-muted-foreground hover:text-foreground transition-colors"
@@ -103,7 +109,7 @@ export function CreateProjectDialog({ open, onClose }: CreateProjectDialogProps)
           {/* GitHub Repo */}
           <div>
             <label className="block text-[11px] font-medium text-muted-foreground uppercase tracking-wider mb-1.5">
-              GitHub Repo <span className="text-red-400">*</span>
+              GitHub Repo
             </label>
             <input
               type="text"
@@ -125,20 +131,21 @@ export function CreateProjectDialog({ open, onClose }: CreateProjectDialogProps)
               value={branch}
               onChange={(e) => setBranch(e.target.value)}
               placeholder="main (defaults to repo default)"
-              className="w-full text-xs bg-secondary rounded-md px-3 py-2 outline-none placeholder:text-muted-foreground border border-transparent focus:border-primary/50 transition-colors"
+              disabled={!hasRepo}
+              className={`w-full text-xs bg-secondary rounded-md px-3 py-2 outline-none placeholder:text-muted-foreground border border-transparent focus:border-primary/50 transition-colors ${!hasRepo ? "opacity-40 cursor-not-allowed" : ""}`}
             />
           </div>
 
           {/* Project Name */}
           <div>
             <label className="block text-[11px] font-medium text-muted-foreground uppercase tracking-wider mb-1.5">
-              Project Name
+              Project Name {!hasRepo && <span className="text-red-400">*</span>}
             </label>
             <input
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="Auto-fills from repo name"
+              placeholder={hasRepo ? "Auto-fills from repo name" : "my-project"}
               className="w-full text-xs bg-secondary rounded-md px-3 py-2 outline-none placeholder:text-muted-foreground border border-transparent focus:border-primary/50 transition-colors"
             />
           </div>
@@ -172,11 +179,12 @@ export function CreateProjectDialog({ open, onClose }: CreateProjectDialogProps)
           </div>
 
           {/* Issue Monitor */}
-          <label className="flex items-center gap-2 cursor-pointer">
+          <label className={`flex items-center gap-2 ${hasRepo ? "cursor-pointer" : "cursor-not-allowed opacity-40"}`}>
             <input
               type="checkbox"
               checked={issueMonitor}
               onChange={(e) => setIssueMonitor(e.target.checked)}
+              disabled={!hasRepo}
               className="rounded border-border"
             />
             <span className="text-xs text-foreground">
@@ -194,7 +202,7 @@ export function CreateProjectDialog({ open, onClose }: CreateProjectDialogProps)
           {/* Submit */}
           <button
             type="submit"
-            disabled={loading || !githubRepo.trim()}
+            disabled={loading || (!githubRepo.trim() && !name.trim())}
             className="w-full text-xs bg-primary text-primary-foreground rounded-md px-3 py-2.5 font-medium disabled:opacity-40 hover:bg-primary/90 transition-colors flex items-center justify-center gap-2"
           >
             {loading ? (
@@ -203,7 +211,7 @@ export function CreateProjectDialog({ open, onClose }: CreateProjectDialogProps)
                   <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" opacity="0.25" />
                   <path fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" opacity="0.75" />
                 </svg>
-                Cloning repository...
+                {hasRepo ? "Cloning repository..." : "Creating project..."}
               </>
             ) : (
               "Create Project"

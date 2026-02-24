@@ -42,7 +42,25 @@
     { "asset": "kaykit-prototype-bits/Floor", "position": [0, -0.5, 10], "receiveShadow": true },
     { "asset": "kaykit-prototype-bits/Floor", "position": [0, -0.5, 14], "receiveShadow": true },
     { "asset": "kaykit-prototype-bits/Floor", "position": [0, -0.5, 18], "receiveShadow": true },
-    { "asset": "kaykit-prototype-bits/Floor", "position": [0, -0.5, 22], "receiveShadow": true }
+    { "asset": "kaykit-prototype-bits/Floor", "position": [0, -0.5, 22], "receiveShadow": true },
+
+    { "asset": "kaykit-prototype-bits/Floor", "position": [-12, -0.5, 4], "receiveShadow": true },
+    { "asset": "kaykit-prototype-bits/Floor", "position": [-8, -0.5, 4], "receiveShadow": true },
+    { "asset": "kaykit-prototype-bits/Floor", "position": [-4, -0.5, 4], "receiveShadow": true },
+    { "asset": "kaykit-prototype-bits/Floor", "position": [-12, -0.5, 8], "receiveShadow": true },
+    { "asset": "kaykit-prototype-bits/Floor", "position": [-8, -0.5, 8], "receiveShadow": true },
+    { "asset": "kaykit-prototype-bits/Floor", "position": [-4, -0.5, 8], "receiveShadow": true },
+    { "asset": "kaykit-prototype-bits/Floor", "position": [-12, -0.5, 12], "receiveShadow": true },
+    { "asset": "kaykit-prototype-bits/Floor", "position": [-8, -0.5, 12], "receiveShadow": true },
+    { "asset": "kaykit-prototype-bits/Floor", "position": [-4, -0.5, 12], "receiveShadow": true },
+
+    { "asset": "kaykit-prototype-bits/table_medium", "position": [-6, 0, 7], "castShadow": true, "receiveShadow": true },
+    { "asset": "kaykit-prototype-bits/table_medium", "position": [-10, 0, 7], "castShadow": true, "receiveShadow": true },
+    { "asset": "kaykit-prototype-bits/table_medium_Decorated", "position": [-8, 0, 10], "castShadow": true, "receiveShadow": true },
+
+    { "asset": "kaykit-prototype-bits/Barrel_A", "position": [-13, 0.5, 4], "castShadow": true },
+    { "asset": "kaykit-prototype-bits/Box_A", "position": [-13, 0, 12], "scale": 2, "castShadow": true },
+    { "asset": "kaykit-prototype-bits/Barrel_B", "position": [-4, 0.5, 12.5], "castShadow": true }
   ],
   "lighting": {
     "ambientIntensity": 0.5,
@@ -60,6 +78,13 @@
       "projectId": null,
       "position": [0, 0, -8],
       "size": [20, 4, 16]
+    },
+    {
+      "id": "break-room",
+      "name": "Break Room",
+      "projectId": null,
+      "position": [-8, 0, 8],
+      "size": [12, 4, 12]
     }
   ],
   "waypointGraph": {
@@ -78,6 +103,15 @@
       { "id": "mo-inner-1", "position": [0, 0, -4], "label": "Inner 1", "zoneId": "main-office" },
       { "id": "mo-inner-2", "position": [-4, 0, -8], "label": "Inner Left", "zoneId": "main-office" },
       { "id": "mo-inner-3", "position": [4, 0, -8], "label": "Inner Right", "zoneId": "main-office" },
+
+      { "id": "br-entrance", "position": [-3, 0, 5], "label": "Break Room Entrance", "zoneId": "break-room", "tag": "entrance" },
+      { "id": "br-center", "position": [-8, 0, 8], "label": "Break Room Center", "zoneId": "break-room", "tag": "center" },
+      { "id": "br-lounge-1", "position": [-6, 0, 6], "label": "Lounge Spot 1", "zoneId": "break-room", "tag": "lounge" },
+      { "id": "br-lounge-2", "position": [-10, 0, 6], "label": "Lounge Spot 2", "zoneId": "break-room", "tag": "lounge" },
+      { "id": "br-lounge-3", "position": [-6, 0, 10], "label": "Lounge Spot 3", "zoneId": "break-room", "tag": "lounge" },
+      { "id": "br-lounge-4", "position": [-10, 0, 10], "label": "Lounge Spot 4", "zoneId": "break-room", "tag": "lounge" },
+      { "id": "br-desk-1", "position": [-5, 0, 8], "label": "Scheduler Desk 1", "zoneId": "break-room", "tag": "desk" },
+      { "id": "br-desk-2", "position": [-11, 0, 8], "label": "Scheduler Desk 2", "zoneId": "break-room", "tag": "desk" },
 
       { "id": "hall-0", "position": [0, 0, 1], "label": "Hallway Start", "tag": "hallway" },
       { "id": "hall-1", "position": [0, 0, 5], "label": "Hallway 1", "tag": "hallway" },
@@ -102,6 +136,15 @@
       { "from": "mo-center", "to": "mo-desk-tl2" },
       { "from": "mo-inner-3", "to": "mo-desk-w1" },
       { "from": "mo-inner-1", "to": "mo-desk-w2" },
+
+      { "from": "br-entrance", "to": "hall-1" },
+      { "from": "br-entrance", "to": "br-center" },
+      { "from": "br-center", "to": "br-lounge-1" },
+      { "from": "br-center", "to": "br-lounge-2" },
+      { "from": "br-center", "to": "br-lounge-3" },
+      { "from": "br-center", "to": "br-lounge-4" },
+      { "from": "br-center", "to": "br-desk-1" },
+      { "from": "br-center", "to": "br-desk-2" },
 
       { "from": "mo-entrance", "to": "hall-0" },
       { "from": "hall-0", "to": "hall-1" },

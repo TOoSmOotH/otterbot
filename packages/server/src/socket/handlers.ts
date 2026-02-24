@@ -20,6 +20,7 @@ import { SoulAdvisor } from "../memory/soul-advisor.js";
 import type { WorkspaceManager } from "../workspace/workspace.js";
 import type { GitHubIssueMonitor } from "../github/issue-monitor.js";
 import { cloneRepo, getRepoDefaultBranch } from "../github/github-service.js";
+import { initGitRepo, createInitialCommit } from "../utils/git.js";
 import { NO_REPORT_SENTINEL } from "../schedulers/custom-task-scheduler.js";
 import { ProjectStatus, CharterStatus } from "@otterbot/shared";
 import { existsSync, rmSync } from "node:fs";
@@ -383,6 +384,9 @@ export function setupSocketHandlers(
       // Stop running agents and remove workspace
       coo.destroyProject(data.projectId);
 
+      // Clear conversation contexts that reference this project
+      coo.clearProjectConversations(data.projectId);
+
       // Cascade-delete related DB records
       db.delete(schema.kanbanTasks).where(eq(schema.kanbanTasks.projectId, data.projectId)).run();
       db.delete(schema.agentActivity).where(eq(schema.agentActivity.projectId, data.projectId)).run();
@@ -397,104 +401,149 @@ export function setupSocketHandlers(
       callback?.({ ok: true });
     });
 
-    // Manual project creation (GitHub-linked)
+    // Manual project creation (GitHub-linked or local-only)
     socket.on("project:create-manual", async (data, callback) => {
       try {
-        // Validate GitHub is configured
-        const ghToken = getConfig("github:token");
-        const ghUsername = getConfig("github:username");
-        if (!ghToken || !ghUsername) {
-          callback?.({ ok: false, error: "GitHub is not configured. Set up your PAT and username in Settings first." });
-          return;
-        }
-
-        if (!data.githubRepo || !data.githubRepo.includes("/")) {
-          callback?.({ ok: false, error: "Invalid repo format. Use 'owner/repo'." });
-          return;
-        }
-
         const workspace = deps?.workspace;
         if (!workspace) {
           callback?.({ ok: false, error: "Workspace not available." });
           return;
         }
 
-        // Determine branch — use provided, or fetch default from API
-        let branch = data.githubBranch?.trim();
-        if (!branch) {
-          try {
-            branch = await getRepoDefaultBranch(data.githubRepo, ghToken);
-          } catch {
-            branch = "main";
+        const hasGithubRepo = !!data.githubRepo?.trim();
+
+        if (hasGithubRepo) {
+          // --- GitHub-linked path ---
+          const ghToken = getConfig("github:token");
+          const ghUsername = getConfig("github:username");
+          if (!ghToken || !ghUsername) {
+            callback?.({ ok: false, error: "GitHub is not configured. Set up your PAT and username in Settings first." });
+            return;
           }
+
+          if (!data.githubRepo!.includes("/")) {
+            callback?.({ ok: false, error: "Invalid repo format. Use 'owner/repo'." });
+            return;
+          }
+
+          let branch = data.githubBranch?.trim();
+          if (!branch) {
+            try {
+              branch = await getRepoDefaultBranch(data.githubRepo!, ghToken);
+            } catch {
+              branch = "main";
+            }
+          }
+
+          const name = data.name?.trim() || data.githubRepo!.split("/")[1] || data.githubRepo!;
+          const description = data.description?.trim() || `GitHub project: ${data.githubRepo}`;
+          const rules = data.rules ?? [];
+          const issueMonitor = data.issueMonitor ?? false;
+
+          const projectId = makeProjectId(name);
+          const db = getDb();
+
+          db.insert(schema.projects)
+            .values({
+              id: projectId,
+              name,
+              description,
+              status: ProjectStatus.Active,
+              charter: null,
+              charterStatus: CharterStatus.Gathering,
+              githubRepo: data.githubRepo!,
+              githubBranch: branch,
+              githubIssueMonitor: issueMonitor,
+              rules,
+              createdAt: new Date().toISOString(),
+            })
+            .run();
+
+          workspace.createProject(projectId);
+
+          const repoPath = workspace.repoPath(projectId);
+          try {
+            cloneRepo(data.githubRepo!, repoPath, branch);
+          } catch (cloneErr) {
+            try { rmSync(workspace.projectPath(projectId), { recursive: true, force: true }); } catch { /* best effort */ }
+            db.delete(schema.projects).where(eq(schema.projects.id, projectId)).run();
+            const errMsg = cloneErr instanceof Error ? cloneErr.message : String(cloneErr);
+            callback?.({ ok: false, error: `Failed to clone repository: ${errMsg}` });
+            return;
+          }
+
+          setConfig(`project:${projectId}:github:repo`, data.githubRepo!);
+          setConfig(`project:${projectId}:github:branch`, branch);
+          setConfig(`project:${projectId}:github:rules`, JSON.stringify(rules));
+
+          await coo.spawnTeamLeadForManualProject(projectId, data.githubRepo!, branch, rules);
+
+          const project = db
+            .select()
+            .from(schema.projects)
+            .where(eq(schema.projects.id, projectId))
+            .get();
+          if (project) {
+            io.emit("project:created", project as unknown as Project);
+          }
+
+          if (deps?.issueMonitor) {
+            deps.issueMonitor.watchProject(projectId, data.githubRepo!, ghUsername);
+          }
+
+          callback?.({ ok: true, projectId });
+        } else {
+          // --- Local-only path (no GitHub repo) ---
+          const name = data.name?.trim();
+          if (!name) {
+            callback?.({ ok: false, error: "Project name is required when no GitHub repo is provided." });
+            return;
+          }
+
+          const description = data.description?.trim() || `Local project: ${name}`;
+          const rules = data.rules ?? [];
+
+          const projectId = makeProjectId(name);
+          const db = getDb();
+
+          db.insert(schema.projects)
+            .values({
+              id: projectId,
+              name,
+              description,
+              status: ProjectStatus.Active,
+              charter: null,
+              charterStatus: CharterStatus.Gathering,
+              githubRepo: null,
+              githubBranch: null,
+              githubIssueMonitor: false,
+              rules,
+              createdAt: new Date().toISOString(),
+            })
+            .run();
+
+          workspace.createProject(projectId);
+
+          // Initialize local git repo instead of cloning
+          const repoPath = workspace.repoPath(projectId);
+          initGitRepo(repoPath);
+          createInitialCommit(repoPath);
+
+          setConfig(`project:${projectId}:github:rules`, JSON.stringify(rules));
+
+          await coo.spawnTeamLeadForManualProject(projectId, null, null, rules);
+
+          const project = db
+            .select()
+            .from(schema.projects)
+            .where(eq(schema.projects.id, projectId))
+            .get();
+          if (project) {
+            io.emit("project:created", project as unknown as Project);
+          }
+
+          callback?.({ ok: true, projectId });
         }
-
-        // Auto-fill name from repo if not provided
-        const name = data.name?.trim() || data.githubRepo.split("/")[1] || data.githubRepo;
-        const description = data.description?.trim() || `GitHub project: ${data.githubRepo}`;
-        const rules = data.rules ?? [];
-        const issueMonitor = data.issueMonitor ?? false;
-
-        const projectId = makeProjectId(name);
-        const db = getDb();
-
-        // Create project record
-        db.insert(schema.projects)
-          .values({
-            id: projectId,
-            name,
-            description,
-            status: ProjectStatus.Active,
-            charter: null,
-            charterStatus: CharterStatus.Gathering,
-            githubRepo: data.githubRepo,
-            githubBranch: branch,
-            githubIssueMonitor: issueMonitor,
-            rules,
-            createdAt: new Date().toISOString(),
-          })
-          .run();
-
-        // Create workspace
-        workspace.createProject(projectId);
-
-        // Clone repo
-        const repoPath = workspace.repoPath(projectId);
-        try {
-          cloneRepo(data.githubRepo, repoPath, branch);
-        } catch (cloneErr) {
-          // Clean up on failure
-          try { rmSync(workspace.projectPath(projectId), { recursive: true, force: true }); } catch { /* best effort */ }
-          db.delete(schema.projects).where(eq(schema.projects.id, projectId)).run();
-          const errMsg = cloneErr instanceof Error ? cloneErr.message : String(cloneErr);
-          callback?.({ ok: false, error: `Failed to clone repository: ${errMsg}` });
-          return;
-        }
-
-        // Store GitHub config in KV for recovery
-        setConfig(`project:${projectId}:github:repo`, data.githubRepo);
-        setConfig(`project:${projectId}:github:branch`, branch);
-        setConfig(`project:${projectId}:github:rules`, JSON.stringify(rules));
-
-        // Spawn TeamLead
-        await coo.spawnTeamLeadForManualProject(projectId, data.githubRepo, branch, rules);
-
-        // Emit project:created event
-        const project = db
-          .select()
-          .from(schema.projects)
-          .where(eq(schema.projects.id, projectId))
-          .get();
-        if (project) {
-          io.emit("project:created", project as unknown as Project);
-        }
-
-        // Register issue monitor if enabled
-        if (issueMonitor && deps?.issueMonitor) {
-          deps.issueMonitor.watchProject(projectId, data.githubRepo, ghUsername);
-        }
-
-        callback?.({ ok: true, projectId });
       } catch (err) {
         const errMsg = err instanceof Error ? err.message : String(err);
         console.error("[project:create-manual] Error:", err);
@@ -526,6 +575,7 @@ export function setupSocketHandlers(
         "builtin-opencode-coder",
         "builtin-claude-code-coder",
         "builtin-codex-coder",
+        "builtin-gemini-cli-coder",
       ]);
 
       // Validate all agent IDs
@@ -550,6 +600,29 @@ export function setupSocketHandlers(
       }
 
       callback?.({ ok: true });
+    });
+
+    // Get per-project pipeline configuration
+    socket.on("project:get-pipeline-config", (data, callback) => {
+      const raw = getConfig(`project:${data.projectId}:pipeline-config`);
+      try {
+        callback(raw ? JSON.parse(raw) : null);
+      } catch {
+        callback(null);
+      }
+    });
+
+    // Set per-project pipeline configuration
+    socket.on("project:set-pipeline-config", (data, callback) => {
+      try {
+        setConfig(
+          `project:${data.projectId}:pipeline-config`,
+          JSON.stringify(data.config),
+        );
+        callback?.({ ok: true });
+      } catch (err) {
+        callback?.({ ok: false, error: err instanceof Error ? err.message : "Failed to save" });
+      }
     });
 
     // Retrieve agent activity (bus messages + persisted activity records)
@@ -643,6 +716,17 @@ export function setupSocketHandlers(
     socket.on("memory:delete", (data, callback) => {
       const ok = memoryService.delete(data.id);
       callback?.({ ok });
+    });
+
+    socket.on("memory:clear-all", (callback) => {
+      try {
+        const deleted = memoryService.clearAll();
+        // Also clear COO conversation contexts so the LLM doesn't reference stale data
+        coo.clearAllConversations();
+        callback?.({ ok: true, deleted });
+      } catch (err) {
+        callback?.({ ok: false, deleted: 0, error: err instanceof Error ? err.message : String(err) });
+      }
     });
 
     socket.on("memory:search", async (data, callback) => {

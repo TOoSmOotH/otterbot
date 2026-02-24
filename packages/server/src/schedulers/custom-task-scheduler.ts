@@ -1,22 +1,56 @@
 import { eq } from "drizzle-orm";
 import { getDb, schema } from "../db/index.js";
 import type { MessageBus } from "../bus/message-bus.js";
-import { MessageType } from "@otterbot/shared";
+import { MessageType, AgentRole, AgentStatus } from "@otterbot/shared";
+import type { Agent } from "@otterbot/shared";
 import type { Server } from "socket.io";
+import { getRandomModelPackId } from "../models3d/model-packs.js";
 
 export const MIN_CUSTOM_TASK_INTERVAL_MS = 60_000;
 export const NO_REPORT_SENTINEL = "[NO_REPORT]";
+/** How long (ms) the scheduler pseudo-agent shows as "acting" before reverting to idle */
+const ACTING_DURATION_MS = 15_000;
 
 export type CustomTaskRow = typeof schema.customScheduledTasks.$inferSelect;
 
 export class CustomTaskScheduler {
   private timers = new Map<string, ReturnType<typeof setInterval>>();
+  /** Timeouts for reverting acting→idle after a task fires */
+  private actingTimeouts = new Map<string, ReturnType<typeof setTimeout>>();
+  /** Stable model pack assignments per task */
+  private modelPackIds = new Map<string, string | null>();
   private bus: MessageBus;
   private io: Server;
 
   constructor(bus: MessageBus, io: Server) {
     this.bus = bus;
     this.io = io;
+  }
+
+  private getModelPackId(taskId: string): string | null {
+    if (!this.modelPackIds.has(taskId)) {
+      this.modelPackIds.set(taskId, getRandomModelPackId());
+    }
+    return this.modelPackIds.get(taskId) ?? null;
+  }
+
+  /** Build a pseudo-agent data object for a scheduled task (socket-only, no DB row). */
+  private buildPseudoAgent(task: CustomTaskRow, status: AgentStatus = AgentStatus.Idle): Agent {
+    return {
+      id: `scheduler-${task.id}`,
+      name: task.name,
+      registryEntryId: null,
+      role: AgentRole.Scheduler,
+      parentId: null,
+      status,
+      model: "",
+      provider: "",
+      projectId: null,
+      modelPackId: this.getModelPackId(task.id),
+      gearConfig: null,
+      workspacePath: null,
+      createdAt: task.createdAt,
+    };
   }
 
   /** Load all enabled custom tasks from DB and start their timers. */
@@ -49,13 +83,27 @@ export class CustomTaskScheduler {
     }, intervalMs);
 
     this.timers.set(task.id, timer);
+
+    // Emit pseudo-agent spawned if starting a new task (e.g. via API create/enable)
+    this.io.emit("agent:spawned", this.buildPseudoAgent(task));
   }
 
   stopTask(taskId: string): void {
+    const hadTimer = this.timers.has(taskId);
     const timer = this.timers.get(taskId);
     if (timer) {
       clearInterval(timer);
       this.timers.delete(taskId);
+    }
+    const actingTimeout = this.actingTimeouts.get(taskId);
+    if (actingTimeout) {
+      clearTimeout(actingTimeout);
+      this.actingTimeouts.delete(taskId);
+    }
+    this.modelPackIds.delete(taskId);
+    // Only emit destroyed if there was actually a running task
+    if (hadTimer) {
+      this.io.emit("agent:destroyed", { agentId: `scheduler-${taskId}` });
     }
   }
 
@@ -74,15 +122,40 @@ export class CustomTaskScheduler {
     }
   }
 
+  /** Return pseudo-agent data for all currently-running scheduler tasks. */
+  getActivePseudoAgents(): Agent[] {
+    const db = getDb();
+    const agents: Agent[] = [];
+    for (const taskId of this.timers.keys()) {
+      const task = db
+        .select()
+        .from(schema.customScheduledTasks)
+        .where(eq(schema.customScheduledTasks.id, taskId))
+        .get();
+      if (task) {
+        agents.push(this.buildPseudoAgent(task));
+      }
+    }
+    return agents;
+  }
+
   stopAll(): void {
+    for (const [taskId] of this.timers) {
+      this.io.emit("agent:destroyed", { agentId: `scheduler-${taskId}` });
+    }
     for (const timer of this.timers.values()) {
       clearInterval(timer);
     }
     this.timers.clear();
+    for (const timeout of this.actingTimeouts.values()) {
+      clearTimeout(timeout);
+    }
+    this.actingTimeouts.clear();
   }
 
   private fireTask(task: CustomTaskRow): void {
     const now = new Date().toISOString();
+    const agentId = `scheduler-${task.id}`;
 
     // Update lastRunAt in DB
     const db = getDb();
@@ -90,6 +163,20 @@ export class CustomTaskScheduler {
       .set({ lastRunAt: now, updatedAt: now })
       .where(eq(schema.customScheduledTasks.id, task.id))
       .run();
+
+    // Show pseudo-agent as acting in 3D view
+    this.io.emit("agent:status", { agentId, status: AgentStatus.Acting });
+
+    // Revert to idle after a delay
+    const prevTimeout = this.actingTimeouts.get(task.id);
+    if (prevTimeout) clearTimeout(prevTimeout);
+    this.actingTimeouts.set(
+      task.id,
+      setTimeout(() => {
+        this.io.emit("agent:status", { agentId, status: AgentStatus.Idle });
+        this.actingTimeouts.delete(task.id);
+      }, ACTING_DURATION_MS),
+    );
 
     const baseMeta = { source: "custom-scheduled-task", taskId: task.id, taskName: task.name };
 

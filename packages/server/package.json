@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^1.1.9",
+    "@ai-sdk/google": "^3.0.30",
     "@ai-sdk/openai": "^1.1.14",
     "@ai-sdk/openai-compatible": "^0.1.8",
     "@andresaya/edge-tts": "^1.8.0",
@@ -23,6 +24,7 @@
     "@huggingface/transformers": "^3.4.1",
     "@opencode-ai/sdk": "^1.2.6",
     "@otterbot/shared": "workspace:*",
+    "@slack/bolt": "^4.6.0",
     "ai": "^4.1.61",
     "better-sqlite3-multiple-ciphers": "^11.8.1",
     "discord.js": "^14.16.0",
@@ -31,9 +33,13 @@
     "fastify": "^5.2.1",
     "googleapis": "^171.4.0",
     "gray-matter": "^4.0.3",
+    "irc-framework": "^4.14.0",
+    "isolated-vm": "^6.0.2",
     "kokoro-js": "^1.1.0",
+    "matrix-js-sdk": "^34.11.1",
     "nanoid": "^5.0.9",
     "node-pty": "^1.1.0",
+    "node-telegram-bot-api": "^0.67.0",
     "ollama-ai-provider": "^1.2.0",
     "playwright": "^1.50.0",
     "puppeteer": "^24.2.0",
@@ -45,9 +51,18 @@
     "zod": "^3.24.1",
     "zod-to-json-schema": "^3.25.1"
   },
+  "peerDependencies": {
+    "botbuilder": "^4.23.0"
+  },
+  "peerDependenciesMeta": {
+    "botbuilder": {
+      "optional": true
+    }
+  },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^22.13.1",
+    "@types/node-telegram-bot-api": "^0.64.13",
     "@types/ws": "^8.5.13",
     "@types/yauzl": "^2.10.3",
     "@types/yazl": "^3.3.0",

@@ -20,6 +20,7 @@ function isCodingAgentEnabled(registryEntryId: string): boolean {
     case "builtin-opencode-coder": return getConfig("opencode:enabled") === "true";
     case "builtin-claude-code-coder": return getConfig("claude-code:enabled") === "true";
     case "builtin-codex-coder": return getConfig("codex:enabled") === "true";
+    case "builtin-gemini-cli-coder": return getConfig("gemini-cli:enabled") === "true";
     default: return true;
   }
 }
@@ -31,11 +32,19 @@ import type { WorkspaceManager } from "../workspace/workspace.js";
 import { eq } from "drizzle-orm";
 import { getConfig, setConfig, deleteConfig } from "../auth/auth.js";
 import { execSync } from "node:child_process";
+import { getAgentModelOverride } from "../settings/settings.js";
 import { getConfiguredSearchProvider } from "../tools/search/providers.js";
 import { isDesktopEnabled } from "../desktop/desktop.js";
 import { TEAM_LEAD_PROMPT } from "./prompts/team-lead.js";
 import { getRandomModelPackId } from "../models3d/model-packs.js";
 import { debug } from "../utils/debug.js";
+import {
+  fetchPullRequest,
+  fetchPullRequestReviews,
+  requestPullRequestReviewers,
+  createIssueComment,
+} from "../github/github-service.js";
+import type { PipelineManager } from "../pipeline/pipeline-manager.js";
 
 /** Tool descriptions for environment context injection */
 const TOOL_DESCRIPTIONS: Record<string, string> = {
@@ -187,6 +196,7 @@ export interface TeamLeadDependencies {
 
 const MAX_CONTINUATION_CYCLES = 5;
 const MAX_TASK_RETRIES = 3;
+const MAX_TASK_SPAWNS = 10;
 
 export class TeamLead extends BaseAgent {
   private workers: Map<string, Worker> = new Map();
@@ -206,6 +216,12 @@ export class TeamLead extends BaseAgent {
   private _onTerminalData?: (agentId: string, data: string) => void;
   private _onPtySessionRegistered?: (agentId: string, client: import("./worker.js").PtyClient) => void;
   private _onPtySessionUnregistered?: (agentId: string) => void;
+  private _pipelineManager: PipelineManager | null = null;
+
+  /** Inject the pipeline manager (avoids circular dependency at construction) */
+  setPipelineManager(pm: PipelineManager): void {
+    this._pipelineManager = pm;
+  }
 
   constructor(deps: TeamLeadDependencies) {
     const registry = new Registry();
@@ -289,6 +305,24 @@ export class TeamLead extends BaseAgent {
     this.verificationRequested = this.loadFlag("verification");
   }
 
+  /** Re-read model/provider from config so settings changes take effect without restart */
+  protected override refreshLlmConfig(): void {
+    const newModel =
+      getConfig("team_lead_model") ??
+      getConfig("coo_model") ??
+      "claude-sonnet-4-5-20250929";
+    const newProvider =
+      getConfig("team_lead_provider") ??
+      getConfig("coo_provider") ??
+      "anthropic";
+
+    if (newModel !== this.llmConfig.model || newProvider !== this.llmConfig.provider) {
+      console.log(`[TeamLead ${this.id}] LLM config changed: ${this.llmConfig.provider}/${this.llmConfig.model} → ${newProvider}/${newModel}`);
+      this.llmConfig.model = newModel;
+      this.llmConfig.provider = newProvider;
+    }
+  }
+
   /** Persist a flag to the config KV table so it survives restarts */
   private persistFlag(flag: "verification", value: boolean): void {
     const key = `project:${this.projectId}:${flag}_requested`;
@@ -322,6 +356,31 @@ export class TeamLead extends BaseAgent {
     if (!message.metadata?.isRecovery) {
       this.verificationRequested = false;
       this.persistFlag("verification", false);
+    }
+
+    // Pipeline directives carry structured metadata — spawn the worker directly
+    // instead of relying on LLM interpretation of the text hint.
+    const pipelineRegistryEntryId = message.metadata?.pipelineRegistryEntryId as string | undefined;
+    const pipelineTaskId = message.metadata?.pipelineTaskId as string | undefined;
+    if (pipelineRegistryEntryId && pipelineTaskId) {
+      // Extract the worker directive from the message content
+      const directiveMatch = message.content.match(/Worker directive:\n([\s\S]+)/);
+      const workerTask = directiveMatch?.[1]?.trim() ?? message.content;
+      const pipelineBranch = message.metadata?.pipelineBranch as string | undefined;
+
+      const result = await this.spawnWorker(pipelineRegistryEntryId, workerTask, pipelineTaskId, { pipelineOverride: true, sourceBranch: pipelineBranch });
+      const isSpawnSuccess = result.startsWith("Spawned ");
+
+      if (!isSpawnSuccess && this._pipelineManager?.isPipelineTask(pipelineTaskId)) {
+        console.warn(`[TeamLead ${this.id}] Pipeline spawn failure for task ${pipelineTaskId}: ${result}`);
+        await this._pipelineManager.handleSpawnFailure(pipelineTaskId, result);
+        return;
+      }
+
+      if (this.parentId) {
+        this.sendMessage(this.parentId, MessageType.Report, result);
+      }
+      return;
     }
 
     // Inject current board state so the TL knows what's already done
@@ -362,15 +421,111 @@ export class TeamLead extends BaseAgent {
   /** Detect whether a worker report indicates a PR was created — definitive success signal */
   private isPRCreated(report: string): boolean {
     const lower = report.toLowerCase();
+    // Must match affirmative PR creation signals — NOT just mentioning "pull request"
+    // (a failure report like "I was unable to open a pull request" must not match)
     return (
       lower.includes("gh pr create") ||
-      lower.includes("pull request") ||
       /github\.com\/[^\s]+\/pull\/\d+/.test(lower) ||
       lower.includes("created pull request") ||
       lower.includes("opened a pull request") ||
       lower.includes("pr created") ||
-      lower.includes("created a pr")
+      lower.includes("created a pr") ||
+      lower.includes("opened a pr") ||
+      lower.includes("pull request #")
     );
+  }
+
+  /** Extract a PR number from a worker report */
+  private extractPRNumber(report: string): number | null {
+    // Match github.com/{owner}/{repo}/pull/{number}
+    const urlMatch = report.match(/github\.com\/[^\s]+\/pull\/(\d+)/);
+    if (urlMatch) return parseInt(urlMatch[1], 10);
+    // Match "PR #123" or "Pull Request #123"
+    const prMatch = report.match(/(?:PR|Pull Request)\s*#(\d+)/i);
+    if (prMatch) return parseInt(prMatch[1], 10);
+    return null;
+  }
+
+  /** Extract a branch name from a worker report */
+  private extractPRBranch(report: string): string | null {
+    // Match common patterns for branch names in worker reports
+    const patterns = [
+      /branch[:\s]+([a-zA-Z0-9._\/-]+)/i,
+      /created branch\s+([a-zA-Z0-9._\/-]+)/i,
+      /git checkout -b\s+([a-zA-Z0-9._\/-]+)/i,
+      /pushed to\s+([a-zA-Z0-9._\/-]+)/i,
+    ];
+    for (const pattern of patterns) {
+      const match = report.match(pattern);
+      if (match) return match[1];
+    }
+    return null;
+  }
+
+  /** Fetch the authoritative branch name for a PR from the GitHub API */
+  private async resolvePRBranch(projectId: string, prNumber: number): Promise<string | null> {
+    try {
+      const db = getDb();
+      const project = db.select().from(schema.projects).where(eq(schema.projects.id, projectId)).get();
+      if (!project?.githubRepo) return null;
+      const token = getConfig("github:token");
+      if (!token) return null;
+      const pr = await fetchPullRequest(project.githubRepo, token, prNumber);
+      return pr.head.ref;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * After a worker addresses review feedback and the task returns to in_review:
+   * 1. Post a comment on the PR summarizing what was changed
+   * 2. Re-request review from whoever previously requested changes
+   */
+  private async postReviewUpdateAndReRequest(
+    projectId: string,
+    prNumber: number,
+    completionReport: string,
+  ): Promise<void> {
+    const db = getDb();
+    const project = db.select().from(schema.projects).where(eq(schema.projects.id, projectId)).get();
+    if (!project?.githubRepo) return;
+    const token = getConfig("github:token");
+    if (!token) return;
+    const botUsername = getConfig("github:username") ?? "otterbot";
+
+    // Post a comment summarizing the changes
+    const snippet = completionReport.length > 1500
+      ? completionReport.slice(0, 1500) + "\n\n_(truncated)_"
+      : completionReport;
+    const commentBody =
+      `I've addressed the review feedback and pushed updates to this PR.\n\n` +
+      `**Changes made:**\n${snippet}`;
+
+    try {
+      await createIssueComment(project.githubRepo, token, prNumber, commentBody);
+    } catch (err) {
+      console.error(`[TeamLead ${this.id}] Failed to post PR comment:`, err);
+    }
+
+    // Find reviewers who requested changes and re-request their review
+    try {
+      const reviews = await fetchPullRequestReviews(project.githubRepo, token, prNumber);
+      const changeRequesters = [
+        ...new Set(
+          reviews
+            .filter((r) => r.state === "CHANGES_REQUESTED")
+            .map((r) => r.user.login)
+            .filter((login) => login.toLowerCase() !== botUsername.toLowerCase()),
+        ),
+      ];
+      if (changeRequesters.length > 0) {
+        await requestPullRequestReviewers(project.githubRepo, token, prNumber, changeRequesters);
+        console.log(`[TeamLead ${this.id}] Re-requested review from: ${changeRequesters.join(", ")} on PR #${prNumber}`);
+      }
+    } catch (err) {
+      console.error(`[TeamLead ${this.id}] Failed to re-request reviewers:`, err);
+    }
   }
 
   private isFailureReport(report: string): boolean {
@@ -409,7 +564,37 @@ export class TeamLead extends BaseAgent {
       .where(eq(schema.kanbanTasks.id, taskId))
       .get();
 
-    if (!task || task.column !== "in_progress") return false; // LLM already moved it
+    if (!task) return false;
+
+    // If the LLM incorrectly moved a successful task to backlog, override
+    if (task.column === "backlog" && !this.isFailureReport(workerReport)) {
+      // Detect PR in the report — route to in_review instead of done
+      const prNumber = this.extractPRNumber(workerReport) ?? task.prNumber;
+      const targetCol = prNumber ? "in_review" : "done";
+      console.warn(
+        `[TeamLead ${this.id}] Safety net: LLM moved task "${task.title}" (${taskId}) to backlog ` +
+        `but report looks successful. Overriding to "${targetCol}".`,
+      );
+      const overrideUpdates: Record<string, unknown> = {
+        column: targetCol,
+        assigneeAgentId: task.assigneeAgentId ?? "",
+        completionReport: workerReport,
+      };
+      if (prNumber) {
+        overrideUpdates.prNumber = prNumber;
+        // Fetch authoritative branch name from GitHub API
+        this.resolvePRBranch(task.projectId, prNumber).then((branch) => {
+          if (branch) {
+            this.updateKanbanTask(taskId, { prBranch: branch } as any);
+          }
+        }).catch(() => {});
+      }
+      this.updateKanbanTask(taskId, overrideUpdates as any);
+      if (targetCol === "done") this.checkUnblockedTasks(taskId);
+      return true;
+    }
+
+    if (task.column !== "in_progress") return false; // LLM already moved it
 
     const failed = this.isFailureReport(workerReport);
     const assignee = failed ? "" : task.assigneeAgentId;
@@ -418,8 +603,12 @@ export class TeamLead extends BaseAgent {
     const currentRetries = (task as any).retryCount ?? 0;
     const nextRetryCount = failed ? currentRetries + 1 : currentRetries;
     const retriesExhausted = failed && nextRetryCount >= MAX_TASK_RETRIES;
+
+    // Detect PR in the report — route successful tasks to in_review if a PR was created
+    const prNumber = this.extractPRNumber(workerReport) ?? task.prNumber;
+    const hasExistingPR = !!task.prNumber;
     // Always target "backlog" for failures — updateKanbanTask will force to "done" if retries exhausted
-    const targetColumn = failed ? "backlog" : "done";
+    const targetColumn = failed ? "backlog" : (prNumber || hasExistingPR) ? "in_review" : "done";
 
     console.warn(
       `[TeamLead ${this.id}] Safety net: LLM did not move task "${task.title}" (${taskId}). ` +
@@ -428,13 +617,22 @@ export class TeamLead extends BaseAgent {
     );
 
     // Build updates — updateKanbanTask handles retry counting for backlog transitions
-    const updates: { column: string; assigneeAgentId: string; description?: string; completionReport?: string } = {
+    const updates: Record<string, unknown> = {
       column: targetColumn,
       assigneeAgentId: assignee ?? "",
     };
 
     if (!failed) {
       updates.completionReport = workerReport;
+      if (prNumber) {
+        updates.prNumber = prNumber;
+        // Fetch authoritative branch name from GitHub API (async, non-blocking)
+        this.resolvePRBranch(task.projectId, prNumber).then((branch) => {
+          if (branch) {
+            this.updateKanbanTask(taskId, { prBranch: branch } as any);
+          }
+        }).catch(() => {});
+      }
     }
 
     if (failed && !retriesExhausted) {
@@ -498,6 +696,14 @@ export class TeamLead extends BaseAgent {
       }
     }
 
+    // Pipeline intercept: if this task is managed by the pipeline, let PipelineManager
+    // handle the next step instead of the LLM evaluation. Still clean up the worker above.
+    if (reportingTaskId && this._pipelineManager?.isPipelineTask(reportingTaskId)) {
+      console.log(`[TeamLead ${this.id}] Pipeline-managed task ${reportingTaskId} — routing to PipelineManager`);
+      await this._pipelineManager.advancePipeline(reportingTaskId, message.content);
+      return;
+    }
+
     // Programmatically clean up orphaned tasks (in_progress but assigned to dead workers)
     // Don't rely on the LLM — it consistently fails to handle orphans
     // IMPORTANT: Skip the currently-reporting task — its worker was just cleaned up above,
@@ -510,8 +716,9 @@ export class TeamLead extends BaseAgent {
       this.updateKanbanTask(orphan.id, { column: "backlog", assigneeAgentId: "" });
     }
 
-    // Re-check orphans after cleanup (should be 0 now)
-    const orphans = this.getOrphanedTasks();
+    // Re-check orphans after cleanup — exclude the reporting task since its
+    // worker was legitimately cleaned up and we're about to evaluate its report.
+    const orphans = this.getOrphanedTasks().filter((o) => o.id !== reportingTaskId);
     const livingWorkers = this.workers.size;
 
     const board = this.getKanbanBoardState();
@@ -757,7 +964,9 @@ export class TeamLead extends BaseAgent {
     for (const task of toSpawn) {
       // Check if task is browser/desktop-related — sandboxed coding agents can't do these
       const taskText = `${task.title} ${task.description ?? ""}`.toLowerCase();
-      const isBrowserTask = /\b(browser|chrome|chromium|firefox|launch.*browser|open.*url|browse.*web|headless|puppeteer|playwright|selenium|desktop.*app)\b/.test(taskText);
+      // Tasks involving git/CI/PR work must go to a coding agent, never a browser agent
+      const isCIOrGitTask = /\b(ci\b|pipeline|pull.?request|\bpr\b|git push|git commit|open.?pr|create.?pr|merge|deploy)\b/.test(taskText);
+      const isBrowserTask = !isCIOrGitTask && /\b(browser|chrome|chromium|firefox|launch.*browser|open.*url|browse.*web|headless|puppeteer|playwright|selenium|desktop.*app)\b/.test(taskText);
 
       // Find the right registry entry — check project assignments first, then global fallback
       let registryEntryId = "builtin-coder";
@@ -772,6 +981,8 @@ export class TeamLead extends BaseAgent {
         registryEntryId = "builtin-claude-code-coder";
       } else if (getConfig("codex:enabled") === "true") {
         registryEntryId = "builtin-codex-coder";
+      } else if (getConfig("gemini-cli:enabled") === "true") {
+        registryEntryId = "builtin-gemini-cli-coder";
       }
 
       console.log(
@@ -834,11 +1045,12 @@ export class TeamLead extends BaseAgent {
     hasBacklog: boolean; backlogCount: number;
     hasUnblockedBacklog: boolean; unblockedBacklogCount: number;
     hasInProgress: boolean; inProgressCount: number;
+    hasInReview: boolean; inReviewCount: number;
     allDone: boolean; doneCount: number;
     summary: string;
   } {
     if (!this.projectId) {
-      return { hasBacklog: false, backlogCount: 0, hasUnblockedBacklog: false, unblockedBacklogCount: 0, hasInProgress: false, inProgressCount: 0, allDone: false, doneCount: 0, summary: "No project context." };
+      return { hasBacklog: false, backlogCount: 0, hasUnblockedBacklog: false, unblockedBacklogCount: 0, hasInProgress: false, inProgressCount: 0, hasInReview: false, inReviewCount: 0, allDone: false, doneCount: 0, summary: "No project context." };
     }
 
     const db = getDb();
@@ -849,10 +1061,10 @@ export class TeamLead extends BaseAgent {
       .all();
 
     if (tasks.length === 0) {
-      return { hasBacklog: false, backlogCount: 0, hasUnblockedBacklog: false, unblockedBacklogCount: 0, hasInProgress: false, inProgressCount: 0, allDone: false, doneCount: 0, summary: "No tasks." };
+      return { hasBacklog: false, backlogCount: 0, hasUnblockedBacklog: false, unblockedBacklogCount: 0, hasInProgress: false, inProgressCount: 0, hasInReview: false, inReviewCount: 0, allDone: false, doneCount: 0, summary: "No tasks." };
     }
 
-    const byColumn: Record<string, typeof tasks> = { backlog: [], in_progress: [], done: [] };
+    const byColumn: Record<string, typeof tasks> = { triage: [], backlog: [], in_progress: [], in_review: [], done: [] };
     for (const t of tasks) {
       (byColumn[t.column] ?? []).push(t);
     }
@@ -868,7 +1080,9 @@ export class TeamLead extends BaseAgent {
         const blockedTag = blocked ? ` [BLOCKED by: ${blockedBy.join(", ")}]` : "";
         const retryCount = (t as any).retryCount ?? 0;
         const retryTag = col === "backlog" && retryCount > 0 ? ` [retry ${retryCount}/${MAX_TASK_RETRIES}]` : "";
-        lines.push(`  - ${t.title} (${t.id})${assignee}${blockedTag}${retryTag}`);
+        const spawnCount = (t as any).spawnCount ?? 0;
+        const spawnTag = spawnCount > 1 ? ` [spawned ${spawnCount}x]` : "";
+        lines.push(`  - ${t.title} (${t.id})${assignee}${blockedTag}${retryTag}${spawnTag}`);
         // Include descriptions for backlog tasks so the TL can see failure context from previous attempts
         if (col === "backlog" && t.description && t.description.includes("PREVIOUS ATTEMPT FAILED")) {
           lines.push(`    ${t.description.slice(t.description.lastIndexOf("--- PREVIOUS ATTEMPT FAILED ---")).slice(0, 300)}`);
@@ -885,8 +1099,11 @@ export class TeamLead extends BaseAgent {
       (t) => !this.isTaskBlocked((t.blockedBy as string[]) ?? []),
     ).length;
     const inProgressCount = byColumn.in_progress.length;
+    const inReviewCount = byColumn.in_review.length;
     const doneCount = byColumn.done.length;
-    const allDone = tasks.length > 0 && backlogCount === 0 && inProgressCount === 0;
+    // Triage tasks are unassigned GitHub issues — they should NOT block allDone
+    const nonTriageTasks = tasks.filter((t) => t.column !== "triage");
+    const allDone = nonTriageTasks.length > 0 && backlogCount === 0 && inProgressCount === 0 && inReviewCount === 0;
     return {
       hasBacklog: backlogCount > 0,
       backlogCount,
@@ -894,6 +1111,8 @@ export class TeamLead extends BaseAgent {
       unblockedBacklogCount,
       hasInProgress: inProgressCount > 0,
       inProgressCount,
+      hasInReview: inReviewCount > 0,
+      inReviewCount,
       allDone,
       doneCount,
       summary: lines.join("\n"),
@@ -1046,6 +1265,30 @@ export class TeamLead extends BaseAgent {
             this._shouldAbortThink = true;
             return "STOP. Already refused. Wait for current worker to finish.";
           }
+          // Early rejection: refuse to spawn for tasks already in "done" or "in_review"
+          if (taskId) {
+            const db = getDb();
+            const existingTask = db
+              .select()
+              .from(schema.kanbanTasks)
+              .where(eq(schema.kanbanTasks.id, taskId))
+              .get();
+            if (existingTask?.column === "done") {
+              this._toolCallCounts.set("spawn_worker_refused", (refusals) + 1);
+              this._shouldAbortThink = true;
+              return `REFUSED: Task "${existingTask.title}" (${taskId}) is already DONE. Do not re-spawn workers for completed tasks.`;
+            }
+            if (existingTask?.column === "in_review") {
+              this._toolCallCounts.set("spawn_worker_refused", (refusals) + 1);
+              this._shouldAbortThink = true;
+              return `REFUSED: Task "${existingTask.title}" (${taskId}) is IN REVIEW — PR #${(existingTask as any).prNumber ?? "?"} is awaiting reviewer approval. Do NOT spawn a worker. The PR monitor handles this automatically.`;
+            }
+            if (existingTask?.column === "triage") {
+              this._toolCallCounts.set("spawn_worker_refused", (refusals) + 1);
+              this._shouldAbortThink = true;
+              return `REFUSED: Task "${existingTask.title}" (${taskId}) is in TRIAGE — it has not been assigned yet. Only work on tasks in the backlog or in_progress columns.`;
+            }
+          }
           const result = await this.spawnWorker(registryEntryId, task, taskId);
           if (result.startsWith("REFUSED:")) {
             this._toolCallCounts.set("spawn_worker_refused", refusals + 1);
@@ -1105,7 +1348,7 @@ export class TeamLead extends BaseAgent {
         parameters: z.object({
           title: z.string().describe("Short task title"),
           description: z.string().optional().describe("Detailed task description"),
-          column: z.enum(["backlog", "in_progress", "done"]).optional().describe("Column to place the task in (default: backlog)"),
+          column: z.enum(["triage", "backlog", "in_progress", "in_review", "done"]).optional().describe("Column to place the task in (default: backlog). The 'triage' column is for unassigned GitHub issues — do not place manually created tasks there."),
           labels: z.array(z.string()).optional().describe("Labels/tags for the task"),
           blockedBy: z.array(z.string()).optional().describe("Actual task IDs (from create_task results) that must complete before this task can start. Do NOT use symbolic names like 'task-1'."),
         }),
@@ -1118,7 +1361,7 @@ export class TeamLead extends BaseAgent {
           "Update a kanban task card. Move tasks between columns, assign agents, or update details.",
         parameters: z.object({
           taskId: z.string().describe("The task ID to update"),
-          column: z.enum(["backlog", "in_progress", "done"]).optional().describe("Move task to this column"),
+          column: z.enum(["triage", "backlog", "in_progress", "in_review", "done"]).optional().describe("Move task to this column. The 'triage' column is for unassigned GitHub issues — do not move tasks there."),
           assigneeAgentId: z.string().optional().describe("Agent ID to assign the task to"),
           description: z.string().optional().describe("Updated description"),
           title: z.string().optional().describe("Updated title"),
@@ -1177,6 +1420,7 @@ export class TeamLead extends BaseAgent {
       if (entry.id === "builtin-opencode-coder" && getConfig("opencode:enabled") !== "true") return false;
       if (entry.id === "builtin-claude-code-coder" && getConfig("claude-code:enabled") !== "true") return false;
       if (entry.id === "builtin-codex-coder" && getConfig("codex:enabled") !== "true") return false;
+      if (entry.id === "builtin-gemini-cli-coder" && getConfig("gemini-cli:enabled") !== "true") return false;
       return entry.capabilities.some((c) =>
         c.toLowerCase().includes(capability.toLowerCase()),
       );
@@ -1210,36 +1454,42 @@ export class TeamLead extends BaseAgent {
     registryEntryId: string,
     task: string,
     taskId?: string,
+    options?: { pipelineOverride?: boolean; sourceBranch?: string },
   ): Promise<string> {
     try {
       const originalRequestedId = registryEntryId;
 
-      // Remap to project-preferred agent if applicable
-      const assignments = this.getProjectAgentAssignments();
-      if (assignments.coder && isCodingAgentEnabled(assignments.coder) && CODING_AGENT_IDS.has(registryEntryId) && registryEntryId !== assignments.coder) {
-        console.log(
-          `[TeamLead ${this.id}] Remapping agent ${registryEntryId} → ${assignments.coder} (project assignment)`,
-        );
-        registryEntryId = assignments.coder;
-      }
-
-      // If LLM requested builtin-coder but an external coding agent is enabled globally, prefer it
-      if (registryEntryId === "builtin-coder") {
-        if (assignments.coder && isCodingAgentEnabled(assignments.coder)) {
+      // Pipeline directives specify the exact agent — skip remapping
+      if (!options?.pipelineOverride) {
+        // Remap to project-preferred agent if applicable
+        const assignments = this.getProjectAgentAssignments();
+        if (assignments.coder && isCodingAgentEnabled(assignments.coder) && CODING_AGENT_IDS.has(registryEntryId) && registryEntryId !== assignments.coder) {
+          console.log(
+            `[TeamLead ${this.id}] Remapping agent ${registryEntryId} → ${assignments.coder} (project assignment)`,
+          );
           registryEntryId = assignments.coder;
-        } else if (getConfig("opencode:enabled") === "true") {
-          registryEntryId = "builtin-opencode-coder";
-        } else if (getConfig("claude-code:enabled") === "true") {
-          registryEntryId = "builtin-claude-code-coder";
-        } else if (getConfig("codex:enabled") === "true") {
-          registryEntryId = "builtin-codex-coder";
         }
-      }
 
-      if (registryEntryId !== originalRequestedId) {
-        console.log(
-          `[TeamLead ${this.id}] spawnWorker: requested=${originalRequestedId}, resolved=${registryEntryId}`,
-        );
+        // If LLM requested builtin-coder but an external coding agent is enabled globally, prefer it
+        if (registryEntryId === "builtin-coder") {
+          if (assignments.coder && isCodingAgentEnabled(assignments.coder)) {
+            registryEntryId = assignments.coder;
+          } else if (getConfig("opencode:enabled") === "true") {
+            registryEntryId = "builtin-opencode-coder";
+          } else if (getConfig("claude-code:enabled") === "true") {
+            registryEntryId = "builtin-claude-code-coder";
+          } else if (getConfig("codex:enabled") === "true") {
+            registryEntryId = "builtin-codex-coder";
+          } else if (getConfig("gemini-cli:enabled") === "true") {
+            registryEntryId = "builtin-gemini-cli-coder";
+          }
+        }
+
+        if (registryEntryId !== originalRequestedId) {
+          console.log(
+            `[TeamLead ${this.id}] spawnWorker: requested=${originalRequestedId}, resolved=${registryEntryId}`,
+          );
+        }
       }
 
       // Enforce max concurrent coding workers
@@ -1280,7 +1530,8 @@ export class TeamLead extends BaseAgent {
 
       if (this.projectId) {
         // Prepare a git worktree for the worker to avoid file conflicts
-        workspacePath = this.workspace.prepareAgentWorktree(this.projectId, workerId);
+        // For pipeline kickbacks (security/review), start from the feature branch so the worker can find existing code
+        workspacePath = this.workspace.prepareAgentWorktree(this.projectId, workerId, options?.sourceBranch);
       }
 
       // Derive human-readable name from kanban task title or task description
@@ -1363,10 +1614,12 @@ export class TeamLead extends BaseAgent {
         modelPackId: (entry as any).modelPackId ?? getRandomModelPackId(),
         gearConfig: (entry as any).gearConfig ? JSON.parse((entry as any).gearConfig) : null,
         model:
+          getAgentModelOverride(entry.id)?.model ??
           getConfig("worker_model") ??
           getConfig("coo_model") ??
           entry.defaultModel,
         provider:
+          getAgentModelOverride(entry.id)?.provider ??
           getConfig("worker_provider") ??
           getConfig("coo_provider") ??
           entry.defaultProvider,
@@ -1401,13 +1654,13 @@ export class TeamLead extends BaseAgent {
 
       // Auto-assign kanban task if taskId provided
       if (taskId) {
-        const assigned = this.autoAssignTask(taskId, worker.id);
-        if (!assigned) {
-          // Task is blocked — clean up the worker and abort
+        const reason = this.autoAssignTask(taskId, worker.id);
+        if (reason) {
+          // Task cannot be assigned — clean up the worker and abort
           worker.destroy();
           this.workers.delete(worker.id);
           console.warn(`[TeamLead ${this.id}] Aborted spawn for blocked task ${taskId}`);
-          return `BLOCKED: Task ${taskId} cannot start — it depends on tasks that are not yet done. Wait for blockers to complete first.`;
+          return reason;
         }
       }
 
@@ -1463,9 +1716,9 @@ export class TeamLead extends BaseAgent {
     return false;
   }
 
-  /** Auto-assign a kanban task to a worker: move to in_progress and set assigneeAgentId. Returns false if blocked. */
-  private autoAssignTask(taskId: string, workerId: string): boolean {
-    if (!this.projectId) return false;
+  /** Auto-assign a kanban task to a worker: move to in_progress and set assigneeAgentId. Returns null on success, or a reason string on failure. */
+  private autoAssignTask(taskId: string, workerId: string): string | null {
+    if (!this.projectId) return "No project configured.";
 
     const db = getDb();
     const task = db
@@ -1476,7 +1729,32 @@ export class TeamLead extends BaseAgent {
 
     if (!task) {
       console.warn(`[TeamLead ${this.id}] autoAssignTask: task ${taskId} not found`);
-      return false;
+      return `Task ${taskId} not found.`;
+    }
+
+    // Guard: refuse if task is already done (prevents re-work loops)
+    if (task.column === "done") {
+      console.warn(`[TeamLead ${this.id}] autoAssignTask: task "${task.title}" (${taskId}) is already DONE — refusing assignment`);
+      return `REFUSED: Task "${task.title}" (${taskId}) is already DONE. Do not re-spawn workers for completed tasks.`;
+    }
+
+    // Guard: refuse if task is in triage (not yet assigned — only backlog tasks can be worked on)
+    if (task.column === "triage") {
+      console.warn(`[TeamLead ${this.id}] autoAssignTask: task "${task.title}" (${taskId}) is in TRIAGE — refusing assignment`);
+      return `REFUSED: Task "${task.title}" (${taskId}) is in TRIAGE and has not been assigned. Only backlog tasks can be worked on.`;
+    }
+
+    // Guard: refuse if task is in review (PR awaiting approval — PR monitor handles this)
+    if (task.column === "in_review") {
+      console.warn(`[TeamLead ${this.id}] autoAssignTask: task "${task.title}" (${taskId}) is IN REVIEW — refusing assignment`);
+      return `REFUSED: Task "${task.title}" (${taskId}) is IN REVIEW — a PR is awaiting approval. Do not re-spawn workers.`;
+    }
+
+    // Guard: refuse if task has been spawned too many times (hard cap to prevent infinite loops)
+    const currentSpawnCount = (task as any).spawnCount ?? 0;
+    if (currentSpawnCount >= MAX_TASK_SPAWNS) {
+      console.warn(`[TeamLead ${this.id}] autoAssignTask: task "${task.title}" (${taskId}) has reached spawn cap (${currentSpawnCount}/${MAX_TASK_SPAWNS}) — refusing assignment`);
+      return `REFUSED: Task "${task.title}" (${taskId}) has reached the maximum spawn attempts (${currentSpawnCount}/${MAX_TASK_SPAWNS}). This task has failed too many times and cannot be retried automatically.`;
     }
 
     // Programmatic enforcement: refuse if task is blocked
@@ -1485,12 +1763,12 @@ export class TeamLead extends BaseAgent {
       console.warn(
         `[TeamLead ${this.id}] autoAssignTask: task "${task.title}" (${taskId}) is BLOCKED by [${blockedBy.join(", ")}] — refusing assignment`,
       );
-      return false;
+      return `BLOCKED: Task ${taskId} cannot start — it depends on tasks that are not yet done. Wait for blockers to complete first.`;
     }
 
     const now = new Date().toISOString();
     db.update(schema.kanbanTasks)
-      .set({ column: "in_progress", assigneeAgentId: workerId, updatedAt: now })
+      .set({ column: "in_progress", assigneeAgentId: workerId, spawnCount: currentSpawnCount + 1, updatedAt: now })
       .where(eq(schema.kanbanTasks.id, taskId))
       .run();
 
@@ -1504,7 +1782,7 @@ export class TeamLead extends BaseAgent {
     }
 
     console.log(`[TeamLead ${this.id}] Auto-assigned task "${task.title}" (${taskId}) to worker ${workerId}`);
-    return true;
+    return null;
   }
 
   private createKanbanTask(
@@ -1588,7 +1866,7 @@ export class TeamLead extends BaseAgent {
 
   private updateKanbanTask(
     taskId: string,
-    updates: { column?: string; assigneeAgentId?: string; description?: string; title?: string; blockedBy?: string[]; completionReport?: string },
+    updates: { column?: string; assigneeAgentId?: string; description?: string; title?: string; blockedBy?: string[]; completionReport?: string; prNumber?: number; prBranch?: string },
   ): string {
     const db = getDb();
     const existing = db
@@ -1619,9 +1897,65 @@ export class TeamLead extends BaseAgent {
     if (updates.description !== undefined) setValues.description = updates.description;
     if (updates.title !== undefined) setValues.title = updates.title;
     if (updates.blockedBy !== undefined) setValues.blockedBy = updates.blockedBy;
+    if (updates.prNumber !== undefined) setValues.prNumber = updates.prNumber;
+    if (updates.prBranch !== undefined) setValues.prBranch = updates.prBranch;
+
+    // Guard: tasks with an open PR should go to in_review, not done.
+    // Only the PR monitor should move them to done (when the PR is actually merged).
+    if (updates.column === "done" && existing.column === "in_progress" && (existing as any).prNumber) {
+      console.warn(
+        `[TeamLead ${this.id}] Auto-correcting update_task: task "${existing.title}" (${taskId}) has PR #${(existing as any).prNumber} — ` +
+        `routing to "in_review" instead of "done". The PR monitor will move it to done when the PR is merged.`,
+      );
+      setValues.column = "in_review";
+    }
+
+    // Guard: reject in_progress→backlog when the pending worker report indicates success.
+    // The LLM sometimes misjudges a successful task as failed. Correcting here prevents
+    // the LLM from spawning a duplicate worker in the same think cycle.
+    if (updates.column === "backlog" && existing.column === "in_progress") {
+      const pendingReport = this._pendingWorkerReport.get(taskId);
+      if (pendingReport && !this.isFailureReport(pendingReport)) {
+        // If a PR is detected, route to in_review instead of done
+        const detectedPR = this.extractPRNumber(pendingReport) ?? (existing as any).prNumber;
+        const correctedColumn = detectedPR ? "in_review" : "done";
+        console.warn(
+          `[TeamLead ${this.id}] Blocked update_task: LLM tried to move "${existing.title}" (${taskId}) to backlog ` +
+          `but pending worker report indicates success. Auto-correcting to "${correctedColumn}".`,
+        );
+        setValues.column = correctedColumn;
+        setValues.completionReport = pendingReport;
+        if (detectedPR) {
+          setValues.prNumber = detectedPR;
+        }
+        this._pendingWorkerReport.delete(taskId);
+
+        if (correctedColumn === "in_review") {
+          // Perform the DB update now, emit the event, and return a hard stop message.
+          db.update(schema.kanbanTasks)
+            .set(setValues)
+            .where(eq(schema.kanbanTasks.id, taskId))
+            .run();
+          const updatedRow = db.select().from(schema.kanbanTasks).where(eq(schema.kanbanTasks.id, taskId)).get();
+          if (updatedRow) this.onKanbanChange?.("updated", updatedRow as unknown as KanbanTask);
+          // Fire-and-forget PR comment + re-request review
+          if ((existing as any).prNumber || detectedPR) {
+            this.postReviewUpdateAndReRequest(
+              existing.projectId,
+              detectedPR ?? (existing as any).prNumber,
+              pendingReport,
+            ).catch(() => {});
+          }
+          return (
+            `AUTO-CORRECTED: Task "${existing.title}" moved to "in_review" — PR #${detectedPR ?? (existing as any).prNumber} is awaiting reviewer approval. ` +
+            `STOP. Do NOT spawn a worker for this task. The PR monitor will handle it automatically when the review is complete.`
+          );
+        }
+      }
+    }
 
     // Retry count enforcement: when LLM moves a task from in_progress back to backlog
-    if (updates.column === "backlog" && existing.column === "in_progress") {
+    if (setValues.column === "backlog" && existing.column === "in_progress") {
       const currentRetries = (existing as any).retryCount ?? 0;
       const newRetryCount = currentRetries + 1;
       setValues.retryCount = newRetryCount;
@@ -1634,6 +1968,18 @@ export class TeamLead extends BaseAgent {
         console.warn(
           `[TeamLead ${this.id}] Task "${existing.title}" (${taskId}) exceeded ${MAX_TASK_RETRIES} retries — marking as FAILED.`,
         );
+
+        // Escalate to COO immediately so the user is notified
+        if (this.parentId) {
+          this.sendMessage(
+            this.parentId,
+            MessageType.Report,
+            `⚠️ TASK FAILED after ${MAX_TASK_RETRIES} attempts — manual intervention needed.\n` +
+            `Task: "${existing.title}" (${taskId})\n` +
+            `Last error: ${snippet.slice(0, 300)}\n` +
+            `This task has been marked as FAILED and will not be retried automatically.`,
+          );
+        }
       }
     }
 
@@ -1663,8 +2009,24 @@ export class TeamLead extends BaseAgent {
     }
 
     // When a task moves to done, check for newly unblocked tasks
-    if (updates.column === "done") {
+    if (setValues.column === "done") {
       this.checkUnblockedTasks(taskId);
+    }
+
+    // When a task moves to in_review from in_progress, post a comment on the PR
+    // summarizing what was done and re-request review from the original reviewers.
+    if (
+      setValues.column === "in_review" &&
+      existing.column === "in_progress" &&
+      (existing as any).prNumber
+    ) {
+      this.postReviewUpdateAndReRequest(
+        existing.projectId,
+        (existing as any).prNumber as number,
+        (setValues.completionReport as string) ?? updates.completionReport ?? "",
+      ).catch((err) => {
+        console.error(`[TeamLead ${this.id}] Failed to post PR review update:`, err);
+      });
     }
 
     return `Task "${existing.title}" updated.`;

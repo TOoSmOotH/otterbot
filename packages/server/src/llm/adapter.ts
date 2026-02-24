@@ -1,4 +1,5 @@
 import { createAnthropic } from "@ai-sdk/anthropic";
+import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { createOpenAI } from "@ai-sdk/openai";
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import { createOllama } from "ollama-ai-provider";
@@ -86,6 +87,13 @@ export function resolveModel(config: LLMConfig): LanguageModel {
       return openai(config.model);
     }
 
+    case "google": {
+      const google = createGoogleGenerativeAI({
+        apiKey: config.apiKey ?? resolved.apiKey ?? "",
+      });
+      return google(config.model) as unknown as LanguageModel;
+    }
+
     case "ollama": {
       const ollama = createOllama({
         baseURL:
@@ -101,7 +109,7 @@ export function resolveModel(config: LLMConfig): LanguageModel {
         baseURL: "https://openrouter.ai/api/v1",
         apiKey: config.apiKey ?? resolved.apiKey ?? "",
       });
-      return openrouter(config.model);
+      return openrouter(config.model, { structuredOutputs: false });
     }
 
     case "openai-compatible": {
@@ -118,6 +126,45 @@ export function resolveModel(config: LLMConfig): LanguageModel {
       });
       return compatible(config.model);
     }
+
+    case "github-copilot": {
+      const copilot = createOpenAI({
+        baseURL: config.baseUrl ?? resolved.baseUrl ?? "https://api.githubcopilot.com",
+        apiKey: config.apiKey ?? resolved.apiKey ?? "",
+      });
+      return copilot(config.model);
+    }
+
+    case "huggingface": {
+      const hf = createOpenAICompatible({
+        name: "huggingface",
+        baseURL: config.baseUrl ?? resolved.baseUrl ?? "https://api-inference.huggingface.co/v1",
+        apiKey: config.apiKey ?? resolved.apiKey ?? "",
+      });
+      return hf(config.model);
+    }
+
+    case "nvidia": {
+      const nvidia = createOpenAI({
+        baseURL: config.baseUrl ?? resolved.baseUrl ?? "https://integrate.api.nvidia.com/v1",
+        apiKey: config.apiKey ?? resolved.apiKey ?? "",
+      });
+      return nvidia(config.model);
+    }
+
+    case "perplexity": {
+      const perplexity = createOpenAI({
+        baseURL: config.baseUrl ?? resolved.baseUrl ?? "https://api.perplexity.ai",
+        apiKey: config.apiKey ?? resolved.apiKey ?? "",
+      });
+      return perplexity(config.model);
+    }
+
+    case "deepgram":
+      throw new Error(
+        "Deepgram is a speech provider (STT/TTS) and does not support text generation. " +
+        "Configure it under TTS or STT settings instead.",
+      );
 
     default:
       throw new Error(`Unknown LLM provider: ${config.provider} (type: ${resolved.type})`);

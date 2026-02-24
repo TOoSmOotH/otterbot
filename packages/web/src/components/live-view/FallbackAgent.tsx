@@ -1,4 +1,4 @@
-import { useRef, useState, useEffect } from "react";
+import { useRef, useEffect } from "react";
 import { useFrame } from "@react-three/fiber";
 import { Html, Sparkles } from "@react-three/drei";
 import type { Mesh } from "three";
@@ -20,6 +20,7 @@ const ROLE_COLORS: Record<string, string> = {
   team_lead: "#f59e0b", // amber
   worker: "#06b6d4",   // cyan
   admin_assistant: "#e879f9", // pink
+  scheduler: "#f97316",  // orange
 };
 
 const STATUS_COLORS: Record<string, string> = {
@@ -35,8 +36,17 @@ export function FallbackAgent({ position, label, role, status, agentId, rotation
   const groupRef = useRef<THREE.Group>(null);
   const currentRotationRef = useRef(rotationY);
   const targetPosRef = useRef(new THREE.Vector3(...position));
-  const [isMoving, setIsMoving] = useState(false);
+  const tempVec3 = useRef(new THREE.Vector3());
   const color = ROLE_COLORS[role] ?? ROLE_COLORS.worker;
+
+  // Set initial position once on mount so the group starts at the right spot
+  useEffect(() => {
+    if (groupRef.current) {
+      groupRef.current.position.set(...position);
+      groupRef.current.rotation.y = rotationY;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Update target position when prop changes
   useEffect(() => {
@@ -46,18 +56,27 @@ export function FallbackAgent({ position, label, role, status, agentId, rotation
   useFrame((_, delta) => {
     if (!meshRef.current) return;
 
-    const ms = agentId ? useMovementStore.getState().getAgentPosition(agentId) : null;
+    const store = useMovementStore.getState();
+    const ms = agentId ? store.getAgentPosition(agentId) : null;
     const moving = ms?.isMoving ?? false;
-
-    if (moving !== isMoving) setIsMoving(moving);
+    const busy = agentId ? store.isAgentBusy(agentId) : false;
 
     // Update group position/rotation for movement
     if (groupRef.current) {
       if (moving && ms) {
         groupRef.current.position.set(...ms.position);
         currentRotationRef.current = THREE.MathUtils.lerp(currentRotationRef.current, ms.rotationY, delta * 8);
+      } else if (busy) {
+        // Hold current position — queue is about to start the next walk
       } else {
-        groupRef.current.position.lerp(targetPosRef.current, delta * 5);
+        // If the movement system placed this agent somewhere, stay there
+        // instead of sliding back to the prop position (prevents roaming snap-back).
+        const lastPos = agentId ? store.getLastKnownPosition(agentId) : null;
+        if (lastPos) {
+          groupRef.current.position.lerp(tempVec3.current.set(...lastPos), delta * 5);
+        } else {
+          groupRef.current.position.lerp(targetPosRef.current, delta * 5);
+        }
         currentRotationRef.current = THREE.MathUtils.lerp(currentRotationRef.current, rotationY, delta * 5);
       }
       groupRef.current.rotation.y = currentRotationRef.current;
@@ -81,7 +100,7 @@ export function FallbackAgent({ position, label, role, status, agentId, rotation
   });
 
   return (
-    <group ref={groupRef} position={position} rotation={[0, rotationY, 0]}>
+    <group ref={groupRef}>
       {/* Capsule body */}
       <mesh ref={meshRef} position={[0, 0.75, 0]} castShadow>
         <capsuleGeometry args={[0.3, 0.8, 8, 16]} />

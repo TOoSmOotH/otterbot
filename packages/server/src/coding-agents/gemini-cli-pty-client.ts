@@ -1,0 +1,265 @@
+/**
+ * Gemini CLI PTY client — spawns the `gemini` CLI in a pseudo-terminal
+ * and streams raw terminal output to the browser via Socket.IO + xterm.js.
+ *
+ * Implements the CodingAgentClient interface so it can be used as a drop-in
+ * replacement for the subprocess-based clients.
+ */
+
+import type {
+  CodingAgentClient,
+  CodingAgentTaskResult,
+  CodingAgentDiff,
+} from "./coding-agent-client.js";
+import { execSync } from "node:child_process";
+import { getConfig } from "../auth/auth.js";
+
+/** Ring buffer size for late-joining clients (~100KB) */
+const RING_BUFFER_SIZE = 100 * 1024;
+
+export interface GeminiCliPtyConfig {
+  workspacePath?: string | null;
+  /** Callback for raw PTY data — stream to Socket.IO clients */
+  onData?: (data: string) => void;
+  /** Callback when process exits */
+  onExit?: (exitCode: number) => void;
+}
+
+export class GeminiCliPtyClient implements CodingAgentClient {
+  private config: GeminiCliPtyConfig;
+  private ptyProcess: any | null = null;
+  private ringBuffer = "";
+  private _killed = false;
+
+  constructor(config: GeminiCliPtyConfig) {
+    this.config = config;
+  }
+
+  async executeTask(task: string): Promise<CodingAgentTaskResult> {
+    const sessionId = `gemini-cli-pty-${Date.now()}`;
+    const label = "Gemini CLI (PTY)";
+
+    console.log(`[${label}] Starting task (${task.length} chars)...`);
+
+    try {
+      // Dynamic import to avoid loading native module at module init
+      const nodePty = await import("node-pty");
+
+      // Build environment
+      const env: Record<string, string> = { ...(process.env as Record<string, string>) };
+
+      const apiKey = getConfig("gemini-cli:api_key");
+      if (apiKey) {
+        env.GEMINI_API_KEY = apiKey;
+      }
+
+      const ghToken = getConfig("github:token");
+      if (ghToken) {
+        env.GH_TOKEN = ghToken;
+        env.GITHUB_TOKEN = ghToken;
+      }
+
+      // Build args
+      const args: string[] = [];
+
+      // Set prompt (non-interactive mode)
+      args.push("-p", task);
+
+      // Set model if configured (skip in OAuth mode — Gemini handles it)
+      const authMode = getConfig("gemini-cli:auth_mode") ?? "api-key";
+      if (authMode === "api-key") {
+        const model = getConfig("gemini-cli:model");
+        if (model) {
+          args.push("-m", model);
+        }
+      }
+
+      // Set approval mode
+      const approvalMode = getConfig("gemini-cli:approval_mode") ?? "full-auto";
+      switch (approvalMode) {
+        case "full-auto":
+          args.push("--yolo");
+          break;
+        case "auto-edit":
+          args.push("--approval-mode", "auto_edit");
+          break;
+        case "default":
+          args.push("--approval-mode", "default");
+          break;
+      }
+
+      // Enable sandbox if configured
+      const sandbox = getConfig("gemini-cli:sandbox");
+      if (sandbox === "true") {
+        args.push("--sandbox");
+      }
+
+      const cwd = this.config.workspacePath || process.cwd();
+
+      this.ptyProcess = nodePty.spawn("gemini", args, {
+        name: "xterm-256color",
+        cols: 120,
+        rows: 40,
+        cwd,
+        env,
+      });
+
+      return await new Promise<CodingAgentTaskResult>((resolve) => {
+        this.ptyProcess!.onData((data: string) => {
+          // Append to ring buffer (trim to size)
+          this.ringBuffer += data;
+          if (this.ringBuffer.length > RING_BUFFER_SIZE) {
+            this.ringBuffer = this.ringBuffer.slice(-RING_BUFFER_SIZE);
+          }
+
+          // Stream to callback
+          this.config.onData?.(data);
+        });
+
+        this.ptyProcess!.onExit(({ exitCode }: { exitCode: number; signal?: number }) => {
+          console.log(`[${label}] Process exited with code ${exitCode}`);
+          this.config.onExit?.(exitCode);
+
+          // Compute diff via git
+          const diff = this.computeGitDiff();
+
+          const success = exitCode === 0 || !this._killed;
+
+          resolve({
+            success,
+            sessionId,
+            summary: success ? this.extractSummary() : `Process exited with code ${exitCode}`,
+            diff,
+            usage: null,
+          });
+
+          this.ptyProcess = null;
+        });
+      });
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      console.error(`[${label}] Task failed:`, errMsg);
+
+      return {
+        success: false,
+        sessionId,
+        summary: `Gemini CLI failed: ${errMsg}`,
+        diff: null,
+        usage: null,
+        error: errMsg,
+      };
+    }
+  }
+
+  /** Write user keystrokes to PTY stdin */
+  writeInput(data: string): void {
+    this.ptyProcess?.write(data);
+  }
+
+  /** Resize PTY dimensions */
+  resize(cols: number, rows: number): void {
+    try {
+      this.ptyProcess?.resize(cols, rows);
+    } catch {
+      // Ignore resize errors (process may have exited)
+    }
+  }
+
+  /** Get the ring buffer contents for late-joining clients */
+  getReplayBuffer(): string {
+    return this.ringBuffer;
+  }
+
+  /** Kill the PTY process (marks result as failed) */
+  kill(): void {
+    if (!this.ptyProcess) return;
+    this._killed = true;
+
+    try {
+      this.ptyProcess.kill("SIGTERM");
+    } catch {
+      // Already dead
+    }
+
+    // Force kill after 3 seconds
+    setTimeout(() => {
+      try {
+        this.ptyProcess?.kill("SIGKILL");
+      } catch {
+        // Already dead
+      }
+    }, 3000);
+  }
+
+  /** Gracefully terminate the PTY process (marks result as successful) */
+  gracefulExit(): void {
+    if (!this.ptyProcess) return;
+    // Don't set _killed so the exit is treated as successful
+    try {
+      this.ptyProcess.kill("SIGTERM");
+    } catch {
+      // Already dead
+    }
+
+    // Force kill after 3 seconds if SIGTERM didn't work
+    setTimeout(() => {
+      try {
+        this.ptyProcess?.kill("SIGKILL");
+      } catch {
+        // Already dead
+      }
+    }, 3000);
+  }
+
+  /** Extract a meaningful summary from the PTY ring buffer instead of a generic message */
+  private extractSummary(): string {
+    // Strip ANSI escape codes
+    // eslint-disable-next-line no-control-regex
+    const clean = this.ringBuffer.replace(/\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g, "");
+
+    // Extract PR URLs
+    const prUrls = clean.match(/https:\/\/github\.com\/[^\s]+\/pull\/\d+/g);
+
+    const parts: string[] = ["Task completed."];
+    if (prUrls) {
+      const unique = [...new Set(prUrls)];
+      for (const url of unique) {
+        parts.push(`PR created: ${url}`);
+      }
+    }
+
+    // Append last ~2000 chars of clean output for context
+    const tail = clean.slice(-2000);
+    parts.push("", `Terminal output (last 2000 chars):\n${tail}`);
+
+    return parts.join("\n");
+  }
+
+  /** Compute file diffs via git in the workspace directory */
+  private computeGitDiff(): CodingAgentDiff | null {
+    if (!this.config.workspacePath) return null;
+
+    try {
+      const output = execSync("git diff --stat --numstat HEAD", {
+        cwd: this.config.workspacePath,
+        encoding: "utf-8",
+        timeout: 10_000,
+      }).trim();
+
+      if (!output) return null;
+
+      const files = output.split("\n").map((line) => {
+        const parts = line.split("\t");
+        return {
+          path: parts[2] ?? parts[0] ?? "",
+          additions: parseInt(parts[0] ?? "0", 10) || 0,
+          deletions: parseInt(parts[1] ?? "0", 10) || 0,
+        };
+      }).filter((f) => f.path);
+
+      return { files };
+    } catch {
+      return null;
+    }
+  }
+}

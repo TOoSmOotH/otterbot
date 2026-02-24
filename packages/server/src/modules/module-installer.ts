@@ -11,7 +11,7 @@ import {
   rmSync,
   readFileSync,
 } from "node:fs";
-import { execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import type {
   ModuleSource,
   InstalledModule,
@@ -23,6 +23,22 @@ import {
   getModule,
   updateModule,
 } from "./module-manifest.js";
+
+// Input validation patterns
+const GIT_URI_RE = /^(https?:\/\/[^\s]+|git@[^\s]+:[^\s]+|ssh:\/\/[^\s]+)$/;
+const NPM_PACKAGE_RE = /^(@[a-zA-Z0-9._-]+\/)?[a-zA-Z0-9._-]+(@[^\s]*)?$/;
+
+function validateGitUri(uri: string): void {
+  if (!GIT_URI_RE.test(uri)) {
+    throw new Error(`Invalid git URI: ${uri}`);
+  }
+}
+
+function validateNpmPackage(name: string): void {
+  if (!NPM_PACKAGE_RE.test(name)) {
+    throw new Error(`Invalid npm package name: ${name}`);
+  }
+}
 
 function modulesDir(): string {
   const wsRoot = process.env.WORKSPACE_ROOT ?? "./data";
@@ -91,15 +107,17 @@ export async function installFromGit(
 
   mkdirSync(targetDir, { recursive: true });
 
+  validateGitUri(sourceUri);
+
   try {
-    execSync(`git clone ${sourceUri} ${targetDir}`, {
+    execFileSync("git", ["clone", sourceUri, targetDir], {
       stdio: "pipe",
       timeout: 120_000,
     });
 
     // Install deps and build
     if (existsSync(resolve(targetDir, "package.json"))) {
-      execSync("npx pnpm install --frozen-lockfile", {
+      execFileSync("npx", ["pnpm", "install", "--frozen-lockfile"], {
         cwd: targetDir,
         stdio: "pipe",
         timeout: 120_000,
@@ -107,7 +125,7 @@ export async function installFromGit(
 
       const pkg = JSON.parse(readFileSync(resolve(targetDir, "package.json"), "utf-8"));
       if (pkg.scripts?.build) {
-        execSync("npx pnpm build", {
+        execFileSync("npx", ["pnpm", "build"], {
           cwd: targetDir,
           stdio: "pipe",
           timeout: 120_000,
@@ -193,9 +211,11 @@ export async function installFromNpm(
   packageName: string,
   instanceId?: string,
 ): Promise<InstalledModule> {
+  validateNpmPackage(packageName);
+
   // Install the package into the server
   const serverRoot = resolve(import.meta.dirname, "../..");
-  execSync(`npx pnpm add ${packageName}`, {
+  execFileSync("npx", ["pnpm", "add", packageName], {
     cwd: serverRoot,
     stdio: "pipe",
     timeout: 120_000,
@@ -260,7 +280,7 @@ export async function uninstallModule(id: string): Promise<void> {
   if (entry.source === "npm") {
     try {
       const serverRoot = resolve(import.meta.dirname, "../..");
-      execSync(`npx pnpm remove ${entry.sourceUri}`, {
+      execFileSync("npx", ["pnpm", "remove", entry.sourceUri], {
         cwd: serverRoot,
         stdio: "pipe",
         timeout: 60_000,
@@ -292,14 +312,14 @@ export async function upgradeModule(id: string): Promise<InstalledModule> {
   }
 
   if (entry.source === "git") {
-    execSync("git pull", {
+    execFileSync("git", ["pull"], {
       cwd: entry.modulePath,
       stdio: "pipe",
       timeout: 60_000,
     });
 
     if (existsSync(resolve(entry.modulePath, "package.json"))) {
-      execSync("npx pnpm install --frozen-lockfile", {
+      execFileSync("npx", ["pnpm", "install", "--frozen-lockfile"], {
         cwd: entry.modulePath,
         stdio: "pipe",
         timeout: 120_000,
@@ -307,7 +327,7 @@ export async function upgradeModule(id: string): Promise<InstalledModule> {
 
       const pkg = JSON.parse(readFileSync(resolve(entry.modulePath, "package.json"), "utf-8"));
       if (pkg.scripts?.build) {
-        execSync("npx pnpm build", {
+        execFileSync("npx", ["pnpm", "build"], {
           cwd: entry.modulePath,
           stdio: "pipe",
           timeout: 120_000,
@@ -325,7 +345,7 @@ export async function upgradeModule(id: string): Promise<InstalledModule> {
     return { ...entry, version: definition.manifest.version, updatedAt: new Date().toISOString() };
   } else if (entry.source === "npm") {
     const serverRoot = resolve(import.meta.dirname, "../..");
-    execSync(`npx pnpm update ${entry.sourceUri}`, {
+    execFileSync("npx", ["pnpm", "update", entry.sourceUri], {
       cwd: serverRoot,
       stdio: "pipe",
       timeout: 120_000,
