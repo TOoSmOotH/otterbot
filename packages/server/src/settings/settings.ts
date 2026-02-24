@@ -62,6 +62,7 @@ export const PROVIDER_TYPE_META: ProviderTypeMeta[] = [
   { type: "nvidia", label: "NVIDIA", needsApiKey: true, needsBaseUrl: false },
   { type: "perplexity", label: "Perplexity Sonar", needsApiKey: true, needsBaseUrl: false },
   { type: "deepgram", label: "Deepgram", needsApiKey: true, needsBaseUrl: false },
+  { type: "bedrock", label: "AWS Bedrock", needsApiKey: true, needsBaseUrl: true },
 ];
 
 // Static fallback models per provider (used when API fetch fails)
@@ -106,6 +107,13 @@ const FALLBACK_MODELS: Record<string, string[]> = {
     "sonar-reasoning-pro",
   ],
   deepgram: [],
+  bedrock: [
+    "anthropic.claude-sonnet-4-5-20250929-v1:0",
+    "anthropic.claude-haiku-4-20250414-v1:0",
+    "meta.llama3-1-70b-instruct-v1:0",
+    "mistral.mistral-large-2407-v1:0",
+    "amazon.titan-text-premier-v2:0",
+  ],
 };
 
 // ---------------------------------------------------------------------------
@@ -374,6 +382,57 @@ export async function testProvider(
 }
 
 // ---------------------------------------------------------------------------
+// AWS Signature V4 helper for Bedrock model discovery
+// ---------------------------------------------------------------------------
+
+async function signAwsRequest(
+  method: string,
+  url: string,
+  region: string,
+  service: string,
+  accessKeyId: string,
+  secretAccessKey: string,
+): Promise<Record<string, string>> {
+  const { createHmac, createHash } = await import("node:crypto");
+  const parsedUrl = new URL(url);
+  const now = new Date();
+  const dateStamp = now.toISOString().replace(/[-:]/g, "").slice(0, 8);
+  const amzDate = dateStamp + "T" + now.toISOString().replace(/[-:]/g, "").slice(9, 15) + "Z";
+  const credentialScope = `${dateStamp}/${region}/${service}/aws4_request`;
+  const signedHeaders = "host;x-amz-date";
+  const payloadHash = createHash("sha256").update("").digest("hex");
+
+  const canonicalRequest = [
+    method,
+    parsedUrl.pathname,
+    parsedUrl.search.slice(1),
+    `host:${parsedUrl.host}\nx-amz-date:${amzDate}\n`,
+    signedHeaders,
+    payloadHash,
+  ].join("\n");
+
+  const stringToSign = [
+    "AWS4-HMAC-SHA256",
+    amzDate,
+    credentialScope,
+    createHash("sha256").update(canonicalRequest).digest("hex"),
+  ].join("\n");
+
+  const hmac = (key: Buffer | string, data: string) =>
+    createHmac("sha256", key).update(data).digest();
+  const kDate = hmac(`AWS4${secretAccessKey}`, dateStamp);
+  const kRegion = hmac(kDate, region);
+  const kService = hmac(kRegion, service);
+  const kSigning = hmac(kService, "aws4_request");
+  const signature = createHmac("sha256", kSigning).update(stringToSign).digest("hex");
+
+  return {
+    "x-amz-date": amzDate,
+    Authorization: `AWS4-HMAC-SHA256 Credential=${accessKeyId}/${credentialScope}, SignedHeaders=${signedHeaders}, Signature=${signature}`,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Fetch models from provider API
 // ---------------------------------------------------------------------------
 
@@ -515,6 +574,45 @@ export async function fetchModelsWithCredentials(
         if (!nvidiaRes.ok) return FALLBACK_MODELS.nvidia ?? [];
         const nvidiaData = (await nvidiaRes.json()) as { data?: Array<{ id: string }> };
         return nvidiaData.data?.map((m) => m.id).sort() ?? FALLBACK_MODELS.nvidia ?? [];
+      }
+
+      case "bedrock": {
+        // Bedrock stores credentials as "accessKeyId:secretAccessKey" in apiKey
+        // and the region in baseUrl. Model discovery uses the Bedrock API.
+        if (!apiKey) return FALLBACK_MODELS.bedrock ?? [];
+        const [bedrockAccessKey, bedrockSecretKey] = apiKey.includes(":")
+          ? apiKey.split(":", 2)
+          : ["", ""];
+        if (!bedrockAccessKey || !bedrockSecretKey) return FALLBACK_MODELS.bedrock ?? [];
+        const bedrockRegion = baseUrl ?? "us-east-1";
+        try {
+          const bedrockRes = await fetch(
+            `https://bedrock.${bedrockRegion}.amazonaws.com/foundation-models`,
+            {
+              headers: await signAwsRequest(
+                "GET",
+                `https://bedrock.${bedrockRegion}.amazonaws.com/foundation-models`,
+                bedrockRegion,
+                "bedrock",
+                bedrockAccessKey,
+                bedrockSecretKey,
+              ),
+              signal: AbortSignal.timeout(10_000),
+            },
+          );
+          if (!bedrockRes.ok) return FALLBACK_MODELS.bedrock ?? [];
+          const bedrockData = (await bedrockRes.json()) as {
+            modelSummaries?: Array<{ modelId: string; inferenceTypesSupported?: string[] }>;
+          };
+          return (
+            bedrockData.modelSummaries
+              ?.filter((m) => m.inferenceTypesSupported?.includes("ON_DEMAND"))
+              .map((m) => m.modelId)
+              .sort() ?? FALLBACK_MODELS.bedrock ?? []
+          );
+        } catch {
+          return FALLBACK_MODELS.bedrock ?? [];
+        }
       }
 
       case "perplexity": {
