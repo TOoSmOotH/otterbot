@@ -4,6 +4,7 @@ import { Html, Sparkles } from "@react-three/drei";
 import type { Mesh } from "three";
 import * as THREE from "three";
 import { useMovementStore } from "../../stores/movement-store";
+import { AgentChatBubble } from "./AgentChatBubble";
 
 interface FallbackAgentProps {
   position: [number, number, number];
@@ -134,6 +135,9 @@ export function FallbackAgent({ position, label, role, status, agentId, rotation
           color="#3b82f6"
         />
       )}
+
+      {/* Chat bubble */}
+      <AgentChatBubble agentId={agentId} status={status} yOffset={2.2} />
 
       {/* Floating label */}
       <Html position={[0, 1.8, 0]} center distanceFactor={8}>
