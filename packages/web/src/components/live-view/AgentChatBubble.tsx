@@ -176,18 +176,18 @@ export function AgentChatBubble({ agentId, status, yOffset }: AgentChatBubblePro
           style={{
             background: "rgba(0, 0, 0, 0.75)",
             backdropFilter: "blur(4px)",
-            borderRadius: 6,
-            paddingLeft: 8,
-            paddingRight: 8,
-            paddingTop: 4,
-            paddingBottom: 4,
-            maxWidth: 160,
+            borderRadius: 10,
+            paddingLeft: 14,
+            paddingRight: 14,
+            paddingTop: 8,
+            paddingBottom: 8,
+            maxWidth: 300,
             position: "relative",
           }}
         >
           <span
             style={{
-              fontSize: 9,
+              fontSize: 24,
               color: "white",
               whiteSpace: "nowrap",
               fontFamily: "system-ui, sans-serif",
@@ -201,14 +201,14 @@ export function AgentChatBubble({ agentId, status, yOffset }: AgentChatBubblePro
             <div
               style={{
                 position: "absolute",
-                bottom: -5,
+                bottom: -12,
                 left: "50%",
                 transform: "translateX(-50%)",
                 width: 0,
                 height: 0,
-                borderLeft: "5px solid transparent",
-                borderRight: "5px solid transparent",
-                borderTop: "5px solid rgba(0, 0, 0, 0.75)",
+                borderLeft: "12px solid transparent",
+                borderRight: "12px solid transparent",
+                borderTop: "12px solid rgba(0, 0, 0, 0.75)",
               }}
             />
           )}
@@ -220,15 +220,15 @@ export function AgentChatBubble({ agentId, status, yOffset }: AgentChatBubblePro
                 display: "flex",
                 flexDirection: "column",
                 alignItems: "center",
-                gap: 2,
+                gap: 4,
                 position: "absolute",
-                bottom: -14,
+                bottom: -30,
                 left: "50%",
                 transform: "translateX(-50%)",
               }}
             >
-              <div style={{ width: 5, height: 5, borderRadius: "50%", background: "rgba(0,0,0,0.7)" }} />
-              <div style={{ width: 3, height: 3, borderRadius: "50%", background: "rgba(0,0,0,0.7)" }} />
+              <div style={{ width: 12, height: 12, borderRadius: "50%", background: "rgba(0,0,0,0.7)" }} />
+              <div style={{ width: 8, height: 8, borderRadius: "50%", background: "rgba(0,0,0,0.7)" }} />
             </div>
           )}
         </div>

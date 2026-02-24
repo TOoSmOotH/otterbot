@@ -137,7 +137,7 @@ export function FallbackAgent({ position, label, role, status, agentId, rotation
       )}
 
       {/* Chat bubble */}
-      <AgentChatBubble agentId={agentId} status={status} yOffset={2.2} />
+      <AgentChatBubble agentId={agentId} status={status} yOffset={3.2} />
 
       {/* Floating label */}
       <Html position={[0, 1.8, 0]} center distanceFactor={8}>

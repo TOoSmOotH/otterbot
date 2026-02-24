@@ -126,7 +126,7 @@ export function AgentCharacter({ pack, position, label, role, status, agentId, g
       )}
 
       {/* Chat bubble */}
-      <AgentChatBubble agentId={agentId} status={status} yOffset={2.6} />
+      <AgentChatBubble agentId={agentId} status={status} yOffset={3.5} />
 
       {/* Floating label */}
       <Html position={[0, 2.2, 0]} center distanceFactor={8}>
