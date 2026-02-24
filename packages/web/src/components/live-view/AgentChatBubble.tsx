@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { Html } from "@react-three/drei";
 import { useAgentActivityStore } from "../../stores/agent-activity-store";
 import { useCodingAgentStore } from "../../stores/coding-agent-store";
@@ -25,82 +25,13 @@ function useBubbleState(agentId: string | undefined, status: string): BubbleStat
   const lastToolTimestampRef = useRef<number>(0);
   const staleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  useEffect(() => {
+  const derive = useCallback(() => {
     if (!agentId) {
       setBubble(null);
       return;
     }
 
-    const unsubActivity = useAgentActivityStore.subscribe((state) => {
-      const calls = state.agentToolCalls.get(agentId);
-      if (calls && calls.length > 0) {
-        const latest = calls[calls.length - 1];
-        const ts = new Date(latest.timestamp).getTime();
-        if (ts !== lastToolTimestampRef.current) {
-          lastToolTimestampRef.current = ts;
-          // Clear any existing stale timer
-          if (staleTimerRef.current) clearTimeout(staleTimerRef.current);
-          setBubble({ text: humanizeToolName(latest.toolName), type: "speech" });
-          // Set timer to clear stale tool call bubble
-          staleTimerRef.current = setTimeout(() => {
-            lastToolTimestampRef.current = 0;
-            // Re-derive from other sources
-            deriveFallback();
-          }, TOOL_CALL_STALE_MS);
-          return;
-        }
-        // If tool call is still recent, keep showing it
-        const age = Date.now() - ts;
-        if (age < TOOL_CALL_STALE_MS) return;
-      }
-      deriveFallback();
-    });
-
-    function deriveFallback() {
-      if (!agentId) return;
-
-      // Check coding session
-      const codingState = useCodingAgentStore.getState();
-      const session = codingState.sessions.get(agentId);
-      if (session && session.status === "active") {
-        setBubble({ text: "Coding: " + truncateText(session.task, 22), type: "speech" });
-        return;
-      }
-
-      // Check kanban tasks
-      const projectState = useProjectStore.getState();
-      const assignedTask = projectState.tasks.find(
-        (t) => t.assigneeAgentId === agentId && t.column === "in_progress",
-      );
-      if (assignedTask) {
-        setBubble({ text: "Working on: " + truncateText(assignedTask.title, 18), type: "speech" });
-        return;
-      }
-
-      // Check thinking state
-      const activityState = useAgentActivityStore.getState();
-      const stream = activityState.agentStreams.get(agentId);
-      if (stream?.isThinking) {
-        setBubble({ text: "...", type: "thought" });
-        return;
-      }
-
-      setBubble(null);
-    }
-
-    // Also subscribe to coding and project stores for reactivity
-    const unsubCoding = useCodingAgentStore.subscribe(() => {
-      // Only re-derive if no recent tool call is active
-      if (lastToolTimestampRef.current && Date.now() - lastToolTimestampRef.current < TOOL_CALL_STALE_MS) return;
-      deriveFallback();
-    });
-
-    const unsubProject = useProjectStore.subscribe(() => {
-      if (lastToolTimestampRef.current && Date.now() - lastToolTimestampRef.current < TOOL_CALL_STALE_MS) return;
-      deriveFallback();
-    });
-
-    // Initial derivation
+    // 1. Check for recent tool call
     const activityState = useAgentActivityStore.getState();
     const calls = activityState.agentToolCalls.get(agentId);
     if (calls && calls.length > 0) {
@@ -108,18 +39,65 @@ function useBubbleState(agentId: string | undefined, status: string): BubbleStat
       const ts = new Date(latest.timestamp).getTime();
       const age = Date.now() - ts;
       if (age < TOOL_CALL_STALE_MS) {
-        lastToolTimestampRef.current = ts;
+        if (ts !== lastToolTimestampRef.current) {
+          lastToolTimestampRef.current = ts;
+          if (staleTimerRef.current) clearTimeout(staleTimerRef.current);
+          staleTimerRef.current = setTimeout(() => {
+            lastToolTimestampRef.current = 0;
+            derive();
+          }, TOOL_CALL_STALE_MS - age);
+        }
         setBubble({ text: humanizeToolName(latest.toolName), type: "speech" });
-        staleTimerRef.current = setTimeout(() => {
-          lastToolTimestampRef.current = 0;
-          deriveFallback();
-        }, TOOL_CALL_STALE_MS - age);
-      } else {
-        deriveFallback();
+        return;
       }
-    } else {
-      deriveFallback();
     }
+
+    // 2. Check coding session
+    const codingState = useCodingAgentStore.getState();
+    const session = codingState.sessions.get(agentId);
+    if (session && session.status === "active") {
+      setBubble({ text: "Coding: " + truncateText(session.task, 22), type: "speech" });
+      return;
+    }
+
+    // 3. Check kanban tasks
+    const projectState = useProjectStore.getState();
+    const assignedTask = projectState.tasks.find(
+      (t) => t.assigneeAgentId === agentId && t.column === "in_progress",
+    );
+    if (assignedTask) {
+      setBubble({ text: "Working on: " + truncateText(assignedTask.title, 18), type: "speech" });
+      return;
+    }
+
+    // 4. Check thinking/acting status
+    if (status === "thinking") {
+      setBubble({ text: "...", type: "thought" });
+      return;
+    }
+
+    if (status === "acting") {
+      setBubble({ text: "Working...", type: "speech" });
+      return;
+    }
+
+    // 5. Idle / done — no bubble
+    setBubble(null);
+  }, [agentId, status]);
+
+  // Subscribe to stores for reactivity
+  useEffect(() => {
+    if (!agentId) {
+      setBubble(null);
+      return;
+    }
+
+    // Initial derivation
+    derive();
+
+    const unsubActivity = useAgentActivityStore.subscribe(() => derive());
+    const unsubCoding = useCodingAgentStore.subscribe(() => derive());
+    const unsubProject = useProjectStore.subscribe(() => derive());
 
     return () => {
       unsubActivity();
@@ -127,34 +105,7 @@ function useBubbleState(agentId: string | undefined, status: string): BubbleStat
       unsubProject();
       if (staleTimerRef.current) clearTimeout(staleTimerRef.current);
     };
-  }, [agentId]);
-
-  // Also react to status changes for thinking state
-  useEffect(() => {
-    if (!agentId) return;
-    if (status === "thinking") {
-      // Check if we should show thought bubble (only if no higher-priority source)
-      const activityState = useAgentActivityStore.getState();
-      const calls = activityState.agentToolCalls.get(agentId);
-      const hasRecentTool = calls && calls.length > 0 &&
-        Date.now() - new Date(calls[calls.length - 1].timestamp).getTime() < TOOL_CALL_STALE_MS;
-      if (!hasRecentTool) {
-        const codingState = useCodingAgentStore.getState();
-        const session = codingState.sessions.get(agentId);
-        if (!session || session.status !== "active") {
-          const stream = activityState.agentStreams.get(agentId);
-          if (stream?.isThinking) {
-            setBubble({ text: "...", type: "thought" });
-          }
-        }
-      }
-    } else if (status === "idle" || status === "done") {
-      // Clear bubble when idle unless there's a recent tool call still showing
-      if (!lastToolTimestampRef.current || Date.now() - lastToolTimestampRef.current >= TOOL_CALL_STALE_MS) {
-        setBubble(null);
-      }
-    }
-  }, [agentId, status]);
+  }, [agentId, derive]);
 
   return bubble;
 }
