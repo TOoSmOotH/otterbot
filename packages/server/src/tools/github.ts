@@ -257,7 +257,7 @@ export function createGitHubCreatePRTool(ctx: ToolContext) {
     execute: async ({ title, head, base, body }) => {
       try {
         const { repo, token } = getGitHubContext(ctx);
-        const targetBase = base ?? getConfig(`project:${ctx.projectId}:branch`) ?? "main";
+        const targetBase = base ?? getConfig(`project:${ctx.projectId}:github:branch`) ?? "main";
         const pr = await createPullRequest(repo, token, head, targetBase, title, body);
         return `Pull request created: #${pr.number} — ${pr.html_url}`;
       } catch (err) {

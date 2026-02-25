@@ -887,6 +887,14 @@ export class PipelineManager {
       return;
     }
 
+    // Max retries exhausted — for re-reviews, fail gracefully instead of backlog
+    if (state.isReReview && this.mergeQueue) {
+      console.error(`[PipelineManager] Re-review spawn failed for task ${taskId} — aborting re-review`);
+      this.pipelines.delete(taskId);
+      await this.mergeQueue.onReReviewComplete(taskId, false);
+      return;
+    }
+
     // Max retries exhausted — move to backlog
     console.error(
       `[PipelineManager] Max spawn retries exhausted for task ${taskId} — moving to backlog`,
@@ -1306,6 +1314,7 @@ export class PipelineManager {
             pipelineRegistryEntryId: registryEntryId,
             pipelineTaskId: state.taskId,
             pipelineBranch: state.prBranch ?? state.targetBranch,
+            pipelineIsReReview: !!state.isReReview,
           },
         });
         console.log(`[PipelineManager] Sent ${currentStage} directive for task ${state.taskId}`);
