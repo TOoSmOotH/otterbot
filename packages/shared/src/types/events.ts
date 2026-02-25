@@ -7,6 +7,7 @@ import type { CodingAgentSession, CodingAgentMessage, CodingAgentFileDiff, Codin
 import type { SoulDocument, Memory, MemoryEpisode, SoulSuggestion } from "./memory.js";
 import type { Todo } from "./todo.js";
 import type { MergeQueueEntry } from "./merge-queue.js";
+import type { McpServerRuntime } from "./mcp-server.js";
 
 /** Events emitted from server to client */
 export interface ServerToClientEvents {
@@ -71,6 +72,7 @@ export interface ServerToClientEvents {
   "nextcloud-talk:status": (data: { status: "connected" | "disconnected" | "error"; botUsername?: string }) => void;
   "merge-queue:updated": (data: { entries: MergeQueueEntry[] }) => void;
   "merge-queue:entry-updated": (entry: MergeQueueEntry) => void;
+  "mcp:status": (runtime: McpServerRuntime) => void;
 }
 
 /** Events emitted from client to server */

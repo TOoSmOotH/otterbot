@@ -1,5 +1,5 @@
 import { sqliteTable, text, integer, primaryKey, unique } from "drizzle-orm/sqlite-core";
-import type { ScanFinding, SkillScanStatus, CodingAgentPart, CodingAgentType, MemoryCategory, MemorySource } from "@otterbot/shared";
+import type { ScanFinding, SkillScanStatus, CodingAgentPart, CodingAgentType, MemoryCategory, MemorySource, McpToolMeta } from "@otterbot/shared";
 
 export const agents = sqliteTable("agents", {
   id: text("id").primaryKey(),
@@ -467,6 +467,41 @@ export const mergeQueue = sqliteTable("merge_queue", {
   lastError: text("last_error"),
   approvedAt: text("approved_at").notNull(),
   mergedAt: text("merged_at"),
+  createdAt: text("created_at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+  updatedAt: text("updated_at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+});
+
+export const mcpServers = sqliteTable("mcp_servers", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  enabled: integer("enabled", { mode: "boolean" }).notNull().default(false),
+  transport: text("transport", { enum: ["stdio", "sse"] }).notNull(),
+  command: text("command"),
+  args: text("args", { mode: "json" })
+    .$type<string[]>()
+    .notNull()
+    .default([]),
+  env: text("env", { mode: "json" })
+    .$type<Record<string, string>>()
+    .notNull()
+    .default({}),
+  url: text("url"),
+  headers: text("headers", { mode: "json" })
+    .$type<Record<string, string>>()
+    .notNull()
+    .default({}),
+  autoStart: integer("auto_start", { mode: "boolean" }).notNull().default(false),
+  timeout: integer("timeout").notNull().default(30000),
+  allowedTools: text("allowed_tools", { mode: "json" })
+    .$type<string[] | null>()
+    .default(null),
+  discoveredTools: text("discovered_tools", { mode: "json" })
+    .$type<McpToolMeta[] | null>()
+    .default(null),
   createdAt: text("created_at")
     .notNull()
     .$defaultFn(() => new Date().toISOString()),

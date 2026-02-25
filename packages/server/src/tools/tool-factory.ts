@@ -35,6 +35,8 @@ import { SkillService } from "../skills/skill-service.js";
 import { CustomToolService } from "./custom-tool-service.js";
 import { executeCustomTool } from "./custom-tool-executor.js";
 import { createMemorySaveTool } from "./memory-save.js";
+import { McpClientManager } from "../mcp/mcp-client-manager.js";
+import { McpServerService as McpServerServiceRef } from "../mcp/mcp-service.js";
 
 type ToolCreator = (ctx: ToolContext) => unknown;
 
@@ -109,6 +111,14 @@ export function createTools(
       tools[name] = createCustomToolWrapper(customTool);
       continue;
     }
+    // Check MCP tools (naming convention: mcp_<serverName>_<toolName>)
+    if (name.startsWith("mcp_")) {
+      const mcpTool = createMcpToolWrapper(name);
+      if (mcpTool) {
+        tools[name] = mcpTool;
+        continue;
+      }
+    }
     console.warn(`[tool-factory] Unknown tool "${name}" requested — skipping.`);
   }
   return tools;
@@ -169,10 +179,12 @@ export function createToolsForAgent(
 export function getAvailableToolNames(): string[] {
   const customToolService = new CustomToolService();
   const customNames = customToolService.list().map((t) => t.name);
+  const mcpNames = McpClientManager.getAllEnabledToolNames();
   return [
     ...Object.keys(TOOL_REGISTRY),
     ...Object.keys(CONTEXTLESS_TOOL_REGISTRY),
     ...customNames,
+    ...mcpNames,
   ];
 }
 
@@ -498,6 +510,24 @@ export function getToolsWithMeta(): {
     };
   }
 
+  // Add MCP tools
+  const mcpService = new McpServerServiceRef();
+  const mcpServers = mcpService.list().filter((s) => s.enabled);
+  for (const server of mcpServers) {
+    if (!McpClientManager.isConnected(server.id)) continue;
+    const tools = server.discoveredTools ?? [];
+    for (const t of tools) {
+      if (server.allowedTools !== null && !server.allowedTools.includes(t.name)) continue;
+      const fullName = `mcp_${McpClientManager.sanitizeName(server.name)}_${t.name}`;
+      toolMeta[fullName] = {
+        description: t.description,
+        builtIn: false,
+        parameters: extractMcpToolParams(t.inputSchema),
+        category: `MCP: ${server.name}`,
+      };
+    }
+  }
+
   return { builtInTools: builtInNames, customTools: customs, toolMeta };
 }
 
@@ -626,4 +656,100 @@ function createTestCustomToolTool() {
       }
     },
   });
+}
+
+// =========================================================================
+// MCP Tool Helpers
+// =========================================================================
+
+/**
+ * Create a Vercel AI SDK tool wrapper for an MCP tool.
+ * Tool names follow the convention: mcp_<serverName>_<toolName>
+ */
+function createMcpToolWrapper(fullName: string): unknown | null {
+  // fullName = mcp_<sanitizedServerName>_<toolName>
+  const mcpService = new McpServerServiceRef();
+  const servers = mcpService.list().filter((s) => s.enabled);
+
+  for (const server of servers) {
+    if (!McpClientManager.isConnected(server.id)) continue;
+    const prefix = `mcp_${McpClientManager.sanitizeName(server.name)}_`;
+    if (!fullName.startsWith(prefix)) continue;
+
+    const toolName = fullName.slice(prefix.length);
+    const tools = server.discoveredTools ?? [];
+    const mcpTool = tools.find((t) => t.name === toolName);
+    if (!mcpTool) continue;
+
+    // Check allowed tools gate
+    if (server.allowedTools !== null && !server.allowedTools.includes(toolName)) continue;
+
+    // Convert JSON Schema to Zod
+    const zodSchema = jsonSchemaToZod(mcpTool.inputSchema);
+
+    return tool({
+      description: mcpTool.description || `MCP tool: ${toolName}`,
+      parameters: zodSchema,
+      execute: async (params: Record<string, unknown>) => {
+        const result = await McpClientManager.callTool(server.id, toolName, params);
+        return JSON.stringify(result);
+      },
+    });
+  }
+
+  return null;
+}
+
+/** Convert a JSON Schema object to a Zod schema (basic support) */
+function jsonSchemaToZod(schema: Record<string, unknown>): z.ZodTypeAny {
+  if (!schema || schema.type !== "object") {
+    return z.object({});
+  }
+
+  const properties = (schema.properties ?? {}) as Record<string, Record<string, unknown>>;
+  const required = new Set((schema.required ?? []) as string[]);
+  const shape: Record<string, z.ZodTypeAny> = {};
+
+  for (const [key, prop] of Object.entries(properties)) {
+    let fieldSchema: z.ZodTypeAny;
+    const desc = (prop.description as string) || "";
+
+    switch (prop.type) {
+      case "number":
+      case "integer":
+        fieldSchema = z.number().describe(desc);
+        break;
+      case "boolean":
+        fieldSchema = z.boolean().describe(desc);
+        break;
+      case "array":
+        fieldSchema = z.array(z.unknown()).describe(desc);
+        break;
+      case "object":
+        fieldSchema = z.record(z.unknown()).describe(desc);
+        break;
+      default:
+        fieldSchema = z.string().describe(desc);
+    }
+
+    shape[key] = required.has(key) ? fieldSchema : fieldSchema.optional();
+  }
+
+  return z.object(shape);
+}
+
+/** Extract parameter metadata from a JSON Schema for UI display */
+function extractMcpToolParams(
+  schema: Record<string, unknown>,
+): ToolParamMeta[] {
+  if (!schema || schema.type !== "object") return [];
+  const properties = (schema.properties ?? {}) as Record<string, Record<string, unknown>>;
+  const required = new Set((schema.required ?? []) as string[]);
+
+  return Object.entries(properties).map(([name, prop]) => ({
+    name,
+    type: (prop.type as string) || "string",
+    required: required.has(name),
+    description: (prop.description as string) || "",
+  }));
 }

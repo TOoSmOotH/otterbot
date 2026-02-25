@@ -24,6 +24,7 @@ export type SettingsSection =
   | "mattermost"
   | "nextcloud-talk"
   | "worker-names"
+  | "mcp-servers"
   | "security";
 
 export interface NavItem {
@@ -70,6 +71,7 @@ export const SETTINGS_NAV: NavGroup[] = [
       { id: "opencode", label: "Coding Agents" },
       { id: "scheduled", label: "Scheduled Tasks" },
       { id: "modules", label: "Modules" },
+      { id: "mcp-servers", label: "MCP Servers" },
     ],
   },
   {
