@@ -235,7 +235,9 @@ export class TeamLead extends BaseAgent {
 
     // Inject GitHub context if this project is linked to a repo
     const ghRepo = getConfig(`project:${deps.projectId}:github:repo`);
-    const ghBranch = getConfig(`project:${deps.projectId}:github:branch`);
+    const ghBranch = getConfig(`project:${deps.projectId}:github:branch`)
+      ?? getDb().select().from(schema.projects).where(eq(schema.projects.id, deps.projectId)).get()?.githubBranch
+      ?? undefined;
     const ghRulesRaw = getConfig(`project:${deps.projectId}:github:rules`);
     if (ghRepo) {
       const sections: string[] = [
