@@ -210,6 +210,14 @@ export function resolveModel(config: LLMConfig): LanguageModel {
       return lmstudio(config.model);
     }
 
+    case "deepseek": {
+      const deepseek = createOpenAI({
+        baseURL: config.baseUrl ?? resolved.baseUrl ?? "https://api.deepseek.com",
+        apiKey: config.apiKey ?? resolved.apiKey ?? "",
+      });
+      return deepseek(config.model);
+    }
+
     default:
       throw new Error(`Unknown LLM provider: ${config.provider} (type: ${resolved.type})`);
   }

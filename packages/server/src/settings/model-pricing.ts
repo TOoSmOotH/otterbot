@@ -34,6 +34,9 @@ const DEFAULT_MODEL_PRICES: Record<string, ModelPrice> = {
   "grok-3": { inputPerMillion: 3, outputPerMillion: 15 },
   "grok-3-mini": { inputPerMillion: 0.3, outputPerMillion: 0.5 },
   "grok-4": { inputPerMillion: 3, outputPerMillion: 15 },
+  // DeepSeek
+  "deepseek-chat": { inputPerMillion: 0.27, outputPerMillion: 1.10 },
+  "deepseek-reasoner": { inputPerMillion: 0.55, outputPerMillion: 2.19 },
   // Google
   "gemini-2.5-pro": { inputPerMillion: 1.25, outputPerMillion: 10 },
   "gemini-2.5-flash": { inputPerMillion: 0.15, outputPerMillion: 0.6 },
