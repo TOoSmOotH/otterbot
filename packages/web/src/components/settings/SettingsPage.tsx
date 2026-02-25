@@ -25,6 +25,7 @@ import { TelegramSection } from "./TelegramSection";
 import { GoogleSection } from "./GoogleSection";
 import { SecuritySection } from "./SecuritySection";
 import { ModulesSection } from "./ModulesSection";
+import { WorkerNamesSection } from "./WorkerNamesSection";
 import type { SettingsSection } from "./settings-nav";
 
 interface SettingsPageProps {
@@ -60,6 +61,7 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
     if (activeSection === "telegram") return <TelegramSection />;
     if (activeSection === "slack") return <SlackSection />;
     if (activeSection === "mattermost") return <MattermostSection />;
+    if (activeSection === "worker-names") return <WorkerNamesSection />;
     if (activeSection === "security") return <SecuritySection />;
     if (activeSection === "soul") return <SoulTab />;
     if (activeSection === "memory") return <MemoryTab />;

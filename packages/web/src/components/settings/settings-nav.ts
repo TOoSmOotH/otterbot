@@ -22,6 +22,7 @@ export type SettingsSection =
   | "telegram"
   | "slack"
   | "mattermost"
+  | "worker-names"
   | "security";
 
 export interface NavItem {
@@ -43,6 +44,7 @@ export const SETTINGS_NAV: NavGroup[] = [
       { id: "profile", label: "Profile" },
       { id: "appearance", label: "Appearance" },
       { id: "system", label: "System" },
+      { id: "worker-names", label: "Worker Names" },
     ],
   },
   {
