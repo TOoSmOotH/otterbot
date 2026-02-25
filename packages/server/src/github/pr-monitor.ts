@@ -6,6 +6,7 @@ import { getDb, schema } from "../db/index.js";
 import { getConfig } from "../auth/auth.js";
 import {
   fetchPullRequest,
+  fetchPullRequests,
   fetchPullRequestReviews,
   fetchPullRequestReviewComments,
 } from "./github-service.js";
@@ -63,18 +64,18 @@ export class GitHubPRMonitor {
     if (!token) return;
 
     const db = getDb();
-    // Find all tasks in "in_review" with a prNumber set
+    // Find all tasks in "in_review" with a prNumber or prBranch set
     const tasks = db
       .select()
       .from(schema.kanbanTasks)
       .all()
-      .filter((t) => t.column === "in_review" && t.prNumber != null);
+      .filter((t) => t.column === "in_review" && (t.prNumber != null || t.prBranch != null));
 
     for (const task of tasks) {
       try {
         await this.checkPR(task, token);
       } catch (err) {
-        console.error(`[PRMonitor] Error checking PR #${task.prNumber} for task ${task.id}:`, err);
+        console.error(`[PRMonitor] Error checking PR for task ${task.id}:`, err);
       }
     }
   }
@@ -95,9 +96,34 @@ export class GitHubPRMonitor {
       .where(eq(schema.projects.id, task.projectId))
       .get();
 
-    if (!project?.githubRepo || !task.prNumber) return;
+    if (!project?.githubRepo) return;
 
-    const pr = await fetchPullRequest(project.githubRepo, token, task.prNumber);
+    // Resolve missing prNumber from prBranch via GitHub API
+    let prNumber = task.prNumber;
+    if (!prNumber) {
+      if (!task.prBranch) return;
+      try {
+        const prs = await fetchPullRequests(project.githubRepo, token, { state: "all" });
+        const match = prs.find((pr) => pr.head.ref === task.prBranch);
+        if (!match) {
+          console.warn(`[PRMonitor] No PR found for branch ${task.prBranch} on task ${task.id}`);
+          return;
+        }
+        // Save the resolved prNumber to DB
+        const now = new Date().toISOString();
+        db.update(schema.kanbanTasks)
+          .set({ prNumber: match.number, updatedAt: now })
+          .where(eq(schema.kanbanTasks.id, task.id))
+          .run();
+        prNumber = match.number;
+        console.log(`[PRMonitor] Resolved prNumber=${match.number} from branch ${task.prBranch} for task ${task.id}`);
+      } catch (err) {
+        console.warn(`[PRMonitor] Failed to resolve prNumber from branch ${task.prBranch}:`, err);
+        return;
+      }
+    }
+
+    const pr = await fetchPullRequest(project.githubRepo, token, prNumber);
 
     if (pr.merged) {
       // PR merged → move task to done
@@ -105,21 +131,21 @@ export class GitHubPRMonitor {
       db.update(schema.kanbanTasks)
         .set({
           column: "done",
-          completionReport: `PR #${task.prNumber} merged successfully.`,
+          completionReport: `PR #${prNumber} merged successfully.`,
           updatedAt: now,
         })
         .where(eq(schema.kanbanTasks.id, task.id))
         .run();
 
       // Clean up tracked review IDs for this task
-      this.cleanupReviewIds(task.prNumber);
+      this.cleanupReviewIds(prNumber);
 
       const updated = db.select().from(schema.kanbanTasks).where(eq(schema.kanbanTasks.id, task.id)).get();
       if (updated) {
         this.io.emit("kanban:task-updated", updated as unknown as KanbanTask);
       }
 
-      console.log(`[PRMonitor] PR #${task.prNumber} merged — task ${task.id} → done`);
+      console.log(`[PRMonitor] PR #${prNumber} merged — task ${task.id} → done`);
       return;
     }
 
@@ -136,19 +162,19 @@ export class GitHubPRMonitor {
         .run();
 
       // Clean up tracked review IDs for this task
-      this.cleanupReviewIds(task.prNumber);
+      this.cleanupReviewIds(prNumber);
 
       const updated = db.select().from(schema.kanbanTasks).where(eq(schema.kanbanTasks.id, task.id)).get();
       if (updated) {
         this.io.emit("kanban:task-updated", updated as unknown as KanbanTask);
       }
 
-      console.log(`[PRMonitor] PR #${task.prNumber} closed (not merged) — task ${task.id} → backlog`);
+      console.log(`[PRMonitor] PR #${prNumber} closed (not merged) — task ${task.id} → backlog`);
       return;
     }
 
     // PR is still open — check for reviews
-    const reviews = await fetchPullRequestReviews(project.githubRepo, token, task.prNumber);
+    const reviews = await fetchPullRequestReviews(project.githubRepo, token, prNumber);
 
     // Check for APPROVED reviews — auto-enqueue in merge queue
     if (this.mergeQueue) {
@@ -162,7 +188,7 @@ export class GitHubPRMonitor {
         if (!this.mergeQueue.isInQueue(task.id)) {
           const entry = this.mergeQueue.approveForMerge(task.id);
           if (entry) {
-            console.log(`[PRMonitor] PR #${task.prNumber} approved — auto-enqueued in merge queue`);
+            console.log(`[PRMonitor] PR #${prNumber} approved — auto-enqueued in merge queue`);
           }
         }
       }
@@ -189,7 +215,7 @@ export class GitHubPRMonitor {
     const reviewComments = await fetchPullRequestReviewComments(
       project.githubRepo,
       token,
-      task.prNumber,
+      prNumber,
     );
 
     // Route through pipeline if the task is pipeline-managed
@@ -227,10 +253,10 @@ export class GitHubPRMonitor {
         task.id,
         feedback,
         branchName,
-        task.prNumber!,
+        prNumber,
       );
 
-      console.log(`[PRMonitor] Routed PR #${task.prNumber} review feedback through pipeline for task ${task.id}`);
+      console.log(`[PRMonitor] Routed PR #${prNumber} review feedback through pipeline for task ${task.id}`);
       return;
     }
 
