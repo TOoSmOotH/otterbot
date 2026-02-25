@@ -6,6 +6,7 @@ import { getDb, schema } from "../db/index.js";
 import { getConfig } from "../auth/auth.js";
 import {
   fetchPullRequest,
+  fetchPullRequests,
   fetchPullRequestReviews,
   fetchPullRequestReviewComments,
 } from "./github-service.js";
@@ -63,12 +64,12 @@ export class GitHubPRMonitor {
     if (!token) return;
 
     const db = getDb();
-    // Find all tasks in "in_review" with a prNumber set
+    // Find all tasks in "in_review" with a prNumber or prBranch set
     const tasks = db
       .select()
       .from(schema.kanbanTasks)
       .all()
-      .filter((t) => t.column === "in_review" && t.prNumber != null);
+      .filter((t) => t.column === "in_review" && (t.prNumber != null || t.prBranch != null));
 
     for (const task of tasks) {
       try {
@@ -95,7 +96,31 @@ export class GitHubPRMonitor {
       .where(eq(schema.projects.id, task.projectId))
       .get();
 
-    if (!project?.githubRepo || !task.prNumber) return;
+    if (!project?.githubRepo) return;
+
+    // Resolve missing prNumber from prBranch via GitHub API
+    if (!task.prNumber) {
+      if (!task.prBranch) return;
+      try {
+        const prs = await fetchPullRequests(project.githubRepo, token, { state: "all" });
+        const match = prs.find((pr) => pr.head.ref === task.prBranch);
+        if (!match) {
+          console.warn(`[PRMonitor] No PR found for branch ${task.prBranch} on task ${task.id}`);
+          return;
+        }
+        // Save the resolved prNumber to DB
+        const now = new Date().toISOString();
+        db.update(schema.kanbanTasks)
+          .set({ prNumber: match.number, updatedAt: now })
+          .where(eq(schema.kanbanTasks.id, task.id))
+          .run();
+        (task as any).prNumber = match.number;
+        console.log(`[PRMonitor] Resolved prNumber=${match.number} from branch ${task.prBranch} for task ${task.id}`);
+      } catch (err) {
+        console.warn(`[PRMonitor] Failed to resolve prNumber from branch ${task.prBranch}:`, err);
+        return;
+      }
+    }
 
     const pr = await fetchPullRequest(project.githubRepo, token, task.prNumber);
 

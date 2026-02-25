@@ -811,7 +811,7 @@ export class PipelineManager {
         return;
       }
 
-      this.completeTask(taskId, state, workerReport);
+      await this.completeTask(taskId, state, workerReport);
       this.pipelines.delete(taskId);
 
       // Auto-enqueue in merge queue if the pipeline created a PR.
@@ -1653,11 +1653,11 @@ export class PipelineManager {
    * If the task has a PR, move to in_review (PR monitor handles the rest).
    * Otherwise move to done with a completion report.
    */
-  private completeTask(
+  private async completeTask(
     taskId: string,
     state: PipelineState,
     finalReport: string,
-  ): void {
+  ): Promise<void> {
     const db = getDb();
     const task = db
       .select()
@@ -1665,6 +1665,33 @@ export class PipelineManager {
       .where(eq(schema.kanbanTasks.id, taskId))
       .get();
     if (!task) return;
+
+    // If we have a branch but no PR number, try to resolve it via GitHub API
+    if (task.prBranch && !task.prNumber) {
+      const token = getConfig("github:token");
+      const project = db
+        .select()
+        .from(schema.projects)
+        .where(eq(schema.projects.id, task.projectId))
+        .get();
+
+      if (token && project?.githubRepo) {
+        try {
+          const prs = await fetchPullRequests(project.githubRepo, token, { state: "all" });
+          const match = prs.find((pr) => pr.head.ref === task.prBranch);
+          if (match) {
+            db.update(schema.kanbanTasks)
+              .set({ prNumber: match.number, updatedAt: new Date().toISOString() })
+              .where(eq(schema.kanbanTasks.id, taskId))
+              .run();
+            (task as any).prNumber = match.number;
+            console.log(`[PipelineManager] Resolved prNumber=${match.number} from branch ${task.prBranch} for task ${taskId}`);
+          }
+        } catch (err) {
+          console.warn(`[PipelineManager] Failed to resolve prNumber from branch ${task.prBranch}:`, err);
+        }
+      }
+    }
 
     const now = new Date().toISOString();
     const hasPR = !!task.prNumber || !!task.prBranch;
