@@ -64,6 +64,9 @@ export interface ServerToClientEvents {
   "telegram:pairing-request": (data: { code: string; telegramUserId: string; telegramUsername: string }) => void;
   "telegram:status": (data: { status: "connected" | "disconnected" | "error"; botUsername?: string }) => void;
   "whatsapp:status": (data: { status: "connected" | "disconnected" | "qr" | "authenticated" | "auth_failure"; qr?: string }) => void;
+  "webchat:pairing-request": (data: { code: string; webchatUserId: string; webchatUsername: string }) => void;
+  "webchat:status": (data: { status: "connected" | "disconnected" | "error" }) => void;
+  "webchat:response": (data: { content: string; conversationId: string | null }) => void;
 }
 
 /** Events emitted from client to server */
@@ -216,5 +219,15 @@ export interface ClientToServerEvents {
   // Soul advisor
   "soul:suggest": (
     callback: (ack: { ok: boolean; suggestions?: SoulSuggestion[]; error?: string }) => void,
+  ) => void;
+
+  // WebChat
+  "webchat:join": (
+    data: { userId: string; username: string },
+    callback?: (ack: { ok: boolean; error?: string }) => void,
+  ) => void;
+  "webchat:message": (
+    data: { userId: string; content: string },
+    callback?: (ack: { ok: boolean; error?: string }) => void,
   ) => void;
 }

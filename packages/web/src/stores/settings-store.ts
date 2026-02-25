@@ -212,6 +212,11 @@ interface SettingsState {
   mattermostPendingPairings: Array<{ code: string; mattermostUserId: string; mattermostUsername: string; createdAt: string }>;
   mattermostTestResult: TestResult | null;
 
+  // WebChat
+  webchatEnabled: boolean;
+  webchatPairedUsers: Array<{ webchatUserId: string; webchatUsername: string; pairedAt: string }>;
+  webchatPendingPairings: Array<{ code: string; webchatUserId: string; webchatUsername: string; createdAt: string }>;
+
   // Google
   googleConnected: boolean;
   googleConnectedEmail: string | null;
@@ -418,6 +423,13 @@ interface SettingsState {
   rejectMattermostPairing: (code: string) => Promise<void>;
   revokeMattermostUser: (userId: string) => Promise<void>;
 
+  // WebChat actions
+  loadWebchatSettings: () => Promise<void>;
+  updateWebchatSettings: (data: { enabled?: boolean }) => Promise<void>;
+  approveWebchatPairing: (code: string) => Promise<void>;
+  rejectWebchatPairing: (code: string) => Promise<void>;
+  revokeWebchatUser: (userId: string) => Promise<void>;
+
   // Google actions
   loadGoogleSettings: () => Promise<void>;
   updateGoogleCredentials: (data: {
@@ -550,6 +562,9 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   mattermostPairedUsers: [],
   mattermostPendingPairings: [],
   mattermostTestResult: null,
+  webchatEnabled: false,
+  webchatPairedUsers: [],
+  webchatPendingPairings: [],
   googleConnected: false,
   googleConnectedEmail: null,
   googleClientIdSet: false,
@@ -2039,6 +2054,81 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       });
       if (!res.ok) throw new Error("Failed to revoke user");
       await get().loadMattermostSettings();
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "Unknown error" });
+    }
+  },
+
+  // WebChat actions
+
+  loadWebchatSettings: async () => {
+    try {
+      const res = await fetch("/api/settings/webchat");
+      if (!res.ok) return;
+      const data = await res.json();
+      set({
+        webchatEnabled: data.enabled,
+        webchatPairedUsers: data.pairedUsers,
+        webchatPendingPairings: data.pendingPairings,
+      });
+    } catch {
+      // Silently fail
+    }
+  },
+
+  updateWebchatSettings: async (data) => {
+    set({ error: null });
+    try {
+      const res = await fetch("/api/settings/webchat", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) throw new Error("Failed to update WebChat settings");
+      await get().loadWebchatSettings();
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "Unknown error" });
+    }
+  },
+
+  approveWebchatPairing: async (code) => {
+    set({ error: null });
+    try {
+      const res = await fetch("/api/settings/webchat/pair/approve", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code }),
+      });
+      if (!res.ok) throw new Error("Failed to approve pairing");
+      await get().loadWebchatSettings();
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "Unknown error" });
+    }
+  },
+
+  rejectWebchatPairing: async (code) => {
+    set({ error: null });
+    try {
+      const res = await fetch("/api/settings/webchat/pair/reject", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code }),
+      });
+      if (!res.ok) throw new Error("Failed to reject pairing");
+      await get().loadWebchatSettings();
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "Unknown error" });
+    }
+  },
+
+  revokeWebchatUser: async (userId) => {
+    set({ error: null });
+    try {
+      const res = await fetch(`/api/settings/webchat/pair/${userId}`, {
+        method: "DELETE",
+      });
+      if (!res.ok) throw new Error("Failed to revoke user");
+      await get().loadWebchatSettings();
     } catch (err) {
       set({ error: err instanceof Error ? err.message : "Unknown error" });
     }

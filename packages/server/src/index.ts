@@ -240,6 +240,17 @@ import {
   updateWhatsAppSettings,
   getWhatsAppConfig,
 } from "./whatsapp/whatsapp-settings.js";
+import { WebchatBridge } from "./webchat/webchat-bridge.js";
+import {
+  getWebchatSettings,
+  updateWebchatSettings,
+  isWebchatEnabled,
+} from "./webchat/webchat-settings.js";
+import {
+  approvePairing as approveWebchatPairing,
+  rejectPairing as rejectWebchatPairing,
+  revokePairing as revokeWebchatPairing,
+} from "./webchat/pairing.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -698,6 +709,26 @@ async function main() {
     }
   }
 
+  // WebChat bridge (initialized when enabled)
+  let webchatBridge: WebchatBridge | null = null;
+
+  function startWebchatBridge() {
+    if (webchatBridge || !coo) return;
+    if (!isWebchatEnabled()) return;
+    webchatBridge = new WebchatBridge({ bus, coo, io });
+    webchatBridge.start().catch((err) => {
+      console.error("[WebChat] Failed to start bridge:", err);
+      webchatBridge = null;
+    });
+  }
+
+  async function stopWebchatBridge() {
+    if (webchatBridge) {
+      await webchatBridge.stop();
+      webchatBridge = null;
+    }
+  }
+
   function startCoo() {
     if (coo) return;
     try {
@@ -1034,6 +1065,7 @@ async function main() {
     startTelegramBridge();
     startTlonBridge();
     startWhatsAppBridge();
+    startWebchatBridge();
   } else {
     console.log("Setup not complete. Waiting for setup wizard...");
   }
@@ -1361,6 +1393,7 @@ async function main() {
     startTelegramBridge();
     startTlonBridge();
     startWhatsAppBridge();
+    startWebchatBridge();
 
     return { ok: true };
   });
@@ -3805,6 +3838,65 @@ async function main() {
   });
 
   // =========================================================================
+  // WebChat settings routes
+  // =========================================================================
+
+  app.get("/api/settings/webchat", async () => {
+    return getWebchatSettings();
+  });
+
+  app.put<{
+    Body: {
+      enabled?: boolean;
+    };
+  }>("/api/settings/webchat", async (req) => {
+    const wasEnabled = isWebchatEnabled();
+    updateWebchatSettings(req.body);
+    const nowEnabled = isWebchatEnabled();
+
+    if (nowEnabled && !wasEnabled) {
+      startWebchatBridge();
+    } else if (!nowEnabled && wasEnabled) {
+      await stopWebchatBridge();
+    }
+
+    return { ok: true };
+  });
+
+  app.post<{
+    Body: { code: string };
+  }>("/api/settings/webchat/pair/approve", async (req, reply) => {
+    const result = approveWebchatPairing(req.body.code);
+    if (!result) {
+      reply.code(400);
+      return { ok: false, error: "Invalid or expired pairing code" };
+    }
+    return { ok: true, user: result };
+  });
+
+  app.post<{
+    Body: { code: string };
+  }>("/api/settings/webchat/pair/reject", async (req, reply) => {
+    const ok = rejectWebchatPairing(req.body.code);
+    if (!ok) {
+      reply.code(400);
+      return { ok: false, error: "Pairing code not found" };
+    }
+    return { ok: true };
+  });
+
+  app.delete<{
+    Params: { userId: string };
+  }>("/api/settings/webchat/pair/:userId", async (req, reply) => {
+    const ok = revokeWebchatPairing(req.params.userId);
+    if (!ok) {
+      reply.code(400);
+      return { ok: false, error: "User not found" };
+    }
+    return { ok: true };
+  });
+
+  // =========================================================================
   // Google settings routes
   // =========================================================================
 
@@ -4495,6 +4587,7 @@ Respond with ONLY a JSON object (no markdown, no explanation) with these fields:
     await stopSlackBridge();
     await stopTlonBridge();
     await stopWhatsAppBridge();
+    await stopWebchatBridge();
     await stopMattermostBridge();
     await closeBrowser();
     process.exit(0);

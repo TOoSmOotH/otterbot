@@ -31,6 +31,12 @@ const CHANNELS = [
     icon: "M",
     settingsSection: "mattermost" as const,
   },
+  {
+    name: "WebChat",
+    description: "Browser-based chat interface",
+    icon: "WC",
+    settingsSection: "webchat" as const,
+  },
 ];
 
 export function ChannelsSection() {
@@ -46,18 +52,22 @@ export function ChannelsSection() {
   const mattermostEnabled = useSettingsStore((s) => s.mattermostEnabled);
   const mattermostTokenSet = useSettingsStore((s) => s.mattermostTokenSet);
   const loadMattermostSettings = useSettingsStore((s) => s.loadMattermostSettings);
+  const webchatEnabled = useSettingsStore((s) => s.webchatEnabled);
+  const loadWebchatSettings = useSettingsStore((s) => s.loadWebchatSettings);
 
   useEffect(() => {
     loadDiscordSettings();
     loadTelegramSettings();
     loadSlackSettings();
     loadMattermostSettings();
+    loadWebchatSettings();
   }, []);
 
   const isDiscordConnected = discordEnabled && discordTokenSet;
   const isTelegramConnected = telegramEnabled && telegramTokenSet;
   const isSlackConnected = slackEnabled && slackBotTokenSet;
   const isMattermostConnected = mattermostEnabled && mattermostTokenSet;
+  const isWebchatConnected = webchatEnabled;
 
   return (
     <div className="p-5 space-y-4">
@@ -70,7 +80,7 @@ export function ChannelsSection() {
 
       <div className="grid grid-cols-2 gap-3">
         {CHANNELS.map((channel) => {
-          const connected = (channel.name === "Discord" && isDiscordConnected) || (channel.name === "Telegram" && isTelegramConnected) || (channel.name === "Slack" && isSlackConnected) || (channel.name === "Mattermost" && isMattermostConnected);
+          const connected = (channel.name === "Discord" && isDiscordConnected) || (channel.name === "Telegram" && isTelegramConnected) || (channel.name === "Slack" && isSlackConnected) || (channel.name === "Mattermost" && isMattermostConnected) || (channel.name === "WebChat" && isWebchatConnected);
           return (
             <div
               key={channel.name}
