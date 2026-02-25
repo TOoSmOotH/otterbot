@@ -4625,6 +4625,7 @@ Respond with ONLY a JSON object (no markdown, no explanation) with these fields:
     await stopTlonBridge();
     await stopWhatsAppBridge();
     await stopMattermostBridge();
+    await stopSignalBridge();
     await closeBrowser();
     process.exit(0);
   };
