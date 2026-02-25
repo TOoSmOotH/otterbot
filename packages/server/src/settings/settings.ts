@@ -60,6 +60,7 @@ export const PROVIDER_TYPE_META: ProviderTypeMeta[] = [
   { type: "github-copilot", label: "GitHub Copilot", needsApiKey: true, needsBaseUrl: false },
   { type: "huggingface", label: "Hugging Face", needsApiKey: true, needsBaseUrl: false },
   { type: "nvidia", label: "NVIDIA", needsApiKey: true, needsBaseUrl: false },
+  { type: "minimax", label: "MiniMax", needsApiKey: true, needsBaseUrl: false },
   { type: "xai", label: "xAI (Grok)", needsApiKey: true, needsBaseUrl: false },
   { type: "zai", label: "Z.AI", needsApiKey: true, needsBaseUrl: false },
   { type: "perplexity", label: "Perplexity Sonar", needsApiKey: true, needsBaseUrl: false },
@@ -103,6 +104,12 @@ const FALLBACK_MODELS: Record<string, string[]> = {
     "meta/llama-3.1-8b-instruct",
     "mistralai/mistral-7b-instruct-v0.3",
     "mistralai/mixtral-8x22b-instruct-v0.1",
+  ],
+  minimax: [
+    "MiniMax-M1",
+    "MiniMax-M1-80k",
+    "MiniMax-Text-01",
+    "MiniMax-Text-01-128k",
   ],
   xai: [
     "grok-3",
@@ -600,6 +607,18 @@ export async function fetchModelsWithCredentials(
         if (!nvidiaRes.ok) return FALLBACK_MODELS.nvidia ?? [];
         const nvidiaData = (await nvidiaRes.json()) as { data?: Array<{ id: string }> };
         return nvidiaData.data?.map((m) => m.id).sort() ?? FALLBACK_MODELS.nvidia ?? [];
+      }
+
+      case "minimax": {
+        if (!apiKey) return FALLBACK_MODELS.minimax ?? [];
+        const minimaxBase = baseUrl ?? "https://api.minimax.chat/v1";
+        const minimaxRes = await fetch(`${minimaxBase}/models`, {
+          headers: { Authorization: `Bearer ${apiKey}` },
+          signal: AbortSignal.timeout(10_000),
+        });
+        if (!minimaxRes.ok) return FALLBACK_MODELS.minimax ?? [];
+        const minimaxData = (await minimaxRes.json()) as { data?: Array<{ id: string }> };
+        return minimaxData.data?.map((m) => m.id).sort() ?? FALLBACK_MODELS.minimax ?? [];
       }
 
       case "xai": {

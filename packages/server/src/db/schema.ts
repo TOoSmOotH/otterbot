@@ -268,7 +268,7 @@ export const providers = sqliteTable("providers", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
   type: text("type", {
-    enum: ["anthropic", "openai", "google", "ollama", "openai-compatible", "openrouter", "github-copilot", "huggingface", "nvidia", "xai", "zai", "perplexity", "deepgram", "bedrock", "lmstudio", "deepseek"],
+    enum: ["anthropic", "openai", "google", "ollama", "openai-compatible", "openrouter", "github-copilot", "huggingface", "nvidia", "minimax", "xai", "zai", "perplexity", "deepgram", "bedrock", "lmstudio", "deepseek"],
   }).notNull(),
   apiKey: text("api_key"),
   baseUrl: text("base_url"),
