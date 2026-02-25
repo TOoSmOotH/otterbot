@@ -27,6 +27,7 @@ import { GoogleSection } from "./GoogleSection";
 import { SecuritySection } from "./SecuritySection";
 import { ModulesSection } from "./ModulesSection";
 import { WorkerNamesSection } from "./WorkerNamesSection";
+import { McpServersSection } from "./McpServersSection";
 import type { SettingsSection } from "./settings-nav";
 
 interface SettingsPageProps {
@@ -64,6 +65,7 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
     if (activeSection === "mattermost") return <MattermostSection />;
     if (activeSection === "nextcloud-talk") return <NextcloudTalkSection />;
     if (activeSection === "worker-names") return <WorkerNamesSection />;
+    if (activeSection === "mcp-servers") return <McpServersSection />;
     if (activeSection === "security") return <SecuritySection />;
     if (activeSection === "soul") return <SoulTab />;
     if (activeSection === "memory") return <MemoryTab />;

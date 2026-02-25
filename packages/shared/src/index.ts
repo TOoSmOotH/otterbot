@@ -18,3 +18,4 @@ export * from "./types/opencode.js";
 export * from "./types/memory.js";
 export * from "./types/module.js";
 export * from "./types/merge-queue.js";
+export * from "./types/mcp-server.js";

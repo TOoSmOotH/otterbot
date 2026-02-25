@@ -151,7 +151,10 @@ import {
   clearAgentModelOverride,
   type TierDefaults,
 } from "./settings/settings.js";
-import type { ProviderType } from "@otterbot/shared";
+import type { ProviderType, McpServerCreate, McpServerUpdate, McpServerRuntime } from "@otterbot/shared";
+import { McpServerService } from "./mcp/mcp-service.js";
+import { McpClientManager } from "./mcp/mcp-client-manager.js";
+import { getSecurityWarnings, type SecurityWarning } from "./mcp/mcp-security.js";
 import { createBackupArchive, restoreFromArchive, looksLikeZip } from "./backup/backup.js";
 import { writeOpenCodeConfig } from "./opencode/opencode-manager.js";
 import { GitHubIssueMonitor } from "./github/issue-monitor.js";
@@ -2721,6 +2724,141 @@ async function main() {
   });
 
   // =========================================================================
+  // MCP Servers settings routes
+  // =========================================================================
+
+  const mcpServerService = new McpServerService();
+
+  app.get("/api/settings/mcp-servers", async () => {
+    const servers = mcpServerService.list().map((s) => mcpServerService.maskSecrets(s));
+    const statuses: Record<string, McpServerRuntime> = {};
+    const warnings: Record<string, SecurityWarning[]> = {};
+    for (const s of servers) {
+      statuses[s.id] = McpClientManager.getStatus(s.id);
+      warnings[s.id] = getSecurityWarnings(s);
+    }
+    return { servers, statuses, warnings };
+  });
+
+  app.post<{
+    Body: McpServerCreate;
+  }>("/api/settings/mcp-servers", async (req, reply) => {
+    const { name, transport } = req.body;
+    if (!name || !transport) {
+      reply.code(400);
+      return { error: "name and transport are required" };
+    }
+    try {
+      const created = mcpServerService.create(req.body);
+      return mcpServerService.maskSecrets(created);
+    } catch (err) {
+      reply.code(400);
+      return { error: err instanceof Error ? err.message : "Invalid configuration" };
+    }
+  });
+
+  app.get<{ Params: { id: string } }>("/api/settings/mcp-servers/:id", async (req, reply) => {
+    const server = mcpServerService.get(req.params.id);
+    if (!server) {
+      reply.code(404);
+      return { error: "MCP server not found" };
+    }
+    return {
+      server: mcpServerService.maskSecrets(server),
+      status: McpClientManager.getStatus(server.id),
+      warnings: getSecurityWarnings(server),
+    };
+  });
+
+  app.put<{ Params: { id: string }; Body: McpServerUpdate }>(
+    "/api/settings/mcp-servers/:id",
+    async (req, reply) => {
+      try {
+        const updated = mcpServerService.update(req.params.id, req.body);
+        if (!updated) {
+          reply.code(404);
+          return { error: "MCP server not found" };
+        }
+        return mcpServerService.maskSecrets(updated);
+      } catch (err) {
+        reply.code(400);
+        return { error: err instanceof Error ? err.message : "Invalid configuration" };
+      }
+    },
+  );
+
+  app.delete<{ Params: { id: string } }>("/api/settings/mcp-servers/:id", async (req, reply) => {
+    // Stop if running
+    await McpClientManager.stop(req.params.id);
+    const deleted = mcpServerService.delete(req.params.id);
+    if (!deleted) {
+      reply.code(404);
+      return { error: "MCP server not found" };
+    }
+    return { ok: true };
+  });
+
+  app.post<{ Params: { id: string } }>("/api/settings/mcp-servers/:id/start", async (req, reply) => {
+    try {
+      await McpClientManager.start(req.params.id);
+      return { ok: true, status: McpClientManager.getStatus(req.params.id) };
+    } catch (err) {
+      reply.code(500);
+      return { error: err instanceof Error ? err.message : "Failed to start MCP server" };
+    }
+  });
+
+  app.post<{ Params: { id: string } }>("/api/settings/mcp-servers/:id/stop", async (req) => {
+    await McpClientManager.stop(req.params.id);
+    return { ok: true, status: McpClientManager.getStatus(req.params.id) };
+  });
+
+  app.post<{ Params: { id: string } }>("/api/settings/mcp-servers/:id/restart", async (req, reply) => {
+    try {
+      await McpClientManager.restart(req.params.id);
+      return { ok: true, status: McpClientManager.getStatus(req.params.id) };
+    } catch (err) {
+      reply.code(500);
+      return { error: err instanceof Error ? err.message : "Failed to restart MCP server" };
+    }
+  });
+
+  app.post<{ Params: { id: string } }>("/api/settings/mcp-servers/:id/test", async (req, reply) => {
+    try {
+      await McpClientManager.start(req.params.id);
+      const tools = await McpClientManager.discoverTools(req.params.id);
+      return { ok: true, tools, status: McpClientManager.getStatus(req.params.id) };
+    } catch (err) {
+      reply.code(500);
+      return { error: err instanceof Error ? err.message : "Failed to test MCP server" };
+    }
+  });
+
+  app.post<{ Params: { id: string } }>("/api/settings/mcp-servers/:id/discover", async (req, reply) => {
+    try {
+      const tools = await McpClientManager.discoverTools(req.params.id);
+      return { ok: true, tools };
+    } catch (err) {
+      reply.code(500);
+      return { error: err instanceof Error ? err.message : "Failed to discover tools" };
+    }
+  });
+
+  app.put<{ Params: { id: string }; Body: { allowedTools: string[] | null } }>(
+    "/api/settings/mcp-servers/:id/tools",
+    async (req, reply) => {
+      const updated = mcpServerService.update(req.params.id, {
+        allowedTools: req.body.allowedTools,
+      });
+      if (!updated) {
+        reply.code(404);
+        return { error: "MCP server not found" };
+      }
+      return mcpServerService.maskSecrets(updated);
+    },
+  );
+
+  // =========================================================================
   // Search settings routes
   // =========================================================================
 
@@ -4722,6 +4860,16 @@ Respond with ONLY a JSON object (no markdown, no explanation) with these fields:
   await app.listen({ port, host });
   console.log(`Otterbot server listening on https://${host}:${port}`);
 
+  // Auto-start MCP servers
+  McpClientManager.autoStartAll().catch((err) => {
+    console.error("[MCP] Failed to auto-start servers:", err);
+  });
+
+  // Emit MCP status changes via socket
+  McpClientManager.onStatusChange((runtime) => {
+    io.emit("mcp:status", runtime);
+  });
+
   // Graceful shutdown
   const shutdown = async () => {
     await stopDiscordBridge();
@@ -4733,6 +4881,7 @@ Respond with ONLY a JSON object (no markdown, no explanation) with these fields:
     await stopMattermostBridge();
     await stopSignalBridge();
     await stopNextcloudTalkBridge();
+    await McpClientManager.stopAll();
     await closeBrowser();
     process.exit(0);
   };

@@ -626,6 +626,25 @@ export async function migrateDb() {
     updated_at TEXT NOT NULL
   )`);
 
+  // MCP servers table
+  db.run(sql`CREATE TABLE IF NOT EXISTS mcp_servers (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    enabled INTEGER NOT NULL DEFAULT 0,
+    transport TEXT NOT NULL,
+    command TEXT,
+    args TEXT NOT NULL DEFAULT '[]',
+    env TEXT NOT NULL DEFAULT '{}',
+    url TEXT,
+    headers TEXT NOT NULL DEFAULT '{}',
+    auto_start INTEGER NOT NULL DEFAULT 0,
+    timeout INTEGER NOT NULL DEFAULT 30000,
+    allowed_tools TEXT,
+    discovered_tools TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  )`);
+
   // FTS5 full-text search index for memories
   try {
     db.run(sql`CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(
