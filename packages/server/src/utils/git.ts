@@ -1,5 +1,5 @@
 
-import { execSync } from "node:child_process";
+import { execSync, execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -303,4 +303,77 @@ export function computeGitDiff(workspacePath: string): GitDiffResult | null {
 
   if (fileMap.size === 0) return null;
   return { files: Array.from(fileMap.values()) };
+}
+
+// ---------------------------------------------------------------------------
+// Rebase utilities
+// ---------------------------------------------------------------------------
+
+/**
+ * Rebase a branch onto the latest remote target branch.
+ * Fetches origin, checks out the branch, and rebases onto origin/{targetBranch}.
+ * Returns true on success, false on conflict (rebase is aborted).
+ *
+ * @param gitEnv - Environment variables for git (for PAT auth)
+ * @param credentialArgs - Extra git args for credential helper
+ */
+export function rebaseBranch(
+  cwd: string,
+  branch: string,
+  targetBranch: string,
+  gitEnv?: Record<string, string>,
+  credentialArgs?: string[],
+): boolean {
+  const execOpts = {
+    cwd,
+    stdio: "pipe" as const,
+    timeout: 120_000,
+    env: gitEnv,
+  };
+  const creds = credentialArgs ?? [];
+
+  // Fetch latest from origin
+  execFileSync("git", [...creds, "fetch", "origin"], execOpts);
+
+  // Checkout the branch
+  execFileSync("git", ["checkout", branch], { cwd, stdio: "pipe", timeout: 30_000 });
+
+  // Attempt rebase
+  try {
+    execFileSync("git", ["rebase", `origin/${targetBranch}`], execOpts);
+    return true;
+  } catch {
+    // Rebase failed — abort and return false
+    try {
+      execFileSync("git", ["rebase", "--abort"], { cwd, stdio: "pipe", timeout: 10_000 });
+    } catch {
+      // Already aborted or not in rebase state
+    }
+    return false;
+  }
+}
+
+/**
+ * Force-push a branch to origin using --force-with-lease (safe force push).
+ *
+ * @param gitEnv - Environment variables for git (for PAT auth)
+ * @param credentialArgs - Extra git args for credential helper
+ */
+export function forcePushBranch(
+  cwd: string,
+  branch: string,
+  gitEnv?: Record<string, string>,
+  credentialArgs?: string[],
+): void {
+  const creds = credentialArgs ?? [];
+  execFileSync(
+    "git",
+    [...creds, "push", "--force-with-lease", "origin", branch],
+    {
+      cwd,
+      stdio: "pipe",
+      timeout: 120_000,
+      env: gitEnv,
+    },
+  );
 }

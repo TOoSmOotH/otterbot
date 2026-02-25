@@ -94,6 +94,7 @@ interface PipelineState {
   stageReports: Map<string, string>; // stage → report content
   prBranch: string | null;
   targetBranch: string;             // project's configured branch (for diff base)
+  isReReview?: boolean;             // true when running re-review for merge queue
 }
 
 export class PipelineManager {
@@ -107,10 +108,17 @@ export class PipelineManager {
   private static readonly STALE_THRESHOLD_MS = 30 * 60 * 1000;
   /** Sweep interval in milliseconds (10 minutes) */
   private static readonly SWEEP_INTERVAL_MS = 10 * 60 * 1000;
+  /** Merge queue reference (injected to avoid circular deps) */
+  private mergeQueue: { onReReviewComplete(taskId: string, passed: boolean): Promise<void> } | null = null;
 
   constructor(coo: COO, io: TypedServer) {
     this.coo = coo;
     this.io = io;
+  }
+
+  /** Inject the merge queue (avoids circular dependency) */
+  setMergeQueue(mq: { onReReviewComplete(taskId: string, passed: boolean): Promise<void> }): void {
+    this.mergeQueue = mq;
   }
 
   /**
@@ -609,6 +617,9 @@ export class PipelineManager {
     const coderIndex = state.stages.indexOf("coder");
 
     // Stage-specific verdict handling with kickback support
+    // For re-review pipelines (merge queue), failures abort instead of kicking back to coder
+    const isReReview = !!state.isReReview;
+
     switch (currentStage) {
       case "coder": {
         const failed = verdict === "fail";
@@ -637,48 +648,65 @@ export class PipelineManager {
         const cleanedReport = workerReport.replace(/⚠️ WARNING: Task reported success but produced zero file changes[^\n]*/g, "").trim();
         const hasFindings = verdict === "fail" || (verdict === null && this.securityHasFindings(cleanedReport));
         console.log(`[PipelineManager] Security review for task ${taskId}: hasFindings=${hasFindings}`);
-        if (hasFindings && coderIndex >= 0) {
-          state.currentStageIndex = coderIndex;
-          state.lastKickbackSource = "security";
-          state.spawnRetryCount = 0;
-          this.updateTaskPipelineStage(taskId, "coder");
-          if (state.issueNumber && state.repo) {
-            const token = getConfig("github:token");
-            if (token) {
-              try {
-                await createIssueComment(
-                  state.repo, token, state.issueNumber,
-                  formatBotComment("Security Kickback", "Security review found issues. Sending back to coder for fixes."),
-                );
-              } catch { /* best effort */ }
-            }
+        if (hasFindings) {
+          if (isReReview && this.mergeQueue) {
+            // Re-review failed — abort and notify merge queue
+            this.pipelines.delete(taskId);
+            await this.mergeQueue.onReReviewComplete(taskId, false);
+            console.log(`[PipelineManager] Re-review failed at security for task ${taskId}`);
+            return;
           }
-          await this.sendStageDirective(state, workerReport);
-          return;
+          if (coderIndex >= 0) {
+            state.currentStageIndex = coderIndex;
+            state.lastKickbackSource = "security";
+            state.spawnRetryCount = 0;
+            this.updateTaskPipelineStage(taskId, "coder");
+            if (state.issueNumber && state.repo) {
+              const token = getConfig("github:token");
+              if (token) {
+                try {
+                  await createIssueComment(
+                    state.repo, token, state.issueNumber,
+                    formatBotComment("Security Kickback", "Security review found issues. Sending back to coder for fixes."),
+                  );
+                } catch { /* best effort */ }
+              }
+            }
+            await this.sendStageDirective(state, workerReport);
+            return;
+          }
         }
         break;
       }
       case "tester": {
         const failed = verdict === "fail" || (verdict === null && this.testerHasFailed(workerReport));
         console.log(`[PipelineManager] Tester review for task ${taskId}: failed=${failed}`);
-        if (failed && coderIndex >= 0) {
-          state.currentStageIndex = coderIndex;
-          state.lastKickbackSource = "tester";
-          state.spawnRetryCount = 0;
-          this.updateTaskPipelineStage(taskId, "coder");
-          if (state.issueNumber && state.repo) {
-            const token = getConfig("github:token");
-            if (token) {
-              try {
-                await createIssueComment(
-                  state.repo, token, state.issueNumber,
-                  formatBotComment("Test Kickback", "Tests failed. Sending back to coder for fixes."),
-                );
-              } catch { /* best effort */ }
-            }
+        if (failed) {
+          if (isReReview && this.mergeQueue) {
+            this.pipelines.delete(taskId);
+            await this.mergeQueue.onReReviewComplete(taskId, false);
+            console.log(`[PipelineManager] Re-review failed at tester for task ${taskId}`);
+            return;
           }
-          await this.sendStageDirective(state, workerReport);
-          return;
+          if (coderIndex >= 0) {
+            state.currentStageIndex = coderIndex;
+            state.lastKickbackSource = "tester";
+            state.spawnRetryCount = 0;
+            this.updateTaskPipelineStage(taskId, "coder");
+            if (state.issueNumber && state.repo) {
+              const token = getConfig("github:token");
+              if (token) {
+                try {
+                  await createIssueComment(
+                    state.repo, token, state.issueNumber,
+                    formatBotComment("Test Kickback", "Tests failed. Sending back to coder for fixes."),
+                  );
+                } catch { /* best effort */ }
+              }
+            }
+            await this.sendStageDirective(state, workerReport);
+            return;
+          }
         }
         break;
       }
@@ -696,24 +724,32 @@ export class PipelineManager {
 
         const failed = verdict === "fail" || (verdict === null && this.reviewerHasIssues(workerReport));
         console.log(`[PipelineManager] Reviewer review for task ${taskId}: failed=${failed}`);
-        if (failed && coderIndex >= 0) {
-          state.currentStageIndex = coderIndex;
-          state.lastKickbackSource = "reviewer";
-          state.spawnRetryCount = 0;
-          this.updateTaskPipelineStage(taskId, "coder");
-          if (state.issueNumber && state.repo) {
-            const token = getConfig("github:token");
-            if (token) {
-              try {
-                await createIssueComment(
-                  state.repo, token, state.issueNumber,
-                  formatBotComment("Review Kickback", "Code review found issues. Sending back to coder for fixes."),
-                );
-              } catch { /* best effort */ }
-            }
+        if (failed) {
+          if (isReReview && this.mergeQueue) {
+            this.pipelines.delete(taskId);
+            await this.mergeQueue.onReReviewComplete(taskId, false);
+            console.log(`[PipelineManager] Re-review failed at reviewer for task ${taskId}`);
+            return;
           }
-          await this.sendStageDirective(state, workerReport);
-          return;
+          if (coderIndex >= 0) {
+            state.currentStageIndex = coderIndex;
+            state.lastKickbackSource = "reviewer";
+            state.spawnRetryCount = 0;
+            this.updateTaskPipelineStage(taskId, "coder");
+            if (state.issueNumber && state.repo) {
+              const token = getConfig("github:token");
+              if (token) {
+                try {
+                  await createIssueComment(
+                    state.repo, token, state.issueNumber,
+                    formatBotComment("Review Kickback", "Code review found issues. Sending back to coder for fixes."),
+                  );
+                } catch { /* best effort */ }
+              }
+            }
+            await this.sendStageDirective(state, workerReport);
+            return;
+          }
         }
         break;
       }
@@ -726,6 +762,15 @@ export class PipelineManager {
     if (state.currentStageIndex >= state.stages.length) {
       // Pipeline complete — update DB first, then clean up memory
       this.updateTaskPipelineStage(taskId, null);
+
+      if (state.isReReview && this.mergeQueue) {
+        // Re-review passed — hand back to merge queue for merge
+        this.pipelines.delete(taskId);
+        await this.mergeQueue.onReReviewComplete(taskId, true);
+        console.log(`[PipelineManager] Re-review complete for task ${taskId} — passed`);
+        return;
+      }
+
       this.completeTask(taskId, state, workerReport);
       this.pipelines.delete(taskId);
 
@@ -908,6 +953,91 @@ export class PipelineManager {
     }
 
     await this.sendStageDirective(state, feedback);
+  }
+
+  /**
+   * Start a re-review pipeline for a merge queue entry.
+   * Runs review stages (security, tester, reviewer) but skips triage and coder.
+   * On completion, calls mergeQueue.onReReviewComplete() instead of the normal flow.
+   */
+  async startReReview(
+    taskId: string,
+    branchName: string,
+    prNumber: number,
+  ): Promise<void> {
+    const db = getDb();
+    const task = db
+      .select()
+      .from(schema.kanbanTasks)
+      .where(eq(schema.kanbanTasks.id, taskId))
+      .get();
+    if (!task) return;
+
+    const config = this.getConfig(task.projectId);
+    if (!config?.enabled) return;
+
+    const project = db
+      .select()
+      .from(schema.projects)
+      .where(eq(schema.projects.id, task.projectId))
+      .get();
+
+    // Build review-only stages (skip triage and coder)
+    const reviewStages: string[] = [];
+    for (const stageKey of IMPLEMENTATION_STAGE_KEYS) {
+      if (stageKey === "coder") continue; // Skip coder for re-review
+      const stageConfig = config.stages[stageKey];
+      if (stageConfig?.enabled !== false) {
+        reviewStages.push(stageKey);
+      }
+    }
+
+    if (reviewStages.length === 0) {
+      // No review stages enabled — pass directly
+      if (this.mergeQueue) {
+        await this.mergeQueue.onReReviewComplete(taskId, true);
+      }
+      return;
+    }
+
+    // Extract issue number from labels
+    const issueLabel = (task.labels as string[]).find((l) => l.startsWith("github-issue-"));
+    const issueNumber = issueLabel ? parseInt(issueLabel.replace("github-issue-", ""), 10) : null;
+
+    const state: PipelineState = {
+      taskId,
+      projectId: task.projectId,
+      issueNumber,
+      repo: project?.githubRepo ?? null,
+      stages: reviewStages,
+      currentStageIndex: 0,
+      spawnRetryCount: 0,
+      lastKickbackSource: null,
+      stageReports: new Map(),
+      prBranch: branchName,
+      targetBranch: getConfig(`project:${task.projectId}:github:branch`) ?? "main",
+      isReReview: true,
+    };
+
+    this.pipelines.set(taskId, state);
+
+    // Update kanban task with pipeline stage info
+    const now = new Date().toISOString();
+    db.update(schema.kanbanTasks)
+      .set({
+        pipelineStages: reviewStages,
+        pipelineStage: reviewStages[0],
+        updatedAt: now,
+      })
+      .where(eq(schema.kanbanTasks.id, taskId))
+      .run();
+    const updated = db.select().from(schema.kanbanTasks).where(eq(schema.kanbanTasks.id, taskId)).get();
+    if (updated) {
+      this.io.emit("kanban:task-updated", updated as unknown as KanbanTask);
+    }
+
+    console.log(`[PipelineManager] Started re-review for task ${taskId} stages: ${reviewStages.join(" → ")}`);
+    await this.sendStageDirective(state);
   }
 
   // ─── Directive building ──────────────────────────────────────────

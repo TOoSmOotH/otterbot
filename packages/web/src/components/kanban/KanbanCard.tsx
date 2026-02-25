@@ -1,11 +1,23 @@
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import type { KanbanTask, KanbanColumn } from "@otterbot/shared";
+import type { KanbanTask, KanbanColumn, MergeQueueStatus } from "@otterbot/shared";
 import { PIPELINE_STAGES } from "@otterbot/shared";
+import { useMergeQueueStore } from "../../stores/merge-queue-store";
+import { getSocket } from "../../lib/socket";
 
 const STAGE_LABELS: Record<string, string> = Object.fromEntries(
   PIPELINE_STAGES.map((s) => [s.key, s.label]),
 );
+
+const MERGE_QUEUE_STATUS_CONFIG: Record<MergeQueueStatus, { label: string; className: string }> = {
+  queued: { label: "Queued", className: "bg-blue-500/15 text-blue-400" },
+  rebasing: { label: "Rebasing", className: "bg-purple-500/15 text-purple-400" },
+  re_review: { label: "Re-Review", className: "bg-indigo-500/15 text-indigo-400" },
+  merging: { label: "Merging", className: "bg-emerald-500/15 text-emerald-400" },
+  merged: { label: "Merged", className: "bg-emerald-500/15 text-emerald-400" },
+  conflict: { label: "Conflict", className: "bg-red-500/15 text-red-400" },
+  failed: { label: "Failed", className: "bg-red-500/15 text-red-400" },
+};
 
 function PipelineProgress({
   stages,
@@ -80,10 +92,25 @@ export function KanbanCard({
     isDragging,
   } = useSortable({ id: task.id });
 
+  const mergeQueueEntries = useMergeQueueStore((s) => s.entries);
+  const mqEntry = mergeQueueEntries.find((e) => e.taskId === task.id);
+
   const style = {
     transform: CSS.Transform.toString(transform),
     transition,
   };
+
+  const handleApproveForMerge = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const socket = getSocket();
+    socket.emit("merge-queue:approve", { taskId: task.id });
+  };
+
+  const showApproveButton =
+    task.column === "in_review" &&
+    task.prNumber != null &&
+    task.prBranch != null &&
+    !mqEntry;
 
   return (
     <div
@@ -144,6 +171,11 @@ export function KanbanCard({
             PR #{task.prNumber}
           </span>
         )}
+        {mqEntry && (
+          <span className={`text-[10px] rounded px-1.5 py-0.5 font-medium ${MERGE_QUEUE_STATUS_CONFIG[mqEntry.status].className}`}>
+            {MERGE_QUEUE_STATUS_CONFIG[mqEntry.status].label}
+          </span>
+        )}
         {task.column === "backlog" && task.blockedBy?.length > 0 && (
           <span className="text-[10px] bg-destructive/15 text-destructive rounded px-1.5 py-0.5 font-medium">
             Blocked
@@ -163,6 +195,14 @@ export function KanbanCard({
           </span>
         )}
       </div>
+      {showApproveButton && (
+        <button
+          className="mt-2 w-full text-[11px] font-medium bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25 rounded px-2 py-1 transition-colors"
+          onClick={handleApproveForMerge}
+        >
+          Approve for Merge
+        </button>
+      )}
     </div>
   );
 }

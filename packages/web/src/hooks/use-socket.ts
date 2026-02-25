@@ -7,6 +7,7 @@ import { useAgentActivityStore } from "../stores/agent-activity-store";
 import { useEnvironmentStore } from "../stores/environment-store";
 import { useCodingAgentStore } from "../stores/coding-agent-store";
 import { useTodoStore } from "../stores/todo-store";
+import { useMergeQueueStore } from "../stores/merge-queue-store";
 
 export function useSocket() {
   const initialized = useRef(false);
@@ -44,6 +45,8 @@ export function useSocket() {
   const addTodo = useTodoStore((s) => s.addTodo);
   const patchTodo = useTodoStore((s) => s.patchTodo);
   const removeTodo = useTodoStore((s) => s.removeTodo);
+  const setMergeQueueEntries = useMergeQueueStore((s) => s.setEntries);
+  const updateMergeQueueEntry = useMergeQueueStore((s) => s.updateEntry);
 
   useEffect(() => {
     if (initialized.current) return;
@@ -134,6 +137,14 @@ export function useSocket() {
 
     socket.on("kanban:task-deleted", ({ taskId }) => {
       removeTask(taskId);
+    });
+
+    socket.on("merge-queue:updated", ({ entries }) => {
+      setMergeQueueEntries(entries);
+    });
+
+    socket.on("merge-queue:entry-updated", (entry) => {
+      updateMergeQueueEntry(entry);
     });
 
     socket.on("todo:created", (todo) => {
@@ -229,6 +240,8 @@ export function useSocket() {
       socket.off("kanban:task-created");
       socket.off("kanban:task-updated");
       socket.off("kanban:task-deleted");
+      socket.off("merge-queue:updated");
+      socket.off("merge-queue:entry-updated");
       socket.off("todo:created");
       socket.off("todo:updated");
       socket.off("todo:deleted");

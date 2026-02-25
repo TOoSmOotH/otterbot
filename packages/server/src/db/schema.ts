@@ -446,6 +446,29 @@ export const customScheduledTasks = sqliteTable("custom_scheduled_tasks", {
   updatedAt: text("updated_at").notNull().$defaultFn(() => new Date().toISOString()),
 });
 
+export const mergeQueue = sqliteTable("merge_queue", {
+  id: text("id").primaryKey(),
+  taskId: text("task_id").notNull(),
+  projectId: text("project_id").notNull(),
+  prNumber: integer("pr_number").notNull(),
+  prBranch: text("pr_branch").notNull(),
+  baseBranch: text("base_branch").notNull(),
+  status: text("status", {
+    enum: ["queued", "rebasing", "re_review", "merging", "merged", "conflict", "failed"],
+  }).notNull().default("queued"),
+  position: integer("position").notNull(),
+  rebaseAttempts: integer("rebase_attempts").notNull().default(0),
+  lastError: text("last_error"),
+  approvedAt: text("approved_at").notNull(),
+  mergedAt: text("merged_at"),
+  createdAt: text("created_at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+  updatedAt: text("updated_at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+});
+
 export const memoryEpisodes = sqliteTable("memory_episodes", {
   id: text("id").primaryKey(),
   date: text("date").notNull(), // YYYY-MM-DD

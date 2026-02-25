@@ -157,6 +157,7 @@ import { writeOpenCodeConfig } from "./opencode/opencode-manager.js";
 import { GitHubIssueMonitor } from "./github/issue-monitor.js";
 import { GitHubPRMonitor } from "./github/pr-monitor.js";
 import { PipelineManager } from "./pipeline/pipeline-manager.js";
+import { MergeQueue } from "./merge-queue/merge-queue.js";
 import { ReminderScheduler } from "./reminders/reminder-scheduler.js";
 import { MemoryCompactor } from "./memory/memory-compactor.js";
 import { SchedulerRegistry } from "./schedulers/scheduler-registry.js";
@@ -837,8 +838,12 @@ async function main() {
       pipelineManager.init().catch((err) => {
         console.error("[PipelineManager] Init failed:", err);
       });
+      const mergeQueue = new MergeQueue(io as any, workspace);
       issueMonitor.setPipelineManager(pipelineManager);
       prMonitor.setPipelineManager(pipelineManager);
+      prMonitor.setMergeQueue(mergeQueue);
+      pipelineManager.setMergeQueue(mergeQueue);
+      mergeQueue.setPipelineManager(pipelineManager);
       coo.setPipelineManager(pipelineManager);
 
       setupSocketHandlers(io, bus, coo, registry, {
@@ -876,7 +881,7 @@ async function main() {
           callback?.({ messageId: confirmMsg.id, conversationId: conversationId ?? "" });
           return true;
         },
-      }, { workspace, issueMonitor: issueMonitor! });
+      }, { workspace, issueMonitor: issueMonitor!, mergeQueue });
       console.log(`COO agent started. (model=${coo.toData().model}, provider=${coo.toData().provider})`);
 
       // Spawn AdminAssistant alongside COO
@@ -993,6 +998,13 @@ async function main() {
           minIntervalMs: 30_000,
         });
       }
+
+      schedulerRegistry.register("merge-queue", mergeQueue, {
+        name: "Merge Queue",
+        description: "Processes approved PRs: rebase, re-review, and auto-merge sequentially.",
+        defaultIntervalMs: 30_000,
+        minIntervalMs: 10_000,
+      });
 
       schedulerRegistry.startAll();
 
