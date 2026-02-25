@@ -110,7 +110,10 @@ export class PipelineManager {
   /** Sweep interval in milliseconds (10 minutes) */
   private static readonly SWEEP_INTERVAL_MS = 10 * 60 * 1000;
   /** Merge queue reference (injected to avoid circular deps) */
-  private mergeQueue: { onReReviewComplete(taskId: string, passed: boolean): Promise<void> } | null = null;
+  private mergeQueue: {
+    onReReviewComplete(taskId: string, passed: boolean): Promise<void>;
+    approveForMerge(taskId: string): unknown;
+  } | null = null;
 
   constructor(coo: COO, io: TypedServer) {
     this.coo = coo;
@@ -118,7 +121,10 @@ export class PipelineManager {
   }
 
   /** Inject the merge queue (avoids circular dependency) */
-  setMergeQueue(mq: { onReReviewComplete(taskId: string, passed: boolean): Promise<void> }): void {
+  setMergeQueue(mq: {
+    onReReviewComplete(taskId: string, passed: boolean): Promise<void>;
+    approveForMerge(taskId: string): unknown;
+  }): void {
     this.mergeQueue = mq;
   }
 
@@ -807,6 +813,17 @@ export class PipelineManager {
 
       this.completeTask(taskId, state, workerReport);
       this.pipelines.delete(taskId);
+
+      // Auto-enqueue in merge queue if the pipeline created a PR.
+      // The pipeline's own reviewer stage PASS verdict serves as the approval —
+      // without this, tasks sit in "in_review" waiting for an external GitHub
+      // approval that never comes for bot-created PRs.
+      if (this.mergeQueue && (state.prNumber || state.prBranch)) {
+        const entry = this.mergeQueue.approveForMerge(taskId);
+        if (entry) {
+          console.log(`[PipelineManager] Auto-enqueued task ${taskId} in merge queue after pipeline completion`);
+        }
+      }
 
       // Post completion comment
       if (state.issueNumber && state.repo) {
