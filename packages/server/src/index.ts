@@ -241,6 +241,17 @@ import {
   updateWhatsAppSettings,
   getWhatsAppConfig,
 } from "./whatsapp/whatsapp-settings.js";
+import { SignalBridge } from "./signal/signal-bridge.js";
+import {
+  getSignalSettings,
+  updateSignalSettings,
+  testSignalConnection,
+} from "./signal/signal-settings.js";
+import {
+  approvePairing as approveSignalPairing,
+  rejectPairing as rejectSignalPairing,
+  revokePairing as revokeSignalPairing,
+} from "./signal/pairing.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -699,6 +710,27 @@ async function main() {
     }
   }
 
+  // Signal bridge (initialized when enabled + config set)
+  let signalBridge: SignalBridge | null = null;
+
+  function startSignalBridge() {
+    if (signalBridge || !coo) return;
+    const settings = getSignalSettings();
+    if (!settings.enabled || !settings.apiUrl || !settings.phoneNumber) return;
+    signalBridge = new SignalBridge({ bus, coo, io });
+    signalBridge.start({ apiUrl: settings.apiUrl, phoneNumber: settings.phoneNumber }).catch((err) => {
+      console.error("[Signal] Failed to start bridge:", err);
+      signalBridge = null;
+    });
+  }
+
+  async function stopSignalBridge() {
+    if (signalBridge) {
+      await signalBridge.stop();
+      signalBridge = null;
+    }
+  }
+
   function startCoo() {
     if (coo) return;
     try {
@@ -1046,6 +1078,7 @@ async function main() {
     startTelegramBridge();
     startTlonBridge();
     startWhatsAppBridge();
+    startSignalBridge();
   } else {
     console.log("Setup not complete. Waiting for setup wizard...");
   }
@@ -1373,6 +1406,7 @@ async function main() {
     startTelegramBridge();
     startTlonBridge();
     startWhatsAppBridge();
+    startSignalBridge();
 
     return { ok: true };
   });
@@ -3831,6 +3865,71 @@ async function main() {
       await stopWhatsAppBridge();
     }
 
+    return { ok: true };
+  });
+
+  // =========================================================================
+  // Signal settings routes
+  // =========================================================================
+
+  app.get("/api/settings/signal", async () => {
+    return getSignalSettings();
+  });
+
+  app.put<{
+    Body: {
+      enabled?: boolean;
+      apiUrl?: string;
+      phoneNumber?: string;
+    };
+  }>("/api/settings/signal", async (req) => {
+    const wasEnabled = getSignalSettings().enabled && !!getSignalSettings().apiUrl && !!getSignalSettings().phoneNumber;
+    updateSignalSettings(req.body);
+    const nowEnabled = getSignalSettings().enabled && !!getSignalSettings().apiUrl && !!getSignalSettings().phoneNumber;
+
+    if (nowEnabled && !wasEnabled) {
+      startSignalBridge();
+    } else if (!nowEnabled && wasEnabled) {
+      await stopSignalBridge();
+    }
+
+    return { ok: true };
+  });
+
+  app.post("/api/settings/signal/test", async () => {
+    return testSignalConnection();
+  });
+
+  app.post<{
+    Body: { code: string };
+  }>("/api/settings/signal/pair/approve", async (req, reply) => {
+    const result = approveSignalPairing(req.body.code);
+    if (!result) {
+      reply.code(400);
+      return { ok: false, error: "Invalid or expired pairing code" };
+    }
+    return { ok: true, user: result };
+  });
+
+  app.post<{
+    Body: { code: string };
+  }>("/api/settings/signal/pair/reject", async (req, reply) => {
+    const ok = rejectSignalPairing(req.body.code);
+    if (!ok) {
+      reply.code(400);
+      return { ok: false, error: "Pairing code not found" };
+    }
+    return { ok: true };
+  });
+
+  app.delete<{
+    Params: { userId: string };
+  }>("/api/settings/signal/pair/:userId", async (req, reply) => {
+    const ok = revokeSignalPairing(req.params.userId);
+    if (!ok) {
+      reply.code(400);
+      return { ok: false, error: "User not found" };
+    }
     return { ok: true };
   });
 
