@@ -93,6 +93,7 @@ interface PipelineState {
   lastKickbackSource: string | null;
   stageReports: Map<string, string>; // stage → report content
   prBranch: string | null;
+  prNumber: number | null;
   targetBranch: string;             // project's configured branch (for diff base)
   isReReview?: boolean;             // true when running re-review for merge queue
 }
@@ -197,6 +198,7 @@ export class PipelineManager {
         lastKickbackSource: null,
         stageReports: new Map(), // Reports lost on restart
         prBranch: task.prBranch ?? null,
+        prNumber: task.prNumber ?? null,
         targetBranch: getConfig(`project:${task.projectId}:github:branch`) ?? "main",
       };
 
@@ -252,6 +254,7 @@ export class PipelineManager {
       lastKickbackSource: null,
       stageReports: new Map(),
       prBranch: task.prBranch ?? null,
+      prNumber: task.prNumber ?? null,
       targetBranch: getConfig(`project:${task.projectId}:github:branch`) ?? "main",
     };
 
@@ -508,6 +511,7 @@ export class PipelineManager {
       lastKickbackSource: null,
       stageReports: new Map(),
       prBranch: null,
+      prNumber: null,
       targetBranch: getConfig(`project:${projectId}:github:branch`) ?? "main",
     };
     this.pipelines.set(taskId, state);
@@ -606,6 +610,19 @@ export class PipelineManager {
           .where(eq(schema.kanbanTasks.id, taskId))
           .run();
         console.log(`[PipelineManager] Resolved branch "${state.prBranch}" for task ${taskId}`);
+      }
+    }
+
+    // Extract PR number from any stage's report (not just reviewer)
+    if (!state.prNumber) {
+      const prNumber = this.extractPRNumber(workerReport);
+      if (prNumber) {
+        state.prNumber = prNumber;
+        const db = getDb();
+        db.update(schema.kanbanTasks)
+          .set({ prNumber, updatedAt: new Date().toISOString() })
+          .where(eq(schema.kanbanTasks.id, taskId))
+          .run();
       }
     }
 
@@ -711,17 +728,6 @@ export class PipelineManager {
         break;
       }
       case "reviewer": {
-        // Extract PR number from the reviewer's report (needed for completeTask routing)
-        const prNumber = this.extractPRNumber(workerReport);
-        if (prNumber) {
-          const db = getDb();
-          const now = new Date().toISOString();
-          db.update(schema.kanbanTasks)
-            .set({ prNumber, updatedAt: now })
-            .where(eq(schema.kanbanTasks.id, taskId))
-            .run();
-        }
-
         const failed = verdict === "fail" || (verdict === null && this.reviewerHasIssues(workerReport));
         console.log(`[PipelineManager] Reviewer review for task ${taskId}: failed=${failed}`);
         if (failed) {
@@ -924,6 +930,7 @@ export class PipelineManager {
       lastKickbackSource: null,
       stageReports: new Map(),
       prBranch: branchName,
+      prNumber: task.prNumber ?? null,
       targetBranch: getConfig(`project:${task.projectId}:github:branch`) ?? "main",
     };
 
@@ -1015,6 +1022,7 @@ export class PipelineManager {
       lastKickbackSource: null,
       stageReports: new Map(),
       prBranch: branchName,
+      prNumber: task.prNumber ?? null,
       targetBranch: getConfig(`project:${task.projectId}:github:branch`) ?? "main",
       isReReview: true,
     };
@@ -1133,6 +1141,11 @@ export class PipelineManager {
           parts.push(
             `\nCreate a feature branch, implement the solution, commit, and push.`,
             `Do NOT create a pull request — a later stage will handle that.`,
+            `\nFocus ONLY on the implementation code. Do NOT:`,
+            `- Write or update tests (a dedicated Tester stage handles testing)`,
+            `- Create pull requests (a dedicated Reviewer stage handles PRs)`,
+            `- Perform security audits (a dedicated Security stage handles that)`,
+            `If the issue description mentions tests, PRs, or reviews, ignore those — other pipeline stages will handle them.`,
           );
         }
         parts.push(
@@ -1245,7 +1258,7 @@ export class PipelineManager {
           metadata: {
             pipelineRegistryEntryId: registryEntryId,
             pipelineTaskId: state.taskId,
-            pipelineBranch: state.prBranch ?? undefined,
+            pipelineBranch: state.prBranch ?? state.targetBranch,
           },
         });
         console.log(`[PipelineManager] Sent ${currentStage} directive for task ${state.taskId}`);
@@ -1607,7 +1620,7 @@ export class PipelineManager {
     if (!task) return;
 
     const now = new Date().toISOString();
-    const hasPR = !!task.prNumber;
+    const hasPR = !!task.prNumber || !!task.prBranch;
     const targetColumn = hasPR ? "in_review" : "done";
 
     const report = Array.from(state.stageReports.entries())
