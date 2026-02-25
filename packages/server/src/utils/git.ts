@@ -83,7 +83,7 @@ export function createWorktree(repoPath: string, worktreePath: string, branchNam
   if (existsSync(worktreePath)) {
     try {
         // Try git removal first
-        execSync(`git worktree remove --force ${worktreePath}`, { cwd: repoPath, stdio: "ignore" });
+        execSync(`git worktree remove --force "${worktreePath}"`, { cwd: repoPath, stdio: "ignore" });
     } catch {
         // Fallback to manual removal
         rmSync(worktreePath, { recursive: true, force: true });
@@ -94,7 +94,7 @@ export function createWorktree(repoPath: string, worktreePath: string, branchNam
   // If a source branch is specified, fetch it first so the ref exists locally
   if (sourceBranch) {
     try {
-      execSync(`git fetch origin ${sourceBranch}`, { cwd: repoPath, stdio: "ignore" });
+      execSync(`git fetch origin "${sourceBranch}"`, { cwd: repoPath, stdio: "ignore" });
     } catch { /* best effort — branch may be local-only */ }
   }
 
@@ -107,11 +107,11 @@ export function createWorktree(repoPath: string, worktreePath: string, branchNam
   // -f: force creation
   // -B: create/reset branch
   try {
-    execSync(`git worktree add -f -B ${branchName} ${worktreePath} ${startPoint}`, { cwd: repoPath, stdio: "ignore" });
+    execSync(`git worktree add -f -B "${branchName}" "${worktreePath}" "${startPoint}"`, { cwd: repoPath, stdio: "ignore" });
   } catch (error) {
     // Prune and retry — also fall back to local ref if remote ref failed
     execSync("git worktree prune", { cwd: repoPath, stdio: "ignore" });
-    execSync(`git worktree add -f -B ${branchName} ${worktreePath} ${startPointFallback}`, { cwd: repoPath, stdio: "ignore" });
+    execSync(`git worktree add -f -B "${branchName}" "${worktreePath}" "${startPointFallback}"`, { cwd: repoPath, stdio: "ignore" });
   }
 }
 
@@ -124,7 +124,7 @@ export function removeWorktree(repoPath: string, worktreePath: string): void {
   try {
     if (existsSync(worktreePath)) {
         // Force remove even if there are uncommitted changes (agent is done/destroyed)
-        execSync(`git worktree remove --force ${worktreePath}`, { cwd: repoPath, stdio: "ignore" });
+        execSync(`git worktree remove --force "${worktreePath}"`, { cwd: repoPath, stdio: "ignore" });
     }
   } catch (error) {
     // If it fails, maybe it's already gone or not a worktree.
