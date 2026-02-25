@@ -1,6 +1,6 @@
 import Database from "better-sqlite3-multiple-ciphers";
 import { drizzle } from "drizzle-orm/better-sqlite3";
-import { sql } from "drizzle-orm";
+import { sql, eq } from "drizzle-orm";
 import * as schema from "./schema.js";
 import { resolve, dirname } from "node:path";
 import { mkdirSync } from "node:fs";
@@ -304,6 +304,49 @@ export async function migrateDb() {
     db.run(sql`ALTER TABLE kanban_tasks ADD COLUMN pipeline_stages TEXT NOT NULL DEFAULT '[]'`);
   } catch {
     // Column already exists — ignore
+  }
+
+  // Idempotent migration: add task_number to kanban_tasks
+  try {
+    db.run(sql`ALTER TABLE kanban_tasks ADD COLUMN task_number INTEGER`);
+  } catch {
+    // Column already exists — ignore
+  }
+
+  // Backfill task_number for existing tasks that don't have one
+  {
+    const unnumbered = db
+      .select()
+      .from(schema.kanbanTasks)
+      .all()
+      .filter((t) => t.taskNumber == null);
+    if (unnumbered.length > 0) {
+      // Group by project, sort by created_at, assign sequential numbers
+      const byProject = new Map<string, typeof unnumbered>();
+      for (const t of unnumbered) {
+        const list = byProject.get(t.projectId) ?? [];
+        list.push(t);
+        byProject.set(t.projectId, list);
+      }
+      for (const [projectId, tasks] of byProject) {
+        // Find current max task_number for this project
+        const allProjectTasks = db
+          .select()
+          .from(schema.kanbanTasks)
+          .where(eq(schema.kanbanTasks.projectId, projectId))
+          .all();
+        let maxNum = allProjectTasks.reduce((max, t) => Math.max(max, t.taskNumber ?? 0), 0);
+        tasks.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+        for (const t of tasks) {
+          maxNum++;
+          db.update(schema.kanbanTasks)
+            .set({ taskNumber: maxNum })
+            .where(eq(schema.kanbanTasks.id, t.id))
+            .run();
+        }
+      }
+      console.log(`[DB] Backfilled task_number for ${unnumbered.length} task(s)`);
+    }
   }
 
   db.run(sql`CREATE TABLE IF NOT EXISTS sessions (

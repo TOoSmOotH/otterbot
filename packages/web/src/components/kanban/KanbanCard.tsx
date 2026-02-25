@@ -124,7 +124,12 @@ export function KanbanCard({
         </button>
       )}
 
-      <h4 className="text-sm font-medium leading-snug pr-4">{task.title}</h4>
+      <h4 className="text-sm font-medium leading-snug pr-4">
+        {task.taskNumber && (
+          <span className="text-muted-foreground font-mono mr-1.5 text-xs">#{task.taskNumber}</span>
+        )}
+        {task.title}
+      </h4>
       {task.description && (
         <p className="text-xs text-muted-foreground mt-1 line-clamp-2">
           {task.description}

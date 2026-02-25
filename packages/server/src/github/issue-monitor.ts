@@ -483,6 +483,9 @@ export class GitHubIssueMonitor {
           .filter((t) => t.column === "backlog")
           .reduce((max, t) => Math.max(max, t.position), -1);
 
+        // Assign next task_number for this project
+        const maxTaskNum = existingTasks.reduce((max, t) => Math.max(max, (t as any).taskNumber ?? 0), 0);
+
         const task = {
           id: taskId,
           projectId,
@@ -497,6 +500,7 @@ export class GitHubIssueMonitor {
           retryCount: 0,
           spawnCount: 0,
           completionReport: null,
+          taskNumber: maxTaskNum + 1,
           pipelineStage: null,
           pipelineStages: [] as string[],
           pipelineAttempt: 0,
