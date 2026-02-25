@@ -11,6 +11,7 @@ export type CenterView =
   | "calendar"
   | "code"
   | "settings"
+  | "merge-queue"
   | "dashboard";
 
 export const centerViewLabels: Record<CenterView, string> = {
@@ -25,11 +26,12 @@ export const centerViewLabels: Record<CenterView, string> = {
   calendar: "Calendar",
   code: "Code",
   settings: "Settings",
+  "merge-queue": "Merge Queue",
   usage: "Usage",
   desktop: "Desktop",
 };
 
-const projectTabs: CenterView[] = ["dashboard", "kanban", "charter", "files", "code", "settings"];
+const projectTabs: CenterView[] = ["dashboard", "kanban", "charter", "files", "code", "settings", "merge-queue"];
 const globalTabs: CenterView[] = ["dashboard", "todos", "inbox", "calendar", "code", "usage"];
 
 export function getCenterTabs(activeProjectId: string | null): CenterView[] {
