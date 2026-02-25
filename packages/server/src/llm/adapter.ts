@@ -152,6 +152,14 @@ export function resolveModel(config: LLMConfig): LanguageModel {
       return nvidia(config.model);
     }
 
+    case "minimax": {
+      const minimax = createOpenAI({
+        baseURL: config.baseUrl ?? resolved.baseUrl ?? "https://api.minimax.chat/v1",
+        apiKey: config.apiKey ?? resolved.apiKey ?? "",
+      });
+      return minimax(config.model);
+    }
+
     default:
       throw new Error(`Unknown LLM provider: ${config.provider} (type: ${resolved.type})`);
   }
