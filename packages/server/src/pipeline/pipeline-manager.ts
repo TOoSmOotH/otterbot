@@ -110,7 +110,10 @@ export class PipelineManager {
   /** Sweep interval in milliseconds (10 minutes) */
   private static readonly SWEEP_INTERVAL_MS = 10 * 60 * 1000;
   /** Merge queue reference (injected to avoid circular deps) */
-  private mergeQueue: { onReReviewComplete(taskId: string, passed: boolean): Promise<void> } | null = null;
+  private mergeQueue: {
+    onReReviewComplete(taskId: string, passed: boolean): Promise<void>;
+    approveForMerge(taskId: string): unknown;
+  } | null = null;
 
   constructor(coo: COO, io: TypedServer) {
     this.coo = coo;
@@ -118,7 +121,10 @@ export class PipelineManager {
   }
 
   /** Inject the merge queue (avoids circular dependency) */
-  setMergeQueue(mq: { onReReviewComplete(taskId: string, passed: boolean): Promise<void> }): void {
+  setMergeQueue(mq: {
+    onReReviewComplete(taskId: string, passed: boolean): Promise<void>;
+    approveForMerge(taskId: string): unknown;
+  }): void {
     this.mergeQueue = mq;
   }
 
