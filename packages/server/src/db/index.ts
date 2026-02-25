@@ -313,6 +313,27 @@ export async function migrateDb() {
     // Column already exists — ignore
   }
 
+  // Idempotent migration: add stage_reports to kanban_tasks
+  try {
+    db.run(sql`ALTER TABLE kanban_tasks ADD COLUMN stage_reports TEXT NOT NULL DEFAULT '{}'`);
+  } catch {
+    // Column already exists — ignore
+  }
+
+  // Idempotent migration: add last_kickback_source to kanban_tasks
+  try {
+    db.run(sql`ALTER TABLE kanban_tasks ADD COLUMN last_kickback_source TEXT`);
+  } catch {
+    // Column already exists — ignore
+  }
+
+  // Idempotent migration: add spawn_retry_count to kanban_tasks
+  try {
+    db.run(sql`ALTER TABLE kanban_tasks ADD COLUMN spawn_retry_count INTEGER NOT NULL DEFAULT 0`);
+  } catch {
+    // Column already exists — ignore
+  }
+
   // Backfill task_number for existing tasks that don't have one
   {
     const unnumbered = db

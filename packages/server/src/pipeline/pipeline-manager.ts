@@ -123,6 +123,23 @@ export class PipelineManager {
   }
 
   /**
+   * Persist pipeline orchestration state (stageReports, lastKickbackSource, spawnRetryCount) to DB.
+   * Called after each mutation so state survives server restarts.
+   */
+  private persistPipelineState(state: PipelineState): void {
+    const db = getDb();
+    db.update(schema.kanbanTasks)
+      .set({
+        stageReports: Object.fromEntries(state.stageReports),
+        lastKickbackSource: state.lastKickbackSource,
+        spawnRetryCount: state.spawnRetryCount,
+        updatedAt: new Date().toISOString(),
+      })
+      .where(eq(schema.kanbanTasks.id, state.taskId))
+      .run();
+  }
+
+  /**
    * Initialize the pipeline manager: recover in-flight pipelines from DB
    * and start the periodic stale pipeline sweep.
    * Must be called after construction (DB must be ready).
@@ -194,9 +211,9 @@ export class PipelineManager {
         repo: project?.githubRepo ?? null,
         stages,
         currentStageIndex,
-        spawnRetryCount: 0,
-        lastKickbackSource: null,
-        stageReports: new Map(), // Reports lost on restart
+        spawnRetryCount: task.spawnRetryCount ?? 0,
+        lastKickbackSource: task.lastKickbackSource ?? null,
+        stageReports: new Map(Object.entries((task.stageReports as Record<string, string>) ?? {})),
         prBranch: task.prBranch ?? null,
         prNumber: task.prNumber ?? null,
         targetBranch: getConfig(`project:${task.projectId}:github:branch`) ?? "main",
@@ -250,9 +267,9 @@ export class PipelineManager {
       repo: project?.githubRepo ?? null,
       stages,
       currentStageIndex,
-      spawnRetryCount: 0,
-      lastKickbackSource: null,
-      stageReports: new Map(),
+      spawnRetryCount: task.spawnRetryCount ?? 0,
+      lastKickbackSource: task.lastKickbackSource ?? null,
+      stageReports: new Map(Object.entries((task.stageReports as Record<string, string>) ?? {})),
       prBranch: task.prBranch ?? null,
       prNumber: task.prNumber ?? null,
       targetBranch: getConfig(`project:${task.projectId}:github:branch`) ?? "main",
@@ -571,6 +588,7 @@ export class PipelineManager {
 
     // Store the report
     state.stageReports.set(currentStage, workerReport);
+    this.persistPipelineState(state);
 
     // Safety net: catch spawn failure strings that slipped through the normal report path
     if (workerReport.startsWith("Error spawning worker") || workerReport.startsWith("REFUSED:")) {
@@ -677,6 +695,7 @@ export class PipelineManager {
             state.currentStageIndex = coderIndex;
             state.lastKickbackSource = "security";
             state.spawnRetryCount = 0;
+            this.persistPipelineState(state);
             this.updateTaskPipelineStage(taskId, "coder");
             if (state.issueNumber && state.repo) {
               const token = getConfig("github:token");
@@ -709,6 +728,7 @@ export class PipelineManager {
             state.currentStageIndex = coderIndex;
             state.lastKickbackSource = "tester";
             state.spawnRetryCount = 0;
+            this.persistPipelineState(state);
             this.updateTaskPipelineStage(taskId, "coder");
             if (state.issueNumber && state.repo) {
               const token = getConfig("github:token");
@@ -741,6 +761,7 @@ export class PipelineManager {
             state.currentStageIndex = coderIndex;
             state.lastKickbackSource = "reviewer";
             state.spawnRetryCount = 0;
+            this.persistPipelineState(state);
             this.updateTaskPipelineStage(taskId, "coder");
             if (state.issueNumber && state.repo) {
               const token = getConfig("github:token");
@@ -764,6 +785,7 @@ export class PipelineManager {
     // Stage passed — advance to next stage
     state.spawnRetryCount = 0;
     state.currentStageIndex++;
+    this.persistPipelineState(state);
 
     if (state.currentStageIndex >= state.stages.length) {
       // Pipeline complete — update DB first, then clean up memory
@@ -814,6 +836,7 @@ export class PipelineManager {
     }
 
     state.spawnRetryCount++;
+    this.persistPipelineState(state);
     const currentStage = state.stages[state.currentStageIndex];
     console.warn(
       `[PipelineManager] Spawn failure for task ${taskId} at stage ${currentStage} ` +
@@ -938,6 +961,7 @@ export class PipelineManager {
     state.stageReports.set("review_feedback", feedback);
 
     this.pipelines.set(taskId, state);
+    this.persistPipelineState(state);
     this.updateTaskPipelineStage(taskId, "coder");
 
     // Reset spawn count — PR feedback is a legitimate new cycle, not a failure loop
