@@ -65,6 +65,7 @@ export const PROVIDER_TYPE_META: ProviderTypeMeta[] = [
   { type: "perplexity", label: "Perplexity Sonar", needsApiKey: true, needsBaseUrl: false },
   { type: "deepgram", label: "Deepgram", needsApiKey: true, needsBaseUrl: false },
   { type: "bedrock", label: "AWS Bedrock", needsApiKey: true, needsBaseUrl: true },
+  { type: "lmstudio", label: "LM Studio", needsApiKey: false, needsBaseUrl: true },
 ];
 
 // Static fallback models per provider (used when API fetch fails)
@@ -127,6 +128,12 @@ const FALLBACK_MODELS: Record<string, string[]> = {
     "meta.llama3-1-70b-instruct-v1:0",
     "mistral.mistral-large-2407-v1:0",
     "amazon.titan-text-premier-v2:0",
+  ],
+  lmstudio: [
+    "llama-3.1-8b-instruct",
+    "mistral-7b-instruct",
+    "qwen2.5-coder-7b-instruct",
+    "phi-3-mini-4k-instruct",
   ],
 };
 
