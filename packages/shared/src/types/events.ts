@@ -65,6 +65,8 @@ export interface ServerToClientEvents {
   "telegram:pairing-request": (data: { code: string; telegramUserId: string; telegramUsername: string }) => void;
   "telegram:status": (data: { status: "connected" | "disconnected" | "error"; botUsername?: string }) => void;
   "whatsapp:status": (data: { status: "connected" | "disconnected" | "qr" | "authenticated" | "auth_failure"; qr?: string }) => void;
+  "signal:pairing-request": (data: { code: string; signalNumber: string }) => void;
+  "signal:status": (data: { status: "connected" | "disconnected" | "error"; phoneNumber?: string }) => void;
   "merge-queue:updated": (data: { entries: MergeQueueEntry[] }) => void;
   "merge-queue:entry-updated": (entry: MergeQueueEntry) => void;
 }
