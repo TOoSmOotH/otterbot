@@ -508,6 +508,159 @@ describe("PipelineManager", () => {
     });
   });
 
+  // ─── completeTask ───────────────────────────────────────────
+
+  describe("completeTask", () => {
+    it("moves task with PR to in_review (not done)", async () => {
+      const task = insertTask({
+        id: "task-complete-pr",
+        column: "in_progress",
+        prNumber: 100,
+        prBranch: "feat/my-feature",
+      });
+      const state = createPipelineState({
+        taskId: task.id,
+        prNumber: 100,
+        prBranch: "feat/my-feature",
+        stageReports: new Map([["coder", "implemented"], ["reviewer", "VERDICT: PASS"]]),
+      });
+
+      await (pm as any).completeTask(task.id, state, "final report");
+
+      const dbTask = getTask(task.id);
+      expect(dbTask?.column).toBe("in_review");
+      expect(dbTask?.completionReport).toContain("coder");
+      expect(dbTask?.completionReport).toContain("reviewer");
+    });
+
+    it("moves task without PR to done", async () => {
+      const task = insertTask({
+        id: "task-complete-nopr",
+        column: "in_progress",
+        prNumber: null,
+        prBranch: null,
+      });
+      const state = createPipelineState({
+        taskId: task.id,
+        prNumber: null,
+        prBranch: null,
+        stageReports: new Map([["coder", "done"]]),
+      });
+
+      await (pm as any).completeTask(task.id, state, "final report");
+
+      const dbTask = getTask(task.id);
+      expect(dbTask?.column).toBe("done");
+    });
+
+    it("task with prBranch but no prNumber still goes to in_review", async () => {
+      const task = insertTask({
+        id: "task-complete-branch-only",
+        column: "in_progress",
+        prNumber: null,
+        prBranch: "feat/branch-only",
+      });
+      const state = createPipelineState({
+        taskId: task.id,
+        prNumber: null,
+        prBranch: "feat/branch-only",
+        stageReports: new Map([["coder", "pushed to branch"]]),
+      });
+
+      await (pm as any).completeTask(task.id, state, "final report");
+
+      const dbTask = getTask(task.id);
+      expect(dbTask?.column).toBe("in_review");
+    });
+  });
+
+  // ─── advancePipeline (final stage → completion) ────────────
+
+  describe("advancePipeline", () => {
+    it("on final stage PASS with PR: task → in_review, does NOT auto-enqueue", async () => {
+      const task = insertTask({
+        id: "task-adv-final",
+        column: "in_progress",
+        prNumber: 200,
+        prBranch: "feat/final-stage",
+        pipelineStage: "reviewer",
+        pipelineStages: ["coder", "reviewer"],
+      });
+      insertProject();
+      setPipelineConfig(PROJECT_ID);
+
+      const state = createPipelineState({
+        taskId: task.id,
+        stages: ["coder", "reviewer"],
+        currentStageIndex: 1, // reviewer (last stage)
+        prNumber: 200,
+        prBranch: "feat/final-stage",
+        stageReports: new Map([["coder", "implemented"]]),
+      });
+      (pm as any).pipelines.set(task.id, state);
+
+      await pm.advancePipeline(task.id, "VERDICT: PASS\nLooks good to me.");
+
+      const dbTask = getTask(task.id);
+      expect(dbTask?.column).toBe("in_review");
+      expect(dbTask?.pipelineStage).toBeNull();
+      expect(mq.approveForMerge).not.toHaveBeenCalled();
+    });
+
+    it("on final stage PASS without PR: task → done, no merge queue", async () => {
+      const task = insertTask({
+        id: "task-adv-nopr",
+        column: "in_progress",
+        prNumber: null,
+        prBranch: null,
+        pipelineStage: "reviewer",
+        pipelineStages: ["coder", "reviewer"],
+      });
+      insertProject();
+      setPipelineConfig(PROJECT_ID);
+
+      const state = createPipelineState({
+        taskId: task.id,
+        stages: ["coder", "reviewer"],
+        currentStageIndex: 1,
+        prNumber: null,
+        prBranch: null,
+        stageReports: new Map([["coder", "done"]]),
+      });
+      (pm as any).pipelines.set(task.id, state);
+
+      await pm.advancePipeline(task.id, "VERDICT: PASS");
+
+      const dbTask = getTask(task.id);
+      expect(dbTask?.column).toBe("done");
+      expect(mq.approveForMerge).not.toHaveBeenCalled();
+    });
+
+    it("advances to next stage when not final", async () => {
+      const task = insertTask({
+        id: "task-adv-mid",
+        column: "in_progress",
+        pipelineStage: "coder",
+        pipelineStages: ["coder", "security", "reviewer"],
+      });
+      insertProject();
+      setPipelineConfig(PROJECT_ID);
+
+      const state = createPipelineState({
+        taskId: task.id,
+        stages: ["coder", "security", "reviewer"],
+        currentStageIndex: 0,
+      });
+      (pm as any).pipelines.set(task.id, state);
+
+      await pm.advancePipeline(task.id, "VERDICT: PASS\nBranch: feat/test-branch");
+
+      const dbTask = getTask(task.id);
+      expect(dbTask?.pipelineStage).toBe("security");
+      expect(state.currentStageIndex).toBe(1);
+    });
+  });
+
   // ─── persistPipelineState ──────────────────────────────────
 
   describe("persistPipelineState", () => {
