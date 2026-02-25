@@ -68,6 +68,7 @@ export const PROVIDER_TYPE_META: ProviderTypeMeta[] = [
   { type: "bedrock", label: "AWS Bedrock", needsApiKey: true, needsBaseUrl: true },
   { type: "lmstudio", label: "LM Studio", needsApiKey: false, needsBaseUrl: true },
   { type: "deepseek", label: "DeepSeek", needsApiKey: true, needsBaseUrl: false },
+  { type: "mistral", label: "Mistral", needsApiKey: true, needsBaseUrl: false },
 ];
 
 // Static fallback models per provider (used when API fetch fails)
@@ -146,6 +147,12 @@ const FALLBACK_MODELS: Record<string, string[]> = {
   deepseek: [
     "deepseek-chat",
     "deepseek-reasoner",
+  ],
+  mistral: [
+    "mistral-large-latest",
+    "mistral-small-latest",
+    "codestral-latest",
+    "mistral-medium-latest",
   ],
 };
 
@@ -706,6 +713,18 @@ export async function fetchModelsWithCredentials(
         if (!deepseekRes.ok) return FALLBACK_MODELS.deepseek ?? [];
         const deepseekData = (await deepseekRes.json()) as { data?: Array<{ id: string }> };
         return deepseekData.data?.map((m) => m.id).sort() ?? FALLBACK_MODELS.deepseek ?? [];
+      }
+
+      case "mistral": {
+        if (!apiKey) return FALLBACK_MODELS.mistral ?? [];
+        const mistralBase = baseUrl ?? "https://api.mistral.ai/v1";
+        const mistralRes = await fetch(`${mistralBase}/models`, {
+          headers: { Authorization: `Bearer ${apiKey}` },
+          signal: AbortSignal.timeout(10_000),
+        });
+        if (!mistralRes.ok) return FALLBACK_MODELS.mistral ?? [];
+        const mistralData = (await mistralRes.json()) as { data?: Array<{ id: string }> };
+        return mistralData.data?.map((m) => m.id).sort() ?? FALLBACK_MODELS.mistral ?? [];
       }
 
       default:

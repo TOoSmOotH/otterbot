@@ -12,6 +12,7 @@ const TYPE_LABELS: Record<string, string> = {
   nvidia: "NVIDIA",
   lmstudio: "LM Studio",
   deepseek: "DeepSeek",
+  mistral: "Mistral",
 };
 
 export function ProvidersTab() {

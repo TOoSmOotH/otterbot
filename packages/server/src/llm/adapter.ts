@@ -226,6 +226,14 @@ export function resolveModel(config: LLMConfig): LanguageModel {
       return deepseek(config.model);
     }
 
+    case "mistral": {
+      const mistral = createOpenAI({
+        baseURL: config.baseUrl ?? resolved.baseUrl ?? "https://api.mistral.ai/v1",
+        apiKey: config.apiKey ?? resolved.apiKey ?? "",
+      });
+      return mistral(config.model);
+    }
+
     default:
       throw new Error(`Unknown LLM provider: ${config.provider} (type: ${resolved.type})`);
   }
