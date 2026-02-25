@@ -1,6 +1,7 @@
 import { useRef, useEffect, useState, useMemo, useCallback } from "react";
 import { useMessageStore } from "../../stores/message-store";
 import { useProjectStore } from "../../stores/project-store";
+import { useAgentStore } from "../../stores/agent-store";
 import { cn } from "../../lib/utils";
 import type { BusMessage } from "@otterbot/shared";
 
@@ -18,10 +19,23 @@ const TYPE_LABELS: Record<string, string> = {
   status: "Status",
 };
 
-function getAgentLabel(agentId: string | null, ceoName?: string, cooName?: string): { name: string; role: string } {
+interface AgentNameInfo {
+  name: string | null;
+  role: string;
+}
+
+function getAgentLabel(
+  agentId: string | null,
+  ceoName?: string,
+  cooName?: string,
+  agentNames?: Map<string, AgentNameInfo>,
+): { name: string; role: string } {
   if (agentId === null) return { name: ceoName || "CEO", role: "ceo" };
   if (agentId === "coo") return { name: cooName || "COO", role: "coo" };
-  return { name: agentId.slice(0, 8), role: "worker" };
+  const info = agentNames?.get(agentId);
+  const role = info?.role ?? "worker";
+  const name = info?.name ?? agentId.slice(0, 8);
+  return { name, role };
 }
 
 // ---------------------------------------------------------------------------
@@ -82,9 +96,9 @@ function groupByConversationPair(messages: BusMessage[]): ConversationGroup[] {
 // Components
 // ---------------------------------------------------------------------------
 
-function MessageItem({ message, ceoName, cooName }: { message: BusMessage; ceoName?: string; cooName?: string }) {
-  const from = getAgentLabel(message.fromAgentId, ceoName, cooName);
-  const to = getAgentLabel(message.toAgentId, ceoName, cooName);
+function MessageItem({ message, ceoName, cooName, agentNames }: { message: BusMessage; ceoName?: string; cooName?: string; agentNames?: Map<string, AgentNameInfo> }) {
+  const from = getAgentLabel(message.fromAgentId, ceoName, cooName, agentNames);
+  const to = getAgentLabel(message.toAgentId, ceoName, cooName, agentNames);
 
   return (
     <div className="group px-3 py-2 hover:bg-secondary/50 transition-colors">
@@ -140,15 +154,17 @@ function ConversationGroupHeader({
   onToggle,
   ceoName,
   cooName,
+  agentNames,
 }: {
   group: ConversationGroup;
   expanded: boolean;
   onToggle: () => void;
   ceoName?: string;
   cooName?: string;
+  agentNames?: Map<string, AgentNameInfo>;
 }) {
-  const a = getAgentLabel(group.participantA, ceoName, cooName);
-  const b = getAgentLabel(group.participantB, ceoName, cooName);
+  const a = getAgentLabel(group.participantA, ceoName, cooName, agentNames);
+  const b = getAgentLabel(group.participantB, ceoName, cooName, agentNames);
 
   return (
     <button
@@ -221,7 +237,18 @@ export function MessageStream({
   const agentFilter = useMessageStore((s) => s.agentFilter);
   const setAgentFilter = useMessageStore((s) => s.setAgentFilter);
   const activeProjectId = useProjectStore((s) => s.activeProjectId);
+  const agents = useAgentStore((s) => s.agents);
   const containerRef = useRef<HTMLDivElement>(null);
+
+  // Cache agent names so they persist even after agents are removed (status "done")
+  const agentNameCacheRef = useRef<Map<string, AgentNameInfo>>(new Map());
+  const agentNames = useMemo(() => {
+    const cache = agentNameCacheRef.current;
+    for (const [id, agent] of agents) {
+      cache.set(id, { name: agent.name, role: agent.role });
+    }
+    return cache;
+  }, [agents]);
   const [autoScroll, setAutoScroll] = useState(true);
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
   const [loadingMore, setLoadingMore] = useState(false);
@@ -361,6 +388,7 @@ export function MessageStream({
                 onToggle={() => toggleGroup(group.key)}
                 ceoName={userProfile?.name ?? undefined}
                 cooName={userProfile?.cooName}
+                agentNames={agentNames}
               />
               {expandedGroups[group.key] && (
                 <div className="divide-y divide-border/30 bg-secondary/20">
@@ -370,6 +398,7 @@ export function MessageStream({
                       message={msg}
                       ceoName={userProfile?.name ?? undefined}
                       cooName={userProfile?.cooName}
+                      agentNames={agentNames}
                     />
                   ))}
                 </div>
