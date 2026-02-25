@@ -155,6 +155,11 @@ export class WorkspaceManager {
     return resolve(this.root, "projects", projectId, "worktrees");
   }
 
+  /** Get the worktree path for an agent (without creating it) */
+  agentWorktreePath(projectId: string, agentId: string): string {
+    return resolve(this.worktreesPath(projectId), agentId);
+  }
+
   private isUnder(child: string, parent: string): boolean {
     const normalizedChild = resolve(child);
     const normalizedParent = resolve(parent);

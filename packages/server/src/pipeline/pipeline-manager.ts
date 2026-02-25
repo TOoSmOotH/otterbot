@@ -541,6 +541,7 @@ export class PipelineManager {
   async advancePipeline(
     taskId: string,
     workerReport: string,
+    detectedBranch?: string | null,
   ): Promise<void> {
     let state = this.pipelines.get(taskId);
     if (!state) {
@@ -568,6 +569,11 @@ export class PipelineManager {
     // Extract branch name from the worker report (any stage may mention it)
     if (!state.prBranch) {
       state.prBranch = this.extractBranchName(workerReport);
+
+      // Fallback: use git-detected branch from worktree (captured before cleanup)
+      if (!state.prBranch && detectedBranch) {
+        state.prBranch = detectedBranch;
+      }
 
       // Fallback: check if the task's prBranch was set in DB (e.g., by TeamLead's safety net)
       if (!state.prBranch) {
@@ -1385,11 +1391,11 @@ export class PipelineManager {
   /** Extract a branch name from a worker report */
   private extractBranchName(report: string): string | null {
     const patterns = [
-      /branch[:\s]+`?([a-zA-Z0-9._\/-]+)`?/i,
-      /created branch\s+`?([a-zA-Z0-9._\/-]+)`?/i,
-      /git checkout -b\s+`?([a-zA-Z0-9._\/-]+)`?/i,
-      /pushed to\s+`?([a-zA-Z0-9._\/-]+)`?/i,
-      /on branch\s+`?([a-zA-Z0-9._\/-]+)`?/i,
+      /branch[:\s]+`?([a-zA-Z0-9._\/#-]+)`?/i,
+      /created branch\s+`?([a-zA-Z0-9._\/#-]+)`?/i,
+      /git checkout -b\s+`?([a-zA-Z0-9._\/#-]+)`?/i,
+      /pushed to\s+`?([a-zA-Z0-9._\/#-]+)`?/i,
+      /on branch\s+`?([a-zA-Z0-9._\/#-]+)`?/i,
     ];
     for (const pattern of patterns) {
       const match = report.match(pattern);

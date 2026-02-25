@@ -32,6 +32,7 @@ import type { WorkspaceManager } from "../workspace/workspace.js";
 import { eq } from "drizzle-orm";
 import { getConfig, setConfig, deleteConfig } from "../auth/auth.js";
 import { execSync } from "node:child_process";
+import { existsSync } from "node:fs";
 import { getAgentModelOverride } from "../settings/settings.js";
 import { getConfiguredSearchProvider } from "../tools/search/providers.js";
 import { isDesktopEnabled } from "../desktop/desktop.js";
@@ -686,6 +687,32 @@ export class TeamLead extends BaseAgent {
     debug("team-lead", `handleWorkerReport from=${message.fromAgentId} taskId=${reportingTaskId} reportLen=${message.content.length} report="${message.content.slice(0, 200)}"`);
     debug("team-lead", `isFailureReport=${reportingTaskId ? this.isFailureReport(message.content) : "N/A"}`);
 
+    // Before cleanup — capture the branch the worker pushed to (for pipeline branch detection)
+    let detectedBranch: string | null = null;
+    if (message.fromAgentId && this.projectId) {
+      const wtPath = this.workspace.agentWorktreePath(this.projectId, message.fromAgentId);
+      if (wtPath && existsSync(wtPath)) {
+        try {
+          let branch = execSync("git branch --show-current", {
+            cwd: wtPath, encoding: "utf-8", timeout: 5000,
+          }).trim() || null;
+          // The worktree branch is "agent/{agentId}" — look for the feature branch the coder pushed
+          if (branch?.startsWith("agent/")) {
+            const remoteBranches = execSync(
+              "git branch -r --sort=-committerdate --format='%(refname:short)' | head -5",
+              { cwd: wtPath, encoding: "utf-8", timeout: 5000 }
+            ).trim();
+            const pushed = remoteBranches.split("\n").find(b =>
+              !b.includes("agent/") && !b.includes("/main") && !b.includes("/dev") && !b.includes("/HEAD")
+            );
+            if (pushed) branch = pushed.replace(/^origin\//, "");
+            else branch = null; // Don't use agent/* branches
+          }
+          detectedBranch = branch;
+        } catch { /* best effort */ }
+      }
+    }
+
     // Clean up the finished worker — it already set itself to Done
     if (message.fromAgentId) {
       const worker = this.workers.get(message.fromAgentId);
@@ -703,7 +730,7 @@ export class TeamLead extends BaseAgent {
     // handle the next step instead of the LLM evaluation. Still clean up the worker above.
     if (reportingTaskId && this._pipelineManager?.isPipelineTask(reportingTaskId)) {
       console.log(`[TeamLead ${this.id}] Pipeline-managed task ${reportingTaskId} — routing to PipelineManager`);
-      await this._pipelineManager.advancePipeline(reportingTaskId, message.content);
+      await this._pipelineManager.advancePipeline(reportingTaskId, message.content, detectedBranch);
       return;
     }
 
