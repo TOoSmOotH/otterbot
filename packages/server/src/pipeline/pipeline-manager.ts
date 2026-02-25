@@ -67,8 +67,10 @@ function extractTriageJson(text: string): TriageResult {
   const classification =
     classifications.find((c) => lower.includes(c)) ?? "question";
   const shouldProceed = ["bug", "feature", "enhancement"].includes(classification);
-  // Use first ~300 chars of the response as the comment
-  const comment = text.slice(0, 300).replace(/\n+/g, " ").trim();
+  // Use first ~1500 chars of the response as the comment, truncating at sentence boundary
+  const raw = text.slice(0, 1500).replace(/\n+/g, " ").trim();
+  const lastEnd = Math.max(raw.lastIndexOf(". "), raw.lastIndexOf("? "), raw.lastIndexOf("! "));
+  const comment = lastEnd > 0 ? raw.slice(0, lastEnd + 1) : raw;
   const labels = [classification];
 
   console.warn(
@@ -407,7 +409,7 @@ export class PipelineManager {
         model,
         system: `${SECURITY_PREAMBLE}\n${entry.systemPrompt}`,
         prompt: issueText,
-        maxTokens: 1000,
+        maxTokens: 2000,
       });
 
       // Parse JSON response
@@ -441,8 +443,18 @@ export class PipelineManager {
       ];
       parsed.labels = (parsed.labels ?? []).filter((l) => ALLOWED_LABELS.includes(l));
 
-      if (typeof parsed.comment === "string" && parsed.comment.length > 500) {
-        parsed.comment = parsed.comment.slice(0, 500);
+      if (typeof parsed.comment === "string" && parsed.comment.length > 1500) {
+        // Truncate at the last sentence boundary within 1500 chars to avoid mid-sentence cuts
+        const truncated = parsed.comment.slice(0, 1500);
+        const lastSentenceEnd = Math.max(
+          truncated.lastIndexOf(". "),
+          truncated.lastIndexOf(".\n"),
+          truncated.lastIndexOf("? "),
+          truncated.lastIndexOf("! "),
+        );
+        parsed.comment = lastSentenceEnd > 0
+          ? truncated.slice(0, lastSentenceEnd + 1)
+          : truncated;
       }
 
       parsed.shouldProceed = !!parsed.shouldProceed;
@@ -464,12 +476,9 @@ export class PipelineManager {
       }
 
       // Post classification comment
-      const proceedText = parsed.shouldProceed
-        ? "Proceeding with implementation when assigned."
-        : "No implementation needed — labeling accordingly.";
       const commentBody = formatBotComment(
         `Triage: ${parsed.classification}`,
-        `${parsed.comment}\n\n${proceedText}`,
+        parsed.comment,
       );
 
       try {
