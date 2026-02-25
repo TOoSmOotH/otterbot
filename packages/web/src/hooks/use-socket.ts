@@ -11,6 +11,30 @@ import { useMergeQueueStore } from "../stores/merge-queue-store";
 
 export function useSocket() {
   const initialized = useRef(false);
+  const ttsQueue = useRef<string[]>([]);
+  const ttsPlaying = useRef(false);
+
+  function playNextInQueue() {
+    if (ttsPlaying.current || ttsQueue.current.length === 0) return;
+    const url = ttsQueue.current.shift()!;
+    ttsPlaying.current = true;
+    const player = new Audio(url);
+    player.addEventListener("ended", () => {
+      URL.revokeObjectURL(url);
+      ttsPlaying.current = false;
+      playNextInQueue();
+    });
+    player.addEventListener("error", () => {
+      URL.revokeObjectURL(url);
+      ttsPlaying.current = false;
+      playNextInQueue();
+    });
+    player.play().catch(() => {
+      URL.revokeObjectURL(url);
+      ttsPlaying.current = false;
+      playNextInQueue();
+    });
+  }
   const addMessage = useMessageStore((s) => s.addMessage);
   const setCooResponse = useMessageStore((s) => s.setCooResponse);
   const appendCooStream = useMessageStore((s) => s.appendCooStream);
@@ -83,9 +107,8 @@ export function useSocket() {
         for (let i = 0; i < bytes.length; i++) arr[i] = bytes.charCodeAt(i);
         const blob = new Blob([arr], { type: contentType });
         const url = URL.createObjectURL(blob);
-        const player = new Audio(url);
-        player.addEventListener("ended", () => URL.revokeObjectURL(url));
-        player.play().catch(() => URL.revokeObjectURL(url));
+        ttsQueue.current.push(url);
+        playNextInQueue();
       } catch {
         // Best-effort audio playback
       }
