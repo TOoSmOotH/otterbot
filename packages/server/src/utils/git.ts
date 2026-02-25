@@ -91,15 +91,32 @@ export function createWorktree(repoPath: string, worktreePath: string, branchNam
     }
   }
 
-  // If a source branch is specified, fetch it first so the ref exists locally
-  if (sourceBranch) {
-    try {
+  // Always fetch latest from remote so the worktree starts with up-to-date code
+  try {
+    if (sourceBranch) {
       execSync(`git fetch origin "${sourceBranch}"`, { cwd: repoPath, stdio: "ignore" });
-    } catch { /* best effort — branch may be local-only */ }
-  }
+    } else {
+      execSync("git fetch origin", { cwd: repoPath, stdio: "ignore" });
+    }
+  } catch { /* best effort — remote may be unavailable or repo may be local-only */ }
 
-  // Determine the start point: source branch (for kickbacks/iterations) or HEAD
-  const startPoint = sourceBranch ? `origin/${sourceBranch}` : "HEAD";
+  // Determine the start point: source branch (for kickbacks/iterations) or latest HEAD
+  // When no source branch is specified, prefer the fetched remote HEAD over the
+  // potentially stale local HEAD so workers always start with up-to-date code.
+  let startPoint: string;
+  if (sourceBranch) {
+    startPoint = `origin/${sourceBranch}`;
+  } else {
+    // Use the remote default branch if available, otherwise fall back to local HEAD
+    try {
+      const defaultBranch = execSync("git symbolic-ref refs/remotes/origin/HEAD", {
+        cwd: repoPath, encoding: "utf-8", stdio: ["pipe", "pipe", "ignore"],
+      }).trim().replace("refs/remotes/", "");
+      startPoint = defaultBranch; // e.g. "origin/main"
+    } catch {
+      startPoint = "HEAD";
+    }
+  }
   // For source branches, try the remote ref first; fall back to local ref
   const startPointFallback = sourceBranch ?? "HEAD";
 
