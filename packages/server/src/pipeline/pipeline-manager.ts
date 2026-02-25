@@ -216,7 +216,7 @@ export class PipelineManager {
         stageReports: new Map(Object.entries((task.stageReports as Record<string, string>) ?? {})),
         prBranch: task.prBranch ?? null,
         prNumber: task.prNumber ?? null,
-        targetBranch: getConfig(`project:${task.projectId}:github:branch`) ?? "main",
+        targetBranch: project?.githubBranch ?? getConfig(`project:${task.projectId}:github:branch`) ?? "main",
       };
 
       this.pipelines.set(task.id, state);
@@ -272,7 +272,7 @@ export class PipelineManager {
       stageReports: new Map(Object.entries((task.stageReports as Record<string, string>) ?? {})),
       prBranch: task.prBranch ?? null,
       prNumber: task.prNumber ?? null,
-      targetBranch: getConfig(`project:${task.projectId}:github:branch`) ?? "main",
+      targetBranch: project?.githubBranch ?? getConfig(`project:${task.projectId}:github:branch`) ?? "main",
     };
 
     this.pipelines.set(taskId, state);
@@ -517,6 +517,13 @@ export class PipelineManager {
     }
 
     // Initialize pipeline state
+    const db = getDb();
+    const project = db
+      .select()
+      .from(schema.projects)
+      .where(eq(schema.projects.id, projectId))
+      .get();
+
     const state: PipelineState = {
       taskId,
       projectId,
@@ -529,12 +536,11 @@ export class PipelineManager {
       stageReports: new Map(),
       prBranch: null,
       prNumber: null,
-      targetBranch: getConfig(`project:${projectId}:github:branch`) ?? "main",
+      targetBranch: project?.githubBranch ?? getConfig(`project:${projectId}:github:branch`) ?? "main",
     };
     this.pipelines.set(taskId, state);
 
     // Update kanban task with pipeline stage and stage list
-    const db = getDb();
     const now = new Date().toISOString();
     db.update(schema.kanbanTasks)
       .set({ pipelineStages: enabledStages, pipelineStage: enabledStages[0], updatedAt: now })
@@ -954,7 +960,7 @@ export class PipelineManager {
       stageReports: new Map(),
       prBranch: branchName,
       prNumber: task.prNumber ?? null,
-      targetBranch: getConfig(`project:${task.projectId}:github:branch`) ?? "main",
+      targetBranch: project?.githubBranch ?? getConfig(`project:${task.projectId}:github:branch`) ?? "main",
     };
 
     // Store review feedback context
@@ -1047,7 +1053,7 @@ export class PipelineManager {
       stageReports: new Map(),
       prBranch: branchName,
       prNumber: task.prNumber ?? null,
-      targetBranch: getConfig(`project:${task.projectId}:github:branch`) ?? "main",
+      targetBranch: project?.githubBranch ?? getConfig(`project:${task.projectId}:github:branch`) ?? "main",
       isReReview: true,
     };
 

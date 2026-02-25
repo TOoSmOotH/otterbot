@@ -1655,6 +1655,7 @@ The user can see everything on the desktop in real-time.`;
     name: string;
     description: string;
     charter: string | null;
+    githubBranch: string | null;
   }): Promise<void> {
     const db = getDb();
 
@@ -1754,7 +1755,7 @@ The user can see everything on the desktop in real-time.`;
   }
 
   private buildRecoveryDirective(
-    project: { id: string; name: string; description: string; charter: string | null },
+    project: { id: string; name: string; description: string; charter: string | null; githubBranch: string | null },
     tasks: Array<{
       id: string;
       title: string;
@@ -1782,7 +1783,7 @@ The user can see everything on the desktop in real-time.`;
 
     // Include GitHub context if available
     const ghRepo = getConfig(`project:${project.id}:github:repo`);
-    const ghBranch = getConfig(`project:${project.id}:github:branch`);
+    const ghBranch = getConfig(`project:${project.id}:github:branch`) ?? project.githubBranch;
     const ghRulesRaw = getConfig(`project:${project.id}:github:rules`);
     if (ghRepo) {
       lines.push(`GITHUB REPO: ${ghRepo}`);
@@ -2011,7 +2012,7 @@ The user can see everything on the desktop in real-time.`;
     }
 
     // Delegate to existing recovery logic (resets orphaned tasks, spawns fresh TL, sends recovery directive)
-    await this.recoverProject(project as { id: string; name: string; description: string; charter: string | null });
+    await this.recoverProject(project as { id: string; name: string; description: string; charter: string | null; githubBranch: string | null });
 
     console.log(`[COO] Live-recovered project "${project.name}" (${projectId})`);
     return { ok: true };
