@@ -151,6 +151,12 @@ export const kanbanTasks = sqliteTable("kanban_tasks", {
     .default([]),
   taskNumber: integer("task_number"),
   pipelineAttempt: integer("pipeline_attempt").notNull().default(0),
+  stageReports: text("stage_reports", { mode: "json" })
+    .$type<Record<string, string>>()
+    .notNull()
+    .default({}),
+  lastKickbackSource: text("last_kickback_source"),
+  spawnRetryCount: integer("spawn_retry_count").notNull().default(0),
   createdAt: text("created_at")
     .notNull()
     .$defaultFn(() => new Date().toISOString()),
