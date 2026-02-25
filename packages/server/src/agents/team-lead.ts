@@ -374,7 +374,8 @@ export class TeamLead extends BaseAgent {
       const workerTask = directiveMatch?.[1]?.trim() ?? message.content;
       const pipelineBranch = message.metadata?.pipelineBranch as string | undefined;
 
-      const result = await this.spawnWorker(pipelineRegistryEntryId, workerTask, pipelineTaskId, { pipelineOverride: true, sourceBranch: pipelineBranch });
+      const pipelineIsReReview = !!message.metadata?.pipelineIsReReview;
+      const result = await this.spawnWorker(pipelineRegistryEntryId, workerTask, pipelineTaskId, { pipelineOverride: true, sourceBranch: pipelineBranch, skipAutoAssign: pipelineIsReReview });
       const isSpawnSuccess = result.startsWith("Spawned ");
 
       if (!isSpawnSuccess && this._pipelineManager?.isPipelineTask(pipelineTaskId)) {
@@ -1496,7 +1497,7 @@ export class TeamLead extends BaseAgent {
     registryEntryId: string,
     task: string,
     taskId?: string,
-    options?: { pipelineOverride?: boolean; sourceBranch?: string },
+    options?: { pipelineOverride?: boolean; sourceBranch?: string; skipAutoAssign?: boolean },
   ): Promise<string> {
     try {
       const originalRequestedId = registryEntryId;
@@ -1685,8 +1686,8 @@ export class TeamLead extends BaseAgent {
         this.onAgentSpawned(worker);
       }
 
-      // Auto-assign kanban task if taskId provided
-      if (taskId) {
+      // Auto-assign kanban task if taskId provided (skip for re-reviews)
+      if (taskId && !options?.skipAutoAssign) {
         const reason = this.autoAssignTask(taskId, worker.id);
         if (reason) {
           // Task cannot be assigned — clean up the worker and abort
