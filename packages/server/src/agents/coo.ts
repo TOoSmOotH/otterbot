@@ -56,6 +56,13 @@ import { isDesktopEnabled } from "../desktop/desktop.js";
 import { execSync } from "node:child_process";
 import { existsSync, rmSync } from "node:fs";
 
+export interface PendingProjectApproval {
+  name: string;
+  description: string;
+  charter: string;
+  directive: string;
+}
+
 export interface COODependencies {
   bus: MessageBus;
   workspace: WorkspaceManager;
@@ -66,6 +73,7 @@ export interface COODependencies {
   onThinkingEnd?: (messageId: string, conversationId: string | null) => void;
   onProjectCreated?: (project: Project) => void;
   onProjectUpdated?: (project: Project) => void;
+  onProjectApprovalRequest?: (details: PendingProjectApproval) => void;
   onKanbanTaskCreated?: (task: KanbanTask) => void;
   onKanbanTaskUpdated?: (task: KanbanTask) => void;
   onKanbanTaskDeleted?: (taskId: string, projectId: string) => void;
@@ -116,6 +124,8 @@ export class COO extends BaseAgent {
   private lastProjectCreatedAt = 0;
   private projectCreatedThisTurn = false;
   private projectStatusCheckedThisTurn = false;
+  private _pendingProjectApproval: PendingProjectApproval | null = null;
+  private _onProjectApprovalRequest?: (details: PendingProjectApproval) => void;
   /** Per-think-cycle run_command call count — prevents the COO from burning steps on repeated commands */
   private _runCommandCalls = 0;
 
@@ -215,6 +225,7 @@ The user can see everything on the desktop in real-time.`;
     this._onPtySessionUnregistered = deps.onPtySessionUnregistered;
     this.onAgentDestroyed = deps.onAgentDestroyed;
     this.onConversationSwitched = deps.onConversationSwitched;
+    this._onProjectApprovalRequest = deps.onProjectApprovalRequest;
     this.contextManager = new ConversationContextManager(systemPrompt);
   }
 
@@ -486,7 +497,7 @@ The user can see everything on the desktop in real-time.`;
       }),
       create_project: tool({
         description:
-          "Create a NEW project and spawn a Team Lead. ONLY use this when no active project covers the CEO's goal. Always call get_project_status first to check existing projects. Prefer send_directive if an existing project can handle the work.",
+          "Request to create a NEW project and spawn a Team Lead. Requires CEO approval before the project is actually created. ONLY use this when no active project covers the CEO's goal. Always call get_project_status first to check existing projects. Prefer send_directive if an existing project can handle the work.",
         parameters: z.object({
           name: z
             .string()
@@ -506,7 +517,7 @@ The user can see everything on the desktop in real-time.`;
             ),
         }),
         execute: async ({ name, description, charter, directive }) => {
-          return this.createProject(name, description, directive, charter);
+          return this.requestProjectApproval(name, description, charter, directive);
         },
       }),
       send_directive: tool({
@@ -1059,6 +1070,43 @@ The user can see everything on the desktop in real-time.`;
       projectId,
     });
     return `Directive sent to Team Lead ${teamLead.id} for project ${projectId}.`;
+  }
+
+  private requestProjectApproval(
+    name: string,
+    description: string,
+    charter: string,
+    directive: string,
+  ): string {
+    // Store the pending project details
+    this._pendingProjectApproval = { name, description, charter, directive };
+
+    // Notify the server to send confirmation request to CEO
+    this._onProjectApprovalRequest?.(this._pendingProjectApproval);
+
+    return `Project "${name}" requires CEO approval before creation. A confirmation request has been sent. Wait for the CEO to approve or deny.`;
+  }
+
+  /** Returns the pending project approval details (if any). */
+  getPendingProjectApproval(): PendingProjectApproval | null {
+    return this._pendingProjectApproval;
+  }
+
+  /** Called when the CEO approves the pending project creation. */
+  async approvePendingProject(): Promise<string> {
+    const pending = this._pendingProjectApproval;
+    if (!pending) return "No pending project to approve.";
+    this._pendingProjectApproval = null;
+    return this.createProject(pending.name, pending.description, pending.directive, pending.charter);
+  }
+
+  /** Called when the CEO denies the pending project creation. */
+  denyPendingProject(): string {
+    const pending = this._pendingProjectApproval;
+    if (!pending) return "No pending project to deny.";
+    const name = pending.name;
+    this._pendingProjectApproval = null;
+    return `Project "${name}" creation was denied by the CEO.`;
   }
 
   private async createProject(

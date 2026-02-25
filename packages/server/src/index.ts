@@ -540,6 +540,9 @@ async function main() {
   // Track the most recent permission request so chat replies can resolve it
   let activePermissionRequest: { agentId: string; permissionId: string; sessionId: string } | null = null;
 
+  // Track pending project creation approval — CEO must approve before projects are created
+  let pendingProjectApproval = false;
+
   // Discord bridge (initialized when enabled + token set)
   let discordBridge: DiscordBridge | null = null;
 
@@ -804,6 +807,18 @@ async function main() {
         onProjectUpdated: (project) => {
           emitProjectUpdated(io, project);
         },
+        onProjectApprovalRequest: (details) => {
+          if (!coo) return;
+          pendingProjectApproval = true;
+          const approvalMsg = bus.send({
+            fromAgentId: "coo",
+            toAgentId: null,
+            type: "chat" as any,
+            content: `**Project Approval Required** — I'd like to create a project:\n\n**${details.name}**\n${details.description}\n\nReply **approve** or **deny**.`,
+            conversationId: coo.getCurrentConversationId() ?? undefined,
+          });
+          io.emit("coo:response", approvalMsg);
+        },
         onKanbanTaskCreated: (task) => {
           emitKanbanTaskCreated(io, task);
         },
@@ -919,9 +934,48 @@ async function main() {
 
       setupSocketHandlers(io, bus, coo, registry, {
         beforeCeoMessage: (content, conversationId, callback) => {
+          const lower = content.trim().toLowerCase();
+
+          // Check for pending project approval first
+          if (pendingProjectApproval && coo) {
+            const isApprove = ["allow", "yes", "approve", "ok", "y"].includes(lower);
+            const isDeny = ["deny", "no", "reject", "n"].includes(lower);
+
+            if (isApprove || isDeny) {
+              pendingProjectApproval = false;
+
+              if (isApprove) {
+                // Approve and create the project
+                coo.approvePendingProject().then((result) => {
+                  const approveMsg = bus.send({
+                    fromAgentId: "coo",
+                    toAgentId: null,
+                    type: "chat" as any,
+                    content: `Project approved. ${result}`,
+                    conversationId,
+                  });
+                  io.emit("coo:response", approveMsg);
+                });
+              } else {
+                const result = coo.denyPendingProject();
+                const denyMsg = bus.send({
+                  fromAgentId: "coo",
+                  toAgentId: null,
+                  type: "chat" as any,
+                  content: result,
+                  conversationId,
+                });
+                io.emit("coo:response", denyMsg);
+              }
+
+              callback?.({ messageId: "", conversationId: conversationId ?? "" });
+              return true;
+            }
+          }
+
+          // Check for pending coding agent permission request
           if (!activePermissionRequest) return false;
 
-          const lower = content.trim().toLowerCase();
           let response: "once" | "always" | "reject" | null = null;
 
           if (["allow", "yes", "approve", "ok", "y", "allow once"].includes(lower)) {
