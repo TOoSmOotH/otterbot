@@ -38,6 +38,7 @@ import { isDesktopEnabled } from "../desktop/desktop.js";
 import { TEAM_LEAD_PROMPT } from "./prompts/team-lead.js";
 import { getRandomModelPackId } from "../models3d/model-packs.js";
 import { debug } from "../utils/debug.js";
+import { pickWorkerName } from "../utils/worker-names.js";
 import {
   fetchPullRequest,
   fetchPullRequestReviews,
@@ -1546,22 +1547,12 @@ export class TeamLead extends BaseAgent {
         workspacePath = this.workspace.prepareAgentWorktree(this.projectId, workerId, options?.sourceBranch);
       }
 
-      // Derive human-readable name from kanban task title or task description
-      let workerName: string | null = null;
-      if (taskId) {
-        const kanbanTask = db
-          .select({ title: schema.kanbanTasks.title })
-          .from(schema.kanbanTasks)
-          .where(eq(schema.kanbanTasks.id, taskId))
-          .get();
-        if (kanbanTask?.title) {
-          workerName = kanbanTask.title.slice(0, 60);
-        }
+      // Assign a random human name, avoiding names already in use by living workers
+      const usedNames = new Set<string>();
+      for (const w of this.workers.values()) {
+        if (w.name) usedNames.add(w.name);
       }
-      if (!workerName) {
-        // Fallback: first line of the task string, truncated
-        workerName = task.split("\n")[0].slice(0, 60) || null;
-      }
+      const workerName = pickWorkerName(usedNames);
 
       console.log(`[TeamLead ${this.id}] Spawning worker ${workerId} "${workerName}" from ${entry.name} (workspace=${workspacePath})`);
 

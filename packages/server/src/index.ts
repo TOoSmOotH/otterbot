@@ -2242,6 +2242,24 @@ async function main() {
     return { ok: true };
   });
 
+  // Worker names settings
+  app.get("/api/settings/worker-names", async () => {
+    const { getWorkerNames, DEFAULT_WORKER_NAMES } = await import("./utils/worker-names.js");
+    return { names: getWorkerNames(), defaults: DEFAULT_WORKER_NAMES };
+  });
+
+  app.put<{
+    Body: { names: string[] };
+  }>("/api/settings/worker-names", async (req) => {
+    const { names } = req.body;
+    if (!Array.isArray(names) || names.length === 0) {
+      deleteConfig("worker_names");
+    } else {
+      setConfig("worker_names", JSON.stringify(names));
+    }
+    return { ok: true };
+  });
+
   // Agent list endpoint (only active agents, not stale "done" ones)
   // Includes scheduler pseudo-agents that aren't persisted in the DB.
   app.get("/api/agents", async () => {
