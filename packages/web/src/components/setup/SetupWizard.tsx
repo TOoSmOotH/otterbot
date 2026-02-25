@@ -5,16 +5,13 @@ import { CharacterSelect } from "../character-select/CharacterSelect";
 import { DEFAULT_AVATARS } from "./default-avatars";
 import type { GearConfig } from "@otterbot/shared";
 import { ModelPricingPrompt } from "../settings/ModelPricingPrompt";
+import { saveWizardState, loadWizardState, clearWizardState } from "../../hooks/use-setup-persistence";
 
 const SUGGESTED_MODELS: Record<string, string[]> = {
   anthropic: ["claude-sonnet-4-5-20250929", "claude-haiku-4-20250414"],
   openai: ["gpt-4o", "gpt-4o-mini"],
   ollama: ["llama3.1", "mistral", "codellama"],
-  openrouter: [
-    "anthropic/claude-sonnet-4-5-20250929",
-    "openai/gpt-4o",
-    "google/gemini-2.0-flash-exp:free",
-  ],
+  openrouter: [],
   "openai-compatible": [],
   lmstudio: ["llama-3.1-8b-instruct", "mistral-7b-instruct", "qwen2.5-coder-7b-instruct"],
 };
@@ -194,6 +191,69 @@ export function SetupWizard() {
   const [openCodeModelFilter, setOpenCodeModelFilter] = useState("");
   const openCodeModelComboRef = useRef<HTMLDivElement>(null);
 
+  // Restore wizard state from sessionStorage on mount
+  useEffect(() => {
+    const saved = loadWizardState();
+    if (!saved) return;
+    if (typeof saved.step === "number") setStep(saved.step);
+    if (typeof saved.provider === "string") setProvider(saved.provider);
+    if (typeof saved.providerName === "string") setProviderName(saved.providerName);
+    if (typeof saved.model === "string") setModel(saved.model);
+    if (typeof saved.apiKey === "string") setApiKey(saved.apiKey);
+    if (typeof saved.baseUrl === "string") setBaseUrl(saved.baseUrl);
+    if (typeof saved.displayName === "string") setDisplayName(saved.displayName);
+    if (typeof saved.avatar === "string") setAvatar(saved.avatar);
+    if (typeof saved.bio === "string") setBio(saved.bio);
+    if (typeof saved.timezone === "string") setTimezone(saved.timezone);
+    if (typeof saved.characterPackId === "string") setCharacterPackId(saved.characterPackId);
+    if (saved.characterGearConfig != null) setCharacterGearConfig(saved.characterGearConfig as GearConfig);
+    if (typeof saved.cooName === "string") setCooName(saved.cooName);
+    if (typeof saved.cooModelPackId === "string") setCooModelPackId(saved.cooModelPackId);
+    if (saved.cooGearConfig != null) setCooGearConfig(saved.cooGearConfig as GearConfig);
+    if (typeof saved.adminName === "string") setAdminName(saved.adminName);
+    if (typeof saved.adminModelPackId === "string") setAdminModelPackId(saved.adminModelPackId);
+    if (saved.adminGearConfig != null) setAdminGearConfig(saved.adminGearConfig as GearConfig);
+    if (typeof saved.searchProvider === "string") setSearchProvider(saved.searchProvider);
+    if (typeof saved.searchApiKey === "string") setSearchApiKey(saved.searchApiKey);
+    if (typeof saved.searchBaseUrl === "string") setSearchBaseUrl(saved.searchBaseUrl);
+    if (typeof saved.ttsProvider === "string") setTtsProvider(saved.ttsProvider);
+    if (typeof saved.ttsVoice === "string") setTtsVoice(saved.ttsVoice);
+    if (typeof saved.ttsApiKey === "string") setTtsApiKey(saved.ttsApiKey);
+    if (typeof saved.ttsBaseUrl === "string") setTtsBaseUrl(saved.ttsBaseUrl);
+    if (typeof saved.openCodeEnabled === "boolean") setOpenCodeEnabled(saved.openCodeEnabled);
+    if (typeof saved.openCodeInteractive === "boolean") setOpenCodeInteractive(saved.openCodeInteractive);
+    if (typeof saved.openCodeUseSameProvider === "boolean") setOpenCodeUseSameProvider(saved.openCodeUseSameProvider);
+    if (typeof saved.openCodeProvider === "string") setOpenCodeProvider(saved.openCodeProvider);
+    if (typeof saved.openCodeModel === "string") setOpenCodeModel(saved.openCodeModel);
+    if (typeof saved.openCodeApiKey === "string") setOpenCodeApiKey(saved.openCodeApiKey);
+    if (typeof saved.openCodeBaseUrl === "string") setOpenCodeBaseUrl(saved.openCodeBaseUrl);
+  }, []);
+
+  // Persist wizard state to sessionStorage on change
+  useEffect(() => {
+    saveWizardState({
+      step, provider, providerName, model, apiKey, baseUrl,
+      displayName, avatar, bio, timezone,
+      characterPackId, characterGearConfig,
+      cooName, cooModelPackId, cooGearConfig,
+      adminName, adminModelPackId, adminGearConfig,
+      searchProvider, searchApiKey, searchBaseUrl,
+      ttsProvider, ttsVoice, ttsApiKey, ttsBaseUrl,
+      openCodeEnabled, openCodeInteractive, openCodeUseSameProvider,
+      openCodeProvider, openCodeModel, openCodeApiKey, openCodeBaseUrl,
+    });
+  }, [
+    step, provider, providerName, model, apiKey, baseUrl,
+    displayName, avatar, bio, timezone,
+    characterPackId, characterGearConfig,
+    cooName, cooModelPackId, cooGearConfig,
+    adminName, adminModelPackId, adminGearConfig,
+    searchProvider, searchApiKey, searchBaseUrl,
+    ttsProvider, ttsVoice, ttsApiKey, ttsBaseUrl,
+    openCodeEnabled, openCodeInteractive, openCodeUseSameProvider,
+    openCodeProvider, openCodeModel, openCodeApiKey, openCodeBaseUrl,
+  ]);
+
   const probeModels = useCallback(async (prov: string, key: string, url: string) => {
     const needsKey = NEEDS_API_KEY.has(prov);
     const needsUrl = NEEDS_BASE_URL.has(prov);
@@ -212,8 +272,8 @@ export function SetupWizard() {
       if (res.ok) {
         const data = (await res.json()) as { models: string[] };
         setFetchedModels(data.models);
-        // Auto-select first fetched model if no model is currently set
-        if (data.models.length > 0) {
+        // Auto-select first fetched model if no model is currently set (except for openrouter)
+        if (data.models.length > 0 && prov !== "openrouter") {
           setModel((prev) => prev || data.models[0]);
         }
       }
@@ -365,7 +425,7 @@ export function SetupWizard() {
       return;
     }
     setError(null);
-    setStep(3);
+    setStep(4);
   };
 
   const handleAvatarChange = async (file: File) => {
@@ -393,12 +453,12 @@ export function SetupWizard() {
     }
     setError(null);
     loadPacks();
-    setStep(4);
+    setStep(5);
   };
 
   const handleNextToCoo = () => {
     setError(null);
-    setStep(5);
+    setStep(6);
   };
 
   const handleNextToAdmin = () => {
@@ -407,7 +467,7 @@ export function SetupWizard() {
       return;
     }
     setError(null);
-    setStep(6);
+    setStep(7);
   };
 
   const handleNextToSearch = () => {
@@ -416,7 +476,7 @@ export function SetupWizard() {
       return;
     }
     setError(null);
-    setStep(7);
+    setStep(8);
   };
 
   const handleNextToOpenCode = () => {
@@ -428,17 +488,17 @@ export function SetupWizard() {
         setOpenCodeModel(suggestions[0]);
       }
     }
-    setStep(8);
+    setStep(9);
   };
 
   const handleNextToVoice = () => {
     setError(null);
-    setStep(9);
+    setStep(10);
   };
 
   const handleComplete = async () => {
     setSubmitting(true);
-    await completeSetup({
+    const ok = await completeSetup({
       provider,
       providerName: providerName || undefined,
       model,
@@ -475,6 +535,7 @@ export function SetupWizard() {
         : undefined,
     });
     setSubmitting(false);
+    if (ok) clearWizardState();
   };
 
   const previewAudioRef = useRef<HTMLAudioElement | null>(null);
@@ -536,7 +597,7 @@ export function SetupWizard() {
 
           {/* Step indicator */}
           <div className="flex items-center justify-center gap-2 mb-6">
-            {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((s, i) => (
+            {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((s, i) => (
               <div key={s} className="flex items-center gap-2">
                 {i > 0 && (
                   <div className={`w-6 h-px ${step >= s ? "bg-primary" : "bg-muted"}`} />
@@ -601,8 +662,36 @@ export function SetupWizard() {
           {step === 2 && (
             <div className="space-y-4">
               <h2 className="text-sm font-medium">
-                2. Configure your LLM provider
+                2. Welcome to OtterBot!
               </h2>
+              <div className="text-xs text-muted-foreground space-y-3">
+                <p>Thanks for trying OtterBot! This is still experimental and is not feature complete. Things you should do:</p>
+                <ol className="list-decimal list-inside space-y-2 ml-1">
+                  <li>Use <strong>GPTOSS 120B</strong> or something similar for the main model. The assistant has several layers and it doesn&apos;t need a lot of smarts to communicate to you. Fast is what matters.</li>
+                  <li><strong>qwen3-coder-next</strong> inside of opencode works great for coding tasks.</li>
+                  <li>The way we use Claude Code, Gemini, and Codex is via a terminal so it shouldn&apos;t violate TOS. I am not a lawyer so I can&apos;t guarantee that so make your own judgement.</li>
+                  <li>If it breaks you get to keep both pieces. I am not responsible if something happens.</li>
+                  <li>Create accounts for your agents. <strong>DO NOT</strong> connect it to your email or github accounts. Create their own accounts and you can invite them to your projects.</li>
+                </ol>
+              </div>
+
+              <button
+                onClick={() => setStep(3)}
+                className="w-full px-4 py-2 bg-primary text-primary-foreground text-sm font-medium rounded-md hover:bg-primary/90 transition-colors"
+              >
+                OK, I understand
+              </button>
+            </div>
+          )}
+
+          {step === 3 && (
+            <div className="space-y-4">
+              <h2 className="text-sm font-medium">
+                3. Configure your LLM provider
+              </h2>
+              <p className="text-xs text-muted-foreground">
+                Only <strong>OpenAI Compatible</strong> and <strong>OpenRouter</strong> have been tested.
+              </p>
 
               {/* Provider type cards */}
               <div className="grid grid-cols-2 gap-2">
@@ -732,8 +821,12 @@ export function SetupWizard() {
                         }
                       }}
                       placeholder="Search or type a model name"
+                      aria-describedby="model-search-hint"
                       className="w-full px-3 py-2 bg-background border border-input rounded-md text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
                     />
+                    <p id="model-search-hint" data-testid="model-search-hint" className="mt-1.5 text-xs text-muted-foreground">
+                      Type to search and filter available models, or enter a custom model name.
+                    </p>
                     {fetchingModels && (
                       <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">
                         Loading...
@@ -794,7 +887,7 @@ export function SetupWizard() {
               <div className="flex gap-2">
                 <button
                   onClick={() => {
-                    setStep(1);
+                    setStep(2);
                     setError(null);
                   }}
                   className="px-4 py-2 bg-secondary text-secondary-foreground text-sm font-medium rounded-md hover:bg-secondary/80 transition-colors"
@@ -812,10 +905,10 @@ export function SetupWizard() {
             </div>
           )}
 
-          {step === 3 && (
+          {step === 4 && (
             <div className="space-y-4">
               <h2 className="text-sm font-medium">
-                3. Tell the team about yourself
+                4. Tell the team about yourself
               </h2>
               <p className="text-xs text-muted-foreground">
                 Your AI agents will use this to personalize their interactions
@@ -956,7 +1049,7 @@ export function SetupWizard() {
               <div className="flex gap-2">
                 <button
                   onClick={() => {
-                    setStep(2);
+                    setStep(3);
                     setError(null);
                   }}
                   className="px-4 py-2 bg-secondary text-secondary-foreground text-sm font-medium rounded-md hover:bg-secondary/80 transition-colors"
@@ -974,10 +1067,10 @@ export function SetupWizard() {
             </div>
           )}
 
-          {step === 4 && (
+          {step === 5 && (
             <div className="space-y-4">
               <h2 className="text-sm font-medium">
-                4. Choose your character
+                5. Choose your character
               </h2>
               <p className="text-xs text-muted-foreground">
                 Pick a 3D character for the Live View. You can change this later in Settings.
@@ -997,7 +1090,7 @@ export function SetupWizard() {
               <div className="flex gap-2">
                 <button
                   onClick={() => {
-                    setStep(3);
+                    setStep(4);
                     setError(null);
                   }}
                   className="px-4 py-2 bg-secondary text-secondary-foreground text-sm font-medium rounded-md hover:bg-secondary/80 transition-colors"
@@ -1014,10 +1107,10 @@ export function SetupWizard() {
             </div>
           )}
 
-          {step === 5 && (
+          {step === 6 && (
             <div className="space-y-4">
               <h2 className="text-sm font-medium">
-                5. Customize your COO
+                6. Customize your COO
               </h2>
               <p className="text-xs text-muted-foreground">
                 Your COO manages all operations and reports directly to you. Give them a name and optionally pick a 3D character.
@@ -1054,7 +1147,7 @@ export function SetupWizard() {
               <div className="flex gap-2">
                 <button
                   onClick={() => {
-                    setStep(4);
+                    setStep(5);
                     setError(null);
                   }}
                   className="px-4 py-2 bg-secondary text-secondary-foreground text-sm font-medium rounded-md hover:bg-secondary/80 transition-colors"
@@ -1072,10 +1165,10 @@ export function SetupWizard() {
             </div>
           )}
 
-          {step === 6 && (
+          {step === 7 && (
             <div className="space-y-4">
               <h2 className="text-sm font-medium">
-                6. Customize your Admin Assistant
+                7. Customize your Admin Assistant
               </h2>
               <p className="text-xs text-muted-foreground">
                 Your Admin Assistant handles personal productivity — managing your todos, email (Gmail), and calendar. Give them a name and optionally pick a 3D character.
@@ -1112,7 +1205,7 @@ export function SetupWizard() {
               <div className="flex gap-2">
                 <button
                   onClick={() => {
-                    setStep(5);
+                    setStep(6);
                     setError(null);
                   }}
                   className="px-4 py-2 bg-secondary text-secondary-foreground text-sm font-medium rounded-md hover:bg-secondary/80 transition-colors"
@@ -1130,10 +1223,10 @@ export function SetupWizard() {
             </div>
           )}
 
-          {step === 7 && (
+          {step === 8 && (
             <div className="space-y-4">
               <h2 className="text-sm font-medium">
-                7. Set up web search
+                8. Set up web search
               </h2>
               <p className="text-xs text-muted-foreground">
                 Give your agents the ability to search the web. DuckDuckGo works
@@ -1205,7 +1298,7 @@ export function SetupWizard() {
               <div className="flex gap-2">
                 <button
                   onClick={() => {
-                    setStep(6);
+                    setStep(7);
                     setError(null);
                   }}
                   className="px-4 py-2 bg-secondary text-secondary-foreground text-sm font-medium rounded-md hover:bg-secondary/80 transition-colors"
@@ -1232,10 +1325,10 @@ export function SetupWizard() {
             </div>
           )}
 
-          {step === 8 && (
+          {step === 9 && (
             <div className="space-y-4">
               <h2 className="text-sm font-medium">
-                8. Configure Coding Agents
+                9. Configure Coding Agents
               </h2>
               <p className="text-xs text-muted-foreground">
                 Coding agents are autonomous tools that handle multi-file edits, refactoring, and complex code changes.
@@ -1419,8 +1512,12 @@ export function SetupWizard() {
                           }
                         }}
                         placeholder="Search or type a model name"
+                        aria-describedby="opencode-model-search-hint"
                         className="w-full px-3 py-2 bg-background border border-input rounded-md text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
                       />
+                      <p id="opencode-model-search-hint" data-testid="model-search-hint" className="mt-1.5 text-xs text-muted-foreground">
+                        Type to search and filter available models, or enter a custom model name.
+                      </p>
                       {openCodeFetchingModels && (
                         <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">
                           Loading...
@@ -1467,7 +1564,7 @@ export function SetupWizard() {
               <div className="flex gap-2">
                 <button
                   onClick={() => {
-                    setStep(7);
+                    setStep(8);
                     setError(null);
                   }}
                   className="px-4 py-2 bg-secondary text-secondary-foreground text-sm font-medium rounded-md hover:bg-secondary/80 transition-colors"
@@ -1495,10 +1592,10 @@ export function SetupWizard() {
             </div>
           )}
 
-          {step === 9 && (
+          {step === 10 && (
             <div className="space-y-4">
               <h2 className="text-sm font-medium">
-                9. Choose a voice for your assistant
+                10. Choose a voice for your assistant
               </h2>
               <p className="text-xs text-muted-foreground">
                 Your assistant can speak its responses aloud. Pick a TTS
@@ -1650,7 +1747,7 @@ export function SetupWizard() {
               <div className="flex gap-2">
                 <button
                   onClick={() => {
-                    setStep(8);
+                    setStep(9);
                     setError(null);
                   }}
                   className="px-4 py-2 bg-secondary text-secondary-foreground text-sm font-medium rounded-md hover:bg-secondary/80 transition-colors"

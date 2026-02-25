@@ -177,6 +177,14 @@ interface SettingsState {
   discordPendingPairings: Array<{ code: string; discordUserId: string; discordUsername: string; createdAt: string }>;
   discordTestResult: TestResult | null;
 
+  // Telegram
+  telegramEnabled: boolean;
+  telegramTokenSet: boolean;
+  telegramBotUsername: string | null;
+  telegramPairedUsers: Array<{ telegramUserId: string; telegramUsername: string; pairedAt: string }>;
+  telegramPendingPairings: Array<{ code: string; telegramUserId: string; telegramUsername: string; createdAt: string }>;
+  telegramTestResult: TestResult | null;
+
   // Slack
   slackEnabled: boolean;
   slackBotTokenSet: boolean;
@@ -189,6 +197,20 @@ interface SettingsState {
   slackPairedUsers: Array<{ slackUserId: string; slackUsername: string; pairedAt: string }>;
   slackPendingPairings: Array<{ code: string; slackUserId: string; slackUsername: string; createdAt: string }>;
   slackTestResult: TestResult | null;
+
+  // Mattermost
+  mattermostEnabled: boolean;
+  mattermostTokenSet: boolean;
+  mattermostServerUrlSet: boolean;
+  mattermostServerUrl: string | null;
+  mattermostDefaultTeam: string | null;
+  mattermostRequireMention: boolean;
+  mattermostBotUsername: string | null;
+  mattermostAllowedChannels: string[];
+  mattermostAvailableChannels: Array<{ id: string; name: string; displayName: string; teamName: string }>;
+  mattermostPairedUsers: Array<{ mattermostUserId: string; mattermostUsername: string; pairedAt: string }>;
+  mattermostPendingPairings: Array<{ code: string; mattermostUserId: string; mattermostUsername: string; createdAt: string }>;
+  mattermostTestResult: TestResult | null;
 
   // Google
   googleConnected: boolean;
@@ -355,6 +377,17 @@ interface SettingsState {
   rejectDiscordPairing: (code: string) => Promise<void>;
   revokeDiscordUser: (userId: string) => Promise<void>;
 
+  // Telegram actions
+  loadTelegramSettings: () => Promise<void>;
+  updateTelegramSettings: (data: {
+    enabled?: boolean;
+    botToken?: string;
+  }) => Promise<void>;
+  testTelegramConnection: () => Promise<void>;
+  approveTelegramPairing: (code: string) => Promise<void>;
+  rejectTelegramPairing: (code: string) => Promise<void>;
+  revokeTelegramUser: (userId: string) => Promise<void>;
+
   // Slack actions
   loadSlackSettings: () => Promise<void>;
   updateSlackSettings: (data: {
@@ -369,6 +402,21 @@ interface SettingsState {
   approveSlackPairing: (code: string) => Promise<void>;
   rejectSlackPairing: (code: string) => Promise<void>;
   revokeSlackUser: (userId: string) => Promise<void>;
+
+  // Mattermost actions
+  loadMattermostSettings: () => Promise<void>;
+  updateMattermostSettings: (data: {
+    enabled?: boolean;
+    botToken?: string;
+    serverUrl?: string;
+    defaultTeam?: string;
+    requireMention?: boolean;
+    allowedChannels?: string[];
+  }) => Promise<void>;
+  testMattermostConnection: () => Promise<void>;
+  approveMattermostPairing: (code: string) => Promise<void>;
+  rejectMattermostPairing: (code: string) => Promise<void>;
+  revokeMattermostUser: (userId: string) => Promise<void>;
 
   // Google actions
   loadGoogleSettings: () => Promise<void>;
@@ -473,6 +521,12 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   discordPairedUsers: [],
   discordPendingPairings: [],
   discordTestResult: null,
+  telegramEnabled: false,
+  telegramTokenSet: false,
+  telegramBotUsername: null,
+  telegramPairedUsers: [],
+  telegramPendingPairings: [],
+  telegramTestResult: null,
   slackEnabled: false,
   slackBotTokenSet: false,
   slackSigningSecretSet: false,
@@ -484,6 +538,18 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   slackPairedUsers: [],
   slackPendingPairings: [],
   slackTestResult: null,
+  mattermostEnabled: false,
+  mattermostTokenSet: false,
+  mattermostServerUrlSet: false,
+  mattermostServerUrl: null,
+  mattermostDefaultTeam: null,
+  mattermostRequireMention: true,
+  mattermostBotUsername: null,
+  mattermostAllowedChannels: [],
+  mattermostAvailableChannels: [],
+  mattermostPairedUsers: [],
+  mattermostPendingPairings: [],
+  mattermostTestResult: null,
   googleConnected: false,
   googleConnectedEmail: null,
   googleClientIdSet: false,
@@ -1658,6 +1724,111 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     }
   },
 
+  // Telegram actions
+
+  loadTelegramSettings: async () => {
+    try {
+      const res = await fetch("/api/settings/telegram");
+      if (!res.ok) return;
+      const data = await res.json();
+      set({
+        telegramEnabled: data.enabled,
+        telegramTokenSet: data.tokenSet,
+        telegramBotUsername: data.botUsername,
+        telegramPairedUsers: data.pairedUsers,
+        telegramPendingPairings: data.pendingPairings,
+      });
+    } catch {
+      // Silently fail
+    }
+  },
+
+  updateTelegramSettings: async (data) => {
+    set({ error: null });
+    try {
+      const res = await fetch("/api/settings/telegram", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) throw new Error("Failed to update Telegram settings");
+      await get().loadTelegramSettings();
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "Unknown error" });
+    }
+  },
+
+  testTelegramConnection: async () => {
+    set({ telegramTestResult: { ok: false, testing: true } });
+    try {
+      const res = await fetch("/api/settings/telegram/test", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      const data = await res.json();
+      set({
+        telegramTestResult: {
+          ok: data.ok,
+          error: data.error,
+          testing: false,
+        },
+        telegramBotUsername: data.ok ? data.botUsername : get().telegramBotUsername,
+      });
+    } catch (err) {
+      set({
+        telegramTestResult: {
+          ok: false,
+          error: err instanceof Error ? err.message : "Unknown error",
+          testing: false,
+        },
+      });
+    }
+  },
+
+  approveTelegramPairing: async (code) => {
+    set({ error: null });
+    try {
+      const res = await fetch("/api/settings/telegram/pair/approve", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code }),
+      });
+      if (!res.ok) throw new Error("Failed to approve pairing");
+      await get().loadTelegramSettings();
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "Unknown error" });
+    }
+  },
+
+  rejectTelegramPairing: async (code) => {
+    set({ error: null });
+    try {
+      const res = await fetch("/api/settings/telegram/pair/reject", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code }),
+      });
+      if (!res.ok) throw new Error("Failed to reject pairing");
+      await get().loadTelegramSettings();
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "Unknown error" });
+    }
+  },
+
+  revokeTelegramUser: async (userId) => {
+    set({ error: null });
+    try {
+      const res = await fetch(`/api/settings/telegram/pair/${userId}`, {
+        method: "DELETE",
+      });
+      if (!res.ok) throw new Error("Failed to revoke user");
+      await get().loadTelegramSettings();
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "Unknown error" });
+    }
+  },
+
   // Slack actions
 
   loadSlackSettings: async () => {
@@ -1759,6 +1930,115 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       });
       if (!res.ok) throw new Error("Failed to revoke user");
       await get().loadSlackSettings();
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "Unknown error" });
+    }
+  },
+
+  // Mattermost actions
+
+  loadMattermostSettings: async () => {
+    try {
+      const res = await fetch("/api/settings/mattermost");
+      if (!res.ok) return;
+      const data = await res.json();
+      set({
+        mattermostEnabled: data.enabled,
+        mattermostTokenSet: data.tokenSet,
+        mattermostServerUrlSet: data.serverUrlSet,
+        mattermostServerUrl: data.serverUrl,
+        mattermostDefaultTeam: data.defaultTeam,
+        mattermostRequireMention: data.requireMention,
+        mattermostBotUsername: data.botUsername,
+        mattermostAllowedChannels: data.allowedChannels ?? [],
+        mattermostAvailableChannels: data.availableChannels ?? [],
+        mattermostPairedUsers: data.pairedUsers,
+        mattermostPendingPairings: data.pendingPairings,
+      });
+    } catch {
+      // Silently fail
+    }
+  },
+
+  updateMattermostSettings: async (data) => {
+    set({ error: null });
+    try {
+      const res = await fetch("/api/settings/mattermost", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) throw new Error("Failed to update Mattermost settings");
+      await get().loadMattermostSettings();
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "Unknown error" });
+    }
+  },
+
+  testMattermostConnection: async () => {
+    set({ mattermostTestResult: { ok: false, testing: true } });
+    try {
+      const res = await fetch("/api/settings/mattermost/test", {
+        method: "POST",
+      });
+      const data = await res.json();
+      set({
+        mattermostTestResult: {
+          ok: data.ok,
+          error: data.error,
+          testing: false,
+        },
+        mattermostBotUsername: data.ok ? data.botUsername : get().mattermostBotUsername,
+      });
+    } catch {
+      set({
+        mattermostTestResult: {
+          ok: false,
+          error: "Network error",
+          testing: false,
+        },
+      });
+    }
+  },
+
+  approveMattermostPairing: async (code) => {
+    set({ error: null });
+    try {
+      const res = await fetch("/api/settings/mattermost/pair/approve", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code }),
+      });
+      if (!res.ok) throw new Error("Failed to approve pairing");
+      await get().loadMattermostSettings();
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "Unknown error" });
+    }
+  },
+
+  rejectMattermostPairing: async (code) => {
+    set({ error: null });
+    try {
+      const res = await fetch("/api/settings/mattermost/pair/reject", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code }),
+      });
+      if (!res.ok) throw new Error("Failed to reject pairing");
+      await get().loadMattermostSettings();
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "Unknown error" });
+    }
+  },
+
+  revokeMattermostUser: async (userId) => {
+    set({ error: null });
+    try {
+      const res = await fetch(`/api/settings/mattermost/pair/${userId}`, {
+        method: "DELETE",
+      });
+      if (!res.ok) throw new Error("Failed to revoke user");
+      await get().loadMattermostSettings();
     } catch (err) {
       set({ error: err instanceof Error ? err.message : "Unknown error" });
     }

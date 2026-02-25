@@ -10,12 +10,7 @@ import type { MessageBus } from "../bus/message-bus.js";
 import { createTools } from "../tools/tool-factory.js";
 import { debug } from "../utils/debug.js";
 import { getConfig } from "../auth/auth.js";
-
-/** Strip ANSI escape codes from terminal output for LLM analysis */
-function stripAnsi(str: string): string {
-  // eslint-disable-next-line no-control-regex
-  return str.replace(/\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g, "");
-}
+import { stripAnsi } from "../utils/terminal.js";
 
 export interface WorkerDependencies {
   id?: string;
@@ -274,7 +269,7 @@ export class Worker extends BaseAgent {
       const filesChanged = result.diff?.files?.length ?? 0;
       let report = `OpenCode completed successfully.\n\nSummary: ${result.summary}\n\nFiles changed: ${filesChanged}`;
       if (filesChanged === 0) {
-        report += `\n\n⚠️ WARNING: Task reported success but produced zero file changes (no diff). This may indicate the task was already completed or the agent did not make any modifications.`;
+        report += `\n\nNote: No file changes were detected. The task may have been informational or already completed.`;
       }
       return report;
     }
@@ -359,7 +354,7 @@ export class Worker extends BaseAgent {
       const filesChanged = result.diff?.files?.length ?? 0;
       let report = `Codex completed successfully.\n\nSummary: ${result.summary}\n\nFiles changed: ${filesChanged}`;
       if (filesChanged === 0) {
-        report += `\n\n⚠️ WARNING: Task reported success but produced zero file changes (no diff). This may indicate the task was already completed or the agent did not make any modifications.`;
+        report += `\n\nNote: No file changes were detected. The task may have been informational or already completed.`;
       }
       return report;
     }
@@ -444,7 +439,7 @@ export class Worker extends BaseAgent {
       const filesChanged = result.diff?.files?.length ?? 0;
       let report = `Gemini CLI completed successfully.\n\nSummary: ${result.summary}\n\nFiles changed: ${filesChanged}`;
       if (filesChanged === 0) {
-        report += `\n\n⚠️ WARNING: Task reported success but produced zero file changes (no diff). This may indicate the task was already completed or the agent did not make any modifications.`;
+        report += `\n\nNote: No file changes were detected. The task may have been informational or already completed.`;
       }
       return report;
     }
@@ -551,7 +546,7 @@ export class Worker extends BaseAgent {
       const filesChanged = result.diff?.files?.length ?? 0;
       let report = `Claude Code completed successfully.\n\nSummary: ${result.summary}\n\nFiles changed: ${filesChanged}`;
       if (filesChanged === 0) {
-        report += `\n\n⚠️ WARNING: Task reported success but produced zero file changes (no diff). This may indicate the task was already completed or the agent did not make any modifications.`;
+        report += `\n\nNote: No file changes were detected. The task may have been informational or already completed.`;
       }
       return report;
     }
@@ -604,6 +599,16 @@ export class Worker extends BaseAgent {
       if (isReplPrompt || hasCompletionSignal || hasOpenCodeCompletion) {
         console.log(`[Worker ${this.id}] Terminal idle — detected completion (prompt=${isReplPrompt}, signal=${hasCompletionSignal}, opencode=${hasOpenCodeCompletion})`);
         this.handleTerminalComplete("Task finished (detected completion signal)", ptyClient);
+        return;
+      }
+
+      // Claude Code plan mode: numbered menu with "bypass permissions" / "manually approve" options.
+      // Auto-select option 2 ("Yes, and bypass permissions") to continue without clearing context.
+      const isPlanModePrompt = tailSegments.some(l => /bypass\s+permissions/i.test(l))
+        && tailSegments.some(l => /manually\s+approve/i.test(l));
+      if (isPlanModePrompt) {
+        console.log(`[Worker ${this.id}] Terminal idle — detected plan mode prompt, auto-selecting option 2`);
+        ptyClient.writeInput("2\r");
         return;
       }
 

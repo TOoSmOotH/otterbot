@@ -59,6 +59,7 @@ vi.mock("botbuilder", () => ({
 // ---------------------------------------------------------------------------
 
 const { TeamsBridge } = await import("../teams-bridge.js");
+import { setConfig } from "../../auth/auth.js";
 
 interface SendParams {
   fromAgentId: string | null;
@@ -155,6 +156,24 @@ describe("TeamsBridge", () => {
       coo: coo as any,
       io: io as any,
     });
+
+    // Pair default test users
+    const now = new Date().toISOString();
+    setConfig("teams:paired:user1", JSON.stringify({
+      teamsUserId: "user1", teamsUsername: "Alice", pairedAt: now,
+    }));
+    setConfig("teams:paired:user2", JSON.stringify({
+      teamsUserId: "user2", teamsUsername: "Bob", pairedAt: now,
+    }));
+    setConfig("teams:paired:user-abc", JSON.stringify({
+      teamsUserId: "user-abc", teamsUsername: "Bob", pairedAt: now,
+    }));
+    setConfig("teams:paired:user-xyz", JSON.stringify({
+      teamsUserId: "user-xyz", teamsUsername: "user-xyz", pairedAt: now,
+    }));
+    setConfig("teams:paired:unknown", JSON.stringify({
+      teamsUserId: "unknown", teamsUsername: "unknown", pairedAt: now,
+    }));
 
     mockContinueConversationAsync.mockReset();
     mockContinueConversationAsync.mockImplementation(
@@ -426,6 +445,46 @@ describe("TeamsBridge", () => {
           }),
         }),
       );
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Pairing
+  // -------------------------------------------------------------------------
+
+  describe("pairing", () => {
+    it("sends pairing code to unpaired users", async () => {
+      await bridge.start(testConfig);
+
+      const ctx = makeTeamsContext({
+        text: "hello",
+        from: { id: "stranger", name: "Stranger" },
+      });
+      await bridge.handleTurn(ctx);
+
+      // Should NOT route to COO
+      expect(bus.send).not.toHaveBeenCalled();
+      // Should send pairing message
+      expect(ctx.sendActivity).toHaveBeenCalledWith(
+        expect.stringContaining("approve this code"),
+      );
+      // Should emit pairing request
+      expect(io.emit).toHaveBeenCalledWith(
+        "teams:pairing-request",
+        expect.objectContaining({
+          teamsUserId: "stranger",
+          teamsUsername: "Stranger",
+        }),
+      );
+    });
+
+    it("routes messages from paired users to COO", async () => {
+      await bridge.start(testConfig);
+
+      const ctx = makeTeamsContext({ text: "hello" });
+      await bridge.handleTurn(ctx);
+
+      expect(bus.send).toHaveBeenCalledOnce();
     });
   });
 

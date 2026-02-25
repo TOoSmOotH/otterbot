@@ -8,15 +8,14 @@
 import type {
   CodingAgentClient,
   CodingAgentTaskResult,
-  CodingAgentDiff,
   CodingAgentTokenUsage,
   GetHumanResponse,
   OnPermissionRequest,
   OnEvent,
 } from "./coding-agent-client.js";
 import { TASK_COMPLETE_SENTINEL } from "./coding-agent-client.js";
+import { computeGitDiff } from "../utils/git.js";
 import { spawn } from "node:child_process";
-import { execSync } from "node:child_process";
 import { getConfig } from "../auth/auth.js";
 
 export interface CodexConfig {
@@ -87,7 +86,7 @@ export class CodexClient implements CodingAgentClient {
       }
 
       // Compute diff via git
-      const diff = this.computeGitDiff();
+      const diff = this.config.workspacePath ? computeGitDiff(this.config.workspacePath) : null;
 
       console.log(`[${label}] Task completed. ${summary.length} chars output, ${diff?.files?.length ?? 0} files changed.`);
 
@@ -193,31 +192,4 @@ export class CodexClient implements CodingAgentClient {
     });
   }
 
-  /** Compute file diffs via git in the workspace directory */
-  private computeGitDiff(): CodingAgentDiff | null {
-    if (!this.config.workspacePath) return null;
-
-    try {
-      const output = execSync("git diff --stat --numstat HEAD", {
-        cwd: this.config.workspacePath,
-        encoding: "utf-8",
-        timeout: 10_000,
-      }).trim();
-
-      if (!output) return null;
-
-      const files = output.split("\n").map((line) => {
-        const parts = line.split("\t");
-        return {
-          path: parts[2] ?? parts[0] ?? "",
-          additions: parseInt(parts[0] ?? "0", 10) || 0,
-          deletions: parseInt(parts[1] ?? "0", 10) || 0,
-        };
-      }).filter((f) => f.path);
-
-      return { files };
-    } catch {
-      return null;
-    }
-  }
 }

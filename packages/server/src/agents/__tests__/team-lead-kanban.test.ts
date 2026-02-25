@@ -120,6 +120,7 @@ function insertTask(overrides: Partial<{
   description: string;
   assigneeAgentId: string | null;
   position: number;
+  labels: string[];
   blockedBy: string[];
   retryCount: number;
   completionReport: string | null;
@@ -136,7 +137,7 @@ function insertTask(overrides: Partial<{
     position: overrides.position ?? 0,
     assigneeAgentId: overrides.assigneeAgentId ?? null,
     createdBy: "test",
-    labels: [],
+    labels: overrides.labels ?? [],
     blockedBy: overrides.blockedBy ?? [],
     retryCount: overrides.retryCount ?? 0,
     completionReport: overrides.completionReport ?? null,
@@ -530,6 +531,80 @@ describe("TeamLead — Kanban logic", () => {
       await (tl as any).autoSpawnUnblockedTasks();
 
       expect(spawnSpy).toHaveBeenCalledWith("builtin-browser-agent", expect.any(String), "task-br2");
+    });
+  });
+
+  // ─── createKanbanTask — label-based duplicate detection ─────
+
+  describe("createKanbanTask label-based dedup", () => {
+    it("detects duplicate when existing task has matching github-issue-N label", () => {
+      insertTask({
+        id: "issue-task-1",
+        title: "#133: Add WhatsApp chat provider",
+        labels: ["github-issue-133"],
+        column: "backlog",
+      });
+
+      // TeamLead LLM creates a task with a different title but same issue number
+      const result = (tl as any).createKanbanTask(
+        "Add WhatsApp chat provider (feat #133)",
+        "Implement the WhatsApp provider",
+        "backlog",
+      );
+      expect(result).toContain("DUPLICATE");
+      expect(result).toContain("#133");
+      expect(result).toContain("issue-task-1");
+    });
+
+    it("detects duplicate for done tasks with matching label", () => {
+      insertTask({
+        id: "done-issue-1",
+        title: "#50: Fix login bug",
+        labels: ["github-issue-50"],
+        column: "done",
+        completionReport: "Fixed the login bug by updating auth flow",
+      });
+
+      const result = (tl as any).createKanbanTask(
+        "Fix login bug (#50)",
+        "Fix the bug",
+        "backlog",
+      );
+      expect(result).toContain("DUPLICATE");
+      expect(result).toContain("DONE");
+      expect(result).toContain("done-issue-1");
+    });
+
+    it("does not flag duplicate when issue numbers differ", () => {
+      insertTask({
+        id: "issue-task-2",
+        title: "#100: Some feature",
+        labels: ["github-issue-100"],
+        column: "backlog",
+      });
+
+      const result = (tl as any).createKanbanTask(
+        "Another feature (#200)",
+        "Different issue",
+        "backlog",
+      );
+      expect(result).toContain("Created task");
+    });
+
+    it("does not flag duplicate when title has no issue number", () => {
+      insertTask({
+        id: "issue-task-3",
+        title: "#100: Some feature",
+        labels: ["github-issue-100"],
+        column: "backlog",
+      });
+
+      const result = (tl as any).createKanbanTask(
+        "A task with no issue reference",
+        "No issue number",
+        "backlog",
+      );
+      expect(result).toContain("Created task");
     });
   });
 

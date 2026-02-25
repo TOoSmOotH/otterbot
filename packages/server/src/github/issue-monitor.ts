@@ -16,6 +16,7 @@ import {
 } from "./github-service.js";
 import type { COO } from "../agents/coo.js";
 import type { PipelineManager } from "../pipeline/pipeline-manager.js";
+import { formatBotComment } from "../utils/github-comments.js";
 
 type TypedServer = Server<ClientToServerEvents, ServerToClientEvents>;
 
@@ -66,7 +67,7 @@ export class GitHubIssueMonitor {
     if (!assignee) return;
 
     for (const project of projects) {
-      if (project.githubIssueMonitor && project.githubRepo) {
+      if (project.githubRepo) {
         this.watchProject(project.id, project.githubRepo, assignee);
       }
     }
@@ -162,12 +163,11 @@ export class GitHubIssueMonitor {
         console.log(`[IssueMonitor] Re-triaging issue #${issue.number} due to new comments`);
       }
 
-      // Run triage (this also creates a triage task when pipeline is enabled)
+      // Run lightweight LLM triage — always creates a kanban task
       try {
         await this.pipelineManager.runTriage(projectId, watched.repo, issue);
       } catch (err) {
         console.error(`[IssueMonitor] Triage failed for issue #${issue.number}:`, err);
-        // Even if triage LLM fails, create a triage task so the issue is visible
         this.pipelineManager.createTriageTask(
           projectId, issue.number, issue.title, "", issue.body ?? "",
         );
@@ -459,6 +459,7 @@ export class GitHubIssueMonitor {
           .set({
             column: "backlog",
             position: maxPos + 1,
+            spawnCount: 0,
             description: issue.body ?? existingTriageTask.description,
             updatedAt: now,
           })
@@ -544,7 +545,7 @@ export class GitHubIssueMonitor {
           watched.repo,
           token,
           issue.number,
-          `👀 I'm looking into this issue and will begin working on a fix shortly.`,
+          formatBotComment("Issue Acknowledged", "Looking into this issue and will begin working on a fix shortly."),
         );
       } catch (commentErr) {
         console.error(
