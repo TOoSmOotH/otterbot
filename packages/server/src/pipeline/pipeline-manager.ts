@@ -814,17 +814,6 @@ export class PipelineManager {
       await this.completeTask(taskId, state, workerReport);
       this.pipelines.delete(taskId);
 
-      // Auto-enqueue in merge queue if the pipeline created a PR.
-      // The pipeline's own reviewer stage PASS verdict serves as the approval —
-      // without this, tasks sit in "in_review" waiting for an external GitHub
-      // approval that never comes for bot-created PRs.
-      if (this.mergeQueue && (state.prNumber || state.prBranch)) {
-        const entry = this.mergeQueue.approveForMerge(taskId);
-        if (entry) {
-          console.log(`[PipelineManager] Auto-enqueued task ${taskId} in merge queue after pipeline completion`);
-        }
-      }
-
       // Post completion comment
       if (state.issueNumber && state.repo) {
         const token = getConfig("github:token");
