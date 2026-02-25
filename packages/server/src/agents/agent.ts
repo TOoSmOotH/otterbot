@@ -27,6 +27,7 @@ import { SoulService } from "../memory/soul-service.js";
 import { MemoryService } from "../memory/memory-service.js";
 import { MemoryExtractor } from "../memory/memory-extractor.js";
 import { MemoryCompactor } from "../memory/memory-compactor.js";
+import { SECURITY_PREAMBLE } from "./prompts/security-preamble.js";
 
 export interface AgentOptions {
   id?: string;
@@ -89,7 +90,7 @@ export abstract class BaseAgent {
     this.modelPackId = options.modelPackId ?? null;
     this.gearConfig = options.gearConfig ?? null;
     this.bus = bus;
-    this.systemPrompt = options.systemPrompt;
+    this.systemPrompt = `${SECURITY_PREAMBLE}\n${options.systemPrompt}`;
 
     // Resolve and inject soul document into system prompt
     try {
@@ -193,6 +194,9 @@ export abstract class BaseAgent {
     });
   }
 
+  /** Hook for long-lived agents (COO, TeamLead) to re-read model/provider from config before each think() call. */
+  protected refreshLlmConfig(): void {}
+
   /** Run LLM inference with the current conversation and stream the response */
   protected async think(
     userMessage: string,
@@ -200,6 +204,9 @@ export abstract class BaseAgent {
     onReasoning?: (token: string, messageId: string) => void,
     onReasoningEnd?: (messageId: string) => void,
   ): Promise<{ text: string; thinking: string | undefined; hadToolCalls: boolean; isError?: boolean; timedOut?: boolean }> {
+    // Re-read model/provider from config (no-op for short-lived workers)
+    this.refreshLlmConfig();
+
     // Reset abort flag at the start of each think cycle
     this._shouldAbortThink = false;
 
@@ -466,9 +473,16 @@ export abstract class BaseAgent {
     // Track pending tool calls — use longer timeout while tools are executing
     let pendingToolCalls = 0;
 
+    // Track stream errors surfaced by the provider
+    let streamError: string | undefined;
+
     // Process first part
     const processPart = (part: any) => {
-      if (part.type === "reasoning") {
+      if (part.type === "error") {
+        const errMsg = part.error instanceof Error ? part.error.message : JSON.stringify(part.error);
+        console.error(`[Agent ${this.id}] Stream error part: ${errMsg}`);
+        streamError = errMsg;
+      } else if (part.type === "reasoning") {
         reasoning += part.textDelta;
         wasReasoning = true;
         onReasoning?.(part.textDelta, messageId);
@@ -510,6 +524,10 @@ export abstract class BaseAgent {
         pendingToolCalls = Math.max(0, pendingToolCalls - 1);
         const resultStr = typeof part.result === "string" ? part.result : JSON.stringify(part.result ?? "");
         console.log(`[Agent ${this.id}] Tool result (${part.toolName}): ${resultStr.slice(0, 300)}`);
+      } else if (part.type === "finish") {
+        if (!fullResponse && !hadToolCalls) {
+          console.warn(`[Agent ${this.id}] Stream finished with 0 chars — finishReason=${part.finishReason}, usage=${JSON.stringify(part.usage ?? {})}`);
+        }
       }
     };
 
@@ -556,7 +574,12 @@ export abstract class BaseAgent {
       this.persistActivity("response", fullResponse, {}, messageId);
     }
 
-    console.log(`[Agent ${this.id}] runStream complete — text=${fullResponse.length} chars, thinking=${reasoning.length} chars, toolCalls=${hadToolCalls}`);
+    console.log(`[Agent ${this.id}] runStream complete — text=${fullResponse.length} chars, thinking=${reasoning.length} chars, toolCalls=${hadToolCalls}${streamError ? `, error=${streamError}` : ""}`);
+
+    // If the stream produced an error and no text, surface the error
+    if (streamError && !fullResponse && !hadToolCalls) {
+      return { text: `Error: ${streamError}`, thinking: undefined, hadToolCalls: false };
+    }
 
     // Capture token usage from the stream result (fire-and-forget)
     this.captureTokenUsage(result as any, messageId);

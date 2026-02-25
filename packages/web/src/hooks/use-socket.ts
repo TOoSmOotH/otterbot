@@ -16,6 +16,8 @@ export function useSocket() {
   const appendCooThinking = useMessageStore((s) => s.appendCooThinking);
   const endCooThinking = useMessageStore((s) => s.endCooThinking);
   const addConversation = useMessageStore((s) => s.addConversation);
+  const loadConversationMessages = useMessageStore((s) => s.loadConversationMessages);
+  const setCurrentConversation = useMessageStore((s) => s.setCurrentConversation);
   const addAgent = useAgentStore((s) => s.addAgent);
   const updateAgentStatus = useAgentStore((s) => s.updateAgentStatus);
   const removeAgent = useAgentStore((s) => s.removeAgent);
@@ -91,6 +93,11 @@ export function useSocket() {
       if (conversation.projectId) {
         addProjectConversation(conversation);
       }
+    });
+
+    socket.on("conversation:switched", ({ conversationId, messages }) => {
+      loadConversationMessages(messages);
+      setCurrentConversation(conversationId);
     });
 
     socket.on("agent:spawned", (agent) => {
@@ -212,6 +219,7 @@ export function useSocket() {
       socket.off("coo:thinking-end");
       socket.off("coo:audio");
       socket.off("conversation:created");
+      socket.off("conversation:switched");
       socket.off("agent:spawned");
       socket.off("agent:status");
       socket.off("agent:destroyed");

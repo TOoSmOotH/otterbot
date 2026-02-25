@@ -143,6 +143,48 @@ class EdgeTTSProvider implements TTSProvider {
 }
 
 // ---------------------------------------------------------------------------
+// Deepgram TTS provider (cloud)
+// ---------------------------------------------------------------------------
+
+class DeepgramTTSProvider implements TTSProvider {
+  private apiKey: string;
+
+  constructor(apiKey: string) {
+    this.apiKey = apiKey;
+  }
+
+  async synthesize(
+    text: string,
+    voice: string,
+    _speed: number,
+  ): Promise<{ audio: Buffer; contentType: string }> {
+    const url = `https://api.deepgram.com/v1/speak?model=${encodeURIComponent(voice)}`;
+
+    const res = await fetch(url, {
+      method: "POST",
+      headers: {
+        Authorization: `Token ${this.apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ text }),
+      signal: AbortSignal.timeout(30_000),
+    });
+
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      throw new Error(`Deepgram TTS API error ${res.status}: ${body}`);
+    }
+
+    const contentType = res.headers.get("content-type") ?? "audio/mpeg";
+    const arrayBuffer = await res.arrayBuffer();
+    return {
+      audio: Buffer.from(arrayBuffer),
+      contentType,
+    };
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Markdown stripping — remove formatting so TTS reads clean prose
 // ---------------------------------------------------------------------------
 
@@ -200,6 +242,12 @@ export function getConfiguredTTSProvider(): TTSProvider | null {
       const apiKey = getConfig("tts:openai-compatible:api_key") ?? "";
       if (!baseUrl) return null;
       return new OpenAICompatibleProvider(baseUrl, apiKey);
+    }
+
+    case "deepgram": {
+      const dgApiKey = getConfig("tts:deepgram:api_key");
+      if (!dgApiKey) return null;
+      return new DeepgramTTSProvider(dgApiKey);
     }
 
     default:

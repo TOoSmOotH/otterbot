@@ -5,15 +5,15 @@ runs:
   using: composite
   steps:
     - name: Setup Node 22
-      uses: actions/setup-node@v4
+      uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
       with:
         node-version: 22
 
     - name: Setup pnpm
-      uses: pnpm/action-setup@v4
+      uses: pnpm/action-setup@c5ba7f7862a0f64c1b1a05fbac13e0b8e86ba08c # v4
 
     - name: Cache pnpm store
-      uses: actions/cache@v4
+      uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
       with:
         path: ~/.local/share/pnpm/store/v10
         key: pnpm-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}

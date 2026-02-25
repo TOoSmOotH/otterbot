@@ -16,11 +16,13 @@ const PAIRING_TTL_MS = 60 * 60 * 1000; // 1 hour
 export interface PendingPairing {
   code: string;
   matrixUserId: string;
+  matrixUsername: string;
   createdAt: string;
 }
 
 export interface PairedUser {
   matrixUserId: string;
+  matrixUsername: string;
   pairedAt: string;
 }
 
@@ -45,7 +47,7 @@ function getConfigsByPrefix(prefix: string): Array<{ key: string; value: string 
  * Generate a pairing code for a Matrix user.
  * Only one active code per user — generating a new one deletes the old.
  */
-export function generatePairingCode(matrixUserId: string): string {
+export function generatePairingCode(matrixUserId: string, matrixUsername: string): string {
   // Remove any existing code for this user
   const existing = getConfigsByPrefix("matrix:pairing:");
   for (const row of existing) {
@@ -61,6 +63,7 @@ export function generatePairingCode(matrixUserId: string): string {
   const data: PendingPairing = {
     code,
     matrixUserId,
+    matrixUsername,
     createdAt: new Date().toISOString(),
   };
   setConfig(`matrix:pairing:${code}`, JSON.stringify(data));
@@ -72,6 +75,19 @@ export function generatePairingCode(matrixUserId: string): string {
  */
 export function isPaired(matrixUserId: string): boolean {
   return !!getConfig(`matrix:paired:${matrixUserId}`);
+}
+
+/**
+ * Get paired user info.
+ */
+export function getPairedUser(matrixUserId: string): PairedUser | null {
+  const raw = getConfig(`matrix:paired:${matrixUserId}`);
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as PairedUser;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -97,6 +113,7 @@ export function approvePairing(code: string): PairedUser | null {
 
   const paired: PairedUser = {
     matrixUserId: pending.matrixUserId,
+    matrixUsername: pending.matrixUsername,
     pairedAt: new Date().toISOString(),
   };
 

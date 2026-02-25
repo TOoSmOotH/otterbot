@@ -204,8 +204,8 @@ function ClaudeCodeSection() {
       <p className="text-xs text-muted-foreground">
         Use{" "}
         <a href="https://docs.anthropic.com/en/docs/claude-code" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">Claude Code</a>{" "}
-        (Anthropic's autonomous coding agent) to delegate coding tasks. Install with:{" "}
-        <code className="bg-secondary px-1 py-0.5 rounded text-[11px]">npm install -g @anthropic-ai/claude-code</code>
+        (Anthropic's autonomous coding agent) to delegate coding tasks. Connect to the desktop and log in with{" "}
+        <code className="bg-secondary px-1 py-0.5 rounded text-[11px]">claude login</code>
       </p>
 
       <ToggleSwitch checked={enabled} onChange={() => updateClaudeCodeSettings({ enabled: !enabled })} label="Enable Claude Code integration" />
@@ -219,7 +219,7 @@ function ClaudeCodeSection() {
         )}
         {authMode === "oauth" && (
           <p className="text-xs text-muted-foreground bg-secondary/50 p-2 rounded">
-            Run <code className="bg-secondary px-1 py-0.5 rounded text-[11px]">claude login</code> in a terminal to authenticate.
+            Connect to the desktop and run <code className="bg-secondary px-1 py-0.5 rounded text-[11px]">claude login</code> to authenticate.
           </p>
         )}
 
@@ -284,8 +284,8 @@ function CodexSection() {
       <p className="text-xs text-muted-foreground">
         Use{" "}
         <a href="https://github.com/openai/codex" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">Codex CLI</a>{" "}
-        (OpenAI's autonomous coding agent) to delegate coding tasks. Install with:{" "}
-        <code className="bg-secondary px-1 py-0.5 rounded text-[11px]">npm install -g @openai/codex</code>
+        (OpenAI's autonomous coding agent) to delegate coding tasks. Connect to the desktop and log in with{" "}
+        <code className="bg-secondary px-1 py-0.5 rounded text-[11px]">codex login</code>
       </p>
 
       <ToggleSwitch checked={enabled} onChange={() => updateCodexSettings({ enabled: !enabled })} label="Enable Codex integration" />
@@ -299,7 +299,7 @@ function CodexSection() {
         )}
         {authMode === "oauth" && (
           <p className="text-xs text-muted-foreground bg-secondary/50 p-2 rounded">
-            Run <code className="bg-secondary px-1 py-0.5 rounded text-[11px]">codex login</code> in a terminal to authenticate.
+            Connect to the desktop and run <code className="bg-secondary px-1 py-0.5 rounded text-[11px]">codex login</code> to authenticate.
           </p>
         )}
 
@@ -362,9 +362,8 @@ function GeminiCliSection() {
       <p className="text-xs text-muted-foreground">
         Use{" "}
         <a href="https://github.com/google-gemini/gemini-cli" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">Gemini CLI</a>{" "}
-        (Google's autonomous AI coding agent) to delegate coding tasks. To authenticate, run{" "}
-        <code className="bg-secondary px-1 py-0.5 rounded text-[11px]">gemini login</code>{" "}
-        in the terminal.
+        (Google's autonomous AI coding agent) to delegate coding tasks. Connect to the desktop and log in with{" "}
+        <code className="bg-secondary px-1 py-0.5 rounded text-[11px]">gemini login</code>.
       </p>
 
       <ToggleSwitch checked={enabled} onChange={() => updateGeminiCliSettings({ enabled: !enabled })} label="Enable Gemini CLI integration" />
@@ -378,7 +377,7 @@ function GeminiCliSection() {
         )}
         {authMode === "oauth" && (
           <p className="text-xs text-muted-foreground bg-secondary/50 p-2 rounded">
-            Run <code className="bg-secondary px-1 py-0.5 rounded text-[11px]">gemini login</code> in a terminal to authenticate with your Google account.
+            Connect to the desktop and run <code className="bg-secondary px-1 py-0.5 rounded text-[11px]">gemini login</code> to authenticate with your Google account.
           </p>
         )}
 

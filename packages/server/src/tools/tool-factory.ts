@@ -517,7 +517,7 @@ function createCustomToolWrapper(customTool: import("@otterbot/shared").CustomTo
       default:
         schema = z.string().describe(param.description);
     }
-    shape[param.name] = param.required ? schema : schema.optional();
+    shape[param.name] = param.required ? schema : schema.nullable().optional();
   }
 
   return tool({
@@ -575,18 +575,26 @@ function createUpdateCustomToolTool() {
     description: "Update an existing custom tool by ID.",
     parameters: z.object({
       id: z.string().describe("The tool ID to update"),
-      name: z.string().optional().describe("New name"),
-      description: z.string().optional().describe("New description"),
+      name: z.string().nullable().optional().describe("New name"),
+      description: z.string().nullable().optional().describe("New description"),
       parameters: z.array(z.object({
         name: z.string(),
         type: z.enum(["string", "number", "boolean"]),
         required: z.boolean(),
         description: z.string(),
-      })).optional().describe("New parameters"),
-      code: z.string().optional().describe("New code"),
-      timeout: z.number().optional().describe("New timeout"),
+      })).nullable().optional().describe("New parameters"),
+      code: z.string().nullable().optional().describe("New code"),
+      timeout: z.number().nullable().optional().describe("New timeout"),
     }),
-    execute: async ({ id, ...data }) => {
+    execute: async ({ id, name, description, parameters, code, timeout }) => {
+      // Strip null values for downstream compatibility
+      const data = {
+        ...(name != null && { name }),
+        ...(description != null && { description }),
+        ...(parameters != null && { parameters }),
+        ...(code != null && { code }),
+        ...(timeout != null && { timeout }),
+      };
       const svc = new CustomToolService();
       if (data.name && !svc.isNameAvailable(data.name, id)) {
         return JSON.stringify({ error: `Tool name "${data.name}" already exists` });

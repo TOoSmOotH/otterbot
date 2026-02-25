@@ -196,7 +196,7 @@ export interface TeamLeadDependencies {
 
 const MAX_CONTINUATION_CYCLES = 5;
 const MAX_TASK_RETRIES = 3;
-const MAX_TASK_SPAWNS = 4;
+const MAX_TASK_SPAWNS = 10;
 
 export class TeamLead extends BaseAgent {
   private workers: Map<string, Worker> = new Map();
@@ -305,6 +305,24 @@ export class TeamLead extends BaseAgent {
     this.verificationRequested = this.loadFlag("verification");
   }
 
+  /** Re-read model/provider from config so settings changes take effect without restart */
+  protected override refreshLlmConfig(): void {
+    const newModel =
+      getConfig("team_lead_model") ??
+      getConfig("coo_model") ??
+      "claude-sonnet-4-5-20250929";
+    const newProvider =
+      getConfig("team_lead_provider") ??
+      getConfig("coo_provider") ??
+      "anthropic";
+
+    if (newModel !== this.llmConfig.model || newProvider !== this.llmConfig.provider) {
+      console.log(`[TeamLead ${this.id}] LLM config changed: ${this.llmConfig.provider}/${this.llmConfig.model} → ${newProvider}/${newModel}`);
+      this.llmConfig.model = newModel;
+      this.llmConfig.provider = newProvider;
+    }
+  }
+
   /** Persist a flag to the config KV table so it survives restarts */
   private persistFlag(flag: "verification", value: boolean): void {
     const key = `project:${this.projectId}:${flag}_requested`;
@@ -348,8 +366,17 @@ export class TeamLead extends BaseAgent {
       // Extract the worker directive from the message content
       const directiveMatch = message.content.match(/Worker directive:\n([\s\S]+)/);
       const workerTask = directiveMatch?.[1]?.trim() ?? message.content;
+      const pipelineBranch = message.metadata?.pipelineBranch as string | undefined;
 
-      const result = await this.spawnWorker(pipelineRegistryEntryId, workerTask, pipelineTaskId, { pipelineOverride: true });
+      const result = await this.spawnWorker(pipelineRegistryEntryId, workerTask, pipelineTaskId, { pipelineOverride: true, sourceBranch: pipelineBranch });
+      const isSpawnSuccess = result.startsWith("Spawned ");
+
+      if (!isSpawnSuccess && this._pipelineManager?.isPipelineTask(pipelineTaskId)) {
+        console.warn(`[TeamLead ${this.id}] Pipeline spawn failure for task ${pipelineTaskId}: ${result}`);
+        await this._pipelineManager.handleSpawnFailure(pipelineTaskId, result);
+        return;
+      }
+
       if (this.parentId) {
         this.sendMessage(this.parentId, MessageType.Report, result);
       }
@@ -394,14 +421,17 @@ export class TeamLead extends BaseAgent {
   /** Detect whether a worker report indicates a PR was created — definitive success signal */
   private isPRCreated(report: string): boolean {
     const lower = report.toLowerCase();
+    // Must match affirmative PR creation signals — NOT just mentioning "pull request"
+    // (a failure report like "I was unable to open a pull request" must not match)
     return (
       lower.includes("gh pr create") ||
-      lower.includes("pull request") ||
       /github\.com\/[^\s]+\/pull\/\d+/.test(lower) ||
       lower.includes("created pull request") ||
       lower.includes("opened a pull request") ||
       lower.includes("pr created") ||
-      lower.includes("created a pr")
+      lower.includes("created a pr") ||
+      lower.includes("opened a pr") ||
+      lower.includes("pull request #")
     );
   }
 
@@ -934,7 +964,9 @@ export class TeamLead extends BaseAgent {
     for (const task of toSpawn) {
       // Check if task is browser/desktop-related — sandboxed coding agents can't do these
       const taskText = `${task.title} ${task.description ?? ""}`.toLowerCase();
-      const isBrowserTask = /\b(browser|chrome|chromium|firefox|launch.*browser|open.*url|browse.*web|headless|puppeteer|playwright|selenium|desktop.*app)\b/.test(taskText);
+      // Tasks involving git/CI/PR work must go to a coding agent, never a browser agent
+      const isCIOrGitTask = /\b(ci\b|pipeline|pull.?request|\bpr\b|git push|git commit|open.?pr|create.?pr|merge|deploy)\b/.test(taskText);
+      const isBrowserTask = !isCIOrGitTask && /\b(browser|chrome|chromium|firefox|launch.*browser|open.*url|browse.*web|headless|puppeteer|playwright|selenium|desktop.*app)\b/.test(taskText);
 
       // Find the right registry entry — check project assignments first, then global fallback
       let registryEntryId = "builtin-coder";
@@ -1251,6 +1283,11 @@ export class TeamLead extends BaseAgent {
               this._shouldAbortThink = true;
               return `REFUSED: Task "${existingTask.title}" (${taskId}) is IN REVIEW — PR #${(existingTask as any).prNumber ?? "?"} is awaiting reviewer approval. Do NOT spawn a worker. The PR monitor handles this automatically.`;
             }
+            if (existingTask?.column === "triage") {
+              this._toolCallCounts.set("spawn_worker_refused", (refusals) + 1);
+              this._shouldAbortThink = true;
+              return `REFUSED: Task "${existingTask.title}" (${taskId}) is in TRIAGE — it has not been assigned yet. Only work on tasks in the backlog or in_progress columns.`;
+            }
           }
           const result = await this.spawnWorker(registryEntryId, task, taskId);
           if (result.startsWith("REFUSED:")) {
@@ -1417,7 +1454,7 @@ export class TeamLead extends BaseAgent {
     registryEntryId: string,
     task: string,
     taskId?: string,
-    options?: { pipelineOverride?: boolean },
+    options?: { pipelineOverride?: boolean; sourceBranch?: string },
   ): Promise<string> {
     try {
       const originalRequestedId = registryEntryId;
@@ -1493,7 +1530,8 @@ export class TeamLead extends BaseAgent {
 
       if (this.projectId) {
         // Prepare a git worktree for the worker to avoid file conflicts
-        workspacePath = this.workspace.prepareAgentWorktree(this.projectId, workerId);
+        // For pipeline kickbacks (security/review), start from the feature branch so the worker can find existing code
+        workspacePath = this.workspace.prepareAgentWorktree(this.projectId, workerId, options?.sourceBranch);
       }
 
       // Derive human-readable name from kanban task title or task description
@@ -1616,13 +1654,13 @@ export class TeamLead extends BaseAgent {
 
       // Auto-assign kanban task if taskId provided
       if (taskId) {
-        const assigned = this.autoAssignTask(taskId, worker.id);
-        if (!assigned) {
-          // Task is blocked — clean up the worker and abort
+        const reason = this.autoAssignTask(taskId, worker.id);
+        if (reason) {
+          // Task cannot be assigned — clean up the worker and abort
           worker.destroy();
           this.workers.delete(worker.id);
           console.warn(`[TeamLead ${this.id}] Aborted spawn for blocked task ${taskId}`);
-          return `BLOCKED: Task ${taskId} cannot start — it depends on tasks that are not yet done. Wait for blockers to complete first.`;
+          return reason;
         }
       }
 
@@ -1678,9 +1716,9 @@ export class TeamLead extends BaseAgent {
     return false;
   }
 
-  /** Auto-assign a kanban task to a worker: move to in_progress and set assigneeAgentId. Returns false if blocked. */
-  private autoAssignTask(taskId: string, workerId: string): boolean {
-    if (!this.projectId) return false;
+  /** Auto-assign a kanban task to a worker: move to in_progress and set assigneeAgentId. Returns null on success, or a reason string on failure. */
+  private autoAssignTask(taskId: string, workerId: string): string | null {
+    if (!this.projectId) return "No project configured.";
 
     const db = getDb();
     const task = db
@@ -1691,26 +1729,32 @@ export class TeamLead extends BaseAgent {
 
     if (!task) {
       console.warn(`[TeamLead ${this.id}] autoAssignTask: task ${taskId} not found`);
-      return false;
+      return `Task ${taskId} not found.`;
     }
 
     // Guard: refuse if task is already done (prevents re-work loops)
     if (task.column === "done") {
       console.warn(`[TeamLead ${this.id}] autoAssignTask: task "${task.title}" (${taskId}) is already DONE — refusing assignment`);
-      return false;
+      return `REFUSED: Task "${task.title}" (${taskId}) is already DONE. Do not re-spawn workers for completed tasks.`;
+    }
+
+    // Guard: refuse if task is in triage (not yet assigned — only backlog tasks can be worked on)
+    if (task.column === "triage") {
+      console.warn(`[TeamLead ${this.id}] autoAssignTask: task "${task.title}" (${taskId}) is in TRIAGE — refusing assignment`);
+      return `REFUSED: Task "${task.title}" (${taskId}) is in TRIAGE and has not been assigned. Only backlog tasks can be worked on.`;
     }
 
     // Guard: refuse if task is in review (PR awaiting approval — PR monitor handles this)
     if (task.column === "in_review") {
       console.warn(`[TeamLead ${this.id}] autoAssignTask: task "${task.title}" (${taskId}) is IN REVIEW — refusing assignment`);
-      return false;
+      return `REFUSED: Task "${task.title}" (${taskId}) is IN REVIEW — a PR is awaiting approval. Do not re-spawn workers.`;
     }
 
     // Guard: refuse if task has been spawned too many times (hard cap to prevent infinite loops)
     const currentSpawnCount = (task as any).spawnCount ?? 0;
     if (currentSpawnCount >= MAX_TASK_SPAWNS) {
       console.warn(`[TeamLead ${this.id}] autoAssignTask: task "${task.title}" (${taskId}) has reached spawn cap (${currentSpawnCount}/${MAX_TASK_SPAWNS}) — refusing assignment`);
-      return false;
+      return `REFUSED: Task "${task.title}" (${taskId}) has reached the maximum spawn attempts (${currentSpawnCount}/${MAX_TASK_SPAWNS}). This task has failed too many times and cannot be retried automatically.`;
     }
 
     // Programmatic enforcement: refuse if task is blocked
@@ -1719,7 +1763,7 @@ export class TeamLead extends BaseAgent {
       console.warn(
         `[TeamLead ${this.id}] autoAssignTask: task "${task.title}" (${taskId}) is BLOCKED by [${blockedBy.join(", ")}] — refusing assignment`,
       );
-      return false;
+      return `BLOCKED: Task ${taskId} cannot start — it depends on tasks that are not yet done. Wait for blockers to complete first.`;
     }
 
     const now = new Date().toISOString();
@@ -1738,7 +1782,7 @@ export class TeamLead extends BaseAgent {
     }
 
     console.log(`[TeamLead ${this.id}] Auto-assigned task "${task.title}" (${taskId}) to worker ${workerId}`);
-    return true;
+    return null;
   }
 
   private createKanbanTask(
@@ -1778,6 +1822,26 @@ export class TeamLead extends BaseAgent {
         `DUPLICATE: A task with the same title already exists: "${duplicate.title}" (${duplicate.id}) in column "${duplicate.column}".` +
         ` Use the existing task instead of creating a new one.`
       );
+    }
+
+    // Duplicate detection: check if a task for the same GitHub issue already exists (by label)
+    const issueMatch = title.match(/#(\d+)/);
+    if (issueMatch) {
+      const issueLabel = `github-issue-${issueMatch[1]}`;
+      const labelDup = existing.find((t) => t.labels?.includes(issueLabel));
+      if (labelDup) {
+        if (labelDup.column === "done") {
+          return (
+            `DUPLICATE: A task for GitHub issue #${issueMatch[1]} already exists and is DONE: "${labelDup.title}" (${labelDup.id}).` +
+            (labelDup.completionReport ? ` Completion report: ${labelDup.completionReport.slice(0, 200)}` : "") +
+            ` Do NOT create duplicate tasks for work that is already completed.`
+          );
+        }
+        return (
+          `DUPLICATE: A task for GitHub issue #${issueMatch[1]} already exists: "${labelDup.title}" (${labelDup.id}) in column "${labelDup.column}".` +
+          ` Use the existing task instead of creating a new one.`
+        );
+      }
     }
 
     // Validate blockedBy IDs — reject symbolic names like "task-1"
