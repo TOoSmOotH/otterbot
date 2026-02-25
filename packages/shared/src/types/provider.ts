@@ -39,7 +39,7 @@ export interface AgentModelOverride {
 }
 
 /** Supported messaging-platform chat provider types. */
-export type ChatProviderType = "discord" | "matrix" | "irc" | "teams" | "telegram" | "tlon" | "whatsapp" | "signal";
+export type ChatProviderType = "discord" | "matrix" | "irc" | "teams" | "telegram" | "tlon" | "whatsapp" | "signal" | "nextcloud-talk";
 
 /** Settings common to all chat provider bridges. */
 export interface ChatProviderSettings {
@@ -61,4 +61,13 @@ export interface TeamsChatProviderSettings extends ChatProviderSettings {
   appIdSet: boolean;
   appPasswordSet: boolean;
   tenantId: string | null;
+}
+
+/** Nextcloud Talk-specific chat provider settings exposed to the client. */
+export interface NextcloudTalkChatProviderSettings extends ChatProviderSettings {
+  type: "nextcloud-talk";
+  serverUrl: string | null;
+  usernameSet: boolean;
+  appPasswordSet: boolean;
+  botUsername: string | null;
 }
