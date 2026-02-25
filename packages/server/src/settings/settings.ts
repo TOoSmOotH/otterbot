@@ -60,6 +60,7 @@ export const PROVIDER_TYPE_META: ProviderTypeMeta[] = [
   { type: "github-copilot", label: "GitHub Copilot", needsApiKey: true, needsBaseUrl: false },
   { type: "huggingface", label: "Hugging Face", needsApiKey: true, needsBaseUrl: false },
   { type: "nvidia", label: "NVIDIA", needsApiKey: true, needsBaseUrl: false },
+  { type: "lmstudio", label: "LM Studio", needsApiKey: false, needsBaseUrl: true },
 ];
 
 // Static fallback models per provider (used when API fetch fails)
@@ -96,6 +97,12 @@ const FALLBACK_MODELS: Record<string, string[]> = {
     "meta/llama-3.1-8b-instruct",
     "mistralai/mistral-7b-instruct-v0.3",
     "mistralai/mixtral-8x22b-instruct-v0.1",
+  ],
+  lmstudio: [
+    "llama-3.1-8b-instruct",
+    "mistral-7b-instruct",
+    "qwen2.5-coder-7b-instruct",
+    "phi-3-mini-4k-instruct",
   ],
 };
 

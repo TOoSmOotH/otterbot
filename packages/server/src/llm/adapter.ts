@@ -152,6 +152,14 @@ export function resolveModel(config: LLMConfig): LanguageModel {
       return nvidia(config.model);
     }
 
+    case "lmstudio": {
+      const lmstudio = createOpenAI({
+        baseURL: config.baseUrl ?? resolved.baseUrl ?? "http://localhost:1234/v1",
+        apiKey: config.apiKey ?? resolved.apiKey ?? "lm-studio",
+      });
+      return lmstudio(config.model);
+    }
+
     default:
       throw new Error(`Unknown LLM provider: ${config.provider} (type: ${resolved.type})`);
   }

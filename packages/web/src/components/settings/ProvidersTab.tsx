@@ -10,6 +10,7 @@ const TYPE_LABELS: Record<string, string> = {
   "openai-compatible": "OpenAI-Compatible",
   huggingface: "Hugging Face",
   nvidia: "NVIDIA",
+  lmstudio: "LM Studio",
 };
 
 export function ProvidersTab() {
@@ -72,7 +73,7 @@ function AddProviderForm({
     const m = providerTypes.find((p) => p.type === newType);
     setName(m?.label || newType);
     setApiKey("");
-    setBaseUrl(newType === "ollama" ? "http://localhost:11434/api" : "");
+    setBaseUrl(newType === "ollama" ? "http://localhost:11434/api" : newType === "lmstudio" ? "http://localhost:1234/v1" : "");
   };
 
   const handleCreate = async () => {
