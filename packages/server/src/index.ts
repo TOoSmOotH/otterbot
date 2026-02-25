@@ -183,6 +183,17 @@ import {
   rejectPairing as rejectIrcPairing,
   revokePairing as revokeIrcPairing,
 } from "./irc/pairing.js";
+import { NostrBridge } from "./nostr/nostr-bridge.js";
+import {
+  getNostrSettings,
+  updateNostrSettings,
+  getNostrConfig,
+} from "./nostr/nostr-settings.js";
+import {
+  approvePairing as approveNostrPairing,
+  rejectPairing as rejectNostrPairing,
+  revokePairing as revokeNostrPairing,
+} from "./nostr/pairing.js";
 import { TeamsBridge } from "./teams/teams-bridge.js";
 import {
   getTeamsSettings,
@@ -555,6 +566,27 @@ async function main() {
     if (ircBridge) {
       await ircBridge.stop();
       ircBridge = null;
+    }
+  }
+
+  // Nostr bridge (initialized when enabled + config set)
+  let nostrBridge: NostrBridge | null = null;
+
+  function startNostrBridge() {
+    if (nostrBridge || !coo) return;
+    const config = getNostrConfig();
+    if (!config) return;
+    nostrBridge = new NostrBridge({ bus, coo, io });
+    nostrBridge.start(config).catch((err) => {
+      console.error("[Nostr] Failed to start bridge:", err);
+      nostrBridge = null;
+    });
+  }
+
+  async function stopNostrBridge() {
+    if (nostrBridge) {
+      await nostrBridge.stop();
+      nostrBridge = null;
     }
   }
 
@@ -1028,6 +1060,7 @@ async function main() {
     startCoo();
     startDiscordBridge();
     startIrcBridge();
+    startNostrBridge();
     startTeamsBridge();
     startSlackBridge();
     startMattermostBridge();
@@ -1355,6 +1388,7 @@ async function main() {
     startCoo();
     startDiscordBridge();
     startIrcBridge();
+    startNostrBridge();
     startTeamsBridge();
     startSlackBridge();
     startMattermostBridge();
@@ -3456,6 +3490,71 @@ async function main() {
   });
 
   // =========================================================================
+  // Nostr settings routes
+  // =========================================================================
+
+  app.get("/api/settings/nostr", async () => {
+    return getNostrSettings();
+  });
+
+  app.put<{
+    Body: {
+      enabled?: boolean;
+      privateKey?: string;
+      relays?: string[];
+    };
+  }>("/api/settings/nostr", async (req) => {
+    const wasEnabled = !!getNostrConfig();
+    updateNostrSettings(req.body);
+    const nowEnabled = !!getNostrConfig();
+
+    if (nowEnabled && !wasEnabled) {
+      startNostrBridge();
+    } else if (!nowEnabled && wasEnabled) {
+      await stopNostrBridge();
+    } else if (nowEnabled && wasEnabled) {
+      // Restart on config change
+      await stopNostrBridge();
+      startNostrBridge();
+    }
+
+    return { ok: true };
+  });
+
+  app.post<{
+    Body: { code: string };
+  }>("/api/settings/nostr/pair/approve", async (req, reply) => {
+    const result = approveNostrPairing(req.body.code);
+    if (!result) {
+      reply.code(400);
+      return { ok: false, error: "Invalid or expired pairing code" };
+    }
+    return { ok: true, user: result };
+  });
+
+  app.post<{
+    Body: { code: string };
+  }>("/api/settings/nostr/pair/reject", async (req, reply) => {
+    const ok = rejectNostrPairing(req.body.code);
+    if (!ok) {
+      reply.code(400);
+      return { ok: false, error: "Pairing code not found" };
+    }
+    return { ok: true };
+  });
+
+  app.delete<{
+    Params: { userId: string };
+  }>("/api/settings/nostr/pair/:userId", async (req, reply) => {
+    const ok = revokeNostrPairing(req.params.userId);
+    if (!ok) {
+      reply.code(400);
+      return { ok: false, error: "User not found" };
+    }
+    return { ok: true };
+  });
+
+  // =========================================================================
   // Teams settings routes
   // =========================================================================
 
@@ -4491,6 +4590,7 @@ Respond with ONLY a JSON object (no markdown, no explanation) with these fields:
   const shutdown = async () => {
     await stopDiscordBridge();
     await stopIrcBridge();
+    await stopNostrBridge();
     await stopTeamsBridge();
     await stopSlackBridge();
     await stopTlonBridge();

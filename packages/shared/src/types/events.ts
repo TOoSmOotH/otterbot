@@ -55,6 +55,8 @@ export interface ServerToClientEvents {
   "matrix:status": (data: { status: "connected" | "disconnected" | "error"; userId?: string }) => void;
   "irc:pairing-request": (data: { code: string; ircUserId: string; ircUsername: string }) => void;
   "irc:status": (data: { status: "connected" | "disconnected" | "error"; nickname?: string }) => void;
+  "nostr:pairing-request": (data: { code: string; nostrPubkey: string; nostrDisplayName: string }) => void;
+  "nostr:status": (data: { status: "connected" | "disconnected" | "error"; pubkey?: string }) => void;
   "teams:pairing-request": (data: { code: string; teamsUserId: string; teamsUsername: string }) => void;
   "teams:status": (data: { status: "connected" | "disconnected" | "error" }) => void;
   "slack:pairing-request": (data: { code: string; slackUserId: string; slackUsername: string }) => void;

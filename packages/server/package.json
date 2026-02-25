@@ -41,6 +41,7 @@
     "nanoid": "^5.0.9",
     "node-pty": "^1.1.0",
     "node-telegram-bot-api": "^0.67.0",
+    "nostr-tools": "^2.23.1",
     "ollama-ai-provider": "^1.2.0",
     "playwright": "^1.50.0",
     "puppeteer": "^24.2.0",
