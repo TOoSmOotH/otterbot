@@ -1574,8 +1574,9 @@ export class TeamLead extends BaseAgent {
         workspacePath = this.workspace.prepareAgentWorktree(this.projectId, workerId, options?.sourceBranch);
       }
 
-      // Assign a random human name, avoiding names already in use by living workers
+      // Assign a random human name, avoiding names already in use by this team lead and its workers
       const usedNames = new Set<string>();
+      if (this.name) usedNames.add(this.name);
       for (const w of this.workers.values()) {
         if (w.name) usedNames.add(w.name);
       }

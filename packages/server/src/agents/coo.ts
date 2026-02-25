@@ -51,6 +51,7 @@ import {
 import { createMemorySaveTool } from "../tools/memory-save.js";
 import { getConfiguredSearchProvider } from "../tools/search/providers.js";
 import { getRandomModelPackId } from "../models3d/model-packs.js";
+import { pickWorkerName } from "../utils/worker-names.js";
 import { isDesktopEnabled } from "../desktop/desktop.js";
 import { execSync } from "node:child_process";
 import { existsSync, rmSync } from "node:fs";
@@ -1113,7 +1114,7 @@ The user can see everything on the desktop in real-time.`;
       workspace: this.workspace,
       projectId,
       parentId: this.id,
-      name,
+      name: pickWorkerName(this.getUsedAgentNames()),
       modelPackId: getRandomModelPackId(),
       onAgentSpawned: this.onAgentSpawned,
       onStatusChange: this.onStatusChange,
@@ -1555,6 +1556,18 @@ The user can see everything on the desktop in real-time.`;
     }
   }
 
+  /** Collect all names in use by team leads and their workers. */
+  private getUsedAgentNames(): Set<string> {
+    const used = new Set<string>();
+    for (const tl of this.teamLeads.values()) {
+      if (tl.name) used.add(tl.name);
+      for (const w of tl.getWorkers().values()) {
+        if (w.name) used.add(w.name);
+      }
+    }
+    return used;
+  }
+
   /**
    * Spawn a TeamLead for a manually-created (user-initiated) project.
    * Skips LLM guards (cooldown, duplicate check) since this is user-initiated via the UI.
@@ -1565,14 +1578,12 @@ The user can see everything on the desktop in real-time.`;
     branch: string | null,
     rules: string[],
   ): Promise<void> {
-    const db = getDb();
-    const project = db.select().from(schema.projects).where(eq(schema.projects.id, projectId)).get();
     const teamLead = new TeamLead({
       bus: this.bus,
       workspace: this.workspace,
       projectId,
       parentId: this.id,
-      name: project?.name ?? projectId,
+      name: pickWorkerName(this.getUsedAgentNames()),
       modelPackId: getRandomModelPackId(),
       onAgentSpawned: this.onAgentSpawned,
       onStatusChange: this.onStatusChange,
@@ -1704,7 +1715,7 @@ The user can see everything on the desktop in real-time.`;
       workspace: this.workspace,
       projectId: project.id,
       parentId: this.id,
-      name: project.name,
+      name: pickWorkerName(this.getUsedAgentNames()),
       modelPackId: getRandomModelPackId(),
       onAgentSpawned: this.onAgentSpawned,
       onStatusChange: this.onStatusChange,
