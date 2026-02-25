@@ -81,6 +81,7 @@ export class ClaudeCodePtyClient implements CodingAgentClient {
       }
 
       const cwd = this.config.workspacePath || process.cwd();
+      this.ensureDirectoryTrusted(cwd);
 
       this.ptyProcess = nodePty.spawn("claude", args, {
         name: "xterm-256color",
@@ -227,5 +228,38 @@ export class ClaudeCodePtyClient implements CodingAgentClient {
     }
   }
 
+  /**
+   * Pre-accept the workspace trust dialog for a directory so Claude Code
+   * doesn't prompt interactively when spawned in a worktree path.
+   */
+  private ensureDirectoryTrusted(dirPath: string): void {
+    try {
+      const home = process.env.HOME || process.env.USERPROFILE || "";
+      const claudeJsonPath = join(home, ".claude.json");
 
+      let data: Record<string, unknown> = {};
+      if (existsSync(claudeJsonPath)) {
+        try {
+          data = JSON.parse(readFileSync(claudeJsonPath, "utf-8"));
+        } catch {
+          // Corrupted — don't overwrite the whole file, just bail
+          return;
+        }
+      }
+
+      const projects = (data.projects ?? {}) as Record<string, Record<string, unknown>>;
+      if (projects[dirPath]?.hasTrustDialogAccepted === true) return;
+
+      if (!projects[dirPath]) {
+        projects[dirPath] = {};
+      }
+      projects[dirPath].hasTrustDialogAccepted = true;
+      data.projects = projects;
+
+      writeFileSync(claudeJsonPath, JSON.stringify(data, null, 2), "utf-8");
+      console.log(`[Claude Code PTY] Pre-accepted trust for ${dirPath}`);
+    } catch (err) {
+      console.warn("[Claude Code PTY] Failed to pre-accept directory trust:", err);
+    }
+  }
 }
