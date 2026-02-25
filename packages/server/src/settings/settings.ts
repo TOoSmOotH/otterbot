@@ -66,6 +66,7 @@ export const PROVIDER_TYPE_META: ProviderTypeMeta[] = [
   { type: "deepgram", label: "Deepgram", needsApiKey: true, needsBaseUrl: false },
   { type: "bedrock", label: "AWS Bedrock", needsApiKey: true, needsBaseUrl: true },
   { type: "lmstudio", label: "LM Studio", needsApiKey: false, needsBaseUrl: true },
+  { type: "deepseek", label: "DeepSeek", needsApiKey: true, needsBaseUrl: false },
 ];
 
 // Static fallback models per provider (used when API fetch fails)
@@ -134,6 +135,10 @@ const FALLBACK_MODELS: Record<string, string[]> = {
     "mistral-7b-instruct",
     "qwen2.5-coder-7b-instruct",
     "phi-3-mini-4k-instruct",
+  ],
+  deepseek: [
+    "deepseek-chat",
+    "deepseek-reasoner",
   ],
 };
 
@@ -670,6 +675,18 @@ export async function fetchModelsWithCredentials(
         if (!pplxRes.ok) return FALLBACK_MODELS.perplexity ?? [];
         const pplxData = (await pplxRes.json()) as { data?: Array<{ id: string }> };
         return pplxData.data?.map((m) => m.id).sort() ?? FALLBACK_MODELS.perplexity ?? [];
+      }
+
+      case "deepseek": {
+        if (!apiKey) return FALLBACK_MODELS.deepseek ?? [];
+        const deepseekBase = baseUrl ?? "https://api.deepseek.com";
+        const deepseekRes = await fetch(`${deepseekBase}/models`, {
+          headers: { Authorization: `Bearer ${apiKey}` },
+          signal: AbortSignal.timeout(10_000),
+        });
+        if (!deepseekRes.ok) return FALLBACK_MODELS.deepseek ?? [];
+        const deepseekData = (await deepseekRes.json()) as { data?: Array<{ id: string }> };
+        return deepseekData.data?.map((m) => m.id).sort() ?? FALLBACK_MODELS.deepseek ?? [];
       }
 
       default:

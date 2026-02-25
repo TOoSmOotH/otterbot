@@ -11,6 +11,7 @@ const TYPE_LABELS: Record<string, string> = {
   huggingface: "Hugging Face",
   nvidia: "NVIDIA",
   lmstudio: "LM Studio",
+  deepseek: "DeepSeek",
 };
 
 export function ProvidersTab() {
