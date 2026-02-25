@@ -6,6 +6,7 @@ import type { SceneZone } from "./environment.js";
 import type { CodingAgentSession, CodingAgentMessage, CodingAgentFileDiff, CodingAgentPermission } from "./coding-agent.js";
 import type { SoulDocument, Memory, MemoryEpisode, SoulSuggestion } from "./memory.js";
 import type { Todo } from "./todo.js";
+import type { MergeQueueEntry } from "./merge-queue.js";
 
 /** Events emitted from server to client */
 export interface ServerToClientEvents {
@@ -64,6 +65,8 @@ export interface ServerToClientEvents {
   "telegram:pairing-request": (data: { code: string; telegramUserId: string; telegramUsername: string }) => void;
   "telegram:status": (data: { status: "connected" | "disconnected" | "error"; botUsername?: string }) => void;
   "whatsapp:status": (data: { status: "connected" | "disconnected" | "qr" | "authenticated" | "auth_failure"; qr?: string }) => void;
+  "merge-queue:updated": (data: { entries: MergeQueueEntry[] }) => void;
+  "merge-queue:entry-updated": (entry: MergeQueueEntry) => void;
 }
 
 /** Events emitted from client to server */
@@ -216,5 +219,23 @@ export interface ClientToServerEvents {
   // Soul advisor
   "soul:suggest": (
     callback: (ack: { ok: boolean; suggestions?: SoulSuggestion[]; error?: string }) => void,
+  ) => void;
+
+  // Merge queue
+  "merge-queue:approve": (
+    data: { taskId: string },
+    callback?: (ack: { ok: boolean; entry?: MergeQueueEntry; error?: string }) => void,
+  ) => void;
+  "merge-queue:remove": (
+    data: { taskId: string },
+    callback?: (ack: { ok: boolean; error?: string }) => void,
+  ) => void;
+  "merge-queue:list": (
+    data?: { projectId?: string },
+    callback?: (entries: MergeQueueEntry[]) => void,
+  ) => void;
+  "merge-queue:reorder": (
+    data: { entryId: string; newPosition: number },
+    callback?: (ack: { ok: boolean; error?: string }) => void,
   ) => void;
 }

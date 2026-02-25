@@ -51,7 +51,7 @@ export interface GitHubPullRequest {
  * Build environment variables for git commands that use a PAT for authentication.
  * The PAT is passed via GIT_PAT env var and consumed by the inline credential helper.
  */
-function gitEnvWithPAT(token: string): Record<string, string> {
+export function gitEnvWithPAT(token: string): Record<string, string> {
   return {
     ...(process.env as Record<string, string>),
     GIT_TERMINAL_PROMPT: "0",
@@ -64,7 +64,7 @@ function gitEnvWithPAT(token: string): Record<string, string> {
  * This keeps the token out of .git/config and remote URLs.
  * Returns an array of arguments for use with execFileSync.
  */
-function gitCredentialArgs(): string[] {
+export function gitCredentialArgs(): string[] {
   return ["-c", `credential.helper=!f() { echo username=x-access-token; echo password=$GIT_PAT; }; f`];
 }
 
@@ -611,3 +611,50 @@ export async function createPullRequest(
     },
   );
 }
+
+/**
+ * Merge a pull request via the GitHub API.
+ */
+export async function mergePullRequest(
+  repoFullName: string,
+  token: string,
+  prNumber: number,
+  mergeMethod: "merge" | "squash" | "rebase" = "squash",
+  commitTitle?: string,
+  commitMessage?: string,
+): Promise<{ sha: string; merged: boolean; message: string }> {
+  const payload: Record<string, unknown> = { merge_method: mergeMethod };
+  if (commitTitle) payload.commit_title = commitTitle;
+  if (commitMessage) payload.commit_message = commitMessage;
+
+  return ghFetch<{ sha: string; merged: boolean; message: string }>(
+    `https://api.github.com/repos/${repoFullName}/pulls/${prNumber}/merge`,
+    token,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+/**
+ * Update a pull request (title, body, state, base).
+ */
+export async function updatePullRequest(
+  repoFullName: string,
+  token: string,
+  prNumber: number,
+  updates: { title?: string; body?: string; state?: "open" | "closed"; base?: string },
+): Promise<GitHubPullRequest> {
+  return ghFetch<GitHubPullRequest>(
+    `https://api.github.com/repos/${repoFullName}/pulls/${prNumber}`,
+    token,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(updates),
+    },
+  );
+}
+

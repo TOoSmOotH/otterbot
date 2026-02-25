@@ -19,6 +19,7 @@ import { MemoryService } from "../memory/memory-service.js";
 import { SoulAdvisor } from "../memory/soul-advisor.js";
 import type { WorkspaceManager } from "../workspace/workspace.js";
 import type { GitHubIssueMonitor } from "../github/issue-monitor.js";
+import type { MergeQueue } from "../merge-queue/merge-queue.js";
 import { cloneRepo, getRepoDefaultBranch } from "../github/github-service.js";
 import { initGitRepo, createInitialCommit } from "../utils/git.js";
 import { NO_REPORT_SENTINEL } from "../schedulers/custom-task-scheduler.js";
@@ -84,7 +85,7 @@ export function setupSocketHandlers(
   coo: COO,
   registry: Registry,
   hooks?: SocketHooks,
-  deps?: { workspace?: WorkspaceManager; issueMonitor?: GitHubIssueMonitor },
+  deps?: { workspace?: WorkspaceManager; issueMonitor?: GitHubIssueMonitor; mergeQueue?: MergeQueue },
 ) {
   // Track conversation IDs used by background tasks so we can suppress
   // the COO's response in that same conversation.
@@ -821,6 +822,39 @@ export function setupSocketHandlers(
         callback?.({ ok: false, error: "No active PTY session" });
       }
     });
+
+    // ─── Merge queue handlers ───────────────────────────────────────
+    if (deps?.mergeQueue) {
+      const mq = deps.mergeQueue;
+
+      socket.on("merge-queue:approve", (data, callback) => {
+        try {
+          const entry = mq.approveForMerge(data.taskId);
+          if (entry) {
+            callback?.({ ok: true, entry });
+          } else {
+            callback?.({ ok: false, error: "Task not eligible for merge queue (missing PR number or branch)" });
+          }
+        } catch (err) {
+          callback?.({ ok: false, error: err instanceof Error ? err.message : "Unknown error" });
+        }
+      });
+
+      socket.on("merge-queue:remove", (data, callback) => {
+        const removed = mq.removeFromQueue(data.taskId);
+        callback?.({ ok: removed, error: removed ? undefined : "Task not found in queue" });
+      });
+
+      socket.on("merge-queue:list", (data, callback) => {
+        const entries = mq.getQueue(data?.projectId);
+        callback?.(entries);
+      });
+
+      socket.on("merge-queue:reorder", (data, callback) => {
+        const reordered = mq.reorderEntry(data.entryId, data.newPosition);
+        callback?.({ ok: reordered, error: reordered ? undefined : "Entry not found" });
+      });
+    }
 
     socket.on("disconnect", () => {
       console.log(`Client disconnected: ${socket.id}`);

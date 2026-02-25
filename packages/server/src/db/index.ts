@@ -573,6 +573,24 @@ export async function migrateDb() {
     created_at TEXT NOT NULL
   )`);
 
+  // Merge queue table
+  db.run(sql`CREATE TABLE IF NOT EXISTS merge_queue (
+    id TEXT PRIMARY KEY,
+    task_id TEXT NOT NULL,
+    project_id TEXT NOT NULL,
+    pr_number INTEGER NOT NULL,
+    pr_branch TEXT NOT NULL,
+    base_branch TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'queued',
+    position INTEGER NOT NULL,
+    rebase_attempts INTEGER NOT NULL DEFAULT 0,
+    last_error TEXT,
+    approved_at TEXT NOT NULL,
+    merged_at TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  )`);
+
   // Custom scheduled tasks
   db.run(sql`CREATE TABLE IF NOT EXISTS custom_scheduled_tasks (
     id TEXT PRIMARY KEY,

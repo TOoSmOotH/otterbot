@@ -11,6 +11,7 @@ import {
 } from "./github-service.js";
 import type { COO } from "../agents/coo.js";
 import type { PipelineManager } from "../pipeline/pipeline-manager.js";
+import type { MergeQueue } from "../merge-queue/merge-queue.js";
 
 type TypedServer = Server<ClientToServerEvents, ServerToClientEvents>;
 
@@ -21,6 +22,7 @@ export class GitHubPRMonitor {
   /** Track processed review IDs to avoid re-triggering on the same review */
   private processedReviewIds = new Set<number>();
   private pipelineManager: PipelineManager | null = null;
+  private mergeQueue: MergeQueue | null = null;
 
   constructor(coo: COO, io: TypedServer) {
     this.coo = coo;
@@ -30,6 +32,11 @@ export class GitHubPRMonitor {
   /** Inject the pipeline manager (avoids circular dependency) */
   setPipelineManager(pm: PipelineManager): void {
     this.pipelineManager = pm;
+  }
+
+  /** Inject the merge queue (avoids circular dependency) */
+  setMergeQueue(mq: MergeQueue): void {
+    this.mergeQueue = mq;
   }
 
   /** Start the polling loop */
@@ -76,6 +83,9 @@ export class GitHubPRMonitor {
     task: typeof schema.kanbanTasks.$inferSelect,
     token: string,
   ): Promise<void> {
+    // If the merge queue owns this task, skip — it handles its own PR state
+    if (this.mergeQueue?.isInQueue(task.id)) return;
+
     const db = getDb();
 
     // Look up project to get githubRepo
@@ -137,8 +147,26 @@ export class GitHubPRMonitor {
       return;
     }
 
-    // PR is still open — check for changes requested
+    // PR is still open — check for reviews
     const reviews = await fetchPullRequestReviews(project.githubRepo, token, task.prNumber);
+
+    // Check for APPROVED reviews — auto-enqueue in merge queue
+    if (this.mergeQueue) {
+      const newApprovals = reviews.filter(
+        (r) => r.state === "APPROVED" && !this.processedReviewIds.has(r.id),
+      );
+      if (newApprovals.length > 0) {
+        for (const r of newApprovals) {
+          this.processedReviewIds.add(r.id);
+        }
+        if (!this.mergeQueue.isInQueue(task.id)) {
+          const entry = this.mergeQueue.approveForMerge(task.id);
+          if (entry) {
+            console.log(`[PRMonitor] PR #${task.prNumber} approved — auto-enqueued in merge queue`);
+          }
+        }
+      }
+    }
 
     // Find new CHANGES_REQUESTED reviews that we haven't processed
     const newChangeRequests = reviews.filter(
