@@ -164,6 +164,14 @@ export function resolveModel(config: LLMConfig): LanguageModel {
       return xai(config.model);
     }
 
+    case "zai": {
+      const zai = createOpenAI({
+        baseURL: config.baseUrl ?? resolved.baseUrl ?? "https://api.z.ai/api/paas/v4",
+        apiKey: config.apiKey ?? resolved.apiKey ?? "",
+      });
+      return zai(config.model);
+    }
+
     case "perplexity": {
       const perplexity = createOpenAI({
         baseURL: config.baseUrl ?? resolved.baseUrl ?? "https://api.perplexity.ai",
@@ -193,7 +201,6 @@ export function resolveModel(config: LLMConfig): LanguageModel {
         "Deepgram is a speech provider (STT/TTS) and does not support text generation. " +
         "Configure it under TTS or STT settings instead.",
       );
-
 
     default:
       throw new Error(`Unknown LLM provider: ${config.provider} (type: ${resolved.type})`);

@@ -234,6 +234,12 @@ import {
   getTlonConfig,
   testTlonConnection,
 } from "./tlon/tlon-settings.js";
+import { WhatsAppBridge } from "./whatsapp/whatsapp-bridge.js";
+import {
+  getWhatsAppSettings,
+  updateWhatsAppSettings,
+  getWhatsAppConfig,
+} from "./whatsapp/whatsapp-settings.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -671,6 +677,27 @@ async function main() {
     }
   }
 
+  // WhatsApp bridge (initialized when enabled)
+  let whatsappBridge: WhatsAppBridge | null = null;
+
+  function startWhatsAppBridge() {
+    if (whatsappBridge || !coo) return;
+    const config = getWhatsAppConfig();
+    if (!config) return;
+    whatsappBridge = new WhatsAppBridge({ bus, coo, io });
+    whatsappBridge.start(config).catch((err) => {
+      console.error("[WhatsApp] Failed to start bridge:", err);
+      whatsappBridge = null;
+    });
+  }
+
+  async function stopWhatsAppBridge() {
+    if (whatsappBridge) {
+      await whatsappBridge.stop();
+      whatsappBridge = null;
+    }
+  }
+
   function startCoo() {
     if (coo) return;
     try {
@@ -1006,6 +1033,7 @@ async function main() {
     startMattermostBridge();
     startTelegramBridge();
     startTlonBridge();
+    startWhatsAppBridge();
   } else {
     console.log("Setup not complete. Waiting for setup wizard...");
   }
@@ -1332,6 +1360,7 @@ async function main() {
     startMattermostBridge();
     startTelegramBridge();
     startTlonBridge();
+    startWhatsAppBridge();
 
     return { ok: true };
   });
@@ -3748,6 +3777,34 @@ async function main() {
   });
 
   // =========================================================================
+  // WhatsApp settings routes
+  // =========================================================================
+
+  app.get("/api/settings/whatsapp", async () => {
+    return getWhatsAppSettings();
+  });
+
+  app.put<{
+    Body: {
+      enabled?: boolean;
+      allowedNumbers?: string[];
+      dataPath?: string;
+    };
+  }>("/api/settings/whatsapp", async (req) => {
+    const wasEnabled = !!getWhatsAppConfig();
+    updateWhatsAppSettings(req.body);
+    const nowEnabled = !!getWhatsAppConfig();
+
+    if (nowEnabled && !wasEnabled) {
+      startWhatsAppBridge();
+    } else if (!nowEnabled && wasEnabled) {
+      await stopWhatsAppBridge();
+    }
+
+    return { ok: true };
+  });
+
+  // =========================================================================
   // Google settings routes
   // =========================================================================
 
@@ -4437,6 +4494,7 @@ Respond with ONLY a JSON object (no markdown, no explanation) with these fields:
     await stopTeamsBridge();
     await stopSlackBridge();
     await stopTlonBridge();
+    await stopWhatsAppBridge();
     await stopMattermostBridge();
     await closeBrowser();
     process.exit(0);

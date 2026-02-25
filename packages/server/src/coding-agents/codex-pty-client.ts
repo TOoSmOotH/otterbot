@@ -9,9 +9,9 @@
 import type {
   CodingAgentClient,
   CodingAgentTaskResult,
-  CodingAgentDiff,
 } from "./coding-agent-client.js";
-import { execSync } from "node:child_process";
+import { computeGitDiff } from "../utils/git.js";
+import { extractPtySummary } from "../utils/terminal.js";
 import { getConfig } from "../auth/auth.js";
 
 /** Ring buffer size for late-joining clients (~100KB) */
@@ -102,14 +102,14 @@ export class CodexPtyClient implements CodingAgentClient {
           this.config.onExit?.(exitCode);
 
           // Compute diff via git
-          const diff = this.computeGitDiff();
+          const diff = this.config.workspacePath ? computeGitDiff(this.config.workspacePath) : null;
 
           const success = exitCode === 0 || !this._killed;
 
           resolve({
             success,
             sessionId,
-            summary: success ? this.extractSummary() : `Process exited with code ${exitCode}`,
+            summary: success ? extractPtySummary(this.ringBuffer) : `Process exited with code ${exitCode}`,
             diff,
             usage: null,
           });
@@ -192,55 +192,5 @@ export class CodexPtyClient implements CodingAgentClient {
     }, 3000);
   }
 
-  /** Extract a meaningful summary from the PTY ring buffer instead of a generic message */
-  private extractSummary(): string {
-    // Strip ANSI escape codes
-    // eslint-disable-next-line no-control-regex
-    const clean = this.ringBuffer.replace(/\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g, "");
 
-    // Extract PR URLs
-    const prUrls = clean.match(/https:\/\/github\.com\/[^\s]+\/pull\/\d+/g);
-
-    const parts: string[] = ["Task completed."];
-    if (prUrls) {
-      const unique = [...new Set(prUrls)];
-      for (const url of unique) {
-        parts.push(`PR created: ${url}`);
-      }
-    }
-
-    // Append last ~2000 chars of clean output for context
-    const tail = clean.slice(-2000);
-    parts.push("", `Terminal output (last 2000 chars):\n${tail}`);
-
-    return parts.join("\n");
-  }
-
-  /** Compute file diffs via git in the workspace directory */
-  private computeGitDiff(): CodingAgentDiff | null {
-    if (!this.config.workspacePath) return null;
-
-    try {
-      const output = execSync("git diff --stat --numstat HEAD", {
-        cwd: this.config.workspacePath,
-        encoding: "utf-8",
-        timeout: 10_000,
-      }).trim();
-
-      if (!output) return null;
-
-      const files = output.split("\n").map((line) => {
-        const parts = line.split("\t");
-        return {
-          path: parts[2] ?? parts[0] ?? "",
-          additions: parseInt(parts[0] ?? "0", 10) || 0,
-          deletions: parseInt(parts[1] ?? "0", 10) || 0,
-        };
-      }).filter((f) => f.path);
-
-      return { files };
-    } catch {
-      return null;
-    }
-  }
 }

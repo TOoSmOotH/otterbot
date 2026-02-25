@@ -61,6 +61,7 @@ export const PROVIDER_TYPE_META: ProviderTypeMeta[] = [
   { type: "huggingface", label: "Hugging Face", needsApiKey: true, needsBaseUrl: false },
   { type: "nvidia", label: "NVIDIA", needsApiKey: true, needsBaseUrl: false },
   { type: "xai", label: "xAI (Grok)", needsApiKey: true, needsBaseUrl: false },
+  { type: "zai", label: "Z.AI", needsApiKey: true, needsBaseUrl: false },
   { type: "perplexity", label: "Perplexity Sonar", needsApiKey: true, needsBaseUrl: false },
   { type: "deepgram", label: "Deepgram", needsApiKey: true, needsBaseUrl: false },
   { type: "bedrock", label: "AWS Bedrock", needsApiKey: true, needsBaseUrl: true },
@@ -105,6 +106,13 @@ const FALLBACK_MODELS: Record<string, string[]> = {
     "grok-3",
     "grok-3-mini",
     "grok-4",
+  ],
+  zai: [
+    "glm-5",
+    "glm-4.7",
+    "glm-4.6",
+    "glm-4.6v",
+    "glm-4.5-flash",
   ],
   perplexity: [
     "sonar",
@@ -592,6 +600,18 @@ export async function fetchModelsWithCredentials(
         if (!xaiRes.ok) return FALLBACK_MODELS.xai ?? [];
         const xaiData = (await xaiRes.json()) as { data?: Array<{ id: string }> };
         return xaiData.data?.map((m) => m.id).sort() ?? FALLBACK_MODELS.xai ?? [];
+      }
+
+      case "zai": {
+        if (!apiKey) return FALLBACK_MODELS.zai ?? [];
+        const zaiBase = baseUrl ?? "https://api.z.ai/api/paas/v4";
+        const zaiRes = await fetch(`${zaiBase}/models`, {
+          headers: { Authorization: `Bearer ${apiKey}` },
+          signal: AbortSignal.timeout(10_000),
+        });
+        if (!zaiRes.ok) return FALLBACK_MODELS.zai ?? [];
+        const zaiData = (await zaiRes.json()) as { data?: Array<{ id: string }> };
+        return zaiData.data?.map((m) => m.id).sort() ?? FALLBACK_MODELS.zai ?? [];
       }
 
       case "bedrock": {
