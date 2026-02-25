@@ -122,6 +122,12 @@ describe("TeamsBridge", () => {
 
     configStore.clear();
     vi.clearAllMocks();
+
+    // Pair default test users
+    const now = new Date().toISOString();
+    configStore.set("teams:paired:user-1", JSON.stringify({
+      teamsUserId: "user-1", teamsUsername: "Test User", pairedAt: now,
+    }));
   });
 
   afterEach(() => {

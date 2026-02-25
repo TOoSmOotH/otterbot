@@ -149,6 +149,7 @@ export const kanbanTasks = sqliteTable("kanban_tasks", {
     .$type<string[]>()
     .notNull()
     .default([]),
+  taskNumber: integer("task_number"),
   pipelineAttempt: integer("pipeline_attempt").notNull().default(0),
   createdAt: text("created_at")
     .notNull()
@@ -267,7 +268,7 @@ export const providers = sqliteTable("providers", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
   type: text("type", {
-    enum: ["anthropic", "openai", "google", "ollama", "openai-compatible", "openrouter", "github-copilot", "huggingface", "nvidia", "minimax"],
+    enum: ["anthropic", "openai", "google", "ollama", "openai-compatible", "openrouter", "github-copilot", "huggingface", "nvidia", "minimax", "xai", "zai", "perplexity", "deepgram", "bedrock", "lmstudio", "deepseek"],
   }).notNull(),
   apiKey: text("api_key"),
   baseUrl: text("base_url"),

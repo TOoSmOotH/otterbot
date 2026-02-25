@@ -7,6 +7,7 @@ import type { BusMessage, Conversation } from "@otterbot/shared";
 import { MessageBus } from "../bus/message-bus.js";
 import { COO } from "../agents/coo.js";
 import { getDb, schema } from "../db/index.js";
+import { isPaired, generatePairingCode } from "./pairing.js";
 
 type TypedServer = Server<ClientToServerEvents, ServerToClientEvents>;
 
@@ -144,7 +145,22 @@ export class TeamsBridge {
     if (!content) return;
 
     const teamsUserId: string = ctx.activity.from?.id ?? "unknown";
+    const teamsUsername: string = ctx.activity.from?.name ?? teamsUserId;
     const channelId: string = ctx.activity.channelId ?? "msteams";
+
+    // Check pairing
+    if (!isPaired(teamsUserId)) {
+      const code = generatePairingCode(teamsUserId, teamsUsername);
+      await ctx.sendActivity(
+        `I don't recognize you yet. To pair with me, ask my owner to approve this code in the Otterbot dashboard:\n\n**\`${code}\`**\n\nThis code expires in 1 hour.`,
+      );
+      this.io.emit("teams:pairing-request", {
+        code,
+        teamsUserId,
+        teamsUsername,
+      });
+      return;
+    }
 
     await this.routeToCOO(ctx, teamsUserId, channelId, content);
   }

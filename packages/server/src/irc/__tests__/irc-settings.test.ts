@@ -34,6 +34,8 @@ describe("IRC Settings", () => {
         channels: [],
         tls: false,
         passwordSet: false,
+        pairedUsers: [],
+        pendingPairings: [],
       });
     });
   });

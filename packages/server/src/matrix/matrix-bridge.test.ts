@@ -254,6 +254,7 @@ describe("MatrixBridge", () => {
         "matrix:pairing-request",
         expect.objectContaining({
           matrixUserId: "@stranger:example.com",
+          matrixUsername: "@stranger:example.com",
         }),
       );
     });

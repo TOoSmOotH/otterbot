@@ -274,12 +274,13 @@ export class GitHubPRMonitor {
     if (teamLead) {
       const bus = (this.coo as any).bus;
       if (bus) {
+        const taskLabel = task.taskNumber ? `Issue #${task.taskNumber}` : task.id;
         bus.send({
           fromAgentId: "coo",
           toAgentId: teamLead.id,
           type: MessageType.Directive,
           content:
-            `PR REVIEW FEEDBACK for existing task "${task.title}" (${task.id}) — this task is already in_progress on the kanban board.\n\n` +
+            `PR REVIEW FEEDBACK for existing task "${task.title}" (${taskLabel}) — this task is already in_progress on the kanban board.\n\n` +
             `IMPORTANT: Do NOT create any new tasks. Do NOT redo the original work. ` +
             `Spawn exactly ONE worker to address the review feedback on the EXISTING task (${task.id}). ` +
             `The task description already contains the review feedback and branch instructions.\n\n` +
@@ -291,7 +292,8 @@ export class GitHubPRMonitor {
       }
     }
 
-    console.log(`[PRMonitor] Changes requested on PR #${task.prNumber} — sent directive for task ${task.id}`);
+    const prTaskLabel = task.taskNumber ? `Issue #${task.taskNumber} (${task.id})` : task.id;
+    console.log(`[PRMonitor] Changes requested on PR #${task.prNumber} — sent directive for ${prTaskLabel}`);
   }
 
   /** Remove tracked review IDs for a given PR when it leaves in_review */

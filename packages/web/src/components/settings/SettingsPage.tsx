@@ -20,9 +20,12 @@ import { EmailSection } from "./EmailSection";
 import { GitHubTab } from "./GitHubTab";
 import { DiscordSection } from "./DiscordSection";
 import { SlackSection } from "./SlackSection";
+import { MattermostSection } from "./MattermostSection";
+import { TelegramSection } from "./TelegramSection";
 import { GoogleSection } from "./GoogleSection";
 import { SecuritySection } from "./SecuritySection";
 import { ModulesSection } from "./ModulesSection";
+import { WorkerNamesSection } from "./WorkerNamesSection";
 import type { SettingsSection } from "./settings-nav";
 
 interface SettingsPageProps {
@@ -55,7 +58,10 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
     if (activeSection === "google") return <GoogleSection />;
     if (activeSection === "github") return <GitHubTab />;
     if (activeSection === "discord") return <DiscordSection />;
+    if (activeSection === "telegram") return <TelegramSection />;
     if (activeSection === "slack") return <SlackSection />;
+    if (activeSection === "mattermost") return <MattermostSection />;
+    if (activeSection === "worker-names") return <WorkerNamesSection />;
     if (activeSection === "security") return <SecuritySection />;
     if (activeSection === "soul") return <SoulTab />;
     if (activeSection === "memory") return <MemoryTab />;

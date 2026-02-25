@@ -6,12 +6,12 @@
  * replacement for the SDK-based ClaudeCodeClient.
  */
 
+import { extractPtySummary } from "../utils/terminal.js";
 import type {
   CodingAgentClient,
   CodingAgentTaskResult,
-  CodingAgentDiff,
 } from "./coding-agent-client.js";
-import { execSync } from "node:child_process";
+import { computeGitDiff } from "../utils/git.js";
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { getConfig } from "../auth/auth.js";
@@ -81,6 +81,7 @@ export class ClaudeCodePtyClient implements CodingAgentClient {
       }
 
       const cwd = this.config.workspacePath || process.cwd();
+      this.ensureDirectoryTrusted(cwd);
 
       this.ptyProcess = nodePty.spawn("claude", args, {
         name: "xterm-256color",
@@ -107,14 +108,14 @@ export class ClaudeCodePtyClient implements CodingAgentClient {
           this.config.onExit?.(exitCode);
 
           // Compute diff via git
-          const diff = this.computeGitDiff();
+          const diff = this.config.workspacePath ? computeGitDiff(this.config.workspacePath) : null;
 
           const success = exitCode === 0 || !this._killed;
 
           resolve({
             success,
             sessionId,
-            summary: success ? this.extractSummary() : `Process exited with code ${exitCode}`,
+            summary: success ? extractPtySummary(this.ringBuffer) : `Process exited with code ${exitCode}`,
             diff,
             usage: null,
           });
@@ -227,55 +228,38 @@ export class ClaudeCodePtyClient implements CodingAgentClient {
     }
   }
 
-  /** Extract a meaningful summary from the PTY ring buffer instead of a generic message */
-  private extractSummary(): string {
-    // Strip ANSI escape codes
-    // eslint-disable-next-line no-control-regex
-    const clean = this.ringBuffer.replace(/\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g, "");
-
-    // Extract PR URLs
-    const prUrls = clean.match(/https:\/\/github\.com\/[^\s]+\/pull\/\d+/g);
-
-    const parts: string[] = ["Task completed."];
-    if (prUrls) {
-      const unique = [...new Set(prUrls)];
-      for (const url of unique) {
-        parts.push(`PR created: ${url}`);
-      }
-    }
-
-    // Append last ~2000 chars of clean output for context
-    const tail = clean.slice(-2000);
-    parts.push("", `Terminal output (last 2000 chars):\n${tail}`);
-
-    return parts.join("\n");
-  }
-
-  /** Compute file diffs via git in the workspace directory */
-  private computeGitDiff(): CodingAgentDiff | null {
-    if (!this.config.workspacePath) return null;
-
+  /**
+   * Pre-accept the workspace trust dialog for a directory so Claude Code
+   * doesn't prompt interactively when spawned in a worktree path.
+   */
+  private ensureDirectoryTrusted(dirPath: string): void {
     try {
-      const output = execSync("git diff --stat --numstat HEAD", {
-        cwd: this.config.workspacePath,
-        encoding: "utf-8",
-        timeout: 10_000,
-      }).trim();
+      const home = process.env.HOME || process.env.USERPROFILE || "";
+      const claudeJsonPath = join(home, ".claude.json");
 
-      if (!output) return null;
+      let data: Record<string, unknown> = {};
+      if (existsSync(claudeJsonPath)) {
+        try {
+          data = JSON.parse(readFileSync(claudeJsonPath, "utf-8"));
+        } catch {
+          // Corrupted — don't overwrite the whole file, just bail
+          return;
+        }
+      }
 
-      const files = output.split("\n").map((line) => {
-        const parts = line.split("\t");
-        return {
-          path: parts[2] ?? parts[0] ?? "",
-          additions: parseInt(parts[0] ?? "0", 10) || 0,
-          deletions: parseInt(parts[1] ?? "0", 10) || 0,
-        };
-      }).filter((f) => f.path);
+      const projects = (data.projects ?? {}) as Record<string, Record<string, unknown>>;
+      if (projects[dirPath]?.hasTrustDialogAccepted === true) return;
 
-      return { files };
-    } catch {
-      return null;
+      if (!projects[dirPath]) {
+        projects[dirPath] = {};
+      }
+      projects[dirPath].hasTrustDialogAccepted = true;
+      data.projects = projects;
+
+      writeFileSync(claudeJsonPath, JSON.stringify(data, null, 2), "utf-8");
+      console.log(`[Claude Code PTY] Pre-accepted trust for ${dirPath}`);
+    } catch (err) {
+      console.warn("[Claude Code PTY] Failed to pre-accept directory trust:", err);
     }
   }
 }

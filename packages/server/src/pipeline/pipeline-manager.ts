@@ -1,5 +1,5 @@
 import { nanoid } from "nanoid";
-import { eq } from "drizzle-orm";
+import { eq, and, isNotNull, inArray } from "drizzle-orm";
 import { generateText } from "ai";
 import type { Server } from "socket.io";
 import type {
@@ -17,17 +17,18 @@ import { Registry } from "../registry/registry.js";
 import {
   createIssueComment,
   addLabelsToIssue,
-  fetchIssue,
   fetchCompareCommitsDiff,
-  getRepoDefaultBranch,
+  fetchPullRequests,
 } from "../github/github-service.js";
-import { CODING_AGENT_REGISTRY_IDS } from "../agents/worker.js";
 import type { COO } from "../agents/coo.js";
 import type { GitHubIssue } from "../github/github-service.js";
+import { SECURITY_PREAMBLE } from "../agents/prompts/security-preamble.js";
+import { cleanTerminalOutput } from "../utils/terminal.js";
+import { formatBotComment, formatBotCommentWithDetails } from "../utils/github-comments.js";
 
 type TypedServer = Server<ClientToServerEvents, ServerToClientEvents>;
 
-const MAX_KICKBACKS = 2;
+const MAX_SPAWN_RETRIES = 3;
 
 interface TriageResult {
   classification: string;
@@ -88,10 +89,11 @@ interface PipelineState {
   repo: string | null;
   stages: string[];           // enabled stages in order (excluding triage)
   currentStageIndex: number;
-  kickbackCount: number;
-  maxKickbacks: number;
+  spawnRetryCount: number;
+  lastKickbackSource: string | null;
   stageReports: Map<string, string>; // stage → report content
   prBranch: string | null;
+  targetBranch: string;             // project's configured branch (for diff base)
 }
 
 export class PipelineManager {
@@ -99,14 +101,186 @@ export class PipelineManager {
   private io: TypedServer;
   /** In-memory pipeline states keyed by kanban task ID */
   private pipelines = new Map<string, PipelineState>();
-  /** Prevent duplicate coding-agent triage dispatches (keyed by issue number) */
-  private triageInFlight = new Set<number>();
-  /** Track in-flight coding-agent triage ops (keyed by kanban task ID) */
-  private triageSessions = new Map<string, { projectId: string; repo: string; issue: GitHubIssue; taskId: string }>();
+  /** Timer for periodic stale pipeline sweep */
+  private sweepTimer: ReturnType<typeof setInterval> | null = null;
+  /** Stale pipeline threshold in milliseconds (30 minutes) */
+  private static readonly STALE_THRESHOLD_MS = 30 * 60 * 1000;
+  /** Sweep interval in milliseconds (10 minutes) */
+  private static readonly SWEEP_INTERVAL_MS = 10 * 60 * 1000;
 
   constructor(coo: COO, io: TypedServer) {
     this.coo = coo;
     this.io = io;
+  }
+
+  /**
+   * Initialize the pipeline manager: recover in-flight pipelines from DB
+   * and start the periodic stale pipeline sweep.
+   * Must be called after construction (DB must be ready).
+   */
+  async init(): Promise<void> {
+    this.recoverPipelines();
+    this.sweepTimer = setInterval(() => {
+      this.sweepStalePipelines().catch((err) => {
+        console.error("[PipelineManager] Stale pipeline sweep failed:", err);
+      });
+    }, PipelineManager.SWEEP_INTERVAL_MS);
+  }
+
+  /** Stop the periodic sweep timer. */
+  dispose(): void {
+    if (this.sweepTimer) {
+      clearInterval(this.sweepTimer);
+      this.sweepTimer = null;
+    }
+  }
+
+  /**
+   * Scan the DB for tasks with active pipeline state and reconstruct
+   * in-memory PipelineState objects so pipelines survive server restarts.
+   */
+  private recoverPipelines(): void {
+    const db = getDb();
+    const tasks = db
+      .select()
+      .from(schema.kanbanTasks)
+      .where(
+        and(
+          isNotNull(schema.kanbanTasks.pipelineStage),
+          inArray(schema.kanbanTasks.column, ["in_progress"]),
+        ),
+      )
+      .all();
+
+    for (const task of tasks) {
+      // Skip if already tracked (shouldn't happen on fresh startup)
+      if (this.pipelines.has(task.id)) continue;
+
+      const stages = (task.pipelineStages as string[]) ?? [];
+      const currentStage = task.pipelineStage!;
+      const currentStageIndex = stages.indexOf(currentStage);
+
+      if (currentStageIndex < 0) {
+        console.warn(
+          `[PipelineManager] Recovery: task ${task.id} has pipelineStage="${currentStage}" not found in stages [${stages.join(",")}] — skipping`,
+        );
+        continue;
+      }
+
+      // Extract issue number from labels
+      const issueLabel = (task.labels as string[]).find((l) => l.startsWith("github-issue-"));
+      const issueNumber = issueLabel ? parseInt(issueLabel.replace("github-issue-", ""), 10) : null;
+
+      // Look up project for repo info
+      const project = db
+        .select()
+        .from(schema.projects)
+        .where(eq(schema.projects.id, task.projectId))
+        .get();
+
+      const state: PipelineState = {
+        taskId: task.id,
+        projectId: task.projectId,
+        issueNumber,
+        repo: project?.githubRepo ?? null,
+        stages,
+        currentStageIndex,
+        spawnRetryCount: 0,
+        lastKickbackSource: null,
+        stageReports: new Map(), // Reports lost on restart
+        prBranch: task.prBranch ?? null,
+        targetBranch: getConfig(`project:${task.projectId}:github:branch`) ?? "main",
+      };
+
+      this.pipelines.set(task.id, state);
+
+      console.log(
+        `[PipelineManager] Recovered pipeline for task ${task.id} at stage ${currentStage}`,
+      );
+    }
+
+    if (tasks.length > 0) {
+      console.log(`[PipelineManager] Recovered ${this.pipelines.size} pipeline(s) from DB`);
+    }
+  }
+
+  /**
+   * Try to recover a single pipeline from DB state.
+   * Used when advancePipeline() receives a report for a task with no in-memory state.
+   */
+  private tryRecoverPipeline(taskId: string): PipelineState | null {
+    const db = getDb();
+    const task = db
+      .select()
+      .from(schema.kanbanTasks)
+      .where(eq(schema.kanbanTasks.id, taskId))
+      .get();
+
+    if (!task || !task.pipelineStage) return null;
+
+    const stages = (task.pipelineStages as string[]) ?? [];
+    const currentStage = task.pipelineStage;
+    const currentStageIndex = stages.indexOf(currentStage);
+
+    if (currentStageIndex < 0) return null;
+
+    const issueLabel = (task.labels as string[]).find((l) => l.startsWith("github-issue-"));
+    const issueNumber = issueLabel ? parseInt(issueLabel.replace("github-issue-", ""), 10) : null;
+
+    const project = db
+      .select()
+      .from(schema.projects)
+      .where(eq(schema.projects.id, task.projectId))
+      .get();
+
+    const state: PipelineState = {
+      taskId: task.id,
+      projectId: task.projectId,
+      issueNumber,
+      repo: project?.githubRepo ?? null,
+      stages,
+      currentStageIndex,
+      spawnRetryCount: 0,
+      lastKickbackSource: null,
+      stageReports: new Map(),
+      prBranch: task.prBranch ?? null,
+      targetBranch: getConfig(`project:${task.projectId}:github:branch`) ?? "main",
+    };
+
+    this.pipelines.set(taskId, state);
+    console.log(
+      `[PipelineManager] Recovered pipeline for task ${taskId} at stage ${currentStage} (on-demand)`,
+    );
+    return state;
+  }
+
+  /**
+   * Reset a task back to backlog when pipeline recovery fails.
+   * This prevents the task from being permanently stuck.
+   */
+  private resetTaskToBacklog(taskId: string): void {
+    const db = getDb();
+    const now = new Date().toISOString();
+    db.update(schema.kanbanTasks)
+      .set({
+        column: "backlog",
+        pipelineStage: null,
+        assigneeAgentId: null,
+        updatedAt: now,
+      })
+      .where(eq(schema.kanbanTasks.id, taskId))
+      .run();
+
+    const updated = db
+      .select()
+      .from(schema.kanbanTasks)
+      .where(eq(schema.kanbanTasks.id, taskId))
+      .get();
+    if (updated) {
+      this.io.emit("kanban:task-updated", updated as unknown as KanbanTask);
+    }
+
+    console.log(`[PipelineManager] Reset task ${taskId} to backlog`);
   }
 
   // ─── Config helpers ──────────────────────────────────────────────
@@ -156,34 +330,30 @@ export class PipelineManager {
     const triageStage = config?.stages?.triage;
     if (!triageStage?.enabled) return;
 
-    // Resolve the triage agent's model
+    // Resolve the triage agent's model (always use lightweight LLM, never coding-agent)
     const registry = new Registry();
     const agentId = triageStage.agentId || "builtin-triage";
     const entry = registry.get(agentId) ?? registry.get("builtin-triage");
     if (!entry) return;
 
-    // If a coding agent is selected for triage, route through the worker pipeline
-    if (CODING_AGENT_REGISTRY_IDS.has(agentId) && agentId !== "builtin-coder") {
-      await this.runTriageViaCodingAgent(projectId, repo, issue, agentId);
-      return;
-    }
-
     // Post start comment
     try {
       await createIssueComment(
         repo, token, issue.number,
-        `🔍 Analyzing this issue...`,
+        formatBotComment("Analyzing Issue"),
       );
     } catch (err) {
       console.error(`[PipelineManager] Failed to post triage start comment on #${issue.number}:`, err);
     }
 
-    // Build prompt
+    // Build prompt — wrap in XML delimiters to isolate untrusted content
     const issueText =
+      `<github-issue>\n` +
       `Issue #${issue.number}: ${issue.title}\n\n` +
       `${issue.body ?? "(no description)"}\n\n` +
       `Labels: ${issue.labels.map((l) => l.name).join(", ") || "none"}\n` +
-      `Assignees: ${issue.assignees.map((a) => a.login).join(", ") || "none"}`;
+      `Assignees: ${issue.assignees.map((a) => a.login).join(", ") || "none"}\n` +
+      `</github-issue>`;
 
     try {
       const model = resolveModel({
@@ -201,7 +371,7 @@ export class PipelineManager {
 
       const result = await generateText({
         model,
-        system: entry.systemPrompt,
+        system: `${SECURITY_PREAMBLE}\n${entry.systemPrompt}`,
         prompt: issueText,
         maxTokens: 1000,
       });
@@ -220,6 +390,28 @@ export class PipelineManager {
         console.error(`[PipelineManager] Failed to parse triage response for #${issue.number}:`, result.text);
         return;
       }
+
+      // Validate and sanitize triage output
+      const ALLOWED_CLASSIFICATIONS = [
+        "bug", "feature", "enhancement", "user-error",
+        "duplicate", "question", "documentation",
+      ];
+      if (!ALLOWED_CLASSIFICATIONS.includes(parsed.classification)) {
+        console.warn(`[PipelineManager] Invalid classification "${parsed.classification}" — defaulting to "question"`);
+        parsed.classification = "question";
+      }
+
+      const ALLOWED_LABELS = [
+        "bug", "feature", "enhancement", "user-error", "duplicate",
+        "question", "documentation", "good-first-issue", "help-wanted",
+      ];
+      parsed.labels = (parsed.labels ?? []).filter((l) => ALLOWED_LABELS.includes(l));
+
+      if (typeof parsed.comment === "string" && parsed.comment.length > 500) {
+        parsed.comment = parsed.comment.slice(0, 500);
+      }
+
+      parsed.shouldProceed = !!parsed.shouldProceed;
 
       // Apply labels
       if (parsed.labels && parsed.labels.length > 0) {
@@ -241,10 +433,10 @@ export class PipelineManager {
       const proceedText = parsed.shouldProceed
         ? "Proceeding with implementation when assigned."
         : "No implementation needed — labeling accordingly.";
-      const commentBody =
-        `**Triage:** ${parsed.classification}\n\n` +
-        `${parsed.comment}\n\n` +
-        `${proceedText}`;
+      const commentBody = formatBotComment(
+        `Triage: ${parsed.classification}`,
+        `${parsed.comment}\n\n${proceedText}`,
+      );
 
       try {
         await createIssueComment(repo, token, issue.number, commentBody);
@@ -254,147 +446,11 @@ export class PipelineManager {
 
       console.log(`[PipelineManager] Triaged issue #${issue.number} as "${parsed.classification}" (proceed=${parsed.shouldProceed})`);
 
-      // Create a kanban task in the Triage column (if one doesn't already exist)
+      // Create a kanban task in the Triage column (read-only view of all open issues)
       this.createTriageTask(projectId, issue.number, issue.title, parsed.classification, issue.body ?? "");
     } catch (err) {
       console.error(`[PipelineManager] Triage LLM call failed for #${issue.number}:`, err);
     }
-  }
-
-  /**
-   * Route triage through the worker pipeline when a coding agent is selected.
-   * Creates a kanban task, registers a single-stage pipeline, and delegates to sendStageDirective().
-   */
-  private async runTriageViaCodingAgent(
-    projectId: string,
-    repo: string,
-    issue: GitHubIssue,
-    agentId: string,
-  ): Promise<void> {
-    // Guard against duplicate dispatch
-    if (this.triageInFlight.has(issue.number)) {
-      console.log(`[PipelineManager] Triage already in flight for issue #${issue.number}, skipping`);
-      return;
-    }
-    this.triageInFlight.add(issue.number);
-
-    // Create kanban task in Triage column (idempotent)
-    this.createTriageTask(projectId, issue.number, issue.title, "", issue.body ?? "");
-
-    // Look up the created task by label
-    const db = getDb();
-    const label = `github-issue-${issue.number}`;
-    const allTasks = db
-      .select()
-      .from(schema.kanbanTasks)
-      .where(eq(schema.kanbanTasks.projectId, projectId))
-      .all();
-    const task = allTasks.find((t) => (t.labels as string[]).includes(label));
-    if (!task) {
-      console.error(`[PipelineManager] Could not find triage task for issue #${issue.number}`);
-      this.triageInFlight.delete(issue.number);
-      return;
-    }
-
-    // Register a single-stage pipeline so isPipelineTask() returns true
-    // and advancePipeline() will intercept the worker report
-    const state: PipelineState = {
-      taskId: task.id,
-      projectId,
-      issueNumber: issue.number,
-      repo,
-      stages: ["triage"],
-      currentStageIndex: 0,
-      kickbackCount: 0,
-      maxKickbacks: 0,
-      stageReports: new Map(),
-      prBranch: null,
-    };
-    this.pipelines.set(task.id, state);
-
-    // Store triage metadata for completion handler
-    this.triageSessions.set(task.id, { projectId, repo, issue, taskId: task.id });
-
-    // Update kanban task pipeline stage
-    this.updateTaskPipelineStage(task.id, "triage");
-
-    // Send directive via the standard pipeline mechanism
-    await this.sendStageDirective(state);
-
-    console.log(`[PipelineManager] Dispatched coding-agent triage for issue #${issue.number} (task ${task.id})`);
-  }
-
-  /**
-   * Process the worker report from a coding-agent triage.
-   * Applies labels, posts classification comment, updates the kanban task.
-   */
-  private async handleTriageReport(
-    session: { projectId: string; repo: string; issue: GitHubIssue; taskId: string },
-    workerReport: string,
-  ): Promise<void> {
-    const { repo, issue, taskId } = session;
-    const token = getConfig("github:token");
-
-    // Parse the report using the same extractor as direct-LLM triage
-    const parsed = extractTriageJson(workerReport);
-
-    // Apply labels
-    if (token) {
-      if (parsed.labels && parsed.labels.length > 0) {
-        try {
-          await addLabelsToIssue(repo, token, issue.number, parsed.labels);
-        } catch (err) {
-          console.error(`[PipelineManager] Failed to apply labels to #${issue.number}:`, err);
-        }
-      }
-
-      // Apply "triaged" label so we don't re-process
-      try {
-        await addLabelsToIssue(repo, token, issue.number, ["triaged"]);
-      } catch (err) {
-        console.error(`[PipelineManager] Failed to apply triaged label to #${issue.number}:`, err);
-      }
-
-      // Post classification comment
-      const proceedText = parsed.shouldProceed
-        ? "Proceeding with implementation when assigned."
-        : "No implementation needed — labeling accordingly.";
-      const commentBody =
-        `**Triage:** ${parsed.classification}\n\n` +
-        `${parsed.comment}\n\n` +
-        `${proceedText}`;
-
-      try {
-        await createIssueComment(repo, token, issue.number, commentBody);
-      } catch (err) {
-        console.error(`[PipelineManager] Failed to post triage comment on #${issue.number}:`, err);
-      }
-    }
-
-    // Update kanban task description with classification
-    const db = getDb();
-    const now = new Date().toISOString();
-    db.update(schema.kanbanTasks)
-      .set({
-        description: `Triage: ${parsed.classification}\n\n${issue.body ?? ""}`,
-        updatedAt: now,
-      })
-      .where(eq(schema.kanbanTasks.id, taskId))
-      .run();
-
-    const updated = db
-      .select()
-      .from(schema.kanbanTasks)
-      .where(eq(schema.kanbanTasks.id, taskId))
-      .get();
-    if (updated) {
-      this.io.emit("kanban:task-updated", updated as unknown as KanbanTask);
-    }
-
-    // Remove from in-flight set
-    this.triageInFlight.delete(issue.number);
-
-    console.log(`[PipelineManager] Coding-agent triaged issue #${issue.number} as "${parsed.classification}" (proceed=${parsed.shouldProceed})`);
   }
 
   // ─── Implementation pipeline ─────────────────────────────────────
@@ -440,10 +496,11 @@ export class PipelineManager {
       repo,
       stages: enabledStages,
       currentStageIndex: 0,
-      kickbackCount: 0,
-      maxKickbacks: MAX_KICKBACKS,
+      spawnRetryCount: 0,
+      lastKickbackSource: null,
       stageReports: new Map(),
       prBranch: null,
+      targetBranch: getConfig(`project:${projectId}:github:branch`) ?? "main",
     };
     this.pipelines.set(taskId, state);
 
@@ -466,7 +523,7 @@ export class PipelineManager {
         try {
           await createIssueComment(
             repo, token, issueNumber,
-            `🚀 Starting implementation pipeline: ${enabledStages.join(" → ")}`,
+            formatBotComment("Pipeline Started", `Stages: ${enabledStages.map(s => `\`${s}\``).join(" → ")}`),
           );
         } catch (err) {
           console.error(`[PipelineManager] Failed to post pipeline start comment:`, err);
@@ -484,99 +541,193 @@ export class PipelineManager {
   async advancePipeline(
     taskId: string,
     workerReport: string,
+    detectedBranch?: string | null,
   ): Promise<void> {
-    const state = this.pipelines.get(taskId);
-    if (!state) return;
+    let state = this.pipelines.get(taskId);
+    if (!state) {
+      console.warn(`[PipelineManager] advancePipeline: no in-memory state for task ${taskId} — attempting recovery`);
+      const recovered = this.tryRecoverPipeline(taskId);
+      if (!recovered) {
+        console.error(`[PipelineManager] advancePipeline: cannot recover task ${taskId} — moving to backlog`);
+        this.resetTaskToBacklog(taskId);
+        return;
+      }
+      state = recovered;
+    }
 
     const currentStage = state.stages[state.currentStageIndex];
 
     // Store the report
     state.stageReports.set(currentStage, workerReport);
 
-    // Handle coding-agent triage completion (single-stage pipeline, no "next stage")
-    if (currentStage === "triage" && this.triageSessions.has(taskId)) {
-      const session = this.triageSessions.get(taskId)!;
-      await this.handleTriageReport(session, workerReport);
-      this.triageSessions.delete(taskId);
-      this.pipelines.delete(taskId);
-      this.updateTaskPipelineStage(taskId, null);
+    // Safety net: catch spawn failure strings that slipped through the normal report path
+    if (workerReport.startsWith("Error spawning worker") || workerReport.startsWith("REFUSED:")) {
+      await this.handleSpawnFailure(taskId, workerReport);
       return;
     }
 
-    // Extract branch name from coder's report if present
-    if (currentStage === "coder" && !state.prBranch) {
-      const branchMatch = workerReport.match(
-        /branch[:\s]+([a-zA-Z0-9._\/-]+)/i,
-      ) ?? workerReport.match(
-        /git checkout -b\s+([a-zA-Z0-9._\/-]+)/i,
-      ) ?? workerReport.match(
-        /pushed to\s+([a-zA-Z0-9._\/-]+)/i,
-      );
-      if (branchMatch) {
-        state.prBranch = branchMatch[1];
+    // Extract branch name from the worker report (any stage may mention it)
+    if (!state.prBranch) {
+      state.prBranch = this.extractBranchName(workerReport);
+
+      // Fallback: use git-detected branch from worktree (captured before cleanup)
+      if (!state.prBranch && detectedBranch) {
+        state.prBranch = detectedBranch;
+      }
+
+      // Fallback: check if the task's prBranch was set in DB (e.g., by TeamLead's safety net)
+      if (!state.prBranch) {
+        const db = getDb();
+        const task = db.select().from(schema.kanbanTasks).where(eq(schema.kanbanTasks.id, taskId)).get();
+        if (task?.prBranch) {
+          state.prBranch = task.prBranch;
+        }
+      }
+
+      // Fallback: look for an open PR referencing this issue
+      if (!state.prBranch && state.issueNumber && state.repo) {
+        state.prBranch = await this.resolveIssueBranch(state.repo, state.issueNumber);
+      }
+
+      // Persist to DB so it survives server restarts and is available to later stages
+      if (state.prBranch) {
+        const db = getDb();
+        const now = new Date().toISOString();
+        db.update(schema.kanbanTasks)
+          .set({ prBranch: state.prBranch, updatedAt: now })
+          .where(eq(schema.kanbanTasks.id, taskId))
+          .run();
+        console.log(`[PipelineManager] Resolved branch "${state.prBranch}" for task ${taskId}`);
       }
     }
 
     // Post completion comment on GitHub issue
     await this.postStageComment(state, currentStage, workerReport, "complete");
 
-    // Security kickback logic
-    if (currentStage === "security") {
-      const hasFindings = this.securityHasFindings(workerReport);
-      if (hasFindings && state.kickbackCount < state.maxKickbacks) {
-        state.kickbackCount++;
+    // Parse structured verdict from report
+    const verdict = this.parseVerdict(workerReport);
+    const coderIndex = state.stages.indexOf("coder");
 
-        // Find coder stage index
-        const coderIndex = state.stages.indexOf("coder");
-        if (coderIndex >= 0) {
-          state.currentStageIndex = coderIndex;
-
-          // Update kanban task
-          this.updateTaskPipelineStage(taskId, "coder");
-
-          // Post kickback comment
+    // Stage-specific verdict handling with kickback support
+    switch (currentStage) {
+      case "coder": {
+        const failed = verdict === "fail";
+        if (failed) {
+          // Coder failed — move to backlog
+          console.warn(`[PipelineManager] Coder FAIL for task ${taskId} — moving to backlog`);
           if (state.issueNumber && state.repo) {
             const token = getConfig("github:token");
             if (token) {
               try {
                 await createIssueComment(
                   state.repo, token, state.issueNumber,
-                  `🔄 Security review found issues (attempt ${state.kickbackCount}/${state.maxKickbacks}). Sending back to coder for fixes.`,
+                  formatBotComment("Implementation Failed", "Task moved to backlog for review."),
                 );
               } catch { /* best effort */ }
             }
           }
-
-          // Send coder directive with security findings
+          this.resetTaskToBacklog(taskId);
+          this.pipelines.delete(taskId);
+          return;
+        }
+        break;
+      }
+      case "security": {
+        // Strip zero-file-changes warning — review-only stages never produce file changes
+        const cleanedReport = workerReport.replace(/⚠️ WARNING: Task reported success but produced zero file changes[^\n]*/g, "").trim();
+        const hasFindings = verdict === "fail" || (verdict === null && this.securityHasFindings(cleanedReport));
+        console.log(`[PipelineManager] Security review for task ${taskId}: hasFindings=${hasFindings}`);
+        if (hasFindings && coderIndex >= 0) {
+          state.currentStageIndex = coderIndex;
+          state.lastKickbackSource = "security";
+          state.spawnRetryCount = 0;
+          this.updateTaskPipelineStage(taskId, "coder");
+          if (state.issueNumber && state.repo) {
+            const token = getConfig("github:token");
+            if (token) {
+              try {
+                await createIssueComment(
+                  state.repo, token, state.issueNumber,
+                  formatBotComment("Security Kickback", "Security review found issues. Sending back to coder for fixes."),
+                );
+              } catch { /* best effort */ }
+            }
+          }
           await this.sendStageDirective(state, workerReport);
           return;
         }
-      } else if (hasFindings) {
-        // Max kickbacks reached — proceed with a warning
-        if (state.issueNumber && state.repo) {
-          const token = getConfig("github:token");
-          if (token) {
-            try {
-              await createIssueComment(
-                state.repo, token, state.issueNumber,
-                `⚠️ Security review still has findings after ${state.maxKickbacks} attempts. Proceeding with remaining stages.`,
-              );
-            } catch { /* best effort */ }
+        break;
+      }
+      case "tester": {
+        const failed = verdict === "fail" || (verdict === null && this.testerHasFailed(workerReport));
+        console.log(`[PipelineManager] Tester review for task ${taskId}: failed=${failed}`);
+        if (failed && coderIndex >= 0) {
+          state.currentStageIndex = coderIndex;
+          state.lastKickbackSource = "tester";
+          state.spawnRetryCount = 0;
+          this.updateTaskPipelineStage(taskId, "coder");
+          if (state.issueNumber && state.repo) {
+            const token = getConfig("github:token");
+            if (token) {
+              try {
+                await createIssueComment(
+                  state.repo, token, state.issueNumber,
+                  formatBotComment("Test Kickback", "Tests failed. Sending back to coder for fixes."),
+                );
+              } catch { /* best effort */ }
+            }
           }
+          await this.sendStageDirective(state, workerReport);
+          return;
         }
+        break;
+      }
+      case "reviewer": {
+        // Extract PR number from the reviewer's report (needed for completeTask routing)
+        const prNumber = this.extractPRNumber(workerReport);
+        if (prNumber) {
+          const db = getDb();
+          const now = new Date().toISOString();
+          db.update(schema.kanbanTasks)
+            .set({ prNumber, updatedAt: now })
+            .where(eq(schema.kanbanTasks.id, taskId))
+            .run();
+        }
+
+        const failed = verdict === "fail" || (verdict === null && this.reviewerHasIssues(workerReport));
+        console.log(`[PipelineManager] Reviewer review for task ${taskId}: failed=${failed}`);
+        if (failed && coderIndex >= 0) {
+          state.currentStageIndex = coderIndex;
+          state.lastKickbackSource = "reviewer";
+          state.spawnRetryCount = 0;
+          this.updateTaskPipelineStage(taskId, "coder");
+          if (state.issueNumber && state.repo) {
+            const token = getConfig("github:token");
+            if (token) {
+              try {
+                await createIssueComment(
+                  state.repo, token, state.issueNumber,
+                  formatBotComment("Review Kickback", "Code review found issues. Sending back to coder for fixes."),
+                );
+              } catch { /* best effort */ }
+            }
+          }
+          await this.sendStageDirective(state, workerReport);
+          return;
+        }
+        break;
       }
     }
 
-    // Advance to next stage
+    // Stage passed — advance to next stage
+    state.spawnRetryCount = 0;
     state.currentStageIndex++;
 
     if (state.currentStageIndex >= state.stages.length) {
-      // Pipeline complete
-      this.pipelines.delete(taskId);
+      // Pipeline complete — update DB first, then clean up memory
       this.updateTaskPipelineStage(taskId, null);
-
-      // Move the task to done (or in_review if a PR exists)
       this.completeTask(taskId, state, workerReport);
+      this.pipelines.delete(taskId);
 
       // Post completion comment
       if (state.issueNumber && state.repo) {
@@ -585,7 +736,7 @@ export class PipelineManager {
           try {
             await createIssueComment(
               state.repo, token, state.issueNumber,
-              `✅ Implementation pipeline complete.`,
+              formatBotComment("Pipeline Complete"),
             );
           } catch { /* best effort */ }
         }
@@ -598,6 +749,82 @@ export class PipelineManager {
     const nextStage = state.stages[state.currentStageIndex];
     this.updateTaskPipelineStage(taskId, nextStage);
     await this.sendStageDirective(state);
+  }
+
+  /**
+   * Handle a spawn failure for a pipeline task.
+   * Retries with backoff up to MAX_SPAWN_RETRIES, then moves to backlog.
+   */
+  async handleSpawnFailure(taskId: string, errorMessage: string): Promise<void> {
+    const state = this.pipelines.get(taskId);
+    if (!state) {
+      console.warn(`[PipelineManager] handleSpawnFailure: no state for task ${taskId}`);
+      return;
+    }
+
+    state.spawnRetryCount++;
+    const currentStage = state.stages[state.currentStageIndex];
+    console.warn(
+      `[PipelineManager] Spawn failure for task ${taskId} at stage ${currentStage} ` +
+      `(attempt ${state.spawnRetryCount}/${MAX_SPAWN_RETRIES}): ${errorMessage}`,
+    );
+
+    if (state.spawnRetryCount <= MAX_SPAWN_RETRIES) {
+      // Determine backoff delay
+      const isConcurrencyRefusal = errorMessage.includes("REFUSED") && errorMessage.toLowerCase().includes("already running");
+      const delayMs = isConcurrencyRefusal
+        ? 30_000 * state.spawnRetryCount
+        : 10_000 * state.spawnRetryCount;
+
+      console.log(
+        `[PipelineManager] Retrying spawn for task ${taskId} in ${delayMs / 1000}s`,
+      );
+
+      setTimeout(() => {
+        // Guard: pipeline may have been cleaned up during the delay
+        if (!this.pipelines.has(taskId)) return;
+        this.sendStageDirective(state).catch((err) => {
+          console.error(`[PipelineManager] Retry directive failed for task ${taskId}:`, err);
+        });
+      }, delayMs);
+      return;
+    }
+
+    // Max retries exhausted — move to backlog
+    console.error(
+      `[PipelineManager] Max spawn retries exhausted for task ${taskId} — moving to backlog`,
+    );
+
+    // Append error note to task description
+    const db = getDb();
+    const task = db.select().from(schema.kanbanTasks).where(eq(schema.kanbanTasks.id, taskId)).get();
+    if (task) {
+      const errorNote = `\n\n---\n⚠️ Pipeline spawn failed after ${MAX_SPAWN_RETRIES} retries at stage "${currentStage}": ${errorMessage}`;
+      const updatedDesc = (task.description ?? "") + errorNote;
+      db.update(schema.kanbanTasks)
+        .set({ description: updatedDesc, updatedAt: new Date().toISOString() })
+        .where(eq(schema.kanbanTasks.id, taskId))
+        .run();
+    }
+
+    // Post GitHub comment
+    if (state.issueNumber && state.repo) {
+      const token = getConfig("github:token");
+      if (token) {
+        try {
+          await createIssueComment(
+            state.repo, token, state.issueNumber,
+            formatBotComment(
+              "Pipeline Spawn Failed",
+              `Failed after ${MAX_SPAWN_RETRIES} retries at stage \`${currentStage}\`. Task moved to backlog for review.\n\nError: ${errorMessage}`,
+            ),
+          );
+        } catch { /* best effort */ }
+      }
+    }
+
+    this.resetTaskToBacklog(taskId);
+    this.pipelines.delete(taskId);
   }
 
   /**
@@ -648,10 +875,11 @@ export class PipelineManager {
       repo: project?.githubRepo ?? null,
       stages: enabledStages,
       currentStageIndex: enabledStages.indexOf("coder"),
-      kickbackCount: 0,
-      maxKickbacks: MAX_KICKBACKS,
+      spawnRetryCount: 0,
+      lastKickbackSource: null,
       stageReports: new Map(),
       prBranch: branchName,
+      targetBranch: getConfig(`project:${task.projectId}:github:branch`) ?? "main",
     };
 
     // Store review feedback context
@@ -660,6 +888,12 @@ export class PipelineManager {
     this.pipelines.set(taskId, state);
     this.updateTaskPipelineStage(taskId, "coder");
 
+    // Reset spawn count — PR feedback is a legitimate new cycle, not a failure loop
+    db.update(schema.kanbanTasks)
+      .set({ spawnCount: 0, updatedAt: new Date().toISOString() })
+      .where(eq(schema.kanbanTasks.id, taskId))
+      .run();
+
     // Post comment on issue
     if (issueNumber && state.repo) {
       const token = getConfig("github:token");
@@ -667,7 +901,7 @@ export class PipelineManager {
         try {
           await createIssueComment(
             state.repo, token, issueNumber,
-            `🔄 PR review feedback received. Re-entering pipeline at coder stage to address changes.`,
+            formatBotComment("PR Feedback Received", "Re-entering pipeline at `coder` stage to address changes."),
           );
         } catch { /* best effort */ }
       }
@@ -712,9 +946,9 @@ export class PipelineManager {
       parts.push(`GitHub Issue: #${state.issueNumber}`);
     }
 
-    // Include task description (original issue body)
+    // Include task description (original issue body) — wrapped in XML delimiters to isolate untrusted content
     if (task.description) {
-      parts.push(`\nTask Description:\n${task.description}`);
+      parts.push(`\n<issue-description>\n${task.description}\n</issue-description>`);
     }
 
     // Stage-specific instructions
@@ -731,7 +965,7 @@ export class PipelineManager {
           if (extraContext) {
             parts.push(`\n--- REVIEW FEEDBACK ---\n${extraContext}\n--- END FEEDBACK ---`);
           }
-        } else if (state.stageReports.has("security")) {
+        } else if (state.lastKickbackSource === "security") {
           // Security kickback — fix findings
           parts.push(
             `\n[SECURITY KICKBACK — Fix Required]`,
@@ -742,6 +976,28 @@ export class PipelineManager {
           if (extraContext) {
             parts.push(`\n--- SECURITY FINDINGS ---\n${extraContext}\n--- END FINDINGS ---`);
           }
+        } else if (state.lastKickbackSource === "tester") {
+          // Test failure kickback
+          parts.push(
+            `\n[TEST FAILURE KICKBACK — Fix Required]`,
+            `Tests failed on your implementation. Fix the code so tests pass.`,
+            state.prBranch ? `Work on branch \`${state.prBranch}\`.` : "",
+            `Do NOT create a PR — just fix and push.`,
+          );
+          if (extraContext) {
+            parts.push(`\n--- TEST RESULTS ---\n${extraContext}\n--- END TEST RESULTS ---`);
+          }
+        } else if (state.lastKickbackSource === "reviewer") {
+          // Review kickback
+          parts.push(
+            `\n[REVIEW KICKBACK — Fix Required]`,
+            `The code reviewer found quality issues. Address the findings below.`,
+            state.prBranch ? `Work on branch \`${state.prBranch}\`.` : "",
+            `Do NOT create a PR — just fix and push.`,
+          );
+          if (extraContext) {
+            parts.push(`\n--- REVIEW FINDINGS ---\n${extraContext}\n--- END REVIEW FINDINGS ---`);
+          }
         } else {
           // Initial implementation
           parts.push(
@@ -749,6 +1005,11 @@ export class PipelineManager {
             `Do NOT create a pull request — a later stage will handle that.`,
           );
         }
+        parts.push(
+          `\nIMPORTANT: End your report with exactly one of these verdicts on its own line:`,
+          `  VERDICT: PASS — if you successfully implemented, committed, and pushed the changes`,
+          `  VERDICT: FAIL — if you could not complete the implementation (explain why above)`,
+        );
         break;
       }
       case "security": {
@@ -759,6 +1020,9 @@ export class PipelineManager {
             `Focus ONLY on the changes below — do not review unchanged code.`,
             `Check for: injection attacks, XSS, CSRF, auth issues, data exposure, dependency risks.`,
             `If you find issues, describe them clearly. If no issues found, state that explicitly.`,
+            `\nIMPORTANT: End your review with exactly one of these verdicts on its own line:`,
+            `  VERDICT: PASS — if no actionable security issues were found`,
+            `  VERDICT: FAIL — if there are security issues that must be fixed before merging`,
           );
           parts.push(diffSection);
         } else {
@@ -766,6 +1030,9 @@ export class PipelineManager {
             `\nReview the code on branch \`${state.prBranch ?? "(see coder report)"}\` for security vulnerabilities.`,
             `Check for: injection attacks, XSS, CSRF, auth issues, data exposure, dependency risks.`,
             `If you find issues, describe them clearly. If no issues found, state that explicitly.`,
+            `\nIMPORTANT: End your review with exactly one of these verdicts on its own line:`,
+            `  VERDICT: PASS — if no actionable security issues were found`,
+            `  VERDICT: FAIL — if there are security issues that must be fixed before merging`,
           );
         }
         // Include coder's report for context
@@ -780,6 +1047,9 @@ export class PipelineManager {
           `\nRun tests on branch \`${state.prBranch ?? "(see coder report)"}\` to validate the implementation.`,
           `Install dependencies, build the project, and run the test suite.`,
           `Report test results clearly — pass/fail with details.`,
+          `\nIMPORTANT: End your report with exactly one of these verdicts on its own line:`,
+          `  VERDICT: PASS — if all tests pass`,
+          `  VERDICT: FAIL — if any tests fail (include failure details above)`,
         );
         const coderReport = state.stageReports.get("coder");
         if (coderReport) {
@@ -803,30 +1073,15 @@ export class PipelineManager {
         if (isLastStage) {
           parts.push(`After review, create a pull request for this branch.`);
         }
+        parts.push(
+          `\nIMPORTANT: End your report with exactly one of these verdicts on its own line:`,
+          `  VERDICT: PASS — if the code is acceptable quality and ready to merge`,
+          `  VERDICT: FAIL — if there are issues that must be fixed before merging (list them above)`,
+        );
         // Include reports from prior stages
         for (const [stage, report] of state.stageReports) {
           if (stage === "review_feedback") continue;
           parts.push(`\n--- ${stage.toUpperCase()} REPORT ---\n${report.slice(0, 1500)}\n--- END ---`);
-        }
-        break;
-      }
-      case "triage": {
-        // Coding-agent triage — instruct the agent to analyze the issue with codebase context
-        const triageSession = this.triageSessions.get(state.taskId);
-        if (triageSession) {
-          const { issue } = triageSession;
-          parts.push(
-            `\nYou are triaging a GitHub issue. Read the codebase for context, then classify the issue.`,
-            `\nIssue #${issue.number}: ${issue.title}`,
-            `\n${issue.body ?? "(no description)"}`,
-            `\nLabels: ${issue.labels.map((l) => l.name).join(", ") || "none"}`,
-            `Assignees: ${issue.assignees.map((a) => a.login).join(", ") || "none"}`,
-            `\nAfter analyzing the issue and relevant code, respond with ONLY a JSON object:`,
-            `{"classification": "<bug|feature|enhancement|user-error|duplicate|question|documentation>",`,
-            ` "shouldProceed": <true if implementation is needed, false otherwise>,`,
-            ` "comment": "<your analysis and reasoning>",`,
-            ` "labels": ["<label1>", "<label2>"]}`,
-          );
         }
         break;
       }
@@ -860,12 +1115,19 @@ export class PipelineManager {
           metadata: {
             pipelineRegistryEntryId: registryEntryId,
             pipelineTaskId: state.taskId,
+            pipelineBranch: state.prBranch ?? undefined,
           },
         });
+        console.log(`[PipelineManager] Sent ${currentStage} directive for task ${state.taskId}`);
       }
+    } else {
+      console.error(
+        `[PipelineManager] No TeamLead found for project ${state.projectId} — directive not sent for task ${state.taskId} stage ${currentStage}`,
+      );
+      // Move task back to backlog so it can be retried when TeamLead is available
+      this.resetTaskToBacklog(state.taskId);
+      this.pipelines.delete(state.taskId);
     }
-
-    console.log(`[PipelineManager] Sent ${currentStage} directive for task ${state.taskId}`);
   }
 
   // ─── GitHub comments ─────────────────────────────────────────────
@@ -882,31 +1144,34 @@ export class PipelineManager {
 
     let body: string;
     if (phase === "start") {
-      const startComments: Record<string, string> = {
-        triage: "🔍 Analyzing issue...",
-        coder: "🔨 Beginning implementation...",
-        security: "🔒 Running security review...",
-        tester: "🧪 Running tests...",
-        reviewer: "📝 Reviewing code...",
+      const startTitles: Record<string, string> = {
+        triage: "Analyzing Issue",
+        coder: "Beginning Implementation",
+        security: "Running Security Review",
+        tester: "Running Tests",
+        reviewer: "Reviewing Code",
       };
-      body = startComments[stage] ?? `Starting ${stage}...`;
+      body = formatBotComment(startTitles[stage] ?? `Starting ${stage}`);
     } else {
-      // Completion — summarize the report
-      const summary = report.length > 500
-        ? report.slice(0, 500) + "\n\n_(truncated)_"
-        : report;
+      // Completion — clean the report and put it in a collapsible section
+      const cleaned = cleanTerminalOutput(report);
+      const preview = cleaned.length > 500
+        ? cleaned.slice(0, 500) + "\n\n_(truncated)_"
+        : cleaned;
 
-      const completeComments: Record<string, (r: string) => string> = {
-        coder: (r) => `✅ Implementation complete.\n\n${r}`,
-        security: (r) =>
-          this.securityHasFindings(report)
-            ? `⚠️ Security issues found:\n\n${r}`
-            : `✅ No security issues found.\n\n${r}`,
-        tester: (r) => `🧪 Test results:\n\n${r}`,
-        reviewer: (r) => `📝 Review complete.\n\n${r}`,
+      const completeTitles: Record<string, string> = {
+        coder: "Implementation Complete",
+        security: this.securityHasFindings(report)
+          ? "Security Issues Found"
+          : "No Security Issues",
+        tester: "Test Results",
+        reviewer: "Review Complete",
       };
-      const formatter = completeComments[stage];
-      body = formatter ? formatter(summary) : `${stage} complete: ${summary}`;
+      const title = completeTitles[stage] ?? `${stage} Complete`;
+
+      body = cleaned.length > 500
+        ? formatBotCommentWithDetails(title, preview, cleaned)
+        : formatBotComment(title, preview);
     }
 
     try {
@@ -948,6 +1213,9 @@ export class PipelineManager {
       .filter((t) => t.column === "triage")
       .reduce((max, t) => Math.max(max, t.position), -1);
 
+    // Assign next task_number for this project
+    const maxTaskNum = existingTasks.reduce((max, t) => Math.max(max, (t as any).taskNumber ?? 0), 0);
+
     const now = new Date().toISOString();
     const task = {
       id: nanoid(),
@@ -963,6 +1231,7 @@ export class PipelineManager {
       retryCount: 0,
       spawnCount: 0,
       completionReport: null,
+      taskNumber: maxTaskNum + 1,
       pipelineStage: null,
       pipelineStages: [] as string[],
       pipelineAttempt: 0,
@@ -982,11 +1251,10 @@ export class PipelineManager {
     if (!token) return null;
 
     try {
-      const defaultBranch = await getRepoDefaultBranch(state.repo, token);
       const files = await fetchCompareCommitsDiff(
         state.repo,
         token,
-        defaultBranch,
+        state.targetBranch,
         state.prBranch,
       );
 
@@ -1016,18 +1284,160 @@ export class PipelineManager {
     }
   }
 
+  /** Parse a structured VERDICT: PASS/FAIL line from a worker report */
+  private parseVerdict(report: string): "pass" | "fail" | null {
+    if (/verdict:\s*pass/i.test(report)) return "pass";
+    if (/verdict:\s*fail/i.test(report)) return "fail";
+    return null;
+  }
+
   private securityHasFindings(report: string): boolean {
+    const verdict = this.parseVerdict(report);
+    if (verdict === "pass") return false;
+    if (verdict === "fail") return true;
+
+    // Fallback: keyword heuristics for reports without a verdict line
     const lower = report.toLowerCase();
+    const cleanSignals = [
+      "no vulnerabilit",
+      "no security issue",
+      "no security risk",
+      "no issues found",
+      "no issues were found",
+      "no findings",
+      "no critical",
+      "no concerns",
+      "clean security",
+      "security review passed",
+      "passed security",
+      "looks good",
+      "lgtm",
+      "no problems",
+      "appears secure",
+      "no significant",
+      "safe to merge",
+      "is safe to merge",
+      "safe to proceed",
+      "no issues identified",
+      "does not introduce",
+      "adheres to",
+      "found no",
+    ];
+    if (cleanSignals.some((s) => lower.includes(s))) return false;
+
+    // Look for affirmative finding signals
     return (
-      lower.includes("vulnerability") ||
+      /\bvulnerabilit(y|ies)\b/.test(lower) ||
       lower.includes("security issue") ||
       lower.includes("security risk") ||
       lower.includes("found issue") ||
-      lower.includes("xss") ||
-      lower.includes("injection") ||
-      lower.includes("csrf") ||
-      (lower.includes("found") && lower.includes("issue"))
+      /\bxss\b/.test(lower) ||
+      /\bsql.?injection\b/.test(lower) ||
+      /\bcsrf\b/.test(lower) ||
+      /\binjection\b/.test(lower) ||
+      (lower.includes("found") && lower.includes("issue") && !lower.includes("no issue"))
     );
+  }
+
+  /** Heuristic fallback: detect test failures when tester doesn't include a verdict */
+  private testerHasFailed(report: string): boolean {
+    const lower = report.toLowerCase();
+
+    // Clean signals — tests passed
+    const passSignals = [
+      "all tests pass",
+      "tests passed",
+      "0 failed",
+      "no failures",
+      "test suite passed",
+      "all passing",
+    ];
+    if (passSignals.some((s) => lower.includes(s))) return false;
+
+    // Fail signals
+    return (
+      lower.includes("test failed") ||
+      lower.includes("tests failed") ||
+      /\bFAIL\b/.test(report) ||
+      lower.includes("exit code: 1") ||
+      lower.includes("failing")
+    );
+  }
+
+  /** Heuristic fallback: detect review issues when reviewer doesn't include a verdict */
+  private reviewerHasIssues(report: string): boolean {
+    const lower = report.toLowerCase();
+
+    // Clean signals — review passed
+    const passSignals = [
+      "lgtm",
+      "looks good",
+      "approved",
+      "no issues",
+      "ready to merge",
+      "no concerns",
+    ];
+    if (passSignals.some((s) => lower.includes(s))) return false;
+
+    // Issue signals
+    return (
+      lower.includes("request changes") ||
+      lower.includes("needs fix") ||
+      lower.includes("must be fixed") ||
+      lower.includes("reject")
+    );
+  }
+
+  /** Extract a branch name from a worker report */
+  private extractBranchName(report: string): string | null {
+    const patterns = [
+      /branch[:\s]+`?([a-zA-Z0-9._\/#-]+)`?/i,
+      /created branch\s+`?([a-zA-Z0-9._\/#-]+)`?/i,
+      /git checkout -b\s+`?([a-zA-Z0-9._\/#-]+)`?/i,
+      /pushed to\s+`?([a-zA-Z0-9._\/#-]+)`?/i,
+      /on branch\s+`?([a-zA-Z0-9._\/#-]+)`?/i,
+    ];
+    for (const pattern of patterns) {
+      const match = report.match(pattern);
+      if (match) return match[1];
+    }
+    return null;
+  }
+
+  /**
+   * Find the feature branch for an issue by looking for open PRs that reference it.
+   * Falls back to the conventional feat/<issueNumber>-* branch naming pattern.
+   */
+  private async resolveIssueBranch(repo: string, issueNumber: number): Promise<string | null> {
+    const token = getConfig("github:token");
+    if (!token) return null;
+
+    try {
+      const prs = await fetchPullRequests(repo, token, { state: "open", per_page: 30 });
+      // Find a PR whose body references the issue or whose branch matches the issue number
+      for (const pr of prs) {
+        const branchMatchesIssue = pr.head.ref.includes(String(issueNumber));
+        const bodyReferencesIssue = pr.body?.includes(`#${issueNumber}`) ?? false;
+        if (branchMatchesIssue || bodyReferencesIssue) {
+          return pr.head.ref;
+        }
+      }
+    } catch (err) {
+      console.warn(`[PipelineManager] Failed to resolve branch for issue #${issueNumber}:`, err);
+    }
+
+    return null;
+  }
+
+  /** Extract a PR number from a worker report */
+  private extractPRNumber(report: string): number | null {
+    // Match github.com/{owner}/{repo}/pull/{number}
+    const urlMatch = report.match(/github\.com\/[^\s]+\/pull\/(\d+)/);
+    if (urlMatch) return parseInt(urlMatch[1], 10);
+    // Match "PR #123" or "Pull Request #123"
+    const prMatch = report.match(/(?:PR|Pull Request)\s*#(\d+)/i);
+    if (prMatch) return parseInt(prMatch[1], 10);
+    return null;
   }
 
   private updateTaskPipelineStage(taskId: string, stage: string | null): void {
@@ -1095,6 +1505,54 @@ export class PipelineManager {
     console.log(
       `[PipelineManager] Task ${taskId} → ${targetColumn}${hasPR ? ` (PR #${task.prNumber})` : ""}`,
     );
+  }
+
+  /**
+   * Periodic sweep for stale pipelines. If a task has been in_progress with a
+   * pipelineStage set for longer than the threshold, re-send the stage directive
+   * to dispatch a new worker (the original may have crashed).
+   */
+  private async sweepStalePipelines(): Promise<void> {
+    const db = getDb();
+    const tasks = db
+      .select()
+      .from(schema.kanbanTasks)
+      .where(
+        and(
+          eq(schema.kanbanTasks.column, "in_progress"),
+          isNotNull(schema.kanbanTasks.pipelineStage),
+        ),
+      )
+      .all();
+
+    const now = Date.now();
+
+    for (const task of tasks) {
+      const updatedAt = new Date(task.updatedAt).getTime();
+      if (now - updatedAt < PipelineManager.STALE_THRESHOLD_MS) continue;
+
+      const state = this.pipelines.get(task.id);
+      if (!state) {
+        // No in-memory state — try to recover first
+        const recovered = this.tryRecoverPipeline(task.id);
+        if (!recovered) {
+          console.warn(
+            `[PipelineManager] Sweep: stale task ${task.id} at stage ${task.pipelineStage} — cannot recover, moving to backlog`,
+          );
+          this.resetTaskToBacklog(task.id);
+          continue;
+        }
+        console.warn(
+          `[PipelineManager] Sweep: stale task ${task.id} at stage ${task.pipelineStage} — recovered and resending directive`,
+        );
+        await this.sendStageDirective(recovered);
+      } else {
+        console.warn(
+          `[PipelineManager] Sweep: stale task ${task.id} at stage ${task.pipelineStage} — resending directive`,
+        );
+        await this.sendStageDirective(state);
+      }
+    }
   }
 
   /** Fallback: send existing-style direct directive to TeamLead (no pipeline) */

@@ -19,7 +19,10 @@ export type SettingsSection =
   | "google"
   | "github"
   | "discord"
+  | "telegram"
   | "slack"
+  | "mattermost"
+  | "worker-names"
   | "security";
 
 export interface NavItem {
@@ -41,6 +44,7 @@ export const SETTINGS_NAV: NavGroup[] = [
       { id: "profile", label: "Profile" },
       { id: "appearance", label: "Appearance" },
       { id: "system", label: "System" },
+      { id: "worker-names", label: "Worker Names" },
     ],
   },
   {
@@ -76,7 +80,9 @@ export const SETTINGS_NAV: NavGroup[] = [
       { id: "email", label: "Email Setup" },
       { id: "github", label: "GitHub" },
       { id: "discord", label: "Discord" },
+      { id: "telegram", label: "Telegram" },
       { id: "slack", label: "Slack" },
+      { id: "mattermost", label: "Mattermost" },
     ],
   },
   {

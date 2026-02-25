@@ -1,3 +1,4 @@
+import { createAmazonBedrock } from "@ai-sdk/amazon-bedrock";
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { createOpenAI } from "@ai-sdk/openai";
@@ -63,6 +64,9 @@ export function isThinkingModel(config: LLMConfig): boolean {
   if (resolved.type === "openrouter") {
     return /^anthropic\/claude-(sonnet-4-5|opus-4)/.test(config.model);
   }
+  if (resolved.type === "bedrock") {
+    return /^anthropic\.claude-(sonnet-4-5|opus-4)/.test(config.model);
+  }
   return false;
 }
 
@@ -109,7 +113,7 @@ export function resolveModel(config: LLMConfig): LanguageModel {
         baseURL: "https://openrouter.ai/api/v1",
         apiKey: config.apiKey ?? resolved.apiKey ?? "",
       });
-      return openrouter(config.model);
+      return openrouter(config.model, { structuredOutputs: false });
     }
 
     case "openai-compatible": {
@@ -158,6 +162,68 @@ export function resolveModel(config: LLMConfig): LanguageModel {
         apiKey: config.apiKey ?? resolved.apiKey ?? "",
       });
       return minimax(config.model);
+    }
+
+    case "xai": {
+      const xai = createOpenAI({
+        baseURL: config.baseUrl ?? resolved.baseUrl ?? "https://api.x.ai/v1",
+        apiKey: config.apiKey ?? resolved.apiKey ?? "",
+      });
+      return xai(config.model);
+    }
+
+    case "zai": {
+      const zai = createOpenAI({
+        baseURL: config.baseUrl ?? resolved.baseUrl ?? "https://api.z.ai/api/paas/v4",
+        apiKey: config.apiKey ?? resolved.apiKey ?? "",
+      });
+      return zai(config.model);
+    }
+
+    case "perplexity": {
+      const perplexity = createOpenAI({
+        baseURL: config.baseUrl ?? resolved.baseUrl ?? "https://api.perplexity.ai",
+        apiKey: config.apiKey ?? resolved.apiKey ?? "",
+      });
+      return perplexity(config.model);
+    }
+
+    case "bedrock": {
+      // apiKey is stored as "accessKeyId:secretAccessKey" for Bedrock
+      // baseUrl is used to store the AWS region (e.g. "us-east-1")
+      const bedrockApiKey = config.apiKey ?? resolved.apiKey ?? "";
+      const [accessKeyId, secretAccessKey] = bedrockApiKey.includes(":")
+        ? bedrockApiKey.split(":", 2)
+        : ["", ""];
+      const region = config.baseUrl ?? resolved.baseUrl ?? "us-east-1";
+      const bedrock = createAmazonBedrock({
+        region,
+        accessKeyId,
+        secretAccessKey,
+      });
+      return bedrock(config.model) as unknown as LanguageModel;
+    }
+
+    case "deepgram":
+      throw new Error(
+        "Deepgram is a speech provider (STT/TTS) and does not support text generation. " +
+        "Configure it under TTS or STT settings instead.",
+      );
+
+    case "lmstudio": {
+      const lmstudio = createOpenAI({
+        baseURL: config.baseUrl ?? resolved.baseUrl ?? "http://localhost:1234/v1",
+        apiKey: config.apiKey ?? resolved.apiKey ?? "lm-studio",
+      });
+      return lmstudio(config.model);
+    }
+
+    case "deepseek": {
+      const deepseek = createOpenAI({
+        baseURL: config.baseUrl ?? resolved.baseUrl ?? "https://api.deepseek.com",
+        apiKey: config.apiKey ?? resolved.apiKey ?? "",
+      });
+      return deepseek(config.model);
     }
 
     default:

@@ -7,18 +7,22 @@ export function createCalendarUpdateEventTool() {
     description: "Update an existing calendar event. Specify the source to route to the correct backend.",
     parameters: z.object({
       eventId: z.string().describe("The event ID to update"),
-      title: z.string().optional().describe("New title"),
-      description: z.string().optional().describe("New description"),
-      location: z.string().optional().describe("New location"),
-      start: z.string().optional().describe("New start time (ISO datetime)"),
-      end: z.string().optional().describe("New end time (ISO datetime)"),
-      allDay: z.boolean().optional().describe("Whether this is an all-day event"),
+      title: z.string().nullable().optional().describe("New title"),
+      description: z.string().nullable().optional().describe("New description"),
+      location: z.string().nullable().optional().describe("New location"),
+      start: z.string().nullable().optional().describe("New start time (ISO datetime)"),
+      end: z.string().nullable().optional().describe("New end time (ISO datetime)"),
+      allDay: z.boolean().nullable().optional().describe("Whether this is an all-day event"),
       source: z
         .enum(["local", "google"])
         .optional()
         .describe('Which calendar backend (default: "local")'),
     }),
-    execute: async ({ eventId, source, ...updates }) => {
+    execute: async ({ eventId, source, ...rawUpdates }) => {
+      // Strip null values to undefined for downstream compatibility
+      const updates = Object.fromEntries(
+        Object.entries(rawUpdates).map(([k, v]) => [k, v ?? undefined]),
+      ) as Partial<{ title: string; description: string; location: string; start: string; end: string; allDay: boolean }>;
       try {
         if (source === "google") {
           const { updateGoogleEvent } = await import("../google/calendar-client.js");

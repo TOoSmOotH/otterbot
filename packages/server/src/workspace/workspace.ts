@@ -42,7 +42,7 @@ export class WorkspaceManager {
    * Prepare a git worktree for a coding agent.
    * Ensures the main repo is initialized and creates a worktree for the agent.
    */
-  prepareAgentWorktree(projectId: string, agentId: string): string {
+  prepareAgentWorktree(projectId: string, agentId: string, sourceBranch?: string): string {
     const repoPath = this.repoPath(projectId);
     const worktreesPath = this.worktreesPath(projectId);
 
@@ -56,7 +56,7 @@ export class WorkspaceManager {
     // We use a branch name convention "agent/<agentId>"
     const branchName = `agent/${agentId}`;
 
-    createWorktree(repoPath, agentWorktreePath, branchName);
+    createWorktree(repoPath, agentWorktreePath, branchName, sourceBranch);
 
     return agentWorktreePath;
   }
@@ -153,6 +153,11 @@ export class WorkspaceManager {
 
   worktreesPath(projectId: string): string {
     return resolve(this.root, "projects", projectId, "worktrees");
+  }
+
+  /** Get the worktree path for an agent (without creating it) */
+  agentWorktreePath(projectId: string, agentId: string): string {
+    return resolve(this.worktreesPath(projectId), agentId);
   }
 
   private isUnder(child: string, parent: string): boolean {
