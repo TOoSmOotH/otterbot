@@ -252,6 +252,17 @@ import {
   rejectPairing as rejectSignalPairing,
   revokePairing as revokeSignalPairing,
 } from "./signal/pairing.js";
+import { NextcloudTalkBridge } from "./nextcloud-talk/nextcloud-talk-bridge.js";
+import {
+  getNextcloudTalkSettings,
+  updateNextcloudTalkSettings,
+  testNextcloudTalkConnection,
+} from "./nextcloud-talk/nextcloud-talk-settings.js";
+import {
+  approvePairing as approveNextcloudTalkPairing,
+  rejectPairing as rejectNextcloudTalkPairing,
+  revokePairing as revokeNextcloudTalkPairing,
+} from "./nextcloud-talk/pairing.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -731,6 +742,31 @@ async function main() {
     }
   }
 
+  // Nextcloud Talk bridge (initialized when enabled + credentials set)
+  let nextcloudTalkBridge: NextcloudTalkBridge | null = null;
+
+  function startNextcloudTalkBridge() {
+    if (nextcloudTalkBridge || !coo) return;
+    const settings = getNextcloudTalkSettings();
+    if (!settings.enabled || !settings.serverUrlSet || !settings.usernameSet || !settings.appPasswordSet) return;
+    const serverUrl = getConfig("nextcloud-talk:server_url");
+    const username = getConfig("nextcloud-talk:username");
+    const appPassword = getConfig("nextcloud-talk:app_password");
+    if (!serverUrl || !username || !appPassword) return;
+    nextcloudTalkBridge = new NextcloudTalkBridge({ bus, coo, io });
+    nextcloudTalkBridge.start({ serverUrl, username, appPassword }).catch((err) => {
+      console.error("[Nextcloud Talk] Failed to start bridge:", err);
+      nextcloudTalkBridge = null;
+    });
+  }
+
+  async function stopNextcloudTalkBridge() {
+    if (nextcloudTalkBridge) {
+      await nextcloudTalkBridge.stop();
+      nextcloudTalkBridge = null;
+    }
+  }
+
   function startCoo() {
     if (coo) return;
     try {
@@ -1079,6 +1115,7 @@ async function main() {
     startTlonBridge();
     startWhatsAppBridge();
     startSignalBridge();
+    startNextcloudTalkBridge();
   } else {
     console.log("Setup not complete. Waiting for setup wizard...");
   }
@@ -1407,6 +1444,7 @@ async function main() {
     startTlonBridge();
     startWhatsAppBridge();
     startSignalBridge();
+    startNextcloudTalkBridge();
 
     return { ok: true };
   });
@@ -3934,6 +3972,74 @@ async function main() {
   });
 
   // =========================================================================
+  // Nextcloud Talk settings routes
+  // =========================================================================
+
+  app.get("/api/settings/nextcloud-talk", async () => {
+    return getNextcloudTalkSettings();
+  });
+
+  app.put<{
+    Body: {
+      enabled?: boolean;
+      serverUrl?: string;
+      username?: string;
+      appPassword?: string;
+      requireMention?: boolean;
+      allowedConversations?: string[];
+    };
+  }>("/api/settings/nextcloud-talk", async (req) => {
+    const wasEnabled = getNextcloudTalkSettings().enabled && getNextcloudTalkSettings().serverUrlSet && getNextcloudTalkSettings().usernameSet && getNextcloudTalkSettings().appPasswordSet;
+    updateNextcloudTalkSettings(req.body);
+    const nowEnabled = getNextcloudTalkSettings().enabled && getNextcloudTalkSettings().serverUrlSet && getNextcloudTalkSettings().usernameSet && getNextcloudTalkSettings().appPasswordSet;
+
+    if (nowEnabled && !wasEnabled) {
+      startNextcloudTalkBridge();
+    } else if (!nowEnabled && wasEnabled) {
+      await stopNextcloudTalkBridge();
+    }
+
+    return { ok: true };
+  });
+
+  app.post("/api/settings/nextcloud-talk/test", async () => {
+    return testNextcloudTalkConnection();
+  });
+
+  app.post<{
+    Body: { code: string };
+  }>("/api/settings/nextcloud-talk/pair/approve", async (req, reply) => {
+    const result = approveNextcloudTalkPairing(req.body.code);
+    if (!result) {
+      reply.code(400);
+      return { ok: false, error: "Invalid or expired pairing code" };
+    }
+    return { ok: true, user: result };
+  });
+
+  app.post<{
+    Body: { code: string };
+  }>("/api/settings/nextcloud-talk/pair/reject", async (req, reply) => {
+    const ok = rejectNextcloudTalkPairing(req.body.code);
+    if (!ok) {
+      reply.code(400);
+      return { ok: false, error: "Pairing code not found" };
+    }
+    return { ok: true };
+  });
+
+  app.delete<{
+    Params: { userId: string };
+  }>("/api/settings/nextcloud-talk/pair/:userId", async (req, reply) => {
+    const ok = revokeNextcloudTalkPairing(req.params.userId);
+    if (!ok) {
+      reply.code(400);
+      return { ok: false, error: "User not found" };
+    }
+    return { ok: true };
+  });
+
+  // =========================================================================
   // Google settings routes
   // =========================================================================
 
@@ -4626,6 +4732,7 @@ Respond with ONLY a JSON object (no markdown, no explanation) with these fields:
     await stopWhatsAppBridge();
     await stopMattermostBridge();
     await stopSignalBridge();
+    await stopNextcloudTalkBridge();
     await closeBrowser();
     process.exit(0);
   };

@@ -212,6 +212,17 @@ interface SettingsState {
   mattermostPendingPairings: Array<{ code: string; mattermostUserId: string; mattermostUsername: string; createdAt: string }>;
   mattermostTestResult: TestResult | null;
 
+  // Nextcloud Talk
+  nextcloudTalkEnabled: boolean;
+  nextcloudTalkServerUrlSet: boolean;
+  nextcloudTalkUsernameSet: boolean;
+  nextcloudTalkAppPasswordSet: boolean;
+  nextcloudTalkBotUsername: string | null;
+  nextcloudTalkRequireMention: boolean;
+  nextcloudTalkPairedUsers: Array<{ nextcloudUserId: string; nextcloudDisplayName: string; pairedAt: string }>;
+  nextcloudTalkPendingPairings: Array<{ code: string; nextcloudUserId: string; nextcloudDisplayName: string; createdAt: string }>;
+  nextcloudTalkTestResult: TestResult | null;
+
   // Google
   googleConnected: boolean;
   googleConnectedEmail: string | null;
@@ -418,6 +429,21 @@ interface SettingsState {
   rejectMattermostPairing: (code: string) => Promise<void>;
   revokeMattermostUser: (userId: string) => Promise<void>;
 
+  // Nextcloud Talk actions
+  loadNextcloudTalkSettings: () => Promise<void>;
+  updateNextcloudTalkSettings: (data: {
+    enabled?: boolean;
+    serverUrl?: string;
+    username?: string;
+    appPassword?: string;
+    requireMention?: boolean;
+    allowedConversations?: string[];
+  }) => Promise<void>;
+  testNextcloudTalkConnection: () => Promise<void>;
+  approveNextcloudTalkPairing: (code: string) => Promise<void>;
+  rejectNextcloudTalkPairing: (code: string) => Promise<void>;
+  revokeNextcloudTalkUser: (userId: string) => Promise<void>;
+
   // Google actions
   loadGoogleSettings: () => Promise<void>;
   updateGoogleCredentials: (data: {
@@ -550,6 +576,15 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   mattermostPairedUsers: [],
   mattermostPendingPairings: [],
   mattermostTestResult: null,
+  nextcloudTalkEnabled: false,
+  nextcloudTalkServerUrlSet: false,
+  nextcloudTalkUsernameSet: false,
+  nextcloudTalkAppPasswordSet: false,
+  nextcloudTalkBotUsername: null,
+  nextcloudTalkRequireMention: true,
+  nextcloudTalkPairedUsers: [],
+  nextcloudTalkPendingPairings: [],
+  nextcloudTalkTestResult: null,
   googleConnected: false,
   googleConnectedEmail: null,
   googleClientIdSet: false,
@@ -2039,6 +2074,112 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       });
       if (!res.ok) throw new Error("Failed to revoke user");
       await get().loadMattermostSettings();
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "Unknown error" });
+    }
+  },
+
+  // Nextcloud Talk actions
+
+  loadNextcloudTalkSettings: async () => {
+    try {
+      const res = await fetch("/api/settings/nextcloud-talk");
+      if (!res.ok) return;
+      const data = await res.json();
+      set({
+        nextcloudTalkEnabled: data.enabled,
+        nextcloudTalkServerUrlSet: data.serverUrlSet,
+        nextcloudTalkUsernameSet: data.usernameSet,
+        nextcloudTalkAppPasswordSet: data.appPasswordSet,
+        nextcloudTalkBotUsername: data.botUsername,
+        nextcloudTalkRequireMention: data.requireMention,
+        nextcloudTalkPairedUsers: data.pairedUsers,
+        nextcloudTalkPendingPairings: data.pendingPairings,
+      });
+    } catch {
+      // Silently fail
+    }
+  },
+
+  updateNextcloudTalkSettings: async (data) => {
+    set({ error: null });
+    try {
+      const res = await fetch("/api/settings/nextcloud-talk", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) throw new Error("Failed to update Nextcloud Talk settings");
+      await get().loadNextcloudTalkSettings();
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "Unknown error" });
+    }
+  },
+
+  testNextcloudTalkConnection: async () => {
+    set({ nextcloudTalkTestResult: { ok: false, testing: true } });
+    try {
+      const res = await fetch("/api/settings/nextcloud-talk/test", {
+        method: "POST",
+      });
+      const data = await res.json();
+      set({
+        nextcloudTalkTestResult: {
+          ok: data.ok,
+          error: data.error,
+          testing: false,
+        },
+        nextcloudTalkBotUsername: data.ok ? data.botUsername : get().nextcloudTalkBotUsername,
+      });
+    } catch {
+      set({
+        nextcloudTalkTestResult: {
+          ok: false,
+          error: "Network error",
+          testing: false,
+        },
+      });
+    }
+  },
+
+  approveNextcloudTalkPairing: async (code) => {
+    set({ error: null });
+    try {
+      const res = await fetch("/api/settings/nextcloud-talk/pair/approve", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code }),
+      });
+      if (!res.ok) throw new Error("Failed to approve pairing");
+      await get().loadNextcloudTalkSettings();
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "Unknown error" });
+    }
+  },
+
+  rejectNextcloudTalkPairing: async (code) => {
+    set({ error: null });
+    try {
+      const res = await fetch("/api/settings/nextcloud-talk/pair/reject", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code }),
+      });
+      if (!res.ok) throw new Error("Failed to reject pairing");
+      await get().loadNextcloudTalkSettings();
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "Unknown error" });
+    }
+  },
+
+  revokeNextcloudTalkUser: async (userId) => {
+    set({ error: null });
+    try {
+      const res = await fetch(`/api/settings/nextcloud-talk/pair/${userId}`, {
+        method: "DELETE",
+      });
+      if (!res.ok) throw new Error("Failed to revoke user");
+      await get().loadNextcloudTalkSettings();
     } catch (err) {
       set({ error: err instanceof Error ? err.message : "Unknown error" });
     }

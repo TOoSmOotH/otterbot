@@ -22,6 +22,7 @@ export type SettingsSection =
   | "telegram"
   | "slack"
   | "mattermost"
+  | "nextcloud-talk"
   | "worker-names"
   | "security";
 
@@ -83,6 +84,7 @@ export const SETTINGS_NAV: NavGroup[] = [
       { id: "telegram", label: "Telegram" },
       { id: "slack", label: "Slack" },
       { id: "mattermost", label: "Mattermost" },
+      { id: "nextcloud-talk", label: "Nextcloud Talk" },
     ],
   },
   {
