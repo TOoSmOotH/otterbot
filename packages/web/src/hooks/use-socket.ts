@@ -9,32 +9,60 @@ import { useCodingAgentStore } from "../stores/coding-agent-store";
 import { useTodoStore } from "../stores/todo-store";
 import { useMergeQueueStore } from "../stores/merge-queue-store";
 
+// Module-level TTS state (singleton — useSocket only initializes once)
+const ttsState = {
+  queue: [] as string[],
+  playing: false,
+  currentPlayer: null as HTMLAudioElement | null,
+};
+
+/** Stop any currently playing TTS audio and clear the queue. */
+export function cancelTts() {
+  // Stop current playback
+  if (ttsState.currentPlayer) {
+    ttsState.currentPlayer.pause();
+    ttsState.currentPlayer.removeAttribute("src");
+    ttsState.currentPlayer = null;
+  }
+  ttsState.playing = false;
+
+  // Revoke all queued blob URLs to free memory
+  for (const url of ttsState.queue) {
+    URL.revokeObjectURL(url);
+  }
+  ttsState.queue.length = 0;
+
+  // Tell server to cancel in-flight TTS synthesis
+  try {
+    getSocket().emit("ceo:cancel-tts");
+  } catch {
+    // best-effort
+  }
+}
+
+function playNextInQueue() {
+  if (ttsState.playing || ttsState.queue.length === 0) return;
+  const url = ttsState.queue.shift()!;
+  ttsState.playing = true;
+  const player = new Audio(url);
+  ttsState.currentPlayer = player;
+
+  const cleanup = () => {
+    URL.revokeObjectURL(url);
+    ttsState.playing = false;
+    if (ttsState.currentPlayer === player) {
+      ttsState.currentPlayer = null;
+    }
+    playNextInQueue();
+  };
+
+  player.addEventListener("ended", cleanup);
+  player.addEventListener("error", cleanup);
+  player.play().catch(cleanup);
+}
+
 export function useSocket() {
   const initialized = useRef(false);
-  const ttsQueue = useRef<string[]>([]);
-  const ttsPlaying = useRef(false);
-
-  function playNextInQueue() {
-    if (ttsPlaying.current || ttsQueue.current.length === 0) return;
-    const url = ttsQueue.current.shift()!;
-    ttsPlaying.current = true;
-    const player = new Audio(url);
-    player.addEventListener("ended", () => {
-      URL.revokeObjectURL(url);
-      ttsPlaying.current = false;
-      playNextInQueue();
-    });
-    player.addEventListener("error", () => {
-      URL.revokeObjectURL(url);
-      ttsPlaying.current = false;
-      playNextInQueue();
-    });
-    player.play().catch(() => {
-      URL.revokeObjectURL(url);
-      ttsPlaying.current = false;
-      playNextInQueue();
-    });
-  }
   const addMessage = useMessageStore((s) => s.addMessage);
   const setCooResponse = useMessageStore((s) => s.setCooResponse);
   const appendCooStream = useMessageStore((s) => s.appendCooStream);
@@ -107,7 +135,7 @@ export function useSocket() {
         for (let i = 0; i < bytes.length; i++) arr[i] = bytes.charCodeAt(i);
         const blob = new Blob([arr], { type: contentType });
         const url = URL.createObjectURL(blob);
-        ttsQueue.current.push(url);
+        ttsState.queue.push(url);
         playNextInQueue();
       } catch {
         // Best-effort audio playback
