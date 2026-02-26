@@ -701,15 +701,30 @@ export class TeamLead extends BaseAgent {
           }).trim() || null;
           // The worktree branch is "agent/{agentId}" — look for the feature branch the coder pushed
           if (branch?.startsWith("agent/")) {
-            const remoteBranches = execSync(
-              "git branch -r --sort=-committerdate --format='%(refname:short)' | head -5",
-              { cwd: wtPath, encoding: "utf-8", timeout: 5000 }
-            ).trim();
-            const pushed = remoteBranches.split("\n").find(b =>
-              !b.includes("agent/") && !b.includes("/main") && !b.includes("/dev") && !b.includes("/HEAD")
-            );
-            if (pushed) branch = pushed.replace(/^origin\//, "");
-            else branch = null; // Don't use agent/* branches
+            const project = getDb().select().from(schema.projects).where(eq(schema.projects.id, this.projectId)).get();
+            if (project?.githubRepo) {
+              // Remote project: detect from remote branches
+              const remoteBranches = execSync(
+                "git branch -r --sort=-committerdate --format='%(refname:short)' | head -5",
+                { cwd: wtPath, encoding: "utf-8", timeout: 5000 }
+              ).trim();
+              const pushed = remoteBranches.split("\n").find(b =>
+                !b.includes("agent/") && !b.includes("/main") && !b.includes("/dev") && !b.includes("/HEAD")
+              );
+              if (pushed) branch = pushed.replace(/^origin\//, "");
+              else branch = null;
+            } else {
+              // Local-only project: detect from local branches
+              const localBranches = execSync(
+                "git branch --sort=-committerdate --format='%(refname:short)' | head -5",
+                { cwd: wtPath, encoding: "utf-8", timeout: 5000 }
+              ).trim();
+              const pushed = localBranches.split("\n").find(b =>
+                !b.includes("agent/") && b !== "main" && b !== "dev"
+              );
+              if (pushed) branch = pushed;
+              else branch = null;
+            }
           }
           detectedBranch = branch;
         } catch { /* best effort */ }

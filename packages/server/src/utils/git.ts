@@ -70,6 +70,18 @@ export function createInitialCommit(cwd: string): void {
 }
 
 /**
+ * Check if a git remote exists.
+ */
+export function hasRemote(cwd: string, remoteName = "origin"): boolean {
+  try {
+    execSync(`git remote get-url ${remoteName}`, { cwd, stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Create a worktree for an agent.
  * @param repoPath Path to the main repository
  * @param worktreePath Path where the worktree should be created
@@ -91,22 +103,28 @@ export function createWorktree(repoPath: string, worktreePath: string, branchNam
     }
   }
 
-  // Always fetch latest from remote so the worktree starts with up-to-date code
-  try {
-    if (sourceBranch) {
-      execSync(`git fetch origin "${sourceBranch}"`, { cwd: repoPath, stdio: "ignore" });
-    } else {
-      execSync("git fetch origin", { cwd: repoPath, stdio: "ignore" });
-    }
-  } catch { /* best effort — remote may be unavailable or repo may be local-only */ }
+  // Only fetch from remote if one exists
+  const remoteAvailable = hasRemote(repoPath);
+  if (remoteAvailable) {
+    try {
+      if (sourceBranch) {
+        execSync(`git fetch origin "${sourceBranch}"`, { cwd: repoPath, stdio: "ignore" });
+      } else {
+        execSync("git fetch origin", { cwd: repoPath, stdio: "ignore" });
+      }
+    } catch { /* best effort — remote may be unavailable */ }
+  }
 
   // Determine the start point: source branch (for kickbacks/iterations) or latest HEAD
   // When no source branch is specified, prefer the fetched remote HEAD over the
   // potentially stale local HEAD so workers always start with up-to-date code.
   let startPoint: string;
-  if (sourceBranch) {
+  if (sourceBranch && remoteAvailable) {
     startPoint = `origin/${sourceBranch}`;
-  } else {
+  } else if (sourceBranch) {
+    // Local-only repo: use the local source branch directly
+    startPoint = sourceBranch;
+  } else if (remoteAvailable) {
     // Use the remote default branch if available, otherwise fall back to local HEAD
     try {
       const defaultBranch = execSync("git symbolic-ref refs/remotes/origin/HEAD", {
@@ -116,6 +134,8 @@ export function createWorktree(repoPath: string, worktreePath: string, branchNam
     } catch {
       startPoint = "HEAD";
     }
+  } else {
+    startPoint = "HEAD";
   }
   // For source branches, try the remote ref first; fall back to local ref
   const startPointFallback = sourceBranch ?? "HEAD";
@@ -230,8 +250,8 @@ export function findMergeBase(cwd: string): string | null {
     // No upstream tracking — fall through
   }
 
-  // Try common remote default branches
-  for (const ref of ["origin/dev", "origin/main", "origin/master"]) {
+  // Try common remote default branches, then local branches (for local-only repos)
+  for (const ref of ["origin/dev", "origin/main", "origin/master", "dev", "main", "master"]) {
     try {
       const base = execSync(`git merge-base ${ref} HEAD`, {
         cwd,
