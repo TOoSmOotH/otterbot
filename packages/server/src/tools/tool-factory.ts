@@ -35,6 +35,10 @@ import { SkillService } from "../skills/skill-service.js";
 import { CustomToolService } from "./custom-tool-service.js";
 import { executeCustomTool } from "./custom-tool-executor.js";
 import { createMemorySaveTool } from "./memory-save.js";
+import { createSshExecTool } from "./ssh-exec.js";
+import { createSshListKeysTool } from "./ssh-list-keys.js";
+import { createSshListHostsTool } from "./ssh-list-hosts.js";
+import { createSshConnectTool } from "./ssh-connect.js";
 import { McpClientManager } from "../mcp/mcp-client-manager.js";
 import { McpServerService as McpServerServiceRef } from "../mcp/mcp-service.js";
 
@@ -81,6 +85,11 @@ const CONTEXTLESS_TOOL_REGISTRY: Record<string, () => unknown> = {
   test_custom_tool: createTestCustomToolTool,
   // Memory tools
   memory_save: createMemorySaveTool,
+  // SSH tools
+  ssh_exec: createSshExecTool,
+  ssh_list_keys: createSshListKeysTool,
+  ssh_list_hosts: createSshListHostsTool,
+  ssh_connect: createSshConnectTool,
 };
 
 /**
@@ -482,6 +491,36 @@ export function getToolsWithMeta(): {
       parameters: [
         { name: "id", type: "string", required: true, description: "The tool ID to test" },
         { name: "params", type: "object", required: true, description: "Parameters to pass to the tool" },
+      ],
+    },
+    ssh_exec: {
+      description: "Execute a command on a remote host via SSH. Output capped at 50KB, timeout 2 minutes.",
+      category: "SSH",
+      parameters: [
+        { name: "keyId", type: "string", required: true, description: "The SSH key ID to authenticate with" },
+        { name: "host", type: "string", required: true, description: "The remote hostname or IP" },
+        { name: "command", type: "string", required: true, description: "The shell command to execute" },
+        { name: "timeout", type: "number", required: false, description: "Timeout in milliseconds (default: 120000)" },
+      ],
+    },
+    ssh_list_keys: {
+      description: "List all configured SSH keys with metadata.",
+      category: "SSH",
+      parameters: [],
+    },
+    ssh_list_hosts: {
+      description: "List allowed hosts for a specific SSH key.",
+      category: "SSH",
+      parameters: [
+        { name: "keyId", type: "string", required: true, description: "The SSH key ID" },
+      ],
+    },
+    ssh_connect: {
+      description: "Start an interactive SSH session to a remote host. Opens a live terminal in the SSH View.",
+      category: "SSH",
+      parameters: [
+        { name: "keyId", type: "string", required: true, description: "The SSH key ID to authenticate with" },
+        { name: "host", type: "string", required: true, description: "The remote hostname or IP" },
       ],
     },
   };

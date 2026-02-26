@@ -8,6 +8,7 @@ import type { SoulDocument, Memory, MemoryEpisode, SoulSuggestion } from "./memo
 import type { Todo } from "./todo.js";
 import type { MergeQueueEntry } from "./merge-queue.js";
 import type { McpServerRuntime } from "./mcp-server.js";
+import type { SshSessionStatus } from "./ssh.js";
 
 /** Events emitted from server to client */
 export interface ServerToClientEvents {
@@ -73,6 +74,8 @@ export interface ServerToClientEvents {
   "merge-queue:updated": (data: { entries: MergeQueueEntry[] }) => void;
   "merge-queue:entry-updated": (entry: MergeQueueEntry) => void;
   "mcp:status": (runtime: McpServerRuntime) => void;
+  "ssh:session-start": (data: { sessionId: string; keyId: string; host: string; username: string; agentId: string }) => void;
+  "ssh:session-end": (data: { sessionId: string; agentId: string; status: SshSessionStatus }) => void;
 }
 
 /** Events emitted from client to server */
@@ -252,6 +255,16 @@ export interface ClientToServerEvents {
   ) => void;
   "project:set-branch": (
     data: { projectId: string; branch: string },
+    callback?: (ack: { ok: boolean; error?: string }) => void,
+  ) => void;
+
+  // SSH sessions
+  "ssh:connect": (
+    data: { keyId: string; host: string },
+    callback?: (ack: { ok: boolean; sessionId?: string; agentId?: string; error?: string }) => void,
+  ) => void;
+  "ssh:disconnect": (
+    data: { sessionId: string },
     callback?: (ack: { ok: boolean; error?: string }) => void,
   ) => void;
 }

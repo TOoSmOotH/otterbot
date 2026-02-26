@@ -460,6 +460,39 @@ automatically filters to your assigned issues. Do not pick up unassigned issues.
     },
   },
   {
+    id: "builtin-skill-ssh-administration",
+    data: {
+      meta: {
+        name: "SSH Administration",
+        description:
+          "SSH key management and remote command execution for system administration.",
+        version: "1.0.0",
+        author: "otterbot",
+        tools: ["ssh_exec", "ssh_list_keys", "ssh_list_hosts", "ssh_connect"],
+        capabilities: ["ssh", "remote-management", "system-administration"],
+        parameters: {},
+        tags: ["built-in", "ssh"],
+      },
+      body: `You are an SSH administration specialist. You manage remote servers via SSH.
+
+## Workflow
+1. **Always start by listing available SSH keys** using ssh_list_keys
+2. **Check allowed hosts** for the relevant key using ssh_list_hosts
+3. **Use targeted commands** — run specific, well-scoped commands rather than broad operations
+4. **Report output clearly** — summarize command results for the user
+
+## Tool Selection
+- Use \`ssh_exec\` for quick one-shot commands (status checks, log tailing, service management)
+- Use \`ssh_connect\` for interactive debugging sessions that need sustained terminal access
+
+## Security Rules
+- NEVER modify remote authorized_keys files
+- NEVER run shutdown, reboot, or destructive filesystem commands unless explicitly instructed
+- Always verify you're connecting to the correct host before running commands
+- Report any connection failures or unexpected output immediately`,
+    },
+  },
+  {
     id: "builtin-skill-tool-building",
     data: {
       meta: {
@@ -531,6 +564,7 @@ const ENTRY_SKILL_ASSIGNMENTS: Record<string, string[]> = {
   "builtin-codex-coder": ["builtin-skill-codex-delegation", "builtin-skill-github-tools"],
   "builtin-triage": ["builtin-skill-github-tools"],
   "builtin-browser-agent": ["builtin-skill-browser-automation"],
+  "builtin-ssh-administrator": ["builtin-skill-ssh-administration"],
   "builtin-tool-builder": ["builtin-skill-tool-building"],
 };
 

@@ -1,5 +1,5 @@
 import { sqliteTable, text, integer, primaryKey, unique } from "drizzle-orm/sqlite-core";
-import type { ScanFinding, SkillScanStatus, CodingAgentPart, CodingAgentType, MemoryCategory, MemorySource, McpToolMeta } from "@otterbot/shared";
+import type { ScanFinding, SkillScanStatus, CodingAgentPart, CodingAgentType, MemoryCategory, MemorySource, McpToolMeta, SshKeyType, SshSessionStatus } from "@otterbot/shared";
 
 export const agents = sqliteTable("agents", {
   id: text("id").primaryKey(),
@@ -506,6 +506,40 @@ export const mcpServers = sqliteTable("mcp_servers", {
     .notNull()
     .$defaultFn(() => new Date().toISOString()),
   updatedAt: text("updated_at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+});
+
+export const sshKeys = sqliteTable("ssh_keys", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  username: text("username").notNull(),
+  privateKeyPath: text("private_key_path").notNull(),
+  fingerprint: text("fingerprint").notNull(),
+  keyType: text("key_type").$type<SshKeyType>().notNull().default("ed25519"),
+  allowedHosts: text("allowed_hosts", { mode: "json" })
+    .$type<string[]>()
+    .notNull()
+    .default([]),
+  port: integer("port").notNull().default(22),
+  createdAt: text("created_at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+  updatedAt: text("updated_at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+});
+
+export const sshSessions = sqliteTable("ssh_sessions", {
+  id: text("id").primaryKey(),
+  sshKeyId: text("ssh_key_id").notNull(),
+  host: text("host").notNull(),
+  status: text("status").$type<SshSessionStatus>().notNull().default("active"),
+  startedAt: text("started_at").notNull(),
+  completedAt: text("completed_at"),
+  terminalBuffer: text("terminal_buffer"),
+  initiatedBy: text("initiated_by").notNull().default("user"),
+  createdAt: text("created_at")
     .notNull()
     .$defaultFn(() => new Date().toISOString()),
 });

@@ -2414,6 +2414,104 @@ async function main() {
   });
 
   // =========================================================================
+  // SSH Key Management routes
+  // =========================================================================
+
+  app.get("/api/settings/ssh/keys", async () => {
+    const { SshService } = await import("./ssh/ssh-service.js");
+    const svc = new SshService();
+    return { keys: svc.list() };
+  });
+
+  app.get("/api/settings/ssh/keys/:id", async (req) => {
+    const { SshService } = await import("./ssh/ssh-service.js");
+    const svc = new SshService();
+    const key = svc.get((req.params as { id: string }).id);
+    if (!key) return { error: "Not found" };
+    const publicKey = svc.getPublicKey(key.id);
+    return { key, publicKey };
+  });
+
+  app.post("/api/settings/ssh/keys/generate", async (req) => {
+    const { SshService } = await import("./ssh/ssh-service.js");
+    const svc = new SshService();
+    const body = req.body as { name: string; username: string; allowedHosts: string[]; keyType?: "ed25519" | "rsa"; port?: number };
+    const key = svc.generateKey(body);
+    return { key };
+  });
+
+  app.post("/api/settings/ssh/keys/import", async (req) => {
+    const { SshService } = await import("./ssh/ssh-service.js");
+    const svc = new SshService();
+    const body = req.body as { name: string; username: string; privateKey: string; allowedHosts: string[]; port?: number };
+    try {
+      const key = svc.importKey(body);
+      return { key };
+    } catch (err) {
+      return { error: err instanceof Error ? err.message : "Import failed" };
+    }
+  });
+
+  app.put("/api/settings/ssh/keys/:id", async (req) => {
+    const { SshService } = await import("./ssh/ssh-service.js");
+    const svc = new SshService();
+    const id = (req.params as { id: string }).id;
+    const body = req.body as { name?: string; username?: string; allowedHosts?: string[]; port?: number };
+    const key = svc.update(id, body);
+    if (!key) return { error: "Not found" };
+    return { key };
+  });
+
+  app.delete("/api/settings/ssh/keys/:id", async (req) => {
+    const { SshService } = await import("./ssh/ssh-service.js");
+    const svc = new SshService();
+    const deleted = svc.deleteKey((req.params as { id: string }).id);
+    return { ok: deleted };
+  });
+
+  app.get("/api/settings/ssh/keys/:id/public-key", async (req) => {
+    const { SshService } = await import("./ssh/ssh-service.js");
+    const svc = new SshService();
+    const pubKey = svc.getPublicKey((req.params as { id: string }).id);
+    if (!pubKey) return { error: "Not found" };
+    return { publicKey: pubKey };
+  });
+
+  app.post("/api/settings/ssh/test", async (req) => {
+    const { SshService } = await import("./ssh/ssh-service.js");
+    const svc = new SshService();
+    const body = req.body as { keyId: string; host: string };
+    const result = svc.testConnection(body);
+    return result;
+  });
+
+  // =========================================================================
+  // SSH Session routes
+  // =========================================================================
+
+  app.get("/api/ssh/sessions", async (req) => {
+    const { SshService } = await import("./ssh/ssh-service.js");
+    const svc = new SshService();
+    const limit = parseInt((req.query as Record<string, string>).limit || "20", 10);
+    return { sessions: svc.listSessions(limit) };
+  });
+
+  app.get("/api/ssh/sessions/:id", async (req) => {
+    const { SshService } = await import("./ssh/ssh-service.js");
+    const svc = new SshService();
+    const session = svc.getSession((req.params as { id: string }).id);
+    if (!session) return { error: "Not found" };
+    return { session };
+  });
+
+  app.delete("/api/ssh/sessions/:id", async (req) => {
+    const { SshService } = await import("./ssh/ssh-service.js");
+    const svc = new SshService();
+    const deleted = svc.deleteSession((req.params as { id: string }).id);
+    return { ok: deleted };
+  });
+
+  // =========================================================================
   // Backup & Restore routes
   // =========================================================================
 
