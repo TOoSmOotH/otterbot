@@ -36,7 +36,7 @@ vi.mock("../github-service.js", () => ({
 }));
 
 import { GitHubIssueMonitor } from "../issue-monitor.js";
-import type { PipelineManager } from "../pipeline/pipeline-manager.js";
+import type { PipelineManager } from "../../pipeline/pipeline-manager.js";
 
 // Create mock COO
 function createMockCoo() {
