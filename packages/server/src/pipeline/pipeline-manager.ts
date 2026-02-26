@@ -748,7 +748,7 @@ export class PipelineManager {
                 try {
                   await createIssueComment(
                     state.repo, token, state.issueNumber,
-                    formatBotComment("Test Kickback", "Tests failed. Sending back to coder for fixes."),
+                    formatBotComment("Test Kickback", "Tests written by the tester revealed implementation issues. Sending back to coder for fixes."),
                   );
                 } catch { /* best effort */ }
               }
@@ -1162,7 +1162,8 @@ export class PipelineManager {
           // Test failure kickback
           parts.push(
             `\n[TEST FAILURE KICKBACK — Fix Required]`,
-            `Tests failed on your implementation. Fix the code so tests pass.`,
+            `The tester wrote tests for your implementation and they revealed bugs. Fix your implementation code so the tests pass.`,
+            `Do NOT modify or delete the test files — only fix the implementation.`,
             state.prBranch ? `Work on branch \`${state.prBranch}\`.` : "",
             `Do NOT create a PR — just fix and push.`,
           );
@@ -1230,13 +1231,34 @@ export class PipelineManager {
         break;
       }
       case "tester": {
+        const diffSection = await this.fetchDiffSection(state);
         parts.push(
-          `\nRun tests on branch \`${state.prBranch ?? "(see coder report)"}\` to validate the implementation.`,
-          `Install dependencies, build the project, and run the test suite.`,
-          `Report test results clearly — pass/fail with details.`,
+          `\nYou are the Tester for branch \`${state.prBranch ?? "(see coder report)"}\`.`,
+          `Your job is to **write tests** for the new/changed code and then **run them**.`,
+          ``,
+          `## Steps`,
+          `1. Check out the branch and review the changes (diff provided below).`,
+          `2. Identify what new functionality was added or changed.`,
+          `3. **Write unit tests** that cover the new/changed code. Place test files next to the source following existing project conventions (e.g. \`__tests__/\` directories, \`.test.ts\` suffix).`,
+          `4. Install dependencies and build the project if needed.`,
+          `5. **Run the full test suite** (both your new tests and existing tests).`,
+          `6. If your new tests fail because of a bug in the implementation (not a test bug), report VERDICT: FAIL so the code gets sent back to the coder for fixes. Include the failure details.`,
+          `7. If all tests pass, report VERDICT: PASS.`,
+          ``,
+          `## Guidelines`,
+          `- Focus on testing **behavior**, not implementation details.`,
+          `- Cover happy paths, edge cases, and error handling.`,
+          `- Do NOT modify the implementation code — only write/update test files.`,
+          `- If the implementation has a bug, do NOT fix it yourself — report FAIL with details so it goes back to the coder.`,
+          `- Commit and push your new test files to the branch before reporting.`,
+        );
+        if (diffSection) {
+          parts.push(diffSection);
+        }
+        parts.push(
           `\nIMPORTANT: End your report with exactly one of these verdicts on its own line:`,
-          `  VERDICT: PASS — if all tests pass`,
-          `  VERDICT: FAIL — if any tests fail (include failure details above)`,
+          `  VERDICT: PASS — if all tests (existing + new) pass`,
+          `  VERDICT: FAIL — if any tests fail due to implementation bugs (include failure details above)`,
         );
         const coderReport = state.stageReports.get("coder");
         if (coderReport) {
