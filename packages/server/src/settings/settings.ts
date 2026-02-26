@@ -1639,7 +1639,7 @@ export function getCodexSettings(): CodexSettingsResponse {
     enabled: getConfig("codex:enabled") === "true",
     authMode: (getConfig("codex:auth_mode") ?? "api-key") as "api-key" | "oauth",
     apiKeySet: !!getConfig("codex:api_key"),
-    model: getConfig("codex:model") ?? "codex-mini",
+    model: getConfig("codex:model") ?? "gpt-5.3-codex-medium",
     approvalMode: (getConfig("codex:approval_mode") ?? "full-auto") as "full-auto" | "on-failure" | "on-request" | "never",
     timeoutMs: parseInt(getConfig("codex:timeout_ms") ?? "1200000", 10),
   };

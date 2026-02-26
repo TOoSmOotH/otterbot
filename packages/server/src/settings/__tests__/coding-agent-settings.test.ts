@@ -131,7 +131,7 @@ describe("Coding agent settings", () => {
       expect(settings.enabled).toBe(false);
       expect(settings.authMode).toBe("api-key");
       expect(settings.apiKeySet).toBe(false);
-      expect(settings.model).toBe("codex-mini");
+      expect(settings.model).toBe("gpt-5.3-codex-medium");
       expect(settings.approvalMode).toBe("full-auto");
       expect(settings.timeoutMs).toBe(1200000);
     });

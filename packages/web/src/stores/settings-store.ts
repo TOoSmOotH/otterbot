@@ -517,7 +517,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   codexEnabled: false,
   codexAuthMode: "api-key",
   codexApiKeySet: false,
-  codexModel: "codex-mini",
+  codexModel: "gpt-5.3-codex-medium",
   codexApprovalMode: "full-auto",
   codexTimeoutMs: 1200000,
   codexTestResult: null,
@@ -1375,7 +1375,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
         codexEnabled: data.enabled,
         codexAuthMode: data.authMode ?? "api-key",
         codexApiKeySet: data.apiKeySet,
-        codexModel: data.model ?? "codex-mini",
+        codexModel: data.model ?? "gpt-5.3-codex-medium",
         codexApprovalMode: data.approvalMode ?? "full-auto",
         codexTimeoutMs: data.timeoutMs ?? 1200000,
       });

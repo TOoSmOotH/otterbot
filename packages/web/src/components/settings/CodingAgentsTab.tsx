@@ -303,7 +303,7 @@ function CodexSection() {
           </p>
         )}
 
-        <InputField label="Model" value={localModel} onChange={setLocalModel} placeholder="codex-mini" />
+        <InputField label="Model" value={localModel} onChange={setLocalModel} placeholder="gpt-5.3-codex-medium" />
         <SelectField label="Approval Mode" value={localApprovalMode} onChange={(v) => setLocalApprovalMode(v as "full-auto" | "on-failure" | "on-request" | "never")}
           options={[{ value: "full-auto", label: "Full Auto" }, { value: "on-failure", label: "On Failure" }, { value: "on-request", label: "On Request" }, { value: "never", label: "Never" }]} />
         <InputField label="Timeout (ms)" value={localTimeoutMs} onChange={setLocalTimeoutMs} placeholder="1200000" type="number" />

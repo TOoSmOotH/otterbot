@@ -156,7 +156,7 @@ const SEED_ENTRIES = [
       "Ideal for code generation, refactoring, and implementation tasks.",
     systemPrompt: "See assigned skills for instructions.",
     capabilities: [] as string[],
-    defaultModel: "codex-mini",
+    defaultModel: "gpt-5.3-codex-medium",
     defaultProvider: "openai",
     tools: [] as string[],
     builtIn: true,
