@@ -1,6 +1,7 @@
 import { useEffect } from "react";
-import type { MergeQueueStatus } from "@otterbot/shared";
+import type { MergeQueueStatus, KanbanTask } from "@otterbot/shared";
 import { useMergeQueueStore } from "../../stores/merge-queue-store";
+import { useProjectStore } from "../../stores/project-store";
 import { getSocket } from "../../lib/socket";
 
 const STATUS_CONFIG: Record<MergeQueueStatus, { label: string; color: string; bg: string }> = {
@@ -13,9 +14,18 @@ const STATUS_CONFIG: Record<MergeQueueStatus, { label: string; color: string; bg
   failed: { label: "Failed", color: "text-red-400", bg: "bg-red-400/10" },
 };
 
+function getPipelineLabel(task: KanbanTask): string {
+  if (task.pipelineStage) {
+    return task.pipelineStage.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+  }
+  if (task.column === "in_progress") return "In Progress";
+  return "In Review";
+}
+
 export function MergeQueueView({ projectId }: { projectId: string }) {
   const entries = useMergeQueueStore((s) => s.entries);
   const setEntries = useMergeQueueStore((s) => s.setEntries);
+  const tasks = useProjectStore((s) => s.tasks);
 
   useEffect(() => {
     const socket = getSocket();
@@ -24,6 +34,32 @@ export function MergeQueueView({ projectId }: { projectId: string }) {
     });
   }, [projectId, setEntries]);
 
+  // IDs of tasks already in the merge queue
+  const mqTaskIds = new Set(entries.filter((e) => e.projectId === projectId).map((e) => e.taskId));
+
+  // Tasks with PRs that are still in pipeline (in_progress with a PR)
+  const pipelineTasks = tasks
+    .filter(
+      (t) =>
+        t.projectId === projectId &&
+        t.prNumber != null &&
+        t.column === "in_progress" &&
+        !mqTaskIds.has(t.id),
+    )
+    .sort((a, b) => a.position - b.position);
+
+  // Tasks with PRs awaiting merge approval (in_review, not yet in queue)
+  const awaitingApprovalTasks = tasks
+    .filter(
+      (t) =>
+        t.projectId === projectId &&
+        t.prNumber != null &&
+        t.column === "in_review" &&
+        !mqTaskIds.has(t.id),
+    )
+    .sort((a, b) => a.position - b.position);
+
+  // Active merge queue entries (queued, rebasing, re_review, merging, conflict, failed)
   const activeEntries = entries
     .filter((e) => e.projectId === projectId && e.status !== "merged")
     .sort((a, b) => a.position - b.position);
@@ -41,20 +77,99 @@ export function MergeQueueView({ projectId }: { projectId: string }) {
     socket.emit("merge-queue:remove", { taskId });
   };
 
+  const handleApprove = (taskId: string) => {
+    const socket = getSocket();
+    socket.emit("merge-queue:approve", { taskId });
+  };
+
+  const hasAnyContent =
+    pipelineTasks.length > 0 ||
+    awaitingApprovalTasks.length > 0 ||
+    activeEntries.length > 0 ||
+    mergedEntries.length > 0;
+
   return (
     <div className="h-full overflow-y-auto p-6">
       <h2 className="text-lg font-semibold text-foreground mb-4">Merge Queue</h2>
 
-      {activeEntries.length === 0 && mergedEntries.length === 0 && (
+      {!hasAnyContent && (
         <div className="text-sm text-muted-foreground py-8 text-center">
-          No entries in the merge queue.
+          No PRs in the merge queue or pipeline.
+        </div>
+      )}
+
+      {pipelineTasks.length > 0 && (
+        <div className="mb-6">
+          <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">
+            In Pipeline ({pipelineTasks.length})
+          </h3>
+          <div className="space-y-2">
+            {pipelineTasks.map((task) => (
+              <div
+                key={task.id}
+                className="flex items-center gap-3 bg-card border border-border rounded-lg px-4 py-3"
+              >
+                <span className="font-medium text-sm">PR #{task.prNumber}</span>
+                <span className="text-xs text-muted-foreground truncate">
+                  {task.prBranch}
+                </span>
+                {task.taskNumber && (
+                  <span className="text-xs text-muted-foreground font-mono">
+                    #{task.taskNumber}
+                  </span>
+                )}
+                <span className="ml-auto">
+                  <span className="text-xs font-medium px-2 py-0.5 rounded text-yellow-400 bg-yellow-400/10">
+                    {getPipelineLabel(task)}
+                  </span>
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {awaitingApprovalTasks.length > 0 && (
+        <div className="mb-6">
+          <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">
+            Awaiting Approval ({awaitingApprovalTasks.length})
+          </h3>
+          <div className="space-y-2">
+            {awaitingApprovalTasks.map((task) => (
+              <div
+                key={task.id}
+                className="flex items-center gap-3 bg-card border border-border rounded-lg px-4 py-3"
+              >
+                <span className="font-medium text-sm">PR #{task.prNumber}</span>
+                <span className="text-xs text-muted-foreground truncate">
+                  {task.prBranch}
+                </span>
+                {task.taskNumber && (
+                  <span className="text-xs text-muted-foreground font-mono">
+                    #{task.taskNumber}
+                  </span>
+                )}
+                <span className="ml-auto flex items-center gap-2">
+                  <span className="text-xs font-medium px-2 py-0.5 rounded text-amber-400 bg-amber-400/10">
+                    Reviewed
+                  </span>
+                  <button
+                    className="text-xs font-medium px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25 transition-colors"
+                    onClick={() => handleApprove(task.id)}
+                  >
+                    Approve
+                  </button>
+                </span>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
       {activeEntries.length > 0 && (
         <div className="mb-6">
           <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">
-            Active ({activeEntries.length})
+            Queue ({activeEntries.length})
           </h3>
           <div className="space-y-2">
             {activeEntries.map((entry, i) => {
@@ -77,7 +192,7 @@ export function MergeQueueView({ projectId }: { projectId: string }) {
                     >
                       {config.label}
                     </span>
-                    {entry.status === "queued" && (
+                    {(entry.status === "queued" || entry.status === "conflict" || entry.status === "failed") && (
                       <button
                         className="text-muted-foreground hover:text-red-400 transition-colors text-sm"
                         onClick={() => handleRemove(entry.taskId)}
