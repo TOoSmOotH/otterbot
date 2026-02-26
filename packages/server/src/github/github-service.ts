@@ -276,6 +276,30 @@ async function ghFetch<T>(url: string, token: string, init?: RequestInit): Promi
 }
 
 // ---------------------------------------------------------------------------
+// Collaborator / contributor check
+// ---------------------------------------------------------------------------
+
+/**
+ * Check if a user is a collaborator on a repository.
+ * Uses GET /repos/{owner}/{repo}/collaborators/{username} which returns
+ * 204 if the user is a collaborator, 404 if not.
+ */
+export async function checkIsCollaborator(
+  repoFullName: string,
+  token: string,
+  username: string,
+): Promise<boolean> {
+  const res = await fetch(
+    `https://api.github.com/repos/${repoFullName}/collaborators/${encodeURIComponent(username)}`,
+    {
+      headers: GITHUB_HEADERS(token),
+    },
+  );
+  // 204 = is a collaborator, 404 = not a collaborator
+  return res.status === 204;
+}
+
+// ---------------------------------------------------------------------------
 // Issue APIs
 // ---------------------------------------------------------------------------
 
