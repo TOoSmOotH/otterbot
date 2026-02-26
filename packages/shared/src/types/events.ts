@@ -244,4 +244,14 @@ export interface ClientToServerEvents {
     data: { entryId: string; newPosition: number },
     callback?: (ack: { ok: boolean; error?: string }) => void,
   ) => void;
+
+  // Target branch
+  "project:get-branch": (
+    data: { projectId: string },
+    callback: (result: { branch: string | null }) => void,
+  ) => void;
+  "project:set-branch": (
+    data: { projectId: string; branch: string },
+    callback?: (ack: { ok: boolean; error?: string }) => void,
+  ) => void;
 }
