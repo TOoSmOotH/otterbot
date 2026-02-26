@@ -67,10 +67,8 @@ function extractTriageJson(text: string): TriageResult {
   const classification =
     classifications.find((c) => lower.includes(c)) ?? "question";
   const shouldProceed = ["bug", "feature", "enhancement"].includes(classification);
-  // Use first ~1500 chars of the response as the comment, truncating at sentence boundary
-  const raw = text.slice(0, 1500).replace(/\n+/g, " ").trim();
-  const lastEnd = Math.max(raw.lastIndexOf(". "), raw.lastIndexOf("? "), raw.lastIndexOf("! "));
-  const comment = lastEnd > 0 ? raw.slice(0, lastEnd + 1) : raw;
+  // Use the full response text as the comment, preserving markdown formatting
+  const comment = text.trim();
   const labels = [classification];
 
   console.warn(
@@ -409,7 +407,7 @@ export class PipelineManager {
         model,
         system: `${SECURITY_PREAMBLE}\n${entry.systemPrompt}`,
         prompt: issueText,
-        maxTokens: 2000,
+        maxTokens: 4000,
       });
 
       // Parse JSON response
@@ -443,20 +441,6 @@ export class PipelineManager {
       ];
       parsed.labels = (parsed.labels ?? []).filter((l) => ALLOWED_LABELS.includes(l));
 
-      if (typeof parsed.comment === "string" && parsed.comment.length > 1500) {
-        // Truncate at the last sentence boundary within 1500 chars to avoid mid-sentence cuts
-        const truncated = parsed.comment.slice(0, 1500);
-        const lastSentenceEnd = Math.max(
-          truncated.lastIndexOf(". "),
-          truncated.lastIndexOf(".\n"),
-          truncated.lastIndexOf("? "),
-          truncated.lastIndexOf("! "),
-        );
-        parsed.comment = lastSentenceEnd > 0
-          ? truncated.slice(0, lastSentenceEnd + 1)
-          : truncated;
-      }
-
       parsed.shouldProceed = !!parsed.shouldProceed;
 
       // Apply labels
@@ -475,11 +459,10 @@ export class PipelineManager {
         console.error(`[PipelineManager] Failed to apply triaged label to #${issue.number}:`, err);
       }
 
-      // Post classification comment
-      const commentBody = formatBotComment(
-        `Triage: ${parsed.classification}`,
-        parsed.comment,
-      );
+      // Post classification comment — no truncation; use the full markdown comment
+      const triageTitle = `Triage: ${parsed.classification}`;
+      const comment = typeof parsed.comment === "string" ? parsed.comment : "";
+      const commentBody = formatBotComment(triageTitle, comment);
 
       try {
         await createIssueComment(repo, token, issue.number, commentBody);
@@ -1374,9 +1357,15 @@ export class PipelineManager {
     } else {
       // Completion — clean the report and put it in a collapsible section
       const cleaned = cleanTerminalOutput(report);
-      const preview = cleaned.length > 500
-        ? cleaned.slice(0, 500) + "\n\n_(truncated)_"
-        : cleaned;
+      let preview: string;
+      if (cleaned.length > 500) {
+        // Try to break at a paragraph boundary (double newline) within 500 chars
+        const slice = cleaned.slice(0, 500);
+        const paraBreak = slice.lastIndexOf("\n\n");
+        preview = (paraBreak > 100 ? slice.slice(0, paraBreak) : slice) + "\n\n_(see details for full output)_";
+      } else {
+        preview = cleaned;
+      }
 
       const completeTitles: Record<string, string> = {
         coder: "Implementation Complete",

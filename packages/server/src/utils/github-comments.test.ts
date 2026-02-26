@@ -43,4 +43,33 @@ describe("formatBotCommentWithDetails", () => {
     const result = formatBotCommentWithDetails("Title", "Summary", details);
     expect(result).toContain(details);
   });
+
+  it("wraps details in a code block to preserve formatting", () => {
+    const details = "Terminal output with **markdown** that should not be interpreted";
+    const result = formatBotCommentWithDetails("Title", "Summary", details);
+    expect(result).toContain("```\n");
+    expect(result).toContain("\n```");
+    const wrappedDetails = result.match(/<details>[\s\S]*?<\/details>/)?.[0] || "";
+    expect(wrappedDetails).toContain("```\n" + details + "\n```");
+  });
+
+  it("preserves special characters in terminal output", () => {
+    const details = "stdout: test\nstderr: error\nexit code: 1";
+    const result = formatBotCommentWithDetails("Title", "Summary", details);
+    expect(result).toContain(details);
+  });
+
+  it("handles details with backticks", () => {
+    const details = "Run `npm test` to verify";
+    const result = formatBotCommentWithDetails("Title", "Summary", details);
+    expect(result).toContain(details);
+  });
+
+  it("handles details with markdown that could break the comment", () => {
+    const details = "# Heading\n\n- List item\n\n```\ncode block\n```";
+    const result = formatBotCommentWithDetails("Title", "Summary", details);
+    expect(result).toContain("### Title");
+    expect(result).toContain("<details>");
+    expect(result).toContain(details);
+  });
 });
