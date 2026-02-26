@@ -24,13 +24,13 @@ const mockCreateIssueComment = vi.fn().mockResolvedValue({
   html_url: "",
 });
 const mockFetchOpenIssues = vi.fn().mockResolvedValue([]);
-const mockCheckIsCollaborator = vi.fn().mockResolvedValue(true);
+const mockCheckHasTriageAccess = vi.fn().mockResolvedValue(true);
 vi.mock("../github-service.js", () => ({
   fetchAssignedIssues: (...args: any[]) => mockFetchAssignedIssues(...args),
   fetchOpenIssues: (...args: any[]) => mockFetchOpenIssues(...args),
   createIssueComment: (...args: any[]) => mockCreateIssueComment(...args),
   addLabelsToIssue: vi.fn().mockResolvedValue(undefined),
-  checkIsCollaborator: (...args: any[]) => mockCheckIsCollaborator(...args),
+  checkHasTriageAccess: (...args: any[]) => mockCheckHasTriageAccess(...args),
   cloneRepo: vi.fn(),
   getRepoDefaultBranch: vi.fn().mockResolvedValue("main"),
 }));
@@ -117,7 +117,7 @@ describe("GitHubIssueMonitor", () => {
       html_url: "",
     });
     mockFetchOpenIssues.mockReset().mockResolvedValue([]);
-    mockCheckIsCollaborator.mockReset().mockResolvedValue(true);
+    mockCheckHasTriageAccess.mockReset().mockResolvedValue(true);
     process.env.DATABASE_URL = `file:${join(tmpDir, "test.db")}`;
     process.env.OTTERBOT_DB_KEY = "test-key";
     await migrateDb();
@@ -766,7 +766,7 @@ describe("triage collaborator check", () => {
     configStore.set("github:username", "otterbot");
     configStore.set("github:token", "ghp_test");
     configStore.set("github:username", "otterbot");
-    mockCheckIsCollaborator.mockResolvedValue(true);
+    mockCheckHasTriageAccess.mockResolvedValue(true);
   });
 
   afterEach(() => {
@@ -793,7 +793,7 @@ describe("triage collaborator check", () => {
     monitor.watchProject("proj-triage-no-collab", "owner/repo", "testuser");
     configStore.set("pipeline:proj-triage-no-collab:enabled", "true");
     configStore.set("pipeline:proj-triage-no-collab:stages.triage.enabled", "true");
-    mockCheckIsCollaborator.mockResolvedValue(false);
+    mockCheckHasTriageAccess.mockResolvedValue(false);
 
     await (monitor as any).poll();
 
@@ -836,7 +836,7 @@ describe("triage collaborator check", () => {
     await (monitor as any).poll();
 
     expect(mockFetchOpenIssues).toHaveBeenCalledWith("owner/repo", "ghp_test", undefined);
-    expect(mockCheckIsCollaborator).toHaveBeenCalledWith("owner/repo", "ghp_test", "otterbot");
+    expect(mockCheckHasTriageAccess).toHaveBeenCalledWith("owner/repo", "ghp_test");
   });
 
   it("caches collaborator status for the same repo", async () => {
@@ -862,7 +862,7 @@ describe("triage collaborator check", () => {
     await (monitor as any).poll();
     await (monitor as any).poll();
 
-    expect(mockCheckIsCollaborator).toHaveBeenCalledTimes(1);
+    expect(mockCheckHasTriageAccess).toHaveBeenCalledTimes(1);
   });
 
   it("refreshes cache after TTL expires", async () => {
@@ -893,12 +893,12 @@ describe("triage collaborator check", () => {
 
     await (monitor as any).poll();
 
-    expect(mockCheckIsCollaborator).toHaveBeenCalledTimes(2);
+    expect(mockCheckHasTriageAccess).toHaveBeenCalledTimes(2);
 
     vi.useRealTimers();
   });
 
-  it("handles collaborator check failure gracefully (fail open)", async () => {
+  it("handles collaborator check failure gracefully (fail closed)", async () => {
     const db = getDb();
 
     db.insert(schema.projects)
@@ -917,13 +917,13 @@ describe("triage collaborator check", () => {
 
     monitor.watchProject("proj-fail-open", "owner/repo", "testuser");
     setPipelineConfig("proj-fail-open", { triage: { enabled: true } });
-    mockCheckIsCollaborator.mockRejectedValue(new Error("API error"));
+    mockCheckHasTriageAccess.mockRejectedValue(new Error("API error"));
 
     mockFetchOpenIssues.mockResolvedValue([]);
 
     await (monitor as any).poll();
 
-    expect(mockFetchOpenIssues).toHaveBeenCalledWith("owner/repo", "ghp_test", undefined);
+    expect(mockFetchOpenIssues).not.toHaveBeenCalled();
   });
 
   it("skips triage when github:username is not set", async () => {
@@ -951,7 +951,7 @@ describe("triage collaborator check", () => {
 
     await (monitor as any).poll();
 
-    expect(mockCheckIsCollaborator).not.toHaveBeenCalled();
+    expect(mockCheckHasTriageAccess).not.toHaveBeenCalled();
     expect(mockFetchOpenIssues).not.toHaveBeenCalled();
   });
 });
