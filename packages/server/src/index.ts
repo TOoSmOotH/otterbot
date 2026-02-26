@@ -3274,7 +3274,7 @@ async function main() {
       authMode?: "api-key" | "oauth";
       apiKey?: string;
       model?: string;
-      approvalMode?: "full-auto" | "suggest" | "ask";
+      approvalMode?: "full-auto" | "on-failure" | "on-request" | "never";
       timeoutMs?: number;
     };
   }>("/api/settings/codex", async (req) => {
