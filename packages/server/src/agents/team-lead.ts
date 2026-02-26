@@ -815,7 +815,7 @@ export class TeamLead extends BaseAgent {
         actionRequired;
 
       const waitSummary =
-        `[Worker ${message.fromAgentId} report]: ${message.content}\n\n` +
+        `[Worker ${(message.fromAgentId && this.workers.get(message.fromAgentId)?.name) ?? message.fromAgentId} report]: ${message.content}\n\n` +
         taskNotice +
         `[KANBAN BOARD]\n${board.summary}\n[/KANBAN BOARD]\n\n` +
         waitInstructions;
@@ -890,7 +890,7 @@ export class TeamLead extends BaseAgent {
     }
 
     const summary =
-      `[Worker ${message.fromAgentId} report]: ${message.content}\n\n` +
+      `[Worker ${(message.fromAgentId && this.workers.get(message.fromAgentId)?.name) ?? message.fromAgentId} report]: ${message.content}\n\n` +
       taskNotice +
       `[KANBAN BOARD]\n${board.summary}\n[/KANBAN BOARD]\n\n` +
       instructions;
@@ -1246,7 +1246,7 @@ export class TeamLead extends BaseAgent {
   }
 
   override getStatusSummary(): string {
-    return `TeamLead ${this.id} [${this.status}] — ${this.workers.size} worker(s)`;
+    return `TeamLead ${this.name ?? this.id} [${this.status}] — ${this.workers.size} worker(s)`;
   }
 
   protected getTools(): Record<string, unknown> {
@@ -1709,7 +1709,7 @@ export class TeamLead extends BaseAgent {
         assignedMsg = kanbanT ? ` ${this.taskLabel(kanbanT)} moved to in_progress.` : ` Task ${taskId} moved to in_progress.`;
       }
       console.log(`[TeamLead ${this.id}] Worker ${workerId} spawned and directive sent`);
-      return `Spawned ${entry.name} worker (${worker.id}) and assigned task.${assignedMsg}`;
+      return `Spawned ${entry.name} worker "${workerName}" and assigned task.${assignedMsg}`;
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
       console.error(`[TeamLead ${this.id}] Failed to spawn worker: ${errMsg}`, err);

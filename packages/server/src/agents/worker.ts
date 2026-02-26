@@ -161,7 +161,7 @@ export class Worker extends BaseAgent {
   }
 
   override getStatusSummary(): string {
-    return `Worker ${this.id} [${this.status}]`;
+    return `Worker ${this.name ?? this.id} [${this.status}]`;
   }
 
   protected getTools(): Record<string, unknown> {
