@@ -682,9 +682,10 @@ The user can see everything on the desktop in real-time.`;
       }),
       delegate_to_admin: tool({
         description:
-          "Delegate a personal/administrative task to the Admin Assistant. " +
-          "Use this for: todos, reminders, email, calendar, and other personal productivity tasks. " +
-          "Do NOT create a project for these — they are personal tasks, not engineering work.",
+          "Delegate a task to the Admin Assistant for direct execution. " +
+          "Use this for: todos, reminders, email, calendar, SSH commands, remote server operations, " +
+          "memory/notes, custom tools, and other tasks that don't require a full project. " +
+          "Do NOT create a project for these — they are operational tasks, not engineering work.",
         parameters: z.object({
           request: z.string().describe(
             "The request to send to the Admin Assistant, in natural language"
@@ -698,7 +699,7 @@ The user can see everything on the desktop in real-time.`;
               type: MessageType.Chat,
               content: request,
             },
-            30_000,
+            60_000,
           );
           if (!reply) {
             return "The Admin Assistant did not respond in time. Please try again.";
