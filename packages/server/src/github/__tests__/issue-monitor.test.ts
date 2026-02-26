@@ -23,16 +23,20 @@ const mockCreateIssueComment = vi.fn().mockResolvedValue({
   updated_at: "2026-01-01T00:00:00Z",
   html_url: "",
 });
+const mockFetchOpenIssues = vi.fn().mockResolvedValue([]);
+const mockCheckIsCollaborator = vi.fn().mockResolvedValue(true);
 vi.mock("../github-service.js", () => ({
   fetchAssignedIssues: (...args: any[]) => mockFetchAssignedIssues(...args),
-  fetchOpenIssues: vi.fn().mockResolvedValue([]),
+  fetchOpenIssues: (...args: any[]) => mockFetchOpenIssues(...args),
   createIssueComment: (...args: any[]) => mockCreateIssueComment(...args),
   addLabelsToIssue: vi.fn().mockResolvedValue(undefined),
+  checkIsCollaborator: (...args: any[]) => mockCheckIsCollaborator(...args),
   cloneRepo: vi.fn(),
   getRepoDefaultBranch: vi.fn().mockResolvedValue("main"),
 }));
 
 import { GitHubIssueMonitor } from "../issue-monitor.js";
+import type { PipelineManager } from "../pipeline/pipeline-manager.js";
 
 // Create mock COO
 function createMockCoo() {
@@ -60,6 +64,39 @@ function createMockIo() {
   };
 }
 
+function createMockPipelineManager() {
+  return {
+    isEnabled: vi.fn((projectId: string) => {
+      const config = configStore.get(`project:${projectId}:pipeline-config`);
+      if (!config) return false;
+      const parsed = JSON.parse(config);
+      return parsed.enabled === true;
+    }),
+    getConfig: vi.fn((projectId: string) => {
+      const config = configStore.get(`project:${projectId}:pipeline-config`);
+      if (!config) return null;
+      return JSON.parse(config);
+    }),
+    createTriageTask: vi.fn(),
+    runTriage: vi.fn(),
+    createTask: vi.fn(),
+  } as unknown as PipelineManager;
+}
+
+function setPipelineConfig(projectId: string, stageOverrides: Record<string, { enabled?: boolean; agentId?: string }> = {}) {
+  const config = {
+    enabled: true,
+    stages: {
+      triage: { enabled: false, ...stageOverrides.triage },
+      coder: { enabled: true, ...stageOverrides.coder },
+      security: { enabled: true, ...stageOverrides.security },
+      tester: { enabled: true, ...stageOverrides.tester },
+      reviewer: { enabled: true, ...stageOverrides.reviewer },
+    },
+  };
+  configStore.set(`project:${projectId}:pipeline-config`, JSON.stringify(config));
+}
+
 describe("GitHubIssueMonitor", () => {
   let tmpDir: string;
   let mockCoo: ReturnType<typeof createMockCoo>;
@@ -79,6 +116,8 @@ describe("GitHubIssueMonitor", () => {
       updated_at: "2026-01-01T00:00:00Z",
       html_url: "",
     });
+    mockFetchOpenIssues.mockReset().mockResolvedValue([]);
+    mockCheckIsCollaborator.mockReset().mockResolvedValue(true);
     process.env.DATABASE_URL = `file:${join(tmpDir, "test.db")}`;
     process.env.OTTERBOT_DB_KEY = "test-key";
     await migrateDb();
@@ -86,6 +125,7 @@ describe("GitHubIssueMonitor", () => {
     mockCoo = createMockCoo();
     mockIo = createMockIo();
     monitor = new GitHubIssueMonitor(mockCoo as any, mockIo as any);
+    (monitor as any).pipelineManager = createMockPipelineManager();
   });
 
   afterEach(() => {
@@ -716,8 +756,203 @@ describe("GitHubIssueMonitor", () => {
 
       expect(firstId).toBe(secondId);
 
-      monitor.stop();
-      vi.useRealTimers();
-    });
+    monitor.stop();
+    vi.useRealTimers();
   });
+});
+
+describe("triage collaborator check", () => {
+  beforeEach(() => {
+    configStore.set("github:username", "otterbot");
+    configStore.set("github:token", "ghp_test");
+    configStore.set("github:username", "otterbot");
+    mockCheckIsCollaborator.mockResolvedValue(true);
+  });
+
+  afterEach(() => {
+    configStore.delete("github:username");
+  });
+
+  it("skips triage when bot is not a collaborator", async () => {
+    const db = getDb();
+
+    db.insert(schema.projects)
+      .values({
+        id: "proj-triage-no-collab",
+        name: "Triage No Collab",
+        description: "test",
+        status: "active",
+        githubRepo: "owner/repo",
+        githubBranch: "main",
+        githubIssueMonitor: true,
+        rules: [],
+        createdAt: new Date().toISOString(),
+      })
+      .run();
+
+    monitor.watchProject("proj-triage-no-collab", "owner/repo", "testuser");
+    configStore.set("pipeline:proj-triage-no-collab:enabled", "true");
+    configStore.set("pipeline:proj-triage-no-collab:stages.triage.enabled", "true");
+    mockCheckIsCollaborator.mockResolvedValue(false);
+
+    await (monitor as any).poll();
+
+    expect(mockFetchOpenIssues).not.toHaveBeenCalled();
+  });
+
+  it("performs triage when bot is a collaborator", async () => {
+    const db = getDb();
+
+    db.insert(schema.projects)
+      .values({
+        id: "proj-triage-collab",
+        name: "Triage Collab",
+        description: "test",
+        status: "active",
+        githubRepo: "owner/repo",
+        githubBranch: "main",
+        githubIssueMonitor: true,
+        rules: [],
+        createdAt: new Date().toISOString(),
+      })
+      .run();
+
+    monitor.watchProject("proj-triage-collab", "owner/repo", "testuser");
+    setPipelineConfig("proj-triage-collab", { triage: { enabled: true } });
+
+    mockFetchOpenIssues.mockResolvedValue([
+      {
+        number: 5,
+        title: "Issue needing triage",
+        body: "Bug report",
+        labels: [{ name: "bug" }],
+        state: "open",
+        html_url: "https://github.com/owner/repo/issues/5",
+        created_at: "2026-02-01T00:00:00Z",
+        updated_at: "2026-02-02T00:00:00Z",
+      },
+    ]);
+
+    await (monitor as any).poll();
+
+    expect(mockFetchOpenIssues).toHaveBeenCalledWith("owner/repo", "ghp_test", undefined);
+    expect(mockCheckIsCollaborator).toHaveBeenCalledWith("owner/repo", "ghp_test", "otterbot");
+  });
+
+  it("caches collaborator status for the same repo", async () => {
+    const db = getDb();
+
+    db.insert(schema.projects)
+      .values({
+        id: "proj-cached",
+        name: "Cached",
+        description: "test",
+        status: "active",
+        githubRepo: "owner/repo",
+        githubBranch: "main",
+        githubIssueMonitor: true,
+        rules: [],
+        createdAt: new Date().toISOString(),
+      })
+      .run();
+
+    monitor.watchProject("proj-cached", "owner/repo", "testuser");
+    setPipelineConfig("proj-cached", { triage: { enabled: true } });
+
+    await (monitor as any).poll();
+    await (monitor as any).poll();
+
+    expect(mockCheckIsCollaborator).toHaveBeenCalledTimes(1);
+  });
+
+  it("refreshes cache after TTL expires", async () => {
+    vi.useFakeTimers();
+
+    const db = getDb();
+
+    db.insert(schema.projects)
+      .values({
+        id: "proj-cache-refresh",
+        name: "Cache Refresh",
+        description: "test",
+        status: "active",
+        githubRepo: "owner/repo",
+        githubBranch: "main",
+        githubIssueMonitor: true,
+        rules: [],
+        createdAt: new Date().toISOString(),
+      })
+      .run();
+
+    monitor.watchProject("proj-cache-refresh", "owner/repo", "testuser");
+    setPipelineConfig("proj-cache-refresh", { triage: { enabled: true } });
+
+    await (monitor as any).poll();
+
+    vi.advanceTimersByTime(600_001);
+
+    await (monitor as any).poll();
+
+    expect(mockCheckIsCollaborator).toHaveBeenCalledTimes(2);
+
+    vi.useRealTimers();
+  });
+
+  it("handles collaborator check failure gracefully (fail open)", async () => {
+    const db = getDb();
+
+    db.insert(schema.projects)
+      .values({
+        id: "proj-fail-open",
+        name: "Fail Open",
+        description: "test",
+        status: "active",
+        githubRepo: "owner/repo",
+        githubBranch: "main",
+        githubIssueMonitor: true,
+        rules: [],
+        createdAt: new Date().toISOString(),
+      })
+      .run();
+
+    monitor.watchProject("proj-fail-open", "owner/repo", "testuser");
+    setPipelineConfig("proj-fail-open", { triage: { enabled: true } });
+    mockCheckIsCollaborator.mockRejectedValue(new Error("API error"));
+
+    mockFetchOpenIssues.mockResolvedValue([]);
+
+    await (monitor as any).poll();
+
+    expect(mockFetchOpenIssues).toHaveBeenCalledWith("owner/repo", "ghp_test", undefined);
+  });
+
+  it("skips triage when github:username is not set", async () => {
+    const db = getDb();
+
+    db.insert(schema.projects)
+      .values({
+        id: "proj-no-username",
+        name: "No Username",
+        description: "test",
+        status: "active",
+        githubRepo: "owner/repo",
+        githubBranch: "main",
+        githubIssueMonitor: true,
+        rules: [],
+        createdAt: new Date().toISOString(),
+      })
+      .run();
+
+    monitor.watchProject("proj-no-username", "owner/repo", "testuser");
+    configStore.set("pipeline:proj-no-username:enabled", "true");
+    configStore.set("pipeline:proj-no-username:stages.triage.enabled", "true");
+    configStore.delete("github:username");
+    configStore.set("pipeline:proj-no-username:stages.triage.enabled", "true");
+
+    await (monitor as any).poll();
+
+    expect(mockCheckIsCollaborator).not.toHaveBeenCalled();
+    expect(mockFetchOpenIssues).not.toHaveBeenCalled();
+  });
+});
 });
