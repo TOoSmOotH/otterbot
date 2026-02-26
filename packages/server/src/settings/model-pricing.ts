@@ -37,6 +37,11 @@ const DEFAULT_MODEL_PRICES: Record<string, ModelPrice> = {
   // DeepSeek
   "deepseek-chat": { inputPerMillion: 0.27, outputPerMillion: 1.10 },
   "deepseek-reasoner": { inputPerMillion: 0.55, outputPerMillion: 2.19 },
+  // Mistral
+  "mistral-large-latest": { inputPerMillion: 2, outputPerMillion: 6 },
+  "mistral-small-latest": { inputPerMillion: 0.1, outputPerMillion: 0.3 },
+  "codestral-latest": { inputPerMillion: 0.3, outputPerMillion: 0.9 },
+  "mistral-medium-latest": { inputPerMillion: 2.7, outputPerMillion: 8.1 },
   // Google
   "gemini-2.5-pro": { inputPerMillion: 1.25, outputPerMillion: 10 },
   "gemini-2.5-flash": { inputPerMillion: 0.15, outputPerMillion: 0.6 },
