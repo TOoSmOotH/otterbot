@@ -626,6 +626,54 @@ export function setupSocketHandlers(
       }
     });
 
+    // Get target branch for a project
+    socket.on("project:get-branch", (data, callback) => {
+      const configBranch = getConfig(`project:${data.projectId}:github:branch`);
+      if (configBranch) {
+        callback({ branch: configBranch });
+        return;
+      }
+      // Fall back to DB column
+      const db = getDb();
+      const project = db
+        .select({ githubBranch: schema.projects.githubBranch })
+        .from(schema.projects)
+        .where(eq(schema.projects.id, data.projectId))
+        .get();
+      callback({ branch: project?.githubBranch ?? null });
+    });
+
+    // Set target branch for a project
+    socket.on("project:set-branch", (data, callback) => {
+      try {
+        const branch = data.branch.trim();
+        if (!branch) {
+          callback?.({ ok: false, error: "Branch name cannot be empty" });
+          return;
+        }
+        // Update config key (used at runtime by pipeline consumers)
+        setConfig(`project:${data.projectId}:github:branch`, branch);
+        // Update DB column to keep in sync
+        const db = getDb();
+        db.update(schema.projects)
+          .set({ githubBranch: branch })
+          .where(eq(schema.projects.id, data.projectId))
+          .run();
+        // Emit project:updated so UI refreshes
+        const updated = db
+          .select()
+          .from(schema.projects)
+          .where(eq(schema.projects.id, data.projectId))
+          .get();
+        if (updated) {
+          io.emit("project:updated", updated as any);
+        }
+        callback?.({ ok: true });
+      } catch (err) {
+        callback?.({ ok: false, error: err instanceof Error ? err.message : "Failed to save branch" });
+      }
+    });
+
     // Retrieve agent activity (bus messages + persisted activity records)
     socket.on("agent:activity", (data, callback) => {
       const db = getDb();
