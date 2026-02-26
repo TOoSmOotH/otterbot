@@ -4,6 +4,7 @@ import { useSettingsStore } from "../../stores/settings-store";
 import { useProjectStore } from "../../stores/project-store";
 import { useSpeechToText } from "../../hooks/use-speech-to-text";
 import { getSocket } from "../../lib/socket";
+import { cancelTts } from "../../hooks/use-socket";
 import { cn } from "../../lib/utils";
 import { MarkdownContent } from "./MarkdownContent";
 
@@ -156,6 +157,10 @@ export function CeoChat({ cooName, detached }: { cooName?: string; detached?: bo
     setSpeakerOn((prev) => {
       const next = !prev;
       localStorage.setItem("otterbot:speaker", String(next));
+      // When turning speaker off, immediately stop all TTS playback
+      if (!next) {
+        cancelTts();
+      }
       return next;
     });
   }, []);

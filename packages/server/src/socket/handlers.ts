@@ -28,6 +28,9 @@ import { existsSync, rmSync } from "node:fs";
 import type { PtyClient } from "../agents/worker.js";
 
 type TypedSocket = Socket<ClientToServerEvents, ServerToClientEvents>;
+
+/** Monotonically increasing counter; bumped on cancel to suppress in-flight TTS */
+let ttsGeneration = 0;
 type TypedServer = Server<ClientToServerEvents, ServerToClientEvents>;
 
 // Server-side part accumulator (mirrors client's partBuffers)
@@ -143,6 +146,7 @@ export function setupSocketHandlers(
             ? stripMarkdown(message.content)
             : "";
           if (provider && plainText) {
+            const gen = ttsGeneration; // snapshot before async work
             const voice = getConfig("tts:voice") ?? "af_heart";
             const speed = parseFloat(getConfig("tts:speed") ?? "1");
             const { audio, contentType } = await provider.synthesize(
@@ -150,6 +154,8 @@ export function setupSocketHandlers(
               voice,
               speed,
             );
+            // If cancelled while synthesizing, discard the result
+            if (gen !== ttsGeneration) return;
             io.emit("coo:audio", {
               messageId: message.id,
               audio: audio.toString("base64"),
@@ -229,6 +235,14 @@ export function setupSocketHandlers(
     // CEO starts a new chat (reset COO conversation)
     socket.on("ceo:new-chat", (callback) => {
       coo.resetConversation();
+      if (callback) {
+        callback({ ok: true });
+      }
+    });
+
+    // Cancel in-flight TTS synthesis
+    socket.on("ceo:cancel-tts", (callback) => {
+      ttsGeneration++;
       if (callback) {
         callback({ ok: true });
       }
