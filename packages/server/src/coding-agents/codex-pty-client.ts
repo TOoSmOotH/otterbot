@@ -64,7 +64,11 @@ export class CodexPtyClient implements CodingAgentClient {
 
       // Set approval mode
       const approvalMode = getConfig("codex:approval_mode") ?? "full-auto";
-      args.push("--approval-mode", approvalMode);
+      if (approvalMode === "full-auto") {
+        args.push("--full-auto");
+      } else {
+        args.push("-a", approvalMode);
+      }
 
       // Set model if configured
       const model = getConfig("codex:model");

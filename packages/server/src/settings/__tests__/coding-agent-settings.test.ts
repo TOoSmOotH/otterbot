@@ -141,7 +141,7 @@ describe("Coding agent settings", () => {
         enabled: true,
         apiKey: "sk-codex-456",
         model: "codex-large",
-        approvalMode: "suggest",
+        approvalMode: "on-failure",
         timeoutMs: 300000,
       });
 
@@ -149,7 +149,7 @@ describe("Coding agent settings", () => {
       expect(settings.enabled).toBe(true);
       expect(settings.apiKeySet).toBe(true);
       expect(settings.model).toBe("codex-large");
-      expect(settings.approvalMode).toBe("suggest");
+      expect(settings.approvalMode).toBe("on-failure");
       expect(settings.timeoutMs).toBe(300000);
     });
 

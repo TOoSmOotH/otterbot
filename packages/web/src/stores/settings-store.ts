@@ -139,7 +139,7 @@ interface SettingsState {
   codexAuthMode: "api-key" | "oauth";
   codexApiKeySet: boolean;
   codexModel: string;
-  codexApprovalMode: "full-auto" | "suggest" | "ask";
+  codexApprovalMode: "full-auto" | "on-failure" | "on-request" | "never";
   codexTimeoutMs: number;
   codexTestResult: TestResult | null;
 
@@ -342,7 +342,7 @@ interface SettingsState {
     authMode?: "api-key" | "oauth";
     apiKey?: string;
     model?: string;
-    approvalMode?: "full-auto" | "suggest" | "ask";
+    approvalMode?: "full-auto" | "on-failure" | "on-request" | "never";
     timeoutMs?: number;
   }) => Promise<void>;
   testCodexConnection: () => Promise<void>;

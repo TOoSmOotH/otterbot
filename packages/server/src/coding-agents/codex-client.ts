@@ -22,7 +22,7 @@ export interface CodexConfig {
   workspacePath?: string | null;
   apiKey?: string;
   model?: string;
-  approvalMode?: "full-auto" | "suggest" | "ask";
+  approvalMode?: "full-auto" | "on-failure" | "on-request" | "never";
   timeoutMs?: number;
   maxTurns?: number;
   onEvent?: OnEvent;
@@ -54,7 +54,11 @@ export class CodexClient implements CodingAgentClient {
 
       // Set approval mode
       const approvalMode = this.config.approvalMode ?? "full-auto";
-      args.push("--approval-mode", approvalMode);
+      if (approvalMode === "full-auto") {
+        args.push("--full-auto");
+      } else {
+        args.push("-a", approvalMode);
+      }
 
       // Set model if specified
       if (this.config.model) {

@@ -1630,7 +1630,7 @@ export interface CodexSettingsResponse {
   authMode: "api-key" | "oauth";
   apiKeySet: boolean;
   model: string;
-  approvalMode: "full-auto" | "suggest" | "ask";
+  approvalMode: "full-auto" | "on-failure" | "on-request" | "never";
   timeoutMs: number;
 }
 
@@ -1640,7 +1640,7 @@ export function getCodexSettings(): CodexSettingsResponse {
     authMode: (getConfig("codex:auth_mode") ?? "api-key") as "api-key" | "oauth",
     apiKeySet: !!getConfig("codex:api_key"),
     model: getConfig("codex:model") ?? "codex-mini",
-    approvalMode: (getConfig("codex:approval_mode") ?? "full-auto") as "full-auto" | "suggest" | "ask",
+    approvalMode: (getConfig("codex:approval_mode") ?? "full-auto") as "full-auto" | "on-failure" | "on-request" | "never",
     timeoutMs: parseInt(getConfig("codex:timeout_ms") ?? "1200000", 10),
   };
 }
@@ -1650,7 +1650,7 @@ export async function updateCodexSettings(data: {
   authMode?: "api-key" | "oauth";
   apiKey?: string;
   model?: string;
-  approvalMode?: "full-auto" | "suggest" | "ask";
+  approvalMode?: "full-auto" | "on-failure" | "on-request" | "never";
   timeoutMs?: number;
 }): Promise<void> {
   if (data.enabled !== undefined) {
