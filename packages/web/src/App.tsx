@@ -28,6 +28,7 @@ import { CodeView } from "./components/code/CodeView";
 import { ProjectSettings } from "./components/project/ProjectSettings";
 import { MergeQueueView } from "./components/project/MergeQueueView";
 import { DetachedLiveView } from "./components/live-view/DetachedLiveView";
+import { DetachedCeoChat } from "./components/chat/DetachedCeoChat";
 import { useDesktopStore } from "./stores/desktop-store";
 import { useOpenCodeStore } from "./stores/opencode-store";
 import { useSettingsStore } from "./stores/settings-store";
@@ -60,6 +61,12 @@ export default function App() {
   const isDetached3D = new URLSearchParams(window.location.search).has("detached-3d");
   if (isDetached3D && screen === "app") {
     return <DetachedLiveView />;
+  }
+
+  // Detached chat mode
+  const isDetachedChat = new URLSearchParams(window.location.search).has("detached-chat");
+  if (isDetachedChat && screen === "app") {
+    return <DetachedCeoChat />;
   }
 
   if (screen === "loading") {
