@@ -16,7 +16,7 @@ vi.mock("node:child_process", () => ({
   execFileSync: (...args: any[]) => mockExecFileSync(...args),
 }));
 
-import { cloneRepo, getRepoDefaultBranch, fetchAssignedIssues } from "../github-service.js";
+import { cloneRepo, getRepoDefaultBranch, fetchAssignedIssues, fetchCheckRunsForRef, aggregateCheckRunStatus } from "../github-service.js";
 
 describe("github-service", () => {
   let tmpDir: string;
@@ -258,6 +258,348 @@ describe("github-service", () => {
       ).rejects.toThrow("GitHub API error 401");
 
       vi.unstubAllGlobals();
+    });
+  });
+
+  describe("fetchCheckRunsForRef", () => {
+    it("fetches check runs for a given ref", async () => {
+      const mockFetch = vi.fn().mockResolvedValue({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            total_count: 2,
+            check_runs: [
+              {
+                id: 123,
+                name: "Test Suite",
+                status: "completed",
+                conclusion: "success",
+                html_url: "https://github.com/owner/repo/runs/123",
+                started_at: "2026-02-20T00:00:00Z",
+                completed_at: "2026-02-20T00:05:00Z",
+              },
+              {
+                id: 456,
+                name: "Lint",
+                status: "completed",
+                conclusion: "success",
+                html_url: "https://github.com/owner/repo/runs/456",
+                started_at: "2026-02-20T00:00:00Z",
+                completed_at: "2026-02-20T00:02:00Z",
+              },
+            ],
+          }),
+      });
+      vi.stubGlobal("fetch", mockFetch);
+
+      const checkRuns = await fetchCheckRunsForRef("owner/repo", "ghp_test", "main");
+
+      expect(checkRuns).toHaveLength(2);
+      expect(checkRuns[0].id).toBe(123);
+      expect(checkRuns[0].name).toBe("Test Suite");
+      expect(checkRuns[0].status).toBe("completed");
+      expect(checkRuns[0].conclusion).toBe("success");
+
+      const call = mockFetch.mock.calls[0];
+      const url = call[0] as string;
+      expect(url).toBe(
+        "https://api.github.com/repos/owner/repo/commits/main/check-runs?per_page=100",
+      );
+      expect(call[1]).toEqual({
+        headers: {
+          Authorization: "Bearer ghp_test",
+          Accept: "application/vnd.github+json",
+          "X-GitHub-Api-Version": "2022-11-28",
+        },
+      });
+
+      vi.unstubAllGlobals();
+    });
+
+    it("URL-encodes the ref parameter", async () => {
+      const mockFetch = vi.fn().mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({ total_count: 0, check_runs: [] }),
+      });
+      vi.stubGlobal("fetch", mockFetch);
+
+      const checkRuns = await fetchCheckRunsForRef("owner/repo", "ghp_test", "feat/branch-name");
+
+      const url = mockFetch.mock.calls[0][0] as string;
+      expect(url).toContain("commits/feat%2Fbranch-name/check-runs");
+
+      vi.unstubAllGlobals();
+    });
+
+    it("throws on API error", async () => {
+      const mockFetch = vi.fn().mockResolvedValue({
+        ok: false,
+        status: 404,
+        text: () => Promise.resolve("Not Found"),
+      });
+      vi.stubGlobal("fetch", mockFetch);
+
+      await expect(fetchCheckRunsForRef("owner/missing", "ghp_test", "main")).rejects.toThrow("GitHub API error 404");
+
+      vi.unstubAllGlobals();
+    });
+  });
+
+  describe("aggregateCheckRunStatus", () => {
+    it("returns null for empty check runs", () => {
+      expect(aggregateCheckRunStatus([])).toBeNull();
+    });
+
+    it("returns pending when checks are queued", () => {
+      const checkRuns = [
+        {
+          id: 1,
+          name: "Test",
+          status: "queued" as const,
+          conclusion: null,
+          html_url: "",
+          started_at: null,
+          completed_at: null,
+        },
+      ];
+      expect(aggregateCheckRunStatus(checkRuns)).toBe("pending");
+    });
+
+    it("returns pending when checks are in progress", () => {
+      const checkRuns = [
+        {
+          id: 1,
+          name: "Test",
+          status: "in_progress" as const,
+          conclusion: null,
+          html_url: "",
+          started_at: "2026-02-20T00:00:00Z",
+          completed_at: null,
+        },
+      ];
+      expect(aggregateCheckRunStatus(checkRuns)).toBe("pending");
+    });
+
+    it("returns pending when mix of complete and incomplete", () => {
+      const checkRuns = [
+        {
+          id: 1,
+          name: "Test",
+          status: "completed" as const,
+          conclusion: "success",
+          html_url: "",
+          started_at: "2026-02-20T00:00:00Z",
+          completed_at: "2026-02-20T00:05:00Z",
+        },
+        {
+          id: 2,
+          name: "Lint",
+          status: "in_progress" as const,
+          conclusion: null,
+          html_url: "",
+          started_at: "2026-02-20T00:00:00Z",
+          completed_at: null,
+        },
+      ];
+      expect(aggregateCheckRunStatus(checkRuns)).toBe("pending");
+    });
+
+    it("returns success when all checks complete successfully", () => {
+      const checkRuns = [
+        {
+          id: 1,
+          name: "Test",
+          status: "completed" as const,
+          conclusion: "success" as const,
+          html_url: "",
+          started_at: "2026-02-20T00:00:00Z",
+          completed_at: "2026-02-20T00:05:00Z",
+        },
+        {
+          id: 2,
+          name: "Lint",
+          status: "completed" as const,
+          conclusion: "success" as const,
+          html_url: "",
+          started_at: "2026-02-20T00:00:00Z",
+          completed_at: "2026-02-20T00:02:00Z",
+        },
+      ];
+      expect(aggregateCheckRunStatus(checkRuns)).toBe("success");
+    });
+
+    it("returns success when checks are skipped", () => {
+      const checkRuns = [
+        {
+          id: 1,
+          name: "Test",
+          status: "completed" as const,
+          conclusion: "skipped" as const,
+          html_url: "",
+          started_at: "2026-02-20T00:00:00Z",
+          completed_at: "2026-02-20T00:05:00Z",
+        },
+      ];
+      expect(aggregateCheckRunStatus(checkRuns)).toBe("success");
+    });
+
+    it("returns success when checks are neutral", () => {
+      const checkRuns = [
+        {
+          id: 1,
+          name: "Test",
+          status: "completed" as const,
+          conclusion: "neutral" as const,
+          html_url: "",
+          started_at: "2026-02-20T00:00:00Z",
+          completed_at: "2026-02-20T00:05:00Z",
+        },
+      ];
+      expect(aggregateCheckRunStatus(checkRuns)).toBe("success");
+    });
+
+    it("returns failure when a check fails", () => {
+      const checkRuns = [
+        {
+          id: 1,
+          name: "Test",
+          status: "completed" as const,
+          conclusion: "success" as const,
+          html_url: "",
+          started_at: "2026-02-20T00:00:00Z",
+          completed_at: "2026-02-20T00:05:00Z",
+        },
+        {
+          id: 2,
+          name: "Build",
+          status: "completed" as const,
+          conclusion: "failure" as const,
+          html_url: "",
+          started_at: "2026-02-20T00:00:00Z",
+          completed_at: "2026-02-20T00:08:00Z",
+        },
+      ];
+      expect(aggregateCheckRunStatus(checkRuns)).toBe("failure");
+    });
+
+    it("returns failure when check times out", () => {
+      const checkRuns = [
+        {
+          id: 1,
+          name: "Test",
+          status: "completed" as const,
+          conclusion: "timed_out" as const,
+          html_url: "",
+          started_at: "2026-02-20T00:00:00Z",
+          completed_at: "2026-02-20T00:10:00Z",
+        },
+      ];
+      expect(aggregateCheckRunStatus(checkRuns)).toBe("failure");
+    });
+
+    it("returns failure when check is cancelled", () => {
+      const checkRuns = [
+        {
+          id: 1,
+          name: "Test",
+          status: "completed" as const,
+          conclusion: "cancelled" as const,
+          html_url: "",
+          started_at: "2026-02-20T00:00:00Z",
+          completed_at: "2026-02-20T00:05:00Z",
+        },
+      ];
+      expect(aggregateCheckRunStatus(checkRuns)).toBe("failure");
+    });
+
+    it("returns failure when check requires action", () => {
+      const checkRuns = [
+        {
+          id: 1,
+          name: "Test",
+          status: "completed" as const,
+          conclusion: "action_required" as const,
+          html_url: "",
+          started_at: "2026-02-20T00:00:00Z",
+          completed_at: "2026-02-20T00:05:00Z",
+        },
+      ];
+      expect(aggregateCheckRunStatus(checkRuns)).toBe("failure");
+    });
+
+    it("returns failure if any check fails among many", () => {
+      const checkRuns = [
+        {
+          id: 1,
+          name: "Test1",
+          status: "completed" as const,
+          conclusion: "success" as const,
+          html_url: "",
+          started_at: "2026-02-20T00:00:00Z",
+          completed_at: "2026-02-20T00:05:00Z",
+        },
+        {
+          id: 2,
+          name: "Test2",
+          status: "completed" as const,
+          conclusion: "success" as const,
+          html_url: "",
+          started_at: "2026-02-20T00:00:00Z",
+          completed_at: "2026-02-20T00:05:00Z",
+        },
+        {
+          id: 3,
+          name: "Test3",
+          status: "completed" as const,
+          conclusion: "failure" as const,
+          html_url: "",
+          started_at: "2026-02-20T00:00:00Z",
+          completed_at: "2026-02-20T00:08:00Z",
+        },
+        {
+          id: 4,
+          name: "Test4",
+          status: "completed" as const,
+          conclusion: "skipped" as const,
+          html_url: "",
+          started_at: "2026-02-20T00:00:00Z",
+          completed_at: "2026-02-20T00:01:00Z",
+        },
+      ];
+      expect(aggregateCheckRunStatus(checkRuns)).toBe("failure");
+    });
+
+    it("returns success when all checks complete without failures", () => {
+      const checkRuns = [
+        {
+          id: 1,
+          name: "Test",
+          status: "completed" as const,
+          conclusion: "success" as const,
+          html_url: "",
+          started_at: "2026-02-20T00:00:00Z",
+          completed_at: "2026-02-20T00:05:00Z",
+        },
+        {
+          id: 2,
+          name: "Lint",
+          status: "completed" as const,
+          conclusion: "skipped" as const,
+          html_url: "",
+          started_at: "2026-02-20T00:00:00Z",
+          completed_at: "2026-02-20T00:01:00Z",
+        },
+        {
+          id: 3,
+          name: "Deploy",
+          status: "completed" as const,
+          conclusion: "neutral" as const,
+          html_url: "",
+          started_at: "2026-02-20T00:00:00Z",
+          completed_at: "2026-02-20T00:02:00Z",
+        },
+      ];
+      expect(aggregateCheckRunStatus(checkRuns)).toBe("success");
     });
   });
 });
