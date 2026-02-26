@@ -48,14 +48,15 @@ export class CodexClient implements CodingAgentClient {
     console.log(`[${label}] Starting task (${task.length} chars)...`);
 
     try {
+      // Use `exec` subcommand so the process exits when the task completes
       const args: string[] = [
-        "--quiet",
+        "exec",
       ];
 
       // Set approval mode
       const approvalMode = this.config.approvalMode ?? "full-auto";
       if (approvalMode === "full-auto") {
-        args.push("--full-auto");
+        args.push("--dangerously-bypass-approvals-and-sandbox");
       } else {
         args.push("-a", approvalMode);
       }

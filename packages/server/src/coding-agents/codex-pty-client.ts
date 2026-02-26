@@ -59,13 +59,13 @@ export class CodexPtyClient implements CodingAgentClient {
         env.GITHUB_TOKEN = ghToken;
       }
 
-      // Build args
-      const args: string[] = [];
+      // Use `codex exec` so the process exits when the task completes
+      const args: string[] = ["exec"];
 
       // Set approval mode
       const approvalMode = getConfig("codex:approval_mode") ?? "full-auto";
       if (approvalMode === "full-auto") {
-        args.push("--full-auto");
+        args.push("--dangerously-bypass-approvals-and-sandbox");
       } else {
         args.push("-a", approvalMode);
       }
