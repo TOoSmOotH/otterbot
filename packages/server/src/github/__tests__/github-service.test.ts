@@ -16,7 +16,14 @@ vi.mock("node:child_process", () => ({
   execFileSync: (...args: any[]) => mockExecFileSync(...args),
 }));
 
-import { cloneRepo, getRepoDefaultBranch, fetchAssignedIssues, fetchCheckRunsForRef, aggregateCheckRunStatus } from "../github-service.js";
+import {
+  cloneRepo,
+  getRepoDefaultBranch,
+  fetchAssignedIssues,
+  checkIsCollaborator,
+  fetchCheckRunsForRef,
+  aggregateCheckRunStatus,
+} from "../github-service.js";
 
 describe("github-service", () => {
   let tmpDir: string;
@@ -256,6 +263,81 @@ describe("github-service", () => {
       await expect(
         fetchAssignedIssues("owner/repo", "bad_token", "testuser"),
       ).rejects.toThrow("GitHub API error 401");
+
+      vi.unstubAllGlobals();
+    });
+  });
+
+  describe("checkIsCollaborator", () => {
+    beforeEach(() => {
+      configStore.clear();
+    });
+
+    it("returns true when the user is a collaborator (204 response)", async () => {
+      const mockFetch = vi.fn().mockResolvedValue({
+        status: 204,
+        ok: true,
+        text: () => Promise.resolve(""),
+      });
+      vi.stubGlobal("fetch", mockFetch);
+
+      const isCollab = await checkIsCollaborator("owner/repo", "ghp_test", "testuser");
+
+      expect(isCollab).toBe(true);
+      expect(mockFetch).toHaveBeenCalledWith(
+        "https://api.github.com/repos/owner/repo/collaborators/testuser",
+        expect.objectContaining({
+          headers: expect.objectContaining({
+            Authorization: "Bearer ghp_test",
+          }),
+        }),
+      );
+
+      vi.unstubAllGlobals();
+    });
+
+    it("returns false when the user is not a collaborator (404 response)", async () => {
+      const mockFetch = vi.fn().mockResolvedValue({
+        status: 404,
+        ok: false,
+        text: () => Promise.resolve("Not Found"),
+      });
+      vi.stubGlobal("fetch", mockFetch);
+
+      const isCollab = await checkIsCollaborator("owner/repo", "ghp_test", "noncollab");
+
+      expect(isCollab).toBe(false);
+
+      vi.unstubAllGlobals();
+    });
+
+    it("handles non-204/404 responses as not a collaborator", async () => {
+      const mockFetch = vi.fn().mockResolvedValue({
+        status: 500,
+        ok: false,
+        text: () => Promise.resolve("Internal Server Error"),
+      });
+      vi.stubGlobal("fetch", mockFetch);
+
+      const isCollab = await checkIsCollaborator("owner/repo", "bad_token", "testuser");
+
+      expect(isCollab).toBe(false);
+
+      vi.unstubAllGlobals();
+    });
+
+    it("handles special characters in username", async () => {
+      const mockFetch = vi.fn().mockResolvedValue({
+        status: 204,
+        ok: true,
+        text: () => Promise.resolve(""),
+      });
+      vi.stubGlobal("fetch", mockFetch);
+
+      await checkIsCollaborator("owner/repo", "ghp_test", "user-name");
+
+      const url = mockFetch.mock.calls[0][0] as string;
+      expect(url).toContain("user-name");
 
       vi.unstubAllGlobals();
     });

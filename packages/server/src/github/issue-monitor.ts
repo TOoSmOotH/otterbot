@@ -13,6 +13,7 @@ import {
   fetchIssueComments,
   createIssueComment,
   removeLabelFromIssue,
+  checkHasTriageAccess,
 } from "./github-service.js";
 import type { COO } from "../agents/coo.js";
 import type { PipelineManager } from "../pipeline/pipeline-manager.js";
@@ -32,6 +33,9 @@ export class GitHubIssueMonitor {
   private coo: COO;
   private io: TypedServer;
   private pipelineManager: PipelineManager | null = null;
+  /** Cache collaborator status per repo to avoid repeated API calls. Refreshed every 10 minutes. */
+  private collaboratorCache = new Map<string, { isCollaborator: boolean; checkedAt: number }>();
+  private static readonly COLLABORATOR_CACHE_TTL_MS = 600_000; // 10 minutes
 
   constructor(coo: COO, io: TypedServer) {
     this.coo = coo;
@@ -122,12 +126,22 @@ export class GitHubIssueMonitor {
     const config = this.pipelineManager.getConfig(projectId);
     if (!config?.stages?.triage?.enabled) return;
 
+    // Only triage issues if the bot is a collaborator on the repo.
+    // This prevents the bot from triaging issues in repos where it has no
+    // contributor relationship and will never be assigned work.
+    const botUsername = getConfig("github:username") ?? null;
+    if (!botUsername) return;
+
+    const isCollaborator = await this.isRepoCollaborator(watched.repo, token, botUsername);
+    if (!isCollaborator) {
+      console.log(`[IssueMonitor] Skipping triage for ${watched.repo} — bot user "${botUsername}" is not a collaborator`);
+      return;
+    }
+
     const triageSinceKey = `project:${projectId}:github:triage_last_polled_at`;
     const since = getConfig(triageSinceKey) ?? undefined;
 
     const issues = await fetchOpenIssues(watched.repo, token, since);
-
-    const botUsername = getConfig("github:username") ?? null;
 
     for (const issue of issues) {
       const isTriaged = issue.labels.some((l) => l.name === "triaged");
@@ -274,6 +288,38 @@ export class GitHubIssueMonitor {
    * Quick local check: is the issue's updated_at newer than the triage task's updatedAt?
    * This avoids calling fetchIssueComments when nothing has changed.
    */
+  /**
+   * Check if the bot user has at least triage-level access on the repo, with caching.
+   * Uses the repo permissions endpoint which doesn't require admin access to call
+   * (unlike the collaborator endpoint). Fails closed — if we cannot determine
+   * permissions, we skip triage to avoid acting on repos where the bot has no role.
+   */
+  private async isRepoCollaborator(
+    repo: string,
+    token: string,
+    _username: string,
+  ): Promise<boolean> {
+    const cached = this.collaboratorCache.get(repo);
+    if (cached && Date.now() - cached.checkedAt < GitHubIssueMonitor.COLLABORATOR_CACHE_TTL_MS) {
+      return cached.isCollaborator;
+    }
+
+    try {
+      const result = await checkHasTriageAccess(repo, token);
+      this.collaboratorCache.set(repo, { isCollaborator: result, checkedAt: Date.now() });
+      if (!result) {
+        console.log(`[IssueMonitor] Bot lacks triage/push access on ${repo} — skipping triage`);
+      }
+      return result;
+    } catch (err) {
+      console.error(`[IssueMonitor] Failed to check permissions on ${repo}:`, err);
+      // Fail closed: if we cannot determine permissions, do not triage.
+      // This prevents the bot from triaging issues in repos where it has no
+      // contributor relationship and will never be assigned work.
+      return false;
+    }
+  }
+
   /**
    * Check if any kanban task (any column) exists for a given issue number.
    */
