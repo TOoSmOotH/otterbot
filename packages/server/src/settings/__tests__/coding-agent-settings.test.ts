@@ -89,7 +89,7 @@ describe("Coding agent settings", () => {
       expect(settings.model).toBe("claude-sonnet-4-5-20250929");
       expect(settings.approvalMode).toBe("full-auto");
       expect(settings.timeoutMs).toBe(1200000);
-      expect(settings.maxTurns).toBe(50);
+      expect(settings.maxTurns).toBe(75);
     });
 
     it("updateClaudeCodeSettings persists values", async () => {

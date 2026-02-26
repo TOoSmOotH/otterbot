@@ -229,7 +229,7 @@ function ClaudeCodeSection() {
         <SelectField label="Approval Mode" value={localApprovalMode} onChange={(v) => setLocalApprovalMode(v as "full-auto" | "auto-edit")}
           options={[{ value: "full-auto", label: "Full Auto (YOLO)" }, { value: "auto-edit", label: "Auto Edit (ask for tool use)" }]} />
         <InputField label="Timeout (ms)" value={localTimeoutMs} onChange={setLocalTimeoutMs} placeholder="1200000" type="number" />
-        <InputField label="Max Turns" value={localMaxTurns} onChange={setLocalMaxTurns} placeholder="50" type="number" />
+        <InputField label="Max Turns" value={localMaxTurns} onChange={setLocalMaxTurns} placeholder="75" type="number" />
 
         <ActionButtons saving={saving} onSave={handleSave} onTest={testClaudeCodeConnection} testResult={testResult} />
       </div>

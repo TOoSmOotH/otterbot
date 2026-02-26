@@ -73,6 +73,12 @@ export class ClaudeCodePtyClient implements CodingAgentClient {
         args.unshift("--model", model);
       }
 
+      // Add max-turns flag if configured
+      const maxTurns = getConfig("claude-code:max_turns");
+      if (maxTurns) {
+        args.unshift("--max-turns", maxTurns);
+      }
+
       if (approvalMode === "full-auto") {
         args.unshift("--dangerously-skip-permissions");
         // Ensure the "are you sure?" confirmation for --dangerously-skip-permissions
