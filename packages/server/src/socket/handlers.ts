@@ -998,6 +998,7 @@ export function setupSocketHandlers(
         const ptyClient = activePtySessions.get(agentId);
         const terminalBuffer = ptyClient?.getReplayBuffer() ?? "";
 
+        let errored = false;
         const messageId = await handleSshChat(
           {
             sessionId: data.sessionId,
@@ -1012,12 +1013,15 @@ export function setupSocketHandlers(
               io.emit("ssh:chat-response", { sessionId: data.sessionId, messageId: msgId, content, command });
             },
             onError: (error) => {
+              errored = true;
               callback?.({ ok: false, error });
             },
           },
         );
 
-        callback?.({ ok: true, messageId });
+        if (!errored) {
+          callback?.({ ok: true, messageId });
+        }
       } catch (err) {
         callback?.({ ok: false, error: err instanceof Error ? err.message : "SSH chat failed" });
       }
