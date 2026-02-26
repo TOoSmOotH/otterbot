@@ -1461,7 +1461,7 @@ export function getClaudeCodeSettings(): ClaudeCodeSettingsResponse {
     model: getConfig("claude-code:model") ?? "claude-sonnet-4-5-20250929",
     approvalMode: (getConfig("claude-code:approval_mode") ?? "full-auto") as "full-auto" | "auto-edit",
     timeoutMs: parseInt(getConfig("claude-code:timeout_ms") ?? "1200000", 10),
-    maxTurns: parseInt(getConfig("claude-code:max_turns") ?? "50", 10),
+    maxTurns: parseInt(getConfig("claude-code:max_turns") ?? "75", 10),
   };
 }
 

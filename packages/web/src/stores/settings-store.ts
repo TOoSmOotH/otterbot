@@ -512,7 +512,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   claudeCodeModel: "claude-sonnet-4-5-20250929",
   claudeCodeApprovalMode: "full-auto",
   claudeCodeTimeoutMs: 1200000,
-  claudeCodeMaxTurns: 50,
+  claudeCodeMaxTurns: 75,
   claudeCodeTestResult: null,
   codexEnabled: false,
   codexAuthMode: "api-key",
