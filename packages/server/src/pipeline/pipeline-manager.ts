@@ -999,6 +999,90 @@ export class PipelineManager {
   }
 
   /**
+   * Handle CI failure on a PR — re-enter the pipeline at the coder stage
+   * so the agent can fix the CI issues and push again.
+   */
+  async handleCIFailure(
+    taskId: string,
+    feedback: string,
+    branchName: string,
+    prNumber: number,
+  ): Promise<void> {
+    const db = getDb();
+    const task = db
+      .select()
+      .from(schema.kanbanTasks)
+      .where(eq(schema.kanbanTasks.id, taskId))
+      .get();
+    if (!task) return;
+
+    const config = this.getConfig(task.projectId);
+    if (!config?.enabled) return;
+
+    const project = db
+      .select()
+      .from(schema.projects)
+      .where(eq(schema.projects.id, task.projectId))
+      .get();
+
+    const issueLabel = (task.labels as string[]).find((l) => l.startsWith("github-issue-"));
+    const issueNumber = issueLabel ? parseInt(issueLabel.replace("github-issue-", ""), 10) : null;
+
+    // Build enabled stages
+    const enabledStages: string[] = [];
+    for (const stageKey of IMPLEMENTATION_STAGE_KEYS) {
+      const stageConfig = config.stages[stageKey];
+      if (stageConfig?.enabled !== false) {
+        enabledStages.push(stageKey);
+      }
+    }
+
+    // Create a new pipeline state starting at coder
+    const state: PipelineState = {
+      taskId,
+      projectId: task.projectId,
+      issueNumber,
+      repo: project?.githubRepo ?? null,
+      stages: enabledStages,
+      currentStageIndex: enabledStages.indexOf("coder"),
+      spawnRetryCount: 0,
+      lastKickbackSource: null,
+      stageReports: new Map(),
+      prBranch: branchName,
+      prNumber: task.prNumber ?? null,
+      targetBranch: project?.githubBranch ?? getConfig(`project:${task.projectId}:github:branch`) ?? "main",
+    };
+
+    // Store CI failure context
+    state.stageReports.set("ci_failure", feedback);
+
+    this.pipelines.set(taskId, state);
+    this.persistPipelineState(state);
+    this.updateTaskPipelineStage(taskId, "coder");
+
+    // Reset spawn count — CI failure fix is a legitimate new cycle
+    db.update(schema.kanbanTasks)
+      .set({ spawnCount: 0, updatedAt: new Date().toISOString() })
+      .where(eq(schema.kanbanTasks.id, taskId))
+      .run();
+
+    // Post comment on issue
+    if (issueNumber && state.repo) {
+      const token = getConfig("github:token");
+      if (token) {
+        try {
+          await createIssueComment(
+            state.repo, token, issueNumber,
+            formatBotComment("CI Failure Detected", "CI checks failed on the PR. Re-entering pipeline at `coder` stage to fix."),
+          );
+        } catch { /* best effort */ }
+      }
+    }
+
+    await this.sendStageDirective(state, feedback);
+  }
+
+  /**
    * Start a re-review pipeline for a merge queue entry.
    * Runs review stages (security, tester, reviewer) but skips triage and coder.
    * On completion, calls mergeQueue.onReReviewComplete() instead of the normal flow.

@@ -638,6 +638,61 @@ export async function mergePullRequest(
   );
 }
 
+// ---------------------------------------------------------------------------
+// Check Runs / CI Status APIs
+// ---------------------------------------------------------------------------
+
+export interface GitHubCheckRun {
+  id: number;
+  name: string;
+  status: "queued" | "in_progress" | "completed";
+  conclusion: string | null; // "success" | "failure" | "neutral" | "cancelled" | "skipped" | "timed_out" | "action_required" | null
+  html_url: string;
+  started_at: string | null;
+  completed_at: string | null;
+}
+
+/**
+ * Fetch check runs for a specific git ref (SHA, branch name, or tag).
+ */
+export async function fetchCheckRunsForRef(
+  repoFullName: string,
+  token: string,
+  ref: string,
+): Promise<GitHubCheckRun[]> {
+  const data = await ghFetch<{ total_count: number; check_runs: GitHubCheckRun[] }>(
+    `https://api.github.com/repos/${repoFullName}/commits/${encodeURIComponent(ref)}/check-runs?per_page=100`,
+    token,
+  );
+  return data.check_runs;
+}
+
+/**
+ * Determine the combined CI status for a set of check runs.
+ * Returns:
+ *  - "pending" if any checks are still running or queued
+ *  - "failure" if all checks are complete and at least one failed
+ *  - "success" if all checks completed successfully (or were skipped/neutral)
+ *  - null if there are no check runs
+ */
+export function aggregateCheckRunStatus(
+  checkRuns: GitHubCheckRun[],
+): "pending" | "success" | "failure" | null {
+  if (checkRuns.length === 0) return null;
+
+  const hasIncomplete = checkRuns.some((cr) => cr.status !== "completed");
+  if (hasIncomplete) return "pending";
+
+  const hasFailure = checkRuns.some(
+    (cr) =>
+      cr.conclusion === "failure" ||
+      cr.conclusion === "timed_out" ||
+      cr.conclusion === "cancelled" ||
+      cr.conclusion === "action_required",
+  );
+  return hasFailure ? "failure" : "success";
+}
+
 /**
  * Update a pull request (title, body, state, base).
  */
