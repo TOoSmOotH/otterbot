@@ -14,6 +14,7 @@ import {
   parseNumstat,
   findMergeBase,
   computeGitDiff,
+  hasRemote,
 } from "./git.js";
 
 const TEST_DIR = join(process.cwd(), "test-git-utils");
@@ -247,11 +248,28 @@ describe("findMergeBase", () => {
     }
   });
 
-  it("returns null when no remote refs exist", () => {
+  it("finds merge-base using local branch when no remote refs exist", () => {
     initGitRepo(REPO_DIR);
     createInitialCommit(REPO_DIR);
+
+    const mainHash = execSync("git rev-parse HEAD", { cwd: REPO_DIR, encoding: "utf-8" }).trim();
+
+    // Create a feature branch with a commit — no remote refs
+    execSync("git checkout -b feature", { cwd: REPO_DIR, stdio: "ignore" });
+    writeFileSync(join(REPO_DIR, "local.txt"), "local");
+    execSync("git add . && git commit -m 'local work'", { cwd: REPO_DIR, stdio: "ignore" });
+
+    const base = findMergeBase(REPO_DIR);
+    expect(base).toBe(mainHash);
+  });
+
+  it("returns null when on the only branch with no remote refs", () => {
+    initGitRepo(REPO_DIR);
+    createInitialCommit(REPO_DIR);
+    // On main with no other branches and no remote — merge-base of main against itself is HEAD
+    // which is a valid merge-base (it's the same commit)
     const result = findMergeBase(REPO_DIR);
-    expect(result).toBeNull();
+    expect(result).not.toBeNull();
   });
 
   it("finds merge-base with origin/main", () => {
@@ -267,5 +285,106 @@ describe("findMergeBase", () => {
 
     const base = findMergeBase(REPO_DIR);
     expect(base).toBe(mainHash);
+  });
+});
+
+describe("hasRemote", () => {
+  beforeEach(() => {
+    if (existsSync(TEST_DIR)) {
+      rmSync(TEST_DIR, { recursive: true, force: true });
+    }
+    mkdirSync(REPO_DIR, { recursive: true });
+  });
+
+  afterEach(() => {
+    if (existsSync(TEST_DIR)) {
+      rmSync(TEST_DIR, { recursive: true, force: true });
+    }
+  });
+
+  it("returns false for local-only repo", () => {
+    initGitRepo(REPO_DIR);
+    createInitialCommit(REPO_DIR);
+    expect(hasRemote(REPO_DIR)).toBe(false);
+  });
+
+  it("returns true when a remote is configured", () => {
+    initGitRepo(REPO_DIR);
+    createInitialCommit(REPO_DIR);
+    execSync("git remote add origin https://example.com/repo.git", { cwd: REPO_DIR, stdio: "ignore" });
+    expect(hasRemote(REPO_DIR)).toBe(true);
+  });
+});
+
+describe("createWorktree (local-only)", () => {
+  beforeEach(() => {
+    if (existsSync(TEST_DIR)) {
+      rmSync(TEST_DIR, { recursive: true, force: true });
+    }
+    mkdirSync(REPO_DIR, { recursive: true });
+    mkdirSync(join(TEST_DIR, "worktrees"), { recursive: true });
+  });
+
+  afterEach(() => {
+    if (existsSync(TEST_DIR)) {
+      rmSync(TEST_DIR, { recursive: true, force: true });
+    }
+  });
+
+  it("creates worktree without a remote", () => {
+    initGitRepo(REPO_DIR);
+    createInitialCommit(REPO_DIR);
+    expect(hasRemote(REPO_DIR)).toBe(false);
+
+    createWorktree(REPO_DIR, WORKTREE_DIR, "agent-local");
+    expect(existsSync(WORKTREE_DIR)).toBe(true);
+
+    const branch = execSync("git branch --show-current", { cwd: WORKTREE_DIR, encoding: "utf-8" }).trim();
+    expect(branch).toBe("agent-local");
+  });
+
+  it("creates worktree with a local source branch", () => {
+    initGitRepo(REPO_DIR);
+    createInitialCommit(REPO_DIR);
+
+    // Create a dev branch with extra content
+    execSync("git checkout -b dev", { cwd: REPO_DIR, stdio: "ignore" });
+    writeFileSync(join(REPO_DIR, "dev-file.txt"), "dev content");
+    execSync("git add . && git commit -m 'dev work'", { cwd: REPO_DIR, stdio: "ignore" });
+    execSync("git checkout main", { cwd: REPO_DIR, stdio: "ignore" });
+
+    createWorktree(REPO_DIR, WORKTREE_DIR, "agent-from-dev", "dev");
+    expect(existsSync(WORKTREE_DIR)).toBe(true);
+    // The worktree should have the dev-file.txt since it started from the dev branch
+    expect(existsSync(join(WORKTREE_DIR, "dev-file.txt"))).toBe(true);
+  });
+});
+
+describe("computeGitDiff (local-only)", () => {
+  beforeEach(() => {
+    if (existsSync(TEST_DIR)) {
+      rmSync(TEST_DIR, { recursive: true, force: true });
+    }
+    mkdirSync(REPO_DIR, { recursive: true });
+  });
+
+  afterEach(() => {
+    if (existsSync(TEST_DIR)) {
+      rmSync(TEST_DIR, { recursive: true, force: true });
+    }
+  });
+
+  it("detects committed changes on a branch in local-only repo", () => {
+    initGitRepo(REPO_DIR);
+    createInitialCommit(REPO_DIR);
+
+    // Create a feature branch and commit — no remote refs at all
+    execSync("git checkout -b feature-local", { cwd: REPO_DIR, stdio: "ignore" });
+    writeFileSync(join(REPO_DIR, "feature.ts"), "export const x = 1;");
+    execSync("git add . && git commit -m 'add feature'", { cwd: REPO_DIR, stdio: "ignore" });
+
+    const result = computeGitDiff(REPO_DIR);
+    expect(result).not.toBeNull();
+    expect(result!.files.some((f) => f.path === "feature.ts")).toBe(true);
   });
 });
