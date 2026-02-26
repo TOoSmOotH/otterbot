@@ -28,6 +28,7 @@ import { SecuritySection } from "./SecuritySection";
 import { ModulesSection } from "./ModulesSection";
 import { WorkerNamesSection } from "./WorkerNamesSection";
 import { McpServersSection } from "./McpServersSection";
+import { SshTab } from "./SshTab";
 import type { SettingsSection } from "./settings-nav";
 
 interface SettingsPageProps {
@@ -66,6 +67,7 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
     if (activeSection === "nextcloud-talk") return <NextcloudTalkSection />;
     if (activeSection === "worker-names") return <WorkerNamesSection />;
     if (activeSection === "mcp-servers") return <McpServersSection />;
+    if (activeSection === "ssh") return <SshTab />;
     if (activeSection === "security") return <SecuritySection />;
     if (activeSection === "soul") return <SoulTab />;
     if (activeSection === "memory") return <MemoryTab />;

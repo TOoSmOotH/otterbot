@@ -25,6 +25,7 @@ import { TodoView } from "./components/todos/TodoView";
 import { InboxView } from "./components/inbox/InboxView";
 import { CalendarView } from "./components/calendar/CalendarView";
 import { CodeView } from "./components/code/CodeView";
+import { SshView } from "./components/ssh/SshView";
 import { ProjectSettings } from "./components/project/ProjectSettings";
 import { MergeQueueView } from "./components/project/MergeQueueView";
 import { DetachedLiveView } from "./components/live-view/DetachedLiveView";
@@ -463,6 +464,8 @@ function ResizableLayout({
         return <DesktopView />;
       case "code":
         return <CodeView projectId={activeProjectId} />;
+      case "ssh":
+        return <SshView />;
       case "settings":
         return activeProjectId ? (
           <ProjectSettings projectId={activeProjectId} />

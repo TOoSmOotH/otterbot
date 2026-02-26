@@ -645,6 +645,33 @@ export async function migrateDb() {
     updated_at TEXT NOT NULL
   )`);
 
+  // SSH keys table
+  db.run(sql`CREATE TABLE IF NOT EXISTS ssh_keys (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    username TEXT NOT NULL,
+    private_key_path TEXT NOT NULL,
+    fingerprint TEXT NOT NULL,
+    key_type TEXT NOT NULL DEFAULT 'ed25519',
+    allowed_hosts TEXT NOT NULL DEFAULT '[]',
+    port INTEGER NOT NULL DEFAULT 22,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  )`);
+
+  // SSH sessions table
+  db.run(sql`CREATE TABLE IF NOT EXISTS ssh_sessions (
+    id TEXT PRIMARY KEY,
+    ssh_key_id TEXT NOT NULL,
+    host TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'active',
+    started_at TEXT NOT NULL,
+    completed_at TEXT,
+    terminal_buffer TEXT,
+    initiated_by TEXT NOT NULL DEFAULT 'user',
+    created_at TEXT NOT NULL
+  )`);
+
   // FTS5 full-text search index for memories
   try {
     db.run(sql`CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(

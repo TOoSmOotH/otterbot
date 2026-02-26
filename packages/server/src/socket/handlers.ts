@@ -904,6 +904,97 @@ export function setupSocketHandlers(
       });
     }
 
+    // ─── SSH session events ────────────────────────────────────
+    socket.on("ssh:connect", async (data, callback) => {
+      try {
+        const { SshService } = await import("../ssh/ssh-service.js");
+        const { SshPtyClient } = await import("../ssh/ssh-pty-client.js");
+        const sshService = new SshService();
+
+        // Validate key and host
+        const key = sshService.get(data.keyId);
+        if (!key) {
+          callback?.({ ok: false, error: "SSH key not found" });
+          return;
+        }
+
+        const hostCheck = sshService.validateHost(data.keyId, data.host);
+        if (!hostCheck.ok) {
+          callback?.({ ok: false, error: hostCheck.error });
+          return;
+        }
+
+        // Create session record
+        const sessionId = sshService.createSession({
+          sshKeyId: data.keyId,
+          host: data.host,
+          initiatedBy: "user",
+        });
+
+        // Use sessionId as the agentId key for PTY routing
+        const agentId = `ssh-${sessionId}`;
+
+        const ptyClient = new SshPtyClient({
+          keyId: data.keyId,
+          host: data.host,
+          sshService,
+          onData: (chunk) => {
+            io.emit("terminal:data", { agentId, data: chunk });
+          },
+          onExit: (exitCode) => {
+            unregisterPtySession(agentId);
+            const status = exitCode === 0 ? "completed" : "error";
+            const buffer = ptyClient.getReplayBuffer();
+            sshService.updateSession(sessionId, {
+              status,
+              completedAt: new Date().toISOString(),
+              terminalBuffer: buffer || undefined,
+            });
+            io.emit("ssh:session-end", { sessionId, agentId, status });
+          },
+        });
+
+        await ptyClient.connect();
+        registerPtySession(agentId, ptyClient);
+
+        io.emit("ssh:session-start", {
+          sessionId,
+          keyId: data.keyId,
+          host: data.host,
+          username: key.username,
+          agentId,
+        });
+
+        callback?.({ ok: true, sessionId, agentId });
+      } catch (err) {
+        callback?.({ ok: false, error: err instanceof Error ? err.message : "Failed to connect" });
+      }
+    });
+
+    socket.on("ssh:disconnect", async (data, callback) => {
+      try {
+        const { SshService } = await import("../ssh/ssh-service.js");
+        const sshService = new SshService();
+
+        const agentId = `ssh-${data.sessionId}`;
+        const client = activePtySessions.get(agentId);
+        if (client) {
+          client.gracefulExit();
+          // The onExit handler in ssh:connect will handle cleanup
+          callback?.({ ok: true });
+        } else {
+          // Session may have already ended — just update DB
+          sshService.updateSession(data.sessionId, {
+            status: "completed",
+            completedAt: new Date().toISOString(),
+          });
+          callback?.({ ok: true });
+        }
+      } catch (err) {
+        callback?.({ ok: false, error: err instanceof Error ? err.message : "Failed to disconnect" });
+      }
+    });
+
     socket.on("disconnect", () => {
       console.log(`Client disconnected: ${socket.id}`);
     });

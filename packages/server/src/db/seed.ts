@@ -224,6 +224,19 @@ Guidelines:
     role: "worker" as const,
   },
   {
+    id: "builtin-ssh-administrator",
+    name: "SSH Administrator",
+    description:
+      "Manages remote servers via SSH. Can execute commands, check system status, and open interactive sessions for debugging.",
+    systemPrompt: "See assigned skills for instructions.",
+    capabilities: [] as string[],
+    defaultModel: "claude-sonnet-4-5-20250929",
+    defaultProvider: "anthropic",
+    tools: [] as string[],
+    builtIn: true,
+    role: "worker" as const,
+  },
+  {
     id: "builtin-tool-builder",
     name: "Tool Builder",
     description:
