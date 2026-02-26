@@ -955,7 +955,7 @@ export function setupSocketHandlers(
           onData: (chunk) => {
             io.emit("terminal:data", { agentId, data: chunk });
           },
-          onExit: (exitCode) => {
+          onExit: async (exitCode) => {
             unregisterPtySession(agentId);
             const status = exitCode === 0 ? "completed" : "error";
             const buffer = ptyClient.getReplayBuffer();
@@ -964,6 +964,11 @@ export function setupSocketHandlers(
               completedAt: new Date().toISOString(),
               terminalBuffer: buffer || undefined,
             });
+            // Clean up chat history for this session
+            try {
+              const { clearSshChatHistory } = await import("../ssh/ssh-chat.js");
+              clearSshChatHistory(sessionId);
+            } catch { /* ignore */ }
             io.emit("ssh:session-end", { sessionId, agentId, status });
           },
         });
@@ -982,6 +987,55 @@ export function setupSocketHandlers(
         callback?.({ ok: true, sessionId, agentId });
       } catch (err) {
         callback?.({ ok: false, error: err instanceof Error ? err.message : "Failed to connect" });
+      }
+    });
+
+    socket.on("ssh:chat", async (data, callback) => {
+      try {
+        const { handleSshChat } = await import("../ssh/ssh-chat.js");
+
+        const agentId = `ssh-${data.sessionId}`;
+        const ptyClient = activePtySessions.get(agentId);
+        const terminalBuffer = ptyClient?.getReplayBuffer() ?? "";
+
+        const messageId = await handleSshChat(
+          {
+            sessionId: data.sessionId,
+            message: data.message,
+            terminalBuffer,
+          },
+          {
+            onStream: (token, msgId) => {
+              io.emit("ssh:chat-stream", { sessionId: data.sessionId, token, messageId: msgId });
+            },
+            onComplete: (msgId, content, command) => {
+              io.emit("ssh:chat-response", { sessionId: data.sessionId, messageId: msgId, content, command });
+            },
+            onError: (error) => {
+              callback?.({ ok: false, error });
+            },
+          },
+        );
+
+        callback?.({ ok: true, messageId });
+      } catch (err) {
+        callback?.({ ok: false, error: err instanceof Error ? err.message : "SSH chat failed" });
+      }
+    });
+
+    socket.on("ssh:chat-confirm", async (data, callback) => {
+      try {
+        const agentId = `ssh-${data.sessionId}`;
+        const ptyClient = activePtySessions.get(agentId);
+        if (!ptyClient) {
+          callback?.({ ok: false, error: "No active SSH session" });
+          return;
+        }
+        // Write the command followed by newline to the PTY
+        ptyClient.writeInput(data.command + "\n");
+        callback?.({ ok: true });
+      } catch (err) {
+        callback?.({ ok: false, error: err instanceof Error ? err.message : "Failed to execute command" });
       }
     });
 
