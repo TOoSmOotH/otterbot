@@ -70,11 +70,9 @@ export class CodexPtyClient implements CodingAgentClient {
         args.push("-a", approvalMode);
       }
 
-      // Set model if configured
-      const model = getConfig("codex:model");
-      if (model) {
-        args.push("--model", model);
-      }
+      // Set model (default to gpt-5.3-codex-medium if not configured)
+      const model = getConfig("codex:model") ?? "gpt-5.3-codex-medium";
+      args.push("--model", model);
 
       // Add the task as positional argument
       args.push(task);

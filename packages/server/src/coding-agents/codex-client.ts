@@ -61,10 +61,9 @@ export class CodexClient implements CodingAgentClient {
         args.push("-a", approvalMode);
       }
 
-      // Set model if specified
-      if (this.config.model) {
-        args.push("--model", this.config.model);
-      }
+      // Set model (default to gpt-5.3-codex-medium if not configured)
+      const model = this.config.model ?? "gpt-5.3-codex-medium";
+      args.push("--model", model);
 
       // Add the task as the prompt
       args.push(task);
