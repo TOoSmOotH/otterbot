@@ -361,7 +361,7 @@ The user can see everything on the desktop in real-time.`;
     // Process the Team Lead's report with a strong instruction to relay.
     // Use thinkWithoutTools so the COO just summarises instead of looping
     // on get_project_status or other tools — it only needs to relay.
-    const summary = `[IMPORTANT: Summarize this report and relay it to the CEO immediately. Do NOT call any tools — just write your summary.]\n\n[Report from Team Lead ${message.fromAgentId}]: ${message.content}`;
+    const summary = `[IMPORTANT: Summarize this report and relay it to the CEO immediately. Do NOT call any tools — just write your summary.]\n\n[Report from Team Lead ${this.getAgentName(message.fromAgentId ?? '')}]: ${message.content}`;
     const { text, thinking } = await this.thinkWithoutTools(
       summary,
       (token, messageId) => {
@@ -393,6 +393,13 @@ The user can see everything on the desktop in real-time.`;
       thinking ? { thinking } : undefined,
       this.currentConversationId ?? undefined,
     );
+  }
+
+  private getAgentName(agentId: string): string {
+    for (const tl of this.teamLeads.values()) {
+      if (tl.id === agentId) return tl.name ?? agentId;
+    }
+    return agentId;
   }
 
   /** Reset per-cycle tool call counters before each LLM invocation */
