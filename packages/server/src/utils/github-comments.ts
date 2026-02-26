@@ -35,6 +35,9 @@ export function formatBotCommentWithDetails(
   summary: string,
   details: string,
 ): string {
+  // Wrap details in a code block to preserve formatting and prevent
+  // raw terminal output from being interpreted as broken markdown
+  const wrappedDetails = "```\n" + details + "\n```";
   return [
     `### ${title}`,
     "",
@@ -43,7 +46,7 @@ export function formatBotCommentWithDetails(
     "<details>",
     "<summary>Details</summary>",
     "",
-    details,
+    wrappedDetails,
     "",
     "</details>",
   ].join("\n");
