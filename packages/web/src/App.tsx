@@ -26,6 +26,7 @@ import { InboxView } from "./components/inbox/InboxView";
 import { CalendarView } from "./components/calendar/CalendarView";
 import { CodeView } from "./components/code/CodeView";
 import { ProjectSettings } from "./components/project/ProjectSettings";
+import { MergeQueueView } from "./components/project/MergeQueueView";
 import { DetachedLiveView } from "./components/live-view/DetachedLiveView";
 import { useDesktopStore } from "./stores/desktop-store";
 import { useOpenCodeStore } from "./stores/opencode-store";
@@ -458,6 +459,10 @@ function ResizableLayout({
       case "settings":
         return activeProjectId ? (
           <ProjectSettings projectId={activeProjectId} />
+        ) : null;
+      case "merge-queue":
+        return activeProjectId ? (
+          <MergeQueueView projectId={activeProjectId} />
         ) : null;
       case "live3d":
         return (
