@@ -76,6 +76,8 @@ export interface ServerToClientEvents {
   "mcp:status": (runtime: McpServerRuntime) => void;
   "ssh:session-start": (data: { sessionId: string; keyId: string; host: string; username: string; agentId: string }) => void;
   "ssh:session-end": (data: { sessionId: string; agentId: string; status: SshSessionStatus }) => void;
+  "ssh:chat-stream": (data: { sessionId: string; token: string; messageId: string }) => void;
+  "ssh:chat-response": (data: { sessionId: string; messageId: string; content: string; command?: string }) => void;
 }
 
 /** Events emitted from client to server */
@@ -268,6 +270,14 @@ export interface ClientToServerEvents {
   ) => void;
   "ssh:disconnect": (
     data: { sessionId: string },
+    callback?: (ack: { ok: boolean; error?: string }) => void,
+  ) => void;
+  "ssh:chat": (
+    data: { sessionId: string; message: string },
+    callback?: (ack: { ok: boolean; messageId?: string; error?: string }) => void,
+  ) => void;
+  "ssh:chat-confirm": (
+    data: { sessionId: string; messageId: string; command: string },
     callback?: (ack: { ok: boolean; error?: string }) => void,
   ) => void;
 }

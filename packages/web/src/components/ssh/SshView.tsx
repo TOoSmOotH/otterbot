@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useSshStore } from "../../stores/ssh-store";
 import { TerminalView } from "../code/TerminalView";
+import { SshChat } from "./SshChat";
 import { getSocket } from "../../lib/socket";
 import type { SshKeyInfo, SshSessionStatus } from "@otterbot/shared";
 
@@ -156,23 +157,28 @@ export function SshView() {
               </div>
             </div>
 
-            {/* Terminal */}
-            <div className="flex-1 min-h-0 relative">
-              {agentId && (
-                <TerminalView
-                  agentId={agentId}
-                  readOnly={selectedSession.status !== "active"}
-                />
-              )}
-              {selectedSession.status !== "active" && (
-                <div className="absolute bottom-0 left-0 right-0 bg-zinc-900/90 border-t border-border px-4 py-2 text-center">
-                  <span className="text-xs text-muted-foreground">
-                    Session ended
-                    {selectedSession.completedAt && (
-                      <> &middot; {new Date(selectedSession.completedAt).toLocaleString()}</>
-                    )}
-                  </span>
-                </div>
+            {/* Terminal + Chat */}
+            <div className="flex-1 min-h-0 flex flex-col">
+              <div className="flex-1 min-h-0 relative">
+                {agentId && (
+                  <TerminalView
+                    agentId={agentId}
+                    readOnly={selectedSession.status !== "active"}
+                  />
+                )}
+                {selectedSession.status !== "active" && (
+                  <div className="absolute bottom-0 left-0 right-0 bg-zinc-900/90 border-t border-border px-4 py-2 text-center">
+                    <span className="text-xs text-muted-foreground">
+                      Session ended
+                      {selectedSession.completedAt && (
+                        <> &middot; {new Date(selectedSession.completedAt).toLocaleString()}</>
+                      )}
+                    </span>
+                  </div>
+                )}
+              </div>
+              {selectedSession.status === "active" && (
+                <SshChat sessionId={selectedSession.id} />
               )}
             </div>
           </>
