@@ -87,6 +87,9 @@ export interface ClientToServerEvents {
   "ceo:new-chat": (
     callback?: (ack: { ok: boolean }) => void,
   ) => void;
+  "ceo:cancel-tts": (
+    callback?: (ack: { ok: boolean }) => void,
+  ) => void;
   "ceo:list-conversations": (
     data: { projectId?: string } | undefined,
     callback: (conversations: Conversation[]) => void,
