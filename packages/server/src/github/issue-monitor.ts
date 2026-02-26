@@ -13,7 +13,7 @@ import {
   fetchIssueComments,
   createIssueComment,
   removeLabelFromIssue,
-  checkIsCollaborator,
+  checkHasTriageAccess,
 } from "./github-service.js";
 import type { COO } from "../agents/coo.js";
 import type { PipelineManager } from "../pipeline/pipeline-manager.js";
@@ -289,12 +289,15 @@ export class GitHubIssueMonitor {
    * This avoids calling fetchIssueComments when nothing has changed.
    */
   /**
-   * Check if the bot user is a collaborator on the repo, with caching.
+   * Check if the bot user has at least triage-level access on the repo, with caching.
+   * Uses the repo permissions endpoint which doesn't require admin access to call
+   * (unlike the collaborator endpoint). Fails closed — if we cannot determine
+   * permissions, we skip triage to avoid acting on repos where the bot has no role.
    */
   private async isRepoCollaborator(
     repo: string,
     token: string,
-    username: string,
+    _username: string,
   ): Promise<boolean> {
     const cached = this.collaboratorCache.get(repo);
     if (cached && Date.now() - cached.checkedAt < GitHubIssueMonitor.COLLABORATOR_CACHE_TTL_MS) {
@@ -302,15 +305,18 @@ export class GitHubIssueMonitor {
     }
 
     try {
-      const result = await checkIsCollaborator(repo, token, username);
+      const result = await checkHasTriageAccess(repo, token);
       this.collaboratorCache.set(repo, { isCollaborator: result, checkedAt: Date.now() });
+      if (!result) {
+        console.log(`[IssueMonitor] Bot lacks triage/push access on ${repo} — skipping triage`);
+      }
       return result;
     } catch (err) {
-      console.error(`[IssueMonitor] Failed to check collaborator status for ${username} on ${repo}:`, err);
-      // If the check fails, allow triage to proceed (fail open) to avoid
-      // silently breaking triage for repos where the user IS a collaborator
-      // but the API call had a transient error.
-      return true;
+      console.error(`[IssueMonitor] Failed to check permissions on ${repo}:`, err);
+      // Fail closed: if we cannot determine permissions, do not triage.
+      // This prevents the bot from triaging issues in repos where it has no
+      // contributor relationship and will never be assigned work.
+      return false;
     }
   }
 

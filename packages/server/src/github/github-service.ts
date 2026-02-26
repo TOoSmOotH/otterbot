@@ -283,6 +283,7 @@ async function ghFetch<T>(url: string, token: string, init?: RequestInit): Promi
  * Check if a user is a collaborator on a repository.
  * Uses GET /repos/{owner}/{repo}/collaborators/{username} which returns
  * 204 if the user is a collaborator, 404 if not.
+ * Note: This endpoint requires the caller to have push access on the repo.
  */
 export async function checkIsCollaborator(
   repoFullName: string,
@@ -297,6 +298,51 @@ export async function checkIsCollaborator(
   );
   // 204 = is a collaborator, 404 = not a collaborator
   return res.status === 204;
+}
+
+export interface RepoPermissions {
+  admin: boolean;
+  maintain: boolean;
+  push: boolean;
+  triage: boolean;
+  pull: boolean;
+}
+
+/**
+ * Check the authenticated user's permissions on a repository.
+ * Uses GET /repos/{owner}/{repo} which returns a `permissions` object
+ * when called with an authenticated token. Unlike the collaborator endpoint,
+ * this does NOT require admin/push access to call.
+ *
+ * Returns null if the permissions could not be determined (e.g. network error).
+ */
+export async function getRepoPermissions(
+  repoFullName: string,
+  token: string,
+): Promise<RepoPermissions | null> {
+  const res = await fetch(
+    `https://api.github.com/repos/${repoFullName}`,
+    {
+      headers: GITHUB_HEADERS(token),
+    },
+  );
+  if (!res.ok) return null;
+  const data = await res.json();
+  return (data as any).permissions ?? null;
+}
+
+/**
+ * Check if the authenticated user has at least triage-level access on a repo.
+ * A user with triage, push, maintain, or admin permissions is considered a
+ * contributor who can meaningfully interact with the repo's issues.
+ */
+export async function checkHasTriageAccess(
+  repoFullName: string,
+  token: string,
+): Promise<boolean> {
+  const perms = await getRepoPermissions(repoFullName, token);
+  if (!perms) return false;
+  return perms.triage || perms.push || perms.maintain || perms.admin;
 }
 
 // ---------------------------------------------------------------------------
