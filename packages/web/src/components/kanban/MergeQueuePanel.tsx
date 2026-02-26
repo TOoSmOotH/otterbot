@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import type { MergeQueueStatus } from "@otterbot/shared";
 import { useMergeQueueStore } from "../../stores/merge-queue-store";
+import { useProjectStore } from "../../stores/project-store";
 import { getSocket } from "../../lib/socket";
 
 const STATUS_CONFIG: Record<MergeQueueStatus, { label: string; color: string }> = {
@@ -16,6 +17,7 @@ const STATUS_CONFIG: Record<MergeQueueStatus, { label: string; color: string }> 
 export function MergeQueuePanel({ projectId }: { projectId: string }) {
   const entries = useMergeQueueStore((s) => s.entries);
   const setEntries = useMergeQueueStore((s) => s.setEntries);
+  const tasks = useProjectStore((s) => s.tasks);
 
   useEffect(() => {
     const socket = getSocket();
@@ -24,11 +26,27 @@ export function MergeQueuePanel({ projectId }: { projectId: string }) {
     });
   }, [projectId, setEntries]);
 
-  const projectEntries = entries
+  // IDs of tasks already in the merge queue
+  const mqTaskIds = new Set(entries.filter((e) => e.projectId === projectId).map((e) => e.taskId));
+
+  // Tasks with PRs in pipeline or awaiting approval, not yet in merge queue
+  const pendingPrTasks = tasks
+    .filter(
+      (t) =>
+        t.projectId === projectId &&
+        t.prNumber != null &&
+        (t.column === "in_progress" || t.column === "in_review") &&
+        !mqTaskIds.has(t.id),
+    )
+    .sort((a, b) => a.position - b.position);
+
+  const queueEntries = entries
     .filter((e) => e.projectId === projectId && e.status !== "merged")
     .sort((a, b) => a.position - b.position);
 
-  if (projectEntries.length === 0) return null;
+  const totalCount = pendingPrTasks.length + queueEntries.length;
+
+  if (totalCount === 0) return null;
 
   const handleRemove = (taskId: string) => {
     const socket = getSocket();
@@ -38,10 +56,22 @@ export function MergeQueuePanel({ projectId }: { projectId: string }) {
   return (
     <div className="bg-card border border-border rounded-lg p-3">
       <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">
-        Merge Queue ({projectEntries.length})
+        Merge Queue ({totalCount})
       </h3>
       <div className="space-y-2">
-        {projectEntries.map((entry, i) => {
+        {pendingPrTasks.map((task) => (
+          <div
+            key={task.id}
+            className="flex items-center gap-2 text-xs bg-muted/30 rounded px-2 py-1.5"
+          >
+            <span className="text-muted-foreground font-mono w-4">&middot;</span>
+            <span className="truncate flex-1">PR #{task.prNumber}</span>
+            <span className="font-medium text-yellow-400">
+              {task.column === "in_progress" ? "Pipeline" : "Review"}
+            </span>
+          </div>
+        ))}
+        {queueEntries.map((entry, i) => {
           const config = STATUS_CONFIG[entry.status];
           return (
             <div
@@ -51,7 +81,7 @@ export function MergeQueuePanel({ projectId }: { projectId: string }) {
               <span className="text-muted-foreground font-mono w-4">{i + 1}.</span>
               <span className="truncate flex-1">PR #{entry.prNumber}</span>
               <span className={`font-medium ${config.color}`}>{config.label}</span>
-              {entry.status === "queued" && (
+              {(entry.status === "queued" || entry.status === "conflict" || entry.status === "failed") && (
                 <button
                   className="text-muted-foreground hover:text-red-400 transition-colors"
                   onClick={() => handleRemove(entry.taskId)}
