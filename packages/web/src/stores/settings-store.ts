@@ -34,12 +34,19 @@ export interface CustomTaskInfo {
   name: string;
   description: string;
   message: string;
-  mode: "coo-prompt" | "coo-background" | "notification";
+  mode: "coo-prompt" | "coo-background" | "notification" | "module-agent";
+  moduleAgentId?: string | null;
   intervalMs: number;
   enabled: boolean;
   lastRunAt: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface ModuleAgentInfo {
+  moduleId: string;
+  agentId: string;
+  name: string | null;
 }
 
 export interface SearchProviderConfig {
@@ -262,7 +269,8 @@ interface SettingsState {
     name: string;
     description?: string;
     message: string;
-    mode?: "coo-prompt" | "coo-background" | "notification";
+    mode?: "coo-prompt" | "coo-background" | "notification" | "module-agent";
+    moduleAgentId?: string;
     intervalMs: number;
     enabled?: boolean;
   }) => Promise<void>;
@@ -270,11 +278,16 @@ interface SettingsState {
     name?: string;
     description?: string;
     message?: string;
-    mode?: "coo-prompt" | "coo-background" | "notification";
+    mode?: "coo-prompt" | "coo-background" | "notification" | "module-agent";
+    moduleAgentId?: string;
     intervalMs?: number;
     enabled?: boolean;
   }) => Promise<void>;
   deleteCustomTask: (id: string) => Promise<void>;
+
+  // Module agents
+  moduleAgents: ModuleAgentInfo[];
+  loadModuleAgents: () => Promise<void>;
 
   // Search actions
   loadSearchSettings: () => Promise<void>;
@@ -481,6 +494,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   scheduledTasksLoading: false,
   customTasks: [],
   customTasksLoading: false,
+  moduleAgents: [],
   searchProviders: [],
   activeSearchProvider: null,
   searchTestResults: {},
@@ -854,6 +868,17 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       // Silently fail
     } finally {
       set({ customTasksLoading: false });
+    }
+  },
+
+  loadModuleAgents: async () => {
+    try {
+      const res = await fetch("/api/settings/module-agents");
+      if (!res.ok) return;
+      const data = await res.json();
+      set({ moduleAgents: data.agents });
+    } catch {
+      // Silently fail
     }
   },
 

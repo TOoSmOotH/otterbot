@@ -5,7 +5,7 @@ export const agents = sqliteTable("agents", {
   id: text("id").primaryKey(),
   name: text("name"),
   registryEntryId: text("registry_entry_id"),
-  role: text("role", { enum: ["coo", "team_lead", "worker", "admin_assistant", "scheduler"] }).notNull(),
+  role: text("role", { enum: ["coo", "team_lead", "worker", "admin_assistant", "scheduler", "module_agent"] }).notNull(),
   parentId: text("parent_id"),
   status: text("status", {
     enum: ["idle", "thinking", "acting", "awaiting_input", "done", "error"],
@@ -73,7 +73,7 @@ export const registryEntries = sqliteTable("registry_entries", {
     .notNull()
     .default([]),
   builtIn: integer("built_in", { mode: "boolean" }).notNull().default(false),
-  role: text("role", { enum: ["coo", "team_lead", "worker", "admin_assistant", "scheduler"] })
+  role: text("role", { enum: ["coo", "team_lead", "worker", "admin_assistant", "scheduler", "module_agent"] })
     .notNull()
     .default("worker"),
   modelPackId: text("model_pack_id"),
@@ -444,7 +444,8 @@ export const customScheduledTasks = sqliteTable("custom_scheduled_tasks", {
   name: text("name").notNull(),
   description: text("description").notNull().default(""),
   message: text("message").notNull(),
-  mode: text("mode", { enum: ["coo-prompt", "coo-background", "notification"] }).notNull().default("notification"),
+  mode: text("mode", { enum: ["coo-prompt", "coo-background", "notification", "module-agent"] }).notNull().default("notification"),
+  moduleAgentId: text("module_agent_id"),
   intervalMs: integer("interval_ms").notNull(),
   enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),
   lastRunAt: text("last_run_at"),

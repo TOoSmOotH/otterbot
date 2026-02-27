@@ -134,12 +134,20 @@ export interface ModuleToolDefinition {
 
 // ─── Module definition ───────────────────────────────────────────────────────
 
+export interface ModuleAgentConfig {
+  defaultName: string;
+  defaultPrompt: string;
+  defaultModel?: string;
+  defaultProvider?: string;
+}
+
 export interface ModuleDefinition {
   manifest: ModuleManifest;
   configSchema?: ModuleConfigSchema;
   triggers?: ModuleTrigger[];
   migrations?: ModuleMigration[];
   tools?: ModuleToolDefinition[];
+  agent?: ModuleAgentConfig;
   onPoll?: PollHandler;
   onWebhook?: WebhookHandler;
   onQuery?: QueryHandler;
