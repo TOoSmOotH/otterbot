@@ -385,6 +385,28 @@ export async function testProvider(
   const row = getProviderRow(providerId);
   const providerType = row?.type ?? providerId;
 
+  // For ollama, just check that the server is reachable by listing models
+  if (providerType === "ollama") {
+    try {
+      const baseUrl = row?.baseUrl ?? "http://localhost:11434/api";
+      const tagsUrl = baseUrl.endsWith("/api")
+        ? `${baseUrl}/tags`
+        : `${baseUrl}/api/tags`;
+      const res = await fetch(tagsUrl, {
+        signal: AbortSignal.timeout(10_000),
+      });
+      if (!res.ok) {
+        return { ok: false, error: `Ollama returned HTTP ${res.status}` };
+      }
+      return { ok: true, latencyMs: Date.now() - start };
+    } catch (error) {
+      return {
+        ok: false,
+        error: error instanceof Error ? error.message : "Unknown error",
+      };
+    }
+  }
+
   // Determine which model to test with
   const testModel =
     model ??
