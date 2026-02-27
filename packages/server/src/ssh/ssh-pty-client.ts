@@ -27,9 +27,18 @@ export class SshPtyClient implements PtyClient {
   private ptyProcess: any | null = null;
   private ringBuffer = "";
   private _killed = false;
+  private dataListeners: Array<(data: string) => void> = [];
 
   constructor(config: SshPtyConfig) {
     this.config = config;
+  }
+
+  /** Register an additional data listener. Returns an unsubscribe function. */
+  addDataListener(cb: (data: string) => void): () => void {
+    this.dataListeners.push(cb);
+    return () => {
+      this.dataListeners = this.dataListeners.filter((l) => l !== cb);
+    };
   }
 
   /** Connect to the remote host via PTY */
@@ -73,6 +82,7 @@ export class SshPtyClient implements PtyClient {
         this.ringBuffer = this.ringBuffer.slice(-RING_BUFFER_SIZE);
       }
       this.config.onData?.(data);
+      for (const listener of this.dataListeners) listener(data);
     });
 
     this.ptyProcess.onExit(({ exitCode }: { exitCode: number; signal?: number }) => {

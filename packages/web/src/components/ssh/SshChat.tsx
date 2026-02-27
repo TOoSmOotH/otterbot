@@ -20,6 +20,7 @@ export function SshChat({ sessionId }: SshChatProps) {
   const [streamingContent, setStreamingContent] = useState("");
   const [streamingMessageId, setStreamingMessageId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -41,6 +42,7 @@ export function SshChat({ sessionId }: SshChatProps) {
       setStreamingContent("");
       setStreamingMessageId(null);
       setIsLoading(false);
+      setIsAnalyzing(false);
       setMessages((prev) => [
         ...prev,
         {
@@ -53,12 +55,20 @@ export function SshChat({ sessionId }: SshChatProps) {
       ]);
     };
 
+    const handleAnalyzing = (data: { sessionId: string; command: string }) => {
+      if (data.sessionId !== sessionId) return;
+      setIsAnalyzing(true);
+      setIsLoading(true);
+    };
+
     socket.on("ssh:chat-stream", handleStream);
     socket.on("ssh:chat-response", handleResponse);
+    socket.on("ssh:chat-analyzing", handleAnalyzing);
 
     return () => {
       socket.off("ssh:chat-stream", handleStream);
       socket.off("ssh:chat-response", handleResponse);
+      socket.off("ssh:chat-analyzing", handleAnalyzing);
     };
   }, [sessionId]);
 
@@ -68,6 +78,7 @@ export function SshChat({ sessionId }: SshChatProps) {
     setStreamingContent("");
     setStreamingMessageId(null);
     setIsLoading(false);
+    setIsAnalyzing(false);
   }, [sessionId]);
 
   const sendMessage = useCallback(() => {
@@ -237,7 +248,7 @@ export function SshChat({ sessionId }: SshChatProps) {
                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                 </svg>
-                <span>Thinking...</span>
+                <span>{isAnalyzing ? "Analyzing output..." : "Thinking..."}</span>
               </div>
             </div>
           </div>

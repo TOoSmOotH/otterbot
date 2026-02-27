@@ -137,6 +137,22 @@ export async function handleSshChat(
   }
 }
 
+/**
+ * Automatically analyze the output of a command that was just executed.
+ * This injects a synthetic user message into the conversation history
+ * and streams the LLM's analysis back to the caller.
+ */
+export async function analyzeCommandOutput(
+  req: { sessionId: string; command: string; terminalBuffer: string },
+  callbacks: SshChatCallbacks,
+): Promise<string> {
+  const message = `The command \`${req.command}\` was just executed. Analyze the output shown in the terminal. Highlight any important results, errors, or warnings. Be concise.`;
+  return handleSshChat(
+    { sessionId: req.sessionId, message, terminalBuffer: req.terminalBuffer },
+    callbacks,
+  );
+}
+
 /** Clear conversation history for a session */
 export function clearSshChatHistory(sessionId: string): void {
   sessionHistories.delete(sessionId);
