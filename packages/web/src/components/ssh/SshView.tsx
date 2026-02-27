@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Group, Panel, Separator } from "react-resizable-panels";
 import { useSshStore } from "../../stores/ssh-store";
 import { TerminalView } from "../code/TerminalView";
 import { SshChat } from "./SshChat";
@@ -158,29 +159,36 @@ export function SshView() {
             </div>
 
             {/* Terminal + Chat */}
-            <div className="flex-1 min-h-0 flex flex-col">
-              <div className="flex-1 min-h-0 relative">
-                {agentId && (
-                  <TerminalView
-                    agentId={agentId}
-                    readOnly={selectedSession.status !== "active"}
-                  />
-                )}
-                {selectedSession.status !== "active" && (
-                  <div className="absolute bottom-0 left-0 right-0 bg-zinc-900/90 border-t border-border px-4 py-2 text-center">
-                    <span className="text-xs text-muted-foreground">
-                      Session ended
-                      {selectedSession.completedAt && (
-                        <> &middot; {new Date(selectedSession.completedAt).toLocaleString()}</>
-                      )}
-                    </span>
-                  </div>
-                )}
-              </div>
+            <Group direction="vertical" className="flex-1 min-h-0" autoSaveId="ssh-terminal-chat">
+              <Panel minSize={20} defaultSize={selectedSession.status === "active" ? 65 : 100}>
+                <div className="h-full relative">
+                  {agentId && (
+                    <TerminalView
+                      agentId={agentId}
+                      readOnly={selectedSession.status !== "active"}
+                    />
+                  )}
+                  {selectedSession.status !== "active" && (
+                    <div className="absolute bottom-0 left-0 right-0 bg-zinc-900/90 border-t border-border px-4 py-2 text-center">
+                      <span className="text-xs text-muted-foreground">
+                        Session ended
+                        {selectedSession.completedAt && (
+                          <> &middot; {new Date(selectedSession.completedAt).toLocaleString()}</>
+                        )}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              </Panel>
               {selectedSession.status === "active" && (
-                <SshChat sessionId={selectedSession.id} />
+                <>
+                  <Separator className="panel-resize-handle-horizontal" />
+                  <Panel minSize={15} defaultSize={35}>
+                    <SshChat sessionId={selectedSession.id} />
+                  </Panel>
+                </>
               )}
-            </div>
+            </Group>
           </>
         ) : (
           <div className="flex-1 flex items-center justify-center text-sm text-muted-foreground">

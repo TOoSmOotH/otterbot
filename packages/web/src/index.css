@@ -131,6 +131,30 @@
   cursor: col-resize;
 }
 
+/* Horizontal resize handle (for vertical panel groups) */
+.panel-resize-handle-horizontal {
+  height: 1px;
+  background: hsl(var(--border));
+  transition: background 150ms, height 150ms;
+  position: relative;
+}
+
+.panel-resize-handle-horizontal::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -3px;
+  bottom: -3px;
+}
+
+.panel-resize-handle-horizontal[data-separator="hover"],
+.panel-resize-handle-horizontal[data-separator="active"] {
+  height: 3px;
+  background: hsl(var(--primary));
+  cursor: row-resize;
+}
+
 /* Prose overrides for chat bubbles — tighten spacing */
 .prose {
   font-size: inherit;

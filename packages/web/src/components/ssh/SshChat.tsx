@@ -156,7 +156,7 @@ export function SshChat({ sessionId }: SshChatProps) {
   }, []);
 
   return (
-    <div className="flex flex-col border-t border-border bg-card" style={{ height: "260px" }}>
+    <div className="flex flex-col border-t border-border bg-card h-full">
       {/* Chat header */}
       <div className="flex items-center justify-between px-3 py-1.5 border-b border-border">
         <div className="flex items-center gap-1.5">
