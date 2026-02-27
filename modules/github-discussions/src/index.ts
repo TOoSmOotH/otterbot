@@ -172,9 +172,28 @@ export default defineModule({
   manifest: {
     id: "github-discussions",
     name: "GitHub Discussions",
-    version: "0.1.0",
+    version: "0.2.0",
     description: "Monitors GitHub Discussions and indexes them for Q&A",
     author: "Otterbot",
+  },
+
+  agent: {
+    defaultName: "Discussions Agent",
+    defaultPrompt: [
+      "You are a GitHub Discussions specialist. You have access to a knowledge store",
+      "containing indexed GitHub Discussions from a repository.",
+      "",
+      "When answering questions:",
+      "- Use the knowledge_search tool to find relevant discussions",
+      "- Synthesize information across multiple discussions when appropriate",
+      "- Include discussion numbers (#N) and URLs in your answers for reference",
+      "- Note whether a discussion has an accepted answer",
+      "- If a discussion is unanswered, say so clearly",
+      "- Summarize key points rather than dumping raw content",
+      "",
+      "You can also use the search_discussions tool to query the structured discussions",
+      "database for more targeted searches (by category, author, answered status, etc.).",
+    ].join("\n"),
   },
 
   configSchema: {
@@ -199,6 +218,75 @@ export default defineModule({
       required: false,
     },
   },
+
+  tools: [
+    {
+      name: "search_discussions",
+      description:
+        "Search the structured discussions database with filters. " +
+        "More targeted than knowledge_search — can filter by category, author, answered status.",
+      parameters: {
+        query: { type: "string", description: "Text to search in title and body", required: false },
+        category: { type: "string", description: "Filter by discussion category name", required: false },
+        author: { type: "string", description: "Filter by author login", required: false },
+        answered_only: { type: "boolean", description: "Only return discussions with an accepted answer", required: false },
+        limit: { type: "number", description: "Max results (default 10)", required: false },
+      },
+      async execute(args, ctx) {
+        const conditions: string[] = [];
+        const params: unknown[] = [];
+
+        if (args.query) {
+          conditions.push("(title LIKE ? OR body LIKE ?)");
+          params.push(`%${args.query}%`, `%${args.query}%`);
+        }
+        if (args.category) {
+          conditions.push("category = ?");
+          params.push(args.category);
+        }
+        if (args.author) {
+          conditions.push("author = ?");
+          params.push(args.author);
+        }
+        if (args.answered_only) {
+          conditions.push("answer_body IS NOT NULL");
+        }
+
+        const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+        const limit = typeof args.limit === "number" ? Math.min(args.limit, 50) : 10;
+
+        const rows = ctx.knowledge.db
+          .prepare(
+            `SELECT number, title, body, author, category, url, state, answer_body, answer_author, created_at, updated_at
+             FROM discussions ${where}
+             ORDER BY updated_at DESC
+             LIMIT ?`,
+          )
+          .all(...params, limit) as Array<Record<string, unknown>>;
+
+        if (rows.length === 0) return "No discussions found matching the criteria.";
+
+        return rows
+          .map((r) => {
+            const answered = r.answer_body ? " [ANSWERED]" : "";
+            const answer = r.answer_body
+              ? `\nAccepted Answer by @${r.answer_author ?? "unknown"}:\n${(r.answer_body as string).slice(0, 500)}`
+              : "";
+            return [
+              `--- Discussion #${r.number}${answered} ---`,
+              `Title: ${r.title}`,
+              `Author: @${r.author ?? "unknown"} | Category: ${r.category ?? "none"}`,
+              `URL: ${r.url}`,
+              `Updated: ${r.updated_at}`,
+              "",
+              (r.body as string).slice(0, 1000),
+              answer,
+            ].join("\n");
+          })
+          .join("\n\n");
+      },
+    },
+  ],
 
   triggers: [{ type: "poll", intervalMs: 300_000, minIntervalMs: 60_000 }],
 
