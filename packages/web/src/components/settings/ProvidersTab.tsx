@@ -180,6 +180,8 @@ function ProviderCard({ provider }: { provider: NamedProvider }) {
   const [apiKey, setApiKey] = useState("");
   const [baseUrl, setBaseUrl] = useState(provider.baseUrl ?? "");
   const [saving, setSaving] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
 
   const updateProvider = useSettingsStore((s) => s.updateProvider);
   const deleteProviderFn = useSettingsStore((s) => s.deleteProvider);
@@ -207,9 +209,11 @@ function ProviderCard({ provider }: { provider: NamedProvider }) {
   };
 
   const handleDelete = async () => {
+    setDeleteError(null);
     const result = await deleteProviderFn(provider.id);
     if (!result.ok) {
-      // Error is set in the store
+      setDeleteError(result.error || "Failed to delete provider");
+      setConfirmingDelete(false);
     }
   };
 
@@ -315,12 +319,29 @@ function ProviderCard({ provider }: { provider: NamedProvider }) {
             >
               {testResult?.testing ? "Testing..." : "Test"}
             </button>
-            <button
-              onClick={handleDelete}
-              className="text-xs bg-secondary text-red-400 px-3 py-1.5 rounded-md hover:bg-red-500/20"
-            >
-              Delete
-            </button>
+            {!confirmingDelete ? (
+              <button
+                onClick={() => { setDeleteError(null); setConfirmingDelete(true); }}
+                className="text-xs bg-secondary text-red-400 px-3 py-1.5 rounded-md hover:bg-red-500/20"
+              >
+                Delete
+              </button>
+            ) : (
+              <>
+                <button
+                  onClick={handleDelete}
+                  className="text-xs bg-red-600 text-white px-3 py-1.5 rounded-md hover:bg-red-700"
+                >
+                  Confirm Delete
+                </button>
+                <button
+                  onClick={() => setConfirmingDelete(false)}
+                  className="text-xs bg-secondary text-foreground px-3 py-1.5 rounded-md hover:bg-secondary/80"
+                >
+                  Cancel
+                </button>
+              </>
+            )}
 
             {testResult && !testResult.testing && (
               <span
@@ -335,6 +356,10 @@ function ProviderCard({ provider }: { provider: NamedProvider }) {
               </span>
             )}
           </div>
+
+          {deleteError && (
+            <p className="text-xs text-red-500">{deleteError}</p>
+          )}
         </div>
       )}
     </div>
