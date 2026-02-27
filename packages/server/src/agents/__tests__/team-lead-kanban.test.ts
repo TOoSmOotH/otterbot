@@ -588,7 +588,7 @@ describe("TeamLead — Kanban logic", () => {
         "Different issue",
         "backlog",
       );
-      expect(result).toContain("Created task");
+      expect(result).toMatch(/^Created /);
     });
 
     it("does not flag duplicate when title has no issue number", () => {
@@ -604,7 +604,7 @@ describe("TeamLead — Kanban logic", () => {
         "No issue number",
         "backlog",
       );
-      expect(result).toContain("Created task");
+      expect(result).toMatch(/^Created /);
     });
   });
 

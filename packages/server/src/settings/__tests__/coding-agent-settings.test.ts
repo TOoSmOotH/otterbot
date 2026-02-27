@@ -89,7 +89,7 @@ describe("Coding agent settings", () => {
       expect(settings.model).toBe("claude-sonnet-4-5-20250929");
       expect(settings.approvalMode).toBe("full-auto");
       expect(settings.timeoutMs).toBe(1200000);
-      expect(settings.maxTurns).toBe(50);
+      expect(settings.maxTurns).toBe(75);
     });
 
     it("updateClaudeCodeSettings persists values", async () => {
@@ -131,7 +131,7 @@ describe("Coding agent settings", () => {
       expect(settings.enabled).toBe(false);
       expect(settings.authMode).toBe("api-key");
       expect(settings.apiKeySet).toBe(false);
-      expect(settings.model).toBe("codex-mini");
+      expect(settings.model).toBe("gpt-5.3-codex-medium");
       expect(settings.approvalMode).toBe("full-auto");
       expect(settings.timeoutMs).toBe(1200000);
     });
@@ -141,7 +141,7 @@ describe("Coding agent settings", () => {
         enabled: true,
         apiKey: "sk-codex-456",
         model: "codex-large",
-        approvalMode: "suggest",
+        approvalMode: "on-failure",
         timeoutMs: 300000,
       });
 
@@ -149,7 +149,7 @@ describe("Coding agent settings", () => {
       expect(settings.enabled).toBe(true);
       expect(settings.apiKeySet).toBe(true);
       expect(settings.model).toBe("codex-large");
-      expect(settings.approvalMode).toBe("suggest");
+      expect(settings.approvalMode).toBe("on-failure");
       expect(settings.timeoutMs).toBe(300000);
     });
 

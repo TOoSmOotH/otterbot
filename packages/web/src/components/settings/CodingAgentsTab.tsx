@@ -229,7 +229,7 @@ function ClaudeCodeSection() {
         <SelectField label="Approval Mode" value={localApprovalMode} onChange={(v) => setLocalApprovalMode(v as "full-auto" | "auto-edit")}
           options={[{ value: "full-auto", label: "Full Auto (YOLO)" }, { value: "auto-edit", label: "Auto Edit (ask for tool use)" }]} />
         <InputField label="Timeout (ms)" value={localTimeoutMs} onChange={setLocalTimeoutMs} placeholder="1200000" type="number" />
-        <InputField label="Max Turns" value={localMaxTurns} onChange={setLocalMaxTurns} placeholder="50" type="number" />
+        <InputField label="Max Turns" value={localMaxTurns} onChange={setLocalMaxTurns} placeholder="75" type="number" />
 
         <ActionButtons saving={saving} onSave={handleSave} onTest={testClaudeCodeConnection} testResult={testResult} />
       </div>
@@ -303,9 +303,9 @@ function CodexSection() {
           </p>
         )}
 
-        <InputField label="Model" value={localModel} onChange={setLocalModel} placeholder="codex-mini" />
-        <SelectField label="Approval Mode" value={localApprovalMode} onChange={(v) => setLocalApprovalMode(v as "full-auto" | "suggest" | "ask")}
-          options={[{ value: "full-auto", label: "Full Auto" }, { value: "suggest", label: "Suggest" }, { value: "ask", label: "Ask" }]} />
+        <InputField label="Model" value={localModel} onChange={setLocalModel} placeholder="gpt-5.3-codex-medium" />
+        <SelectField label="Approval Mode" value={localApprovalMode} onChange={(v) => setLocalApprovalMode(v as "full-auto" | "on-failure" | "on-request" | "never")}
+          options={[{ value: "full-auto", label: "Full Auto" }, { value: "on-failure", label: "On Failure" }, { value: "on-request", label: "On Request" }, { value: "never", label: "Never" }]} />
         <InputField label="Timeout (ms)" value={localTimeoutMs} onChange={setLocalTimeoutMs} placeholder="1200000" type="number" />
 
         <ActionButtons saving={saving} onSave={handleSave} onTest={testCodexConnection} testResult={testResult} />

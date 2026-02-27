@@ -151,12 +151,16 @@ import {
   clearAgentModelOverride,
   type TierDefaults,
 } from "./settings/settings.js";
-import type { ProviderType } from "@otterbot/shared";
+import type { ProviderType, McpServerCreate, McpServerUpdate, McpServerRuntime } from "@otterbot/shared";
+import { McpServerService } from "./mcp/mcp-service.js";
+import { McpClientManager } from "./mcp/mcp-client-manager.js";
+import { getSecurityWarnings, type SecurityWarning } from "./mcp/mcp-security.js";
 import { createBackupArchive, restoreFromArchive, looksLikeZip } from "./backup/backup.js";
 import { writeOpenCodeConfig } from "./opencode/opencode-manager.js";
 import { GitHubIssueMonitor } from "./github/issue-monitor.js";
 import { GitHubPRMonitor } from "./github/pr-monitor.js";
 import { PipelineManager } from "./pipeline/pipeline-manager.js";
+import { MergeQueue } from "./merge-queue/merge-queue.js";
 import { ReminderScheduler } from "./reminders/reminder-scheduler.js";
 import { MemoryCompactor } from "./memory/memory-compactor.js";
 import { SchedulerRegistry } from "./schedulers/scheduler-registry.js";
@@ -240,6 +244,28 @@ import {
   updateWhatsAppSettings,
   getWhatsAppConfig,
 } from "./whatsapp/whatsapp-settings.js";
+import { SignalBridge } from "./signal/signal-bridge.js";
+import {
+  getSignalSettings,
+  updateSignalSettings,
+  testSignalConnection,
+} from "./signal/signal-settings.js";
+import {
+  approvePairing as approveSignalPairing,
+  rejectPairing as rejectSignalPairing,
+  revokePairing as revokeSignalPairing,
+} from "./signal/pairing.js";
+import { NextcloudTalkBridge } from "./nextcloud-talk/nextcloud-talk-bridge.js";
+import {
+  getNextcloudTalkSettings,
+  updateNextcloudTalkSettings,
+  testNextcloudTalkConnection,
+} from "./nextcloud-talk/nextcloud-talk-settings.js";
+import {
+  approvePairing as approveNextcloudTalkPairing,
+  rejectPairing as rejectNextcloudTalkPairing,
+  revokePairing as revokeNextcloudTalkPairing,
+} from "./nextcloud-talk/pairing.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -514,6 +540,9 @@ async function main() {
   // Track the most recent permission request so chat replies can resolve it
   let activePermissionRequest: { agentId: string; permissionId: string; sessionId: string } | null = null;
 
+  // Track pending project creation approval — CEO must approve before projects are created
+  let pendingProjectApproval = false;
+
   // Discord bridge (initialized when enabled + token set)
   let discordBridge: DiscordBridge | null = null;
 
@@ -698,6 +727,52 @@ async function main() {
     }
   }
 
+  // Signal bridge (initialized when enabled + config set)
+  let signalBridge: SignalBridge | null = null;
+
+  function startSignalBridge() {
+    if (signalBridge || !coo) return;
+    const settings = getSignalSettings();
+    if (!settings.enabled || !settings.apiUrl || !settings.phoneNumber) return;
+    signalBridge = new SignalBridge({ bus, coo, io });
+    signalBridge.start({ apiUrl: settings.apiUrl, phoneNumber: settings.phoneNumber }).catch((err) => {
+      console.error("[Signal] Failed to start bridge:", err);
+      signalBridge = null;
+    });
+  }
+
+  async function stopSignalBridge() {
+    if (signalBridge) {
+      await signalBridge.stop();
+      signalBridge = null;
+    }
+  }
+
+  // Nextcloud Talk bridge (initialized when enabled + credentials set)
+  let nextcloudTalkBridge: NextcloudTalkBridge | null = null;
+
+  function startNextcloudTalkBridge() {
+    if (nextcloudTalkBridge || !coo) return;
+    const settings = getNextcloudTalkSettings();
+    if (!settings.enabled || !settings.serverUrlSet || !settings.usernameSet || !settings.appPasswordSet) return;
+    const serverUrl = getConfig("nextcloud-talk:server_url");
+    const username = getConfig("nextcloud-talk:username");
+    const appPassword = getConfig("nextcloud-talk:app_password");
+    if (!serverUrl || !username || !appPassword) return;
+    nextcloudTalkBridge = new NextcloudTalkBridge({ bus, coo, io });
+    nextcloudTalkBridge.start({ serverUrl, username, appPassword }).catch((err) => {
+      console.error("[Nextcloud Talk] Failed to start bridge:", err);
+      nextcloudTalkBridge = null;
+    });
+  }
+
+  async function stopNextcloudTalkBridge() {
+    if (nextcloudTalkBridge) {
+      await nextcloudTalkBridge.stop();
+      nextcloudTalkBridge = null;
+    }
+  }
+
   function startCoo() {
     if (coo) return;
     try {
@@ -731,6 +806,18 @@ async function main() {
         },
         onProjectUpdated: (project) => {
           emitProjectUpdated(io, project);
+        },
+        onProjectApprovalRequest: (details) => {
+          if (!coo) return;
+          pendingProjectApproval = true;
+          const approvalMsg = bus.send({
+            fromAgentId: "coo",
+            toAgentId: null,
+            type: "chat" as any,
+            content: `**Project Approval Required** — I'd like to create a project:\n\n**${details.name}**\n${details.description}\n\nReply **approve** or **deny**.`,
+            conversationId: coo.getCurrentConversationId() ?? undefined,
+          });
+          io.emit("coo:response", approvalMsg);
         },
         onKanbanTaskCreated: (task) => {
           emitKanbanTaskCreated(io, task);
@@ -837,15 +924,58 @@ async function main() {
       pipelineManager.init().catch((err) => {
         console.error("[PipelineManager] Init failed:", err);
       });
+      const mergeQueue = new MergeQueue(io as any, workspace);
       issueMonitor.setPipelineManager(pipelineManager);
       prMonitor.setPipelineManager(pipelineManager);
+      prMonitor.setMergeQueue(mergeQueue);
+      pipelineManager.setMergeQueue(mergeQueue);
+      mergeQueue.setPipelineManager(pipelineManager);
       coo.setPipelineManager(pipelineManager);
 
       setupSocketHandlers(io, bus, coo, registry, {
         beforeCeoMessage: (content, conversationId, callback) => {
+          const lower = content.trim().toLowerCase();
+
+          // Check for pending project approval first
+          if (pendingProjectApproval && coo) {
+            const isApprove = ["allow", "yes", "approve", "ok", "y"].includes(lower);
+            const isDeny = ["deny", "no", "reject", "n"].includes(lower);
+
+            if (isApprove || isDeny) {
+              pendingProjectApproval = false;
+
+              if (isApprove) {
+                // Approve and create the project
+                coo.approvePendingProject().then((result) => {
+                  const approveMsg = bus.send({
+                    fromAgentId: "coo",
+                    toAgentId: null,
+                    type: "chat" as any,
+                    content: `Project approved. ${result}`,
+                    conversationId,
+                  });
+                  io.emit("coo:response", approveMsg);
+                });
+              } else {
+                const result = coo.denyPendingProject();
+                const denyMsg = bus.send({
+                  fromAgentId: "coo",
+                  toAgentId: null,
+                  type: "chat" as any,
+                  content: result,
+                  conversationId,
+                });
+                io.emit("coo:response", denyMsg);
+              }
+
+              callback?.({ messageId: "", conversationId: conversationId ?? "" });
+              return true;
+            }
+          }
+
+          // Check for pending coding agent permission request
           if (!activePermissionRequest) return false;
 
-          const lower = content.trim().toLowerCase();
           let response: "once" | "always" | "reject" | null = null;
 
           if (["allow", "yes", "approve", "ok", "y", "allow once"].includes(lower)) {
@@ -876,7 +1006,7 @@ async function main() {
           callback?.({ messageId: confirmMsg.id, conversationId: conversationId ?? "" });
           return true;
         },
-      }, { workspace, issueMonitor: issueMonitor! });
+      }, { workspace, issueMonitor: issueMonitor!, mergeQueue });
       console.log(`COO agent started. (model=${coo.toData().model}, provider=${coo.toData().provider})`);
 
       // Spawn AdminAssistant alongside COO
@@ -994,6 +1124,13 @@ async function main() {
         });
       }
 
+      schedulerRegistry.register("merge-queue", mergeQueue, {
+        name: "Merge Queue",
+        description: "Processes approved PRs: rebase, re-review, and auto-merge sequentially.",
+        defaultIntervalMs: 30_000,
+        minIntervalMs: 10_000,
+      });
+
       schedulerRegistry.startAll();
 
       // Start custom scheduled tasks
@@ -1034,6 +1171,8 @@ async function main() {
     startTelegramBridge();
     startTlonBridge();
     startWhatsAppBridge();
+    startSignalBridge();
+    startNextcloudTalkBridge();
   } else {
     console.log("Setup not complete. Waiting for setup wizard...");
   }
@@ -1361,6 +1500,8 @@ async function main() {
     startTelegramBridge();
     startTlonBridge();
     startWhatsAppBridge();
+    startSignalBridge();
+    startNextcloudTalkBridge();
 
     return { ok: true };
   });
@@ -2242,6 +2383,24 @@ async function main() {
     return { ok: true };
   });
 
+  // Worker names settings
+  app.get("/api/settings/worker-names", async () => {
+    const { getWorkerNames, DEFAULT_WORKER_NAMES } = await import("./utils/worker-names.js");
+    return { names: getWorkerNames(), defaults: DEFAULT_WORKER_NAMES };
+  });
+
+  app.put<{
+    Body: { names: string[] };
+  }>("/api/settings/worker-names", async (req) => {
+    const { names } = req.body;
+    if (!Array.isArray(names) || names.length === 0) {
+      deleteConfig("worker_names");
+    } else {
+      setConfig("worker_names", JSON.stringify(names));
+    }
+    return { ok: true };
+  });
+
   // Agent list endpoint (only active agents, not stale "done" ones)
   // Includes scheduler pseudo-agents that aren't persisted in the DB.
   app.get("/api/agents", async () => {
@@ -2252,6 +2411,104 @@ async function main() {
     const schedulerAgents = customTaskScheduler?.getActivePseudoAgents() ?? [];
     const builtinSchedulerAgents = schedulerRegistry.getActivePseudoAgents();
     return [...dbAgents, ...schedulerAgents, ...builtinSchedulerAgents];
+  });
+
+  // =========================================================================
+  // SSH Key Management routes
+  // =========================================================================
+
+  app.get("/api/settings/ssh/keys", async () => {
+    const { SshService } = await import("./ssh/ssh-service.js");
+    const svc = new SshService();
+    return { keys: svc.list() };
+  });
+
+  app.get("/api/settings/ssh/keys/:id", async (req) => {
+    const { SshService } = await import("./ssh/ssh-service.js");
+    const svc = new SshService();
+    const key = svc.get((req.params as { id: string }).id);
+    if (!key) return { error: "Not found" };
+    const publicKey = svc.getPublicKey(key.id);
+    return { key, publicKey };
+  });
+
+  app.post("/api/settings/ssh/keys/generate", async (req) => {
+    const { SshService } = await import("./ssh/ssh-service.js");
+    const svc = new SshService();
+    const body = req.body as { name: string; username: string; allowedHosts: string[]; keyType?: "ed25519" | "rsa"; port?: number };
+    const key = svc.generateKey(body);
+    return { key };
+  });
+
+  app.post("/api/settings/ssh/keys/import", async (req) => {
+    const { SshService } = await import("./ssh/ssh-service.js");
+    const svc = new SshService();
+    const body = req.body as { name: string; username: string; privateKey: string; allowedHosts: string[]; port?: number };
+    try {
+      const key = svc.importKey(body);
+      return { key };
+    } catch (err) {
+      return { error: err instanceof Error ? err.message : "Import failed" };
+    }
+  });
+
+  app.put("/api/settings/ssh/keys/:id", async (req) => {
+    const { SshService } = await import("./ssh/ssh-service.js");
+    const svc = new SshService();
+    const id = (req.params as { id: string }).id;
+    const body = req.body as { name?: string; username?: string; allowedHosts?: string[]; port?: number };
+    const key = svc.update(id, body);
+    if (!key) return { error: "Not found" };
+    return { key };
+  });
+
+  app.delete("/api/settings/ssh/keys/:id", async (req) => {
+    const { SshService } = await import("./ssh/ssh-service.js");
+    const svc = new SshService();
+    const deleted = svc.deleteKey((req.params as { id: string }).id);
+    return { ok: deleted };
+  });
+
+  app.get("/api/settings/ssh/keys/:id/public-key", async (req) => {
+    const { SshService } = await import("./ssh/ssh-service.js");
+    const svc = new SshService();
+    const pubKey = svc.getPublicKey((req.params as { id: string }).id);
+    if (!pubKey) return { error: "Not found" };
+    return { publicKey: pubKey };
+  });
+
+  app.post("/api/settings/ssh/test", async (req) => {
+    const { SshService } = await import("./ssh/ssh-service.js");
+    const svc = new SshService();
+    const body = req.body as { keyId: string; host: string };
+    const result = svc.testConnection(body);
+    return result;
+  });
+
+  // =========================================================================
+  // SSH Session routes
+  // =========================================================================
+
+  app.get("/api/ssh/sessions", async (req) => {
+    const { SshService } = await import("./ssh/ssh-service.js");
+    const svc = new SshService();
+    const limit = parseInt((req.query as Record<string, string>).limit || "20", 10);
+    return { sessions: svc.listSessions(limit) };
+  });
+
+  app.get("/api/ssh/sessions/:id", async (req) => {
+    const { SshService } = await import("./ssh/ssh-service.js");
+    const svc = new SshService();
+    const session = svc.getSession((req.params as { id: string }).id);
+    if (!session) return { error: "Not found" };
+    return { session };
+  });
+
+  app.delete("/api/ssh/sessions/:id", async (req) => {
+    const { SshService } = await import("./ssh/ssh-service.js");
+    const svc = new SshService();
+    const deleted = svc.deleteSession((req.params as { id: string }).id);
+    return { ok: deleted };
   });
 
   // =========================================================================
@@ -2619,6 +2876,141 @@ async function main() {
   });
 
   // =========================================================================
+  // MCP Servers settings routes
+  // =========================================================================
+
+  const mcpServerService = new McpServerService();
+
+  app.get("/api/settings/mcp-servers", async () => {
+    const servers = mcpServerService.list().map((s) => mcpServerService.maskSecrets(s));
+    const statuses: Record<string, McpServerRuntime> = {};
+    const warnings: Record<string, SecurityWarning[]> = {};
+    for (const s of servers) {
+      statuses[s.id] = McpClientManager.getStatus(s.id);
+      warnings[s.id] = getSecurityWarnings(s);
+    }
+    return { servers, statuses, warnings };
+  });
+
+  app.post<{
+    Body: McpServerCreate;
+  }>("/api/settings/mcp-servers", async (req, reply) => {
+    const { name, transport } = req.body;
+    if (!name || !transport) {
+      reply.code(400);
+      return { error: "name and transport are required" };
+    }
+    try {
+      const created = mcpServerService.create(req.body);
+      return mcpServerService.maskSecrets(created);
+    } catch (err) {
+      reply.code(400);
+      return { error: err instanceof Error ? err.message : "Invalid configuration" };
+    }
+  });
+
+  app.get<{ Params: { id: string } }>("/api/settings/mcp-servers/:id", async (req, reply) => {
+    const server = mcpServerService.get(req.params.id);
+    if (!server) {
+      reply.code(404);
+      return { error: "MCP server not found" };
+    }
+    return {
+      server: mcpServerService.maskSecrets(server),
+      status: McpClientManager.getStatus(server.id),
+      warnings: getSecurityWarnings(server),
+    };
+  });
+
+  app.put<{ Params: { id: string }; Body: McpServerUpdate }>(
+    "/api/settings/mcp-servers/:id",
+    async (req, reply) => {
+      try {
+        const updated = mcpServerService.update(req.params.id, req.body);
+        if (!updated) {
+          reply.code(404);
+          return { error: "MCP server not found" };
+        }
+        return mcpServerService.maskSecrets(updated);
+      } catch (err) {
+        reply.code(400);
+        return { error: err instanceof Error ? err.message : "Invalid configuration" };
+      }
+    },
+  );
+
+  app.delete<{ Params: { id: string } }>("/api/settings/mcp-servers/:id", async (req, reply) => {
+    // Stop if running
+    await McpClientManager.stop(req.params.id);
+    const deleted = mcpServerService.delete(req.params.id);
+    if (!deleted) {
+      reply.code(404);
+      return { error: "MCP server not found" };
+    }
+    return { ok: true };
+  });
+
+  app.post<{ Params: { id: string } }>("/api/settings/mcp-servers/:id/start", async (req, reply) => {
+    try {
+      await McpClientManager.start(req.params.id);
+      return { ok: true, status: McpClientManager.getStatus(req.params.id) };
+    } catch (err) {
+      reply.code(500);
+      return { error: err instanceof Error ? err.message : "Failed to start MCP server" };
+    }
+  });
+
+  app.post<{ Params: { id: string } }>("/api/settings/mcp-servers/:id/stop", async (req) => {
+    await McpClientManager.stop(req.params.id);
+    return { ok: true, status: McpClientManager.getStatus(req.params.id) };
+  });
+
+  app.post<{ Params: { id: string } }>("/api/settings/mcp-servers/:id/restart", async (req, reply) => {
+    try {
+      await McpClientManager.restart(req.params.id);
+      return { ok: true, status: McpClientManager.getStatus(req.params.id) };
+    } catch (err) {
+      reply.code(500);
+      return { error: err instanceof Error ? err.message : "Failed to restart MCP server" };
+    }
+  });
+
+  app.post<{ Params: { id: string } }>("/api/settings/mcp-servers/:id/test", async (req, reply) => {
+    try {
+      await McpClientManager.start(req.params.id);
+      const tools = await McpClientManager.discoverTools(req.params.id);
+      return { ok: true, tools, status: McpClientManager.getStatus(req.params.id) };
+    } catch (err) {
+      reply.code(500);
+      return { error: err instanceof Error ? err.message : "Failed to test MCP server" };
+    }
+  });
+
+  app.post<{ Params: { id: string } }>("/api/settings/mcp-servers/:id/discover", async (req, reply) => {
+    try {
+      const tools = await McpClientManager.discoverTools(req.params.id);
+      return { ok: true, tools };
+    } catch (err) {
+      reply.code(500);
+      return { error: err instanceof Error ? err.message : "Failed to discover tools" };
+    }
+  });
+
+  app.put<{ Params: { id: string }; Body: { allowedTools: string[] | null } }>(
+    "/api/settings/mcp-servers/:id/tools",
+    async (req, reply) => {
+      const updated = mcpServerService.update(req.params.id, {
+        allowedTools: req.body.allowedTools,
+      });
+      if (!updated) {
+        reply.code(404);
+        return { error: "MCP server not found" };
+      }
+      return mcpServerService.maskSecrets(updated);
+    },
+  );
+
+  // =========================================================================
   // Search settings routes
   // =========================================================================
 
@@ -2882,7 +3274,7 @@ async function main() {
       authMode?: "api-key" | "oauth";
       apiKey?: string;
       model?: string;
-      approvalMode?: "full-auto" | "suggest" | "ask";
+      approvalMode?: "full-auto" | "on-failure" | "on-request" | "never";
       timeoutMs?: number;
     };
   }>("/api/settings/codex", async (req) => {
@@ -3805,6 +4197,139 @@ async function main() {
   });
 
   // =========================================================================
+  // Signal settings routes
+  // =========================================================================
+
+  app.get("/api/settings/signal", async () => {
+    return getSignalSettings();
+  });
+
+  app.put<{
+    Body: {
+      enabled?: boolean;
+      apiUrl?: string;
+      phoneNumber?: string;
+    };
+  }>("/api/settings/signal", async (req) => {
+    const wasEnabled = getSignalSettings().enabled && !!getSignalSettings().apiUrl && !!getSignalSettings().phoneNumber;
+    updateSignalSettings(req.body);
+    const nowEnabled = getSignalSettings().enabled && !!getSignalSettings().apiUrl && !!getSignalSettings().phoneNumber;
+
+    if (nowEnabled && !wasEnabled) {
+      startSignalBridge();
+    } else if (!nowEnabled && wasEnabled) {
+      await stopSignalBridge();
+    }
+
+    return { ok: true };
+  });
+
+  app.post("/api/settings/signal/test", async () => {
+    return testSignalConnection();
+  });
+
+  app.post<{
+    Body: { code: string };
+  }>("/api/settings/signal/pair/approve", async (req, reply) => {
+    const result = approveSignalPairing(req.body.code);
+    if (!result) {
+      reply.code(400);
+      return { ok: false, error: "Invalid or expired pairing code" };
+    }
+    return { ok: true, user: result };
+  });
+
+  app.post<{
+    Body: { code: string };
+  }>("/api/settings/signal/pair/reject", async (req, reply) => {
+    const ok = rejectSignalPairing(req.body.code);
+    if (!ok) {
+      reply.code(400);
+      return { ok: false, error: "Pairing code not found" };
+    }
+    return { ok: true };
+  });
+
+  app.delete<{
+    Params: { userId: string };
+  }>("/api/settings/signal/pair/:userId", async (req, reply) => {
+    const ok = revokeSignalPairing(req.params.userId);
+    if (!ok) {
+      reply.code(400);
+      return { ok: false, error: "User not found" };
+    }
+    return { ok: true };
+  });
+
+  // =========================================================================
+  // Nextcloud Talk settings routes
+  // =========================================================================
+
+  app.get("/api/settings/nextcloud-talk", async () => {
+    return getNextcloudTalkSettings();
+  });
+
+  app.put<{
+    Body: {
+      enabled?: boolean;
+      serverUrl?: string;
+      username?: string;
+      appPassword?: string;
+      requireMention?: boolean;
+      allowedConversations?: string[];
+    };
+  }>("/api/settings/nextcloud-talk", async (req) => {
+    const wasEnabled = getNextcloudTalkSettings().enabled && getNextcloudTalkSettings().serverUrlSet && getNextcloudTalkSettings().usernameSet && getNextcloudTalkSettings().appPasswordSet;
+    updateNextcloudTalkSettings(req.body);
+    const nowEnabled = getNextcloudTalkSettings().enabled && getNextcloudTalkSettings().serverUrlSet && getNextcloudTalkSettings().usernameSet && getNextcloudTalkSettings().appPasswordSet;
+
+    if (nowEnabled && !wasEnabled) {
+      startNextcloudTalkBridge();
+    } else if (!nowEnabled && wasEnabled) {
+      await stopNextcloudTalkBridge();
+    }
+
+    return { ok: true };
+  });
+
+  app.post("/api/settings/nextcloud-talk/test", async () => {
+    return testNextcloudTalkConnection();
+  });
+
+  app.post<{
+    Body: { code: string };
+  }>("/api/settings/nextcloud-talk/pair/approve", async (req, reply) => {
+    const result = approveNextcloudTalkPairing(req.body.code);
+    if (!result) {
+      reply.code(400);
+      return { ok: false, error: "Invalid or expired pairing code" };
+    }
+    return { ok: true, user: result };
+  });
+
+  app.post<{
+    Body: { code: string };
+  }>("/api/settings/nextcloud-talk/pair/reject", async (req, reply) => {
+    const ok = rejectNextcloudTalkPairing(req.body.code);
+    if (!ok) {
+      reply.code(400);
+      return { ok: false, error: "Pairing code not found" };
+    }
+    return { ok: true };
+  });
+
+  app.delete<{
+    Params: { userId: string };
+  }>("/api/settings/nextcloud-talk/pair/:userId", async (req, reply) => {
+    const ok = revokeNextcloudTalkPairing(req.params.userId);
+    if (!ok) {
+      reply.code(400);
+      return { ok: false, error: "User not found" };
+    }
+    return { ok: true };
+  });
+
+  // =========================================================================
   // Google settings routes
   // =========================================================================
 
@@ -4487,6 +5012,16 @@ Respond with ONLY a JSON object (no markdown, no explanation) with these fields:
   await app.listen({ port, host });
   console.log(`Otterbot server listening on https://${host}:${port}`);
 
+  // Auto-start MCP servers
+  McpClientManager.autoStartAll().catch((err) => {
+    console.error("[MCP] Failed to auto-start servers:", err);
+  });
+
+  // Emit MCP status changes via socket
+  McpClientManager.onStatusChange((runtime) => {
+    io.emit("mcp:status", runtime);
+  });
+
   // Graceful shutdown
   const shutdown = async () => {
     await stopDiscordBridge();
@@ -4496,6 +5031,9 @@ Respond with ONLY a JSON object (no markdown, no explanation) with these fields:
     await stopTlonBridge();
     await stopWhatsAppBridge();
     await stopMattermostBridge();
+    await stopSignalBridge();
+    await stopNextcloudTalkBridge();
+    await McpClientManager.stopAll();
     await closeBrowser();
     process.exit(0);
   };

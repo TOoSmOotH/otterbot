@@ -4,17 +4,22 @@ import { getCenterTabs, centerViewLabels } from "./get-center-tabs";
 describe("getCenterTabs", () => {
   it("returns project-scoped tabs when a project is active", () => {
     const tabs = getCenterTabs("project-123");
-    expect(tabs).toEqual(["dashboard", "kanban", "charter", "files", "code", "settings"]);
+    expect(tabs).toEqual(["dashboard", "kanban", "charter", "files", "code", "ssh", "settings", "merge-queue"]);
   });
 
   it("returns global tabs when no project is active (null)", () => {
     const tabs = getCenterTabs(null);
-    expect(tabs).toEqual(["dashboard", "todos", "inbox", "calendar", "code", "usage"]);
+    expect(tabs).toEqual(["dashboard", "todos", "inbox", "calendar", "code", "ssh", "usage"]);
   });
 
   it("includes 'code' in both project and global tabs", () => {
     expect(getCenterTabs("proj-1")).toContain("code");
     expect(getCenterTabs(null)).toContain("code");
+  });
+
+  it("includes 'ssh' in both project and global tabs", () => {
+    expect(getCenterTabs("proj-1")).toContain("ssh");
+    expect(getCenterTabs(null)).toContain("ssh");
   });
 
   it("does not include graph in project tabs", () => {
@@ -36,7 +41,7 @@ describe("centerViewLabels", () => {
   it("has a label for every CenterView value", () => {
     const allViews = [
       "graph", "live3d", "dashboard", "charter", "kanban",
-      "files", "todos", "inbox", "calendar", "code", "settings", "usage", "desktop",
+      "files", "todos", "inbox", "calendar", "code", "ssh", "settings", "merge-queue", "usage", "desktop",
     ] as const;
     for (const view of allViews) {
       expect(centerViewLabels[view]).toBeDefined();

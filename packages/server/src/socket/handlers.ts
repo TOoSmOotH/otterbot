@@ -19,6 +19,7 @@ import { MemoryService } from "../memory/memory-service.js";
 import { SoulAdvisor } from "../memory/soul-advisor.js";
 import type { WorkspaceManager } from "../workspace/workspace.js";
 import type { GitHubIssueMonitor } from "../github/issue-monitor.js";
+import type { MergeQueue } from "../merge-queue/merge-queue.js";
 import { cloneRepo, getRepoDefaultBranch } from "../github/github-service.js";
 import { initGitRepo, createInitialCommit } from "../utils/git.js";
 import { NO_REPORT_SENTINEL } from "../schedulers/custom-task-scheduler.js";
@@ -27,6 +28,9 @@ import { existsSync, rmSync } from "node:fs";
 import type { PtyClient } from "../agents/worker.js";
 
 type TypedSocket = Socket<ClientToServerEvents, ServerToClientEvents>;
+
+/** Monotonically increasing counter; bumped on cancel to suppress in-flight TTS */
+let ttsGeneration = 0;
 type TypedServer = Server<ClientToServerEvents, ServerToClientEvents>;
 
 // Server-side part accumulator (mirrors client's partBuffers)
@@ -84,7 +88,7 @@ export function setupSocketHandlers(
   coo: COO,
   registry: Registry,
   hooks?: SocketHooks,
-  deps?: { workspace?: WorkspaceManager; issueMonitor?: GitHubIssueMonitor },
+  deps?: { workspace?: WorkspaceManager; issueMonitor?: GitHubIssueMonitor; mergeQueue?: MergeQueue },
 ) {
   // Track conversation IDs used by background tasks so we can suppress
   // the COO's response in that same conversation.
@@ -142,6 +146,7 @@ export function setupSocketHandlers(
             ? stripMarkdown(message.content)
             : "";
           if (provider && plainText) {
+            const gen = ttsGeneration; // snapshot before async work
             const voice = getConfig("tts:voice") ?? "af_heart";
             const speed = parseFloat(getConfig("tts:speed") ?? "1");
             const { audio, contentType } = await provider.synthesize(
@@ -149,6 +154,8 @@ export function setupSocketHandlers(
               voice,
               speed,
             );
+            // If cancelled while synthesizing, discard the result
+            if (gen !== ttsGeneration) return;
             io.emit("coo:audio", {
               messageId: message.id,
               audio: audio.toString("base64"),
@@ -228,6 +235,14 @@ export function setupSocketHandlers(
     // CEO starts a new chat (reset COO conversation)
     socket.on("ceo:new-chat", (callback) => {
       coo.resetConversation();
+      if (callback) {
+        callback({ ok: true });
+      }
+    });
+
+    // Cancel in-flight TTS synthesis
+    socket.on("ceo:cancel-tts", (callback) => {
+      ttsGeneration++;
       if (callback) {
         callback({ ok: true });
       }
@@ -625,6 +640,54 @@ export function setupSocketHandlers(
       }
     });
 
+    // Get target branch for a project
+    socket.on("project:get-branch", (data, callback) => {
+      const configBranch = getConfig(`project:${data.projectId}:github:branch`);
+      if (configBranch) {
+        callback({ branch: configBranch });
+        return;
+      }
+      // Fall back to DB column
+      const db = getDb();
+      const project = db
+        .select({ githubBranch: schema.projects.githubBranch })
+        .from(schema.projects)
+        .where(eq(schema.projects.id, data.projectId))
+        .get();
+      callback({ branch: project?.githubBranch ?? null });
+    });
+
+    // Set target branch for a project
+    socket.on("project:set-branch", (data, callback) => {
+      try {
+        const branch = data.branch.trim();
+        if (!branch) {
+          callback?.({ ok: false, error: "Branch name cannot be empty" });
+          return;
+        }
+        // Update config key (used at runtime by pipeline consumers)
+        setConfig(`project:${data.projectId}:github:branch`, branch);
+        // Update DB column to keep in sync
+        const db = getDb();
+        db.update(schema.projects)
+          .set({ githubBranch: branch })
+          .where(eq(schema.projects.id, data.projectId))
+          .run();
+        // Emit project:updated so UI refreshes
+        const updated = db
+          .select()
+          .from(schema.projects)
+          .where(eq(schema.projects.id, data.projectId))
+          .get();
+        if (updated) {
+          io.emit("project:updated", updated as any);
+        }
+        callback?.({ ok: true });
+      } catch (err) {
+        callback?.({ ok: false, error: err instanceof Error ? err.message : "Failed to save branch" });
+      }
+    });
+
     // Retrieve agent activity (bus messages + persisted activity records)
     socket.on("agent:activity", (data, callback) => {
       const db = getDb();
@@ -819,6 +882,246 @@ export function setupSocketHandlers(
         callback?.({ ok: true });
       } else {
         callback?.({ ok: false, error: "No active PTY session" });
+      }
+    });
+
+    // ─── Merge queue handlers ───────────────────────────────────────
+    if (deps?.mergeQueue) {
+      const mq = deps.mergeQueue;
+
+      socket.on("merge-queue:approve", (data, callback) => {
+        try {
+          const entry = mq.approveForMerge(data.taskId);
+          if (entry) {
+            callback?.({ ok: true, entry });
+          } else {
+            callback?.({ ok: false, error: "Task not eligible for merge queue (missing PR number or branch)" });
+          }
+        } catch (err) {
+          callback?.({ ok: false, error: err instanceof Error ? err.message : "Unknown error" });
+        }
+      });
+
+      socket.on("merge-queue:remove", (data, callback) => {
+        const removed = mq.removeFromQueue(data.taskId);
+        callback?.({ ok: removed, error: removed ? undefined : "Task not found in queue" });
+      });
+
+      socket.on("merge-queue:list", (data, callback) => {
+        const entries = mq.getQueue(data?.projectId);
+        callback?.(entries);
+      });
+
+      socket.on("merge-queue:reorder", (data, callback) => {
+        const reordered = mq.reorderEntry(data.entryId, data.newPosition);
+        callback?.({ ok: reordered, error: reordered ? undefined : "Entry not found" });
+      });
+    }
+
+    // ─── SSH session events ────────────────────────────────────
+    socket.on("ssh:connect", async (data, callback) => {
+      try {
+        const { SshService } = await import("../ssh/ssh-service.js");
+        const { SshPtyClient } = await import("../ssh/ssh-pty-client.js");
+        const sshService = new SshService();
+
+        // Validate key and host
+        const key = sshService.get(data.keyId);
+        if (!key) {
+          callback?.({ ok: false, error: "SSH key not found" });
+          return;
+        }
+
+        const hostCheck = sshService.validateHost(data.keyId, data.host);
+        if (!hostCheck.ok) {
+          callback?.({ ok: false, error: hostCheck.error });
+          return;
+        }
+
+        // Create session record
+        const sessionId = sshService.createSession({
+          sshKeyId: data.keyId,
+          host: data.host,
+          initiatedBy: "user",
+        });
+
+        // Use sessionId as the agentId key for PTY routing
+        const agentId = `ssh-${sessionId}`;
+
+        const ptyClient = new SshPtyClient({
+          keyId: data.keyId,
+          host: data.host,
+          sshService,
+          onData: (chunk) => {
+            io.emit("terminal:data", { agentId, data: chunk });
+          },
+          onExit: async (exitCode) => {
+            unregisterPtySession(agentId);
+            const status = exitCode === 0 ? "completed" : "error";
+            const buffer = ptyClient.getReplayBuffer();
+            sshService.updateSession(sessionId, {
+              status,
+              completedAt: new Date().toISOString(),
+              terminalBuffer: buffer || undefined,
+            });
+            // Clean up chat history for this session
+            try {
+              const { clearSshChatHistory } = await import("../ssh/ssh-chat.js");
+              clearSshChatHistory(sessionId);
+            } catch { /* ignore */ }
+            io.emit("ssh:session-end", { sessionId, agentId, status });
+          },
+        });
+
+        await ptyClient.connect();
+        registerPtySession(agentId, ptyClient);
+
+        io.emit("ssh:session-start", {
+          sessionId,
+          keyId: data.keyId,
+          host: data.host,
+          username: key.username,
+          agentId,
+        });
+
+        callback?.({ ok: true, sessionId, agentId });
+      } catch (err) {
+        callback?.({ ok: false, error: err instanceof Error ? err.message : "Failed to connect" });
+      }
+    });
+
+    socket.on("ssh:chat", async (data, callback) => {
+      try {
+        const { handleSshChat } = await import("../ssh/ssh-chat.js");
+
+        const agentId = `ssh-${data.sessionId}`;
+        const ptyClient = activePtySessions.get(agentId);
+        const terminalBuffer = ptyClient?.getReplayBuffer() ?? "";
+
+        let errored = false;
+        const messageId = await handleSshChat(
+          {
+            sessionId: data.sessionId,
+            message: data.message,
+            terminalBuffer,
+          },
+          {
+            onStream: (token, msgId) => {
+              io.emit("ssh:chat-stream", { sessionId: data.sessionId, token, messageId: msgId });
+            },
+            onComplete: (msgId, content, command) => {
+              io.emit("ssh:chat-response", { sessionId: data.sessionId, messageId: msgId, content, command });
+            },
+            onError: (error) => {
+              errored = true;
+              callback?.({ ok: false, error });
+            },
+          },
+        );
+
+        if (!errored) {
+          callback?.({ ok: true, messageId });
+        }
+      } catch (err) {
+        callback?.({ ok: false, error: err instanceof Error ? err.message : "SSH chat failed" });
+      }
+    });
+
+    socket.on("ssh:chat-confirm", async (data, callback) => {
+      try {
+        const agentId = `ssh-${data.sessionId}`;
+        const ptyClient = activePtySessions.get(agentId);
+        if (!ptyClient) {
+          callback?.({ ok: false, error: "No active SSH session" });
+          return;
+        }
+
+        // Write the command followed by newline to the PTY
+        ptyClient.writeInput(data.command + "\n");
+        callback?.({ ok: true });
+
+        // Auto-analyze command output: wait for output to settle, then
+        // send it through the LLM so the model can interpret the results.
+        const { analyzeCommandOutput } = await import("../ssh/ssh-chat.js");
+        const { SshPtyClient } = await import("../ssh/ssh-pty-client.js");
+
+        // Only proceed if the ptyClient supports data listeners
+        if (!(ptyClient instanceof SshPtyClient)) return;
+
+        const SETTLE_MS = 1500; // wait 1.5s of silence before analyzing
+        const MAX_WAIT_MS = 30000; // give up after 30s
+        let settleTimer: ReturnType<typeof setTimeout> | null = null;
+        let maxTimer: ReturnType<typeof setTimeout> | null = null;
+
+        const cleanup = () => {
+          if (settleTimer) clearTimeout(settleTimer);
+          if (maxTimer) clearTimeout(maxTimer);
+          unsubscribe();
+        };
+
+        const triggerAnalysis = () => {
+          cleanup();
+          // Notify the frontend that analysis is starting
+          io.emit("ssh:chat-analyzing", { sessionId: data.sessionId, command: data.command });
+
+          const terminalBuffer = ptyClient.getReplayBuffer();
+          analyzeCommandOutput(
+            { sessionId: data.sessionId, command: data.command, terminalBuffer },
+            {
+              onStream: (token, msgId) => {
+                io.emit("ssh:chat-stream", { sessionId: data.sessionId, token, messageId: msgId });
+              },
+              onComplete: (msgId, content, command) => {
+                io.emit("ssh:chat-response", { sessionId: data.sessionId, messageId: msgId, content, command });
+              },
+              onError: () => {
+                // Silently fail — the user still has the terminal output
+              },
+            },
+          ).catch(() => {
+            // Silently fail
+          });
+        };
+
+        // Listen for new data to detect when output settles
+        const unsubscribe = ptyClient.addDataListener(() => {
+          if (settleTimer) clearTimeout(settleTimer);
+          settleTimer = setTimeout(triggerAnalysis, SETTLE_MS);
+        });
+
+        // Start the settle timer immediately (handles commands with no output)
+        settleTimer = setTimeout(triggerAnalysis, SETTLE_MS);
+
+        // Safety timeout to prevent indefinite waiting
+        maxTimer = setTimeout(() => {
+          triggerAnalysis();
+        }, MAX_WAIT_MS);
+      } catch (err) {
+        callback?.({ ok: false, error: err instanceof Error ? err.message : "Failed to execute command" });
+      }
+    });
+
+    socket.on("ssh:disconnect", async (data, callback) => {
+      try {
+        const { SshService } = await import("../ssh/ssh-service.js");
+        const sshService = new SshService();
+
+        const agentId = `ssh-${data.sessionId}`;
+        const client = activePtySessions.get(agentId);
+        if (client) {
+          client.gracefulExit();
+          // The onExit handler in ssh:connect will handle cleanup
+          callback?.({ ok: true });
+        } else {
+          // Session may have already ended — just update DB
+          sshService.updateSession(data.sessionId, {
+            status: "completed",
+            completedAt: new Date().toISOString(),
+          });
+          callback?.({ ok: true });
+        }
+      } catch (err) {
+        callback?.({ ok: false, error: err instanceof Error ? err.message : "Failed to disconnect" });
       }
     });
 

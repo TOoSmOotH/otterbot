@@ -1,4 +1,4 @@
-export type ProviderType = "anthropic" | "openai" | "google" | "ollama" | "openai-compatible" | "openrouter" | "github-copilot" | "huggingface" | "nvidia" | "perplexity" | "deepgram" | "bedrock";
+export type ProviderType = "anthropic" | "openai" | "google" | "ollama" | "openai-compatible" | "openrouter" | "github-copilot" | "huggingface" | "nvidia" | "minimax" | "xai" | "zai" | "perplexity" | "deepgram" | "bedrock" | "lmstudio" | "deepseek" | "mistral";
 
 export interface NamedProvider {
   id: string;
@@ -39,7 +39,7 @@ export interface AgentModelOverride {
 }
 
 /** Supported messaging-platform chat provider types. */
-export type ChatProviderType = "discord" | "matrix" | "irc" | "teams" | "telegram" | "tlon" | "whatsapp";
+export type ChatProviderType = "discord" | "matrix" | "irc" | "teams" | "telegram" | "tlon" | "whatsapp" | "signal" | "nextcloud-talk";
 
 /** Settings common to all chat provider bridges. */
 export interface ChatProviderSettings {
@@ -61,4 +61,13 @@ export interface TeamsChatProviderSettings extends ChatProviderSettings {
   appIdSet: boolean;
   appPasswordSet: boolean;
   tenantId: string | null;
+}
+
+/** Nextcloud Talk-specific chat provider settings exposed to the client. */
+export interface NextcloudTalkChatProviderSettings extends ChatProviderSettings {
+  type: "nextcloud-talk";
+  serverUrl: string | null;
+  usernameSet: boolean;
+  appPasswordSet: boolean;
+  botUsername: string | null;
 }

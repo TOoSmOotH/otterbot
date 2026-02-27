@@ -21,10 +21,14 @@ import { GitHubTab } from "./GitHubTab";
 import { DiscordSection } from "./DiscordSection";
 import { SlackSection } from "./SlackSection";
 import { MattermostSection } from "./MattermostSection";
+import { NextcloudTalkSection } from "./NextcloudTalkSection";
 import { TelegramSection } from "./TelegramSection";
 import { GoogleSection } from "./GoogleSection";
 import { SecuritySection } from "./SecuritySection";
 import { ModulesSection } from "./ModulesSection";
+import { WorkerNamesSection } from "./WorkerNamesSection";
+import { McpServersSection } from "./McpServersSection";
+import { SshTab } from "./SshTab";
 import type { SettingsSection } from "./settings-nav";
 
 interface SettingsPageProps {
@@ -60,6 +64,10 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
     if (activeSection === "telegram") return <TelegramSection />;
     if (activeSection === "slack") return <SlackSection />;
     if (activeSection === "mattermost") return <MattermostSection />;
+    if (activeSection === "nextcloud-talk") return <NextcloudTalkSection />;
+    if (activeSection === "worker-names") return <WorkerNamesSection />;
+    if (activeSection === "mcp-servers") return <McpServersSection />;
+    if (activeSection === "ssh") return <SshTab />;
     if (activeSection === "security") return <SecuritySection />;
     if (activeSection === "soul") return <SoulTab />;
     if (activeSection === "memory") return <MemoryTab />;

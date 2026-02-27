@@ -51,9 +51,18 @@ import {
 import { createMemorySaveTool } from "../tools/memory-save.js";
 import { getConfiguredSearchProvider } from "../tools/search/providers.js";
 import { getRandomModelPackId } from "../models3d/model-packs.js";
+import { pickWorkerName } from "../utils/worker-names.js";
 import { isDesktopEnabled } from "../desktop/desktop.js";
+import { resolveProjectBranch } from "../github/github-service.js";
 import { execSync } from "node:child_process";
 import { existsSync, rmSync } from "node:fs";
+
+export interface PendingProjectApproval {
+  name: string;
+  description: string;
+  charter: string;
+  directive: string;
+}
 
 export interface COODependencies {
   bus: MessageBus;
@@ -65,6 +74,7 @@ export interface COODependencies {
   onThinkingEnd?: (messageId: string, conversationId: string | null) => void;
   onProjectCreated?: (project: Project) => void;
   onProjectUpdated?: (project: Project) => void;
+  onProjectApprovalRequest?: (details: PendingProjectApproval) => void;
   onKanbanTaskCreated?: (task: KanbanTask) => void;
   onKanbanTaskUpdated?: (task: KanbanTask) => void;
   onKanbanTaskDeleted?: (taskId: string, projectId: string) => void;
@@ -115,6 +125,8 @@ export class COO extends BaseAgent {
   private lastProjectCreatedAt = 0;
   private projectCreatedThisTurn = false;
   private projectStatusCheckedThisTurn = false;
+  private _pendingProjectApproval: PendingProjectApproval | null = null;
+  private _onProjectApprovalRequest?: (details: PendingProjectApproval) => void;
   /** Per-think-cycle run_command call count — prevents the COO from burning steps on repeated commands */
   private _runCommandCalls = 0;
 
@@ -214,6 +226,7 @@ The user can see everything on the desktop in real-time.`;
     this._onPtySessionUnregistered = deps.onPtySessionUnregistered;
     this.onAgentDestroyed = deps.onAgentDestroyed;
     this.onConversationSwitched = deps.onConversationSwitched;
+    this._onProjectApprovalRequest = deps.onProjectApprovalRequest;
     this.contextManager = new ConversationContextManager(systemPrompt);
   }
 
@@ -349,7 +362,7 @@ The user can see everything on the desktop in real-time.`;
     // Process the Team Lead's report with a strong instruction to relay.
     // Use thinkWithoutTools so the COO just summarises instead of looping
     // on get_project_status or other tools — it only needs to relay.
-    const summary = `[IMPORTANT: Summarize this report and relay it to the CEO immediately. Do NOT call any tools — just write your summary.]\n\n[Report from Team Lead ${message.fromAgentId}]: ${message.content}`;
+    const summary = `[IMPORTANT: Summarize this report and relay it to the CEO immediately. Do NOT call any tools — just write your summary.]\n\n[Report from Team Lead ${this.getAgentName(message.fromAgentId ?? '')}]: ${message.content}`;
     const { text, thinking } = await this.thinkWithoutTools(
       summary,
       (token, messageId) => {
@@ -381,6 +394,13 @@ The user can see everything on the desktop in real-time.`;
       thinking ? { thinking } : undefined,
       this.currentConversationId ?? undefined,
     );
+  }
+
+  private getAgentName(agentId: string): string {
+    for (const tl of this.teamLeads.values()) {
+      if (tl.id === agentId) return tl.name ?? agentId;
+    }
+    return agentId;
   }
 
   /** Reset per-cycle tool call counters before each LLM invocation */
@@ -485,7 +505,7 @@ The user can see everything on the desktop in real-time.`;
       }),
       create_project: tool({
         description:
-          "Create a NEW project and spawn a Team Lead. ONLY use this when no active project covers the CEO's goal. Always call get_project_status first to check existing projects. Prefer send_directive if an existing project can handle the work.",
+          "Request to create a NEW project and spawn a Team Lead. Requires CEO approval before the project is actually created. ONLY use this when no active project covers the CEO's goal. Always call get_project_status first to check existing projects. Prefer send_directive if an existing project can handle the work.",
         parameters: z.object({
           name: z
             .string()
@@ -505,7 +525,7 @@ The user can see everything on the desktop in real-time.`;
             ),
         }),
         execute: async ({ name, description, charter, directive }) => {
-          return this.createProject(name, description, directive, charter);
+          return this.requestProjectApproval(name, description, charter, directive);
         },
       }),
       send_directive: tool({
@@ -670,9 +690,10 @@ The user can see everything on the desktop in real-time.`;
       }),
       delegate_to_admin: tool({
         description:
-          "Delegate a personal/administrative task to the Admin Assistant. " +
-          "Use this for: todos, reminders, email, calendar, and other personal productivity tasks. " +
-          "Do NOT create a project for these — they are personal tasks, not engineering work.",
+          "Delegate a task to the Admin Assistant for direct execution. " +
+          "Use this for: todos, reminders, email, calendar, SSH commands, remote server operations, " +
+          "memory/notes, custom tools, and other tasks that don't require a full project. " +
+          "Do NOT create a project for these — they are operational tasks, not engineering work.",
         parameters: z.object({
           request: z.string().describe(
             "The request to send to the Admin Assistant, in natural language"
@@ -686,7 +707,7 @@ The user can see everything on the desktop in real-time.`;
               type: MessageType.Chat,
               content: request,
             },
-            30_000,
+            60_000,
           );
           if (!reply) {
             return "The Admin Assistant did not respond in time. Please try again.";
@@ -1060,6 +1081,43 @@ The user can see everything on the desktop in real-time.`;
     return `Directive sent to Team Lead ${teamLead.id} for project ${projectId}.`;
   }
 
+  private requestProjectApproval(
+    name: string,
+    description: string,
+    charter: string,
+    directive: string,
+  ): string {
+    // Store the pending project details
+    this._pendingProjectApproval = { name, description, charter, directive };
+
+    // Notify the server to send confirmation request to CEO
+    this._onProjectApprovalRequest?.(this._pendingProjectApproval);
+
+    return `Project "${name}" requires CEO approval before creation. A confirmation request has been sent. Wait for the CEO to approve or deny.`;
+  }
+
+  /** Returns the pending project approval details (if any). */
+  getPendingProjectApproval(): PendingProjectApproval | null {
+    return this._pendingProjectApproval;
+  }
+
+  /** Called when the CEO approves the pending project creation. */
+  async approvePendingProject(): Promise<string> {
+    const pending = this._pendingProjectApproval;
+    if (!pending) return "No pending project to approve.";
+    this._pendingProjectApproval = null;
+    return this.createProject(pending.name, pending.description, pending.directive, pending.charter);
+  }
+
+  /** Called when the CEO denies the pending project creation. */
+  denyPendingProject(): string {
+    const pending = this._pendingProjectApproval;
+    if (!pending) return "No pending project to deny.";
+    const name = pending.name;
+    this._pendingProjectApproval = null;
+    return `Project "${name}" creation was denied by the CEO.`;
+  }
+
   private async createProject(
     name: string,
     description: string,
@@ -1113,7 +1171,7 @@ The user can see everything on the desktop in real-time.`;
       workspace: this.workspace,
       projectId,
       parentId: this.id,
-      name,
+      name: pickWorkerName(this.getUsedAgentNames()),
       modelPackId: getRandomModelPackId(),
       onAgentSpawned: this.onAgentSpawned,
       onStatusChange: this.onStatusChange,
@@ -1555,6 +1613,18 @@ The user can see everything on the desktop in real-time.`;
     }
   }
 
+  /** Collect all names in use by team leads and their workers. */
+  private getUsedAgentNames(): Set<string> {
+    const used = new Set<string>();
+    for (const tl of this.teamLeads.values()) {
+      if (tl.name) used.add(tl.name);
+      for (const w of tl.getWorkers().values()) {
+        if (w.name) used.add(w.name);
+      }
+    }
+    return used;
+  }
+
   /**
    * Spawn a TeamLead for a manually-created (user-initiated) project.
    * Skips LLM guards (cooldown, duplicate check) since this is user-initiated via the UI.
@@ -1565,14 +1635,12 @@ The user can see everything on the desktop in real-time.`;
     branch: string | null,
     rules: string[],
   ): Promise<void> {
-    const db = getDb();
-    const project = db.select().from(schema.projects).where(eq(schema.projects.id, projectId)).get();
     const teamLead = new TeamLead({
       bus: this.bus,
       workspace: this.workspace,
       projectId,
       parentId: this.id,
-      name: project?.name ?? projectId,
+      name: pickWorkerName(this.getUsedAgentNames()),
       modelPackId: getRandomModelPackId(),
       onAgentSpawned: this.onAgentSpawned,
       onStatusChange: this.onStatusChange,
@@ -1655,6 +1723,7 @@ The user can see everything on the desktop in real-time.`;
     name: string;
     description: string;
     charter: string | null;
+    githubBranch: string | null;
   }): Promise<void> {
     const db = getDb();
 
@@ -1704,7 +1773,7 @@ The user can see everything on the desktop in real-time.`;
       workspace: this.workspace,
       projectId: project.id,
       parentId: this.id,
-      name: project.name,
+      name: pickWorkerName(this.getUsedAgentNames()),
       modelPackId: getRandomModelPackId(),
       onAgentSpawned: this.onAgentSpawned,
       onStatusChange: this.onStatusChange,
@@ -1754,7 +1823,7 @@ The user can see everything on the desktop in real-time.`;
   }
 
   private buildRecoveryDirective(
-    project: { id: string; name: string; description: string; charter: string | null },
+    project: { id: string; name: string; description: string; charter: string | null; githubBranch: string | null },
     tasks: Array<{
       id: string;
       title: string;
@@ -1782,12 +1851,12 @@ The user can see everything on the desktop in real-time.`;
 
     // Include GitHub context if available
     const ghRepo = getConfig(`project:${project.id}:github:repo`);
-    const ghBranch = getConfig(`project:${project.id}:github:branch`);
+    const ghBranch = resolveProjectBranch(project.id);
     const ghRulesRaw = getConfig(`project:${project.id}:github:rules`);
     if (ghRepo) {
       lines.push(`GITHUB REPO: ${ghRepo}`);
-      lines.push(`TARGET BRANCH: ${ghBranch ?? "main"}`);
-      lines.push(`PR WORKFLOW: Workers must create feature branches from \`${ghBranch ?? "main"}\`, commit, push, and open a PR targeting \`${ghBranch ?? "main"}\`.`);
+      lines.push(`TARGET BRANCH: ${ghBranch}`);
+      lines.push(`PR WORKFLOW: Workers must create feature branches from \`${ghBranch}\`, commit, push, and open a PR targeting \`${ghBranch}\`.`);
       if (ghRulesRaw) {
         try {
           const rules = JSON.parse(ghRulesRaw) as string[];
@@ -2011,7 +2080,7 @@ The user can see everything on the desktop in real-time.`;
     }
 
     // Delegate to existing recovery logic (resets orphaned tasks, spawns fresh TL, sends recovery directive)
-    await this.recoverProject(project as { id: string; name: string; description: string; charter: string | null });
+    await this.recoverProject(project as { id: string; name: string; description: string; charter: string | null; githubBranch: string | null });
 
     console.log(`[COO] Live-recovered project "${project.name}" (${projectId})`);
     return { ok: true };

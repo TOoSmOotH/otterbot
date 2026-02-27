@@ -22,7 +22,7 @@ export interface CodexConfig {
   workspacePath?: string | null;
   apiKey?: string;
   model?: string;
-  approvalMode?: "full-auto" | "suggest" | "ask";
+  approvalMode?: "full-auto" | "on-failure" | "on-request" | "never";
   timeoutMs?: number;
   maxTurns?: number;
   onEvent?: OnEvent;
@@ -48,18 +48,22 @@ export class CodexClient implements CodingAgentClient {
     console.log(`[${label}] Starting task (${task.length} chars)...`);
 
     try {
+      // Use `exec` subcommand so the process exits when the task completes
       const args: string[] = [
-        "--quiet",
+        "exec",
       ];
 
       // Set approval mode
       const approvalMode = this.config.approvalMode ?? "full-auto";
-      args.push("--approval-mode", approvalMode);
-
-      // Set model if specified
-      if (this.config.model) {
-        args.push("--model", this.config.model);
+      if (approvalMode === "full-auto") {
+        args.push("--dangerously-bypass-approvals-and-sandbox");
+      } else {
+        args.push("-a", approvalMode);
       }
+
+      // Set model (default to gpt-5.3-codex-medium if not configured)
+      const model = this.config.model ?? "gpt-5.3-codex-medium";
+      args.push("--model", model);
 
       // Add the task as the prompt
       args.push(task);
