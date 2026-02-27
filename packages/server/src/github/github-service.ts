@@ -2,7 +2,9 @@ import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { eq } from "drizzle-orm";
 import { getConfig } from "../auth/auth.js";
+import { getDb, schema } from "../db/index.js";
 
 // Input validation patterns
 const REPO_NAME_RE = /^[a-zA-Z0-9._-]+\/[a-zA-Z0-9._-]+$/;
@@ -781,5 +783,16 @@ export async function updatePullRequest(
       body: JSON.stringify(updates),
     },
   );
+}
+
+/**
+ * Resolve the target branch for a project, checking runtime config first,
+ * then the DB, falling back to "main".
+ */
+export function resolveProjectBranch(projectId: string): string {
+  return getConfig(`project:${projectId}:github:branch`)
+    ?? getDb().select().from(schema.projects)
+        .where(eq(schema.projects.id, projectId)).get()?.githubBranch
+    ?? "main";
 }
 

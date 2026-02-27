@@ -53,6 +53,7 @@ import { getConfiguredSearchProvider } from "../tools/search/providers.js";
 import { getRandomModelPackId } from "../models3d/model-packs.js";
 import { pickWorkerName } from "../utils/worker-names.js";
 import { isDesktopEnabled } from "../desktop/desktop.js";
+import { resolveProjectBranch } from "../github/github-service.js";
 import { execSync } from "node:child_process";
 import { existsSync, rmSync } from "node:fs";
 
@@ -1850,12 +1851,12 @@ The user can see everything on the desktop in real-time.`;
 
     // Include GitHub context if available
     const ghRepo = getConfig(`project:${project.id}:github:repo`);
-    const ghBranch = getConfig(`project:${project.id}:github:branch`) ?? project.githubBranch;
+    const ghBranch = resolveProjectBranch(project.id);
     const ghRulesRaw = getConfig(`project:${project.id}:github:rules`);
     if (ghRepo) {
       lines.push(`GITHUB REPO: ${ghRepo}`);
-      lines.push(`TARGET BRANCH: ${ghBranch ?? "main"}`);
-      lines.push(`PR WORKFLOW: Workers must create feature branches from \`${ghBranch ?? "main"}\`, commit, push, and open a PR targeting \`${ghBranch ?? "main"}\`.`);
+      lines.push(`TARGET BRANCH: ${ghBranch}`);
+      lines.push(`PR WORKFLOW: Workers must create feature branches from \`${ghBranch}\`, commit, push, and open a PR targeting \`${ghBranch}\`.`);
       if (ghRulesRaw) {
         try {
           const rules = JSON.parse(ghRulesRaw) as string[];

@@ -45,6 +45,7 @@ import {
   fetchPullRequestReviews,
   requestPullRequestReviewers,
   createIssueComment,
+  resolveProjectBranch,
 } from "../github/github-service.js";
 import type { PipelineManager } from "../pipeline/pipeline-manager.js";
 import { cleanTerminalOutput } from "../utils/terminal.js";
@@ -235,16 +236,14 @@ export class TeamLead extends BaseAgent {
 
     // Inject GitHub context if this project is linked to a repo
     const ghRepo = getConfig(`project:${deps.projectId}:github:repo`);
-    const ghBranch = getConfig(`project:${deps.projectId}:github:branch`)
-      ?? getDb().select().from(schema.projects).where(eq(schema.projects.id, deps.projectId)).get()?.githubBranch
-      ?? undefined;
+    const ghBranch = resolveProjectBranch(deps.projectId);
     const ghRulesRaw = getConfig(`project:${deps.projectId}:github:rules`);
     if (ghRepo) {
       const sections: string[] = [
         `\n\n## GitHub Integration`,
         `Repository: ${ghRepo}`,
-        `Target branch: ${ghBranch ?? "main"}`,
-        `**PR Workflow:** Workers must create feature branches from \`${ghBranch ?? "main"}\`, commit, push, and open a PR targeting \`${ghBranch ?? "main"}\`.`,
+        `Target branch: ${ghBranch}`,
+        `**PR Workflow:** Workers must create feature branches from \`${ghBranch}\`, commit, push, and open a PR targeting \`${ghBranch}\`.`,
         `Use conventional commits and reference issue numbers.`,
       ];
       if (ghRulesRaw) {
@@ -1606,14 +1605,14 @@ export class TeamLead extends BaseAgent {
       let githubWorkerContext = "";
       if (this.projectId) {
         const wGhRepo = getConfig(`project:${this.projectId}:github:repo`);
-        const wGhBranch = getConfig(`project:${this.projectId}:github:branch`);
+        const wGhBranch = resolveProjectBranch(this.projectId);
         const wGhRulesRaw = getConfig(`project:${this.projectId}:github:rules`);
         if (wGhRepo) {
           const parts: string[] = [
             `\n\n## GitHub Workflow`,
             `Repository: ${wGhRepo}`,
-            `Create a feature branch from \`${wGhBranch ?? "main"}\`.`,
-            `After completing your work, push your branch and create a pull request targeting \`${wGhBranch ?? "main"}\`.`,
+            `Create a feature branch from \`${wGhBranch}\`.`,
+            `After completing your work, push your branch and create a pull request targeting \`${wGhBranch}\`.`,
             `Use conventional commits and reference issue numbers where applicable.`,
           ];
           if (wGhRulesRaw) {

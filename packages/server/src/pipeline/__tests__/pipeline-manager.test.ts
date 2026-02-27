@@ -18,6 +18,7 @@ vi.mock("../../github/github-service.js", () => ({
   addLabelsToIssue: vi.fn().mockResolvedValue(undefined),
   fetchCompareCommitsDiff: vi.fn().mockResolvedValue([]),
   fetchPullRequests: vi.fn().mockResolvedValue([]),
+  resolveProjectBranch: vi.fn(() => "main"),
 }));
 
 vi.mock("../../settings/settings.js", () => ({

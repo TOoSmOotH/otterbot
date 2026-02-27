@@ -9,6 +9,7 @@ import {
   fetchPullRequest,
   fetchPullRequests,
   createPullRequest,
+  resolveProjectBranch,
 } from "../github/github-service.js";
 import type { ToolContext } from "./tool-context.js";
 
@@ -241,23 +242,19 @@ export function createGitHubCommentTool(ctx: ToolContext) {
 export function createGitHubCreatePRTool(ctx: ToolContext) {
   return tool({
     description:
-      "Create a new GitHub pull request. Returns the PR URL and number.",
+      "Create a new GitHub pull request. The target branch is determined by project configuration and cannot be overridden. Returns the PR URL and number.",
     parameters: z.object({
       title: z.string().describe("PR title"),
       head: z.string().describe("The branch containing your changes"),
-      base: z
-        .string()
-        .optional()
-        .describe("The branch to merge into (defaults to the project's configured branch)"),
       body: z
         .string()
         .optional()
         .describe("PR description (Markdown supported)"),
     }),
-    execute: async ({ title, head, base, body }) => {
+    execute: async ({ title, head, body }) => {
       try {
         const { repo, token } = getGitHubContext(ctx);
-        const targetBase = base ?? getConfig(`project:${ctx.projectId}:github:branch`) ?? "main";
+        const targetBase = resolveProjectBranch(ctx.projectId);
         const pr = await createPullRequest(repo, token, head, targetBase, title, body);
         return `Pull request created: #${pr.number} — ${pr.html_url}`;
       } catch (err) {

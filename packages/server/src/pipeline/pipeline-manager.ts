@@ -21,7 +21,7 @@ import {
   fetchPullRequests,
 } from "../github/github-service.js";
 import type { COO } from "../agents/coo.js";
-import type { GitHubIssue } from "../github/github-service.js";
+import { resolveProjectBranch, type GitHubIssue } from "../github/github-service.js";
 import { SECURITY_PREAMBLE } from "../agents/prompts/security-preamble.js";
 import { cleanTerminalOutput } from "../utils/terminal.js";
 import { formatBotComment, formatBotCommentWithDetails } from "../utils/github-comments.js";
@@ -222,7 +222,7 @@ export class PipelineManager {
         stageReports: new Map(Object.entries((task.stageReports as Record<string, string>) ?? {})),
         prBranch: task.prBranch ?? null,
         prNumber: task.prNumber ?? null,
-        targetBranch: project?.githubBranch ?? getConfig(`project:${task.projectId}:github:branch`) ?? "main",
+        targetBranch: resolveProjectBranch(task.projectId),
       };
 
       this.pipelines.set(task.id, state);
@@ -278,7 +278,7 @@ export class PipelineManager {
       stageReports: new Map(Object.entries((task.stageReports as Record<string, string>) ?? {})),
       prBranch: task.prBranch ?? null,
       prNumber: task.prNumber ?? null,
-      targetBranch: project?.githubBranch ?? getConfig(`project:${task.projectId}:github:branch`) ?? "main",
+      targetBranch: resolveProjectBranch(task.projectId),
     };
 
     this.pipelines.set(taskId, state);
@@ -534,7 +534,7 @@ export class PipelineManager {
       stageReports: new Map(),
       prBranch: null,
       prNumber: null,
-      targetBranch: project?.githubBranch ?? getConfig(`project:${projectId}:github:branch`) ?? "main",
+      targetBranch: resolveProjectBranch(projectId),
     };
     this.pipelines.set(taskId, state);
 
@@ -966,7 +966,7 @@ export class PipelineManager {
       stageReports: new Map(),
       prBranch: branchName,
       prNumber: task.prNumber ?? null,
-      targetBranch: project?.githubBranch ?? getConfig(`project:${task.projectId}:github:branch`) ?? "main",
+      targetBranch: resolveProjectBranch(task.projectId),
     };
 
     // Store review feedback context
@@ -1050,7 +1050,7 @@ export class PipelineManager {
       stageReports: new Map(),
       prBranch: branchName,
       prNumber: task.prNumber ?? null,
-      targetBranch: project?.githubBranch ?? getConfig(`project:${task.projectId}:github:branch`) ?? "main",
+      targetBranch: resolveProjectBranch(task.projectId),
     };
 
     // Store CI failure context
@@ -1143,7 +1143,7 @@ export class PipelineManager {
       stageReports: new Map(),
       prBranch: branchName,
       prNumber: task.prNumber ?? null,
-      targetBranch: project?.githubBranch ?? getConfig(`project:${task.projectId}:github:branch`) ?? "main",
+      targetBranch: resolveProjectBranch(task.projectId),
       isReReview: true,
     };
 

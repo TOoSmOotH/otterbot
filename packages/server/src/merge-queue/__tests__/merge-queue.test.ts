@@ -20,6 +20,7 @@ vi.mock("../../github/github-service.js", () => ({
   fetchPullRequest: (...args: unknown[]) => mockFetchPullRequest(...args),
   mergePullRequest: (...args: unknown[]) => mockMergePullRequest(...args),
   createIssueComment: (...args: unknown[]) => mockCreateIssueComment(...args),
+  resolveProjectBranch: vi.fn(() => "main"),
   gitEnvWithPAT: vi.fn(() => ({})),
   gitCredentialArgs: vi.fn(() => []),
 }));
