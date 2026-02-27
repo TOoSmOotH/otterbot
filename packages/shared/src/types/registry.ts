@@ -13,7 +13,7 @@ export interface RegistryEntry {
   /** Derived from assigned skills — not stored on the entry directly */
   tools: string[];
   builtIn: boolean;
-  role: "coo" | "team_lead" | "worker";
+  role: "coo" | "team_lead" | "worker" | "module_agent";
   modelPackId: string | null;
   gearConfig: GearConfig | null;
   clonedFromId: string | null;
@@ -27,7 +27,7 @@ export interface RegistryEntryCreate {
   promptAddendum?: string | null;
   defaultModel: string;
   defaultProvider: string;
-  role?: "coo" | "team_lead" | "worker";
+  role?: "coo" | "team_lead" | "worker" | "module_agent";
   clonedFromId?: string | null;
   modelPackId?: string | null;
   gearConfig?: GearConfig | null;

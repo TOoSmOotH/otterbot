@@ -1152,7 +1152,7 @@ async function main() {
 
       // Initialize module system (non-blocking)
       import("./modules/index.js").then(async ({ initModules }) => {
-        await initModules(coo!, app);
+        await initModules(coo!, app, bus, io);
       }).catch((err) => {
         console.warn("[modules] Failed to initialize module system:", err);
       });
@@ -2620,6 +2620,25 @@ async function main() {
   );
 
   // =========================================================================
+  // Module Agents
+  // =========================================================================
+
+  app.get("/api/settings/module-agents", async () => {
+    try {
+      const { getActiveModuleAgents } = await import("./modules/index.js");
+      const agents = getActiveModuleAgents();
+      const items = Array.from(agents.entries()).map(([moduleId, agent]) => ({
+        moduleId,
+        agentId: agent.id,
+        name: agent.name,
+      }));
+      return { agents: items };
+    } catch {
+      return { agents: [] };
+    }
+  });
+
+  // =========================================================================
   // Custom Scheduled Tasks CRUD
   // =========================================================================
 
@@ -2639,7 +2658,7 @@ async function main() {
       enabled?: boolean;
     };
   }>("/api/settings/custom-tasks", async (req, reply) => {
-    const { name, description, message, mode, intervalMs, enabled } = req.body;
+    const { name, description, message, mode, intervalMs, enabled, moduleAgentId } = req.body as any;
     if (!name || !message || !intervalMs) {
       reply.code(400);
       return { error: "name, message, and intervalMs are required" };
@@ -2654,10 +2673,11 @@ async function main() {
       name,
       description: description ?? "",
       message,
-      mode: (mode ?? "notification") as "coo-prompt" | "coo-background" | "notification",
+      mode: (mode ?? "notification") as "coo-prompt" | "coo-background" | "notification" | "module-agent",
       intervalMs: clampedInterval,
       enabled: enabled ?? true,
       lastRunAt: null,
+      moduleAgentId: moduleAgentId ?? null,
       createdAt: now,
       updatedAt: now,
     };
@@ -2674,9 +2694,10 @@ async function main() {
       name?: string;
       description?: string;
       message?: string;
-      mode?: "coo-prompt" | "coo-background" | "notification";
+      mode?: "coo-prompt" | "coo-background" | "notification" | "module-agent";
       intervalMs?: number;
       enabled?: boolean;
+      moduleAgentId?: string;
     };
   }>("/api/settings/custom-tasks/:id", async (req, reply) => {
     const { eq } = await import("drizzle-orm");
@@ -2700,6 +2721,7 @@ async function main() {
       patch.intervalMs = Math.max(req.body.intervalMs, MIN_CUSTOM_TASK_INTERVAL_MS);
     }
     if (req.body.enabled !== undefined) patch.enabled = req.body.enabled;
+    if (req.body.moduleAgentId !== undefined) patch.moduleAgentId = req.body.moduleAgentId;
     db.update(schema.customScheduledTasks)
       .set(patch)
       .where(eq(schema.customScheduledTasks.id, id))
