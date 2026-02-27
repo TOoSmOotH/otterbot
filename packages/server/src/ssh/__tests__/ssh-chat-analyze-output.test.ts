@@ -1,23 +1,23 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const mockResolveModel = vi.fn(() => "model");
-const mockGetConfig = vi.fn((key: string) => {
+const mockResolveModel = vi.fn<(...args: any[]) => any>(() => "model");
+const mockGetConfig = vi.fn<(...args: any[]) => any>((key: string) => {
   if (key === "coo_provider") return "anthropic";
   if (key === "coo_model") return "test-model";
   return "";
 });
-const mockStreamText = vi.fn();
+const mockStreamText = vi.fn<(...args: any[]) => any>();
 
 vi.mock("../../llm/adapter.js", () => ({
-  resolveModel: (...args: any[]) => mockResolveModel(...args),
+  resolveModel: (config: any) => mockResolveModel(config),
 }));
 
 vi.mock("../../auth/auth.js", () => ({
-  getConfig: (...args: any[]) => mockGetConfig(...args),
+  getConfig: (key: any) => mockGetConfig(key),
 }));
 
 vi.mock("ai", () => ({
-  streamText: (...args: any[]) => mockStreamText(...args),
+  streamText: (opts: any) => mockStreamText(opts),
 }));
 
 import { analyzeCommandOutput, clearSshChatHistory } from "../ssh-chat.js";
