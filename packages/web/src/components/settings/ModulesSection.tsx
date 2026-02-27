@@ -76,7 +76,7 @@ function ModuleDbInfo({ moduleId }: { moduleId: string }) {
   );
 }
 
-function ModuleConfigPanel({ moduleId, moduleLoaded }: { moduleId: string; moduleLoaded: boolean }) {
+function ModuleConfigPanel({ moduleId }: { moduleId: string }) {
   const [config, setConfig] = useState<ModuleConfig | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -177,7 +177,7 @@ function ModuleConfigPanel({ moduleId, moduleLoaded }: { moduleId: string; modul
   }
 
   if (!config || Object.keys(config.schema).length === 0) {
-    return moduleLoaded ? <ModuleDbInfo moduleId={moduleId} /> : null;
+    return null;
   }
 
   // Separate core config from agent config
@@ -234,6 +234,28 @@ function ModuleConfigPanel({ moduleId, moduleLoaded }: { moduleId: string; modul
               setDirty(true);
             }}
             placeholder="System default"
+          />
+        </div>
+      );
+    }
+
+    // Special handling for agent_prompt — multi-line textarea
+    if (key === "agent_prompt") {
+      return (
+        <div key={key}>
+          <label className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1 flex items-center gap-1.5">
+            {key.replace(/_/g, " ")}
+          </label>
+          <p className="text-[10px] text-muted-foreground/60 mb-1">{field.description}</p>
+          <textarea
+            value={editValues[key] ?? ""}
+            onChange={(e) => {
+              setEditValues({ ...editValues, [key]: e.target.value });
+              setDirty(true);
+            }}
+            placeholder={field.default != null ? String(field.default) : undefined}
+            rows={8}
+            className="w-full bg-secondary rounded-md px-3 py-1.5 text-xs outline-none focus:ring-1 ring-primary font-mono resize-y"
           />
         </div>
       );
@@ -357,7 +379,6 @@ function ModuleConfigPanel({ moduleId, moduleLoaded }: { moduleId: string; modul
         {success && <span className="text-xs text-green-500">Saved</span>}
       </div>
 
-      {moduleLoaded && <ModuleDbInfo moduleId={moduleId} />}
     </div>
   );
 }
@@ -727,9 +748,12 @@ export function ModulesSection() {
                 </div>
               )}
 
+              {/* Database stats (always visible when loaded) */}
+              {mod.loaded && <ModuleDbInfo moduleId={mod.id} />}
+
               {/* Config panel */}
               {expandedId === mod.id && (
-                <ModuleConfigPanel moduleId={mod.id} moduleLoaded={mod.loaded} />
+                <ModuleConfigPanel moduleId={mod.id} />
               )}
 
               {/* Duplicate inline form */}
