@@ -14,6 +14,8 @@ RUN pnpm install --frozen-lockfile
 
 # Build
 FROM deps AS build
+ARG BUILD_VERSION
+ENV VITE_APP_VERSION=${BUILD_VERSION}
 COPY . .
 RUN pnpm build
 

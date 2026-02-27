@@ -50,7 +50,7 @@ npx pnpm dev
 The repo uses a three-branch promotion model: `dev` → `beta` → `main`.
 
 - **dev**: Push freely. CI runs tests + build on push.
-- **beta**: PRs required. Merging triggers release-please (prerelease) and publishes `:beta` container to GHCR.
+- **beta**: PRs required. Merging computes a git-derived version and publishes `:beta` container to GHCR.
 - **main**: PRs required. Merging triggers release-please (stable) and publishes `:latest` container to GHCR.
 
 Use conventional commits (`feat:`, `fix:`, `chore:`, etc.) — release-please uses them for automated versioning and changelogs.

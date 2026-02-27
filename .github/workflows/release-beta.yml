@@ -5,8 +5,6 @@ on:
     branches: [beta]
 
 permissions:
-  contents: write
-  pull-requests: write
   packages: write
 
 concurrency:
@@ -21,25 +19,34 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - uses: ./.github/actions/test-and-build
 
-  release-please:
-    name: Release Please
+  compute-version:
+    name: Compute Version
     needs: test-and-build
     runs-on: ubuntu-latest
     outputs:
-      release_created: ${{ steps.release.outputs.release_created }}
-      tag_name: ${{ steps.release.outputs.tag_name }}
+      version: ${{ steps.version.outputs.version }}
+      docker_tag: ${{ steps.version.outputs.docker_tag }}
     steps:
-      - uses: googleapis/release-please-action@16a9c90856f42705d54a6fda1823352bdc62cf38 # v4
-        id: release
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          target-branch: beta
-          config-file: release-please-config-beta.json
-          manifest-file: .release-please-manifest.json
+          fetch-depth: 0
+
+      - name: Derive version from git
+        id: version
+        run: |
+          BASE_TAG=$(git describe --tags --abbrev=0 --match 'otterbot-v[0-9]*.[0-9]*.[0-9]' --exclude '*-*' 2>/dev/null || echo "otterbot-v0.0.0")
+          BASE_VERSION=${BASE_TAG#otterbot-v}
+          COMMIT_COUNT=$(git rev-list ${BASE_TAG}..HEAD --count)
+          SHORT_SHA=$(git rev-parse --short HEAD)
+          VERSION="${BASE_VERSION}-beta.${COMMIT_COUNT}+${SHORT_SHA}"
+          DOCKER_TAG="${BASE_VERSION}-beta.${COMMIT_COUNT}-${SHORT_SHA}"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "docker_tag=${DOCKER_TAG}" >> "$GITHUB_OUTPUT"
+          echo "Computed version: ${VERSION}"
 
   publish:
     name: Publish Container
-    needs: release-please
-    if: needs.release-please.outputs.release_created == 'true'
+    needs: compute-version
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -59,8 +66,10 @@ jobs:
         with:
           context: .
           push: true
+          build-args: |
+            BUILD_VERSION=${{ needs.compute-version.outputs.version }}
           tags: |
             ghcr.io/toosmooth/otterbot:beta
-            ghcr.io/toosmooth/otterbot:${{ needs.release-please.outputs.tag_name }}
+            ghcr.io/toosmooth/otterbot:${{ needs.compute-version.outputs.docker_tag }}
           cache-from: type=gha
           cache-to: type=gha,mode=max

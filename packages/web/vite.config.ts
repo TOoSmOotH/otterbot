@@ -8,7 +8,9 @@ export default defineConfig(({ mode }) => ({
   plugins: [react(), basicSsl()],
   define: {
     __APP_VERSION__: JSON.stringify(
-      mode === "development" ? "dev" : rootPkg.version
+      mode === "development"
+        ? "dev"
+        : process.env.VITE_APP_VERSION || rootPkg.version
     ),
   },
   resolve: {
