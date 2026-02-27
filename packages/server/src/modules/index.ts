@@ -17,17 +17,17 @@ import { ModuleScheduler } from "./module-scheduler.js";
 import { registerModuleWebhooks } from "./module-webhook.js";
 import { createModuleTools } from "./module-tools.js";
 import { getModule, addModule } from "./module-manifest.js";
-import { ModuleAgent, type ModuleAgentDeps } from "../agents/module-agent.js";
-import { AgentStatus } from "@otterbot/shared";
-import { getConfig } from "../auth/auth.js";
-import { getRandomModelPackId } from "../models3d/model-packs.js";
+// ModuleAgent, getConfig, getRandomModelPackId are imported dynamically
+// inside spawnModuleAgent() to avoid breaking module system init if
+// agent-related deps fail to load.
 
 let _loader: ModuleLoader | null = null;
 let _scheduler: ModuleScheduler | null = null;
 let _bus: MessageBus | null = null;
 let _io: Server | null = null;
 /** Active module agents keyed by module instance ID */
-const _moduleAgents = new Map<string, ModuleAgent>();
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const _moduleAgents = new Map<string, any>();
 
 export function getModuleLoader(): ModuleLoader | null {
   return _loader;
@@ -37,11 +37,11 @@ export function getModuleScheduler(): ModuleScheduler | null {
   return _scheduler;
 }
 
-export function getModuleAgent(moduleId: string): ModuleAgent | undefined {
+export function getModuleAgent(moduleId: string): unknown | undefined {
   return _moduleAgents.get(moduleId);
 }
 
-export function getActiveModuleAgents(): Map<string, ModuleAgent> {
+export function getActiveModuleAgents(): Map<string, unknown> {
   return _moduleAgents;
 }
 
@@ -164,9 +164,14 @@ async function spawnModuleAgent(
   loaded: import("./module-loader.js").LoadedModule,
   bus: MessageBus,
   io: Server,
-): Promise<ModuleAgent | null> {
+): Promise<unknown | null> {
   const agentConfig = loaded.definition.agent;
   if (!agentConfig) return null;
+
+  // Dynamic imports to avoid breaking module system init if agent deps fail
+  const { getConfig } = await import("../auth/auth.js");
+  const { ModuleAgent } = await import("../agents/module-agent.js");
+  const { getRandomModelPackId } = await import("../models3d/model-packs.js");
 
   // Check if agent is disabled via config
   const enabledRaw = getConfig(`module:${moduleId}:agent_enabled`);
@@ -183,10 +188,10 @@ async function spawnModuleAgent(
       moduleContext: loaded.context,
       moduleTools: loaded.definition.tools,
       bus,
-      onStatusChange: (agentId, status) => {
+      onStatusChange: (agentId: string, status: string) => {
         io.emit("agent:status", { agentId, status });
       },
-      onStream: (agentId, token, messageId) => {
+      onStream: (agentId: string, token: string, messageId: string) => {
         io.emit("agent:stream", { agentId, token, messageId });
       },
     });
