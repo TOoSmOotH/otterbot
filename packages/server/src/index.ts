@@ -5012,6 +5012,101 @@ Respond with ONLY a JSON object (no markdown, no explanation) with these fields:
     },
   );
 
+  // Module config: get schema + current values
+  app.get<{ Params: { id: string } }>(
+    "/api/modules/:id/config",
+    async (req, reply) => {
+      const { getModuleLoader } = await import("./modules/index.js");
+      const { getModule } = await import("./modules/module-manifest.js");
+      const { loadModuleDefinition } = await import("./modules/module-installer.js");
+      const { getConfig: getConfigValue } = await import("./auth/auth.js");
+
+      const entry = getModule(req.params.id);
+      if (!entry) return reply.status(404).send({ error: "Module not found" });
+
+      try {
+        // Try loaded module first, fall back to loading definition from disk
+        const loader = getModuleLoader();
+        const loaded = loader?.get(req.params.id);
+        let configSchema = loaded?.definition.configSchema;
+
+        if (!configSchema) {
+          // Load definition from disk to get configSchema (even when module is disabled)
+          const definition = await loadModuleDefinition(entry.modulePath);
+          configSchema = definition.configSchema;
+
+          // Auto-inject agent config fields (same logic as module-loader.ts)
+          if (definition.agent && configSchema) {
+            if (!configSchema.agent_enabled) {
+              configSchema.agent_enabled = { type: "boolean", description: "Enable the module's AI agent", required: false, default: true };
+            }
+            if (!configSchema.agent_name) {
+              configSchema.agent_name = { type: "string", description: "Display name for the module agent", required: false, default: definition.agent.defaultName };
+            }
+            if (!configSchema.agent_prompt) {
+              configSchema.agent_prompt = { type: "string", description: "System prompt for the module agent", required: false, default: definition.agent.defaultPrompt };
+            }
+            if (!configSchema.agent_model) {
+              configSchema.agent_model = { type: "string", description: "LLM model for the module agent", required: false };
+            }
+            if (!configSchema.agent_provider) {
+              configSchema.agent_provider = { type: "string", description: "LLM provider for the module agent", required: false };
+            }
+          }
+        }
+
+        if (!configSchema || Object.keys(configSchema).length === 0) {
+          return { schema: {}, values: {} };
+        }
+
+        // Get current values for each config field
+        const values: Record<string, string | undefined> = {};
+        for (const key of Object.keys(configSchema)) {
+          values[key] = getConfigValue(`module:${req.params.id}:${key}`);
+        }
+
+        return { schema: configSchema, values };
+      } catch (err) {
+        return reply
+          .status(500)
+          .send({ error: err instanceof Error ? err.message : String(err) });
+      }
+    },
+  );
+
+  // Module config: set values
+  app.post<{ Params: { id: string }; Body: Record<string, string | null> }>(
+    "/api/modules/:id/config",
+    async (req, reply) => {
+      const { getModule } = await import("./modules/module-manifest.js");
+      const { getConfig: getConfigValue, setConfig: setConfigValue } = await import("./auth/auth.js");
+
+      const entry = getModule(req.params.id);
+      if (!entry) return reply.status(404).send({ error: "Module not found" });
+
+      try {
+        const updates = req.body;
+        for (const [key, value] of Object.entries(updates)) {
+          if (value === null || value === "") {
+            // Delete config by setting empty — getConfig returns undefined for missing keys
+            // Use the DB directly to delete the row
+            const { getDb } = await import("./db/index.js");
+            const { sql } = await import("drizzle-orm");
+            const db = getDb();
+            db.run(sql`DELETE FROM config WHERE key = ${"module:" + req.params.id + ":" + key}`);
+          } else {
+            setConfigValue(`module:${req.params.id}:${key}`, value);
+          }
+        }
+        return { ok: true };
+      } catch (err) {
+        return reply
+          .status(500)
+          .send({ error: err instanceof Error ? err.message : String(err) });
+      }
+    },
+  );
+
   // SPA fallback for client-side routing (only for page navigation, not JS/CSS/API requests)
   if (existsSync(webDistPath)) {
     app.setNotFoundHandler(async (req, reply) => {
