@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { cn } from "../../lib/utils";
 
 interface InstalledModule {
@@ -14,6 +14,185 @@ interface InstalledModule {
   hasQuery: boolean;
   installedAt: string;
   updatedAt: string;
+}
+
+interface ConfigField {
+  type: "string" | "number" | "boolean" | "secret";
+  description: string;
+  required: boolean;
+  default?: string | number | boolean;
+}
+
+interface ModuleConfig {
+  schema: Record<string, ConfigField>;
+  values: Record<string, string | undefined>;
+}
+
+function ModuleConfigPanel({ moduleId }: { moduleId: string }) {
+  const [config, setConfig] = useState<ModuleConfig | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [editValues, setEditValues] = useState<Record<string, string>>({});
+  const [dirty, setDirty] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState(false);
+
+  const loadConfig = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/modules/${moduleId}/config`);
+      if (res.ok) {
+        const data = await res.json();
+        setConfig(data);
+        // Initialize edit values from current values
+        const vals: Record<string, string> = {};
+        for (const [key, field] of Object.entries(data.schema as Record<string, ConfigField>)) {
+          vals[key] = data.values[key] ?? (field.default != null ? String(field.default) : "");
+        }
+        setEditValues(vals);
+        setDirty(false);
+      }
+    } catch {
+      /* ignore */
+    } finally {
+      setLoading(false);
+    }
+  }, [moduleId]);
+
+  useEffect(() => {
+    loadConfig();
+  }, [loadConfig]);
+
+  const handleSave = async () => {
+    if (!config) return;
+    setSaving(true);
+    setError(null);
+    setSuccess(false);
+    try {
+      const updates: Record<string, string | null> = {};
+      for (const key of Object.keys(config.schema)) {
+        const newVal = editValues[key] ?? "";
+        const oldVal = config.values[key] ?? "";
+        if (newVal !== oldVal) {
+          updates[key] = newVal || null;
+        }
+      }
+      if (Object.keys(updates).length === 0) {
+        setDirty(false);
+        return;
+      }
+      const res = await fetch(`/api/modules/${moduleId}/config`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(updates),
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        setError(data.error ?? "Save failed");
+      } else {
+        setDirty(false);
+        setSuccess(true);
+        setTimeout(() => setSuccess(false), 2000);
+        await loadConfig();
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Save failed");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (loading) {
+    return <div className="text-[10px] text-muted-foreground py-2">Loading config...</div>;
+  }
+
+  if (!config || Object.keys(config.schema).length === 0) {
+    return null;
+  }
+
+  // Separate core config from agent config
+  const coreFields = Object.entries(config.schema).filter(([key]) => !key.startsWith("agent_"));
+  const agentFields = Object.entries(config.schema).filter(([key]) => key.startsWith("agent_"));
+
+  const renderField = ([key, field]: [string, ConfigField]) => (
+    <div key={key}>
+      <label className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1 flex items-center gap-1.5">
+        {key.replace(/_/g, " ")}
+        {field.required && <span className="text-red-400">*</span>}
+        {field.type === "secret" && (
+          <span className="text-yellow-500 normal-case">(secret)</span>
+        )}
+      </label>
+      <p className="text-[10px] text-muted-foreground/60 mb-1">{field.description}</p>
+      {field.type === "boolean" ? (
+        <button
+          onClick={() => {
+            const newVal = editValues[key] === "true" ? "false" : "true";
+            setEditValues({ ...editValues, [key]: newVal });
+            setDirty(true);
+          }}
+          className={cn(
+            "relative w-9 h-5 rounded-full transition-colors",
+            editValues[key] === "true" ? "bg-primary" : "bg-secondary",
+          )}
+        >
+          <span
+            className={cn(
+              "absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full transition-transform",
+              editValues[key] === "true" && "translate-x-4",
+            )}
+          />
+        </button>
+      ) : (
+        <input
+          type={field.type === "secret" ? "password" : "text"}
+          value={editValues[key] ?? ""}
+          onChange={(e) => {
+            setEditValues({ ...editValues, [key]: e.target.value });
+            setDirty(true);
+          }}
+          placeholder={field.default != null ? String(field.default) : undefined}
+          className="w-full bg-secondary rounded-md px-3 py-1.5 text-xs outline-none focus:ring-1 ring-primary font-mono"
+        />
+      )}
+    </div>
+  );
+
+  return (
+    <div className="border-t border-border pt-3 space-y-3">
+      <div className="text-[10px] text-muted-foreground uppercase tracking-wider font-medium">
+        Configuration
+      </div>
+
+      {coreFields.length > 0 && (
+        <div className="space-y-3">
+          {coreFields.map(renderField)}
+        </div>
+      )}
+
+      {agentFields.length > 0 && (
+        <details className="group">
+          <summary className="text-[10px] text-muted-foreground uppercase tracking-wider font-medium cursor-pointer hover:text-foreground">
+            Agent Settings
+          </summary>
+          <div className="space-y-3 mt-3">
+            {agentFields.map(renderField)}
+          </div>
+        </details>
+      )}
+
+      <div className="flex items-center gap-2">
+        <button
+          onClick={handleSave}
+          disabled={!dirty || saving}
+          className="text-xs bg-primary text-primary-foreground px-3 py-1.5 rounded-md hover:bg-primary/90 disabled:opacity-50"
+        >
+          {saving ? "Saving..." : "Save"}
+        </button>
+        {error && <span className="text-xs text-red-500">{error}</span>}
+        {success && <span className="text-xs text-green-500">Saved</span>}
+      </div>
+    </div>
+  );
 }
 
 export function ModulesSection() {
@@ -32,6 +211,7 @@ export function ModulesSection() {
   const [duplicateError, setDuplicateError] = useState<string | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
 
   const loadModules = async () => {
     try {
@@ -315,6 +495,12 @@ export function ModulesSection() {
                   {!mod.loaded && mod.enabled && (
                     <span className="text-[10px] text-yellow-500">Not loaded</span>
                   )}
+                  <button
+                    onClick={() => setExpandedId(expandedId === mod.id ? null : mod.id)}
+                    className="text-xs text-muted-foreground hover:text-foreground px-2 py-1"
+                  >
+                    {expandedId === mod.id ? "Hide Config" : "Config"}
+                  </button>
                 </div>
               </div>
 
@@ -335,6 +521,11 @@ export function ModulesSection() {
                 <div className="text-[10px] text-muted-foreground font-mono truncate">
                   {mod.sourceUri}
                 </div>
+              )}
+
+              {/* Config panel */}
+              {expandedId === mod.id && (
+                <ModuleConfigPanel moduleId={mod.id} />
               )}
 
               {/* Duplicate inline form */}
