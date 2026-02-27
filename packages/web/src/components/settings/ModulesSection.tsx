@@ -93,21 +93,28 @@ function ModuleQueryBox({ moduleId }: { moduleId: string }) {
     setLastQ(q);
     setLastA(null);
     try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 150_000);
       const res = await fetch(`/api/modules/${moduleId}/query`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ question: q }),
+        signal: controller.signal,
       });
+      clearTimeout(timeout);
+      const data = await res.json();
       if (!res.ok) {
-        const data = await res.json();
         setError(data.error ?? "Query failed");
       } else {
-        const data = await res.json();
-        setLastA(data.answer);
+        setLastA(data.answer ?? "(no answer returned)");
         setQuestion("");
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Query failed");
+      if (err instanceof DOMException && err.name === "AbortError") {
+        setError("Request timed out — the agent may be busy.");
+      } else {
+        setError(err instanceof Error ? err.message : "Query failed");
+      }
     } finally {
       setAsking(false);
     }

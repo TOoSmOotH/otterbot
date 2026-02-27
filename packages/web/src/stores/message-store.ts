@@ -55,20 +55,26 @@ export const useMessageStore = create<MessageState>((set) => ({
     set((state) => {
       const newMessages = [...state.messages, message];
 
-      // If it's a CEO↔COO chat message, also add to chat
+      // If it's a CEO↔COO or CEO↔module-agent chat/report message, also add to chat
+      const isModuleAgent =
+        message.fromAgentId?.startsWith("module-agent-") ||
+        message.toAgentId?.startsWith("module-agent-");
       const isCeoChat =
-        message.type === "chat" &&
+        (message.type === "chat" || (message.type === "report" && isModuleAgent)) &&
         (message.fromAgentId === null ||
-          message.fromAgentId === "coo") &&
-        (message.toAgentId === null || message.toAgentId === "coo");
+          message.fromAgentId === "coo" ||
+          message.fromAgentId?.startsWith("module-agent-")) &&
+        (message.toAgentId === null ||
+          message.toAgentId === "coo" ||
+          message.toAgentId?.startsWith("module-agent-"));
 
       const newChat = isCeoChat
         ? [...state.chatMessages, message]
         : state.chatMessages;
 
-      // Clear streaming if this is the final COO response for the current conversation
+      // Clear streaming if this is the final agent response for the current conversation
       const clearStream =
-        message.fromAgentId === "coo" &&
+        (message.fromAgentId === "coo" || message.fromAgentId?.startsWith("module-agent-")) &&
         message.toAgentId === null &&
         (!message.conversationId || message.conversationId === state.currentConversationId);
 
