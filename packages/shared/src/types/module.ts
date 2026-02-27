@@ -112,6 +112,7 @@ export interface ModuleContext {
 // ─── Handlers ────────────────────────────────────────────────────────────────
 
 export type PollHandler = (ctx: ModuleContext) => Promise<PollResult>;
+export type FullSyncHandler = (ctx: ModuleContext) => Promise<PollResult>;
 export type WebhookHandler = (req: WebhookRequest, ctx: ModuleContext) => Promise<WebhookResult>;
 export type QueryHandler = (query: string, ctx: ModuleContext) => Promise<string>;
 
@@ -150,6 +151,7 @@ export interface ModuleDefinition {
   tools?: ModuleToolDefinition[];
   agent?: ModuleAgentConfig;
   onPoll?: PollHandler;
+  onFullSync?: FullSyncHandler;
   onWebhook?: WebhookHandler;
   onQuery?: QueryHandler;
   onLoad?(ctx: ModuleContext): Promise<void>;

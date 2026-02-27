@@ -2,6 +2,7 @@ import {
   defineModule,
   type ModuleContext,
   type PollResult,
+  type PollResultItem,
   type WebhookRequest,
   type WebhookResult,
 } from "@otterbot/shared";
@@ -166,6 +167,156 @@ function discussionToContent(d: GHDiscussion): string {
   return parts.join("\n");
 }
 
+function discussionToItem(d: GHDiscussion): PollResultItem {
+  return {
+    id: `discussion-${d.number}`,
+    title: d.title,
+    content: discussionToContent(d),
+    url: d.url,
+    metadata: {
+      number: d.number,
+      author: d.author?.login,
+      category: d.category?.name,
+      hasAnswer: !!d.answer,
+      commentCount: d.comments.nodes.length,
+    },
+  };
+}
+
+function upsertDiscussions(ctx: ModuleContext, discussions: GHDiscussion[]): void {
+  for (const d of discussions) {
+    ctx.knowledge.db
+      .prepare(
+        `INSERT INTO discussions (id, number, title, body, author, category, url, state, answer_body, answer_author, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET
+           title = excluded.title,
+           body = excluded.body,
+           answer_body = excluded.answer_body,
+           answer_author = excluded.answer_author,
+           updated_at = excluded.updated_at`,
+      )
+      .run(
+        d.id,
+        d.number,
+        d.title,
+        d.body,
+        d.author?.login,
+        d.category?.name,
+        d.url,
+        d.answer?.body ?? null,
+        d.answer?.author?.login ?? null,
+        d.createdAt,
+        d.updatedAt,
+      );
+
+    for (const c of d.comments.nodes) {
+      ctx.knowledge.db
+        .prepare(
+          `INSERT INTO comments (id, discussion_id, body, author, is_answer, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(id) DO UPDATE SET
+             body = excluded.body,
+             is_answer = excluded.is_answer,
+             updated_at = excluded.updated_at`,
+        )
+        .run(c.id, d.id, c.body, c.author?.login, c.isAnswer ? 1 : 0, c.createdAt, c.updatedAt);
+    }
+  }
+}
+
+async function fetchAllDiscussions(ctx: ModuleContext): Promise<GHDiscussion[]> {
+  const owner = ctx.getConfig("repo_owner");
+  const name = ctx.getConfig("repo_name");
+  const token = ctx.getConfig("github_token") ?? ctx.getConfig("github:token");
+
+  if (!owner || !name) {
+    ctx.warn("repo_owner and repo_name must be configured");
+    return [];
+  }
+
+  if (!token) {
+    ctx.warn("No GitHub token configured (set github_token or github:token)");
+    return [];
+  }
+
+  const categories = ctx.getConfig("categories");
+  const allDiscussions: GHDiscussion[] = [];
+  let cursor: string | null = null;
+  let pageCount = 0;
+  const batchSize = 50; // pages per batch before sleeping
+
+  try {
+    while (true) {
+      const response = await fetch("https://api.github.com/graphql", {
+        method: "POST",
+        headers: {
+          Authorization: `bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          query: DISCUSSIONS_QUERY,
+          variables: { owner, name, first: 20, after: cursor },
+        }),
+      });
+
+      if (!response.ok) {
+        ctx.error(`GitHub API error: ${response.status} ${response.statusText}`);
+        break;
+      }
+
+      const data = (await response.json()) as {
+        data?: {
+          repository?: {
+            discussions?: {
+              nodes: GHDiscussion[];
+              pageInfo: { hasNextPage: boolean; endCursor: string | null };
+            };
+          };
+        };
+        errors?: Array<{ message: string }>;
+      };
+
+      if (data.errors) {
+        ctx.error("GraphQL errors:", data.errors.map((e) => e.message).join(", "));
+        break;
+      }
+
+      const discussions = data.data?.repository?.discussions;
+      if (!discussions) break;
+
+      let nodes = discussions.nodes;
+
+      // Filter by categories if configured
+      if (categories) {
+        const allowedCategories = categories.split(",").map((c) => c.trim().toLowerCase());
+        nodes = nodes.filter((d) =>
+          d.category && allowedCategories.includes(d.category.name.toLowerCase()),
+        );
+      }
+
+      allDiscussions.push(...nodes);
+      pageCount++;
+
+      ctx.log(`Fetched page ${pageCount} (${allDiscussions.length} discussions so far)`);
+
+      if (!discussions.pageInfo.hasNextPage || !discussions.pageInfo.endCursor) break;
+      cursor = discussions.pageInfo.endCursor;
+
+      // Rate limit: sleep 2 seconds every batchSize pages
+      if (pageCount % batchSize === 0) {
+        ctx.log(`Rate limit pause after ${pageCount} pages...`);
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+      }
+    }
+  } catch (err) {
+    ctx.error("Failed to fetch all discussions:", err);
+  }
+
+  ctx.log(`Full sync complete: ${allDiscussions.length} discussions across ${pageCount} pages`);
+  return allDiscussions;
+}
+
 // ─── Module definition ───────────────────────────────────────────────────────
 
 export default defineModule({
@@ -294,65 +445,23 @@ export default defineModule({
 
   async onPoll(ctx): Promise<PollResult> {
     const discussions = await fetchDiscussions(ctx);
-
-    const items = discussions.map((d) => ({
-      id: `discussion-${d.number}`,
-      title: d.title,
-      content: discussionToContent(d),
-      url: d.url,
-      metadata: {
-        number: d.number,
-        author: d.author?.login,
-        category: d.category?.name,
-        hasAnswer: !!d.answer,
-        commentCount: d.comments.nodes.length,
-      },
-    }));
-
-    // Also store discussions and comments in custom tables
-    for (const d of discussions) {
-      ctx.knowledge.db
-        .prepare(
-          `INSERT INTO discussions (id, number, title, body, author, category, url, state, answer_body, answer_author, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?, ?)
-           ON CONFLICT(id) DO UPDATE SET
-             title = excluded.title,
-             body = excluded.body,
-             answer_body = excluded.answer_body,
-             answer_author = excluded.answer_author,
-             updated_at = excluded.updated_at`,
-        )
-        .run(
-          d.id,
-          d.number,
-          d.title,
-          d.body,
-          d.author?.login,
-          d.category?.name,
-          d.url,
-          d.answer?.body ?? null,
-          d.answer?.author?.login ?? null,
-          d.createdAt,
-          d.updatedAt,
-        );
-
-      for (const c of d.comments.nodes) {
-        ctx.knowledge.db
-          .prepare(
-            `INSERT INTO comments (id, discussion_id, body, author, is_answer, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?)
-             ON CONFLICT(id) DO UPDATE SET
-               body = excluded.body,
-               is_answer = excluded.is_answer,
-               updated_at = excluded.updated_at`,
-          )
-          .run(c.id, d.id, c.body, c.author?.login, c.isAnswer ? 1 : 0, c.createdAt, c.updatedAt);
-      }
-    }
+    const items = discussions.map(discussionToItem);
+    upsertDiscussions(ctx, discussions);
 
     return {
       items,
       summary: `Indexed ${items.length} discussions`,
+    };
+  },
+
+  async onFullSync(ctx): Promise<PollResult> {
+    const discussions = await fetchAllDiscussions(ctx);
+    const items = discussions.map(discussionToItem);
+    upsertDiscussions(ctx, discussions);
+
+    return {
+      items,
+      summary: `Full sync: indexed ${items.length} discussions`,
     };
   },
 

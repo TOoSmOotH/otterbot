@@ -5120,6 +5120,35 @@ Respond with ONLY a JSON object (no markdown, no explanation) with these fields:
     },
   );
 
+  // Trigger a poll (or full sync) for a module
+  app.post<{ Params: { id: string }; Body: { fullSync?: boolean } }>(
+    "/api/modules/:id/poll",
+    async (req, reply) => {
+      const { getModuleLoader, getModuleScheduler } = await import("./modules/index.js");
+      const loader = getModuleLoader();
+      const scheduler = getModuleScheduler();
+
+      if (!loader || !scheduler) {
+        return reply.status(503).send({ error: "Module system not initialized" });
+      }
+
+      const loaded = loader.get(req.params.id);
+      if (!loaded) {
+        return reply.status(400).send({ error: "Module not loaded" });
+      }
+
+      try {
+        const fullSync = req.body?.fullSync ?? false;
+        const items = await scheduler.executePoll(req.params.id, loaded, fullSync);
+        return { ok: true, items };
+      } catch (err) {
+        return reply
+          .status(500)
+          .send({ error: err instanceof Error ? err.message : String(err) });
+      }
+    },
+  );
+
   // Module config: set values
   app.post<{ Params: { id: string }; Body: Record<string, string | null> }>(
     "/api/modules/:id/config",
