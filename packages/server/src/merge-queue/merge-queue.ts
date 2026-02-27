@@ -10,6 +10,7 @@ import type {
 } from "@otterbot/shared";
 import { getDb, schema } from "../db/index.js";
 import { getConfig } from "../auth/auth.js";
+import { resolveProjectBranch } from "../github/github-service.js";
 import {
   fetchPullRequest,
   mergePullRequest,
@@ -81,10 +82,7 @@ export class MergeQueue implements Scheduler {
     if (existing) return existing as unknown as MergeQueueEntry;
 
     // Get project info for base branch
-    const project = db.select().from(schema.projects).where(eq(schema.projects.id, task.projectId)).get();
-    const baseBranch = project?.githubBranch
-      ?? getConfig(`project:${task.projectId}:github:branch`)
-      ?? "main";
+    const baseBranch = resolveProjectBranch(task.projectId);
 
     // Determine position (append to end)
     const allEntries = db.select().from(schema.mergeQueue).all();
