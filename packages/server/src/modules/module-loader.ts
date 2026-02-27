@@ -141,6 +141,20 @@ export class ModuleLoader {
           required: false,
         };
       }
+      if (!definition.configSchema.agent_posting_mode) {
+        definition.configSchema.agent_posting_mode = {
+          type: "select",
+          description: "Controls when the module agent responds to queries",
+          required: false,
+          default: "respond",
+          options: [
+            { value: "respond", label: "Always respond" },
+            { value: "lurk", label: "Lurk (index only, never respond)" },
+            { value: "new_chats", label: "New conversations only" },
+            { value: "permission", label: "Ask COO for permission" },
+          ],
+        };
+      }
     }
 
     // Create knowledge store (data dir is always in ./data/modules/<id>/)

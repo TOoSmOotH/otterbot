@@ -27,10 +27,11 @@ export interface ModuleManifest {
 // ─── Config schema ───────────────────────────────────────────────────────────
 
 export interface ModuleConfigField {
-  type: "string" | "number" | "boolean" | "secret";
+  type: "string" | "number" | "boolean" | "secret" | "select";
   description: string;
   required: boolean;
   default?: string | number | boolean;
+  options?: { value: string; label: string }[];
 }
 
 export type ModuleConfigSchema = Record<string, ModuleConfigField>;

@@ -5052,6 +5052,20 @@ Respond with ONLY a JSON object (no markdown, no explanation) with these fields:
             if (!configSchema.agent_provider) {
               configSchema.agent_provider = { type: "string", description: "LLM provider for the module agent", required: false };
             }
+            if (!configSchema.agent_posting_mode) {
+              configSchema.agent_posting_mode = {
+                type: "select",
+                description: "Controls when the module agent responds to queries",
+                required: false,
+                default: "respond",
+                options: [
+                  { value: "respond", label: "Always respond" },
+                  { value: "lurk", label: "Lurk (index only, never respond)" },
+                  { value: "new_chats", label: "New conversations only" },
+                  { value: "permission", label: "Ask COO for permission" },
+                ],
+              };
+            }
           }
         }
 
@@ -5066,6 +5080,38 @@ Respond with ONLY a JSON object (no markdown, no explanation) with these fields:
         }
 
         return { schema: configSchema, values };
+      } catch (err) {
+        return reply
+          .status(500)
+          .send({ error: err instanceof Error ? err.message : String(err) });
+      }
+    },
+  );
+
+  // Module database info
+  app.get<{ Params: { id: string } }>(
+    "/api/modules/:id/db-info",
+    async (req, reply) => {
+      const { getModuleLoader } = await import("./modules/index.js");
+
+      const loader = getModuleLoader();
+      const loaded = loader?.get(req.params.id);
+      if (!loaded) {
+        return { tables: [] };
+      }
+
+      try {
+        const db = loaded.knowledgeStore.db;
+        const tableRows = db.prepare(
+          "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'",
+        ).all() as { name: string }[];
+
+        const tables = tableRows.map((row) => {
+          const countRow = db.prepare(`SELECT count(*) as cnt FROM "${row.name}"`).get() as { cnt: number } | undefined;
+          return { name: row.name, rowCount: countRow?.cnt ?? 0 };
+        });
+
+        return { tables };
       } catch (err) {
         return reply
           .status(500)

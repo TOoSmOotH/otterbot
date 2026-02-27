@@ -35,6 +35,7 @@ export class ModuleAgent extends BaseAgent {
   private onStream?: (agentId: string, token: string, messageId: string) => void;
   private onThinking?: (agentId: string, token: string, messageId: string) => void;
   private onThinkingEnd?: (agentId: string, messageId: string) => void;
+  private seenConversations = new Set<string>();
 
   constructor(deps: ModuleAgentDeps) {
     const moduleId = deps.moduleId;
@@ -145,6 +146,41 @@ export class ModuleAgent extends BaseAgent {
   }
 
   private async handleDirective(message: BusMessage) {
+    // Check posting mode before responding
+    const postingMode = getConfig(`module:${this.moduleId}:agent_posting_mode`) ?? "respond";
+
+    if (postingMode === "lurk") {
+      if (message.correlationId && message.fromAgentId) {
+        this.sendMessage(
+          message.fromAgentId,
+          MessageType.Report,
+          "Module agent is in lurk mode — indexing only, not responding to queries.",
+          { moduleId: this.moduleId },
+          undefined,
+          message.correlationId,
+        );
+      }
+      return;
+    }
+
+    if (postingMode === "new_chats") {
+      const convId = message.conversationId ?? message.correlationId ?? "";
+      if (this.seenConversations.has(convId)) {
+        if (message.correlationId && message.fromAgentId) {
+          this.sendMessage(
+            message.fromAgentId,
+            MessageType.Report,
+            "Module agent only responds to new conversations.",
+            { moduleId: this.moduleId },
+            undefined,
+            message.correlationId,
+          );
+        }
+        return;
+      }
+      this.seenConversations.add(convId);
+    }
+
     const { text, thinking } = await this.think(
       message.content,
       (token, messageId) => {
@@ -158,13 +194,18 @@ export class ModuleAgent extends BaseAgent {
       },
     );
 
+    // Build metadata, flagging pendingApproval in permission mode
+    const baseMeta: Record<string, unknown> = { moduleId: this.moduleId };
+    if (thinking) baseMeta.thinking = thinking;
+    if (postingMode === "permission") baseMeta.pendingApproval = true;
+
     // If has correlationId, reply with it so request() resolves
     if (message.correlationId && message.fromAgentId) {
       this.sendMessage(
         message.fromAgentId,
         MessageType.Report,
         text,
-        thinking ? { thinking, moduleId: this.moduleId } : { moduleId: this.moduleId },
+        baseMeta,
         undefined,
         message.correlationId,
       );
@@ -173,7 +214,7 @@ export class ModuleAgent extends BaseAgent {
         message.fromAgentId,
         MessageType.Report,
         text,
-        thinking ? { thinking, moduleId: this.moduleId } : { moduleId: this.moduleId },
+        baseMeta,
       );
     }
   }
