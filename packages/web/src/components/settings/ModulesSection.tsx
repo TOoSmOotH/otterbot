@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { cn } from "../../lib/utils";
+import { useSettingsStore } from "../../stores/settings-store";
+import { ModelCombobox } from "./ModelCombobox";
 
 interface InstalledModule {
   id: string;
@@ -17,10 +19,11 @@ interface InstalledModule {
 }
 
 interface ConfigField {
-  type: "string" | "number" | "boolean" | "secret";
+  type: "string" | "number" | "boolean" | "secret" | "select";
   description: string;
   required: boolean;
   default?: string | number | boolean;
+  options?: { value: string; label: string }[];
 }
 
 interface ModuleConfig {
@@ -28,7 +31,52 @@ interface ModuleConfig {
   values: Record<string, string | undefined>;
 }
 
-function ModuleConfigPanel({ moduleId }: { moduleId: string }) {
+interface DbTableInfo {
+  name: string;
+  rowCount: number;
+}
+
+function ModuleDbInfo({ moduleId }: { moduleId: string }) {
+  const [tables, setTables] = useState<DbTableInfo[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch(`/api/modules/${moduleId}/db-info`);
+        if (res.ok) {
+          const data = await res.json();
+          setTables(data.tables ?? []);
+        }
+      } catch {
+        /* ignore */
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, [moduleId]);
+
+  if (loading) return null;
+  if (tables.length === 0) return null;
+
+  return (
+    <div className="border-t border-border pt-3 space-y-2">
+      <div className="text-[10px] text-muted-foreground uppercase tracking-wider font-medium">
+        Database
+      </div>
+      <div className="grid grid-cols-2 gap-x-4 gap-y-1">
+        {tables.map((t) => (
+          <div key={t.name} className="flex items-center justify-between text-[10px]">
+            <span className="text-muted-foreground font-mono">{t.name}</span>
+            <span className="text-muted-foreground/60 font-mono">{t.rowCount.toLocaleString()} rows</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ModuleConfigPanel({ moduleId, moduleLoaded }: { moduleId: string; moduleLoaded: boolean }) {
   const [config, setConfig] = useState<ModuleConfig | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -36,6 +84,18 @@ function ModuleConfigPanel({ moduleId }: { moduleId: string }) {
   const [dirty, setDirty] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
+
+  const providers = useSettingsStore((s) => s.providers);
+  const models = useSettingsStore((s) => s.models);
+  const fetchModels = useSettingsStore((s) => s.fetchModels);
+  const loadSettings = useSettingsStore((s) => s.loadSettings);
+
+  // Load providers on mount
+  useEffect(() => {
+    if (providers.length === 0) {
+      loadSettings();
+    }
+  }, [providers.length, loadSettings]);
 
   const loadConfig = useCallback(async () => {
     try {
@@ -61,6 +121,17 @@ function ModuleConfigPanel({ moduleId }: { moduleId: string }) {
   useEffect(() => {
     loadConfig();
   }, [loadConfig]);
+
+  // Fetch models when provider changes
+  const selectedProvider = editValues.agent_provider;
+  useEffect(() => {
+    if (selectedProvider) {
+      const provider = providers.find((p) => p.id === selectedProvider);
+      if (provider && !models[provider.id]) {
+        fetchModels(provider.id);
+      }
+    }
+  }, [selectedProvider, providers, models, fetchModels]);
 
   const handleSave = async () => {
     if (!config) return;
@@ -106,43 +177,137 @@ function ModuleConfigPanel({ moduleId }: { moduleId: string }) {
   }
 
   if (!config || Object.keys(config.schema).length === 0) {
-    return null;
+    return moduleLoaded ? <ModuleDbInfo moduleId={moduleId} /> : null;
   }
 
   // Separate core config from agent config
   const coreFields = Object.entries(config.schema).filter(([key]) => !key.startsWith("agent_"));
   const agentFields = Object.entries(config.schema).filter(([key]) => key.startsWith("agent_"));
 
-  const renderField = ([key, field]: [string, ConfigField]) => (
-    <div key={key}>
-      <label className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1 flex items-center gap-1.5">
-        {key.replace(/_/g, " ")}
-        {field.required && <span className="text-red-400">*</span>}
-        {field.type === "secret" && (
-          <span className="text-yellow-500 normal-case">(secret)</span>
-        )}
-      </label>
-      <p className="text-[10px] text-muted-foreground/60 mb-1">{field.description}</p>
-      {field.type === "boolean" ? (
-        <button
-          onClick={() => {
-            const newVal = editValues[key] === "true" ? "false" : "true";
-            setEditValues({ ...editValues, [key]: newVal });
-            setDirty(true);
-          }}
-          className={cn(
-            "relative w-9 h-5 rounded-full transition-colors",
-            editValues[key] === "true" ? "bg-primary" : "bg-secondary",
-          )}
-        >
-          <span
-            className={cn(
-              "absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full transition-transform",
-              editValues[key] === "true" && "translate-x-4",
-            )}
+  const renderField = ([key, field]: [string, ConfigField]) => {
+    // Special handling for agent_provider
+    if (key === "agent_provider") {
+      return (
+        <div key={key}>
+          <label className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1 flex items-center gap-1.5">
+            {key.replace(/_/g, " ")}
+          </label>
+          <p className="text-[10px] text-muted-foreground/60 mb-1">{field.description}</p>
+          <select
+            value={editValues[key] ?? ""}
+            onChange={(e) => {
+              setEditValues({ ...editValues, [key]: e.target.value });
+              setDirty(true);
+              // Fetch models for newly selected provider
+              if (e.target.value) {
+                fetchModels(e.target.value);
+              }
+            }}
+            className="w-full bg-secondary rounded-md px-3 py-1.5 text-xs outline-none focus:ring-1 ring-primary"
+          >
+            <option value="">System default</option>
+            {providers.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name} ({p.type})
+              </option>
+            ))}
+          </select>
+        </div>
+      );
+    }
+
+    // Special handling for agent_model
+    if (key === "agent_model") {
+      const provId = editValues.agent_provider;
+      const modelOptions = provId ? (models[provId] ?? []) : [];
+      return (
+        <div key={key}>
+          <label className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1 flex items-center gap-1.5">
+            {key.replace(/_/g, " ")}
+          </label>
+          <p className="text-[10px] text-muted-foreground/60 mb-1">{field.description}</p>
+          <ModelCombobox
+            value={editValues[key] ?? ""}
+            options={modelOptions}
+            onChange={(val) => {
+              setEditValues({ ...editValues, [key]: val });
+              setDirty(true);
+            }}
+            placeholder="System default"
           />
-        </button>
-      ) : (
+        </div>
+      );
+    }
+
+    // Generic select field
+    if (field.type === "select" && field.options) {
+      return (
+        <div key={key}>
+          <label className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1 flex items-center gap-1.5">
+            {key.replace(/_/g, " ")}
+            {field.required && <span className="text-red-400">*</span>}
+          </label>
+          <p className="text-[10px] text-muted-foreground/60 mb-1">{field.description}</p>
+          <select
+            value={editValues[key] ?? ""}
+            onChange={(e) => {
+              setEditValues({ ...editValues, [key]: e.target.value });
+              setDirty(true);
+            }}
+            className="w-full bg-secondary rounded-md px-3 py-1.5 text-xs outline-none focus:ring-1 ring-primary"
+          >
+            {field.options.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
+        </div>
+      );
+    }
+
+    // Boolean toggle
+    if (field.type === "boolean") {
+      return (
+        <div key={key}>
+          <label className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1 flex items-center gap-1.5">
+            {key.replace(/_/g, " ")}
+            {field.required && <span className="text-red-400">*</span>}
+          </label>
+          <p className="text-[10px] text-muted-foreground/60 mb-1">{field.description}</p>
+          <button
+            onClick={() => {
+              const newVal = editValues[key] === "true" ? "false" : "true";
+              setEditValues({ ...editValues, [key]: newVal });
+              setDirty(true);
+            }}
+            className={cn(
+              "relative w-9 h-5 rounded-full transition-colors",
+              editValues[key] === "true" ? "bg-primary" : "bg-secondary",
+            )}
+          >
+            <span
+              className={cn(
+                "absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full transition-transform",
+                editValues[key] === "true" && "translate-x-4",
+              )}
+            />
+          </button>
+        </div>
+      );
+    }
+
+    // Default: text/number/secret input
+    return (
+      <div key={key}>
+        <label className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1 flex items-center gap-1.5">
+          {key.replace(/_/g, " ")}
+          {field.required && <span className="text-red-400">*</span>}
+          {field.type === "secret" && (
+            <span className="text-yellow-500 normal-case">(secret)</span>
+          )}
+        </label>
+        <p className="text-[10px] text-muted-foreground/60 mb-1">{field.description}</p>
         <input
           type={field.type === "secret" ? "password" : "text"}
           value={editValues[key] ?? ""}
@@ -153,9 +318,9 @@ function ModuleConfigPanel({ moduleId }: { moduleId: string }) {
           placeholder={field.default != null ? String(field.default) : undefined}
           className="w-full bg-secondary rounded-md px-3 py-1.5 text-xs outline-none focus:ring-1 ring-primary font-mono"
         />
-      )}
-    </div>
-  );
+      </div>
+    );
+  };
 
   return (
     <div className="border-t border-border pt-3 space-y-3">
@@ -191,6 +356,8 @@ function ModuleConfigPanel({ moduleId }: { moduleId: string }) {
         {error && <span className="text-xs text-red-500">{error}</span>}
         {success && <span className="text-xs text-green-500">Saved</span>}
       </div>
+
+      {moduleLoaded && <ModuleDbInfo moduleId={moduleId} />}
     </div>
   );
 }
@@ -525,7 +692,7 @@ export function ModulesSection() {
 
               {/* Config panel */}
               {expandedId === mod.id && (
-                <ModuleConfigPanel moduleId={mod.id} />
+                <ModuleConfigPanel moduleId={mod.id} moduleLoaded={mod.loaded} />
               )}
 
               {/* Duplicate inline form */}
