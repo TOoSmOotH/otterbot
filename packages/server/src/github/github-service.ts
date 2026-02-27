@@ -2,7 +2,9 @@ import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { eq } from "drizzle-orm";
 import { getConfig } from "../auth/auth.js";
+import { getDb, schema } from "../db/index.js";
 
 // Input validation patterns
 const REPO_NAME_RE = /^[a-zA-Z0-9._-]+\/[a-zA-Z0-9._-]+$/;
@@ -51,7 +53,7 @@ export interface GitHubPullRequest {
  * Build environment variables for git commands that use a PAT for authentication.
  * The PAT is passed via GIT_PAT env var and consumed by the inline credential helper.
  */
-function gitEnvWithPAT(token: string): Record<string, string> {
+export function gitEnvWithPAT(token: string): Record<string, string> {
   return {
     ...(process.env as Record<string, string>),
     GIT_TERMINAL_PROMPT: "0",
@@ -64,7 +66,7 @@ function gitEnvWithPAT(token: string): Record<string, string> {
  * This keeps the token out of .git/config and remote URLs.
  * Returns an array of arguments for use with execFileSync.
  */
-function gitCredentialArgs(): string[] {
+export function gitCredentialArgs(): string[] {
   return ["-c", `credential.helper=!f() { echo username=x-access-token; echo password=$GIT_PAT; }; f`];
 }
 
@@ -273,6 +275,76 @@ async function ghFetch<T>(url: string, token: string, init?: RequestInit): Promi
     throw new Error(`GitHub API error ${res.status}: ${await res.text()}`);
   }
   return (await res.json()) as T;
+}
+
+// ---------------------------------------------------------------------------
+// Collaborator / contributor check
+// ---------------------------------------------------------------------------
+
+/**
+ * Check if a user is a collaborator on a repository.
+ * Uses GET /repos/{owner}/{repo}/collaborators/{username} which returns
+ * 204 if the user is a collaborator, 404 if not.
+ * Note: This endpoint requires the caller to have push access on the repo.
+ */
+export async function checkIsCollaborator(
+  repoFullName: string,
+  token: string,
+  username: string,
+): Promise<boolean> {
+  const res = await fetch(
+    `https://api.github.com/repos/${repoFullName}/collaborators/${encodeURIComponent(username)}`,
+    {
+      headers: GITHUB_HEADERS(token),
+    },
+  );
+  // 204 = is a collaborator, 404 = not a collaborator
+  return res.status === 204;
+}
+
+export interface RepoPermissions {
+  admin: boolean;
+  maintain: boolean;
+  push: boolean;
+  triage: boolean;
+  pull: boolean;
+}
+
+/**
+ * Check the authenticated user's permissions on a repository.
+ * Uses GET /repos/{owner}/{repo} which returns a `permissions` object
+ * when called with an authenticated token. Unlike the collaborator endpoint,
+ * this does NOT require admin/push access to call.
+ *
+ * Returns null if the permissions could not be determined (e.g. network error).
+ */
+export async function getRepoPermissions(
+  repoFullName: string,
+  token: string,
+): Promise<RepoPermissions | null> {
+  const res = await fetch(
+    `https://api.github.com/repos/${repoFullName}`,
+    {
+      headers: GITHUB_HEADERS(token),
+    },
+  );
+  if (!res.ok) return null;
+  const data = await res.json();
+  return (data as any).permissions ?? null;
+}
+
+/**
+ * Check if the authenticated user has at least triage-level access on a repo.
+ * A user with triage, push, maintain, or admin permissions is considered a
+ * contributor who can meaningfully interact with the repo's issues.
+ */
+export async function checkHasTriageAccess(
+  repoFullName: string,
+  token: string,
+): Promise<boolean> {
+  const perms = await getRepoPermissions(repoFullName, token);
+  if (!perms) return false;
+  return perms.triage || perms.push || perms.maintain || perms.admin;
 }
 
 // ---------------------------------------------------------------------------
@@ -611,3 +683,116 @@ export async function createPullRequest(
     },
   );
 }
+
+/**
+ * Merge a pull request via the GitHub API.
+ */
+export async function mergePullRequest(
+  repoFullName: string,
+  token: string,
+  prNumber: number,
+  mergeMethod: "merge" | "squash" | "rebase" = "squash",
+  commitTitle?: string,
+  commitMessage?: string,
+): Promise<{ sha: string; merged: boolean; message: string }> {
+  const payload: Record<string, unknown> = { merge_method: mergeMethod };
+  if (commitTitle) payload.commit_title = commitTitle;
+  if (commitMessage) payload.commit_message = commitMessage;
+
+  return ghFetch<{ sha: string; merged: boolean; message: string }>(
+    `https://api.github.com/repos/${repoFullName}/pulls/${prNumber}/merge`,
+    token,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Check Runs / CI Status APIs
+// ---------------------------------------------------------------------------
+
+export interface GitHubCheckRun {
+  id: number;
+  name: string;
+  status: "queued" | "in_progress" | "completed";
+  conclusion: string | null; // "success" | "failure" | "neutral" | "cancelled" | "skipped" | "timed_out" | "action_required" | null
+  html_url: string;
+  started_at: string | null;
+  completed_at: string | null;
+}
+
+/**
+ * Fetch check runs for a specific git ref (SHA, branch name, or tag).
+ */
+export async function fetchCheckRunsForRef(
+  repoFullName: string,
+  token: string,
+  ref: string,
+): Promise<GitHubCheckRun[]> {
+  const data = await ghFetch<{ total_count: number; check_runs: GitHubCheckRun[] }>(
+    `https://api.github.com/repos/${repoFullName}/commits/${encodeURIComponent(ref)}/check-runs?per_page=100`,
+    token,
+  );
+  return data.check_runs;
+}
+
+/**
+ * Determine the combined CI status for a set of check runs.
+ * Returns:
+ *  - "pending" if any checks are still running or queued
+ *  - "failure" if all checks are complete and at least one failed
+ *  - "success" if all checks completed successfully (or were skipped/neutral)
+ *  - null if there are no check runs
+ */
+export function aggregateCheckRunStatus(
+  checkRuns: GitHubCheckRun[],
+): "pending" | "success" | "failure" | null {
+  if (checkRuns.length === 0) return null;
+
+  const hasIncomplete = checkRuns.some((cr) => cr.status !== "completed");
+  if (hasIncomplete) return "pending";
+
+  const hasFailure = checkRuns.some(
+    (cr) =>
+      cr.conclusion === "failure" ||
+      cr.conclusion === "timed_out" ||
+      cr.conclusion === "cancelled" ||
+      cr.conclusion === "action_required",
+  );
+  return hasFailure ? "failure" : "success";
+}
+
+/**
+ * Update a pull request (title, body, state, base).
+ */
+export async function updatePullRequest(
+  repoFullName: string,
+  token: string,
+  prNumber: number,
+  updates: { title?: string; body?: string; state?: "open" | "closed"; base?: string },
+): Promise<GitHubPullRequest> {
+  return ghFetch<GitHubPullRequest>(
+    `https://api.github.com/repos/${repoFullName}/pulls/${prNumber}`,
+    token,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(updates),
+    },
+  );
+}
+
+/**
+ * Resolve the target branch for a project, checking runtime config first,
+ * then the DB, falling back to "main".
+ */
+export function resolveProjectBranch(projectId: string): string {
+  return getConfig(`project:${projectId}:github:branch`)
+    ?? getDb().select().from(schema.projects)
+        .where(eq(schema.projects.id, projectId)).get()?.githubBranch
+    ?? "main";
+}
+

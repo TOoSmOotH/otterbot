@@ -6,6 +6,9 @@ import type { SceneZone } from "./environment.js";
 import type { CodingAgentSession, CodingAgentMessage, CodingAgentFileDiff, CodingAgentPermission } from "./coding-agent.js";
 import type { SoulDocument, Memory, MemoryEpisode, SoulSuggestion } from "./memory.js";
 import type { Todo } from "./todo.js";
+import type { MergeQueueEntry } from "./merge-queue.js";
+import type { McpServerRuntime } from "./mcp-server.js";
+import type { SshSessionStatus } from "./ssh.js";
 
 /** Events emitted from server to client */
 export interface ServerToClientEvents {
@@ -64,6 +67,18 @@ export interface ServerToClientEvents {
   "telegram:pairing-request": (data: { code: string; telegramUserId: string; telegramUsername: string }) => void;
   "telegram:status": (data: { status: "connected" | "disconnected" | "error"; botUsername?: string }) => void;
   "whatsapp:status": (data: { status: "connected" | "disconnected" | "qr" | "authenticated" | "auth_failure"; qr?: string }) => void;
+  "signal:pairing-request": (data: { code: string; signalNumber: string }) => void;
+  "signal:status": (data: { status: "connected" | "disconnected" | "error"; phoneNumber?: string }) => void;
+  "nextcloud-talk:pairing-request": (data: { code: string; nextcloudUserId: string; nextcloudDisplayName: string }) => void;
+  "nextcloud-talk:status": (data: { status: "connected" | "disconnected" | "error"; botUsername?: string }) => void;
+  "merge-queue:updated": (data: { entries: MergeQueueEntry[] }) => void;
+  "merge-queue:entry-updated": (entry: MergeQueueEntry) => void;
+  "mcp:status": (runtime: McpServerRuntime) => void;
+  "ssh:session-start": (data: { sessionId: string; keyId: string; host: string; username: string; agentId: string }) => void;
+  "ssh:session-end": (data: { sessionId: string; agentId: string; status: SshSessionStatus }) => void;
+  "ssh:chat-stream": (data: { sessionId: string; token: string; messageId: string }) => void;
+  "ssh:chat-response": (data: { sessionId: string; messageId: string; content: string; command?: string }) => void;
+  "ssh:chat-analyzing": (data: { sessionId: string; command: string }) => void;
 }
 
 /** Events emitted from client to server */
@@ -73,6 +88,9 @@ export interface ClientToServerEvents {
     callback?: (ack: { messageId: string; conversationId: string }) => void,
   ) => void;
   "ceo:new-chat": (
+    callback?: (ack: { ok: boolean }) => void,
+  ) => void;
+  "ceo:cancel-tts": (
     callback?: (ack: { ok: boolean }) => void,
   ) => void;
   "ceo:list-conversations": (
@@ -216,5 +234,51 @@ export interface ClientToServerEvents {
   // Soul advisor
   "soul:suggest": (
     callback: (ack: { ok: boolean; suggestions?: SoulSuggestion[]; error?: string }) => void,
+  ) => void;
+
+  // Merge queue
+  "merge-queue:approve": (
+    data: { taskId: string },
+    callback?: (ack: { ok: boolean; entry?: MergeQueueEntry; error?: string }) => void,
+  ) => void;
+  "merge-queue:remove": (
+    data: { taskId: string },
+    callback?: (ack: { ok: boolean; error?: string }) => void,
+  ) => void;
+  "merge-queue:list": (
+    data?: { projectId?: string },
+    callback?: (entries: MergeQueueEntry[]) => void,
+  ) => void;
+  "merge-queue:reorder": (
+    data: { entryId: string; newPosition: number },
+    callback?: (ack: { ok: boolean; error?: string }) => void,
+  ) => void;
+
+  // Target branch
+  "project:get-branch": (
+    data: { projectId: string },
+    callback: (result: { branch: string | null }) => void,
+  ) => void;
+  "project:set-branch": (
+    data: { projectId: string; branch: string },
+    callback?: (ack: { ok: boolean; error?: string }) => void,
+  ) => void;
+
+  // SSH sessions
+  "ssh:connect": (
+    data: { keyId: string; host: string },
+    callback?: (ack: { ok: boolean; sessionId?: string; agentId?: string; error?: string }) => void,
+  ) => void;
+  "ssh:disconnect": (
+    data: { sessionId: string },
+    callback?: (ack: { ok: boolean; error?: string }) => void,
+  ) => void;
+  "ssh:chat": (
+    data: { sessionId: string; message: string },
+    callback?: (ack: { ok: boolean; messageId?: string; error?: string }) => void,
+  ) => void;
+  "ssh:chat-confirm": (
+    data: { sessionId: string; messageId: string; command: string },
+    callback?: (ack: { ok: boolean; error?: string }) => void,
   ) => void;
 }

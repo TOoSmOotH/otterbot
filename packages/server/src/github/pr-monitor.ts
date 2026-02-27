@@ -6,11 +6,15 @@ import { getDb, schema } from "../db/index.js";
 import { getConfig } from "../auth/auth.js";
 import {
   fetchPullRequest,
+  fetchPullRequests,
   fetchPullRequestReviews,
   fetchPullRequestReviewComments,
+  fetchCheckRunsForRef,
+  aggregateCheckRunStatus,
 } from "./github-service.js";
 import type { COO } from "../agents/coo.js";
 import type { PipelineManager } from "../pipeline/pipeline-manager.js";
+import type { MergeQueue } from "../merge-queue/merge-queue.js";
 
 type TypedServer = Server<ClientToServerEvents, ServerToClientEvents>;
 
@@ -20,7 +24,10 @@ export class GitHubPRMonitor {
   private io: TypedServer;
   /** Track processed review IDs to avoid re-triggering on the same review */
   private processedReviewIds = new Set<number>();
+  /** Track HEAD SHAs for which we already processed a CI failure */
+  private processedCIFailureSHAs = new Set<string>();
   private pipelineManager: PipelineManager | null = null;
+  private mergeQueue: MergeQueue | null = null;
 
   constructor(coo: COO, io: TypedServer) {
     this.coo = coo;
@@ -30,6 +37,11 @@ export class GitHubPRMonitor {
   /** Inject the pipeline manager (avoids circular dependency) */
   setPipelineManager(pm: PipelineManager): void {
     this.pipelineManager = pm;
+  }
+
+  /** Inject the merge queue (avoids circular dependency) */
+  setMergeQueue(mq: MergeQueue): void {
+    this.mergeQueue = mq;
   }
 
   /** Start the polling loop */
@@ -56,18 +68,18 @@ export class GitHubPRMonitor {
     if (!token) return;
 
     const db = getDb();
-    // Find all tasks in "in_review" with a prNumber set
+    // Find all tasks in "in_review" with a prNumber or prBranch set
     const tasks = db
       .select()
       .from(schema.kanbanTasks)
       .all()
-      .filter((t) => t.column === "in_review" && t.prNumber != null);
+      .filter((t) => t.column === "in_review" && (t.prNumber != null || t.prBranch != null));
 
     for (const task of tasks) {
       try {
         await this.checkPR(task, token);
       } catch (err) {
-        console.error(`[PRMonitor] Error checking PR #${task.prNumber} for task ${task.id}:`, err);
+        console.error(`[PRMonitor] Error checking PR for task ${task.id}:`, err);
       }
     }
   }
@@ -76,6 +88,9 @@ export class GitHubPRMonitor {
     task: typeof schema.kanbanTasks.$inferSelect,
     token: string,
   ): Promise<void> {
+    // If the merge queue owns this task, skip — it handles its own PR state
+    if (this.mergeQueue?.isInQueue(task.id)) return;
+
     const db = getDb();
 
     // Look up project to get githubRepo
@@ -85,9 +100,34 @@ export class GitHubPRMonitor {
       .where(eq(schema.projects.id, task.projectId))
       .get();
 
-    if (!project?.githubRepo || !task.prNumber) return;
+    if (!project?.githubRepo) return;
 
-    const pr = await fetchPullRequest(project.githubRepo, token, task.prNumber);
+    // Resolve missing prNumber from prBranch via GitHub API
+    let prNumber = task.prNumber;
+    if (!prNumber) {
+      if (!task.prBranch) return;
+      try {
+        const prs = await fetchPullRequests(project.githubRepo, token, { state: "all" });
+        const match = prs.find((pr) => pr.head.ref === task.prBranch);
+        if (!match) {
+          console.warn(`[PRMonitor] No PR found for branch ${task.prBranch} on task ${task.id}`);
+          return;
+        }
+        // Save the resolved prNumber to DB
+        const now = new Date().toISOString();
+        db.update(schema.kanbanTasks)
+          .set({ prNumber: match.number, updatedAt: now })
+          .where(eq(schema.kanbanTasks.id, task.id))
+          .run();
+        prNumber = match.number;
+        console.log(`[PRMonitor] Resolved prNumber=${match.number} from branch ${task.prBranch} for task ${task.id}`);
+      } catch (err) {
+        console.warn(`[PRMonitor] Failed to resolve prNumber from branch ${task.prBranch}:`, err);
+        return;
+      }
+    }
+
+    const pr = await fetchPullRequest(project.githubRepo, token, prNumber);
 
     if (pr.merged) {
       // PR merged → move task to done
@@ -95,21 +135,21 @@ export class GitHubPRMonitor {
       db.update(schema.kanbanTasks)
         .set({
           column: "done",
-          completionReport: `PR #${task.prNumber} merged successfully.`,
+          completionReport: `PR #${prNumber} merged successfully.`,
           updatedAt: now,
         })
         .where(eq(schema.kanbanTasks.id, task.id))
         .run();
 
       // Clean up tracked review IDs for this task
-      this.cleanupReviewIds(task.prNumber);
+      this.cleanupReviewIds(prNumber);
 
       const updated = db.select().from(schema.kanbanTasks).where(eq(schema.kanbanTasks.id, task.id)).get();
       if (updated) {
         this.io.emit("kanban:task-updated", updated as unknown as KanbanTask);
       }
 
-      console.log(`[PRMonitor] PR #${task.prNumber} merged — task ${task.id} → done`);
+      console.log(`[PRMonitor] PR #${prNumber} merged — task ${task.id} → done`);
       return;
     }
 
@@ -126,64 +166,164 @@ export class GitHubPRMonitor {
         .run();
 
       // Clean up tracked review IDs for this task
-      this.cleanupReviewIds(task.prNumber);
+      this.cleanupReviewIds(prNumber);
 
       const updated = db.select().from(schema.kanbanTasks).where(eq(schema.kanbanTasks.id, task.id)).get();
       if (updated) {
         this.io.emit("kanban:task-updated", updated as unknown as KanbanTask);
       }
 
-      console.log(`[PRMonitor] PR #${task.prNumber} closed (not merged) — task ${task.id} → backlog`);
+      console.log(`[PRMonitor] PR #${prNumber} closed (not merged) — task ${task.id} → backlog`);
       return;
     }
 
-    // PR is still open — check for changes requested
-    const reviews = await fetchPullRequestReviews(project.githubRepo, token, task.prNumber);
+    // PR is still open — check for reviews
+    const reviews = await fetchPullRequestReviews(project.githubRepo, token, prNumber);
+
+    // Check for APPROVED reviews — auto-enqueue in merge queue
+    if (this.mergeQueue) {
+      const newApprovals = reviews.filter(
+        (r) => r.state === "APPROVED" && !this.processedReviewIds.has(r.id),
+      );
+      if (newApprovals.length > 0) {
+        for (const r of newApprovals) {
+          this.processedReviewIds.add(r.id);
+        }
+        if (!this.mergeQueue.isInQueue(task.id)) {
+          const entry = this.mergeQueue.approveForMerge(task.id);
+          if (entry) {
+            console.log(`[PRMonitor] PR #${prNumber} approved — auto-enqueued in merge queue`);
+          }
+        }
+      }
+    }
 
     // Find new CHANGES_REQUESTED reviews that we haven't processed
     const newChangeRequests = reviews.filter(
       (r) => r.state === "CHANGES_REQUESTED" && !this.processedReviewIds.has(r.id),
     );
 
-    if (newChangeRequests.length === 0) return;
+    if (newChangeRequests.length > 0) {
+      // Mark all new reviews as processed
+      for (const r of newChangeRequests) {
+        this.processedReviewIds.add(r.id);
+      }
 
-    // Mark all new reviews as processed
-    for (const r of newChangeRequests) {
-      this.processedReviewIds.add(r.id);
+      // Also mark any other review IDs we see to avoid processing them later
+      for (const r of reviews) {
+        this.processedReviewIds.add(r.id);
+      }
+
+      // Fetch inline review comments for additional context
+      const reviewComments = await fetchPullRequestReviewComments(
+        project.githubRepo,
+        token,
+        prNumber,
+      );
+
+      // Route through pipeline if the task is pipeline-managed
+      if (this.pipelineManager?.isEnabled(task.projectId)) {
+        const branchName = task.prBranch || pr.head.ref;
+
+        // Build feedback string
+        const feedbackParts: string[] = [];
+        const changeRequests = reviews.filter((r) => r.state === "CHANGES_REQUESTED");
+        for (const review of changeRequests) {
+          feedbackParts.push(`Review by ${review.user.login} (CHANGES_REQUESTED):\n${review.body || "(no body)"}`);
+        }
+        if (reviewComments.length > 0) {
+          feedbackParts.push("\nInline review comments:");
+          for (const c of reviewComments) {
+            const location = c.line ? `${c.path}:${c.line}` : c.path;
+            feedbackParts.push(`- ${c.user.login} on \`${location}\`:\n  ${c.body}\n  \`\`\`diff\n  ${c.diff_hunk.slice(-200)}\n  \`\`\``);
+          }
+        }
+        const feedback = feedbackParts.join("\n\n");
+
+        // Move task to in_progress
+        const db = getDb();
+        const now = new Date().toISOString();
+        db.update(schema.kanbanTasks)
+          .set({ column: "in_progress", assigneeAgentId: null, updatedAt: now })
+          .where(eq(schema.kanbanTasks.id, task.id))
+          .run();
+        const updated = db.select().from(schema.kanbanTasks).where(eq(schema.kanbanTasks.id, task.id)).get();
+        if (updated) {
+          this.io.emit("kanban:task-updated", updated as unknown as KanbanTask);
+        }
+
+        await this.pipelineManager.handleReviewFeedback(
+          task.id,
+          feedback,
+          branchName,
+          prNumber,
+        );
+
+        console.log(`[PRMonitor] Routed PR #${prNumber} review feedback through pipeline for task ${task.id}`);
+        return;
+      }
+
+      await this.requestChangesWorker(task, project, pr, reviews, reviewComments);
+      return;
     }
 
-    // Also mark any other review IDs we see to avoid processing them later
-    for (const r of reviews) {
-      this.processedReviewIds.add(r.id);
+    // Check CI status on the PR's HEAD commit
+    await this.checkCIStatus(task, project, pr, token);
+  }
+
+  private async checkCIStatus(
+    task: typeof schema.kanbanTasks.$inferSelect,
+    project: typeof schema.projects.$inferSelect,
+    pr: Awaited<ReturnType<typeof fetchPullRequest>>,
+    token: string,
+  ): Promise<void> {
+    if (!project.githubRepo) return;
+
+    const headSHA = pr.head.sha;
+
+    // Skip if we already processed a CI failure for this exact SHA
+    if (this.processedCIFailureSHAs.has(headSHA)) return;
+
+    let checkRuns;
+    try {
+      checkRuns = await fetchCheckRunsForRef(project.githubRepo, token, headSHA);
+    } catch (err) {
+      console.warn(`[PRMonitor] Failed to fetch check runs for ${headSHA}:`, err);
+      return;
     }
 
-    // Fetch inline review comments for additional context
-    const reviewComments = await fetchPullRequestReviewComments(
-      project.githubRepo,
-      token,
-      task.prNumber,
+    const ciStatus = aggregateCheckRunStatus(checkRuns);
+
+    // Only act on definitive failures — pending/success/no-checks are fine
+    if (ciStatus !== "failure") return;
+
+    // Mark this SHA as processed so we don't keep re-triggering
+    this.processedCIFailureSHAs.add(headSHA);
+
+    // Build a summary of the failed checks
+    const failedChecks = checkRuns.filter(
+      (cr) =>
+        cr.conclusion === "failure" ||
+        cr.conclusion === "timed_out" ||
+        cr.conclusion === "cancelled" ||
+        cr.conclusion === "action_required",
     );
+    const failureSummary = failedChecks
+      .map((cr) => `- **${cr.name}**: ${cr.conclusion} ([details](${cr.html_url}))`)
+      .join("\n");
+
+    const prNumber = pr.number;
+    const branchName = task.prBranch || pr.head.ref;
+
+    const feedback =
+      `CI checks failed on PR #${prNumber} (commit ${headSHA.slice(0, 7)}).\n\n` +
+      `Failed checks:\n${failureSummary}\n\n` +
+      `Please investigate the CI failures and fix them on branch \`${branchName}\`.`;
+
+    console.log(`[PRMonitor] CI failure detected on PR #${prNumber} (${headSHA.slice(0, 7)}) — routing for fixes`);
 
     // Route through pipeline if the task is pipeline-managed
     if (this.pipelineManager?.isEnabled(task.projectId)) {
-      const branchName = task.prBranch || pr.head.ref;
-
-      // Build feedback string
-      const feedbackParts: string[] = [];
-      const changeRequests = reviews.filter((r) => r.state === "CHANGES_REQUESTED");
-      for (const review of changeRequests) {
-        feedbackParts.push(`Review by ${review.user.login} (CHANGES_REQUESTED):\n${review.body || "(no body)"}`);
-      }
-      if (reviewComments.length > 0) {
-        feedbackParts.push("\nInline review comments:");
-        for (const c of reviewComments) {
-          const location = c.line ? `${c.path}:${c.line}` : c.path;
-          feedbackParts.push(`- ${c.user.login} on \`${location}\`:\n  ${c.body}\n  \`\`\`diff\n  ${c.diff_hunk.slice(-200)}\n  \`\`\``);
-        }
-      }
-      const feedback = feedbackParts.join("\n\n");
-
-      // Move task to in_progress
       const db = getDb();
       const now = new Date().toISOString();
       db.update(schema.kanbanTasks)
@@ -195,18 +335,79 @@ export class GitHubPRMonitor {
         this.io.emit("kanban:task-updated", updated as unknown as KanbanTask);
       }
 
-      await this.pipelineManager.handleReviewFeedback(
+      await this.pipelineManager.handleCIFailure(
         task.id,
         feedback,
         branchName,
-        task.prNumber!,
+        prNumber,
       );
-
-      console.log(`[PRMonitor] Routed PR #${task.prNumber} review feedback through pipeline for task ${task.id}`);
       return;
     }
 
-    await this.requestChangesWorker(task, project, pr, reviews, reviewComments);
+    // Non-pipeline path: use the COO/TeamLead to fix
+    await this.ciFailureWorker(task, project, pr, feedback);
+  }
+
+  private async ciFailureWorker(
+    task: typeof schema.kanbanTasks.$inferSelect,
+    project: typeof schema.projects.$inferSelect,
+    pr: Awaited<ReturnType<typeof fetchPullRequest>>,
+    feedback: string,
+  ): Promise<void> {
+    const db = getDb();
+    const now = new Date().toISOString();
+
+    const branchName = task.prBranch || pr.head.ref;
+
+    const ciDescription =
+      `[CI FAILURE — PR #${task.prNumber} on branch \`${branchName}\`]\n\n` +
+      `This task has an open PR but CI checks are failing.\n` +
+      `The worker must ONLY fix the CI failures — do NOT redo the original task.\n\n` +
+      `--- CI FAILURE DETAILS ---\n${feedback}\n--- END DETAILS ---\n\n` +
+      `Instructions: Check out branch \`${branchName}\`, investigate and fix the CI failures, commit, and push. ` +
+      `Do NOT create a new branch or PR — pushing to this branch auto-updates the existing PR #${task.prNumber}.`;
+
+    db.update(schema.kanbanTasks)
+      .set({
+        column: "in_progress",
+        description: ciDescription,
+        assigneeAgentId: null,
+        updatedAt: now,
+      })
+      .where(eq(schema.kanbanTasks.id, task.id))
+      .run();
+
+    const updated = db.select().from(schema.kanbanTasks).where(eq(schema.kanbanTasks.id, task.id)).get();
+    if (updated) {
+      this.io.emit("kanban:task-updated", updated as unknown as KanbanTask);
+    }
+
+    // Send directive to TeamLead
+    const teamLeads = this.coo.getTeamLeads();
+    const teamLead = teamLeads.get(task.projectId);
+    if (teamLead) {
+      const bus = (this.coo as any).bus;
+      if (bus) {
+        const taskLabel = task.taskNumber ? `Issue #${task.taskNumber}` : task.id;
+        bus.send({
+          fromAgentId: "coo",
+          toAgentId: teamLead.id,
+          type: MessageType.Directive,
+          content:
+            `CI FAILURE for existing task "${task.title}" (${taskLabel}) — this task is already in_progress on the kanban board.\n\n` +
+            `IMPORTANT: Do NOT create any new tasks. Do NOT redo the original work. ` +
+            `Spawn exactly ONE worker to fix the CI failures on the EXISTING task (${task.id}). ` +
+            `The task description already contains the CI failure details and branch instructions.\n\n` +
+            `Use update_task to assign the worker to task ${task.id}, then spawn_worker with the CI failure feedback.\n\n` +
+            `CI summary: PR #${task.prNumber} on branch \`${branchName}\` has failing CI checks.\n` +
+            `${feedback}`,
+          projectId: task.projectId,
+        });
+      }
+    }
+
+    const prTaskLabel = task.taskNumber ? `Issue #${task.taskNumber} (${task.id})` : task.id;
+    console.log(`[PRMonitor] CI failure on PR #${task.prNumber} — sent directive for ${prTaskLabel}`);
   }
 
   private async requestChangesWorker(
@@ -274,12 +475,13 @@ export class GitHubPRMonitor {
     if (teamLead) {
       const bus = (this.coo as any).bus;
       if (bus) {
+        const taskLabel = task.taskNumber ? `Issue #${task.taskNumber}` : task.id;
         bus.send({
           fromAgentId: "coo",
           toAgentId: teamLead.id,
           type: MessageType.Directive,
           content:
-            `PR REVIEW FEEDBACK for existing task "${task.title}" (${task.id}) — this task is already in_progress on the kanban board.\n\n` +
+            `PR REVIEW FEEDBACK for existing task "${task.title}" (${taskLabel}) — this task is already in_progress on the kanban board.\n\n` +
             `IMPORTANT: Do NOT create any new tasks. Do NOT redo the original work. ` +
             `Spawn exactly ONE worker to address the review feedback on the EXISTING task (${task.id}). ` +
             `The task description already contains the review feedback and branch instructions.\n\n` +
@@ -291,7 +493,8 @@ export class GitHubPRMonitor {
       }
     }
 
-    console.log(`[PRMonitor] Changes requested on PR #${task.prNumber} — sent directive for task ${task.id}`);
+    const prTaskLabel = task.taskNumber ? `Issue #${task.taskNumber} (${task.id})` : task.id;
+    console.log(`[PRMonitor] Changes requested on PR #${task.prNumber} — sent directive for ${prTaskLabel}`);
   }
 
   /** Remove tracked review IDs for a given PR when it leaves in_review */

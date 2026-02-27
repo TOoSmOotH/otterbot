@@ -22,6 +22,7 @@ export interface KanbanTask {
   blockedBy: string[];
   pipelineStage: string | null;
   pipelineStages: string[];
+  taskNumber: number | null;
   pipelineAttempt: number;
   createdAt: string;
   updatedAt: string;

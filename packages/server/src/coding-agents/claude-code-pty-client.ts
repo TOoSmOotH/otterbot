@@ -6,6 +6,7 @@
  * replacement for the SDK-based ClaudeCodeClient.
  */
 
+import { extractPtySummary } from "../utils/terminal.js";
 import type {
   CodingAgentClient,
   CodingAgentTaskResult,
@@ -72,6 +73,12 @@ export class ClaudeCodePtyClient implements CodingAgentClient {
         args.unshift("--model", model);
       }
 
+      // Add max-turns flag if configured
+      const maxTurns = getConfig("claude-code:max_turns");
+      if (maxTurns) {
+        args.unshift("--max-turns", maxTurns);
+      }
+
       if (approvalMode === "full-auto") {
         args.unshift("--dangerously-skip-permissions");
         // Ensure the "are you sure?" confirmation for --dangerously-skip-permissions
@@ -80,6 +87,7 @@ export class ClaudeCodePtyClient implements CodingAgentClient {
       }
 
       const cwd = this.config.workspacePath || process.cwd();
+      this.ensureDirectoryTrusted(cwd);
 
       this.ptyProcess = nodePty.spawn("claude", args, {
         name: "xterm-256color",
@@ -113,7 +121,7 @@ export class ClaudeCodePtyClient implements CodingAgentClient {
           resolve({
             success,
             sessionId,
-            summary: success ? this.extractSummary() : `Process exited with code ${exitCode}`,
+            summary: success ? extractPtySummary(this.ringBuffer) : `Process exited with code ${exitCode}`,
             diff,
             usage: null,
           });
@@ -226,28 +234,38 @@ export class ClaudeCodePtyClient implements CodingAgentClient {
     }
   }
 
-  /** Extract a meaningful summary from the PTY ring buffer instead of a generic message */
-  private extractSummary(): string {
-    // Strip ANSI escape codes
-    // eslint-disable-next-line no-control-regex
-    const clean = this.ringBuffer.replace(/\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g, "");
+  /**
+   * Pre-accept the workspace trust dialog for a directory so Claude Code
+   * doesn't prompt interactively when spawned in a worktree path.
+   */
+  private ensureDirectoryTrusted(dirPath: string): void {
+    try {
+      const home = process.env.HOME || process.env.USERPROFILE || "";
+      const claudeJsonPath = join(home, ".claude.json");
 
-    // Extract PR URLs
-    const prUrls = clean.match(/https:\/\/github\.com\/[^\s]+\/pull\/\d+/g);
-
-    const parts: string[] = ["Task completed."];
-    if (prUrls) {
-      const unique = [...new Set(prUrls)];
-      for (const url of unique) {
-        parts.push(`PR created: ${url}`);
+      let data: Record<string, unknown> = {};
+      if (existsSync(claudeJsonPath)) {
+        try {
+          data = JSON.parse(readFileSync(claudeJsonPath, "utf-8"));
+        } catch {
+          // Corrupted — don't overwrite the whole file, just bail
+          return;
+        }
       }
+
+      const projects = (data.projects ?? {}) as Record<string, Record<string, unknown>>;
+      if (projects[dirPath]?.hasTrustDialogAccepted === true) return;
+
+      if (!projects[dirPath]) {
+        projects[dirPath] = {};
+      }
+      projects[dirPath].hasTrustDialogAccepted = true;
+      data.projects = projects;
+
+      writeFileSync(claudeJsonPath, JSON.stringify(data, null, 2), "utf-8");
+      console.log(`[Claude Code PTY] Pre-accepted trust for ${dirPath}`);
+    } catch (err) {
+      console.warn("[Claude Code PTY] Failed to pre-accept directory trust:", err);
     }
-
-    // Append last ~2000 chars of clean output for context
-    const tail = clean.slice(-2000);
-    parts.push("", `Terminal output (last 2000 chars):\n${tail}`);
-
-    return parts.join("\n");
   }
-
 }

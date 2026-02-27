@@ -212,6 +212,52 @@ describe("adapter – resolveModel", () => {
     });
   });
 
+  it("creates an OpenAI-based model for lmstudio provider type", () => {
+    const config: LLMConfig = {
+      provider: "lmstudio",
+      model: "llama-3.1-8b-instruct",
+    };
+
+    const model = resolveModel(config);
+
+    expect(createOpenAI).toHaveBeenCalledWith({
+      baseURL: "http://localhost:1234/v1",
+      apiKey: "lm-studio",
+    });
+    expect(mockOpenAIFactory).toHaveBeenCalledWith("llama-3.1-8b-instruct");
+    expect(model).toBe(mockOpenAIModel);
+  });
+
+  it("allows overriding the lmstudio baseUrl", () => {
+    const config: LLMConfig = {
+      provider: "lmstudio",
+      model: "mistral-7b-instruct",
+      baseUrl: "http://192.168.1.100:1234/v1",
+    };
+
+    resolveModel(config);
+
+    expect(createOpenAI).toHaveBeenCalledWith({
+      baseURL: "http://192.168.1.100:1234/v1",
+      apiKey: "lm-studio",
+    });
+    expect(mockOpenAIFactory).toHaveBeenCalledWith("mistral-7b-instruct");
+  });
+
+  it("uses placeholder apiKey for lmstudio when none provided", () => {
+    const config: LLMConfig = {
+      provider: "lmstudio",
+      model: "qwen2.5-coder-7b-instruct",
+    };
+
+    resolveModel(config);
+
+    expect(createOpenAI).toHaveBeenCalledWith({
+      baseURL: "http://localhost:1234/v1",
+      apiKey: "lm-studio",
+    });
+  });
+
   it("throws for unknown provider type", () => {
     const config: LLMConfig = {
       provider: "nonexistent",
@@ -268,6 +314,12 @@ describe("adapter – isThinkingModel", () => {
   it("returns false for nvidia models", () => {
     expect(
       isThinkingModel({ provider: "nvidia", model: "meta/llama-3.1-70b-instruct" }),
+    ).toBe(false);
+  });
+
+  it("returns false for lmstudio models", () => {
+    expect(
+      isThinkingModel({ provider: "lmstudio", model: "llama-3.1-8b-instruct" }),
     ).toBe(false);
   });
 });

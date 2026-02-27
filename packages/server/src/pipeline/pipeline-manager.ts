@@ -21,8 +21,10 @@ import {
   fetchPullRequests,
 } from "../github/github-service.js";
 import type { COO } from "../agents/coo.js";
-import type { GitHubIssue } from "../github/github-service.js";
+import { resolveProjectBranch, type GitHubIssue } from "../github/github-service.js";
 import { SECURITY_PREAMBLE } from "../agents/prompts/security-preamble.js";
+import { cleanTerminalOutput } from "../utils/terminal.js";
+import { formatBotComment, formatBotCommentWithDetails } from "../utils/github-comments.js";
 
 type TypedServer = Server<ClientToServerEvents, ServerToClientEvents>;
 
@@ -65,8 +67,8 @@ function extractTriageJson(text: string): TriageResult {
   const classification =
     classifications.find((c) => lower.includes(c)) ?? "question";
   const shouldProceed = ["bug", "feature", "enhancement"].includes(classification);
-  // Use first ~300 chars of the response as the comment
-  const comment = text.slice(0, 300).replace(/\n+/g, " ").trim();
+  // Use the full response text as the comment, preserving markdown formatting
+  const comment = text.trim();
   const labels = [classification];
 
   console.warn(
@@ -91,7 +93,9 @@ interface PipelineState {
   lastKickbackSource: string | null;
   stageReports: Map<string, string>; // stage → report content
   prBranch: string | null;
+  prNumber: number | null;
   targetBranch: string;             // project's configured branch (for diff base)
+  isReReview?: boolean;             // true when running re-review for merge queue
 }
 
 export class PipelineManager {
@@ -105,10 +109,40 @@ export class PipelineManager {
   private static readonly STALE_THRESHOLD_MS = 30 * 60 * 1000;
   /** Sweep interval in milliseconds (10 minutes) */
   private static readonly SWEEP_INTERVAL_MS = 10 * 60 * 1000;
+  /** Merge queue reference (injected to avoid circular deps) */
+  private mergeQueue: {
+    onReReviewComplete(taskId: string, passed: boolean): Promise<void>;
+    approveForMerge(taskId: string): unknown;
+  } | null = null;
 
   constructor(coo: COO, io: TypedServer) {
     this.coo = coo;
     this.io = io;
+  }
+
+  /** Inject the merge queue (avoids circular dependency) */
+  setMergeQueue(mq: {
+    onReReviewComplete(taskId: string, passed: boolean): Promise<void>;
+    approveForMerge(taskId: string): unknown;
+  }): void {
+    this.mergeQueue = mq;
+  }
+
+  /**
+   * Persist pipeline orchestration state (stageReports, lastKickbackSource, spawnRetryCount) to DB.
+   * Called after each mutation so state survives server restarts.
+   */
+  private persistPipelineState(state: PipelineState): void {
+    const db = getDb();
+    db.update(schema.kanbanTasks)
+      .set({
+        stageReports: Object.fromEntries(state.stageReports),
+        lastKickbackSource: state.lastKickbackSource,
+        spawnRetryCount: state.spawnRetryCount,
+        updatedAt: new Date().toISOString(),
+      })
+      .where(eq(schema.kanbanTasks.id, state.taskId))
+      .run();
   }
 
   /**
@@ -183,11 +217,12 @@ export class PipelineManager {
         repo: project?.githubRepo ?? null,
         stages,
         currentStageIndex,
-        spawnRetryCount: 0,
-        lastKickbackSource: null,
-        stageReports: new Map(), // Reports lost on restart
+        spawnRetryCount: task.spawnRetryCount ?? 0,
+        lastKickbackSource: task.lastKickbackSource ?? null,
+        stageReports: new Map(Object.entries((task.stageReports as Record<string, string>) ?? {})),
         prBranch: task.prBranch ?? null,
-        targetBranch: getConfig(`project:${task.projectId}:github:branch`) ?? "main",
+        prNumber: task.prNumber ?? null,
+        targetBranch: resolveProjectBranch(task.projectId),
       };
 
       this.pipelines.set(task.id, state);
@@ -238,11 +273,12 @@ export class PipelineManager {
       repo: project?.githubRepo ?? null,
       stages,
       currentStageIndex,
-      spawnRetryCount: 0,
-      lastKickbackSource: null,
-      stageReports: new Map(),
+      spawnRetryCount: task.spawnRetryCount ?? 0,
+      lastKickbackSource: task.lastKickbackSource ?? null,
+      stageReports: new Map(Object.entries((task.stageReports as Record<string, string>) ?? {})),
       prBranch: task.prBranch ?? null,
-      targetBranch: getConfig(`project:${task.projectId}:github:branch`) ?? "main",
+      prNumber: task.prNumber ?? null,
+      targetBranch: resolveProjectBranch(task.projectId),
     };
 
     this.pipelines.set(taskId, state);
@@ -338,7 +374,7 @@ export class PipelineManager {
     try {
       await createIssueComment(
         repo, token, issue.number,
-        `🔍 Analyzing this issue...`,
+        formatBotComment("Analyzing Issue"),
       );
     } catch (err) {
       console.error(`[PipelineManager] Failed to post triage start comment on #${issue.number}:`, err);
@@ -371,7 +407,7 @@ export class PipelineManager {
         model,
         system: `${SECURITY_PREAMBLE}\n${entry.systemPrompt}`,
         prompt: issueText,
-        maxTokens: 1000,
+        maxTokens: 4000,
       });
 
       // Parse JSON response
@@ -405,10 +441,6 @@ export class PipelineManager {
       ];
       parsed.labels = (parsed.labels ?? []).filter((l) => ALLOWED_LABELS.includes(l));
 
-      if (typeof parsed.comment === "string" && parsed.comment.length > 500) {
-        parsed.comment = parsed.comment.slice(0, 500);
-      }
-
       parsed.shouldProceed = !!parsed.shouldProceed;
 
       // Apply labels
@@ -427,14 +459,10 @@ export class PipelineManager {
         console.error(`[PipelineManager] Failed to apply triaged label to #${issue.number}:`, err);
       }
 
-      // Post classification comment
-      const proceedText = parsed.shouldProceed
-        ? "Proceeding with implementation when assigned."
-        : "No implementation needed — labeling accordingly.";
-      const commentBody =
-        `**Triage:** ${parsed.classification}\n\n` +
-        `${parsed.comment}\n\n` +
-        `${proceedText}`;
+      // Post classification comment — no truncation; use the full markdown comment
+      const triageTitle = `Triage: ${parsed.classification}`;
+      const comment = typeof parsed.comment === "string" ? parsed.comment : "";
+      const commentBody = formatBotComment(triageTitle, comment);
 
       try {
         await createIssueComment(repo, token, issue.number, commentBody);
@@ -487,6 +515,13 @@ export class PipelineManager {
     }
 
     // Initialize pipeline state
+    const db = getDb();
+    const project = db
+      .select()
+      .from(schema.projects)
+      .where(eq(schema.projects.id, projectId))
+      .get();
+
     const state: PipelineState = {
       taskId,
       projectId,
@@ -498,12 +533,12 @@ export class PipelineManager {
       lastKickbackSource: null,
       stageReports: new Map(),
       prBranch: null,
-      targetBranch: getConfig(`project:${projectId}:github:branch`) ?? "main",
+      prNumber: null,
+      targetBranch: resolveProjectBranch(projectId),
     };
     this.pipelines.set(taskId, state);
 
     // Update kanban task with pipeline stage and stage list
-    const db = getDb();
     const now = new Date().toISOString();
     db.update(schema.kanbanTasks)
       .set({ pipelineStages: enabledStages, pipelineStage: enabledStages[0], updatedAt: now })
@@ -521,7 +556,7 @@ export class PipelineManager {
         try {
           await createIssueComment(
             repo, token, issueNumber,
-            `🚀 Starting implementation pipeline: ${enabledStages.join(" → ")}`,
+            formatBotComment("Pipeline Started", `Stages: ${enabledStages.map(s => `\`${s}\``).join(" → ")}`),
           );
         } catch (err) {
           console.error(`[PipelineManager] Failed to post pipeline start comment:`, err);
@@ -539,6 +574,7 @@ export class PipelineManager {
   async advancePipeline(
     taskId: string,
     workerReport: string,
+    detectedBranch?: string | null,
   ): Promise<void> {
     let state = this.pipelines.get(taskId);
     if (!state) {
@@ -556,6 +592,7 @@ export class PipelineManager {
 
     // Store the report
     state.stageReports.set(currentStage, workerReport);
+    this.persistPipelineState(state);
 
     // Safety net: catch spawn failure strings that slipped through the normal report path
     if (workerReport.startsWith("Error spawning worker") || workerReport.startsWith("REFUSED:")) {
@@ -566,6 +603,11 @@ export class PipelineManager {
     // Extract branch name from the worker report (any stage may mention it)
     if (!state.prBranch) {
       state.prBranch = this.extractBranchName(workerReport);
+
+      // Fallback: use git-detected branch from worktree (captured before cleanup)
+      if (!state.prBranch && detectedBranch) {
+        state.prBranch = detectedBranch;
+      }
 
       // Fallback: check if the task's prBranch was set in DB (e.g., by TeamLead's safety net)
       if (!state.prBranch) {
@@ -593,6 +635,19 @@ export class PipelineManager {
       }
     }
 
+    // Extract PR number from any stage's report (not just reviewer)
+    if (!state.prNumber) {
+      const prNumber = this.extractPRNumber(workerReport);
+      if (prNumber) {
+        state.prNumber = prNumber;
+        const db = getDb();
+        db.update(schema.kanbanTasks)
+          .set({ prNumber, updatedAt: new Date().toISOString() })
+          .where(eq(schema.kanbanTasks.id, taskId))
+          .run();
+      }
+    }
+
     // Post completion comment on GitHub issue
     await this.postStageComment(state, currentStage, workerReport, "complete");
 
@@ -601,6 +656,9 @@ export class PipelineManager {
     const coderIndex = state.stages.indexOf("coder");
 
     // Stage-specific verdict handling with kickback support
+    // For re-review pipelines (merge queue), failures abort instead of kicking back to coder
+    const isReReview = !!state.isReReview;
+
     switch (currentStage) {
       case "coder": {
         const failed = verdict === "fail";
@@ -613,7 +671,7 @@ export class PipelineManager {
               try {
                 await createIssueComment(
                   state.repo, token, state.issueNumber,
-                  `❌ Implementation failed. Task moved to backlog for review.`,
+                  formatBotComment("Implementation Failed", "Task moved to backlog for review."),
                 );
               } catch { /* best effort */ }
             }
@@ -629,83 +687,100 @@ export class PipelineManager {
         const cleanedReport = workerReport.replace(/⚠️ WARNING: Task reported success but produced zero file changes[^\n]*/g, "").trim();
         const hasFindings = verdict === "fail" || (verdict === null && this.securityHasFindings(cleanedReport));
         console.log(`[PipelineManager] Security review for task ${taskId}: hasFindings=${hasFindings}`);
-        if (hasFindings && coderIndex >= 0) {
-          state.currentStageIndex = coderIndex;
-          state.lastKickbackSource = "security";
-          state.spawnRetryCount = 0;
-          this.updateTaskPipelineStage(taskId, "coder");
-          if (state.issueNumber && state.repo) {
-            const token = getConfig("github:token");
-            if (token) {
-              try {
-                await createIssueComment(
-                  state.repo, token, state.issueNumber,
-                  `🔄 Security review found issues. Sending back to coder for fixes.`,
-                );
-              } catch { /* best effort */ }
-            }
+        if (hasFindings) {
+          if (isReReview && this.mergeQueue) {
+            // Re-review failed — abort and notify merge queue
+            this.pipelines.delete(taskId);
+            await this.mergeQueue.onReReviewComplete(taskId, false);
+            console.log(`[PipelineManager] Re-review failed at security for task ${taskId}`);
+            return;
           }
-          await this.sendStageDirective(state, workerReport);
-          return;
+          if (coderIndex >= 0) {
+            state.currentStageIndex = coderIndex;
+            state.lastKickbackSource = "security";
+            state.spawnRetryCount = 0;
+            this.persistPipelineState(state);
+            this.updateTaskPipelineStage(taskId, "coder");
+            if (state.issueNumber && state.repo) {
+              const token = getConfig("github:token");
+              if (token) {
+                try {
+                  await createIssueComment(
+                    state.repo, token, state.issueNumber,
+                    formatBotComment("Security Kickback", "Security review found issues. Sending back to coder for fixes."),
+                  );
+                } catch { /* best effort */ }
+              }
+            }
+            await this.sendStageDirective(state, workerReport);
+            return;
+          }
         }
         break;
       }
       case "tester": {
         const failed = verdict === "fail" || (verdict === null && this.testerHasFailed(workerReport));
         console.log(`[PipelineManager] Tester review for task ${taskId}: failed=${failed}`);
-        if (failed && coderIndex >= 0) {
-          state.currentStageIndex = coderIndex;
-          state.lastKickbackSource = "tester";
-          state.spawnRetryCount = 0;
-          this.updateTaskPipelineStage(taskId, "coder");
-          if (state.issueNumber && state.repo) {
-            const token = getConfig("github:token");
-            if (token) {
-              try {
-                await createIssueComment(
-                  state.repo, token, state.issueNumber,
-                  `🔄 Tests failed. Sending back to coder for fixes.`,
-                );
-              } catch { /* best effort */ }
-            }
+        if (failed) {
+          if (isReReview && this.mergeQueue) {
+            this.pipelines.delete(taskId);
+            await this.mergeQueue.onReReviewComplete(taskId, false);
+            console.log(`[PipelineManager] Re-review failed at tester for task ${taskId}`);
+            return;
           }
-          await this.sendStageDirective(state, workerReport);
-          return;
+          if (coderIndex >= 0) {
+            state.currentStageIndex = coderIndex;
+            state.lastKickbackSource = "tester";
+            state.spawnRetryCount = 0;
+            this.persistPipelineState(state);
+            this.updateTaskPipelineStage(taskId, "coder");
+            if (state.issueNumber && state.repo) {
+              const token = getConfig("github:token");
+              if (token) {
+                try {
+                  await createIssueComment(
+                    state.repo, token, state.issueNumber,
+                    formatBotComment("Test Kickback", "Tests written by the tester revealed implementation issues. Sending back to coder for fixes."),
+                  );
+                } catch { /* best effort */ }
+              }
+            }
+            await this.sendStageDirective(state, workerReport);
+            return;
+          }
         }
         break;
       }
       case "reviewer": {
-        // Extract PR number from the reviewer's report (needed for completeTask routing)
-        const prNumber = this.extractPRNumber(workerReport);
-        if (prNumber) {
-          const db = getDb();
-          const now = new Date().toISOString();
-          db.update(schema.kanbanTasks)
-            .set({ prNumber, updatedAt: now })
-            .where(eq(schema.kanbanTasks.id, taskId))
-            .run();
-        }
-
         const failed = verdict === "fail" || (verdict === null && this.reviewerHasIssues(workerReport));
         console.log(`[PipelineManager] Reviewer review for task ${taskId}: failed=${failed}`);
-        if (failed && coderIndex >= 0) {
-          state.currentStageIndex = coderIndex;
-          state.lastKickbackSource = "reviewer";
-          state.spawnRetryCount = 0;
-          this.updateTaskPipelineStage(taskId, "coder");
-          if (state.issueNumber && state.repo) {
-            const token = getConfig("github:token");
-            if (token) {
-              try {
-                await createIssueComment(
-                  state.repo, token, state.issueNumber,
-                  `🔄 Code review found issues. Sending back to coder for fixes.`,
-                );
-              } catch { /* best effort */ }
-            }
+        if (failed) {
+          if (isReReview && this.mergeQueue) {
+            this.pipelines.delete(taskId);
+            await this.mergeQueue.onReReviewComplete(taskId, false);
+            console.log(`[PipelineManager] Re-review failed at reviewer for task ${taskId}`);
+            return;
           }
-          await this.sendStageDirective(state, workerReport);
-          return;
+          if (coderIndex >= 0) {
+            state.currentStageIndex = coderIndex;
+            state.lastKickbackSource = "reviewer";
+            state.spawnRetryCount = 0;
+            this.persistPipelineState(state);
+            this.updateTaskPipelineStage(taskId, "coder");
+            if (state.issueNumber && state.repo) {
+              const token = getConfig("github:token");
+              if (token) {
+                try {
+                  await createIssueComment(
+                    state.repo, token, state.issueNumber,
+                    formatBotComment("Review Kickback", "Code review found issues. Sending back to coder for fixes."),
+                  );
+                } catch { /* best effort */ }
+              }
+            }
+            await this.sendStageDirective(state, workerReport);
+            return;
+          }
         }
         break;
       }
@@ -714,11 +789,21 @@ export class PipelineManager {
     // Stage passed — advance to next stage
     state.spawnRetryCount = 0;
     state.currentStageIndex++;
+    this.persistPipelineState(state);
 
     if (state.currentStageIndex >= state.stages.length) {
       // Pipeline complete — update DB first, then clean up memory
       this.updateTaskPipelineStage(taskId, null);
-      this.completeTask(taskId, state, workerReport);
+
+      if (state.isReReview && this.mergeQueue) {
+        // Re-review passed — hand back to merge queue for merge
+        this.pipelines.delete(taskId);
+        await this.mergeQueue.onReReviewComplete(taskId, true);
+        console.log(`[PipelineManager] Re-review complete for task ${taskId} — passed`);
+        return;
+      }
+
+      await this.completeTask(taskId, state, workerReport);
       this.pipelines.delete(taskId);
 
       // Post completion comment
@@ -728,7 +813,7 @@ export class PipelineManager {
           try {
             await createIssueComment(
               state.repo, token, state.issueNumber,
-              `✅ Implementation pipeline complete.`,
+              formatBotComment("Pipeline Complete"),
             );
           } catch { /* best effort */ }
         }
@@ -755,6 +840,7 @@ export class PipelineManager {
     }
 
     state.spawnRetryCount++;
+    this.persistPipelineState(state);
     const currentStage = state.stages[state.currentStageIndex];
     console.warn(
       `[PipelineManager] Spawn failure for task ${taskId} at stage ${currentStage} ` +
@@ -782,6 +868,14 @@ export class PipelineManager {
       return;
     }
 
+    // Max retries exhausted — for re-reviews, fail gracefully instead of backlog
+    if (state.isReReview && this.mergeQueue) {
+      console.error(`[PipelineManager] Re-review spawn failed for task ${taskId} — aborting re-review`);
+      this.pipelines.delete(taskId);
+      await this.mergeQueue.onReReviewComplete(taskId, false);
+      return;
+    }
+
     // Max retries exhausted — move to backlog
     console.error(
       `[PipelineManager] Max spawn retries exhausted for task ${taskId} — moving to backlog`,
@@ -806,7 +900,10 @@ export class PipelineManager {
         try {
           await createIssueComment(
             state.repo, token, state.issueNumber,
-            `⚠️ Pipeline spawn failed after ${MAX_SPAWN_RETRIES} retries at stage "${currentStage}". Task moved to backlog for review.\n\nError: ${errorMessage}`,
+            formatBotComment(
+              "Pipeline Spawn Failed",
+              `Failed after ${MAX_SPAWN_RETRIES} retries at stage \`${currentStage}\`. Task moved to backlog for review.\n\nError: ${errorMessage}`,
+            ),
           );
         } catch { /* best effort */ }
       }
@@ -868,13 +965,15 @@ export class PipelineManager {
       lastKickbackSource: null,
       stageReports: new Map(),
       prBranch: branchName,
-      targetBranch: getConfig(`project:${task.projectId}:github:branch`) ?? "main",
+      prNumber: task.prNumber ?? null,
+      targetBranch: resolveProjectBranch(task.projectId),
     };
 
     // Store review feedback context
     state.stageReports.set("review_feedback", feedback);
 
     this.pipelines.set(taskId, state);
+    this.persistPipelineState(state);
     this.updateTaskPipelineStage(taskId, "coder");
 
     // Reset spawn count — PR feedback is a legitimate new cycle, not a failure loop
@@ -890,13 +989,183 @@ export class PipelineManager {
         try {
           await createIssueComment(
             state.repo, token, issueNumber,
-            `🔄 PR review feedback received. Re-entering pipeline at coder stage to address changes.`,
+            formatBotComment("PR Feedback Received", "Re-entering pipeline at `coder` stage to address changes."),
           );
         } catch { /* best effort */ }
       }
     }
 
     await this.sendStageDirective(state, feedback);
+  }
+
+  /**
+   * Handle CI failure on a PR — re-enter the pipeline at the coder stage
+   * so the agent can fix the CI issues and push again.
+   */
+  async handleCIFailure(
+    taskId: string,
+    feedback: string,
+    branchName: string,
+    prNumber: number,
+  ): Promise<void> {
+    const db = getDb();
+    const task = db
+      .select()
+      .from(schema.kanbanTasks)
+      .where(eq(schema.kanbanTasks.id, taskId))
+      .get();
+    if (!task) return;
+
+    const config = this.getConfig(task.projectId);
+    if (!config?.enabled) return;
+
+    const project = db
+      .select()
+      .from(schema.projects)
+      .where(eq(schema.projects.id, task.projectId))
+      .get();
+
+    const issueLabel = (task.labels as string[]).find((l) => l.startsWith("github-issue-"));
+    const issueNumber = issueLabel ? parseInt(issueLabel.replace("github-issue-", ""), 10) : null;
+
+    // Build enabled stages
+    const enabledStages: string[] = [];
+    for (const stageKey of IMPLEMENTATION_STAGE_KEYS) {
+      const stageConfig = config.stages[stageKey];
+      if (stageConfig?.enabled !== false) {
+        enabledStages.push(stageKey);
+      }
+    }
+
+    // Create a new pipeline state starting at coder
+    const state: PipelineState = {
+      taskId,
+      projectId: task.projectId,
+      issueNumber,
+      repo: project?.githubRepo ?? null,
+      stages: enabledStages,
+      currentStageIndex: enabledStages.indexOf("coder"),
+      spawnRetryCount: 0,
+      lastKickbackSource: null,
+      stageReports: new Map(),
+      prBranch: branchName,
+      prNumber: task.prNumber ?? null,
+      targetBranch: resolveProjectBranch(task.projectId),
+    };
+
+    // Store CI failure context
+    state.stageReports.set("ci_failure", feedback);
+
+    this.pipelines.set(taskId, state);
+    this.persistPipelineState(state);
+    this.updateTaskPipelineStage(taskId, "coder");
+
+    // Reset spawn count — CI failure fix is a legitimate new cycle
+    db.update(schema.kanbanTasks)
+      .set({ spawnCount: 0, updatedAt: new Date().toISOString() })
+      .where(eq(schema.kanbanTasks.id, taskId))
+      .run();
+
+    // Post comment on issue
+    if (issueNumber && state.repo) {
+      const token = getConfig("github:token");
+      if (token) {
+        try {
+          await createIssueComment(
+            state.repo, token, issueNumber,
+            formatBotComment("CI Failure Detected", "CI checks failed on the PR. Re-entering pipeline at `coder` stage to fix."),
+          );
+        } catch { /* best effort */ }
+      }
+    }
+
+    await this.sendStageDirective(state, feedback);
+  }
+
+  /**
+   * Start a re-review pipeline for a merge queue entry.
+   * Runs review stages (security, tester, reviewer) but skips triage and coder.
+   * On completion, calls mergeQueue.onReReviewComplete() instead of the normal flow.
+   */
+  async startReReview(
+    taskId: string,
+    branchName: string,
+    prNumber: number,
+  ): Promise<void> {
+    const db = getDb();
+    const task = db
+      .select()
+      .from(schema.kanbanTasks)
+      .where(eq(schema.kanbanTasks.id, taskId))
+      .get();
+    if (!task) return;
+
+    const config = this.getConfig(task.projectId);
+    if (!config?.enabled) return;
+
+    const project = db
+      .select()
+      .from(schema.projects)
+      .where(eq(schema.projects.id, task.projectId))
+      .get();
+
+    // Build review-only stages (skip triage and coder)
+    const reviewStages: string[] = [];
+    for (const stageKey of IMPLEMENTATION_STAGE_KEYS) {
+      if (stageKey === "coder") continue; // Skip coder for re-review
+      const stageConfig = config.stages[stageKey];
+      if (stageConfig?.enabled !== false) {
+        reviewStages.push(stageKey);
+      }
+    }
+
+    if (reviewStages.length === 0) {
+      // No review stages enabled — pass directly
+      if (this.mergeQueue) {
+        await this.mergeQueue.onReReviewComplete(taskId, true);
+      }
+      return;
+    }
+
+    // Extract issue number from labels
+    const issueLabel = (task.labels as string[]).find((l) => l.startsWith("github-issue-"));
+    const issueNumber = issueLabel ? parseInt(issueLabel.replace("github-issue-", ""), 10) : null;
+
+    const state: PipelineState = {
+      taskId,
+      projectId: task.projectId,
+      issueNumber,
+      repo: project?.githubRepo ?? null,
+      stages: reviewStages,
+      currentStageIndex: 0,
+      spawnRetryCount: 0,
+      lastKickbackSource: null,
+      stageReports: new Map(),
+      prBranch: branchName,
+      prNumber: task.prNumber ?? null,
+      targetBranch: resolveProjectBranch(task.projectId),
+      isReReview: true,
+    };
+
+    this.pipelines.set(taskId, state);
+
+    // Update kanban task with pipeline stage info
+    const now = new Date().toISOString();
+    db.update(schema.kanbanTasks)
+      .set({
+        pipelineStages: reviewStages,
+        pipelineStage: reviewStages[0],
+        updatedAt: now,
+      })
+      .where(eq(schema.kanbanTasks.id, taskId))
+      .run();
+    const updated = db.select().from(schema.kanbanTasks).where(eq(schema.kanbanTasks.id, taskId)).get();
+    if (updated) {
+      this.io.emit("kanban:task-updated", updated as unknown as KanbanTask);
+    }
+
+    console.log(`[PipelineManager] Started re-review for task ${taskId} stages: ${reviewStages.join(" → ")}`);
+    await this.sendStageDirective(state);
   }
 
   // ─── Directive building ──────────────────────────────────────────
@@ -969,7 +1238,8 @@ export class PipelineManager {
           // Test failure kickback
           parts.push(
             `\n[TEST FAILURE KICKBACK — Fix Required]`,
-            `Tests failed on your implementation. Fix the code so tests pass.`,
+            `The tester wrote tests for your implementation and they revealed bugs. Fix your implementation code so the tests pass.`,
+            `Do NOT modify or delete the test files — only fix the implementation.`,
             state.prBranch ? `Work on branch \`${state.prBranch}\`.` : "",
             `Do NOT create a PR — just fix and push.`,
           );
@@ -992,6 +1262,11 @@ export class PipelineManager {
           parts.push(
             `\nCreate a feature branch, implement the solution, commit, and push.`,
             `Do NOT create a pull request — a later stage will handle that.`,
+            `\nFocus ONLY on the implementation code. Do NOT:`,
+            `- Write or update tests (a dedicated Tester stage handles testing)`,
+            `- Create pull requests (a dedicated Reviewer stage handles PRs)`,
+            `- Perform security audits (a dedicated Security stage handles that)`,
+            `If the issue description mentions tests, PRs, or reviews, ignore those — other pipeline stages will handle them.`,
           );
         }
         parts.push(
@@ -1032,13 +1307,34 @@ export class PipelineManager {
         break;
       }
       case "tester": {
+        const diffSection = await this.fetchDiffSection(state);
         parts.push(
-          `\nRun tests on branch \`${state.prBranch ?? "(see coder report)"}\` to validate the implementation.`,
-          `Install dependencies, build the project, and run the test suite.`,
-          `Report test results clearly — pass/fail with details.`,
+          `\nYou are the Tester for branch \`${state.prBranch ?? "(see coder report)"}\`.`,
+          `Your job is to **write tests** for the new/changed code and then **run them**.`,
+          ``,
+          `## Steps`,
+          `1. Check out the branch and review the changes (diff provided below).`,
+          `2. Identify what new functionality was added or changed.`,
+          `3. **Write unit tests** that cover the new/changed code. Place test files next to the source following existing project conventions (e.g. \`__tests__/\` directories, \`.test.ts\` suffix).`,
+          `4. Install dependencies and build the project if needed.`,
+          `5. **Run the full test suite** (both your new tests and existing tests).`,
+          `6. If your new tests fail because of a bug in the implementation (not a test bug), report VERDICT: FAIL so the code gets sent back to the coder for fixes. Include the failure details.`,
+          `7. If all tests pass, report VERDICT: PASS.`,
+          ``,
+          `## Guidelines`,
+          `- Focus on testing **behavior**, not implementation details.`,
+          `- Cover happy paths, edge cases, and error handling.`,
+          `- Do NOT modify the implementation code — only write/update test files.`,
+          `- If the implementation has a bug, do NOT fix it yourself — report FAIL with details so it goes back to the coder.`,
+          `- Commit and push your new test files to the branch before reporting.`,
+        );
+        if (diffSection) {
+          parts.push(diffSection);
+        }
+        parts.push(
           `\nIMPORTANT: End your report with exactly one of these verdicts on its own line:`,
-          `  VERDICT: PASS — if all tests pass`,
-          `  VERDICT: FAIL — if any tests fail (include failure details above)`,
+          `  VERDICT: PASS — if all tests (existing + new) pass`,
+          `  VERDICT: FAIL — if any tests fail due to implementation bugs (include failure details above)`,
         );
         const coderReport = state.stageReports.get("coder");
         if (coderReport) {
@@ -1104,7 +1400,8 @@ export class PipelineManager {
           metadata: {
             pipelineRegistryEntryId: registryEntryId,
             pipelineTaskId: state.taskId,
-            pipelineBranch: state.prBranch ?? undefined,
+            pipelineBranch: state.prBranch ?? state.targetBranch,
+            pipelineIsReReview: !!state.isReReview,
           },
         });
         console.log(`[PipelineManager] Sent ${currentStage} directive for task ${state.taskId}`);
@@ -1133,31 +1430,40 @@ export class PipelineManager {
 
     let body: string;
     if (phase === "start") {
-      const startComments: Record<string, string> = {
-        triage: "🔍 Analyzing issue...",
-        coder: "🔨 Beginning implementation...",
-        security: "🔒 Running security review...",
-        tester: "🧪 Running tests...",
-        reviewer: "📝 Reviewing code...",
+      const startTitles: Record<string, string> = {
+        triage: "Analyzing Issue",
+        coder: "Beginning Implementation",
+        security: "Running Security Review",
+        tester: "Running Tests",
+        reviewer: "Reviewing Code",
       };
-      body = startComments[stage] ?? `Starting ${stage}...`;
+      body = formatBotComment(startTitles[stage] ?? `Starting ${stage}`);
     } else {
-      // Completion — summarize the report
-      const summary = report.length > 500
-        ? report.slice(0, 500) + "\n\n_(truncated)_"
-        : report;
+      // Completion — clean the report and put it in a collapsible section
+      const cleaned = cleanTerminalOutput(report);
+      let preview: string;
+      if (cleaned.length > 500) {
+        // Try to break at a paragraph boundary (double newline) within 500 chars
+        const slice = cleaned.slice(0, 500);
+        const paraBreak = slice.lastIndexOf("\n\n");
+        preview = (paraBreak > 100 ? slice.slice(0, paraBreak) : slice) + "\n\n_(see details for full output)_";
+      } else {
+        preview = cleaned;
+      }
 
-      const completeComments: Record<string, (r: string) => string> = {
-        coder: (r) => `✅ Implementation complete.\n\n${r}`,
-        security: (r) =>
-          this.securityHasFindings(report)
-            ? `⚠️ Security issues found:\n\n${r}`
-            : `✅ No security issues found.\n\n${r}`,
-        tester: (r) => `🧪 Test results:\n\n${r}`,
-        reviewer: (r) => `📝 Review complete.\n\n${r}`,
+      const completeTitles: Record<string, string> = {
+        coder: "Implementation Complete",
+        security: this.securityHasFindings(report)
+          ? "Security Issues Found"
+          : "No Security Issues",
+        tester: "Test Results",
+        reviewer: "Review Complete",
       };
-      const formatter = completeComments[stage];
-      body = formatter ? formatter(summary) : `${stage} complete: ${summary}`;
+      const title = completeTitles[stage] ?? `${stage} Complete`;
+
+      body = cleaned.length > 500
+        ? formatBotCommentWithDetails(title, preview, cleaned)
+        : formatBotComment(title, preview);
     }
 
     try {
@@ -1199,6 +1505,9 @@ export class PipelineManager {
       .filter((t) => t.column === "triage")
       .reduce((max, t) => Math.max(max, t.position), -1);
 
+    // Assign next task_number for this project
+    const maxTaskNum = existingTasks.reduce((max, t) => Math.max(max, (t as any).taskNumber ?? 0), 0);
+
     const now = new Date().toISOString();
     const task = {
       id: nanoid(),
@@ -1214,6 +1523,7 @@ export class PipelineManager {
       retryCount: 0,
       spawnCount: 0,
       completionReport: null,
+      taskNumber: maxTaskNum + 1,
       pipelineStage: null,
       pipelineStages: [] as string[],
       pipelineAttempt: 0,
@@ -1373,11 +1683,11 @@ export class PipelineManager {
   /** Extract a branch name from a worker report */
   private extractBranchName(report: string): string | null {
     const patterns = [
-      /branch[:\s]+`?([a-zA-Z0-9._\/-]+)`?/i,
-      /created branch\s+`?([a-zA-Z0-9._\/-]+)`?/i,
-      /git checkout -b\s+`?([a-zA-Z0-9._\/-]+)`?/i,
-      /pushed to\s+`?([a-zA-Z0-9._\/-]+)`?/i,
-      /on branch\s+`?([a-zA-Z0-9._\/-]+)`?/i,
+      /branch[:\s]+`?([a-zA-Z0-9._\/#-]+)`?/i,
+      /created branch\s+`?([a-zA-Z0-9._\/#-]+)`?/i,
+      /git checkout -b\s+`?([a-zA-Z0-9._\/#-]+)`?/i,
+      /pushed to\s+`?([a-zA-Z0-9._\/#-]+)`?/i,
+      /on branch\s+`?([a-zA-Z0-9._\/#-]+)`?/i,
     ];
     for (const pattern of patterns) {
       const match = report.match(pattern);
@@ -1445,11 +1755,11 @@ export class PipelineManager {
    * If the task has a PR, move to in_review (PR monitor handles the rest).
    * Otherwise move to done with a completion report.
    */
-  private completeTask(
+  private async completeTask(
     taskId: string,
     state: PipelineState,
     finalReport: string,
-  ): void {
+  ): Promise<void> {
     const db = getDb();
     const task = db
       .select()
@@ -1458,8 +1768,35 @@ export class PipelineManager {
       .get();
     if (!task) return;
 
+    // If we have a branch but no PR number, try to resolve it via GitHub API
+    if (task.prBranch && !task.prNumber) {
+      const token = getConfig("github:token");
+      const project = db
+        .select()
+        .from(schema.projects)
+        .where(eq(schema.projects.id, task.projectId))
+        .get();
+
+      if (token && project?.githubRepo) {
+        try {
+          const prs = await fetchPullRequests(project.githubRepo, token, { state: "all" });
+          const match = prs.find((pr) => pr.head.ref === task.prBranch);
+          if (match) {
+            db.update(schema.kanbanTasks)
+              .set({ prNumber: match.number, updatedAt: new Date().toISOString() })
+              .where(eq(schema.kanbanTasks.id, taskId))
+              .run();
+            (task as any).prNumber = match.number;
+            console.log(`[PipelineManager] Resolved prNumber=${match.number} from branch ${task.prBranch} for task ${taskId}`);
+          }
+        } catch (err) {
+          console.warn(`[PipelineManager] Failed to resolve prNumber from branch ${task.prBranch}:`, err);
+        }
+      }
+    }
+
     const now = new Date().toISOString();
-    const hasPR = !!task.prNumber;
+    const hasPR = !!task.prNumber || !!task.prBranch;
     const targetColumn = hasPR ? "in_review" : "done";
 
     const report = Array.from(state.stageReports.entries())
