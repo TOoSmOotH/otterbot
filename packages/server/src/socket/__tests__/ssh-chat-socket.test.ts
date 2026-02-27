@@ -1,10 +1,32 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const mockHandleSshChat = vi.fn();
+const mockAnalyzeCommandOutput = vi.fn();
 
 vi.mock("../../ssh/ssh-chat.js", () => ({
   handleSshChat: (...args: any[]) => mockHandleSshChat(...args),
+  analyzeCommandOutput: (...args: any[]) => mockAnalyzeCommandOutput(...args),
   clearSshChatHistory: vi.fn(),
+}));
+
+vi.mock("../../ssh/ssh-pty-client.js", () => ({
+  SshPtyClient: class MockSshPtyClient {
+    private listeners: Array<(data: string) => void> = [];
+    writeInput = vi.fn();
+    gracefulExit = vi.fn();
+    getReplayBuffer = vi.fn(() => "recent terminal output");
+
+    addDataListener(cb: (data: string) => void): () => void {
+      this.listeners.push(cb);
+      return () => {
+        this.listeners = this.listeners.filter((listener) => listener !== cb);
+      };
+    }
+
+    emitData(data: string): void {
+      for (const listener of this.listeners) listener(data);
+    }
+  },
 }));
 
 import {
@@ -76,9 +98,11 @@ describe("SSH chat socket handlers", () => {
   beforeEach(() => {
     socketHandlers.clear();
     mockHandleSshChat.mockReset();
+    mockAnalyzeCommandOutput.mockReset();
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     unregisterPtySession("ssh-sess-1");
   });
 
@@ -95,6 +119,11 @@ describe("SSH chat socket handlers", () => {
     );
 
     return { mockIo };
+  }
+
+  async function createPtyClient() {
+    const { SshPtyClient } = await import("../../ssh/ssh-pty-client.js");
+    return new SshPtyClient({} as any) as any;
   }
 
   it("handles ssh:chat by passing terminal buffer and emitting stream + response", async () => {
@@ -195,5 +224,102 @@ describe("SSH chat socket handlers", () => {
 
     expect(ptyClient.writeInput).toHaveBeenCalledWith("df -h\n");
     expect(callback).toHaveBeenCalledWith({ ok: true });
+    expect(mockAnalyzeCommandOutput).not.toHaveBeenCalled();
+  });
+
+  it("auto-analyzes confirmed command output after settle timeout", async () => {
+    vi.useFakeTimers();
+    const { mockIo } = setupHandler();
+    const ptyClient = await createPtyClient();
+    ptyClient.getReplayBuffer.mockReturnValue("command output");
+    registerPtySession("ssh-sess-1", ptyClient as any);
+    mockAnalyzeCommandOutput.mockResolvedValue("msg-analysis");
+
+    const handler = socketHandlers.get("ssh:chat-confirm");
+    const callback = vi.fn();
+
+    await handler!({ sessionId: "sess-1", messageId: "m1", command: "df -h" }, callback);
+
+    expect(callback).toHaveBeenCalledWith({ ok: true });
+    expect(ptyClient.writeInput).toHaveBeenCalledWith("df -h\n");
+    expect(mockAnalyzeCommandOutput).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(1499);
+    expect(mockAnalyzeCommandOutput).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(1);
+    expect(mockIo.emit).toHaveBeenCalledWith("ssh:chat-analyzing", {
+      sessionId: "sess-1",
+      command: "df -h",
+    });
+    expect(mockAnalyzeCommandOutput).toHaveBeenCalledWith(
+      { sessionId: "sess-1", command: "df -h", terminalBuffer: "command output" },
+      expect.objectContaining({
+        onStream: expect.any(Function),
+        onComplete: expect.any(Function),
+        onError: expect.any(Function),
+      }),
+    );
+
+    const callbacks = mockAnalyzeCommandOutput.mock.calls[0][1];
+    callbacks.onStream("tok", "msg-analysis");
+    callbacks.onComplete("msg-analysis", "Looks good", "df -h");
+
+    expect(mockIo.emit).toHaveBeenCalledWith("ssh:chat-stream", {
+      sessionId: "sess-1",
+      token: "tok",
+      messageId: "msg-analysis",
+    });
+    expect(mockIo.emit).toHaveBeenCalledWith("ssh:chat-response", {
+      sessionId: "sess-1",
+      messageId: "msg-analysis",
+      content: "Looks good",
+      command: "df -h",
+    });
+  });
+
+  it("resets settle timer on PTY data and analyzes only once after output settles", async () => {
+    vi.useFakeTimers();
+    setupHandler();
+    const ptyClient = await createPtyClient();
+    registerPtySession("ssh-sess-1", ptyClient as any);
+    mockAnalyzeCommandOutput.mockResolvedValue("msg-analysis");
+
+    const handler = socketHandlers.get("ssh:chat-confirm");
+    await handler!({ sessionId: "sess-1", messageId: "m1", command: "ls -la" }, vi.fn());
+
+    await vi.advanceTimersByTimeAsync(1000);
+    ptyClient.emitData("line 1");
+    await vi.advanceTimersByTimeAsync(1000);
+    ptyClient.emitData("line 2");
+    await vi.advanceTimersByTimeAsync(1499);
+    expect(mockAnalyzeCommandOutput).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(1);
+    expect(mockAnalyzeCommandOutput).toHaveBeenCalledTimes(1);
+
+    ptyClient.emitData("line 3");
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(mockAnalyzeCommandOutput).toHaveBeenCalledTimes(1);
+  });
+
+  it("triggers analysis at max wait timeout when output keeps streaming", async () => {
+    vi.useFakeTimers();
+    setupHandler();
+    const ptyClient = await createPtyClient();
+    registerPtySession("ssh-sess-1", ptyClient as any);
+    mockAnalyzeCommandOutput.mockResolvedValue("msg-analysis");
+
+    const handler = socketHandlers.get("ssh:chat-confirm");
+    await handler!({ sessionId: "sess-1", messageId: "m1", command: "tail -f app.log" }, vi.fn());
+
+    for (let second = 0; second < 29; second++) {
+      await vi.advanceTimersByTimeAsync(1000);
+      ptyClient.emitData(`tick-${second}`);
+    }
+    expect(mockAnalyzeCommandOutput).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(mockAnalyzeCommandOutput).toHaveBeenCalledTimes(1);
   });
 });
