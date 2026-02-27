@@ -1035,9 +1035,67 @@ export function setupSocketHandlers(
           callback?.({ ok: false, error: "No active SSH session" });
           return;
         }
+
         // Write the command followed by newline to the PTY
         ptyClient.writeInput(data.command + "\n");
         callback?.({ ok: true });
+
+        // Auto-analyze command output: wait for output to settle, then
+        // send it through the LLM so the model can interpret the results.
+        const { analyzeCommandOutput } = await import("../ssh/ssh-chat.js");
+        const { SshPtyClient } = await import("../ssh/ssh-pty-client.js");
+
+        // Only proceed if the ptyClient supports data listeners
+        if (!(ptyClient instanceof SshPtyClient)) return;
+
+        const SETTLE_MS = 1500; // wait 1.5s of silence before analyzing
+        const MAX_WAIT_MS = 30000; // give up after 30s
+        let settleTimer: ReturnType<typeof setTimeout> | null = null;
+        let maxTimer: ReturnType<typeof setTimeout> | null = null;
+
+        const cleanup = () => {
+          if (settleTimer) clearTimeout(settleTimer);
+          if (maxTimer) clearTimeout(maxTimer);
+          unsubscribe();
+        };
+
+        const triggerAnalysis = () => {
+          cleanup();
+          // Notify the frontend that analysis is starting
+          io.emit("ssh:chat-analyzing", { sessionId: data.sessionId, command: data.command });
+
+          const terminalBuffer = ptyClient.getReplayBuffer();
+          analyzeCommandOutput(
+            { sessionId: data.sessionId, command: data.command, terminalBuffer },
+            {
+              onStream: (token, msgId) => {
+                io.emit("ssh:chat-stream", { sessionId: data.sessionId, token, messageId: msgId });
+              },
+              onComplete: (msgId, content, command) => {
+                io.emit("ssh:chat-response", { sessionId: data.sessionId, messageId: msgId, content, command });
+              },
+              onError: () => {
+                // Silently fail — the user still has the terminal output
+              },
+            },
+          ).catch(() => {
+            // Silently fail
+          });
+        };
+
+        // Listen for new data to detect when output settles
+        const unsubscribe = ptyClient.addDataListener(() => {
+          if (settleTimer) clearTimeout(settleTimer);
+          settleTimer = setTimeout(triggerAnalysis, SETTLE_MS);
+        });
+
+        // Start the settle timer immediately (handles commands with no output)
+        settleTimer = setTimeout(triggerAnalysis, SETTLE_MS);
+
+        // Safety timeout to prevent indefinite waiting
+        maxTimer = setTimeout(() => {
+          triggerAnalysis();
+        }, MAX_WAIT_MS);
       } catch (err) {
         callback?.({ ok: false, error: err instanceof Error ? err.message : "Failed to execute command" });
       }

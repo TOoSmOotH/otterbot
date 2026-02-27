@@ -78,6 +78,7 @@ export interface ServerToClientEvents {
   "ssh:session-end": (data: { sessionId: string; agentId: string; status: SshSessionStatus }) => void;
   "ssh:chat-stream": (data: { sessionId: string; token: string; messageId: string }) => void;
   "ssh:chat-response": (data: { sessionId: string; messageId: string; content: string; command?: string }) => void;
+  "ssh:chat-analyzing": (data: { sessionId: string; command: string }) => void;
 }
 
 /** Events emitted from client to server */
