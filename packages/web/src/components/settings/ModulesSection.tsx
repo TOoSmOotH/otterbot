@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { cn } from "../../lib/utils";
 import { useSettingsStore } from "../../stores/settings-store";
 import { ModelCombobox } from "./ModelCombobox";
+import { ModuleAgentChat } from "./ModuleAgentChat";
 
 interface InstalledModule {
   id: string;
@@ -14,6 +15,7 @@ interface InstalledModule {
   loaded: boolean;
   documents: number;
   hasQuery: boolean;
+  hasAgent: boolean;
   installedAt: string;
   updatedAt: string;
 }
@@ -72,6 +74,80 @@ function ModuleDbInfo({ moduleId }: { moduleId: string }) {
           </div>
         ))}
       </div>
+    </div>
+  );
+}
+
+function ModuleQueryBox({ moduleId }: { moduleId: string }) {
+  const [question, setQuestion] = useState("");
+  const [asking, setAsking] = useState(false);
+  const [lastQ, setLastQ] = useState<string | null>(null);
+  const [lastA, setLastA] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleAsk = async () => {
+    const q = question.trim();
+    if (!q || asking) return;
+    setAsking(true);
+    setError(null);
+    setLastQ(q);
+    setLastA(null);
+    try {
+      const res = await fetch(`/api/modules/${moduleId}/query`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ question: q }),
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        setError(data.error ?? "Query failed");
+      } else {
+        const data = await res.json();
+        setLastA(data.answer);
+        setQuestion("");
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Query failed");
+    } finally {
+      setAsking(false);
+    }
+  };
+
+  return (
+    <div className="border-t border-border pt-3 space-y-2">
+      <div className="text-[10px] text-muted-foreground uppercase tracking-wider font-medium">
+        Ask Agent
+      </div>
+      <div className="flex items-center gap-2">
+        <input
+          type="text"
+          value={question}
+          onChange={(e) => setQuestion(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && handleAsk()}
+          placeholder="Ask a question..."
+          disabled={asking}
+          className="flex-1 bg-secondary rounded-md px-3 py-1.5 text-xs outline-none focus:ring-1 ring-primary"
+        />
+        <button
+          onClick={handleAsk}
+          disabled={asking || !question.trim()}
+          className="text-xs bg-primary text-primary-foreground px-3 py-1.5 rounded-md hover:bg-primary/90 disabled:opacity-50"
+        >
+          {asking ? "Asking..." : "Ask"}
+        </button>
+      </div>
+      {error && <div className="text-xs text-red-500">{error}</div>}
+      {lastQ && lastA && (
+        <div className="bg-secondary/50 rounded-md p-3 space-y-2">
+          <div className="text-[10px] text-muted-foreground">Q: {lastQ}</div>
+          <div className="text-xs text-foreground whitespace-pre-wrap">{lastA}</div>
+        </div>
+      )}
+      {lastQ && !lastA && asking && (
+        <div className="text-[10px] text-muted-foreground animate-pulse">
+          Thinking...
+        </div>
+      )}
     </div>
   );
 }
@@ -402,6 +478,7 @@ export function ModulesSection() {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [syncingId, setSyncingId] = useState<string | null>(null);
   const [syncResult, setSyncResult] = useState<{ id: string; items: number } | null>(null);
+  const [showAgentChat, setShowAgentChat] = useState(false);
 
   const loadModules = async () => {
     try {
@@ -549,7 +626,7 @@ export function ModulesSection() {
         into isolated knowledge stores, queryable by the COO via tools.
       </p>
 
-      {/* Install button */}
+      {/* Install button + Agent Chat */}
       <div className="flex items-center gap-2">
         <button
           onClick={() => setShowInstall(!showInstall)}
@@ -557,6 +634,14 @@ export function ModulesSection() {
         >
           {showInstall ? "Cancel" : "Install Module"}
         </button>
+        {modules.some((m) => m.loaded && (m.hasAgent || m.hasQuery)) && (
+          <button
+            onClick={() => setShowAgentChat(true)}
+            className="text-xs bg-secondary text-foreground px-3 py-1.5 rounded-md hover:bg-secondary/80"
+          >
+            Agent Chat
+          </button>
+        )}
       </div>
 
       {/* Install form */}
@@ -751,6 +836,11 @@ export function ModulesSection() {
               {/* Database stats (always visible when loaded) */}
               {mod.loaded && <ModuleDbInfo moduleId={mod.id} />}
 
+              {/* Inline query box for modules with agent or query handler */}
+              {mod.loaded && (mod.hasAgent || mod.hasQuery) && (
+                <ModuleQueryBox moduleId={mod.id} />
+              )}
+
               {/* Config panel */}
               {expandedId === mod.id && (
                 <ModuleConfigPanel moduleId={mod.id} />
@@ -823,6 +913,16 @@ export function ModulesSection() {
             </div>
           ))}
         </div>
+      )}
+
+      {/* Agent Chat modal */}
+      {showAgentChat && (
+        <ModuleAgentChat
+          modules={modules
+            .filter((m) => m.loaded && (m.hasAgent || m.hasQuery))
+            .map((m) => ({ id: m.id, name: m.name }))}
+          onClose={() => setShowAgentChat(false)}
+        />
       )}
     </div>
   );
