@@ -2627,11 +2627,10 @@ async function main() {
     try {
       const { getActiveModuleAgents } = await import("./modules/index.js");
       const agents = getActiveModuleAgents();
-      const items = Array.from(agents.entries()).map(([moduleId, agent]) => ({
-        moduleId,
-        agentId: agent.id,
-        name: agent.name,
-      }));
+      const items = Array.from(agents.entries()).map(([moduleId, agent]) => {
+        const a = agent as { id: string; name: string };
+        return { moduleId, agentId: a.id, name: a.name };
+      });
       return { agents: items };
     } catch {
       return { agents: [] };
