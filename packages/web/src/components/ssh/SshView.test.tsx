@@ -55,8 +55,8 @@ vi.mock("react-resizable-panels", () => ({
   ),
 }));
 
-function makeStore(status: "active" | "completed") {
-  const completedAt = status === "completed" ? "2026-02-26T12:30:00.000Z" : undefined;
+function makeStore(status: "active" | "completed" | "error") {
+  const completedAt = status !== "active" ? "2026-02-26T12:30:00.000Z" : undefined;
 
   return {
     sessions: [
@@ -115,5 +115,16 @@ describe("SshView resize layout", () => {
     expect(html).not.toContain('data-testid="ssh-chat"');
     expect(html).toContain('data-testid="terminal-view" data-agent-id="ssh-session-1" data-read-only="true"');
     expect(html).toContain("Session ended");
+  });
+
+  it("keeps only the terminal panel for error sessions", () => {
+    useSshStoreMock.mockReturnValue(makeStore("error"));
+
+    const html = renderToStaticMarkup(<SshView />);
+
+    expect(html).toContain('data-testid="panel" data-min-size="20" data-default-size="100"');
+    expect(html).not.toContain('data-testid="separator"');
+    expect(html).not.toContain('data-testid="ssh-chat"');
+    expect(html).toContain('data-testid="terminal-view" data-agent-id="ssh-session-1" data-read-only="true"');
   });
 });
