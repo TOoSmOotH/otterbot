@@ -4907,7 +4907,7 @@ Respond with ONLY a JSON object (no markdown, no explanation) with these fields:
   // ─── Module REST API ────────────────────────────────────────────────────────
 
   app.get("/api/modules", async () => {
-    const { getModuleLoader } = await import("./modules/index.js");
+    const { getModuleLoader, getModuleAgent } = await import("./modules/index.js");
     const { listModules } = await import("./modules/module-manifest.js");
     const loader = getModuleLoader();
     const installed = listModules();
@@ -4919,6 +4919,7 @@ Respond with ONLY a JSON object (no markdown, no explanation) with these fields:
         loaded: !!loaded,
         documents: loaded ? loaded.knowledgeStore.count() : 0,
         hasQuery: loaded ? !!loaded.definition.onQuery : false,
+        hasAgent: !!getModuleAgent(m.id),
       };
     });
   });
@@ -5112,6 +5113,80 @@ Respond with ONLY a JSON object (no markdown, no explanation) with these fields:
         });
 
         return { tables };
+      } catch (err) {
+        return reply
+          .status(500)
+          .send({ error: err instanceof Error ? err.message : String(err) });
+      }
+    },
+  );
+
+  // Query a module's agent / knowledge base
+  app.post<{ Params: { id: string }; Body: { question: string } }>(
+    "/api/modules/:id/query",
+    async (req, reply) => {
+      const { getModuleLoader, getModuleAgent, getModuleBus } = await import("./modules/index.js");
+      const loader = getModuleLoader();
+
+      if (!loader) {
+        return reply.status(503).send({ error: "Module system not initialized" });
+      }
+
+      const loaded = loader.get(req.params.id);
+      if (!loaded) {
+        return reply.status(400).send({ error: "Module not loaded" });
+      }
+
+      const question = req.body?.question;
+      if (!question || typeof question !== "string") {
+        return reply.status(400).send({ error: "question is required" });
+      }
+
+      try {
+        // If the module has an active agent, route through it
+        const moduleAgent = getModuleAgent(req.params.id);
+        if (moduleAgent) {
+          const bus = getModuleBus();
+          if (bus) {
+            const { MessageType } = await import("@otterbot/shared");
+            const agentId = `module-agent-${req.params.id}`;
+            const replyMsg = await bus.request(
+              {
+                fromAgentId: "ui",
+                toAgentId: agentId,
+                type: MessageType.Directive,
+                content: question,
+                metadata: { source: "ui_query" },
+              },
+              120_000,
+            );
+            if (replyMsg) {
+              return { ok: true, answer: replyMsg.content };
+            }
+          }
+        }
+
+        // Fall back to onQuery handler
+        if (loaded.definition.onQuery) {
+          const answer = await loaded.definition.onQuery(question, loaded.context);
+          return { ok: true, answer };
+        }
+
+        // Fall back to knowledge store search
+        const results = await loaded.knowledgeStore.search(question, 5);
+        if (results.length === 0) {
+          return { ok: true, answer: `No results found for: ${question}` };
+        }
+
+        const answer = results
+          .map((doc) => {
+            const meta = doc.metadata;
+            const url = meta?.url ? ` (${meta.url})` : "";
+            return `---\n${doc.content}${url}\n`;
+          })
+          .join("\n");
+
+        return { ok: true, answer };
       } catch (err) {
         return reply
           .status(500)
