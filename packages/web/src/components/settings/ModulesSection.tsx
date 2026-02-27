@@ -137,15 +137,18 @@ function ModuleQueryBox({ moduleId }: { moduleId: string }) {
         </button>
       </div>
       {error && <div className="text-xs text-red-500">{error}</div>}
-      {lastQ && lastA && (
+      {lastQ && asking && (
         <div className="bg-secondary/50 rounded-md p-3 space-y-2">
           <div className="text-[10px] text-muted-foreground">Q: {lastQ}</div>
-          <div className="text-xs text-foreground whitespace-pre-wrap">{lastA}</div>
+          <div className="text-xs text-muted-foreground animate-pulse">
+            Thinking... this may take a minute while the agent reasons.
+          </div>
         </div>
       )}
-      {lastQ && !lastA && asking && (
-        <div className="text-[10px] text-muted-foreground animate-pulse">
-          Thinking...
+      {lastQ && !asking && lastA !== null && (
+        <div className="bg-secondary/50 rounded-md p-3 space-y-2">
+          <div className="text-[10px] text-muted-foreground">Q: {lastQ}</div>
+          <div className="text-xs text-foreground whitespace-pre-wrap">{lastA || "(empty response)"}</div>
         </div>
       )}
     </div>

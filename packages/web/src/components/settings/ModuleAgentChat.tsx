@@ -57,7 +57,7 @@ export function ModuleAgentChat({ modules, onClose }: ModuleAgentChatProps) {
         ]);
       } else {
         const data = await res.json();
-        setMessages((prev) => [...prev, { role: "agent", content: data.answer }]);
+        setMessages((prev) => [...prev, { role: "agent", content: data.answer || "(empty response)" }]);
       }
     } catch (err) {
       setMessages((prev) => [

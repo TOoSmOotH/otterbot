@@ -5163,6 +5163,11 @@ Respond with ONLY a JSON object (no markdown, no explanation) with these fields:
             if (replyMsg) {
               return { ok: true, answer: replyMsg.content };
             }
+            // Agent timed out — fall through to simpler handlers
+            // but if there's no fallback, return a timeout message
+            if (!loaded.definition.onQuery) {
+              return { ok: true, answer: "The agent did not respond in time. It may be busy or unavailable." };
+            }
           }
         }
 
