@@ -379,6 +379,8 @@ export function ModulesSection() {
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [syncingId, setSyncingId] = useState<string | null>(null);
+  const [syncResult, setSyncResult] = useState<{ id: string; items: number } | null>(null);
 
   const loadModules = async () => {
     try {
@@ -494,6 +496,28 @@ export function ModulesSection() {
       /* ignore */
     } finally {
       setDeletingId(null);
+    }
+  };
+
+  const handleSync = async (id: string) => {
+    setSyncingId(id);
+    setSyncResult(null);
+    try {
+      const res = await fetch(`/api/modules/${id}/poll`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fullSync: true }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setSyncResult({ id, items: data.items });
+        setTimeout(() => setSyncResult(null), 5000);
+        await loadModules();
+      }
+    } catch {
+      /* ignore */
+    } finally {
+      setSyncingId(null);
     }
   };
 
@@ -661,6 +685,19 @@ export function ModulesSection() {
                   )}
                   {!mod.loaded && mod.enabled && (
                     <span className="text-[10px] text-yellow-500">Not loaded</span>
+                  )}
+                  {mod.loaded && (
+                    <button
+                      onClick={() => handleSync(mod.id)}
+                      disabled={syncingId === mod.id}
+                      className="text-xs text-muted-foreground hover:text-foreground px-2 py-1"
+                    >
+                      {syncingId === mod.id
+                        ? "Syncing..."
+                        : syncResult?.id === mod.id
+                          ? `Synced ${syncResult.items} items`
+                          : "Sync Now"}
+                    </button>
                   )}
                   <button
                     onClick={() => setExpandedId(expandedId === mod.id ? null : mod.id)}
