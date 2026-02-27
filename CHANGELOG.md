@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.8.1](https://github.com/TOoSmOotH/otterbot/compare/otterbot-v0.8.0...otterbot-v0.8.1) (2026-02-27)
+
+
+### Bug Fixes
+
+* replace release-please on beta with git-derived versioning ([5a53d5d](https://github.com/TOoSmOotH/otterbot/commit/5a53d5d591a5fdfc11c334ecd5ab55b8070811e4))
+* replace release-please on beta with git-derived versioning ([fcb3ca0](https://github.com/TOoSmOotH/otterbot/commit/fcb3ca06625c3658a74d780f2f927f102921642a))
+
 ## [0.8.0](https://github.com/TOoSmOotH/otterbot/compare/otterbot-v0.7.0...otterbot-v0.8.0) (2026-02-27)
 
 
