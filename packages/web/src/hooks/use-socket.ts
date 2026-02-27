@@ -7,6 +7,59 @@ import { useAgentActivityStore } from "../stores/agent-activity-store";
 import { useEnvironmentStore } from "../stores/environment-store";
 import { useCodingAgentStore } from "../stores/coding-agent-store";
 import { useTodoStore } from "../stores/todo-store";
+import { useMergeQueueStore } from "../stores/merge-queue-store";
+
+// Module-level TTS state (singleton — useSocket only initializes once)
+const ttsState = {
+  queue: [] as string[],
+  playing: false,
+  currentPlayer: null as HTMLAudioElement | null,
+};
+
+/** Stop any currently playing TTS audio and clear the queue. */
+export function cancelTts() {
+  // Stop current playback
+  if (ttsState.currentPlayer) {
+    ttsState.currentPlayer.pause();
+    ttsState.currentPlayer.removeAttribute("src");
+    ttsState.currentPlayer = null;
+  }
+  ttsState.playing = false;
+
+  // Revoke all queued blob URLs to free memory
+  for (const url of ttsState.queue) {
+    URL.revokeObjectURL(url);
+  }
+  ttsState.queue.length = 0;
+
+  // Tell server to cancel in-flight TTS synthesis
+  try {
+    getSocket().emit("ceo:cancel-tts");
+  } catch {
+    // best-effort
+  }
+}
+
+function playNextInQueue() {
+  if (ttsState.playing || ttsState.queue.length === 0) return;
+  const url = ttsState.queue.shift()!;
+  ttsState.playing = true;
+  const player = new Audio(url);
+  ttsState.currentPlayer = player;
+
+  const cleanup = () => {
+    URL.revokeObjectURL(url);
+    ttsState.playing = false;
+    if (ttsState.currentPlayer === player) {
+      ttsState.currentPlayer = null;
+    }
+    playNextInQueue();
+  };
+
+  player.addEventListener("ended", cleanup);
+  player.addEventListener("error", cleanup);
+  player.play().catch(cleanup);
+}
 
 export function useSocket() {
   const initialized = useRef(false);
@@ -44,6 +97,8 @@ export function useSocket() {
   const addTodo = useTodoStore((s) => s.addTodo);
   const patchTodo = useTodoStore((s) => s.patchTodo);
   const removeTodo = useTodoStore((s) => s.removeTodo);
+  const setMergeQueueEntries = useMergeQueueStore((s) => s.setEntries);
+  const updateMergeQueueEntry = useMergeQueueStore((s) => s.updateEntry);
 
   useEffect(() => {
     if (initialized.current) return;
@@ -80,9 +135,8 @@ export function useSocket() {
         for (let i = 0; i < bytes.length; i++) arr[i] = bytes.charCodeAt(i);
         const blob = new Blob([arr], { type: contentType });
         const url = URL.createObjectURL(blob);
-        const player = new Audio(url);
-        player.addEventListener("ended", () => URL.revokeObjectURL(url));
-        player.play().catch(() => URL.revokeObjectURL(url));
+        ttsState.queue.push(url);
+        playNextInQueue();
       } catch {
         // Best-effort audio playback
       }
@@ -134,6 +188,14 @@ export function useSocket() {
 
     socket.on("kanban:task-deleted", ({ taskId }) => {
       removeTask(taskId);
+    });
+
+    socket.on("merge-queue:updated", ({ entries }) => {
+      setMergeQueueEntries(entries);
+    });
+
+    socket.on("merge-queue:entry-updated", (entry) => {
+      updateMergeQueueEntry(entry);
     });
 
     socket.on("todo:created", (todo) => {
@@ -229,6 +291,8 @@ export function useSocket() {
       socket.off("kanban:task-created");
       socket.off("kanban:task-updated");
       socket.off("kanban:task-deleted");
+      socket.off("merge-queue:updated");
+      socket.off("merge-queue:entry-updated");
       socket.off("todo:created");
       socket.off("todo:updated");
       socket.off("todo:deleted");

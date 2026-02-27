@@ -4,6 +4,7 @@ import { useSettingsStore } from "../../stores/settings-store";
 import { useProjectStore } from "../../stores/project-store";
 import { useSpeechToText } from "../../hooks/use-speech-to-text";
 import { getSocket } from "../../lib/socket";
+import { cancelTts } from "../../hooks/use-socket";
 import { cn } from "../../lib/utils";
 import { MarkdownContent } from "./MarkdownContent";
 
@@ -53,7 +54,7 @@ const ThinkingDisclosure: FC<{ thinking: string }> = ({ thinking }) => {
   );
 };
 
-export function CeoChat({ cooName }: { cooName?: string }) {
+export function CeoChat({ cooName, detached }: { cooName?: string; detached?: boolean }) {
   const [input, setInput] = useState("");
   const [showHistory, setShowHistory] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -75,6 +76,9 @@ export function CeoChat({ cooName }: { cooName?: string }) {
   const activeProject = useProjectStore((s) => s.activeProject);
   const projectConversations = useProjectStore((s) => s.projectConversations);
   const setProjectConversations = useProjectStore((s) => s.setProjectConversations);
+  const projects = useProjectStore((s) => s.projects);
+  const enterProject = useProjectStore((s) => s.enterProject);
+  const exitProject = useProjectStore((s) => s.exitProject);
 
   // Use project conversations when in a project context, global otherwise
   const displayedConversations = activeProjectId ? projectConversations : conversations;
@@ -153,6 +157,10 @@ export function CeoChat({ cooName }: { cooName?: string }) {
     setSpeakerOn((prev) => {
       const next = !prev;
       localStorage.setItem("otterbot:speaker", String(next));
+      // When turning speaker off, immediately stop all TTS playback
+      if (!next) {
+        cancelTts();
+      }
       return next;
     });
   }, []);
@@ -203,6 +211,55 @@ export function CeoChat({ cooName }: { cooName?: string }) {
     setShowHistory(false);
   }, [clearChat]);
 
+  const handlePopOut = useCallback(() => {
+    window.open(
+      `${window.location.origin}?detached-chat=true`,
+      "OtterbotChat",
+      "width=500,height=700,menubar=no,toolbar=no,status=no",
+    );
+  }, []);
+
+  const handleSwitchContext = useCallback(
+    (projectId: string | null) => {
+      const socket = getSocket();
+      clearChat();
+      if (projectId) {
+        // Switch to project context
+        const cached = projects.find((p) => p.id === projectId);
+        if (cached) {
+          enterProject(projectId, cached, [], []);
+        }
+        socket.emit("project:enter", { projectId }, (result) => {
+          if (result.project) {
+            enterProject(projectId, result.project, result.conversations, result.tasks);
+            if (result.conversations.length > 0) {
+              const latest = result.conversations[0];
+              socket.emit("ceo:load-conversation", { conversationId: latest.id }, (convResult) => {
+                loadConversationMessages(convResult.messages);
+                setCurrentConversation(latest.id);
+              });
+            }
+          }
+        });
+      } else {
+        // Switch to global context
+        exitProject();
+        socket.emit("ceo:list-conversations", undefined, (convs) => {
+          setConversations(convs);
+          if (convs.length > 0) {
+            const latest = convs[0];
+            socket.emit("ceo:load-conversation", { conversationId: latest.id }, (result) => {
+              loadConversationMessages(result.messages);
+              setCurrentConversation(latest.id);
+            });
+          }
+        });
+      }
+      setShowHistory(false);
+    },
+    [clearChat, projects, enterProject, exitProject, loadConversationMessages, setCurrentConversation, setConversations],
+  );
+
   const handleLoadConversation = useCallback(
     (conversationId: string) => {
       const socket = getSocket();
@@ -248,6 +305,29 @@ export function CeoChat({ cooName }: { cooName?: string }) {
           )}
         </div>
         <div className="flex items-center gap-1">
+          {/* Pop-out button (not shown when already detached) */}
+          {!detached && (
+            <button
+              onClick={handlePopOut}
+              title="Pop out chat"
+              className="w-7 h-7 rounded-lg flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors"
+            >
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+                <polyline points="15 3 21 3 21 9" />
+                <line x1="10" y1="14" x2="21" y2="3" />
+              </svg>
+            </button>
+          )}
           {/* History toggle */}
           <button
             onClick={() => setShowHistory(!showHistory)}
@@ -297,6 +377,38 @@ export function CeoChat({ cooName }: { cooName?: string }) {
           </button>
         </div>
       </div>
+
+      {/* Context switcher (detached mode only) */}
+      {detached && projects.length > 0 && (
+        <div className="flex items-center gap-1 px-3 py-1.5 border-b border-border bg-card overflow-x-auto">
+          <button
+            onClick={() => handleSwitchContext(null)}
+            className={cn(
+              "shrink-0 text-[11px] px-2 py-1 rounded transition-colors",
+              !activeProjectId
+                ? "bg-primary/20 text-primary font-medium"
+                : "text-muted-foreground hover:text-foreground hover:bg-secondary",
+            )}
+          >
+            Global
+          </button>
+          {projects.map((project) => (
+            <button
+              key={project.id}
+              onClick={() => handleSwitchContext(project.id)}
+              className={cn(
+                "shrink-0 text-[11px] px-2 py-1 rounded transition-colors truncate max-w-[120px]",
+                activeProjectId === project.id
+                  ? "bg-primary/20 text-primary font-medium"
+                  : "text-muted-foreground hover:text-foreground hover:bg-secondary",
+              )}
+              title={project.name}
+            >
+              {project.name}
+            </button>
+          ))}
+        </div>
+      )}
 
       {showHistory ? (
         /* Conversation history list */

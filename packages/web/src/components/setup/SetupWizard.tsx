@@ -13,6 +13,7 @@ const SUGGESTED_MODELS: Record<string, string[]> = {
   ollama: ["llama3.1", "mistral", "codellama"],
   openrouter: [],
   "openai-compatible": [],
+  lmstudio: ["llama-3.1-8b-instruct", "mistral-7b-instruct", "qwen2.5-coder-7b-instruct"],
 };
 
 const CODING_SUGGESTED_MODELS: Record<string, string[]> = {
@@ -25,6 +26,7 @@ const CODING_SUGGESTED_MODELS: Record<string, string[]> = {
     "deepseek/deepseek-coder",
   ],
   "openai-compatible": [],
+  lmstudio: ["qwen2.5-coder-7b-instruct", "llama-3.1-8b-instruct", "mistral-7b-instruct"],
 };
 
 const PROVIDER_DESCRIPTIONS: Record<string, string> = {
@@ -34,10 +36,11 @@ const PROVIDER_DESCRIPTIONS: Record<string, string> = {
   openrouter: "Access 200+ models through one API. Requires an OpenRouter API key.",
   "openai-compatible":
     "Any OpenAI-compatible API endpoint. Requires a base URL and optionally an API key.",
+  lmstudio: "Run local models with LM Studio. Exposes an OpenAI-compatible API on localhost.",
 };
 
 const NEEDS_API_KEY = new Set(["anthropic", "openai", "openrouter", "openai-compatible"]);
-const NEEDS_BASE_URL = new Set(["ollama", "openai-compatible"]);
+const NEEDS_BASE_URL = new Set(["ollama", "openai-compatible", "lmstudio"]);
 
 const IANA_TIMEZONES = Intl.supportedValuesOf("timeZone");
 
@@ -379,9 +382,11 @@ export function SetupWizard() {
     } else {
       setModel("");
     }
-    // Set default base URL for ollama
+    // Set default base URL for local providers
     if (id === "ollama" && !baseUrl) {
       setBaseUrl("http://localhost:11434/api");
+    } else if (id === "lmstudio" && !baseUrl) {
+      setBaseUrl("http://localhost:1234/v1");
     }
     setError(null);
   };
@@ -1410,6 +1415,8 @@ export function SetupWizard() {
                               }
                               if (pt.type === "ollama" && !openCodeBaseUrl) {
                                 setOpenCodeBaseUrl("http://localhost:11434/api");
+                              } else if (pt.type === "lmstudio" && !openCodeBaseUrl) {
+                                setOpenCodeBaseUrl("http://localhost:1234/v1");
                               }
                             }}
                             className={`p-3 rounded-md border text-left text-sm transition-colors ${

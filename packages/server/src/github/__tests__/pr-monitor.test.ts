@@ -17,10 +17,15 @@ vi.mock("../../auth/auth.js", () => ({
 const mockFetchPullRequest = vi.fn();
 const mockFetchPullRequestReviews = vi.fn().mockResolvedValue([]);
 const mockFetchPullRequestReviewComments = vi.fn().mockResolvedValue([]);
+const mockFetchCheckRunsForRef = vi.fn();
+const mockAggregateCheckRunStatus = vi.fn();
+
 vi.mock("../github-service.js", () => ({
   fetchPullRequest: (...args: any[]) => mockFetchPullRequest(...args),
   fetchPullRequestReviews: (...args: any[]) => mockFetchPullRequestReviews(...args),
   fetchPullRequestReviewComments: (...args: any[]) => mockFetchPullRequestReviewComments(...args),
+  fetchCheckRunsForRef: (...args: any[]) => mockFetchCheckRunsForRef(...args),
+  aggregateCheckRunStatus: (...args: any[]) => mockAggregateCheckRunStatus(...args),
   cloneRepo: vi.fn(),
   getRepoDefaultBranch: vi.fn().mockResolvedValue("main"),
 }));
@@ -401,6 +406,278 @@ describe("GitHubPRMonitor", () => {
 
       monitor.stop();
       vi.useRealTimers();
+    });
+  });
+
+  describe("CI failure detection", () => {
+    beforeEach(() => {
+      mockFetchCheckRunsForRef.mockReset();
+      mockAggregateCheckRunStatus.mockReset();
+    });
+
+    it("detects CI failure and routes task back to in_progress", async () => {
+      const db = getDb();
+      insertProject(db, "proj-1", "owner/repo");
+      insertTask(db, {
+        id: "task-ci-fail",
+        projectId: "proj-1",
+        title: "#50: CI failure",
+        column: "in_review",
+        prNumber: 50,
+        prBranch: "feat/ci-fail",
+      });
+
+      mockFetchPullRequest.mockResolvedValue({
+        number: 50,
+        state: "open",
+        merged: false,
+        head: { ref: "feat/ci-fail", sha: "abc123def456" },
+        base: { ref: "main" },
+      });
+
+      mockFetchCheckRunsForRef.mockResolvedValue([
+        {
+          id: 101,
+          name: "Test Suite",
+          status: "completed",
+          conclusion: "failure",
+          html_url: "https://github.com/owner/repo/runs/101",
+          started_at: "2026-02-20T00:00:00Z",
+          completed_at: "2026-02-20T00:05:00Z",
+        },
+        {
+          id: 102,
+          name: "Lint",
+          status: "completed",
+          conclusion: "success",
+          html_url: "https://github.com/owner/repo/runs/102",
+          started_at: "2026-02-20T00:00:00Z",
+          completed_at: "2026-02-20T00:02:00Z",
+        },
+      ]);
+
+      mockAggregateCheckRunStatus.mockReturnValue("failure");
+
+      configStore.set("github:token", "ghp_test");
+
+      await (monitor as any).poll();
+
+      const task = db
+        .select()
+        .from(schema.kanbanTasks)
+        .where(eq(schema.kanbanTasks.id, "task-ci-fail"))
+        .get();
+
+      expect(task?.column).toBe("in_progress");
+      expect(task?.assigneeAgentId).toBeNull();
+
+      expect(mockIo.emit).toHaveBeenCalledWith(
+        "kanban:task-updated",
+        expect.objectContaining({ id: "task-ci-fail", column: "in_progress" }),
+      );
+    });
+
+    it("does not act on pending CI status", async () => {
+      const db = getDb();
+      insertProject(db, "proj-1", "owner/repo");
+      insertTask(db, {
+        id: "task-ci-pending",
+        projectId: "proj-1",
+        title: "#51: CI pending",
+        column: "in_review",
+        prNumber: 51,
+        prBranch: "feat/ci-pending",
+      });
+
+      mockFetchPullRequest.mockResolvedValue({
+        number: 51,
+        state: "open",
+        merged: false,
+        head: { ref: "feat/ci-pending", sha: "def456abc123" },
+        base: { ref: "main" },
+      });
+
+      mockFetchCheckRunsForRef.mockResolvedValue([
+        {
+          id: 201,
+          name: "Test Suite",
+          status: "in_progress" as const,
+          conclusion: null,
+          html_url: "https://github.com/owner/repo/runs/201",
+          started_at: "2026-02-20T00:00:00Z",
+          completed_at: null,
+        },
+      ]);
+
+      mockAggregateCheckRunStatus.mockReturnValue("pending");
+
+      configStore.set("github:token", "ghp_test");
+
+      await (monitor as any).poll();
+
+      const task = db
+        .select()
+        .from(schema.kanbanTasks)
+        .where(eq(schema.kanbanTasks.id, "task-ci-pending"))
+        .get();
+
+      expect(task?.column).toBe("in_review");
+    });
+
+    it("does not act on CI success", async () => {
+      const db = getDb();
+      insertProject(db, "proj-1", "owner/repo");
+      insertTask(db, {
+        id: "task-ci-success",
+        projectId: "proj-1",
+        title: "#52: CI success",
+        column: "in_review",
+        prNumber: 52,
+        prBranch: "feat/ci-success",
+      });
+
+      mockFetchPullRequest.mockResolvedValue({
+        number: 52,
+        state: "open",
+        merged: false,
+        head: { ref: "feat/ci-success", sha: "ghi789jkl012" },
+        base: { ref: "main" },
+      });
+
+      mockFetchCheckRunsForRef.mockResolvedValue([
+        {
+          id: 301,
+          name: "Test Suite",
+          status: "completed" as const,
+          conclusion: "success" as const,
+          html_url: "https://github.com/owner/repo/runs/301",
+          started_at: "2026-02-20T00:00:00Z",
+          completed_at: "2026-02-20T00:05:00Z",
+        },
+      ]);
+
+      mockAggregateCheckRunStatus.mockReturnValue("success");
+
+      configStore.set("github:token", "ghp_test");
+
+      await (monitor as any).poll();
+
+      const task = db
+        .select()
+        .from(schema.kanbanTasks)
+        .where(eq(schema.kanbanTasks.id, "task-ci-success"))
+        .get();
+
+      expect(task?.column).toBe("in_review");
+    });
+
+    it("does not re-trigger on same SHA after CI failure", async () => {
+      const db = getDb();
+      insertProject(db, "proj-1", "owner/repo");
+      insertTask(db, {
+        id: "task-ci-repeat",
+        projectId: "proj-1",
+        title: "#53: CI repeat",
+        column: "in_review",
+        prNumber: 53,
+        prBranch: "feat/ci-repeat",
+      });
+
+      mockFetchPullRequest.mockResolvedValue({
+        number: 53,
+        state: "open",
+        merged: false,
+        head: { ref: "feat/ci-repeat", sha: "repeat123sha" },
+        base: { ref: "main" },
+      });
+
+      mockFetchCheckRunsForRef.mockResolvedValue([
+        {
+          id: 401,
+          name: "Test Suite",
+          status: "completed",
+          conclusion: "failure",
+          html_url: "https://github.com/owner/repo/runs/401",
+          started_at: "2026-02-20T00:00:00Z",
+          completed_at: "2026-02-20T00:05:00Z",
+        },
+      ]);
+
+      mockAggregateCheckRunStatus.mockReturnValue("failure");
+
+      configStore.set("github:token", "ghp_test");
+
+      await (monitor as any).poll();
+
+      const task1 = db
+        .select()
+        .from(schema.kanbanTasks)
+        .where(eq(schema.kanbanTasks.id, "task-ci-repeat"))
+        .get();
+
+      expect(task1?.column).toBe("in_progress");
+
+      db.update(schema.kanbanTasks)
+        .set({ column: "in_review" })
+        .where(eq(schema.kanbanTasks.id, "task-ci-repeat"))
+        .run();
+
+      const sameSha = "repeat123sha";
+      mockFetchPullRequest.mockResolvedValue({
+        number: 53,
+        state: "open",
+        merged: false,
+        head: { ref: "feat/ci-repeat", sha: sameSha },
+        base: { ref: "main" },
+      });
+
+      await (monitor as any).poll();
+
+      const task2 = db
+        .select()
+        .from(schema.kanbanTasks)
+        .where(eq(schema.kanbanTasks.id, "task-ci-repeat"))
+        .get();
+
+      // Task should remain in_review because the same SHA was already processed
+      expect(task2?.column).toBe("in_review");
+    });
+
+    it("handles missing check runs gracefully", async () => {
+      const db = getDb();
+      insertProject(db, "proj-1", "owner/repo");
+      insertTask(db, {
+        id: "task-no-checks",
+        projectId: "proj-1",
+        title: "#54: No checks",
+        column: "in_review",
+        prNumber: 54,
+        prBranch: "feat/no-checks",
+      });
+
+      mockFetchPullRequest.mockResolvedValue({
+        number: 54,
+        state: "open",
+        merged: false,
+        head: { ref: "feat/no-checks", sha: "nochecks123" },
+        base: { ref: "main" },
+      });
+
+      mockFetchCheckRunsForRef.mockResolvedValue([]);
+
+      mockAggregateCheckRunStatus.mockReturnValue(null);
+
+      configStore.set("github:token", "ghp_test");
+
+      await (monitor as any).poll();
+
+      const task = db
+        .select()
+        .from(schema.kanbanTasks)
+        .where(eq(schema.kanbanTasks.id, "task-no-checks"))
+        .get();
+
+      expect(task?.column).toBe("in_review");
     });
   });
 });

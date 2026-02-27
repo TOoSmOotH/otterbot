@@ -22,6 +22,10 @@ export type SettingsSection =
   | "telegram"
   | "slack"
   | "mattermost"
+  | "nextcloud-talk"
+  | "worker-names"
+  | "mcp-servers"
+  | "ssh"
   | "security";
 
 export interface NavItem {
@@ -43,6 +47,7 @@ export const SETTINGS_NAV: NavGroup[] = [
       { id: "profile", label: "Profile" },
       { id: "appearance", label: "Appearance" },
       { id: "system", label: "System" },
+      { id: "worker-names", label: "Worker Names" },
     ],
   },
   {
@@ -67,6 +72,8 @@ export const SETTINGS_NAV: NavGroup[] = [
       { id: "opencode", label: "Coding Agents" },
       { id: "scheduled", label: "Scheduled Tasks" },
       { id: "modules", label: "Modules" },
+      { id: "mcp-servers", label: "MCP Servers" },
+      { id: "ssh", label: "SSH Keys" },
     ],
   },
   {
@@ -81,6 +88,7 @@ export const SETTINGS_NAV: NavGroup[] = [
       { id: "telegram", label: "Telegram" },
       { id: "slack", label: "Slack" },
       { id: "mattermost", label: "Mattermost" },
+      { id: "nextcloud-talk", label: "Nextcloud Talk" },
     ],
   },
   {

@@ -17,6 +17,7 @@ import { useProjectStore } from "../../stores/project-store";
 import { KanbanCard } from "./KanbanCard";
 import { KanbanTaskDetail } from "./KanbanTaskDetail";
 import { KanbanDroppableColumn } from "./KanbanDroppableColumn";
+import { MergeQueuePanel } from "./MergeQueuePanel";
 import { KanbanColumn, type KanbanTask } from "@otterbot/shared";
 
 const COLUMNS: { key: KanbanColumn; label: string }[] = [
@@ -172,6 +173,10 @@ export function KanbanBoard({ projectId }: { projectId: string }) {
             onClose={() => setSelectedTaskId(null)}
           />
         )}
+      </div>
+
+      <div className="px-4 pb-2">
+        <MergeQueuePanel projectId={projectId} />
       </div>
 
       <DragOverlay>

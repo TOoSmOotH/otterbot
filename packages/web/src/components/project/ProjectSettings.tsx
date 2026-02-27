@@ -37,6 +37,7 @@ export function ProjectSettings({ projectId }: { projectId: string }) {
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isGitHubProject, setIsGitHubProject] = useState(false);
+  const [targetBranch, setTargetBranch] = useState("");
 
   const openCodeEnabled = useSettingsStore((s) => s.openCodeEnabled);
   const claudeCodeEnabled = useSettingsStore((s) => s.claudeCodeEnabled);
@@ -50,6 +51,11 @@ export function ProjectSettings({ projectId }: { projectId: string }) {
     // Check if project has GitHub integration
     socket.emit("project:get", { projectId }, (project) => {
       setIsGitHubProject(!!project?.githubRepo);
+    });
+
+    // Load target branch
+    socket.emit("project:get-branch", { projectId }, (result) => {
+      setTargetBranch(result?.branch ?? "");
     });
 
     // Load agent assignments (for non-pipeline mode)
@@ -151,6 +157,11 @@ export function ProjectSettings({ projectId }: { projectId: string }) {
         return;
       }
 
+      // Save target branch if set
+      if (targetBranch.trim()) {
+        socket.emit("project:set-branch", { projectId, branch: targetBranch.trim() });
+      }
+
       // Also save agent assignments (for non-pipeline mode)
       socket.emit("project:set-agent-assignments", { projectId, assignments }, (ack2) => {
         setSaving(false);
@@ -173,6 +184,23 @@ export function ProjectSettings({ projectId }: { projectId: string }) {
   return (
     <div className="h-full overflow-y-auto p-4">
       <div className="max-w-2xl mx-auto space-y-6">
+        {/* Target Branch (GitHub projects only) */}
+        {isGitHubProject && (
+          <div>
+            <h2 className="text-sm font-semibold">Target Branch</h2>
+            <p className="text-xs text-muted-foreground mt-1">
+              The base branch for pull requests and feature branches (e.g. dev, beta, main)
+            </p>
+            <input
+              type="text"
+              value={targetBranch}
+              onChange={(e) => { setTargetBranch(e.target.value); setSaved(false); }}
+              placeholder="main"
+              className="mt-2 text-sm bg-secondary border border-border rounded px-3 py-1.5 w-full max-w-xs focus:outline-none focus:ring-1 focus:ring-primary"
+            />
+          </div>
+        )}
+
         {/* Pipeline master toggle */}
         <div>
           <div className="flex items-center justify-between">

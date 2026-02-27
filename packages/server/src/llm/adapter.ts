@@ -156,6 +156,30 @@ export function resolveModel(config: LLMConfig): LanguageModel {
       return nvidia(config.model);
     }
 
+    case "minimax": {
+      const minimax = createOpenAI({
+        baseURL: config.baseUrl ?? resolved.baseUrl ?? "https://api.minimax.chat/v1",
+        apiKey: config.apiKey ?? resolved.apiKey ?? "",
+      });
+      return minimax(config.model);
+    }
+
+    case "xai": {
+      const xai = createOpenAI({
+        baseURL: config.baseUrl ?? resolved.baseUrl ?? "https://api.x.ai/v1",
+        apiKey: config.apiKey ?? resolved.apiKey ?? "",
+      });
+      return xai(config.model);
+    }
+
+    case "zai": {
+      const zai = createOpenAI({
+        baseURL: config.baseUrl ?? resolved.baseUrl ?? "https://api.z.ai/api/paas/v4",
+        apiKey: config.apiKey ?? resolved.apiKey ?? "",
+      });
+      return zai(config.model);
+    }
+
     case "perplexity": {
       const perplexity = createOpenAI({
         baseURL: config.baseUrl ?? resolved.baseUrl ?? "https://api.perplexity.ai",
@@ -185,6 +209,30 @@ export function resolveModel(config: LLMConfig): LanguageModel {
         "Deepgram is a speech provider (STT/TTS) and does not support text generation. " +
         "Configure it under TTS or STT settings instead.",
       );
+
+    case "lmstudio": {
+      const lmstudio = createOpenAI({
+        baseURL: config.baseUrl ?? resolved.baseUrl ?? "http://localhost:1234/v1",
+        apiKey: config.apiKey ?? resolved.apiKey ?? "lm-studio",
+      });
+      return lmstudio(config.model);
+    }
+
+    case "deepseek": {
+      const deepseek = createOpenAI({
+        baseURL: config.baseUrl ?? resolved.baseUrl ?? "https://api.deepseek.com",
+        apiKey: config.apiKey ?? resolved.apiKey ?? "",
+      });
+      return deepseek(config.model);
+    }
+
+    case "mistral": {
+      const mistral = createOpenAI({
+        baseURL: config.baseUrl ?? resolved.baseUrl ?? "https://api.mistral.ai/v1",
+        apiKey: config.apiKey ?? resolved.apiKey ?? "",
+      });
+      return mistral(config.model);
+    }
 
     default:
       throw new Error(`Unknown LLM provider: ${config.provider} (type: ${resolved.type})`);

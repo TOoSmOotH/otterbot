@@ -60,9 +60,15 @@ export const PROVIDER_TYPE_META: ProviderTypeMeta[] = [
   { type: "github-copilot", label: "GitHub Copilot", needsApiKey: true, needsBaseUrl: false },
   { type: "huggingface", label: "Hugging Face", needsApiKey: true, needsBaseUrl: false },
   { type: "nvidia", label: "NVIDIA", needsApiKey: true, needsBaseUrl: false },
+  { type: "minimax", label: "MiniMax", needsApiKey: true, needsBaseUrl: false },
+  { type: "xai", label: "xAI (Grok)", needsApiKey: true, needsBaseUrl: false },
+  { type: "zai", label: "Z.AI", needsApiKey: true, needsBaseUrl: false },
   { type: "perplexity", label: "Perplexity Sonar", needsApiKey: true, needsBaseUrl: false },
   { type: "deepgram", label: "Deepgram", needsApiKey: true, needsBaseUrl: false },
   { type: "bedrock", label: "AWS Bedrock", needsApiKey: true, needsBaseUrl: true },
+  { type: "lmstudio", label: "LM Studio", needsApiKey: false, needsBaseUrl: true },
+  { type: "deepseek", label: "DeepSeek", needsApiKey: true, needsBaseUrl: false },
+  { type: "mistral", label: "Mistral", needsApiKey: true, needsBaseUrl: false },
 ];
 
 // Static fallback models per provider (used when API fetch fails)
@@ -100,6 +106,24 @@ const FALLBACK_MODELS: Record<string, string[]> = {
     "mistralai/mistral-7b-instruct-v0.3",
     "mistralai/mixtral-8x22b-instruct-v0.1",
   ],
+  minimax: [
+    "MiniMax-M1",
+    "MiniMax-M1-80k",
+    "MiniMax-Text-01",
+    "MiniMax-Text-01-128k",
+  ],
+  xai: [
+    "grok-3",
+    "grok-3-mini",
+    "grok-4",
+  ],
+  zai: [
+    "glm-5",
+    "glm-4.7",
+    "glm-4.6",
+    "glm-4.6v",
+    "glm-4.5-flash",
+  ],
   perplexity: [
     "sonar",
     "sonar-pro",
@@ -113,6 +137,22 @@ const FALLBACK_MODELS: Record<string, string[]> = {
     "meta.llama3-1-70b-instruct-v1:0",
     "mistral.mistral-large-2407-v1:0",
     "amazon.titan-text-premier-v2:0",
+  ],
+  lmstudio: [
+    "llama-3.1-8b-instruct",
+    "mistral-7b-instruct",
+    "qwen2.5-coder-7b-instruct",
+    "phi-3-mini-4k-instruct",
+  ],
+  deepseek: [
+    "deepseek-chat",
+    "deepseek-reasoner",
+  ],
+  mistral: [
+    "mistral-large-latest",
+    "mistral-small-latest",
+    "codestral-latest",
+    "mistral-medium-latest",
   ],
 };
 
@@ -345,6 +385,28 @@ export async function testProvider(
   const row = getProviderRow(providerId);
   const providerType = row?.type ?? providerId;
 
+  // For ollama, just check that the server is reachable by listing models
+  if (providerType === "ollama") {
+    try {
+      const baseUrl = row?.baseUrl ?? "http://localhost:11434/api";
+      const tagsUrl = baseUrl.endsWith("/api")
+        ? `${baseUrl}/tags`
+        : `${baseUrl}/api/tags`;
+      const res = await fetch(tagsUrl, {
+        signal: AbortSignal.timeout(10_000),
+      });
+      if (!res.ok) {
+        return { ok: false, error: `Ollama returned HTTP ${res.status}` };
+      }
+      return { ok: true, latencyMs: Date.now() - start };
+    } catch (error) {
+      return {
+        ok: false,
+        error: error instanceof Error ? error.message : "Unknown error",
+      };
+    }
+  }
+
   // Determine which model to test with
   const testModel =
     model ??
@@ -576,6 +638,42 @@ export async function fetchModelsWithCredentials(
         return nvidiaData.data?.map((m) => m.id).sort() ?? FALLBACK_MODELS.nvidia ?? [];
       }
 
+      case "minimax": {
+        if (!apiKey) return FALLBACK_MODELS.minimax ?? [];
+        const minimaxBase = baseUrl ?? "https://api.minimax.chat/v1";
+        const minimaxRes = await fetch(`${minimaxBase}/models`, {
+          headers: { Authorization: `Bearer ${apiKey}` },
+          signal: AbortSignal.timeout(10_000),
+        });
+        if (!minimaxRes.ok) return FALLBACK_MODELS.minimax ?? [];
+        const minimaxData = (await minimaxRes.json()) as { data?: Array<{ id: string }> };
+        return minimaxData.data?.map((m) => m.id).sort() ?? FALLBACK_MODELS.minimax ?? [];
+      }
+
+      case "xai": {
+        if (!apiKey) return FALLBACK_MODELS.xai ?? [];
+        const xaiBase = baseUrl ?? "https://api.x.ai/v1";
+        const xaiRes = await fetch(`${xaiBase}/models`, {
+          headers: { Authorization: `Bearer ${apiKey}` },
+          signal: AbortSignal.timeout(10_000),
+        });
+        if (!xaiRes.ok) return FALLBACK_MODELS.xai ?? [];
+        const xaiData = (await xaiRes.json()) as { data?: Array<{ id: string }> };
+        return xaiData.data?.map((m) => m.id).sort() ?? FALLBACK_MODELS.xai ?? [];
+      }
+
+      case "zai": {
+        if (!apiKey) return FALLBACK_MODELS.zai ?? [];
+        const zaiBase = baseUrl ?? "https://api.z.ai/api/paas/v4";
+        const zaiRes = await fetch(`${zaiBase}/models`, {
+          headers: { Authorization: `Bearer ${apiKey}` },
+          signal: AbortSignal.timeout(10_000),
+        });
+        if (!zaiRes.ok) return FALLBACK_MODELS.zai ?? [];
+        const zaiData = (await zaiRes.json()) as { data?: Array<{ id: string }> };
+        return zaiData.data?.map((m) => m.id).sort() ?? FALLBACK_MODELS.zai ?? [];
+      }
+
       case "bedrock": {
         // Bedrock stores credentials as "accessKeyId:secretAccessKey" in apiKey
         // and the region in baseUrl. Model discovery uses the Bedrock API.
@@ -625,6 +723,30 @@ export async function fetchModelsWithCredentials(
         if (!pplxRes.ok) return FALLBACK_MODELS.perplexity ?? [];
         const pplxData = (await pplxRes.json()) as { data?: Array<{ id: string }> };
         return pplxData.data?.map((m) => m.id).sort() ?? FALLBACK_MODELS.perplexity ?? [];
+      }
+
+      case "deepseek": {
+        if (!apiKey) return FALLBACK_MODELS.deepseek ?? [];
+        const deepseekBase = baseUrl ?? "https://api.deepseek.com";
+        const deepseekRes = await fetch(`${deepseekBase}/models`, {
+          headers: { Authorization: `Bearer ${apiKey}` },
+          signal: AbortSignal.timeout(10_000),
+        });
+        if (!deepseekRes.ok) return FALLBACK_MODELS.deepseek ?? [];
+        const deepseekData = (await deepseekRes.json()) as { data?: Array<{ id: string }> };
+        return deepseekData.data?.map((m) => m.id).sort() ?? FALLBACK_MODELS.deepseek ?? [];
+      }
+
+      case "mistral": {
+        if (!apiKey) return FALLBACK_MODELS.mistral ?? [];
+        const mistralBase = baseUrl ?? "https://api.mistral.ai/v1";
+        const mistralRes = await fetch(`${mistralBase}/models`, {
+          headers: { Authorization: `Bearer ${apiKey}` },
+          signal: AbortSignal.timeout(10_000),
+        });
+        if (!mistralRes.ok) return FALLBACK_MODELS.mistral ?? [];
+        const mistralData = (await mistralRes.json()) as { data?: Array<{ id: string }> };
+        return mistralData.data?.map((m) => m.id).sort() ?? FALLBACK_MODELS.mistral ?? [];
       }
 
       default:
@@ -1361,7 +1483,7 @@ export function getClaudeCodeSettings(): ClaudeCodeSettingsResponse {
     model: getConfig("claude-code:model") ?? "claude-sonnet-4-5-20250929",
     approvalMode: (getConfig("claude-code:approval_mode") ?? "full-auto") as "full-auto" | "auto-edit",
     timeoutMs: parseInt(getConfig("claude-code:timeout_ms") ?? "1200000", 10),
-    maxTurns: parseInt(getConfig("claude-code:max_turns") ?? "50", 10),
+    maxTurns: parseInt(getConfig("claude-code:max_turns") ?? "75", 10),
   };
 }
 
@@ -1530,7 +1652,7 @@ export interface CodexSettingsResponse {
   authMode: "api-key" | "oauth";
   apiKeySet: boolean;
   model: string;
-  approvalMode: "full-auto" | "suggest" | "ask";
+  approvalMode: "full-auto" | "on-failure" | "on-request" | "never";
   timeoutMs: number;
 }
 
@@ -1539,8 +1661,8 @@ export function getCodexSettings(): CodexSettingsResponse {
     enabled: getConfig("codex:enabled") === "true",
     authMode: (getConfig("codex:auth_mode") ?? "api-key") as "api-key" | "oauth",
     apiKeySet: !!getConfig("codex:api_key"),
-    model: getConfig("codex:model") ?? "codex-mini",
-    approvalMode: (getConfig("codex:approval_mode") ?? "full-auto") as "full-auto" | "suggest" | "ask",
+    model: getConfig("codex:model") ?? "gpt-5.3-codex-medium",
+    approvalMode: (getConfig("codex:approval_mode") ?? "full-auto") as "full-auto" | "on-failure" | "on-request" | "never",
     timeoutMs: parseInt(getConfig("codex:timeout_ms") ?? "1200000", 10),
   };
 }
@@ -1550,7 +1672,7 @@ export async function updateCodexSettings(data: {
   authMode?: "api-key" | "oauth";
   apiKey?: string;
   model?: string;
-  approvalMode?: "full-auto" | "suggest" | "ask";
+  approvalMode?: "full-auto" | "on-failure" | "on-request" | "never";
   timeoutMs?: number;
 }): Promise<void> {
   if (data.enabled !== undefined) {

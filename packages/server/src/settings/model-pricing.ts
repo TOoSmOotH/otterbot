@@ -30,6 +30,18 @@ const DEFAULT_MODEL_PRICES: Record<string, ModelPrice> = {
   "o3": { inputPerMillion: 10, outputPerMillion: 40 },
   "o3-mini": { inputPerMillion: 1.1, outputPerMillion: 4.4 },
   "o4-mini": { inputPerMillion: 1.1, outputPerMillion: 4.4 },
+  // xAI (Grok)
+  "grok-3": { inputPerMillion: 3, outputPerMillion: 15 },
+  "grok-3-mini": { inputPerMillion: 0.3, outputPerMillion: 0.5 },
+  "grok-4": { inputPerMillion: 3, outputPerMillion: 15 },
+  // DeepSeek
+  "deepseek-chat": { inputPerMillion: 0.27, outputPerMillion: 1.10 },
+  "deepseek-reasoner": { inputPerMillion: 0.55, outputPerMillion: 2.19 },
+  // Mistral
+  "mistral-large-latest": { inputPerMillion: 2, outputPerMillion: 6 },
+  "mistral-small-latest": { inputPerMillion: 0.1, outputPerMillion: 0.3 },
+  "codestral-latest": { inputPerMillion: 0.3, outputPerMillion: 0.9 },
+  "mistral-medium-latest": { inputPerMillion: 2.7, outputPerMillion: 8.1 },
   // Google
   "gemini-2.5-pro": { inputPerMillion: 1.25, outputPerMillion: 10 },
   "gemini-2.5-flash": { inputPerMillion: 0.15, outputPerMillion: 0.6 },

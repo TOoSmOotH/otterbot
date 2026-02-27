@@ -1,5 +1,5 @@
 import { sqliteTable, text, integer, primaryKey, unique } from "drizzle-orm/sqlite-core";
-import type { ScanFinding, SkillScanStatus, CodingAgentPart, CodingAgentType, MemoryCategory, MemorySource } from "@otterbot/shared";
+import type { ScanFinding, SkillScanStatus, CodingAgentPart, CodingAgentType, MemoryCategory, MemorySource, McpToolMeta, SshKeyType, SshSessionStatus } from "@otterbot/shared";
 
 export const agents = sqliteTable("agents", {
   id: text("id").primaryKey(),
@@ -149,7 +149,14 @@ export const kanbanTasks = sqliteTable("kanban_tasks", {
     .$type<string[]>()
     .notNull()
     .default([]),
+  taskNumber: integer("task_number"),
   pipelineAttempt: integer("pipeline_attempt").notNull().default(0),
+  stageReports: text("stage_reports", { mode: "json" })
+    .$type<Record<string, string>>()
+    .notNull()
+    .default({}),
+  lastKickbackSource: text("last_kickback_source"),
+  spawnRetryCount: integer("spawn_retry_count").notNull().default(0),
   createdAt: text("created_at")
     .notNull()
     .$defaultFn(() => new Date().toISOString()),
@@ -267,7 +274,7 @@ export const providers = sqliteTable("providers", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
   type: text("type", {
-    enum: ["anthropic", "openai", "google", "ollama", "openai-compatible", "openrouter", "github-copilot", "huggingface", "nvidia", "perplexity", "deepgram", "bedrock"],
+    enum: ["anthropic", "openai", "google", "ollama", "openai-compatible", "openrouter", "github-copilot", "huggingface", "nvidia", "minimax", "xai", "zai", "perplexity", "deepgram", "bedrock", "lmstudio", "deepseek", "mistral"],
   }).notNull(),
   apiKey: text("api_key"),
   baseUrl: text("base_url"),
@@ -443,6 +450,98 @@ export const customScheduledTasks = sqliteTable("custom_scheduled_tasks", {
   lastRunAt: text("last_run_at"),
   createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
   updatedAt: text("updated_at").notNull().$defaultFn(() => new Date().toISOString()),
+});
+
+export const mergeQueue = sqliteTable("merge_queue", {
+  id: text("id").primaryKey(),
+  taskId: text("task_id").notNull(),
+  projectId: text("project_id").notNull(),
+  prNumber: integer("pr_number").notNull(),
+  prBranch: text("pr_branch").notNull(),
+  baseBranch: text("base_branch").notNull(),
+  status: text("status", {
+    enum: ["queued", "rebasing", "re_review", "merging", "merged", "conflict", "failed"],
+  }).notNull().default("queued"),
+  position: integer("position").notNull(),
+  rebaseAttempts: integer("rebase_attempts").notNull().default(0),
+  lastError: text("last_error"),
+  approvedAt: text("approved_at").notNull(),
+  mergedAt: text("merged_at"),
+  createdAt: text("created_at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+  updatedAt: text("updated_at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+});
+
+export const mcpServers = sqliteTable("mcp_servers", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  enabled: integer("enabled", { mode: "boolean" }).notNull().default(false),
+  transport: text("transport", { enum: ["stdio", "sse"] }).notNull(),
+  command: text("command"),
+  args: text("args", { mode: "json" })
+    .$type<string[]>()
+    .notNull()
+    .default([]),
+  env: text("env", { mode: "json" })
+    .$type<Record<string, string>>()
+    .notNull()
+    .default({}),
+  url: text("url"),
+  headers: text("headers", { mode: "json" })
+    .$type<Record<string, string>>()
+    .notNull()
+    .default({}),
+  autoStart: integer("auto_start", { mode: "boolean" }).notNull().default(false),
+  timeout: integer("timeout").notNull().default(30000),
+  allowedTools: text("allowed_tools", { mode: "json" })
+    .$type<string[] | null>()
+    .default(null),
+  discoveredTools: text("discovered_tools", { mode: "json" })
+    .$type<McpToolMeta[] | null>()
+    .default(null),
+  createdAt: text("created_at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+  updatedAt: text("updated_at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+});
+
+export const sshKeys = sqliteTable("ssh_keys", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  username: text("username").notNull(),
+  privateKeyPath: text("private_key_path").notNull(),
+  fingerprint: text("fingerprint").notNull(),
+  keyType: text("key_type").$type<SshKeyType>().notNull().default("ed25519"),
+  allowedHosts: text("allowed_hosts", { mode: "json" })
+    .$type<string[]>()
+    .notNull()
+    .default([]),
+  port: integer("port").notNull().default(22),
+  createdAt: text("created_at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+  updatedAt: text("updated_at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+});
+
+export const sshSessions = sqliteTable("ssh_sessions", {
+  id: text("id").primaryKey(),
+  sshKeyId: text("ssh_key_id").notNull(),
+  host: text("host").notNull(),
+  status: text("status").$type<SshSessionStatus>().notNull().default("active"),
+  startedAt: text("started_at").notNull(),
+  completedAt: text("completed_at"),
+  terminalBuffer: text("terminal_buffer"),
+  initiatedBy: text("initiated_by").notNull().default("user"),
+  createdAt: text("created_at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
 });
 
 export const memoryEpisodes = sqliteTable("memory_episodes", {

@@ -1,6 +1,6 @@
 import Database from "better-sqlite3-multiple-ciphers";
 import { drizzle } from "drizzle-orm/better-sqlite3";
-import { sql } from "drizzle-orm";
+import { sql, eq } from "drizzle-orm";
 import * as schema from "./schema.js";
 import { resolve, dirname } from "node:path";
 import { mkdirSync } from "node:fs";
@@ -306,6 +306,70 @@ export async function migrateDb() {
     // Column already exists — ignore
   }
 
+  // Idempotent migration: add task_number to kanban_tasks
+  try {
+    db.run(sql`ALTER TABLE kanban_tasks ADD COLUMN task_number INTEGER`);
+  } catch {
+    // Column already exists — ignore
+  }
+
+  // Idempotent migration: add stage_reports to kanban_tasks
+  try {
+    db.run(sql`ALTER TABLE kanban_tasks ADD COLUMN stage_reports TEXT NOT NULL DEFAULT '{}'`);
+  } catch {
+    // Column already exists — ignore
+  }
+
+  // Idempotent migration: add last_kickback_source to kanban_tasks
+  try {
+    db.run(sql`ALTER TABLE kanban_tasks ADD COLUMN last_kickback_source TEXT`);
+  } catch {
+    // Column already exists — ignore
+  }
+
+  // Idempotent migration: add spawn_retry_count to kanban_tasks
+  try {
+    db.run(sql`ALTER TABLE kanban_tasks ADD COLUMN spawn_retry_count INTEGER NOT NULL DEFAULT 0`);
+  } catch {
+    // Column already exists — ignore
+  }
+
+  // Backfill task_number for existing tasks that don't have one
+  {
+    const unnumbered = db
+      .select()
+      .from(schema.kanbanTasks)
+      .all()
+      .filter((t) => t.taskNumber == null);
+    if (unnumbered.length > 0) {
+      // Group by project, sort by created_at, assign sequential numbers
+      const byProject = new Map<string, typeof unnumbered>();
+      for (const t of unnumbered) {
+        const list = byProject.get(t.projectId) ?? [];
+        list.push(t);
+        byProject.set(t.projectId, list);
+      }
+      for (const [projectId, tasks] of byProject) {
+        // Find current max task_number for this project
+        const allProjectTasks = db
+          .select()
+          .from(schema.kanbanTasks)
+          .where(eq(schema.kanbanTasks.projectId, projectId))
+          .all();
+        let maxNum = allProjectTasks.reduce((max, t) => Math.max(max, t.taskNumber ?? 0), 0);
+        tasks.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+        for (const t of tasks) {
+          maxNum++;
+          db.update(schema.kanbanTasks)
+            .set({ taskNumber: maxNum })
+            .where(eq(schema.kanbanTasks.id, t.id))
+            .run();
+        }
+      }
+      console.log(`[DB] Backfilled task_number for ${unnumbered.length} task(s)`);
+    }
+  }
+
   db.run(sql`CREATE TABLE IF NOT EXISTS sessions (
     token TEXT PRIMARY KEY,
     expires_at TEXT NOT NULL,
@@ -530,6 +594,24 @@ export async function migrateDb() {
     created_at TEXT NOT NULL
   )`);
 
+  // Merge queue table
+  db.run(sql`CREATE TABLE IF NOT EXISTS merge_queue (
+    id TEXT PRIMARY KEY,
+    task_id TEXT NOT NULL,
+    project_id TEXT NOT NULL,
+    pr_number INTEGER NOT NULL,
+    pr_branch TEXT NOT NULL,
+    base_branch TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'queued',
+    position INTEGER NOT NULL,
+    rebase_attempts INTEGER NOT NULL DEFAULT 0,
+    last_error TEXT,
+    approved_at TEXT NOT NULL,
+    merged_at TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  )`);
+
   // Custom scheduled tasks
   db.run(sql`CREATE TABLE IF NOT EXISTS custom_scheduled_tasks (
     id TEXT PRIMARY KEY,
@@ -542,6 +624,52 @@ export async function migrateDb() {
     last_run_at TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
+  )`);
+
+  // MCP servers table
+  db.run(sql`CREATE TABLE IF NOT EXISTS mcp_servers (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    enabled INTEGER NOT NULL DEFAULT 0,
+    transport TEXT NOT NULL,
+    command TEXT,
+    args TEXT NOT NULL DEFAULT '[]',
+    env TEXT NOT NULL DEFAULT '{}',
+    url TEXT,
+    headers TEXT NOT NULL DEFAULT '{}',
+    auto_start INTEGER NOT NULL DEFAULT 0,
+    timeout INTEGER NOT NULL DEFAULT 30000,
+    allowed_tools TEXT,
+    discovered_tools TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  )`);
+
+  // SSH keys table
+  db.run(sql`CREATE TABLE IF NOT EXISTS ssh_keys (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    username TEXT NOT NULL,
+    private_key_path TEXT NOT NULL,
+    fingerprint TEXT NOT NULL,
+    key_type TEXT NOT NULL DEFAULT 'ed25519',
+    allowed_hosts TEXT NOT NULL DEFAULT '[]',
+    port INTEGER NOT NULL DEFAULT 22,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  )`);
+
+  // SSH sessions table
+  db.run(sql`CREATE TABLE IF NOT EXISTS ssh_sessions (
+    id TEXT PRIMARY KEY,
+    ssh_key_id TEXT NOT NULL,
+    host TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'active',
+    started_at TEXT NOT NULL,
+    completed_at TEXT,
+    terminal_buffer TEXT,
+    initiated_by TEXT NOT NULL DEFAULT 'user',
+    created_at TEXT NOT NULL
   )`);
 
   // FTS5 full-text search index for memories
