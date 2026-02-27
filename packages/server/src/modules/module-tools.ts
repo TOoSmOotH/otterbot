@@ -14,7 +14,6 @@ import {
   uninstallModule,
 } from "./module-installer.js";
 import { getConfig } from "../auth/auth.js";
-import { getModuleAgent } from "./index.js";
 
 export function createModuleTools(
   loader: ModuleLoader,
@@ -28,6 +27,7 @@ export function createModuleTools(
       execute: async () => {
         const modules = loader.getAll();
         const { listModules } = await import("./module-manifest.js");
+        const { getModuleAgent } = await import("./index.js");
         const installed = listModules();
 
         const items = installed.map((m) => {
@@ -74,9 +74,9 @@ export function createModuleTools(
 
         try {
           // If the module has an active agent, route through it for reasoned answers
+          const { getModuleAgent, getModuleBus } = await import("./index.js");
           const moduleAgent = getModuleAgent(moduleId);
           if (moduleAgent) {
-            const { getModuleBus } = await import("./index.js");
             const bus = getModuleBus();
             if (bus) {
               const agentId = `module-agent-${moduleId}`;
