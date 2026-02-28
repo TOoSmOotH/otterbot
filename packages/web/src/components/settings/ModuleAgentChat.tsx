@@ -44,28 +44,31 @@ export function ModuleAgentChat({ modules, onClose }: ModuleAgentChatProps) {
     setMessages((prev) => [...prev, { role: "user", content: q }]);
 
     try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 150_000);
       const res = await fetch(`/api/modules/${selectedId}/query`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ question: q }),
+        signal: controller.signal,
       });
+      clearTimeout(timeout);
+      const data = await res.json();
       if (!res.ok) {
-        const data = await res.json();
         setMessages((prev) => [
           ...prev,
           { role: "agent", content: `Error: ${data.error ?? "Query failed"}` },
         ]);
       } else {
-        const data = await res.json();
         setMessages((prev) => [...prev, { role: "agent", content: data.answer || "(empty response)" }]);
       }
     } catch (err) {
+      const msg = err instanceof DOMException && err.name === "AbortError"
+        ? "Request timed out — the agent may be busy."
+        : (err instanceof Error ? err.message : "Query failed");
       setMessages((prev) => [
         ...prev,
-        {
-          role: "agent",
-          content: `Error: ${err instanceof Error ? err.message : "Query failed"}`,
-        },
+        { role: "agent", content: `Error: ${msg}` },
       ]);
     } finally {
       setSending(false);
