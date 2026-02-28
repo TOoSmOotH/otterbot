@@ -8,6 +8,7 @@ import type {
   ModuleDefinition,
   ModuleContext,
   InstalledModule,
+  GenerateResponseOptions,
 } from "@otterbot/shared";
 import { ModuleKnowledgeStore } from "./module-knowledge-store.js";
 import { runMigrations } from "./module-migrations.js";
@@ -47,6 +48,38 @@ function createModuleContext(
     },
     error(...args: unknown[]) {
       console.error(`[module:${moduleId}]`, ...args);
+    },
+    async generateResponse(options: GenerateResponseOptions) {
+      const provider = getConfig(`module:${moduleId}:agent_provider`)
+        ?? getConfig("worker_provider")
+        ?? getConfig("coo_provider")
+        ?? "anthropic";
+      const model = getConfig(`module:${moduleId}:agent_model`)
+        ?? getConfig("worker_model")
+        ?? getConfig("coo_model")
+        ?? "claude-sonnet-4-5-20250929";
+
+      const { generate } = await import("../llm/adapter.js");
+      const messages = [
+        { role: "system" as const, content: options.systemPrompt },
+        ...options.messages.map((m) => ({
+          role: m.role as "user" | "assistant" | "system",
+          content: m.content,
+        })),
+      ];
+
+      const result = await generate(
+        {
+          provider,
+          model,
+          temperature: options.temperature ?? 0.3,
+          maxRetries: 3,
+          maxSteps: options.maxSteps ?? 8,
+        },
+        messages,
+      );
+
+      return { text: result.text };
     },
   };
 }
