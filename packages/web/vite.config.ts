@@ -5,7 +5,7 @@ import { resolve } from "path";
 import rootPkg from "../../package.json";
 
 export default defineConfig(({ mode }) => ({
-  plugins: [react(), basicSsl()],
+  plugins: [react(), ...(process.env.VITE_NO_SSL ? [] : [basicSsl()])],
   define: {
     __APP_VERSION__: JSON.stringify(
       mode === "development"

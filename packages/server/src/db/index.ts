@@ -626,6 +626,11 @@ export async function migrateDb() {
     updated_at TEXT NOT NULL
   )`);
 
+  // Idempotent migration: add module_agent_id to custom_scheduled_tasks
+  try {
+    db.run(sql`ALTER TABLE custom_scheduled_tasks ADD COLUMN module_agent_id TEXT`);
+  } catch { /* column already exists */ }
+
   // MCP servers table
   db.run(sql`CREATE TABLE IF NOT EXISTS mcp_servers (
     id TEXT PRIMARY KEY,

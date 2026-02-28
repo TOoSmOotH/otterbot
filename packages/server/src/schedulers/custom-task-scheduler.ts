@@ -208,6 +208,21 @@ export class CustomTaskScheduler {
         content: wrappedMessage,
         metadata: { ...baseMeta, backgroundTask: true },
       });
+    } else if (task.mode === "module-agent") {
+      // Send directive to a specific module agent
+      const moduleAgentId = (task as any).moduleAgentId;
+      if (moduleAgentId) {
+        // Send as a Directive; the module agent will process and send a Report back to COO
+        this.bus.send({
+          fromAgentId: "coo",
+          toAgentId: moduleAgentId,
+          type: MessageType.Directive,
+          content: task.message,
+          metadata: { ...baseMeta, moduleAgent: true },
+        });
+      } else {
+        console.warn(`[CustomTaskScheduler] Task "${task.name}" has mode=module-agent but no moduleAgentId`);
+      }
     } else {
       // notification mode: post as a COO message to the chat (no agent processing)
       this.bus.send({

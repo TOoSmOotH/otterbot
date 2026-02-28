@@ -218,10 +218,11 @@ export function setupSocketHandlers(
           .run();
       }
 
+      const targetAgent = data.toAgentId ?? "coo";
       const message = bus.send({
         fromAgentId: null, // CEO
-        toAgentId: "coo",
-        type: MessageType.Chat,
+        toAgentId: targetAgent,
+        type: targetAgent === "coo" ? MessageType.Chat : MessageType.Directive,
         content: data.content,
         conversationId,
         metadata: projectId ? { projectId } : undefined,

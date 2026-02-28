@@ -1152,7 +1152,7 @@ async function main() {
 
       // Initialize module system (non-blocking)
       import("./modules/index.js").then(async ({ initModules }) => {
-        await initModules(coo!, app);
+        await initModules(coo!, app, bus, io);
       }).catch((err) => {
         console.warn("[modules] Failed to initialize module system:", err);
       });
@@ -2336,6 +2336,56 @@ async function main() {
     return { ok: true };
   });
 
+  // GitHub releases endpoint (cached for 1 hour)
+  let releasesCache: { data: unknown; fetchedAt: number } | null = null;
+  const RELEASES_CACHE_MS = 60 * 60 * 1000; // 1 hour
+
+  app.get("/api/releases", async (_req, reply) => {
+    const now = Date.now();
+    if (releasesCache && now - releasesCache.fetchedAt < RELEASES_CACHE_MS) {
+      return releasesCache.data;
+    }
+    try {
+      const res = await fetch(
+        "https://api.github.com/repos/TOoSmOotH/otterbot/releases?per_page=20",
+        {
+          headers: {
+            Accept: "application/vnd.github+json",
+            "User-Agent": "otterbot-server",
+          },
+        },
+      );
+      if (!res.ok) {
+        reply.code(502);
+        return { error: "Failed to fetch releases from GitHub" };
+      }
+      const raw = (await res.json()) as Array<{
+        tag_name: string;
+        name: string;
+        body: string;
+        published_at: string;
+        html_url: string;
+        prerelease: boolean;
+        draft: boolean;
+      }>;
+      const releases = raw
+        .filter((r) => !r.draft)
+        .map((r) => ({
+          tag: r.tag_name,
+          name: r.name || r.tag_name,
+          body: r.body || "",
+          publishedAt: r.published_at,
+          url: r.html_url,
+          prerelease: r.prerelease,
+        }));
+      releasesCache = { data: { releases }, fetchedAt: now };
+      return { releases };
+    } catch (err) {
+      reply.code(502);
+      return { error: "Failed to fetch releases" };
+    }
+  });
+
   // User profile endpoint
   app.get("/api/profile", async () => {
     const gearConfigRaw = getConfig("user_gear_config");
@@ -2620,6 +2670,24 @@ async function main() {
   );
 
   // =========================================================================
+  // Module Agents
+  // =========================================================================
+
+  app.get("/api/settings/module-agents", async () => {
+    try {
+      const { getActiveModuleAgents } = await import("./modules/index.js");
+      const agents = getActiveModuleAgents();
+      const items = Array.from(agents.entries()).map(([moduleId, agent]) => {
+        const a = agent as { id: string; name: string };
+        return { moduleId, agentId: a.id, name: a.name };
+      });
+      return { agents: items };
+    } catch {
+      return { agents: [] };
+    }
+  });
+
+  // =========================================================================
   // Custom Scheduled Tasks CRUD
   // =========================================================================
 
@@ -2639,7 +2707,7 @@ async function main() {
       enabled?: boolean;
     };
   }>("/api/settings/custom-tasks", async (req, reply) => {
-    const { name, description, message, mode, intervalMs, enabled } = req.body;
+    const { name, description, message, mode, intervalMs, enabled, moduleAgentId } = req.body as any;
     if (!name || !message || !intervalMs) {
       reply.code(400);
       return { error: "name, message, and intervalMs are required" };
@@ -2654,10 +2722,11 @@ async function main() {
       name,
       description: description ?? "",
       message,
-      mode: (mode ?? "notification") as "coo-prompt" | "coo-background" | "notification",
+      mode: (mode ?? "notification") as "coo-prompt" | "coo-background" | "notification" | "module-agent",
       intervalMs: clampedInterval,
       enabled: enabled ?? true,
       lastRunAt: null,
+      moduleAgentId: moduleAgentId ?? null,
       createdAt: now,
       updatedAt: now,
     };
@@ -2674,9 +2743,10 @@ async function main() {
       name?: string;
       description?: string;
       message?: string;
-      mode?: "coo-prompt" | "coo-background" | "notification";
+      mode?: "coo-prompt" | "coo-background" | "notification" | "module-agent";
       intervalMs?: number;
       enabled?: boolean;
+      moduleAgentId?: string;
     };
   }>("/api/settings/custom-tasks/:id", async (req, reply) => {
     const { eq } = await import("drizzle-orm");
@@ -2700,6 +2770,7 @@ async function main() {
       patch.intervalMs = Math.max(req.body.intervalMs, MIN_CUSTOM_TASK_INTERVAL_MS);
     }
     if (req.body.enabled !== undefined) patch.enabled = req.body.enabled;
+    if (req.body.moduleAgentId !== undefined) patch.moduleAgentId = req.body.moduleAgentId;
     db.update(schema.customScheduledTasks)
       .set(patch)
       .where(eq(schema.customScheduledTasks.id, id))
@@ -4886,7 +4957,7 @@ Respond with ONLY a JSON object (no markdown, no explanation) with these fields:
   // ─── Module REST API ────────────────────────────────────────────────────────
 
   app.get("/api/modules", async () => {
-    const { getModuleLoader } = await import("./modules/index.js");
+    const { getModuleLoader, getModuleAgent } = await import("./modules/index.js");
     const { listModules } = await import("./modules/module-manifest.js");
     const loader = getModuleLoader();
     const installed = listModules();
@@ -4898,6 +4969,7 @@ Respond with ONLY a JSON object (no markdown, no explanation) with these fields:
         loaded: !!loaded,
         documents: loaded ? loaded.knowledgeStore.count() : 0,
         hasQuery: loaded ? !!loaded.definition.onQuery : false,
+        hasAgent: !!getModuleAgent(m.id),
       };
     });
   });
@@ -4982,6 +5054,255 @@ Respond with ONLY a JSON object (no markdown, no explanation) with these fields:
         if (scheduler) scheduler.stopModule(req.params.id);
         if (loader) await loader.unload(req.params.id);
         await uninstallModule(req.params.id);
+        return { ok: true };
+      } catch (err) {
+        return reply
+          .status(500)
+          .send({ error: err instanceof Error ? err.message : String(err) });
+      }
+    },
+  );
+
+  // Module config: get schema + current values
+  app.get<{ Params: { id: string } }>(
+    "/api/modules/:id/config",
+    async (req, reply) => {
+      const { getModuleLoader } = await import("./modules/index.js");
+      const { getModule } = await import("./modules/module-manifest.js");
+      const { loadModuleDefinition } = await import("./modules/module-installer.js");
+      const { getConfig: getConfigValue } = await import("./auth/auth.js");
+
+      const entry = getModule(req.params.id);
+      if (!entry) return reply.status(404).send({ error: "Module not found" });
+
+      try {
+        // Try loaded module first, fall back to loading definition from disk
+        const loader = getModuleLoader();
+        const loaded = loader?.get(req.params.id);
+        let configSchema = loaded?.definition.configSchema;
+
+        if (!configSchema) {
+          // Load definition from disk to get configSchema (even when module is disabled)
+          const definition = await loadModuleDefinition(entry.modulePath);
+          configSchema = definition.configSchema;
+
+          // Auto-inject agent config fields (same logic as module-loader.ts)
+          if (definition.agent && configSchema) {
+            if (!configSchema.agent_enabled) {
+              configSchema.agent_enabled = { type: "boolean", description: "Enable the module's AI agent", required: false, default: true };
+            }
+            if (!configSchema.agent_name) {
+              configSchema.agent_name = { type: "string", description: "Display name for the module agent", required: false, default: definition.agent.defaultName };
+            }
+            if (!configSchema.agent_prompt) {
+              configSchema.agent_prompt = { type: "string", description: "System prompt for the module agent", required: false, default: definition.agent.defaultPrompt };
+            }
+            if (!configSchema.agent_model) {
+              configSchema.agent_model = { type: "string", description: "LLM model for the module agent", required: false };
+            }
+            if (!configSchema.agent_provider) {
+              configSchema.agent_provider = { type: "string", description: "LLM provider for the module agent", required: false };
+            }
+            if (!configSchema.agent_posting_mode) {
+              configSchema.agent_posting_mode = {
+                type: "select",
+                description: "Controls when the module agent responds to queries",
+                required: false,
+                default: "respond",
+                options: [
+                  { value: "respond", label: "Always respond" },
+                  { value: "lurk", label: "Lurk (index only, never respond)" },
+                  { value: "new_chats", label: "New conversations only" },
+                  { value: "permission", label: "Ask COO for permission" },
+                ],
+              };
+            }
+          }
+        }
+
+        if (!configSchema || Object.keys(configSchema).length === 0) {
+          return { schema: {}, values: {} };
+        }
+
+        // Get current values for each config field
+        const values: Record<string, string | undefined> = {};
+        for (const key of Object.keys(configSchema)) {
+          values[key] = getConfigValue(`module:${req.params.id}:${key}`);
+        }
+
+        return { schema: configSchema, values };
+      } catch (err) {
+        return reply
+          .status(500)
+          .send({ error: err instanceof Error ? err.message : String(err) });
+      }
+    },
+  );
+
+  // Module database info
+  app.get<{ Params: { id: string } }>(
+    "/api/modules/:id/db-info",
+    async (req, reply) => {
+      const { getModuleLoader } = await import("./modules/index.js");
+
+      const loader = getModuleLoader();
+      const loaded = loader?.get(req.params.id);
+      if (!loaded) {
+        return { tables: [] };
+      }
+
+      try {
+        const db = loaded.knowledgeStore.db;
+        const tableRows = db.prepare(
+          "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'",
+        ).all() as { name: string }[];
+
+        const tables = tableRows.map((row) => {
+          const countRow = db.prepare(`SELECT count(*) as cnt FROM "${row.name}"`).get() as { cnt: number } | undefined;
+          return { name: row.name, rowCount: countRow?.cnt ?? 0 };
+        });
+
+        return { tables };
+      } catch (err) {
+        return reply
+          .status(500)
+          .send({ error: err instanceof Error ? err.message : String(err) });
+      }
+    },
+  );
+
+  // Query a module's agent / knowledge base
+  app.post<{ Params: { id: string }; Body: { question: string } }>(
+    "/api/modules/:id/query",
+    async (req, reply) => {
+      const { getModuleLoader, getModuleAgent, getModuleBus } = await import("./modules/index.js");
+      const loader = getModuleLoader();
+
+      if (!loader) {
+        return reply.status(503).send({ error: "Module system not initialized" });
+      }
+
+      const loaded = loader.get(req.params.id);
+      if (!loaded) {
+        return reply.status(400).send({ error: "Module not loaded" });
+      }
+
+      const question = req.body?.question;
+      if (!question || typeof question !== "string") {
+        return reply.status(400).send({ error: "question is required" });
+      }
+
+      try {
+        // If the module has an active agent, route through it
+        const moduleAgent = getModuleAgent(req.params.id);
+        if (moduleAgent) {
+          const bus = getModuleBus();
+          if (bus) {
+            const { MessageType } = await import("@otterbot/shared");
+            const agentId = `module-agent-${req.params.id}`;
+            const replyMsg = await bus.request(
+              {
+                fromAgentId: "ui",
+                toAgentId: agentId,
+                type: MessageType.Directive,
+                content: question,
+                metadata: { source: "ui_query" },
+              },
+              120_000,
+            );
+            if (replyMsg) {
+              return { ok: true, answer: replyMsg.content };
+            }
+            // Agent timed out — fall through to simpler handlers
+            // but if there's no fallback, return a timeout message
+            if (!loaded.definition.onQuery) {
+              return { ok: true, answer: "The agent did not respond in time. It may be busy or unavailable." };
+            }
+          }
+        }
+
+        // Fall back to onQuery handler
+        if (loaded.definition.onQuery) {
+          const answer = await loaded.definition.onQuery(question, loaded.context);
+          return { ok: true, answer };
+        }
+
+        // Fall back to knowledge store search
+        const results = await loaded.knowledgeStore.search(question, 5);
+        if (results.length === 0) {
+          return { ok: true, answer: `No results found for: ${question}` };
+        }
+
+        const answer = results
+          .map((doc) => {
+            const meta = doc.metadata;
+            const url = meta?.url ? ` (${meta.url})` : "";
+            return `---\n${doc.content}${url}\n`;
+          })
+          .join("\n");
+
+        return { ok: true, answer };
+      } catch (err) {
+        return reply
+          .status(500)
+          .send({ error: err instanceof Error ? err.message : String(err) });
+      }
+    },
+  );
+
+  // Trigger a poll (or full sync) for a module
+  app.post<{ Params: { id: string }; Body: { fullSync?: boolean } }>(
+    "/api/modules/:id/poll",
+    async (req, reply) => {
+      const { getModuleLoader, getModuleScheduler } = await import("./modules/index.js");
+      const loader = getModuleLoader();
+      const scheduler = getModuleScheduler();
+
+      if (!loader || !scheduler) {
+        return reply.status(503).send({ error: "Module system not initialized" });
+      }
+
+      const loaded = loader.get(req.params.id);
+      if (!loaded) {
+        return reply.status(400).send({ error: "Module not loaded" });
+      }
+
+      try {
+        const fullSync = req.body?.fullSync ?? false;
+        const items = await scheduler.executePoll(req.params.id, loaded, fullSync);
+        return { ok: true, items };
+      } catch (err) {
+        return reply
+          .status(500)
+          .send({ error: err instanceof Error ? err.message : String(err) });
+      }
+    },
+  );
+
+  // Module config: set values
+  app.post<{ Params: { id: string }; Body: Record<string, string | null> }>(
+    "/api/modules/:id/config",
+    async (req, reply) => {
+      const { getModule } = await import("./modules/module-manifest.js");
+      const { getConfig: getConfigValue, setConfig: setConfigValue } = await import("./auth/auth.js");
+
+      const entry = getModule(req.params.id);
+      if (!entry) return reply.status(404).send({ error: "Module not found" });
+
+      try {
+        const updates = req.body;
+        for (const [key, value] of Object.entries(updates)) {
+          if (value === null || value === "") {
+            // Delete config by setting empty — getConfig returns undefined for missing keys
+            // Use the DB directly to delete the row
+            const { getDb } = await import("./db/index.js");
+            const { sql } = await import("drizzle-orm");
+            const db = getDb();
+            db.run(sql`DELETE FROM config WHERE key = ${"module:" + req.params.id + ":" + key}`);
+          } else {
+            setConfigValue(`module:${req.params.id}:${key}`, value);
+          }
+        }
         return { ok: true };
       } catch (err) {
         return reply

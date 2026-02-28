@@ -17,6 +17,9 @@ dist/
 # MCP
 .mcp.json
 
+# Claude Code
+.claude/
+
 # IDE
 .vscode/
 .idea/

@@ -268,6 +268,8 @@ export function deleteProvider(id: string): { ok: boolean; error?: string } {
     }
   }
   const db = getDb();
+  // Remove custom models that reference this provider
+  db.delete(schema.customModels).where(eq(schema.customModels.providerId, id)).run();
   db.delete(schema.providers).where(eq(schema.providers.id, id)).run();
   return { ok: true };
 }
