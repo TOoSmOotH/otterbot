@@ -149,33 +149,21 @@ export class ModuleAgent extends BaseAgent {
     // Check posting mode before responding
     const postingMode = getConfig(`module:${this.moduleId}:agent_posting_mode`) ?? "respond";
 
-    if (postingMode === "lurk") {
-      if (message.correlationId && message.fromAgentId) {
-        this.sendMessage(
-          message.fromAgentId,
-          MessageType.Report,
-          "Module agent is in lurk mode — indexing only, not responding to queries.",
-          { moduleId: this.moduleId },
-          undefined,
-          message.correlationId,
-        );
-      }
+    // Determine if this is a direct query (from CEO, COO, or UI) vs an external post
+    const isDirectQuery =
+      message.fromAgentId === null || // CEO
+      message.fromAgentId === "coo" ||
+      message.metadata?.source === "module_query" ||
+      message.metadata?.source === "ui_query";
+
+    if (postingMode === "lurk" && !isDirectQuery) {
+      // Lurk mode: don't post to external channels, but always respond to direct queries
       return;
     }
 
-    if (postingMode === "new_chats") {
+    if (postingMode === "new_chats" && !isDirectQuery) {
       const convId = message.conversationId ?? message.correlationId ?? "";
       if (this.seenConversations.has(convId)) {
-        if (message.correlationId && message.fromAgentId) {
-          this.sendMessage(
-            message.fromAgentId,
-            MessageType.Report,
-            "Module agent only responds to new conversations.",
-            { moduleId: this.moduleId },
-            undefined,
-            message.correlationId,
-          );
-        }
         return;
       }
       this.seenConversations.add(convId);
@@ -199,22 +187,24 @@ export class ModuleAgent extends BaseAgent {
     if (thinking) baseMeta.thinking = thinking;
     if (postingMode === "permission") baseMeta.pendingApproval = true;
 
-    // If has correlationId, reply with it so request() resolves
-    if (message.correlationId && message.fromAgentId) {
+    // Reply to sender — fromAgentId may be null (CEO sending directly)
+    const replyTo = message.fromAgentId ?? null;
+    if (message.correlationId) {
       this.sendMessage(
-        message.fromAgentId,
+        replyTo,
         MessageType.Report,
         text,
         baseMeta,
-        undefined,
+        message.conversationId,
         message.correlationId,
       );
-    } else if (message.fromAgentId) {
+    } else {
       this.sendMessage(
-        message.fromAgentId,
+        replyTo,
         MessageType.Report,
         text,
         baseMeta,
+        message.conversationId,
       );
     }
   }
