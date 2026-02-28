@@ -2336,6 +2336,56 @@ async function main() {
     return { ok: true };
   });
 
+  // GitHub releases endpoint (cached for 1 hour)
+  let releasesCache: { data: unknown; fetchedAt: number } | null = null;
+  const RELEASES_CACHE_MS = 60 * 60 * 1000; // 1 hour
+
+  app.get("/api/releases", async (_req, reply) => {
+    const now = Date.now();
+    if (releasesCache && now - releasesCache.fetchedAt < RELEASES_CACHE_MS) {
+      return releasesCache.data;
+    }
+    try {
+      const res = await fetch(
+        "https://api.github.com/repos/TOoSmOotH/otterbot/releases?per_page=20",
+        {
+          headers: {
+            Accept: "application/vnd.github+json",
+            "User-Agent": "otterbot-server",
+          },
+        },
+      );
+      if (!res.ok) {
+        reply.code(502);
+        return { error: "Failed to fetch releases from GitHub" };
+      }
+      const raw = (await res.json()) as Array<{
+        tag_name: string;
+        name: string;
+        body: string;
+        published_at: string;
+        html_url: string;
+        prerelease: boolean;
+        draft: boolean;
+      }>;
+      const releases = raw
+        .filter((r) => !r.draft)
+        .map((r) => ({
+          tag: r.tag_name,
+          name: r.name || r.tag_name,
+          body: r.body || "",
+          publishedAt: r.published_at,
+          url: r.html_url,
+          prerelease: r.prerelease,
+        }));
+      releasesCache = { data: { releases }, fetchedAt: now };
+      return { releases };
+    } catch (err) {
+      reply.code(502);
+      return { error: "Failed to fetch releases" };
+    }
+  });
+
   // User profile endpoint
   app.get("/api/profile", async () => {
     const gearConfigRaw = getConfig("user_gear_config");

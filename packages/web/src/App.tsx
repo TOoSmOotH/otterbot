@@ -41,6 +41,8 @@ import { Group, Panel, Separator, useDefaultLayout, usePanelRef } from "react-re
 import { disconnectSocket, getSocket } from "./lib/socket";
 import { Tooltip } from "./components/ui/Tooltip";
 import { useUIModeStore } from "./stores/ui-mode-store";
+import { useWhatsNewStore } from "./stores/whats-new-store";
+import { WhatsNewPanel } from "./components/whats-new/WhatsNewPanel";
 
 export default function App() {
   const screen = useAuthStore((s) => s.screen);
@@ -125,7 +127,10 @@ function MainApp() {
   const projects = useProjectStore((s) => s.projects);
   const isBasic = useUIModeStore((s) => s.mode === "basic");
   const toggleMode = useUIModeStore((s) => s.toggleMode);
+  const unreadCount = useWhatsNewStore((s) => s.unreadCount);
+  const fetchReleases = useWhatsNewStore((s) => s.fetchReleases);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [whatsNewOpen, setWhatsNewOpen] = useState(false);
   const [userProfile, setUserProfile] = useState<UserProfile | undefined>();
   const [centerView, setCenterView] = useState<CenterView>("dashboard");
 
@@ -187,6 +192,9 @@ function MainApp() {
 
     // Check desktop environment status
     useDesktopStore.getState().checkStatus();
+
+    // Fetch release info for What's New badge
+    fetchReleases();
 
     // Initialize movement trigger system
     initMovementTriggers();
@@ -358,11 +366,40 @@ function MainApp() {
             </button>
           </Tooltip>
 
+          <div className="relative">
+            <Tooltip label="What's New">
+              <button
+                onClick={() => {
+                  setWhatsNewOpen((prev) => !prev);
+                  setSettingsOpen(false);
+                }}
+                className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${
+                  whatsNewOpen
+                    ? "text-primary bg-primary/10"
+                    : "text-muted-foreground hover:text-foreground hover:bg-secondary"
+                }`}
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2z" />
+                </svg>
+                {unreadCount > 0 && (
+                  <span className="absolute -top-0.5 -right-0.5 min-w-[16px] h-4 flex items-center justify-center rounded-full bg-primary text-[9px] font-bold text-primary-foreground px-1">
+                    {unreadCount > 9 ? "9+" : unreadCount}
+                  </span>
+                )}
+              </button>
+            </Tooltip>
+            <WhatsNewPanel open={whatsNewOpen} onClose={() => setWhatsNewOpen(false)} />
+          </div>
+
           <div className="w-px h-4 bg-border mx-1" />
 
           <Tooltip label="Settings">
             <button
-              onClick={() => setSettingsOpen(!settingsOpen)}
+              onClick={() => {
+                setSettingsOpen(!settingsOpen);
+                setWhatsNewOpen(false);
+              }}
               className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${
                 settingsOpen
                   ? "text-primary bg-primary/10"
