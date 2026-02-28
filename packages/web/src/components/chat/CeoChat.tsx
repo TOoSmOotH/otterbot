@@ -297,7 +297,7 @@ export function CeoChat({ cooName, detached }: { cooName?: string; detached?: bo
               ? "Chat History"
               : activeProject
                 ? activeProject.name
-                : `${cooName ?? "COO"} Chat`}
+                : "Chat"}
           </h2>
           {!showHistory && currentConversationId && (() => {
             const activeConv = displayedConversations.find((c) => c.id === currentConversationId);
@@ -460,9 +460,12 @@ export function CeoChat({ cooName, detached }: { cooName?: string; detached?: bo
           {/* Messages */}
           <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
             {chatMessages.length === 0 && !streamingContent && (
-              <div className="flex items-center justify-center h-full">
+              <div className="flex flex-col items-center justify-center h-full gap-2">
                 <p className="text-sm text-muted-foreground text-center max-w-[240px]">
-                  Send a message to start working with {cooName ?? "your COO"}
+                  Send a message to start working with Otter
+                </p>
+                <p className="text-[11px] text-muted-foreground/60 text-center max-w-[200px]">
+                  Ask questions, create projects, or give instructions
                 </p>
               </div>
             )}

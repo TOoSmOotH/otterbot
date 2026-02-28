@@ -326,7 +326,7 @@ export function MessageStream({
     <div className="flex flex-col h-full">
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-border">
-        <h2 className="text-sm font-semibold tracking-tight">Message Bus</h2>
+        <h2 className="text-sm font-semibold tracking-tight">Activity</h2>
         <div className="flex items-center gap-2">
           {agentFilter && (
             <button

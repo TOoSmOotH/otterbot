@@ -44,6 +44,9 @@ const ROLE_ICONS: Record<string, string> = {
   coo: "C",
   team_lead: "TL",
   worker: "W",
+  scheduler: "S",
+  admin_assistant: "A",
+  module_agent: "M",
 };
 
 export const AgentNode = memo(function AgentNode({
@@ -83,7 +86,13 @@ export const AgentNode = memo(function AgentNode({
                   ? "bg-violet-500/30 text-violet-300"
                   : role === "team_lead"
                     ? "bg-amber-500/30 text-amber-300"
-                    : "bg-cyan-500/30 text-cyan-300",
+                    : role === "scheduler"
+                      ? "bg-rose-500/30 text-rose-300"
+                      : role === "admin_assistant"
+                        ? "bg-teal-500/30 text-teal-300"
+                        : role === "module_agent"
+                          ? "bg-indigo-500/30 text-indigo-300"
+                          : "bg-cyan-500/30 text-cyan-300",
             )}
           >
             {ROLE_ICONS[role] ?? "?"}

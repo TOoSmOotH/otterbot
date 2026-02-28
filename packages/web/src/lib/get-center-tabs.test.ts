@@ -9,17 +9,17 @@ describe("getCenterTabs", () => {
 
   it("returns global tabs when no project is active (null)", () => {
     const tabs = getCenterTabs(null);
-    expect(tabs).toEqual(["dashboard", "todos", "inbox", "calendar", "code", "ssh", "usage"]);
+    expect(tabs).toEqual(["dashboard", "todos", "inbox", "calendar", "usage"]);
   });
 
-  it("includes 'code' in both project and global tabs", () => {
+  it("includes 'code' in project tabs only", () => {
     expect(getCenterTabs("proj-1")).toContain("code");
-    expect(getCenterTabs(null)).toContain("code");
+    expect(getCenterTabs(null)).not.toContain("code");
   });
 
-  it("includes 'ssh' in both project and global tabs", () => {
+  it("includes 'ssh' in project tabs only", () => {
     expect(getCenterTabs("proj-1")).toContain("ssh");
-    expect(getCenterTabs(null)).toContain("ssh");
+    expect(getCenterTabs(null)).not.toContain("ssh");
   });
 
   it("does not include graph in project tabs", () => {
