@@ -1,6 +1,7 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useSettingsStore } from "../../stores/settings-store";
 import { SettingsNav } from "./SettingsNav";
+import { SettingsOverview } from "./SettingsOverview";
 import { AppearanceTab } from "./AppearanceTab";
 import { ProvidersTab } from "./ProvidersTab";
 import { ModelsTab } from "./ModelsTab";
@@ -28,17 +29,21 @@ import { SecuritySection } from "./SecuritySection";
 import { WorkerNamesSection } from "./WorkerNamesSection";
 import { McpServersSection } from "./McpServersSection";
 import { SshTab } from "./SshTab";
+import { useSettingsStatus } from "./useSettingsStatus";
 import type { SettingsSection } from "./settings-nav";
+import type { SettingsSearchHandle } from "./SettingsSearch";
 
 interface SettingsPageProps {
   onClose: () => void;
 }
 
 export function SettingsPage({ onClose }: SettingsPageProps) {
-  const [activeSection, setActiveSection] = useState<SettingsSection>("profile");
+  const [activeSection, setActiveSection] = useState<SettingsSection>("overview");
   const loadSettings = useSettingsStore((s) => s.loadSettings);
   const loading = useSettingsStore((s) => s.loading);
   const contentRef = useRef<HTMLDivElement>(null);
+  const searchRef = useRef<SettingsSearchHandle>(null);
+  const statusMap = useSettingsStatus();
 
   useEffect(() => {
     loadSettings();
@@ -49,7 +54,21 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
     contentRef.current?.scrollTo(0, 0);
   }, [activeSection]);
 
+  // Keyboard shortcut: "/" focuses search (when not in an input)
+  const handleKeyDown = useCallback((e: KeyboardEvent) => {
+    if (e.key === "/" && !(e.target instanceof HTMLInputElement) && !(e.target instanceof HTMLTextAreaElement)) {
+      e.preventDefault();
+      searchRef.current?.focus();
+    }
+  }, []);
+
+  useEffect(() => {
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [handleKeyDown]);
+
   const renderContent = () => {
+    if (activeSection === "overview") return <SettingsOverview onSelect={setActiveSection} statusMap={statusMap} />;
     if (activeSection === "appearance") return <AppearanceTab />;
     if (activeSection === "profile") return <ProfileSection />;
     if (activeSection === "system") return <SystemSection />;
@@ -107,6 +126,8 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
         activeSection={activeSection}
         onSelect={setActiveSection}
         onBack={onClose}
+        statusMap={statusMap}
+        searchRef={searchRef}
       />
       <div ref={contentRef} className="flex-1 overflow-y-auto">
         <div className="max-w-3xl mx-auto">

@@ -470,6 +470,9 @@ interface SettingsState {
   // Backup & Restore
   backupDatabase: () => Promise<void>;
   restoreDatabase: (file: File) => Promise<{ ok: boolean; error?: string }>;
+
+  // Overview (loads all integration statuses in parallel)
+  loadSettingsOverview: () => Promise<void>;
 }
 
 // ---------------------------------------------------------------------------
@@ -2320,5 +2323,26 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       set({ error: msg });
       return { ok: false, error: msg };
     }
+  },
+
+  loadSettingsOverview: async () => {
+    const a = get();
+    await Promise.all([
+      a.loadSettings(),
+      a.loadDiscordSettings(),
+      a.loadTelegramSettings(),
+      a.loadSlackSettings(),
+      a.loadMattermostSettings(),
+      a.loadNextcloudTalkSettings(),
+      a.loadGitHubSettings(),
+      a.loadGoogleSettings(),
+      a.loadSearchSettings(),
+      a.loadTTSSettings(),
+      a.loadSTTSettings(),
+      a.loadOpenCodeSettings(),
+      a.loadClaudeCodeSettings(),
+      a.loadCodexSettings(),
+      a.loadGeminiCliSettings(),
+    ]);
   },
 }));

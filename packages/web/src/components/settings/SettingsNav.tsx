@@ -1,14 +1,18 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { cn } from "../../lib/utils";
-import { SETTINGS_NAV, type SettingsSection } from "./settings-nav";
+import { SETTINGS_NAV, type SettingsSection, type ConfigStatus } from "./settings-nav";
+import { NavIcon } from "./NavIcon";
+import { SettingsSearch, type SettingsSearchHandle } from "./SettingsSearch";
 
 interface SettingsNavProps {
   activeSection: SettingsSection;
   onSelect: (section: SettingsSection) => void;
   onBack: () => void;
+  statusMap: Record<string, ConfigStatus>;
+  searchRef?: React.RefObject<SettingsSearchHandle | null>;
 }
 
-export function SettingsNav({ activeSection, onSelect, onBack }: SettingsNavProps) {
+export function SettingsNav({ activeSection, onSelect, onBack, statusMap, searchRef }: SettingsNavProps) {
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(() => {
     const initial: Record<string, boolean> = {};
     for (const group of SETTINGS_NAV) {
@@ -16,15 +20,21 @@ export function SettingsNav({ activeSection, onSelect, onBack }: SettingsNavProp
     }
     return initial;
   });
+  const [searchActive, setSearchActive] = useState(false);
 
   const toggleGroup = (label: string) => {
     setOpenGroups((prev) => ({ ...prev, [label]: !prev[label] }));
   };
 
+  const handleSearchSelect = (section: SettingsSection) => {
+    setSearchActive(false);
+    onSelect(section);
+  };
+
   return (
     <nav className="w-60 shrink-0 border-r border-border bg-card flex flex-col h-full">
       {/* Back button */}
-      <div className="p-3 border-b border-border">
+      <div className="p-3 border-b border-border space-y-2">
         <button
           onClick={onBack}
           className="flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground transition-colors px-2 py-1.5 rounded hover:bg-secondary w-full"
@@ -33,6 +43,30 @@ export function SettingsNav({ activeSection, onSelect, onBack }: SettingsNavProp
             <polyline points="15 18 9 12 15 6" />
           </svg>
           Back to app
+        </button>
+
+        {/* Search */}
+        <SettingsSearch
+          ref={searchRef}
+          onSelect={handleSearchSelect}
+          statusMap={statusMap}
+          className="px-0"
+        />
+      </div>
+
+      {/* Overview link */}
+      <div className="px-2 pt-2">
+        <button
+          onClick={() => onSelect("overview")}
+          className={cn(
+            "w-full text-left px-3 py-1.5 text-xs rounded transition-colors flex items-center gap-2",
+            activeSection === "overview"
+              ? "bg-primary/10 text-primary font-medium"
+              : "text-muted-foreground hover:text-foreground hover:bg-secondary",
+          )}
+        >
+          <NavIcon icon="overview" size={12} />
+          <span>Overview</span>
         </button>
       </div>
 
@@ -63,20 +97,35 @@ export function SettingsNav({ activeSection, onSelect, onBack }: SettingsNavProp
 
             {openGroups[group.label] && (
               <div className="space-y-0.5 mb-2">
-                {group.items.map((item) => (
-                  <button
-                    key={item.id}
-                    onClick={() => onSelect(item.id)}
-                    className={cn(
-                      "w-full text-left px-3 py-1.5 text-xs rounded transition-colors",
-                      activeSection === item.id
-                        ? "bg-primary/10 text-primary font-medium"
-                        : "text-muted-foreground hover:text-foreground hover:bg-secondary",
-                    )}
-                  >
-                    {item.label}
-                  </button>
-                ))}
+                {group.items.map((item) => {
+                  const status = statusMap[item.id] ?? "none";
+                  return (
+                    <button
+                      key={item.id}
+                      onClick={() => onSelect(item.id)}
+                      title={item.description}
+                      className={cn(
+                        "w-full text-left px-3 py-1.5 text-xs rounded transition-colors flex items-center gap-2",
+                        activeSection === item.id
+                          ? "bg-primary/10 text-primary font-medium"
+                          : "text-muted-foreground hover:text-foreground hover:bg-secondary",
+                      )}
+                    >
+                      <NavIcon icon={item.icon} size={12} />
+                      <span className="flex-1 truncate">{item.label}</span>
+                      {status !== "none" && status !== "unconfigured" && (
+                        <span
+                          className={cn(
+                            "w-1.5 h-1.5 rounded-full shrink-0",
+                            status === "connected" && "bg-green-500",
+                            status === "configured" && "bg-blue-500",
+                            status === "partial" && "bg-yellow-500",
+                          )}
+                        />
+                      )}
+                    </button>
+                  );
+                })}
               </div>
             )}
           </div>
