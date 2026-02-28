@@ -40,6 +40,7 @@ import type { CenterView } from "./lib/get-center-tabs";
 import { Group, Panel, Separator, useDefaultLayout, usePanelRef } from "react-resizable-panels";
 import { disconnectSocket, getSocket } from "./lib/socket";
 import { Tooltip } from "./components/ui/Tooltip";
+import { useUIModeStore } from "./stores/ui-mode-store";
 
 export default function App() {
   const screen = useAuthStore((s) => s.screen);
@@ -122,6 +123,8 @@ function MainApp() {
   const enterProject = useProjectStore((s) => s.enterProject);
   const exitProject = useProjectStore((s) => s.exitProject);
   const projects = useProjectStore((s) => s.projects);
+  const isBasic = useUIModeStore((s) => s.mode === "basic");
+  const toggleMode = useUIModeStore((s) => s.toggleMode);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [userProfile, setUserProfile] = useState<UserProfile | undefined>();
   const [centerView, setCenterView] = useState<CenterView>("dashboard");
@@ -284,40 +287,44 @@ function MainApp() {
           )}
         </div>
         <div className="flex items-center gap-0.5">
-          <Tooltip label="Desktop">
-            <button
-              onClick={() => {
-                setCenterView("desktop");
-                setSettingsOpen(false);
-              }}
-              className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${
-                !settingsOpen && centerView === "desktop"
-                  ? "text-primary bg-primary/10"
-                  : "text-muted-foreground hover:text-foreground hover:bg-secondary"
-              }`}
-            >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <rect x="2" y="3" width="20" height="14" rx="2" ry="2" /><line x1="8" y1="21" x2="16" y2="21" /><line x1="12" y1="17" x2="12" y2="21" />
-              </svg>
-            </button>
-          </Tooltip>
-          <Tooltip label="Agent Graph">
-            <button
-              onClick={() => {
-                setCenterView("graph");
-                setSettingsOpen(false);
-              }}
-              className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${
-                !settingsOpen && centerView === "graph"
-                  ? "text-primary bg-primary/10"
-                  : "text-muted-foreground hover:text-foreground hover:bg-secondary"
-              }`}
-            >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="18" cy="18" r="3" /><circle cx="6" cy="6" r="3" /><circle cx="18" cy="6" r="3" /><line x1="8.59" y1="7.41" x2="15.42" y2="14.59" /><line x1="15.41" y1="7.41" x2="8.59" y2="14.59" />
-              </svg>
-            </button>
-          </Tooltip>
+          {!isBasic && (
+            <>
+              <Tooltip label="Desktop">
+                <button
+                  onClick={() => {
+                    setCenterView("desktop");
+                    setSettingsOpen(false);
+                  }}
+                  className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${
+                    !settingsOpen && centerView === "desktop"
+                      ? "text-primary bg-primary/10"
+                      : "text-muted-foreground hover:text-foreground hover:bg-secondary"
+                  }`}
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <rect x="2" y="3" width="20" height="14" rx="2" ry="2" /><line x1="8" y1="21" x2="16" y2="21" /><line x1="12" y1="17" x2="12" y2="21" />
+                  </svg>
+                </button>
+              </Tooltip>
+              <Tooltip label="Agent Graph">
+                <button
+                  onClick={() => {
+                    setCenterView("graph");
+                    setSettingsOpen(false);
+                  }}
+                  className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${
+                    !settingsOpen && centerView === "graph"
+                      ? "text-primary bg-primary/10"
+                      : "text-muted-foreground hover:text-foreground hover:bg-secondary"
+                  }`}
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <circle cx="18" cy="18" r="3" /><circle cx="6" cy="6" r="3" /><circle cx="18" cy="6" r="3" /><line x1="8.59" y1="7.41" x2="15.42" y2="14.59" /><line x1="15.41" y1="7.41" x2="8.59" y2="14.59" />
+                  </svg>
+                </button>
+              </Tooltip>
+            </>
+          )}
           <Tooltip label="3D View">
             <button
               onClick={() => {
@@ -332,6 +339,21 @@ function MainApp() {
             >
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" /><polyline points="3.27 6.96 12 12.01 20.73 6.96" /><line x1="12" y1="22.08" x2="12" y2="12" />
+              </svg>
+            </button>
+          </Tooltip>
+
+          <Tooltip label={isBasic ? "Switch to Advanced" : "Switch to Basic"}>
+            <button
+              onClick={toggleMode}
+              className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${
+                !isBasic
+                  ? "text-primary bg-primary/10"
+                  : "text-muted-foreground hover:text-foreground hover:bg-secondary"
+              }`}
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="4" y1="21" x2="4" y2="14" /><line x1="4" y1="10" x2="4" y2="3" /><line x1="12" y1="21" x2="12" y2="12" /><line x1="12" y1="8" x2="12" y2="3" /><line x1="20" y1="21" x2="20" y2="16" /><line x1="20" y1="12" x2="20" y2="3" /><line x1="1" y1="14" x2="7" y2="14" /><line x1="9" y1="8" x2="15" y2="8" /><line x1="17" y1="16" x2="23" y2="16" />
               </svg>
             </button>
           </Tooltip>
@@ -380,6 +402,7 @@ function MainApp() {
             onEnterProject={handleEnterProject}
             cooName={userProfile?.cooName}
             onOpenSettings={() => setSettingsOpen(true)}
+            isBasic={isBasic}
           />
         </main>
       )}
@@ -431,6 +454,7 @@ function ResizableLayout({
   onEnterProject,
   cooName,
   onOpenSettings,
+  isBasic,
 }: {
   userProfile?: UserProfile;
   activeProjectId: string | null;
@@ -441,6 +465,7 @@ function ResizableLayout({
   onEnterProject: (projectId: string) => void;
   cooName?: string;
   onOpenSettings?: () => void;
+  isBasic?: boolean;
 }) {
   const { defaultLayout, onLayoutChanged } = useDefaultLayout({
     id: "otterbot-layout",
@@ -547,7 +572,7 @@ function ResizableLayout({
         <div className="h-full flex flex-col">
           {/* Tab bar */}
           <div className="flex items-center gap-1 px-3 py-1.5 border-b border-border bg-card">
-              {getCenterTabs(activeProjectId).map((tab) => (
+              {getCenterTabs(activeProjectId, isBasic).map((tab) => (
                   <button
                     key={tab}
                     onClick={() => setCenterView(tab)}
@@ -567,32 +592,36 @@ function ResizableLayout({
         </div>
       </Panel>
 
-      <Separator className="panel-resize-handle" />
+      {!isBasic && (
+        <>
+          <Separator className="panel-resize-handle" />
 
-      {/* Right: Message Stream (collapsible) */}
-      <Panel
-        id="stream"
-        minSize="15%"
-        maxSize="40%"
-        collapsible
-        collapsedSize="40px"
-        panelRef={streamPanelRef}
-        onResize={() => {
-          const collapsed = streamPanelRef.current?.isCollapsed() ?? false;
-          setStreamCollapsed(collapsed);
-        }}
-      >
-        {streamCollapsed ? (
-          <CollapsedStreamStrip onExpand={() => streamPanelRef.current?.expand()} />
-        ) : (
-          <div className="h-full relative">
-            <MessageStream
-              userProfile={userProfile}
-              onCollapse={() => streamPanelRef.current?.collapse()}
-            />
-          </div>
-        )}
-      </Panel>
+          {/* Right: Message Stream (collapsible) */}
+          <Panel
+            id="stream"
+            minSize="15%"
+            maxSize="40%"
+            collapsible
+            collapsedSize="40px"
+            panelRef={streamPanelRef}
+            onResize={() => {
+              const collapsed = streamPanelRef.current?.isCollapsed() ?? false;
+              setStreamCollapsed(collapsed);
+            }}
+          >
+            {streamCollapsed ? (
+              <CollapsedStreamStrip onExpand={() => streamPanelRef.current?.expand()} />
+            ) : (
+              <div className="h-full relative">
+                <MessageStream
+                  userProfile={userProfile}
+                  onCollapse={() => streamPanelRef.current?.collapse()}
+                />
+              </div>
+            )}
+          </Panel>
+        </>
+      )}
     </Group>
   );
 }

@@ -37,6 +37,38 @@ describe("getCenterTabs", () => {
   });
 });
 
+describe("getCenterTabs — basic mode", () => {
+  it("returns simplified global tabs in basic mode", () => {
+    const tabs = getCenterTabs(null, true);
+    expect(tabs).toEqual(["dashboard", "todos"]);
+  });
+
+  it("returns simplified project tabs in basic mode", () => {
+    const tabs = getCenterTabs("proj-1", true);
+    expect(tabs).toEqual(["dashboard", "kanban", "files", "settings"]);
+  });
+
+  it("hides inbox, calendar, and usage in basic global mode", () => {
+    const tabs = getCenterTabs(null, true);
+    expect(tabs).not.toContain("inbox");
+    expect(tabs).not.toContain("calendar");
+    expect(tabs).not.toContain("usage");
+  });
+
+  it("hides charter, code, ssh, merge-queue in basic project mode", () => {
+    const tabs = getCenterTabs("proj-1", true);
+    expect(tabs).not.toContain("charter");
+    expect(tabs).not.toContain("code");
+    expect(tabs).not.toContain("ssh");
+    expect(tabs).not.toContain("merge-queue");
+  });
+
+  it("advanced mode (isBasic=false) returns full tabs", () => {
+    expect(getCenterTabs(null, false)).toEqual(getCenterTabs(null));
+    expect(getCenterTabs("proj-1", false)).toEqual(getCenterTabs("proj-1"));
+  });
+});
+
 describe("centerViewLabels", () => {
   it("has a label for every CenterView value", () => {
     const allViews = [

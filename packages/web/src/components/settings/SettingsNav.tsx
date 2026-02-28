@@ -1,8 +1,13 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useMemo } from "react";
 import { cn } from "../../lib/utils";
 import { SETTINGS_NAV, type SettingsSection, type ConfigStatus } from "./settings-nav";
 import { NavIcon } from "./NavIcon";
 import { SettingsSearch, type SettingsSearchHandle } from "./SettingsSearch";
+import { useUIModeStore } from "../../stores/ui-mode-store";
+
+const BASIC_SECTIONS = new Set<SettingsSection>([
+  "overview", "profile", "appearance", "system", "providers", "models", "workshop", "channels", "github",
+]);
 
 interface SettingsNavProps {
   activeSection: SettingsSection;
@@ -13,6 +18,18 @@ interface SettingsNavProps {
 }
 
 export function SettingsNav({ activeSection, onSelect, onBack, statusMap, searchRef }: SettingsNavProps) {
+  const isBasic = useUIModeStore((s) => s.mode === "basic");
+
+  const filteredNav = useMemo(() => {
+    if (!isBasic) return SETTINGS_NAV;
+    return SETTINGS_NAV
+      .map((group) => ({
+        ...group,
+        items: group.items.filter((item) => BASIC_SECTIONS.has(item.id)),
+      }))
+      .filter((group) => group.items.length > 0);
+  }, [isBasic]);
+
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(() => {
     const initial: Record<string, boolean> = {};
     for (const group of SETTINGS_NAV) {
@@ -72,7 +89,7 @@ export function SettingsNav({ activeSection, onSelect, onBack, statusMap, search
 
       {/* Navigation groups */}
       <div className="flex-1 overflow-y-auto py-2 px-2 space-y-1">
-        {SETTINGS_NAV.map((group) => (
+        {filteredNav.map((group) => (
           <div key={group.label}>
             <button
               onClick={() => toggleGroup(group.label)}

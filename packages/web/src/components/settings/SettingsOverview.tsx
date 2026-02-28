@@ -1,8 +1,13 @@
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import { cn } from "../../lib/utils";
 import { SETTINGS_NAV, type SettingsSection, type ConfigStatus } from "./settings-nav";
 import { NavIcon } from "./NavIcon";
 import { useSettingsStore } from "../../stores/settings-store";
+import { useUIModeStore } from "../../stores/ui-mode-store";
+
+const BASIC_SECTIONS = new Set<SettingsSection>([
+  "overview", "profile", "appearance", "system", "providers", "models", "workshop", "channels", "github",
+]);
 
 interface SettingsOverviewProps {
   onSelect: (section: SettingsSection) => void;
@@ -19,6 +24,17 @@ const STATUS_BADGE: Record<ConfigStatus, { label: string; className: string } | 
 
 export function SettingsOverview({ onSelect, statusMap }: SettingsOverviewProps) {
   const loadSettingsOverview = useSettingsStore((s) => s.loadSettingsOverview);
+  const isBasic = useUIModeStore((s) => s.mode === "basic");
+
+  const filteredNav = useMemo(() => {
+    if (!isBasic) return SETTINGS_NAV;
+    return SETTINGS_NAV
+      .map((group) => ({
+        ...group,
+        items: group.items.filter((item) => BASIC_SECTIONS.has(item.id)),
+      }))
+      .filter((group) => group.items.length > 0);
+  }, [isBasic]);
 
   useEffect(() => {
     loadSettingsOverview();
@@ -33,7 +49,7 @@ export function SettingsOverview({ onSelect, statusMap }: SettingsOverviewProps)
         </p>
       </div>
 
-      {SETTINGS_NAV.map((group) => (
+      {filteredNav.map((group) => (
         <div key={group.label}>
           <h3 className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold mb-2">
             {group.label}
