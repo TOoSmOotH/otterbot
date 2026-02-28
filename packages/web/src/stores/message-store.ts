@@ -1,6 +1,26 @@
 import { create } from "zustand";
 import type { BusMessage, Conversation } from "@otterbot/shared";
 
+/** Returns true if the message should appear in the CEO chat panel */
+function isCeoChatMessage(m: BusMessage): boolean {
+  const isModuleAgent =
+    m.fromAgentId?.startsWith("module-agent-") ||
+    m.toAgentId?.startsWith("module-agent-");
+  const isCeoDirective =
+    m.type === "directive" &&
+    m.fromAgentId === null &&
+    m.toAgentId?.startsWith("module-agent-");
+  return (
+    (m.type === "chat" || (m.type === "report" && isModuleAgent) || isCeoDirective) &&
+    (m.fromAgentId === null ||
+      m.fromAgentId === "coo" ||
+      m.fromAgentId?.startsWith("module-agent-")) &&
+    (m.toAgentId === null ||
+      m.toAgentId === "coo" ||
+      m.toAgentId?.startsWith("module-agent-"))
+  );
+}
+
 interface MessageState {
   /** All bus messages (for the stream panel) */
   messages: BusMessage[];
@@ -55,20 +75,7 @@ export const useMessageStore = create<MessageState>((set) => ({
     set((state) => {
       const newMessages = [...state.messages, message];
 
-      // If it's a CEO↔COO or CEO↔module-agent chat/report message, also add to chat
-      const isModuleAgent =
-        message.fromAgentId?.startsWith("module-agent-") ||
-        message.toAgentId?.startsWith("module-agent-");
-      const isCeoChat =
-        (message.type === "chat" || (message.type === "report" && isModuleAgent)) &&
-        (message.fromAgentId === null ||
-          message.fromAgentId === "coo" ||
-          message.fromAgentId?.startsWith("module-agent-")) &&
-        (message.toAgentId === null ||
-          message.toAgentId === "coo" ||
-          message.toAgentId?.startsWith("module-agent-"));
-
-      const newChat = isCeoChat
+      const newChat = isCeoChatMessage(message)
         ? [...state.chatMessages, message]
         : state.chatMessages;
 
@@ -150,12 +157,7 @@ export const useMessageStore = create<MessageState>((set) => ({
     set({
       messages,
       hasMore,
-      chatMessages: messages.filter(
-        (m) =>
-          m.type === "chat" &&
-          (m.fromAgentId === null || m.fromAgentId === "coo") &&
-          (m.toAgentId === null || m.toAgentId === "coo"),
-      ),
+      chatMessages: messages.filter(isCeoChatMessage),
     }),
 
   prependHistory: ({ messages: older, hasMore }) =>
@@ -164,12 +166,7 @@ export const useMessageStore = create<MessageState>((set) => ({
       return {
         messages: merged,
         hasMore,
-        chatMessages: merged.filter(
-          (m) =>
-            m.type === "chat" &&
-            (m.fromAgentId === null || m.fromAgentId === "coo") &&
-            (m.toAgentId === null || m.toAgentId === "coo"),
-        ),
+        chatMessages: merged.filter(isCeoChatMessage),
       };
     }),
 
@@ -198,12 +195,7 @@ export const useMessageStore = create<MessageState>((set) => ({
 
   loadConversationMessages: (messages) =>
     set({
-      chatMessages: messages.filter(
-        (m) =>
-          m.type === "chat" &&
-          (m.fromAgentId === null || m.fromAgentId === "coo") &&
-          (m.toAgentId === null || m.toAgentId === "coo"),
-      ),
+      chatMessages: messages.filter(isCeoChatMessage),
       streamingContent: "",
       streamingMessageId: null,
       streamingConversationId: null,
