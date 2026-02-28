@@ -1,5 +1,51 @@
 # Changelog
 
+## [0.9.0](https://github.com/TOoSmOotH/otterbot/compare/otterbot-v0.8.1...otterbot-v0.9.0) (2026-02-28)
+
+
+### Features
+
+* add basic/advanced UI mode for new user onboarding ([e6db82c](https://github.com/TOoSmOotH/otterbot/commit/e6db82c792c594892b15bb4daecc7484d3987e44))
+* add clone functionality to Specialists tab ([395e765](https://github.com/TOoSmOotH/otterbot/commit/395e76520e2d3a5e830208bbf075bac3895c8808))
+* add full historical sync for modules with paginated fetching ([876b0cd](https://github.com/TOoSmOotH/otterbot/commit/876b0cd858cafcd9e89f1fe577847f2de52d1864))
+* add module agent query UI and main chat agent selector ([65df40b](https://github.com/TOoSmOotH/otterbot/commit/65df40be4a171ccef685c7580d4c4bbab9de9758))
+* add module agent query UI with inline ask box and chat panel ([c2bea6c](https://github.com/TOoSmOotH/otterbot/commit/c2bea6cacc33b36db36d641908f100f6152b5940))
+* add module agent query UI with inline ask box and chat panel ([c7582d9](https://github.com/TOoSmOotH/otterbot/commit/c7582d9757984095aa020e9b3b079ac4715cf0b1))
+* add module agent query UI with inline ask box and chat panel ([9d5abc2](https://github.com/TOoSmOotH/otterbot/commit/9d5abc2adc2295f9ee5d7a60f0e1f6a0863534e3))
+* add module agent selector to main chat, fix query feedback ([8150f7e](https://github.com/TOoSmOotH/otterbot/commit/8150f7e477ac7c3e28b58da0ce53ede5520f25aa))
+* add module agents — give modules their own subordinate AI agents ([b763680](https://github.com/TOoSmOotH/otterbot/commit/b7636808434f42c638223525f83d1b68c8d42b18))
+* add module agents — subordinate AI agents for modules ([7104fb0](https://github.com/TOoSmOotH/otterbot/commit/7104fb086fedbba938b6e6387f79de026c829946))
+* add module config UI and API endpoints ([e6a4e6c](https://github.com/TOoSmOotH/otterbot/commit/e6a4e6ce7907d45b6ff761c20a570b595f3cf891))
+* add module config UI and API endpoints ([fbad62e](https://github.com/TOoSmOotH/otterbot/commit/fbad62e4ba6ad440ee8170e516259e484c0dcfd7))
+* add posting mode controls, provider/model dropdowns, and DB info to module config UI ([055ae1f](https://github.com/TOoSmOotH/otterbot/commit/055ae1f65b6a1554ec90605ba45d289e9b5de8a7))
+* add What's New button to header with GitHub release notifications ([5be4aef](https://github.com/TOoSmOotH/otterbot/commit/5be4aef0cccadde03a7d9613f7ea697c3ff2ed88))
+* **github-discussions:** add agent config and search_discussions tool ([3ad4d59](https://github.com/TOoSmOotH/otterbot/commit/3ad4d5978063307dc47a72397c13631c5eea3219))
+* **github-discussions:** add agent config and search_discussions tool ([5a23ea3](https://github.com/TOoSmOotH/otterbot/commit/5a23ea36f973bf7c01aba267a0ccc239d01339cc))
+* improve main page UX and fix agent graph layout ([115708b](https://github.com/TOoSmOotH/otterbot/commit/115708b94d8f778d2fedea98c8637ab72ae0b769))
+* module agent query UI, main chat selector, and lurk mode fix ([a8b180d](https://github.com/TOoSmOotH/otterbot/commit/a8b180d2c25217907d6785ed8c81ad0f528615f1))
+* module config UI and full historical sync ([426dccd](https://github.com/TOoSmOotH/otterbot/commit/426dccd4ccbc01c8ca70b028b86e64e9958a2471))
+* module config UI dropdowns, posting modes & DB info ([7210a17](https://github.com/TOoSmOotH/otterbot/commit/7210a174b1a12bdcf1318e87acd0bf7e3abc2f2c))
+* redesign settings UI with overview page, icons, search, and status indicators ([b559964](https://github.com/TOoSmOotH/otterbot/commit/b559964c55b9586f2ef3df083211aca668846f2c))
+* show DB stats on module cards, add agent prompt textarea ([16c69ad](https://github.com/TOoSmOotH/otterbot/commit/16c69ad8a16f81fec301015a626c4888fa0ecadb))
+* show DB stats without expanding config, add textarea for agent prompt ([76ca77e](https://github.com/TOoSmOotH/otterbot/commit/76ca77e5ea4b1b3bae6acc27ba71913809080ccd))
+* unify modules into Agent Workshop as Specialist Agents ([e65a3f1](https://github.com/TOoSmOotH/otterbot/commit/e65a3f199f91cf1cdf1ed1ff3bc9a0ff451ada24))
+
+
+### Bug Fixes
+
+* add missing migration for module_agent_id column ([f62d63a](https://github.com/TOoSmOotH/otterbot/commit/f62d63ad69334be42d743f90edeefba1704504af))
+* add missing migration for module_agent_id column on custom_scheduled_tasks ([814012f](https://github.com/TOoSmOotH/otterbot/commit/814012f31d1a3fae3a761d0065dbe05861488d22))
+* break circular import between module-tools and module index ([96dcec4](https://github.com/TOoSmOotH/otterbot/commit/96dcec4f3350549ee1c7191b6a6413df8623bcf3))
+* break circular import preventing module system init ([97d149c](https://github.com/TOoSmOotH/otterbot/commit/97d149c70d4f969c1e2b6f22582122c783311e43))
+* convert static imports to dynamic in modules/index.ts ([596755f](https://github.com/TOoSmOotH/otterbot/commit/596755fbb218709642ba02a7c6713290ac61a700))
+* convert static imports to dynamic in modules/index.ts to prevent init failure ([b81cddc](https://github.com/TOoSmOotH/otterbot/commit/b81cddc5b50d883b7f162eab4a8978a27c693b5c))
+* improve module query UI feedback and handle edge cases ([bfffeef](https://github.com/TOoSmOotH/otterbot/commit/bfffeeffada36a2b4e41b7ad87eb48f066cd12af))
+* lurk mode should only suppress external posts, not direct queries ([3462f74](https://github.com/TOoSmOotH/otterbot/commit/3462f743d9bd363b8f922032744f58561cb24dcb))
+* provider deletion now shows errors and requires confirmation ([1c6546e](https://github.com/TOoSmOotH/otterbot/commit/1c6546eb1120391b25711f47c55b3ddab717f6d7))
+* provider deletion now shows errors and requires confirmation ([8c3da57](https://github.com/TOoSmOotH/otterbot/commit/8c3da57ff5a946d7e767e2862f50ce7903e9c86a)), closes [#311](https://github.com/TOoSmOotH/otterbot/issues/311)
+* use git tag listing for beta version derivation ([0a811f2](https://github.com/TOoSmOotH/otterbot/commit/0a811f27f84d4a5196961bda2654186e5cc28a51))
+* use git tag listing for beta version derivation ([ca8c6e5](https://github.com/TOoSmOotH/otterbot/commit/ca8c6e58310fc8bf80bb95fa91b0a13ed792f018))
+
 ## [0.8.1](https://github.com/TOoSmOotH/otterbot/compare/otterbot-v0.8.0...otterbot-v0.8.1) (2026-02-27)
 
 
