@@ -12,13 +12,15 @@ interface WASDControlsProps {
 /**
  * WASD camera movement for the 3D live view.
  *
- * Moves the camera and its OrbitControls target together on the XZ plane,
+ * Moves the camera and its OrbitControls target together,
  * relative to the camera's current horizontal facing direction.
  *
  * - W / ArrowUp    → forward
  * - S / ArrowDown  → backward
  * - A / ArrowLeft  → strafe left
  * - D / ArrowRight → strafe right
+ * - Space          → move up
+ * - Ctrl           → move down
  */
 export function WASDControls({ speed = 10, disabled = false }: WASDControlsProps) {
   const { camera } = useThree();
@@ -37,7 +39,9 @@ export function WASDControls({ speed = 10, disabled = false }: WASDControlsProps
 
       const key = e.key.toLowerCase();
       if (key === "w" || key === "a" || key === "s" || key === "d" ||
-          key === "arrowup" || key === "arrowdown" || key === "arrowleft" || key === "arrowright") {
+          key === "arrowup" || key === "arrowdown" || key === "arrowleft" || key === "arrowright" ||
+          key === " " || key === "control") {
+        if (key === " ") e.preventDefault();
         keys.current.add(key);
       }
     };
@@ -64,6 +68,7 @@ export function WASDControls({ speed = 10, disabled = false }: WASDControlsProps
   // Reusable vectors (allocated once, reused per frame)
   const forward = useRef(new THREE.Vector3());
   const right = useRef(new THREE.Vector3());
+  const up = useRef(new THREE.Vector3(0, 1, 0));
   const delta = useRef(new THREE.Vector3());
 
   useFrame((state, dt) => {
@@ -84,6 +89,8 @@ export function WASDControls({ speed = 10, disabled = false }: WASDControlsProps
     if (pressed.has("s") || pressed.has("arrowdown")) delta.current.sub(forward.current);
     if (pressed.has("a") || pressed.has("arrowleft")) delta.current.sub(right.current);
     if (pressed.has("d") || pressed.has("arrowright")) delta.current.add(right.current);
+    if (pressed.has(" ")) delta.current.add(up.current);
+    if (pressed.has("control")) delta.current.sub(up.current);
 
     if (delta.current.lengthSq() === 0) return;
     delta.current.normalize().multiplyScalar(speed * dt);

@@ -130,6 +130,42 @@ describe("WASDControls", () => {
     expect(mockState.camera?.position.z).toBeCloseTo(0, 6);
   });
 
+  it("moves camera up when Space is pressed", () => {
+    mountWASDControls({ speed: 10 });
+
+    dispatchWindowEvent("keydown", { key: " ", target: { tagName: "DIV" }, preventDefault: () => {} });
+    mockState.frameCallback?.({ controls: { target: new THREE.Vector3() } }, 0.5);
+
+    expect(mockState.camera?.position.x).toBeCloseTo(0, 6);
+    expect(mockState.camera?.position.y).toBeCloseTo(6, 6);
+    expect(mockState.camera?.position.z).toBeCloseTo(0, 6);
+  });
+
+  it("moves camera down when Ctrl is pressed", () => {
+    mountWASDControls({ speed: 10 });
+
+    dispatchWindowEvent("keydown", { key: "Control", target: { tagName: "DIV" } });
+    mockState.frameCallback?.({ controls: { target: new THREE.Vector3() } }, 0.5);
+
+    expect(mockState.camera?.position.x).toBeCloseTo(0, 6);
+    expect(mockState.camera?.position.y).toBeCloseTo(-4, 6);
+    expect(mockState.camera?.position.z).toBeCloseTo(0, 6);
+  });
+
+  it("normalizes combined horizontal + vertical movement", () => {
+    mountWASDControls({ speed: 10 });
+
+    dispatchWindowEvent("keydown", { key: "w", target: { tagName: "DIV" } });
+    dispatchWindowEvent("keydown", { key: " ", target: { tagName: "DIV" }, preventDefault: () => {} });
+    mockState.frameCallback?.({ controls: { target: new THREE.Vector3() } }, 1);
+
+    // W = (0,0,-1), Space = (0,1,0), normalized = (0, 1/√2, -1/√2)
+    const expected = 10 / Math.SQRT2;
+    expect(mockState.camera?.position.x).toBeCloseTo(0, 5);
+    expect(mockState.camera?.position.y).toBeCloseTo(1 + expected, 5);
+    expect(mockState.camera?.position.z).toBeCloseTo(-expected, 5);
+  });
+
   it("does not register listeners or move when disabled", () => {
     mountWASDControls({ speed: 10, disabled: true });
 
