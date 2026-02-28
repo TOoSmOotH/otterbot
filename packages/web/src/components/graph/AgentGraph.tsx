@@ -16,6 +16,18 @@ import type { Agent } from "@otterbot/shared";
 
 const nodeTypes = { agent: AgentNode };
 
+/** Map every AgentRole to a layout tier so we can compute Y positions. */
+const ROLE_TIER: Record<string, number> = {
+  coo: 1,
+  admin_assistant: 2,
+  scheduler: 2,
+  team_lead: 2,
+  worker: 3,
+  module_agent: 3,
+};
+
+const TIER_Y = [0, 150, 320, 490]; // CEO, COO, middle, bottom
+
 function buildLayout(
   agents: Map<string, Agent>,
   userProfile?: { name: string | null; avatar: string | null; cooName?: string },
@@ -23,6 +35,7 @@ function buildLayout(
 ): {
   nodes: Node[];
   edges: Edge[];
+  activeCount: number;
 } {
   const nodes: Node[] = [];
   const edges: Edge[] = [];
@@ -32,7 +45,7 @@ function buildLayout(
   nodes.push({
     id: "ceo",
     type: "agent",
-    position: { x: 300, y: 0 },
+    position: { x: 300, y: TIER_Y[0] },
     data: {
       label: ceoLabel,
       role: "ceo",
@@ -46,69 +59,61 @@ function buildLayout(
     (a) => a.status !== "done",
   );
 
-  // Group agents by parent for hierarchical layout
-  const byParent = new Map<string | null, Agent[]>();
+  // Group agents by tier for horizontal spacing
+  const tierAgents: Agent[][] = [[], [], [], []];
   for (const agent of activeAgents) {
-    const parentId = agent.parentId;
-    if (!byParent.has(parentId)) {
-      byParent.set(parentId, []);
-    }
-    byParent.get(parentId)!.push(agent);
+    const tier = ROLE_TIER[agent.role] ?? 3;
+    tierAgents[tier].push(agent);
   }
 
-  // Position agents in levels
-  const levelY: Record<string, number> = {
-    coo: 100,
-    team_lead: 220,
-    worker: 340,
-  };
+  for (let tier = 1; tier < tierAgents.length; tier++) {
+    const group = tierAgents[tier];
+    const count = group.length;
+    if (count === 0) continue;
 
-  // Count agents per level for horizontal spacing
-  const levelCounts: Record<string, number> = { coo: 0, team_lead: 0, worker: 0 };
-  for (const agent of activeAgents) {
-    levelCounts[agent.role] = (levelCounts[agent.role] || 0) + 1;
-  }
+    const spacing = 220;
+    const totalWidth = count * spacing;
+    const startX = 300 - totalWidth / 2 + spacing / 2;
 
-  const levelIndex: Record<string, number> = { coo: 0, team_lead: 0, worker: 0 };
-
-  for (const agent of activeAgents) {
-    const count = levelCounts[agent.role] || 1;
-    const idx = levelIndex[agent.role]++;
-    const totalWidth = count * 220;
-    const startX = 300 - totalWidth / 2 + 110;
-    const x = startX + idx * 220;
-
-    nodes.push({
-      id: agent.id,
-      type: "agent",
-      position: { x, y: levelY[agent.role] ?? 340 },
-      data: {
-        label: getRoleLabel(agent, userProfile?.cooName),
-        role: agent.role,
-        status: agent.status,
-        onClick: onNodeClick ? () => onNodeClick(agent.id) : undefined,
-      },
-    });
-
-    // Edge from parent
-    const parentId = agent.parentId ?? (agent.role === "coo" ? "ceo" : null);
-    if (parentId) {
-      edges.push({
-        id: `${parentId}-${agent.id}`,
-        source: parentId,
-        target: agent.id,
-        animated: agent.status === "thinking" || agent.status === "acting" || agent.status === "awaiting_input",
-        style: { stroke: "hsl(var(--muted-foreground))" },
+    for (let i = 0; i < count; i++) {
+      const agent = group[i];
+      nodes.push({
+        id: agent.id,
+        type: "agent",
+        position: { x: startX + i * spacing, y: TIER_Y[tier] },
+        data: {
+          label: getRoleLabel(agent, userProfile?.cooName),
+          role: agent.role,
+          status: agent.status,
+          onClick: onNodeClick ? () => onNodeClick(agent.id) : undefined,
+        },
       });
+
+      // Edge from parent — auto-link COO→CEO, schedulers/admin→COO
+      const parentId = agent.parentId
+        ?? (agent.role === "coo" ? "ceo" : null)
+        ?? (agent.role === "scheduler" || agent.role === "admin_assistant" ? "coo" : null);
+      if (parentId) {
+        edges.push({
+          id: `${parentId}-${agent.id}`,
+          source: parentId,
+          target: agent.id,
+          animated: agent.status === "thinking" || agent.status === "acting" || agent.status === "awaiting_input",
+          style: { stroke: "hsl(var(--muted-foreground))" },
+        });
+      }
     }
   }
 
-  return { nodes, edges };
+  return { nodes, edges, activeCount: activeAgents.length };
 }
 
 function getRoleLabel(agent: Agent, cooName?: string): string {
   if (agent.role === "coo") return cooName ?? "COO";
   if (agent.role === "team_lead") return agent.name ?? "Team Lead";
+  if (agent.role === "scheduler") return agent.name ?? "Scheduler";
+  if (agent.role === "admin_assistant") return agent.name ?? "Admin Assistant";
+  if (agent.role === "module_agent") return agent.name ?? "Specialist";
   return agent.name ?? `Worker ${agent.id.slice(0, 6)}`;
 }
 
@@ -141,7 +146,7 @@ function AgentGraphInner({
     selectAgent(agentId);
   }, [selectAgent]);
 
-  const { nodes, edges } = useMemo(
+  const { nodes, edges, activeCount } = useMemo(
     () => buildLayout(agents, userProfile, handleNodeClick),
     [agents, userProfile, handleNodeClick],
   );
@@ -150,20 +155,21 @@ function AgentGraphInner({
   const initializedRef = useRef(false);
   const prevAgentCountRef = useRef(-1);
 
+  const fitViewOptions = useMemo(() => ({ padding: 0.25 }), []);
+
   const handleInit = useCallback(() => {
     initializedRef.current = true;
-    prevAgentCountRef.current = agents.size;
-    fitView();
-  }, [fitView, agents.size]);
+    prevAgentCountRef.current = activeCount;
+    fitView(fitViewOptions);
+  }, [fitView, fitViewOptions, activeCount]);
 
   useEffect(() => {
     if (!initializedRef.current) return;
-    const currentCount = agents.size;
-    if (prevAgentCountRef.current !== currentCount) {
-      prevAgentCountRef.current = currentCount;
-      requestAnimationFrame(() => fitView());
+    if (prevAgentCountRef.current !== activeCount) {
+      prevAgentCountRef.current = activeCount;
+      requestAnimationFrame(() => fitView(fitViewOptions));
     }
-  }, [agents.size, fitView]);
+  }, [activeCount, fitView, fitViewOptions]);
 
   return (
     <div className="flex flex-col h-full">
@@ -172,7 +178,7 @@ function AgentGraphInner({
         <h2 className="text-sm font-semibold tracking-tight">Agent Graph</h2>
         <div className="flex items-center gap-2">
           <span className="text-[10px] text-muted-foreground">
-            {agents.size} agents
+            {activeCount} agents
           </span>
           {onToggleView && (
             <button
@@ -205,10 +211,10 @@ function AgentGraphInner({
             zoomOnScroll={true}
             panOnScroll={false}
             panOnDrag={true}
-            minZoom={0.5}
+            minZoom={0.2}
             maxZoom={1.5}
           >
-            <Controls showInteractive={false} />
+            <Controls showInteractive={false} className="!bg-secondary !border-border !shadow-md [&>button]:!bg-secondary [&>button]:!border-border [&>button]:!text-foreground [&>button:hover]:!bg-muted" />
           </ReactFlow>
         </div>
         {selectedAgentId && <AgentDetailPanel />}

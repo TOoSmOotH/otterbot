@@ -4,6 +4,7 @@
 
 import { tool } from "ai";
 import { z } from "zod";
+import { MessageType } from "@otterbot/shared";
 import type { ModuleLoader } from "./module-loader.js";
 import type { ModuleScheduler } from "./module-scheduler.js";
 import {
@@ -26,6 +27,7 @@ export function createModuleTools(
       execute: async () => {
         const modules = loader.getAll();
         const { listModules } = await import("./module-manifest.js");
+        const { getModuleAgent } = await import("./index.js");
         const installed = listModules();
 
         const items = installed.map((m) => {
@@ -46,6 +48,8 @@ export function createModuleTools(
             hasQuery: loaded ? !!loaded.definition.onQuery : false,
             hasPoll: loaded ? !!loaded.definition.onPoll : false,
             hasWebhook: loaded ? !!loaded.definition.onWebhook : false,
+            hasAgent: loaded ? !!loaded.definition.agent : false,
+            agentActive: !!getModuleAgent(m.id),
           };
         });
 
@@ -55,8 +59,9 @@ export function createModuleTools(
 
     module_query: tool({
       description:
-        "Query a specific module's knowledge base. If the module has a custom query handler, " +
-        "it will be used; otherwise falls back to searching the module's knowledge store.",
+        "Query a specific module's knowledge base. If the module has an active agent, " +
+        "it will reason over the query and return a synthesized answer. Otherwise falls " +
+        "back to the custom query handler or raw knowledge store search.",
       parameters: z.object({
         moduleId: z.string().describe("The module ID to query"),
         question: z.string().describe("The question or search query"),
@@ -68,6 +73,30 @@ export function createModuleTools(
         }
 
         try {
+          // If the module has an active agent, route through it for reasoned answers
+          const { getModuleAgent, getModuleBus } = await import("./index.js");
+          const moduleAgent = getModuleAgent(moduleId);
+          if (moduleAgent) {
+            const bus = getModuleBus();
+            if (bus) {
+              const agentId = `module-agent-${moduleId}`;
+              const reply = await bus.request(
+                {
+                  fromAgentId: "coo",
+                  toAgentId: agentId,
+                  type: MessageType.Directive,
+                  content: question,
+                  metadata: { source: "module_query" },
+                },
+                120_000, // 2 minute timeout for agent reasoning
+              );
+              if (reply) {
+                return reply.content;
+              }
+              // Fall through to raw search on timeout
+            }
+          }
+
           if (loaded.definition.onQuery) {
             return await loaded.definition.onQuery(question, loaded.context);
           }

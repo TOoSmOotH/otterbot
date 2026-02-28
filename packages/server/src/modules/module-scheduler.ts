@@ -73,11 +73,15 @@ export class ModuleScheduler {
     }
   }
 
-  /** Execute a single poll cycle for a module. */
-  private async executePoll(id: string, loaded: LoadedModule): Promise<void> {
-    if (!loaded.definition.onPoll) return;
+  /** Execute a single poll cycle for a module. When fullSync is true, uses onFullSync if available. */
+  async executePoll(id: string, loaded: LoadedModule, fullSync?: boolean): Promise<number> {
+    const handler = fullSync && loaded.definition.onFullSync
+      ? loaded.definition.onFullSync
+      : loaded.definition.onPoll;
 
-    const result = await loaded.definition.onPoll(loaded.context);
+    if (!handler) return 0;
+
+    const result = await handler(loaded.context);
 
     // Auto-ingest items into knowledge store
     for (const item of result.items) {
@@ -97,5 +101,7 @@ export class ModuleScheduler {
     if (result.items.length > 0) {
       loaded.context.log(`Polled ${result.items.length} items`);
     }
+
+    return result.items.length;
   }
 }

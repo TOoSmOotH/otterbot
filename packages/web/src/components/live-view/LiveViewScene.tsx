@@ -43,6 +43,7 @@ export function LiveViewScene({ userProfile }: LiveViewSceneProps) {
     const workers = activeAgents.filter((a) => a.role === "worker");
     const adminAssistants = activeAgents.filter((a) => a.role === "admin_assistant");
     const schedulers = activeAgents.filter((a) => a.role === "scheduler");
+    const moduleAgents = activeAgents.filter((a) => a.role === "module_agent");
 
     // Helper: does a project have any actively-working non-lead agents?
     const hasActiveWorkersInProject = (projectId: string | null): boolean => {
@@ -222,6 +223,24 @@ export function LiveViewScene({ userProfile }: LiveViewSceneProps) {
           rotationY: pos.rotationY,
         });
       }
+
+      // Module agents — share break room with schedulers
+      for (let i = 0; i < moduleAgents.length; i++) {
+        const ma = moduleAgents[i];
+        const zoneId = breakRoomZone ? breakRoomZoneId : mainZoneId;
+        const deskIdx = breakRoomZone ? breakRoomIdx++ : nextDeskIndex++;
+        const pos = getStatusAwarePos(ma, zoneId, deskIdx);
+        positions.push({
+          agent: ma,
+          role: "module_agent",
+          x: pos.x,
+          z: pos.z,
+          label: ma.name ?? `Module Agent ${ma.id.slice(0, 6)}`,
+          modelPackId: ma.modelPackId ?? null,
+          gearConfig: ma.gearConfig ?? null,
+          rotationY: pos.rotationY,
+        });
+      }
     } else if (activeScene?.agentPositions) {
       const ap = activeScene.agentPositions;
 
@@ -296,6 +315,21 @@ export function LiveViewScene({ userProfile }: LiveViewSceneProps) {
           rotationY: slot.rotation ?? 0,
         });
       }
+
+      // Module agents — cycle through worker slots after schedulers
+      for (let i = 0; i < moduleAgents.length; i++) {
+        const slot = ap.worker[(workers.length + schedulers.length + i) % ap.worker.length];
+        positions.push({
+          agent: moduleAgents[i],
+          role: "module_agent",
+          x: slot.position[0],
+          z: slot.position[2],
+          label: moduleAgents[i].name ?? `Module Agent ${moduleAgents[i].id.slice(0, 6)}`,
+          modelPackId: moduleAgents[i].modelPackId ?? null,
+          gearConfig: moduleAgents[i].gearConfig ?? null,
+          rotationY: slot.rotation ?? 0,
+        });
+      }
     } else {
       // Fallback: original grid layout
       positions.push({
@@ -361,6 +395,20 @@ export function LiveViewScene({ userProfile }: LiveViewSceneProps) {
           label: schedulers[i].name ?? `Scheduler ${schedulers[i].id.slice(0, 6)}`,
           modelPackId: schedulers[i].modelPackId ?? null,
           gearConfig: schedulers[i].gearConfig ?? null,
+          rotationY: 0,
+        });
+      }
+
+      for (let i = 0; i < moduleAgents.length; i++) {
+        const spread = (i - (moduleAgents.length - 1) / 2) * 3;
+        positions.push({
+          agent: moduleAgents[i],
+          role: "module_agent",
+          x: spread,
+          z: -15,
+          label: moduleAgents[i].name ?? `Module Agent ${moduleAgents[i].id.slice(0, 6)}`,
+          modelPackId: moduleAgents[i].modelPackId ?? null,
+          gearConfig: moduleAgents[i].gearConfig ?? null,
           rotationY: 0,
         });
       }

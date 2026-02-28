@@ -7,6 +7,7 @@ import { getSocket } from "../../lib/socket";
 import { cancelTts } from "../../hooks/use-socket";
 import { cn } from "../../lib/utils";
 import { MarkdownContent } from "./MarkdownContent";
+import { useUIModeStore } from "../../stores/ui-mode-store";
 
 function formatRelativeTime(dateStr: string): string {
   const now = Date.now();
@@ -55,8 +56,12 @@ const ThinkingDisclosure: FC<{ thinking: string }> = ({ thinking }) => {
 };
 
 export function CeoChat({ cooName, detached }: { cooName?: string; detached?: boolean }) {
+  const isBasic = useUIModeStore((s) => s.mode === "basic");
   const [input, setInput] = useState("");
   const [showHistory, setShowHistory] = useState(false);
+  const [targetAgentId, setTargetAgentId] = useState<string | null>(null);
+  const moduleAgents = useSettingsStore((s) => s.moduleAgents);
+  const loadModuleAgents = useSettingsStore((s) => s.loadModuleAgents);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const chatMessages = useMessageStore((s) => s.chatMessages);
@@ -85,6 +90,11 @@ export function CeoChat({ cooName, detached }: { cooName?: string; detached?: bo
 
   const sttEnabled = useSettingsStore((s) => s.sttEnabled);
   const activeSTTProvider = useSettingsStore((s) => s.activeSTTProvider);
+
+  // Load module agents for the agent selector
+  useEffect(() => {
+    if (moduleAgents.length === 0) loadModuleAgents();
+  }, [moduleAgents.length, loadModuleAgents]);
 
   const [speechError, setSpeechError] = useState<string | null>(null);
   const [interimText, setInterimText] = useState("");
@@ -182,6 +192,7 @@ export function CeoChat({ cooName, detached }: { cooName?: string; detached?: bo
         content,
         conversationId: currentConversationId ?? undefined,
         projectId: activeProjectId ?? undefined,
+        ...(targetAgentId ? { toAgentId: targetAgentId } : {}),
       },
       (ack) => {
         if (ack?.conversationId) {
@@ -288,7 +299,7 @@ export function CeoChat({ cooName, detached }: { cooName?: string; detached?: bo
               ? "Chat History"
               : activeProject
                 ? activeProject.name
-                : `${cooName ?? "COO"} Chat`}
+                : "Chat"}
           </h2>
           {!showHistory && currentConversationId && (() => {
             const activeConv = displayedConversations.find((c) => c.id === currentConversationId);
@@ -305,8 +316,8 @@ export function CeoChat({ cooName, detached }: { cooName?: string; detached?: bo
           )}
         </div>
         <div className="flex items-center gap-1">
-          {/* Pop-out button (not shown when already detached) */}
-          {!detached && (
+          {/* Pop-out button (not shown when already detached or in basic mode) */}
+          {!detached && !isBasic && (
             <button
               onClick={handlePopOut}
               title="Pop out chat"
@@ -451,9 +462,12 @@ export function CeoChat({ cooName, detached }: { cooName?: string; detached?: bo
           {/* Messages */}
           <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
             {chatMessages.length === 0 && !streamingContent && (
-              <div className="flex items-center justify-center h-full">
+              <div className="flex flex-col items-center justify-center h-full gap-2">
                 <p className="text-sm text-muted-foreground text-center max-w-[240px]">
-                  Send a message to start working with {cooName ?? "your COO"}
+                  Send a message to start working with Otter
+                </p>
+                <p className="text-[11px] text-muted-foreground/60 text-center max-w-[200px]">
+                  Ask questions, create projects, or give instructions
                 </p>
               </div>
             )}
@@ -544,18 +558,39 @@ export function CeoChat({ cooName, detached }: { cooName?: string; detached?: bo
           </div>
 
           {/* Input */}
-          <div className="px-3 py-3 border-t border-border">
+          <div className="px-3 py-3 border-t border-border space-y-2">
+            {!isBasic && moduleAgents.length > 0 && (
+              <div className="flex items-center gap-2">
+                <select
+                  value={targetAgentId ?? ""}
+                  onChange={(e) => setTargetAgentId(e.target.value || null)}
+                  className="bg-secondary rounded-md px-2 py-1 text-[11px] outline-none focus:ring-1 ring-primary text-muted-foreground"
+                >
+                  <option value="">{cooName ?? "COO"}</option>
+                  {moduleAgents.map((a) => (
+                    <option key={a.agentId} value={a.agentId}>
+                      {a.name ?? a.moduleId}
+                    </option>
+                  ))}
+                </select>
+                {targetAgentId && (
+                  <span className="text-[10px] text-muted-foreground">
+                    Direct message — bypasses COO
+                  </span>
+                )}
+              </div>
+            )}
             <div className="flex items-end gap-2 bg-secondary rounded-xl px-3 py-2">
               <textarea
                 ref={textareaRef}
                 value={input}
                 onChange={handleInput}
                 onKeyDown={handleKeyDown}
-                placeholder={`Message ${cooName ?? "the COO"}...`}
+                placeholder={`Message ${targetAgentId ? (moduleAgents.find((a) => a.agentId === targetAgentId)?.name ?? "agent") : (cooName ?? "the COO")}...`}
                 rows={1}
                 className="flex-1 bg-transparent text-sm resize-none outline-none placeholder:text-muted-foreground max-h-[200px]"
               />
-              {isSupported && (
+              {!isBasic && isSupported && (
                 <button
                   onClick={toggleListening}
                   disabled={isTranscribing}
@@ -615,7 +650,7 @@ export function CeoChat({ cooName, detached }: { cooName?: string; detached?: bo
                   )}
                 </button>
               )}
-              <button
+              {!isBasic && <button
                 onClick={toggleSpeaker}
                 title={speakerOn ? "Mute assistant voice" : "Unmute assistant voice"}
                 className={cn(
@@ -649,7 +684,7 @@ export function CeoChat({ cooName, detached }: { cooName?: string; detached?: bo
                     </>
                   )}
                 </svg>
-              </button>
+              </button>}
               <button
                 onClick={sendMessage}
                 disabled={!input.trim()}

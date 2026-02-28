@@ -84,7 +84,7 @@ export interface ServerToClientEvents {
 /** Events emitted from client to server */
 export interface ClientToServerEvents {
   "ceo:message": (
-    data: { content: string; conversationId?: string; projectId?: string },
+    data: { content: string; conversationId?: string; projectId?: string; toAgentId?: string },
     callback?: (ack: { messageId: string; conversationId: string }) => void,
   ) => void;
   "ceo:new-chat": (

@@ -1,10 +1,17 @@
 // ---------------------------------------------------------------------------
-// Module system types
+// Specialist Agent types (formerly "Module system")
+//
+// Specialist Agents are agents with their own isolated knowledge store,
+// data ingestion pipeline, config schema, and tools. They are the primary
+// extension point for connecting Otterbot to external data sources.
+//
+// The "Module" naming is preserved for backward compatibility — internally
+// a specialist agent is implemented as a module.
 // ---------------------------------------------------------------------------
 
 /**
  * Opaque type alias for the better-sqlite3 Database instance.
- * Module authors who need raw DB access can cast to their preferred type.
+ * Specialist authors who need raw DB access can cast to their preferred type.
  * We avoid importing better-sqlite3 here to keep the shared package dependency-free.
  */
 // eslint-disable-next-line @typescript-eslint/no-empty-object-type
@@ -27,10 +34,11 @@ export interface ModuleManifest {
 // ─── Config schema ───────────────────────────────────────────────────────────
 
 export interface ModuleConfigField {
-  type: "string" | "number" | "boolean" | "secret";
+  type: "string" | "number" | "boolean" | "secret" | "select";
   description: string;
   required: boolean;
   default?: string | number | boolean;
+  options?: { value: string; label: string }[];
 }
 
 export type ModuleConfigSchema = Record<string, ModuleConfigField>;
@@ -111,6 +119,7 @@ export interface ModuleContext {
 // ─── Handlers ────────────────────────────────────────────────────────────────
 
 export type PollHandler = (ctx: ModuleContext) => Promise<PollResult>;
+export type FullSyncHandler = (ctx: ModuleContext) => Promise<PollResult>;
 export type WebhookHandler = (req: WebhookRequest, ctx: ModuleContext) => Promise<WebhookResult>;
 export type QueryHandler = (query: string, ctx: ModuleContext) => Promise<string>;
 
@@ -134,13 +143,22 @@ export interface ModuleToolDefinition {
 
 // ─── Module definition ───────────────────────────────────────────────────────
 
+export interface ModuleAgentConfig {
+  defaultName: string;
+  defaultPrompt: string;
+  defaultModel?: string;
+  defaultProvider?: string;
+}
+
 export interface ModuleDefinition {
   manifest: ModuleManifest;
   configSchema?: ModuleConfigSchema;
   triggers?: ModuleTrigger[];
   migrations?: ModuleMigration[];
   tools?: ModuleToolDefinition[];
+  agent?: ModuleAgentConfig;
   onPoll?: PollHandler;
+  onFullSync?: FullSyncHandler;
   onWebhook?: WebhookHandler;
   onQuery?: QueryHandler;
   onLoad?(ctx: ModuleContext): Promise<void>;
@@ -170,9 +188,34 @@ export interface ModulesManifest {
   modules: InstalledModule[];
 }
 
-// ─── defineModule() ──────────────────────────────────────────────────────────
+// ─── defineModule() / defineSpecialist() ─────────────────────────────────────
 
 /** Identity function for type narrowing — module authors use this to define their module. */
 export function defineModule(def: ModuleDefinition): ModuleDefinition {
   return def;
 }
+
+// ─── Specialist Agent aliases ────────────────────────────────────────────────
+// User-facing name for the module system. These are type aliases only —
+// the underlying implementation is unchanged.
+
+/** A specialist agent definition. Alias for ModuleDefinition. */
+export type SpecialistDefinition = ModuleDefinition;
+
+/** A specialist agent's manifest. Alias for ModuleManifest. */
+export type SpecialistManifest = ModuleManifest;
+
+/** A specialist agent's config schema. Alias for ModuleConfigSchema. */
+export type SpecialistConfigSchema = ModuleConfigSchema;
+
+/** A specialist agent's config field. Alias for ModuleConfigField. */
+export type SpecialistConfigField = ModuleConfigField;
+
+/** A specialist agent's AI config. Alias for ModuleAgentConfig. */
+export type SpecialistAgentConfig = ModuleAgentConfig;
+
+/** An installed specialist agent. Alias for InstalledModule. */
+export type InstalledSpecialist = InstalledModule;
+
+/** Define a specialist agent. Alias for defineModule(). */
+export const defineSpecialist = defineModule;

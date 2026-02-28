@@ -58,6 +58,7 @@ export function ProjectList({
             </svg>
           </button>
           <button
+            data-action="new-project"
             onClick={() => setShowForm(!showForm)}
             className="text-[11px] text-primary hover:text-primary/80 transition-colors font-medium"
           >
