@@ -39,6 +39,10 @@ export interface ModuleConfigField {
   required: boolean;
   default?: string | number | boolean;
   options?: { value: string; label: string }[];
+  /** Hide this field from the UI entirely. */
+  hidden?: boolean;
+  /** Only show this field when another field has a specific value. */
+  showWhen?: { field: string; value: string };
 }
 
 export type ModuleConfigSchema = Record<string, ModuleConfigField>;

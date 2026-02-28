@@ -107,18 +107,21 @@ export default defineModule({
       description:
         "Brave Search API key (overrides system key for this module)",
       required: false,
+      showWhen: { field: "search_provider", value: "brave" },
     },
     tavily_api_key: {
       type: "secret",
       description:
         "Tavily API key (overrides system key for this module)",
       required: false,
+      showWhen: { field: "search_provider", value: "tavily" },
     },
     searxng_base_url: {
       type: "string",
       description:
         "SearXNG instance base URL (overrides system URL for this module)",
       required: false,
+      showWhen: { field: "search_provider", value: "searxng" },
     },
     twitter_bearer_token: {
       type: "secret",
@@ -143,6 +146,16 @@ export default defineModule({
       description: "HTTP request timeout in milliseconds (default 15000)",
       required: false,
       default: 15000,
+    },
+    agent_posting_mode: {
+      type: "select",
+      description: "Not applicable — deep research only responds to direct queries",
+      required: false,
+      default: "respond",
+      hidden: true,
+      options: [
+        { value: "respond", label: "Always respond" },
+      ],
     },
   },
 
