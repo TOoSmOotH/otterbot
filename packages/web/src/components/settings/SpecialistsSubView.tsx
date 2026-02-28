@@ -71,6 +71,12 @@ export function SpecialistsSubView({ navigateToId, onNavigatedTo }: SpecialistsS
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [showAgentChat, setShowAgentChat] = useState(false);
 
+  // Clone state
+  const [showClone, setShowClone] = useState(false);
+  const [cloneInstanceId, setCloneInstanceId] = useState("");
+  const [cloning, setCloning] = useState(false);
+  const [cloneError, setCloneError] = useState<string | null>(null);
+
   const loadSpecialists = useCallback(async () => {
     try {
       const res = await fetch("/api/modules");
@@ -187,6 +193,49 @@ export function SpecialistsSubView({ navigateToId, onNavigatedTo }: SpecialistsS
     } finally {
       setDeletingId(null);
     }
+  };
+
+  const handleClone = async () => {
+    if (!selected || !cloneInstanceId.trim()) return;
+    setCloning(true);
+    setCloneError(null);
+    try {
+      const res = await fetch("/api/modules/install", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          source: selected.source,
+          uri: selected.sourceUri,
+          instanceId: cloneInstanceId.trim(),
+        }),
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        setCloneError(data.error ?? "Clone failed");
+        return;
+      }
+      setShowClone(false);
+      setCloneInstanceId("");
+      // Reload the list and select the new clone
+      const listRes = await fetch("/api/modules");
+      if (listRes.ok) {
+        const data: InstalledSpecialist[] = await listRes.json();
+        setSpecialists(data);
+        const newEntry = data.find((s) => s.id === cloneInstanceId.trim());
+        if (newEntry) setSelected(newEntry);
+      }
+    } catch (err) {
+      setCloneError(err instanceof Error ? err.message : "Clone failed");
+    } finally {
+      setCloning(false);
+    }
+  };
+
+  const openClone = () => {
+    if (!selected) return;
+    setShowClone(true);
+    setCloneInstanceId(`${selected.moduleId ?? selected.id}-${Date.now().toString(36)}`);
+    setCloneError(null);
   };
 
   const enabled = specialists.filter((s) => s.enabled);
@@ -359,6 +408,12 @@ export function SpecialistsSubView({ navigateToId, onNavigatedTo }: SpecialistsS
                 </>
               )}
               <button
+                onClick={openClone}
+                className="text-xs bg-secondary text-foreground px-3 py-1.5 rounded-md hover:bg-secondary/80"
+              >
+                Clone
+              </button>
+              <button
                 onClick={() => handleDelete(selected.id)}
                 disabled={deletingId === selected.id}
                 className={cn(
@@ -383,6 +438,47 @@ export function SpecialistsSubView({ navigateToId, onNavigatedTo }: SpecialistsS
                 </button>
               )}
             </div>
+
+            {/* Clone form */}
+            {showClone && (
+              <div className="border border-border rounded-md p-3 space-y-2">
+                <div className="text-[10px] text-muted-foreground uppercase tracking-wider font-medium">
+                  Clone Specialist
+                </div>
+                <p className="text-[10px] text-muted-foreground">
+                  Creates a new instance of <span className="font-mono">{selected.moduleId ?? selected.id}</span> with its own config and knowledge store.
+                </p>
+                <div>
+                  <label className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1 block">
+                    Instance ID
+                  </label>
+                  <input
+                    type="text"
+                    value={cloneInstanceId}
+                    onChange={(e) => setCloneInstanceId(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && handleClone()}
+                    placeholder="my-specialist-instance"
+                    className="w-full bg-secondary rounded-md px-3 py-1.5 text-xs outline-none focus:ring-1 ring-primary font-mono"
+                  />
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={handleClone}
+                    disabled={cloning || !cloneInstanceId.trim()}
+                    className="text-xs bg-primary text-primary-foreground px-3 py-1.5 rounded-md hover:bg-primary/90 disabled:opacity-50"
+                  >
+                    {cloning ? "Cloning..." : "Create Clone"}
+                  </button>
+                  <button
+                    onClick={() => { setShowClone(false); setCloneError(null); }}
+                    className="text-xs text-muted-foreground hover:text-foreground"
+                  >
+                    Cancel
+                  </button>
+                  {cloneError && <span className="text-xs text-red-500">{cloneError}</span>}
+                </div>
+              </div>
+            )}
 
             {/* Knowledge Store / Database info */}
             {selected.loaded && <SpecialistDbInfo moduleId={selected.id} />}
