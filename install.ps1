@@ -1,0 +1,227 @@
+#Requires -Version 5.1
+<#
+.SYNOPSIS
+    Otterbot installer for Windows — https://otterbot.ai
+.DESCRIPTION
+    Usage: irm https://otterbot.ai/install.ps1 | iex
+    Or:    .\install.ps1 [-Dir <path>] [-Beta] [-NoStart] [-Help]
+.PARAMETER Dir
+    Install directory (default: $env:USERPROFILE\otterbot)
+.PARAMETER Beta
+    Use the :beta image tag instead of :latest
+.PARAMETER NoStart
+    Generate files but don't pull/start the container
+.PARAMETER Help
+    Show usage information
+#>
+[CmdletBinding()]
+param(
+    [string]$Dir,
+    [switch]$Beta,
+    [switch]$NoStart,
+    [switch]$Help
+)
+
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
+
+# ── Defaults ──────────────────────────────────────────────────────────────────
+
+$Image = 'ghcr.io/toosmooth/otterbot'
+$Tag = if ($Beta) { 'beta' } else { 'latest' }
+$InstallDir = if ($Dir) { $Dir }
+              elseif ($env:OTTERBOT_DIR) { $env:OTTERBOT_DIR }
+              else { Join-Path $env:USERPROFILE 'otterbot' }
+
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
+function Write-Info    { param([string]$Msg) Write-Host "  $Msg" -ForegroundColor Green }
+function Write-Warn    { param([string]$Msg) Write-Host "  $Msg" -ForegroundColor Yellow }
+function Write-Err     { param([string]$Msg) Write-Host "  $Msg" -ForegroundColor Red }
+
+function Show-Usage {
+    Write-Host @"
+
+Otterbot Installer (Windows)
+
+Usage:
+  irm https://otterbot.ai/install.ps1 | iex
+  .\install.ps1 [OPTIONS]
+
+Options:
+  -Dir <path>   Install directory (default: ~\otterbot)
+  -Beta         Use the beta image tag
+  -NoStart      Generate files but don't start the container
+  -Help         Show this help message
+
+"@
+    exit 0
+}
+
+function Get-RandomHex {
+    param([int]$Bytes = 16)
+    $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+    $buf = New-Object byte[] $Bytes
+    $rng.GetBytes($buf)
+    return ($buf | ForEach-Object { $_.ToString('x2') }) -join ''
+}
+
+function Confirm-Prompt {
+    param([string]$Question)
+    $answer = Read-Host "$Question [y/N]"
+    return $answer -match '^[Yy]'
+}
+
+# ── Main ──────────────────────────────────────────────────────────────────────
+
+if ($Help) { Show-Usage }
+
+Write-Host ''
+Write-Host '  Otterbot Installer' -ForegroundColor Cyan
+Write-Host ''
+
+# ── Detect architecture ──────────────────────────────────────────────────────
+
+$Arch = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture
+Write-Info "Detected Windows on $Arch"
+
+# ── Check for Docker ─────────────────────────────────────────────────────────
+
+$dockerCmd = Get-Command docker -ErrorAction SilentlyContinue
+if (-not $dockerCmd) {
+    Write-Warn 'Docker is not installed.'
+
+    $wingetCmd = Get-Command winget -ErrorAction SilentlyContinue
+    if ($wingetCmd) {
+        if (Confirm-Prompt 'Install Docker Desktop via winget?') {
+            Write-Info 'Installing Docker Desktop...'
+            winget install -e --id Docker.DockerDesktop
+            Write-Warn 'Please launch Docker Desktop, then re-run this script.'
+            exit 0
+        }
+    }
+
+    Write-Err 'Docker Desktop is required. Install it from https://docker.com/products/docker-desktop and re-run this script.'
+    exit 1
+}
+
+# ── Check Docker is running ──────────────────────────────────────────────────
+
+try {
+    $null = docker info 2>&1
+    if ($LASTEXITCODE -ne 0) { throw }
+    Write-Info 'Docker is running'
+}
+catch {
+    Write-Err 'Docker is installed but not running. Please start Docker Desktop and re-run this script.'
+    exit 1
+}
+
+# ── Check for Docker Compose v2 ──────────────────────────────────────────────
+
+try {
+    $null = docker compose version 2>&1
+    if ($LASTEXITCODE -ne 0) { throw }
+    Write-Info 'Docker Compose v2 detected'
+}
+catch {
+    Write-Err 'Docker Compose v2 is required but not found.'
+    Write-Err 'Modern Docker Desktop includes it. Please upgrade Docker: https://docs.docker.com/compose/install/'
+    exit 1
+}
+
+# ── Check for existing installation ──────────────────────────────────────────
+
+$composeFile = Join-Path $InstallDir 'docker-compose.yml'
+$envFile     = Join-Path $InstallDir '.env'
+$dataDir     = Join-Path $InstallDir 'data'
+
+if (Test-Path $composeFile) {
+    Write-Warn "Existing installation found at $InstallDir"
+    if (-not (Confirm-Prompt 'Overwrite docker-compose.yml? (your .env will be preserved)')) {
+        Write-Info 'Aborted. Existing installation left untouched.'
+        exit 0
+    }
+}
+
+# ── Create directory structure ────────────────────────────────────────────────
+
+Write-Info "Installing to $InstallDir"
+New-Item -ItemType Directory -Path $dataDir -Force | Out-Null
+
+# ── Generate .env (never overwrite) ──────────────────────────────────────────
+
+if (Test-Path $envFile) {
+    Write-Info 'Existing .env found - preserving it'
+}
+else {
+    $dbKey = Get-RandomHex
+    @"
+# Otterbot environment - generated by install.ps1
+OTTERBOT_DB_KEY=$dbKey
+OTTERBOT_UID=1000
+OTTERBOT_GID=1000
+OTTERBOT_DATA_DIR=./data
+ENABLE_DESKTOP=true
+DESKTOP_RESOLUTION=1280x720x24
+SUDO_MODE=restricted
+"@ | Set-Content -Path $envFile -Encoding UTF8
+    Write-Info 'Generated .env with new database key'
+}
+
+# ── Generate docker-compose.yml ──────────────────────────────────────────────
+
+@"
+services:
+  otterbot:
+    image: ${Image}:${Tag}
+    shm_size: "256m"
+    ports:
+      - "`${PORT:-62626}:62626"
+    volumes:
+      - `${OTTERBOT_DATA_DIR:-./data}:/otterbot
+    environment:
+      - OTTERBOT_DB_KEY=`${OTTERBOT_DB_KEY}
+      - OTTERBOT_UID=`${OTTERBOT_UID:-1000}
+      - OTTERBOT_GID=`${OTTERBOT_GID:-1000}
+      - ENABLE_DESKTOP=`${ENABLE_DESKTOP:-true}
+      - DESKTOP_RESOLUTION=`${DESKTOP_RESOLUTION:-1280x720x24}
+      - SUDO_MODE=`${SUDO_MODE:-restricted}
+      - OTTERBOT_ALLOWED_ORIGIN=`${OTTERBOT_ALLOWED_ORIGIN:-}
+    restart: unless-stopped
+"@ | Set-Content -Path $composeFile -Encoding UTF8
+
+Write-Info "Generated docker-compose.yml (image tag: $Tag)"
+
+# ── Pull & start ─────────────────────────────────────────────────────────────
+
+if ($NoStart) {
+    Write-Info 'Skipping pull & start (-NoStart)'
+}
+else {
+    Write-Info 'Pulling image...'
+    Push-Location $InstallDir
+    try {
+        docker compose pull
+        Write-Info 'Starting Otterbot...'
+        docker compose up -d
+    }
+    finally {
+        Pop-Location
+    }
+}
+
+# ── Success ───────────────────────────────────────────────────────────────────
+
+Write-Host ''
+Write-Host '  Otterbot is installed!' -ForegroundColor Green
+Write-Host ''
+Write-Host "  URL:      https://localhost:62626  (self-signed certificate)"
+Write-Host "  Data:     $dataDir"
+Write-Host "  Config:   $envFile"
+Write-Host ''
+Write-Host "  Stop:     cd $InstallDir; docker compose down"
+Write-Host "  Start:    cd $InstallDir; docker compose up -d"
+Write-Host "  Logs:     cd $InstallDir; docker compose logs -f"
+Write-Host "  Update:   cd $InstallDir; docker compose pull; docker compose up -d"
+Write-Host ''
