@@ -6,7 +6,9 @@ export enum AgentRole {
   Worker = "worker",
   AdminAssistant = "admin_assistant",
   Scheduler = "scheduler",
+  /** @deprecated Use SpecialistAgent instead */
   ModuleAgent = "module_agent",
+  SpecialistAgent = "module_agent", // same DB value, new name
 }
 
 export enum AgentStatus {

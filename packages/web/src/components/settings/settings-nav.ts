@@ -13,7 +13,6 @@ export type SettingsSection =
   | "liveview"
   | "opencode"
   | "scheduled"
-  | "modules"
   | "channels"
   | "email"
   | "google"
@@ -71,7 +70,6 @@ export const SETTINGS_NAV: NavGroup[] = [
       { id: "liveview", label: "Live View" },
       { id: "opencode", label: "Coding Agents" },
       { id: "scheduled", label: "Scheduled Tasks" },
-      { id: "modules", label: "Modules" },
       { id: "mcp-servers", label: "MCP Servers" },
       { id: "ssh", label: "SSH Keys" },
     ],

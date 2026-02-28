@@ -25,7 +25,6 @@ import { NextcloudTalkSection } from "./NextcloudTalkSection";
 import { TelegramSection } from "./TelegramSection";
 import { GoogleSection } from "./GoogleSection";
 import { SecuritySection } from "./SecuritySection";
-import { ModulesSection } from "./ModulesSection";
 import { WorkerNamesSection } from "./WorkerNamesSection";
 import { McpServersSection } from "./McpServersSection";
 import { SshTab } from "./SshTab";
@@ -56,7 +55,6 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
     if (activeSection === "system") return <SystemSection />;
     if (activeSection === "channels") return <ChannelsSection />;
     if (activeSection === "scheduled") return <ScheduledTasksSection />;
-    if (activeSection === "modules") return <ModulesSection />;
     if (activeSection === "email") return <EmailSection />;
     if (activeSection === "google") return <GoogleSection />;
     if (activeSection === "github") return <GitHubTab />;
