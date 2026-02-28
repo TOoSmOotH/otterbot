@@ -34,9 +34,21 @@ jobs:
       - name: Derive version from git
         id: version
         run: |
-          BASE_TAG=$(git describe --tags --abbrev=0 --match 'otterbot-v[0-9]*.[0-9]*.[0-9]' --exclude '*-*' 2>/dev/null || echo "otterbot-v0.0.0")
-          BASE_VERSION=${BASE_TAG#otterbot-v}
-          COMMIT_COUNT=$(git rev-list ${BASE_TAG}..HEAD --count)
+          # Find latest stable tag across all branches (tags on main aren't ancestors of beta)
+          BASE_TAG=$(git tag -l 'otterbot-v[0-9]*.[0-9]*.[0-9]' --sort=-version:refname | grep -E '^otterbot-v[0-9]+\.[0-9]+\.[0-9]+$' | head -1)
+          if [ -n "$BASE_TAG" ]; then
+            BASE_VERSION=${BASE_TAG#otterbot-v}
+            # Count commits on beta since it diverged from the tagged commit
+            MERGE_BASE=$(git merge-base "$BASE_TAG" HEAD 2>/dev/null || echo "")
+            if [ -n "$MERGE_BASE" ]; then
+              COMMIT_COUNT=$(git rev-list ${MERGE_BASE}..HEAD --count)
+            else
+              COMMIT_COUNT=$(git rev-list HEAD --count)
+            fi
+          else
+            BASE_VERSION="0.0.0"
+            COMMIT_COUNT=$(git rev-list HEAD --count)
+          fi
           SHORT_SHA=$(git rev-parse --short HEAD)
           VERSION="${BASE_VERSION}-beta.${COMMIT_COUNT}+${SHORT_SHA}"
           DOCKER_TAG="${BASE_VERSION}-beta.${COMMIT_COUNT}-${SHORT_SHA}"
