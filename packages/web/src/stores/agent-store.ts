@@ -5,6 +5,8 @@ interface AgentState {
   agents: Map<string, Agent>;
   /** IDs of agents removed via socket events — prevents stale API data re-adding them */
   _removedIds: Set<string>;
+  /** IDs of agents walking to center before exploding */
+  _departingIds: Set<string>;
   addAgent: (agent: Agent) => void;
   updateAgentStatus: (agentId: string, status: AgentStatus) => void;
   removeAgent: (agentId: string) => void;
@@ -14,6 +16,7 @@ interface AgentState {
 export const useAgentStore = create<AgentState>((set) => ({
   agents: new Map(),
   _removedIds: new Set(),
+  _departingIds: new Set(),
 
   addAgent: (agent) =>
     set((state) => {
@@ -29,10 +32,13 @@ export const useAgentStore = create<AgentState>((set) => ({
       if (!agent) return state;
       const next = new Map(state.agents);
       if (status === "done") {
-        next.delete(agentId);
-        const removed = new Set(state._removedIds);
-        removed.add(agentId);
-        return { agents: next, _removedIds: removed };
+        // Keep the agent in the map so it continues rendering while walking to center.
+        // Mark as departing — movement-triggers will walk it to center,
+        // then the departure watcher will trigger the explosion on arrival.
+        next.set(agentId, { ...agent, status });
+        const departing = new Set(state._departingIds);
+        departing.add(agentId);
+        return { agents: next, _departingIds: departing };
       }
       next.set(agentId, { ...agent, status });
       return { agents: next };
@@ -44,7 +50,9 @@ export const useAgentStore = create<AgentState>((set) => ({
       next.delete(agentId);
       const removed = new Set(state._removedIds);
       removed.add(agentId);
-      return { agents: next, _removedIds: removed };
+      const departing = new Set(state._departingIds);
+      departing.delete(agentId);
+      return { agents: next, _removedIds: removed, _departingIds: departing };
     }),
 
   loadAgents: (agents) =>
