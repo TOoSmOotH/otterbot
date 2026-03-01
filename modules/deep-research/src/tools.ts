@@ -8,6 +8,7 @@ import { search as webSearch } from "./search-providers.js";
 import { extractReadableContent } from "./content-extractor.js";
 import { validateUrlForSsrf } from "./ssrf.js";
 import { acquireSlot } from "./rate-limiter.js";
+import { crawlSite } from "./crawler.js";
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -850,6 +851,93 @@ export const searchFindingsTool: ModuleToolDefinition = {
       const message = err instanceof Error ? err.message : String(err);
       ctx.error("search_findings failed:", err);
       return `Search findings error: ${message}`;
+    }
+  },
+};
+
+// ─── 10. crawl_site ─────────────────────────────────────────────────────────
+
+export const crawlSiteTool: ModuleToolDefinition = {
+  name: "crawl_site",
+  description:
+    "Crawl a documentation site and ingest all pages into the knowledge base. " +
+    "Starts from the given URL, optionally uses sitemap.xml for discovery, " +
+    "and follows links within the same domain and path prefix. After crawling, " +
+    "use search_findings to query the ingested content.",
+  parameters: {
+    url: {
+      type: "string",
+      description: "Starting URL to crawl (e.g. https://docs.example.com/v2/)",
+      required: true,
+    },
+    max_pages: {
+      type: "number",
+      description: "Max pages to crawl (default 100)",
+      required: false,
+    },
+    max_depth: {
+      type: "number",
+      description: "Max link depth from start URL (default 5)",
+      required: false,
+    },
+    skip_sitemap: {
+      type: "boolean",
+      description: "Skip sitemap.xml discovery (default false)",
+      required: false,
+    },
+    topic: {
+      type: "string",
+      description: "Research topic tag for all crawled pages",
+      required: false,
+    },
+  },
+
+  async execute(args: Record<string, unknown>, ctx: ModuleContext): Promise<string> {
+    const url = args.url as string;
+    const maxPages = (args.max_pages as number) || 100;
+    const maxDepth = (args.max_depth as number) || 5;
+    const skipSitemap = (args.skip_sitemap as boolean) || false;
+    const topic = (args.topic as string) || undefined;
+
+    try {
+      // Validate the starting URL
+      await validateUrlForSsrf(url);
+
+      ctx.log(`Starting crawl of ${url} (max_pages=${maxPages}, max_depth=${maxDepth})`);
+
+      const result = await crawlSite(
+        url,
+        { maxPages, maxDepth, skipSitemap, topic },
+        ctx,
+      );
+
+      const lines: string[] = [
+        `## Crawl Complete`,
+        "",
+        `- **Pages stored:** ${result.pagesStored}`,
+        `- **Pages failed:** ${result.pagesFailed}`,
+        `- **Pages skipped:** ${result.pagesSkipped}`,
+        "",
+      ];
+
+      if (result.urls.length > 0) {
+        lines.push("**Crawled URLs:**");
+        for (const crawledUrl of result.urls.slice(0, 50)) {
+          lines.push(`- ${crawledUrl}`);
+        }
+        if (result.urls.length > 50) {
+          lines.push(`- ... and ${result.urls.length - 50} more`);
+        }
+      }
+
+      lines.push("");
+      lines.push("Use `search_findings` to query the ingested content.");
+
+      return lines.join("\n");
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      ctx.error("crawl_site failed:", err);
+      return `Crawl error: ${message}`;
     }
   },
 };

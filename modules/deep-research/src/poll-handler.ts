@@ -4,11 +4,18 @@
  * Periodically searches configured sources for configured subjects,
  * returning PollResultItems that the module scheduler automatically
  * ingests into the knowledge store (deduped by ID).
+ *
+ * Operates on a time budget (default 5 min), cycling through all
+ * subjects with multiple query variations and full-page content
+ * extraction for top results.
  */
 
 import type { ModuleContext, PollResult, PollResultItem } from "@otterbot/shared";
 import { search as webSearch } from "./search-providers.js";
+import { extractReadableContent } from "./content-extractor.js";
+import { validateUrlForSsrf } from "./ssrf.js";
 import { acquireSlot } from "./rate-limiter.js";
+import { crawlSite } from "./crawler.js";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -22,12 +29,112 @@ interface RawResult {
   sourceType: SourceType;
 }
 
+// ─── Time-budget helpers ────────────────────────────────────────────────────
+
+function isTimeUp(deadline: number): boolean {
+  return Date.now() >= deadline;
+}
+
+/**
+ * Generate multiple query variations for a subject to get broader coverage.
+ */
+function generateQueryVariations(subject: string): string[] {
+  const year = new Date().getFullYear();
+  return [
+    subject,
+    `${subject} tutorial guide`,
+    `${subject} latest news updates ${year}`,
+    `${subject} best practices tips`,
+  ];
+}
+
+/**
+ * Check whether a URL looks like a documentation site worth crawling.
+ */
+function isDocsUrl(url: string): boolean {
+  try {
+    const { pathname } = new URL(url);
+    return /\/(docs?|guide|wiki|manual|reference|learn|tutorial|handbook)\b/i.test(pathname);
+  } catch {
+    return false;
+  }
+}
+
+// ─── Full-page fetch helper ─────────────────────────────────────────────────
+
+/**
+ * Fetch a single URL, extract readable content, and return a PollResultItem.
+ * Returns null if the URL is invalid, non-HTML, too short, or already seen.
+ */
+async function fetchAndStoreFullPage(
+  url: string,
+  subject: string,
+  ctx: ModuleContext,
+  seenUrls: Set<string>,
+): Promise<PollResultItem | null> {
+  if (seenUrls.has(url)) return null;
+  seenUrls.add(url);
+
+  const timeout = Number(ctx.getConfig("request_timeout_ms")) || 15_000;
+  const maxLength = Number(ctx.getConfig("max_page_content_length")) || 15_000;
+
+  try {
+    await validateUrlForSsrf(url);
+
+    const hostname = new URL(url).hostname;
+    await acquireSlot(hostname);
+
+    const res = await fetch(url, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (compatible; otterbot-deep-research/0.1.0)",
+        Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+      },
+      signal: AbortSignal.timeout(timeout),
+      redirect: "follow",
+    });
+
+    if (!res.ok) return null;
+
+    const contentType = res.headers.get("content-type") ?? "";
+    if (
+      !contentType.includes("text/html") &&
+      !contentType.includes("application/xhtml") &&
+      !contentType.includes("text/plain")
+    ) {
+      return null;
+    }
+
+    const html = await res.text();
+    const { title, content } = extractReadableContent(html, maxLength);
+
+    if (!content || content.length < 100) return null;
+
+    const id = `poll:page:${Buffer.from(url).toString("base64url").slice(0, 64)}`;
+    const fullContent = title
+      ? `# ${title}\n\nSource: ${url}\n\n${content}`
+      : `Source: ${url}\n\n${content}`;
+
+    return {
+      id,
+      title: title || url,
+      content: fullContent,
+      url,
+      metadata: {
+        source: "poll",
+        source_type: "full_page",
+        subject,
+        polled_at: new Date().toISOString(),
+      },
+    };
+  } catch (err) {
+    ctx.log(`Poll page fetch failed for ${url}: ${err instanceof Error ? err.message : String(err)}`);
+    return null;
+  }
+}
+
 // ─── Subject round-robin state ──────────────────────────────────────────────
 
-function getNextSubject(
-  subjects: string[],
-  ctx: ModuleContext,
-): { subject: string; nextIndex: number } {
+function getSubjectIndex(subjects: string[], ctx: ModuleContext): number {
   const db = ctx.knowledge.db;
 
   const row = db
@@ -35,14 +142,15 @@ function getNextSubject(
     .get() as { last_subject_index: number } | undefined;
 
   const lastIndex = row?.last_subject_index ?? 0;
-  const index = lastIndex >= subjects.length ? 0 : lastIndex;
-  const nextIndex = (index + 1) % subjects.length;
+  return lastIndex >= subjects.length ? 0 : lastIndex;
+}
 
-  db.prepare(
-    "UPDATE poll_state SET last_subject_index = ?, last_polled_at = ? WHERE id = 1",
-  ).run(nextIndex, new Date().toISOString());
-
-  return { subject: subjects[index], nextIndex };
+function saveSubjectIndex(index: number, ctx: ModuleContext): void {
+  ctx.knowledge.db
+    .prepare(
+      "UPDATE poll_state SET last_subject_index = ?, last_polled_at = ? WHERE id = 1",
+    )
+    .run(index, new Date().toISOString());
 }
 
 // ─── Source search dispatchers ──────────────────────────────────────────────
@@ -313,43 +421,137 @@ export async function handlePoll(ctx: ModuleContext): Promise<PollResult> {
     return { items: [] };
   }
 
-  const { subject } = getNextSubject(subjects, ctx);
-  ctx.log(`Polling research for subject: "${subject}"`);
-
   const sourcesRaw = ctx.getConfig("poll_sources") || "web,reddit,hackernews";
   const sources = sourcesRaw
     .split(",")
     .map((s) => s.trim().toLowerCase())
     .filter(Boolean) as SourceType[];
 
-  const maxResults =
+  const maxResultsPerSource =
     Number(ctx.getConfig("max_poll_results_per_source")) || 5;
+  const timeBudgetMs =
+    Number(ctx.getConfig("poll_time_budget_ms")) || 300_000;
+  const fetchTopN =
+    Number(ctx.getConfig("poll_fetch_top_n")) || 3;
 
-  // Search all sources in parallel
-  const resultSets = await Promise.all(
-    sources.map((source) => searchSource(source, subject, maxResults, ctx)),
-  );
+  const deadline = Date.now() + timeBudgetMs;
+  const startIndex = getSubjectIndex(subjects, ctx);
+  const allItems: PollResultItem[] = [];
+  const seenUrls = new Set<string>();
+  let subjectsProcessed = 0;
 
-  const allResults = resultSets.flat();
+  ctx.log(`Poll starting: ${subjects.length} subjects, ${timeBudgetMs / 1000}s budget, starting at index ${startIndex}`);
 
-  // Convert to PollResultItems
-  const items: PollResultItem[] = allResults.map((r) => ({
-    id: r.id,
-    title: r.title,
-    content: `**${r.title}**\n${r.snippet}\n\nSource: ${r.url}`,
-    url: r.url,
-    metadata: {
-      source: "poll",
-      subject,
-      source_type: r.sourceType,
-      polled_at: new Date().toISOString(),
-    },
-  }));
+  for (let i = 0; i < subjects.length; i++) {
+    if (isTimeUp(deadline)) break;
 
-  ctx.log(`Poll complete for "${subject}": ${items.length} items from ${sources.join(", ")}`);
+    const subjectIndex = (startIndex + i) % subjects.length;
+    const subject = subjects[subjectIndex];
+    ctx.log(`Researching subject: "${subject}"`);
+
+    const queryVariations = generateQueryVariations(subject);
+    const subjectResults: RawResult[] = [];
+
+    // ── Phase 1: Search with query variations ──
+    for (const query of queryVariations) {
+      if (isTimeUp(deadline)) break;
+
+      ctx.log(`  Searching: "${query}"`);
+
+      // Search all sources in parallel for this query
+      const resultSets = await Promise.all(
+        sources.map((source) => searchSource(source, query, maxResultsPerSource, ctx)),
+      );
+
+      const results = resultSets.flat();
+      subjectResults.push(...results);
+
+      // Convert search snippets to PollResultItems
+      for (const r of results) {
+        allItems.push({
+          id: r.id,
+          title: r.title,
+          content: `**${r.title}**\n${r.snippet}\n\nSource: ${r.url}`,
+          url: r.url,
+          metadata: {
+            source: "poll",
+            subject,
+            source_type: r.sourceType,
+            query,
+            polled_at: new Date().toISOString(),
+          },
+        });
+      }
+    }
+
+    // ── Phase 2: Fetch full page content for top N unique URLs ──
+    const uniqueUrls = [...new Set(subjectResults.map((r) => r.url))];
+    const urlsToFetch = uniqueUrls
+      .filter((u) => !seenUrls.has(u))
+      .slice(0, fetchTopN);
+
+    if (urlsToFetch.length > 0) {
+      ctx.log(`  Fetching full content for ${urlsToFetch.length} pages`);
+    }
+
+    for (const url of urlsToFetch) {
+      if (isTimeUp(deadline)) break;
+
+      const pageItem = await fetchAndStoreFullPage(url, subject, ctx, seenUrls);
+      if (pageItem) {
+        allItems.push(pageItem);
+      }
+    }
+
+    // ── Phase 3: Crawl documentation sites ──
+    if (!isTimeUp(deadline)) {
+      const docsUrl = uniqueUrls.find((u) => isDocsUrl(u) && !seenUrls.has(u));
+      if (docsUrl) {
+        ctx.log(`  Crawling docs site: ${docsUrl}`);
+        try {
+          const crawlResult = await crawlSite(docsUrl, {
+            maxPages: 10,
+            maxDepth: 2,
+            skipSitemap: false,
+            topic: subject,
+          }, ctx);
+          ctx.log(`  Crawled ${crawlResult.pagesStored} pages from ${docsUrl}`);
+
+          // Add crawled pages as poll items for the summary
+          for (const crawledUrl of crawlResult.urls) {
+            seenUrls.add(crawledUrl);
+            allItems.push({
+              id: `poll:crawl:${Buffer.from(crawledUrl).toString("base64url").slice(0, 64)}`,
+              title: `Crawled: ${crawledUrl}`,
+              content: `Crawled documentation page from ${crawledUrl}`,
+              url: crawledUrl,
+              metadata: {
+                source: "poll",
+                source_type: "crawl",
+                subject,
+                crawl_base: docsUrl,
+                polled_at: new Date().toISOString(),
+              },
+            });
+          }
+        } catch (err) {
+          ctx.log(`  Doc crawl failed for ${docsUrl}: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
+    }
+
+    subjectsProcessed++;
+
+    // Save progress after each subject so interrupted cycles resume correctly
+    const nextIndex = (subjectIndex + 1) % subjects.length;
+    saveSubjectIndex(nextIndex, ctx);
+  }
+
+  const elapsed = Math.round((timeBudgetMs - (deadline - Date.now())) / 1000);
+  ctx.log(`Poll complete: ${subjectsProcessed}/${subjects.length} subjects, ${allItems.length} items, ${elapsed}s elapsed`);
 
   return {
-    items,
-    summary: `Researched "${subject}" — found ${items.length} items across ${sources.join(", ")}`,
+    items: allItems,
+    summary: `Researched ${subjectsProcessed} subject(s) — found ${allItems.length} items across ${sources.join(", ")} in ${elapsed}s`,
   };
 }

@@ -11,6 +11,7 @@ import {
   saveFindingTool,
   searchFindingsTool,
   listResearchSubjectsTool,
+  crawlSiteTool,
 } from "./tools.js";
 import { handlePoll } from "./poll-handler.js";
 
@@ -55,6 +56,8 @@ When given a research question, follow this systematic approach:
 - Store important findings as you go with save_finding — don't wait until the end
 - Check search_findings first if the user asks about something you may have researched before
 - Use the knowledge_search tool to recall previously stored information
+- Use crawl_site to ingest entire documentation sites into the knowledge base
+- After crawling, use search_findings to query the ingested content
 - For controversial topics, actively seek multiple viewpoints
 
 ## Quality Standards
@@ -178,6 +181,20 @@ export default defineModule({
       required: false,
       default: 5,
     },
+    poll_time_budget_ms: {
+      type: "number",
+      description:
+        "Time budget per poll cycle in milliseconds (default 300000 = 5 minutes)",
+      required: false,
+      default: 300000,
+    },
+    poll_fetch_top_n: {
+      type: "number",
+      description:
+        "Fetch full page content for the top N search results per subject (default 3)",
+      required: false,
+      default: 3,
+    },
     agent_posting_mode: {
       type: "select",
       description:
@@ -206,6 +223,7 @@ export default defineModule({
     saveFindingTool,
     searchFindingsTool,
     listResearchSubjectsTool,
+    crawlSiteTool,
   ],
 
   onPoll: handlePoll,
