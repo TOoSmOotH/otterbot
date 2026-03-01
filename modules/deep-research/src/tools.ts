@@ -727,6 +727,72 @@ export const saveFindingTool: ModuleToolDefinition = {
 
 // ─── 8. search_findings ─────────────────────────────────────────────────────
 
+// ─── 9. list_research_subjects ──────────────────────────────────────────────
+
+export const listResearchSubjectsTool: ModuleToolDefinition = {
+  name: "list_research_subjects",
+  description:
+    "List configured background research subjects with finding counts " +
+    "and poll status. Shows which subjects are being autonomously monitored.",
+  parameters: {},
+
+  async execute(_args: Record<string, unknown>, ctx: ModuleContext): Promise<string> {
+    const subjectsRaw = ctx.getConfig("research_subjects");
+    if (!subjectsRaw?.trim()) {
+      return "No research subjects configured. Set the `research_subjects` config to a comma-separated list of topics.";
+    }
+
+    const subjects = subjectsRaw
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+
+    // Get poll state
+    let lastSubjectIndex = 0;
+    let lastPolledAt: string | null = null;
+    try {
+      const row = ctx.knowledge.db
+        .prepare("SELECT last_subject_index, last_polled_at FROM poll_state WHERE id = 1")
+        .get() as { last_subject_index: number; last_polled_at: string | null } | undefined;
+      if (row) {
+        lastSubjectIndex = row.last_subject_index;
+        lastPolledAt = row.last_polled_at;
+      }
+    } catch {
+      // Table may not exist yet if migration hasn't run
+    }
+
+    // Count findings per subject
+    const lines: string[] = ["## Monitored Research Subjects\n"];
+
+    for (let i = 0; i < subjects.length; i++) {
+      const subject = subjects[i];
+      const isNext = i === lastSubjectIndex;
+      const marker = isNext ? " ← next" : "";
+
+      // Search for findings related to this subject
+      let count = 0;
+      try {
+        const results = await ctx.knowledge.search(subject, 50);
+        count = results.filter(
+          (doc) => doc.metadata?.subject === subject && doc.metadata?.source === "poll",
+        ).length;
+      } catch {
+        // Ignore search errors
+      }
+
+      lines.push(`${i + 1}. **${subject}**${marker} — ${count} finding${count !== 1 ? "s" : ""}`);
+    }
+
+    lines.push("");
+    lines.push(`**Last polled:** ${lastPolledAt ?? "never"}`);
+    lines.push(`**Sources:** ${ctx.getConfig("poll_sources") || "web,reddit,hackernews"}`);
+    lines.push(`**Max results per source:** ${ctx.getConfig("max_poll_results_per_source") || "5"}`);
+
+    return lines.join("\n");
+  },
+};
+
 export const searchFindingsTool: ModuleToolDefinition = {
   name: "search_findings",
   description:

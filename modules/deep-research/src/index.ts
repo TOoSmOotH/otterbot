@@ -1,5 +1,6 @@
 import { defineModule, type ModuleContext } from "@otterbot/shared";
 import { migration001 } from "./migrations/001-initial.js";
+import { migration002 } from "./migrations/002-poll-state.js";
 import {
   webSearchTool,
   searchRedditTool,
@@ -9,7 +10,9 @@ import {
   fetchRedditThreadTool,
   saveFindingTool,
   searchFindingsTool,
+  listResearchSubjectsTool,
 } from "./tools.js";
+import { handlePoll } from "./poll-handler.js";
 
 // ─── Agent system prompt ────────────────────────────────────────────────────
 
@@ -67,7 +70,14 @@ When given a research question, follow this systematic approach:
 When the user asks follow-up questions:
 - Check your existing findings first (search_findings / knowledge_search)
 - Only search for new information if needed
-- Build on previous research rather than starting from scratch`;
+- Build on previous research rather than starting from scratch
+
+## Accumulated Research Knowledge
+
+This agent periodically researches configured subjects in the background.
+When asked about a topic, ALWAYS check search_findings first — there may
+already be accumulated research from background polling.
+Use list_research_subjects to see which topics are being monitored.`;
 
 // ─── Module definition ──────────────────────────────────────────────────────
 
@@ -147,19 +157,44 @@ export default defineModule({
       required: false,
       default: 15000,
     },
+    research_subjects: {
+      type: "string",
+      description:
+        "Comma-separated subjects to autonomously research in the background " +
+        '(e.g. "tacos, machine learning, rust programming")',
+      required: false,
+    },
+    poll_sources: {
+      type: "string",
+      description:
+        "Comma-separated sources to search during background polls: " +
+        "web, reddit, hackernews, twitter (default: web,reddit,hackernews)",
+      required: false,
+      default: "web,reddit,hackernews",
+    },
+    max_poll_results_per_source: {
+      type: "number",
+      description: "Max search results per source per poll cycle (default 5)",
+      required: false,
+      default: 5,
+    },
     agent_posting_mode: {
       type: "select",
-      description: "Not applicable — deep research only responds to direct queries",
+      description:
+        "How the agent posts messages — 'respond' for direct queries only, " +
+        "'background' to also share notable background research findings",
       required: false,
       default: "respond",
-      hidden: true,
       options: [
-        { value: "respond", label: "Always respond" },
+        { value: "respond", label: "Only respond to queries" },
+        { value: "background", label: "Also share background findings" },
       ],
     },
   },
 
-  migrations: [migration001],
+  triggers: [{ type: "poll", intervalMs: 3_600_000, minIntervalMs: 300_000 }],
+
+  migrations: [migration001, migration002],
 
   tools: [
     webSearchTool,
@@ -170,7 +205,10 @@ export default defineModule({
     fetchRedditThreadTool,
     saveFindingTool,
     searchFindingsTool,
+    listResearchSubjectsTool,
   ],
+
+  onPoll: handlePoll,
 
   async onQuery(query: string, ctx: ModuleContext): Promise<string> {
     // Handle cross-module queries (e.g. from COO asking about past research)
