@@ -48,7 +48,6 @@ function getGitHubConfig(ctx: ModuleContext) {
   const token = ctx.getConfig("github_token") ?? ctx.getConfig("github:token");
 
   if (!repo) {
-    ctx.warn("github_repo must be configured (owner/repo format)");
     return null;
   }
   if (!token) {

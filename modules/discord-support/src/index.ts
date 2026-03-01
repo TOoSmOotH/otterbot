@@ -64,7 +64,7 @@ export default defineModule({
       type: "string",
       description:
         "GitHub repository to index (owner/repo format, e.g. 'myorg/myproject')",
-      required: true,
+      required: false,
     },
     github_token: {
       type: "secret",
