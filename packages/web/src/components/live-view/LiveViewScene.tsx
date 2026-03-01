@@ -32,6 +32,7 @@ interface LiveViewSceneProps {
 
 export function LiveViewScene({ userProfile }: LiveViewSceneProps) {
   const agents = useAgentStore((s) => s.agents);
+  const departingIds = useAgentStore((s) => s._departingIds);
   // Subscribe to packs so we re-render when they load asynchronously
   const packs = useModelPackStore((s) => s.packs);
   const getPackById = useModelPackStore((s) => s.getPackById);
@@ -40,8 +41,9 @@ export function LiveViewScene({ userProfile }: LiveViewSceneProps) {
   const movementTick = useMovementStore((s) => s.tick);
   const explosions = useExplosionStore((s) => s.explosions);
 
-  // Track departing agents that have already been exploded to avoid double-firing
-  const explodedRef = useRef(new Set<string>());
+  // Track departing agents: value = frame count since departure started.
+  // We skip the first few frames to give the movement system time to enqueue the walk.
+  const departureFramesRef = useRef(new Map<string, number>());
 
   // Tick movement interpolators every frame + check departing agents
   useFrame((_, delta) => {
@@ -50,26 +52,41 @@ export function LiveViewScene({ userProfile }: LiveViewSceneProps) {
     // Check if any departing agents have finished walking to center
     const { _departingIds, agents: currentAgents, removeAgent } = useAgentStore.getState();
     const movementState = useMovementStore.getState();
+    const frames = departureFramesRef.current;
+
+    // Track new departures
+    for (const id of _departingIds) {
+      if (!frames.has(id)) frames.set(id, 0);
+    }
+
+    // Clean up stale tracking
+    for (const id of frames.keys()) {
+      if (!_departingIds.has(id)) frames.delete(id);
+    }
 
     for (const id of _departingIds) {
-      if (explodedRef.current.has(id)) continue;
+      const frameCount = frames.get(id) ?? 0;
+      frames.set(id, frameCount + 1);
+
+      // Wait at least 10 frames for the movement system to start the walk
+      if (frameCount < 10) continue;
+
       if (!movementState.isAgentBusy(id)) {
-        explodedRef.current.add(id);
+        frames.delete(id);
         const agent = currentAgents.get(id);
         const lastPos = movementState.getLastKnownPosition(id);
         const position: [number, number, number] = lastPos ?? [0, 0, 0];
         const color = agent ? (ROLE_COLORS[agent.role] ?? ROLE_COLORS.worker) : "#06b6d4";
         useExplosionStore.getState().addExplosion(id, position, color);
         removeAgent(id);
-        // Clean up tracking after a short delay
-        setTimeout(() => explodedRef.current.delete(id), 2000);
       }
     }
   });
 
   const { positions } = useMemo(() => {
+    // Include departing agents (status "done" but walking to center) so they still render
     const activeAgents = Array.from(agents.values()).filter(
-      (a) => a.status !== "done",
+      (a) => a.status !== "done" || departingIds.has(a.id),
     );
 
     // Group by role
@@ -450,7 +467,7 @@ export function LiveViewScene({ userProfile }: LiveViewSceneProps) {
     }
 
     return { positions };
-  }, [agents, userProfile, packs, activeScene]);
+  }, [agents, userProfile, packs, activeScene, departingIds]);
 
   const lighting = activeScene?.lighting;
   const camera = activeScene?.camera;
