@@ -1,5 +1,7 @@
 import { useState, type KeyboardEvent } from "react";
 import { useAuthStore } from "../../stores/auth-store";
+import { PasswordInput } from "./PasswordInput";
+import { PasswordStrengthBar } from "./PasswordStrengthBar";
 
 export function ChangeTemporaryPassphraseScreen() {
   const { changeTemporaryPassphrase, error } = useAuthStore();
@@ -9,12 +11,12 @@ export function ChangeTemporaryPassphraseScreen() {
 
   const handleSubmit = async () => {
     if (!newPassphrase || !confirmPassphrase || submitting) return;
-    
+
     if (newPassphrase.length < 8) {
       useAuthStore.getState().setError("Passphrase must be at least 8 characters");
       return;
     }
-    
+
     if (newPassphrase !== confirmPassphrase) {
       useAuthStore.getState().setError("Passphrases do not match");
       return;
@@ -40,6 +42,15 @@ export function ChangeTemporaryPassphraseScreen() {
             <h1 className="text-lg font-semibold tracking-tight">Otterbot</h1>
           </div>
 
+          {/* Hidden username anchor for password managers */}
+          <input
+            type="text"
+            autoComplete="username"
+            value="otterbot"
+            hidden
+            readOnly
+          />
+
           <div className="space-y-4">
             <div className="text-center">
               <h2 className="text-sm font-medium mb-1">Change Your Passphrase</h2>
@@ -51,37 +62,60 @@ export function ChangeTemporaryPassphraseScreen() {
             <div>
               <label
                 htmlFor="newPassphrase"
-                className="block text-sm text-muted-foreground mb-1.5"
+                className="block text-sm font-medium text-muted-foreground mb-1.5"
               >
                 New Passphrase
               </label>
-              <input
+              <PasswordInput
                 id="newPassphrase"
-                type="password"
+                name="new-passphrase"
+                autoComplete="new-password"
                 value={newPassphrase}
                 onChange={(e) => setNewPassphrase(e.target.value)}
                 placeholder="Enter a new passphrase"
+                minLength={8}
+                required
                 autoFocus
                 className="w-full px-3 py-2 bg-background border border-input rounded-md text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
               />
+              <div className="mt-1.5">
+                <PasswordStrengthBar password={newPassphrase} />
+              </div>
             </div>
 
             <div>
               <label
                 htmlFor="confirmPassphrase"
-                className="block text-sm text-muted-foreground mb-1.5"
+                className="block text-sm font-medium text-muted-foreground mb-1.5"
               >
                 Confirm Passphrase
               </label>
-              <input
+              <PasswordInput
                 id="confirmPassphrase"
-                type="password"
+                name="confirm-passphrase"
+                autoComplete="new-password"
                 value={confirmPassphrase}
                 onChange={(e) => setConfirmPassphrase(e.target.value)}
                 onKeyDown={handleKeyDown}
                 placeholder="Confirm your passphrase"
+                minLength={8}
+                required
                 className="w-full px-3 py-2 bg-background border border-input rounded-md text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
               />
+              {/* Inline match validation */}
+              {confirmPassphrase && (
+                <p
+                  className={`text-xs mt-1 ${
+                    newPassphrase === confirmPassphrase
+                      ? "text-green-500"
+                      : "text-destructive"
+                  }`}
+                >
+                  {newPassphrase === confirmPassphrase
+                    ? "Passphrases match"
+                    : "Passphrases do not match"}
+                </p>
+              )}
             </div>
 
             {error && (
@@ -90,10 +124,16 @@ export function ChangeTemporaryPassphraseScreen() {
 
             <button
               onClick={handleSubmit}
-              disabled={!newPassphrase || !confirmPassphrase || submitting}
+              disabled={
+                !newPassphrase ||
+                !confirmPassphrase ||
+                newPassphrase.length < 8 ||
+                newPassphrase !== confirmPassphrase ||
+                submitting
+              }
               className="w-full px-4 py-2 bg-primary text-primary-foreground text-sm font-medium rounded-md hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
-              {submitting ? "Saving..." : "Continue"}
+              {submitting ? "Saving..." : "Set Passphrase"}
             </button>
           </div>
         </div>
