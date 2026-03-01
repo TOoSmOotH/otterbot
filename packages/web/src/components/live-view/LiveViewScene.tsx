@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useRef } from "react";
 import { useFrame } from "@react-three/fiber";
 import { OrbitControls } from "@react-three/drei";
 import { useAgentStore } from "../../stores/agent-store";
@@ -6,14 +6,25 @@ import { useModelPackStore } from "../../stores/model-pack-store";
 import { useEnvironmentStore } from "../../stores/environment-store";
 import { useRoomBuilderStore } from "../../stores/room-builder-store";
 import { useMovementStore } from "../../stores/movement-store";
+import { useExplosionStore } from "../../stores/explosion-store";
 import { AgentCharacter } from "./AgentCharacter";
 import { FallbackAgent } from "./FallbackAgent";
+import { AgentExplosion } from "./AgentExplosion";
 import { EnvironmentScene } from "./EnvironmentScene";
 import { ZoneGroundMarkers } from "./ZoneGroundMarkers";
 import { WASDControls } from "./WASDControls";
 import { EditableEnvironmentScene } from "../room-builder/EditableEnvironmentScene";
 import type { Agent } from "@otterbot/shared";
 import { findWaypointsByZoneAndTag } from "../../lib/pathfinding";
+
+const ROLE_COLORS: Record<string, string> = {
+  ceo: "#a855f7",
+  coo: "#8b5cf6",
+  team_lead: "#f59e0b",
+  worker: "#06b6d4",
+  admin_assistant: "#e879f9",
+  scheduler: "#f97316",
+};
 
 interface LiveViewSceneProps {
   userProfile?: { name: string | null; avatar: string | null; modelPackId?: string | null; gearConfig?: Record<string, boolean> | null; cooName?: string };
@@ -27,10 +38,33 @@ export function LiveViewScene({ userProfile }: LiveViewSceneProps) {
   const activeScene = useEnvironmentStore((s) => s.getActiveScene());
   const builderActive = useRoomBuilderStore((s) => s.active);
   const movementTick = useMovementStore((s) => s.tick);
+  const explosions = useExplosionStore((s) => s.explosions);
 
-  // Tick movement interpolators every frame
+  // Track departing agents that have already been exploded to avoid double-firing
+  const explodedRef = useRef(new Set<string>());
+
+  // Tick movement interpolators every frame + check departing agents
   useFrame((_, delta) => {
     movementTick(delta);
+
+    // Check if any departing agents have finished walking to center
+    const { _departingIds, agents: currentAgents, removeAgent } = useAgentStore.getState();
+    const movementState = useMovementStore.getState();
+
+    for (const id of _departingIds) {
+      if (explodedRef.current.has(id)) continue;
+      if (!movementState.isAgentBusy(id)) {
+        explodedRef.current.add(id);
+        const agent = currentAgents.get(id);
+        const lastPos = movementState.getLastKnownPosition(id);
+        const position: [number, number, number] = lastPos ?? [0, 0, 0];
+        const color = agent ? (ROLE_COLORS[agent.role] ?? ROLE_COLORS.worker) : "#06b6d4";
+        useExplosionStore.getState().addExplosion(id, position, color);
+        removeAgent(id);
+        // Clean up tracking after a short delay
+        setTimeout(() => explodedRef.current.delete(id), 2000);
+      }
+    }
   });
 
   const { positions } = useMemo(() => {
@@ -492,6 +526,16 @@ export function LiveViewScene({ userProfile }: LiveViewSceneProps) {
             />
           );
         })}
+
+      {/* Explosions */}
+      {Array.from(explosions.values()).map((exp) => (
+        <AgentExplosion
+          key={exp.id}
+          id={exp.id}
+          position={exp.position}
+          color={exp.color}
+        />
+      ))}
 
       {/* Camera controls */}
       <OrbitControls
