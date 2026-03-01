@@ -413,6 +413,7 @@ async function main() {
 
   // Serve 3D assets (model packs)
   const assetsRoot = resolve(__dirname, "../../../assets");
+  const worldLayout = new WorldLayoutManager(assetsRoot);
   console.log(`3D assets root: ${assetsRoot} (exists: ${existsSync(assetsRoot)})`);
   if (existsSync(assetsRoot)) {
     await app.register(fastifyStatic, {
@@ -1006,7 +1007,7 @@ async function main() {
           callback?.({ messageId: confirmMsg.id, conversationId: conversationId ?? "" });
           return true;
         },
-      }, { workspace, issueMonitor: issueMonitor!, mergeQueue });
+      }, { workspace, issueMonitor: issueMonitor!, mergeQueue, worldLayout });
       console.log(`COO agent started. (model=${coo.toData().model}, provider=${coo.toData().provider})`);
 
       // Spawn AdminAssistant alongside COO
@@ -2303,7 +2304,6 @@ async function main() {
   });
 
   // World layout API
-  const worldLayout = new WorldLayoutManager(assetsRoot);
 
   app.get("/api/world", async () => {
     const composite = worldLayout.getCompositeWorld();
