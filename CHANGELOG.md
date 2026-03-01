@@ -1,5 +1,46 @@
 # Changelog
 
+## [0.10.0](https://github.com/TOoSmOotH/otterbot/compare/otterbot-v0.9.0...otterbot-v0.10.0) (2026-03-01)
+
+
+### Features
+
+* add autonomous background research polling to deep-research module ([24645fb](https://github.com/TOoSmOotH/otterbot/commit/24645fb28616fd42ca5ce5540775070b91f17fd0))
+* add curl-to-install scripts and production compose template ([0533b0d](https://github.com/TOoSmOotH/otterbot/commit/0533b0d8ec74b3b421b8113afa4e3f28eebc8d10))
+* add Deep Research specialist module ([fd5a4ce](https://github.com/TOoSmOotH/otterbot/commit/fd5a4ce2c557aed4d87a6430e2dd125da46e2151))
+* add Discord support bot specialist module ([afce9ce](https://github.com/TOoSmOotH/otterbot/commit/afce9cef2bf5bd8677441280ef1ff81e74ec82e6))
+* add Space/Ctrl vertical movement to WASD camera controls ([cec6deb](https://github.com/TOoSmOotH/otterbot/commit/cec6debca1a8b128e5fde4b54ac27b909e1436df))
+* add time-budgeted deep polling with full-page fetching and doc crawling ([be43f22](https://github.com/TOoSmOotH/otterbot/commit/be43f22fa155df73d2f3db7a72ca0cfe890f442c))
+* add WASD camera movement controls to 3D live view ([4913e9a](https://github.com/TOoSmOotH/otterbot/commit/4913e9ab754334faa61e6a15508ce23758f0654b))
+* add WASD camera movement controls to 3D live view ([1fe2a60](https://github.com/TOoSmOotH/otterbot/commit/1fe2a60eaf4d0341aac9f0aa0153562c0164c3bd)), closes [#332](https://github.com/TOoSmOotH/otterbot/issues/332)
+* hide irrelevant config fields for deep research specialist ([8fa6430](https://github.com/TOoSmOotH/otterbot/commit/8fa6430e8704b09960a16a79f0c747e2d817a31e))
+* improve password UX/UI across setup wizard and auth screens ([59a2df6](https://github.com/TOoSmOotH/otterbot/commit/59a2df6811641eda19599c051302ad91b1c75052))
+* improve password UX/UI across setup wizard and auth screens ([2f04481](https://github.com/TOoSmOotH/otterbot/commit/2f044819897d4e4e35e08ad47d257331ef56733e)), closes [#337](https://github.com/TOoSmOotH/otterbot/issues/337)
+* inject specialist agent awareness into COO system prompt ([6754dbe](https://github.com/TOoSmOotH/otterbot/commit/6754dbe3c0b38c182b553e8538ae06838ed7f38d))
+* open browser after install.sh in desktop environments ([a21e0aa](https://github.com/TOoSmOotH/otterbot/commit/a21e0aa6d6625d01efa16f74290a14cbb380ec89))
+* open browser after install.sh in desktop environments ([12c0f5d](https://github.com/TOoSmOotH/otterbot/commit/12c0f5ddb90c5f49cdcdc43e902f80b567113dfb)), closes [#338](https://github.com/TOoSmOotH/otterbot/issues/338)
+* pass triage analysis and issue comments to coder agent ([05ac647](https://github.com/TOoSmOotH/otterbot/commit/05ac64794f65205aae6e62120ecc11012eb27fc4))
+* surface module poll triggers in Scheduled Tasks UI ([33b2057](https://github.com/TOoSmOotH/otterbot/commit/33b2057e15d6ad6756273b2db3406b616a19d5ed))
+* switch to existing conversation history when selecting specialist agent ([bfeb13a](https://github.com/TOoSmOotH/otterbot/commit/bfeb13a83efe855111c1eab15977b8c2e0b4662c))
+* switch to existing conversation history when selecting specialist agent ([4b8df7f](https://github.com/TOoSmOotH/otterbot/commit/4b8df7f0f332cf7bbfa59465e6821f8e9fb0ad3c)), closes [#330](https://github.com/TOoSmOotH/otterbot/issues/330)
+* v0.10.0 beta promotion ([c0f5121](https://github.com/TOoSmOotH/otterbot/commit/c0f5121abded3765570dd78e6c343ef046e41cb4))
+
+
+### Bug Fixes
+
+* add deep-research and discord-support modules to Docker build ([e357c12](https://github.com/TOoSmOotH/otterbot/commit/e357c120ae4fe4d245102660364f99e6ed161339))
+* consolidate system messages for Anthropic/Bedrock providers ([deb9733](https://github.com/TOoSmOotH/otterbot/commit/deb9733189590c5e5a3ee2a94d3b29574242cb73))
+* correct passphrase copy and revert release-managed files ([e4f6881](https://github.com/TOoSmOotH/otterbot/commit/e4f68819425684c4a7c872121de4f92e2476b494))
+* detect garbled Ollama responses and retry without SDK tools ([0034412](https://github.com/TOoSmOotH/otterbot/commit/0034412b951274f77ab807a46eabf5be329c21ab))
+* disable structuredOutputs for OpenAI providers to allow optional params ([fa03f4b](https://github.com/TOoSmOotH/otterbot/commit/fa03f4b4bf8aa479852c353149d9d2387768b1cf))
+* force text synthesis when agent exhausts maxSteps on tool calls ([2f24669](https://github.com/TOoSmOotH/otterbot/commit/2f246699489de8314ace5e3f6d6cd3ed92c1e56b))
+* load module agents in detached chat for specialist selector ([1e108d6](https://github.com/TOoSmOotH/otterbot/commit/1e108d6723ce2799ae82388d706f65b28c88d42f))
+* make github_repo optional in discord-support module ([b941b71](https://github.com/TOoSmOotH/otterbot/commit/b941b715bca8d0babe3921c83f2c79be348b467f))
+* module getConfig falls back to global config as intended ([1bfccac](https://github.com/TOoSmOotH/otterbot/commit/1bfccac9c3a99a68e8187302b92c2be4657207e0))
+* prevent branch collision when parallel pipeline tasks resolve same branch ([44e0ed2](https://github.com/TOoSmOotH/otterbot/commit/44e0ed2294847a27212553f44277bc7d2e429617))
+* publish multi-arch Docker images for arm64 support ([c9d89bb](https://github.com/TOoSmOotH/otterbot/commit/c9d89bbe40a371d0a52c0eac583f2df59f236f4a)), closes [#335](https://github.com/TOoSmOotH/otterbot/issues/335)
+* revert structuredOutputs on openai-compatible (not supported) ([0c480d5](https://github.com/TOoSmOotH/otterbot/commit/0c480d5ebe5c51550c3d9b2ae565c268ed91275a))
+
 ## [0.9.0](https://github.com/TOoSmOotH/otterbot/compare/otterbot-v0.8.1...otterbot-v0.9.0) (2026-02-28)
 
 
