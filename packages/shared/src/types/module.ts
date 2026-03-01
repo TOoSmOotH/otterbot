@@ -39,6 +39,10 @@ export interface ModuleConfigField {
   required: boolean;
   default?: string | number | boolean;
   options?: { value: string; label: string }[];
+  /** Hide this field from the UI entirely. */
+  hidden?: boolean;
+  /** Only show this field when another field has a specific value. */
+  showWhen?: { field: string; value: string };
 }
 
 export type ModuleConfigSchema = Record<string, ModuleConfigField>;
@@ -106,6 +110,19 @@ export interface KnowledgeStore {
   count(): number;
 }
 
+// ─── LLM access for modules ─────────────────────────────────────────────────
+
+export interface GenerateResponseOptions {
+  systemPrompt: string;
+  messages: Array<{ role: "user" | "assistant" | "system"; content: string }>;
+  temperature?: number;
+  maxSteps?: number;
+}
+
+export interface GenerateResponseResult {
+  text: string;
+}
+
 // ─── Module context ──────────────────────────────────────────────────────────
 
 export interface ModuleContext {
@@ -114,6 +131,8 @@ export interface ModuleContext {
   log(...args: unknown[]): void;
   warn(...args: unknown[]): void;
   error(...args: unknown[]): void;
+  /** Generate an LLM response using the server's configured provider. Available at runtime. */
+  generateResponse?(options: GenerateResponseOptions): Promise<GenerateResponseResult>;
 }
 
 // ─── Handlers ────────────────────────────────────────────────────────────────

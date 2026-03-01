@@ -294,6 +294,17 @@ export abstract class BaseAgent {
         getCircuitBreaker(this.llmConfig.provider).recordSuccess();
       }
 
+      // Detect garbled responses (raw template tokens leaking) — indicates the
+      // model's chat template can't handle SDK tool formatting (common with Ollama).
+      // Treat as if the response was empty so we retry without SDK tools.
+      const garbledToolResponse = hasTools && !hadToolCalls && text &&
+        /\<\|(?:start_header_id|end_header_id|eot_id|im_start|im_end)\|>/.test(text);
+      if (garbledToolResponse) {
+        console.warn(`[Agent ${this.id}] Garbled response detected (raw template tokens) — retrying without tools`);
+        // Remove the garbled assistant message from history if it was appended
+        text = "";
+      }
+
       // If tools were available but the stream produced NO text AND NO tool calls,
       // the provider likely doesn't support function calling — use text injection.
       // IMPORTANT: If tool calls were made (hadToolCalls), do NOT retry — the SDK
@@ -358,8 +369,27 @@ export abstract class BaseAgent {
         return { text: retry.text, thinking: retry.thinking, hadToolCalls: false };
       }
 
-      // If tools were called but final text is empty, synthesize a placeholder
-      // so callers have something to work with.
+      // If tools were called but the model never produced a final text response
+      // (e.g. it exhausted maxSteps on tool calls), do one more call WITHOUT tools
+      // to force the model to synthesize an answer from the tool results already
+      // in the conversation history.
+      if (!text && hadToolCalls) {
+        console.log(`[Agent ${this.id}] Tool calls produced no text — forcing synthesis without tools`);
+        const synthesis = await this.runStream(
+          undefined,
+          onToken,
+          onReasoning,
+          onReasoningEnd,
+        );
+        getCircuitBreaker(this.llmConfig.provider).recordSuccess();
+        text = synthesis.text;
+        if (synthesis.thinking) {
+          thinking = thinking
+            ? thinking + "\n\n" + synthesis.thinking
+            : synthesis.thinking;
+        }
+      }
+
       const finalText = text || (hadToolCalls ? "(tool calls executed)" : "");
 
       this.conversationHistory.push({
@@ -369,7 +399,7 @@ export abstract class BaseAgent {
       this.setStatus(AgentStatus.Idle);
 
       // Fire-and-forget: extract memories from this conversation turn
-      if (finalText && !hadToolCalls) {
+      if (finalText && finalText !== "(tool calls executed)") {
         new MemoryExtractor()
           .extract(userMessage, finalText, this.role, this.projectId)
           .catch(() => {}); // swallow errors silently

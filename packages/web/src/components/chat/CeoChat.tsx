@@ -563,7 +563,25 @@ export function CeoChat({ cooName, detached }: { cooName?: string; detached?: bo
               <div className="flex items-center gap-2">
                 <select
                   value={targetAgentId ?? ""}
-                  onChange={(e) => setTargetAgentId(e.target.value || null)}
+                  onChange={(e) => {
+                    const newAgentId = e.target.value || null;
+                    setTargetAgentId(newAgentId);
+                    // Switch to existing conversation with this agent
+                    const socket = getSocket();
+                    socket.emit(
+                      "ceo:find-agent-conversation",
+                      { agentId: newAgentId, projectId: activeProjectId ?? undefined },
+                      (result) => {
+                        if (result.conversationId) {
+                          loadConversationMessages(result.messages);
+                          setCurrentConversation(result.conversationId);
+                        } else {
+                          // No existing conversation — start fresh
+                          clearChat();
+                        }
+                      },
+                    );
+                  }}
                   className="bg-secondary rounded-md px-2 py-1 text-[11px] outline-none focus:ring-1 ring-primary text-muted-foreground"
                 >
                   <option value="">{cooName ?? "COO"}</option>

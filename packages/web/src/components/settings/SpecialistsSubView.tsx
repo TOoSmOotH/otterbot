@@ -29,6 +29,8 @@ interface ConfigField {
   required: boolean;
   default?: string | number | boolean;
   options?: { value: string; label: string }[];
+  hidden?: boolean;
+  showWhen?: { field: string; value: string };
 }
 
 interface SpecialistConfig {
@@ -902,6 +904,12 @@ function SpecialistConfigPanel({ moduleId }: { moduleId: string }) {
   );
 
   const renderField = ([key, field]: [string, ConfigField]) => {
+    if (field.hidden) return null;
+    if (field.showWhen) {
+      const depValue = editValues[field.showWhen.field] ?? "";
+      if (depValue !== field.showWhen.value) return null;
+    }
+
     if (key === "agent_provider") {
       return (
         <div key={key}>

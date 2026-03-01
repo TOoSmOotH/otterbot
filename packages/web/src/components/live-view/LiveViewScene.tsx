@@ -10,6 +10,7 @@ import { AgentCharacter } from "./AgentCharacter";
 import { FallbackAgent } from "./FallbackAgent";
 import { EnvironmentScene } from "./EnvironmentScene";
 import { ZoneGroundMarkers } from "./ZoneGroundMarkers";
+import { WASDControls } from "./WASDControls";
 import { EditableEnvironmentScene } from "../room-builder/EditableEnvironmentScene";
 import type { Agent } from "@otterbot/shared";
 import { findWaypointsByZoneAndTag } from "../../lib/pathfinding";
@@ -500,6 +501,7 @@ export function LiveViewScene({ userProfile }: LiveViewSceneProps) {
         minPolarAngle={0.3}
         maxPolarAngle={Math.PI / 2.1}
       />
+      <WASDControls disabled={builderActive} />
     </>
   );
 }

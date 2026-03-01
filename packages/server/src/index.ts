@@ -2653,13 +2653,26 @@ async function main() {
   // =========================================================================
 
   app.get("/api/settings/scheduled-tasks", async () => {
-    return { tasks: schedulerRegistry.getAll() };
+    const { getModuleScheduler } = await import("./modules/index.js");
+    const moduleTasks = getModuleScheduler()?.getAll() ?? [];
+    return { tasks: [...schedulerRegistry.getAll(), ...moduleTasks] };
   });
 
   app.put<{ Params: { taskId: string }; Body: { enabled?: boolean; intervalMs?: number } }>(
     "/api/settings/scheduled-tasks/:taskId",
     async (req, reply) => {
       const { taskId } = req.params;
+
+      if (taskId.startsWith("module-poll:")) {
+        const { getModuleScheduler } = await import("./modules/index.js");
+        const result = getModuleScheduler()?.update(taskId, req.body) ?? null;
+        if (!result) {
+          reply.code(404);
+          return { error: "Unknown module poll scheduler" };
+        }
+        return { ok: true, task: result };
+      }
+
       const result = schedulerRegistry.update(taskId, req.body);
       if (!result) {
         reply.code(404);
