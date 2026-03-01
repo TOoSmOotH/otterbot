@@ -38,7 +38,7 @@ function createModuleContext(
     knowledge: knowledgeStore,
     getConfig(key: string): string | undefined {
       // Try module-specific config first, then fall back to global
-      return getConfig(`module:${moduleId}:${key}`);
+      return getConfig(`module:${moduleId}:${key}`) ?? getConfig(key);
     },
     log(...args: unknown[]) {
       console.log(`[module:${moduleId}]`, ...args);
