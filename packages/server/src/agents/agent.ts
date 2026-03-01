@@ -294,6 +294,17 @@ export abstract class BaseAgent {
         getCircuitBreaker(this.llmConfig.provider).recordSuccess();
       }
 
+      // Detect garbled responses (raw template tokens leaking) — indicates the
+      // model's chat template can't handle SDK tool formatting (common with Ollama).
+      // Treat as if the response was empty so we retry without SDK tools.
+      const garbledToolResponse = hasTools && !hadToolCalls && text &&
+        /\<\|(?:start_header_id|end_header_id|eot_id|im_start|im_end)\|>/.test(text);
+      if (garbledToolResponse) {
+        console.warn(`[Agent ${this.id}] Garbled response detected (raw template tokens) — retrying without tools`);
+        // Remove the garbled assistant message from history if it was appended
+        text = "";
+      }
+
       // If tools were available but the stream produced NO text AND NO tool calls,
       // the provider likely doesn't support function calling — use text injection.
       // IMPORTANT: If tool calls were made (hadToolCalls), do NOT retry — the SDK
