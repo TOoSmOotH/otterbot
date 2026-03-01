@@ -88,7 +88,7 @@ export function resolveModel(config: LLMConfig): LanguageModel {
         apiKey: config.apiKey ?? resolved.apiKey ?? "",
         ...(baseUrl ? { baseURL: baseUrl } : {}),
       });
-      return openai(config.model);
+      return openai(config.model, { structuredOutputs: false });
     }
 
     case "google": {
@@ -128,7 +128,7 @@ export function resolveModel(config: LLMConfig): LanguageModel {
         baseURL: baseUrl,
         apiKey: config.apiKey ?? resolved.apiKey ?? "",
       });
-      return compatible(config.model);
+      return compatible(config.model, { structuredOutputs: false });
     }
 
     case "github-copilot": {
