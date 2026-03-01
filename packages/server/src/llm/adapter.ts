@@ -128,7 +128,7 @@ export function resolveModel(config: LLMConfig): LanguageModel {
         baseURL: baseUrl,
         apiKey: config.apiKey ?? resolved.apiKey ?? "",
       });
-      return compatible(config.model, { structuredOutputs: false });
+      return compatible(config.model);
     }
 
     case "github-copilot": {
