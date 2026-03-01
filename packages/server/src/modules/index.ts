@@ -155,6 +155,18 @@ export async function initModules(
     }
   }
 
+  // 6. Inform COO about active specialist agents so it can route by name
+  const specialists: Array<{ moduleId: string; name: string; description: string }> = [];
+  for (const [id, agent] of _moduleAgents) {
+    const loaded = modules.get(id);
+    specialists.push({
+      moduleId: id,
+      name: (agent as { name?: string }).name ?? id,
+      description: loaded?.definition.manifest.description ?? "",
+    });
+  }
+  coo.setSpecialistContext(specialists);
+
   console.log(`[Modules] Module system initialized with ${modules.size} modules`);
 }
 

@@ -30,53 +30,40 @@ The chat panel supports markdown, Mermaid diagrams, and optional voice (TTS/STT)
 
 ## Quick Start
 
-### Prerequisites
+The fastest way to get Otterbot running. The install script handles Docker detection, generates config files, and starts the container.
 
-- Node.js >= 20
-- pnpm >= 9 (`npm install -g pnpm`)
-
-### Setup
+### Linux / macOS
 
 ```bash
-# Clone and install
-git clone https://github.com/TOoSmOotH/otterbot.git
-cd otterbot
-pnpm install
-
-# Configure environment
-cp .env.example .env
-# Edit .env and set OTTERBOT_DB_KEY to a strong secret (used to encrypt the database)
-
-# Push the database schema
-pnpm db:push
-
-# Start development servers (backend on :62626, frontend on :5173)
-pnpm dev
+curl -fsSL https://otterbot.ai/install.sh | sh
 ```
 
-Open [http://localhost:5173](http://localhost:5173). On first launch, the **Setup Wizard** will walk you through:
+### Windows (PowerShell)
 
-1. Choosing an LLM provider (Anthropic, OpenAI, Google Gemini, Ollama, OpenRouter, Hugging Face, GitHub Copilot, NVIDIA, or OpenAI-compatible)
-2. Entering your API key and selecting a model
-3. Creating your user profile
-4. Optionally configuring TTS voice and 3D character model
-5. Customizing the COO agent
-6. Setting a login passphrase
+```powershell
+irm https://otterbot.ai/install.ps1 | iex
+```
 
-Once setup completes, you'll be chatting with the COO.
+This will:
+1. Check for Docker (and offer to install it if missing)
+2. Create `~/otterbot/` with a `docker-compose.yml` and `.env` (auto-generated DB encryption key)
+3. Pull the latest image and start the container
+4. Print the URL: **https://localhost:62626**
 
-### Docker
+On first launch, the **Setup Wizard** walks you through choosing an LLM provider, entering your API key, creating your profile, and setting a login passphrase.
+
+**Flags:** `--beta` (use beta channel), `--dir <path>` (custom install directory), `--no-start` (generate files only)
+
+### Docker (manual)
+
+If you prefer to set things up yourself:
 
 ```bash
-# Build and run in a container
-pnpm docker:build
-pnpm docker:up
-
-# Start with self-hosted SearXNG search
-pnpm docker:up:search
-
-# Or for development with hot-reload
-pnpm docker:dev
+docker run -d -p 62626:62626 --name otterbot \
+  -e OTTERBOT_DB_KEY=$(openssl rand -hex 16) \
+  -v ~/otterbot:/otterbot \
+  --shm-size 256m \
+  ghcr.io/toosmooth/otterbot:latest
 ```
 
 The container runs Node 22 as a non-root user with a full development environment pre-installed:
@@ -85,8 +72,6 @@ The container runs Node 22 as a non-root user with a full development environmen
 - **Desktop**: XFCE + Xvfb + x11vnc + noVNC (virtual desktop viewable in the web UI)
 - **Browser**: Playwright with Chromium (headed mode when desktop is enabled)
 - **CLI tools**: GitHub CLI, coding agent CLIs (OpenCode, Claude Code, Codex)
-
-Data is persisted to `./docker/otterbot/` (or `$OTTERBOT_DATA_DIR`).
 
 ### Container Images
 
@@ -101,6 +86,17 @@ docker pull ghcr.io/toosmooth/otterbot:beta
 
 # Specific version (e.g. v0.4.0)
 docker pull ghcr.io/toosmooth/otterbot:v0.4.0
+```
+
+### From Source (development)
+
+```bash
+git clone https://github.com/TOoSmOotH/otterbot.git
+cd otterbot
+pnpm install
+cp .env.example .env   # edit .env and set OTTERBOT_DB_KEY
+pnpm db:push
+pnpm dev               # backend on :62626, frontend on :5173
 ```
 
 ## Contributing

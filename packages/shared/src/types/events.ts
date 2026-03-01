@@ -101,6 +101,10 @@ export interface ClientToServerEvents {
     data: { conversationId: string },
     callback: (result: { messages: BusMessage[] }) => void,
   ) => void;
+  "ceo:find-agent-conversation": (
+    data: { agentId: string | null; projectId?: string },
+    callback: (result: { conversationId: string | null; messages: BusMessage[] }) => void,
+  ) => void;
   "project:list": (
     callback: (projects: Project[]) => void,
   ) => void;

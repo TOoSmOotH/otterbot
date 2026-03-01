@@ -19,6 +19,7 @@ import {
   addLabelsToIssue,
   fetchCompareCommitsDiff,
   fetchPullRequests,
+  fetchIssueComments,
 } from "../github/github-service.js";
 import type { COO } from "../agents/coo.js";
 import { resolveProjectBranch, type GitHubIssue } from "../github/github-service.js";
@@ -473,7 +474,7 @@ export class PipelineManager {
       console.log(`[PipelineManager] Triaged issue #${issue.number} as "${parsed.classification}" (proceed=${parsed.shouldProceed})`);
 
       // Create a kanban task in the Triage column (read-only view of all open issues)
-      this.createTriageTask(projectId, issue.number, issue.title, parsed.classification, issue.body ?? "");
+      this.createTriageTask(projectId, issue.number, issue.title, parsed.classification, issue.body ?? "", parsed.comment);
     } catch (err) {
       console.error(`[PipelineManager] Triage LLM call failed for #${issue.number}:`, err);
     }
@@ -621,6 +622,19 @@ export class PipelineManager {
       // Fallback: look for an open PR referencing this issue
       if (!state.prBranch && state.issueNumber && state.repo) {
         state.prBranch = await this.resolveIssueBranch(state.repo, state.issueNumber);
+      }
+
+      // Check for branch collision with other active pipelines
+      if (state.prBranch) {
+        for (const [otherId, otherState] of this.pipelines) {
+          if (otherId !== taskId && otherState.prBranch === state.prBranch) {
+            console.warn(
+              `[PipelineManager] Branch collision: "${state.prBranch}" already used by task ${otherId} — clearing for task ${taskId}`,
+            );
+            state.prBranch = null;
+            break;
+          }
+        }
       }
 
       // Persist to DB so it survives server restarts and is available to later stages
@@ -1260,7 +1274,8 @@ export class PipelineManager {
         } else {
           // Initial implementation
           parts.push(
-            `\nCreate a feature branch, implement the solution, commit, and push.`,
+            `\nCreate a feature branch named \`feat/issue-${state.issueNumber}-<short-description>\` (e.g. \`feat/issue-${state.issueNumber ?? "42"}-add-login-button\`), implement the solution, commit, and push.`,
+            `Do NOT reuse an existing branch. Always create a fresh branch from the default branch.`,
             `Do NOT create a pull request — a later stage will handle that.`,
             `\nFocus ONLY on the implementation code. Do NOT:`,
             `- Write or update tests (a dedicated Tester stage handles testing)`,
@@ -1268,6 +1283,39 @@ export class PipelineManager {
             `- Perform security audits (a dedicated Security stage handles that)`,
             `If the issue description mentions tests, PRs, or reviews, ignore those — other pipeline stages will handle them.`,
           );
+
+          // Fetch and include issue comments for additional context
+          if (state.issueNumber && state.repo) {
+            const token = getConfig("github:token");
+            const botUsername = getConfig("github:username");
+            if (token) {
+              try {
+                const allComments = await fetchIssueComments(state.repo, token, state.issueNumber);
+                // Filter out bot comments (matching bot username or ### prefix from formatBotComment)
+                const userComments = allComments.filter((c) => {
+                  if (botUsername && c.user.login === botUsername) return false;
+                  if (c.body.startsWith("### ")) return false;
+                  return true;
+                });
+                if (userComments.length > 0) {
+                  const last5 = userComments.slice(-5);
+                  const formatted = last5
+                    .map((c) => {
+                      const body = c.body.length > 3000 ? c.body.slice(0, 3000) + "..." : c.body;
+                      return `@${c.user.login} (${c.created_at}):\n${body}`;
+                    })
+                    .join("\n\n");
+                  parts.push(
+                    `\nThe following comments are from the GitHub issue discussion. User comments contain`,
+                    `clarifications and additional requirements — incorporate them into your implementation.`,
+                    `\n<issue-comments>\n${formatted}\n</issue-comments>`,
+                  );
+                }
+              } catch (err) {
+                console.error(`[PipelineManager] Failed to fetch issue comments for #${state.issueNumber}:`, err);
+              }
+            }
+          }
         }
         parts.push(
           `\nIMPORTANT: End your report with exactly one of these verdicts on its own line:`,
@@ -1485,6 +1533,7 @@ export class PipelineManager {
     issueTitle: string,
     classification: string,
     body: string,
+    triageComment?: string,
   ): void {
     const db = getDb();
     const label = `github-issue-${issueNumber}`;
@@ -1513,7 +1562,9 @@ export class PipelineManager {
       id: nanoid(),
       projectId,
       title: `#${issueNumber}: ${issueTitle}`,
-      description: classification ? `Triage: ${classification}\n\n${body}` : body,
+      description: classification
+        ? `Triage: ${classification}\n\n${body}${triageComment ? `\n\n--- TRIAGE ANALYSIS ---\nThe following is a prior triage agent's analysis. Review it for context but form your own implementation approach.\n\n${triageComment}\n--- END TRIAGE ANALYSIS ---` : ""}`
+        : body,
       column: "triage" as const,
       position: maxPos + 1,
       assigneeAgentId: null,
@@ -1796,6 +1847,34 @@ export class PipelineManager {
     }
 
     const now = new Date().toISOString();
+
+    // Guard: if we have a branch but still no PR number after resolution,
+    // send the task back to backlog for retry rather than leaving it stuck in in_review
+    if (task.prBranch && !(task as any).prNumber) {
+      console.warn(
+        `[PipelineManager] Task ${taskId} has branch "${task.prBranch}" but no PR number — sending back to backlog for retry`,
+      );
+      db.update(schema.kanbanTasks)
+        .set({
+          column: "backlog",
+          pipelineStage: null,
+          updatedAt: now,
+        })
+        .where(eq(schema.kanbanTasks.id, taskId))
+        .run();
+
+      const rolledBack = db
+        .select()
+        .from(schema.kanbanTasks)
+        .where(eq(schema.kanbanTasks.id, taskId))
+        .get();
+      if (rolledBack) {
+        this.io.emit("kanban:task-updated", rolledBack as unknown as KanbanTask);
+      }
+      this.pipelines.delete(taskId);
+      return;
+    }
+
     const hasPR = !!task.prNumber || !!task.prBranch;
     const targetColumn = hasPR ? "in_review" : "done";
 

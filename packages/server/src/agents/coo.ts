@@ -250,6 +250,42 @@ The user can see everything on the desktop in real-time.`;
     this._moduleTools = tools;
   }
 
+  /** Inject specialist agent awareness into the system prompt so the COO can route by name. */
+  setSpecialistContext(
+    specialists: Array<{ moduleId: string; name: string; description: string }>,
+  ): void {
+    if (specialists.length === 0) return;
+
+    const lines = [
+      "\n\n## Specialist Agents",
+      "You have specialist agents with deep expertise. When the CEO refers to one by name, use `module_query` with the module ID to route their request.",
+      "",
+    ];
+    for (const s of specialists) {
+      lines.push(
+        `- **${s.name}** (module ID: \`${s.moduleId}\`) — ${s.description}`,
+      );
+    }
+    lines.push("");
+    lines.push(
+      'Example: If the CEO says "ask Steve about WebAssembly" and Steve is the Deep Research specialist, ' +
+      'call module_query(moduleId="deep-research", question="What do you know about WebAssembly?")',
+    );
+
+    this.systemPrompt += lines.join("\n");
+
+    // Update the system message in conversation history to match
+    if (
+      this.conversationHistory.length > 0 &&
+      this.conversationHistory[0].role === "system"
+    ) {
+      this.conversationHistory[0] = {
+        role: "system",
+        content: this.systemPrompt,
+      };
+    }
+  }
+
   async handleMessage(message: BusMessage): Promise<void> {
     console.log(`[COO] handleMessage type=${message.type} from=${message.fromAgentId ?? "CEO"}`);
     if (message.type === MessageType.Chat) {

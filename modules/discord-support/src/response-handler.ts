@@ -1,0 +1,236 @@
+import { randomUUID } from "node:crypto";
+import type { Message as DiscordMessage, ThreadChannel } from "discord.js";
+import type { ModuleContext } from "@otterbot/shared";
+import type { DiscordSupportClient } from "./discord-client.js";
+
+// ─── Constants ──────────────────────────────────────────────────────────────
+
+const MAX_HISTORY_MESSAGES = 20;
+const MAX_CODE_RESULTS = 5;
+const MAX_CODE_SNIPPET_LENGTH = 4000;
+const RESPONSE_COOLDOWN_MS = 10_000; // 10 second cooldown per thread
+
+// ─── Thread state ───────────────────────────────────────────────────────────
+
+const lastResponseTime = new Map<string, number>();
+
+// ─── Database helpers ───────────────────────────────────────────────────────
+
+function ensureThread(
+  ctx: ModuleContext,
+  thread: ThreadChannel,
+  message: DiscordMessage,
+): void {
+  const existing = ctx.knowledge.db
+    .prepare("SELECT thread_id FROM threads WHERE thread_id = ?")
+    .get(thread.id) as { thread_id: string } | undefined;
+
+  if (!existing) {
+    ctx.knowledge.db
+      .prepare(
+        `INSERT INTO threads (thread_id, channel_id, title, author_id, author_name, status, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, 'open', ?, ?)`,
+      )
+      .run(
+        thread.id,
+        thread.parentId ?? "",
+        thread.name,
+        message.author.id,
+        message.author.username,
+        new Date().toISOString(),
+        new Date().toISOString(),
+      );
+  } else {
+    ctx.knowledge.db
+      .prepare("UPDATE threads SET updated_at = ? WHERE thread_id = ?")
+      .run(new Date().toISOString(), thread.id);
+  }
+}
+
+function storeMessage(
+  ctx: ModuleContext,
+  threadId: string,
+  discordMessageId: string,
+  authorId: string,
+  authorName: string,
+  isBot: boolean,
+  content: string,
+): void {
+  ctx.knowledge.db
+    .prepare(
+      `INSERT OR IGNORE INTO thread_messages (id, thread_id, discord_message_id, author_id, author_name, is_bot, content, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    )
+    .run(
+      randomUUID(),
+      threadId,
+      discordMessageId,
+      authorId,
+      authorName,
+      isBot ? 1 : 0,
+      content,
+      new Date().toISOString(),
+    );
+}
+
+interface StoredMessage {
+  author_name: string | null;
+  is_bot: number;
+  content: string;
+  created_at: string;
+}
+
+function loadThreadHistory(ctx: ModuleContext, threadId: string): StoredMessage[] {
+  return ctx.knowledge.db
+    .prepare(
+      `SELECT author_name, is_bot, content, created_at
+       FROM thread_messages
+       WHERE thread_id = ?
+       ORDER BY created_at ASC`,
+    )
+    .all(threadId) as StoredMessage[];
+}
+
+// ─── Response generation ────────────────────────────────────────────────────
+
+function buildSystemPrompt(
+  ctx: ModuleContext,
+  threadTitle: string,
+  codeContext: string,
+): string {
+  const botName = ctx.getConfig("bot_name") ?? "Support Bot";
+  const repo = ctx.getConfig("github_repo") ?? "the project";
+
+  return [
+    `You are ${botName}, a support assistant for the ${repo} project.`,
+    "You help users with questions about the codebase by referencing the indexed source code.",
+    "",
+    "When answering:",
+    "- Reference specific file paths when relevant",
+    "- Use code blocks with appropriate syntax highlighting",
+    "- Be concise but thorough",
+    "- If you don't know the answer, say so honestly",
+    "- If the question is about a bug, suggest debugging steps",
+    "- Format your response for Discord (markdown, keep responses focused)",
+    "- If the question has been asked before in past threads, reference the previous answer",
+    "",
+    `Thread topic: ${threadTitle}`,
+    "",
+    codeContext
+      ? `The following source code files may be relevant:\n\n${codeContext}`
+      : "No specific source code context was found for this query. Use the search_code tool if needed.",
+  ].join("\n");
+}
+
+function buildMessages(
+  history: StoredMessage[],
+): Array<{ role: "user" | "assistant"; content: string }> {
+  // Take last N messages for context
+  const recent = history.slice(-MAX_HISTORY_MESSAGES);
+
+  return recent.map((msg) => ({
+    role: msg.is_bot ? ("assistant" as const) : ("user" as const),
+    content: msg.is_bot
+      ? msg.content
+      : `[${msg.author_name ?? "User"}]: ${msg.content}`,
+  }));
+}
+
+// ─── Main handler ───────────────────────────────────────────────────────────
+
+export async function handleSupportMessage(
+  ctx: ModuleContext,
+  client: DiscordSupportClient,
+  message: DiscordMessage,
+  thread: ThreadChannel,
+): Promise<void> {
+  // Rate limit: don't respond too quickly to the same thread
+  const lastTime = lastResponseTime.get(thread.id);
+  if (lastTime && Date.now() - lastTime < RESPONSE_COOLDOWN_MS) {
+    return;
+  }
+
+  // Ensure thread record exists
+  ensureThread(ctx, thread, message);
+
+  // Store the incoming message
+  storeMessage(
+    ctx,
+    thread.id,
+    message.id,
+    message.author.id,
+    message.author.username,
+    false,
+    message.content,
+  );
+
+  // Check if generateResponse is available
+  if (!ctx.generateResponse) {
+    ctx.error("generateResponse not available — cannot respond to support message");
+    return;
+  }
+
+  // Start typing indicator
+  const typingTimer = await client.sendTyping(thread);
+
+  try {
+    // Load conversation history
+    const history = loadThreadHistory(ctx, thread.id);
+
+    // Search for relevant code context
+    const searchQuery = `${thread.name} ${message.content}`;
+    const codeResults = await ctx.knowledge.search(searchQuery, MAX_CODE_RESULTS);
+    const codeFiles = codeResults.filter((doc) => doc.id.startsWith("file:"));
+
+    const codeContext = codeFiles
+      .map((doc) => {
+        const path = (doc.metadata?.path as string) ?? doc.id.replace("file:", "");
+        const content = doc.content.length > MAX_CODE_SNIPPET_LENGTH
+          ? doc.content.slice(0, MAX_CODE_SNIPPET_LENGTH) + "\n... (truncated)"
+          : doc.content;
+        return `### ${path}\n${content}`;
+      })
+      .join("\n\n");
+
+    // Build prompt and messages
+    const systemPrompt = buildSystemPrompt(ctx, thread.name, codeContext);
+    const messages = buildMessages(history);
+
+    // Generate response
+    const result = await ctx.generateResponse({
+      systemPrompt,
+      messages,
+    });
+
+    if (!result.text) {
+      ctx.warn("Empty response from LLM for thread:", thread.id);
+      return;
+    }
+
+    // Send response
+    await client.sendReply(thread, result.text);
+
+    // Store bot response
+    storeMessage(
+      ctx,
+      thread.id,
+      `bot-${randomUUID()}`,
+      client.botUserId ?? "bot",
+      ctx.getConfig("bot_name") ?? "Support Bot",
+      true,
+      result.text,
+    );
+
+    // Update thread timestamp
+    ctx.knowledge.db
+      .prepare("UPDATE threads SET last_responded_at = ?, updated_at = ? WHERE thread_id = ?")
+      .run(new Date().toISOString(), new Date().toISOString(), thread.id);
+
+    // Record response time for cooldown
+    lastResponseTime.set(thread.id, Date.now());
+  } catch (err) {
+    ctx.error("Failed to generate support response:", err);
+  } finally {
+    clearInterval(typingTimer);
+  }
+}

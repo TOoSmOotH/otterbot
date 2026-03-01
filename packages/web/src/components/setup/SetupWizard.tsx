@@ -6,6 +6,9 @@ import { DEFAULT_AVATARS } from "./default-avatars";
 import type { GearConfig } from "@otterbot/shared";
 import { ModelPricingPrompt } from "../settings/ModelPricingPrompt";
 import { saveWizardState, loadWizardState, clearWizardState } from "../../hooks/use-setup-persistence";
+import { PasswordInput } from "../ui/PasswordInput";
+import { StrengthMeter } from "../ui/StrengthMeter";
+import { scorePassword } from "../../utils/password-strength";
 
 const SUGGESTED_MODELS: Record<string, string[]> = {
   anthropic: ["claude-sonnet-4-5-20250929", "claude-haiku-4-20250414"],
@@ -596,65 +599,101 @@ export function SetupWizard() {
           </p>
 
           {/* Step indicator */}
-          <div className="flex items-center justify-center gap-2 mb-6">
+          <div className="flex items-center justify-center gap-1 mb-6">
             {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((s, i) => (
-              <div key={s} className="flex items-center gap-2">
+              <div key={s} className="flex items-center gap-1">
                 {i > 0 && (
-                  <div className={`w-6 h-px ${step >= s ? "bg-primary" : "bg-muted"}`} />
+                  <div className={`w-4 h-px ${step >= s ? "bg-primary" : "bg-muted"}`} />
                 )}
-                <div className={`w-2 h-2 rounded-full ${step >= s ? "bg-primary" : "bg-muted"}`} />
+                <div
+                  className={`rounded-full transition-all ${
+                    step === s
+                      ? "w-3 h-3 bg-primary ring-2 ring-primary/30"
+                      : step > s
+                        ? "w-2.5 h-2.5 bg-primary"
+                        : "w-2.5 h-2.5 bg-muted"
+                  }`}
+                />
               </div>
             ))}
           </div>
 
           {step === 1 && (
             <div className="space-y-4">
-              <h2 className="text-sm font-medium">
-                1. Set a passphrase to protect the UI
+              {/* Hidden username anchor for password managers */}
+              <input
+                type="text"
+                autoComplete="username"
+                value="otterbot"
+                readOnly
+                hidden
+                tabIndex={-1}
+              />
+
+              <h2 className="text-sm font-semibold">
+                Step 1 of 10: Security
               </h2>
               <p className="text-xs text-muted-foreground">
-                You will need this passphrase to access Otterbot. Minimum 8
-                characters.
+                This passphrase protects access to the Otterbot UI.
+                Choose something memorable — there is no recovery mechanism.
               </p>
 
               <div>
-                <label className="block text-sm text-muted-foreground mb-1.5">
+                <label htmlFor="setup-passphrase" className="block text-sm font-medium text-muted-foreground mb-1.5">
                   Passphrase
                 </label>
-                <input
-                  type="password"
+                <PasswordInput
+                  id="setup-passphrase"
+                  name="passphrase"
+                  autoComplete="new-password"
                   value={passphrase}
-                  onChange={(e) => setPassphrase(e.target.value)}
-                  placeholder="Enter a passphrase"
+                  onChange={(e) => setPassphrase(e.currentTarget.value)}
+                  placeholder="Enter a passphrase (min. 8 characters)"
                   autoFocus
-                  className="w-full px-3 py-2 bg-background border border-input rounded-md text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                  minLength={8}
+                  required
                 />
+                {passphrase && (
+                  <div className="mt-2">
+                    <StrengthMeter strength={scorePassword(passphrase)} />
+                  </div>
+                )}
               </div>
 
               <div>
-                <label className="block text-sm text-muted-foreground mb-1.5">
+                <label htmlFor="setup-confirm-passphrase" className="block text-sm font-medium text-muted-foreground mb-1.5">
                   Confirm Passphrase
                 </label>
-                <input
-                  type="password"
+                <PasswordInput
+                  id="setup-confirm-passphrase"
+                  name="confirmPassphrase"
+                  autoComplete="new-password"
                   value={confirmPassphrase}
-                  onChange={(e) => setConfirmPassphrase(e.target.value)}
+                  onChange={(e) => setConfirmPassphrase(e.currentTarget.value)}
                   onKeyDown={(e) => {
                     if (e.key === "Enter") handleNextFromPassphrase();
                   }}
                   placeholder="Confirm your passphrase"
-                  className="w-full px-3 py-2 bg-background border border-input rounded-md text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                  minLength={8}
+                  required
                 />
+                {confirmPassphrase && (
+                  <p className={`mt-1.5 text-xs ${passphrase === confirmPassphrase ? "text-green-500" : "text-destructive"}`}>
+                    {passphrase === confirmPassphrase
+                      ? "Passphrases match"
+                      : "Passphrases do not match"}
+                  </p>
+                )}
               </div>
 
               {error && <p className="text-sm text-destructive">{error}</p>}
 
               <button
                 onClick={handleNextFromPassphrase}
-                disabled={!passphrase || !confirmPassphrase}
+                disabled={!passphrase || !confirmPassphrase || passphrase !== confirmPassphrase || passphrase.length < 8}
                 className="w-full px-4 py-2 bg-primary text-primary-foreground text-sm font-medium rounded-md hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               >
-                Next
+                Set Passphrase
               </button>
             </div>
           )}

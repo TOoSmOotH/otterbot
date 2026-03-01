@@ -6,7 +6,7 @@ import type {
 import { MessageType, type Agent, type AgentActivityRecord, type BusMessage, type Conversation, type Project, type KanbanTask, type Todo, type CodingAgentSession, type CodingAgentMessage, type CodingAgentPart, type CodingAgentFileDiff, type CodingAgentType } from "@otterbot/shared";
 import { nanoid } from "nanoid";
 import { makeProjectId } from "../utils/slugify.js";
-import { eq, or, desc, isNull } from "drizzle-orm";
+import { eq, or, and, desc, isNull } from "drizzle-orm";
 import type { MessageBus } from "../bus/message-bus.js";
 import type { COO } from "../agents/coo.js";
 import type { Registry } from "../registry/registry.js";
@@ -295,6 +295,62 @@ export function setupSocketHandlers(
       }
       coo.loadConversation(data.conversationId, messages, projectId, charter);
       callback({ messages });
+    });
+
+    // Find the most recent conversation involving a specific agent
+    socket.on("ceo:find-agent-conversation", (data, callback) => {
+      const db = getDb();
+      const { agentId, projectId } = data;
+
+      // Find conversations that have messages involving this agent
+      // For COO (agentId=null), find conversations where messages are to/from "coo"
+      // For specialists, find conversations where messages are to/from the specialist agentId
+      const targetId = agentId ?? "coo";
+
+      // Find the most recent conversation that has messages involving this agent
+      const projectFilter = projectId
+        ? eq(schema.messages.projectId, projectId)
+        : isNull(schema.messages.projectId);
+
+      const matchingMessage = db
+        .select({ conversationId: schema.messages.conversationId })
+        .from(schema.messages)
+        .where(
+          and(
+            or(
+              eq(schema.messages.fromAgentId, targetId),
+              eq(schema.messages.toAgentId, targetId),
+            ),
+            projectFilter,
+          ),
+        )
+        .orderBy(desc(schema.messages.timestamp))
+        .limit(1)
+        .get();
+
+      if (matchingMessage?.conversationId) {
+        const convId = matchingMessage.conversationId;
+        const messages = bus.getConversationMessages(convId);
+        const conv = db
+          .select()
+          .from(schema.conversations)
+          .where(eq(schema.conversations.id, convId))
+          .get();
+        let charter: string | null = null;
+        const convProjectId = conv?.projectId ?? null;
+        if (convProjectId) {
+          const project = db
+            .select()
+            .from(schema.projects)
+            .where(eq(schema.projects.id, convProjectId))
+            .get();
+          charter = project?.charter ?? null;
+        }
+        coo.loadConversation(convId, messages, convProjectId, charter);
+        callback({ conversationId: convId, messages });
+      } else {
+        callback({ conversationId: null, messages: [] });
+      }
     });
 
     // Request registry entries
