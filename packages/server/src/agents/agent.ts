@@ -369,8 +369,27 @@ export abstract class BaseAgent {
         return { text: retry.text, thinking: retry.thinking, hadToolCalls: false };
       }
 
-      // If tools were called but final text is empty, synthesize a placeholder
-      // so callers have something to work with.
+      // If tools were called but the model never produced a final text response
+      // (e.g. it exhausted maxSteps on tool calls), do one more call WITHOUT tools
+      // to force the model to synthesize an answer from the tool results already
+      // in the conversation history.
+      if (!text && hadToolCalls) {
+        console.log(`[Agent ${this.id}] Tool calls produced no text — forcing synthesis without tools`);
+        const synthesis = await this.runStream(
+          undefined,
+          onToken,
+          onReasoning,
+          onReasoningEnd,
+        );
+        getCircuitBreaker(this.llmConfig.provider).recordSuccess();
+        text = synthesis.text;
+        if (synthesis.thinking) {
+          thinking = thinking
+            ? thinking + "\n\n" + synthesis.thinking
+            : synthesis.thinking;
+        }
+      }
+
       const finalText = text || (hadToolCalls ? "(tool calls executed)" : "");
 
       this.conversationHistory.push({
@@ -380,7 +399,7 @@ export abstract class BaseAgent {
       this.setStatus(AgentStatus.Idle);
 
       // Fire-and-forget: extract memories from this conversation turn
-      if (finalText && !hadToolCalls) {
+      if (finalText && finalText !== "(tool calls executed)") {
         new MemoryExtractor()
           .extract(userMessage, finalText, this.role, this.projectId)
           .catch(() => {}); // swallow errors silently
