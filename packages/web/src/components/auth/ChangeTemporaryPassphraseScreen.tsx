@@ -65,8 +65,8 @@ export function ChangeTemporaryPassphraseScreen() {
               <h2 className="text-sm font-medium mb-1">Change Your Passphrase</h2>
               <p className="text-xs text-muted-foreground">
                 You logged in with a temporary passphrase. Set your own
-                passphrase to continue. This passphrase encrypts your API
-                keys, conversations, and other personal data.
+                passphrase to continue. This passphrase protects access to
+                the Otterbot UI.
               </p>
             </div>
 
@@ -124,7 +124,7 @@ export function ChangeTemporaryPassphraseScreen() {
 
             <p className="text-xs text-muted-foreground">
               There is no recovery mechanism — if you forget this passphrase
-              you will need to reset the database.
+              you will need to reset it.
             </p>
 
             {error && (

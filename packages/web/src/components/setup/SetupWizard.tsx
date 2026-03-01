@@ -634,9 +634,8 @@ export function SetupWizard() {
                 Step 1 of 10: Security
               </h2>
               <p className="text-xs text-muted-foreground">
-                This passphrase encrypts your API keys, conversations, and
-                other personal data. There is no recovery mechanism — if you
-                forget it you will need to reset the database.
+                This passphrase protects access to the Otterbot UI.
+                Choose something memorable — there is no recovery mechanism.
               </p>
 
               <div>
