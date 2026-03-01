@@ -9,6 +9,7 @@
 #   --dir <path>   — custom install directory
 #   --beta         — use :beta image tag instead of :latest
 #   --no-start     — set up files but don't pull/start the container
+#   --no-open      — don't open the browser after starting
 #   --help         — show usage
 
 set -eu
@@ -19,6 +20,7 @@ IMAGE="ghcr.io/toosmooth/otterbot"
 TAG="latest"
 INSTALL_DIR="${OTTERBOT_DIR:-$HOME/otterbot}"
 NO_START=0
+NO_OPEN=0
 
 # ── Colours (disabled when not a tty) ────────────────────────────────────────
 
@@ -51,6 +53,7 @@ Options:
   --dir <path>   Install directory (default: \$HOME/otterbot)
   --beta         Use the beta image tag
   --no-start     Generate files but don't start the container
+  --no-open      Don't open the browser after starting
   --help         Show this help message
 EOF
   exit 0
@@ -71,6 +74,25 @@ prompt_yn() {
       ;;
     *) return 1 ;;
   esac
+}
+
+try_open_browser() {
+  url="$1"
+  # macOS
+  if command -v open >/dev/null 2>&1; then
+    open "$url" 2>/dev/null && return 0
+  fi
+  # Linux with a display server (X11 or Wayland)
+  if [ -n "${DISPLAY:-}" ] || [ -n "${WAYLAND_DISPLAY:-}" ]; then
+    if command -v xdg-open >/dev/null 2>&1; then
+      xdg-open "$url" 2>/dev/null && return 0
+    fi
+  fi
+  # WSL
+  if command -v wslview >/dev/null 2>&1; then
+    wslview "$url" 2>/dev/null && return 0
+  fi
+  return 1
 }
 
 generate_secret() {
@@ -99,6 +121,9 @@ while [ $# -gt 0 ]; do
       ;;
     --no-start)
       NO_START=1
+      ;;
+    --no-open)
+      NO_OPEN=1
       ;;
     --help|-h)
       usage
@@ -275,3 +300,11 @@ printf "  %-12s %s\n" "Start:" "cd $INSTALL_DIR && docker compose up -d"
 printf "  %-12s %s\n" "Logs:" "cd $INSTALL_DIR && docker compose logs -f"
 printf "  %-12s %s\n" "Update:" "cd $INSTALL_DIR && docker compose pull && docker compose up -d"
 printf "\n"
+
+# ── Open browser (desktop environments only) ────────────────────────────────
+
+if [ "$NO_START" -eq 0 ] && [ "$NO_OPEN" -eq 0 ]; then
+  if try_open_browser "https://localhost:62626"; then
+    info "Opened browser to https://localhost:62626"
+  fi
+fi
