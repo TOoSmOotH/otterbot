@@ -248,6 +248,47 @@ export function resolveModel(config: LLMConfig): LanguageModel {
  */
 export type ChatMessage = CoreMessage;
 
+/**
+ * Consolidate system messages so providers that don't support multiple
+ * system messages separated by user/assistant messages still work.
+ *
+ * Strategy: collect all system messages, merge their content into a single
+ * system message at the start, and remove the originals from the stream.
+ */
+function consolidateSystemMessages(messages: ChatMessage[]): ChatMessage[] {
+  const systemParts: string[] = [];
+  const nonSystem: ChatMessage[] = [];
+
+  for (const msg of messages) {
+    if (msg.role === "system") {
+      const text = typeof msg.content === "string"
+        ? msg.content
+        : JSON.stringify(msg.content);
+      systemParts.push(text);
+    } else {
+      nonSystem.push(msg);
+    }
+  }
+
+  if (systemParts.length <= 1) return messages;
+
+  return [
+    { role: "system" as const, content: systemParts.join("\n\n") },
+    ...nonSystem,
+  ];
+}
+
+/** Providers that require a single system message */
+const SINGLE_SYSTEM_PROVIDERS = new Set(["anthropic", "bedrock"]);
+
+/** Normalize messages for the target provider */
+function normalizeMessages(config: LLMConfig, messages: ChatMessage[]): ChatMessage[] {
+  if (SINGLE_SYSTEM_PROVIDERS.has(config.provider)) {
+    return consolidateSystemMessages(messages);
+  }
+  return messages;
+}
+
 /** Generate a complete response (non-streaming) */
 export async function generate(
   config: LLMConfig,
@@ -257,7 +298,7 @@ export async function generate(
   const model = resolveModel(config);
   const result = await generateText({
     model,
-    messages,
+    messages: normalizeMessages(config, messages),
     temperature: config.temperature,
     maxRetries: config.maxRetries ?? 8,
     ...(tools ? { tools: tools as any } : {}),
@@ -279,7 +320,7 @@ export async function stream(
   const thinking = isThinkingModel(config);
   const result = streamText({
     model,
-    messages,
+    messages: normalizeMessages(config, messages),
     temperature: config.temperature,
     maxRetries: config.maxRetries ?? 8,
     ...(tools ? { tools: tools as any, maxSteps: config.maxSteps ?? 20 } : {}),
