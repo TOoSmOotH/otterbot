@@ -1,5 +1,6 @@
 import { useState, type KeyboardEvent } from "react";
 import { useAuthStore } from "../../stores/auth-store";
+import { PasswordInput } from "../ui/PasswordInput";
 
 export function LoginScreen() {
   const { login, error } = useAuthStore();
@@ -29,24 +30,34 @@ export function LoginScreen() {
             <h1 className="text-lg font-semibold tracking-tight">Otterbot</h1>
           </div>
 
+          {/* Hidden username anchor for password managers */}
+          <input
+            type="text"
+            autoComplete="username"
+            value="otterbot"
+            readOnly
+            hidden
+            tabIndex={-1}
+          />
+
           {/* Form */}
           <div className="space-y-4">
             <div>
               <label
-                htmlFor="passphrase"
+                htmlFor="login-passphrase"
                 className="block text-sm text-muted-foreground mb-1.5"
               >
                 Passphrase
               </label>
-              <input
-                id="passphrase"
-                type="password"
+              <PasswordInput
+                id="login-passphrase"
+                name="passphrase"
+                autoComplete="current-password"
                 value={passphrase}
-                onChange={(e) => setPassphrase(e.target.value)}
+                onChange={(e) => setPassphrase(e.currentTarget.value)}
                 onKeyDown={handleKeyDown}
                 placeholder="Enter your passphrase"
                 autoFocus
-                className="w-full px-3 py-2 bg-background border border-input rounded-md text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
               />
             </div>
 
