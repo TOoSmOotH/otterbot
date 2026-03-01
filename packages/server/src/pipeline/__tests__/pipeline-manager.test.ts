@@ -18,6 +18,7 @@ vi.mock("../../github/github-service.js", () => ({
   addLabelsToIssue: vi.fn().mockResolvedValue(undefined),
   fetchCompareCommitsDiff: vi.fn().mockResolvedValue([]),
   fetchPullRequests: vi.fn().mockResolvedValue([]),
+  fetchIssueComments: vi.fn().mockResolvedValue([]),
   resolveProjectBranch: vi.fn(() => "main"),
 }));
 
@@ -58,7 +59,7 @@ vi.mock("../../utils/github-comments.js", () => ({
 }));
 
 import { PipelineManager } from "../pipeline-manager.js";
-import { createIssueComment } from "../../github/github-service.js";
+import { createIssueComment, fetchIssueComments } from "../../github/github-service.js";
 import type { COO } from "../../agents/coo.js";
 import { MessageType } from "@otterbot/shared";
 
@@ -701,6 +702,140 @@ describe("PipelineManager", () => {
       expect(dbTask?.pipelineStage).toBeNull();
       expect(dbTask?.assigneeAgentId).toBeNull();
       expect(io.emit).toHaveBeenCalledWith("kanban:task-updated", expect.objectContaining({ id: task.id }));
+    });
+  });
+
+  // ─── createTriageTask ──────────────────────────────────────
+
+  describe("createTriageTask", () => {
+    it("stores triage comment in task description", () => {
+      insertProject();
+      pm.createTriageTask(
+        PROJECT_ID,
+        99,
+        "Test issue",
+        "bug",
+        "Issue body text",
+        "Recommended approach: fix the null check",
+      );
+
+      const db = getDb();
+      const tasks = db.select().from(schema.kanbanTasks).all();
+      const task = tasks.find((t) => t.title === "#99: Test issue");
+      expect(task).toBeDefined();
+      expect(task!.description).toContain("Triage: bug");
+      expect(task!.description).toContain("Issue body text");
+      expect(task!.description).toContain("--- TRIAGE ANALYSIS ---");
+      expect(task!.description).toContain("Recommended approach: fix the null check");
+      expect(task!.description).toContain("--- END TRIAGE ANALYSIS ---");
+    });
+
+    it("omits triage analysis section when no comment provided", () => {
+      insertProject();
+      pm.createTriageTask(PROJECT_ID, 100, "No comment issue", "feature", "Body");
+
+      const db = getDb();
+      const tasks = db.select().from(schema.kanbanTasks).all();
+      const task = tasks.find((t) => t.title === "#100: No comment issue");
+      expect(task).toBeDefined();
+      expect(task!.description).toBe("Triage: feature\n\nBody");
+      expect(task!.description).not.toContain("TRIAGE ANALYSIS");
+    });
+  });
+
+  // ─── sendStageDirective (issue comments) ──────────────────
+
+  describe("sendStageDirective (issue comments)", () => {
+    it("includes user issue comments in coder initial implementation directive", async () => {
+      const task = insertTask({
+        id: "task-comments-1",
+        column: "in_progress",
+        title: "Fix bug",
+        labels: ["github-issue-42"],
+      });
+      insertProject();
+      setPipelineConfig(PROJECT_ID);
+      configStore.set("github:token", "test-token");
+      configStore.set("github:username", "otterbot");
+
+      (fetchIssueComments as any).mockResolvedValueOnce([
+        { id: 1, user: { login: "otterbot" }, body: "### Triage: bug\n\nBot analysis", created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z", html_url: "" },
+        { id: 2, user: { login: "alice" }, body: "Please also handle the edge case", created_at: "2026-01-02T00:00:00Z", updated_at: "2026-01-02T00:00:00Z", html_url: "" },
+      ]);
+
+      const state = createPipelineState({
+        taskId: task.id,
+        issueNumber: 42,
+        repo: "owner/repo",
+        stages: ["coder", "reviewer"],
+        currentStageIndex: 0,
+      });
+      (pm as any).pipelines.set(task.id, state);
+
+      await (pm as any).sendStageDirective(state);
+
+      const call = (bus.send as any).mock.calls[0][0];
+      expect(call.content).toContain("<issue-comments>");
+      expect(call.content).toContain("Please also handle the edge case");
+      expect(call.content).not.toContain("Bot analysis");
+    });
+
+    it("does not include issue comments on kickback (non-initial) coder runs", async () => {
+      vi.mocked(fetchIssueComments).mockClear();
+
+      const task = insertTask({
+        id: "task-kickback-1",
+        column: "in_progress",
+        title: "Fix bug",
+        labels: ["github-issue-42"],
+      });
+      insertProject();
+      setPipelineConfig(PROJECT_ID);
+      configStore.set("github:token", "test-token");
+
+      const state = createPipelineState({
+        taskId: task.id,
+        issueNumber: 42,
+        repo: "owner/repo",
+        stages: ["coder", "reviewer"],
+        currentStageIndex: 0,
+        lastKickbackSource: "reviewer",
+        prBranch: "feat/issue-42-fix",
+      });
+      (pm as any).pipelines.set(task.id, state);
+
+      await (pm as any).sendStageDirective(state);
+
+      expect(fetchIssueComments).not.toHaveBeenCalled();
+    });
+
+    it("gracefully handles fetchIssueComments API failure", async () => {
+      const task = insertTask({
+        id: "task-comments-err",
+        column: "in_progress",
+        title: "Fix bug",
+        labels: ["github-issue-42"],
+      });
+      insertProject();
+      setPipelineConfig(PROJECT_ID);
+      configStore.set("github:token", "test-token");
+
+      (fetchIssueComments as any).mockRejectedValueOnce(new Error("API error"));
+
+      const state = createPipelineState({
+        taskId: task.id,
+        issueNumber: 42,
+        repo: "owner/repo",
+        stages: ["coder", "reviewer"],
+        currentStageIndex: 0,
+      });
+      (pm as any).pipelines.set(task.id, state);
+
+      // Should not throw
+      await (pm as any).sendStageDirective(state);
+
+      const call = (bus.send as any).mock.calls[0][0];
+      expect(call.content).not.toContain("<issue-comments>");
     });
   });
 
