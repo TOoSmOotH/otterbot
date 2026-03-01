@@ -623,6 +623,19 @@ export class PipelineManager {
         state.prBranch = await this.resolveIssueBranch(state.repo, state.issueNumber);
       }
 
+      // Check for branch collision with other active pipelines
+      if (state.prBranch) {
+        for (const [otherId, otherState] of this.pipelines) {
+          if (otherId !== taskId && otherState.prBranch === state.prBranch) {
+            console.warn(
+              `[PipelineManager] Branch collision: "${state.prBranch}" already used by task ${otherId} — clearing for task ${taskId}`,
+            );
+            state.prBranch = null;
+            break;
+          }
+        }
+      }
+
       // Persist to DB so it survives server restarts and is available to later stages
       if (state.prBranch) {
         const db = getDb();
@@ -1260,7 +1273,8 @@ export class PipelineManager {
         } else {
           // Initial implementation
           parts.push(
-            `\nCreate a feature branch, implement the solution, commit, and push.`,
+            `\nCreate a feature branch named \`feat/issue-${state.issueNumber}-<short-description>\` (e.g. \`feat/issue-${state.issueNumber ?? "42"}-add-login-button\`), implement the solution, commit, and push.`,
+            `Do NOT reuse an existing branch. Always create a fresh branch from the default branch.`,
             `Do NOT create a pull request — a later stage will handle that.`,
             `\nFocus ONLY on the implementation code. Do NOT:`,
             `- Write or update tests (a dedicated Tester stage handles testing)`,
@@ -1796,6 +1810,34 @@ export class PipelineManager {
     }
 
     const now = new Date().toISOString();
+
+    // Guard: if we have a branch but still no PR number after resolution,
+    // send the task back to backlog for retry rather than leaving it stuck in in_review
+    if (task.prBranch && !(task as any).prNumber) {
+      console.warn(
+        `[PipelineManager] Task ${taskId} has branch "${task.prBranch}" but no PR number — sending back to backlog for retry`,
+      );
+      db.update(schema.kanbanTasks)
+        .set({
+          column: "backlog",
+          pipelineStage: null,
+          updatedAt: now,
+        })
+        .where(eq(schema.kanbanTasks.id, taskId))
+        .run();
+
+      const rolledBack = db
+        .select()
+        .from(schema.kanbanTasks)
+        .where(eq(schema.kanbanTasks.id, taskId))
+        .get();
+      if (rolledBack) {
+        this.io.emit("kanban:task-updated", rolledBack as unknown as KanbanTask);
+      }
+      this.pipelines.delete(taskId);
+      return;
+    }
+
     const hasPR = !!task.prNumber || !!task.prBranch;
     const targetColumn = hasPR ? "in_review" : "done";
 
