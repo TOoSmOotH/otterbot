@@ -554,7 +554,7 @@ describe("PipelineManager", () => {
       expect(dbTask?.column).toBe("done");
     });
 
-    it("task with prBranch but no prNumber still goes to in_review", async () => {
+    it("task with prBranch but no prNumber goes back to backlog for retry", async () => {
       const task = insertTask({
         id: "task-complete-branch-only",
         column: "in_progress",
@@ -571,7 +571,7 @@ describe("PipelineManager", () => {
       await (pm as any).completeTask(task.id, state, "final report");
 
       const dbTask = getTask(task.id);
-      expect(dbTask?.column).toBe("in_review");
+      expect(dbTask?.column).toBe("backlog");
     });
   });
 
