@@ -62,10 +62,6 @@ function getGitHubConfig(ctx: ModuleContext) {
   if (!repo) {
     return null;
   }
-  if (!token) {
-    ctx.warn("No GitHub token configured (set github_token or github:token)");
-    return null;
-  }
 
   const [owner, name] = repo.split("/");
   if (!owner || !name) {
@@ -85,14 +81,15 @@ function getGitHubConfig(ctx: ModuleContext) {
   return { owner, name, token, branch, pathPrefixes, extensions, maxFileSizeKb };
 }
 
-async function ghFetch<T>(url: string, token: string): Promise<T | null> {
-  const response = await fetch(url, {
-    headers: {
-      Authorization: `Bearer ${token}`,
-      Accept: "application/vnd.github.v3+json",
-      "User-Agent": "otterbot-discord-support",
-    },
-  });
+async function ghFetch<T>(url: string, token: string | undefined): Promise<T | null> {
+  const headers: Record<string, string> = {
+    Accept: "application/vnd.github.v3+json",
+    "User-Agent": "otterbot-discord-support",
+  };
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+  const response = await fetch(url, { headers });
 
   if (!response.ok) {
     throw new Error(`GitHub API ${response.status}: ${response.statusText}`);
@@ -104,7 +101,7 @@ async function ghFetch<T>(url: string, token: string): Promise<T | null> {
 async function fetchTree(
   owner: string,
   name: string,
-  token: string,
+  token: string | undefined,
   branch?: string,
 ): Promise<GitTreeResponse> {
   const ref = branch ?? "HEAD";
@@ -117,7 +114,7 @@ async function fetchTree(
 async function fetchFileContent(
   owner: string,
   name: string,
-  token: string,
+  token: string | undefined,
   path: string,
   branch?: string,
 ): Promise<string> {

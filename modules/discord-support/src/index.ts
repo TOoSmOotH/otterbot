@@ -79,7 +79,7 @@ export default defineModule({
     github_token: {
       type: "secret",
       description:
-        "GitHub token for source code access (falls back to global github:token)",
+        "GitHub token for API access (optional for public repos, increases rate limit from 60 to 5000 req/hr)",
       required: false,
     },
     github_branch: {
