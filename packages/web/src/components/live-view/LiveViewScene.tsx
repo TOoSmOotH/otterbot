@@ -556,6 +556,7 @@ export function LiveViewScene({ userProfile }: LiveViewSceneProps) {
 
       {/* Camera controls */}
       <OrbitControls
+        makeDefault
         target={camera?.target ?? [0, 1, -4]}
         minDistance={5}
         maxDistance={activeScene?.zones ? 60 : 25}
