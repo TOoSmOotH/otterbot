@@ -37,6 +37,7 @@ const RESPONSE_MODES_BY_TYPE: Record<string, { value: ResponseMode; label: strin
   text: [
     { value: "auto", label: "Auto-respond" },
     { value: "mention", label: "Mention only" },
+    { value: "announce", label: "Announce releases" },
     { value: "readonly", label: "Read-only" },
   ],
   announcement: [
