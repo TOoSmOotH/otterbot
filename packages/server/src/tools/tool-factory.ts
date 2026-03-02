@@ -6,6 +6,7 @@ import { createFileWriteTool } from "./file-write.js";
 import { createShellExecTool } from "./shell-exec.js";
 import { createWebSearchTool } from "./web-search.js";
 import { createWebBrowseTool } from "./web-browse.js";
+import { createDemoRecordTool } from "./demo-record.js";
 import { createInstallPackageTool } from "./install-package.js";
 import { createOpenCodeTaskTool } from "./opencode-task.js";
 import { createTodoListTool } from "./todo-list.js";
@@ -54,6 +55,7 @@ const TOOL_REGISTRY: Record<string, ToolCreator> = {
   web_browse: createWebBrowseTool,
   install_package: createInstallPackageTool,
   opencode_task: createOpenCodeTaskTool,
+  demo_record: createDemoRecordTool,
   github_get_issue: createGitHubGetIssueTool,
   github_list_issues: createGitHubListIssuesTool,
   github_get_pr: createGitHubGetPRTool,
@@ -284,6 +286,19 @@ export function getToolsWithMeta(): {
       category: "Workspace",
       parameters: [
         { name: "task", type: "string", required: true, description: "Detailed description of the coding task" },
+      ],
+    },
+    demo_record: {
+      description: "Record video demos of web applications with optional voiceover narration. Produces YouTube-ready MP4 videos.",
+      category: "Browser",
+      parameters: [
+        { name: "action", type: "string", required: true, description: "Action: start, narrate, wait, stop, run_script, status" },
+        { name: "url", type: "string", required: false, description: "URL to navigate to (for start)" },
+        { name: "text", type: "string", required: false, description: "Narration text (for narrate)" },
+        { name: "seconds", type: "number", required: false, description: "Wait duration in seconds (for wait)" },
+        { name: "resolution", type: "string", required: false, description: "Video resolution: 720p or 1080p (for start)" },
+        { name: "filename", type: "string", required: false, description: "Output filename without extension (for stop)" },
+        { name: "script", type: "string", required: false, description: "JSON demo script (for run_script)" },
       ],
     },
     github_get_issue: {
