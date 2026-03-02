@@ -72,6 +72,7 @@ export function ChannelsConfigSection({
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState("");
   const [migrated, setMigrated] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   // Parse existing config on mount
   useEffect(() => {
@@ -114,6 +115,7 @@ export function ChannelsConfigSection({
 
   const fetchAvailableChannels = async () => {
     setLoading(true);
+    setError(null);
     try {
       const res = await fetch(`/api/modules/${moduleId}/webhook`, {
         method: "POST",
@@ -123,9 +125,13 @@ export function ChannelsConfigSection({
       if (res.ok) {
         const data = await res.json();
         setAvailableChannels(data.channels ?? []);
+      } else {
+        const data = await res.json().catch(() => ({}));
+        setError(data.error ?? `Failed to fetch channels (${res.status})`);
       }
-    } catch { /* ignore */ }
-    finally {
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to fetch channels");
+    } finally {
       setLoading(false);
     }
   };
@@ -207,7 +213,11 @@ export function ChannelsConfigSection({
             placeholder="Search channels..."
             className="w-full bg-secondary rounded-md px-3 py-1.5 text-xs outline-none focus:ring-1 ring-primary"
           />
-          {loading ? (
+          {error ? (
+            <div className="text-[10px] text-red-500 text-center py-2">
+              {error}
+            </div>
+          ) : loading ? (
             <div className="text-[10px] text-muted-foreground text-center py-2">
               Loading channels...
             </div>
