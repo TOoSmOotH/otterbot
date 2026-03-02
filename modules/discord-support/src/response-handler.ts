@@ -101,10 +101,14 @@ function buildSystemPrompt(
   codeContext: string,
 ): string {
   const botName = ctx.getConfig("bot_name") ?? "Support Bot";
-  const repo = ctx.getConfig("github_repo") ?? "the project";
+  const repoRaw = ctx.getConfig("github_repo");
+  const repoList = repoRaw
+    ? repoRaw.split(",").map((r) => r.trim()).filter(Boolean)
+    : [];
+  const repoDesc = repoList.length > 0 ? repoList.join(", ") : "the project";
 
   return [
-    `You are ${botName}, a support assistant for the ${repo} project.`,
+    `You are ${botName}, a support assistant for the ${repoDesc} project${repoList.length > 1 ? "s" : ""}.`,
     "You help users with questions about the codebase by referencing the indexed source code.",
     "",
     "When answering:",

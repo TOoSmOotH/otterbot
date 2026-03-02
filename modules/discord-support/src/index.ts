@@ -5,6 +5,7 @@ import { handleSupportMessage } from "./response-handler.js";
 import { searchCodeTool, getFileTool, searchThreadsTool } from "./tools.js";
 import { migration001 } from "./migrations/001-initial.js";
 import { migration002 } from "./migrations/002-announcements.js";
+import { migration003 } from "./migrations/003-multi-repo.js";
 import { parseChannelConfigs } from "./channel-config.js";
 
 // ─── Discord client lifecycle ───────────────────────────────────────────────
@@ -73,7 +74,7 @@ export default defineModule({
     github_repo: {
       type: "string",
       description:
-        "GitHub repository to index (owner/repo format, e.g. 'myorg/myproject')",
+        "Comma-separated GitHub repos to index (owner/repo format, e.g. 'myorg/code,myorg/docs')",
       required: false,
     },
     github_token: {
@@ -118,7 +119,7 @@ export default defineModule({
     { type: "poll", intervalMs: 600_000, minIntervalMs: 120_000 },
   ],
 
-  migrations: [migration001, migration002],
+  migrations: [migration001, migration002, migration003],
 
   tools: [searchCodeTool, getFileTool, searchThreadsTool],
 
@@ -128,22 +129,23 @@ export default defineModule({
     // Check for new releases and post announcements
     if (discordClient) {
       try {
-        const releases = await checkForNewReleases(ctx);
-        if (releases.length > 0) {
+        const releaseResults = await checkForNewReleases(ctx);
+        if (releaseResults.length > 0) {
           const configs = parseChannelConfigs(ctx.getConfig("channels_config"));
           const announceChannels = configs.filter(
             (c) => c.enabled && c.responseMode === "announce",
           );
 
-          for (const release of releases) {
+          for (const { release, repoId } of releaseResults) {
             const title = release.name || release.tag_name;
             const body = release.body
               ? release.body.length > 1500
                 ? release.body.slice(0, 1500) + "..."
                 : release.body
               : "";
+            const refId = `${repoId}:${release.tag_name}`;
             const content = [
-              `**New Release: ${title}**`,
+              `**New Release: ${title}** (${repoId})`,
               body ? `\n${body}` : "",
               `\n[View Release](${release.html_url})`,
             ].join("");
@@ -151,7 +153,7 @@ export default defineModule({
             for (const channel of announceChannels) {
               try {
                 await discordClient.sendToChannel(channel.channelId, content);
-                recordAnnouncement(ctx, channel.channelId, "release", release.tag_name, content);
+                recordAnnouncement(ctx, channel.channelId, "release", refId, repoId, content);
               } catch (err) {
                 ctx.error(`Failed to announce release to channel ${channel.channelId}:`, err);
               }
@@ -159,12 +161,12 @@ export default defineModule({
 
             // If no announce channels configured, still record so we don't re-check
             if (announceChannels.length === 0) {
-              recordAnnouncement(ctx, "_none", "release", release.tag_name, content);
+              recordAnnouncement(ctx, "_none", "release", refId, repoId, content);
             }
           }
 
-          if (releases.length > 0 && announceChannels.length > 0) {
-            ctx.log(`Announced ${releases.length} release(s) to ${announceChannels.length} channel(s)`);
+          if (releaseResults.length > 0 && announceChannels.length > 0) {
+            ctx.log(`Announced ${releaseResults.length} release(s) to ${announceChannels.length} channel(s)`);
           }
         }
       } catch (err) {
