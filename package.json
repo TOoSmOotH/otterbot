@@ -1,6 +1,6 @@
 {
   "name": "otterbot",
-  "version": "0.10.0",
+  "version": "0.11.0",
   "private": true,
   "description": "Open-source multi-agent AI orchestration system",
   "license": "MIT",
