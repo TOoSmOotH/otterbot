@@ -20,6 +20,7 @@ import { SoulAdvisor } from "../memory/soul-advisor.js";
 import type { WorkspaceManager } from "../workspace/workspace.js";
 import type { GitHubIssueMonitor } from "../github/issue-monitor.js";
 import type { MergeQueue } from "../merge-queue/merge-queue.js";
+import type { WorldLayoutManager } from "../models3d/world-layout.js";
 import { cloneRepo, getRepoDefaultBranch } from "../github/github-service.js";
 import { initGitRepo, createInitialCommit } from "../utils/git.js";
 import { NO_REPORT_SENTINEL } from "../schedulers/custom-task-scheduler.js";
@@ -88,7 +89,7 @@ export function setupSocketHandlers(
   coo: COO,
   registry: Registry,
   hooks?: SocketHooks,
-  deps?: { workspace?: WorkspaceManager; issueMonitor?: GitHubIssueMonitor; mergeQueue?: MergeQueue },
+  deps?: { workspace?: WorkspaceManager; issueMonitor?: GitHubIssueMonitor; mergeQueue?: MergeQueue; worldLayout?: WorldLayoutManager },
 ) {
   // Track conversation IDs used by background tasks so we can suppress
   // the COO's response in that same conversation.
@@ -458,6 +459,15 @@ export function setupSocketHandlers(
 
       // Clear conversation contexts that reference this project
       coo.clearProjectConversations(data.projectId);
+
+      // Remove the 3D office zone for this project
+      const worldLayout = deps?.worldLayout;
+      if (worldLayout) {
+        const removed = worldLayout.removeZone(data.projectId);
+        if (removed) {
+          io.emit("world:zone-removed", { projectId: data.projectId });
+        }
+      }
 
       // Cascade-delete related DB records
       db.delete(schema.kanbanTasks).where(eq(schema.kanbanTasks.projectId, data.projectId)).run();
