@@ -39,6 +39,7 @@ import { createSshExecTool } from "./ssh-exec.js";
 import { createSshListKeysTool } from "./ssh-list-keys.js";
 import { createSshListHostsTool } from "./ssh-list-hosts.js";
 import { createSshConnectTool } from "./ssh-connect.js";
+import { createGetCurrentTimeTool } from "./get-current-time.js";
 import { McpClientManager } from "../mcp/mcp-client-manager.js";
 import { McpServerService as McpServerServiceRef } from "../mcp/mcp-service.js";
 
@@ -83,6 +84,8 @@ const CONTEXTLESS_TOOL_REGISTRY: Record<string, () => unknown> = {
   list_custom_tools: createListCustomToolsTool,
   update_custom_tool: createUpdateCustomToolTool,
   test_custom_tool: createTestCustomToolTool,
+  // Time tools
+  get_current_time: createGetCurrentTimeTool,
   // Memory tools
   memory_save: createMemorySaveTool,
   // SSH tools
@@ -492,6 +495,11 @@ export function getToolsWithMeta(): {
         { name: "id", type: "string", required: true, description: "The tool ID to test" },
         { name: "params", type: "object", required: true, description: "Parameters to pass to the tool" },
       ],
+    },
+    get_current_time: {
+      description: "Get the current date and time. Use this when you need an up-to-date timestamp.",
+      category: "Utility",
+      parameters: [],
     },
     ssh_exec: {
       description: "Execute a command on a remote host via SSH. Output capped at 50KB, timeout 2 minutes.",

@@ -23,6 +23,7 @@ import type { MessageBus } from "../bus/message-bus.js";
 import type { WorkspaceManager } from "../workspace/workspace.js";
 import { eq, and } from "drizzle-orm";
 import { getConfig } from "../auth/auth.js";
+import { buildDateContext } from "./prompts/date-context.js";
 import {
   listPackages,
   installAptPackage,
@@ -167,6 +168,9 @@ Chromium is already installed at \`${chromiumPath}\`. Do NOT try to install a br
 To launch it: use run_command with \`${chromiumPath} --no-sandbox --disable-dev-shm-usage <url> &\`
 The user can see everything on the desktop in real-time.`;
     }
+
+    // Inject current date/time context
+    systemPrompt += buildDateContext();
 
     // Inject user profile into system prompt if available
     const userName = getConfig("user_name");

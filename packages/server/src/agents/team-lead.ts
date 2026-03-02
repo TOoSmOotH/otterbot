@@ -37,6 +37,7 @@ import { getAgentModelOverride } from "../settings/settings.js";
 import { getConfiguredSearchProvider } from "../tools/search/providers.js";
 import { isDesktopEnabled } from "../desktop/desktop.js";
 import { TEAM_LEAD_PROMPT } from "./prompts/team-lead.js";
+import { buildDateContext } from "./prompts/date-context.js";
 import { getRandomModelPackId } from "../models3d/model-packs.js";
 import { debug } from "../utils/debug.js";
 import { pickWorkerName } from "../utils/worker-names.js";
@@ -257,6 +258,9 @@ export class TeamLead extends BaseAgent {
       }
       systemPrompt += sections.join("\n");
     }
+
+    // Inject current date/time context
+    systemPrompt += buildDateContext();
 
     // Agent assignments are resolved dynamically at spawn time (not baked into the
     // system prompt) so that config changes take effect without restarting the TL.
@@ -1672,6 +1676,7 @@ export class TeamLead extends BaseAgent {
           getConfig("coo_provider") ??
           entry.defaultProvider,
         systemPrompt: (skillPromptContent || entry.systemPrompt) + buildEnvironmentContext(entryTools) +
+          buildDateContext() +
           githubWorkerContext +
           (workspacePath
             ? `\n\n## Your Workspace\nYour workspace directory is: \`${workspacePath}\`\n` +
