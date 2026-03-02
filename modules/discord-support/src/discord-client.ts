@@ -168,11 +168,17 @@ export class DiscordSupportClient {
   // ─── Guild channels (for channel picker UI) ────────────────────────────
 
   async getGuildChannels(): Promise<Array<{ id: string; name: string; type: string }>> {
-    if (!this.client) return [];
+    if (!this.client) {
+      this.ctx.warn("getGuildChannels: client is null");
+      return [];
+    }
 
     const results: Array<{ id: string; name: string; type: string }> = [];
+    const guildCount = this.client.guilds.cache.size;
+    this.ctx.log(`getGuildChannels: bot is in ${guildCount} guild(s)`);
 
     for (const guild of this.client.guilds.cache.values()) {
+      this.ctx.log(`getGuildChannels: fetching channels for guild "${guild.name}" (${guild.id})`);
       const channels = await guild.channels.fetch();
       for (const channel of channels.values()) {
         if (!channel) continue;
