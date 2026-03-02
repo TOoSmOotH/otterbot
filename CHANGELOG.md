@@ -1,5 +1,30 @@
 # Changelog
 
+## [0.11.0](https://github.com/TOoSmOotH/otterbot/compare/otterbot-v0.10.0...otterbot-v0.11.0) (2026-03-02)
+
+
+### Features
+
+* add explosion particle effect when agents complete tasks ([2e5c80e](https://github.com/TOoSmOotH/otterbot/commit/2e5c80ed6cd018fe5fd74e5b0fa8dd59ca07c155))
+* add per-channel configuration for Discord support module ([e36180d](https://github.com/TOoSmOotH/otterbot/commit/e36180d4d6bff20daa4375dcc2b5091a8469be16))
+* explosion effect when agents complete tasks ([49deb81](https://github.com/TOoSmOotH/otterbot/commit/49deb817365ceaf7f793728e2caa86919e51fb7f))
+* promote beta to main ([7a372f7](https://github.com/TOoSmOotH/otterbot/commit/7a372f725dddf0b8656f2660a5d6ad4b4e8a083e))
+* support multiple GitHub repos in discord-support module ([25bafc0](https://github.com/TOoSmOotH/otterbot/commit/25bafc0d53d70ae779444b567f8055286a79f205))
+
+
+### Bug Fixes
+
+* add error display and debug logging for channel picker ([8511c91](https://github.com/TOoSmOotH/otterbot/commit/8511c91ba26bf1956764de17cc832513aa4ce283))
+* allow announce mode on text channels ([dbbd2a8](https://github.com/TOoSmOotH/otterbot/commit/dbbd2a86be6e56629272104eade522b61266b210))
+* departing agents now render while walking to center before exploding ([74e433b](https://github.com/TOoSmOotH/otterbot/commit/74e433bb407bdaf1de9011aa08dc55642970bd6b))
+* departing agents render while walking to center before exploding ([ecf2a40](https://github.com/TOoSmOotH/otterbot/commit/ecf2a40e36aa543c6aaf7c6c27d4f91d90e45f08))
+* make GitHub token optional for public repos ([aaf4b5c](https://github.com/TOoSmOotH/otterbot/commit/aaf4b5c9ae0239d5ad6f91fbdb256b6aebf62ddb))
+* register module webhook route before app.listen ([4718e30](https://github.com/TOoSmOotH/otterbot/commit/4718e309c4f46e5f7a0fa7c65467d8c2b1f4b2e2))
+* remove 3D office zone when project is deleted ([cc809c8](https://github.com/TOoSmOotH/otterbot/commit/cc809c8d284813a135660cc39eaa67a9325063d9)), closes [#347](https://github.com/TOoSmOotH/otterbot/issues/347)
+* seed existing releases on first run to prevent announcement spam ([979a604](https://github.com/TOoSmOotH/otterbot/commit/979a604cf01c5615d735067430879ab5dec3118b))
+* WASD keys pan camera instead of rotating ([1558d5b](https://github.com/TOoSmOotH/otterbot/commit/1558d5bfe70a34e15111b0c04b480bc4eae8fcf7))
+* WASD panning by making OrbitControls default ([48f528d](https://github.com/TOoSmOotH/otterbot/commit/48f528d0b68f7c198a021e9f36780eced616a220))
+
 ## [0.10.0](https://github.com/TOoSmOotH/otterbot/compare/otterbot-v0.9.0...otterbot-v0.10.0) (2026-03-01)
 
 
