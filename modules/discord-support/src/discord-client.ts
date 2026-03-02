@@ -6,17 +6,22 @@ import {
   ChannelType,
   type Message as DiscordMessage,
   type ThreadChannel,
+  type TextChannel,
 } from "discord.js";
 import type { ModuleContext } from "@otterbot/shared";
+import {
+  type ChannelConfig,
+  type ResponseMode,
+  parseChannelConfigs,
+  getChannelConfig,
+} from "./channel-config.js";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
 export type MessageHandler = (
   message: DiscordMessage,
-  thread: ThreadChannel,
+  channel: ThreadChannel | TextChannel,
 ) => Promise<void>;
-
-export type ResponseMode = "auto" | "mention" | "new_threads";
 
 // ─── Discord Support Client ─────────────────────────────────────────────────
 
@@ -85,74 +90,148 @@ export class DiscordSupportClient {
     return this.client?.user?.id ?? null;
   }
 
+  // ─── Channel config helpers ─────────────────────────────────────────────
+
+  private getChannelConfigs(): ChannelConfig[] {
+    return parseChannelConfigs(this.ctx.getConfig("channels_config"));
+  }
+
   // ─── Message handling ───────────────────────────────────────────────────
 
   private async handleMessage(message: DiscordMessage): Promise<void> {
     // Ignore bot messages
     if (message.author.bot) return;
 
-    // Only handle messages in threads
-    if (!message.channel.isThread()) return;
+    const configs = this.getChannelConfigs();
 
-    const thread = message.channel as ThreadChannel;
+    // Handle messages in threads (forum posts, thread replies)
+    if (message.channel.isThread()) {
+      const thread = message.channel as ThreadChannel;
+      const parentId = thread.parentId;
+      if (!parentId) return;
 
-    // Check if the parent is a monitored forum channel
-    const parentId = thread.parentId;
-    if (!parentId || !this.isMonitoredChannel(parentId)) return;
+      // Check if the parent channel is monitored
+      const config = getChannelConfig(configs, parentId);
+      if (!config || !config.enabled) return;
 
-    // Check response mode
-    if (!this.shouldRespond(message, thread)) return;
+      if (!this.shouldRespond(message, config.responseMode, thread)) return;
 
-    // Delegate to handler
-    await this.onMessage(message, thread);
+      await this.onMessage(message, thread);
+      return;
+    }
+
+    // Handle messages in regular text channels
+    if (message.channel.type === ChannelType.GuildText) {
+      const textChannel = message.channel as TextChannel;
+      const config = getChannelConfig(configs, textChannel.id);
+      if (!config || !config.enabled) return;
+
+      if (!this.shouldRespond(message, config.responseMode)) return;
+
+      await this.onMessage(message, textChannel);
+      return;
+    }
   }
 
-  private isMonitoredChannel(channelId: string): boolean {
-    const raw = this.ctx.getConfig("forum_channel_ids");
-    if (!raw) return false;
-
-    const ids = raw.split(",").map((id) => id.trim()).filter(Boolean);
-    return ids.includes(channelId);
+  isMonitoredChannel(channelId: string): boolean {
+    const configs = this.getChannelConfigs();
+    const config = getChannelConfig(configs, channelId);
+    return config != null && config.enabled;
   }
 
-  private shouldRespond(message: DiscordMessage, thread: ThreadChannel): boolean {
-    const mode = (this.ctx.getConfig("response_mode") ?? "auto") as ResponseMode;
-
+  private shouldRespond(
+    message: DiscordMessage,
+    mode: ResponseMode,
+    thread?: ThreadChannel,
+  ): boolean {
     switch (mode) {
       case "mention": {
-        // Only respond when @mentioned
         if (!this.client?.user) return false;
         return message.mentions.has(this.client.user);
       }
       case "new_threads": {
-        // Only respond to the first message of new threads we haven't responded to
+        if (!thread) return false;
         if (this.respondedThreads.has(thread.id)) return false;
         this.respondedThreads.add(thread.id);
         return true;
       }
+      case "announce":
+      case "readonly":
+        // These modes don't respond to user messages
+        return false;
       case "auto":
       default:
         return true;
     }
   }
 
+  // ─── Guild channels (for channel picker UI) ────────────────────────────
+
+  async getGuildChannels(): Promise<Array<{ id: string; name: string; type: string }>> {
+    if (!this.client) return [];
+
+    const results: Array<{ id: string; name: string; type: string }> = [];
+
+    for (const guild of this.client.guilds.cache.values()) {
+      const channels = await guild.channels.fetch();
+      for (const channel of channels.values()) {
+        if (!channel) continue;
+        let type: string;
+        switch (channel.type) {
+          case ChannelType.GuildForum:
+            type = "forum";
+            break;
+          case ChannelType.GuildText:
+            type = "text";
+            break;
+          case ChannelType.GuildAnnouncement:
+            type = "announcement";
+            break;
+          case ChannelType.GuildVoice:
+            type = "voice";
+            break;
+          default:
+            continue; // Skip unsupported channel types
+        }
+        results.push({ id: channel.id, name: channel.name, type });
+      }
+    }
+
+    return results;
+  }
+
   // ─── Sending ──────────────────────────────────────────────────────────
 
-  async sendTyping(thread: ThreadChannel): Promise<ReturnType<typeof setInterval>> {
+  async sendTyping(channel: ThreadChannel | TextChannel): Promise<ReturnType<typeof setInterval>> {
     const sendTyping = () => {
-      thread.sendTyping().catch(() => { /* ignore */ });
+      channel.sendTyping().catch(() => { /* ignore */ });
     };
     sendTyping();
     return setInterval(sendTyping, TYPING_INTERVAL_MS);
   }
 
   async sendReply(
-    thread: ThreadChannel,
+    channel: ThreadChannel | TextChannel,
     content: string,
   ): Promise<void> {
     const chunks = splitMessage(content, DISCORD_MAX_LENGTH);
     for (const chunk of chunks) {
-      await thread.send(chunk);
+      await channel.send(chunk);
+    }
+  }
+
+  async sendToChannel(channelId: string, content: string): Promise<void> {
+    if (!this.client) return;
+
+    const channel = await this.client.channels.fetch(channelId);
+    if (!channel || !("send" in channel)) {
+      this.ctx.warn(`Cannot send to channel ${channelId}: not a sendable channel`);
+      return;
+    }
+
+    const chunks = splitMessage(content, DISCORD_MAX_LENGTH);
+    for (const chunk of chunks) {
+      await (channel as TextChannel).send(chunk);
     }
   }
 }

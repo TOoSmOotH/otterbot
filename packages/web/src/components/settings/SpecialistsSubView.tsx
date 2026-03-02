@@ -3,6 +3,7 @@ import { cn } from "../../lib/utils";
 import { useSettingsStore } from "../../stores/settings-store";
 import { ModelCombobox } from "./ModelCombobox";
 import { ModuleAgentChat } from "./ModuleAgentChat";
+import { ChannelsConfigSection } from "./ChannelsConfigSection";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -1065,6 +1066,17 @@ function SpecialistConfigPanel({ moduleId }: { moduleId: string }) {
       <div className="text-[10px] text-muted-foreground uppercase tracking-wider font-medium">
         Configuration
       </div>
+
+      {config.schema.channels_config && (
+        <ChannelsConfigSection
+          moduleId={moduleId}
+          configValues={editValues}
+          onConfigChange={(key, value) => {
+            setEditValues((prev) => ({ ...prev, [key]: value }));
+            setDirty(true);
+          }}
+        />
+      )}
 
       {coreFields.length > 0 && (
         <div className="space-y-3">{coreFields.map(renderField)}</div>

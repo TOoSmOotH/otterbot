@@ -1,6 +1,18 @@
+import { randomUUID } from "node:crypto";
 import type { ModuleContext, PollResult, PollResultItem } from "@otterbot/shared";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
+
+export interface GitHubRelease {
+  id: number;
+  tag_name: string;
+  name: string | null;
+  body: string | null;
+  html_url: string;
+  published_at: string | null;
+  draft: boolean;
+  prerelease: boolean;
+}
 
 interface GitTreeEntry {
   path: string;
@@ -255,6 +267,66 @@ export async function pollGitHub(ctx: ModuleContext): Promise<PollResult> {
     ctx.error("GitHub poll failed:", err);
     return { items: [], summary: `Error: ${err instanceof Error ? err.message : String(err)}` };
   }
+}
+
+// ─── Release checking ────────────────────────────────────────────────────────
+
+/**
+ * Check for new GitHub releases that haven't been announced yet.
+ * Returns an array of releases that need to be announced.
+ */
+export async function checkForNewReleases(ctx: ModuleContext): Promise<GitHubRelease[]> {
+  const config = getGitHubConfig(ctx);
+  if (!config) return [];
+
+  const { owner, name, token } = config;
+
+  try {
+    const releases = await ghFetch<GitHubRelease[]>(
+      `https://api.github.com/repos/${owner}/${name}/releases?per_page=10`,
+      token,
+    );
+
+    if (!releases || releases.length === 0) return [];
+
+    // Filter out drafts
+    const published = releases.filter((r) => !r.draft);
+
+    // Check which ones have already been announced
+    const unannounced: GitHubRelease[] = [];
+    for (const release of published) {
+      const existing = ctx.knowledge.db
+        .prepare("SELECT id FROM announcements WHERE reference_id = ? AND type = 'release'")
+        .get(release.tag_name) as { id: string } | undefined;
+
+      if (!existing) {
+        unannounced.push(release);
+      }
+    }
+
+    return unannounced;
+  } catch (err) {
+    ctx.error("Failed to check for new releases:", err);
+    return [];
+  }
+}
+
+/**
+ * Record that a release has been announced to a channel.
+ */
+export function recordAnnouncement(
+  ctx: ModuleContext,
+  channelId: string,
+  type: string,
+  referenceId: string,
+  content: string,
+): void {
+  ctx.knowledge.db
+    .prepare(
+      `INSERT INTO announcements (id, channel_id, type, reference_id, content, posted_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    )
+    .run(randomUUID(), channelId, type, referenceId, content, new Date().toISOString());
 }
 
 /**
