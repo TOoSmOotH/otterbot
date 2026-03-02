@@ -97,6 +97,7 @@ export class COO extends BaseAgent {
   private workspace: WorkspaceManager;
   private onAgentSpawned?: (agent: BaseAgent) => void;
   private _moduleTools: Record<string, unknown> = {};
+  private _specialists: Array<{ moduleId: string; name: string; description: string }> = [];
   private onStream?: (token: string, messageId: string, conversationId: string | null) => void;
   private onThinking?: (token: string, messageId: string, conversationId: string | null) => void;
   private onThinkingEnd?: (messageId: string, conversationId: string | null) => void;
@@ -254,23 +255,31 @@ The user can see everything on the desktop in real-time.`;
   setSpecialistContext(
     specialists: Array<{ moduleId: string; name: string; description: string }>,
   ): void {
-    if (specialists.length === 0) return;
+    // Always store specialists so list_specialists tool can read them
+    this._specialists = specialists;
 
     const lines = [
-      "\n\n## Specialist Agents",
-      "You have specialist agents with deep expertise. When the CEO refers to one by name, use `module_query` with the module ID to route their request.",
+      "\n\n## Active Specialist Agents (Module-Backed)",
+      "**These are your ONLY specialist agents.** Worker types (Coder, Researcher, Tester, Browser Agent) are NOT specialist agents — they are project workers spawned by Team Leads.",
       "",
     ];
-    for (const s of specialists) {
+
+    if (specialists.length === 0) {
+      lines.push("No specialist agents are currently active. If the CEO asks about specialists, tell them none are installed.");
+    } else {
+      lines.push("Use `module_query` with the module ID to route requests to a specialist. Use `list_specialists` to get this list dynamically.");
+      lines.push("");
+      for (const s of specialists) {
+        lines.push(
+          `- **${s.name}** (module ID: \`${s.moduleId}\`) — ${s.description}`,
+        );
+      }
+      lines.push("");
       lines.push(
-        `- **${s.name}** (module ID: \`${s.moduleId}\`) — ${s.description}`,
+        'Example: If the CEO says "ask Steve about WebAssembly" and Steve is the Deep Research specialist, ' +
+        'call module_query(moduleId="deep-research", question="What do you know about WebAssembly?")',
       );
     }
-    lines.push("");
-    lines.push(
-      'Example: If the CEO says "ask Steve about WebAssembly" and Steve is the Deep Research specialist, ' +
-      'call module_query(moduleId="deep-research", question="What do you know about WebAssembly?")',
-    );
 
     this.systemPrompt += lines.join("\n");
 
@@ -1064,6 +1073,29 @@ The user can see everything on the desktop in real-time.`;
           this.onConversationSwitched?.(conversation.id, messages);
 
           return `Switched to conversation: "${conversation.title}"`;
+        },
+      }),
+
+      list_specialists: tool({
+        description:
+          "List all active specialist agents. Specialist agents are module-backed autonomous agents with their own knowledge stores — they are NOT worker types (Coder, Researcher, etc.).",
+        parameters: z.object({}),
+        execute: async () => {
+          if (this._specialists.length === 0) {
+            return "No specialist agents are currently active. Specialist agents are powered by the module system and must be installed separately. Worker types (Coder, Researcher, Tester, Browser Agent) are NOT specialist agents — they are project workers spawned by Team Leads.";
+          }
+          const lines = [
+            `${this._specialists.length} specialist agent(s) active:\n`,
+          ];
+          for (const s of this._specialists) {
+            lines.push(
+              `- **${s.name}** (module ID: \`${s.moduleId}\`) — ${s.description}`,
+            );
+          }
+          lines.push(
+            "\nUse `module_query` with the module ID to communicate with a specialist.",
+          );
+          return lines.join("\n");
         },
       }),
 
