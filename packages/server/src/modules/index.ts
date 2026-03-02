@@ -141,8 +141,8 @@ export async function initModules(
   // 2. Start poll schedulers
   scheduler.startAll(modules);
 
-  // 3. Register webhook routes
-  registerModuleWebhooks(app, loader);
+  // 3. Webhook routes are registered statically in the main server setup
+  //    (before app.listen) so they're available immediately.
 
   // 4. Register module tools in COO
   const tools = createModuleTools(loader, scheduler);

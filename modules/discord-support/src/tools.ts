@@ -34,9 +34,11 @@ export const searchCodeTool: ModuleToolDefinition = {
     return filtered
       .map((doc) => {
         const meta = doc.metadata;
-        const path = (meta?.path as string) ?? doc.id.replace("file:", "");
+        const repo = meta?.repo as string | undefined;
+        const filePath = (meta?.path as string) ?? "";
+        const displayPath = repo ? `${repo}:${filePath}` : doc.id.replace("file:", "");
         const lang = (meta?.language as string) ?? "";
-        return `--- ${path} (${lang}) ---\n${doc.content}\n`;
+        return `--- ${displayPath} (${lang}) ---\n${doc.content}\n`;
       })
       .join("\n");
   },
@@ -51,15 +53,37 @@ export const getFileTool: ModuleToolDefinition = {
   },
   async execute(args: Record<string, unknown>, ctx: ModuleContext): Promise<string> {
     const path = args.path as string;
-    const doc = ctx.knowledge.get(`file:${path}`);
+
+    // Try exact match first (handles both "owner/repo:path" and legacy "path" formats)
+    let doc = ctx.knowledge.get(`file:${path}`);
 
     if (!doc) {
-      // Try a search as fallback in case the exact path doesn't match
+      // If path doesn't include a repo prefix, try finding it across repos
+      const repoRaw = ctx.getConfig("github_repo");
+      if (repoRaw && !path.includes(":")) {
+        const repos = repoRaw.split(",").map((r: string) => r.trim()).filter(Boolean);
+        // If single repo, try the namespaced lookup directly
+        if (repos.length === 1) {
+          doc = ctx.knowledge.get(`file:${repos[0]}:${path}`);
+        } else {
+          // Multiple repos: try each
+          for (const repo of repos) {
+            doc = ctx.knowledge.get(`file:${repo}:${path}`);
+            if (doc) break;
+          }
+        }
+      }
+    }
+
+    if (!doc) {
+      // Fallback to search
       const results = await ctx.knowledge.search(path, 3);
       const match = results.find((r) => r.id.startsWith("file:"));
       if (match) {
-        const matchPath = (match.metadata?.path as string) ?? match.id.replace("file:", "");
-        return `File "${path}" not found. Did you mean "${matchPath}"?\n\n${match.content}`;
+        const repo = match.metadata?.repo as string | undefined;
+        const filePath = (match.metadata?.path as string) ?? "";
+        const displayPath = repo ? `${repo}:${filePath}` : match.id.replace("file:", "");
+        return `File "${path}" not found. Did you mean "${displayPath}"?\n\n${match.content}`;
       }
       return `File not found: ${path}. Use search_code to find files by content or name.`;
     }

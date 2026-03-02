@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useRef } from "react";
 import { useFrame } from "@react-three/fiber";
 import { OrbitControls } from "@react-three/drei";
 import { useAgentStore } from "../../stores/agent-store";
@@ -6,8 +6,10 @@ import { useModelPackStore } from "../../stores/model-pack-store";
 import { useEnvironmentStore } from "../../stores/environment-store";
 import { useRoomBuilderStore } from "../../stores/room-builder-store";
 import { useMovementStore } from "../../stores/movement-store";
+import { useExplosionStore } from "../../stores/explosion-store";
 import { AgentCharacter } from "./AgentCharacter";
 import { FallbackAgent } from "./FallbackAgent";
+import { AgentExplosion } from "./AgentExplosion";
 import { EnvironmentScene } from "./EnvironmentScene";
 import { ZoneGroundMarkers } from "./ZoneGroundMarkers";
 import { WASDControls } from "./WASDControls";
@@ -15,27 +17,76 @@ import { EditableEnvironmentScene } from "../room-builder/EditableEnvironmentSce
 import type { Agent } from "@otterbot/shared";
 import { findWaypointsByZoneAndTag } from "../../lib/pathfinding";
 
+const ROLE_COLORS: Record<string, string> = {
+  ceo: "#a855f7",
+  coo: "#8b5cf6",
+  team_lead: "#f59e0b",
+  worker: "#06b6d4",
+  admin_assistant: "#e879f9",
+  scheduler: "#f97316",
+};
+
 interface LiveViewSceneProps {
   userProfile?: { name: string | null; avatar: string | null; modelPackId?: string | null; gearConfig?: Record<string, boolean> | null; cooName?: string };
 }
 
 export function LiveViewScene({ userProfile }: LiveViewSceneProps) {
   const agents = useAgentStore((s) => s.agents);
+  const departingIds = useAgentStore((s) => s._departingIds);
   // Subscribe to packs so we re-render when they load asynchronously
   const packs = useModelPackStore((s) => s.packs);
   const getPackById = useModelPackStore((s) => s.getPackById);
   const activeScene = useEnvironmentStore((s) => s.getActiveScene());
   const builderActive = useRoomBuilderStore((s) => s.active);
   const movementTick = useMovementStore((s) => s.tick);
+  const explosions = useExplosionStore((s) => s.explosions);
 
-  // Tick movement interpolators every frame
+  // Track departing agents: value = frame count since departure started.
+  // We skip the first few frames to give the movement system time to enqueue the walk.
+  const departureFramesRef = useRef(new Map<string, number>());
+
+  // Tick movement interpolators every frame + check departing agents
   useFrame((_, delta) => {
     movementTick(delta);
+
+    // Check if any departing agents have finished walking to center
+    const { _departingIds, agents: currentAgents, removeAgent } = useAgentStore.getState();
+    const movementState = useMovementStore.getState();
+    const frames = departureFramesRef.current;
+
+    // Track new departures
+    for (const id of _departingIds) {
+      if (!frames.has(id)) frames.set(id, 0);
+    }
+
+    // Clean up stale tracking
+    for (const id of frames.keys()) {
+      if (!_departingIds.has(id)) frames.delete(id);
+    }
+
+    for (const id of _departingIds) {
+      const frameCount = frames.get(id) ?? 0;
+      frames.set(id, frameCount + 1);
+
+      // Wait at least 10 frames for the movement system to start the walk
+      if (frameCount < 10) continue;
+
+      if (!movementState.isAgentBusy(id)) {
+        frames.delete(id);
+        const agent = currentAgents.get(id);
+        const lastPos = movementState.getLastKnownPosition(id);
+        const position: [number, number, number] = lastPos ?? [0, 0, 0];
+        const color = agent ? (ROLE_COLORS[agent.role] ?? ROLE_COLORS.worker) : "#06b6d4";
+        useExplosionStore.getState().addExplosion(id, position, color);
+        removeAgent(id);
+      }
+    }
   });
 
   const { positions } = useMemo(() => {
+    // Include departing agents (status "done" but walking to center) so they still render
     const activeAgents = Array.from(agents.values()).filter(
-      (a) => a.status !== "done",
+      (a) => a.status !== "done" || departingIds.has(a.id),
     );
 
     // Group by role
@@ -416,7 +467,7 @@ export function LiveViewScene({ userProfile }: LiveViewSceneProps) {
     }
 
     return { positions };
-  }, [agents, userProfile, packs, activeScene]);
+  }, [agents, userProfile, packs, activeScene, departingIds]);
 
   const lighting = activeScene?.lighting;
   const camera = activeScene?.camera;
@@ -493,13 +544,25 @@ export function LiveViewScene({ userProfile }: LiveViewSceneProps) {
           );
         })}
 
+      {/* Explosions */}
+      {Array.from(explosions.values()).map((exp) => (
+        <AgentExplosion
+          key={exp.id}
+          id={exp.id}
+          position={exp.position}
+          color={exp.color}
+        />
+      ))}
+
       {/* Camera controls */}
       <OrbitControls
+        makeDefault
         target={camera?.target ?? [0, 1, -4]}
         minDistance={5}
         maxDistance={activeScene?.zones ? 60 : 25}
         minPolarAngle={0.3}
         maxPolarAngle={Math.PI / 2.1}
+        enableKeys={false}
       />
       <WASDControls disabled={builderActive} />
     </>

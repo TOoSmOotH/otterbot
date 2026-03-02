@@ -413,6 +413,7 @@ async function main() {
 
   // Serve 3D assets (model packs)
   const assetsRoot = resolve(__dirname, "../../../assets");
+  const worldLayout = new WorldLayoutManager(assetsRoot);
   console.log(`3D assets root: ${assetsRoot} (exists: ${existsSync(assetsRoot)})`);
   if (existsSync(assetsRoot)) {
     await app.register(fastifyStatic, {
@@ -1006,7 +1007,7 @@ async function main() {
           callback?.({ messageId: confirmMsg.id, conversationId: conversationId ?? "" });
           return true;
         },
-      }, { workspace, issueMonitor: issueMonitor!, mergeQueue });
+      }, { workspace, issueMonitor: issueMonitor!, mergeQueue, worldLayout });
       console.log(`COO agent started. (model=${coo.toData().model}, provider=${coo.toData().provider})`);
 
       // Spawn AdminAssistant alongside COO
@@ -2303,7 +2304,6 @@ async function main() {
   });
 
   // World layout API
-  const worldLayout = new WorldLayoutManager(assetsRoot);
 
   app.get("/api/world", async () => {
     const composite = worldLayout.getCompositeWorld();
@@ -5321,6 +5321,73 @@ Respond with ONLY a JSON object (no markdown, no explanation) with these fields:
         return reply
           .status(500)
           .send({ error: err instanceof Error ? err.message : String(err) });
+      }
+    },
+  );
+
+  // Module webhooks — registered here (before app.listen) so the route exists early.
+  // The actual handler delegates to the loaded module's onWebhook at runtime.
+  app.post<{ Params: { moduleId: string } }>(
+    "/api/modules/:moduleId/webhook",
+    async (req, reply) => {
+      const { getModuleLoader } = await import("./modules/index.js");
+      const { getConfig: getConfigValue } = await import("./auth/auth.js");
+
+      const loader = getModuleLoader();
+      if (!loader) {
+        return reply.status(503).send({ error: "Module system not initialized" });
+      }
+
+      const loaded = loader.get(req.params.moduleId);
+      if (!loaded) {
+        return reply.status(404).send({ error: `Module not found: ${req.params.moduleId}` });
+      }
+
+      if (!loaded.definition.onWebhook) {
+        return reply.status(400).send({ error: `Module ${req.params.moduleId} does not handle webhooks` });
+      }
+
+      // Verify webhook secret if configured
+      const expectedSecret = getConfigValue(`module:${req.params.moduleId}:webhook_secret`);
+      if (expectedSecret) {
+        const providedSecret =
+          (req.headers["x-webhook-secret"] as string) ??
+          (req.headers["x-hub-signature-256"] as string);
+
+        if (!providedSecret || providedSecret !== expectedSecret) {
+          return reply.status(401).send({ error: "Invalid webhook secret" });
+        }
+      }
+
+      const webhookReq = {
+        method: req.method,
+        headers: req.headers as Record<string, string | string[] | undefined>,
+        body: req.body,
+        params: req.params as Record<string, string>,
+        query: req.query as Record<string, string>,
+      };
+
+      try {
+        const result = await loaded.definition.onWebhook(webhookReq, loaded.context);
+
+        // Auto-ingest items if returned
+        if (result.items) {
+          for (const item of result.items) {
+            const content = `# ${item.title}\n\n${item.content}`;
+            const metadata: Record<string, unknown> = {
+              ...item.metadata,
+              ...(item.url ? { url: item.url } : {}),
+              title: item.title,
+            };
+            await loaded.knowledgeStore.upsert(item.id, content, metadata);
+          }
+          loaded.context.log(`Webhook ingested ${result.items.length} items`);
+        }
+
+        return reply.status(result.status ?? 200).send(result.body ?? { ok: true });
+      } catch (err) {
+        loaded.context.error("Webhook handler failed:", err);
+        return reply.status(500).send({ error: "Webhook handler failed" });
       }
     },
   );
