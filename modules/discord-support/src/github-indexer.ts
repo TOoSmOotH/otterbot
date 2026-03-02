@@ -289,6 +289,27 @@ export async function checkForNewReleases(ctx: ModuleContext): Promise<GitHubRel
     // Filter out drafts
     const published = releases.filter((r) => !r.draft);
 
+    // Check if we've ever announced anything — if not, this is first run.
+    // Seed all current releases as "already announced" and only return
+    // the latest one (if any) to avoid spamming historical releases.
+    const announcementCount = ctx.knowledge.db
+      .prepare("SELECT COUNT(*) as count FROM announcements WHERE type = 'release'")
+      .get() as { count: number };
+
+    if (announcementCount.count === 0 && published.length > 0) {
+      // First run: seed all existing releases as already seen
+      for (const release of published) {
+        ctx.knowledge.db
+          .prepare(
+            `INSERT OR IGNORE INTO announcements (id, channel_id, type, reference_id, content, posted_at)
+             VALUES (?, '_seed', 'release', ?, '', ?)`,
+          )
+          .run(randomUUID(), release.tag_name, new Date().toISOString());
+      }
+      ctx.log(`Seeded ${published.length} existing releases — only future releases will be announced`);
+      return [];
+    }
+
     // Check which ones have already been announced
     const unannounced: GitHubRelease[] = [];
     for (const release of published) {
