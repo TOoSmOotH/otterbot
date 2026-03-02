@@ -561,6 +561,7 @@ export function LiveViewScene({ userProfile }: LiveViewSceneProps) {
         maxDistance={activeScene?.zones ? 60 : 25}
         minPolarAngle={0.3}
         maxPolarAngle={Math.PI / 2.1}
+        enableKeys={false}
       />
       <WASDControls disabled={builderActive} />
     </>
