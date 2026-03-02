@@ -12,7 +12,7 @@ const SEED_SKILLS: Array<{ id: string; data: SkillCreate }> = [
       meta: {
         name: "COO Operations",
         description:
-          "Management tools for the COO: project creation, directives, model/search/package management, and shell commands.",
+          "Management tools for the COO: project creation, directives, model/search/package management, shell commands, specialist agent listing, and module management.",
         version: "1.0.0",
         author: "otterbot",
         tools: [
@@ -32,6 +32,11 @@ const SEED_SKILLS: Array<{ id: string; data: SkillCreate }> = [
           "github_get_issue",
           "github_list_prs",
           "github_get_pr",
+          "list_specialists",
+          "module_list",
+          "module_query",
+          "module_install",
+          "module_toggle",
         ],
         capabilities: ["management", "delegation", "coordination", "github"],
         parameters: {},
