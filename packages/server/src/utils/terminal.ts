@@ -83,21 +83,62 @@ export function cleanTerminalOutput(input: string): string {
   return text.trim();
 }
 
+/**
+ * Lighter-touch terminal cleaning that does NOT simulate CR overwrites.
+ *
+ * TUI-based tools (Claude Code, OpenCode, etc.) use \r to redraw their
+ * interface lines — not to overwrite progress bars.  When the TUI exits,
+ * the CR simulation in {@link cleanTerminalOutput} reduces the buffer to
+ * the final (empty) screen state, losing all useful content.
+ *
+ * This variant strips ANSI codes, spinner glyphs, and collapses blank
+ * lines, but preserves every line segment (including those before \r).
+ */
+export function cleanTerminalOutputNoCR(input: string): string {
+  let text = stripAnsi(input);
+
+  // Replace \r with \n so every segment becomes its own line
+  text = text.replace(/\r/g, "\n");
+
+  // Remove spinner / decorative glyphs
+  text = text.replace(SPINNER_GLYPHS_RE, "");
+
+  // Collapse multiple consecutive blank lines into one
+  text = text.replace(/\n{3,}/g, "\n\n");
+
+  return text.trim();
+}
+
 /** GitHub PR URL pattern */
 const PR_URL_RE = /https:\/\/github\.com\/[^\s]+\/pull\/\d+/g;
 
 /**
+ * Minimum length (in chars) for the cleaned output to be considered
+ * substantive.  Below this threshold the two-pass fallback kicks in.
+ */
+const MIN_CLEAN_LENGTH = 50;
+
+/**
  * Build a summary from a PTY ring-buffer suitable for a completion report.
  *
- * - Cleans the buffer via {@link cleanTerminalOutput}
+ * - First pass: cleans via {@link cleanTerminalOutput} (CR simulation)
+ * - Fallback: if the first pass yields very little content but the raw
+ *   buffer is substantial, re-cleans via {@link cleanTerminalOutputNoCR}
+ *   so TUI-based tool output (code reviews, etc.) is preserved.
  * - Extracts any GitHub PR URLs
  * - Appends a cleaned tail (max `tailChars`) only if non-empty
  */
 export function extractPtySummary(
   ringBuffer: string,
-  tailChars = 2000,
+  tailChars = 6000,
 ): string {
-  const clean = cleanTerminalOutput(ringBuffer);
+  let clean = cleanTerminalOutput(ringBuffer);
+
+  // Two-pass fallback: if CR simulation destroyed useful content, retry
+  // without CR processing so TUI output (reviews, analyses) survives.
+  if (clean.length < MIN_CLEAN_LENGTH && ringBuffer.length >= MIN_CLEAN_LENGTH) {
+    clean = cleanTerminalOutputNoCR(ringBuffer);
+  }
 
   // Extract PR URLs
   const prUrls = clean.match(PR_URL_RE);
