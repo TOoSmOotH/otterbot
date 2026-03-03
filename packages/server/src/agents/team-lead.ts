@@ -2016,7 +2016,7 @@ export class TeamLead extends BaseAgent {
 
     // Guard: tasks with an open PR should go to in_review, not done.
     // Only the PR monitor should move them to done (when the PR is actually merged).
-    if (updates.column === "done" && existing.column === "in_progress" && (existing as any).prNumber) {
+    if (updates.column === "done" && (existing as any).prNumber) {
       console.warn(
         `[TeamLead ${this.id}] Auto-correcting update_task: task "${existing.title}" (${taskId}) has PR #${(existing as any).prNumber} — ` +
         `routing to "in_review" instead of "done". The PR monitor will move it to done when the PR is merged.`,
