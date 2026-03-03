@@ -2,19 +2,8 @@
  * TTS provider abstraction — Kokoro (local) and OpenAI-compatible (cloud).
  */
 
-import { resolve, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
 import { getConfig } from "../auth/auth.js";
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
-
-/** Persistent model cache directory (bind-mounted volume in Docker) */
-function getModelCacheDir(): string {
-  const dataDir =
-    process.env.WORKSPACE_ROOT ??
-    resolve(__dirname, "../../../../docker/otterbot");
-  return resolve(dataDir, "data", "models");
-}
+import { ensureModelCacheDir } from "../utils/model-cache.js";
 
 // ---------------------------------------------------------------------------
 // Interface
@@ -41,10 +30,8 @@ class KokoroProvider implements TTSProvider {
     speed: number,
   ): Promise<{ audio: Buffer; contentType: string }> {
     if (!kokoroInstance) {
-      // Point HuggingFace cache to persistent volume so model survives restarts
-      const cacheDir = getModelCacheDir();
-      process.env.HF_HOME = cacheDir;
-      process.env.TRANSFORMERS_CACHE = cacheDir;
+      // Redirect HuggingFace cache to a writable directory before importing
+      await ensureModelCacheDir();
 
       const { KokoroTTS } = await import("kokoro-js");
       kokoroInstance = await KokoroTTS.from_pretrained(

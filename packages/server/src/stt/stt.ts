@@ -2,20 +2,9 @@
  * STT provider abstraction — Whisper (local) and OpenAI-compatible (cloud).
  */
 
-import { resolve, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
 import { getConfig } from "../auth/auth.js";
+import { ensureModelCacheDir } from "../utils/model-cache.js";
 import { decodeToFloat32 } from "./audio-utils.js";
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
-
-/** Persistent model cache directory (bind-mounted volume in Docker) */
-function getModelCacheDir(): string {
-  const dataDir =
-    process.env.WORKSPACE_ROOT ??
-    resolve(__dirname, "../../../../docker/otterbot");
-  return resolve(dataDir, "data", "models");
-}
 
 // ---------------------------------------------------------------------------
 // Interface
@@ -48,15 +37,13 @@ class WhisperLocalProvider implements STTProvider {
   ): Promise<{ text: string }> {
     // Lazy-load (or reload if model changed)
     if (!whisperPipeline || whisperModelId !== this.modelId) {
-      const cacheDir = getModelCacheDir();
-      process.env.HF_HOME = cacheDir;
-      process.env.TRANSFORMERS_CACHE = cacheDir;
+      const cacheDir = await ensureModelCacheDir();
 
       const { pipeline } = await import("@huggingface/transformers");
       whisperPipeline = await pipeline(
         "automatic-speech-recognition",
         this.modelId,
-        { dtype: "q8", device: "cpu" },
+        { dtype: "q8", device: "cpu", cache_dir: cacheDir },
       );
       whisperModelId = this.modelId;
     }

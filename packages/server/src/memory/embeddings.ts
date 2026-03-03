@@ -4,6 +4,8 @@
  * semantic search without external API calls.
  */
 
+import { ensureModelCacheDir } from "../utils/model-cache.js";
+
 let pipeline: any = null;
 let loadingPromise: Promise<void> | null = null;
 
@@ -16,10 +18,11 @@ async function ensureLoaded(): Promise<void> {
 
   loadingPromise = (async () => {
     try {
+      const cacheDir = await ensureModelCacheDir();
       const { pipeline: createPipeline } = await import("@huggingface/transformers");
       pipeline = await createPipeline("feature-extraction", MODEL_NAME, {
-        // Use quantized model for faster loading
         dtype: "fp32",
+        cache_dir: cacheDir,
       });
       console.log(`[embeddings] Loaded embedding model: ${MODEL_NAME}`);
     } catch (err) {
