@@ -1025,11 +1025,15 @@ export class TeamLead extends BaseAgent {
       // Tasks involving git/CI/PR work must go to a coding agent, never a browser agent
       const isCIOrGitTask = /\b(ci\b|pipeline|pull.?request|\bpr\b|git push|git commit|open.?pr|create.?pr|merge|deploy)\b/.test(taskText);
       const isBrowserTask = !isCIOrGitTask && /\b(browser|chrome|chromium|firefox|launch.*browser|open.*url|browse.*web|headless|puppeteer|playwright|selenium|desktop.*app)\b/.test(taskText);
+      const isDemoTask = !isCIOrGitTask && !isBrowserTask &&
+        /\b(demo|record.*video|video.*record|screen.?record|voiceover|narrat|mp4|youtube.*video)\b/.test(taskText);
 
       // Find the right registry entry — check project assignments first, then global fallback
       let registryEntryId = "builtin-coder";
       const assignments = this.getProjectAgentAssignments();
-      if (isBrowserTask) {
+      if (isDemoTask) {
+        registryEntryId = "builtin-demo-recorder";
+      } else if (isBrowserTask) {
         registryEntryId = "builtin-browser-agent";
       } else if (assignments.coder && isCodingAgentEnabled(assignments.coder)) {
         registryEntryId = assignments.coder;

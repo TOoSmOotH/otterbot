@@ -256,7 +256,7 @@ Guidelines:
       "Records video demos of running web applications with optional voiceover narration. " +
       "Navigates the app, interacts with the UI, and produces YouTube-ready MP4 videos.",
     systemPrompt: "See assigned skills for instructions.",
-    capabilities: [] as string[],
+    capabilities: ["demo", "video", "recording", "screen-recording", "voiceover", "narration"],
     defaultModel: "claude-sonnet-4-5-20250929",
     defaultProvider: "anthropic",
     tools: [] as string[],
