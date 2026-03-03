@@ -56,9 +56,6 @@ vi.mock("@ai-sdk/google", () => ({
 vi.mock("@ai-sdk/openai-compatible", () => ({
   createOpenAICompatible: vi.fn(() => vi.fn()),
 }));
-vi.mock("ollama-ai-provider", () => ({
-  createOllama: vi.fn(() => vi.fn()),
-}));
 
 describe("MiniMax provider", () => {
   beforeEach(() => {

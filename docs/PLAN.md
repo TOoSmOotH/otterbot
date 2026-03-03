@@ -265,7 +265,7 @@ Use Vercel AI SDK (`ai` package) which provides a unified interface for multiple
 - `@ai-sdk/openai-compatible` — **Any OpenAI-compatible endpoint** (Together, Groq, Mistral, LM Studio, vLLM, etc.). This is the primary adapter — covers the widest range of providers with a single interface.
 - `@ai-sdk/openai` — OpenAI/GPT models (uses the compatible adapter under the hood)
 - `@ai-sdk/anthropic` — Claude models
-- `ollama-ai-provider` — Local models via Ollama
+- `@ai-sdk/openai` — Local models via Ollama (OpenAI-compatible endpoint)
 
 Each agent has a `provider`, `model`, and optional `baseURL` field. The adapter resolves the right SDK provider at runtime. For OpenAI-compatible endpoints, the user just provides a base URL and API key.
 
