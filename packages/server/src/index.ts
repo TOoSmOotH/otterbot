@@ -27,7 +27,12 @@ import { SkillService } from "./skills/skill-service.js";
 import { scanSkillContent } from "./skills/skill-scanner.js";
 import { getAvailableToolNames, getToolsWithMeta } from "./tools/tool-factory.js";
 import { CustomToolService } from "./tools/custom-tool-service.js";
-import { executeCustomTool } from "./tools/custom-tool-executor.js";
+// Lazy import — isolated-vm (used by custom-tool-executor) requires native
+// binaries that may not be available in all environments (e.g. local dev).
+const lazyExecuteCustomTool = async (...args: Parameters<typeof import("./tools/custom-tool-executor.js").executeCustomTool>) => {
+  const { executeCustomTool } = await import("./tools/custom-tool-executor.js");
+  return executeCustomTool(...args);
+};
 import { TOOL_EXAMPLES } from "./tools/tool-examples.js";
 import { COO } from "./agents/coo.js";
 import { AdminAssistant } from "./agents/admin-assistant.js";
@@ -353,6 +358,12 @@ function ensureSelfSignedCert(dataDir: string): { key: Buffer; cert: Buffer } {
 async function main() {
   // Initialize database
   await migrateDb();
+
+  // Seed mock data if in mock mode (before anything reads config)
+  if (process.env.MOCK_MODE === "true") {
+    const { seedMockData } = await import("./mock/mock-seed.js");
+    await seedMockData();
+  }
 
   // Mark stale agents from previous runs as "done"
   {
@@ -1174,6 +1185,21 @@ async function main() {
     startWhatsAppBridge();
     startSignalBridge();
     startNextcloudTalkBridge();
+
+    // Start mock scenario playback if configured
+    if (process.env.MOCK_MODE === "true" && process.env.MOCK_SCENARIO && coo) {
+      // Import scenarios to register them, then run
+      import("./mock/scenarios/demo-scenario.js").catch(() => {});
+      import("./mock/scenarios/test-scenario.js").catch(() => {});
+      // Small delay to let scenario imports register
+      setTimeout(async () => {
+        const { ScenarioRunner } = await import("./mock/scenario-runner.js");
+        const runner = new ScenarioRunner(bus, coo!, io);
+        runner.start(process.env.MOCK_SCENARIO!).catch((err) => {
+          console.error("[scenario-runner] Failed:", err);
+        });
+      }, 1000);
+    }
   } else {
     console.log("Setup not complete. Waiting for setup wizard...");
   }
@@ -4840,7 +4866,7 @@ async function main() {
         return { error: "Not found" };
       }
       try {
-        const result = await executeCustomTool(tool, req.body.params ?? {});
+        const result = await lazyExecuteCustomTool(tool, req.body.params ?? {});
         return { result };
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);

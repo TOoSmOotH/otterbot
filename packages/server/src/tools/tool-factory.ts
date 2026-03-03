@@ -34,7 +34,12 @@ import {
 } from "./github.js";
 import { SkillService } from "../skills/skill-service.js";
 import { CustomToolService } from "./custom-tool-service.js";
-import { executeCustomTool } from "./custom-tool-executor.js";
+// Lazy import — isolated-vm (used by custom-tool-executor) requires native
+// binaries that may not be available in all environments.
+const lazyExecuteCustomTool = async (...args: Parameters<typeof import("./custom-tool-executor.js").executeCustomTool>) => {
+  const { executeCustomTool } = await import("./custom-tool-executor.js");
+  return executeCustomTool(...args);
+};
 import { createMemorySaveTool } from "./memory-save.js";
 import { createSshExecTool } from "./ssh-exec.js";
 import { createSshListKeysTool } from "./ssh-list-keys.js";
@@ -619,7 +624,7 @@ function createCustomToolWrapper(customTool: import("@otterbot/shared").CustomTo
     description: customTool.description,
     parameters: z.object(shape),
     execute: async (params: Record<string, unknown>) => {
-      return executeCustomTool(customTool, params);
+      return lazyExecuteCustomTool(customTool, params);
     },
   });
 }
@@ -713,7 +718,7 @@ function createTestCustomToolTool() {
       const customTool = svc.get(id);
       if (!customTool) return JSON.stringify({ error: "Tool not found" });
       try {
-        const result = await executeCustomTool(customTool, params);
+        const result = await lazyExecuteCustomTool(customTool, params);
         return JSON.stringify({ result });
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);

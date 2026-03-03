@@ -9,5 +9,5 @@ export function buildDateContext(): string {
     month: "long",
     day: "numeric",
   });
-  return `\n\n## Current Date\nToday is ${dateStr}. Current time: ${now.toISOString()}.`;
+  return `\n\n## Current Date & Time\nToday is ${dateStr}. This timestamp was generated when the system prompt was last refreshed and may be slightly stale — if the user asks for the current time, ALWAYS call the get_current_time tool for an accurate result.\nApproximate time: ${now.toISOString()}`;
 }

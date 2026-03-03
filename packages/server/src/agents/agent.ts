@@ -198,8 +198,12 @@ export abstract class BaseAgent {
   /** Hook for long-lived agents (COO, TeamLead) to re-read model/provider from config before each think() call. */
   protected refreshLlmConfig(): void {}
 
-  /** Date-context pattern used by buildDateContext() — matches the "## Current Date" block. */
-  private static DATE_CONTEXT_RE = /\n\n## Current Date\nToday is .+?\. Current time: .+?\./;
+  /**
+   * Date-context pattern used by buildDateContext().
+   * Matches both the old format ("## Current Date … Current time: …")
+   * and the new format ("## Current Date & Time … Approximate time: …").
+   */
+  private static DATE_CONTEXT_RE = /\n\n## Current Date(?: & Time)?\n[\s\S]*?(?:Current|Approximate) time: [^\n]+/;
 
   /**
    * Replace the stale date/time block inside the system message (conversationHistory[0])
