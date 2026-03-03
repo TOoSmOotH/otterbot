@@ -300,7 +300,7 @@ export function getToolsWithMeta(): {
         { name: "filename", type: "string", required: false, description: "Output filename without extension (for stop)" },
         { name: "script", type: "string", required: false, description: "JSON demo script (for run_script)" },
         { name: "command", type: "string", required: false, description: "Shell command to start the dev server (for start_server)" },
-        { name: "port", type: "number", required: false, description: "Port the server listens on (for start_server)" },
+        { name: "port", type: "number", required: false, description: "Preferred port for the server (for start_server). If busy or omitted, a free port is auto-selected." },
         { name: "cwd", type: "string", required: false, description: "Working directory for the server command (for start_server)" },
       ],
     },

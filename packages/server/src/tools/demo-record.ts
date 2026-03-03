@@ -15,7 +15,7 @@ import { z } from "zod";
 import { mkdirSync, writeFileSync, readdirSync, unlinkSync } from "node:fs";
 import { resolve, join } from "node:path";
 import { spawn, type ChildProcess } from "node:child_process";
-import { createConnection } from "node:net";
+import { createConnection, createServer } from "node:net";
 import type { BrowserContext, Page } from "playwright";
 import type { ToolContext } from "./tool-context.js";
 import {
@@ -121,6 +121,46 @@ function waitForPort(
     }
 
     attempt();
+  });
+}
+
+/**
+ * Check if a TCP port is currently in use.
+ */
+function isPortInUse(port: number, host: string = "127.0.0.1"): Promise<boolean> {
+  return new Promise((resolve) => {
+    const socket = createConnection({ port, host, timeout: 1000 });
+    socket.on("connect", () => {
+      socket.destroy();
+      resolve(true);
+    });
+    socket.on("error", () => {
+      socket.destroy();
+      resolve(false);
+    });
+    socket.on("timeout", () => {
+      socket.destroy();
+      resolve(false);
+    });
+  });
+}
+
+/**
+ * Find a free TCP port by binding to port 0 and reading the assigned port.
+ */
+function findFreePort(): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const srv = createServer();
+    srv.listen(0, "127.0.0.1", () => {
+      const addr = srv.address();
+      if (addr && typeof addr === "object") {
+        const port = addr.port;
+        srv.close(() => resolve(port));
+      } else {
+        srv.close(() => reject(new Error("Failed to get address from server")));
+      }
+    });
+    srv.on("error", reject);
   });
 }
 
@@ -328,7 +368,7 @@ export function createDemoRecordTool(ctx: ToolContext) {
       port: z
         .number()
         .optional()
-        .describe("Port the server listens on (for 'start_server', e.g. 3000)"),
+        .describe("Preferred port for the server (for 'start_server'). If busy or omitted, a free port is auto-selected."),
       cwd: z
         .string()
         .optional()
@@ -554,10 +594,23 @@ export function createDemoRecordTool(ctx: ToolContext) {
           // ---------------------------------------------------------------
           case "start_server": {
             if (!command) return "Error: command is required for start_server action.";
-            if (!port) return "Error: port is required for start_server action.";
             if (serverProcesses.has(ctx.agentId)) {
               const existing = serverProcesses.get(ctx.agentId)!;
               return `Error: A server is already running (PID ${existing.process.pid}, port ${existing.port}). Stop it first with stop_server.`;
+            }
+
+            // Determine which port to use. If the requested port is busy
+            // (or none was specified), auto-pick a free one.
+            let actualPort: number;
+            if (port && !(await isPortInUse(port))) {
+              actualPort = port;
+            } else {
+              actualPort = await findFreePort();
+              if (port) {
+                console.log(
+                  `[demo-record] Requested port ${port} is in use — using free port ${actualPort} instead.`,
+                );
+              }
             }
 
             const workDir = cwd
@@ -571,12 +624,16 @@ export function createDemoRecordTool(ctx: ToolContext) {
               a.replace(/^["']|["']$/g, ""),
             );
 
+            // Inject PORT into the environment so the spawned server
+            // binds to the correct port (works for most Node/Python frameworks).
+            const childEnv = { ...process.env, PORT: String(actualPort) };
+
             // Spawn detached so it survives agent termination until we kill it
             const child = spawn(exe, args, {
               cwd: workDir,
               detached: true,
               stdio: ["ignore", "pipe", "pipe"],
-              env: { ...process.env },
+              env: childEnv,
               shell: true,
             });
 
@@ -602,7 +659,7 @@ export function createDemoRecordTool(ctx: ToolContext) {
 
             const sp: ServerProcess = {
               process: child,
-              port,
+              port: actualPort,
               command,
               startedAt: Date.now(),
             };
@@ -612,7 +669,7 @@ export function createDemoRecordTool(ctx: ToolContext) {
             child.unref();
 
             // Wait for the port to accept connections
-            const ready = await waitForPort(port, "127.0.0.1", 60_000);
+            const ready = await waitForPort(actualPort, "127.0.0.1", 60_000);
 
             if (exitedEarly) {
               serverProcesses.delete(ctx.agentId);
@@ -626,16 +683,19 @@ export function createDemoRecordTool(ctx: ToolContext) {
             if (!ready) {
               killServerProcess(ctx.agentId);
               return (
-                `Error: Server did not start accepting connections on port ${port} within 60 seconds.\n` +
+                `Error: Server did not start accepting connections on port ${actualPort} within 60 seconds.\n` +
                 `Command: ${command}\n` +
                 `Output:\n${serverOutput.slice(-2000)}`
               );
             }
 
+            const portNote = port && port !== actualPort
+              ? ` (requested port ${port} was in use, auto-selected ${actualPort})`
+              : "";
             return (
-              `Server started successfully (PID ${child.pid}, port ${port}).\n` +
+              `Server started successfully (PID ${child.pid}, port ${actualPort})${portNote}.\n` +
               `Command: ${command}\n` +
-              `The server is ready at http://localhost:${port}. ` +
+              `The server is ready at http://localhost:${actualPort}. ` +
               `You can now use demo_record start with this URL.`
             );
           }

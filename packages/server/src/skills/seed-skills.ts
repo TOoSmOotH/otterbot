@@ -578,10 +578,10 @@ You can start and stop dev servers directly — no need for shell_exec or curl.
 ### Starting a dev server
 Use \`demo_record start_server\` with the command and port:
 - **command**: The shell command to run (e.g. "npm run dev", "pnpm dev", "python -m http.server 3000")
-- **port**: The port the server will listen on (e.g. 3000)
+- **port**: The preferred port (e.g. 3000). If the port is already in use or omitted, a free port is auto-selected. The tool sets \`PORT=<actualPort>\` in the environment so most frameworks will bind to it automatically.
 - **cwd**: Optional subdirectory within the workspace (e.g. "packages/web")
 
-The tool spawns the server in the background and waits up to 60 seconds for the port to accept connections. It returns when the server is ready.
+The tool spawns the server in the background and waits up to 60 seconds for the port to accept connections. It returns the actual port and URL when the server is ready — **always use the URL from the response**, not the port you requested, since it may have changed.
 
 ### Discovering the dev command
 Before starting the server, read the project's package.json (or equivalent) to find the correct dev command:
