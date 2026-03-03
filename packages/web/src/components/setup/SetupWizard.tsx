@@ -387,7 +387,7 @@ export function SetupWizard() {
     }
     // Set default base URL for local providers
     if (id === "ollama" && !baseUrl) {
-      setBaseUrl("http://localhost:11434/api");
+      setBaseUrl("http://localhost:11434/v1");
     } else if (id === "lmstudio" && !baseUrl) {
       setBaseUrl("http://localhost:1234/v1");
     }
@@ -800,7 +800,7 @@ export function SetupWizard() {
                     type="text"
                     value={baseUrl}
                     onChange={(e) => setBaseUrl(e.target.value)}
-                    placeholder="http://localhost:11434/api"
+                    placeholder="http://localhost:11434/v1"
                     className="w-full px-3 py-2 bg-background border border-input rounded-md text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
                   />
                 </div>
@@ -1453,7 +1453,7 @@ export function SetupWizard() {
                                 setOpenCodeModel("");
                               }
                               if (pt.type === "ollama" && !openCodeBaseUrl) {
-                                setOpenCodeBaseUrl("http://localhost:11434/api");
+                                setOpenCodeBaseUrl("http://localhost:11434/v1");
                               } else if (pt.type === "lmstudio" && !openCodeBaseUrl) {
                                 setOpenCodeBaseUrl("http://localhost:1234/v1");
                               }
@@ -1489,7 +1489,7 @@ export function SetupWizard() {
                             type="text"
                             value={openCodeBaseUrl}
                             onChange={(e) => setOpenCodeBaseUrl(e.target.value)}
-                            placeholder="http://localhost:11434/api"
+                            placeholder="http://localhost:11434/v1"
                             className="w-full px-3 py-2 bg-background border border-input rounded-md text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
                           />
                         </div>
