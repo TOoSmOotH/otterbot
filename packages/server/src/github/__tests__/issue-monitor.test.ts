@@ -165,7 +165,7 @@ describe("GitHubIssueMonitor", () => {
   });
 
   describe("loadFromDb", () => {
-    it("loads all projects with a githubRepo regardless of githubIssueMonitor flag", async () => {
+    it("only loads projects with githubIssueMonitor enabled", async () => {
       const db = getDb();
       configStore.set("github:username", "testuser");
 
@@ -184,7 +184,7 @@ describe("GitHubIssueMonitor", () => {
         })
         .run();
 
-      // Insert a project without issue monitoring — should still be watched
+      // Insert a project without issue monitoring — should NOT be watched
       db.insert(schema.projects)
         .values({
           id: "proj-no-monitor",
@@ -201,18 +201,12 @@ describe("GitHubIssueMonitor", () => {
 
       monitor.loadFromDb();
 
-      // Verify both projects are watched for assigned issues
+      // Verify only the project with issue monitoring enabled is watched
       configStore.set("github:token", "ghp_test");
       await (monitor as any).poll();
-      expect(mockFetchAssignedIssues).toHaveBeenCalledTimes(2);
+      expect(mockFetchAssignedIssues).toHaveBeenCalledTimes(1);
       expect(mockFetchAssignedIssues).toHaveBeenCalledWith(
         "owner/repo",
-        "ghp_test",
-        "testuser",
-        undefined,
-      );
-      expect(mockFetchAssignedIssues).toHaveBeenCalledWith(
-        "owner/other",
         "ghp_test",
         "testuser",
         undefined,
