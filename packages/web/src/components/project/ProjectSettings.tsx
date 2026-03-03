@@ -37,6 +37,7 @@ export function ProjectSettings({ projectId }: { projectId: string }) {
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isGitHubProject, setIsGitHubProject] = useState(false);
+  const [issueMonitor, setIssueMonitor] = useState(false);
   const [targetBranch, setTargetBranch] = useState("");
 
   const openCodeEnabled = useSettingsStore((s) => s.openCodeEnabled);
@@ -48,9 +49,10 @@ export function ProjectSettings({ projectId }: { projectId: string }) {
   useEffect(() => {
     const socket = getSocket();
 
-    // Check if project has GitHub integration
+    // Check if project has GitHub integration and load issue monitor state
     socket.emit("project:get", { projectId }, (project) => {
       setIsGitHubProject(!!project?.githubRepo);
+      setIssueMonitor(!!project?.githubIssueMonitor);
     });
 
     // Load target branch
@@ -162,6 +164,11 @@ export function ProjectSettings({ projectId }: { projectId: string }) {
         socket.emit("project:set-branch", { projectId, branch: targetBranch.trim() });
       }
 
+      // Save issue monitor setting
+      if (isGitHubProject) {
+        socket.emit("project:set-issue-monitor", { projectId, enabled: issueMonitor });
+      }
+
       // Also save agent assignments (for non-pipeline mode)
       socket.emit("project:set-agent-assignments", { projectId, assignments }, (ack2) => {
         setSaving(false);
@@ -198,6 +205,29 @@ export function ProjectSettings({ projectId }: { projectId: string }) {
               placeholder="main"
               className="mt-2 text-sm bg-secondary border border-border rounded px-3 py-1.5 w-full max-w-xs focus:outline-none focus:ring-1 focus:ring-primary"
             />
+          </div>
+        )}
+
+        {/* Issue Monitor toggle (GitHub projects only) */}
+        {isGitHubProject && (
+          <div>
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-sm font-semibold">Issue Monitor</h2>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Automatically create tasks from GitHub issues assigned to your bot
+                </p>
+              </div>
+              <label className="relative inline-flex items-center cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={issueMonitor}
+                  onChange={(e) => { setIssueMonitor(e.target.checked); setSaved(false); }}
+                  className="sr-only peer"
+                />
+                <div className="w-9 h-5 bg-muted rounded-full peer peer-checked:bg-primary transition-colors after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:after:translate-x-full" />
+              </label>
+            </div>
           </div>
         )}
 

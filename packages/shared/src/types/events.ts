@@ -258,6 +258,12 @@ export interface ClientToServerEvents {
     callback?: (ack: { ok: boolean; error?: string }) => void,
   ) => void;
 
+  // Issue monitor toggle
+  "project:set-issue-monitor": (
+    data: { projectId: string; enabled: boolean },
+    callback?: (ack: { ok: boolean; error?: string }) => void,
+  ) => void;
+
   // Target branch
   "project:get-branch": (
     data: { projectId: string },
