@@ -150,6 +150,12 @@ export class GitHubPRMonitor {
       }
 
       console.log(`[PRMonitor] PR #${prNumber} merged — task ${task.id} → done`);
+
+      // Notify TeamLead to spawn backlog workers
+      const teamLead = this.coo.getTeamLeads().get(task.projectId);
+      if (teamLead) {
+        await teamLead.notifyTaskDone(task.id);
+      }
       return;
     }
 

@@ -942,6 +942,7 @@ async function main() {
       prMonitor.setMergeQueue(mergeQueue);
       pipelineManager.setMergeQueue(mergeQueue);
       mergeQueue.setPipelineManager(pipelineManager);
+      mergeQueue.setCoo(coo);
       coo.setPipelineManager(pipelineManager);
 
       setupSocketHandlers(io, bus, coo, registry, {

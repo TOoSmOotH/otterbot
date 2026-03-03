@@ -752,6 +752,7 @@ export class TeamLead extends BaseAgent {
     if (reportingTaskId && this._pipelineManager?.isPipelineTask(reportingTaskId)) {
       console.log(`[TeamLead ${this.id}] Pipeline-managed task ${reportingTaskId} — routing to PipelineManager`);
       await this._pipelineManager.advancePipeline(reportingTaskId, message.content, detectedBranch);
+      await this.autoSpawnUnblockedTasks();
       return;
     }
 
@@ -2195,6 +2196,12 @@ export class TeamLead extends BaseAgent {
     const delLabel = this.taskLabel(existing);
     const unblockedMsg = unblockedCount > 0 ? ` ${unblockedCount} task(s) unblocked.` : "";
     return `${delLabel} deleted.${unblockedMsg}`;
+  }
+
+  /** Called by external callers (PR Monitor, Merge Queue) when a task moves to "done" to trigger backlog spawning. */
+  async notifyTaskDone(taskId: string): Promise<void> {
+    this.checkUnblockedTasks(taskId);
+    await this.autoSpawnUnblockedTasks();
   }
 
   /** Log which tasks become unblocked when a task completes. No auto-spawning — the continuation loop picks them up. */

@@ -34,7 +34,7 @@ import { GitHubPRMonitor } from "../pr-monitor.js";
 
 // Create mock COO
 function createMockCoo() {
-  const teamLeads = new Map<string, { id: string }>();
+  const teamLeads = new Map<string, { id: string; notifyTaskDone?: ReturnType<typeof vi.fn> }>();
   return {
     getTeamLeads: vi.fn(() => teamLeads),
     bus: {
@@ -162,6 +162,35 @@ describe("GitHubPRMonitor", () => {
         "kanban:task-updated",
         expect.objectContaining({ id: "task-1", column: "done" }),
       );
+    });
+
+    it("calls notifyTaskDone on TeamLead when PR is merged", async () => {
+      const db = getDb();
+      insertProject(db, "proj-1", "owner/repo");
+      insertTask(db, {
+        id: "task-notify-1",
+        projectId: "proj-1",
+        title: "#99: Notify test",
+        column: "in_review",
+        prNumber: 99,
+        prBranch: "feat/notify-99",
+      });
+
+      const mockNotify = vi.fn().mockResolvedValue(undefined);
+      mockCoo._teamLeads.set("proj-1", { id: "tl-1", notifyTaskDone: mockNotify });
+
+      configStore.set("github:token", "ghp_test");
+      mockFetchPullRequest.mockResolvedValue({
+        number: 99,
+        state: "closed",
+        merged: true,
+        head: { ref: "feat/notify-99", sha: "notify123" },
+        base: { ref: "main" },
+      });
+
+      await (monitor as any).poll();
+
+      expect(mockNotify).toHaveBeenCalledWith("task-notify-1");
     });
   });
 
