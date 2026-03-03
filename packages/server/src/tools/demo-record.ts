@@ -14,6 +14,8 @@ import { tool } from "ai";
 import { z } from "zod";
 import { mkdirSync, writeFileSync, readdirSync, unlinkSync } from "node:fs";
 import { resolve, join } from "node:path";
+import { spawn, type ChildProcess } from "node:child_process";
+import { createConnection } from "node:net";
 import type { BrowserContext, Page } from "playwright";
 import type { ToolContext } from "./tool-context.js";
 import {
@@ -45,7 +47,84 @@ interface RecordingSession {
 
 const recordingSessions: Map<string, RecordingSession> = new Map();
 
-// Clean up leaked sessions after 30 minutes
+// ---------------------------------------------------------------------------
+// Per-agent dev server process state
+// ---------------------------------------------------------------------------
+
+interface ServerProcess {
+  process: ChildProcess;
+  port: number;
+  command: string;
+  startedAt: number;
+}
+
+const serverProcesses: Map<string, ServerProcess> = new Map();
+
+/** Kill a managed server process and remove it from the map. */
+function killServerProcess(agentId: string): boolean {
+  const sp = serverProcesses.get(agentId);
+  if (!sp) return false;
+
+  try {
+    // Kill the entire process group (negative PID)
+    if (sp.process.pid) {
+      process.kill(-sp.process.pid, "SIGTERM");
+    }
+  } catch {
+    // Process may have already exited
+    try {
+      sp.process.kill("SIGKILL");
+    } catch {
+      // ignore
+    }
+  }
+
+  serverProcesses.delete(agentId);
+  return true;
+}
+
+/**
+ * Wait for a TCP port to accept connections.
+ * Returns true if the port is ready, false if it timed out.
+ */
+function waitForPort(
+  port: number,
+  host: string = "127.0.0.1",
+  timeoutMs: number = 60_000,
+  intervalMs: number = 500,
+): Promise<boolean> {
+  return new Promise((resolve) => {
+    const deadline = Date.now() + timeoutMs;
+
+    function attempt() {
+      if (Date.now() > deadline) {
+        resolve(false);
+        return;
+      }
+
+      const socket = createConnection({ port, host, timeout: 1000 });
+
+      socket.on("connect", () => {
+        socket.destroy();
+        resolve(true);
+      });
+
+      socket.on("error", () => {
+        socket.destroy();
+        setTimeout(attempt, intervalMs);
+      });
+
+      socket.on("timeout", () => {
+        socket.destroy();
+        setTimeout(attempt, intervalMs);
+      });
+    }
+
+    attempt();
+  });
+}
+
+// Clean up leaked sessions and server processes after 30 minutes
 const SESSION_MAX_AGE = 30 * 60 * 1000;
 setInterval(() => {
   const now = Date.now();
@@ -54,6 +133,14 @@ setInterval(() => {
       console.warn(`[demo-record] Cleaning up stale recording session for agent ${agentId}`);
       session.context.close().catch(() => {});
       recordingSessions.delete(agentId);
+      killServerProcess(agentId);
+    }
+  }
+  // Also clean up orphaned server processes
+  for (const [agentId, sp] of serverProcesses) {
+    if (now - sp.startedAt > SESSION_MAX_AGE) {
+      console.warn(`[demo-record] Cleaning up stale server process for agent ${agentId}`);
+      killServerProcess(agentId);
     }
   }
 }, 60_000);
@@ -199,13 +286,13 @@ export function createDemoRecordTool(ctx: ToolContext) {
   return tool({
     description:
       "Record a video demo of a web application with optional voiceover narration. " +
-      "Use 'start' to begin recording at a URL, 'narrate' to add voiceover, " +
-      "'wait' for pacing pauses, 'run_script' for scripted demos, and 'stop' to " +
-      "finalize the video. Between start and stop, use web_browse to interact " +
-      "with the page — all interactions are captured in the video.",
+      "Use 'start_server' to launch a dev server, 'start' to begin recording at a URL, " +
+      "'narrate' to add voiceover, 'wait' for pacing pauses, 'run_script' for scripted demos, " +
+      "'stop' to finalize the video, and 'stop_server' to shut down the dev server. " +
+      "Between start and stop, use web_browse to interact with the page — all interactions are captured.",
     parameters: z.object({
       action: z
-        .enum(["start", "narrate", "wait", "stop", "run_script", "status"])
+        .enum(["start", "narrate", "wait", "stop", "run_script", "status", "start_server", "stop_server"])
         .describe("The recording action to perform"),
       url: z
         .string()
@@ -234,8 +321,20 @@ export function createDemoRecordTool(ctx: ToolContext) {
           "JSON array of demo steps for 'run_script'. Each step: " +
           '{ narration?: string, actions: [{ type, url?, selector?, value?, seconds? }], waitAfter?: number }',
         ),
+      command: z
+        .string()
+        .optional()
+        .describe("Shell command to start the dev server (for 'start_server', e.g. 'npm run dev')"),
+      port: z
+        .number()
+        .optional()
+        .describe("Port the server listens on (for 'start_server', e.g. 3000)"),
+      cwd: z
+        .string()
+        .optional()
+        .describe("Working directory for the server command (for 'start_server', defaults to workspace root)"),
     }),
-    execute: async ({ action, url, text, seconds, resolution, filename, script }) => {
+    execute: async ({ action, url, text, seconds, resolution, filename, script, command, port, cwd }) => {
       try {
         switch (action) {
           // ---------------------------------------------------------------
@@ -448,6 +547,111 @@ export function createDemoRecordTool(ctx: ToolContext) {
               `Recording in progress (${elapsed}s elapsed, ${narrations} narration segment(s)). ` +
               `Page: ${session.page.url()}`
             );
+          }
+
+          // ---------------------------------------------------------------
+          // START_SERVER
+          // ---------------------------------------------------------------
+          case "start_server": {
+            if (!command) return "Error: command is required for start_server action.";
+            if (!port) return "Error: port is required for start_server action.";
+            if (serverProcesses.has(ctx.agentId)) {
+              const existing = serverProcesses.get(ctx.agentId)!;
+              return `Error: A server is already running (PID ${existing.process.pid}, port ${existing.port}). Stop it first with stop_server.`;
+            }
+
+            const workDir = cwd
+              ? resolve(ctx.workspacePath, cwd)
+              : ctx.workspacePath;
+
+            // Parse command into executable + args
+            const parts = command.match(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g) ?? [command];
+            const exe = parts[0];
+            const args = parts.slice(1).map((a) =>
+              a.replace(/^["']|["']$/g, ""),
+            );
+
+            // Spawn detached so it survives agent termination until we kill it
+            const child = spawn(exe, args, {
+              cwd: workDir,
+              detached: true,
+              stdio: ["ignore", "pipe", "pipe"],
+              env: { ...process.env },
+              shell: true,
+            });
+
+            // Collect output for diagnostics
+            let serverOutput = "";
+            const captureOutput = (chunk: Buffer) => {
+              // Keep only the last 4KB for diagnostics
+              serverOutput += chunk.toString();
+              if (serverOutput.length > 4096) {
+                serverOutput = serverOutput.slice(-4096);
+              }
+            };
+            child.stdout?.on("data", captureOutput);
+            child.stderr?.on("data", captureOutput);
+
+            // Track early exit
+            let exitedEarly = false;
+            let exitCode: number | null = null;
+            child.on("exit", (code) => {
+              exitedEarly = true;
+              exitCode = code;
+            });
+
+            const sp: ServerProcess = {
+              process: child,
+              port,
+              command,
+              startedAt: Date.now(),
+            };
+            serverProcesses.set(ctx.agentId, sp);
+
+            // Don't let the child keep the Node process alive if the parent exits
+            child.unref();
+
+            // Wait for the port to accept connections
+            const ready = await waitForPort(port, "127.0.0.1", 60_000);
+
+            if (exitedEarly) {
+              serverProcesses.delete(ctx.agentId);
+              return (
+                `Error: Server exited immediately with code ${exitCode}.\n` +
+                `Command: ${command}\n` +
+                `Output:\n${serverOutput.slice(-2000)}`
+              );
+            }
+
+            if (!ready) {
+              killServerProcess(ctx.agentId);
+              return (
+                `Error: Server did not start accepting connections on port ${port} within 60 seconds.\n` +
+                `Command: ${command}\n` +
+                `Output:\n${serverOutput.slice(-2000)}`
+              );
+            }
+
+            return (
+              `Server started successfully (PID ${child.pid}, port ${port}).\n` +
+              `Command: ${command}\n` +
+              `The server is ready at http://localhost:${port}. ` +
+              `You can now use demo_record start with this URL.`
+            );
+          }
+
+          // ---------------------------------------------------------------
+          // STOP_SERVER
+          // ---------------------------------------------------------------
+          case "stop_server": {
+            const sp = serverProcesses.get(ctx.agentId);
+            if (!sp) return "No server is running for this agent.";
+
+            const pid = sp.process.pid;
+            const serverPort = sp.port;
+            killServerProcess(ctx.agentId);
+
+            return `Server stopped (PID ${pid}, port ${serverPort}).`;
           }
 
           default:

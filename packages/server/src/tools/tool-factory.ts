@@ -289,16 +289,19 @@ export function getToolsWithMeta(): {
       ],
     },
     demo_record: {
-      description: "Record video demos of web applications with optional voiceover narration. Produces YouTube-ready MP4 videos.",
+      description: "Record video demos of web applications with optional voiceover narration. Can start/stop dev servers and produces YouTube-ready MP4 videos.",
       category: "Browser",
       parameters: [
-        { name: "action", type: "string", required: true, description: "Action: start, narrate, wait, stop, run_script, status" },
+        { name: "action", type: "string", required: true, description: "Action: start_server, stop_server, start, narrate, wait, stop, run_script, status" },
         { name: "url", type: "string", required: false, description: "URL to navigate to (for start)" },
         { name: "text", type: "string", required: false, description: "Narration text (for narrate)" },
         { name: "seconds", type: "number", required: false, description: "Wait duration in seconds (for wait)" },
         { name: "resolution", type: "string", required: false, description: "Video resolution: 720p or 1080p (for start)" },
         { name: "filename", type: "string", required: false, description: "Output filename without extension (for stop)" },
         { name: "script", type: "string", required: false, description: "JSON demo script (for run_script)" },
+        { name: "command", type: "string", required: false, description: "Shell command to start the dev server (for start_server)" },
+        { name: "port", type: "number", required: false, description: "Port the server listens on (for start_server)" },
+        { name: "cwd", type: "string", required: false, description: "Working directory for the server command (for start_server)" },
       ],
     },
     github_get_issue: {
