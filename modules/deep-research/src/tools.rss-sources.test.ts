@@ -18,7 +18,7 @@ function createContext(config: Record<string, string | undefined> = {}): ModuleC
       db: {
         prepare: vi.fn(() => ({ run: vi.fn(), get: vi.fn(), all: vi.fn() })),
         exec: vi.fn(),
-        transaction: vi.fn((fn: () => unknown) => fn),
+        transaction: vi.fn((fn: () => unknown) => fn) as never,
       },
       upsert: vi.fn(async () => {}),
       search: vi.fn(async () => []),
