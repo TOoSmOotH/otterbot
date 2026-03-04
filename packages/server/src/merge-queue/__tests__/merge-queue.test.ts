@@ -52,6 +52,19 @@ function createMockWorkspace() {
   } as any;
 }
 
+function createMockCoo(teamLeadOverrides?: Record<string, { notifyTaskDone: ReturnType<typeof vi.fn> }>) {
+  const teamLeads = new Map<string, { notifyTaskDone: ReturnType<typeof vi.fn> }>();
+  if (teamLeadOverrides) {
+    for (const [key, val] of Object.entries(teamLeadOverrides)) {
+      teamLeads.set(key, val);
+    }
+  }
+  return {
+    getTeamLeads: vi.fn(() => teamLeads),
+    _teamLeads: teamLeads,
+  } as any;
+}
+
 function createMockPipelineManager(overrides?: {
   isEnabled?: boolean;
   startReReview?: (...args: unknown[]) => Promise<void>;
@@ -384,6 +397,32 @@ describe("MergeQueue", () => {
       expect(dbTask?.column).toBe("done");
     });
 
+    it("calls notifyTaskDone on TeamLead after direct merge", async () => {
+      const task = insertTask({ id: "task-pe-notify", prNumber: 33, prBranch: "feat/notify" });
+      insertProject();
+      const entry = insertMergeQueueEntry({
+        id: "entry-pe-notify",
+        taskId: task.id,
+        prNumber: 33,
+        prBranch: "feat/notify",
+      });
+      configStore.set("github:token", "test-token");
+      mockRebaseBranch.mockReturnValue(true);
+      mockForcePushBranch.mockReturnValue(undefined);
+      mockMergePullRequest.mockResolvedValue(undefined);
+
+      const mockPM = createMockPipelineManager({ isEnabled: false });
+      mq.setPipelineManager(mockPM);
+
+      const mockNotify = vi.fn().mockResolvedValue(undefined);
+      const mockCoo = createMockCoo({ [PROJECT_ID]: { notifyTaskDone: mockNotify } });
+      mq.setCoo(mockCoo);
+
+      await (mq as any).processEntry(entry.id);
+
+      expect(mockNotify).toHaveBeenCalledWith(task.id);
+    });
+
     it("rebase conflict → status conflict", async () => {
       const task = insertTask({ id: "task-pe-conflict", prNumber: 32, prBranch: "feat/conflict" });
       insertProject();
@@ -499,6 +538,27 @@ describe("MergeQueue", () => {
       const dbTask = getTask(task.id);
       expect(dbTask?.column).toBe("done");
       expect(dbTask?.completionReport).toContain("merged");
+    });
+
+    it("calls notifyTaskDone on TeamLead when PR merged externally", async () => {
+      const task = insertTask({ id: "task-sync-notify", prNumber: 65 });
+      insertProject();
+      insertMergeQueueEntry({
+        id: "entry-sync-notify",
+        taskId: task.id,
+        prNumber: 65,
+        status: "queued",
+      });
+      configStore.set("github:token", "test-token");
+      mockFetchPullRequest.mockResolvedValue({ merged: true, state: "closed" });
+
+      const mockNotify = vi.fn().mockResolvedValue(undefined);
+      const mockCoo = createMockCoo({ [PROJECT_ID]: { notifyTaskDone: mockNotify } });
+      mq.setCoo(mockCoo);
+
+      await (mq as any).syncExternalState();
+
+      expect(mockNotify).toHaveBeenCalledWith(task.id);
     });
 
     it("removes entry when PR closed without merge", async () => {

@@ -69,8 +69,9 @@ Task F: "Final verification and report"      → blockedBy: [E]
 - **Always pass \`taskId\` when calling \`spawn_worker\`** — this automatically moves the task to "in_progress" and assigns the worker. You do NOT need to call \`update_task\` for this.
 - **Only spawn workers for UNBLOCKED tasks.** Do NOT spawn workers for \`[BLOCKED]\` tasks — the system will refuse the assignment. Blocked tasks automatically become available when their blockers complete.
 - When a worker reports back, **you must evaluate the report** and use \`update_task\` to move the task:
-  - To "done" if the worker succeeded
+  - To "done" if the worker succeeded (but **NEVER move a task with a PR to "done"** — the PR Monitor handles that automatically when the PR is merged)
   - To "backlog" (with \`assigneeAgentId: ""\`) if the worker failed, so it can be retried
+- **Tasks with PRs:** When a worker creates a PR, the task moves to "in_review". Do NOT try to move it to "done" yourself. The PR Monitor will automatically move it to "done" once the PR is merged on GitHub.
 - **Replacing a failed task:** If you need to create a new task to replace a failed one, \`delete_task\` the old task first. This automatically removes it from other tasks' \`blockedBy\` lists so they don't stay stuck. Then create the new task and update any dependencies.
 - Use \`list_tasks\` only when you first receive a directive and need to see existing state. Do NOT use it to poll for changes.
 

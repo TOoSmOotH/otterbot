@@ -752,6 +752,7 @@ export class TeamLead extends BaseAgent {
     if (reportingTaskId && this._pipelineManager?.isPipelineTask(reportingTaskId)) {
       console.log(`[TeamLead ${this.id}] Pipeline-managed task ${reportingTaskId} — routing to PipelineManager`);
       await this._pipelineManager.advancePipeline(reportingTaskId, message.content, detectedBranch);
+      await this.autoSpawnUnblockedTasks();
       return;
     }
 
@@ -2015,7 +2016,7 @@ export class TeamLead extends BaseAgent {
 
     // Guard: tasks with an open PR should go to in_review, not done.
     // Only the PR monitor should move them to done (when the PR is actually merged).
-    if (updates.column === "done" && existing.column === "in_progress" && (existing as any).prNumber) {
+    if (updates.column === "done" && (existing as any).prNumber) {
       console.warn(
         `[TeamLead ${this.id}] Auto-correcting update_task: task "${existing.title}" (${taskId}) has PR #${(existing as any).prNumber} — ` +
         `routing to "in_review" instead of "done". The PR monitor will move it to done when the PR is merged.`,
@@ -2195,6 +2196,12 @@ export class TeamLead extends BaseAgent {
     const delLabel = this.taskLabel(existing);
     const unblockedMsg = unblockedCount > 0 ? ` ${unblockedCount} task(s) unblocked.` : "";
     return `${delLabel} deleted.${unblockedMsg}`;
+  }
+
+  /** Called by external callers (PR Monitor, Merge Queue) when a task moves to "done" to trigger backlog spawning. */
+  async notifyTaskDone(taskId: string): Promise<void> {
+    this.checkUnblockedTasks(taskId);
+    await this.autoSpawnUnblockedTasks();
   }
 
   /** Log which tasks become unblocked when a task completes. No auto-spawning — the continuation loop picks them up. */
