@@ -474,7 +474,7 @@ describe("GitHubIssueMonitor", () => {
         "owner/repo",
         "ghp_test",
         112,
-        expect.stringContaining("Looking into this issue"),
+        expect.stringContaining("Working on this issue now"),
       );
     });
 

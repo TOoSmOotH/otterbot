@@ -371,16 +371,6 @@ export class PipelineManager {
     const entry = registry.get(agentId) ?? registry.get("builtin-triage");
     if (!entry) return;
 
-    // Post start comment
-    try {
-      await createIssueComment(
-        repo, token, issue.number,
-        formatBotComment("Analyzing Issue"),
-      );
-    } catch (err) {
-      console.error(`[PipelineManager] Failed to post triage start comment on #${issue.number}:`, err);
-    }
-
     // Build prompt — wrap in XML delimiters to isolate untrusted content
     const issueText =
       `<github-issue>\n` +
@@ -460,17 +450,6 @@ export class PipelineManager {
         console.error(`[PipelineManager] Failed to apply triaged label to #${issue.number}:`, err);
       }
 
-      // Post classification comment — no truncation; use the full markdown comment
-      const triageTitle = `Triage: ${parsed.classification}`;
-      const comment = typeof parsed.comment === "string" ? parsed.comment : "";
-      const commentBody = formatBotComment(triageTitle, comment);
-
-      try {
-        await createIssueComment(repo, token, issue.number, commentBody);
-      } catch (err) {
-        console.error(`[PipelineManager] Failed to post triage comment on #${issue.number}:`, err);
-      }
-
       console.log(`[PipelineManager] Triaged issue #${issue.number} as "${parsed.classification}" (proceed=${parsed.shouldProceed})`);
 
       // Create a kanban task in the Triage column (read-only view of all open issues)
@@ -548,21 +527,6 @@ export class PipelineManager {
     const updated = db.select().from(schema.kanbanTasks).where(eq(schema.kanbanTasks.id, taskId)).get();
     if (updated) {
       this.io.emit("kanban:task-updated", updated as unknown as KanbanTask);
-    }
-
-    // Post start comment on GitHub issue
-    if (issueNumber && repo) {
-      const token = getConfig("github:token");
-      if (token) {
-        try {
-          await createIssueComment(
-            repo, token, issueNumber,
-            formatBotComment("Pipeline Started", `Stages: ${enabledStages.map(s => `\`${s}\``).join(" → ")}`),
-          );
-        } catch (err) {
-          console.error(`[PipelineManager] Failed to post pipeline start comment:`, err);
-        }
-      }
     }
 
     // Send directive for the first stage
@@ -661,9 +625,6 @@ export class PipelineManager {
           .run();
       }
     }
-
-    // Post completion comment on GitHub issue
-    await this.postStageComment(state, currentStage, workerReport, "complete");
 
     // Parse structured verdict from report
     const verdict = this.parseVerdict(workerReport);
@@ -825,9 +786,12 @@ export class PipelineManager {
         const token = getConfig("github:token");
         if (token) {
           try {
+            const prRef = state.prNumber
+              ? ` — see PR [#${state.prNumber}](https://github.com/${state.repo}/pull/${state.prNumber}) for details.`
+              : "";
             await createIssueComment(
               state.repo, token, state.issueNumber,
-              formatBotComment("Pipeline Complete"),
+              formatBotComment("Done", `Implementation complete${prRef}`),
             );
           } catch { /* best effort */ }
         }
@@ -1419,9 +1383,6 @@ export class PipelineManager {
         break;
       }
     }
-
-    // Post start comment on GitHub issue
-    await this.postStageComment(state, currentStage, "", "start");
 
     // Determine which agent to use for this stage
     let registryEntryId: string = stageInfo?.defaultAgentId ?? "builtin-coder";
