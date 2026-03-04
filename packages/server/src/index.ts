@@ -5,8 +5,8 @@ import fastifyCookie from "@fastify/cookie";
 import fastifyStatic from "@fastify/static";
 import multipart from "@fastify/multipart";
 import { Server } from "socket.io";
-import { resolve, dirname, join, sep } from "node:path";
-import { existsSync, readFileSync, writeFileSync, mkdirSync, createReadStream, createWriteStream, copyFileSync, unlinkSync } from "node:fs";
+import { resolve, dirname, join, sep, basename, extname } from "node:path";
+import { existsSync, readFileSync, writeFileSync, mkdirSync, createReadStream, createWriteStream, copyFileSync, unlinkSync, readdirSync, statSync } from "node:fs";
 import { pipeline } from "node:stream/promises";
 import { execSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -1693,6 +1693,29 @@ async function main() {
     }
   });
 
+  // CSRF protection: validate Origin header on state-changing requests
+  app.addHook("onRequest", async (req, reply) => {
+    if (req.method === "GET" || req.method === "HEAD" || req.method === "OPTIONS") return;
+    if (!req.url.startsWith("/api/")) return;
+    // Allow auth endpoints (login needs to work cross-origin in some setups)
+    if (req.url.startsWith("/api/auth/")) return;
+
+    const origin = req.headers.origin;
+    if (origin) {
+      try {
+        const originHost = new URL(origin).host;
+        const requestHost = req.headers.host ?? req.headers[":authority"];
+        if (requestHost && originHost !== requestHost) {
+          reply.code(403).send({ error: "CSRF validation failed: origin mismatch" });
+          return;
+        }
+      } catch {
+        reply.code(403).send({ error: "CSRF validation failed: invalid origin" });
+        return;
+      }
+    }
+  });
+
   // =========================================================================
   // Protected routes
   // =========================================================================
@@ -1829,6 +1852,105 @@ async function main() {
       .from(schema.conversations)
       .orderBy(desc(schema.conversations.updatedAt))
       .all();
+  });
+
+  // =========================================================================
+  // Chat file upload
+  // =========================================================================
+
+  const uploadsDir = join(dataDir, "data", "uploads");
+  mkdirSync(uploadsDir, { recursive: true });
+
+  // Allowed upload extensions (lowercase, with dot)
+  const ALLOWED_UPLOAD_EXTS = new Set([
+    ".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".svg",
+    ".pdf", ".txt", ".md", ".json", ".csv", ".xml", ".yaml", ".yml",
+    ".js", ".ts", ".jsx", ".tsx", ".py", ".go", ".rs", ".java", ".c", ".cpp", ".h",
+    ".html", ".css",
+  ]);
+  const MAX_UPLOAD_SIZE = 10 * 1024 * 1024; // 10 MB per file
+  const MAX_TOTAL_UPLOAD_BYTES = 500 * 1024 * 1024; // 500 MB total upload quota
+
+  /** Calculate total size of all files in the uploads directory */
+  function getUploadsDirSize(): number {
+    try {
+      const files = readdirSync(uploadsDir);
+      let total = 0;
+      for (const f of files) {
+        try {
+          const s = statSync(join(uploadsDir, f));
+          if (s.isFile()) total += s.size;
+        } catch { /* skip unreadable files */ }
+      }
+      return total;
+    } catch { return 0; }
+  }
+
+  // Serve uploaded files with security headers (auth-protected)
+  app.addHook("onRequest", async (req, reply) => {
+    if (!req.url.startsWith("/uploads/")) return;
+    const token = req.cookies.sb_session;
+    if (!validateSession(token)) {
+      reply.code(401).send({ error: "Unauthorized" });
+    }
+  });
+
+  await app.register(fastifyStatic, {
+    root: uploadsDir,
+    prefix: "/uploads/",
+    decorateReply: false,
+    setHeaders(res) {
+      res.setHeader("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'");
+      res.setHeader("X-Content-Type-Options", "nosniff");
+      res.setHeader("Cache-Control", "private, no-cache");
+    },
+  });
+
+  app.post("/api/chat/upload", async (req) => {
+    // Check total upload quota before accepting new files
+    const currentUsage = getUploadsDirSize();
+    if (currentUsage >= MAX_TOTAL_UPLOAD_BYTES) {
+      throw new Error(`Upload quota exceeded (${Math.round(currentUsage / 1024 / 1024)} MB / ${MAX_TOTAL_UPLOAD_BYTES / 1024 / 1024} MB). Delete old files to free space.`);
+    }
+
+    const file = await req.file({ limits: { fileSize: MAX_UPLOAD_SIZE } });
+    if (!file) throw new Error("No file uploaded");
+
+    // Sanitize: use only basename to prevent path traversal, then extract extension
+    const safeName = basename(file.filename);
+    const ext = extname(safeName).toLowerCase();
+
+    if (ext && !ALLOWED_UPLOAD_EXTS.has(ext)) {
+      throw new Error(`File type '${ext}' is not allowed`);
+    }
+
+    const { nanoid } = await import("nanoid");
+    const id = nanoid();
+    const storedName = `${id}${ext}`;
+    const destPath = join(uploadsDir, storedName);
+
+    // Verify the resolved path is within the uploads directory
+    const resolvedDest = resolve(destPath);
+    const resolvedUploads = resolve(uploadsDir);
+    if (!resolvedDest.startsWith(resolvedUploads + sep) && resolvedDest !== resolvedUploads) {
+      throw new Error("Invalid file path");
+    }
+
+    await pipeline(file.file, createWriteStream(destPath));
+
+    // Check if file was truncated (exceeded size limit)
+    if (file.file.truncated) {
+      unlinkSync(destPath);
+      throw new Error(`File exceeds maximum size of ${MAX_UPLOAD_SIZE / 1024 / 1024} MB`);
+    }
+
+    return {
+      id,
+      filename: safeName,
+      mimeType: file.mimetype,
+      size: file.file.bytesRead,
+      url: `/uploads/${storedName}`,
+    };
   });
 
   // =========================================================================
