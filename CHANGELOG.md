@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.13.0](https://github.com/TOoSmOotH/otterbot/compare/otterbot-v0.12.0...otterbot-v0.13.0) (2026-03-04)
+
+
+### Features
+
+* add arm64 platform detection to install.sh docker-compose output ([1ec6083](https://github.com/TOoSmOotH/otterbot/commit/1ec608339f22b0e6e770de89229fe36d831a345b)), closes [#375](https://github.com/TOoSmOotH/otterbot/issues/375)
+
+
+### Bug Fixes
+
+* add arm64 platform detection to install.sh ([b0c5866](https://github.com/TOoSmOotH/otterbot/commit/b0c58669624e1884aca596fe0b1df5a5ee460491))
+
 ## [0.12.0](https://github.com/TOoSmOotH/otterbot/compare/otterbot-v0.11.0...otterbot-v0.12.0) (2026-03-04)
 
 
