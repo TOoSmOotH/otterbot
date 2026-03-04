@@ -264,6 +264,16 @@ export interface ClientToServerEvents {
     callback?: (ack: { ok: boolean; error?: string }) => void,
   ) => void;
 
+  // Sign commits toggle
+  "project:get-sign-commits": (
+    data: { projectId: string },
+    callback: (result: { enabled: boolean; hasSSHKey: boolean }) => void,
+  ) => void;
+  "project:set-sign-commits": (
+    data: { projectId: string; enabled: boolean },
+    callback?: (ack: { ok: boolean; error?: string }) => void,
+  ) => void;
+
   // Target branch
   "project:get-branch": (
     data: { projectId: string },

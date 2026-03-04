@@ -228,6 +228,11 @@ export async function migrateDb() {
   } catch {
     // Column already exists — ignore
   }
+  try {
+    db.run(sql`ALTER TABLE projects ADD COLUMN sign_commits INTEGER NOT NULL DEFAULT 0`);
+  } catch {
+    // Column already exists — ignore
+  }
 
   db.run(sql`CREATE TABLE IF NOT EXISTS kanban_tasks (
     id TEXT PRIMARY KEY,

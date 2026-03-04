@@ -38,6 +38,8 @@ export function ProjectSettings({ projectId }: { projectId: string }) {
   const [error, setError] = useState<string | null>(null);
   const [isGitHubProject, setIsGitHubProject] = useState(false);
   const [issueMonitor, setIssueMonitor] = useState(false);
+  const [signCommits, setSignCommits] = useState(false);
+  const [hasSSHKey, setHasSSHKey] = useState(false);
   const [targetBranch, setTargetBranch] = useState("");
 
   const openCodeEnabled = useSettingsStore((s) => s.openCodeEnabled);
@@ -53,6 +55,12 @@ export function ProjectSettings({ projectId }: { projectId: string }) {
     socket.emit("project:get", { projectId }, (project) => {
       setIsGitHubProject(!!project?.githubRepo);
       setIssueMonitor(!!project?.githubIssueMonitor);
+    });
+
+    // Load sign-commits setting
+    socket.emit("project:get-sign-commits", { projectId }, (result) => {
+      setSignCommits(!!result?.enabled);
+      setHasSSHKey(!!result?.hasSSHKey);
     });
 
     // Load target branch
@@ -169,6 +177,9 @@ export function ProjectSettings({ projectId }: { projectId: string }) {
         socket.emit("project:set-issue-monitor", { projectId, enabled: issueMonitor });
       }
 
+      // Save sign commits setting
+      socket.emit("project:set-sign-commits", { projectId, enabled: signCommits });
+
       // Also save agent assignments (for non-pipeline mode)
       socket.emit("project:set-agent-assignments", { projectId, assignments }, (ack2) => {
         setSaving(false);
@@ -230,6 +241,40 @@ export function ProjectSettings({ projectId }: { projectId: string }) {
             </div>
           </div>
         )}
+
+        {/* Sign Commits toggle */}
+        <div>
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-sm font-semibold">Sign Commits</h2>
+              <p className="text-xs text-muted-foreground mt-1">
+                Sign git commits with your SSH key for this project
+              </p>
+              {signCommits && !hasSSHKey && (
+                <p className="text-xs text-yellow-500 mt-1">
+                  No SSH key configured. Generate or import one in Settings → GitHub first.
+                </p>
+              )}
+            </div>
+            <label className="relative inline-flex items-center cursor-pointer">
+              <input
+                type="checkbox"
+                checked={signCommits}
+                onChange={(e) => {
+                  const checked = e.target.checked;
+                  if (checked && !hasSSHKey) {
+                    setSignCommits(false);
+                    return;
+                  }
+                  setSignCommits(checked);
+                  setSaved(false);
+                }}
+                className="sr-only peer"
+              />
+              <div className="w-9 h-5 bg-muted rounded-full peer peer-checked:bg-primary transition-colors after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:after:translate-x-full" />
+            </label>
+          </div>
+        </div>
 
         {/* Pipeline master toggle */}
         <div>

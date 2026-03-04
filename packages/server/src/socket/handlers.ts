@@ -22,7 +22,7 @@ import type { GitHubIssueMonitor } from "../github/issue-monitor.js";
 import type { MergeQueue } from "../merge-queue/merge-queue.js";
 import type { WorldLayoutManager } from "../models3d/world-layout.js";
 import { cloneRepo, getRepoDefaultBranch } from "../github/github-service.js";
-import { initGitRepo, createInitialCommit } from "../utils/git.js";
+import { initGitRepo, createInitialCommit, configureCommitSigning, hasSSHKey } from "../utils/git.js";
 import { NO_REPORT_SENTINEL } from "../schedulers/custom-task-scheduler.js";
 import { ProjectStatus, CharterStatus } from "@otterbot/shared";
 import { existsSync, rmSync } from "node:fs";
@@ -808,6 +808,80 @@ export function setupSocketHandlers(
         callback?.({ ok: true });
       } catch (err) {
         callback?.({ ok: false, error: err instanceof Error ? err.message : "Failed to update issue monitor setting" });
+      }
+    });
+
+    // Get sign-commits setting for a project
+    socket.on("project:get-sign-commits", (data, callback) => {
+      try {
+        const db = getDb();
+        const project = db
+          .select()
+          .from(schema.projects)
+          .where(eq(schema.projects.id, data.projectId))
+          .get();
+
+        callback({
+          enabled: !!project?.signCommits,
+          hasSSHKey: hasSSHKey(),
+        });
+      } catch {
+        callback({ enabled: false, hasSSHKey: false });
+      }
+    });
+
+    // Toggle commit signing for a project
+    socket.on("project:set-sign-commits", (data, callback) => {
+      try {
+        const db = getDb();
+        const project = db
+          .select()
+          .from(schema.projects)
+          .where(eq(schema.projects.id, data.projectId))
+          .get();
+
+        if (!project) {
+          callback?.({ ok: false, error: "Project not found" });
+          return;
+        }
+
+        if (data.enabled && !hasSSHKey()) {
+          callback?.({ ok: false, error: "No SSH key configured. Generate or import one in Settings → GitHub first." });
+          return;
+        }
+
+        db.update(schema.projects)
+          .set({ signCommits: data.enabled })
+          .where(eq(schema.projects.id, data.projectId))
+          .run();
+
+        // Apply local git config to the project's repo
+        const workspace = deps?.workspace;
+        if (workspace) {
+          const repoPath = workspace.repoPath(data.projectId);
+          if (existsSync(repoPath)) {
+            try {
+              configureCommitSigning(repoPath, data.enabled);
+            } catch (e) {
+              callback?.({ ok: false, error: e instanceof Error ? e.message : "Failed to configure git signing" });
+              return;
+            }
+          }
+        }
+
+        // Emit project:updated so UI refreshes
+        const updated = db
+          .select()
+          .from(schema.projects)
+          .where(eq(schema.projects.id, data.projectId))
+          .get();
+        if (updated) {
+          io.emit("project:updated", updated as any);
+        }
+
+        callback?.({ ok: true });
+      } catch (err) {
+        callback?.({ ok: false, error: err instanceof Error ? err.message : "Failed to update sign commits setting" });
       }
     });
 

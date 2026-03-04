@@ -109,6 +109,7 @@ export const projects = sqliteTable("projects", {
   githubRepo: text("github_repo"),
   githubBranch: text("github_branch"),
   githubIssueMonitor: integer("github_issue_monitor", { mode: "boolean" }).notNull().default(false),
+  signCommits: integer("sign_commits", { mode: "boolean" }).notNull().default(false),
   rules: text("rules", { mode: "json" })
     .$type<string[]>()
     .notNull()
