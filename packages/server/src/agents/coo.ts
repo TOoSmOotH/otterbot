@@ -1,4 +1,5 @@
 import { makeProjectId } from "../utils/slugify.js";
+import { checkBlockedCommand } from "../utils/command-guard.js";
 import { tool } from "ai";
 import { z } from "zod";
 import {
@@ -23,6 +24,7 @@ import type { MessageBus } from "../bus/message-bus.js";
 import type { WorkspaceManager } from "../workspace/workspace.js";
 import { eq, and } from "drizzle-orm";
 import { getConfig } from "../auth/auth.js";
+import { buildDateContext } from "./prompts/date-context.js";
 import {
   listPackages,
   installAptPackage,
@@ -97,6 +99,7 @@ export class COO extends BaseAgent {
   private workspace: WorkspaceManager;
   private onAgentSpawned?: (agent: BaseAgent) => void;
   private _moduleTools: Record<string, unknown> = {};
+  private _specialists: Array<{ moduleId: string; name: string; description: string }> = [];
   private onStream?: (token: string, messageId: string, conversationId: string | null) => void;
   private onThinking?: (token: string, messageId: string, conversationId: string | null) => void;
   private onThinkingEnd?: (messageId: string, conversationId: string | null) => void;
@@ -166,6 +169,9 @@ Chromium is already installed at \`${chromiumPath}\`. Do NOT try to install a br
 To launch it: use run_command with \`${chromiumPath} --no-sandbox --disable-dev-shm-usage <url> &\`
 The user can see everything on the desktop in real-time.`;
     }
+
+    // Inject current date/time context
+    systemPrompt += buildDateContext();
 
     // Inject user profile into system prompt if available
     const userName = getConfig("user_name");
@@ -254,23 +260,31 @@ The user can see everything on the desktop in real-time.`;
   setSpecialistContext(
     specialists: Array<{ moduleId: string; name: string; description: string }>,
   ): void {
-    if (specialists.length === 0) return;
+    // Always store specialists so list_specialists tool can read them
+    this._specialists = specialists;
 
     const lines = [
-      "\n\n## Specialist Agents",
-      "You have specialist agents with deep expertise. When the CEO refers to one by name, use `module_query` with the module ID to route their request.",
+      "\n\n## Active Specialist Agents (Module-Backed)",
+      "**These are your ONLY specialist agents.** Worker types (Coder, Researcher, Tester, Browser Agent) are NOT specialist agents — they are project workers spawned by Team Leads.",
       "",
     ];
-    for (const s of specialists) {
+
+    if (specialists.length === 0) {
+      lines.push("No specialist agents are currently active. If the CEO asks about specialists, tell them none are installed.");
+    } else {
+      lines.push("Use `module_query` with the module ID to route requests to a specialist. Use `list_specialists` to get this list dynamically.");
+      lines.push("");
+      for (const s of specialists) {
+        lines.push(
+          `- **${s.name}** (module ID: \`${s.moduleId}\`) — ${s.description}`,
+        );
+      }
+      lines.push("");
       lines.push(
-        `- **${s.name}** (module ID: \`${s.moduleId}\`) — ${s.description}`,
+        'Example: If the CEO says "ask Steve about WebAssembly" and Steve is the Deep Research specialist, ' +
+        'call module_query(moduleId="deep-research", question="What do you know about WebAssembly?")',
       );
     }
-    lines.push("");
-    lines.push(
-      'Example: If the CEO says "ask Steve about WebAssembly" and Steve is the Deep Research specialist, ' +
-      'call module_query(moduleId="deep-research", question="What do you know about WebAssembly?")',
-    );
 
     this.systemPrompt += lines.join("\n");
 
@@ -376,11 +390,41 @@ The user can see everything on the desktop in real-time.`;
     );
     console.log(`[COO] think() returned (${text.length} chars): "${text.slice(0, 120)}"`);
 
+    // Guard: if think() produced raw JSON instead of natural language
+    // (e.g. from a forced synthesis after tool failures), re-synthesize.
+    let finalText = text;
+    const trimmed = text.trim();
+    if (
+      (trimmed.startsWith("{") || trimmed.startsWith("[")) &&
+      trimmed.length > 2
+    ) {
+      try {
+        JSON.parse(trimmed);
+        // It's valid JSON — re-synthesize as natural language
+        console.log("[COO] Detected raw JSON output, re-synthesizing as natural language");
+        const { text: resynthesized } = await this.thinkWithoutTools(
+          `[Your previous response was raw JSON. Rewrite it as a helpful, natural language response to the user. Here is the JSON:\n${trimmed}\n]`,
+          (token, messageId) => {
+            this.onStream?.(token, messageId, this.currentConversationId);
+          },
+          (token, messageId) => {
+            this.onThinking?.(token, messageId, this.currentConversationId);
+          },
+          (messageId) => {
+            this.onThinkingEnd?.(messageId, this.currentConversationId);
+          },
+        );
+        finalText = resynthesized || "I wasn't able to get a clear result. Could you rephrase your request?";
+      } catch {
+        // Not valid JSON after all — use the original text as-is
+      }
+    }
+
     // Send the response back through the bus (to CEO / null)
     this.sendMessage(
       null,
       MessageType.Chat,
-      text,
+      finalText,
       thinking ? { thinking } : undefined,
       this.currentConversationId ?? undefined,
     );
@@ -510,6 +554,11 @@ The user can see everything on the desktop in real-time.`;
           if (this._runCommandCalls > 1) {
             return "REFUSED: You already used your one command this turn. " +
               "STOP and use send_directive to delegate work to the Team Lead. Do NOT run more commands.";
+          }
+          const blocked = checkBlockedCommand(command);
+          if (blocked) {
+            console.warn(`[coo:run_command] Blocked command: ${command}`);
+            return blocked;
           }
           const effectiveTimeout = Math.min(timeout ?? 30_000, 120_000);
           let cwd: string | undefined;
@@ -1064,6 +1113,29 @@ The user can see everything on the desktop in real-time.`;
           this.onConversationSwitched?.(conversation.id, messages);
 
           return `Switched to conversation: "${conversation.title}"`;
+        },
+      }),
+
+      list_specialists: tool({
+        description:
+          "List all active specialist agents. Specialist agents are module-backed autonomous agents with their own knowledge stores — they are NOT worker types (Coder, Researcher, etc.).",
+        parameters: z.object({}),
+        execute: async () => {
+          if (this._specialists.length === 0) {
+            return "No specialist agents are currently active. Specialist agents are powered by the module system and must be installed separately. Worker types (Coder, Researcher, Tester, Browser Agent) are NOT specialist agents — they are project workers spawned by Team Leads.";
+          }
+          const lines = [
+            `${this._specialists.length} specialist agent(s) active:\n`,
+          ];
+          for (const s of this._specialists) {
+            lines.push(
+              `- **${s.name}** (module ID: \`${s.moduleId}\`) — ${s.description}`,
+            );
+          }
+          lines.push(
+            "\nUse `module_query` with the module ID to communicate with a specialist.",
+          );
+          return lines.join("\n");
         },
       }),
 

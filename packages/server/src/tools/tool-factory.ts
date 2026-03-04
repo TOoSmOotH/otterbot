@@ -6,6 +6,7 @@ import { createFileWriteTool } from "./file-write.js";
 import { createShellExecTool } from "./shell-exec.js";
 import { createWebSearchTool } from "./web-search.js";
 import { createWebBrowseTool } from "./web-browse.js";
+import { createDemoRecordTool } from "./demo-record.js";
 import { createInstallPackageTool } from "./install-package.js";
 import { createOpenCodeTaskTool } from "./opencode-task.js";
 import { createTodoListTool } from "./todo-list.js";
@@ -33,12 +34,18 @@ import {
 } from "./github.js";
 import { SkillService } from "../skills/skill-service.js";
 import { CustomToolService } from "./custom-tool-service.js";
-import { executeCustomTool } from "./custom-tool-executor.js";
+// Lazy import — isolated-vm (used by custom-tool-executor) requires native
+// binaries that may not be available in all environments.
+const lazyExecuteCustomTool = async (...args: Parameters<typeof import("./custom-tool-executor.js").executeCustomTool>) => {
+  const { executeCustomTool } = await import("./custom-tool-executor.js");
+  return executeCustomTool(...args);
+};
 import { createMemorySaveTool } from "./memory-save.js";
 import { createSshExecTool } from "./ssh-exec.js";
 import { createSshListKeysTool } from "./ssh-list-keys.js";
 import { createSshListHostsTool } from "./ssh-list-hosts.js";
 import { createSshConnectTool } from "./ssh-connect.js";
+import { createGetCurrentTimeTool } from "./get-current-time.js";
 import { McpClientManager } from "../mcp/mcp-client-manager.js";
 import { McpServerService as McpServerServiceRef } from "../mcp/mcp-service.js";
 
@@ -53,6 +60,7 @@ const TOOL_REGISTRY: Record<string, ToolCreator> = {
   web_browse: createWebBrowseTool,
   install_package: createInstallPackageTool,
   opencode_task: createOpenCodeTaskTool,
+  demo_record: createDemoRecordTool,
   github_get_issue: createGitHubGetIssueTool,
   github_list_issues: createGitHubListIssuesTool,
   github_get_pr: createGitHubGetPRTool,
@@ -83,6 +91,8 @@ const CONTEXTLESS_TOOL_REGISTRY: Record<string, () => unknown> = {
   list_custom_tools: createListCustomToolsTool,
   update_custom_tool: createUpdateCustomToolTool,
   test_custom_tool: createTestCustomToolTool,
+  // Time tools
+  get_current_time: createGetCurrentTimeTool,
   // Memory tools
   memory_save: createMemorySaveTool,
   // SSH tools
@@ -281,6 +291,22 @@ export function getToolsWithMeta(): {
       category: "Workspace",
       parameters: [
         { name: "task", type: "string", required: true, description: "Detailed description of the coding task" },
+      ],
+    },
+    demo_record: {
+      description: "Record video demos of web applications with optional voiceover narration. Can start/stop dev servers and produces YouTube-ready MP4 videos.",
+      category: "Browser",
+      parameters: [
+        { name: "action", type: "string", required: true, description: "Action: start_server, stop_server, start, narrate, wait, stop, run_script, status" },
+        { name: "url", type: "string", required: false, description: "URL to navigate to (for start)" },
+        { name: "text", type: "string", required: false, description: "Narration text (for narrate)" },
+        { name: "seconds", type: "number", required: false, description: "Wait duration in seconds (for wait)" },
+        { name: "resolution", type: "string", required: false, description: "Video resolution: 720p or 1080p (for start)" },
+        { name: "filename", type: "string", required: false, description: "Output filename without extension (for stop)" },
+        { name: "script", type: "string", required: false, description: "JSON demo script (for run_script)" },
+        { name: "command", type: "string", required: false, description: "Shell command to start the dev server (for start_server)" },
+        { name: "port", type: "number", required: false, description: "Preferred port for the server (for start_server). If busy or omitted, a free port is auto-selected." },
+        { name: "cwd", type: "string", required: false, description: "Working directory for the server command (for start_server)" },
       ],
     },
     github_get_issue: {
@@ -493,6 +519,11 @@ export function getToolsWithMeta(): {
         { name: "params", type: "object", required: true, description: "Parameters to pass to the tool" },
       ],
     },
+    get_current_time: {
+      description: "Get the current date and time. Use this when you need an up-to-date timestamp.",
+      category: "Utility",
+      parameters: [],
+    },
     ssh_exec: {
       description: "Execute a command on a remote host via SSH. Output capped at 50KB, timeout 2 minutes.",
       category: "SSH",
@@ -593,7 +624,7 @@ function createCustomToolWrapper(customTool: import("@otterbot/shared").CustomTo
     description: customTool.description,
     parameters: z.object(shape),
     execute: async (params: Record<string, unknown>) => {
-      return executeCustomTool(customTool, params);
+      return lazyExecuteCustomTool(customTool, params);
     },
   });
 }
@@ -687,7 +718,7 @@ function createTestCustomToolTool() {
       const customTool = svc.get(id);
       if (!customTool) return JSON.stringify({ error: "Tool not found" });
       try {
-        const result = await executeCustomTool(customTool, params);
+        const result = await lazyExecuteCustomTool(customTool, params);
         return JSON.stringify({ result });
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);

@@ -13,9 +13,10 @@
 import type { ModuleContext, PollResult, PollResultItem } from "@otterbot/shared";
 import { search as webSearch } from "./search-providers.js";
 import { extractReadableContent } from "./content-extractor.js";
-import { validateUrlForSsrf } from "./ssrf.js";
+import { ssrfSafeFetch } from "./ssrf.js";
 import { acquireSlot } from "./rate-limiter.js";
 import { crawlSite } from "./crawler.js";
+import { fetchRssFeed } from "./rss-fetcher.js";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -79,18 +80,15 @@ async function fetchAndStoreFullPage(
   const maxLength = Number(ctx.getConfig("max_page_content_length")) || 15_000;
 
   try {
-    await validateUrlForSsrf(url);
-
     const hostname = new URL(url).hostname;
     await acquireSlot(hostname);
 
-    const res = await fetch(url, {
+    const res = await ssrfSafeFetch(url, {
       headers: {
         "User-Agent": "Mozilla/5.0 (compatible; otterbot-deep-research/0.1.0)",
         Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
       },
       signal: AbortSignal.timeout(timeout),
-      redirect: "follow",
     });
 
     if (!res.ok) return null;
@@ -404,22 +402,122 @@ async function searchSource(
   }
 }
 
+// ─── RSS feed polling ───────────────────────────────────────────────────────
+
+async function pollRssFeeds(
+  ctx: ModuleContext,
+  deadline: number,
+  seenUrls: Set<string>,
+): Promise<PollResultItem[]> {
+  const rssRaw = ctx.getConfig("rss_feeds") || "";
+  const feeds = rssRaw
+    .split("\n")
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  if (feeds.length === 0) return [];
+
+  const timeout = Number(ctx.getConfig("request_timeout_ms")) || 15_000;
+  const items: PollResultItem[] = [];
+
+  for (const feedUrl of feeds) {
+    if (isTimeUp(deadline)) break;
+
+    try {
+      ctx.log(`  Fetching RSS feed: ${feedUrl}`);
+      const feed = await fetchRssFeed(feedUrl, { timeout, maxItems: 20 });
+
+      for (const item of feed.items) {
+        const id = `rss:${Buffer.from(item.id || item.link || item.title).toString("base64url").slice(0, 64)}`;
+        if (item.link) seenUrls.add(item.link);
+
+        const content = [
+          `# ${item.title}`,
+          "",
+          item.link ? `Source: ${item.link}` : "",
+          item.pubDate ? `Published: ${item.pubDate}` : "",
+          item.author ? `Author: ${item.author}` : "",
+          "",
+          item.description,
+        ]
+          .filter(Boolean)
+          .join("\n");
+
+        items.push({
+          id,
+          title: item.title,
+          content,
+          url: item.link,
+          metadata: {
+            source: "poll",
+            source_type: "rss",
+            feed_url: feedUrl,
+            feed_title: feed.feedTitle,
+            pub_date: item.pubDate,
+            polled_at: new Date().toISOString(),
+          },
+        });
+      }
+
+      ctx.log(`  RSS feed "${feed.feedTitle}": ${feed.items.length} items`);
+    } catch (err) {
+      ctx.warn(`RSS feed fetch failed for ${feedUrl}: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  return items;
+}
+
+// ─── Research URL polling ───────────────────────────────────────────────────
+
+async function pollResearchUrls(
+  ctx: ModuleContext,
+  deadline: number,
+  seenUrls: Set<string>,
+): Promise<PollResultItem[]> {
+  const urlsRaw = ctx.getConfig("research_urls") || "";
+  const urls = urlsRaw
+    .split("\n")
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  if (urls.length === 0) return [];
+
+  const items: PollResultItem[] = [];
+
+  for (const url of urls) {
+    if (isTimeUp(deadline)) break;
+    if (seenUrls.has(url)) continue;
+
+    const pageItem = await fetchAndStoreFullPage(url, "research_url", ctx, seenUrls);
+    if (pageItem) {
+      pageItem.metadata = {
+        ...pageItem.metadata,
+        source_type: "research_url",
+      };
+      items.push(pageItem);
+    }
+  }
+
+  return items;
+}
+
 // ─── Main poll handler ──────────────────────────────────────────────────────
 
 export async function handlePoll(ctx: ModuleContext): Promise<PollResult> {
   const subjectsRaw = ctx.getConfig("research_subjects");
-  if (!subjectsRaw?.trim()) {
+  const rssRaw = ctx.getConfig("rss_feeds");
+  const urlsRaw = ctx.getConfig("research_urls");
+
+  // Nothing configured at all
+  if (!subjectsRaw?.trim() && !rssRaw?.trim() && !urlsRaw?.trim()) {
     return { items: [] };
   }
 
-  const subjects = subjectsRaw
+  const subjects = (subjectsRaw || "")
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean);
-
-  if (subjects.length === 0) {
-    return { items: [] };
-  }
 
   const sourcesRaw = ctx.getConfig("poll_sources") || "web,reddit,hackernews";
   const sources = sourcesRaw
@@ -435,12 +533,28 @@ export async function handlePoll(ctx: ModuleContext): Promise<PollResult> {
     Number(ctx.getConfig("poll_fetch_top_n")) || 3;
 
   const deadline = Date.now() + timeBudgetMs;
-  const startIndex = getSubjectIndex(subjects, ctx);
+  const startIndex = subjects.length > 0 ? getSubjectIndex(subjects, ctx) : 0;
   const allItems: PollResultItem[] = [];
   const seenUrls = new Set<string>();
   let subjectsProcessed = 0;
 
   ctx.log(`Poll starting: ${subjects.length} subjects, ${timeBudgetMs / 1000}s budget, starting at index ${startIndex}`);
+
+  // ── Phase 0: Fetch RSS feeds ──
+  if (!isTimeUp(deadline)) {
+    ctx.log("Polling RSS feeds...");
+    const rssItems = await pollRssFeeds(ctx, deadline, seenUrls);
+    allItems.push(...rssItems);
+    ctx.log(`RSS feeds: ${rssItems.length} items`);
+  }
+
+  // ── Phase 0b: Fetch research URLs ──
+  if (!isTimeUp(deadline)) {
+    ctx.log("Polling research URLs...");
+    const urlItems = await pollResearchUrls(ctx, deadline, seenUrls);
+    allItems.push(...urlItems);
+    ctx.log(`Research URLs: ${urlItems.length} items`);
+  }
 
   for (let i = 0; i < subjects.length; i++) {
     if (isTimeUp(deadline)) break;
@@ -550,8 +664,15 @@ export async function handlePoll(ctx: ModuleContext): Promise<PollResult> {
   const elapsed = Math.round((timeBudgetMs - (deadline - Date.now())) / 1000);
   ctx.log(`Poll complete: ${subjectsProcessed}/${subjects.length} subjects, ${allItems.length} items, ${elapsed}s elapsed`);
 
+  const rssCount = allItems.filter((i) => i.metadata?.source_type === "rss").length;
+  const urlCount = allItems.filter((i) => i.metadata?.source_type === "research_url").length;
+  const extraParts: string[] = [];
+  if (rssCount > 0) extraParts.push(`${rssCount} RSS items`);
+  if (urlCount > 0) extraParts.push(`${urlCount} URL pages`);
+  const extra = extraParts.length > 0 ? ` (incl. ${extraParts.join(", ")})` : "";
+
   return {
     items: allItems,
-    summary: `Researched ${subjectsProcessed} subject(s) — found ${allItems.length} items across ${sources.join(", ")} in ${elapsed}s`,
+    summary: `Researched ${subjectsProcessed} subject(s) — found ${allItems.length} items${extra} across ${sources.join(", ")} in ${elapsed}s`,
   };
 }

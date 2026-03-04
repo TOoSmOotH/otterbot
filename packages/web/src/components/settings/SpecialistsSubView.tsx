@@ -491,6 +491,11 @@ export function SpecialistsSubView({ navigateToId, onNavigatedTo }: SpecialistsS
               <SpecialistQueryBox moduleId={selected.id} />
             )}
 
+            {/* Research Sources (RSS feeds & URLs) */}
+            {selected.loaded && (selected.moduleId === "deep-research" || selected.id === "deep-research") && (
+              <ResearchSourcesPanel moduleId={selected.id} />
+            )}
+
             {/* Configuration */}
             <SpecialistConfigPanel moduleId={selected.id} />
           </div>
@@ -792,6 +797,235 @@ function SpecialistQueryBox({ moduleId }: { moduleId: string }) {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+// ─── Research Sources Panel ─────────────────────────────────────────────
+
+function SourceListEditor({
+  label,
+  placeholder,
+  items,
+  onAdd,
+  onRemove,
+}: {
+  label: string;
+  placeholder: string;
+  items: string[];
+  onAdd: (values: string[]) => void;
+  onRemove: (index: number) => void;
+}) {
+  const [inputValue, setInputValue] = useState("");
+
+  const handleAdd = () => {
+    const val = inputValue.trim();
+    if (!val) return;
+    try {
+      new URL(val);
+    } catch {
+      return;
+    }
+    if (items.includes(val)) return;
+    onAdd([val]);
+    setInputValue("");
+  };
+
+  const handlePaste = (e: React.ClipboardEvent<HTMLInputElement>) => {
+    const text = e.clipboardData.getData("text");
+    const candidates = text.split(/[\n,]+/).map((s) => s.trim()).filter(Boolean);
+    const validUrls: string[] = [];
+    for (const c of candidates) {
+      try {
+        new URL(c);
+        if (!items.includes(c) && !validUrls.includes(c)) {
+          validUrls.push(c);
+        }
+      } catch {
+        // skip invalid URLs
+      }
+    }
+    if (validUrls.length > 1) {
+      e.preventDefault();
+      onAdd(validUrls);
+      setInputValue("");
+    }
+  };
+
+  return (
+    <div className="space-y-2">
+      <div className="text-[10px] text-muted-foreground uppercase tracking-wider font-medium">
+        {label}
+      </div>
+      <div className="flex items-center gap-2">
+        <input
+          type="text"
+          value={inputValue}
+          onChange={(e) => setInputValue(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && handleAdd()}
+          onPaste={handlePaste}
+          placeholder={placeholder}
+          className="flex-1 bg-secondary rounded-md px-3 py-1.5 text-xs outline-none focus:ring-1 ring-primary font-mono"
+        />
+        <button
+          onClick={handleAdd}
+          disabled={!inputValue.trim()}
+          className="text-xs bg-primary text-primary-foreground px-3 py-1.5 rounded-md hover:bg-primary/90 disabled:opacity-50"
+        >
+          Add
+        </button>
+      </div>
+      {items.length > 0 && (
+        <div className="space-y-1">
+          {items.map((item, i) => (
+            <div
+              key={item}
+              className="flex items-center justify-between bg-secondary/50 rounded-md px-3 py-1.5 group"
+            >
+              <span className="text-xs font-mono truncate flex-1 mr-2">
+                {item}
+              </span>
+              <button
+                onClick={() => onRemove(i)}
+                className="text-[10px] text-muted-foreground hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity"
+              >
+                Remove
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+      {items.length === 0 && (
+        <div className="text-[10px] text-muted-foreground/60 italic">
+          No {label.toLowerCase()} configured
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ResearchSourcesPanel({ moduleId }: { moduleId: string }) {
+  const [rssFeeds, setRssFeeds] = useState<string[]>([]);
+  const [researchUrls, setResearchUrls] = useState<string[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [dirty, setDirty] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState(false);
+
+  const loadSources = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await fetch(`/api/modules/${moduleId}/config`);
+      if (res.ok) {
+        const data = await res.json();
+        const rssRaw = data.values?.rss_feeds || "";
+        const urlsRaw = data.values?.research_urls || "";
+        setRssFeeds(
+          rssRaw
+            .split("\n")
+            .map((s: string) => s.trim())
+            .filter(Boolean),
+        );
+        setResearchUrls(
+          urlsRaw
+            .split("\n")
+            .map((s: string) => s.trim())
+            .filter(Boolean),
+        );
+        setDirty(false);
+      }
+    } catch {
+      /* ignore */
+    } finally {
+      setLoading(false);
+    }
+  }, [moduleId]);
+
+  useEffect(() => {
+    loadSources();
+  }, [loadSources]);
+
+  const handleSave = async () => {
+    setSaving(true);
+    setError(null);
+    setSuccess(false);
+    try {
+      const updates: Record<string, string | null> = {
+        rss_feeds: rssFeeds.length > 0 ? rssFeeds.join("\n") : null,
+        research_urls: researchUrls.length > 0 ? researchUrls.join("\n") : null,
+      };
+      const res = await fetch(`/api/modules/${moduleId}/config`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(updates),
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        setError(data.error ?? "Save failed");
+      } else {
+        setDirty(false);
+        setSuccess(true);
+        setTimeout(() => setSuccess(false), 2000);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Save failed");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="text-[10px] text-muted-foreground py-2">Loading sources...</div>
+    );
+  }
+
+  return (
+    <div className="border-t border-border pt-3 space-y-4">
+      <div className="text-[10px] text-muted-foreground uppercase tracking-wider font-medium">
+        Research Sources
+      </div>
+
+      <SourceListEditor
+        label="RSS Feeds"
+        placeholder="https://example.com/feed.xml"
+        items={rssFeeds}
+        onAdd={(vals) => {
+          setRssFeeds((prev) => [...prev, ...vals]);
+          setDirty(true);
+        }}
+        onRemove={(i) => {
+          setRssFeeds(rssFeeds.filter((_, idx) => idx !== i));
+          setDirty(true);
+        }}
+      />
+
+      <SourceListEditor
+        label="Monitored URLs"
+        placeholder="https://example.com/page-to-monitor"
+        items={researchUrls}
+        onAdd={(vals) => {
+          setResearchUrls((prev) => [...prev, ...vals]);
+          setDirty(true);
+        }}
+        onRemove={(i) => {
+          setResearchUrls(researchUrls.filter((_, idx) => idx !== i));
+          setDirty(true);
+        }}
+      />
+
+      <div className="flex items-center gap-2">
+        <button
+          onClick={handleSave}
+          disabled={!dirty || saving}
+          className="text-xs bg-primary text-primary-foreground px-3 py-1.5 rounded-md hover:bg-primary/90 disabled:opacity-50"
+        >
+          {saving ? "Saving..." : "Save Sources"}
+        </button>
+        {error && <span className="text-xs text-red-500">{error}</span>}
+        {success && <span className="text-xs text-green-500">Saved</span>}
+      </div>
     </div>
   );
 }

@@ -12,7 +12,7 @@ export default defineConfig({
   reporter: [["html", { open: "never" }], ["list"]],
   globalSetup: "./fixtures/setup.fixture.ts",
   use: {
-    baseURL: "https://localhost:62627",
+    baseURL: process.env.BASE_URL || "https://localhost:62627",
     ignoreHTTPSErrors: true,
     trace: "on-first-retry",
     screenshot: "only-on-failure",

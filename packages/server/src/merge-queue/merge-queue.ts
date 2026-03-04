@@ -23,6 +23,7 @@ import { formatBotComment } from "../utils/github-comments.js";
 import type { Scheduler } from "../schedulers/scheduler-registry.js";
 import type { PipelineManager } from "../pipeline/pipeline-manager.js";
 import type { WorkspaceManager } from "../workspace/workspace.js";
+import type { COO } from "../agents/coo.js";
 
 type TypedServer = Server<ClientToServerEvents, ServerToClientEvents>;
 
@@ -31,6 +32,7 @@ export class MergeQueue implements Scheduler {
   private workspace: WorkspaceManager;
   private intervalId: ReturnType<typeof setInterval> | null = null;
   private pipelineManager: PipelineManager | null = null;
+  private coo: COO | null = null;
   private processing = false;
 
   constructor(io: TypedServer, workspace: WorkspaceManager) {
@@ -40,6 +42,10 @@ export class MergeQueue implements Scheduler {
 
   setPipelineManager(pm: PipelineManager): void {
     this.pipelineManager = pm;
+  }
+
+  setCoo(coo: COO): void {
+    this.coo = coo;
   }
 
   // ─── Scheduler interface ──────────────────────────────────────────
@@ -306,6 +312,14 @@ export class MergeQueue implements Scheduler {
           }
 
           console.log(`[MergeQueue] PR #${entry.prNumber} merged externally — task ${entry.taskId} → done`);
+
+          // Notify TeamLead to spawn backlog workers
+          if (this.coo) {
+            const teamLead = this.coo.getTeamLeads().get(entry.projectId);
+            if (teamLead) {
+              await teamLead.notifyTaskDone(entry.taskId);
+            }
+          }
         } else if (pr.state === "closed") {
           // Closed without merge — remove from queue, task → backlog
           db.delete(schema.mergeQueue).where(eq(schema.mergeQueue.id, entry.id)).run();
@@ -504,6 +518,14 @@ export class MergeQueue implements Scheduler {
       this.emitQueueUpdated();
 
       console.log(`[MergeQueue] PR #${entry.prNumber} merged successfully`);
+
+      // Notify TeamLead to spawn backlog workers
+      if (this.coo) {
+        const teamLead = this.coo.getTeamLeads().get(entry.projectId);
+        if (teamLead) {
+          await teamLead.notifyTaskDone(entry.taskId);
+        }
+      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
 

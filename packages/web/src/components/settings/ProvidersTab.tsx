@@ -75,7 +75,7 @@ function AddProviderForm({
     const m = providerTypes.find((p) => p.type === newType);
     setName(m?.label || newType);
     setApiKey("");
-    setBaseUrl(newType === "ollama" ? "http://localhost:11434/api" : newType === "lmstudio" ? "http://localhost:1234/v1" : "");
+    setBaseUrl(newType === "ollama" ? "http://localhost:11434/v1" : newType === "lmstudio" ? "http://localhost:1234/v1" : "");
   };
 
   const handleCreate = async () => {

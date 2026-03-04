@@ -60,9 +60,6 @@ vi.mock("@ai-sdk/openai-compatible", () => ({
 vi.mock("@ai-sdk/google", () => ({
   createGoogleGenerativeAI: vi.fn(() => vi.fn()),
 }));
-vi.mock("ollama-ai-provider", () => ({
-  createOllama: vi.fn(() => vi.fn()),
-}));
 
 describe("AWS Bedrock provider", () => {
   beforeEach(() => {

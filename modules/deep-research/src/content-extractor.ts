@@ -74,9 +74,25 @@ function htmlToText(html: string): string {
     (_, href: string, content: string) => {
       const linkText = content.replace(/<[^>]*>/g, "").trim();
       if (!linkText) return "";
-      // Skip anchors and javascript links
-      if (href.startsWith("#") || href.startsWith("javascript:")) return linkText;
-      return `[${linkText}](${href})`;
+      // Skip anchors and dangerous protocol links
+      const trimmedHref = href.trim().toLowerCase();
+      if (
+        trimmedHref.startsWith("#") ||
+        trimmedHref.startsWith("javascript:") ||
+        trimmedHref.startsWith("data:") ||
+        trimmedHref.startsWith("vbscript:")
+      )
+        return linkText;
+      // Only allow http/https links
+      if (
+        trimmedHref.startsWith("http://") ||
+        trimmedHref.startsWith("https://") ||
+        trimmedHref.startsWith("/") ||
+        !trimmedHref.includes(":")
+      ) {
+        return `[${linkText}](${href.trim()})`;
+      }
+      return linkText;
     },
   );
 
@@ -160,7 +176,13 @@ export function extractReadableContent(
     "iframe",
     "svg",
     "form",
+    "object",
+    "embed",
   ]);
+
+  // Remove event handler attributes to prevent content injection
+  cleaned = cleaned.replace(/\bon\w+\s*=\s*["'][^"']*["']/gi, "");
+  cleaned = cleaned.replace(/\bon\w+\s*=\s*[^\s>]*/gi, "");
 
   // Find the main content area
   const mainContent = findMainContent(cleaned);

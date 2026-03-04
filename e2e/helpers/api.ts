@@ -4,7 +4,7 @@ process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
-const BASE_URL = "https://localhost:62627";
+const BASE_URL = process.env.BASE_URL || "https://localhost:62627";
 
 /**
  * Read the session cookie from the stored auth state (saved by global setup).

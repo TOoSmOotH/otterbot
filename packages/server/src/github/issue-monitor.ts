@@ -71,7 +71,7 @@ export class GitHubIssueMonitor {
     if (!assignee) return;
 
     for (const project of projects) {
-      if (project.githubRepo) {
+      if (project.githubRepo && project.githubIssueMonitor) {
         this.watchProject(project.id, project.githubRepo, assignee);
       }
     }

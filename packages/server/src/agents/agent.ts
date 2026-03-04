@@ -28,6 +28,7 @@ import { MemoryService } from "../memory/memory-service.js";
 import { MemoryExtractor } from "../memory/memory-extractor.js";
 import { MemoryCompactor } from "../memory/memory-compactor.js";
 import { SECURITY_PREAMBLE } from "./prompts/security-preamble.js";
+import { buildDateContext } from "./prompts/date-context.js";
 
 export interface AgentOptions {
   id?: string;
@@ -197,6 +198,29 @@ export abstract class BaseAgent {
   /** Hook for long-lived agents (COO, TeamLead) to re-read model/provider from config before each think() call. */
   protected refreshLlmConfig(): void {}
 
+  /**
+   * Date-context pattern used by buildDateContext().
+   * Matches both the old format ("## Current Date … Current time: …")
+   * and the new format ("## Current Date & Time … Approximate time: …").
+   */
+  private static DATE_CONTEXT_RE = /\n\n## Current Date(?: & Time)?\n[\s\S]*?(?:Current|Approximate) time: [^\n]+/;
+
+  /**
+   * Replace the stale date/time block inside the system message (conversationHistory[0])
+   * with a freshly generated one.  This ensures long-lived agents always report the
+   * current wall-clock time rather than the time they were constructed.
+   */
+  private refreshDateContext(): void {
+    const sysMsg = this.conversationHistory[0];
+    if (!sysMsg || sysMsg.role !== "system" || typeof sysMsg.content !== "string") return;
+    if (!BaseAgent.DATE_CONTEXT_RE.test(sysMsg.content)) return;
+
+    sysMsg.content = sysMsg.content.replace(
+      BaseAgent.DATE_CONTEXT_RE,
+      buildDateContext(),
+    );
+  }
+
   /** Run LLM inference with the current conversation and stream the response */
   protected async think(
     userMessage: string,
@@ -206,6 +230,10 @@ export abstract class BaseAgent {
   ): Promise<{ text: string; thinking: string | undefined; hadToolCalls: boolean; isError?: boolean; timedOut?: boolean }> {
     // Re-read model/provider from config (no-op for short-lived workers)
     this.refreshLlmConfig();
+
+    // Refresh the date/time block in the system prompt so long-lived agents
+    // (COO, TeamLead) always report the current time, not the startup time.
+    this.refreshDateContext();
 
     // Reset abort flag at the start of each think cycle
     this._shouldAbortThink = false;

@@ -1,0 +1,24 @@
+services:
+  otterbot-e2e:
+    build: .
+    shm_size: "256m"
+    ports:
+      - "62627:62626"
+    tmpfs:
+      - /otterbot
+    environment:
+      - OTTERBOT_DB_KEY=e2e-test-key-not-secret
+      - ENABLE_DESKTOP=false
+      - SUDO_MODE=restricted
+      - MOCK_MODE=true
+      - MOCK_SCENARIO=${MOCK_SCENARIO:-}
+      - MOCK_STREAM_DELAY=${MOCK_STREAM_DELAY:-0}
+      - MOCK_PASSPHRASE=test-passphrase-e2e
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD", "curl", "-fk", "https://localhost:62626/api/setup/status"]
+      interval: 3s
+      timeout: 5s
+      retries: 30
+      start_period: 15s
