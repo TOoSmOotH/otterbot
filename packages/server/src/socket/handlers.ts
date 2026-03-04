@@ -21,7 +21,15 @@ import type { WorkspaceManager } from "../workspace/workspace.js";
 import type { GitHubIssueMonitor } from "../github/issue-monitor.js";
 import type { MergeQueue } from "../merge-queue/merge-queue.js";
 import type { WorldLayoutManager } from "../models3d/world-layout.js";
-import { cloneRepo, getRepoDefaultBranch } from "../github/github-service.js";
+import {
+  cloneRepo,
+  getRepoDefaultBranch,
+  checkHasPushAccess,
+  createFork,
+  waitForFork,
+  syncFork,
+  cloneForForkContribution,
+} from "../github/github-service.js";
 import { initGitRepo, createInitialCommit, configureCommitSigning, hasSSHKey } from "../utils/git.js";
 import { NO_REPORT_SENTINEL } from "../schedulers/custom-task-scheduler.js";
 import { ProjectStatus, CharterStatus } from "@otterbot/shared";
@@ -547,18 +555,49 @@ export function setupSocketHandlers(
           workspace.createProject(projectId);
 
           const repoPath = workspace.repoPath(projectId);
-          try {
-            cloneRepo(data.githubRepo!, repoPath, branch);
-          } catch (cloneErr) {
-            try { rmSync(workspace.projectPath(projectId), { recursive: true, force: true }); } catch { /* best effort */ }
-            db.delete(schema.projects).where(eq(schema.projects.id, projectId)).run();
-            const errMsg = cloneErr instanceof Error ? cloneErr.message : String(cloneErr);
-            callback?.({ ok: false, error: `Failed to clone repository: ${errMsg}` });
-            return;
+
+          // Check push access and set up fork if needed
+          let forkMode = false;
+          let forkRepo: string | null = null;
+          const hasPush = await checkHasPushAccess(data.githubRepo!, ghToken);
+
+          if (hasPush) {
+            // Direct push access — clone normally
+            try {
+              cloneRepo(data.githubRepo!, repoPath, branch);
+            } catch (cloneErr) {
+              try { rmSync(workspace.projectPath(projectId), { recursive: true, force: true }); } catch { /* best effort */ }
+              db.delete(schema.projects).where(eq(schema.projects.id, projectId)).run();
+              const errMsg = cloneErr instanceof Error ? cloneErr.message : String(cloneErr);
+              callback?.({ ok: false, error: `Failed to clone repository: ${errMsg}` });
+              return;
+            }
+          } else {
+            // No push access — fork and clone the fork
+            try {
+              console.log(`[project:create-manual] No push access to ${data.githubRepo} — creating fork`);
+              const fork = await createFork(data.githubRepo!, ghToken);
+              forkRepo = fork.full_name;
+              await waitForFork(fork.full_name, ghToken);
+              await syncFork(fork.full_name, ghToken, branch);
+              cloneForForkContribution(data.githubRepo!, fork.full_name, repoPath, branch);
+              forkMode = true;
+              console.log(`[project:create-manual] Fork set up: ${fork.full_name}`);
+            } catch (forkErr) {
+              try { rmSync(workspace.projectPath(projectId), { recursive: true, force: true }); } catch { /* best effort */ }
+              db.delete(schema.projects).where(eq(schema.projects.id, projectId)).run();
+              const errMsg = forkErr instanceof Error ? forkErr.message : String(forkErr);
+              callback?.({ ok: false, error: `Failed to set up fork: ${errMsg}` });
+              return;
+            }
           }
 
           setConfig(`project:${projectId}:github:repo`, data.githubRepo!);
           setConfig(`project:${projectId}:github:branch`, branch);
+          if (forkMode && forkRepo) {
+            setConfig(`project:${projectId}:github:fork_mode`, "true");
+            setConfig(`project:${projectId}:github:fork_repo`, forkRepo);
+          }
           setConfig(`project:${projectId}:github:rules`, JSON.stringify(rules));
 
           await coo.spawnTeamLeadForManualProject(projectId, data.githubRepo!, branch, rules);

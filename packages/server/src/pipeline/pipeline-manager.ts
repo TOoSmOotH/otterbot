@@ -20,6 +20,11 @@ import {
   fetchCompareCommitsDiff,
   fetchPullRequests,
   fetchIssueComments,
+  checkHasPushAccess,
+  createFork,
+  waitForFork,
+  syncFork,
+  cloneForForkContribution,
 } from "../github/github-service.js";
 import type { COO } from "../agents/coo.js";
 import { resolveProjectBranch, type GitHubIssue } from "../github/github-service.js";
@@ -97,6 +102,8 @@ interface PipelineState {
   prNumber: number | null;
   targetBranch: string;             // project's configured branch (for diff base)
   isReReview?: boolean;             // true when running re-review for merge queue
+  forkMode?: boolean;               // true when contributing via fork
+  forkRepo?: string | null;         // e.g. "botuser/repo-name"
 }
 
 export class PipelineManager {
@@ -224,6 +231,8 @@ export class PipelineManager {
         prBranch: task.prBranch ?? null,
         prNumber: task.prNumber ?? null,
         targetBranch: resolveProjectBranch(task.projectId),
+        forkMode: getConfig(`project:${task.projectId}:github:fork_mode`) === "true",
+        forkRepo: getConfig(`project:${task.projectId}:github:fork_repo`) ?? null,
       };
 
       this.pipelines.set(task.id, state);
@@ -280,6 +289,8 @@ export class PipelineManager {
       prBranch: task.prBranch ?? null,
       prNumber: task.prNumber ?? null,
       targetBranch: resolveProjectBranch(task.projectId),
+      forkMode: getConfig(`project:${task.projectId}:github:fork_mode`) === "true",
+      forkRepo: getConfig(`project:${task.projectId}:github:fork_repo`) ?? null,
     };
 
     this.pipelines.set(taskId, state);
@@ -502,6 +513,45 @@ export class PipelineManager {
       .where(eq(schema.projects.id, projectId))
       .get();
 
+    // Detect fork mode from project config, re-checking push access
+    let forkMode = getConfig(`project:${projectId}:github:fork_mode`) === "true";
+    let forkRepo = getConfig(`project:${projectId}:github:fork_repo`) ?? null;
+    const token = getConfig("github:token");
+
+    if (repo && token) {
+      const hasPush = await checkHasPushAccess(repo, token);
+      if (hasPush && forkMode) {
+        // Gained push access since setup — disable fork mode
+        forkMode = false;
+        forkRepo = null;
+      } else if (!hasPush && !forkMode) {
+        // Lost push access (or never had it) — set up fork mode now
+        try {
+          const fork = await createFork(repo, token);
+          await waitForFork(fork.full_name, token);
+          forkMode = true;
+          forkRepo = fork.full_name;
+          setConfig(`project:${projectId}:github:fork_mode`, "true");
+          setConfig(`project:${projectId}:github:fork_repo`, fork.full_name);
+          console.log(`[PipelineManager] Set up fork mode for ${repo}: ${fork.full_name}`);
+        } catch (err) {
+          console.error(`[PipelineManager] Failed to set up fork for ${repo}:`, err);
+          // Continue without fork mode — push will fail later but at least
+          // the pipeline can attempt the work
+        }
+      }
+
+      // Sync fork before starting implementation
+      if (forkMode && forkRepo) {
+        try {
+          const targetBranch = resolveProjectBranch(projectId);
+          await syncFork(forkRepo, token, targetBranch);
+        } catch (err) {
+          console.warn(`[PipelineManager] Failed to sync fork ${forkRepo}:`, err);
+        }
+      }
+    }
+
     const state: PipelineState = {
       taskId,
       projectId,
@@ -515,6 +565,8 @@ export class PipelineManager {
       prBranch: null,
       prNumber: null,
       targetBranch: resolveProjectBranch(projectId),
+      forkMode,
+      forkRepo,
     };
     this.pipelines.set(taskId, state);
 
@@ -945,6 +997,8 @@ export class PipelineManager {
       prBranch: branchName,
       prNumber: task.prNumber ?? null,
       targetBranch: resolveProjectBranch(task.projectId),
+      forkMode: getConfig(`project:${task.projectId}:github:fork_mode`) === "true",
+      forkRepo: getConfig(`project:${task.projectId}:github:fork_repo`) ?? null,
     };
 
     // Store review feedback context
@@ -1029,6 +1083,8 @@ export class PipelineManager {
       prBranch: branchName,
       prNumber: task.prNumber ?? null,
       targetBranch: resolveProjectBranch(task.projectId),
+      forkMode: getConfig(`project:${task.projectId}:github:fork_mode`) === "true",
+      forkRepo: getConfig(`project:${task.projectId}:github:fork_repo`) ?? null,
     };
 
     // Store CI failure context
@@ -1123,6 +1179,8 @@ export class PipelineManager {
       prNumber: task.prNumber ?? null,
       targetBranch: resolveProjectBranch(task.projectId),
       isReReview: true,
+      forkMode: getConfig(`project:${task.projectId}:github:fork_mode`) === "true",
+      forkRepo: getConfig(`project:${task.projectId}:github:fork_repo`) ?? null,
     };
 
     this.pipelines.set(taskId, state);
@@ -1247,6 +1305,13 @@ export class PipelineManager {
             `- Perform security audits (a dedicated Security stage handles that)`,
             `If the issue description mentions tests, PRs, or reviews, ignore those — other pipeline stages will handle them.`,
           );
+          if (state.forkMode) {
+            parts.push(
+              `\n[FORK MODE] You are contributing via a fork. Pushes go to \`origin\` (the fork).`,
+              `The upstream repo is available as the \`upstream\` remote.`,
+              `Create your feature branch from the latest upstream default branch.`,
+            );
+          }
 
           // Fetch and include issue comments for additional context
           if (state.issueNumber && state.repo) {
@@ -1368,7 +1433,15 @@ export class PipelineManager {
           );
         }
         if (isLastStage) {
-          parts.push(`After review, create a pull request for this branch.`);
+          if (state.forkMode && state.forkRepo) {
+            const forkOwner = state.forkRepo.split("/")[0];
+            parts.push(
+              `After review, create a pull request for this branch.`,
+              `[FORK MODE] This is a cross-fork PR. Use \`${forkOwner}:<branch>\` as the head ref when creating the PR against the upstream repo.`,
+            );
+          } else {
+            parts.push(`After review, create a pull request for this branch.`);
+          }
         }
         parts.push(
           `\nIMPORTANT: End your report with exactly one of these verdicts on its own line:`,
@@ -1411,6 +1484,8 @@ export class PipelineManager {
             pipelineTaskId: state.taskId,
             pipelineBranch: state.prBranch ?? state.targetBranch,
             pipelineIsReReview: !!state.isReReview,
+            pipelineForkMode: !!state.forkMode,
+            pipelineForkRepo: state.forkRepo ?? undefined,
           },
         });
         console.log(`[PipelineManager] Sent ${currentStage} directive for task ${state.taskId}`);

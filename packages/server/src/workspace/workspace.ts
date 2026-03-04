@@ -1,3 +1,4 @@
+import { execSync } from "node:child_process";
 import { mkdirSync, existsSync } from "node:fs";
 import { resolve, normalize, relative } from "node:path";
 import type { AgentRole } from "@otterbot/shared";
@@ -41,8 +42,17 @@ export class WorkspaceManager {
   /**
    * Prepare a git worktree for a coding agent.
    * Ensures the main repo is initialized and creates a worktree for the agent.
+   *
+   * When `forkMode` is true, the worktree is based on `upstream/{defaultBranch}`
+   * instead of `origin/{defaultBranch}` so feature branches start from the
+   * upstream repo's latest state.
    */
-  prepareAgentWorktree(projectId: string, agentId: string, sourceBranch?: string): string {
+  prepareAgentWorktree(
+    projectId: string,
+    agentId: string,
+    sourceBranch?: string,
+    options?: { forkMode?: boolean; upstreamBranch?: string },
+  ): string {
     const repoPath = this.repoPath(projectId);
     const worktreesPath = this.worktreesPath(projectId);
 
@@ -57,6 +67,21 @@ export class WorkspaceManager {
     const branchName = `agent/${agentId}`;
 
     createWorktree(repoPath, agentWorktreePath, branchName, sourceBranch);
+
+    // In fork mode, reset the worktree to upstream's branch so new feature branches
+    // start from the upstream repo's latest state (not the fork's potentially stale state)
+    if (options?.forkMode && !sourceBranch) {
+      const upstreamRef = `upstream/${options.upstreamBranch ?? "main"}`;
+      try {
+        execSync(`git reset --hard "${upstreamRef}"`, {
+          cwd: agentWorktreePath,
+          stdio: "ignore",
+          timeout: 30_000,
+        });
+      } catch {
+        // upstream ref may not exist — fall through with origin-based worktree
+      }
+    }
 
     return agentWorktreePath;
   }

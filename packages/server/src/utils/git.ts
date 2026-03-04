@@ -116,6 +116,14 @@ export function createWorktree(repoPath: string, worktreePath: string, branchNam
     } catch { /* best effort — remote may be unavailable */ }
   }
 
+  // Also fetch upstream if it exists (fork-based workflow)
+  const hasUpstream = hasRemote(repoPath, "upstream");
+  if (hasUpstream) {
+    try {
+      execSync("git fetch upstream", { cwd: repoPath, stdio: "ignore" });
+    } catch { /* best effort */ }
+  }
+
   // Determine the start point: source branch (for kickbacks/iterations) or latest HEAD
   // When no source branch is specified, prefer the fetched remote HEAD over the
   // potentially stale local HEAD so workers always start with up-to-date code.
