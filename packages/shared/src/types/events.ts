@@ -1,5 +1,5 @@
 import type { Agent, AgentStatus, AgentActivityRecord } from "./agent.js";
-import type { BusMessage, Conversation } from "./message.js";
+import type { BusMessage, Conversation, ChatAttachment } from "./message.js";
 import type { RegistryEntry, Project, ProjectAgentAssignments, ProjectPipelineConfig } from "./registry.js";
 import type { KanbanTask } from "./kanban.js";
 import type { SceneZone } from "./environment.js";
@@ -84,7 +84,7 @@ export interface ServerToClientEvents {
 /** Events emitted from client to server */
 export interface ClientToServerEvents {
   "ceo:message": (
-    data: { content: string; conversationId?: string; projectId?: string; toAgentId?: string },
+    data: { content: string; conversationId?: string; projectId?: string; toAgentId?: string; attachments?: ChatAttachment[] },
     callback?: (ack: { messageId: string; conversationId: string }) => void,
   ) => void;
   "ceo:new-chat": (

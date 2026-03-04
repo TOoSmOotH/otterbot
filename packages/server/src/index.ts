@@ -1832,6 +1832,41 @@ async function main() {
   });
 
   // =========================================================================
+  // Chat file upload
+  // =========================================================================
+
+  const uploadsDir = join(dataDir, "data", "uploads");
+  mkdirSync(uploadsDir, { recursive: true });
+
+  // Serve uploaded files
+  await app.register(fastifyStatic, {
+    root: uploadsDir,
+    prefix: "/uploads/",
+    decorateReply: false,
+  });
+
+  app.post("/api/chat/upload", async (req) => {
+    const file = await req.file();
+    if (!file) throw new Error("No file uploaded");
+
+    const { nanoid } = await import("nanoid");
+    const ext = file.filename.includes(".") ? file.filename.slice(file.filename.lastIndexOf(".")) : "";
+    const id = nanoid();
+    const storedName = `${id}${ext}`;
+    const destPath = join(uploadsDir, storedName);
+
+    await pipeline(file.file, createWriteStream(destPath));
+
+    return {
+      id,
+      filename: file.filename,
+      mimeType: file.mimetype,
+      size: file.file.bytesRead,
+      url: `/uploads/${storedName}`,
+    };
+  });
+
+  // =========================================================================
   // Project routes
   // =========================================================================
 

@@ -7,6 +7,7 @@ import {
   AgentStatus,
   MessageType,
   type BusMessage,
+  type ChatAttachment,
   ProjectStatus,
   CharterStatus,
   type Project,
@@ -375,7 +376,26 @@ The user can see everything on the desktop in real-time.`;
     const projectContext = this.getActiveProjectsSummary();
     const enrichedContent = message.content + currentProjectBlock + projectContext;
 
-    console.log(`[COO] Calling think() — model=${this.llmConfig.model} provider=${this.llmConfig.provider}`);
+    // Build image parts from attachments (for multi-modal LLM support)
+    const attachments = (message.metadata?.attachments as ChatAttachment[] | undefined) ?? [];
+    const imageParts: Array<{ type: "image"; image: URL }> = [];
+    for (const att of attachments) {
+      if (att.mimeType.startsWith("image/")) {
+        try {
+          const { readFileSync } = await import("node:fs");
+          const { resolve } = await import("node:path");
+          const uploadsBase = resolve(process.env.WORKSPACE_ROOT ?? resolve(__dirname, "../../../../docker/otterbot"), "data", "uploads");
+          const filename = att.url.split("/").pop()!;
+          const buf = readFileSync(resolve(uploadsBase, filename));
+          const b64 = buf.toString("base64");
+          imageParts.push({ type: "image", image: new URL(`data:${att.mimeType};base64,${b64}`) });
+        } catch (err) {
+          console.warn(`[COO] Failed to read attachment file ${att.url}:`, err);
+        }
+      }
+    }
+
+    console.log(`[COO] Calling think() — model=${this.llmConfig.model} provider=${this.llmConfig.provider}${attachments.length > 0 ? ` attachments=${attachments.length}` : ""}`);
     const { text, thinking } = await this.think(
       enrichedContent,
       (token, messageId) => {
@@ -387,6 +407,7 @@ The user can see everything on the desktop in real-time.`;
       (messageId) => {
         this.onThinkingEnd?.(messageId, this.currentConversationId);
       },
+      imageParts.length > 0 ? { imageParts } : undefined,
     );
     console.log(`[COO] think() returned (${text.length} chars): "${text.slice(0, 120)}"`);
 
@@ -489,9 +510,10 @@ The user can see everything on the desktop in real-time.`;
     onToken?: (token: string, messageId: string) => void,
     onReasoning?: (token: string, messageId: string) => void,
     onReasoningEnd?: (messageId: string) => void,
+    options?: { imageParts?: Array<{ type: "image"; image: URL }> },
   ): Promise<{ text: string; thinking: string | undefined; hadToolCalls: boolean }> {
     this._runCommandCalls = 0;
-    return super.think(userMessage, onToken, onReasoning, onReasoningEnd);
+    return super.think(userMessage, onToken, onReasoning, onReasoningEnd, options);
   }
 
   /**

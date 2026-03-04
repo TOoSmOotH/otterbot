@@ -220,13 +220,16 @@ export function setupSocketHandlers(
       }
 
       const targetAgent = data.toAgentId ?? "coo";
+      const metadata: Record<string, unknown> = {};
+      if (projectId) metadata.projectId = projectId;
+      if (data.attachments && data.attachments.length > 0) metadata.attachments = data.attachments;
       const message = bus.send({
         fromAgentId: null, // CEO
         toAgentId: targetAgent,
         type: targetAgent === "coo" ? MessageType.Chat : MessageType.Directive,
         content: data.content,
         conversationId,
-        metadata: projectId ? { projectId } : undefined,
+        metadata,
       });
 
       if (callback) {
