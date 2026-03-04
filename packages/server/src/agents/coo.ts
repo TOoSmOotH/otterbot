@@ -1,4 +1,5 @@
 import { makeProjectId } from "../utils/slugify.js";
+import { checkBlockedCommand } from "../utils/command-guard.js";
 import { tool } from "ai";
 import { z } from "zod";
 import {
@@ -523,6 +524,11 @@ The user can see everything on the desktop in real-time.`;
           if (this._runCommandCalls > 1) {
             return "REFUSED: You already used your one command this turn. " +
               "STOP and use send_directive to delegate work to the Team Lead. Do NOT run more commands.";
+          }
+          const blocked = checkBlockedCommand(command);
+          if (blocked) {
+            console.warn(`[coo:run_command] Blocked command: ${command}`);
+            return blocked;
           }
           const effectiveTimeout = Math.min(timeout ?? 30_000, 120_000);
           let cwd: string | undefined;
