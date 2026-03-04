@@ -102,11 +102,11 @@ describe("COO chat attachments", () => {
     );
 
     expect(thinkSpy).toHaveBeenCalledTimes(1);
-    const options = thinkSpy.mock.calls[0][4];
+    const options = thinkSpy.mock.calls[0][4] as { imageParts?: Array<{ type: string; image: URL }> } | undefined;
     expect(options).toBeDefined();
-    expect(options.imageParts).toHaveLength(1);
-    expect(options.imageParts[0].type).toBe("image");
-    expect(String(options.imageParts[0].image)).toContain("data:image/png;base64,");
+    expect(options!.imageParts).toHaveLength(1);
+    expect(options!.imageParts![0].type).toBe("image");
+    expect(String(options!.imageParts![0].image)).toContain("data:image/png;base64,");
 
     coo.destroy();
   });
@@ -149,7 +149,8 @@ describe("COO chat attachments", () => {
 
     const thinkSpy = vi
       .spyOn(coo as any, "think")
-      .mockImplementation(async (_msg: string, _a: unknown, _b: unknown, _c: unknown, options?: { imageParts?: Array<{ type: "image"; image: URL }> }) => {
+      .mockImplementation(async (...args: unknown[]) => {
+        const options = args[4] as { imageParts?: Array<{ type: "image"; image: URL }> } | undefined;
         (coo as any).conversationHistory.push({
           role: "user",
           content: [
@@ -172,9 +173,9 @@ describe("COO chat attachments", () => {
       }),
     );
 
-    const options = thinkSpy.mock.calls[0][4];
+    const options = thinkSpy.mock.calls[0][4] as { imageParts?: Array<{ type: string; image: URL }> } | undefined;
     expect(options).toBeDefined();
-    expect(options.imageParts).toHaveLength(5);
+    expect(options!.imageParts).toHaveLength(5);
 
     const history = (coo as any).conversationHistory as Array<{ role: string; content: unknown }>;
     const userMessage = [...history].reverse().find((m) => m.role === "user");
