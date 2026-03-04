@@ -133,7 +133,8 @@ describe("BaseAgent think image parts", () => {
 
     await agent.runThink("hello world");
 
-    const userMessage = agent.getHistory().findLast((m: { role: string }) => m.role === "user");
+    const history = agent.getHistory();
+    const userMessage = [...history].reverse().find((m: { role: string }) => m.role === "user");
     expect(userMessage.content).toBe("hello world");
 
     agent.destroy();
@@ -156,7 +157,8 @@ describe("BaseAgent think image parts", () => {
     const imagePart = { type: "image" as const, image: new URL("data:image/png;base64,ZmFrZQ==") };
     await agent.runThink("describe this", { imageParts: [imagePart] });
 
-    const userMessage = agent.getHistory().findLast((m: { role: string }) => m.role === "user");
+    const history2 = agent.getHistory();
+    const userMessage = [...history2].reverse().find((m: { role: string }) => m.role === "user");
     expect(Array.isArray(userMessage.content)).toBe(true);
     expect(userMessage.content).toEqual([
       { type: "text", text: "describe this" },
@@ -165,7 +167,7 @@ describe("BaseAgent think image parts", () => {
 
     expect(mockStream).toHaveBeenCalledTimes(1);
     const streamMessages = mockStream.mock.calls[0][1] as Array<{ role: string; content: unknown }>;
-    const streamedUserMessage = streamMessages.findLast((m) => m.role === "user");
+    const streamedUserMessage = [...streamMessages].reverse().find((m: { role: string; content: unknown }) => m.role === "user");
     expect(streamedUserMessage?.content).toEqual([
       { type: "text", text: "describe this" },
       imagePart,
