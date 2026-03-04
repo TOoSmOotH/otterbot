@@ -5,7 +5,7 @@
 
 import type { ModuleContext } from "@otterbot/shared";
 import { extractReadableContent } from "./content-extractor.js";
-import { validateUrlForSsrf } from "./ssrf.js";
+import { ssrfSafeFetch } from "./ssrf.js";
 import { acquireSlot } from "./rate-limiter.js";
 
 // File extensions to skip (binary / non-content resources)
@@ -107,13 +107,12 @@ async function fetchSitemapUrls(
     const hostname = new URL(sitemapUrl).hostname;
     await acquireSlot(hostname);
 
-    const res = await fetch(sitemapUrl, {
+    const res = await ssrfSafeFetch(sitemapUrl, {
       headers: {
         "User-Agent": "Mozilla/5.0 (compatible; otterbot-deep-research/0.1.0)",
         Accept: "application/xml, text/xml, */*",
       },
       signal: AbortSignal.timeout(timeout),
-      redirect: "follow",
     });
 
     if (!res.ok) return urls;
@@ -141,13 +140,12 @@ async function fetchSitemapUrls(
         const childHost = new URL(childUrl).hostname;
         await acquireSlot(childHost);
 
-        const childRes = await fetch(childUrl, {
+        const childRes = await ssrfSafeFetch(childUrl, {
           headers: {
             "User-Agent": "Mozilla/5.0 (compatible; otterbot-deep-research/0.1.0)",
             Accept: "application/xml, text/xml, */*",
           },
           signal: AbortSignal.timeout(timeout),
-          redirect: "follow",
         });
 
         if (!childRes.ok) continue;
@@ -267,21 +265,17 @@ export async function crawlSite(
     const entry = queue.shift()!;
 
     try {
-      // SSRF validation
-      await validateUrlForSsrf(entry.url);
-
       // Rate limit
       const hostname = new URL(entry.url).hostname;
       await acquireSlot(hostname);
 
-      // Fetch
-      const res = await fetch(entry.url, {
+      // SSRF-safe fetch (validates URL + each redirect hop)
+      const res = await ssrfSafeFetch(entry.url, {
         headers: {
           "User-Agent": "Mozilla/5.0 (compatible; otterbot-deep-research/0.1.0)",
           Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         },
         signal: AbortSignal.timeout(timeout),
-        redirect: "follow",
       });
 
       if (!res.ok) {

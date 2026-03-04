@@ -6,7 +6,7 @@
 import type { ModuleToolDefinition, ModuleContext } from "@otterbot/shared";
 import { search as webSearch } from "./search-providers.js";
 import { extractReadableContent } from "./content-extractor.js";
-import { validateUrlForSsrf } from "./ssrf.js";
+import { ssrfSafeFetch, validateUrlForSsrf } from "./ssrf.js";
 import { acquireSlot } from "./rate-limiter.js";
 import { crawlSite } from "./crawler.js";
 import { fetchRssFeed } from "./rss-fetcher.js";
@@ -430,20 +430,17 @@ export const fetchPageTool: ModuleToolDefinition = {
     const maxLength = getMaxPageLength(ctx);
 
     try {
-      // SSRF protection
-      await validateUrlForSsrf(url);
-
+      // SSRF protection (validates URL + each redirect hop)
       const hostname = new URL(url).hostname;
       await acquireSlot(hostname);
 
-      const res = await fetch(url, {
+      const res = await ssrfSafeFetch(url, {
         headers: {
           "User-Agent":
             "Mozilla/5.0 (compatible; otterbot-deep-research/0.1.0)",
           Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         },
         signal: AbortSignal.timeout(timeout),
-        redirect: "follow",
       });
 
       if (!res.ok) {
@@ -535,11 +532,12 @@ export const fetchRedditThreadTool: ModuleToolDefinition = {
       if (!jsonUrl.endsWith(".json")) {
         jsonUrl = jsonUrl.replace(/\/$/, "") + ".json";
       }
-      // Ensure it's a reddit.com URL
+      // Ensure it's a reddit.com URL (strict domain validation)
       const parsed = new URL(jsonUrl);
+      const host = parsed.hostname.toLowerCase();
       if (
-        !parsed.hostname.endsWith("reddit.com") &&
-        !parsed.hostname.endsWith("redd.it")
+        host !== "reddit.com" && !host.endsWith(".reddit.com") &&
+        host !== "redd.it" && !host.endsWith(".redd.it")
       ) {
         return "Error: URL must be a reddit.com link";
       }

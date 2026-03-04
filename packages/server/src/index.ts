@@ -5137,10 +5137,17 @@ Respond with ONLY a JSON object (no markdown, no explanation) with these fields:
           return { schema: {}, values: {} };
         }
 
-        // Get current values for each config field
+        // Get current values for each config field, masking secrets
         const values: Record<string, string | undefined> = {};
         for (const key of Object.keys(configSchema)) {
-          values[key] = getConfigValue(`module:${req.params.id}:${key}`);
+          const raw = getConfigValue(`module:${req.params.id}:${key}`);
+          const field = configSchema[key] as { type?: string } | undefined;
+          if (field?.type === "secret" && raw) {
+            // Return a placeholder so the UI knows a value is set, but never expose the secret
+            values[key] = "••••••••";
+          } else {
+            values[key] = raw;
+          }
         }
 
         return { schema: configSchema, values };
@@ -5305,6 +5312,10 @@ Respond with ONLY a JSON object (no markdown, no explanation) with these fields:
       try {
         const updates = req.body;
         for (const [key, value] of Object.entries(updates)) {
+          // Skip masked secret placeholders — the UI sends "••••••••" when the
+          // user hasn't changed a secret field.
+          if (value === "••••••••") continue;
+
           if (value === null || value === "") {
             // Delete config by setting empty — getConfig returns undefined for missing keys
             // Use the DB directly to delete the row

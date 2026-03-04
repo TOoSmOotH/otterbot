@@ -13,7 +13,7 @@
 import type { ModuleContext, PollResult, PollResultItem } from "@otterbot/shared";
 import { search as webSearch } from "./search-providers.js";
 import { extractReadableContent } from "./content-extractor.js";
-import { validateUrlForSsrf } from "./ssrf.js";
+import { ssrfSafeFetch } from "./ssrf.js";
 import { acquireSlot } from "./rate-limiter.js";
 import { crawlSite } from "./crawler.js";
 import { fetchRssFeed } from "./rss-fetcher.js";
@@ -80,18 +80,15 @@ async function fetchAndStoreFullPage(
   const maxLength = Number(ctx.getConfig("max_page_content_length")) || 15_000;
 
   try {
-    await validateUrlForSsrf(url);
-
     const hostname = new URL(url).hostname;
     await acquireSlot(hostname);
 
-    const res = await fetch(url, {
+    const res = await ssrfSafeFetch(url, {
       headers: {
         "User-Agent": "Mozilla/5.0 (compatible; otterbot-deep-research/0.1.0)",
         Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
       },
       signal: AbortSignal.timeout(timeout),
-      redirect: "follow",
     });
 
     if (!res.ok) return null;

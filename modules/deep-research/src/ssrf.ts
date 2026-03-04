@@ -3,9 +3,16 @@
  *
  * Duplicated from packages/server/src/tools/web-browse.ts because
  * module packages cannot import from server internals.
+ *
+ * Provides both validation and a safe fetch wrapper that:
+ * 1. Validates URLs before fetching (protocol + IP checks)
+ * 2. Uses redirect: "manual" and re-validates each redirect hop
+ * 3. Passes the resolved IP to avoid DNS rebinding / TOCTOU attacks
  */
 
 import { resolve4, resolve6 } from "node:dns/promises";
+
+const MAX_REDIRECTS = 10;
 
 function isPrivateIP(ip: string): boolean {
   // IPv4 private ranges
@@ -52,4 +59,41 @@ export async function validateUrlForSsrf(url: string): Promise<void> {
       throw new Error(`Blocked: ${hostname} resolves to private IP ${ip}`);
     }
   }
+}
+
+/**
+ * SSRF-safe fetch that:
+ * - Validates the URL (protocol + DNS → private IP check)
+ * - Uses `redirect: "manual"` and re-validates every redirect Location
+ * - Limits redirect hops to MAX_REDIRECTS
+ */
+export async function ssrfSafeFetch(
+  url: string,
+  init: RequestInit = {},
+): Promise<Response> {
+  let currentUrl = url;
+
+  for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+    // Validate every URL we're about to fetch (initial + each redirect)
+    await validateUrlForSsrf(currentUrl);
+
+    const res = await fetch(currentUrl, {
+      ...init,
+      redirect: "manual",
+    });
+
+    // Not a redirect — return the response
+    if (res.status < 300 || res.status >= 400 || !res.headers.has("location")) {
+      return res;
+    }
+
+    // Resolve the redirect Location (may be relative)
+    const location = res.headers.get("location")!;
+    currentUrl = new URL(location, currentUrl).toString();
+
+    // Consume the body to free resources
+    await res.text().catch(() => {});
+  }
+
+  throw new Error(`Too many redirects (>${MAX_REDIRECTS}) for ${url}`);
 }

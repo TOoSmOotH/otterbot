@@ -5,7 +5,7 @@
  * consistent with the content-extractor pattern in this module.
  */
 
-import { validateUrlForSsrf } from "./ssrf.js";
+import { ssrfSafeFetch } from "./ssrf.js";
 import { acquireSlot } from "./rate-limiter.js";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -70,7 +70,19 @@ function getAllMatches(xml: string, tag: string): string[] {
 
 function stripHtml(html: string): string {
   return html
+    // Remove script/style blocks and their content first
+    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
+    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
+    // Strip remaining HTML tags
     .replace(/<[^>]*>/g, "")
+    // Decode common entities
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&nbsp;/g, " ")
+    // Collapse whitespace
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -167,19 +179,16 @@ export async function fetchRssFeed(
 ): Promise<FeedResult> {
   const { timeout = 15_000, maxItems = 50 } = options;
 
-  await validateUrlForSsrf(feedUrl);
-
   const hostname = new URL(feedUrl).hostname;
   await acquireSlot(hostname);
 
-  const res = await fetch(feedUrl, {
+  const res = await ssrfSafeFetch(feedUrl, {
     headers: {
       "User-Agent": "Mozilla/5.0 (compatible; otterbot-deep-research/0.1.0)",
       Accept:
         "application/rss+xml, application/atom+xml, application/xml, text/xml, */*",
     },
     signal: AbortSignal.timeout(timeout),
-    redirect: "follow",
   });
 
   if (!res.ok) {
