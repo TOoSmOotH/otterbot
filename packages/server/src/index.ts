@@ -5,7 +5,7 @@ import fastifyCookie from "@fastify/cookie";
 import fastifyStatic from "@fastify/static";
 import multipart from "@fastify/multipart";
 import { Server } from "socket.io";
-import { resolve, dirname, join, sep } from "node:path";
+import { resolve, dirname, join, sep, basename, extname } from "node:path";
 import { existsSync, readFileSync, writeFileSync, mkdirSync, createReadStream, createWriteStream, copyFileSync, unlinkSync } from "node:fs";
 import { pipeline } from "node:stream/promises";
 import { execSync } from "node:child_process";
@@ -1838,28 +1838,61 @@ async function main() {
   const uploadsDir = join(dataDir, "data", "uploads");
   mkdirSync(uploadsDir, { recursive: true });
 
-  // Serve uploaded files
+  // Allowed upload extensions (lowercase, with dot)
+  const ALLOWED_UPLOAD_EXTS = new Set([
+    ".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".svg",
+    ".pdf", ".txt", ".md", ".json", ".csv", ".xml", ".yaml", ".yml",
+    ".js", ".ts", ".jsx", ".tsx", ".py", ".go", ".rs", ".java", ".c", ".cpp", ".h",
+    ".html", ".css",
+  ]);
+  const MAX_UPLOAD_SIZE = 10 * 1024 * 1024; // 10 MB per file
+
+  // Serve uploaded files with security headers
   await app.register(fastifyStatic, {
     root: uploadsDir,
     prefix: "/uploads/",
     decorateReply: false,
+    setHeaders(res) {
+      res.setHeader("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'");
+      res.setHeader("X-Content-Type-Options", "nosniff");
+    },
   });
 
   app.post("/api/chat/upload", async (req) => {
-    const file = await req.file();
+    const file = await req.file({ limits: { fileSize: MAX_UPLOAD_SIZE } });
     if (!file) throw new Error("No file uploaded");
 
+    // Sanitize: use only basename to prevent path traversal, then extract extension
+    const safeName = basename(file.filename);
+    const ext = extname(safeName).toLowerCase();
+
+    if (ext && !ALLOWED_UPLOAD_EXTS.has(ext)) {
+      throw new Error(`File type '${ext}' is not allowed`);
+    }
+
     const { nanoid } = await import("nanoid");
-    const ext = file.filename.includes(".") ? file.filename.slice(file.filename.lastIndexOf(".")) : "";
     const id = nanoid();
     const storedName = `${id}${ext}`;
     const destPath = join(uploadsDir, storedName);
 
+    // Verify the resolved path is within the uploads directory
+    const resolvedDest = resolve(destPath);
+    const resolvedUploads = resolve(uploadsDir);
+    if (!resolvedDest.startsWith(resolvedUploads + sep) && resolvedDest !== resolvedUploads) {
+      throw new Error("Invalid file path");
+    }
+
     await pipeline(file.file, createWriteStream(destPath));
+
+    // Check if file was truncated (exceeded size limit)
+    if (file.file.truncated) {
+      unlinkSync(destPath);
+      throw new Error(`File exceeds maximum size of ${MAX_UPLOAD_SIZE / 1024 / 1024} MB`);
+    }
 
     return {
       id,
-      filename: file.filename,
+      filename: safeName,
       mimeType: file.mimetype,
       size: file.file.bytesRead,
       url: `/uploads/${storedName}`,

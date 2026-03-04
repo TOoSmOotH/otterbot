@@ -383,10 +383,18 @@ The user can see everything on the desktop in real-time.`;
       if (att.mimeType.startsWith("image/")) {
         try {
           const { readFileSync } = await import("node:fs");
-          const { resolve } = await import("node:path");
+          const { resolve, basename, sep } = await import("node:path");
           const uploadsBase = resolve(process.env.WORKSPACE_ROOT ?? resolve(__dirname, "../../../../docker/otterbot"), "data", "uploads");
-          const filename = att.url.split("/").pop()!;
-          const buf = readFileSync(resolve(uploadsBase, filename));
+          // Sanitize: use basename to strip any directory traversal from the URL
+          const filename = basename(att.url.split("/").pop() ?? "");
+          if (!filename) continue;
+          const filePath = resolve(uploadsBase, filename);
+          // Verify the resolved path stays within the uploads directory
+          if (!filePath.startsWith(uploadsBase + sep) && filePath !== uploadsBase) {
+            console.warn(`[COO] Rejected path traversal attempt: ${att.url}`);
+            continue;
+          }
+          const buf = readFileSync(filePath);
           const b64 = buf.toString("base64");
           imageParts.push({ type: "image", image: new URL(`data:${att.mimeType};base64,${b64}`) });
         } catch (err) {
