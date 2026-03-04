@@ -160,9 +160,11 @@ case "$ARCH" in
 esac
 
 # On macOS, detect Apple Silicon even when running under Rosetta 2
+ROSETTA=0
 if [ "$OS_NAME" = "macOS" ] && [ "$ARCH_NAME" = "x86_64" ]; then
   if [ "$(sysctl -n hw.optional.arm64 2>/dev/null)" = "1" ]; then
     ARCH_NAME="arm64"
+    ROSETTA=1
     warn "Rosetta 2 detected — using native arm64 image"
   fi
 fi
@@ -191,7 +193,11 @@ if ! command -v docker >/dev/null 2>&1; then
     if command -v brew >/dev/null 2>&1; then
       if prompt_yn "Install Docker Desktop via Homebrew? [y/N]" n; then
         info "Installing Docker Desktop..."
-        brew install --cask docker
+        if [ "$ROSETTA" -eq 1 ]; then
+          arch -arm64 brew install --cask docker
+        else
+          brew install --cask docker
+        fi
         warn "Please launch Docker Desktop from Applications, then re-run this script."
         exit 0
       fi
