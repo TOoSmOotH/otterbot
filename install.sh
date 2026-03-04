@@ -190,14 +190,18 @@ if ! command -v docker >/dev/null 2>&1; then
       exit 1
     fi
   elif [ "$OS_NAME" = "macOS" ]; then
+    if [ "$ROSETTA" -eq 1 ]; then
+      error "Docker is required but cannot be installed via Homebrew under Rosetta 2."
+      error "Either:"
+      error "  1. Restart your terminal in native ARM mode (uncheck 'Open using Rosetta' in Get Info)"
+      error "  2. Download Docker Desktop directly: https://docker.com/products/docker-desktop"
+      error "Then re-run this script."
+      exit 1
+    fi
     if command -v brew >/dev/null 2>&1; then
       if prompt_yn "Install Docker Desktop via Homebrew? [y/N]" n; then
         info "Installing Docker Desktop..."
-        if [ "$ROSETTA" -eq 1 ]; then
-          arch -arm64 brew install --cask docker
-        else
-          brew install --cask docker
-        fi
+        brew install --cask docker
         warn "Please launch Docker Desktop from Applications, then re-run this script."
         exit 0
       fi
