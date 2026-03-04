@@ -1,4 +1,5 @@
-import { useState, useRef, useEffect, useCallback, type KeyboardEvent, type FC } from "react";
+import { useState, useRef, useEffect, useCallback, type KeyboardEvent, type ChangeEvent, type FC } from "react";
+import type { ChatAttachment } from "@otterbot/shared";
 import { useMessageStore } from "../../stores/message-store";
 import { useSettingsStore } from "../../stores/settings-store";
 import { useProjectStore } from "../../stores/project-store";
@@ -98,6 +99,9 @@ export function CeoChat({ cooName, detached }: { cooName?: string; detached?: bo
 
   const [speechError, setSpeechError] = useState<string | null>(null);
   const [interimText, setInterimText] = useState("");
+  const [pendingFiles, setPendingFiles] = useState<ChatAttachment[]>([]);
+  const [isUploading, setIsUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [speakerOn, setSpeakerOn] = useState(() => {
     return localStorage.getItem("otterbot:speaker") === "true";
   });
@@ -175,6 +179,34 @@ export function CeoChat({ cooName, detached }: { cooName?: string; detached?: bo
     });
   }, []);
 
+  const handleFileSelect = useCallback(async (e: ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+
+    setIsUploading(true);
+    try {
+      const uploaded: ChatAttachment[] = [];
+      for (const file of Array.from(files)) {
+        const formData = new FormData();
+        formData.append("file", file);
+        const res = await fetch("/api/chat/upload", { method: "POST", body: formData, credentials: "include" });
+        if (!res.ok) throw new Error(`Upload failed: ${res.statusText}`);
+        const attachment: ChatAttachment = await res.json();
+        uploaded.push(attachment);
+      }
+      setPendingFiles((prev) => [...prev, ...uploaded]);
+    } catch (err) {
+      console.error("File upload failed:", err);
+    } finally {
+      setIsUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  }, []);
+
+  const removePendingFile = useCallback((id: string) => {
+    setPendingFiles((prev) => prev.filter((f) => f.id !== id));
+  }, []);
+
   const isStreaming = !!streamingContent;
 
   useEffect(() => {
@@ -183,16 +215,17 @@ export function CeoChat({ cooName, detached }: { cooName?: string; detached?: bo
 
   const sendMessage = () => {
     const content = input.trim();
-    if (!content) return;
+    if (!content && pendingFiles.length === 0) return;
 
     const socket = getSocket();
     socket.emit(
       "ceo:message",
       {
-        content,
+        content: content || (pendingFiles.length > 0 ? `[Attached ${pendingFiles.length} file(s)]` : ""),
         conversationId: currentConversationId ?? undefined,
         projectId: activeProjectId ?? undefined,
         ...(targetAgentId ? { toAgentId: targetAgentId } : {}),
+        ...(pendingFiles.length > 0 ? { attachments: pendingFiles } : {}),
       },
       (ack) => {
         if (ack?.conversationId) {
@@ -201,6 +234,7 @@ export function CeoChat({ cooName, detached }: { cooName?: string; detached?: bo
       },
     );
     setInput("");
+    setPendingFiles([]);
 
     // Auto-resize textarea
     if (textareaRef.current) {
@@ -475,6 +509,7 @@ export function CeoChat({ cooName, detached }: { cooName?: string; detached?: bo
             {chatMessages.map((msg) => {
               const isCeo = msg.fromAgentId === null;
               const thinking = msg.metadata?.thinking as string | undefined;
+              const msgAttachments = (msg.metadata?.attachments as ChatAttachment[] | undefined) ?? [];
               return (
                 <div
                   key={msg.id}
@@ -483,6 +518,31 @@ export function CeoChat({ cooName, detached }: { cooName?: string; detached?: bo
                     isCeo ? "ml-auto" : "mr-auto",
                   )}
                 >
+                  {msgAttachments.length > 0 && (
+                    <div className={cn("flex flex-wrap gap-1.5 mb-1.5", isCeo ? "justify-end" : "justify-start")}>
+                      {msgAttachments.map((att) =>
+                        att.mimeType.startsWith("image/") ? (
+                          <a key={att.id} href={att.url} target="_blank" rel="noopener noreferrer">
+                            <img src={att.url} alt={att.filename} className="max-h-48 max-w-full rounded-lg object-contain" />
+                          </a>
+                        ) : (
+                          <a
+                            key={att.id}
+                            href={att.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="flex items-center gap-1.5 bg-secondary/80 rounded-lg px-2.5 py-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                          >
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                              <polyline points="14 2 14 8 20 8" />
+                            </svg>
+                            {att.filename}
+                          </a>
+                        ),
+                      )}
+                    </div>
+                  )}
                   <div
                     className={cn(
                       "rounded-xl px-3.5 py-2.5 leading-relaxed",
@@ -598,7 +658,70 @@ export function CeoChat({ cooName, detached }: { cooName?: string; detached?: bo
                 )}
               </div>
             )}
+            {/* Pending file previews */}
+            {pendingFiles.length > 0 && (
+              <div className="flex flex-wrap gap-2 px-1">
+                {pendingFiles.map((file) => (
+                  <div
+                    key={file.id}
+                    className="relative group bg-secondary rounded-lg overflow-hidden"
+                  >
+                    {file.mimeType.startsWith("image/") ? (
+                      <img
+                        src={file.url}
+                        alt={file.filename}
+                        className="h-16 w-16 object-cover rounded-lg"
+                      />
+                    ) : (
+                      <div className="h-16 w-16 flex items-center justify-center text-muted-foreground">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                          <polyline points="14 2 14 8 20 8" />
+                        </svg>
+                      </div>
+                    )}
+                    <button
+                      onClick={() => removePendingFile(file.id)}
+                      className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-destructive text-destructive-foreground flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity text-[10px]"
+                    >
+                      x
+                    </button>
+                    <p className="text-[9px] text-muted-foreground truncate max-w-[64px] px-1 pb-0.5">{file.filename}</p>
+                  </div>
+                ))}
+              </div>
+            )}
             <div className="flex items-end gap-2 bg-secondary rounded-xl px-3 py-2">
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                accept="image/*,.pdf,.txt,.md,.json,.csv,.xml,.yaml,.yml,.js,.ts,.jsx,.tsx,.py,.go,.rs,.java,.c,.cpp,.h,.html,.css"
+                onChange={handleFileSelect}
+                className="hidden"
+              />
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                disabled={isUploading}
+                title="Attach files"
+                className={cn(
+                  "shrink-0 w-7 h-7 rounded-lg flex items-center justify-center transition-colors",
+                  isUploading
+                    ? "text-muted-foreground cursor-not-allowed"
+                    : "text-muted-foreground hover:text-foreground hover:bg-secondary",
+                )}
+              >
+                {isUploading ? (
+                  <svg className="animate-spin h-3.5 w-3.5" viewBox="0 0 24 24" fill="none">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                  </svg>
+                ) : (
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.49" />
+                  </svg>
+                )}
+              </button>
               <textarea
                 ref={textareaRef}
                 value={input}
@@ -705,10 +828,10 @@ export function CeoChat({ cooName, detached }: { cooName?: string; detached?: bo
               </button>}
               <button
                 onClick={sendMessage}
-                disabled={!input.trim()}
+                disabled={!input.trim() && pendingFiles.length === 0}
                 className={cn(
                   "shrink-0 w-7 h-7 rounded-lg flex items-center justify-center transition-colors",
-                  input.trim()
+                  input.trim() || pendingFiles.length > 0
                     ? "bg-primary text-primary-foreground hover:bg-primary/90"
                     : "bg-muted text-muted-foreground",
                 )}

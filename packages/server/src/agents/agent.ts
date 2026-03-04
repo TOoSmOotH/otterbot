@@ -227,6 +227,7 @@ export abstract class BaseAgent {
     onToken?: (token: string, messageId: string) => void,
     onReasoning?: (token: string, messageId: string) => void,
     onReasoningEnd?: (messageId: string) => void,
+    options?: { imageParts?: Array<{ type: "image"; image: URL }> },
   ): Promise<{ text: string; thinking: string | undefined; hadToolCalls: boolean; isError?: boolean; timedOut?: boolean }> {
     // Re-read model/provider from config (no-op for short-lived workers)
     this.refreshLlmConfig();
@@ -290,7 +291,17 @@ export abstract class BaseAgent {
       console.warn(`[Agent ${this.id}] Failed to inject memories:`, err);
     }
 
-    this.conversationHistory.push({ role: "user", content: userMessage });
+    if (options?.imageParts && options.imageParts.length > 0) {
+      this.conversationHistory.push({
+        role: "user",
+        content: [
+          { type: "text", text: userMessage },
+          ...options.imageParts,
+        ],
+      });
+    } else {
+      this.conversationHistory.push({ role: "user", content: userMessage });
+    }
     this.setStatus(AgentStatus.Thinking);
     console.log(`[Agent ${this.id}] think() — provider=${this.llmConfig.provider} model=${this.llmConfig.model}`);
 
