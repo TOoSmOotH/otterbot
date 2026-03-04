@@ -69,6 +69,10 @@ export const PROVIDER_TYPE_META: ProviderTypeMeta[] = [
   { type: "lmstudio", label: "LM Studio", needsApiKey: false, needsBaseUrl: true },
   { type: "deepseek", label: "DeepSeek", needsApiKey: true, needsBaseUrl: false },
   { type: "mistral", label: "Mistral", needsApiKey: true, needsBaseUrl: false },
+  { type: "claude-code", label: "Claude Code", needsApiKey: false, needsBaseUrl: false },
+  { type: "opencode", label: "OpenCode", needsApiKey: false, needsBaseUrl: false },
+  { type: "codex", label: "Codex", needsApiKey: false, needsBaseUrl: false },
+  { type: "gemini-cli", label: "Gemini CLI", needsApiKey: false, needsBaseUrl: false },
 ];
 
 // Static fallback models per provider (used when API fetch fails)
@@ -154,6 +158,10 @@ const FALLBACK_MODELS: Record<string, string[]> = {
     "codestral-latest",
     "mistral-medium-latest",
   ],
+  "claude-code": ["claude-sonnet-4-6", "claude-opus-4-6", "sonnet", "opus"],
+  opencode: [],
+  codex: ["codex-mini", "o3-mini", "o4-mini"],
+  "gemini-cli": ["gemini-2.5-pro", "gemini-2.5-flash"],
 };
 
 // ---------------------------------------------------------------------------
@@ -750,6 +758,13 @@ export async function fetchModelsWithCredentials(
         const mistralData = (await mistralRes.json()) as { data?: Array<{ id: string }> };
         return mistralData.data?.map((m) => m.id).sort() ?? FALLBACK_MODELS.mistral ?? [];
       }
+
+      // Coding agent CLIs — no live model discovery, use fallback lists
+      case "claude-code":
+      case "opencode":
+      case "codex":
+      case "gemini-cli":
+        return FALLBACK_MODELS[providerId] ?? [];
 
       default:
         return FALLBACK_MODELS[providerId] ?? [];

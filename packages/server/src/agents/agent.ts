@@ -14,6 +14,7 @@ import { stream, resolveProviderCredentials } from "../llm/adapter.js";
 import { RetryError } from "ai";
 import {
   containsKimiToolMarkup,
+  CODING_AGENT_PROVIDER_TYPES,
   findToolMarkupStart,
   formatToolsForPrompt,
   parseKimiToolCalls,
@@ -308,7 +309,11 @@ export abstract class BaseAgent {
     try {
       const tools = this.getTools();
       const hasTools = Object.keys(tools).length > 0;
-      const textToolMode = hasTools && usesTextToolCalling(this.llmConfig.model);
+      const resolvedType = resolveProviderCredentials(this.llmConfig.provider).type;
+      const textToolMode = hasTools && (
+        usesTextToolCalling(this.llmConfig.model) ||
+        CODING_AGENT_PROVIDER_TYPES.has(resolvedType)
+      );
 
       // For models that use text-based tool calling (e.g. Kimi K2.5), skip the
       // SDK-tools call entirely — it always returns empty. Go straight to text injection.
