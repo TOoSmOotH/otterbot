@@ -1363,6 +1363,7 @@ async function main() {
       openCodeApiKey?: string;
       openCodeBaseUrl?: string;
       openCodeInteractive?: boolean;
+      additionalProviders?: Array<{ type: string; name: string; apiKey?: string; baseUrl?: string }>;
     };
   }>("/api/setup/complete", async (req, reply) => {
     if (isSetupComplete()) {
@@ -1375,7 +1376,7 @@ async function main() {
       return { error: "Passphrase not set. Start setup from the beginning." };
     }
 
-    const { provider, providerName, model, apiKey, baseUrl, userName, userAvatar, userBio, userTimezone, ttsVoice, ttsProvider, userModelPackId, userGearConfig, cooName, cooModelPackId, cooGearConfig, searchProvider, searchApiKey, searchBaseUrl, adminName, adminModelPackId, adminGearConfig, openCodeEnabled, openCodeProvider, openCodeModel, openCodeApiKey, openCodeBaseUrl, openCodeInteractive } = req.body;
+    const { provider, providerName, model, apiKey, baseUrl, userName, userAvatar, userBio, userTimezone, ttsVoice, ttsProvider, userModelPackId, userGearConfig, cooName, cooModelPackId, cooGearConfig, searchProvider, searchApiKey, searchBaseUrl, adminName, adminModelPackId, adminGearConfig, openCodeEnabled, openCodeProvider, openCodeModel, openCodeApiKey, openCodeBaseUrl, openCodeInteractive, additionalProviders } = req.body;
 
     if (!provider || !model) {
       reply.code(400);
@@ -1405,6 +1406,20 @@ async function main() {
       apiKey: apiKey,
       baseUrl: baseUrl,
     });
+
+    // Create additional providers selected in the wizard
+    if (additionalProviders && Array.isArray(additionalProviders)) {
+      for (const ap of additionalProviders) {
+        if (ap.type && ap.name) {
+          createProvider({
+            name: ap.name,
+            type: ap.type as ProviderType,
+            apiKey: ap.apiKey,
+            baseUrl: ap.baseUrl,
+          });
+        }
+      }
+    }
 
     setConfig("coo_provider", namedProvider.id);
     setConfig("coo_model", model);
