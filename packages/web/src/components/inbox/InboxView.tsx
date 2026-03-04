@@ -1,19 +1,19 @@
 import { useEffect, useState } from "react";
-import { useGmailStore } from "../../stores/gmail-store";
+import { useEmailStore } from "../../stores/email-store";
 
 export function InboxView() {
-  const messages = useGmailStore((s) => s.messages);
-  const selectedMessage = useGmailStore((s) => s.selectedMessage);
-  const loading = useGmailStore((s) => s.loading);
-  const loadingDetail = useGmailStore((s) => s.loadingDetail);
-  const error = useGmailStore((s) => s.error);
-  const loadMessages = useGmailStore((s) => s.loadMessages);
-  const readMessage = useGmailStore((s) => s.readMessage);
-  const clearSelection = useGmailStore((s) => s.clearSelection);
-  const archiveMessage = useGmailStore((s) => s.archiveMessage);
-  const sendEmail = useGmailStore((s) => s.sendEmail);
-  const loadMore = useGmailStore((s) => s.loadMore);
-  const nextPageToken = useGmailStore((s) => s.nextPageToken);
+  const messages = useEmailStore((s) => s.messages);
+  const selectedMessage = useEmailStore((s) => s.selectedMessage);
+  const loading = useEmailStore((s) => s.loading);
+  const loadingDetail = useEmailStore((s) => s.loadingDetail);
+  const error = useEmailStore((s) => s.error);
+  const loadMessages = useEmailStore((s) => s.loadMessages);
+  const readMessage = useEmailStore((s) => s.readMessage);
+  const clearSelection = useEmailStore((s) => s.clearSelection);
+  const archiveMessage = useEmailStore((s) => s.archiveMessage);
+  const sendEmail = useEmailStore((s) => s.sendEmail);
+  const loadMore = useEmailStore((s) => s.loadMore);
+  const nextPageToken = useEmailStore((s) => s.nextPageToken);
 
   const [searchQuery, setSearchQuery] = useState("");
   const [showCompose, setShowCompose] = useState(false);
@@ -52,8 +52,8 @@ export function InboxView() {
       <div className="h-full flex items-center justify-center p-4">
         <div className="text-center space-y-2">
           <p className="text-xs text-muted-foreground">
-            {error.includes("not connected")
-              ? "Connect your Google account in Settings to use Gmail."
+            {error.includes("not configured")
+              ? "Configure email in Settings > Email to use the inbox."
               : error}
           </p>
         </div>

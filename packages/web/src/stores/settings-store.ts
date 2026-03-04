@@ -230,6 +230,19 @@ interface SettingsState {
   nextcloudTalkPendingPairings: Array<{ code: string; nextcloudUserId: string; nextcloudDisplayName: string; createdAt: string }>;
   nextcloudTalkTestResult: TestResult | null;
 
+  // Email (IMAP/SMTP)
+  emailEnabled: boolean;
+  emailImapServer: string | null;
+  emailImapPort: number;
+  emailImapTls: boolean;
+  emailSmtpServer: string | null;
+  emailSmtpPort: number;
+  emailSmtpTls: boolean;
+  emailUsername: string | null;
+  emailPasswordSet: boolean;
+  emailFromName: string | null;
+  emailTestResult: { ok: boolean; imap?: string; smtp?: string; error?: string } | null;
+
   // Google
   googleConnected: boolean;
   googleConnectedEmail: string | null;
@@ -457,6 +470,22 @@ interface SettingsState {
   rejectNextcloudTalkPairing: (code: string) => Promise<void>;
   revokeNextcloudTalkUser: (userId: string) => Promise<void>;
 
+  // Email actions
+  loadEmailSettings: () => Promise<void>;
+  updateEmailSettings: (data: {
+    enabled?: boolean;
+    imapServer?: string;
+    imapPort?: number;
+    imapTls?: boolean;
+    smtpServer?: string;
+    smtpPort?: number;
+    smtpTls?: boolean;
+    username?: string;
+    password?: string;
+    fromName?: string;
+  }) => Promise<void>;
+  testEmailConnection: () => Promise<void>;
+
   // Google actions
   loadGoogleSettings: () => Promise<void>;
   updateGoogleCredentials: (data: {
@@ -602,6 +631,17 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   nextcloudTalkPairedUsers: [],
   nextcloudTalkPendingPairings: [],
   nextcloudTalkTestResult: null,
+  emailEnabled: false,
+  emailImapServer: null,
+  emailImapPort: 993,
+  emailImapTls: true,
+  emailSmtpServer: null,
+  emailSmtpPort: 587,
+  emailSmtpTls: true,
+  emailUsername: null,
+  emailPasswordSet: false,
+  emailFromName: null,
+  emailTestResult: null,
   googleConnected: false,
   googleConnectedEmail: null,
   googleClientIdSet: false,
@@ -2213,6 +2253,56 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     }
   },
 
+  // Email actions
+
+  loadEmailSettings: async () => {
+    try {
+      const res = await fetch("/api/settings/email");
+      if (!res.ok) return;
+      const data = await res.json();
+      set({
+        emailEnabled: data.enabled,
+        emailImapServer: data.imapServer,
+        emailImapPort: data.imapPort,
+        emailImapTls: data.imapTls,
+        emailSmtpServer: data.smtpServer,
+        emailSmtpPort: data.smtpPort,
+        emailSmtpTls: data.smtpTls,
+        emailUsername: data.username,
+        emailPasswordSet: data.passwordSet,
+        emailFromName: data.fromName,
+      });
+    } catch {
+      // Silently fail
+    }
+  },
+
+  updateEmailSettings: async (data) => {
+    set({ error: null });
+    try {
+      const res = await fetch("/api/settings/email", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) throw new Error("Failed to update email settings");
+      await get().loadEmailSettings();
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "Unknown error" });
+    }
+  },
+
+  testEmailConnection: async () => {
+    set({ emailTestResult: null });
+    try {
+      const res = await fetch("/api/settings/email/test", { method: "POST" });
+      const data = await res.json();
+      set({ emailTestResult: data });
+    } catch (err) {
+      set({ emailTestResult: { ok: false, error: err instanceof Error ? err.message : "Test failed" } });
+    }
+  },
+
   // Google actions
 
   loadGoogleSettings: async () => {
@@ -2336,6 +2426,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       a.loadNextcloudTalkSettings(),
       a.loadGitHubSettings(),
       a.loadGoogleSettings(),
+      a.loadEmailSettings(),
       a.loadSearchSettings(),
       a.loadTTSSettings(),
       a.loadSTTSettings(),

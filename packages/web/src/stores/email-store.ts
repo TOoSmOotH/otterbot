@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import type { EmailSummary, EmailDetail } from "@otterbot/shared";
 
-interface GmailState {
+interface EmailState {
   messages: EmailSummary[];
   selectedMessage: EmailDetail | null;
   loading: boolean;
@@ -23,7 +23,7 @@ interface GmailState {
   archiveMessage: (id: string) => Promise<boolean>;
 }
 
-export const useGmailStore = create<GmailState>((set, get) => ({
+export const useEmailStore = create<EmailState>((set, get) => ({
   messages: [],
   selectedMessage: null,
   loading: false,
@@ -37,7 +37,7 @@ export const useGmailStore = create<GmailState>((set, get) => ({
       const params = new URLSearchParams();
       if (query) params.set("q", query);
       params.set("maxResults", "20");
-      const res = await fetch(`/api/gmail/messages?${params}`);
+      const res = await fetch(`/api/email/messages?${params}`);
       if (!res.ok) throw new Error("Failed to load emails");
       const data = await res.json();
       set({
@@ -60,7 +60,7 @@ export const useGmailStore = create<GmailState>((set, get) => ({
       const params = new URLSearchParams();
       params.set("pageToken", nextPageToken);
       params.set("maxResults", "20");
-      const res = await fetch(`/api/gmail/messages?${params}`);
+      const res = await fetch(`/api/email/messages?${params}`);
       if (!res.ok) return;
       const data = await res.json();
       set((s) => ({
@@ -75,7 +75,7 @@ export const useGmailStore = create<GmailState>((set, get) => ({
   readMessage: async (id) => {
     set({ loadingDetail: true, error: null });
     try {
-      const res = await fetch(`/api/gmail/messages/${id}`);
+      const res = await fetch(`/api/email/messages/${id}`);
       if (!res.ok) throw new Error("Failed to read email");
       const email = await res.json();
       set({ selectedMessage: email, loadingDetail: false });
@@ -91,7 +91,7 @@ export const useGmailStore = create<GmailState>((set, get) => ({
 
   sendEmail: async (data) => {
     try {
-      const res = await fetch("/api/gmail/send", {
+      const res = await fetch("/api/email/send", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(data),
@@ -106,11 +106,10 @@ export const useGmailStore = create<GmailState>((set, get) => ({
 
   archiveMessage: async (id) => {
     try {
-      const res = await fetch(`/api/gmail/messages/${id}/archive`, {
+      const res = await fetch(`/api/email/messages/${id}/archive`, {
         method: "POST",
       });
       if (!res.ok) throw new Error("Failed to archive");
-      // Remove from list
       set((s) => ({
         messages: s.messages.filter((m) => m.id !== id),
         selectedMessage: s.selectedMessage?.id === id ? null : s.selectedMessage,

@@ -188,6 +188,15 @@ import {
   getIrcConfig,
 } from "./irc/irc-settings.js";
 import {
+  getEmailSettings,
+  updateEmailSettings as updateEmailSettingsFn,
+  getEmailConnectionConfig,
+} from "./email/email-settings.js";
+import {
+  startEmailConnection,
+  stopEmailConnection,
+} from "./email/imap-client.js";
+import {
   approvePairing as approveIrcPairing,
   rejectPairing as rejectIrcPairing,
   revokePairing as revokeIrcPairing,
@@ -597,6 +606,15 @@ async function main() {
       await ircBridge.stop();
       ircBridge = null;
     }
+  }
+
+  // Email IMAP connection (initialized when enabled + config set)
+  function startEmailImap() {
+    const config = getEmailConnectionConfig();
+    if (!config) return;
+    startEmailConnection(config).catch((err) => {
+      console.error("[Email] Failed to start IMAP connection:", err);
+    });
   }
 
   // Teams bridge (initialized when enabled + credentials set)
@@ -1178,6 +1196,7 @@ async function main() {
     startCoo();
     startDiscordBridge();
     startIrcBridge();
+    startEmailImap();
     startTeamsBridge();
     startSlackBridge();
     startMattermostBridge();
@@ -1537,6 +1556,7 @@ async function main() {
     startCoo();
     startDiscordBridge();
     startIrcBridge();
+    startEmailImap();
     startTeamsBridge();
     startSlackBridge();
     startMattermostBridge();
@@ -4727,14 +4747,14 @@ async function main() {
   });
 
   // =========================================================================
-  // Gmail REST routes
+  // Email (IMAP/SMTP) REST routes
   // =========================================================================
 
   app.get<{
     Querystring: { q?: string; maxResults?: string; pageToken?: string };
-  }>("/api/gmail/messages", async (req, reply) => {
+  }>("/api/email/messages", async (req, reply) => {
     try {
-      const { listEmails } = await import("./google/gmail-client.js");
+      const { listEmails } = await import("./email/imap-client.js");
       return await listEmails(req.query);
     } catch (err) {
       reply.code(500);
@@ -4744,9 +4764,9 @@ async function main() {
 
   app.get<{
     Params: { id: string };
-  }>("/api/gmail/messages/:id", async (req, reply) => {
+  }>("/api/email/messages/:id", async (req, reply) => {
     try {
-      const { readEmail } = await import("./google/gmail-client.js");
+      const { readEmail } = await import("./email/imap-client.js");
       const email = await readEmail(req.params.id);
       if (!email) { reply.code(404); return { error: "Email not found" }; }
       return email;
@@ -4758,10 +4778,13 @@ async function main() {
 
   app.post<{
     Body: { to: string; subject: string; body: string; cc?: string; bcc?: string; inReplyTo?: string; threadId?: string };
-  }>("/api/gmail/send", async (req, reply) => {
+  }>("/api/email/send", async (req, reply) => {
     try {
-      const { sendEmail } = await import("./google/gmail-client.js");
-      return await sendEmail(req.body);
+      const { sendEmail } = await import("./email/imap-client.js");
+      const { getEmailConnectionConfig } = await import("./email/email-settings.js");
+      const config = getEmailConnectionConfig();
+      if (!config) { reply.code(400); return { error: "Email not configured" }; }
+      return await sendEmail(config, req.body);
     } catch (err) {
       reply.code(500);
       return { error: err instanceof Error ? err.message : "Failed to send email" };
@@ -4770,9 +4793,9 @@ async function main() {
 
   app.post<{
     Params: { id: string };
-  }>("/api/gmail/messages/:id/archive", async (req, reply) => {
+  }>("/api/email/messages/:id/archive", async (req, reply) => {
     try {
-      const { archiveEmail } = await import("./google/gmail-client.js");
+      const { archiveEmail } = await import("./email/imap-client.js");
       await archiveEmail(req.params.id);
       return { ok: true };
     } catch (err) {
@@ -4781,13 +4804,67 @@ async function main() {
     }
   });
 
-  app.get("/api/gmail/labels", async (req, reply) => {
+  // =========================================================================
+  // Email settings routes
+  // =========================================================================
+
+  app.get("/api/settings/email", async () => {
+    const { getEmailSettings } = await import("./email/email-settings.js");
+    return getEmailSettings();
+  });
+
+  app.put<{
+    Body: {
+      enabled?: boolean;
+      imapServer?: string;
+      imapPort?: number;
+      imapTls?: boolean;
+      smtpServer?: string;
+      smtpPort?: number;
+      smtpTls?: boolean;
+      username?: string;
+      password?: string;
+      fromName?: string;
+    };
+  }>("/api/settings/email", async (req) => {
+    const { updateEmailSettings, getEmailConnectionConfig } = await import("./email/email-settings.js");
+    const { startEmailConnection, stopEmailConnection } = await import("./email/imap-client.js");
+    updateEmailSettings(req.body);
+    // Reconnect IMAP if settings changed
+    const config = getEmailConnectionConfig();
+    if (config) {
+      try { await startEmailConnection(config); } catch { /* will show in test */ }
+    } else {
+      await stopEmailConnection();
+    }
+    const { getEmailSettings } = await import("./email/email-settings.js");
+    return getEmailSettings();
+  });
+
+  app.post("/api/settings/email/test", async (req, reply) => {
     try {
-      const { listLabels } = await import("./google/gmail-client.js");
-      return await listLabels();
+      const { getEmailConnectionConfig } = await import("./email/email-settings.js");
+      const { testImapConnection, testSmtpConnection } = await import("./email/imap-client.js");
+      const config = getEmailConnectionConfig();
+      if (!config) { reply.code(400); return { error: "Email not fully configured" }; }
+
+      const results: { imap: string; smtp: string } = { imap: "ok", smtp: "ok" };
+      try {
+        await testImapConnection(config);
+      } catch (err) {
+        results.imap = err instanceof Error ? err.message : "IMAP connection failed";
+      }
+      try {
+        await testSmtpConnection(config);
+      } catch (err) {
+        results.smtp = err instanceof Error ? err.message : "SMTP connection failed";
+      }
+      const ok = results.imap === "ok" && results.smtp === "ok";
+      if (!ok) reply.code(400);
+      return { ok, ...results };
     } catch (err) {
       reply.code(500);
-      return { error: err instanceof Error ? err.message : "Failed to list labels" };
+      return { error: err instanceof Error ? err.message : "Test failed" };
     }
   });
 
