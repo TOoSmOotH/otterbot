@@ -159,6 +159,14 @@ case "$ARCH" in
     ;;
 esac
 
+# On macOS, detect Apple Silicon even when running under Rosetta 2
+if [ "$OS_NAME" = "macOS" ] && [ "$ARCH_NAME" = "x86_64" ]; then
+  if [ "$(sysctl -n hw.optional.arm64 2>/dev/null)" = "1" ]; then
+    ARCH_NAME="arm64"
+    warn "Rosetta 2 detected — using native arm64 image"
+  fi
+fi
+
 info "Detected $(bold "$OS_NAME") on $(bold "$ARCH_NAME")"
 
 # ── Check for Docker ─────────────────────────────────────────────────────────
