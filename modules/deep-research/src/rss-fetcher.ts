@@ -69,22 +69,30 @@ function getAllMatches(xml: string, tag: string): string[] {
 }
 
 function stripHtml(html: string): string {
-  return html
-    // Remove script/style blocks and their content first
-    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
-    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
-    // Strip remaining HTML tags
-    .replace(/<[^>]*>/g, "")
-    // Decode common entities
+  let text = html;
+  // Remove script/style/iframe blocks and their content first
+  text = text.replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "");
+  text = text.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "");
+  text = text.replace(/<iframe[^>]*>[\s\S]*?<\/iframe>/gi, "");
+  // Remove event handler attributes (e.g. onerror, onclick) before stripping tags
+  text = text.replace(/\bon\w+\s*=\s*["'][^"']*["']/gi, "");
+  text = text.replace(/\bon\w+\s*=\s*[^\s>]*/gi, "");
+  // Strip remaining HTML tags (run twice to catch nested/malformed tags)
+  text = text.replace(/<[^>]*>/g, "");
+  text = text.replace(/<[^>]*>/g, "");
+  // Remove any remaining angle brackets that could be part of malformed HTML
+  text = text.replace(/<[^>]*$/g, "");
+  // Decode common entities
+  text = text
     .replace(/&amp;/g, "&")
     .replace(/&lt;/g, "<")
     .replace(/&gt;/g, ">")
     .replace(/&quot;/g, '"')
     .replace(/&apos;/g, "'")
-    .replace(/&nbsp;/g, " ")
-    // Collapse whitespace
-    .replace(/\s+/g, " ")
-    .trim();
+    .replace(/&nbsp;/g, " ");
+  // Collapse whitespace
+  text = text.replace(/\s+/g, " ").trim();
+  return text;
 }
 
 // ─── Feed detection ─────────────────────────────────────────────────────────
