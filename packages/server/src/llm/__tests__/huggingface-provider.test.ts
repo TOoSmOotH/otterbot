@@ -56,9 +56,6 @@ vi.mock("@ai-sdk/openai", () => ({
 vi.mock("@ai-sdk/google", () => ({
   createGoogleGenerativeAI: vi.fn(() => vi.fn()),
 }));
-vi.mock("ollama-ai-provider", () => ({
-  createOllama: vi.fn(() => vi.fn()),
-}));
 
 describe("Hugging Face provider", () => {
   beforeEach(() => {

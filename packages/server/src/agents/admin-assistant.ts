@@ -8,6 +8,7 @@ import { BaseAgent, type AgentOptions } from "./agent.js";
 import type { MessageBus } from "../bus/message-bus.js";
 import { createAdminTools } from "../tools/tool-factory.js";
 import { buildAdminAssistantPrompt } from "./prompts/admin-assistant.js";
+import { buildDateContext } from "./prompts/date-context.js";
 import { getConfig } from "../auth/auth.js";
 
 const ADMIN_ASSISTANT_ID = "admin-assistant";
@@ -27,17 +28,9 @@ export class AdminAssistant extends BaseAgent {
 
   constructor(deps: AdminAssistantDependencies) {
     // Build system prompt with current date
-    const now = new Date();
-    const dateStr = now.toLocaleDateString("en-US", {
-      weekday: "long",
-      year: "numeric",
-      month: "long",
-      day: "numeric",
-    });
-
     const agentName = getConfig("admin_assistant_name") ?? "Admin Assistant";
     let systemPrompt = buildAdminAssistantPrompt(agentName);
-    systemPrompt += `\n\n## Current Date\nToday is ${dateStr}. Current time: ${now.toISOString()}.`;
+    systemPrompt += buildDateContext();
 
     // Inject user profile context
     const userName = getConfig("user_name");

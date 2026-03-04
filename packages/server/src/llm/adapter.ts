@@ -3,7 +3,6 @@ import { createAnthropic } from "@ai-sdk/anthropic";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { createOpenAI } from "@ai-sdk/openai";
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
-import { createOllama } from "ollama-ai-provider";
 import { streamText, generateText, type LanguageModel, type CoreMessage } from "ai";
 import { getConfig } from "../auth/auth.js";
 import { getDb, schema } from "../db/index.js";
@@ -99,11 +98,12 @@ export function resolveModel(config: LLMConfig): LanguageModel {
     }
 
     case "ollama": {
-      const ollama = createOllama({
+      const ollama = createOpenAI({
         baseURL:
           config.baseUrl ??
           resolved.baseUrl ??
-          "http://localhost:11434/api",
+          "http://localhost:11434/v1",
+        apiKey: "ollama",
       });
       return ollama(config.model);
     }
@@ -279,11 +279,12 @@ function consolidateSystemMessages(messages: ChatMessage[]): ChatMessage[] {
 }
 
 /** Providers that require a single system message */
-const SINGLE_SYSTEM_PROVIDERS = new Set(["anthropic", "bedrock"]);
+const SINGLE_SYSTEM_PROVIDERS = new Set(["anthropic", "bedrock", "ollama"]);
 
 /** Normalize messages for the target provider */
 function normalizeMessages(config: LLMConfig, messages: ChatMessage[]): ChatMessage[] {
-  if (SINGLE_SYSTEM_PROVIDERS.has(config.provider)) {
+  const resolved = resolveProviderCredentials(config.provider);
+  if (SINGLE_SYSTEM_PROVIDERS.has(resolved.type)) {
     return consolidateSystemMessages(messages);
   }
   return messages;

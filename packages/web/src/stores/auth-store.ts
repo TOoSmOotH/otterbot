@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { ProviderTypeMeta } from "@otterbot/shared";
+import type { ProviderTypeMeta, SetupProviderEntry } from "@otterbot/shared";
 
 export type AppScreen = "loading" | "setup" | "change-passphrase" | "login" | "app";
 
@@ -18,6 +18,7 @@ interface AuthState {
     model: string;
     apiKey?: string;
     baseUrl?: string;
+    additionalProviders?: SetupProviderEntry[];
     userName: string;
     userAvatar?: string;
     userBio?: string;

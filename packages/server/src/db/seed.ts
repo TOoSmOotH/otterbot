@@ -249,6 +249,20 @@ Guidelines:
     builtIn: true,
     role: "worker" as const,
   },
+  {
+    id: "builtin-demo-recorder",
+    name: "Demo Recorder",
+    description:
+      "Records video demos of running web applications with optional voiceover narration. " +
+      "Navigates the app, interacts with the UI, and produces YouTube-ready MP4 videos.",
+    systemPrompt: "See assigned skills for instructions.",
+    capabilities: ["demo", "video", "recording", "screen-recording", "voiceover", "narration"],
+    defaultModel: "claude-sonnet-4-5-20250929",
+    defaultProvider: "anthropic",
+    tools: [] as string[],
+    builtIn: true,
+    role: "worker" as const,
+  },
 ];
 
 /** Upsert all built-in registry entries. Safe to call on every startup. */

@@ -92,6 +92,32 @@ async function closeSession(agentId: string): Promise<void> {
   }
 }
 
+/**
+ * Inject an externally-created session for an agent (e.g. a recording-enabled context).
+ * Closes any existing session first.
+ */
+export async function injectSession(
+  agentId: string,
+  context: BrowserContext,
+  page: Page,
+): Promise<void> {
+  await closeSession(agentId);
+  agentSessions.set(agentId, { context, page, lastUsed: Date.now() });
+}
+
+/**
+ * Detach and return the session for an agent WITHOUT closing it.
+ * The caller is responsible for closing the context/page.
+ */
+export function detachSession(
+  agentId: string,
+): { context: BrowserContext; page: Page } | null {
+  const session = agentSessions.get(agentId);
+  if (!session) return null;
+  agentSessions.delete(agentId);
+  return { context: session.context, page: session.page };
+}
+
 // Periodic cleanup of stale sessions
 setInterval(() => {
   const now = Date.now();
@@ -158,7 +184,9 @@ export function createWebBrowseTool(ctx: ToolContext) {
         switch (action) {
           case "navigate": {
             if (!url) return "Error: url is required for navigate action.";
-            await validateUrlForSsrf(url);
+            if (!ctx.allowLocalBrowsing) {
+              await validateUrlForSsrf(url);
+            }
             const { page } = await getOrCreateSession(ctx.agentId);
             await page.goto(url, {
               waitUntil: "domcontentloaded",

@@ -27,7 +27,12 @@ import { SkillService } from "./skills/skill-service.js";
 import { scanSkillContent } from "./skills/skill-scanner.js";
 import { getAvailableToolNames, getToolsWithMeta } from "./tools/tool-factory.js";
 import { CustomToolService } from "./tools/custom-tool-service.js";
-import { executeCustomTool } from "./tools/custom-tool-executor.js";
+// Lazy import — isolated-vm (used by custom-tool-executor) requires native
+// binaries that may not be available in all environments (e.g. local dev).
+const lazyExecuteCustomTool = async (...args: Parameters<typeof import("./tools/custom-tool-executor.js").executeCustomTool>) => {
+  const { executeCustomTool } = await import("./tools/custom-tool-executor.js");
+  return executeCustomTool(...args);
+};
 import { TOOL_EXAMPLES } from "./tools/tool-examples.js";
 import { COO } from "./agents/coo.js";
 import { AdminAssistant } from "./agents/admin-assistant.js";
@@ -353,6 +358,12 @@ function ensureSelfSignedCert(dataDir: string): { key: Buffer; cert: Buffer } {
 async function main() {
   // Initialize database
   await migrateDb();
+
+  // Seed mock data if in mock mode (before anything reads config)
+  if (process.env.MOCK_MODE === "true") {
+    const { seedMockData } = await import("./mock/mock-seed.js");
+    await seedMockData();
+  }
 
   // Mark stale agents from previous runs as "done"
   {
@@ -931,6 +942,7 @@ async function main() {
       prMonitor.setMergeQueue(mergeQueue);
       pipelineManager.setMergeQueue(mergeQueue);
       mergeQueue.setPipelineManager(pipelineManager);
+      mergeQueue.setCoo(coo);
       coo.setPipelineManager(pipelineManager);
 
       setupSocketHandlers(io, bus, coo, registry, {
@@ -1174,6 +1186,21 @@ async function main() {
     startWhatsAppBridge();
     startSignalBridge();
     startNextcloudTalkBridge();
+
+    // Start mock scenario playback if configured
+    if (process.env.MOCK_MODE === "true" && process.env.MOCK_SCENARIO && coo) {
+      // Import scenarios to register them, then run
+      import("./mock/scenarios/demo-scenario.js").catch(() => {});
+      import("./mock/scenarios/test-scenario.js").catch(() => {});
+      // Small delay to let scenario imports register
+      setTimeout(async () => {
+        const { ScenarioRunner } = await import("./mock/scenario-runner.js");
+        const runner = new ScenarioRunner(bus, coo!, io);
+        runner.start(process.env.MOCK_SCENARIO!).catch((err) => {
+          console.error("[scenario-runner] Failed:", err);
+        });
+      }, 1000);
+    }
   } else {
     console.log("Setup not complete. Waiting for setup wizard...");
   }
@@ -1336,6 +1363,7 @@ async function main() {
       openCodeApiKey?: string;
       openCodeBaseUrl?: string;
       openCodeInteractive?: boolean;
+      additionalProviders?: Array<{ type: string; name: string; apiKey?: string; baseUrl?: string }>;
     };
   }>("/api/setup/complete", async (req, reply) => {
     if (isSetupComplete()) {
@@ -1348,7 +1376,7 @@ async function main() {
       return { error: "Passphrase not set. Start setup from the beginning." };
     }
 
-    const { provider, providerName, model, apiKey, baseUrl, userName, userAvatar, userBio, userTimezone, ttsVoice, ttsProvider, userModelPackId, userGearConfig, cooName, cooModelPackId, cooGearConfig, searchProvider, searchApiKey, searchBaseUrl, adminName, adminModelPackId, adminGearConfig, openCodeEnabled, openCodeProvider, openCodeModel, openCodeApiKey, openCodeBaseUrl, openCodeInteractive } = req.body;
+    const { provider, providerName, model, apiKey, baseUrl, userName, userAvatar, userBio, userTimezone, ttsVoice, ttsProvider, userModelPackId, userGearConfig, cooName, cooModelPackId, cooGearConfig, searchProvider, searchApiKey, searchBaseUrl, adminName, adminModelPackId, adminGearConfig, openCodeEnabled, openCodeProvider, openCodeModel, openCodeApiKey, openCodeBaseUrl, openCodeInteractive, additionalProviders } = req.body;
 
     if (!provider || !model) {
       reply.code(400);
@@ -1378,6 +1406,20 @@ async function main() {
       apiKey: apiKey,
       baseUrl: baseUrl,
     });
+
+    // Create additional providers selected in the wizard
+    if (additionalProviders && Array.isArray(additionalProviders)) {
+      for (const ap of additionalProviders) {
+        if (ap.type && ap.name) {
+          createProvider({
+            name: ap.name,
+            type: ap.type as ProviderType,
+            apiKey: ap.apiKey,
+            baseUrl: ap.baseUrl,
+          });
+        }
+      }
+    }
 
     setConfig("coo_provider", namedProvider.id);
     setConfig("coo_model", model);
@@ -4840,7 +4882,7 @@ async function main() {
         return { error: "Not found" };
       }
       try {
-        const result = await executeCustomTool(tool, req.body.params ?? {});
+        const result = await lazyExecuteCustomTool(tool, req.body.params ?? {});
         return { result };
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);
@@ -5137,10 +5179,17 @@ Respond with ONLY a JSON object (no markdown, no explanation) with these fields:
           return { schema: {}, values: {} };
         }
 
-        // Get current values for each config field
+        // Get current values for each config field, masking secrets
         const values: Record<string, string | undefined> = {};
         for (const key of Object.keys(configSchema)) {
-          values[key] = getConfigValue(`module:${req.params.id}:${key}`);
+          const raw = getConfigValue(`module:${req.params.id}:${key}`);
+          const field = configSchema[key] as { type?: string } | undefined;
+          if (field?.type === "secret" && raw) {
+            // Return a placeholder so the UI knows a value is set, but never expose the secret
+            values[key] = "••••••••";
+          } else {
+            values[key] = raw;
+          }
         }
 
         return { schema: configSchema, values };
@@ -5305,6 +5354,10 @@ Respond with ONLY a JSON object (no markdown, no explanation) with these fields:
       try {
         const updates = req.body;
         for (const [key, value] of Object.entries(updates)) {
+          // Skip masked secret placeholders — the UI sends "••••••••" when the
+          // user hasn't changed a secret field.
+          if (value === "••••••••") continue;
+
           if (value === null || value === "") {
             // Delete config by setting empty — getConfig returns undefined for missing keys
             // Use the DB directly to delete the row

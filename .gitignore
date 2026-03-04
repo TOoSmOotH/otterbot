@@ -43,5 +43,8 @@ playwright-report/
 .credentials
 e2e/.auth-state.json
 
+# Generated scene files (test artifacts)
+assets/scenes/zone-test-app-*.json
+
 # Docker data
 data/

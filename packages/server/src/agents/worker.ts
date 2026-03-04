@@ -174,6 +174,8 @@ export class Worker extends BaseAgent {
       projectId: this.projectId,
       agentId: this.id,
       role: AgentRole.Worker,
+      // Demo recorder needs to access localhost/private IPs to record local dev servers
+      allowLocalBrowsing: this.registryEntryId === "builtin-demo-recorder",
     });
   }
 

@@ -12,6 +12,8 @@ import {
   searchFindingsTool,
   listResearchSubjectsTool,
   crawlSiteTool,
+  fetchRssTool,
+  listSourcesTool,
 } from "./tools.js";
 import { handlePoll } from "./poll-handler.js";
 
@@ -30,6 +32,8 @@ When given a research question, follow this systematic approach:
    - search_reddit: Community opinions, personal experiences, reviews, niche expertise
    - search_hackernews: Technical analysis, startup/tech discussions, engineering perspectives
    - search_twitter: Breaking news, real-time reactions, expert commentary, trending discussions
+   - fetch_rss: RSS/Atom feeds for curated content streams (blogs, news sites, threat intel feeds)
+   - list_sources: View all configured RSS feeds, monitored URLs, and research subjects
 
 3. **Execute searches iteratively**:
    - Start broad, then narrow based on findings
@@ -57,6 +61,8 @@ When given a research question, follow this systematic approach:
 - Check search_findings first if the user asks about something you may have researched before
 - Use the knowledge_search tool to recall previously stored information
 - Use crawl_site to ingest entire documentation sites into the knowledge base
+- Use fetch_rss to pull latest items from RSS/Atom feeds into the knowledge base
+- Use list_sources to see what RSS feeds, URLs, and subjects are configured
 - After crawling, use search_findings to query the ingested content
 - For controversial topics, actively seek multiple viewpoints
 
@@ -77,10 +83,11 @@ When the user asks follow-up questions:
 
 ## Accumulated Research Knowledge
 
-This agent periodically researches configured subjects in the background.
+This agent periodically researches configured subjects in the background,
+fetches configured RSS feeds, and monitors specified URLs for new content.
 When asked about a topic, ALWAYS check search_findings first — there may
-already be accumulated research from background polling.
-Use list_research_subjects to see which topics are being monitored.`;
+already be accumulated research from background polling and RSS ingestion.
+Use list_sources to see all configured RSS feeds, URLs, and research subjects.`;
 
 // ─── Module definition ──────────────────────────────────────────────────────
 
@@ -91,7 +98,7 @@ export default defineModule({
     version: "0.1.0",
     description:
       "Autonomous research agent that becomes an expert on any topic by " +
-      "searching the web, Reddit, X/Twitter, Hacker News, and other sources",
+      "searching the web, Reddit, X/Twitter, Hacker News, RSS feeds, and other sources",
     author: "Otterbot",
   },
 
@@ -160,6 +167,22 @@ export default defineModule({
       required: false,
       default: 15000,
     },
+    rss_feeds: {
+      type: "string",
+      description:
+        "RSS/Atom feed URLs to monitor (one per line). Feeds are checked " +
+        "during background polling and new items are ingested into the knowledge base.",
+      required: false,
+      hidden: true, // Managed by the Research Sources UI panel
+    },
+    research_urls: {
+      type: "string",
+      description:
+        "Website URLs to periodically fetch and monitor for changes (one per line). " +
+        "Pages are fetched during background polling and content is stored in the knowledge base.",
+      required: false,
+      hidden: true, // Managed by the Research Sources UI panel
+    },
     research_subjects: {
       type: "string",
       description:
@@ -224,6 +247,8 @@ export default defineModule({
     searchFindingsTool,
     listResearchSubjectsTool,
     crawlSiteTool,
+    fetchRssTool,
+    listSourcesTool,
   ],
 
   onPoll: handlePoll,

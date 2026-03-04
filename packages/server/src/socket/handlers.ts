@@ -755,6 +755,59 @@ export function setupSocketHandlers(
       }
     });
 
+    // Toggle issue monitor for a project
+    socket.on("project:set-issue-monitor", (data, callback) => {
+      try {
+        const db = getDb();
+        const project = db
+          .select()
+          .from(schema.projects)
+          .where(eq(schema.projects.id, data.projectId))
+          .get();
+
+        if (!project) {
+          callback?.({ ok: false, error: "Project not found" });
+          return;
+        }
+
+        if (!project.githubRepo) {
+          callback?.({ ok: false, error: "Issue monitoring requires a GitHub repository" });
+          return;
+        }
+
+        db.update(schema.projects)
+          .set({ githubIssueMonitor: data.enabled })
+          .where(eq(schema.projects.id, data.projectId))
+          .run();
+
+        // Start or stop monitoring
+        if (deps?.issueMonitor) {
+          if (data.enabled) {
+            const ghUsername = getConfig("github:username");
+            if (ghUsername && project.githubRepo) {
+              deps.issueMonitor.watchProject(data.projectId, project.githubRepo, ghUsername);
+            }
+          } else {
+            deps.issueMonitor.unwatchProject(data.projectId);
+          }
+        }
+
+        // Emit project:updated so UI refreshes
+        const updated = db
+          .select()
+          .from(schema.projects)
+          .where(eq(schema.projects.id, data.projectId))
+          .get();
+        if (updated) {
+          io.emit("project:updated", updated as any);
+        }
+
+        callback?.({ ok: true });
+      } catch (err) {
+        callback?.({ ok: false, error: err instanceof Error ? err.message : "Failed to update issue monitor setting" });
+      }
+    });
+
     // Retrieve agent activity (bus messages + persisted activity records)
     socket.on("agent:activity", (data, callback) => {
       const db = getDb();

@@ -387,14 +387,14 @@ export async function testProvider(
   const row = getProviderRow(providerId);
   const providerType = row?.type ?? providerId;
 
-  // For ollama, just check that the server is reachable by listing models
+  // For ollama, verify the server is reachable by listing models via OpenAI-compatible endpoint
   if (providerType === "ollama") {
     try {
-      const baseUrl = row?.baseUrl ?? "http://localhost:11434/api";
-      const tagsUrl = baseUrl.endsWith("/api")
-        ? `${baseUrl}/tags`
-        : `${baseUrl}/api/tags`;
-      const res = await fetch(tagsUrl, {
+      const baseUrl = row?.baseUrl ?? "http://localhost:11434/v1";
+      const modelsUrl = baseUrl.endsWith("/v1")
+        ? `${baseUrl}/models`
+        : `${baseUrl}/v1/models`;
+      const res = await fetch(modelsUrl, {
         signal: AbortSignal.timeout(10_000),
       });
       if (!res.ok) {
@@ -558,19 +558,19 @@ export async function fetchModelsWithCredentials(
       }
 
       case "ollama": {
-        const effectiveBase = baseUrl ?? "http://localhost:11434/api";
-        const tagsUrl = effectiveBase.endsWith("/api")
-          ? `${effectiveBase}/tags`
-          : `${effectiveBase}/api/tags`;
-        const res = await fetch(tagsUrl, {
+        const effectiveBase = baseUrl ?? "http://localhost:11434/v1";
+        const modelsUrl = effectiveBase.endsWith("/v1")
+          ? `${effectiveBase}/models`
+          : `${effectiveBase}/v1/models`;
+        const res = await fetch(modelsUrl, {
           signal: AbortSignal.timeout(10_000),
         });
         if (!res.ok) return FALLBACK_MODELS.ollama ?? [];
         const data = (await res.json()) as {
-          models?: Array<{ name: string }>;
+          data?: Array<{ id: string }>;
         };
         return (
-          data.models?.map((m) => m.name) ?? FALLBACK_MODELS.ollama ?? []
+          data.data?.map((m) => m.id) ?? FALLBACK_MODELS.ollama ?? []
         );
       }
 

@@ -37,6 +37,7 @@ import { getAgentModelOverride } from "../settings/settings.js";
 import { getConfiguredSearchProvider } from "../tools/search/providers.js";
 import { isDesktopEnabled } from "../desktop/desktop.js";
 import { TEAM_LEAD_PROMPT } from "./prompts/team-lead.js";
+import { buildDateContext } from "./prompts/date-context.js";
 import { getRandomModelPackId } from "../models3d/model-packs.js";
 import { debug } from "../utils/debug.js";
 import { pickWorkerName } from "../utils/worker-names.js";
@@ -257,6 +258,9 @@ export class TeamLead extends BaseAgent {
       }
       systemPrompt += sections.join("\n");
     }
+
+    // Inject current date/time context
+    systemPrompt += buildDateContext();
 
     // Agent assignments are resolved dynamically at spawn time (not baked into the
     // system prompt) so that config changes take effect without restarting the TL.
@@ -748,6 +752,7 @@ export class TeamLead extends BaseAgent {
     if (reportingTaskId && this._pipelineManager?.isPipelineTask(reportingTaskId)) {
       console.log(`[TeamLead ${this.id}] Pipeline-managed task ${reportingTaskId} — routing to PipelineManager`);
       await this._pipelineManager.advancePipeline(reportingTaskId, message.content, detectedBranch);
+      await this.autoSpawnUnblockedTasks();
       return;
     }
 
@@ -1021,11 +1026,15 @@ export class TeamLead extends BaseAgent {
       // Tasks involving git/CI/PR work must go to a coding agent, never a browser agent
       const isCIOrGitTask = /\b(ci\b|pipeline|pull.?request|\bpr\b|git push|git commit|open.?pr|create.?pr|merge|deploy)\b/.test(taskText);
       const isBrowserTask = !isCIOrGitTask && /\b(browser|chrome|chromium|firefox|launch.*browser|open.*url|browse.*web|headless|puppeteer|playwright|selenium|desktop.*app)\b/.test(taskText);
+      const isDemoTask = !isCIOrGitTask && !isBrowserTask &&
+        /\b(demo|record.*video|video.*record|screen.?record|voiceover|narrat|mp4|youtube.*video)\b/.test(taskText);
 
       // Find the right registry entry — check project assignments first, then global fallback
       let registryEntryId = "builtin-coder";
       const assignments = this.getProjectAgentAssignments();
-      if (isBrowserTask) {
+      if (isDemoTask) {
+        registryEntryId = "builtin-demo-recorder";
+      } else if (isBrowserTask) {
         registryEntryId = "builtin-browser-agent";
       } else if (assignments.coder && isCodingAgentEnabled(assignments.coder)) {
         registryEntryId = assignments.coder;
@@ -1672,6 +1681,7 @@ export class TeamLead extends BaseAgent {
           getConfig("coo_provider") ??
           entry.defaultProvider,
         systemPrompt: (skillPromptContent || entry.systemPrompt) + buildEnvironmentContext(entryTools) +
+          buildDateContext() +
           githubWorkerContext +
           (workspacePath
             ? `\n\n## Your Workspace\nYour workspace directory is: \`${workspacePath}\`\n` +
@@ -2006,7 +2016,7 @@ export class TeamLead extends BaseAgent {
 
     // Guard: tasks with an open PR should go to in_review, not done.
     // Only the PR monitor should move them to done (when the PR is actually merged).
-    if (updates.column === "done" && existing.column === "in_progress" && (existing as any).prNumber) {
+    if (updates.column === "done" && (existing as any).prNumber) {
       console.warn(
         `[TeamLead ${this.id}] Auto-correcting update_task: task "${existing.title}" (${taskId}) has PR #${(existing as any).prNumber} — ` +
         `routing to "in_review" instead of "done". The PR monitor will move it to done when the PR is merged.`,
@@ -2186,6 +2196,12 @@ export class TeamLead extends BaseAgent {
     const delLabel = this.taskLabel(existing);
     const unblockedMsg = unblockedCount > 0 ? ` ${unblockedCount} task(s) unblocked.` : "";
     return `${delLabel} deleted.${unblockedMsg}`;
+  }
+
+  /** Called by external callers (PR Monitor, Merge Queue) when a task moves to "done" to trigger backlog spawning. */
+  async notifyTaskDone(taskId: string): Promise<void> {
+    this.checkUnblockedTasks(taskId);
+    await this.autoSpawnUnblockedTasks();
   }
 
   /** Log which tasks become unblocked when a task completes. No auto-spawning — the continuation loop picks them up. */
