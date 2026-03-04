@@ -9,6 +9,7 @@ import { extractReadableContent } from "./content-extractor.js";
 import { validateUrlForSsrf } from "./ssrf.js";
 import { acquireSlot } from "./rate-limiter.js";
 import { crawlSite } from "./crawler.js";
+import { fetchRssFeed } from "./rss-fetcher.js";
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -939,5 +940,169 @@ export const crawlSiteTool: ModuleToolDefinition = {
       ctx.error("crawl_site failed:", err);
       return `Crawl error: ${message}`;
     }
+  },
+};
+
+// ─── 11. fetch_rss ──────────────────────────────────────────────────────────
+
+export const fetchRssTool: ModuleToolDefinition = {
+  name: "fetch_rss",
+  description:
+    "Fetch and parse an RSS or Atom feed. Returns the latest items with " +
+    "titles, links, descriptions, and publication dates. Items are " +
+    "automatically stored in the knowledge base for future reference.",
+  parameters: {
+    url: {
+      type: "string",
+      description: "RSS or Atom feed URL",
+      required: true,
+    },
+    max_items: {
+      type: "number",
+      description: "Max items to return (default 20)",
+      required: false,
+    },
+    topic: {
+      type: "string",
+      description: "Research topic tag for categorizing the findings",
+      required: false,
+    },
+  },
+
+  async execute(args: Record<string, unknown>, ctx: ModuleContext): Promise<string> {
+    const url = args.url as string;
+    const maxItems = (args.max_items as number) || 20;
+    const topic = (args.topic as string) || undefined;
+    const timeout = getTimeout(ctx);
+
+    try {
+      const feed = await fetchRssFeed(url, { timeout, maxItems });
+
+      // Store each item in the knowledge base
+      for (const item of feed.items) {
+        const id = `rss:${Buffer.from(item.id || item.link || item.title).toString("base64url").slice(0, 64)}`;
+        const content = [
+          `# ${item.title}`,
+          "",
+          item.link ? `Source: ${item.link}` : "",
+          item.pubDate ? `Published: ${item.pubDate}` : "",
+          item.author ? `Author: ${item.author}` : "",
+          "",
+          item.description,
+        ]
+          .filter(Boolean)
+          .join("\n");
+
+        await ctx.knowledge.upsert(id, content, {
+          url: item.link,
+          title: item.title,
+          topic,
+          source_type: "rss",
+          feed_url: url,
+          feed_title: feed.feedTitle,
+          pub_date: item.pubDate,
+          fetched_at: new Date().toISOString(),
+        });
+      }
+
+      // Format output
+      const lines: string[] = [
+        `## ${feed.feedTitle}`,
+        `Feed: ${feed.feedUrl}`,
+        `Items: ${feed.items.length}`,
+        "",
+      ];
+
+      for (const item of feed.items) {
+        const date = item.pubDate
+          ? ` (${item.pubDate.split("T")[0] || item.pubDate})`
+          : "";
+        lines.push(`- **${item.title}**${date}`);
+        if (item.link) lines.push(`  ${item.link}`);
+        if (item.description) {
+          lines.push(`  ${item.description.slice(0, 200)}${item.description.length > 200 ? "..." : ""}`);
+        }
+        lines.push("");
+      }
+
+      lines.push(`Stored ${feed.items.length} items in knowledge base.`);
+      return lines.join("\n");
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      ctx.error("fetch_rss failed:", err);
+      return `RSS fetch error for ${url}: ${message}`;
+    }
+  },
+};
+
+// ─── 12. list_sources ───────────────────────────────────────────────────────
+
+export const listSourcesTool: ModuleToolDefinition = {
+  name: "list_sources",
+  description:
+    "List all configured research sources including RSS feeds, custom URLs, " +
+    "and research subjects that are monitored during background polling.",
+  parameters: {},
+
+  async execute(_args: Record<string, unknown>, ctx: ModuleContext): Promise<string> {
+    const lines: string[] = ["## Configured Research Sources\n"];
+
+    // RSS feeds
+    const rssRaw = ctx.getConfig("rss_feeds") || "";
+    const rssFeeds = rssRaw
+      .split("\n")
+      .map((s) => s.trim())
+      .filter(Boolean);
+
+    if (rssFeeds.length > 0) {
+      lines.push(`### RSS Feeds (${rssFeeds.length})`);
+      for (const feed of rssFeeds) {
+        lines.push(`- ${feed}`);
+      }
+      lines.push("");
+    } else {
+      lines.push("### RSS Feeds\nNone configured.\n");
+    }
+
+    // Custom URLs
+    const urlsRaw = ctx.getConfig("research_urls") || "";
+    const urls = urlsRaw
+      .split("\n")
+      .map((s) => s.trim())
+      .filter(Boolean);
+
+    if (urls.length > 0) {
+      lines.push(`### Monitored URLs (${urls.length})`);
+      for (const url of urls) {
+        lines.push(`- ${url}`);
+      }
+      lines.push("");
+    } else {
+      lines.push("### Monitored URLs\nNone configured.\n");
+    }
+
+    // Research subjects
+    const subjectsRaw = ctx.getConfig("research_subjects") || "";
+    const subjects = subjectsRaw
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+
+    if (subjects.length > 0) {
+      lines.push(`### Research Subjects (${subjects.length})`);
+      for (const subject of subjects) {
+        lines.push(`- ${subject}`);
+      }
+      lines.push("");
+    } else {
+      lines.push("### Research Subjects\nNone configured.\n");
+    }
+
+    // Poll sources
+    const pollSources = ctx.getConfig("poll_sources") || "web,reddit,hackernews";
+    lines.push(`### Active Poll Sources`);
+    lines.push(`${pollSources}`);
+
+    return lines.join("\n");
   },
 };
