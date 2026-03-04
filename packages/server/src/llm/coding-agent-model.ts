@@ -22,6 +22,24 @@ export type CodingAgentProviderType =
   | "codex"
   | "gemini-cli";
 
+/**
+ * When the user switches to a coding agent provider but keeps the model from
+ * a previous provider (e.g. "gpt-oss-120b"), we should ignore it and let the
+ * CLI use its default. Only pass through known model aliases.
+ */
+const CLAUDE_CODE_MODEL_PREFIXES = ["claude-", "sonnet", "opus", "haiku"];
+
+/** Returns a model string to pass to the CLI, or undefined to use the CLI default */
+function resolveAgentModel(agentType: CodingAgentProviderType, model: string): string | undefined {
+  if (!model || model === "(default)") return undefined;
+  if (agentType === "claude-code") {
+    const lower = model.toLowerCase();
+    return CLAUDE_CODE_MODEL_PREFIXES.some((p) => lower.startsWith(p)) ? model : undefined;
+  }
+  // For other agents, pass model through (they'll ignore unknown ones)
+  return model === "(default)" ? undefined : model;
+}
+
 export interface CodingAgentModelConfig {
   agentType: CodingAgentProviderType;
   modelId: string;
@@ -122,12 +140,17 @@ async function executeClaudeCode(
     });
   }
 
+  // Only pass model if it looks like a valid Claude Code model alias.
+  // If the user switched providers but kept a non-Anthropic model (e.g.
+  // "gpt-oss-120b"), let the SDK use its default.
+  const effectiveModel = resolveAgentModel("claude-code", modelId);
+
   const result = query({
     prompt: fullPrompt,
     options: {
       abortController,
       tools: [],
-      model: modelId || undefined,
+      ...(effectiveModel ? { model: effectiveModel } : {}),
       maxTurns: 1,
       persistSession: false,
       env,
@@ -135,23 +158,32 @@ async function executeClaudeCode(
   });
 
   let output = "";
-  for await (const msg of result) {
-    if (msg.type === "assistant") {
-      // Extract text from BetaMessage content blocks
-      for (const block of (msg.message as any).content ?? []) {
-        if (block.type === "text") {
-          output += block.text;
+  try {
+    for await (const msg of result) {
+      if (msg.type === "assistant") {
+        // Extract text from BetaMessage content blocks
+        for (const block of (msg.message as any).content ?? []) {
+          if (block.type === "text") {
+            output += block.text;
+          }
+        }
+      } else if (msg.type === "result") {
+        if ((msg as any).is_error) {
+          const errors = (msg as any).errors as string[] | undefined;
+          throw new Error(`Claude Code error: ${errors?.length ? errors.join(", ") : JSON.stringify(msg)}`);
+        }
+        if ("result" in msg && (msg as any).result) {
+          // Use the final result text if we didn't get assistant messages
+          if (!output) output = (msg as any).result;
         }
       }
-    } else if (msg.type === "result") {
-      if ("result" in msg && (msg as any).result) {
-        // Use the final result text if we didn't get assistant messages
-        if (!output) output = (msg as any).result;
-      }
-      if ((msg as any).is_error) {
-        throw new Error(`Claude Code error: ${(msg as any).errors?.join(", ") ?? "unknown"}`);
-      }
     }
+  } catch (err) {
+    // Re-throw our own errors, wrap unexpected ones
+    if (err instanceof Error && err.message.startsWith("Claude Code error:")) {
+      throw err;
+    }
+    throw new Error(`Claude Code SDK error: ${err instanceof Error ? err.message : String(err)}`);
   }
 
   return output;

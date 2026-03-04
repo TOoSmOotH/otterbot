@@ -158,10 +158,10 @@ const FALLBACK_MODELS: Record<string, string[]> = {
     "codestral-latest",
     "mistral-medium-latest",
   ],
-  "claude-code": ["claude-sonnet-4-6", "claude-opus-4-6", "sonnet", "opus"],
-  opencode: [],
-  codex: ["codex-mini", "o3-mini", "o4-mini"],
-  "gemini-cli": ["gemini-2.5-pro", "gemini-2.5-flash"],
+  "claude-code": ["(default)", "claude-sonnet-4-6", "claude-opus-4-6", "sonnet", "opus"],
+  opencode: ["(default)"],
+  codex: ["(default)", "codex-mini", "o3-mini", "o4-mini"],
+  "gemini-cli": ["(default)", "gemini-2.5-pro", "gemini-2.5-flash"],
 };
 
 // ---------------------------------------------------------------------------
