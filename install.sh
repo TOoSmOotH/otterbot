@@ -264,6 +264,7 @@ OTTERBOT_DATA_DIR=./data
 ENABLE_DESKTOP=true
 DESKTOP_RESOLUTION=1280x720x24
 SUDO_MODE=restricted
+OTTERBOT_ALLOWED_ORIGIN=https://localhost:62626
 EOF
   info "Generated .env with new database key"
 fi
