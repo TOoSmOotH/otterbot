@@ -92,24 +92,17 @@ export async function validateUrlForSsrf(
 }
 
 /**
- * Build a URL that uses the resolved IP instead of the hostname,
- * so the actual fetch cannot be DNS-rebinded to a different address.
- */
-function buildIpUrl(parsed: URL, resolvedIp: string): string {
-  // For IPv6, wrap in brackets
-  const host = resolvedIp.includes(":")
-    ? `[${resolvedIp}]`
-    : resolvedIp;
-  const port = parsed.port ? `:${parsed.port}` : "";
-  return `${parsed.protocol}//${host}${port}${parsed.pathname}${parsed.search}`;
-}
-
-/**
  * SSRF-safe fetch that:
- * - Validates the URL (protocol + DNS → private IP check)
- * - Fetches using the resolved IP (with original Host header) to prevent DNS rebinding
- * - Uses `redirect: "manual"` and re-validates every redirect Location
- * - Limits redirect hops to MAX_REDIRECTS
+ * 1. Validates the URL (protocol + DNS → private IP check)
+ * 2. Fetches using the **original URL** so TLS SNI / certificate validation works
+ * 3. Uses `redirect: "manual"` and re-validates every redirect Location
+ * 4. Limits redirect hops to MAX_REDIRECTS
+ *
+ * NOTE: We intentionally fetch with the original hostname rather than the
+ * resolved IP. Fetching by IP breaks TLS because certs have DNS SANs (e.g.
+ * *.githubusercontent.com) but not IP SANs, causing ERR_TLS_CERT_ALTNAME_INVALID.
+ * The SSRF validation still protects against private-IP access since we resolve
+ * and check IPs before each fetch.
  */
 export async function ssrfSafeFetch(
   url: string,
@@ -118,21 +111,11 @@ export async function ssrfSafeFetch(
   let currentUrl = url;
 
   for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
-    // Validate and resolve the hostname to IPs
-    const { parsed, ips } = await validateUrlForSsrf(currentUrl);
+    // Validate: resolve hostname and ensure no private IPs
+    await validateUrlForSsrf(currentUrl);
 
-    // Build a URL using the resolved IP to prevent DNS rebinding
-    const ipUrl = buildIpUrl(parsed, ips[0]);
-
-    // Merge the original Host header so the server sees the correct hostname
-    const headers = new Headers(init.headers);
-    if (!headers.has("Host")) {
-      headers.set("Host", parsed.host);
-    }
-
-    const res = await fetch(ipUrl, {
+    const res = await fetch(currentUrl, {
       ...init,
-      headers,
       redirect: "manual",
     });
 

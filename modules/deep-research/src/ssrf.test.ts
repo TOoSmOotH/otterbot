@@ -26,7 +26,7 @@ describe("SSRF protections", () => {
     );
   });
 
-  it("fetches using resolved IP and preserves Host header", async () => {
+  it("fetches using original URL for TLS SNI compatibility", async () => {
     resolve4Mock.mockResolvedValue(["93.184.216.34"]);
 
     const fetchSpy = vi
@@ -38,9 +38,8 @@ describe("SSRF protections", () => {
     expect(fetchSpy).toHaveBeenCalledTimes(1);
     const [url, init] = fetchSpy.mock.calls[0];
 
-    expect(url).toBe("https://93.184.216.34/docs?q=1");
-    const headers = new Headers((init as RequestInit).headers);
-    expect(headers.get("Host")).toBe("example.com");
+    // Should use the original URL (not IP) so TLS cert validation works
+    expect(url).toBe("https://example.com/docs?q=1");
     expect((init as RequestInit).redirect).toBe("manual");
   });
 

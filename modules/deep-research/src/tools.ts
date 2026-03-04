@@ -430,10 +430,11 @@ export const fetchPageTool: ModuleToolDefinition = {
     const maxLength = getMaxPageLength(ctx);
 
     try {
-      // SSRF protection (validates URL + each redirect hop)
       const hostname = new URL(url).hostname;
       await acquireSlot(hostname);
 
+      // SSRF-safe fetch: validates resolved IPs, then fetches with original
+      // URL so TLS SNI / certificate validation works correctly.
       const res = await ssrfSafeFetch(url, {
         headers: {
           "User-Agent":

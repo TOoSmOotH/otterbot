@@ -390,11 +390,41 @@ The user can see everything on the desktop in real-time.`;
     );
     console.log(`[COO] think() returned (${text.length} chars): "${text.slice(0, 120)}"`);
 
+    // Guard: if think() produced raw JSON instead of natural language
+    // (e.g. from a forced synthesis after tool failures), re-synthesize.
+    let finalText = text;
+    const trimmed = text.trim();
+    if (
+      (trimmed.startsWith("{") || trimmed.startsWith("[")) &&
+      trimmed.length > 2
+    ) {
+      try {
+        JSON.parse(trimmed);
+        // It's valid JSON — re-synthesize as natural language
+        console.log("[COO] Detected raw JSON output, re-synthesizing as natural language");
+        const { text: resynthesized } = await this.thinkWithoutTools(
+          `[Your previous response was raw JSON. Rewrite it as a helpful, natural language response to the user. Here is the JSON:\n${trimmed}\n]`,
+          (token, messageId) => {
+            this.onStream?.(token, messageId, this.currentConversationId);
+          },
+          (token, messageId) => {
+            this.onThinking?.(token, messageId, this.currentConversationId);
+          },
+          (messageId) => {
+            this.onThinkingEnd?.(messageId, this.currentConversationId);
+          },
+        );
+        finalText = resynthesized || "I wasn't able to get a clear result. Could you rephrase your request?";
+      } catch {
+        // Not valid JSON after all — use the original text as-is
+      }
+    }
+
     // Send the response back through the bus (to CEO / null)
     this.sendMessage(
       null,
       MessageType.Chat,
-      text,
+      finalText,
       thinking ? { thinking } : undefined,
       this.currentConversationId ?? undefined,
     );
