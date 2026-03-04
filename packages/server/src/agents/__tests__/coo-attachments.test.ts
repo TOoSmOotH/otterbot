@@ -182,4 +182,34 @@ describe("COO chat attachments", () => {
 
     coo.destroy();
   });
+
+  it("skips oversized image attachments and does not pass imageParts", async () => {
+    // 6 MB file exceeds the 5 MB LLM image-processing limit in COO
+    writeFileSync(join(uploadsDir, "too-large.png"), Buffer.alloc(6 * 1024 * 1024, 1));
+    const bus = createMockBus();
+    const coo = createCoo(bus);
+
+    const thinkSpy = vi
+      .spyOn(coo as any, "think")
+      .mockResolvedValue({ text: "ok", thinking: undefined, hadToolCalls: false });
+
+    await coo.handleMessage(
+      createChatMessage("Please analyze this", {
+        attachments: [
+          {
+            id: "att-large",
+            filename: "too-large.png",
+            mimeType: "image/png",
+            size: 6 * 1024 * 1024,
+            url: "/uploads/too-large.png",
+          },
+        ],
+      }),
+    );
+
+    expect(thinkSpy).toHaveBeenCalledTimes(1);
+    expect(thinkSpy.mock.calls[0][4]).toBeUndefined();
+
+    coo.destroy();
+  });
 });
