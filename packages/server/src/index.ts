@@ -6,7 +6,7 @@ import fastifyStatic from "@fastify/static";
 import multipart from "@fastify/multipart";
 import { Server } from "socket.io";
 import { resolve, dirname, join, sep, basename, extname } from "node:path";
-import { existsSync, readFileSync, writeFileSync, mkdirSync, createReadStream, createWriteStream, copyFileSync, unlinkSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync, mkdirSync, createReadStream, createWriteStream, copyFileSync, unlinkSync, readdirSync, statSync } from "node:fs";
 import { pipeline } from "node:stream/promises";
 import { execSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -1693,6 +1693,29 @@ async function main() {
     }
   });
 
+  // CSRF protection: validate Origin header on state-changing requests
+  app.addHook("onRequest", async (req, reply) => {
+    if (req.method === "GET" || req.method === "HEAD" || req.method === "OPTIONS") return;
+    if (!req.url.startsWith("/api/")) return;
+    // Allow auth endpoints (login needs to work cross-origin in some setups)
+    if (req.url.startsWith("/api/auth/")) return;
+
+    const origin = req.headers.origin;
+    if (origin) {
+      try {
+        const originHost = new URL(origin).host;
+        const requestHost = req.headers.host ?? req.headers[":authority"];
+        if (requestHost && originHost !== requestHost) {
+          reply.code(403).send({ error: "CSRF validation failed: origin mismatch" });
+          return;
+        }
+      } catch {
+        reply.code(403).send({ error: "CSRF validation failed: invalid origin" });
+        return;
+      }
+    }
+  });
+
   // =========================================================================
   // Protected routes
   // =========================================================================
@@ -1846,8 +1869,32 @@ async function main() {
     ".html", ".css",
   ]);
   const MAX_UPLOAD_SIZE = 10 * 1024 * 1024; // 10 MB per file
+  const MAX_TOTAL_UPLOAD_BYTES = 500 * 1024 * 1024; // 500 MB total upload quota
 
-  // Serve uploaded files with security headers
+  /** Calculate total size of all files in the uploads directory */
+  function getUploadsDirSize(): number {
+    try {
+      const files = readdirSync(uploadsDir);
+      let total = 0;
+      for (const f of files) {
+        try {
+          const s = statSync(join(uploadsDir, f));
+          if (s.isFile()) total += s.size;
+        } catch { /* skip unreadable files */ }
+      }
+      return total;
+    } catch { return 0; }
+  }
+
+  // Serve uploaded files with security headers (auth-protected)
+  app.addHook("onRequest", async (req, reply) => {
+    if (!req.url.startsWith("/uploads/")) return;
+    const token = req.cookies.sb_session;
+    if (!validateSession(token)) {
+      reply.code(401).send({ error: "Unauthorized" });
+    }
+  });
+
   await app.register(fastifyStatic, {
     root: uploadsDir,
     prefix: "/uploads/",
@@ -1855,10 +1902,17 @@ async function main() {
     setHeaders(res) {
       res.setHeader("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'");
       res.setHeader("X-Content-Type-Options", "nosniff");
+      res.setHeader("Cache-Control", "private, no-cache");
     },
   });
 
   app.post("/api/chat/upload", async (req) => {
+    // Check total upload quota before accepting new files
+    const currentUsage = getUploadsDirSize();
+    if (currentUsage >= MAX_TOTAL_UPLOAD_BYTES) {
+      throw new Error(`Upload quota exceeded (${Math.round(currentUsage / 1024 / 1024)} MB / ${MAX_TOTAL_UPLOAD_BYTES / 1024 / 1024} MB). Delete old files to free space.`);
+    }
+
     const file = await req.file({ limits: { fileSize: MAX_UPLOAD_SIZE } });
     if (!file) throw new Error("No file uploaded");
 
