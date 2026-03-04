@@ -813,7 +813,7 @@ function SourceListEditor({
   label: string;
   placeholder: string;
   items: string[];
-  onAdd: (value: string) => void;
+  onAdd: (values: string[]) => void;
   onRemove: (index: number) => void;
 }) {
   const [inputValue, setInputValue] = useState("");
@@ -821,15 +821,35 @@ function SourceListEditor({
   const handleAdd = () => {
     const val = inputValue.trim();
     if (!val) return;
-    // Basic URL validation
     try {
       new URL(val);
     } catch {
       return;
     }
     if (items.includes(val)) return;
-    onAdd(val);
+    onAdd([val]);
     setInputValue("");
+  };
+
+  const handlePaste = (e: React.ClipboardEvent<HTMLInputElement>) => {
+    const text = e.clipboardData.getData("text");
+    const candidates = text.split(/[\n,]+/).map((s) => s.trim()).filter(Boolean);
+    const validUrls: string[] = [];
+    for (const c of candidates) {
+      try {
+        new URL(c);
+        if (!items.includes(c) && !validUrls.includes(c)) {
+          validUrls.push(c);
+        }
+      } catch {
+        // skip invalid URLs
+      }
+    }
+    if (validUrls.length > 1) {
+      e.preventDefault();
+      onAdd(validUrls);
+      setInputValue("");
+    }
   };
 
   return (
@@ -843,6 +863,7 @@ function SourceListEditor({
           value={inputValue}
           onChange={(e) => setInputValue(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && handleAdd()}
+          onPaste={handlePaste}
           placeholder={placeholder}
           className="flex-1 bg-secondary rounded-md px-3 py-1.5 text-xs outline-none focus:ring-1 ring-primary font-mono"
         />
@@ -970,8 +991,8 @@ function ResearchSourcesPanel({ moduleId }: { moduleId: string }) {
         label="RSS Feeds"
         placeholder="https://example.com/feed.xml"
         items={rssFeeds}
-        onAdd={(val) => {
-          setRssFeeds([...rssFeeds, val]);
+        onAdd={(vals) => {
+          setRssFeeds((prev) => [...prev, ...vals]);
           setDirty(true);
         }}
         onRemove={(i) => {
@@ -984,8 +1005,8 @@ function ResearchSourcesPanel({ moduleId }: { moduleId: string }) {
         label="Monitored URLs"
         placeholder="https://example.com/page-to-monitor"
         items={researchUrls}
-        onAdd={(val) => {
-          setResearchUrls([...researchUrls, val]);
+        onAdd={(vals) => {
+          setResearchUrls((prev) => [...prev, ...vals]);
           setDirty(true);
         }}
         onRemove={(i) => {
