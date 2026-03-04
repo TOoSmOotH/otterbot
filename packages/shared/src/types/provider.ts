@@ -31,6 +31,14 @@ export interface ModelOption {
   source: "discovered" | "custom";
 }
 
+/** Provider entry submitted during setup wizard (multi-provider). */
+export interface SetupProviderEntry {
+  type: string;
+  name: string;
+  apiKey?: string;
+  baseUrl?: string;
+}
+
 /** Per-agent-type model/provider override (stored in config table) */
 export interface AgentModelOverride {
   registryEntryId: string;

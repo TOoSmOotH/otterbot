@@ -3,7 +3,7 @@ import { useAuthStore } from "../../stores/auth-store";
 import { useModelPackStore } from "../../stores/model-pack-store";
 import { CharacterSelect } from "../character-select/CharacterSelect";
 import { DEFAULT_AVATARS } from "./default-avatars";
-import type { GearConfig } from "@otterbot/shared";
+import type { GearConfig, SetupProviderEntry } from "@otterbot/shared";
 import { ModelPricingPrompt } from "../settings/ModelPricingPrompt";
 import { saveWizardState, loadWizardState, clearWizardState } from "../../hooks/use-setup-persistence";
 import { PasswordInput } from "../ui/PasswordInput";
@@ -125,6 +125,9 @@ export function SetupWizard() {
   const [model, setModel] = useState("");
   const [apiKey, setApiKey] = useState("");
   const [baseUrl, setBaseUrl] = useState("");
+
+  // Additional (non-primary) providers selected in the wizard
+  const [additionalProviders, setAdditionalProviders] = useState<SetupProviderEntry[]>([]);
   const [passphrase, setPassphrase] = useState("");
   const [confirmPassphrase, setConfirmPassphrase] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -230,12 +233,14 @@ export function SetupWizard() {
     if (typeof saved.openCodeModel === "string") setOpenCodeModel(saved.openCodeModel);
     if (typeof saved.openCodeApiKey === "string") setOpenCodeApiKey(saved.openCodeApiKey);
     if (typeof saved.openCodeBaseUrl === "string") setOpenCodeBaseUrl(saved.openCodeBaseUrl);
+    if (Array.isArray(saved.additionalProviders)) setAdditionalProviders(saved.additionalProviders as SetupProviderEntry[]);
   }, []);
 
   // Persist wizard state to sessionStorage on change
   useEffect(() => {
     saveWizardState({
       step, provider, providerName, model, apiKey, baseUrl,
+      additionalProviders,
       displayName, avatar, bio, timezone,
       characterPackId, characterGearConfig,
       cooName, cooModelPackId, cooGearConfig,
@@ -247,6 +252,7 @@ export function SetupWizard() {
     });
   }, [
     step, provider, providerName, model, apiKey, baseUrl,
+    additionalProviders,
     displayName, avatar, bio, timezone,
     characterPackId, characterGearConfig,
     cooName, cooModelPackId, cooGearConfig,
@@ -391,7 +397,34 @@ export function SetupWizard() {
     } else if (id === "lmstudio" && !baseUrl) {
       setBaseUrl("http://localhost:1234/v1");
     }
+    // Remove from additional if it was there
+    setAdditionalProviders((prev) => prev.filter((p) => p.type !== id));
     setError(null);
+  };
+
+  const handleToggleAdditionalProvider = (id: string) => {
+    if (id === provider) return; // Can't toggle the primary provider here
+    setAdditionalProviders((prev) => {
+      const exists = prev.find((p) => p.type === id);
+      if (exists) {
+        return prev.filter((p) => p.type !== id);
+      }
+      const typeMeta = providerTypes.find((pt) => pt.type === id);
+      const entry: SetupProviderEntry = {
+        type: id,
+        name: typeMeta?.label || id,
+      };
+      if (id === "ollama") entry.baseUrl = "http://localhost:11434/api";
+      if (id === "lmstudio") entry.baseUrl = "http://localhost:1234/v1";
+      return [...prev, entry];
+    });
+    setError(null);
+  };
+
+  const updateAdditionalProvider = (type: string, updates: Partial<SetupProviderEntry>) => {
+    setAdditionalProviders((prev) =>
+      prev.map((p) => (p.type === type ? { ...p, ...updates } : p)),
+    );
   };
 
   const handleNextFromPassphrase = async () => {
@@ -426,6 +459,18 @@ export function SetupWizard() {
     if (NEEDS_BASE_URL.has(provider) && !baseUrl) {
       setError("A base URL is required for this provider");
       return;
+    }
+    // Validate additional providers
+    for (const ap of additionalProviders) {
+      const meta = providerTypes.find((pt) => pt.type === ap.type);
+      if (meta?.needsApiKey && !ap.apiKey) {
+        setError(`An API key is required for ${meta.label}`);
+        return;
+      }
+      if (meta?.needsBaseUrl && !ap.baseUrl) {
+        setError(`A base URL is required for ${meta?.label || ap.type}`);
+        return;
+      }
     }
     setError(null);
     setStep(4);
@@ -507,6 +552,7 @@ export function SetupWizard() {
       model,
       apiKey: apiKey || undefined,
       baseUrl: baseUrl || undefined,
+      additionalProviders: additionalProviders.length > 0 ? additionalProviders : undefined,
       userName: displayName.trim(),
       userAvatar: avatar || undefined,
       userBio: bio.trim() || undefined,
@@ -726,27 +772,60 @@ export function SetupWizard() {
           {step === 3 && (
             <div className="space-y-4">
               <h2 className="text-sm font-medium">
-                3. Configure your LLM provider
+                3. Configure your LLM providers
               </h2>
               <p className="text-xs text-muted-foreground">
+                Select a <strong>primary</strong> provider (click once), then optionally add more providers (click others).
                 Only <strong>OpenAI Compatible</strong> and <strong>OpenRouter</strong> have been tested.
               </p>
 
-              {/* Provider type cards */}
-              <div className="grid grid-cols-2 gap-2">
-                {providerTypes.map((pt) => (
-                  <button
-                    key={pt.type}
-                    onClick={() => handleSelectProvider(pt.type)}
-                    className={`p-3 rounded-md border text-left text-sm transition-colors ${
-                      provider === pt.type
-                        ? "border-primary bg-primary/10 text-foreground"
-                        : "border-border bg-background text-muted-foreground hover:border-muted-foreground"
-                    }`}
-                  >
-                    <div className="font-medium">{pt.label}</div>
-                  </button>
-                ))}
+              {/* Provider type cards — multi-select */}
+              <div className="grid grid-cols-2 gap-2" data-testid="provider-grid">
+                {providerTypes.map((pt) => {
+                  const isPrimary = provider === pt.type;
+                  const isAdditional = additionalProviders.some((p) => p.type === pt.type);
+                  const isSelected = isPrimary || isAdditional;
+
+                  return (
+                    <button
+                      key={pt.type}
+                      data-testid={`provider-btn-${pt.type}`}
+                      onClick={() => {
+                        if (!provider || isPrimary) {
+                          // No primary yet, or clicking the already-primary — select as primary
+                          handleSelectProvider(pt.type);
+                        } else if (isAdditional) {
+                          // Already additional — deselect it
+                          handleToggleAdditionalProvider(pt.type);
+                        } else {
+                          // Add as additional provider
+                          handleToggleAdditionalProvider(pt.type);
+                        }
+                      }}
+                      className={`p-3 rounded-md border text-left text-sm transition-colors relative ${
+                        isPrimary
+                          ? "border-primary bg-primary/10 text-foreground ring-2 ring-primary/30"
+                          : isAdditional
+                            ? "border-primary bg-primary/5 text-foreground"
+                            : "border-border bg-background text-muted-foreground hover:border-muted-foreground"
+                      }`}
+                    >
+                      <div className="font-medium flex items-center justify-between">
+                        {pt.label}
+                        {isPrimary && (
+                          <span className="text-[10px] font-normal text-primary bg-primary/10 px-1.5 py-0.5 rounded" data-testid={`primary-badge-${pt.type}`}>
+                            Primary
+                          </span>
+                        )}
+                        {isAdditional && (
+                          <span className="text-[10px] font-normal text-muted-foreground" data-testid={`selected-indicator-${pt.type}`}>
+                            &#10003;
+                          </span>
+                        )}
+                      </div>
+                    </button>
+                  );
+                })}
               </div>
 
               {provider && (
@@ -918,6 +997,70 @@ export function SetupWizard() {
                   a reasoning model (like Claude Opus or Sonnet 4.5) to the Team Lead for better
                   planning. Workers can use cheaper/faster models since they execute the Team Lead's
                   detailed plans.
+                </div>
+              )}
+
+              {/* Additional provider configurations */}
+              {additionalProviders.length > 0 && (
+                <div className="space-y-3" data-testid="additional-providers-section">
+                  <h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                    Additional Providers
+                  </h3>
+                  {additionalProviders.map((ap) => {
+                    const meta = providerTypes.find((pt) => pt.type === ap.type);
+                    return (
+                      <div
+                        key={ap.type}
+                        data-testid={`additional-provider-${ap.type}`}
+                        className="border border-border rounded-md p-3 space-y-2"
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="text-sm font-medium">{meta?.label || ap.type}</span>
+                          <button
+                            onClick={() => handleToggleAdditionalProvider(ap.type)}
+                            className="text-xs text-muted-foreground hover:text-destructive transition-colors"
+                            data-testid={`remove-additional-${ap.type}`}
+                          >
+                            Remove
+                          </button>
+                        </div>
+                        <div>
+                          <label className="block text-xs text-muted-foreground mb-1">Name</label>
+                          <input
+                            type="text"
+                            value={ap.name}
+                            onChange={(e) => updateAdditionalProvider(ap.type, { name: e.target.value })}
+                            placeholder={`e.g. My ${meta?.label || ap.type}`}
+                            className="w-full px-3 py-1.5 bg-background border border-input rounded-md text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                          />
+                        </div>
+                        {meta?.needsApiKey && (
+                          <div>
+                            <label className="block text-xs text-muted-foreground mb-1">API Key</label>
+                            <input
+                              type="password"
+                              value={ap.apiKey || ""}
+                              onChange={(e) => updateAdditionalProvider(ap.type, { apiKey: e.target.value })}
+                              placeholder="sk-..."
+                              className="w-full px-3 py-1.5 bg-background border border-input rounded-md text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                            />
+                          </div>
+                        )}
+                        {meta?.needsBaseUrl && (
+                          <div>
+                            <label className="block text-xs text-muted-foreground mb-1">Base URL</label>
+                            <input
+                              type="text"
+                              value={ap.baseUrl || ""}
+                              onChange={(e) => updateAdditionalProvider(ap.type, { baseUrl: e.target.value })}
+                              placeholder="http://localhost:..."
+                              className="w-full px-3 py-1.5 bg-background border border-input rounded-md text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                            />
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
               )}
 
