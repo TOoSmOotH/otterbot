@@ -41,7 +41,10 @@ export function ProjectSettings({ projectId }: { projectId: string }) {
   const [signCommits, setSignCommits] = useState(false);
   const [hasSSHKey, setHasSSHKey] = useState(false);
   const [targetBranch, setTargetBranch] = useState("");
+  const [githubAccountId, setGithubAccountId] = useState<string | null>(null);
 
+  const gitHubAccounts = useSettingsStore((s) => s.gitHubAccounts);
+  const loadGitHubAccounts = useSettingsStore((s) => s.loadGitHubAccounts);
   const openCodeEnabled = useSettingsStore((s) => s.openCodeEnabled);
   const claudeCodeEnabled = useSettingsStore((s) => s.claudeCodeEnabled);
   const codexEnabled = useSettingsStore((s) => s.codexEnabled);
@@ -55,7 +58,9 @@ export function ProjectSettings({ projectId }: { projectId: string }) {
     socket.emit("project:get", { projectId }, (project) => {
       setIsGitHubProject(!!project?.githubRepo);
       setIssueMonitor(!!project?.githubIssueMonitor);
+      setGithubAccountId((project as any)?.githubAccountId ?? null);
     });
+    loadGitHubAccounts();
 
     // Load sign-commits setting
     socket.emit("project:get-sign-commits", { projectId }, (result) => {
@@ -175,6 +180,7 @@ export function ProjectSettings({ projectId }: { projectId: string }) {
       // Save issue monitor setting
       if (isGitHubProject) {
         socket.emit("project:set-issue-monitor", { projectId, enabled: issueMonitor });
+        socket.emit("project:set-github-account", { projectId, accountId: githubAccountId });
       }
 
       // Save sign commits setting
@@ -202,6 +208,28 @@ export function ProjectSettings({ projectId }: { projectId: string }) {
   return (
     <div className="h-full overflow-y-auto p-4">
       <div className="max-w-2xl mx-auto space-y-6">
+        {/* GitHub Account (GitHub projects only) */}
+        {isGitHubProject && gitHubAccounts.length > 1 && (
+          <div>
+            <h2 className="text-sm font-semibold">GitHub Account</h2>
+            <p className="text-xs text-muted-foreground mt-1">
+              Which GitHub account to use for this project
+            </p>
+            <select
+              value={githubAccountId ?? ""}
+              onChange={(e) => { setGithubAccountId(e.target.value || null); setSaved(false); }}
+              className="mt-2 text-sm bg-secondary border border-border rounded px-3 py-1.5 w-full max-w-xs focus:outline-none focus:ring-1 focus:ring-primary"
+            >
+              <option value="">Default account</option>
+              {gitHubAccounts.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.label}{a.username ? ` (@${a.username})` : ""}{a.isDefault ? " (default)" : ""}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+
         {/* Target Branch (GitHub projects only) */}
         {isGitHubProject && (
           <div>

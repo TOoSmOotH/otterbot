@@ -146,6 +146,12 @@ import {
   getSSHPublicKey,
   removeSSHKey,
   testSSHConnection,
+  testGitHubAccountConnection,
+  generateAccountSSHKey,
+  importAccountSSHKey,
+  getAccountSSHPublicKey,
+  removeAccountSSHKey,
+  testAccountSSHConnection,
   listCustomModels,
   createCustomModel,
   deleteCustomModel,
@@ -4055,6 +4061,104 @@ async function main() {
 
   app.post("/api/settings/github/ssh/test", async () => {
     return testSSHConnection();
+  });
+
+  // --- GitHub Accounts ---
+
+  app.get("/api/settings/github/accounts", async () => {
+    const { getGitHubAccounts } = await import("./github/account-resolver.js");
+    const accounts = getGitHubAccounts();
+    return accounts.map((a) => ({
+      id: a.id,
+      label: a.label,
+      tokenSet: !!a.token,
+      username: a.username,
+      email: a.email,
+      sshKeySet: !!a.sshKeyPath,
+      sshFingerprint: a.sshFingerprint,
+      sshKeyType: a.sshKeyType,
+      isDefault: a.isDefault,
+      createdAt: a.createdAt,
+    }));
+  });
+
+  app.post<{
+    Body: { label: string; token: string; email?: string; isDefault?: boolean };
+  }>("/api/settings/github/accounts", async (req, reply) => {
+    const { createGitHubAccount } = await import("./github/account-resolver.js");
+    const { nanoid } = await import("nanoid");
+    if (!req.body.label || !req.body.token) {
+      reply.code(400);
+      return { error: "label and token are required" };
+    }
+    const account = createGitHubAccount({ id: nanoid(), ...req.body });
+    return { ok: true, id: account.id };
+  });
+
+  app.put<{
+    Params: { id: string };
+    Body: { label?: string; token?: string; email?: string };
+  }>("/api/settings/github/accounts/:id", async (req) => {
+    const { updateGitHubAccount: updateAcct } = await import("./github/account-resolver.js");
+    updateAcct(req.params.id, req.body);
+    return { ok: true };
+  });
+
+  app.delete<{
+    Params: { id: string };
+  }>("/api/settings/github/accounts/:id", async (req) => {
+    const { deleteGitHubAccount } = await import("./github/account-resolver.js");
+    return deleteGitHubAccount(req.params.id);
+  });
+
+  app.put<{
+    Params: { id: string };
+  }>("/api/settings/github/accounts/:id/default", async (req) => {
+    const { setDefaultGitHubAccount } = await import("./github/account-resolver.js");
+    setDefaultGitHubAccount(req.params.id);
+    return { ok: true };
+  });
+
+  app.post<{
+    Params: { id: string };
+  }>("/api/settings/github/accounts/:id/test", async (req) => {
+    return testGitHubAccountConnection(req.params.id);
+  });
+
+  app.post<{
+    Params: { id: string };
+    Body: { type?: "ed25519" | "rsa"; comment?: string };
+  }>("/api/settings/github/accounts/:id/ssh/generate", async (req) => {
+    return generateAccountSSHKey(req.params.id, req.body);
+  });
+
+  app.post<{
+    Params: { id: string };
+    Body: { privateKey: string };
+  }>("/api/settings/github/accounts/:id/ssh/import", async (req, reply) => {
+    if (!req.body.privateKey) {
+      reply.code(400);
+      return { error: "privateKey is required" };
+    }
+    return importAccountSSHKey(req.params.id, req.body.privateKey);
+  });
+
+  app.get<{
+    Params: { id: string };
+  }>("/api/settings/github/accounts/:id/ssh/public-key", async (req) => {
+    return getAccountSSHPublicKey(req.params.id);
+  });
+
+  app.delete<{
+    Params: { id: string };
+  }>("/api/settings/github/accounts/:id/ssh", async (req) => {
+    return removeAccountSSHKey(req.params.id);
+  });
+
+  app.post<{
+    Params: { id: string };
+  }>("/api/settings/github/accounts/:id/ssh/test", async (req) => {
+    return testAccountSSHConnection(req.params.id);
   });
 
   // =========================================================================

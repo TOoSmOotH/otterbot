@@ -14,6 +14,7 @@ import type { BaseAgent } from "../agents/agent.js";
 import { getDb, schema } from "../db/index.js";
 import { isTTSEnabled, getConfiguredTTSProvider, stripMarkdown } from "../tts/tts.js";
 import { getConfig, setConfig, deleteConfig } from "../auth/auth.js";
+import { resolveGitHubToken, resolveGitHubUsername } from "../github/account-resolver.js";
 import { SoulService } from "../memory/soul-service.js";
 import { MemoryService } from "../memory/memory-service.js";
 import { SoulAdvisor } from "../memory/soul-advisor.js";
@@ -507,10 +508,10 @@ export function setupSocketHandlers(
 
         if (hasGithubRepo) {
           // --- GitHub-linked path ---
-          const ghToken = getConfig("github:token");
-          const ghUsername = getConfig("github:username");
+          const ghToken = resolveGitHubToken();
+          const ghUsername = resolveGitHubUsername();
           if (!ghToken || !ghUsername) {
-            callback?.({ ok: false, error: "GitHub is not configured. Set up your PAT and username in Settings first." });
+            callback?.({ ok: false, error: "GitHub is not configured. Add a GitHub account in Settings first." });
             return;
           }
 
@@ -825,7 +826,7 @@ export function setupSocketHandlers(
         // Start or stop monitoring
         if (deps?.issueMonitor) {
           if (data.enabled) {
-            const ghUsername = getConfig("github:username");
+            const ghUsername = resolveGitHubUsername(data.projectId);
             if (ghUsername && project.githubRepo) {
               deps.issueMonitor.watchProject(data.projectId, project.githubRepo, ghUsername);
             }
@@ -847,6 +848,20 @@ export function setupSocketHandlers(
         callback?.({ ok: true });
       } catch (err) {
         callback?.({ ok: false, error: err instanceof Error ? err.message : "Failed to update issue monitor setting" });
+      }
+    });
+
+    // Set GitHub account for a project
+    socket.on("project:set-github-account", (data, callback) => {
+      try {
+        const db = getDb();
+        db.update(schema.projects)
+          .set({ githubAccountId: data.accountId })
+          .where(eq(schema.projects.id, data.projectId))
+          .run();
+        callback?.({ ok: true });
+      } catch (err) {
+        callback?.({ ok: false, error: err instanceof Error ? err.message : "Failed to set GitHub account" });
       }
     });
 

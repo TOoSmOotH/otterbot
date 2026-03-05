@@ -2,7 +2,7 @@ import { tool } from "ai";
 import { z } from "zod";
 import { execSync } from "node:child_process";
 import type { ToolContext } from "./tool-context.js";
-import { getConfig } from "../auth/auth.js";
+import { resolveGitHubToken } from "../github/account-resolver.js";
 import { checkBlockedCommand, normalizeCommand } from "../utils/command-guard.js";
 
 const DEFAULT_TIMEOUT = 30_000; // 30 seconds
@@ -97,7 +97,7 @@ export function createShellExecTool(ctx: ToolContext) {
             ...process.env,
             HOME: ctx.workspacePath,
             ...(() => {
-              const ghToken = getConfig("github:token");
+              const ghToken = resolveGitHubToken(ctx.projectId);
               return ghToken ? { GH_TOKEN: ghToken, GITHUB_TOKEN: ghToken } : {};
             })(),
           },

@@ -9,7 +9,7 @@ import type {
   MergeQueueStatus,
 } from "@otterbot/shared";
 import { getDb, schema } from "../db/index.js";
-import { getConfig } from "../auth/auth.js";
+import { resolveGitHubToken } from "../github/account-resolver.js";
 import { resolveProjectBranch } from "../github/github-service.js";
 import {
   fetchPullRequest,
@@ -271,9 +271,6 @@ export class MergeQueue implements Scheduler {
    * Check GitHub for PRs that were merged/closed externally.
    */
   private async syncExternalState(): Promise<void> {
-    const token = getConfig("github:token");
-    if (!token) return;
-
     const db = getDb();
     const activeEntries = db
       .select()
@@ -283,6 +280,9 @@ export class MergeQueue implements Scheduler {
 
     for (const entry of activeEntries) {
       try {
+        const token = resolveGitHubToken(entry.projectId);
+        if (!token) continue;
+
         const project = db.select().from(schema.projects).where(eq(schema.projects.id, entry.projectId)).get();
         if (!project?.githubRepo) continue;
 
@@ -383,7 +383,7 @@ export class MergeQueue implements Scheduler {
     const project = db.select().from(schema.projects).where(eq(schema.projects.id, entry.projectId)).get();
     if (!project?.githubRepo) return;
 
-    const token = getConfig("github:token");
+    const token = resolveGitHubToken(entry.projectId);
     if (!token) return;
 
     // Step 1: Rebase
@@ -474,7 +474,7 @@ export class MergeQueue implements Scheduler {
     const project = db.select().from(schema.projects).where(eq(schema.projects.id, entry.projectId)).get();
     if (!project?.githubRepo) return;
 
-    const token = getConfig("github:token");
+    const token = resolveGitHubToken(entry.projectId);
     if (!token) return;
 
     const task = db.select().from(schema.kanbanTasks).where(eq(schema.kanbanTasks.id, entry.taskId)).get();

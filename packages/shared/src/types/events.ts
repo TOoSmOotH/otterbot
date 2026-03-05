@@ -268,6 +268,12 @@ export interface ClientToServerEvents {
     callback?: (ack: { ok: boolean; error?: string }) => void,
   ) => void;
 
+  // GitHub account assignment
+  "project:set-github-account": (
+    data: { projectId: string; accountId: string | null },
+    callback?: (ack: { ok: boolean; error?: string }) => void,
+  ) => void;
+
   // Sign commits toggle
   "project:get-sign-commits": (
     data: { projectId: string },

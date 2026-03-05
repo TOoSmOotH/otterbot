@@ -11,6 +11,7 @@ import type {
 import { MessageType, PIPELINE_STAGES } from "@otterbot/shared";
 import { getDb, schema } from "../db/index.js";
 import { getConfig, setConfig } from "../auth/auth.js";
+import { resolveGitHubToken, resolveGitHubUsername } from "../github/account-resolver.js";
 import { getAgentModelOverride } from "../settings/settings.js";
 import { resolveModel } from "../llm/adapter.js";
 import { Registry } from "../registry/registry.js";
@@ -369,7 +370,7 @@ export class PipelineManager {
     repo: string,
     issue: GitHubIssue,
   ): Promise<void> {
-    const token = getConfig("github:token");
+    const token = resolveGitHubToken(projectId);
     if (!token) return;
 
     const config = this.getConfig(projectId);
@@ -516,7 +517,7 @@ export class PipelineManager {
     // Detect fork mode from project config, re-checking push access
     let forkMode = getConfig(`project:${projectId}:github:fork_mode`) === "true";
     let forkRepo = getConfig(`project:${projectId}:github:fork_repo`) ?? null;
-    const token = getConfig("github:token");
+    const token = resolveGitHubToken(projectId);
 
     if (repo && token) {
       const hasPush = await checkHasPushAccess(repo, token);
@@ -637,7 +638,7 @@ export class PipelineManager {
 
       // Fallback: look for an open PR referencing this issue
       if (!state.prBranch && state.issueNumber && state.repo) {
-        state.prBranch = await this.resolveIssueBranch(state.repo, state.issueNumber);
+        state.prBranch = await this.resolveIssueBranch(state.repo, state.issueNumber, state.projectId);
       }
 
       // Check for branch collision with other active pipelines
@@ -693,7 +694,7 @@ export class PipelineManager {
           // Coder failed — move to backlog
           console.warn(`[PipelineManager] Coder FAIL for task ${taskId} — moving to backlog`);
           if (state.issueNumber && state.repo) {
-            const token = getConfig("github:token");
+            const token = resolveGitHubToken(state.projectId);
             if (token) {
               try {
                 await createIssueComment(
@@ -729,7 +730,7 @@ export class PipelineManager {
             this.persistPipelineState(state);
             this.updateTaskPipelineStage(taskId, "coder");
             if (state.issueNumber && state.repo) {
-              const token = getConfig("github:token");
+              const token = resolveGitHubToken(state.projectId);
               if (token) {
                 try {
                   await createIssueComment(
@@ -762,7 +763,7 @@ export class PipelineManager {
             this.persistPipelineState(state);
             this.updateTaskPipelineStage(taskId, "coder");
             if (state.issueNumber && state.repo) {
-              const token = getConfig("github:token");
+              const token = resolveGitHubToken(state.projectId);
               if (token) {
                 try {
                   await createIssueComment(
@@ -795,7 +796,7 @@ export class PipelineManager {
             this.persistPipelineState(state);
             this.updateTaskPipelineStage(taskId, "coder");
             if (state.issueNumber && state.repo) {
-              const token = getConfig("github:token");
+              const token = resolveGitHubToken(state.projectId);
               if (token) {
                 try {
                   await createIssueComment(
@@ -835,7 +836,7 @@ export class PipelineManager {
 
       // Post completion comment
       if (state.issueNumber && state.repo) {
-        const token = getConfig("github:token");
+        const token = resolveGitHubToken(state.projectId);
         if (token) {
           try {
             const prRef = state.prNumber
@@ -925,7 +926,7 @@ export class PipelineManager {
 
     // Post GitHub comment
     if (state.issueNumber && state.repo) {
-      const token = getConfig("github:token");
+      const token = resolveGitHubToken(state.projectId);
       if (token) {
         try {
           await createIssueComment(
@@ -1016,7 +1017,7 @@ export class PipelineManager {
 
     // Post comment on issue
     if (issueNumber && state.repo) {
-      const token = getConfig("github:token");
+      const token = resolveGitHubToken(state.projectId);
       if (token) {
         try {
           await createIssueComment(
@@ -1094,7 +1095,7 @@ export class PipelineManager {
 
     // Post comment on issue
     if (issueNumber && state.repo) {
-      const token = getConfig("github:token");
+      const token = resolveGitHubToken(state.projectId);
       if (token) {
         try {
           await createIssueComment(
@@ -1318,8 +1319,8 @@ export class PipelineManager {
 
           // Fetch and include issue comments for additional context
           if (state.issueNumber && state.repo) {
-            const token = getConfig("github:token");
-            const botUsername = getConfig("github:username");
+            const token = resolveGitHubToken(state.projectId);
+            const botUsername = resolveGitHubUsername(state.projectId);
             if (token) {
               try {
                 const allComments = await fetchIssueComments(state.repo, token, state.issueNumber);
@@ -1512,7 +1513,7 @@ export class PipelineManager {
     phase: "start" | "complete",
   ): Promise<void> {
     if (!state.issueNumber || !state.repo) return;
-    const token = getConfig("github:token");
+    const token = resolveGitHubToken(state.projectId);
     if (!token) return;
 
     let body: string;
@@ -1629,7 +1630,7 @@ export class PipelineManager {
 
   private async fetchDiffSection(state: PipelineState): Promise<string | null> {
     if (!state.prBranch || !state.repo) return null;
-    const token = getConfig("github:token");
+    const token = resolveGitHubToken(state.projectId);
     if (!token) return null;
 
     try {
@@ -1790,8 +1791,8 @@ export class PipelineManager {
    * Find the feature branch for an issue by looking for open PRs that reference it.
    * Falls back to the conventional feat/<issueNumber>-* branch naming pattern.
    */
-  private async resolveIssueBranch(repo: string, issueNumber: number): Promise<string | null> {
-    const token = getConfig("github:token");
+  private async resolveIssueBranch(repo: string, issueNumber: number, projectId: string): Promise<string | null> {
+    const token = resolveGitHubToken(projectId);
     if (!token) return null;
 
     try {
@@ -1860,7 +1861,7 @@ export class PipelineManager {
 
     // If we have a branch but no PR number, try to resolve it via GitHub API
     if (task.prBranch && !task.prNumber) {
-      const token = getConfig("github:token");
+      const token = resolveGitHubToken(state.projectId);
       const project = db
         .select()
         .from(schema.projects)

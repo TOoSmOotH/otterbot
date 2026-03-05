@@ -19,6 +19,23 @@ export interface TestResult {
   testing: boolean;
 }
 
+export interface GitHubAccountState {
+  id: string;
+  label: string;
+  tokenSet: boolean;
+  username: string | null;
+  email: string | null;
+  sshKeySet: boolean;
+  sshFingerprint: string | null;
+  sshKeyType: string | null;
+  isDefault: boolean;
+  createdAt: string;
+  // Local UI state
+  testResult?: TestResult & { username?: string };
+  sshPublicKey?: string | null;
+  sshTestResult?: TestResult & { username?: string };
+}
+
 export interface ScheduledTaskInfo {
   id: string;
   name: string;
@@ -165,6 +182,7 @@ interface SettingsState {
   gitHubTokenSet: boolean;
   gitHubUsername: string | null;
   gitHubTestResult: TestResult | null;
+  gitHubAccounts: GitHubAccountState[];
 
   // GitHub SSH
   sshKeySet: boolean;
@@ -401,6 +419,19 @@ interface SettingsState {
   removeSSHKey: () => Promise<void>;
   testSSHConnection: () => Promise<void>;
 
+  // GitHub account actions
+  loadGitHubAccounts: () => Promise<void>;
+  createGitHubAccount: (data: { label: string; token: string; email?: string; isDefault?: boolean }) => Promise<void>;
+  updateGitHubAccount: (id: string, data: { label?: string; token?: string; email?: string }) => Promise<void>;
+  deleteGitHubAccount: (id: string) => Promise<{ ok: boolean; error?: string }>;
+  setDefaultGitHubAccount: (id: string) => Promise<void>;
+  testGitHubAccount: (id: string) => Promise<void>;
+  generateAccountSSHKey: (accountId: string, type?: "ed25519" | "rsa") => Promise<void>;
+  importAccountSSHKey: (accountId: string, privateKey: string) => Promise<void>;
+  getAccountSSHPublicKey: (accountId: string) => Promise<void>;
+  removeAccountSSHKey: (accountId: string) => Promise<void>;
+  testAccountSSHConnection: (accountId: string) => Promise<void>;
+
   // Discord actions
   loadDiscordSettings: () => Promise<void>;
   updateDiscordSettings: (data: {
@@ -579,6 +610,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   gitHubTokenSet: false,
   gitHubUsername: null,
   gitHubTestResult: null,
+  gitHubAccounts: [],
   sshKeySet: false,
   sshKeyFingerprint: null,
   sshKeyType: null,
@@ -1719,6 +1751,227 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     }
   },
 
+  // GitHub account actions
+
+  loadGitHubAccounts: async () => {
+    try {
+      const res = await fetch("/api/settings/github/accounts");
+      if (!res.ok) return;
+      const accounts = await res.json();
+      set({ gitHubAccounts: accounts });
+    } catch {
+      // Silently fail
+    }
+  },
+
+  createGitHubAccount: async (data) => {
+    set({ error: null });
+    try {
+      const res = await fetch("/api/settings/github/accounts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) throw new Error("Failed to create GitHub account");
+      await get().loadGitHubAccounts();
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "Unknown error" });
+    }
+  },
+
+  updateGitHubAccount: async (id, data) => {
+    set({ error: null });
+    try {
+      const res = await fetch(`/api/settings/github/accounts/${id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) throw new Error("Failed to update GitHub account");
+      await get().loadGitHubAccounts();
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "Unknown error" });
+    }
+  },
+
+  deleteGitHubAccount: async (id) => {
+    set({ error: null });
+    try {
+      const res = await fetch(`/api/settings/github/accounts/${id}`, { method: "DELETE" });
+      const data = await res.json();
+      if (!data.ok) {
+        set({ error: data.error ?? "Failed to delete account" });
+        return data;
+      }
+      await get().loadGitHubAccounts();
+      return data;
+    } catch (err) {
+      const error = err instanceof Error ? err.message : "Unknown error";
+      set({ error });
+      return { ok: false, error };
+    }
+  },
+
+  setDefaultGitHubAccount: async (id) => {
+    set({ error: null });
+    try {
+      const res = await fetch(`/api/settings/github/accounts/${id}/default`, { method: "PUT" });
+      if (!res.ok) throw new Error("Failed to set default account");
+      await get().loadGitHubAccounts();
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "Unknown error" });
+    }
+  },
+
+  testGitHubAccount: async (id) => {
+    set({
+      gitHubAccounts: get().gitHubAccounts.map((a) =>
+        a.id === id ? { ...a, testResult: { ok: false, testing: true } } : a,
+      ),
+    });
+    try {
+      const res = await fetch(`/api/settings/github/accounts/${id}/test`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      const data = await res.json();
+      set({
+        gitHubAccounts: get().gitHubAccounts.map((a) =>
+          a.id === id
+            ? {
+                ...a,
+                username: data.ok && data.username ? data.username : a.username,
+                testResult: { ok: data.ok, error: data.error, testing: false },
+              }
+            : a,
+        ),
+      });
+    } catch (err) {
+      set({
+        gitHubAccounts: get().gitHubAccounts.map((a) =>
+          a.id === id
+            ? { ...a, testResult: { ok: false, error: err instanceof Error ? err.message : "Unknown error", testing: false } }
+            : a,
+        ),
+      });
+    }
+  },
+
+  generateAccountSSHKey: async (accountId, type) => {
+    set({ error: null });
+    try {
+      const res = await fetch(`/api/settings/github/accounts/${accountId}/ssh/generate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type: type ?? "ed25519" }),
+      });
+      const data = await res.json();
+      if (!data.ok) {
+        set({ error: data.error ?? "Failed to generate SSH key" });
+        return;
+      }
+      set({
+        gitHubAccounts: get().gitHubAccounts.map((a) =>
+          a.id === accountId ? { ...a, sshPublicKey: data.publicKey } : a,
+        ),
+      });
+      await get().loadGitHubAccounts();
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "Unknown error" });
+    }
+  },
+
+  importAccountSSHKey: async (accountId, privateKey) => {
+    set({ error: null });
+    try {
+      const res = await fetch(`/api/settings/github/accounts/${accountId}/ssh/import`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ privateKey }),
+      });
+      const data = await res.json();
+      if (!data.ok) {
+        set({ error: data.error ?? "Failed to import SSH key" });
+        return;
+      }
+      set({
+        gitHubAccounts: get().gitHubAccounts.map((a) =>
+          a.id === accountId ? { ...a, sshPublicKey: data.publicKey } : a,
+        ),
+      });
+      await get().loadGitHubAccounts();
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "Unknown error" });
+    }
+  },
+
+  getAccountSSHPublicKey: async (accountId) => {
+    try {
+      const res = await fetch(`/api/settings/github/accounts/${accountId}/ssh/public-key`);
+      if (!res.ok) return;
+      const data = await res.json();
+      set({
+        gitHubAccounts: get().gitHubAccounts.map((a) =>
+          a.id === accountId ? { ...a, sshPublicKey: data.publicKey } : a,
+        ),
+      });
+    } catch {
+      // Silently fail
+    }
+  },
+
+  removeAccountSSHKey: async (accountId) => {
+    set({ error: null });
+    try {
+      const res = await fetch(`/api/settings/github/accounts/${accountId}/ssh`, { method: "DELETE" });
+      const data = await res.json();
+      if (!data.ok) {
+        set({ error: data.error ?? "Failed to remove SSH key" });
+        return;
+      }
+      set({
+        gitHubAccounts: get().gitHubAccounts.map((a) =>
+          a.id === accountId ? { ...a, sshPublicKey: null, sshTestResult: undefined } : a,
+        ),
+      });
+      await get().loadGitHubAccounts();
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "Unknown error" });
+    }
+  },
+
+  testAccountSSHConnection: async (accountId) => {
+    set({
+      gitHubAccounts: get().gitHubAccounts.map((a) =>
+        a.id === accountId ? { ...a, sshTestResult: { ok: false, testing: true } } : a,
+      ),
+    });
+    try {
+      const res = await fetch(`/api/settings/github/accounts/${accountId}/ssh/test`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      const data = await res.json();
+      set({
+        gitHubAccounts: get().gitHubAccounts.map((a) =>
+          a.id === accountId
+            ? { ...a, sshTestResult: { ok: data.ok, error: data.error, username: data.username, testing: false } }
+            : a,
+        ),
+      });
+    } catch (err) {
+      set({
+        gitHubAccounts: get().gitHubAccounts.map((a) =>
+          a.id === accountId
+            ? { ...a, sshTestResult: { ok: false, error: err instanceof Error ? err.message : "Unknown error", testing: false } }
+            : a,
+        ),
+      });
+    }
+  },
+
   // Discord actions
 
   loadDiscordSettings: async () => {
@@ -2425,6 +2678,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       a.loadMattermostSettings(),
       a.loadNextcloudTalkSettings(),
       a.loadGitHubSettings(),
+      a.loadGitHubAccounts(),
       a.loadGoogleSettings(),
       a.loadEmailSettings(),
       a.loadSearchSettings(),
