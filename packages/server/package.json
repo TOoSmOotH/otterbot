@@ -42,6 +42,7 @@
     "isolated-vm": "^6.0.2",
     "kokoro-js": "^1.1.0",
     "mailparser": "^3.9.3",
+    "masto": "^7.10.2",
     "matrix-js-sdk": "^34.11.1",
     "nanoid": "^5.0.9",
     "node-pty": "^1.1.0",
