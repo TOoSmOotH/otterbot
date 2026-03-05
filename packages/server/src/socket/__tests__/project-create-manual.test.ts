@@ -16,9 +16,19 @@ vi.mock("../../auth/auth.js", () => ({
 // Mock github-service
 const mockCloneRepo = vi.fn();
 const mockGetRepoDefaultBranch = vi.fn().mockResolvedValue("main");
+const mockCheckHasPushAccess = vi.fn().mockResolvedValue(true);
+const mockCreateFork = vi.fn();
+const mockWaitForFork = vi.fn();
+const mockSyncFork = vi.fn();
+const mockCloneForForkContribution = vi.fn();
 vi.mock("../../github/github-service.js", () => ({
   cloneRepo: (...args: any[]) => mockCloneRepo(...args),
   getRepoDefaultBranch: (...args: any[]) => mockGetRepoDefaultBranch(...args),
+  checkHasPushAccess: (...args: any[]) => mockCheckHasPushAccess(...args),
+  createFork: (...args: any[]) => mockCreateFork(...args),
+  waitForFork: (...args: any[]) => mockWaitForFork(...args),
+  syncFork: (...args: any[]) => mockSyncFork(...args),
+  cloneForForkContribution: (...args: any[]) => mockCloneForForkContribution(...args),
 }));
 
 // Mock TTS
@@ -178,6 +188,11 @@ describe("project:create-manual socket handler", () => {
     socketHandlers.clear();
     mockCloneRepo.mockReset();
     mockGetRepoDefaultBranch.mockReset().mockResolvedValue("main");
+    mockCheckHasPushAccess.mockReset().mockResolvedValue(true);
+    mockCreateFork.mockReset();
+    mockWaitForFork.mockReset();
+    mockSyncFork.mockReset();
+    mockCloneForForkContribution.mockReset();
     mockInitGitRepo.mockReset();
     mockCreateInitialCommit.mockReset();
     process.env.DATABASE_URL = `file:${join(tmpDir, "test.db")}`;

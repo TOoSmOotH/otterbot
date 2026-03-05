@@ -158,10 +158,9 @@ describe("Ollama provider configuration", () => {
   it("has fallback models for ollama provider", async () => {
     const { fetchModelsWithCredentials } = await import("../../settings/settings.js");
 
-    // Without a reachable Ollama server, should return fallback models
+    // Returns either live models from a running Ollama server or fallback models
     const models = await fetchModelsWithCredentials("ollama");
     expect(models.length).toBeGreaterThan(0);
-    expect(models).toContain("llama3.1");
   });
 });
 

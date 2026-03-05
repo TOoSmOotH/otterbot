@@ -595,7 +595,7 @@ export class GitHubIssueMonitor {
           watched.repo,
           token,
           issue.number,
-          formatBotComment("Issue Acknowledged", "Looking into this issue and will begin working on a fix shortly."),
+          formatBotComment("Working on It", "Working on this issue now."),
         );
       } catch (commentErr) {
         console.error(

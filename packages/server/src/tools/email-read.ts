@@ -1,12 +1,12 @@
 import { tool } from "ai";
 import { z } from "zod";
-import { readEmail } from "../google/gmail-client.js";
+import { readEmail } from "../email/imap-client.js";
 
-export function createGmailReadTool() {
+export function createEmailReadTool() {
   return tool({
     description: "Read a specific email by its message ID. Returns the full body and metadata.",
     parameters: z.object({
-      messageId: z.string().describe("The Gmail message ID"),
+      messageId: z.string().describe("The email message ID (UID)"),
     }),
     execute: async ({ messageId }) => {
       try {
@@ -19,7 +19,6 @@ export function createGmailReadTool() {
           `To: ${email.to}`,
           email.cc ? `Cc: ${email.cc}` : null,
           `Date: ${email.date}`,
-          `Labels: ${email.labelIds.join(", ")}`,
           "",
           email.body.slice(0, 10000),
         ].filter(Boolean);

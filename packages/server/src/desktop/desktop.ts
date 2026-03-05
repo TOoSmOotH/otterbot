@@ -64,10 +64,22 @@ export function registerDesktopProxy(app: FastifyInstance, allowedOrigins?: stri
     // Missing Origin is allowed (non-browser clients), but a present Origin must match.
     const origin = req.headers.origin;
     if (origin) {
-      const allowed = allowedOrigins === false
-        ? false
-        : Array.isArray(allowedOrigins) && allowedOrigins.includes(origin);
+      let allowed = false;
+      if (allowedOrigins === false) {
+        // Same-origin mode: allow if Origin host matches the Host header
+        const host = req.headers.host;
+        if (host) {
+          try {
+            allowed = new URL(origin).host === host;
+          } catch {
+            allowed = false;
+          }
+        }
+      } else {
+        allowed = Array.isArray(allowedOrigins) && allowedOrigins.includes(origin);
+      }
       if (!allowed) {
+        console.warn(`[desktop] WebSocket rejected: origin ${origin} not allowed`);
         socket.write("HTTP/1.1 403 Forbidden\r\n\r\n");
         socket.destroy();
         return;

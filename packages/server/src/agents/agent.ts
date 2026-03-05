@@ -14,6 +14,7 @@ import { stream, resolveProviderCredentials } from "../llm/adapter.js";
 import { RetryError } from "ai";
 import {
   containsKimiToolMarkup,
+  CODING_AGENT_PROVIDER_TYPES,
   findToolMarkupStart,
   formatToolsForPrompt,
   parseKimiToolCalls,
@@ -227,6 +228,7 @@ export abstract class BaseAgent {
     onToken?: (token: string, messageId: string) => void,
     onReasoning?: (token: string, messageId: string) => void,
     onReasoningEnd?: (messageId: string) => void,
+    options?: { imageParts?: Array<{ type: "image"; image: URL }> },
   ): Promise<{ text: string; thinking: string | undefined; hadToolCalls: boolean; isError?: boolean; timedOut?: boolean }> {
     // Re-read model/provider from config (no-op for short-lived workers)
     this.refreshLlmConfig();
@@ -290,14 +292,28 @@ export abstract class BaseAgent {
       console.warn(`[Agent ${this.id}] Failed to inject memories:`, err);
     }
 
-    this.conversationHistory.push({ role: "user", content: userMessage });
+    if (options?.imageParts && options.imageParts.length > 0) {
+      this.conversationHistory.push({
+        role: "user",
+        content: [
+          { type: "text", text: userMessage },
+          ...options.imageParts,
+        ],
+      });
+    } else {
+      this.conversationHistory.push({ role: "user", content: userMessage });
+    }
     this.setStatus(AgentStatus.Thinking);
     console.log(`[Agent ${this.id}] think() — provider=${this.llmConfig.provider} model=${this.llmConfig.model}`);
 
     try {
       const tools = this.getTools();
       const hasTools = Object.keys(tools).length > 0;
-      const textToolMode = hasTools && usesTextToolCalling(this.llmConfig.model);
+      const resolvedType = resolveProviderCredentials(this.llmConfig.provider).type;
+      const textToolMode = hasTools && (
+        usesTextToolCalling(this.llmConfig.model) ||
+        CODING_AGENT_PROVIDER_TYPES.has(resolvedType)
+      );
 
       // For models that use text-based tool calling (e.g. Kimi K2.5), skip the
       // SDK-tools call entirely — it always returns empty. Go straight to text injection.

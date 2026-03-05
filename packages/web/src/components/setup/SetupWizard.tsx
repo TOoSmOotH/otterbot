@@ -1353,7 +1353,7 @@ export function SetupWizard() {
                 7. Customize your Admin Assistant
               </h2>
               <p className="text-xs text-muted-foreground">
-                Your Admin Assistant handles personal productivity — managing your todos, email (Gmail), and calendar. Give them a name and optionally pick a 3D character.
+                Your Admin Assistant handles personal productivity — managing your todos, email, and calendar. Give them a name and optionally pick a 3D character.
               </p>
 
               {/* Admin Assistant Name */}

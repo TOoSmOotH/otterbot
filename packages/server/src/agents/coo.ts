@@ -7,6 +7,7 @@ import {
   AgentStatus,
   MessageType,
   type BusMessage,
+  type ChatAttachment,
   ProjectStatus,
   CharterStatus,
   type Project,
@@ -375,7 +376,48 @@ The user can see everything on the desktop in real-time.`;
     const projectContext = this.getActiveProjectsSummary();
     const enrichedContent = message.content + currentProjectBlock + projectContext;
 
-    console.log(`[COO] Calling think() — model=${this.llmConfig.model} provider=${this.llmConfig.provider}`);
+    // Build image parts from attachments (for multi-modal LLM support)
+    const MAX_IMAGE_ATTACHMENTS = 5;
+    const MAX_IMAGE_FILE_SIZE = 5 * 1024 * 1024; // 5 MB per image for LLM processing
+    const attachments = (message.metadata?.attachments as ChatAttachment[] | undefined) ?? [];
+    const imageParts: Array<{ type: "image"; image: URL }> = [];
+    let imageCount = 0;
+    for (const att of attachments) {
+      if (att.mimeType.startsWith("image/")) {
+        if (imageCount >= MAX_IMAGE_ATTACHMENTS) {
+          console.warn(`[COO] Skipping image attachment — max ${MAX_IMAGE_ATTACHMENTS} images per message`);
+          continue;
+        }
+        try {
+          const { readFile, stat } = await import("node:fs/promises");
+          const { resolve, basename, sep } = await import("node:path");
+          const uploadsBase = resolve(process.env.WORKSPACE_ROOT ?? resolve(__dirname, "../../../../docker/otterbot"), "data", "uploads");
+          // Sanitize: use basename to strip any directory traversal from the URL
+          const filename = basename(att.url.split("/").pop() ?? "");
+          if (!filename) continue;
+          const filePath = resolve(uploadsBase, filename);
+          // Verify the resolved path stays within the uploads directory
+          if (!filePath.startsWith(uploadsBase + sep) && filePath !== uploadsBase) {
+            console.warn(`[COO] Rejected path traversal attempt: ${att.url}`);
+            continue;
+          }
+          // Check file size before reading to prevent memory exhaustion
+          const fileStat = await stat(filePath);
+          if (fileStat.size > MAX_IMAGE_FILE_SIZE) {
+            console.warn(`[COO] Skipping oversized image (${(fileStat.size / 1024 / 1024).toFixed(1)} MB > ${MAX_IMAGE_FILE_SIZE / 1024 / 1024} MB limit): ${filename}`);
+            continue;
+          }
+          const buf = await readFile(filePath);
+          const b64 = buf.toString("base64");
+          imageParts.push({ type: "image", image: new URL(`data:${att.mimeType};base64,${b64}`) });
+          imageCount++;
+        } catch (err) {
+          console.warn(`[COO] Failed to read attachment file ${att.url}:`, err);
+        }
+      }
+    }
+
+    console.log(`[COO] Calling think() — model=${this.llmConfig.model} provider=${this.llmConfig.provider}${attachments.length > 0 ? ` attachments=${attachments.length}` : ""}`);
     const { text, thinking } = await this.think(
       enrichedContent,
       (token, messageId) => {
@@ -387,8 +429,32 @@ The user can see everything on the desktop in real-time.`;
       (messageId) => {
         this.onThinkingEnd?.(messageId, this.currentConversationId);
       },
+      imageParts.length > 0 ? { imageParts } : undefined,
     );
     console.log(`[COO] think() returned (${text.length} chars): "${text.slice(0, 120)}"`);
+
+    // Strip base64 image data from conversation history to prevent memory bloat
+    // on subsequent turns. Replace multimodal entries with text-only equivalents.
+    if (imageParts.length > 0) {
+      for (let i = this.conversationHistory.length - 1; i >= 0; i--) {
+        const entry = this.conversationHistory[i];
+        if (entry.role === "user" && Array.isArray(entry.content)) {
+          const textPart = entry.content.find(
+            (p: { type: string }) => p.type === "text",
+          ) as { type: "text"; text: string } | undefined;
+          if (textPart) {
+            const imageCount = entry.content.filter(
+              (p: { type: string }) => p.type === "image",
+            ).length;
+            this.conversationHistory[i] = {
+              role: "user",
+              content: textPart.text + (imageCount > 0 ? ` [${imageCount} image(s) attached]` : ""),
+            };
+          }
+          break; // only strip the most recent multimodal message
+        }
+      }
+    }
 
     // Guard: if think() produced raw JSON instead of natural language
     // (e.g. from a forced synthesis after tool failures), re-synthesize.
@@ -489,9 +555,10 @@ The user can see everything on the desktop in real-time.`;
     onToken?: (token: string, messageId: string) => void,
     onReasoning?: (token: string, messageId: string) => void,
     onReasoningEnd?: (messageId: string) => void,
+    options?: { imageParts?: Array<{ type: "image"; image: URL }> },
   ): Promise<{ text: string; thinking: string | undefined; hadToolCalls: boolean }> {
     this._runCommandCalls = 0;
-    return super.think(userMessage, onToken, onReasoning, onReasoningEnd);
+    return super.think(userMessage, onToken, onReasoning, onReasoningEnd, options);
   }
 
   /**

@@ -13,12 +13,12 @@ import { createTodoListTool } from "./todo-list.js";
 import { createTodoCreateTool } from "./todo-create.js";
 import { createTodoUpdateTool } from "./todo-update.js";
 import { createTodoDeleteTool } from "./todo-delete.js";
-import { createGmailListTool } from "./gmail-list.js";
-import { createGmailReadTool } from "./gmail-read.js";
-import { createGmailSendTool } from "./gmail-send.js";
-import { createGmailReplyTool } from "./gmail-reply.js";
-import { createGmailLabelTool } from "./gmail-label.js";
-import { createGmailArchiveTool } from "./gmail-archive.js";
+import { createEmailListTool } from "./email-list.js";
+import { createEmailReadTool } from "./email-read.js";
+import { createEmailSendTool } from "./email-send.js";
+import { createEmailReplyTool } from "./email-reply.js";
+import { createEmailFolderTool } from "./email-label.js";
+import { createEmailArchiveTool } from "./email-archive.js";
 import { createCalendarListEventsTool } from "./calendar-list-events.js";
 import { createCalendarCreateEventTool } from "./calendar-create-event.js";
 import { createCalendarUpdateEventTool } from "./calendar-update-event.js";
@@ -75,12 +75,12 @@ const CONTEXTLESS_TOOL_REGISTRY: Record<string, () => unknown> = {
   todo_create: createTodoCreateTool,
   todo_update: createTodoUpdateTool,
   todo_delete: createTodoDeleteTool,
-  gmail_list: createGmailListTool,
-  gmail_read: createGmailReadTool,
-  gmail_send: createGmailSendTool,
-  gmail_reply: createGmailReplyTool,
-  gmail_label: createGmailLabelTool,
-  gmail_archive: createGmailArchiveTool,
+  email_list: createEmailListTool,
+  email_read: createEmailReadTool,
+  email_send: createEmailSendTool,
+  email_reply: createEmailReplyTool,
+  email_folder: createEmailFolderTool,
+  email_archive: createEmailArchiveTool,
   calendar_list_events: createCalendarListEventsTool,
   calendar_create_event: createCalendarCreateEventTool,
   calendar_update_event: createCalendarUpdateEventTool,
@@ -396,23 +396,23 @@ export function getToolsWithMeta(): {
         { name: "id", type: "string", required: true, description: "The todo ID to delete" },
       ],
     },
-    gmail_list: {
-      description: "List Gmail messages from the inbox, with optional query filtering.",
+    email_list: {
+      description: "List email messages from the inbox.",
       category: "Email",
       parameters: [
-        { name: "query", type: "string", required: false, description: "Gmail search query (e.g. 'is:unread', 'from:user@example.com')" },
+        { name: "query", type: "string", required: false, description: "Search query (reserved for future use)" },
         { name: "maxResults", type: "number", required: false, description: "Maximum number of messages to return (default: 10)" },
       ],
     },
-    gmail_read: {
-      description: "Read the full content of a specific Gmail message by ID.",
+    email_read: {
+      description: "Read the full content of a specific email message by ID.",
       category: "Email",
       parameters: [
-        { name: "messageId", type: "string", required: true, description: "The Gmail message ID" },
+        { name: "messageId", type: "string", required: true, description: "The email message ID (UID)" },
       ],
     },
-    gmail_send: {
-      description: "Send a new email via Gmail.",
+    email_send: {
+      description: "Send a new email via SMTP.",
       category: "Email",
       parameters: [
         { name: "to", type: "string", required: true, description: "Recipient email address" },
@@ -420,25 +420,24 @@ export function getToolsWithMeta(): {
         { name: "body", type: "string", required: true, description: "Email body (plain text)" },
       ],
     },
-    gmail_reply: {
-      description: "Reply to an existing Gmail message.",
+    email_reply: {
+      description: "Reply to an existing email message.",
       category: "Email",
       parameters: [
         { name: "messageId", type: "string", required: true, description: "The message ID to reply to" },
         { name: "body", type: "string", required: true, description: "Reply body (plain text)" },
       ],
     },
-    gmail_label: {
-      description: "Add or remove labels on Gmail messages.",
+    email_folder: {
+      description: "Move an email to a different folder.",
       category: "Email",
       parameters: [
         { name: "messageId", type: "string", required: true, description: "The message ID" },
-        { name: "addLabels", type: "string[]", required: false, description: "Labels to add" },
-        { name: "removeLabels", type: "string[]", required: false, description: "Labels to remove" },
+        { name: "folder", type: "string", required: true, description: "Target folder name" },
       ],
     },
-    gmail_archive: {
-      description: "Archive Gmail messages by removing the INBOX label.",
+    email_archive: {
+      description: "Archive an email (move out of inbox).",
       category: "Email",
       parameters: [
         { name: "messageId", type: "string", required: true, description: "The message ID to archive" },

@@ -5,8 +5,8 @@ import fastifyCookie from "@fastify/cookie";
 import fastifyStatic from "@fastify/static";
 import multipart from "@fastify/multipart";
 import { Server } from "socket.io";
-import { resolve, dirname, join, sep } from "node:path";
-import { existsSync, readFileSync, writeFileSync, mkdirSync, createReadStream, createWriteStream, copyFileSync, unlinkSync } from "node:fs";
+import { resolve, dirname, join, sep, basename, extname } from "node:path";
+import { existsSync, readFileSync, writeFileSync, mkdirSync, createReadStream, createWriteStream, copyFileSync, unlinkSync, readdirSync, statSync } from "node:fs";
 import { pipeline } from "node:stream/promises";
 import { execSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -187,6 +187,15 @@ import {
   updateIrcSettings,
   getIrcConfig,
 } from "./irc/irc-settings.js";
+import {
+  getEmailSettings,
+  updateEmailSettings as updateEmailSettingsFn,
+  getEmailConnectionConfig,
+} from "./email/email-settings.js";
+import {
+  startEmailConnection,
+  stopEmailConnection,
+} from "./email/imap-client.js";
 import {
   approvePairing as approveIrcPairing,
   rejectPairing as rejectIrcPairing,
@@ -597,6 +606,15 @@ async function main() {
       await ircBridge.stop();
       ircBridge = null;
     }
+  }
+
+  // Email IMAP connection (initialized when enabled + config set)
+  function startEmailImap() {
+    const config = getEmailConnectionConfig();
+    if (!config) return;
+    startEmailConnection(config).catch((err) => {
+      console.error("[Email] Failed to start IMAP connection:", err);
+    });
   }
 
   // Teams bridge (initialized when enabled + credentials set)
@@ -1178,6 +1196,7 @@ async function main() {
     startCoo();
     startDiscordBridge();
     startIrcBridge();
+    startEmailImap();
     startTeamsBridge();
     startSlackBridge();
     startMattermostBridge();
@@ -1537,6 +1556,7 @@ async function main() {
     startCoo();
     startDiscordBridge();
     startIrcBridge();
+    startEmailImap();
     startTeamsBridge();
     startSlackBridge();
     startMattermostBridge();
@@ -1693,6 +1713,29 @@ async function main() {
     }
   });
 
+  // CSRF protection: validate Origin header on state-changing requests
+  app.addHook("onRequest", async (req, reply) => {
+    if (req.method === "GET" || req.method === "HEAD" || req.method === "OPTIONS") return;
+    if (!req.url.startsWith("/api/")) return;
+    // Allow auth endpoints (login needs to work cross-origin in some setups)
+    if (req.url.startsWith("/api/auth/")) return;
+
+    const origin = req.headers.origin;
+    if (origin) {
+      try {
+        const originHost = new URL(origin).host;
+        const requestHost = req.headers.host ?? req.headers[":authority"];
+        if (requestHost && originHost !== requestHost) {
+          reply.code(403).send({ error: "CSRF validation failed: origin mismatch" });
+          return;
+        }
+      } catch {
+        reply.code(403).send({ error: "CSRF validation failed: invalid origin" });
+        return;
+      }
+    }
+  });
+
   // =========================================================================
   // Protected routes
   // =========================================================================
@@ -1829,6 +1872,105 @@ async function main() {
       .from(schema.conversations)
       .orderBy(desc(schema.conversations.updatedAt))
       .all();
+  });
+
+  // =========================================================================
+  // Chat file upload
+  // =========================================================================
+
+  const uploadsDir = join(dataDir, "data", "uploads");
+  mkdirSync(uploadsDir, { recursive: true });
+
+  // Allowed upload extensions (lowercase, with dot)
+  const ALLOWED_UPLOAD_EXTS = new Set([
+    ".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".svg",
+    ".pdf", ".txt", ".md", ".json", ".csv", ".xml", ".yaml", ".yml",
+    ".js", ".ts", ".jsx", ".tsx", ".py", ".go", ".rs", ".java", ".c", ".cpp", ".h",
+    ".html", ".css",
+  ]);
+  const MAX_UPLOAD_SIZE = 10 * 1024 * 1024; // 10 MB per file
+  const MAX_TOTAL_UPLOAD_BYTES = 500 * 1024 * 1024; // 500 MB total upload quota
+
+  /** Calculate total size of all files in the uploads directory */
+  function getUploadsDirSize(): number {
+    try {
+      const files = readdirSync(uploadsDir);
+      let total = 0;
+      for (const f of files) {
+        try {
+          const s = statSync(join(uploadsDir, f));
+          if (s.isFile()) total += s.size;
+        } catch { /* skip unreadable files */ }
+      }
+      return total;
+    } catch { return 0; }
+  }
+
+  // Serve uploaded files with security headers (auth-protected)
+  app.addHook("onRequest", async (req, reply) => {
+    if (!req.url.startsWith("/uploads/")) return;
+    const token = req.cookies.sb_session;
+    if (!validateSession(token)) {
+      reply.code(401).send({ error: "Unauthorized" });
+    }
+  });
+
+  await app.register(fastifyStatic, {
+    root: uploadsDir,
+    prefix: "/uploads/",
+    decorateReply: false,
+    setHeaders(res) {
+      res.setHeader("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'");
+      res.setHeader("X-Content-Type-Options", "nosniff");
+      res.setHeader("Cache-Control", "private, no-cache");
+    },
+  });
+
+  app.post("/api/chat/upload", async (req) => {
+    // Check total upload quota before accepting new files
+    const currentUsage = getUploadsDirSize();
+    if (currentUsage >= MAX_TOTAL_UPLOAD_BYTES) {
+      throw new Error(`Upload quota exceeded (${Math.round(currentUsage / 1024 / 1024)} MB / ${MAX_TOTAL_UPLOAD_BYTES / 1024 / 1024} MB). Delete old files to free space.`);
+    }
+
+    const file = await req.file({ limits: { fileSize: MAX_UPLOAD_SIZE } });
+    if (!file) throw new Error("No file uploaded");
+
+    // Sanitize: use only basename to prevent path traversal, then extract extension
+    const safeName = basename(file.filename);
+    const ext = extname(safeName).toLowerCase();
+
+    if (ext && !ALLOWED_UPLOAD_EXTS.has(ext)) {
+      throw new Error(`File type '${ext}' is not allowed`);
+    }
+
+    const { nanoid } = await import("nanoid");
+    const id = nanoid();
+    const storedName = `${id}${ext}`;
+    const destPath = join(uploadsDir, storedName);
+
+    // Verify the resolved path is within the uploads directory
+    const resolvedDest = resolve(destPath);
+    const resolvedUploads = resolve(uploadsDir);
+    if (!resolvedDest.startsWith(resolvedUploads + sep) && resolvedDest !== resolvedUploads) {
+      throw new Error("Invalid file path");
+    }
+
+    await pipeline(file.file, createWriteStream(destPath));
+
+    // Check if file was truncated (exceeded size limit)
+    if (file.file.truncated) {
+      unlinkSync(destPath);
+      throw new Error(`File exceeds maximum size of ${MAX_UPLOAD_SIZE / 1024 / 1024} MB`);
+    }
+
+    return {
+      id,
+      filename: safeName,
+      mimeType: file.mimetype,
+      size: file.file.bytesRead,
+      url: `/uploads/${storedName}`,
+    };
   });
 
   // =========================================================================
@@ -4605,14 +4747,24 @@ async function main() {
   });
 
   // =========================================================================
-  // Gmail REST routes
+  // Email (IMAP/SMTP) REST routes
   // =========================================================================
 
-  app.get<{
-    Querystring: { q?: string; maxResults?: string; pageToken?: string };
-  }>("/api/gmail/messages", async (req, reply) => {
+  app.get("/api/email/folders", async (_req, reply) => {
     try {
-      const { listEmails } = await import("./google/gmail-client.js");
+      const { listFolders } = await import("./email/imap-client.js");
+      return await listFolders();
+    } catch (err) {
+      reply.code(500);
+      return { error: err instanceof Error ? err.message : "Failed to list folders" };
+    }
+  });
+
+  app.get<{
+    Querystring: { q?: string; maxResults?: string; pageToken?: string; folder?: string };
+  }>("/api/email/messages", async (req, reply) => {
+    try {
+      const { listEmails } = await import("./email/imap-client.js");
       return await listEmails(req.query);
     } catch (err) {
       reply.code(500);
@@ -4622,10 +4774,11 @@ async function main() {
 
   app.get<{
     Params: { id: string };
-  }>("/api/gmail/messages/:id", async (req, reply) => {
+    Querystring: { folder?: string };
+  }>("/api/email/messages/:id", async (req, reply) => {
     try {
-      const { readEmail } = await import("./google/gmail-client.js");
-      const email = await readEmail(req.params.id);
+      const { readEmail } = await import("./email/imap-client.js");
+      const email = await readEmail(req.params.id, req.query.folder);
       if (!email) { reply.code(404); return { error: "Email not found" }; }
       return email;
     } catch (err) {
@@ -4636,10 +4789,13 @@ async function main() {
 
   app.post<{
     Body: { to: string; subject: string; body: string; cc?: string; bcc?: string; inReplyTo?: string; threadId?: string };
-  }>("/api/gmail/send", async (req, reply) => {
+  }>("/api/email/send", async (req, reply) => {
     try {
-      const { sendEmail } = await import("./google/gmail-client.js");
-      return await sendEmail(req.body);
+      const { sendEmail } = await import("./email/imap-client.js");
+      const { getEmailConnectionConfig } = await import("./email/email-settings.js");
+      const config = getEmailConnectionConfig();
+      if (!config) { reply.code(400); return { error: "Email not configured" }; }
+      return await sendEmail(config, req.body);
     } catch (err) {
       reply.code(500);
       return { error: err instanceof Error ? err.message : "Failed to send email" };
@@ -4648,9 +4804,9 @@ async function main() {
 
   app.post<{
     Params: { id: string };
-  }>("/api/gmail/messages/:id/archive", async (req, reply) => {
+  }>("/api/email/messages/:id/archive", async (req, reply) => {
     try {
-      const { archiveEmail } = await import("./google/gmail-client.js");
+      const { archiveEmail } = await import("./email/imap-client.js");
       await archiveEmail(req.params.id);
       return { ok: true };
     } catch (err) {
@@ -4659,13 +4815,67 @@ async function main() {
     }
   });
 
-  app.get("/api/gmail/labels", async (req, reply) => {
+  // =========================================================================
+  // Email settings routes
+  // =========================================================================
+
+  app.get("/api/settings/email", async () => {
+    const { getEmailSettings } = await import("./email/email-settings.js");
+    return getEmailSettings();
+  });
+
+  app.put<{
+    Body: {
+      enabled?: boolean;
+      imapServer?: string;
+      imapPort?: number;
+      imapTls?: boolean;
+      smtpServer?: string;
+      smtpPort?: number;
+      smtpTls?: boolean;
+      username?: string;
+      password?: string;
+      fromName?: string;
+    };
+  }>("/api/settings/email", async (req) => {
+    const { updateEmailSettings, getEmailConnectionConfig } = await import("./email/email-settings.js");
+    const { startEmailConnection, stopEmailConnection } = await import("./email/imap-client.js");
+    updateEmailSettings(req.body);
+    // Reconnect IMAP if settings changed
+    const config = getEmailConnectionConfig();
+    if (config) {
+      try { await startEmailConnection(config); } catch { /* will show in test */ }
+    } else {
+      await stopEmailConnection();
+    }
+    const { getEmailSettings } = await import("./email/email-settings.js");
+    return getEmailSettings();
+  });
+
+  app.post("/api/settings/email/test", async (req, reply) => {
     try {
-      const { listLabels } = await import("./google/gmail-client.js");
-      return await listLabels();
+      const { getEmailConnectionConfig } = await import("./email/email-settings.js");
+      const { testImapConnection, testSmtpConnection } = await import("./email/imap-client.js");
+      const config = getEmailConnectionConfig();
+      if (!config) { reply.code(400); return { error: "Email not fully configured" }; }
+
+      const results: { imap: string; smtp: string } = { imap: "ok", smtp: "ok" };
+      try {
+        await testImapConnection(config);
+      } catch (err) {
+        results.imap = err instanceof Error ? err.message : "IMAP connection failed";
+      }
+      try {
+        await testSmtpConnection(config);
+      } catch (err) {
+        results.smtp = err instanceof Error ? err.message : "SMTP connection failed";
+      }
+      const ok = results.imap === "ok" && results.smtp === "ok";
+      if (!ok) reply.code(400);
+      return { ok, ...results };
     } catch (err) {
       reply.code(500);
-      return { error: err instanceof Error ? err.message : "Failed to list labels" };
+      return { error: err instanceof Error ? err.message : "Test failed" };
     }
   });
 
