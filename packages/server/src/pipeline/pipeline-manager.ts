@@ -1060,23 +1060,15 @@ export class PipelineManager {
     const issueLabel = (task.labels as string[]).find((l) => l.startsWith("github-issue-"));
     const issueNumber = issueLabel ? parseInt(issueLabel.replace("github-issue-", ""), 10) : null;
 
-    // Build enabled stages
-    const enabledStages: string[] = [];
-    for (const stageKey of IMPLEMENTATION_STAGE_KEYS) {
-      const stageConfig = config.stages[stageKey];
-      if (stageConfig?.enabled !== false) {
-        enabledStages.push(stageKey);
-      }
-    }
-
-    // Create a new pipeline state starting at coder
+    // CI failure fix only needs the coder stage — once the fix is pushed,
+    // CI will re-run automatically and the pipeline completes.
     const state: PipelineState = {
       taskId,
       projectId: task.projectId,
       issueNumber,
       repo: project?.githubRepo ?? null,
-      stages: enabledStages,
-      currentStageIndex: enabledStages.indexOf("coder"),
+      stages: ["coder"],
+      currentStageIndex: 0,
       spawnRetryCount: 0,
       lastKickbackSource: null,
       stageReports: new Map(),
