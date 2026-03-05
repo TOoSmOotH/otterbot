@@ -364,4 +364,54 @@ describe("MastodonBridge", () => {
 
     await bridge.stop();
   });
+
+  it("supports direct posting and timeline reads only when connected", async () => {
+    const { bridge } = await createBridge();
+
+    // Not started yet
+    await expect(bridge.createPost("hello")).resolves.toBeNull();
+    await expect(bridge.getTimeline()).resolves.toEqual([]);
+
+    mockStatusesCreate.mockResolvedValue({ id: "status-created", url: "https://mastodon.example/@otterbot/1" });
+    mockTimelineList.mockResolvedValue([{ id: "status-1" }]);
+
+    await bridge.start({
+      instanceUrl: "https://mastodon.example",
+      accessToken: "token-123",
+    });
+
+    await expect(bridge.createPost("hello mastodon", "unlisted")).resolves.toEqual({
+      id: "status-created",
+      url: "https://mastodon.example/@otterbot/1",
+    });
+    expect(mockStatusesCreate).toHaveBeenCalledWith({
+      status: "hello mastodon",
+      visibility: "unlisted",
+    });
+
+    await expect(bridge.getTimeline(5)).resolves.toEqual([{ id: "status-1" }]);
+    expect(mockTimelineList).toHaveBeenCalledWith({ limit: 5 });
+
+    await bridge.stop();
+  });
+
+  it("emits connected and disconnected status lifecycle events", async () => {
+    const { bridge, io } = await createBridge();
+
+    await bridge.start({
+      instanceUrl: "https://mastodon.example",
+      accessToken: "token-123",
+    });
+
+    expect(io.emit).toHaveBeenCalledWith("mastodon:status", {
+      status: "connected",
+      acct: "otterbot",
+    });
+
+    await bridge.stop();
+
+    expect(io.emit).toHaveBeenCalledWith("mastodon:status", {
+      status: "disconnected",
+    });
+  });
 });
