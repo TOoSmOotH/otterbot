@@ -209,7 +209,7 @@ export function ProjectSettings({ projectId }: { projectId: string }) {
     <div className="h-full overflow-y-auto p-4">
       <div className="max-w-2xl mx-auto space-y-6">
         {/* GitHub Account (GitHub projects only) */}
-        {isGitHubProject && gitHubAccounts.length > 1 && (
+        {isGitHubProject && gitHubAccounts.length > 0 && (
           <div>
             <h2 className="text-sm font-semibold">GitHub Account</h2>
             <p className="text-xs text-muted-foreground mt-1">
