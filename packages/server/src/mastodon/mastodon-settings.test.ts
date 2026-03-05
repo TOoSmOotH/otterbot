@@ -1,9 +1,10 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
+import type { PairedUser, PendingPairing } from "./pairing.js";
 
 const configStore = new Map<string, string>();
 
-const mockListPairedUsers = vi.fn(() => []);
-const mockListPendingPairings = vi.fn(() => []);
+const mockListPairedUsers = vi.fn((): PairedUser[] => []);
+const mockListPendingPairings = vi.fn((): PendingPairing[] => []);
 
 const mockVerifyCredentials = vi.fn();
 
@@ -14,8 +15,8 @@ vi.mock("../auth/auth.js", () => ({
 }));
 
 vi.mock("./pairing.js", () => ({
-  listPairedUsers: (...args: unknown[]) => mockListPairedUsers(...args),
-  listPendingPairings: (...args: unknown[]) => mockListPendingPairings(...args),
+  listPairedUsers: () => mockListPairedUsers(),
+  listPendingPairings: () => mockListPendingPairings(),
 }));
 
 vi.mock("masto", () => ({
