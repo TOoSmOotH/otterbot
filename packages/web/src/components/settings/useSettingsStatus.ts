@@ -13,6 +13,8 @@ export function useSettingsStatus(): Record<string, ConfigStatus> {
   const slackBotTokenSet = useSettingsStore((s) => s.slackBotTokenSet);
   const mattermostEnabled = useSettingsStore((s) => s.mattermostEnabled);
   const mattermostTokenSet = useSettingsStore((s) => s.mattermostTokenSet);
+  const mastodonEnabled = useSettingsStore((s) => s.mastodonEnabled);
+  const mastodonCredentialsSet = useSettingsStore((s) => s.mastodonCredentialsSet);
   const nextcloudTalkEnabled = useSettingsStore((s) => s.nextcloudTalkEnabled);
   const nextcloudTalkAppPasswordSet = useSettingsStore((s) => s.nextcloudTalkAppPasswordSet);
   const gitHubEnabled = useSettingsStore((s) => s.gitHubEnabled);
@@ -44,6 +46,8 @@ export function useSettingsStatus(): Record<string, ConfigStatus> {
       ? "connected" : slackBotTokenSet ? "partial" : "unconfigured";
     s.mattermost = mattermostEnabled && mattermostTokenSet
       ? "connected" : mattermostTokenSet ? "partial" : "unconfigured";
+    s.mastodon = mastodonEnabled && mastodonCredentialsSet
+      ? "connected" : mastodonCredentialsSet ? "partial" : "unconfigured";
     s["nextcloud-talk"] = nextcloudTalkEnabled && nextcloudTalkAppPasswordSet
       ? "connected" : nextcloudTalkAppPasswordSet ? "partial" : "unconfigured";
 
@@ -73,6 +77,7 @@ export function useSettingsStatus(): Record<string, ConfigStatus> {
   }, [
     discordEnabled, discordTokenSet, telegramEnabled, telegramTokenSet,
     slackEnabled, slackBotTokenSet, mattermostEnabled, mattermostTokenSet,
+    mastodonEnabled, mastodonCredentialsSet,
     nextcloudTalkEnabled, nextcloudTalkAppPasswordSet,
     gitHubEnabled, gitHubTokenSet, googleConnected,
     activeSearchProvider, ttsEnabled, sttEnabled,

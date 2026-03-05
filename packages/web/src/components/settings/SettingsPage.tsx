@@ -22,6 +22,7 @@ import { GitHubTab } from "./GitHubTab";
 import { DiscordSection } from "./DiscordSection";
 import { SlackSection } from "./SlackSection";
 import { MattermostSection } from "./MattermostSection";
+import { MastodonSection } from "./MastodonSection";
 import { NextcloudTalkSection } from "./NextcloudTalkSection";
 import { TelegramSection } from "./TelegramSection";
 import { GoogleSection } from "./GoogleSection";
@@ -81,6 +82,7 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
     if (activeSection === "telegram") return <TelegramSection />;
     if (activeSection === "slack") return <SlackSection />;
     if (activeSection === "mattermost") return <MattermostSection />;
+    if (activeSection === "mastodon") return <MastodonSection />;
     if (activeSection === "nextcloud-talk") return <NextcloudTalkSection />;
     if (activeSection === "worker-names") return <WorkerNamesSection />;
     if (activeSection === "mcp-servers") return <McpServersSection />;

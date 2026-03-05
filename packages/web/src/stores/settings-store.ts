@@ -219,6 +219,16 @@ interface SettingsState {
   mattermostPendingPairings: Array<{ code: string; mattermostUserId: string; mattermostUsername: string; createdAt: string }>;
   mattermostTestResult: TestResult | null;
 
+  // Mastodon
+  mastodonEnabled: boolean;
+  mastodonCredentialsSet: boolean;
+  mastodonDisplayName: string | null;
+  mastodonAcct: string | null;
+  mastodonInstanceUrl: string;
+  mastodonPairedUsers: Array<{ mastodonId: string; mastodonAcct: string; pairedAt: string }>;
+  mastodonPendingPairings: Array<{ code: string; mastodonId: string; mastodonAcct: string; createdAt: string }>;
+  mastodonTestResult: TestResult | null;
+
   // Nextcloud Talk
   nextcloudTalkEnabled: boolean;
   nextcloudTalkServerUrlSet: boolean;
@@ -455,6 +465,18 @@ interface SettingsState {
   rejectMattermostPairing: (code: string) => Promise<void>;
   revokeMattermostUser: (userId: string) => Promise<void>;
 
+  // Mastodon actions
+  loadMastodonSettings: () => Promise<void>;
+  updateMastodonSettings: (data: {
+    enabled?: boolean;
+    instanceUrl?: string;
+    accessToken?: string;
+  }) => Promise<void>;
+  testMastodonConnection: () => Promise<void>;
+  approveMastodonPairing: (code: string) => Promise<void>;
+  rejectMastodonPairing: (code: string) => Promise<void>;
+  revokeMastodonUser: (mastodonId: string) => Promise<void>;
+
   // Nextcloud Talk actions
   loadNextcloudTalkSettings: () => Promise<void>;
   updateNextcloudTalkSettings: (data: {
@@ -622,6 +644,14 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   mattermostPairedUsers: [],
   mattermostPendingPairings: [],
   mattermostTestResult: null,
+  mastodonEnabled: false,
+  mastodonCredentialsSet: false,
+  mastodonDisplayName: null,
+  mastodonAcct: null,
+  mastodonInstanceUrl: "https://mastodon.social",
+  mastodonPairedUsers: [],
+  mastodonPendingPairings: [],
+  mastodonTestResult: null,
   nextcloudTalkEnabled: false,
   nextcloudTalkServerUrlSet: false,
   nextcloudTalkUsernameSet: false,
@@ -2147,6 +2177,112 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     }
   },
 
+  // Mastodon actions
+
+  loadMastodonSettings: async () => {
+    try {
+      const res = await fetch("/api/settings/mastodon");
+      if (!res.ok) return;
+      const data = await res.json();
+      set({
+        mastodonEnabled: data.enabled,
+        mastodonCredentialsSet: data.credentialsSet,
+        mastodonDisplayName: data.displayName,
+        mastodonAcct: data.acct,
+        mastodonInstanceUrl: data.instanceUrl,
+        mastodonPairedUsers: data.pairedUsers,
+        mastodonPendingPairings: data.pendingPairings,
+      });
+    } catch {
+      // Silently fail
+    }
+  },
+
+  updateMastodonSettings: async (data) => {
+    set({ error: null });
+    try {
+      const res = await fetch("/api/settings/mastodon", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) throw new Error("Failed to update Mastodon settings");
+      await get().loadMastodonSettings();
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "Unknown error" });
+    }
+  },
+
+  testMastodonConnection: async () => {
+    set({ mastodonTestResult: { ok: false, testing: true } });
+    try {
+      const res = await fetch("/api/settings/mastodon/test", {
+        method: "POST",
+      });
+      const data = await res.json();
+      set({
+        mastodonTestResult: {
+          ok: data.ok,
+          error: data.error,
+          testing: false,
+        },
+        mastodonAcct: data.ok ? data.acct : get().mastodonAcct,
+        mastodonDisplayName: data.ok ? data.displayName : get().mastodonDisplayName,
+      });
+    } catch {
+      set({
+        mastodonTestResult: {
+          ok: false,
+          error: "Network error",
+          testing: false,
+        },
+      });
+    }
+  },
+
+  approveMastodonPairing: async (code) => {
+    set({ error: null });
+    try {
+      const res = await fetch("/api/settings/mastodon/pair/approve", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code }),
+      });
+      if (!res.ok) throw new Error("Failed to approve pairing");
+      await get().loadMastodonSettings();
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "Unknown error" });
+    }
+  },
+
+  rejectMastodonPairing: async (code) => {
+    set({ error: null });
+    try {
+      const res = await fetch("/api/settings/mastodon/pair/reject", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code }),
+      });
+      if (!res.ok) throw new Error("Failed to reject pairing");
+      await get().loadMastodonSettings();
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "Unknown error" });
+    }
+  },
+
+  revokeMastodonUser: async (mastodonId) => {
+    set({ error: null });
+    try {
+      const res = await fetch(`/api/settings/mastodon/pair/${mastodonId}`, {
+        method: "DELETE",
+      });
+      if (!res.ok) throw new Error("Failed to revoke user");
+      await get().loadMastodonSettings();
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "Unknown error" });
+    }
+  },
+
   // Nextcloud Talk actions
 
   loadNextcloudTalkSettings: async () => {
@@ -2423,6 +2559,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       a.loadTelegramSettings(),
       a.loadSlackSettings(),
       a.loadMattermostSettings(),
+      a.loadMastodonSettings(),
       a.loadNextcloudTalkSettings(),
       a.loadGitHubSettings(),
       a.loadGoogleSettings(),

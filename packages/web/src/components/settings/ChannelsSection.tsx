@@ -31,6 +31,12 @@ const CHANNELS = [
     icon: "M",
     settingsSection: "mattermost" as const,
   },
+  {
+    name: "Mastodon",
+    description: "Connect to the Mastodon fediverse",
+    icon: "MA",
+    settingsSection: "mastodon" as const,
+  },
 ];
 
 export function ChannelsSection() {
@@ -46,18 +52,23 @@ export function ChannelsSection() {
   const mattermostEnabled = useSettingsStore((s) => s.mattermostEnabled);
   const mattermostTokenSet = useSettingsStore((s) => s.mattermostTokenSet);
   const loadMattermostSettings = useSettingsStore((s) => s.loadMattermostSettings);
+  const mastodonEnabled = useSettingsStore((s) => s.mastodonEnabled);
+  const mastodonCredentialsSet = useSettingsStore((s) => s.mastodonCredentialsSet);
+  const loadMastodonSettings = useSettingsStore((s) => s.loadMastodonSettings);
 
   useEffect(() => {
     loadDiscordSettings();
     loadTelegramSettings();
     loadSlackSettings();
     loadMattermostSettings();
+    loadMastodonSettings();
   }, []);
 
   const isDiscordConnected = discordEnabled && discordTokenSet;
   const isTelegramConnected = telegramEnabled && telegramTokenSet;
   const isSlackConnected = slackEnabled && slackBotTokenSet;
   const isMattermostConnected = mattermostEnabled && mattermostTokenSet;
+  const isMastodonConnected = mastodonEnabled && mastodonCredentialsSet;
 
   return (
     <div className="p-5 space-y-4">
@@ -70,7 +81,7 @@ export function ChannelsSection() {
 
       <div className="grid grid-cols-2 gap-3">
         {CHANNELS.map((channel) => {
-          const connected = (channel.name === "Discord" && isDiscordConnected) || (channel.name === "Telegram" && isTelegramConnected) || (channel.name === "Slack" && isSlackConnected) || (channel.name === "Mattermost" && isMattermostConnected);
+          const connected = (channel.name === "Discord" && isDiscordConnected) || (channel.name === "Telegram" && isTelegramConnected) || (channel.name === "Slack" && isSlackConnected) || (channel.name === "Mattermost" && isMattermostConnected) || (channel.name === "Mastodon" && isMastodonConnected);
           return (
             <div
               key={channel.name}
