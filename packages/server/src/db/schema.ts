@@ -109,6 +109,7 @@ export const projects = sqliteTable("projects", {
   githubRepo: text("github_repo"),
   githubBranch: text("github_branch"),
   githubIssueMonitor: integer("github_issue_monitor", { mode: "boolean" }).notNull().default(false),
+  signCommits: integer("sign_commits", { mode: "boolean" }).notNull().default(false),
   rules: text("rules", { mode: "json" })
     .$type<string[]>()
     .notNull()
@@ -274,7 +275,7 @@ export const providers = sqliteTable("providers", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
   type: text("type", {
-    enum: ["anthropic", "openai", "google", "ollama", "openai-compatible", "openrouter", "github-copilot", "huggingface", "nvidia", "minimax", "xai", "zai", "perplexity", "deepgram", "bedrock", "lmstudio", "deepseek", "mistral"],
+    enum: ["anthropic", "openai", "google", "ollama", "openai-compatible", "openrouter", "github-copilot", "huggingface", "nvidia", "minimax", "xai", "zai", "perplexity", "deepgram", "bedrock", "lmstudio", "deepseek", "mistral", "claude-code", "opencode", "codex", "gemini-cli"],
   }).notNull(),
   apiKey: text("api_key"),
   baseUrl: text("base_url"),

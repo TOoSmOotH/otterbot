@@ -50,6 +50,18 @@ export function usesTextToolCalling(model: string): boolean {
   return TEXT_TOOL_CALLING_MODELS.some((m) => normalized.includes(m));
 }
 
+/**
+ * Provider types that always use text-based tool calling (coding agent CLIs).
+ * These providers don't support structured SDK function calling — tools are
+ * injected as text in the prompt and parsed from the response.
+ */
+export const CODING_AGENT_PROVIDER_TYPES = new Set([
+  "claude-code",
+  "opencode",
+  "codex",
+  "gemini-cli",
+]);
+
 /** Vercel AI SDK tool shape (subset we need for formatting) */
 interface AiTool {
   description?: string;

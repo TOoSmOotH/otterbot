@@ -1,12 +1,12 @@
 import { tool } from "ai";
 import { z } from "zod";
-import { archiveEmail } from "../google/gmail-client.js";
+import { archiveEmail } from "../email/imap-client.js";
 
-export function createGmailArchiveTool() {
+export function createEmailArchiveTool() {
   return tool({
-    description: "Archive an email (removes it from the inbox but doesn't delete it).",
+    description: "Archive an email (moves it out of the inbox).",
     parameters: z.object({
-      messageId: z.string().describe("The Gmail message ID to archive"),
+      messageId: z.string().describe("The email message ID to archive"),
     }),
     execute: async ({ messageId }) => {
       try {

@@ -1,5 +1,47 @@
 # Changelog
 
+## [0.12.0](https://github.com/TOoSmOotH/otterbot/compare/otterbot-v0.11.0...otterbot-v0.12.0) (2026-03-04)
+
+
+### Features
+
+* add bulk paste support to SourceListEditor ([4f8bb4c](https://github.com/TOoSmOotH/otterbot/commit/4f8bb4c54643b0a4c0a5d7a6f83e3544003a8264))
+* add Demo Recorder worker agent with voiceover narration ([6a71e93](https://github.com/TOoSmOotH/otterbot/commit/6a71e935e6ea4d6bff36647c49bfa419add6e380))
+* add inline PAT dropdown to project creation dialog ([0c5270d](https://github.com/TOoSmOotH/otterbot/commit/0c5270df772d397678e43c2ce3d31e45b51d83c4))
+* add inline PAT dropdown to project creation dialog ([70987a6](https://github.com/TOoSmOotH/otterbot/commit/70987a6b39223a84ef8fc8dd5b113e623c85f187)), closes [#358](https://github.com/TOoSmOotH/otterbot/issues/358)
+* add mock mode for e2e testing without real LLM credentials ([a0923be](https://github.com/TOoSmOotH/otterbot/commit/a0923bed3967b1ca7e8e61a0dc3aa57a5525a71b))
+* add RSS feed and URL monitoring to Deep Research specialist ([7ee1c2b](https://github.com/TOoSmOotH/otterbot/commit/7ee1c2b844282a146f10e1265edb7dc07d20b098))
+* add RSS feed and URL monitoring to Deep Research specialist ([0bea527](https://github.com/TOoSmOotH/otterbot/commit/0bea527adce00677ae93443060c574511eb56fa1)), closes [#364](https://github.com/TOoSmOotH/otterbot/issues/364)
+* add start_server/stop_server actions to demo recorder ([867a5ab](https://github.com/TOoSmOotH/otterbot/commit/867a5ab6d9f5c770e4cda4483f0bc3b256444bef))
+* add time awareness to all agents ([66645cf](https://github.com/TOoSmOotH/otterbot/commit/66645cfbb50f96da4d5e0f790b5c0aa4ea2c204a))
+* improve COO's knowledge of specialist agents vs worker types ([a3fe0e1](https://github.com/TOoSmOotH/otterbot/commit/a3fe0e15fc544a0d1a7edb381ea54c2b98387223))
+* support multi-provider selection in setup wizard ([ecf2a2a](https://github.com/TOoSmOotH/otterbot/commit/ecf2a2aecc1e5dc699bbd3803250ebba7a14c95d))
+* support multiple LLM provider selection in setup wizard ([634b044](https://github.com/TOoSmOotH/otterbot/commit/634b0443179515ec043fa19c7f2084b428baae69))
+
+
+### Bug Fixes
+
+* address security vulnerabilities in deep research module ([8df39d5](https://github.com/TOoSmOotH/otterbot/commit/8df39d5593dec4c6cd06156a86cecd5f280d3870))
+* auto-select free port in demo recorder start_server ([8594480](https://github.com/TOoSmOotH/otterbot/commit/85944803d04f339e62a8dc0aa0838115b0d9d9e9))
+* block malicious shell commands in COO's run_command ([66b7053](https://github.com/TOoSmOotH/otterbot/commit/66b7053020fef86c6a37e8096c31649c0cda08e9))
+* block malicious shell commands in COO's run_command tool ([e562037](https://github.com/TOoSmOotH/otterbot/commit/e562037247b8998354c307f246271a2d8bebbab1))
+* expose issue monitor toggle in project settings ([960df8e](https://github.com/TOoSmOotH/otterbot/commit/960df8e9f042e1320889c20d9efae40741f23ca4))
+* expose issue monitor toggle in project settings ([0dd6e6b](https://github.com/TOoSmOotH/otterbot/commit/0dd6e6b23af727edd6f25fad7be0fe3b50f5d436)), closes [#361](https://github.com/TOoSmOotH/otterbot/issues/361)
+* expose specialist and module tools to COO via seed skills ([6331c10](https://github.com/TOoSmOotH/otterbot/commit/6331c1070efa4d8bf72c233b3868b88b9e4c8da5))
+* preserve review content from TUI-based coding workers ([b2b85f1](https://github.com/TOoSmOotH/otterbot/commit/b2b85f1d0feb4033b07305a81dbb8f5f228099da))
+* prevent LLM from moving PR tasks to done and broaden done guard ([9354819](https://github.com/TOoSmOotH/otterbot/commit/935481901aba21589281b72fc3bcea2c52a2ec75))
+* redirect HuggingFace model cache to writable directory ([c1e06f6](https://github.com/TOoSmOotH/otterbot/commit/c1e06f6313ff5af1a09886d9ae153b14c569c9fc))
+* redirect HuggingFace model cache to writable directory ([d242faa](https://github.com/TOoSmOotH/otterbot/commit/d242faa6e68a9a9f0cac0751e076b80568c1c7f3)), closes [#357](https://github.com/TOoSmOotH/otterbot/issues/357)
+* refresh date/time in system prompt before each think() call ([76e0c4e](https://github.com/TOoSmOotH/otterbot/commit/76e0c4e966dedeccbfbd7e6d0321f4538f279414))
+* resolve DNS rebinding and other security issues in deep research ([cf85d40](https://github.com/TOoSmOotH/otterbot/commit/cf85d4070731b10aa13852dbcc9102e72ad5a4d3))
+* resolve TypeScript generic mock type error in RSS sources test ([2a145d4](https://github.com/TOoSmOotH/otterbot/commit/2a145d403b7aabd2deaa75347fe265c04d9083d4))
+* route demo/video tasks to Demo Recorder worker ([fa7312d](https://github.com/TOoSmOotH/otterbot/commit/fa7312d86650a6200b8c03f32adee784ca1ea3c8))
+* spawn backlog workers when tasks move to done via PR merge ([88dfbad](https://github.com/TOoSmOotH/otterbot/commit/88dfbad6bfc2443024384e7601dc2944fae58c9b))
+* spawn backlog workers when tasks move to done via PR merge ([0c08a50](https://github.com/TOoSmOotH/otterbot/commit/0c08a5033e0eec3826d54b98b1333eb42366ea9b))
+* switch Ollama provider to OpenAI-compatible endpoint ([6c86116](https://github.com/TOoSmOotH/otterbot/commit/6c86116ff95b4cdd0e2e990dd4197f0391495333))
+* switch Ollama provider to OpenAI-compatible endpoint ([ab9b787](https://github.com/TOoSmOotH/otterbot/commit/ab9b787844c6e9f12edb574fff421feca6c495c8))
+* TLS cert errors in deep-research fetch and COO raw JSON output ([5c50f5a](https://github.com/TOoSmOotH/otterbot/commit/5c50f5a96e588b67e228086ac8d12703e9c2a7fa))
+
 ## [0.11.0](https://github.com/TOoSmOotH/otterbot/compare/otterbot-v0.10.0...otterbot-v0.11.0) (2026-03-02)
 
 

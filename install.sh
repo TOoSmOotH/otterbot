@@ -159,6 +159,16 @@ case "$ARCH" in
     ;;
 esac
 
+# On macOS, detect Apple Silicon even when running under Rosetta 2
+ROSETTA=0
+if [ "$OS_NAME" = "macOS" ] && [ "$ARCH_NAME" = "x86_64" ]; then
+  if [ "$(sysctl -n hw.optional.arm64 2>/dev/null)" = "1" ]; then
+    ARCH_NAME="arm64"
+    ROSETTA=1
+    warn "Rosetta 2 detected — using native arm64 image"
+  fi
+fi
+
 info "Detected $(bold "$OS_NAME") on $(bold "$ARCH_NAME")"
 
 # ── Check for Docker ─────────────────────────────────────────────────────────
@@ -180,6 +190,14 @@ if ! command -v docker >/dev/null 2>&1; then
       exit 1
     fi
   elif [ "$OS_NAME" = "macOS" ]; then
+    if [ "$ROSETTA" -eq 1 ]; then
+      error "Docker is required but cannot be installed via Homebrew under Rosetta 2."
+      error "Either:"
+      error "  1. Restart your terminal in native ARM mode (uncheck 'Open using Rosetta' in Get Info)"
+      error "  2. Download Docker Desktop directly: https://docker.com/products/docker-desktop"
+      error "Then re-run this script."
+      exit 1
+    fi
     if command -v brew >/dev/null 2>&1; then
       if prompt_yn "Install Docker Desktop via Homebrew? [y/N]" n; then
         info "Installing Docker Desktop..."
@@ -246,6 +264,7 @@ OTTERBOT_DATA_DIR=./data
 ENABLE_DESKTOP=true
 DESKTOP_RESOLUTION=1280x720x24
 SUDO_MODE=restricted
+OTTERBOT_ALLOWED_ORIGIN=https://localhost:62626
 EOF
   info "Generated .env with new database key"
 fi

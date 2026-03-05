@@ -1,8 +1,9 @@
 import { tool } from "ai";
 import { z } from "zod";
-import { readEmail, sendEmail } from "../google/gmail-client.js";
+import { readEmail, sendEmail } from "../email/imap-client.js";
+import { getEmailConnectionConfig } from "../email/email-settings.js";
 
-export function createGmailReplyTool() {
+export function createEmailReplyTool() {
   return tool({
     description: "Reply to an existing email thread.",
     parameters: z.object({
@@ -12,11 +13,13 @@ export function createGmailReplyTool() {
     }),
     execute: async ({ messageId, body, cc }) => {
       try {
-        // Read the original to get thread info
+        const config = getEmailConnectionConfig();
+        if (!config) return "Email not configured. Set up IMAP/SMTP in Settings > Email.";
+
         const original = await readEmail(messageId);
         if (!original) return `Original email with ID "${messageId}" not found.`;
 
-        const result = await sendEmail({
+        const result = await sendEmail(config, {
           to: original.from,
           subject: original.subject.startsWith("Re:") ? original.subject : `Re: ${original.subject}`,
           body,

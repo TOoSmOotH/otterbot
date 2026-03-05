@@ -1,16 +1,16 @@
 import { tool } from "ai";
 import { z } from "zod";
-import { listEmails } from "../google/gmail-client.js";
+import { listEmails } from "../email/imap-client.js";
 
-export function createGmailListTool() {
+export function createEmailListTool() {
   return tool({
     description:
-      "List emails from the user's Gmail inbox. Can search with Gmail query syntax (e.g., 'is:unread', 'from:alice@example.com', 'subject:meeting').",
+      "List emails from the user's inbox. Returns recent emails, newest first.",
     parameters: z.object({
       query: z
         .string()
         .optional()
-        .describe("Gmail search query (default: 'in:inbox')"),
+        .describe("Search query (currently unused — reserved for future IMAP search)"),
       maxResults: z
         .number()
         .int()
@@ -26,7 +26,7 @@ export function createGmailListTool() {
           maxResults: String(maxResults ?? 10),
         });
         if (result.messages.length === 0) {
-          return "No emails found matching the query.";
+          return "No emails found.";
         }
         const lines = result.messages.map(
           (m) =>

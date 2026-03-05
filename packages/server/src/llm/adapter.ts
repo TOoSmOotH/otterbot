@@ -7,6 +7,7 @@ import { streamText, generateText, type LanguageModel, type CoreMessage } from "
 import { getConfig } from "../auth/auth.js";
 import { getDb, schema } from "../db/index.js";
 import { eq } from "drizzle-orm";
+import { CodingAgentModel } from "./coding-agent-model.js";
 
 export interface LLMConfig {
   provider: string;
@@ -234,6 +235,15 @@ export function resolveModel(config: LLMConfig): LanguageModel {
       return mistral(config.model);
     }
 
+    case "claude-code":
+    case "opencode":
+    case "codex":
+    case "gemini-cli":
+      return new CodingAgentModel({
+        agentType: resolved.type as "claude-code" | "opencode" | "codex" | "gemini-cli",
+        modelId: config.model,
+      });
+
     default:
       throw new Error(`Unknown LLM provider: ${config.provider} (type: ${resolved.type})`);
   }
@@ -279,7 +289,7 @@ function consolidateSystemMessages(messages: ChatMessage[]): ChatMessage[] {
 }
 
 /** Providers that require a single system message */
-const SINGLE_SYSTEM_PROVIDERS = new Set(["anthropic", "bedrock", "ollama"]);
+const SINGLE_SYSTEM_PROVIDERS = new Set(["anthropic", "bedrock", "ollama", "claude-code", "opencode", "codex", "gemini-cli"]);
 
 /** Normalize messages for the target provider */
 function normalizeMessages(config: LLMConfig, messages: ChatMessage[]): ChatMessage[] {

@@ -1,6 +1,7 @@
 
 import { execSync, execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { join } from "node:path";
 
 /**
@@ -115,6 +116,14 @@ export function createWorktree(repoPath: string, worktreePath: string, branchNam
     } catch { /* best effort — remote may be unavailable */ }
   }
 
+  // Also fetch upstream if it exists (fork-based workflow)
+  const hasUpstream = hasRemote(repoPath, "upstream");
+  if (hasUpstream) {
+    try {
+      execSync("git fetch upstream", { cwd: repoPath, stdio: "ignore" });
+    } catch { /* best effort */ }
+  }
+
   // Determine the start point: source branch (for kickbacks/iterations) or latest HEAD
   // When no source branch is specified, prefer the fetched remote HEAD over the
   // potentially stale local HEAD so workers always start with up-to-date code.
@@ -184,6 +193,45 @@ export function getCommitHash(cwd: string): string {
   } catch {
     return "";
   }
+}
+
+// ---------------------------------------------------------------------------
+// Commit signing
+// ---------------------------------------------------------------------------
+
+const SSH_KEY_NAME = "otterbot_github";
+
+/**
+ * Configure (or unconfigure) local commit signing for a repo.
+ * When enabled, sets gpg.format, user.signingkey, commit.gpgsign, and
+ * tag.gpgsign as local git config so commits in this repo are signed.
+ */
+export function configureCommitSigning(cwd: string, enabled: boolean): void {
+  if (enabled) {
+    const pubKeyPath = join(homedir(), ".ssh", `${SSH_KEY_NAME}.pub`);
+    if (!existsSync(pubKeyPath)) {
+      throw new Error("No SSH key configured. Generate or import one in Settings → GitHub first.");
+    }
+    execSync("git config --local gpg.format ssh", { cwd, stdio: "ignore" });
+    execSync(`git config --local user.signingkey "${pubKeyPath}"`, { cwd, stdio: "ignore" });
+    execSync("git config --local commit.gpgsign true", { cwd, stdio: "ignore" });
+    execSync("git config --local tag.gpgsign true", { cwd, stdio: "ignore" });
+  } else {
+    for (const key of ["gpg.format", "user.signingkey", "commit.gpgsign", "tag.gpgsign"]) {
+      try {
+        execSync(`git config --local --unset ${key}`, { cwd, stdio: "ignore" });
+      } catch {
+        // Key not set — ignore
+      }
+    }
+  }
+}
+
+/**
+ * Check whether the otterbot SSH key exists.
+ */
+export function hasSSHKey(): boolean {
+  return existsSync(join(homedir(), ".ssh", `${SSH_KEY_NAME}.pub`));
 }
 
 // ---------------------------------------------------------------------------

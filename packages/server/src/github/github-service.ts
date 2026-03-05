@@ -334,6 +334,19 @@ export async function getRepoPermissions(
 }
 
 /**
+ * Check if the authenticated user has push (write) access on a repo.
+ * Returns true if the user has push, maintain, or admin permissions.
+ */
+export async function checkHasPushAccess(
+  repoFullName: string,
+  token: string,
+): Promise<boolean> {
+  const perms = await getRepoPermissions(repoFullName, token);
+  if (!perms) return false;
+  return perms.push || perms.maintain || perms.admin;
+}
+
+/**
  * Check if the authenticated user has at least triage-level access on a repo.
  * A user with triage, push, maintain, or admin permissions is considered a
  * contributor who can meaningfully interact with the repo's issues.
@@ -794,5 +807,193 @@ export function resolveProjectBranch(projectId: string): string {
     ?? getDb().select().from(schema.projects)
         .where(eq(schema.projects.id, projectId)).get()?.githubBranch
     ?? "main";
+}
+
+// ---------------------------------------------------------------------------
+// Fork-based contribution workflow
+// ---------------------------------------------------------------------------
+
+export interface ForkInfo {
+  full_name: string;
+  clone_url: string;
+  ssh_url: string;
+  owner: string;
+  default_branch: string;
+}
+
+/**
+ * Create a fork of a repository. GitHub's fork API is idempotent —
+ * if a fork already exists, it returns the existing fork.
+ */
+export async function createFork(
+  repoFullName: string,
+  token: string,
+): Promise<ForkInfo> {
+  const res = await fetch(
+    `https://api.github.com/repos/${repoFullName}/forks`,
+    {
+      method: "POST",
+      headers: {
+        ...GITHUB_HEADERS(token),
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({}),
+    },
+  );
+  if (!res.ok) {
+    const body = await res.text();
+    if (res.status === 403) {
+      throw new Error(`This repository does not allow forking (403): ${body}`);
+    }
+    throw new Error(`GitHub API error ${res.status} creating fork: ${body}`);
+  }
+  const data = (await res.json()) as {
+    full_name: string;
+    clone_url: string;
+    ssh_url: string;
+    owner: { login: string };
+    default_branch: string;
+  };
+  return {
+    full_name: data.full_name,
+    clone_url: data.clone_url,
+    ssh_url: data.ssh_url,
+    owner: data.owner.login,
+    default_branch: data.default_branch,
+  };
+}
+
+/**
+ * Wait for a fork to become available. Fork creation is async on GitHub
+ * and can take seconds to minutes. Polls with exponential backoff.
+ */
+export async function waitForFork(
+  forkFullName: string,
+  token: string,
+  maxWaitMs = 300_000, // 5 minutes
+): Promise<void> {
+  const startTime = Date.now();
+  let delay = 2_000; // Start with 2s
+
+  while (Date.now() - startTime < maxWaitMs) {
+    const res = await fetch(
+      `https://api.github.com/repos/${forkFullName}`,
+      { headers: GITHUB_HEADERS(token) },
+    );
+    if (res.ok) return;
+
+    // Wait with exponential backoff (max 30s)
+    await new Promise((resolve) => setTimeout(resolve, delay));
+    delay = Math.min(delay * 1.5, 30_000);
+  }
+
+  throw new Error(
+    `Fork ${forkFullName} not available after ${Math.round(maxWaitMs / 1000)}s. ` +
+    `GitHub may still be processing the fork — try again later.`,
+  );
+}
+
+/**
+ * Sync a fork's default branch with its upstream parent.
+ * Uses GitHub's merge-upstream API.
+ */
+export async function syncFork(
+  forkFullName: string,
+  token: string,
+  branch?: string,
+): Promise<void> {
+  const targetBranch = branch ?? "main";
+  const res = await fetch(
+    `https://api.github.com/repos/${forkFullName}/merge-upstream`,
+    {
+      method: "POST",
+      headers: {
+        ...GITHUB_HEADERS(token),
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ branch: targetBranch }),
+    },
+  );
+  if (!res.ok) {
+    // 409 means already up to date — not an error
+    if (res.status === 409) return;
+    const body = await res.text();
+    console.warn(`[GitHub] syncFork ${forkFullName}/${targetBranch} failed (${res.status}): ${body}`);
+    // Non-fatal: fork may still be usable even if sync fails
+  }
+}
+
+/**
+ * Clone a fork as origin and add the upstream repo as a remote.
+ * Sets up the repo for fork-based contribution.
+ */
+export function cloneForForkContribution(
+  upstreamRepo: string,
+  forkRepo: string,
+  targetDir: string,
+  branch?: string,
+): void {
+  validateRepoName(upstreamRepo);
+  validateRepoName(forkRepo);
+  if (branch) validateBranchName(branch);
+
+  const token = getConfig("github:token") as string | undefined;
+  const sshKeyPath = join(homedir(), ".ssh", "otterbot_github");
+  const sshKeyExists = existsSync(sshKeyPath);
+  const branchArgs = branch ? ["--branch", branch] : [];
+
+  // Clone the fork
+  if (token) {
+    const forkUrl = `https://github.com/${forkRepo}.git`;
+    execFileSync(
+      "git",
+      ["clone", ...gitCredentialArgs(), ...branchArgs, forkUrl, targetDir],
+      {
+        stdio: "pipe",
+        timeout: 300_000,
+        env: gitEnvWithPAT(token),
+      },
+    );
+  } else if (sshKeyExists) {
+    const forkUrl = `git@github.com:${forkRepo}.git`;
+    execFileSync("git", ["clone", ...branchArgs, forkUrl, targetDir], {
+      stdio: "pipe",
+      timeout: 300_000,
+      env: { ...process.env },
+    });
+  } else {
+    throw new Error(`Cannot clone fork ${forkRepo}: no PAT or SSH key available`);
+  }
+
+  // Add upstream remote
+  if (token) {
+    const upstreamUrl = `https://github.com/${upstreamRepo}.git`;
+    execFileSync("git", ["-C", targetDir, "remote", "add", "upstream", upstreamUrl], {
+      stdio: "pipe",
+    });
+  } else {
+    const upstreamUrl = `git@github.com:${upstreamRepo}.git`;
+    execFileSync("git", ["-C", targetDir, "remote", "add", "upstream", upstreamUrl], {
+      stdio: "pipe",
+    });
+  }
+
+  // Fetch upstream
+  const fetchOpts: { stdio: "pipe"; timeout: number; env?: Record<string, string> } = {
+    stdio: "pipe",
+    timeout: 120_000,
+  };
+  if (token) {
+    fetchOpts.env = gitEnvWithPAT(token);
+    execFileSync(
+      "git",
+      [...gitCredentialArgs(), "-C", targetDir, "fetch", "upstream"],
+      fetchOpts,
+    );
+  } else {
+    execFileSync("git", ["-C", targetDir, "fetch", "upstream"], fetchOpts);
+  }
+
+  configureGitUser(targetDir);
 }
 

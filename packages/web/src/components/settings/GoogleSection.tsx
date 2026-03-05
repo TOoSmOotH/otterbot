@@ -67,7 +67,7 @@ export function GoogleSection() {
       <div>
         <h3 className="text-xs font-semibold mb-1">Google Integration</h3>
         <p className="text-xs text-muted-foreground">
-          Connect your Google account to use Gmail and Google Calendar features.
+          Connect your Google account to use Google Calendar features.
         </p>
       </div>
 
@@ -167,7 +167,7 @@ export function GoogleSection() {
         <ol className="list-decimal list-inside space-y-0.5">
           <li>Go to the <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">Google Cloud Console</a></li>
           <li>Create a new project or select an existing one</li>
-          <li>Enable the Gmail API and Google Calendar API</li>
+          <li>Enable the Google Calendar API</li>
           <li>Create OAuth 2.0 credentials (Web application type)</li>
           <li>Add <code className="bg-secondary px-1 rounded">{redirectBaseUrl || "https://your-url"}/api/oauth/google/callback</code> as an authorized redirect URI</li>
           <li>Copy the Client ID and Client Secret here</li>

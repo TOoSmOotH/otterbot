@@ -244,14 +244,14 @@ export const SETTINGS_NAV: NavGroup[] = [
         label: "Google",
         description: "Google account and OAuth setup",
         icon: "google",
-        keywords: ["oauth", "calendar", "drive", "gmail"],
+        keywords: ["oauth", "calendar", "drive"],
       },
       {
         id: "email",
         label: "Email Setup",
         description: "Email sending and receiving",
         icon: "email",
-        keywords: ["gmail", "smtp", "inbox", "send"],
+        keywords: ["imap", "smtp", "inbox", "send", "email"],
       },
       {
         id: "github",

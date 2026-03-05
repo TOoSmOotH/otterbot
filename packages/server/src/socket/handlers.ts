@@ -21,8 +21,16 @@ import type { WorkspaceManager } from "../workspace/workspace.js";
 import type { GitHubIssueMonitor } from "../github/issue-monitor.js";
 import type { MergeQueue } from "../merge-queue/merge-queue.js";
 import type { WorldLayoutManager } from "../models3d/world-layout.js";
-import { cloneRepo, getRepoDefaultBranch } from "../github/github-service.js";
-import { initGitRepo, createInitialCommit } from "../utils/git.js";
+import {
+  cloneRepo,
+  getRepoDefaultBranch,
+  checkHasPushAccess,
+  createFork,
+  waitForFork,
+  syncFork,
+  cloneForForkContribution,
+} from "../github/github-service.js";
+import { initGitRepo, createInitialCommit, configureCommitSigning, hasSSHKey } from "../utils/git.js";
 import { NO_REPORT_SENTINEL } from "../schedulers/custom-task-scheduler.js";
 import { ProjectStatus, CharterStatus } from "@otterbot/shared";
 import { existsSync, rmSync } from "node:fs";
@@ -220,13 +228,16 @@ export function setupSocketHandlers(
       }
 
       const targetAgent = data.toAgentId ?? "coo";
+      const metadata: Record<string, unknown> = {};
+      if (projectId) metadata.projectId = projectId;
+      if (data.attachments && data.attachments.length > 0) metadata.attachments = data.attachments;
       const message = bus.send({
         fromAgentId: null, // CEO
         toAgentId: targetAgent,
         type: targetAgent === "coo" ? MessageType.Chat : MessageType.Directive,
         content: data.content,
         conversationId,
-        metadata: projectId ? { projectId } : undefined,
+        metadata,
       });
 
       if (callback) {
@@ -544,18 +555,49 @@ export function setupSocketHandlers(
           workspace.createProject(projectId);
 
           const repoPath = workspace.repoPath(projectId);
-          try {
-            cloneRepo(data.githubRepo!, repoPath, branch);
-          } catch (cloneErr) {
-            try { rmSync(workspace.projectPath(projectId), { recursive: true, force: true }); } catch { /* best effort */ }
-            db.delete(schema.projects).where(eq(schema.projects.id, projectId)).run();
-            const errMsg = cloneErr instanceof Error ? cloneErr.message : String(cloneErr);
-            callback?.({ ok: false, error: `Failed to clone repository: ${errMsg}` });
-            return;
+
+          // Check push access and set up fork if needed
+          let forkMode = false;
+          let forkRepo: string | null = null;
+          const hasPush = await checkHasPushAccess(data.githubRepo!, ghToken);
+
+          if (hasPush) {
+            // Direct push access — clone normally
+            try {
+              cloneRepo(data.githubRepo!, repoPath, branch);
+            } catch (cloneErr) {
+              try { rmSync(workspace.projectPath(projectId), { recursive: true, force: true }); } catch { /* best effort */ }
+              db.delete(schema.projects).where(eq(schema.projects.id, projectId)).run();
+              const errMsg = cloneErr instanceof Error ? cloneErr.message : String(cloneErr);
+              callback?.({ ok: false, error: `Failed to clone repository: ${errMsg}` });
+              return;
+            }
+          } else {
+            // No push access — fork and clone the fork
+            try {
+              console.log(`[project:create-manual] No push access to ${data.githubRepo} — creating fork`);
+              const fork = await createFork(data.githubRepo!, ghToken);
+              forkRepo = fork.full_name;
+              await waitForFork(fork.full_name, ghToken);
+              await syncFork(fork.full_name, ghToken, branch);
+              cloneForForkContribution(data.githubRepo!, fork.full_name, repoPath, branch);
+              forkMode = true;
+              console.log(`[project:create-manual] Fork set up: ${fork.full_name}`);
+            } catch (forkErr) {
+              try { rmSync(workspace.projectPath(projectId), { recursive: true, force: true }); } catch { /* best effort */ }
+              db.delete(schema.projects).where(eq(schema.projects.id, projectId)).run();
+              const errMsg = forkErr instanceof Error ? forkErr.message : String(forkErr);
+              callback?.({ ok: false, error: `Failed to set up fork: ${errMsg}` });
+              return;
+            }
           }
 
           setConfig(`project:${projectId}:github:repo`, data.githubRepo!);
           setConfig(`project:${projectId}:github:branch`, branch);
+          if (forkMode && forkRepo) {
+            setConfig(`project:${projectId}:github:fork_mode`, "true");
+            setConfig(`project:${projectId}:github:fork_repo`, forkRepo);
+          }
           setConfig(`project:${projectId}:github:rules`, JSON.stringify(rules));
 
           await coo.spawnTeamLeadForManualProject(projectId, data.githubRepo!, branch, rules);
@@ -805,6 +847,80 @@ export function setupSocketHandlers(
         callback?.({ ok: true });
       } catch (err) {
         callback?.({ ok: false, error: err instanceof Error ? err.message : "Failed to update issue monitor setting" });
+      }
+    });
+
+    // Get sign-commits setting for a project
+    socket.on("project:get-sign-commits", (data, callback) => {
+      try {
+        const db = getDb();
+        const project = db
+          .select()
+          .from(schema.projects)
+          .where(eq(schema.projects.id, data.projectId))
+          .get();
+
+        callback({
+          enabled: !!project?.signCommits,
+          hasSSHKey: hasSSHKey(),
+        });
+      } catch {
+        callback({ enabled: false, hasSSHKey: false });
+      }
+    });
+
+    // Toggle commit signing for a project
+    socket.on("project:set-sign-commits", (data, callback) => {
+      try {
+        const db = getDb();
+        const project = db
+          .select()
+          .from(schema.projects)
+          .where(eq(schema.projects.id, data.projectId))
+          .get();
+
+        if (!project) {
+          callback?.({ ok: false, error: "Project not found" });
+          return;
+        }
+
+        if (data.enabled && !hasSSHKey()) {
+          callback?.({ ok: false, error: "No SSH key configured. Generate or import one in Settings → GitHub first." });
+          return;
+        }
+
+        db.update(schema.projects)
+          .set({ signCommits: data.enabled })
+          .where(eq(schema.projects.id, data.projectId))
+          .run();
+
+        // Apply local git config to the project's repo
+        const workspace = deps?.workspace;
+        if (workspace) {
+          const repoPath = workspace.repoPath(data.projectId);
+          if (existsSync(repoPath)) {
+            try {
+              configureCommitSigning(repoPath, data.enabled);
+            } catch (e) {
+              callback?.({ ok: false, error: e instanceof Error ? e.message : "Failed to configure git signing" });
+              return;
+            }
+          }
+        }
+
+        // Emit project:updated so UI refreshes
+        const updated = db
+          .select()
+          .from(schema.projects)
+          .where(eq(schema.projects.id, data.projectId))
+          .get();
+        if (updated) {
+          io.emit("project:updated", updated as any);
+        }
+
+        callback?.({ ok: true });
+      } catch (err) {
+        callback?.({ ok: false, error: err instanceof Error ? err.message : "Failed to update sign commits setting" });
       }
     });
 
