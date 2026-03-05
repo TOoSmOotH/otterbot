@@ -245,6 +245,17 @@ import {
   rejectPairing as rejectTelegramPairing,
   revokePairing as revokeTelegramPairing,
 } from "./telegram/pairing.js";
+import { BlueskyBridge } from "./bluesky/bluesky-bridge.js";
+import {
+  getBlueskySettings,
+  updateBlueskySettings,
+  testBlueskyConnection,
+} from "./bluesky/bluesky-settings.js";
+import {
+  approvePairing as approveBlueskyPairing,
+  rejectPairing as rejectBlueskyPairing,
+  revokePairing as revokeBlueskyPairing,
+} from "./bluesky/pairing.js";
 import { TlonBridge } from "./tlon/tlon-bridge.js";
 import {
   getTlonSettings,
@@ -712,6 +723,31 @@ async function main() {
     if (telegramBridge) {
       await telegramBridge.stop();
       telegramBridge = null;
+    }
+  }
+
+  // Bluesky bridge (initialized when enabled + credentials set)
+  let blueskyBridge: BlueskyBridge | null = null;
+
+  function startBlueskyBridge() {
+    if (blueskyBridge || !coo) return;
+    const settings = getBlueskySettings();
+    if (!settings.enabled || !settings.credentialsSet) return;
+    const identifier = getConfig("bluesky:identifier");
+    const appPassword = getConfig("bluesky:app_password");
+    const service = getConfig("bluesky:service") ?? "https://bsky.social";
+    if (!identifier || !appPassword) return;
+    blueskyBridge = new BlueskyBridge({ bus, coo, io });
+    blueskyBridge.start({ identifier, appPassword, service }).catch((err) => {
+      console.error("[Bluesky] Failed to start bridge:", err);
+      blueskyBridge = null;
+    });
+  }
+
+  async function stopBlueskyBridge() {
+    if (blueskyBridge) {
+      await blueskyBridge.stop();
+      blueskyBridge = null;
     }
   }
 
@@ -1201,6 +1237,7 @@ async function main() {
     startSlackBridge();
     startMattermostBridge();
     startTelegramBridge();
+    startBlueskyBridge();
     startTlonBridge();
     startWhatsAppBridge();
     startSignalBridge();
@@ -1561,6 +1598,7 @@ async function main() {
     startSlackBridge();
     startMattermostBridge();
     startTelegramBridge();
+    startBlueskyBridge();
     startTlonBridge();
     startWhatsAppBridge();
     startSignalBridge();
@@ -4394,6 +4432,73 @@ async function main() {
     Params: { userId: string };
   }>("/api/settings/telegram/pair/:userId", async (req, reply) => {
     const ok = revokeTelegramPairing(req.params.userId);
+    if (!ok) {
+      reply.code(400);
+      return { ok: false, error: "User not found" };
+    }
+    return { ok: true };
+  });
+
+  // =========================================================================
+  // Bluesky settings routes
+  // =========================================================================
+
+  app.get("/api/settings/bluesky", async () => {
+    return getBlueskySettings();
+  });
+
+  app.put<{
+    Body: {
+      enabled?: boolean;
+      identifier?: string;
+      appPassword?: string;
+      service?: string;
+    };
+  }>("/api/settings/bluesky", async (req) => {
+    const wasEnabled = getBlueskySettings().enabled && getBlueskySettings().credentialsSet;
+    updateBlueskySettings(req.body);
+    const nowEnabled = getBlueskySettings().enabled && getBlueskySettings().credentialsSet;
+
+    // Start or stop bridge based on state change
+    if (nowEnabled && !wasEnabled) {
+      startBlueskyBridge();
+    } else if (!nowEnabled && wasEnabled) {
+      await stopBlueskyBridge();
+    }
+
+    return { ok: true };
+  });
+
+  app.post("/api/settings/bluesky/test", async () => {
+    return testBlueskyConnection();
+  });
+
+  app.post<{
+    Body: { code: string };
+  }>("/api/settings/bluesky/pair/approve", async (req, reply) => {
+    const result = approveBlueskyPairing(req.body.code);
+    if (!result) {
+      reply.code(400);
+      return { ok: false, error: "Invalid or expired pairing code" };
+    }
+    return { ok: true, user: result };
+  });
+
+  app.post<{
+    Body: { code: string };
+  }>("/api/settings/bluesky/pair/reject", async (req, reply) => {
+    const ok = rejectBlueskyPairing(req.body.code);
+    if (!ok) {
+      reply.code(400);
+      return { ok: false, error: "Pairing code not found" };
+    }
+    return { ok: true };
+  });
+
+  app.delete<{
+    Params: { userId: string };
+  }>("/api/settings/bluesky/pair/:userId", async (req, reply) => {
+    const ok = revokeBlueskyPairing(req.params.userId);
     if (!ok) {
       reply.code(400);
       return { ok: false, error: "User not found" };

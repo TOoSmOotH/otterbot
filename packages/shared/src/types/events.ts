@@ -66,6 +66,8 @@ export interface ServerToClientEvents {
   "mattermost:status": (data: { status: "connected" | "disconnected" | "error"; botUsername?: string }) => void;
   "telegram:pairing-request": (data: { code: string; telegramUserId: string; telegramUsername: string }) => void;
   "telegram:status": (data: { status: "connected" | "disconnected" | "error"; botUsername?: string }) => void;
+  "bluesky:pairing-request": (data: { code: string; blueskyDid: string; blueskyHandle: string }) => void;
+  "bluesky:status": (data: { status: "connected" | "disconnected" | "error"; handle?: string }) => void;
   "whatsapp:status": (data: { status: "connected" | "disconnected" | "qr" | "authenticated" | "auth_failure"; qr?: string }) => void;
   "signal:pairing-request": (data: { code: string; signalNumber: string }) => void;
   "signal:status": (data: { status: "connected" | "disconnected" | "error"; phoneNumber?: string }) => void;
