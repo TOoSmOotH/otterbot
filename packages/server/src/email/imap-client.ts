@@ -21,6 +21,11 @@ function createImapClient(config: EmailConnectionConfig): ImapFlow {
       pass: config.password,
     },
     logger: false,
+    // Keep the connection alive: restart IDLE every 5 min so the server
+    // (or intermediate firewalls/NAT) don't drop us for inactivity.
+    maxIdleTime: 5 * 60 * 1000,
+    // Allow up to 10 min of socket inactivity before timing out (default 5 min)
+    socketTimeout: 10 * 60 * 1000,
   });
   // Prevent unhandled 'error' events (e.g. socket timeouts) from crashing
   // the process. The client sets usable=false on error, so getImapClient()
