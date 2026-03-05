@@ -219,6 +219,15 @@ interface SettingsState {
   mattermostPendingPairings: Array<{ code: string; mattermostUserId: string; mattermostUsername: string; createdAt: string }>;
   mattermostTestResult: TestResult | null;
 
+  // Bluesky
+  blueskyEnabled: boolean;
+  blueskyCredentialsSet: boolean;
+  blueskyHandle: string | null;
+  blueskyService: string;
+  blueskyPairedUsers: Array<{ blueskyDid: string; blueskyHandle: string; pairedAt: string }>;
+  blueskyPendingPairings: Array<{ code: string; blueskyDid: string; blueskyHandle: string; createdAt: string }>;
+  blueskyTestResult: TestResult | null;
+
   // Nextcloud Talk
   nextcloudTalkEnabled: boolean;
   nextcloudTalkServerUrlSet: boolean;
@@ -425,6 +434,19 @@ interface SettingsState {
   rejectTelegramPairing: (code: string) => Promise<void>;
   revokeTelegramUser: (userId: string) => Promise<void>;
 
+  // Bluesky actions
+  loadBlueskySettings: () => Promise<void>;
+  updateBlueskySettings: (data: {
+    enabled?: boolean;
+    identifier?: string;
+    appPassword?: string;
+    service?: string;
+  }) => Promise<void>;
+  testBlueskyConnection: () => Promise<void>;
+  approveBlueskyPairing: (code: string) => Promise<void>;
+  rejectBlueskyPairing: (code: string) => Promise<void>;
+  revokeBlueskyUser: (did: string) => Promise<void>;
+
   // Slack actions
   loadSlackSettings: () => Promise<void>;
   updateSlackSettings: (data: {
@@ -599,6 +621,13 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   telegramPairedUsers: [],
   telegramPendingPairings: [],
   telegramTestResult: null,
+  blueskyEnabled: false,
+  blueskyCredentialsSet: false,
+  blueskyHandle: null,
+  blueskyService: "https://bsky.social",
+  blueskyPairedUsers: [],
+  blueskyPendingPairings: [],
+  blueskyTestResult: null,
   slackEnabled: false,
   slackBotTokenSet: false,
   slackSigningSecretSet: false,
@@ -1932,6 +1961,112 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     }
   },
 
+  // Bluesky actions
+
+  loadBlueskySettings: async () => {
+    try {
+      const res = await fetch("/api/settings/bluesky");
+      if (!res.ok) return;
+      const data = await res.json();
+      set({
+        blueskyEnabled: data.enabled,
+        blueskyCredentialsSet: data.credentialsSet,
+        blueskyHandle: data.handle,
+        blueskyService: data.service,
+        blueskyPairedUsers: data.pairedUsers,
+        blueskyPendingPairings: data.pendingPairings,
+      });
+    } catch {
+      // Silently fail
+    }
+  },
+
+  updateBlueskySettings: async (data) => {
+    set({ error: null });
+    try {
+      const res = await fetch("/api/settings/bluesky", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) throw new Error("Failed to update Bluesky settings");
+      await get().loadBlueskySettings();
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "Unknown error" });
+    }
+  },
+
+  testBlueskyConnection: async () => {
+    set({ blueskyTestResult: { ok: false, testing: true } });
+    try {
+      const res = await fetch("/api/settings/bluesky/test", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      const data = await res.json();
+      set({
+        blueskyTestResult: {
+          ok: data.ok,
+          error: data.error,
+          testing: false,
+        },
+        blueskyHandle: data.ok ? data.handle : get().blueskyHandle,
+      });
+    } catch (err) {
+      set({
+        blueskyTestResult: {
+          ok: false,
+          error: err instanceof Error ? err.message : "Unknown error",
+          testing: false,
+        },
+      });
+    }
+  },
+
+  approveBlueskyPairing: async (code) => {
+    set({ error: null });
+    try {
+      const res = await fetch("/api/settings/bluesky/pair/approve", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code }),
+      });
+      if (!res.ok) throw new Error("Failed to approve pairing");
+      await get().loadBlueskySettings();
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "Unknown error" });
+    }
+  },
+
+  rejectBlueskyPairing: async (code) => {
+    set({ error: null });
+    try {
+      const res = await fetch("/api/settings/bluesky/pair/reject", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code }),
+      });
+      if (!res.ok) throw new Error("Failed to reject pairing");
+      await get().loadBlueskySettings();
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "Unknown error" });
+    }
+  },
+
+  revokeBlueskyUser: async (did) => {
+    set({ error: null });
+    try {
+      const res = await fetch(`/api/settings/bluesky/pair/${encodeURIComponent(did)}`, {
+        method: "DELETE",
+      });
+      if (!res.ok) throw new Error("Failed to revoke user");
+      await get().loadBlueskySettings();
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "Unknown error" });
+    }
+  },
+
   // Slack actions
 
   loadSlackSettings: async () => {
@@ -2421,6 +2556,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       a.loadSettings(),
       a.loadDiscordSettings(),
       a.loadTelegramSettings(),
+      a.loadBlueskySettings(),
       a.loadSlackSettings(),
       a.loadMattermostSettings(),
       a.loadNextcloudTalkSettings(),

@@ -31,6 +31,12 @@ const CHANNELS = [
     icon: "M",
     settingsSection: "mattermost" as const,
   },
+  {
+    name: "Bluesky",
+    description: "Connect to Bluesky via AT Protocol",
+    icon: "B",
+    settingsSection: "bluesky" as const,
+  },
 ];
 
 export function ChannelsSection() {
@@ -46,18 +52,23 @@ export function ChannelsSection() {
   const mattermostEnabled = useSettingsStore((s) => s.mattermostEnabled);
   const mattermostTokenSet = useSettingsStore((s) => s.mattermostTokenSet);
   const loadMattermostSettings = useSettingsStore((s) => s.loadMattermostSettings);
+  const blueskyEnabled = useSettingsStore((s) => s.blueskyEnabled);
+  const blueskyCredentialsSet = useSettingsStore((s) => s.blueskyCredentialsSet);
+  const loadBlueskySettings = useSettingsStore((s) => s.loadBlueskySettings);
 
   useEffect(() => {
     loadDiscordSettings();
     loadTelegramSettings();
     loadSlackSettings();
     loadMattermostSettings();
+    loadBlueskySettings();
   }, []);
 
   const isDiscordConnected = discordEnabled && discordTokenSet;
   const isTelegramConnected = telegramEnabled && telegramTokenSet;
   const isSlackConnected = slackEnabled && slackBotTokenSet;
   const isMattermostConnected = mattermostEnabled && mattermostTokenSet;
+  const isBlueskyConnected = blueskyEnabled && blueskyCredentialsSet;
 
   return (
     <div className="p-5 space-y-4">
@@ -70,7 +81,7 @@ export function ChannelsSection() {
 
       <div className="grid grid-cols-2 gap-3">
         {CHANNELS.map((channel) => {
-          const connected = (channel.name === "Discord" && isDiscordConnected) || (channel.name === "Telegram" && isTelegramConnected) || (channel.name === "Slack" && isSlackConnected) || (channel.name === "Mattermost" && isMattermostConnected);
+          const connected = (channel.name === "Discord" && isDiscordConnected) || (channel.name === "Telegram" && isTelegramConnected) || (channel.name === "Slack" && isSlackConnected) || (channel.name === "Mattermost" && isMattermostConnected) || (channel.name === "Bluesky" && isBlueskyConnected);
           return (
             <div
               key={channel.name}
