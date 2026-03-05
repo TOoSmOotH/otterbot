@@ -205,12 +205,16 @@ const SSH_KEY_NAME = "otterbot_github";
  * Configure (or unconfigure) local commit signing for a repo.
  * When enabled, sets gpg.format, user.signingkey, commit.gpgsign, and
  * tag.gpgsign as local git config so commits in this repo are signed.
+ *
+ * @param sshKeyPath - Path to the SSH private key (without .pub). When omitted,
+ *                     falls back to the legacy global key.
  */
-export function configureCommitSigning(cwd: string, enabled: boolean): void {
+export function configureCommitSigning(cwd: string, enabled: boolean, sshKeyPath?: string): void {
   if (enabled) {
-    const pubKeyPath = join(homedir(), ".ssh", `${SSH_KEY_NAME}.pub`);
+    const keyBase = sshKeyPath ?? join(homedir(), ".ssh", SSH_KEY_NAME);
+    const pubKeyPath = `${keyBase}.pub`;
     if (!existsSync(pubKeyPath)) {
-      throw new Error("No SSH key configured. Generate or import one in Settings → GitHub first.");
+      throw new Error("No SSH key configured for this account. Generate or import one in Settings → GitHub first.");
     }
     execSync("git config --local gpg.format ssh", { cwd, stdio: "ignore" });
     execSync(`git config --local user.signingkey "${pubKeyPath}"`, { cwd, stdio: "ignore" });
@@ -228,10 +232,13 @@ export function configureCommitSigning(cwd: string, enabled: boolean): void {
 }
 
 /**
- * Check whether the otterbot SSH key exists.
+ * Check whether an SSH key exists.
+ * @param sshKeyPath - Path to the SSH private key (without .pub). When omitted,
+ *                     checks the legacy global key.
  */
-export function hasSSHKey(): boolean {
-  return existsSync(join(homedir(), ".ssh", `${SSH_KEY_NAME}.pub`));
+export function hasSSHKey(sshKeyPath?: string): boolean {
+  const keyBase = sshKeyPath ?? join(homedir(), ".ssh", SSH_KEY_NAME);
+  return existsSync(`${keyBase}.pub`);
 }
 
 // ---------------------------------------------------------------------------

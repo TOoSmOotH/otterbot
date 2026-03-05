@@ -14,7 +14,7 @@ import type { BaseAgent } from "../agents/agent.js";
 import { getDb, schema } from "../db/index.js";
 import { isTTSEnabled, getConfiguredTTSProvider, stripMarkdown } from "../tts/tts.js";
 import { getConfig, setConfig, deleteConfig } from "../auth/auth.js";
-import { resolveGitHubToken, resolveGitHubUsername } from "../github/account-resolver.js";
+import { resolveGitHubAccount, resolveGitHubToken, resolveGitHubUsername } from "../github/account-resolver.js";
 import { SoulService } from "../memory/soul-service.js";
 import { MemoryService } from "../memory/memory-service.js";
 import { SoulAdvisor } from "../memory/soul-advisor.js";
@@ -875,9 +875,10 @@ export function setupSocketHandlers(
           .where(eq(schema.projects.id, data.projectId))
           .get();
 
+        const account = resolveGitHubAccount(data.projectId);
         callback({
           enabled: !!project?.signCommits,
-          hasSSHKey: hasSSHKey(),
+          hasSSHKey: hasSSHKey(account?.sshKeyPath ?? undefined),
         });
       } catch {
         callback({ enabled: false, hasSSHKey: false });
@@ -899,8 +900,11 @@ export function setupSocketHandlers(
           return;
         }
 
-        if (data.enabled && !hasSSHKey()) {
-          callback?.({ ok: false, error: "No SSH key configured. Generate or import one in Settings → GitHub first." });
+        const account = resolveGitHubAccount(data.projectId);
+        const accountKeyPath = account?.sshKeyPath ?? undefined;
+
+        if (data.enabled && !hasSSHKey(accountKeyPath)) {
+          callback?.({ ok: false, error: "No SSH key configured for this account. Generate or import one in Settings → GitHub first." });
           return;
         }
 
@@ -915,7 +919,7 @@ export function setupSocketHandlers(
           const repoPath = workspace.repoPath(data.projectId);
           if (existsSync(repoPath)) {
             try {
-              configureCommitSigning(repoPath, data.enabled);
+              configureCommitSigning(repoPath, data.enabled, accountKeyPath);
             } catch (e) {
               callback?.({ ok: false, error: e instanceof Error ? e.message : "Failed to configure git signing" });
               return;
