@@ -246,4 +246,122 @@ describe("MastodonBridge", () => {
 
     await bridge.stop();
   });
+
+  it("ignores mentions from the bot account itself", async () => {
+    mockIsPaired.mockReturnValue(true);
+    mockNotificationsList.mockResolvedValue([
+      {
+        id: "n-self",
+        type: "mention",
+        account: { id: "bot-id", acct: "otterbot" },
+        status: {
+          id: "status-self",
+          visibility: "public",
+          content: "<p>@otterbot hello from myself</p>",
+        },
+      },
+    ]);
+
+    const { bridge, bus } = await createBridge();
+
+    await bridge.start({
+      instanceUrl: "https://mastodon.example",
+      accessToken: "token-123",
+    });
+
+    await vi.waitFor(() => {
+      expect(mockNotificationsList).toHaveBeenCalled();
+    });
+
+    expect(bus.send).not.toHaveBeenCalled();
+    expect(mockStatusesCreate).not.toHaveBeenCalled();
+
+    await bridge.stop();
+  });
+
+  it("emits error status when polling receives auth failures", async () => {
+    mockNotificationsList.mockRejectedValue(new Error("401 Unauthorized"));
+
+    const { bridge, io } = await createBridge();
+
+    await bridge.start({
+      instanceUrl: "https://mastodon.example",
+      accessToken: "token-123",
+    });
+
+    await vi.waitFor(() => {
+      expect(io.emit).toHaveBeenCalledWith("mastodon:status", { status: "error" });
+    });
+
+    await bridge.stop();
+  });
+
+  it("splits long COO replies into a threaded sequence", async () => {
+    mockIsPaired.mockReturnValue(true);
+    mockNotificationsList.mockResolvedValue([
+      {
+        id: "n3",
+        type: "mention",
+        account: { id: "user-3", acct: "charlie" },
+        status: {
+          id: "status-3",
+          visibility: "public",
+          content: "<p>@otterbot give me a long answer</p>",
+        },
+      },
+    ]);
+
+    let replyCounter = 0;
+    mockStatusesCreate.mockImplementation(async () => {
+      replyCounter += 1;
+      return { id: `reply-${replyCounter}`, url: null };
+    });
+
+    const { bridge, bus } = await createBridge();
+
+    await bridge.start({
+      instanceUrl: "https://mastodon.example",
+      accessToken: "token-123",
+    });
+
+    await vi.waitFor(() => {
+      expect(bus.send).toHaveBeenCalledOnce();
+    });
+
+    const conversationId = (bus.send as ReturnType<typeof vi.fn>).mock.calls[0][0].conversationId as string;
+    const handler = (bus as ReturnType<typeof createMockBus>)._handlers[0];
+    const longReply = "x".repeat(750);
+
+    handler?.({
+      id: "coo-msg-long",
+      fromAgentId: "coo",
+      toAgentId: null,
+      type: MessageType.Chat,
+      content: longReply,
+      metadata: {},
+      conversationId,
+      timestamp: new Date().toISOString(),
+    });
+
+    await vi.waitFor(() => {
+      expect(mockStatusesCreate).toHaveBeenCalledTimes(2);
+    });
+
+    expect(mockStatusesCreate).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        inReplyToId: "status-3",
+        visibility: "public",
+      }),
+    );
+    expect(mockStatusesCreate).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        inReplyToId: "reply-1",
+        visibility: "public",
+      }),
+    );
+
+    await bridge.stop();
+  });
 });
