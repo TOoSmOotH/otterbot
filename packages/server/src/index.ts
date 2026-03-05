@@ -4750,8 +4750,18 @@ async function main() {
   // Email (IMAP/SMTP) REST routes
   // =========================================================================
 
+  app.get("/api/email/folders", async (_req, reply) => {
+    try {
+      const { listFolders } = await import("./email/imap-client.js");
+      return await listFolders();
+    } catch (err) {
+      reply.code(500);
+      return { error: err instanceof Error ? err.message : "Failed to list folders" };
+    }
+  });
+
   app.get<{
-    Querystring: { q?: string; maxResults?: string; pageToken?: string };
+    Querystring: { q?: string; maxResults?: string; pageToken?: string; folder?: string };
   }>("/api/email/messages", async (req, reply) => {
     try {
       const { listEmails } = await import("./email/imap-client.js");
@@ -4764,10 +4774,11 @@ async function main() {
 
   app.get<{
     Params: { id: string };
+    Querystring: { folder?: string };
   }>("/api/email/messages/:id", async (req, reply) => {
     try {
       const { readEmail } = await import("./email/imap-client.js");
-      const email = await readEmail(req.params.id);
+      const email = await readEmail(req.params.id, req.query.folder);
       if (!email) { reply.code(404); return { error: "Email not found" }; }
       return email;
     } catch (err) {

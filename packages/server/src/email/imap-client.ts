@@ -62,6 +62,47 @@ async function getImapClient(): Promise<ImapFlow> {
 }
 
 // ---------------------------------------------------------------------------
+// List folders
+// ---------------------------------------------------------------------------
+
+export interface ImapFolder {
+  path: string;
+  name: string;
+  specialUse?: string;
+  totalMessages: number;
+  unseenMessages: number;
+}
+
+const SPECIAL_USE_ORDER = ["\\Inbox", "\\Sent", "\\Drafts", "\\Trash", "\\Archive", "\\Junk"];
+
+export async function listFolders(): Promise<ImapFolder[]> {
+  const client = await getImapClient();
+  const mailboxes = await client.list({ statusQuery: { messages: true, unseen: true } });
+
+  const folders: ImapFolder[] = mailboxes.map((mb) => ({
+    path: mb.path,
+    name: mb.name,
+    specialUse: mb.specialUse ?? undefined,
+    totalMessages: mb.status?.messages ?? 0,
+    unseenMessages: mb.status?.unseen ?? 0,
+  }));
+
+  // Sort: special-use folders first (in defined order), then alphabetical
+  folders.sort((a, b) => {
+    const aIdx = a.specialUse ? SPECIAL_USE_ORDER.indexOf(a.specialUse) : -1;
+    const bIdx = b.specialUse ? SPECIAL_USE_ORDER.indexOf(b.specialUse) : -1;
+    const aHas = aIdx !== -1;
+    const bHas = bIdx !== -1;
+    if (aHas && bHas) return aIdx - bIdx;
+    if (aHas) return -1;
+    if (bHas) return 1;
+    return a.path.localeCompare(b.path);
+  });
+
+  return folders;
+}
+
+// ---------------------------------------------------------------------------
 // List emails
 // ---------------------------------------------------------------------------
 
@@ -69,14 +110,16 @@ export async function listEmails(opts?: {
   q?: string;
   maxResults?: string;
   pageToken?: string;
+  folder?: string;
 }): Promise<{ messages: EmailSummary[]; nextPageToken: string | null }> {
   const client = await getImapClient();
   const maxResults = Math.min(parseInt(opts?.maxResults ?? "20", 10), 50);
   const offset = opts?.pageToken ? parseInt(opts.pageToken, 10) : 0;
+  const mailbox = opts?.folder ?? "INBOX";
 
-  const lock = await client.getMailboxLock("INBOX");
+  const lock = await client.getMailboxLock(mailbox);
   try {
-    const status = await client.status("INBOX", { messages: true });
+    const status = await client.status(mailbox, { messages: true });
     const total = status.messages ?? 0;
     if (total === 0) {
       return { messages: [], nextPageToken: null };
@@ -156,11 +199,11 @@ export async function listEmails(opts?: {
 // Read single email
 // ---------------------------------------------------------------------------
 
-export async function readEmail(id: string): Promise<EmailDetail | null> {
+export async function readEmail(id: string, folder?: string): Promise<EmailDetail | null> {
   const client = await getImapClient();
   const uid = parseInt(id, 10);
 
-  const lock = await client.getMailboxLock("INBOX");
+  const lock = await client.getMailboxLock(folder ?? "INBOX");
   try {
     const msg = await client.fetchOne(String(uid), {
       envelope: true,

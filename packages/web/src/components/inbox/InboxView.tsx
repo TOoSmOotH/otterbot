@@ -1,5 +1,21 @@
 import { useEffect, useState } from "react";
 import { useEmailStore } from "../../stores/email-store";
+import type { EmailFolder } from "../../stores/email-store";
+
+/** Map special-use flags to friendly display names */
+function folderDisplayName(folder: EmailFolder): string {
+  const map: Record<string, string> = {
+    "\\Inbox": "Inbox",
+    "\\Sent": "Sent",
+    "\\Drafts": "Drafts",
+    "\\Trash": "Trash",
+    "\\Archive": "Archive",
+    "\\Junk": "Spam",
+  };
+  if (folder.specialUse && map[folder.specialUse]) return map[folder.specialUse];
+  // Strip common prefixes like "[Gmail]/" or "INBOX."
+  return folder.name;
+}
 
 export function InboxView() {
   const messages = useEmailStore((s) => s.messages);
@@ -14,6 +30,10 @@ export function InboxView() {
   const sendEmail = useEmailStore((s) => s.sendEmail);
   const loadMore = useEmailStore((s) => s.loadMore);
   const nextPageToken = useEmailStore((s) => s.nextPageToken);
+  const folders = useEmailStore((s) => s.folders);
+  const currentFolder = useEmailStore((s) => s.currentFolder);
+  const loadFolders = useEmailStore((s) => s.loadFolders);
+  const selectFolder = useEmailStore((s) => s.selectFolder);
 
   const [searchQuery, setSearchQuery] = useState("");
   const [showCompose, setShowCompose] = useState(false);
@@ -23,6 +43,7 @@ export function InboxView() {
   const [sending, setSending] = useState(false);
 
   useEffect(() => {
+    loadFolders();
     loadMessages();
   }, []);
 
@@ -47,7 +68,12 @@ export function InboxView() {
     }
   };
 
-  if (error && messages.length === 0) {
+  const activeFolderName = folders.find((f) => f.path === currentFolder);
+  const folderLabel = activeFolderName
+    ? folderDisplayName(activeFolderName)
+    : currentFolder;
+
+  if (error && messages.length === 0 && folders.length === 0) {
     return (
       <div className="h-full flex items-center justify-center p-4">
         <div className="text-center space-y-2">
@@ -131,12 +157,36 @@ export function InboxView() {
         </div>
       )}
 
-      {/* Two-pane: message list + detail */}
+      {/* Three-pane: folders | message list | detail */}
       <div className="flex-1 flex overflow-hidden">
+        {/* Folder sidebar */}
+        {folders.length > 0 && (
+          <div className="w-40 flex-shrink-0 border-r border-border overflow-y-auto">
+            {folders.map((folder) => (
+              <button
+                key={folder.path}
+                onClick={() => selectFolder(folder.path)}
+                className={`w-full text-left px-3 py-1.5 text-xs hover:bg-secondary/50 transition-colors flex items-center justify-between gap-1 ${
+                  currentFolder === folder.path ? "bg-secondary font-medium" : "text-muted-foreground"
+                }`}
+              >
+                <span className="truncate">{folderDisplayName(folder)}</span>
+                {folder.unseenMessages > 0 && (
+                  <span className="text-[9px] bg-primary text-primary-foreground rounded-full px-1.5 min-w-[1.25rem] text-center flex-shrink-0">
+                    {folder.unseenMessages}
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>
+        )}
+
         {/* Message list */}
-        <div className={`${selectedMessage ? "w-2/5" : "w-full"} border-r border-border overflow-y-auto`}>
+        <div className={`${selectedMessage ? "w-2/5" : "flex-1"} border-r border-border overflow-y-auto`}>
           {loading && messages.length === 0 && (
-            <div className="text-xs text-muted-foreground text-center py-8">Loading inbox...</div>
+            <div className="text-xs text-muted-foreground text-center py-8">
+              Loading {folderLabel}...
+            </div>
           )}
 
           {!loading && messages.length === 0 && (
