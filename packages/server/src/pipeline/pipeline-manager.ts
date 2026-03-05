@@ -1293,6 +1293,17 @@ export class PipelineManager {
           if (extraContext) {
             parts.push(`\n--- REVIEW FINDINGS ---\n${extraContext}\n--- END REVIEW FINDINGS ---`);
           }
+        } else if (state.prBranch && state.stageReports.has("ci_failure")) {
+          // CI failure — fix on existing branch
+          parts.push(
+            `\n[CI FAILURE — Fix Required]`,
+            `CI checks failed on the PR. Investigate and fix the failures on branch \`${state.prBranch}\`.`,
+            `Do NOT create a new branch or PR — just fix the issues, commit, and push to the existing branch.`,
+          );
+          const ciReport = state.stageReports.get("ci_failure");
+          if (ciReport) {
+            parts.push(`\n--- CI FAILURE DETAILS ---\n${ciReport}\n--- END CI FAILURE DETAILS ---`);
+          }
         } else {
           // Initial implementation
           parts.push(
