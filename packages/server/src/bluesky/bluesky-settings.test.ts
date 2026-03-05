@@ -1,8 +1,10 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 
+import type { PairedUser, PendingPairing } from "./pairing.js";
+
 const configStore = new Map<string, string>();
-const listPairedUsersMock = vi.fn(() => []);
-const listPendingPairingsMock = vi.fn(() => []);
+const listPairedUsersMock = vi.fn((): PairedUser[] => []);
+const listPendingPairingsMock = vi.fn((): PendingPairing[] => []);
 const loginMock = vi.fn();
 const atpAgentCtorMock = vi.fn();
 
