@@ -355,4 +355,71 @@ describe("BlueskyBridge", () => {
       },
     });
   });
+
+  it("ignores notifications authored by the bot itself", async () => {
+    isPairedMock.mockReturnValue(true);
+    listNotificationsMock.mockResolvedValue({
+      data: {
+        notifications: [{
+          reason: "mention",
+          indexedAt: "2026-03-05T00:00:00.000Z",
+          uri: "at://post/self",
+          cid: "cid-self",
+          author: { did: "did:plc:otterbot", handle: "otterbot.bsky.social" },
+          record: { text: "@otterbot.bsky.social echo" },
+        }],
+      },
+    });
+
+    await bridge.start({ identifier: "otterbot", appPassword: "pass" });
+    await flush();
+
+    expect(generatePairingCodeMock).not.toHaveBeenCalled();
+    expect(bus.send).not.toHaveBeenCalled();
+    expect(postMock).not.toHaveBeenCalled();
+  });
+
+  it("does not route mention-only notifications to COO", async () => {
+    isPairedMock.mockReturnValue(true);
+    listNotificationsMock.mockResolvedValue({
+      data: {
+        notifications: [{
+          reason: "mention",
+          indexedAt: "2026-03-05T00:00:00.000Z",
+          uri: "at://post/mention-only",
+          cid: "cid-mention-only",
+          author: { did: "did:plc:alice", handle: "alice.bsky.social" },
+          record: { text: "@otterbot.bsky.social" },
+        }],
+      },
+    });
+
+    await bridge.start({ identifier: "otterbot", appPassword: "pass" });
+    await flush();
+
+    expect(bus.send).not.toHaveBeenCalled();
+    expect(postMock).not.toHaveBeenCalled();
+  });
+
+  it("attempts to resume an expired session without surfacing status error when refresh succeeds", async () => {
+    listNotificationsMock.mockRejectedValue(new Error("session expired"));
+    resumeSessionMock.mockResolvedValue(undefined);
+
+    await bridge.start({ identifier: "otterbot", appPassword: "pass" });
+    await flush();
+
+    expect(resumeSessionMock).toHaveBeenCalledTimes(1);
+    expect(io.emit).not.toHaveBeenCalledWith("bluesky:status", { status: "error" });
+  });
+
+  it("emits status error when session refresh fails after expiration", async () => {
+    listNotificationsMock.mockRejectedValue(new Error("token expired"));
+    resumeSessionMock.mockRejectedValue(new Error("refresh failed"));
+
+    await bridge.start({ identifier: "otterbot", appPassword: "pass" });
+    await flush();
+
+    expect(resumeSessionMock).toHaveBeenCalledTimes(1);
+    expect(io.emit).toHaveBeenCalledWith("bluesky:status", { status: "error" });
+  });
 });
