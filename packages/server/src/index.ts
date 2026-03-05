@@ -280,6 +280,17 @@ import {
   rejectPairing as rejectNextcloudTalkPairing,
   revokePairing as revokeNextcloudTalkPairing,
 } from "./nextcloud-talk/pairing.js";
+import { MastodonBridge } from "./mastodon/mastodon-bridge.js";
+import {
+  getMastodonSettings,
+  updateMastodonSettings,
+  testMastodonConnection,
+} from "./mastodon/mastodon-settings.js";
+import {
+  approvePairing as approveMastodonPairing,
+  rejectPairing as rejectMastodonPairing,
+  revokePairing as revokeMastodonPairing,
+} from "./mastodon/pairing.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -803,6 +814,30 @@ async function main() {
     }
   }
 
+  // Mastodon bridge (initialized when enabled + credentials set)
+  let mastodonBridge: MastodonBridge | null = null;
+
+  function startMastodonBridge() {
+    if (mastodonBridge || !coo) return;
+    const settings = getMastodonSettings();
+    if (!settings.enabled || !settings.credentialsSet) return;
+    const instanceUrl = getConfig("mastodon:instance_url");
+    const accessToken = getConfig("mastodon:access_token");
+    if (!instanceUrl || !accessToken) return;
+    mastodonBridge = new MastodonBridge({ bus, coo, io });
+    mastodonBridge.start({ instanceUrl, accessToken }).catch((err) => {
+      console.error("[Mastodon] Failed to start bridge:", err);
+      mastodonBridge = null;
+    });
+  }
+
+  async function stopMastodonBridge() {
+    if (mastodonBridge) {
+      await mastodonBridge.stop();
+      mastodonBridge = null;
+    }
+  }
+
   function startCoo() {
     if (coo) return;
     try {
@@ -1205,6 +1240,7 @@ async function main() {
     startWhatsAppBridge();
     startSignalBridge();
     startNextcloudTalkBridge();
+    startMastodonBridge();
 
     // Start mock scenario playback if configured
     if (process.env.MOCK_MODE === "true" && process.env.MOCK_SCENARIO && coo) {
@@ -1565,6 +1601,7 @@ async function main() {
     startWhatsAppBridge();
     startSignalBridge();
     startNextcloudTalkBridge();
+    startMastodonBridge();
 
     return { ok: true };
   });
@@ -4598,6 +4635,72 @@ async function main() {
   });
 
   // =========================================================================
+  // Mastodon settings routes
+  // =========================================================================
+
+  app.get("/api/settings/mastodon", async () => {
+    return getMastodonSettings();
+  });
+
+  app.put<{
+    Body: {
+      enabled?: boolean;
+      instanceUrl?: string;
+      accessToken?: string;
+    };
+  }>("/api/settings/mastodon", async (req) => {
+    const wasEnabled = getMastodonSettings().enabled && getMastodonSettings().credentialsSet;
+    updateMastodonSettings(req.body);
+    const nowEnabled = getMastodonSettings().enabled && getMastodonSettings().credentialsSet;
+
+    // Start or stop bridge based on state change
+    if (nowEnabled && !wasEnabled) {
+      startMastodonBridge();
+    } else if (!nowEnabled && wasEnabled) {
+      await stopMastodonBridge();
+    }
+
+    return { ok: true };
+  });
+
+  app.post("/api/settings/mastodon/test", async () => {
+    return testMastodonConnection();
+  });
+
+  app.post<{
+    Body: { code: string };
+  }>("/api/settings/mastodon/pair/approve", async (req, reply) => {
+    const result = approveMastodonPairing(req.body.code);
+    if (!result) {
+      reply.code(400);
+      return { ok: false, error: "Invalid or expired pairing code" };
+    }
+    return { ok: true, user: result };
+  });
+
+  app.post<{
+    Body: { code: string };
+  }>("/api/settings/mastodon/pair/reject", async (req, reply) => {
+    const ok = rejectMastodonPairing(req.body.code);
+    if (!ok) {
+      reply.code(400);
+      return { ok: false, error: "Pairing code not found" };
+    }
+    return { ok: true };
+  });
+
+  app.delete<{
+    Params: { userId: string };
+  }>("/api/settings/mastodon/pair/:userId", async (req, reply) => {
+    const ok = revokeMastodonPairing(req.params.userId);
+    if (!ok) {
+      reply.code(400);
+      return { ok: false, error: "User not found" };
+    }
+    return { ok: true };
+  });
+
+  // =========================================================================
   // Google settings routes
   // =========================================================================
 
@@ -5697,6 +5800,7 @@ Respond with ONLY a JSON object (no markdown, no explanation) with these fields:
     await stopMattermostBridge();
     await stopSignalBridge();
     await stopNextcloudTalkBridge();
+    await stopMastodonBridge();
     await McpClientManager.stopAll();
     await closeBrowser();
     process.exit(0);

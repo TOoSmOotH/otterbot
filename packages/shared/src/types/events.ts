@@ -71,6 +71,8 @@ export interface ServerToClientEvents {
   "signal:status": (data: { status: "connected" | "disconnected" | "error"; phoneNumber?: string }) => void;
   "nextcloud-talk:pairing-request": (data: { code: string; nextcloudUserId: string; nextcloudDisplayName: string }) => void;
   "nextcloud-talk:status": (data: { status: "connected" | "disconnected" | "error"; botUsername?: string }) => void;
+  "mastodon:pairing-request": (data: { code: string; mastodonId: string; mastodonAcct: string }) => void;
+  "mastodon:status": (data: { status: "connected" | "disconnected" | "error"; acct?: string }) => void;
   "merge-queue:updated": (data: { entries: MergeQueueEntry[] }) => void;
   "merge-queue:entry-updated": (entry: MergeQueueEntry) => void;
   "mcp:status": (runtime: McpServerRuntime) => void;
