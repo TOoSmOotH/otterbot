@@ -11,10 +11,8 @@ import type { EmailConnectionConfig } from "./email-settings.js";
 let imapClient: ImapFlow | null = null;
 let currentConfig: EmailConnectionConfig | null = null;
 
-export async function connectImap(config: EmailConnectionConfig): Promise<void> {
-  await disconnectImap();
-  currentConfig = config;
-  imapClient = new ImapFlow({
+function createImapClient(config: EmailConnectionConfig): ImapFlow {
+  const client = new ImapFlow({
     host: config.imapServer,
     port: config.imapPort,
     secure: config.imapTls,
@@ -24,6 +22,20 @@ export async function connectImap(config: EmailConnectionConfig): Promise<void> 
     },
     logger: false,
   });
+  // Prevent unhandled 'error' events (e.g. socket timeouts) from crashing
+  // the process. The client sets usable=false on error, so getImapClient()
+  // will reconnect on the next call.
+  client.on("error", (err: Error & { code?: string }) => {
+    console.error(`[Email] IMAP error (${err.code ?? "unknown"}): ${err.message}`);
+    imapClient = null;
+  });
+  return client;
+}
+
+export async function connectImap(config: EmailConnectionConfig): Promise<void> {
+  await disconnectImap();
+  currentConfig = config;
+  imapClient = createImapClient(config);
   await imapClient.connect();
 }
 
@@ -46,16 +58,7 @@ async function getImapClient(): Promise<ImapFlow> {
   const config = ensureConfig();
   // Reconnect if the client was dropped
   if (!imapClient || imapClient.usable === false) {
-    imapClient = new ImapFlow({
-      host: config.imapServer,
-      port: config.imapPort,
-      secure: config.imapTls,
-      auth: {
-        user: config.username,
-        pass: config.password,
-      },
-      logger: false,
-    });
+    imapClient = createImapClient(config);
     await imapClient.connect();
   }
   return imapClient;

@@ -30,6 +30,7 @@ const mockImapClient = {
   usable: true,
   connect: vi.fn(),
   logout: vi.fn(),
+  on: vi.fn(),
   list: vi.fn(async () => mockMailboxes),
   getMailboxLock: vi.fn(async (mailbox: string) => {
     lockMailbox = mailbox;
