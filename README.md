@@ -289,6 +289,36 @@ Projects can be linked to GitHub repositories:
 - **PR tools** — agents can create pull requests, post comments, and review code
 - **Issue tools** — agents can list, read, and comment on issues
 
+#### Multi-Account Support
+
+Otterbot supports multiple GitHub accounts, each with its own Personal Access Token (PAT), email, and SSH key. Configure accounts in **Settings → GitHub**.
+
+| Feature | Description |
+|---------|-------------|
+| **Multiple accounts** | Add as many GitHub accounts as you need (e.g. Personal, Work, Bot) |
+| **Default account** | One account is marked as the default and used when no project-specific account is set |
+| **Per-project assignment** | Each project can be assigned a specific GitHub account via Project Settings |
+| **SSH keys** | Generate or import an SSH key per account for commit signing and SSH-based git operations |
+| **Commit signing** | Enable per-project commit signing using the account's SSH key |
+| **Account resolution** | Automatic resolution chain: project-specific account → default account → legacy config fallback |
+
+#### Setting Up a GitHub Account
+
+1. Go to **Settings → GitHub** and click **+ Add Account**
+2. Enter a **label** (e.g. "Personal"), your **Personal Access Token**, and optionally an **email** for commits
+3. Required PAT scopes: `repo`, `read:org`, `workflow`
+4. Click **Test Connection** to verify the token works
+5. Optionally generate or import an **SSH key** for commit signing
+
+#### Per-Project GitHub Settings
+
+In **Project Settings**, you can:
+
+- **Select a GitHub account** — choose which account to use for this project's API calls and git operations
+- **Enable issue monitoring** — automatically create tasks from new GitHub issues
+- **Enable commit signing** — sign commits with the account's SSH key
+- **Set a target branch** — configure the default branch for PRs
+
 ## Coding Agents
 
 Otterbot integrates with external AI coding agents that run in PTY terminals:
@@ -623,6 +653,19 @@ POST   /api/settings/discord/test             # Test Discord connection
 POST   /api/settings/discord/pair/approve     # Approve pairing request
 POST   /api/settings/discord/pair/reject      # Reject pairing request
 DELETE /api/settings/discord/pair/:userId      # Remove a paired user
+
+# Settings — GitHub Accounts
+GET    /api/settings/github/accounts                  # List all GitHub accounts
+POST   /api/settings/github/accounts                  # Create a GitHub account
+PATCH  /api/settings/github/accounts/:id              # Update a GitHub account
+DELETE /api/settings/github/accounts/:id              # Delete a GitHub account
+PUT    /api/settings/github/accounts/:id/default      # Set account as default
+POST   /api/settings/github/accounts/:id/test         # Test account connection
+POST   /api/settings/github/accounts/:id/ssh/generate # Generate SSH key for account
+POST   /api/settings/github/accounts/:id/ssh/import   # Import SSH key for account
+GET    /api/settings/github/accounts/:id/ssh/public-key # Get SSH public key
+DELETE /api/settings/github/accounts/:id/ssh           # Remove SSH key
+POST   /api/settings/github/accounts/:id/ssh/test      # Test SSH connection
 
 # Settings — LLM Providers
 GET    /api/settings                    # Get provider settings
