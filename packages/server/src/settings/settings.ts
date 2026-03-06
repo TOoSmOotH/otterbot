@@ -1959,12 +1959,21 @@ function configureGitSSH(): void {
   sshConfig = sshConfig.trimEnd() + hostBlock;
   writeFileSync(sshConfigPath, sshConfig, { mode: 0o600 });
 
+  // --- allowed signers file for SSH signature verification ---
+  const allowedSignersPath = join(sshDir(), "allowed_signers");
+  const pubKeyContent = readFileSync(pubKeyPath, "utf-8").trim();
+  // Format: <email> <key-type> <key-data>
+  // Use a wildcard email so it matches any committer
+  const signerLine = `* ${pubKeyContent}`;
+  writeFileSync(allowedSignersPath, signerLine + "\n", { mode: 0o644 });
+
   // --- git config for commit signing ---
   const gitCmds = [
     `git config --global gpg.format ssh`,
     `git config --global user.signingkey "${pubKeyPath}"`,
     `git config --global commit.gpgsign true`,
     `git config --global tag.gpgsign true`,
+    `git config --global gpg.ssh.allowedSignersFile "${allowedSignersPath}"`,
   ];
   for (const cmd of gitCmds) {
     execSync(cmd, { stdio: "pipe" });
@@ -1980,12 +1989,19 @@ function removeGitSSHConfig(): void {
     writeFileSync(sshConfigPath, sshConfig, { mode: 0o600 });
   }
 
+  // Remove allowed signers file
+  const allowedSignersPath = join(sshDir(), "allowed_signers");
+  if (existsSync(allowedSignersPath)) {
+    unlinkSync(allowedSignersPath);
+  }
+
   // Unset git signing config
   const gitCmds = [
     "git config --global --unset gpg.format",
     "git config --global --unset user.signingkey",
     "git config --global --unset commit.gpgsign",
     "git config --global --unset tag.gpgsign",
+    "git config --global --unset gpg.ssh.allowedSignersFile",
   ];
   for (const cmd of gitCmds) {
     try { execSync(cmd, { stdio: "pipe" }); } catch { /* key may not exist */ }

@@ -1,6 +1,6 @@
 
 import { execSync, execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { resolveGitHubAccount } from "../github/account-resolver.js";
@@ -227,12 +227,18 @@ export function configureCommitSigning(cwd: string, enabled: boolean, sshKeyPath
     if (!existsSync(pubKeyPath)) {
       throw new Error("No SSH key configured for this account. Generate or import one in Settings → GitHub first.");
     }
+    // Create allowed signers file for SSH signature verification
+    const allowedSignersPath = join(homedir(), ".ssh", "allowed_signers");
+    const pubKeyContent = readFileSync(pubKeyPath, "utf-8").trim();
+    writeFileSync(allowedSignersPath, `* ${pubKeyContent}\n`, { mode: 0o644 });
+
     execSync("git config --local gpg.format ssh", { cwd, stdio: "ignore" });
     execSync(`git config --local user.signingkey "${pubKeyPath}"`, { cwd, stdio: "ignore" });
     execSync("git config --local commit.gpgsign true", { cwd, stdio: "ignore" });
     execSync("git config --local tag.gpgsign true", { cwd, stdio: "ignore" });
+    execSync(`git config --local gpg.ssh.allowedSignersFile "${allowedSignersPath}"`, { cwd, stdio: "ignore" });
   } else {
-    for (const key of ["gpg.format", "user.signingkey", "commit.gpgsign", "tag.gpgsign"]) {
+    for (const key of ["gpg.format", "user.signingkey", "commit.gpgsign", "tag.gpgsign", "gpg.ssh.allowedSignersFile"]) {
       try {
         execSync(`git config --local --unset ${key}`, { cwd, stdio: "ignore" });
       } catch {
