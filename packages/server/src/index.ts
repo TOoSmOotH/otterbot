@@ -308,6 +308,16 @@ import {
   rejectPairing as rejectMastodonPairing,
   revokePairing as revokeMastodonPairing,
 } from "./mastodon/pairing.js";
+import {
+  getXSettings,
+  updateXSettings,
+  testXConnection,
+} from "./x/x-settings.js";
+import {
+  approvePairing as approveXPairing,
+  rejectPairing as rejectXPairing,
+  revokePairing as revokeXPairing,
+} from "./x/pairing.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -4902,6 +4912,64 @@ async function main() {
     Params: { userId: string };
   }>("/api/settings/mastodon/pair/:userId", async (req, reply) => {
     const ok = revokeMastodonPairing(req.params.userId);
+    if (!ok) {
+      reply.code(400);
+      return { ok: false, error: "User not found" };
+    }
+    return { ok: true };
+  });
+
+  // =========================================================================
+  // X (Twitter) settings routes
+  // =========================================================================
+
+  app.get("/api/settings/x", async () => {
+    return getXSettings();
+  });
+
+  app.put<{
+    Body: {
+      enabled?: boolean;
+      apiKey?: string;
+      apiSecret?: string;
+      accessToken?: string;
+      accessTokenSecret?: string;
+    };
+  }>("/api/settings/x", async (req) => {
+    updateXSettings(req.body);
+    return { ok: true };
+  });
+
+  app.post("/api/settings/x/test", async () => {
+    return testXConnection();
+  });
+
+  app.post<{
+    Body: { code: string };
+  }>("/api/settings/x/pair/approve", async (req, reply) => {
+    const result = approveXPairing(req.body.code);
+    if (!result) {
+      reply.code(400);
+      return { ok: false, error: "Invalid or expired pairing code" };
+    }
+    return { ok: true, user: result };
+  });
+
+  app.post<{
+    Body: { code: string };
+  }>("/api/settings/x/pair/reject", async (req, reply) => {
+    const ok = rejectXPairing(req.body.code);
+    if (!ok) {
+      reply.code(400);
+      return { ok: false, error: "Pairing code not found" };
+    }
+    return { ok: true };
+  });
+
+  app.delete<{
+    Params: { userId: string };
+  }>("/api/settings/x/pair/:userId", async (req, reply) => {
+    const ok = revokeXPairing(req.params.userId);
     if (!ok) {
       reply.code(400);
       return { ok: false, error: "User not found" };
