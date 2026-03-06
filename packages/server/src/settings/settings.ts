@@ -2198,34 +2198,36 @@ export async function testGitHubAccountConnection(accountId: string): Promise<Te
     const updates: { username?: string; email?: string } = {};
     if (username) updates.username = username;
 
-    // Resolve email: profile public email → /user/emails primary → noreply fallback
-    let resolvedEmail: string | undefined;
-    if (data.email) {
-      resolvedEmail = data.email;
-    } else {
-      // Try /user/emails to get the primary email (works even when email is private)
-      try {
-        const emailsRes = await fetch("https://api.github.com/user/emails", {
-          headers: {
-            Authorization: `Bearer ${account.token}`,
-            Accept: "application/vnd.github+json",
-            "User-Agent": "Otterbot",
-          },
-          signal: AbortSignal.timeout(10_000),
-        });
-        if (emailsRes.ok) {
-          const emails = (await emailsRes.json()) as Array<{ email: string; primary: boolean; verified: boolean }>;
-          const primary = emails.find((e) => e.primary && e.verified);
-          if (primary) resolvedEmail = primary.email;
+    // Only auto-resolve email if the user hasn't already set one in the UI
+    if (!account.email) {
+      let resolvedEmail: string | undefined;
+      if (data.email) {
+        resolvedEmail = data.email;
+      } else {
+        // Try /user/emails to get the primary email (works even when email is private)
+        try {
+          const emailsRes = await fetch("https://api.github.com/user/emails", {
+            headers: {
+              Authorization: `Bearer ${account.token}`,
+              Accept: "application/vnd.github+json",
+              "User-Agent": "Otterbot",
+            },
+            signal: AbortSignal.timeout(10_000),
+          });
+          if (emailsRes.ok) {
+            const emails = (await emailsRes.json()) as Array<{ email: string; primary: boolean; verified: boolean }>;
+            const primary = emails.find((e) => e.primary && e.verified);
+            if (primary) resolvedEmail = primary.email;
+          }
+        } catch {
+          // Fall through to noreply
         }
-      } catch {
-        // Fall through to noreply
       }
+      if (!resolvedEmail && username && data.id) {
+        resolvedEmail = `${data.id}+${username}@users.noreply.github.com`;
+      }
+      if (resolvedEmail) updates.email = resolvedEmail;
     }
-    if (!resolvedEmail && username && data.id) {
-      resolvedEmail = `${data.id}+${username}@users.noreply.github.com`;
-    }
-    if (resolvedEmail) updates.email = resolvedEmail;
 
     if (Object.keys(updates).length > 0) {
       updateAccountRecord(accountId, updates);
