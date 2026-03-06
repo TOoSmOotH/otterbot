@@ -3,6 +3,7 @@ import { execSync, execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { resolveGitHubAccount } from "../github/account-resolver.js";
 
 /**
  * Check if a directory is a git repository.
@@ -26,9 +27,19 @@ export function initGitRepo(cwd: string): void {
 
   if (!isGitRepo(cwd)) {
     execSync("git init -b main", { cwd, stdio: "ignore" });
-    // Set local config to ensure commits work even if global config is missing
-    execSync("git config user.email 'otterbot@example.com'", { cwd, stdio: "ignore" });
-    execSync("git config user.name 'OtterBot'", { cwd, stdio: "ignore" });
+    // Set local config from GitHub account if available, otherwise use safe defaults
+    let gitName = "OtterBot";
+    let gitEmail = "otterbot@users.noreply.github.com";
+    try {
+      const account = resolveGitHubAccount();
+      if (account?.username) gitName = account.username;
+      if (account?.email) gitEmail = account.email;
+      else if (account?.username) gitEmail = `${account.username}@users.noreply.github.com`;
+    } catch {
+      // DB may not be initialized yet (e.g. during tests) — use defaults
+    }
+    execSync(`git config user.email '${gitEmail}'`, { cwd, stdio: "ignore" });
+    execSync(`git config user.name '${gitName}'`, { cwd, stdio: "ignore" });
   }
 }
 

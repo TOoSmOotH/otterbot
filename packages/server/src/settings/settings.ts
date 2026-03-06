@@ -2192,10 +2192,18 @@ export async function testGitHubAccountConnection(accountId: string): Promise<Te
       if (res.status === 401) return { ok: false, error: "Invalid token. Check scopes: repo, read:org, workflow" };
       return { ok: false, error: `GitHub API error: ${res.status}` };
     }
-    const data = (await res.json()) as { login?: string };
+    const data = (await res.json()) as { login?: string; id?: number; email?: string | null };
     const username = data.login ?? null;
-    if (username) {
-      updateAccountRecord(accountId, { username });
+    const updates: { username?: string; email?: string } = {};
+    if (username) updates.username = username;
+    // Use the public email from the profile if available; otherwise construct the noreply address
+    if (data.email) {
+      updates.email = data.email;
+    } else if (username && data.id && !account.email) {
+      updates.email = `${data.id}+${username}@users.noreply.github.com`;
+    }
+    if (Object.keys(updates).length > 0) {
+      updateAccountRecord(accountId, updates);
     }
     return { ok: true, latencyMs: Date.now() - start, username: username ?? undefined };
   } catch (error) {
