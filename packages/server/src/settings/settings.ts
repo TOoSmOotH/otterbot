@@ -2160,6 +2160,7 @@ function testSSHConnectionForKey(keyPath: string): { ok: boolean; username?: str
 
 import {
   getGitHubAccountById,
+  getGitHubAccounts,
   updateGitHubAccount as updateAccountRecord,
 } from "../github/account-resolver.js";
 
@@ -2196,15 +2197,54 @@ export async function testGitHubAccountConnection(accountId: string): Promise<Te
     const username = data.login ?? null;
     const updates: { username?: string; email?: string } = {};
     if (username) updates.username = username;
-    // Use the public email from the profile if available; otherwise construct the noreply address
+
+    // Resolve email: profile public email → /user/emails primary → noreply fallback
+    let resolvedEmail: string | undefined;
     if (data.email) {
-      updates.email = data.email;
-    } else if (username && data.id && !account.email) {
-      updates.email = `${data.id}+${username}@users.noreply.github.com`;
+      resolvedEmail = data.email;
+    } else {
+      // Try /user/emails to get the primary email (works even when email is private)
+      try {
+        const emailsRes = await fetch("https://api.github.com/user/emails", {
+          headers: {
+            Authorization: `Bearer ${account.token}`,
+            Accept: "application/vnd.github+json",
+            "User-Agent": "Otterbot",
+          },
+          signal: AbortSignal.timeout(10_000),
+        });
+        if (emailsRes.ok) {
+          const emails = (await emailsRes.json()) as Array<{ email: string; primary: boolean; verified: boolean }>;
+          const primary = emails.find((e) => e.primary && e.verified);
+          if (primary) resolvedEmail = primary.email;
+        }
+      } catch {
+        // Fall through to noreply
+      }
     }
+    if (!resolvedEmail && username && data.id) {
+      resolvedEmail = `${data.id}+${username}@users.noreply.github.com`;
+    }
+    if (resolvedEmail) updates.email = resolvedEmail;
+
     if (Object.keys(updates).length > 0) {
       updateAccountRecord(accountId, updates);
     }
+
+    // If this is the default account (or the only one), set global git identity
+    // so all repos on this instance use the correct committer info
+    const updatedAccount = getGitHubAccountById(accountId);
+    if (updatedAccount?.isDefault || getGitHubAccounts().length === 1) {
+      const gitName = updatedAccount?.username ?? username ?? "OtterBot";
+      const gitEmail = updatedAccount?.email ?? resolvedEmail ?? `${gitName}@users.noreply.github.com`;
+      try {
+        execSync(`git config --global user.name "${gitName}"`, { stdio: "ignore" });
+        execSync(`git config --global user.email "${gitEmail}"`, { stdio: "ignore" });
+      } catch {
+        // Non-fatal — git may not be installed
+      }
+    }
+
     return { ok: true, latencyMs: Date.now() - start, username: username ?? undefined };
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : "Unknown error" };
