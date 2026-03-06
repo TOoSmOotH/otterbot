@@ -2238,7 +2238,7 @@ export async function testGitHubAccountConnection(accountId: string): Promise<Te
     const updatedAccount = getGitHubAccountById(accountId);
     if (updatedAccount?.isDefault || getGitHubAccounts().length === 1) {
       const gitName = updatedAccount?.username ?? username ?? "OtterBot";
-      const gitEmail = updatedAccount?.email ?? resolvedEmail ?? `${gitName}@users.noreply.github.com`;
+      const gitEmail = updatedAccount?.email ?? `${gitName}@users.noreply.github.com`;
       try {
         execSync(`git config --global user.name "${gitName}"`, { stdio: "ignore" });
         execSync(`git config --global user.email "${gitEmail}"`, { stdio: "ignore" });
