@@ -71,7 +71,7 @@ The container runs Node 22 as a non-root user with a full development environmen
 - **Languages**: Go, Rust, Python, Java, Ruby
 - **Desktop**: XFCE + Xvfb + x11vnc + noVNC (virtual desktop viewable in the web UI)
 - **Browser**: Playwright with Chromium (headed mode when desktop is enabled)
-- **CLI tools**: GitHub CLI, coding agent CLIs (OpenCode, Claude Code, Codex)
+- **CLI tools**: GitHub CLI, coding agent CLIs (OpenCode, Claude Code, Codex, Gemini CLI)
 
 ### Container Images
 
@@ -155,7 +155,7 @@ This is why visibility works — the UI is just another consumer of the bus.
 
 ### Agent Registry
 
-The registry contains 14 pre-built agent templates:
+The registry contains 15 pre-built agent templates:
 
 | Agent | Description |
 |-------|-------------|
@@ -171,6 +171,7 @@ The registry contains 14 pre-built agent templates:
 | **OpenCode Coder** | Delegates complex coding tasks to OpenCode (autonomous AI coding agent) |
 | **Claude Code Coder** | Delegates coding tasks to Claude Code (Anthropic's coding agent) |
 | **Codex Coder** | Delegates coding tasks to Codex CLI (OpenAI's coding agent) |
+| **Gemini CLI Coder** | Delegates coding tasks to Gemini CLI (Google's coding agent) |
 | **Browser Agent** | Interacts with web pages — navigate, fill forms, click, extract text |
 | **Tool Builder** | Creates custom JavaScript tools that extend agent capabilities |
 
@@ -381,6 +382,7 @@ Otterbot integrates with external AI coding agents that run in PTY terminals:
 | **OpenCode** | Open-source coding agent — multi-file implementations, refactoring |
 | **Claude Code** | Anthropic's coding agent — complex implementations, code review |
 | **Codex CLI** | OpenAI's coding agent — code generation, implementation tasks |
+| **Gemini CLI** | Google's coding agent — code generation, multi-file editing |
 
 When a coding agent worker is spawned, it opens a PTY terminal session. The **Code panel** in the UI shows real-time terminal output, supports interactive input, and displays file diffs when sessions complete. Coding agents are pre-installed in the Docker image.
 
@@ -530,7 +532,7 @@ otterbot/
 | TTS | Kokoro.js (local) + Edge TTS + OpenAI-compatible |
 | STT | HuggingFace Transformers / Whisper (local) + OpenAI-compatible + Browser Web Speech API |
 | Browser Automation | Playwright (Chromium — headed or headless) |
-| Coding Agents | OpenCode, Claude Code, Codex CLI via node-pty |
+| Coding Agents | OpenCode, Claude Code, Codex CLI, Gemini CLI via node-pty |
 | Desktop | XFCE + Xvfb + x11vnc + noVNC |
 | Modules | Installable extension system |
 | Testing | Vitest (unit) + Playwright (e2e) |
