@@ -4022,6 +4022,29 @@ async function main() {
   });
 
   // =========================================================================
+  // Helper: apply git global identity from a GitHub account
+  // =========================================================================
+
+  async function applyGitIdentityFromAccount(accountId: string): Promise<void> {
+    try {
+      const { getGitHubAccountById, getGitHubAccounts } = await import("./github/account-resolver.js");
+      const account = getGitHubAccountById(accountId);
+      if (!account) return;
+      // Only set global config for the default account (or if it's the only one)
+      const allAccounts = getGitHubAccounts();
+      if (!account.isDefault && allAccounts.length > 1) return;
+
+      const name = account.username ?? account.label ?? "OtterBot";
+      const email = account.email ?? `${name}@users.noreply.github.com`;
+      const { execSync } = await import("node:child_process");
+      execSync(`git config --global user.name "${name}"`, { stdio: "ignore" });
+      execSync(`git config --global user.email "${email}"`, { stdio: "ignore" });
+    } catch {
+      // Non-fatal
+    }
+  }
+
+  // =========================================================================
   // GitHub settings routes
   // =========================================================================
 
@@ -4102,6 +4125,7 @@ async function main() {
       return { error: "label and token are required" };
     }
     const account = createGitHubAccount({ id: nanoid(), ...req.body });
+    await applyGitIdentityFromAccount(account.id);
     return { ok: true, id: account.id };
   });
 
@@ -4111,6 +4135,7 @@ async function main() {
   }>("/api/settings/github/accounts/:id", async (req) => {
     const { updateGitHubAccount: updateAcct } = await import("./github/account-resolver.js");
     updateAcct(req.params.id, req.body);
+    await applyGitIdentityFromAccount(req.params.id);
     return { ok: true };
   });
 
@@ -4126,6 +4151,7 @@ async function main() {
   }>("/api/settings/github/accounts/:id/default", async (req) => {
     const { setDefaultGitHubAccount } = await import("./github/account-resolver.js");
     setDefaultGitHubAccount(req.params.id);
+    await applyGitIdentityFromAccount(req.params.id);
     return { ok: true };
   });
 
