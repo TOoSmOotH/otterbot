@@ -9,6 +9,7 @@ import { resolve, dirname, join, sep, basename, extname } from "node:path";
 import { existsSync, readFileSync, writeFileSync, mkdirSync, createReadStream, createWriteStream, copyFileSync, unlinkSync, readdirSync, statSync } from "node:fs";
 import { pipeline } from "node:stream/promises";
 import { execSync } from "node:child_process";
+import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
 import type {
   ServerToClientEvents,
@@ -423,6 +424,17 @@ async function main() {
       .run();
   }
   console.log("Database initialized.");
+
+  // Re-apply SSH config on startup (ensures allowedSignersFile exists for
+  // installs that were configured before this fix was added)
+  try {
+    const legacyKeyPath = join(homedir(), ".ssh", "otterbot_github.pub");
+    if (existsSync(legacyKeyPath)) {
+      applyGitSSHConfig();
+    }
+  } catch {
+    // Non-fatal — SSH signing is optional
+  }
 
   // Bootstrap passphrase from environment (one-time setup)
   if (!isPassphraseSet()) {
