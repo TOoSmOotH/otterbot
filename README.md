@@ -287,11 +287,94 @@ Each bridge supports user pairing — only approved users can interact with the 
 
 ### GitHub
 
-Projects can be linked to GitHub repositories:
+Projects can be linked to GitHub repositories. Configure your Personal Access Token (PAT) and optional SSH key in the **Settings UI** under the GitHub tab.
 
-- **Issue monitoring** — automatically create Otterbot projects from new GitHub issues
-- **PR tools** — agents can create pull requests, post comments, and review code
-- **Issue tools** — agents can list, read, and comment on issues
+#### Authentication
+
+| Method | Description |
+|--------|-------------|
+| **Personal Access Token (PAT)** | HTTPS-based authentication. Required scopes: `repo`, `read:org`, `workflow`. Username is auto-detected from the token. |
+| **SSH Key** | Generate an Ed25519 or RSA key pair directly in Settings, or import an existing private key. Stored at `~/.ssh/otterbot_github`. |
+| **Commit Signing** | When an SSH key is configured, git commits are automatically signed using SSH-based GPG signing. |
+
+Authentication is tried in order: HTTPS+PAT first, then SSH fallback.
+
+#### Project Linking
+
+When creating a project, you can link it to a GitHub repository:
+
+- **Repository** — `owner/repo` format (e.g. `TOoSmOotH/otterbot`)
+- **Target branch** — the branch agents push to and open PRs against (auto-detected from the repo default branch if not specified)
+- **Fork mode** — if the authenticated user lacks push access to the repo, Otterbot automatically creates a fork and uses cross-fork PRs (`forkowner:branch` format)
+
+#### Issue Monitoring
+
+Enable per-project to automatically poll for new GitHub issues:
+
+- Polls every 5 minutes for issues assigned to the configured GitHub username
+- Creates kanban tasks in the project's backlog for each new assigned issue
+- Posts an acknowledgement comment on the GitHub issue
+- Syncs task state when issues are closed (completed → done, not planned → removed)
+
+#### Pipeline (Automated Triage & Implementation)
+
+When the pipeline is enabled for a project, issue monitoring gains additional automation:
+
+| Stage | Description |
+|-------|-------------|
+| **Triage** | LLM-based classification of new issues (bug, feature, enhancement, user-error, duplicate, question, documentation). Posts a triage comment and applies labels. Re-triages when new non-bot comments appear. |
+| **Coder** | Creates a feature branch, implements the solution, and commits changes. |
+| **Security Reviewer** | Audits the implementation for vulnerabilities and security risks. Can kick back to the Coder. |
+| **Tester** | Writes and runs tests to validate the implementation. |
+| **Code Reviewer** | Reviews code quality and correctness, then creates the pull request. |
+
+Each stage can be independently enabled/disabled and assigned a specific agent template.
+
+#### PR Monitoring
+
+Open pull requests linked to kanban tasks are automatically monitored:
+
+- **Review feedback** — when a reviewer requests changes, the task is moved back to in-progress and a worker is spawned to address the feedback on the existing branch
+- **CI failure detection** — when CI checks fail on a PR's HEAD commit, a worker is spawned to investigate and fix the failures
+- **Auto-merge queue** — when a PR receives an approval review, it is automatically enqueued for merge. The merge queue rebases branches, waits for CI, and merges (squash by default).
+
+#### Merge Queue
+
+The merge queue processes approved PRs in FIFO order:
+
+- Rebases each PR branch onto the target branch before merging
+- Waits for CI checks to pass after rebase
+- Merges via the GitHub API (squash merge by default)
+- Moves the kanban task to done on successful merge
+
+#### Agent Tools
+
+Agents with GitHub skills have access to the following tools:
+
+| Tool | Description |
+|------|-------------|
+| `github_get_issue` | Fetch an issue by number, including all comments |
+| `github_list_issues` | List issues with filters (state, labels, assignee) |
+| `github_get_pr` | Fetch a pull request by number, including comments |
+| `github_list_prs` | List pull requests with filters (state) |
+| `github_comment` | Post a comment on an issue or pull request |
+| `github_create_pr` | Create a pull request (target branch is determined by project config) |
+
+#### REST API & Settings
+
+```
+# GitHub settings
+GET    /api/settings/github                  # Get GitHub settings (enabled, token status, username, SSH key info)
+PUT    /api/settings/github                  # Update GitHub settings (enable/disable, set token)
+POST   /api/settings/github/test             # Test GitHub PAT connection
+
+# SSH key management
+POST   /api/settings/github/ssh/generate     # Generate a new SSH key pair (Ed25519 or RSA)
+POST   /api/settings/github/ssh/import       # Import an existing SSH private key
+GET    /api/settings/github/ssh/public-key   # Get the public key (for adding to GitHub)
+DELETE /api/settings/github/ssh              # Remove the SSH key pair
+POST   /api/settings/github/ssh/test         # Test SSH connection to GitHub
+```
 
 ## Coding Agents
 
