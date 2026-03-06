@@ -767,6 +767,82 @@ POST   /api/modules/:moduleId/webhook          # Module webhook endpoint
 POST   /api/stt/transcribe                     # Transcribe audio
 ```
 
+### Updating User Email Settings
+
+Otterbot is a single-user system. To update the user's email configuration (IMAP/SMTP), use the `PUT /api/settings/email` endpoint. After updating, you can verify the connection with `POST /api/settings/email/test`.
+
+#### Authentication
+
+All protected endpoints require a session cookie (`sb_session`) obtained by logging in first:
+
+```bash
+# Step 1: Log in and capture the session cookie
+curl -k -c cookies.txt -X POST https://localhost:62626/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"passphrase": "your-passphrase"}'
+```
+
+#### Update Email Settings
+
+| Detail      | Value                             |
+|-------------|-----------------------------------|
+| **Method**  | `PUT`                             |
+| **URL**     | `/api/settings/email`             |
+| **Auth**    | Session cookie (`sb_session`)     |
+| **Content** | `application/json`                |
+
+**Request body parameters:**
+
+| Parameter    | Type    | Required | Description                        |
+|--------------|---------|----------|------------------------------------|
+| `enabled`    | boolean | No       | Enable or disable email integration |
+| `imapServer` | string  | No       | IMAP server hostname               |
+| `imapPort`   | number  | No       | IMAP server port (e.g. `993`)      |
+| `imapTls`    | boolean | No       | Use TLS for IMAP                   |
+| `smtpServer` | string  | No       | SMTP server hostname               |
+| `smtpPort`   | number  | No       | SMTP server port (e.g. `587`)      |
+| `smtpTls`    | boolean | No       | Use TLS for SMTP                   |
+| `username`   | string  | No       | Email account username/address     |
+| `password`   | string  | No       | Email account password or app password |
+| `fromName`   | string  | No       | Display name for outgoing emails   |
+
+**Example — update the email address and IMAP/SMTP settings:**
+
+```bash
+curl -k -b cookies.txt -X PUT https://localhost:62626/api/settings/email \
+  -H "Content-Type: application/json" \
+  -d '{
+    "enabled": true,
+    "username": "newuser@example.com",
+    "password": "app-password-here",
+    "imapServer": "imap.example.com",
+    "imapPort": 993,
+    "imapTls": true,
+    "smtpServer": "smtp.example.com",
+    "smtpPort": 587,
+    "smtpTls": true,
+    "fromName": "My Name"
+  }'
+```
+
+**Response:** Returns the updated email settings object.
+
+#### Test Email Connection
+
+After updating, verify that the IMAP and SMTP connections work:
+
+```bash
+curl -k -b cookies.txt -X POST https://localhost:62626/api/settings/email/test
+```
+
+**Response:**
+
+```json
+{ "imap": "ok", "smtp": "ok" }
+```
+
+If a connection fails, the corresponding field will contain an error message instead of `"ok"`.
+
 ## Socket.IO Events
 
 ### Server to Client
