@@ -1,4 +1,4 @@
-export type ProviderType = "anthropic" | "openai" | "google" | "ollama" | "openai-compatible" | "openrouter" | "github-copilot" | "huggingface" | "nvidia" | "minimax" | "xai" | "zai" | "perplexity" | "deepgram" | "bedrock" | "lmstudio" | "deepseek" | "mistral" | "claude-code" | "opencode" | "codex" | "gemini-cli";
+export type ProviderType = "anthropic" | "openai" | "google" | "ollama" | "openai-compatible" | "openrouter" | "github-copilot" | "huggingface" | "nvidia" | "minimax" | "xai" | "zai" | "perplexity" | "deepgram" | "bedrock" | "lmstudio" | "deepseek" | "mistral" | "vercel-ai-gateway" | "claude-code" | "opencode" | "codex" | "gemini-cli";
 
 export interface NamedProvider {
   id: string;
