@@ -4050,9 +4050,9 @@ async function main() {
 
       const name = account.username ?? account.label ?? "OtterBot";
       const email = account.email ?? `${name}@users.noreply.github.com`;
-      const { execSync } = await import("node:child_process");
-      execSync(`git config --global user.name "${name}"`, { stdio: "ignore" });
-      execSync(`git config --global user.email "${email}"`, { stdio: "ignore" });
+      const { execFileSync } = await import("node:child_process");
+      execFileSync("git", ["config", "--global", "user.name", name], { stdio: "ignore" });
+      execFileSync("git", ["config", "--global", "user.email", email], { stdio: "ignore" });
     } catch {
       // Non-fatal
     }
