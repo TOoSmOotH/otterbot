@@ -62,6 +62,7 @@ export interface Project {
   githubBranch: string | null;
   githubIssueMonitor: boolean;
   signCommits: boolean;
+  show3d: boolean;
   githubAccountId: string | null;
   rules: string[];
   createdAt: string;

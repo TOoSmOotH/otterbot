@@ -18,7 +18,7 @@ import { ensureOpenCodeConfig } from "../opencode/opencode-manager.js";
 import { getDb, schema } from "../db/index.js";
 import { eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
-import { execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync, unlinkSync, mkdirSync, chmodSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -1933,7 +1933,7 @@ function sshPubKeyPath(): string {
 }
 
 function getFingerprint(pubKeyPath: string): string {
-  const out = execSync(`ssh-keygen -lf ${pubKeyPath}`, { encoding: "utf-8" }).trim();
+  const out = execFileSync("ssh-keygen", ["-lf", pubKeyPath], { encoding: "utf-8" }).trim();
   // Output format: "256 SHA256:xxxxx comment (ED25519)"
   return out.split(" ")[1] ?? out;
 }
@@ -1968,15 +1968,15 @@ function configureGitSSH(): void {
   writeFileSync(allowedSignersPath, signerLine + "\n", { mode: 0o644 });
 
   // --- git config for commit signing ---
-  const gitCmds = [
-    `git config --global gpg.format ssh`,
-    `git config --global user.signingkey "${pubKeyPath}"`,
-    `git config --global commit.gpgsign true`,
-    `git config --global tag.gpgsign true`,
-    `git config --global gpg.ssh.allowedSignersFile "${allowedSignersPath}"`,
+  const gitCmds: string[][] = [
+    ["config", "--global", "gpg.format", "ssh"],
+    ["config", "--global", "user.signingkey", pubKeyPath],
+    ["config", "--global", "commit.gpgsign", "true"],
+    ["config", "--global", "tag.gpgsign", "true"],
+    ["config", "--global", "gpg.ssh.allowedSignersFile", allowedSignersPath],
   ];
-  for (const cmd of gitCmds) {
-    execSync(cmd, { stdio: "pipe" });
+  for (const args of gitCmds) {
+    execFileSync("git", args, { stdio: "pipe" });
   }
 }
 
@@ -1996,15 +1996,15 @@ function removeGitSSHConfig(): void {
   }
 
   // Unset git signing config
-  const gitCmds = [
-    "git config --global --unset gpg.format",
-    "git config --global --unset user.signingkey",
-    "git config --global --unset commit.gpgsign",
-    "git config --global --unset tag.gpgsign",
-    "git config --global --unset gpg.ssh.allowedSignersFile",
+  const gitKeys = [
+    "gpg.format",
+    "user.signingkey",
+    "commit.gpgsign",
+    "tag.gpgsign",
+    "gpg.ssh.allowedSignersFile",
   ];
-  for (const cmd of gitCmds) {
-    try { execSync(cmd, { stdio: "pipe" }); } catch { /* key may not exist */ }
+  for (const key of gitKeys) {
+    try { execFileSync("git", ["config", "--global", "--unset", key], { stdio: "pipe" }); } catch { /* key may not exist */ }
   }
 }
 
@@ -2028,8 +2028,9 @@ export function generateSSHKey(data?: {
   }
 
   try {
-    execSync(
-      `ssh-keygen -t ${keyType} -C "${comment}" -f "${keyPath}" -N ""`,
+    execFileSync(
+      "ssh-keygen",
+      ["-t", keyType, "-C", comment, "-f", keyPath, "-N", ""],
       { stdio: "pipe" },
     );
     chmodSync(keyPath, 0o600);
@@ -2076,7 +2077,7 @@ export function importSSHKey(privateKey: string): {
     writeFileSync(keyPath, normalized, { mode: 0o600 });
 
     // Derive public key
-    const pubKey = execSync(`ssh-keygen -y -f "${keyPath}"`, { encoding: "utf-8" }).trim();
+    const pubKey = execFileSync("ssh-keygen", ["-y", "-f", keyPath], { encoding: "utf-8" }).trim();
     writeFileSync(pubKeyPath, pubKey + "\n", { mode: 0o644 });
 
     const fingerprint = getFingerprint(pubKeyPath);
@@ -2149,9 +2150,10 @@ function testSSHConnectionForKey(keyPath: string): { ok: boolean; username?: str
   try {
     // ssh -T git@github.com exits with code 1 on success (it prints "Hi username!")
     // Explicitly specify the identity file to avoid relying on ssh-agent or config ordering
-    const result = execSync(
-      `ssh -T -i ${keyPath} -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o BatchMode=yes git@github.com 2>&1`,
-      { encoding: "utf-8", timeout: 15_000 },
+    const result = execFileSync(
+      "ssh",
+      ["-T", "-i", keyPath, "-o", "IdentitiesOnly=yes", "-o", "StrictHostKeyChecking=accept-new", "-o", "BatchMode=yes", "git@github.com"],
+      { encoding: "utf-8", timeout: 15_000, stdio: ["pipe", "pipe", "pipe"] },
     ).trim();
 
     const match = result.match(/Hi (\S+)!/);
@@ -2256,8 +2258,8 @@ export async function testGitHubAccountConnection(accountId: string): Promise<Te
       const gitName = updatedAccount?.username ?? username ?? "OtterBot";
       const gitEmail = updatedAccount?.email ?? `${gitName}@users.noreply.github.com`;
       try {
-        execSync(`git config --global user.name "${gitName}"`, { stdio: "ignore" });
-        execSync(`git config --global user.email "${gitEmail}"`, { stdio: "ignore" });
+        execFileSync("git", ["config", "--global", "user.name", gitName], { stdio: "ignore" });
+        execFileSync("git", ["config", "--global", "user.email", gitEmail], { stdio: "ignore" });
       } catch {
         // Non-fatal — git may not be installed
       }
@@ -2286,7 +2288,7 @@ export function generateAccountSSHKey(
   if (existsSync(keyPath)) return { ok: false, error: "SSH key already exists for this account. Remove it first." };
 
   try {
-    execSync(`ssh-keygen -t ${keyType} -C "${comment}" -f "${keyPath}" -N ""`, { stdio: "pipe" });
+    execFileSync("ssh-keygen", ["-t", keyType, "-C", comment, "-f", keyPath, "-N", ""], { stdio: "pipe" });
     chmodSync(keyPath, 0o600);
     chmodSync(pubPath, 0o644);
 
@@ -2324,7 +2326,7 @@ export function importAccountSSHKey(
   try {
     const normalized = privateKey.trimEnd() + "\n";
     writeFileSync(keyPath, normalized, { mode: 0o600 });
-    const pubKey = execSync(`ssh-keygen -y -f "${keyPath}"`, { encoding: "utf-8" }).trim();
+    const pubKey = execFileSync("ssh-keygen", ["-y", "-f", keyPath], { encoding: "utf-8" }).trim();
     writeFileSync(pubPath, pubKey + "\n", { mode: 0o644 });
 
     const fingerprint = getFingerprint(pubPath);

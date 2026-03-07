@@ -41,6 +41,7 @@ export function ProjectSettings({ projectId }: { projectId: string }) {
   const [signCommits, setSignCommits] = useState(false);
   const [hasSSHKey, setHasSSHKey] = useState(false);
   const [targetBranch, setTargetBranch] = useState("");
+  const [show3d, setShow3d] = useState(true);
   const [githubAccountId, setGithubAccountId] = useState<string | null>(null);
 
   const gitHubAccounts = useSettingsStore((s) => s.gitHubAccounts);
@@ -58,6 +59,7 @@ export function ProjectSettings({ projectId }: { projectId: string }) {
     socket.emit("project:get", { projectId }, (project) => {
       setIsGitHubProject(!!project?.githubRepo);
       setIssueMonitor(!!project?.githubIssueMonitor);
+      setShow3d(project?.show3d !== false);
       setGithubAccountId((project as any)?.githubAccountId ?? null);
     });
     loadGitHubAccounts();
@@ -186,6 +188,9 @@ export function ProjectSettings({ projectId }: { projectId: string }) {
       // Save sign commits setting
       socket.emit("project:set-sign-commits", { projectId, enabled: signCommits });
 
+      // Save 3D view visibility
+      socket.emit("project:set-show3d", { projectId, enabled: show3d });
+
       // Also save agent assignments (for non-pipeline mode)
       socket.emit("project:set-agent-assignments", { projectId, assignments }, (ack2) => {
         setSaving(false);
@@ -297,6 +302,28 @@ export function ProjectSettings({ projectId }: { projectId: string }) {
                   setSignCommits(checked);
                   setSaved(false);
                 }}
+                className="sr-only peer"
+              />
+              <div className="w-9 h-5 bg-muted rounded-full peer peer-checked:bg-primary transition-colors after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:after:translate-x-full" />
+            </label>
+          </div>
+        </div>
+
+        {/* Show in 3D View toggle */}
+        <div>
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-sm font-semibold">Show in 3D View</h2>
+              <p className="text-xs text-muted-foreground mt-1">
+                When enabled, this project gets its own office zone in the 3D view and its workers are visible.
+                Disable to reduce clutter for inactive projects.
+              </p>
+            </div>
+            <label className="relative inline-flex items-center cursor-pointer">
+              <input
+                type="checkbox"
+                checked={show3d}
+                onChange={(e) => { setShow3d(e.target.checked); setSaved(false); }}
                 className="sr-only peer"
               />
               <div className="w-9 h-5 bg-muted rounded-full peer peer-checked:bg-primary transition-colors after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:after:translate-x-full" />

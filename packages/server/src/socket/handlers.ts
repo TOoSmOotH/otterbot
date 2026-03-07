@@ -943,6 +943,63 @@ export function setupSocketHandlers(
       }
     });
 
+    // Toggle 3D view visibility for a project
+    socket.on("project:set-show3d", (data, callback) => {
+      try {
+        const db = getDb();
+
+        // Validate project exists to prevent path traversal via crafted projectId
+        const project = db
+          .select()
+          .from(schema.projects)
+          .where(eq(schema.projects.id, data.projectId))
+          .get();
+        if (!project) {
+          callback?.({ ok: false, error: "Project not found" });
+          return;
+        }
+
+        db.update(schema.projects)
+          .set({ show3d: !!data.enabled })
+          .where(eq(schema.projects.id, data.projectId))
+          .run();
+
+        // When toggling 3D off, remove the zone; when toggling on, add it back
+        const worldLayout = deps?.worldLayout;
+        if (worldLayout) {
+          if (!data.enabled) {
+            const removed = worldLayout.removeZone(data.projectId);
+            if (removed) {
+              io.emit("world:zone-removed", { projectId: data.projectId });
+            }
+          } else {
+            // Re-create the zone if it doesn't already exist
+            const existing = worldLayout.loadZoneConfig(data.projectId);
+            if (!existing) {
+              const zone = worldLayout.addZone(data.projectId, "default-project-office", project.name ?? undefined);
+              if (zone) {
+                io.emit("world:zone-added", { zone });
+              }
+            }
+          }
+        }
+
+        // Emit project:updated so UI refreshes (re-read to get updated show3d value)
+        const updated = db
+          .select()
+          .from(schema.projects)
+          .where(eq(schema.projects.id, data.projectId))
+          .get();
+        if (updated) {
+          io.emit("project:updated", updated as any);
+        }
+
+        callback?.({ ok: true });
+      } catch (err) {
+        callback?.({ ok: false, error: err instanceof Error ? err.message : "Failed to update 3D visibility" });
+      }
+    });
+
     // Retrieve agent activity (bus messages + persisted activity records)
     socket.on("agent:activity", (data, callback) => {
       const db = getDb();
