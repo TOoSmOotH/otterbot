@@ -1106,6 +1106,8 @@ async function main() {
           .where(eq(schema.projects.status, "active"))
           .all();
         for (const project of activeProjects) {
+          // Skip zone creation for projects with 3D view disabled
+          if (project.show3d === false) continue;
           const existing = worldLayout.loadZoneConfig(project.id);
           if (!existing) {
             const zone = worldLayout.addZone(project.id, undefined, project.name);

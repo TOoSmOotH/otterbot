@@ -274,6 +274,12 @@ export interface ClientToServerEvents {
     callback?: (ack: { ok: boolean; error?: string }) => void,
   ) => void;
 
+  // 3D view visibility
+  "project:set-show3d": (
+    data: { projectId: string; enabled: boolean },
+    callback?: (ack: { ok: boolean; error?: string }) => void,
+  ) => void;
+
   // Target branch
   "project:get-branch": (
     data: { projectId: string },
