@@ -219,6 +219,17 @@ import {
   rejectPairing as rejectTeamsPairing,
   revokePairing as revokeTeamsPairing,
 } from "./teams/pairing.js";
+import { GoogleChatBridge } from "./googlechat/google-chat-bridge.js";
+import {
+  getGoogleChatSettings,
+  updateGoogleChatSettings,
+  testGoogleChatConnection,
+} from "./googlechat/google-chat-settings.js";
+import {
+  approvePairing as approveGoogleChatPairing,
+  rejectPairing as rejectGoogleChatPairing,
+  revokePairing as revokeGoogleChatPairing,
+} from "./googlechat/pairing.js";
 import { SlackBridge } from "./slack/slack-bridge.js";
 import {
   getSlackSettings,
@@ -362,7 +373,7 @@ const authLimiter = new RateLimiter(5, 60_000);
 // Public API path whitelist (no auth required)
 // ---------------------------------------------------------------------------
 
-const PUBLIC_PATHS = ["/api/setup/status", "/api/setup/passphrase", "/api/auth/login", "/api/oauth/google/callback"];
+const PUBLIC_PATHS = ["/api/setup/status", "/api/setup/passphrase", "/api/auth/login", "/api/oauth/google/callback", "/api/googlechat/webhook"];
 
 // ---------------------------------------------------------------------------
 // Cookie helper for Socket.IO (parse raw Cookie header)
@@ -689,6 +700,34 @@ async function main() {
     if (teamsBridge) {
       await teamsBridge.stop();
       teamsBridge = null;
+    }
+  }
+
+  // Google Chat bridge (initialized when enabled + service account key set)
+  let googleChatBridge: GoogleChatBridge | null = null;
+
+  function startGoogleChatBridge() {
+    if (googleChatBridge || !coo) return;
+    const settings = getGoogleChatSettings();
+    if (!settings.enabled || !settings.serviceAccountKeySet) return;
+    const serviceAccountKey = getConfig("googlechat:service_account_key");
+    if (!serviceAccountKey) return;
+    const projectNumber = getConfig("googlechat:project_number") ?? "";
+    if (!projectNumber) {
+      console.error("[Google Chat] Project number not configured — bridge will not start");
+      return;
+    }
+    googleChatBridge = new GoogleChatBridge({ bus, coo, io });
+    googleChatBridge.start({ serviceAccountKey: JSON.parse(serviceAccountKey), projectNumber }).catch((err) => {
+      console.error("[Google Chat] Failed to start bridge:", err);
+      googleChatBridge = null;
+    });
+  }
+
+  async function stopGoogleChatBridge() {
+    if (googleChatBridge) {
+      await googleChatBridge.stop();
+      googleChatBridge = null;
     }
   }
 
@@ -1299,6 +1338,7 @@ async function main() {
     startIrcBridge();
     startEmailImap();
     startTeamsBridge();
+    startGoogleChatBridge();
     startSlackBridge();
     startMattermostBridge();
     startTelegramBridge();
@@ -1661,6 +1701,7 @@ async function main() {
     startIrcBridge();
     startEmailImap();
     startTeamsBridge();
+    startGoogleChatBridge();
     startSlackBridge();
     startMattermostBridge();
     startTelegramBridge();
@@ -4428,6 +4469,89 @@ async function main() {
   });
 
   // =========================================================================
+  // Google Chat settings routes
+  // =========================================================================
+
+  app.get("/api/settings/googlechat", async () => {
+    return getGoogleChatSettings();
+  });
+
+  app.put<{
+    Body: {
+      enabled?: boolean;
+      serviceAccountKey?: string;
+      projectNumber?: string;
+    };
+  }>("/api/settings/googlechat", async (req) => {
+    const wasEnabled = getGoogleChatSettings().enabled && getGoogleChatSettings().serviceAccountKeySet;
+    updateGoogleChatSettings(req.body);
+    const nowEnabled = getGoogleChatSettings().enabled && getGoogleChatSettings().serviceAccountKeySet;
+
+    if (nowEnabled && !wasEnabled) {
+      startGoogleChatBridge();
+    } else if (!nowEnabled && wasEnabled) {
+      await stopGoogleChatBridge();
+    }
+
+    return { ok: true };
+  });
+
+  app.post("/api/settings/googlechat/test", async () => {
+    return testGoogleChatConnection();
+  });
+
+  app.post<{
+    Body: { code: string };
+  }>("/api/settings/googlechat/pair/approve", async (req, reply) => {
+    const result = approveGoogleChatPairing(req.body.code);
+    if (!result) {
+      reply.code(400);
+      return { ok: false, error: "Invalid or expired pairing code" };
+    }
+    return { ok: true, user: result };
+  });
+
+  app.post<{
+    Body: { code: string };
+  }>("/api/settings/googlechat/pair/reject", async (req, reply) => {
+    const ok = rejectGoogleChatPairing(req.body.code);
+    if (!ok) {
+      reply.code(400);
+      return { ok: false, error: "Pairing code not found" };
+    }
+    return { ok: true };
+  });
+
+  app.delete<{
+    Params: { userId: string };
+  }>("/api/settings/googlechat/pair/:userId", async (req, reply) => {
+    const ok = revokeGoogleChatPairing(req.params.userId);
+    if (!ok) {
+      reply.code(400);
+      return { ok: false, error: "User not found" };
+    }
+    return { ok: true };
+  });
+
+  // Google Chat webhook endpoint
+  // This is in PUBLIC_PATHS — authentication is handled by verifying the
+  // Bearer token (JWT signed by Google) inside the bridge.
+  app.post("/api/googlechat/webhook", async (req, reply) => {
+    if (!googleChatBridge) {
+      reply.code(503);
+      return { error: "Google Chat bridge not started" };
+    }
+    try {
+      const result = await googleChatBridge.handleWebhook(req.body, req.headers.authorization);
+      return result ?? {};
+    } catch (err) {
+      console.error("[Google Chat] Webhook auth failed:", err);
+      reply.code(401);
+      return { error: "Unauthorized" };
+    }
+  });
+
+  // =========================================================================
   // Slack settings routes
   // =========================================================================
 
@@ -6111,6 +6235,7 @@ Respond with ONLY a JSON object (no markdown, no explanation) with these fields:
     await stopDiscordBridge();
     await stopIrcBridge();
     await stopTeamsBridge();
+    await stopGoogleChatBridge();
     await stopSlackBridge();
     await stopTlonBridge();
     await stopWhatsAppBridge();
