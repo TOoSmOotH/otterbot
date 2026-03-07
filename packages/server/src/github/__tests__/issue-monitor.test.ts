@@ -13,6 +13,17 @@ vi.mock("../../auth/auth.js", () => ({
   deleteConfig: vi.fn((key: string) => configStore.delete(key)),
 }));
 
+// Mock account resolver — delegates to configStore for legacy behavior
+vi.mock("../account-resolver.js", () => ({
+  resolveGitHubToken: vi.fn((_projectId?: string) => configStore.get("github:token")),
+  resolveGitHubUsername: vi.fn((_projectId?: string) => configStore.get("github:username")),
+  resolveGitHubAccount: vi.fn((_projectId?: string) => {
+    const token = configStore.get("github:token");
+    if (!token) return null;
+    return { id: "__legacy__", token, username: configStore.get("github:username") ?? null };
+  }),
+}));
+
 // Mock github-service
 const mockFetchAssignedIssues = vi.fn().mockResolvedValue([]);
 const mockCreateIssueComment = vi.fn().mockResolvedValue({

@@ -41,7 +41,11 @@ export function ProjectSettings({ projectId }: { projectId: string }) {
   const [signCommits, setSignCommits] = useState(false);
   const [hasSSHKey, setHasSSHKey] = useState(false);
   const [targetBranch, setTargetBranch] = useState("");
+  const [show3d, setShow3d] = useState(true);
+  const [githubAccountId, setGithubAccountId] = useState<string | null>(null);
 
+  const gitHubAccounts = useSettingsStore((s) => s.gitHubAccounts);
+  const loadGitHubAccounts = useSettingsStore((s) => s.loadGitHubAccounts);
   const openCodeEnabled = useSettingsStore((s) => s.openCodeEnabled);
   const claudeCodeEnabled = useSettingsStore((s) => s.claudeCodeEnabled);
   const codexEnabled = useSettingsStore((s) => s.codexEnabled);
@@ -55,7 +59,10 @@ export function ProjectSettings({ projectId }: { projectId: string }) {
     socket.emit("project:get", { projectId }, (project) => {
       setIsGitHubProject(!!project?.githubRepo);
       setIssueMonitor(!!project?.githubIssueMonitor);
+      setShow3d(project?.show3d !== false);
+      setGithubAccountId((project as any)?.githubAccountId ?? null);
     });
+    loadGitHubAccounts();
 
     // Load sign-commits setting
     socket.emit("project:get-sign-commits", { projectId }, (result) => {
@@ -175,10 +182,14 @@ export function ProjectSettings({ projectId }: { projectId: string }) {
       // Save issue monitor setting
       if (isGitHubProject) {
         socket.emit("project:set-issue-monitor", { projectId, enabled: issueMonitor });
+        socket.emit("project:set-github-account", { projectId, accountId: githubAccountId });
       }
 
       // Save sign commits setting
       socket.emit("project:set-sign-commits", { projectId, enabled: signCommits });
+
+      // Save 3D view visibility
+      socket.emit("project:set-show3d", { projectId, enabled: show3d });
 
       // Also save agent assignments (for non-pipeline mode)
       socket.emit("project:set-agent-assignments", { projectId, assignments }, (ack2) => {
@@ -202,6 +213,28 @@ export function ProjectSettings({ projectId }: { projectId: string }) {
   return (
     <div className="h-full overflow-y-auto p-4">
       <div className="max-w-2xl mx-auto space-y-6">
+        {/* GitHub Account (GitHub projects only) */}
+        {isGitHubProject && gitHubAccounts.length > 0 && (
+          <div>
+            <h2 className="text-sm font-semibold">GitHub Account</h2>
+            <p className="text-xs text-muted-foreground mt-1">
+              Which GitHub account to use for this project
+            </p>
+            <select
+              value={githubAccountId ?? ""}
+              onChange={(e) => { setGithubAccountId(e.target.value || null); setSaved(false); }}
+              className="mt-2 text-sm bg-secondary border border-border rounded px-3 py-1.5 w-full max-w-xs focus:outline-none focus:ring-1 focus:ring-primary"
+            >
+              <option value="">Default account</option>
+              {gitHubAccounts.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.label}{a.username ? ` (@${a.username})` : ""}{a.isDefault ? " (default)" : ""}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+
         {/* Target Branch (GitHub projects only) */}
         {isGitHubProject && (
           <div>
@@ -269,6 +302,28 @@ export function ProjectSettings({ projectId }: { projectId: string }) {
                   setSignCommits(checked);
                   setSaved(false);
                 }}
+                className="sr-only peer"
+              />
+              <div className="w-9 h-5 bg-muted rounded-full peer peer-checked:bg-primary transition-colors after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:after:translate-x-full" />
+            </label>
+          </div>
+        </div>
+
+        {/* Show in 3D View toggle */}
+        <div>
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-sm font-semibold">Show in 3D View</h2>
+              <p className="text-xs text-muted-foreground mt-1">
+                When enabled, this project gets its own office zone in the 3D view and its workers are visible.
+                Disable to reduce clutter for inactive projects.
+              </p>
+            </div>
+            <label className="relative inline-flex items-center cursor-pointer">
+              <input
+                type="checkbox"
+                checked={show3d}
+                onChange={(e) => { setShow3d(e.target.checked); setSaved(false); }}
                 className="sr-only peer"
               />
               <div className="w-9 h-5 bg-muted rounded-full peer peer-checked:bg-primary transition-colors after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:after:translate-x-full" />

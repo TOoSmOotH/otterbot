@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { eq } from "drizzle-orm";
 import { getConfig } from "../auth/auth.js";
 import { getDb, schema } from "../db/index.js";
+import { resolveGitHubAccount, resolveGitHubToken, resolveGitHubUsername } from "./account-resolver.js";
 
 // Input validation patterns
 const REPO_NAME_RE = /^[a-zA-Z0-9._-]+\/[a-zA-Z0-9._-]+$/;
@@ -85,10 +86,11 @@ function validateBranchName(name: string): void {
 /**
  * Configure git user identity in a cloned repo.
  */
-function configureGitUser(targetDir: string): void {
-  const userName = getConfig("github:username") ?? "otterbot";
+function configureGitUser(targetDir: string, projectId?: string): void {
+  const account = resolveGitHubAccount(projectId);
+  const userName = account?.username ?? getConfig("github:username") ?? "otterbot";
   const userEmail =
-    getConfig("github:email") ?? `${userName}@users.noreply.github.com`;
+    account?.email ?? getConfig("github:email") ?? `${userName}@users.noreply.github.com`;
   execFileSync("git", ["-C", targetDir, "config", "user.name", userName], {
     stdio: "pipe",
   });
@@ -106,11 +108,12 @@ export function cloneRepo(
   repoFullName: string,
   targetDir: string,
   branch?: string,
+  projectId?: string,
 ): void {
   validateRepoName(repoFullName);
   if (branch) validateBranchName(branch);
 
-  const token = getConfig("github:token") as string | undefined;
+  const token = resolveGitHubToken(projectId) ?? (getConfig("github:token") as string | undefined);
   const sshKeyPath = join(homedir(), ".ssh", "otterbot_github");
   const sshKeyExists = existsSync(sshKeyPath);
 
@@ -165,7 +168,7 @@ export function cloneRepo(
           env: gitEnvWithPAT(token),
         },
       );
-      configureGitUser(targetDir);
+      configureGitUser(targetDir, projectId);
       return;
     } catch (err) {
       httpsErr = err;
@@ -181,7 +184,7 @@ export function cloneRepo(
       timeout: 300_000,
       env: { ...process.env },
     });
-    configureGitUser(targetDir);
+    configureGitUser(targetDir, projectId);
     return;
   }
 
@@ -932,12 +935,13 @@ export function cloneForForkContribution(
   forkRepo: string,
   targetDir: string,
   branch?: string,
+  projectId?: string,
 ): void {
   validateRepoName(upstreamRepo);
   validateRepoName(forkRepo);
   if (branch) validateBranchName(branch);
 
-  const token = getConfig("github:token") as string | undefined;
+  const token = resolveGitHubToken(projectId) ?? (getConfig("github:token") as string | undefined);
   const sshKeyPath = join(homedir(), ".ssh", "otterbot_github");
   const sshKeyExists = existsSync(sshKeyPath);
   const branchArgs = branch ? ["--branch", branch] : [];
@@ -994,6 +998,6 @@ export function cloneForForkContribution(
     execFileSync("git", ["-C", targetDir, "fetch", "upstream"], fetchOpts);
   }
 
-  configureGitUser(targetDir);
+  configureGitUser(targetDir, projectId);
 }
 

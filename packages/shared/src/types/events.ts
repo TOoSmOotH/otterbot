@@ -66,6 +66,8 @@ export interface ServerToClientEvents {
   "mattermost:status": (data: { status: "connected" | "disconnected" | "error"; botUsername?: string }) => void;
   "telegram:pairing-request": (data: { code: string; telegramUserId: string; telegramUsername: string }) => void;
   "telegram:status": (data: { status: "connected" | "disconnected" | "error"; botUsername?: string }) => void;
+  "bluesky:pairing-request": (data: { code: string; blueskyDid: string; blueskyHandle: string }) => void;
+  "bluesky:status": (data: { status: "connected" | "disconnected" | "error"; handle?: string }) => void;
   "whatsapp:status": (data: { status: "connected" | "disconnected" | "qr" | "authenticated" | "auth_failure"; qr?: string }) => void;
   "signal:pairing-request": (data: { code: string; signalNumber: string }) => void;
   "signal:status": (data: { status: "connected" | "disconnected" | "error"; phoneNumber?: string }) => void;
@@ -73,6 +75,8 @@ export interface ServerToClientEvents {
   "nextcloud-talk:status": (data: { status: "connected" | "disconnected" | "error"; botUsername?: string }) => void;
   "googlechat:pairing-request": (data: { code: string; googleChatUserId: string; googleChatUsername: string }) => void;
   "googlechat:status": (data: { status: "connected" | "disconnected" | "error" }) => void;
+  "mastodon:pairing-request": (data: { code: string; mastodonId: string; mastodonAcct: string }) => void;
+  "mastodon:status": (data: { status: "connected" | "disconnected" | "error"; acct?: string }) => void;
   "merge-queue:updated": (data: { entries: MergeQueueEntry[] }) => void;
   "merge-queue:entry-updated": (entry: MergeQueueEntry) => void;
   "mcp:status": (runtime: McpServerRuntime) => void;
@@ -266,12 +270,24 @@ export interface ClientToServerEvents {
     callback?: (ack: { ok: boolean; error?: string }) => void,
   ) => void;
 
+  // GitHub account assignment
+  "project:set-github-account": (
+    data: { projectId: string; accountId: string | null },
+    callback?: (ack: { ok: boolean; error?: string }) => void,
+  ) => void;
+
   // Sign commits toggle
   "project:get-sign-commits": (
     data: { projectId: string },
     callback: (result: { enabled: boolean; hasSSHKey: boolean }) => void,
   ) => void;
   "project:set-sign-commits": (
+    data: { projectId: string; enabled: boolean },
+    callback?: (ack: { ok: boolean; error?: string }) => void,
+  ) => void;
+
+  // 3D view visibility
+  "project:set-show3d": (
     data: { projectId: string; enabled: boolean },
     callback?: (ack: { ok: boolean; error?: string }) => void,
   ) => void;

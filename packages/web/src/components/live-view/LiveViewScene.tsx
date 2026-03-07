@@ -7,6 +7,7 @@ import { useEnvironmentStore } from "../../stores/environment-store";
 import { useRoomBuilderStore } from "../../stores/room-builder-store";
 import { useMovementStore } from "../../stores/movement-store";
 import { useExplosionStore } from "../../stores/explosion-store";
+import { useProjectStore } from "../../stores/project-store";
 import { AgentCharacter } from "./AgentCharacter";
 import { FallbackAgent } from "./FallbackAgent";
 import { AgentExplosion } from "./AgentExplosion";
@@ -40,6 +41,16 @@ export function LiveViewScene({ userProfile }: LiveViewSceneProps) {
   const builderActive = useRoomBuilderStore((s) => s.active);
   const movementTick = useMovementStore((s) => s.tick);
   const explosions = useExplosionStore((s) => s.explosions);
+  const projects = useProjectStore((s) => s.projects);
+
+  // Build a set of project IDs that have show3d disabled
+  const hiddenProjectIds = useMemo(() => {
+    const hidden = new Set<string>();
+    for (const p of projects) {
+      if (p.show3d === false) hidden.add(p.id);
+    }
+    return hidden;
+  }, [projects]);
 
   // Track departing agents: value = frame count since departure started.
   // We skip the first few frames to give the movement system time to enqueue the walk.
@@ -85,8 +96,10 @@ export function LiveViewScene({ userProfile }: LiveViewSceneProps) {
 
   const { positions } = useMemo(() => {
     // Include departing agents (status "done" but walking to center) so they still render
+    // Exclude agents belonging to projects with 3D view disabled
     const activeAgents = Array.from(agents.values()).filter(
-      (a) => a.status !== "done" || departingIds.has(a.id),
+      (a) => (a.status !== "done" || departingIds.has(a.id)) &&
+             !(a.projectId && hiddenProjectIds.has(a.projectId)),
     );
 
     // Group by role
@@ -467,7 +480,7 @@ export function LiveViewScene({ userProfile }: LiveViewSceneProps) {
     }
 
     return { positions };
-  }, [agents, userProfile, packs, activeScene, departingIds]);
+  }, [agents, userProfile, packs, activeScene, departingIds, hiddenProjectIds]);
 
   const lighting = activeScene?.lighting;
   const camera = activeScene?.camera;
