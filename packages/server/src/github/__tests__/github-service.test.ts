@@ -32,6 +32,19 @@ vi.mock("../account-resolver.js", () => ({
   resolveGitHubEmail: vi.fn(() => configStore.get("github:email")),
 }));
 
+// Mock node:fs — keep real implementations but allow spying on existsSync
+const mockExistsSync = vi.fn<(p: string) => boolean>();
+vi.mock("node:fs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs")>();
+  return {
+    ...actual,
+    existsSync: (p: string) =>
+      mockExistsSync.getMockImplementation()
+        ? mockExistsSync(p)
+        : actual.existsSync(p),
+  };
+});
+
 // Mock child_process execFileSync
 const mockExecFileSync = vi.fn();
 vi.mock("node:child_process", () => ({
@@ -54,6 +67,7 @@ describe("github-service", () => {
     tmpDir = mkdtempSync(join(tmpdir(), "otterbot-gh-test-"));
     configStore.clear();
     mockExecFileSync.mockReset();
+    mockExistsSync.mockReset();
   });
 
   afterEach(() => {
@@ -139,6 +153,7 @@ describe("github-service", () => {
 
     it("throws descriptive error when no PAT or SSH key configured", () => {
       const targetDir = join(tmpDir, "no-auth-repo");
+      mockExistsSync.mockReturnValue(false);
       expect(() => cloneRepo("owner/repo", targetDir)).toThrow(
         /no GitHub PAT configured and no SSH key found/,
       );
