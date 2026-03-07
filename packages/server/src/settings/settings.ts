@@ -69,6 +69,7 @@ export const PROVIDER_TYPE_META: ProviderTypeMeta[] = [
   { type: "lmstudio", label: "LM Studio", needsApiKey: false, needsBaseUrl: true },
   { type: "deepseek", label: "DeepSeek", needsApiKey: true, needsBaseUrl: false },
   { type: "mistral", label: "Mistral", needsApiKey: true, needsBaseUrl: false },
+  { type: "vercel-ai-gateway", label: "Vercel AI Gateway", needsApiKey: true, needsBaseUrl: false },
   { type: "claude-code", label: "Claude Code", needsApiKey: false, needsBaseUrl: false },
   { type: "opencode", label: "OpenCode", needsApiKey: false, needsBaseUrl: false },
   { type: "codex", label: "Codex", needsApiKey: false, needsBaseUrl: false },
@@ -157,6 +158,14 @@ const FALLBACK_MODELS: Record<string, string[]> = {
     "mistral-small-latest",
     "codestral-latest",
     "mistral-medium-latest",
+  ],
+  "vercel-ai-gateway": [
+    "anthropic:claude-sonnet-4-5-20250929",
+    "openai:gpt-4o",
+    "openai:gpt-4o-mini",
+    "google:gemini-2.5-flash",
+    "google:gemini-2.5-pro",
+    "xai:grok-3",
   ],
   "claude-code": ["(default)", "claude-sonnet-4-6", "claude-opus-4-6", "sonnet", "opus"],
   opencode: ["(default)"],
@@ -757,6 +766,18 @@ export async function fetchModelsWithCredentials(
         if (!mistralRes.ok) return FALLBACK_MODELS.mistral ?? [];
         const mistralData = (await mistralRes.json()) as { data?: Array<{ id: string }> };
         return mistralData.data?.map((m) => m.id).sort() ?? FALLBACK_MODELS.mistral ?? [];
+      }
+
+      case "vercel-ai-gateway": {
+        if (!apiKey) return FALLBACK_MODELS["vercel-ai-gateway"] ?? [];
+        const gatewayBase = baseUrl ?? "https://gateway.ai.vercel.com/v1";
+        const gatewayRes = await fetch(`${gatewayBase}/models`, {
+          headers: { Authorization: `Bearer ${apiKey}` },
+          signal: AbortSignal.timeout(10_000),
+        });
+        if (!gatewayRes.ok) return FALLBACK_MODELS["vercel-ai-gateway"] ?? [];
+        const gatewayData = (await gatewayRes.json()) as { data?: Array<{ id: string }> };
+        return gatewayData.data?.map((m) => m.id).sort() ?? FALLBACK_MODELS["vercel-ai-gateway"] ?? [];
       }
 
       // Coding agent CLIs — no live model discovery, use fallback lists
