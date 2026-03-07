@@ -334,7 +334,7 @@ const authLimiter = new RateLimiter(5, 60_000);
 // Public API path whitelist (no auth required)
 // ---------------------------------------------------------------------------
 
-const PUBLIC_PATHS = ["/api/setup/status", "/api/setup/passphrase", "/api/auth/login", "/api/oauth/google/callback"];
+const PUBLIC_PATHS = ["/api/setup/status", "/api/setup/passphrase", "/api/auth/login", "/api/oauth/google/callback", "/api/googlechat/webhook"];
 
 // ---------------------------------------------------------------------------
 // Cookie helper for Socket.IO (parse raw Cookie header)
@@ -662,8 +662,13 @@ async function main() {
     if (!settings.enabled || !settings.serviceAccountKeySet) return;
     const serviceAccountKey = getConfig("googlechat:service_account_key");
     if (!serviceAccountKey) return;
+    const projectNumber = getConfig("googlechat:project_number") ?? "";
+    if (!projectNumber) {
+      console.error("[Google Chat] Project number not configured — bridge will not start");
+      return;
+    }
     googleChatBridge = new GoogleChatBridge({ bus, coo, io });
-    googleChatBridge.start({ serviceAccountKey: JSON.parse(serviceAccountKey) }).catch((err) => {
+    googleChatBridge.start({ serviceAccountKey: JSON.parse(serviceAccountKey), projectNumber }).catch((err) => {
       console.error("[Google Chat] Failed to start bridge:", err);
       googleChatBridge = null;
     });
@@ -4246,6 +4251,7 @@ async function main() {
     Body: {
       enabled?: boolean;
       serviceAccountKey?: string;
+      projectNumber?: string;
     };
   }>("/api/settings/googlechat", async (req) => {
     const wasEnabled = getGoogleChatSettings().enabled && getGoogleChatSettings().serviceAccountKeySet;
@@ -4299,13 +4305,21 @@ async function main() {
   });
 
   // Google Chat webhook endpoint
+  // This is in PUBLIC_PATHS — authentication is handled by verifying the
+  // Bearer token (JWT signed by Google) inside the bridge.
   app.post("/api/googlechat/webhook", async (req, reply) => {
     if (!googleChatBridge) {
       reply.code(503);
       return { error: "Google Chat bridge not started" };
     }
-    const result = await googleChatBridge.handleWebhook(req.body);
-    return result ?? {};
+    try {
+      const result = await googleChatBridge.handleWebhook(req.body, req.headers.authorization);
+      return result ?? {};
+    } catch (err) {
+      console.error("[Google Chat] Webhook auth failed:", err);
+      reply.code(401);
+      return { error: "Unauthorized" };
+    }
   });
 
   // =========================================================================

@@ -9,6 +9,7 @@ import type { PairedUser, PendingPairing } from "./pairing.js";
 export interface GoogleChatSettingsResponse {
   enabled: boolean;
   serviceAccountKeySet: boolean;
+  projectNumber: string;
   pairedUsers: PairedUser[];
   pendingPairings: PendingPairing[];
 }
@@ -26,6 +27,7 @@ export function getGoogleChatSettings(): GoogleChatSettingsResponse {
   return {
     enabled: getConfig("googlechat:enabled") === "true",
     serviceAccountKeySet: !!getConfig("googlechat:service_account_key"),
+    projectNumber: getConfig("googlechat:project_number") ?? "",
     pairedUsers: listPairedUsers(),
     pendingPairings: listPendingPairings(),
   };
@@ -34,6 +36,7 @@ export function getGoogleChatSettings(): GoogleChatSettingsResponse {
 export function updateGoogleChatSettings(data: {
   enabled?: boolean;
   serviceAccountKey?: string;
+  projectNumber?: string;
 }): void {
   if (data.enabled !== undefined) {
     setConfig("googlechat:enabled", data.enabled ? "true" : "false");
@@ -43,6 +46,13 @@ export function updateGoogleChatSettings(data: {
       deleteConfig("googlechat:service_account_key");
     } else {
       setConfig("googlechat:service_account_key", data.serviceAccountKey);
+    }
+  }
+  if (data.projectNumber !== undefined) {
+    if (data.projectNumber === "") {
+      deleteConfig("googlechat:project_number");
+    } else {
+      setConfig("googlechat:project_number", data.projectNumber);
     }
   }
 }

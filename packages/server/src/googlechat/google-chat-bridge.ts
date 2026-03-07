@@ -9,6 +9,9 @@ import { COO } from "../agents/coo.js";
 import { getDb, schema } from "../db/index.js";
 import { isPaired, generatePairingCode } from "./pairing.js";
 
+// Google Chat webhook sender — the issuer of the JWT bearer token.
+const CHAT_ISSUER = "chat@system.gserviceaccount.com";
+
 type TypedServer = Server<ClientToServerEvents, ServerToClientEvents>;
 
 // Google Chat messages can be up to 28 KB; use a conservative limit.
@@ -35,12 +38,16 @@ const POLL_INTERVAL_MS = 5000;
  * `/api/googlechat/webhook`.
  *
  * Authentication: Uses a Google Cloud service account key (JSON) to
- * authenticate outgoing API calls. Incoming webhook events are validated
- * by checking the bearer token against Google's public keys.
+ * authenticate outgoing API calls. Incoming webhook events are verified
+ * by validating the Bearer token in the Authorization header as a signed
+ * JWT issued by `chat@system.gserviceaccount.com`, using the
+ * `google-auth-library` OAuth2Client.
  */
 
 export interface GoogleChatConfig {
   serviceAccountKey: Record<string, unknown>;
+  /** The Google Cloud project number used as the JWT audience for webhook verification. */
+  projectNumber: string;
 }
 
 interface PendingResponse {
@@ -60,6 +67,9 @@ export class GoogleChatBridge {
   private pendingResponses = new Map<string, PendingResponse>();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private chatApi: any = null;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private oauth2Client: any = null;
+  private expectedAudience: string = "";
   private started = false;
 
   constructor(deps: { bus: MessageBus; coo: COO; io: TypedServer }) {
@@ -81,6 +91,12 @@ export class GoogleChatBridge {
     });
 
     this.chatApi = google.chat({ version: "v1", auth });
+
+    // Set up JWT verification for incoming webhooks
+    const { OAuth2Client } = await import("google-auth-library");
+    this.oauth2Client = new OAuth2Client();
+    this.expectedAudience = config.projectNumber;
+
     this.started = true;
 
     // Subscribe to bus broadcasts to intercept COO responses
@@ -102,6 +118,8 @@ export class GoogleChatBridge {
     }
 
     this.chatApi = null;
+    this.oauth2Client = null;
+    this.expectedAudience = "";
     this.started = false;
     this.io.emit("googlechat:status", { status: "disconnected" });
   }
@@ -111,9 +129,41 @@ export class GoogleChatBridge {
   // -------------------------------------------------------------------------
 
   /**
+   * Verify the Bearer token from the Authorization header.
+   * Google Chat sends a signed JWT that must be verified against Google's
+   * public keys. The token audience must match the configured project number,
+   * and the issuer must be `chat@system.gserviceaccount.com`.
+   *
+   * @throws if the token is missing, invalid, or does not match expectations.
+   */
+  async verifyBearerToken(authorizationHeader: string | undefined): Promise<void> {
+    if (!authorizationHeader || !authorizationHeader.startsWith("Bearer ")) {
+      throw new Error("Missing or invalid Authorization header");
+    }
+
+    const token = authorizationHeader.slice("Bearer ".length);
+
+    if (!this.oauth2Client) {
+      throw new Error("OAuth2 client not initialized");
+    }
+
+    const ticket = await this.oauth2Client.verifyIdToken({
+      idToken: token,
+      audience: this.expectedAudience,
+    });
+
+    const payload = ticket.getPayload();
+    if (!payload || payload.email !== CHAT_ISSUER) {
+      throw new Error("Token issuer is not Google Chat");
+    }
+  }
+
+  /**
    * Handle an incoming Google Chat webhook event.
    * The server should wire up a POST route at `/api/googlechat/webhook`
-   * and pass the parsed request body here.
+   * and pass the parsed request body and the Authorization header here.
+   *
+   * The Bearer token is verified before processing the event.
    *
    * Google Chat event types:
    * - ADDED_TO_SPACE: Bot added to a space
@@ -122,7 +172,9 @@ export class GoogleChatBridge {
    * - CARD_CLICKED: Interactive card action
    */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  async handleWebhook(event: any): Promise<Record<string, unknown> | null> {
+  async handleWebhook(event: any, authorizationHeader: string | undefined): Promise<Record<string, unknown> | null> {
+    // Verify the Bearer token from Google Chat
+    await this.verifyBearerToken(authorizationHeader);
     const eventType: string = event.type;
 
     if (eventType === "ADDED_TO_SPACE") {
