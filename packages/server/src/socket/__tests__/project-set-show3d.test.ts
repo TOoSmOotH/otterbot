@@ -257,6 +257,29 @@ describe("project:set-show3d socket handler", () => {
     expect(callback).toHaveBeenCalledWith({ ok: true });
   });
 
+  it("does not emit zone removal when disabling and no zone was removed", () => {
+    const worldLayout = {
+      removeZone: vi.fn(() => false),
+      loadZoneConfig: vi.fn(),
+      addZone: vi.fn(),
+    };
+    const { mockIo } = setupHandler(worldLayout);
+    insertProject("proj-4", true);
+
+    const handler = socketHandlers.get("project:set-show3d");
+    const callback = vi.fn();
+    handler?.({ projectId: "proj-4", enabled: false }, callback);
+
+    const db = getDb();
+    const project = db.select().from(schema.projects).where(eq(schema.projects.id, "proj-4")).get();
+
+    expect(project?.show3d).toBe(false);
+    expect(worldLayout.removeZone).toHaveBeenCalledWith("proj-4");
+    expect(mockIo.emit).not.toHaveBeenCalledWith("world:zone-removed", expect.anything());
+    expect(mockIo.emit).toHaveBeenCalledWith("project:updated", expect.objectContaining({ id: "proj-4", show3d: false }));
+    expect(callback).toHaveBeenCalledWith({ ok: true });
+  });
+
   it("returns not found for missing project", () => {
     const worldLayout = {
       removeZone: vi.fn(),
