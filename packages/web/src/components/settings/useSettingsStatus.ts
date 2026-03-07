@@ -15,6 +15,12 @@ export function useSettingsStatus(): Record<string, ConfigStatus> {
   const mattermostTokenSet = useSettingsStore((s) => s.mattermostTokenSet);
   const nextcloudTalkEnabled = useSettingsStore((s) => s.nextcloudTalkEnabled);
   const nextcloudTalkAppPasswordSet = useSettingsStore((s) => s.nextcloudTalkAppPasswordSet);
+  const blueskyEnabled = useSettingsStore((s) => s.blueskyEnabled);
+  const blueskyCredentialsSet = useSettingsStore((s) => s.blueskyCredentialsSet);
+  const mastodonEnabled = useSettingsStore((s) => s.mastodonEnabled);
+  const mastodonCredentialsSet = useSettingsStore((s) => s.mastodonCredentialsSet);
+  const xEnabled = useSettingsStore((s) => s.xEnabled);
+  const xCredentialsSet = useSettingsStore((s) => s.xCredentialsSet);
   const gitHubEnabled = useSettingsStore((s) => s.gitHubEnabled);
   const gitHubTokenSet = useSettingsStore((s) => s.gitHubTokenSet);
   const googleConnected = useSettingsStore((s) => s.googleConnected);
@@ -46,6 +52,12 @@ export function useSettingsStatus(): Record<string, ConfigStatus> {
       ? "connected" : mattermostTokenSet ? "partial" : "unconfigured";
     s["nextcloud-talk"] = nextcloudTalkEnabled && nextcloudTalkAppPasswordSet
       ? "connected" : nextcloudTalkAppPasswordSet ? "partial" : "unconfigured";
+    s.bluesky = blueskyEnabled && blueskyCredentialsSet
+      ? "connected" : blueskyCredentialsSet ? "partial" : "unconfigured";
+    s.mastodon = mastodonEnabled && mastodonCredentialsSet
+      ? "connected" : mastodonCredentialsSet ? "partial" : "unconfigured";
+    s.x = xEnabled && xCredentialsSet
+      ? "connected" : xCredentialsSet ? "partial" : "unconfigured";
 
     // Services
     s.github = gitHubEnabled && gitHubTokenSet
@@ -74,6 +86,9 @@ export function useSettingsStatus(): Record<string, ConfigStatus> {
     discordEnabled, discordTokenSet, telegramEnabled, telegramTokenSet,
     slackEnabled, slackBotTokenSet, mattermostEnabled, mattermostTokenSet,
     nextcloudTalkEnabled, nextcloudTalkAppPasswordSet,
+    blueskyEnabled, blueskyCredentialsSet,
+    mastodonEnabled, mastodonCredentialsSet,
+    xEnabled, xCredentialsSet,
     gitHubEnabled, gitHubTokenSet, googleConnected,
     activeSearchProvider, ttsEnabled, sttEnabled,
     openCodeEnabled, claudeCodeEnabled, codexEnabled, geminiCliEnabled,

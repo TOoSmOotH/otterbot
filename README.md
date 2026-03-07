@@ -71,7 +71,7 @@ The container runs Node 22 as a non-root user with a full development environmen
 - **Languages**: Go, Rust, Python, Java, Ruby
 - **Desktop**: XFCE + Xvfb + x11vnc + noVNC (virtual desktop viewable in the web UI)
 - **Browser**: Playwright with Chromium (headed mode when desktop is enabled)
-- **CLI tools**: GitHub CLI, coding agent CLIs (OpenCode, Claude Code, Codex)
+- **CLI tools**: GitHub CLI, coding agent CLIs (OpenCode, Claude Code, Codex, Gemini CLI)
 
 ### Container Images
 
@@ -155,7 +155,7 @@ This is why visibility works — the UI is just another consumer of the bus.
 
 ### Agent Registry
 
-The registry contains 14 pre-built agent templates:
+The registry contains 15 pre-built agent templates:
 
 | Agent | Description |
 |-------|-------------|
@@ -171,6 +171,7 @@ The registry contains 14 pre-built agent templates:
 | **OpenCode Coder** | Delegates complex coding tasks to OpenCode (autonomous AI coding agent) |
 | **Claude Code Coder** | Delegates coding tasks to Claude Code (Anthropic's coding agent) |
 | **Codex Coder** | Delegates coding tasks to Codex CLI (OpenAI's coding agent) |
+| **Gemini CLI Coder** | Delegates coding tasks to Gemini CLI (Google's coding agent) |
 | **Browser Agent** | Interacts with web pages — navigate, fill forms, click, extract text |
 | **Tool Builder** | Creates custom JavaScript tools that extend agent capabilities |
 
@@ -283,11 +284,94 @@ Each bridge supports user pairing — only approved users can interact with the 
 
 ### GitHub
 
-Projects can be linked to GitHub repositories:
+Projects can be linked to GitHub repositories. Configure your Personal Access Token (PAT) and optional SSH key in the **Settings UI** under the GitHub tab.
 
-- **Issue monitoring** — automatically create Otterbot projects from new GitHub issues
-- **PR tools** — agents can create pull requests, post comments, and review code
-- **Issue tools** — agents can list, read, and comment on issues
+#### Authentication
+
+| Method | Description |
+|--------|-------------|
+| **Personal Access Token (PAT)** | HTTPS-based authentication. Required scopes: `repo`, `read:org`, `workflow`. Username is auto-detected from the token. |
+| **SSH Key** | Generate an Ed25519 or RSA key pair directly in Settings, or import an existing private key. Stored at `~/.ssh/otterbot_github`. |
+| **Commit Signing** | When an SSH key is configured, git commits are automatically signed using SSH-based GPG signing. |
+
+Authentication is tried in order: HTTPS+PAT first, then SSH fallback.
+
+#### Project Linking
+
+When creating a project, you can link it to a GitHub repository:
+
+- **Repository** — `owner/repo` format (e.g. `TOoSmOotH/otterbot`)
+- **Target branch** — the branch agents push to and open PRs against (auto-detected from the repo default branch if not specified)
+- **Fork mode** — if the authenticated user lacks push access to the repo, Otterbot automatically creates a fork and uses cross-fork PRs (`forkowner:branch` format)
+
+#### Issue Monitoring
+
+Enable per-project to automatically poll for new GitHub issues:
+
+- Polls every 5 minutes for issues assigned to the configured GitHub username
+- Creates kanban tasks in the project's backlog for each new assigned issue
+- Posts an acknowledgement comment on the GitHub issue
+- Syncs task state when issues are closed (completed → done, not planned → removed)
+
+#### Pipeline (Automated Triage & Implementation)
+
+When the pipeline is enabled for a project, issue monitoring gains additional automation:
+
+| Stage | Description |
+|-------|-------------|
+| **Triage** | LLM-based classification of new issues (bug, feature, enhancement, user-error, duplicate, question, documentation). Posts a triage comment and applies labels. Re-triages when new non-bot comments appear. |
+| **Coder** | Creates a feature branch, implements the solution, and commits changes. |
+| **Security Reviewer** | Audits the implementation for vulnerabilities and security risks. Can kick back to the Coder. |
+| **Tester** | Writes and runs tests to validate the implementation. |
+| **Code Reviewer** | Reviews code quality and correctness, then creates the pull request. |
+
+Each stage can be independently enabled/disabled and assigned a specific agent template.
+
+#### PR Monitoring
+
+Open pull requests linked to kanban tasks are automatically monitored:
+
+- **Review feedback** — when a reviewer requests changes, the task is moved back to in-progress and a worker is spawned to address the feedback on the existing branch
+- **CI failure detection** — when CI checks fail on a PR's HEAD commit, a worker is spawned to investigate and fix the failures
+- **Auto-merge queue** — when a PR receives an approval review, it is automatically enqueued for merge. The merge queue rebases branches, waits for CI, and merges (squash by default).
+
+#### Merge Queue
+
+The merge queue processes approved PRs in FIFO order:
+
+- Rebases each PR branch onto the target branch before merging
+- Waits for CI checks to pass after rebase
+- Merges via the GitHub API (squash merge by default)
+- Moves the kanban task to done on successful merge
+
+#### Agent Tools
+
+Agents with GitHub skills have access to the following tools:
+
+| Tool | Description |
+|------|-------------|
+| `github_get_issue` | Fetch an issue by number, including all comments |
+| `github_list_issues` | List issues with filters (state, labels, assignee) |
+| `github_get_pr` | Fetch a pull request by number, including comments |
+| `github_list_prs` | List pull requests with filters (state) |
+| `github_comment` | Post a comment on an issue or pull request |
+| `github_create_pr` | Create a pull request (target branch is determined by project config) |
+
+#### REST API & Settings
+
+```
+# GitHub settings
+GET    /api/settings/github                  # Get GitHub settings (enabled, token status, username, SSH key info)
+PUT    /api/settings/github                  # Update GitHub settings (enable/disable, set token)
+POST   /api/settings/github/test             # Test GitHub PAT connection
+
+# SSH key management
+POST   /api/settings/github/ssh/generate     # Generate a new SSH key pair (Ed25519 or RSA)
+POST   /api/settings/github/ssh/import       # Import an existing SSH private key
+GET    /api/settings/github/ssh/public-key   # Get the public key (for adding to GitHub)
+DELETE /api/settings/github/ssh              # Remove the SSH key pair
+POST   /api/settings/github/ssh/test         # Test SSH connection to GitHub
+```
 
 ## Coding Agents
 
@@ -298,6 +382,7 @@ Otterbot integrates with external AI coding agents that run in PTY terminals:
 | **OpenCode** | Open-source coding agent — multi-file implementations, refactoring |
 | **Claude Code** | Anthropic's coding agent — complex implementations, code review |
 | **Codex CLI** | OpenAI's coding agent — code generation, implementation tasks |
+| **Gemini CLI** | Google's coding agent — code generation, multi-file editing |
 
 When a coding agent worker is spawned, it opens a PTY terminal session. The **Code panel** in the UI shows real-time terminal output, supports interactive input, and displays file diffs when sessions complete. Coding agents are pre-installed in the Docker image.
 
@@ -447,7 +532,7 @@ otterbot/
 | TTS | Kokoro.js (local) + Edge TTS + OpenAI-compatible |
 | STT | HuggingFace Transformers / Whisper (local) + OpenAI-compatible + Browser Web Speech API |
 | Browser Automation | Playwright (Chromium — headed or headless) |
-| Coding Agents | OpenCode, Claude Code, Codex CLI via node-pty |
+| Coding Agents | OpenCode, Claude Code, Codex CLI, Gemini CLI via node-pty |
 | Desktop | XFCE + Xvfb + x11vnc + noVNC |
 | Modules | Installable extension system |
 | Testing | Vitest (unit) + Playwright (e2e) |
@@ -683,6 +768,82 @@ POST   /api/modules/:moduleId/webhook          # Module webhook endpoint
 # Transcription
 POST   /api/stt/transcribe                     # Transcribe audio
 ```
+
+### Updating User Email Settings
+
+Otterbot is a single-user system. To update the user's email configuration (IMAP/SMTP), use the `PUT /api/settings/email` endpoint. After updating, you can verify the connection with `POST /api/settings/email/test`.
+
+#### Authentication
+
+All protected endpoints require a session cookie (`sb_session`) obtained by logging in first:
+
+```bash
+# Step 1: Log in and capture the session cookie
+curl -k -c cookies.txt -X POST https://localhost:62626/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"passphrase": "your-passphrase"}'
+```
+
+#### Update Email Settings
+
+| Detail      | Value                             |
+|-------------|-----------------------------------|
+| **Method**  | `PUT`                             |
+| **URL**     | `/api/settings/email`             |
+| **Auth**    | Session cookie (`sb_session`)     |
+| **Content** | `application/json`                |
+
+**Request body parameters:**
+
+| Parameter    | Type    | Required | Description                        |
+|--------------|---------|----------|------------------------------------|
+| `enabled`    | boolean | No       | Enable or disable email integration |
+| `imapServer` | string  | No       | IMAP server hostname               |
+| `imapPort`   | number  | No       | IMAP server port (e.g. `993`)      |
+| `imapTls`    | boolean | No       | Use TLS for IMAP                   |
+| `smtpServer` | string  | No       | SMTP server hostname               |
+| `smtpPort`   | number  | No       | SMTP server port (e.g. `587`)      |
+| `smtpTls`    | boolean | No       | Use TLS for SMTP                   |
+| `username`   | string  | No       | Email account username/address     |
+| `password`   | string  | No       | Email account password or app password |
+| `fromName`   | string  | No       | Display name for outgoing emails   |
+
+**Example — update the email address and IMAP/SMTP settings:**
+
+```bash
+curl -k -b cookies.txt -X PUT https://localhost:62626/api/settings/email \
+  -H "Content-Type: application/json" \
+  -d '{
+    "enabled": true,
+    "username": "newuser@example.com",
+    "password": "app-password-here",
+    "imapServer": "imap.example.com",
+    "imapPort": 993,
+    "imapTls": true,
+    "smtpServer": "smtp.example.com",
+    "smtpPort": 587,
+    "smtpTls": true,
+    "fromName": "My Name"
+  }'
+```
+
+**Response:** Returns the updated email settings object.
+
+#### Test Email Connection
+
+After updating, verify that the IMAP and SMTP connections work:
+
+```bash
+curl -k -b cookies.txt -X POST https://localhost:62626/api/settings/email/test
+```
+
+**Response:**
+
+```json
+{ "imap": "ok", "smtp": "ok" }
+```
+
+If a connection fails, the corresponding field will contain an error message instead of `"ok"`.
 
 ## Socket.IO Events
 

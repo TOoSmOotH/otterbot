@@ -1,5 +1,37 @@
 # Changelog
 
+## [0.13.0](https://github.com/TOoSmOotH/otterbot/compare/otterbot-v0.12.0...otterbot-v0.13.0) (2026-03-05)
+
+
+### Features
+
+* add arm64 platform detection to install.sh docker-compose output ([1ec6083](https://github.com/TOoSmOotH/otterbot/commit/1ec608339f22b0e6e770de89229fe36d831a345b)), closes [#375](https://github.com/TOoSmOotH/otterbot/issues/375)
+* add coding agents (Claude Code, OpenCode, Codex, Gemini CLI) as LLM provider types ([c8d3744](https://github.com/TOoSmOotH/otterbot/commit/c8d3744ce64b9b90679b7395bd74284e36c5b945))
+* add file upload support to chat ([0a92791](https://github.com/TOoSmOotH/otterbot/commit/0a92791ba377b58ae3aebc3a36e2cf2a6b7581a9))
+* add file upload support to chat ([633fae1](https://github.com/TOoSmOotH/otterbot/commit/633fae1910a40543e3ed14a06372126f8163b47e)), closes [#371](https://github.com/TOoSmOotH/otterbot/issues/371)
+* add fork-based GitHub contribution workflow ([3101380](https://github.com/TOoSmOotH/otterbot/commit/310138061f5e400b3c8737b8877d0886638dadef))
+* add IMAP folder navigation to inbox with tests ([fbfce53](https://github.com/TOoSmOotH/otterbot/commit/fbfce539233650838b87e94ba50056c46c9c865d))
+* add per-project "Sign Commits" toggle to project settings ([d7942cb](https://github.com/TOoSmOotH/otterbot/commit/d7942cb1976637a42a1b39e36ee3c2baf43a2f46))
+* IMAP folders, file uploads, coding agents, and reliability fixes ([f5b7cf4](https://github.com/TOoSmOotH/otterbot/commit/f5b7cf498f22b529251e14a9c6b811102728c93e))
+* replace Gmail API with generic IMAP/SMTP email ([36dceef](https://github.com/TOoSmOotH/otterbot/commit/36dceef8bb799b00e0016379518bd21431746d1c))
+
+
+### Bug Fixes
+
+* add arm64 platform detection to install.sh ([b0c5866](https://github.com/TOoSmOotH/otterbot/commit/b0c58669624e1884aca596fe0b1df5a5ee460491))
+* add IMAP keepalive to prevent idle socket timeouts ([b83ccbe](https://github.com/TOoSmOotH/otterbot/commit/b83ccbe642d3a9fe482d1dc7346950c3329b2eec))
+* detect Apple Silicon under Rosetta 2 in install script ([31a6729](https://github.com/TOoSmOotH/otterbot/commit/31a6729ed970277693176c0c916d2cbbbf04f4b0))
+* handle IMAP socket timeout errors gracefully ([713a858](https://github.com/TOoSmOotH/otterbot/commit/713a858aed149708dde12a9b0e9494f1c8fb4ddd))
+* harden file upload against DoS, CSRF, and unauthorized access ([fc5f305](https://github.com/TOoSmOotH/otterbot/commit/fc5f30543238b19d4dfb694cc64ec8a98f2b55f4))
+* harden file upload endpoint against path traversal and XSS ([02d3738](https://github.com/TOoSmOotH/otterbot/commit/02d3738e9c5621916670407850f4d6b1fba12313)), closes [#371](https://github.com/TOoSmOotH/otterbot/issues/371)
+* ignore non-native model IDs for coding agent providers and improve error handling ([da0780d](https://github.com/TOoSmOotH/otterbot/commit/da0780d2d68e61f6427b134f1bcdf138dc40372b))
+* reduce pipeline GitHub issue comment noise ([251863e](https://github.com/TOoSmOotH/otterbot/commit/251863e66f4d012a5599435ccf4d17b61a94d9ff))
+* replace findLast with ES2022-compatible alternative in test ([6350a4b](https://github.com/TOoSmOotH/otterbot/commit/6350a4b4db678dfdc09b5e9a0e12271a37051546))
+* resolve TypeScript errors in coo-attachments test ([303c3b5](https://github.com/TOoSmOotH/otterbot/commit/303c3b5544c920d66a3f586ef252a82b692da5a6))
+* set default OTTERBOT_ALLOWED_ORIGIN in installers and fix VNC origin check ([3ee4c1c](https://github.com/TOoSmOotH/otterbot/commit/3ee4c1c5e63ae237baf982a53324dbf168f6e55c))
+* skip brew Docker install under Rosetta 2 ([478e2c4](https://github.com/TOoSmOotH/otterbot/commit/478e2c48c2c447b09c26cb30c01d43e0c9785a45))
+* use arch -arm64 for brew install under Rosetta 2 ([635aec7](https://github.com/TOoSmOotH/otterbot/commit/635aec75ee7e762a9d09c2825c8df7ab1a306f38))
+
 ## [0.12.0](https://github.com/TOoSmOotH/otterbot/compare/otterbot-v0.11.0...otterbot-v0.12.0) (2026-03-04)
 
 

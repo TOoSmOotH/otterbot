@@ -462,6 +462,35 @@ describe("PipelineManager", () => {
     });
   });
 
+  // ─── sendStageDirective (CI failure) ─────────────────────────
+
+  describe("sendStageDirective (CI failure)", () => {
+    it("includes CI failure instructions instead of initial implementation when ci_failure is in stageReports", async () => {
+      const task = insertTask({ id: "task-ci-fail", column: "in_progress", title: "Fix feature" });
+      insertProject();
+      setPipelineConfig(PROJECT_ID);
+      const stageReports = new Map<string, string>();
+      stageReports.set("ci_failure", "Error: test suite failed\nnpm ERR! code ELIFECYCLE");
+      const state = createPipelineState({
+        taskId: task.id,
+        prBranch: "feat/issue-10-add-feature",
+        stages: ["coder", "reviewer"],
+        currentStageIndex: 0,
+        stageReports,
+      });
+      (pm as any).pipelines.set(task.id, state);
+
+      await (pm as any).sendStageDirective(state);
+
+      const call = (bus.send as any).mock.calls[0][0];
+      expect(call.content).toContain("CI FAILURE");
+      expect(call.content).toContain("feat/issue-10-add-feature");
+      expect(call.content).toContain("CI FAILURE DETAILS");
+      expect(call.content).toContain("npm ERR! code ELIFECYCLE");
+      expect(call.content).not.toContain("Create a feature branch");
+    });
+  });
+
   // ─── startReReview ─────────────────────────────────────────
 
   describe("startReReview", () => {

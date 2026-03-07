@@ -151,8 +151,14 @@ case "$OS" in
 esac
 
 case "$ARCH" in
-  x86_64|amd64)  ARCH_NAME="x86_64" ;;
-  aarch64|arm64) ARCH_NAME="arm64" ;;
+  x86_64|amd64)
+    ARCH_NAME="x86_64"
+    DOCKER_PLATFORM="linux/amd64"
+    ;;
+  aarch64|arm64)
+    ARCH_NAME="arm64"
+    DOCKER_PLATFORM="linux/arm64"
+    ;;
   *)
     error "Unsupported architecture: $ARCH"
     exit 1
@@ -275,6 +281,7 @@ cat > "$INSTALL_DIR/docker-compose.yml" <<EOF
 services:
   otterbot:
     image: ${IMAGE}:${TAG}
+    platform: ${DOCKER_PLATFORM}
     shm_size: "256m"
     ports:
       - "\${PORT:-62626}:62626"
@@ -291,7 +298,7 @@ services:
     restart: unless-stopped
 EOF
 
-info "Generated docker-compose.yml (image tag: ${TAG})"
+info "Generated docker-compose.yml (image tag: ${TAG}, platform: ${DOCKER_PLATFORM})"
 
 # ── Pull & start ─────────────────────────────────────────────────────────────
 

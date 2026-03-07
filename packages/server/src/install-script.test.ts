@@ -136,3 +136,71 @@ exit 0
     expect(result.stdout).toContain(`Opened browser to ${TEST_URL}`);
   });
 });
+
+describe("install.sh architecture platform detection", () => {
+  it("writes linux/amd64 platform for x86_64", () => {
+    const unameStub = `#!/bin/sh
+if [ "$1" = "-s" ]; then
+  echo "Linux"
+  exit 0
+fi
+if [ "$1" = "-m" ]; then
+  echo "x86_64"
+  exit 0
+fi
+exit 1
+`;
+    const { result, installDir } = runInstallScript({
+      args: ["--no-start", "--no-open"],
+      commands: { uname: unameStub },
+    });
+
+    const compose = readFileSync(join(installDir, "docker-compose.yml"), "utf8");
+    expect(result.status).toBe(0);
+    expect(compose).toContain("platform: linux/amd64");
+    expect(result.stdout).toContain("platform: linux/amd64");
+  });
+
+  it("writes linux/arm64 platform for arm64", () => {
+    const unameStub = `#!/bin/sh
+if [ "$1" = "-s" ]; then
+  echo "Linux"
+  exit 0
+fi
+if [ "$1" = "-m" ]; then
+  echo "arm64"
+  exit 0
+fi
+exit 1
+`;
+    const { result, installDir } = runInstallScript({
+      args: ["--no-start", "--no-open"],
+      commands: { uname: unameStub },
+    });
+
+    const compose = readFileSync(join(installDir, "docker-compose.yml"), "utf8");
+    expect(result.status).toBe(0);
+    expect(compose).toContain("platform: linux/arm64");
+    expect(result.stdout).toContain("platform: linux/arm64");
+  });
+
+  it("fails for unsupported architectures", () => {
+    const unameStub = `#!/bin/sh
+if [ "$1" = "-s" ]; then
+  echo "Linux"
+  exit 0
+fi
+if [ "$1" = "-m" ]; then
+  echo "sparc"
+  exit 0
+fi
+exit 1
+`;
+    const { result } = runInstallScript({
+      commands: { uname: unameStub },
+    });
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("Unsupported architecture: sparc");
+  });
+});

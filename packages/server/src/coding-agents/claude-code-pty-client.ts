@@ -15,6 +15,7 @@ import { computeGitDiff } from "../utils/git.js";
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { getConfig } from "../auth/auth.js";
+import { resolveGitHubToken } from "../github/account-resolver.js";
 
 /** Ring buffer size for late-joining clients (~100KB) */
 const RING_BUFFER_SIZE = 100 * 1024;
@@ -53,7 +54,7 @@ export class ClaudeCodePtyClient implements CodingAgentClient {
       if (apiKey) {
         env.ANTHROPIC_API_KEY = apiKey;
       }
-      const ghToken = getConfig("github:token");
+      const ghToken = resolveGitHubToken();
       if (ghToken) {
         env.GH_TOKEN = ghToken;
         env.GITHUB_TOKEN = ghToken;

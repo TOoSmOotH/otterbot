@@ -110,11 +110,31 @@ export const projects = sqliteTable("projects", {
   githubBranch: text("github_branch"),
   githubIssueMonitor: integer("github_issue_monitor", { mode: "boolean" }).notNull().default(false),
   signCommits: integer("sign_commits", { mode: "boolean" }).notNull().default(false),
+  show3d: integer("show_3d", { mode: "boolean" }).notNull().default(true),
+  githubAccountId: text("github_account_id"),
   rules: text("rules", { mode: "json" })
     .$type<string[]>()
     .notNull()
     .default([]),
   createdAt: text("created_at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+});
+
+export const githubAccounts = sqliteTable("github_accounts", {
+  id: text("id").primaryKey(),
+  label: text("label").notNull(),
+  token: text("token").notNull(),
+  username: text("username"),
+  email: text("email"),
+  sshKeyPath: text("ssh_key_path"),
+  sshFingerprint: text("ssh_fingerprint"),
+  sshKeyType: text("ssh_key_type"),
+  isDefault: integer("is_default", { mode: "boolean" }).notNull().default(false),
+  createdAt: text("created_at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+  updatedAt: text("updated_at")
     .notNull()
     .$defaultFn(() => new Date().toISOString()),
 });
@@ -275,7 +295,7 @@ export const providers = sqliteTable("providers", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
   type: text("type", {
-    enum: ["anthropic", "openai", "google", "ollama", "openai-compatible", "openrouter", "github-copilot", "huggingface", "nvidia", "minimax", "xai", "zai", "perplexity", "deepgram", "bedrock", "lmstudio", "deepseek", "mistral", "claude-code", "opencode", "codex", "gemini-cli"],
+    enum: ["anthropic", "openai", "google", "ollama", "openai-compatible", "openrouter", "github-copilot", "huggingface", "nvidia", "minimax", "xai", "zai", "perplexity", "deepgram", "bedrock", "lmstudio", "deepseek", "mistral", "vercel-ai-gateway", "claude-code", "opencode", "codex", "gemini-cli"],
   }).notNull(),
   apiKey: text("api_key"),
   baseUrl: text("base_url"),

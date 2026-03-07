@@ -11,19 +11,18 @@ import {
   createPullRequest,
   resolveProjectBranch,
 } from "../github/github-service.js";
+import { resolveGitHubAccount } from "../github/account-resolver.js";
 import type { ToolContext } from "./tool-context.js";
 
 function getGitHubContext(ctx: ToolContext): { repo: string; token: string; username: string } {
-  const token = getConfig("github:token");
-  if (!token) throw new Error("GitHub token not configured. Set github:token in Settings.");
-
-  const username = getConfig("github:username");
-  if (!username) throw new Error("GitHub username not configured. Set github:username in Settings.");
+  const account = resolveGitHubAccount(ctx.projectId);
+  if (!account?.token) throw new Error("GitHub token not configured. Add a GitHub account in Settings.");
+  if (!account.username) throw new Error("GitHub username not configured. Test your GitHub account connection in Settings.");
 
   const repo = getConfig(`project:${ctx.projectId}:github:repo`);
   if (!repo) throw new Error("GitHub repo not configured for this project. Set it in project settings.");
 
-  return { repo, token, username };
+  return { repo, token: account.token, username: account.username };
 }
 
 // ---------------------------------------------------------------------------

@@ -25,6 +25,7 @@ import type { MessageBus } from "../bus/message-bus.js";
 import type { WorkspaceManager } from "../workspace/workspace.js";
 import { eq, and } from "drizzle-orm";
 import { getConfig } from "../auth/auth.js";
+import { resolveGitHubToken } from "../github/account-resolver.js";
 import { buildDateContext } from "./prompts/date-context.js";
 import {
   listPackages,
@@ -1221,9 +1222,9 @@ The user can see everything on the desktop in real-time.`;
     projectId?: string | null,
     repo?: string | null,
   ): { repoFullName: string; token: string } {
-    const token = getConfig("github:token");
+    const token = resolveGitHubToken(projectId ?? undefined);
     if (!token) {
-      throw new Error("GitHub token not configured. Ask the CEO to set github:token in Settings.");
+      throw new Error("GitHub token not configured. Add a GitHub account in Settings.");
     }
     if (repo) {
       if (!repo.includes("/")) {

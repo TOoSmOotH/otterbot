@@ -19,6 +19,23 @@ export interface TestResult {
   testing: boolean;
 }
 
+export interface GitHubAccountState {
+  id: string;
+  label: string;
+  tokenSet: boolean;
+  username: string | null;
+  email: string | null;
+  sshKeySet: boolean;
+  sshFingerprint: string | null;
+  sshKeyType: string | null;
+  isDefault: boolean;
+  createdAt: string;
+  // Local UI state
+  testResult?: TestResult & { username?: string };
+  sshPublicKey?: string | null;
+  sshTestResult?: TestResult & { username?: string };
+}
+
 export interface ScheduledTaskInfo {
   id: string;
   name: string;
@@ -165,6 +182,7 @@ interface SettingsState {
   gitHubTokenSet: boolean;
   gitHubUsername: string | null;
   gitHubTestResult: TestResult | null;
+  gitHubAccounts: GitHubAccountState[];
 
   // GitHub SSH
   sshKeySet: boolean;
@@ -229,6 +247,31 @@ interface SettingsState {
   nextcloudTalkPairedUsers: Array<{ nextcloudUserId: string; nextcloudDisplayName: string; pairedAt: string }>;
   nextcloudTalkPendingPairings: Array<{ code: string; nextcloudUserId: string; nextcloudDisplayName: string; createdAt: string }>;
   nextcloudTalkTestResult: TestResult | null;
+
+  // Bluesky
+  blueskyEnabled: boolean;
+  blueskyCredentialsSet: boolean;
+  blueskyHandle: string | null;
+  blueskyPairedUsers: Array<{ blueskyDid: string; blueskyHandle: string; pairedAt: string }>;
+  blueskyPendingPairings: Array<{ code: string; blueskyDid: string; blueskyHandle: string; createdAt: string }>;
+  blueskyTestResult: TestResult | null;
+
+  // Mastodon
+  mastodonEnabled: boolean;
+  mastodonCredentialsSet: boolean;
+  mastodonAcct: string | null;
+  mastodonInstanceUrl: string;
+  mastodonPairedUsers: Array<{ mastodonId: string; mastodonAcct: string; pairedAt: string }>;
+  mastodonPendingPairings: Array<{ code: string; mastodonId: string; mastodonAcct: string; createdAt: string }>;
+  mastodonTestResult: TestResult | null;
+
+  // X (Twitter)
+  xEnabled: boolean;
+  xCredentialsSet: boolean;
+  xUsername: string | null;
+  xPairedUsers: Array<{ xUserId: string; xUsername: string; pairedAt: string }>;
+  xPendingPairings: Array<{ code: string; xUserId: string; xUsername: string; createdAt: string }>;
+  xTestResult: TestResult | null;
 
   // Email (IMAP/SMTP)
   emailEnabled: boolean;
@@ -401,6 +444,19 @@ interface SettingsState {
   removeSSHKey: () => Promise<void>;
   testSSHConnection: () => Promise<void>;
 
+  // GitHub account actions
+  loadGitHubAccounts: () => Promise<void>;
+  createGitHubAccount: (data: { label: string; token: string; email?: string; isDefault?: boolean }) => Promise<void>;
+  updateGitHubAccount: (id: string, data: { label?: string; token?: string; email?: string }) => Promise<void>;
+  deleteGitHubAccount: (id: string) => Promise<{ ok: boolean; error?: string }>;
+  setDefaultGitHubAccount: (id: string) => Promise<void>;
+  testGitHubAccount: (id: string) => Promise<void>;
+  generateAccountSSHKey: (accountId: string, type?: "ed25519" | "rsa") => Promise<void>;
+  importAccountSSHKey: (accountId: string, privateKey: string) => Promise<void>;
+  getAccountSSHPublicKey: (accountId: string) => Promise<void>;
+  removeAccountSSHKey: (accountId: string) => Promise<void>;
+  testAccountSSHConnection: (accountId: string) => Promise<void>;
+
   // Discord actions
   loadDiscordSettings: () => Promise<void>;
   updateDiscordSettings: (data: {
@@ -469,6 +525,45 @@ interface SettingsState {
   approveNextcloudTalkPairing: (code: string) => Promise<void>;
   rejectNextcloudTalkPairing: (code: string) => Promise<void>;
   revokeNextcloudTalkUser: (userId: string) => Promise<void>;
+
+  // Bluesky actions
+  loadBlueskySettings: () => Promise<void>;
+  updateBlueskySettings: (data: {
+    enabled?: boolean;
+    identifier?: string;
+    appPassword?: string;
+    service?: string;
+  }) => Promise<void>;
+  testBlueskyConnection: () => Promise<void>;
+  approveBlueskyPairing: (code: string) => Promise<void>;
+  rejectBlueskyPairing: (code: string) => Promise<void>;
+  revokeBlueskyUser: (userId: string) => Promise<void>;
+
+  // Mastodon actions
+  loadMastodonSettings: () => Promise<void>;
+  updateMastodonSettings: (data: {
+    enabled?: boolean;
+    instanceUrl?: string;
+    accessToken?: string;
+  }) => Promise<void>;
+  testMastodonConnection: () => Promise<void>;
+  approveMastodonPairing: (code: string) => Promise<void>;
+  rejectMastodonPairing: (code: string) => Promise<void>;
+  revokeMastodonUser: (userId: string) => Promise<void>;
+
+  // X actions
+  loadXSettings: () => Promise<void>;
+  updateXSettings: (data: {
+    enabled?: boolean;
+    apiKey?: string;
+    apiSecret?: string;
+    accessToken?: string;
+    accessTokenSecret?: string;
+  }) => Promise<void>;
+  testXConnection: () => Promise<void>;
+  approveXPairing: (code: string) => Promise<void>;
+  rejectXPairing: (code: string) => Promise<void>;
+  revokeXUser: (userId: string) => Promise<void>;
 
   // Email actions
   loadEmailSettings: () => Promise<void>;
@@ -579,6 +674,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   gitHubTokenSet: false,
   gitHubUsername: null,
   gitHubTestResult: null,
+  gitHubAccounts: [],
   sshKeySet: false,
   sshKeyFingerprint: null,
   sshKeyType: null,
@@ -631,6 +727,25 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   nextcloudTalkPairedUsers: [],
   nextcloudTalkPendingPairings: [],
   nextcloudTalkTestResult: null,
+  blueskyEnabled: false,
+  blueskyCredentialsSet: false,
+  blueskyHandle: null,
+  blueskyPairedUsers: [],
+  blueskyPendingPairings: [],
+  blueskyTestResult: null,
+  mastodonEnabled: false,
+  mastodonCredentialsSet: false,
+  mastodonAcct: null,
+  mastodonInstanceUrl: "https://mastodon.social",
+  mastodonPairedUsers: [],
+  mastodonPendingPairings: [],
+  mastodonTestResult: null,
+  xEnabled: false,
+  xCredentialsSet: false,
+  xUsername: null,
+  xPairedUsers: [],
+  xPendingPairings: [],
+  xTestResult: null,
   emailEnabled: false,
   emailImapServer: null,
   emailImapPort: 993,
@@ -1719,6 +1834,227 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     }
   },
 
+  // GitHub account actions
+
+  loadGitHubAccounts: async () => {
+    try {
+      const res = await fetch("/api/settings/github/accounts");
+      if (!res.ok) return;
+      const accounts = await res.json();
+      set({ gitHubAccounts: accounts });
+    } catch {
+      // Silently fail
+    }
+  },
+
+  createGitHubAccount: async (data) => {
+    set({ error: null });
+    try {
+      const res = await fetch("/api/settings/github/accounts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) throw new Error("Failed to create GitHub account");
+      await get().loadGitHubAccounts();
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "Unknown error" });
+    }
+  },
+
+  updateGitHubAccount: async (id, data) => {
+    set({ error: null });
+    try {
+      const res = await fetch(`/api/settings/github/accounts/${id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) throw new Error("Failed to update GitHub account");
+      await get().loadGitHubAccounts();
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "Unknown error" });
+    }
+  },
+
+  deleteGitHubAccount: async (id) => {
+    set({ error: null });
+    try {
+      const res = await fetch(`/api/settings/github/accounts/${id}`, { method: "DELETE" });
+      const data = await res.json();
+      if (!data.ok) {
+        set({ error: data.error ?? "Failed to delete account" });
+        return data;
+      }
+      await get().loadGitHubAccounts();
+      return data;
+    } catch (err) {
+      const error = err instanceof Error ? err.message : "Unknown error";
+      set({ error });
+      return { ok: false, error };
+    }
+  },
+
+  setDefaultGitHubAccount: async (id) => {
+    set({ error: null });
+    try {
+      const res = await fetch(`/api/settings/github/accounts/${id}/default`, { method: "PUT" });
+      if (!res.ok) throw new Error("Failed to set default account");
+      await get().loadGitHubAccounts();
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "Unknown error" });
+    }
+  },
+
+  testGitHubAccount: async (id) => {
+    set({
+      gitHubAccounts: get().gitHubAccounts.map((a) =>
+        a.id === id ? { ...a, testResult: { ok: false, testing: true } } : a,
+      ),
+    });
+    try {
+      const res = await fetch(`/api/settings/github/accounts/${id}/test`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      const data = await res.json();
+      set({
+        gitHubAccounts: get().gitHubAccounts.map((a) =>
+          a.id === id
+            ? {
+                ...a,
+                username: data.ok && data.username ? data.username : a.username,
+                testResult: { ok: data.ok, error: data.error, testing: false },
+              }
+            : a,
+        ),
+      });
+    } catch (err) {
+      set({
+        gitHubAccounts: get().gitHubAccounts.map((a) =>
+          a.id === id
+            ? { ...a, testResult: { ok: false, error: err instanceof Error ? err.message : "Unknown error", testing: false } }
+            : a,
+        ),
+      });
+    }
+  },
+
+  generateAccountSSHKey: async (accountId, type) => {
+    set({ error: null });
+    try {
+      const res = await fetch(`/api/settings/github/accounts/${accountId}/ssh/generate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type: type ?? "ed25519" }),
+      });
+      const data = await res.json();
+      if (!data.ok) {
+        set({ error: data.error ?? "Failed to generate SSH key" });
+        return;
+      }
+      set({
+        gitHubAccounts: get().gitHubAccounts.map((a) =>
+          a.id === accountId ? { ...a, sshPublicKey: data.publicKey } : a,
+        ),
+      });
+      await get().loadGitHubAccounts();
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "Unknown error" });
+    }
+  },
+
+  importAccountSSHKey: async (accountId, privateKey) => {
+    set({ error: null });
+    try {
+      const res = await fetch(`/api/settings/github/accounts/${accountId}/ssh/import`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ privateKey }),
+      });
+      const data = await res.json();
+      if (!data.ok) {
+        set({ error: data.error ?? "Failed to import SSH key" });
+        return;
+      }
+      set({
+        gitHubAccounts: get().gitHubAccounts.map((a) =>
+          a.id === accountId ? { ...a, sshPublicKey: data.publicKey } : a,
+        ),
+      });
+      await get().loadGitHubAccounts();
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "Unknown error" });
+    }
+  },
+
+  getAccountSSHPublicKey: async (accountId) => {
+    try {
+      const res = await fetch(`/api/settings/github/accounts/${accountId}/ssh/public-key`);
+      if (!res.ok) return;
+      const data = await res.json();
+      set({
+        gitHubAccounts: get().gitHubAccounts.map((a) =>
+          a.id === accountId ? { ...a, sshPublicKey: data.publicKey } : a,
+        ),
+      });
+    } catch {
+      // Silently fail
+    }
+  },
+
+  removeAccountSSHKey: async (accountId) => {
+    set({ error: null });
+    try {
+      const res = await fetch(`/api/settings/github/accounts/${accountId}/ssh`, { method: "DELETE" });
+      const data = await res.json();
+      if (!data.ok) {
+        set({ error: data.error ?? "Failed to remove SSH key" });
+        return;
+      }
+      set({
+        gitHubAccounts: get().gitHubAccounts.map((a) =>
+          a.id === accountId ? { ...a, sshPublicKey: null, sshTestResult: undefined } : a,
+        ),
+      });
+      await get().loadGitHubAccounts();
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "Unknown error" });
+    }
+  },
+
+  testAccountSSHConnection: async (accountId) => {
+    set({
+      gitHubAccounts: get().gitHubAccounts.map((a) =>
+        a.id === accountId ? { ...a, sshTestResult: { ok: false, testing: true } } : a,
+      ),
+    });
+    try {
+      const res = await fetch(`/api/settings/github/accounts/${accountId}/ssh/test`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      const data = await res.json();
+      set({
+        gitHubAccounts: get().gitHubAccounts.map((a) =>
+          a.id === accountId
+            ? { ...a, sshTestResult: { ok: data.ok, error: data.error, username: data.username, testing: false } }
+            : a,
+        ),
+      });
+    } catch (err) {
+      set({
+        gitHubAccounts: get().gitHubAccounts.map((a) =>
+          a.id === accountId
+            ? { ...a, sshTestResult: { ok: false, error: err instanceof Error ? err.message : "Unknown error", testing: false } }
+            : a,
+        ),
+      });
+    }
+  },
+
   // Discord actions
 
   loadDiscordSettings: async () => {
@@ -2253,6 +2589,322 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     }
   },
 
+  // Bluesky actions
+
+  loadBlueskySettings: async () => {
+    try {
+      const res = await fetch("/api/settings/bluesky");
+      if (!res.ok) return;
+      const data = await res.json();
+      set({
+        blueskyEnabled: data.enabled,
+        blueskyCredentialsSet: data.credentialsSet,
+        blueskyHandle: data.handle,
+        blueskyPairedUsers: data.pairedUsers,
+        blueskyPendingPairings: data.pendingPairings,
+      });
+    } catch {
+      // Silently fail
+    }
+  },
+
+  updateBlueskySettings: async (data) => {
+    set({ error: null });
+    try {
+      const res = await fetch("/api/settings/bluesky", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) throw new Error("Failed to update Bluesky settings");
+      await get().loadBlueskySettings();
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "Unknown error" });
+    }
+  },
+
+  testBlueskyConnection: async () => {
+    set({ blueskyTestResult: { ok: false, testing: true } });
+    try {
+      const res = await fetch("/api/settings/bluesky/test", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      const data = await res.json();
+      set({
+        blueskyTestResult: {
+          ok: data.ok,
+          error: data.error,
+          testing: false,
+        },
+        blueskyHandle: data.ok ? data.handle : get().blueskyHandle,
+      });
+    } catch (err) {
+      set({
+        blueskyTestResult: {
+          ok: false,
+          error: err instanceof Error ? err.message : "Unknown error",
+          testing: false,
+        },
+      });
+    }
+  },
+
+  approveBlueskyPairing: async (code) => {
+    set({ error: null });
+    try {
+      const res = await fetch("/api/settings/bluesky/pair/approve", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code }),
+      });
+      if (!res.ok) throw new Error("Failed to approve pairing");
+      await get().loadBlueskySettings();
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "Unknown error" });
+    }
+  },
+
+  rejectBlueskyPairing: async (code) => {
+    set({ error: null });
+    try {
+      const res = await fetch("/api/settings/bluesky/pair/reject", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code }),
+      });
+      if (!res.ok) throw new Error("Failed to reject pairing");
+      await get().loadBlueskySettings();
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "Unknown error" });
+    }
+  },
+
+  revokeBlueskyUser: async (userId) => {
+    set({ error: null });
+    try {
+      const res = await fetch(`/api/settings/bluesky/pair/${userId}`, {
+        method: "DELETE",
+      });
+      if (!res.ok) throw new Error("Failed to revoke user");
+      await get().loadBlueskySettings();
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "Unknown error" });
+    }
+  },
+
+  // Mastodon actions
+
+  loadMastodonSettings: async () => {
+    try {
+      const res = await fetch("/api/settings/mastodon");
+      if (!res.ok) return;
+      const data = await res.json();
+      set({
+        mastodonEnabled: data.enabled,
+        mastodonCredentialsSet: data.credentialsSet,
+        mastodonAcct: data.acct,
+        mastodonInstanceUrl: data.instanceUrl,
+        mastodonPairedUsers: data.pairedUsers,
+        mastodonPendingPairings: data.pendingPairings,
+      });
+    } catch {
+      // Silently fail
+    }
+  },
+
+  updateMastodonSettings: async (data) => {
+    set({ error: null });
+    try {
+      const res = await fetch("/api/settings/mastodon", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) throw new Error("Failed to update Mastodon settings");
+      await get().loadMastodonSettings();
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "Unknown error" });
+    }
+  },
+
+  testMastodonConnection: async () => {
+    set({ mastodonTestResult: { ok: false, testing: true } });
+    try {
+      const res = await fetch("/api/settings/mastodon/test", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      const data = await res.json();
+      set({
+        mastodonTestResult: {
+          ok: data.ok,
+          error: data.error,
+          testing: false,
+        },
+        mastodonAcct: data.ok ? data.acct : get().mastodonAcct,
+      });
+    } catch (err) {
+      set({
+        mastodonTestResult: {
+          ok: false,
+          error: err instanceof Error ? err.message : "Unknown error",
+          testing: false,
+        },
+      });
+    }
+  },
+
+  approveMastodonPairing: async (code) => {
+    set({ error: null });
+    try {
+      const res = await fetch("/api/settings/mastodon/pair/approve", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code }),
+      });
+      if (!res.ok) throw new Error("Failed to approve pairing");
+      await get().loadMastodonSettings();
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "Unknown error" });
+    }
+  },
+
+  rejectMastodonPairing: async (code) => {
+    set({ error: null });
+    try {
+      const res = await fetch("/api/settings/mastodon/pair/reject", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code }),
+      });
+      if (!res.ok) throw new Error("Failed to reject pairing");
+      await get().loadMastodonSettings();
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "Unknown error" });
+    }
+  },
+
+  revokeMastodonUser: async (userId) => {
+    set({ error: null });
+    try {
+      const res = await fetch(`/api/settings/mastodon/pair/${userId}`, {
+        method: "DELETE",
+      });
+      if (!res.ok) throw new Error("Failed to revoke user");
+      await get().loadMastodonSettings();
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "Unknown error" });
+    }
+  },
+
+  // X actions
+
+  loadXSettings: async () => {
+    try {
+      const res = await fetch("/api/settings/x");
+      if (!res.ok) return;
+      const data = await res.json();
+      set({
+        xEnabled: data.enabled,
+        xCredentialsSet: data.credentialsSet,
+        xUsername: data.username,
+        xPairedUsers: data.pairedUsers,
+        xPendingPairings: data.pendingPairings,
+      });
+    } catch {
+      // Silently fail
+    }
+  },
+
+  updateXSettings: async (data) => {
+    set({ error: null });
+    try {
+      const res = await fetch("/api/settings/x", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) throw new Error("Failed to update X settings");
+      await get().loadXSettings();
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "Unknown error" });
+    }
+  },
+
+  testXConnection: async () => {
+    set({ xTestResult: { ok: false, testing: true } });
+    try {
+      const res = await fetch("/api/settings/x/test", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      const data = await res.json();
+      set({
+        xTestResult: {
+          ok: data.ok,
+          error: data.error,
+          testing: false,
+        },
+        xUsername: data.ok ? data.username : get().xUsername,
+      });
+    } catch (err) {
+      set({
+        xTestResult: {
+          ok: false,
+          error: err instanceof Error ? err.message : "Unknown error",
+          testing: false,
+        },
+      });
+    }
+  },
+
+  approveXPairing: async (code) => {
+    set({ error: null });
+    try {
+      const res = await fetch("/api/settings/x/pair/approve", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code }),
+      });
+      if (!res.ok) throw new Error("Failed to approve pairing");
+      await get().loadXSettings();
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "Unknown error" });
+    }
+  },
+
+  rejectXPairing: async (code) => {
+    set({ error: null });
+    try {
+      const res = await fetch("/api/settings/x/pair/reject", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code }),
+      });
+      if (!res.ok) throw new Error("Failed to reject pairing");
+      await get().loadXSettings();
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "Unknown error" });
+    }
+  },
+
+  revokeXUser: async (userId) => {
+    set({ error: null });
+    try {
+      const res = await fetch(`/api/settings/x/pair/${userId}`, {
+        method: "DELETE",
+      });
+      if (!res.ok) throw new Error("Failed to revoke user");
+      await get().loadXSettings();
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "Unknown error" });
+    }
+  },
+
   // Email actions
 
   loadEmailSettings: async () => {
@@ -2424,7 +3076,11 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       a.loadSlackSettings(),
       a.loadMattermostSettings(),
       a.loadNextcloudTalkSettings(),
+      a.loadBlueskySettings(),
+      a.loadMastodonSettings(),
+      a.loadXSettings(),
       a.loadGitHubSettings(),
+      a.loadGitHubAccounts(),
       a.loadGoogleSettings(),
       a.loadEmailSettings(),
       a.loadSearchSettings(),

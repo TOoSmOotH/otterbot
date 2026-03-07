@@ -1,8 +1,9 @@
 
 import { execSync, execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { resolveGitHubAccount } from "../github/account-resolver.js";
 
 /**
  * Check if a directory is a git repository.
@@ -26,9 +27,19 @@ export function initGitRepo(cwd: string): void {
 
   if (!isGitRepo(cwd)) {
     execSync("git init -b main", { cwd, stdio: "ignore" });
-    // Set local config to ensure commits work even if global config is missing
-    execSync("git config user.email 'otterbot@example.com'", { cwd, stdio: "ignore" });
-    execSync("git config user.name 'OtterBot'", { cwd, stdio: "ignore" });
+    // Set local config from GitHub account if available, otherwise use safe defaults
+    let gitName = "OtterBot";
+    let gitEmail = "otterbot@users.noreply.github.com";
+    try {
+      const account = resolveGitHubAccount();
+      if (account?.username) gitName = account.username;
+      if (account?.email) gitEmail = account.email;
+      else if (account?.username) gitEmail = `${account.username}@users.noreply.github.com`;
+    } catch {
+      // DB may not be initialized yet (e.g. during tests) — use defaults
+    }
+    execFileSync("git", ["config", "user.email", gitEmail], { cwd, stdio: "ignore" });
+    execFileSync("git", ["config", "user.name", gitName], { cwd, stdio: "ignore" });
   }
 }
 
@@ -75,7 +86,7 @@ export function createInitialCommit(cwd: string): void {
  */
 export function hasRemote(cwd: string, remoteName = "origin"): boolean {
   try {
-    execSync(`git remote get-url ${remoteName}`, { cwd, stdio: "ignore" });
+    execFileSync("git", ["remote", "get-url", remoteName], { cwd, stdio: "ignore" });
     return true;
   } catch {
     return false;
@@ -96,11 +107,11 @@ export function createWorktree(repoPath: string, worktreePath: string, branchNam
   if (existsSync(worktreePath)) {
     try {
         // Try git removal first
-        execSync(`git worktree remove --force "${worktreePath}"`, { cwd: repoPath, stdio: "ignore" });
+        execFileSync("git", ["worktree", "remove", "--force", worktreePath], { cwd: repoPath, stdio: "ignore" });
     } catch {
         // Fallback to manual removal
         rmSync(worktreePath, { recursive: true, force: true });
-        execSync("git worktree prune", { cwd: repoPath, stdio: "ignore" });
+        execFileSync("git", ["worktree", "prune"], { cwd: repoPath, stdio: "ignore" });
     }
   }
 
@@ -109,9 +120,9 @@ export function createWorktree(repoPath: string, worktreePath: string, branchNam
   if (remoteAvailable) {
     try {
       if (sourceBranch) {
-        execSync(`git fetch origin "${sourceBranch}"`, { cwd: repoPath, stdio: "ignore" });
+        execFileSync("git", ["fetch", "origin", sourceBranch], { cwd: repoPath, stdio: "ignore" });
       } else {
-        execSync("git fetch origin", { cwd: repoPath, stdio: "ignore" });
+        execFileSync("git", ["fetch", "origin"], { cwd: repoPath, stdio: "ignore" });
       }
     } catch { /* best effort — remote may be unavailable */ }
   }
@@ -120,7 +131,7 @@ export function createWorktree(repoPath: string, worktreePath: string, branchNam
   const hasUpstream = hasRemote(repoPath, "upstream");
   if (hasUpstream) {
     try {
-      execSync("git fetch upstream", { cwd: repoPath, stdio: "ignore" });
+      execFileSync("git", ["fetch", "upstream"], { cwd: repoPath, stdio: "ignore" });
     } catch { /* best effort */ }
   }
 
@@ -153,11 +164,11 @@ export function createWorktree(repoPath: string, worktreePath: string, branchNam
   // -f: force creation
   // -B: create/reset branch
   try {
-    execSync(`git worktree add -f -B "${branchName}" "${worktreePath}" "${startPoint}"`, { cwd: repoPath, stdio: "ignore" });
+    execFileSync("git", ["worktree", "add", "-f", "-B", branchName, worktreePath, startPoint], { cwd: repoPath, stdio: "ignore" });
   } catch (error) {
     // Prune and retry — also fall back to local ref if remote ref failed
-    execSync("git worktree prune", { cwd: repoPath, stdio: "ignore" });
-    execSync(`git worktree add -f -B "${branchName}" "${worktreePath}" "${startPointFallback}"`, { cwd: repoPath, stdio: "ignore" });
+    execFileSync("git", ["worktree", "prune"], { cwd: repoPath, stdio: "ignore" });
+    execFileSync("git", ["worktree", "add", "-f", "-B", branchName, worktreePath, startPointFallback], { cwd: repoPath, stdio: "ignore" });
   }
 }
 
@@ -170,12 +181,12 @@ export function removeWorktree(repoPath: string, worktreePath: string): void {
   try {
     if (existsSync(worktreePath)) {
         // Force remove even if there are uncommitted changes (agent is done/destroyed)
-        execSync(`git worktree remove --force "${worktreePath}"`, { cwd: repoPath, stdio: "ignore" });
+        execFileSync("git", ["worktree", "remove", "--force", worktreePath], { cwd: repoPath, stdio: "ignore" });
     }
   } catch (error) {
     // If it fails, maybe it's already gone or not a worktree.
     // Just prune worktrees
-    execSync("git worktree prune", { cwd: repoPath, stdio: "ignore" });
+    execFileSync("git", ["worktree", "prune"], { cwd: repoPath, stdio: "ignore" });
 
     // Ensure directory is gone
     if (existsSync(worktreePath)) {
@@ -205,21 +216,31 @@ const SSH_KEY_NAME = "otterbot_github";
  * Configure (or unconfigure) local commit signing for a repo.
  * When enabled, sets gpg.format, user.signingkey, commit.gpgsign, and
  * tag.gpgsign as local git config so commits in this repo are signed.
+ *
+ * @param sshKeyPath - Path to the SSH private key (without .pub). When omitted,
+ *                     falls back to the legacy global key.
  */
-export function configureCommitSigning(cwd: string, enabled: boolean): void {
+export function configureCommitSigning(cwd: string, enabled: boolean, sshKeyPath?: string): void {
   if (enabled) {
-    const pubKeyPath = join(homedir(), ".ssh", `${SSH_KEY_NAME}.pub`);
+    const keyBase = sshKeyPath ?? join(homedir(), ".ssh", SSH_KEY_NAME);
+    const pubKeyPath = `${keyBase}.pub`;
     if (!existsSync(pubKeyPath)) {
-      throw new Error("No SSH key configured. Generate or import one in Settings → GitHub first.");
+      throw new Error("No SSH key configured for this account. Generate or import one in Settings → GitHub first.");
     }
-    execSync("git config --local gpg.format ssh", { cwd, stdio: "ignore" });
-    execSync(`git config --local user.signingkey "${pubKeyPath}"`, { cwd, stdio: "ignore" });
-    execSync("git config --local commit.gpgsign true", { cwd, stdio: "ignore" });
-    execSync("git config --local tag.gpgsign true", { cwd, stdio: "ignore" });
+    // Create allowed signers file for SSH signature verification
+    const allowedSignersPath = join(homedir(), ".ssh", "allowed_signers");
+    const pubKeyContent = readFileSync(pubKeyPath, "utf-8").trim();
+    writeFileSync(allowedSignersPath, `* ${pubKeyContent}\n`, { mode: 0o644 });
+
+    execFileSync("git", ["config", "--local", "gpg.format", "ssh"], { cwd, stdio: "ignore" });
+    execFileSync("git", ["config", "--local", "user.signingkey", pubKeyPath], { cwd, stdio: "ignore" });
+    execFileSync("git", ["config", "--local", "commit.gpgsign", "true"], { cwd, stdio: "ignore" });
+    execFileSync("git", ["config", "--local", "tag.gpgsign", "true"], { cwd, stdio: "ignore" });
+    execFileSync("git", ["config", "--local", "gpg.ssh.allowedSignersFile", allowedSignersPath], { cwd, stdio: "ignore" });
   } else {
-    for (const key of ["gpg.format", "user.signingkey", "commit.gpgsign", "tag.gpgsign"]) {
+    for (const key of ["gpg.format", "user.signingkey", "commit.gpgsign", "tag.gpgsign", "gpg.ssh.allowedSignersFile"]) {
       try {
-        execSync(`git config --local --unset ${key}`, { cwd, stdio: "ignore" });
+        execFileSync("git", ["config", "--local", "--unset", key], { cwd, stdio: "ignore" });
       } catch {
         // Key not set — ignore
       }
@@ -228,10 +249,13 @@ export function configureCommitSigning(cwd: string, enabled: boolean): void {
 }
 
 /**
- * Check whether the otterbot SSH key exists.
+ * Check whether an SSH key exists.
+ * @param sshKeyPath - Path to the SSH private key (without .pub). When omitted,
+ *                     checks the legacy global key.
  */
-export function hasSSHKey(): boolean {
-  return existsSync(join(homedir(), ".ssh", `${SSH_KEY_NAME}.pub`));
+export function hasSSHKey(sshKeyPath?: string): boolean {
+  const keyBase = sshKeyPath ?? join(homedir(), ".ssh", SSH_KEY_NAME);
+  return existsSync(`${keyBase}.pub`);
 }
 
 // ---------------------------------------------------------------------------
@@ -279,14 +303,14 @@ export function parseNumstat(output: string): GitDiffFile[] {
 export function findMergeBase(cwd: string): string | null {
   // Try upstream tracking ref first
   try {
-    const upstream = execSync("git rev-parse --abbrev-ref @{u}", {
+    const upstream = execFileSync("git", ["rev-parse", "--abbrev-ref", "@{u}"], {
       cwd,
       encoding: "utf-8",
       timeout: 10_000,
       stdio: ["pipe", "pipe", "ignore"],
     }).trim();
     if (upstream) {
-      const base = execSync(`git merge-base ${upstream} HEAD`, {
+      const base = execFileSync("git", ["merge-base", upstream, "HEAD"], {
         cwd,
         encoding: "utf-8",
         timeout: 10_000,
@@ -301,7 +325,7 @@ export function findMergeBase(cwd: string): string | null {
   // Try common remote default branches, then local branches (for local-only repos)
   for (const ref of ["origin/dev", "origin/main", "origin/master", "dev", "main", "master"]) {
     try {
-      const base = execSync(`git merge-base ${ref} HEAD`, {
+      const base = execFileSync("git", ["merge-base", ref, "HEAD"], {
         cwd,
         encoding: "utf-8",
         timeout: 10_000,
@@ -343,7 +367,7 @@ export function computeGitDiff(workspacePath: string): GitDiffResult | null {
   try {
     const mergeBase = findMergeBase(workspacePath);
     if (mergeBase) {
-      const committed = execSync(`git diff --numstat ${mergeBase}..HEAD`, {
+      const committed = execFileSync("git", ["diff", "--numstat", `${mergeBase}..HEAD`], {
         cwd: workspacePath,
         encoding: "utf-8",
         timeout: 10_000,

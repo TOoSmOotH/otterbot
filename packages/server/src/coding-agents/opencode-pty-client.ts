@@ -13,6 +13,7 @@ import type {
 import { computeGitDiff } from "../utils/git.js";
 import { extractPtySummary } from "../utils/terminal.js";
 import { getConfig } from "../auth/auth.js";
+import { resolveGitHubToken } from "../github/account-resolver.js";
 
 /** Ring buffer size for late-joining clients (~100KB) */
 const RING_BUFFER_SIZE = 100 * 1024;
@@ -62,7 +63,7 @@ export class OpenCodePtyClient implements CodingAgentClient {
         }
       }
 
-      const ghToken = getConfig("github:token");
+      const ghToken = resolveGitHubToken();
       if (ghToken) {
         env.GH_TOKEN = ghToken;
         env.GITHUB_TOKEN = ghToken;

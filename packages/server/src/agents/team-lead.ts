@@ -31,6 +31,7 @@ import type { MessageBus } from "../bus/message-bus.js";
 import type { WorkspaceManager } from "../workspace/workspace.js";
 import { eq } from "drizzle-orm";
 import { getConfig, setConfig, deleteConfig } from "../auth/auth.js";
+import { resolveGitHubToken, resolveGitHubUsername } from "../github/account-resolver.js";
 import { execSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { getAgentModelOverride } from "../settings/settings.js";
@@ -478,7 +479,7 @@ export class TeamLead extends BaseAgent {
       const db = getDb();
       const project = db.select().from(schema.projects).where(eq(schema.projects.id, projectId)).get();
       if (!project?.githubRepo) return null;
-      const token = getConfig("github:token");
+      const token = resolveGitHubToken(projectId);
       if (!token) return null;
       const pr = await fetchPullRequest(project.githubRepo, token, prNumber);
       return pr.head.ref;
@@ -500,9 +501,9 @@ export class TeamLead extends BaseAgent {
     const db = getDb();
     const project = db.select().from(schema.projects).where(eq(schema.projects.id, projectId)).get();
     if (!project?.githubRepo) return;
-    const token = getConfig("github:token");
+    const token = resolveGitHubToken(projectId);
     if (!token) return;
-    const botUsername = getConfig("github:username") ?? "otterbot";
+    const botUsername = resolveGitHubUsername(projectId) ?? "otterbot";
 
     // Post a comment summarizing the changes
     const cleaned = cleanTerminalOutput(completionReport);
