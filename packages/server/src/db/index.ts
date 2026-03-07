@@ -729,8 +729,33 @@ export async function migrateDb() {
   const { seedBuiltInSkills } = await import("../skills/seed-skills.js");
   seedBuiltInSkills();
 
+  // GitHub accounts table
+  db.run(sql`CREATE TABLE IF NOT EXISTS github_accounts (
+    id TEXT PRIMARY KEY,
+    label TEXT NOT NULL,
+    token TEXT NOT NULL,
+    username TEXT,
+    email TEXT,
+    ssh_key_path TEXT,
+    ssh_fingerprint TEXT,
+    ssh_key_type TEXT,
+    is_default INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  )`);
+
+  // Idempotent migration: add github_account_id to projects
+  try {
+    db.run(sql`ALTER TABLE projects ADD COLUMN github_account_id TEXT`);
+  } catch {
+    // Column already exists — ignore
+  }
+
   // One-time migration: move provider credentials from config KV to providers table
   await migrateProviders(db);
+
+  // One-time migration: move legacy GitHub config to github_accounts table
+  await migrateGitHubAccounts(db);
 }
 
 const PROVIDER_TYPE_LABELS: Record<string, string> = {
@@ -815,6 +840,75 @@ async function migrateProviders(db: ReturnType<typeof drizzle<typeof schema>>) {
   // Set migration flag
   db.insert(schema.config)
     .values({ key: "providers_migrated", value: "true", updatedAt: new Date().toISOString() })
+    .run();
+}
+
+async function migrateGitHubAccounts(db: ReturnType<typeof drizzle<typeof schema>>) {
+  const flag = db
+    .select()
+    .from(schema.config)
+    .where(sql`${schema.config.key} = 'github_accounts_migrated'`)
+    .get();
+  if (flag) return;
+
+  const tokenRow = db
+    .select()
+    .from(schema.config)
+    .where(sql`${schema.config.key} = 'github:token'`)
+    .get();
+
+  if (tokenRow) {
+    const { nanoid } = await import("nanoid");
+    const { existsSync } = await import("node:fs");
+    const { homedir } = await import("node:os");
+    const { join } = await import("node:path");
+
+    const usernameRow = db.select().from(schema.config).where(sql`${schema.config.key} = 'github:username'`).get();
+    const emailRow = db.select().from(schema.config).where(sql`${schema.config.key} = 'github:email'`).get();
+    const fingerprintRow = db.select().from(schema.config).where(sql`${schema.config.key} = 'github:ssh_fingerprint'`).get();
+    const keyTypeRow = db.select().from(schema.config).where(sql`${schema.config.key} = 'github:ssh_key_type'`).get();
+
+    const legacySshPath = join(homedir(), ".ssh", "otterbot_github");
+    const sshExists = existsSync(legacySshPath);
+
+    const id = nanoid();
+    const now = new Date().toISOString();
+
+    db.insert(schema.githubAccounts)
+      .values({
+        id,
+        label: "Default",
+        token: tokenRow.value,
+        username: usernameRow?.value ?? null,
+        email: emailRow?.value ?? null,
+        sshKeyPath: sshExists ? legacySshPath : null,
+        sshFingerprint: fingerprintRow?.value ?? null,
+        sshKeyType: keyTypeRow?.value ?? null,
+        isDefault: true,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .run();
+
+    // Link all projects that have a github repo to this account
+    const projectsWithRepo = db
+      .select()
+      .from(schema.projects)
+      .all()
+      .filter((p) => p.githubRepo);
+
+    for (const p of projectsWithRepo) {
+      db.update(schema.projects)
+        .set({ githubAccountId: id })
+        .where(eq(schema.projects.id, p.id))
+        .run();
+    }
+
+    console.log(`[DB] Migrated legacy GitHub config to github_accounts (id=${id}, username=${usernameRow?.value ?? "unknown"})`);
+  }
+
+  db.insert(schema.config)
+    .values({ key: "github_accounts_migrated", value: "true", updatedAt: new Date().toISOString() })
     .run();
 }
 

@@ -1,8 +1,9 @@
 
 import { execSync, execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { resolveGitHubAccount } from "../github/account-resolver.js";
 
 /**
  * Check if a directory is a git repository.
@@ -26,9 +27,19 @@ export function initGitRepo(cwd: string): void {
 
   if (!isGitRepo(cwd)) {
     execSync("git init -b main", { cwd, stdio: "ignore" });
-    // Set local config to ensure commits work even if global config is missing
-    execSync("git config user.email 'otterbot@example.com'", { cwd, stdio: "ignore" });
-    execSync("git config user.name 'OtterBot'", { cwd, stdio: "ignore" });
+    // Set local config from GitHub account if available, otherwise use safe defaults
+    let gitName = "OtterBot";
+    let gitEmail = "otterbot@users.noreply.github.com";
+    try {
+      const account = resolveGitHubAccount();
+      if (account?.username) gitName = account.username;
+      if (account?.email) gitEmail = account.email;
+      else if (account?.username) gitEmail = `${account.username}@users.noreply.github.com`;
+    } catch {
+      // DB may not be initialized yet (e.g. during tests) — use defaults
+    }
+    execSync(`git config user.email '${gitEmail}'`, { cwd, stdio: "ignore" });
+    execSync(`git config user.name '${gitName}'`, { cwd, stdio: "ignore" });
   }
 }
 
@@ -205,19 +216,29 @@ const SSH_KEY_NAME = "otterbot_github";
  * Configure (or unconfigure) local commit signing for a repo.
  * When enabled, sets gpg.format, user.signingkey, commit.gpgsign, and
  * tag.gpgsign as local git config so commits in this repo are signed.
+ *
+ * @param sshKeyPath - Path to the SSH private key (without .pub). When omitted,
+ *                     falls back to the legacy global key.
  */
-export function configureCommitSigning(cwd: string, enabled: boolean): void {
+export function configureCommitSigning(cwd: string, enabled: boolean, sshKeyPath?: string): void {
   if (enabled) {
-    const pubKeyPath = join(homedir(), ".ssh", `${SSH_KEY_NAME}.pub`);
+    const keyBase = sshKeyPath ?? join(homedir(), ".ssh", SSH_KEY_NAME);
+    const pubKeyPath = `${keyBase}.pub`;
     if (!existsSync(pubKeyPath)) {
-      throw new Error("No SSH key configured. Generate or import one in Settings → GitHub first.");
+      throw new Error("No SSH key configured for this account. Generate or import one in Settings → GitHub first.");
     }
+    // Create allowed signers file for SSH signature verification
+    const allowedSignersPath = join(homedir(), ".ssh", "allowed_signers");
+    const pubKeyContent = readFileSync(pubKeyPath, "utf-8").trim();
+    writeFileSync(allowedSignersPath, `* ${pubKeyContent}\n`, { mode: 0o644 });
+
     execSync("git config --local gpg.format ssh", { cwd, stdio: "ignore" });
     execSync(`git config --local user.signingkey "${pubKeyPath}"`, { cwd, stdio: "ignore" });
     execSync("git config --local commit.gpgsign true", { cwd, stdio: "ignore" });
     execSync("git config --local tag.gpgsign true", { cwd, stdio: "ignore" });
+    execSync(`git config --local gpg.ssh.allowedSignersFile "${allowedSignersPath}"`, { cwd, stdio: "ignore" });
   } else {
-    for (const key of ["gpg.format", "user.signingkey", "commit.gpgsign", "tag.gpgsign"]) {
+    for (const key of ["gpg.format", "user.signingkey", "commit.gpgsign", "tag.gpgsign", "gpg.ssh.allowedSignersFile"]) {
       try {
         execSync(`git config --local --unset ${key}`, { cwd, stdio: "ignore" });
       } catch {
@@ -228,10 +249,13 @@ export function configureCommitSigning(cwd: string, enabled: boolean): void {
 }
 
 /**
- * Check whether the otterbot SSH key exists.
+ * Check whether an SSH key exists.
+ * @param sshKeyPath - Path to the SSH private key (without .pub). When omitted,
+ *                     checks the legacy global key.
  */
-export function hasSSHKey(): boolean {
-  return existsSync(join(homedir(), ".ssh", `${SSH_KEY_NAME}.pub`));
+export function hasSSHKey(sshKeyPath?: string): boolean {
+  const keyBase = sshKeyPath ?? join(homedir(), ".ssh", SSH_KEY_NAME);
+  return existsSync(`${keyBase}.pub`);
 }
 
 // ---------------------------------------------------------------------------

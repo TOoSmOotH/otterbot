@@ -1959,12 +1959,21 @@ function configureGitSSH(): void {
   sshConfig = sshConfig.trimEnd() + hostBlock;
   writeFileSync(sshConfigPath, sshConfig, { mode: 0o600 });
 
+  // --- allowed signers file for SSH signature verification ---
+  const allowedSignersPath = join(sshDir(), "allowed_signers");
+  const pubKeyContent = readFileSync(pubKeyPath, "utf-8").trim();
+  // Format: <email> <key-type> <key-data>
+  // Use a wildcard email so it matches any committer
+  const signerLine = `* ${pubKeyContent}`;
+  writeFileSync(allowedSignersPath, signerLine + "\n", { mode: 0o644 });
+
   // --- git config for commit signing ---
   const gitCmds = [
     `git config --global gpg.format ssh`,
     `git config --global user.signingkey "${pubKeyPath}"`,
     `git config --global commit.gpgsign true`,
     `git config --global tag.gpgsign true`,
+    `git config --global gpg.ssh.allowedSignersFile "${allowedSignersPath}"`,
   ];
   for (const cmd of gitCmds) {
     execSync(cmd, { stdio: "pipe" });
@@ -1980,12 +1989,19 @@ function removeGitSSHConfig(): void {
     writeFileSync(sshConfigPath, sshConfig, { mode: 0o600 });
   }
 
+  // Remove allowed signers file
+  const allowedSignersPath = join(sshDir(), "allowed_signers");
+  if (existsSync(allowedSignersPath)) {
+    unlinkSync(allowedSignersPath);
+  }
+
   // Unset git signing config
   const gitCmds = [
     "git config --global --unset gpg.format",
     "git config --global --unset user.signingkey",
     "git config --global --unset commit.gpgsign",
     "git config --global --unset tag.gpgsign",
+    "git config --global --unset gpg.ssh.allowedSignersFile",
   ];
   for (const cmd of gitCmds) {
     try { execSync(cmd, { stdio: "pipe" }); } catch { /* key may not exist */ }
@@ -2122,10 +2138,19 @@ export function applyGitSSHConfig(): void {
 }
 
 export function testSSHConnection(): { ok: boolean; username?: string; error?: string } {
+  return testSSHConnectionForKey(sshKeyPath());
+}
+
+function testSSHConnectionForKey(keyPath: string): { ok: boolean; username?: string; error?: string } {
+  if (!existsSync(keyPath)) {
+    return { ok: false, error: `SSH key not found at ${keyPath}` };
+  }
+
   try {
     // ssh -T git@github.com exits with code 1 on success (it prints "Hi username!")
+    // Explicitly specify the identity file to avoid relying on ssh-agent or config ordering
     const result = execSync(
-      `ssh -T -o StrictHostKeyChecking=accept-new -o BatchMode=yes git@github.com 2>&1`,
+      `ssh -T -i ${keyPath} -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o BatchMode=yes git@github.com 2>&1`,
       { encoding: "utf-8", timeout: 15_000 },
     ).trim();
 
@@ -2143,4 +2168,209 @@ export function testSSHConnection(): { ok: boolean; username?: string; error?: s
       error: stderr.slice(0, 200) || "SSH connection failed",
     };
   }
+}
+
+// ---------------------------------------------------------------------------
+// GitHub Account-scoped operations
+// ---------------------------------------------------------------------------
+
+import {
+  getGitHubAccountById,
+  getGitHubAccounts,
+  updateGitHubAccount as updateAccountRecord,
+} from "../github/account-resolver.js";
+
+function accountSshKeyPath(accountId: string): string {
+  // Legacy default account keeps the original path
+  const account = getGitHubAccountById(accountId);
+  if (account?.sshKeyPath) return account.sshKeyPath;
+  return join(sshDir(), `otterbot_github_${accountId}`);
+}
+
+function accountSshPubKeyPath(accountId: string): string {
+  return accountSshKeyPath(accountId) + ".pub";
+}
+
+export async function testGitHubAccountConnection(accountId: string): Promise<TestResult & { username?: string }> {
+  const account = getGitHubAccountById(accountId);
+  if (!account) return { ok: false, error: "Account not found." };
+
+  const start = Date.now();
+  try {
+    const res = await fetch("https://api.github.com/user", {
+      headers: {
+        Authorization: `Bearer ${account.token}`,
+        Accept: "application/vnd.github+json",
+        "User-Agent": "Otterbot",
+      },
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!res.ok) {
+      if (res.status === 401) return { ok: false, error: "Invalid token. Check scopes: repo, read:org, workflow" };
+      return { ok: false, error: `GitHub API error: ${res.status}` };
+    }
+    const data = (await res.json()) as { login?: string; id?: number; email?: string | null };
+    const username = data.login ?? null;
+    const updates: { username?: string; email?: string } = {};
+    if (username) updates.username = username;
+
+    // Only auto-resolve email if the user hasn't already set one in the UI
+    if (!account.email) {
+      let resolvedEmail: string | undefined;
+      if (data.email) {
+        resolvedEmail = data.email;
+      } else {
+        // Try /user/emails to get the primary email (works even when email is private)
+        try {
+          const emailsRes = await fetch("https://api.github.com/user/emails", {
+            headers: {
+              Authorization: `Bearer ${account.token}`,
+              Accept: "application/vnd.github+json",
+              "User-Agent": "Otterbot",
+            },
+            signal: AbortSignal.timeout(10_000),
+          });
+          if (emailsRes.ok) {
+            const emails = (await emailsRes.json()) as Array<{ email: string; primary: boolean; verified: boolean }>;
+            const primary = emails.find((e) => e.primary && e.verified);
+            if (primary) resolvedEmail = primary.email;
+          }
+        } catch {
+          // Fall through to noreply
+        }
+      }
+      if (!resolvedEmail && username && data.id) {
+        resolvedEmail = `${data.id}+${username}@users.noreply.github.com`;
+      }
+      if (resolvedEmail) updates.email = resolvedEmail;
+    }
+
+    if (Object.keys(updates).length > 0) {
+      updateAccountRecord(accountId, updates);
+    }
+
+    // If this is the default account (or the only one), set global git identity
+    // so all repos on this instance use the correct committer info
+    const updatedAccount = getGitHubAccountById(accountId);
+    if (updatedAccount?.isDefault || getGitHubAccounts().length === 1) {
+      const gitName = updatedAccount?.username ?? username ?? "OtterBot";
+      const gitEmail = updatedAccount?.email ?? `${gitName}@users.noreply.github.com`;
+      try {
+        execSync(`git config --global user.name "${gitName}"`, { stdio: "ignore" });
+        execSync(`git config --global user.email "${gitEmail}"`, { stdio: "ignore" });
+      } catch {
+        // Non-fatal — git may not be installed
+      }
+    }
+
+    return { ok: true, latencyMs: Date.now() - start, username: username ?? undefined };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : "Unknown error" };
+  }
+}
+
+export function generateAccountSSHKey(
+  accountId: string,
+  data?: { type?: "ed25519" | "rsa"; comment?: string },
+): { ok: boolean; fingerprint?: string; publicKey?: string; error?: string } {
+  const account = getGitHubAccountById(accountId);
+  if (!account) return { ok: false, error: "Account not found." };
+
+  const keyType = data?.type ?? "ed25519";
+  const comment = data?.comment ?? `otterbot-${account.label}@github`;
+  const keyPath = accountSshKeyPath(accountId);
+  const pubPath = keyPath + ".pub";
+
+  const dir = sshDir();
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true, mode: 0o700 });
+  if (existsSync(keyPath)) return { ok: false, error: "SSH key already exists for this account. Remove it first." };
+
+  try {
+    execSync(`ssh-keygen -t ${keyType} -C "${comment}" -f "${keyPath}" -N ""`, { stdio: "pipe" });
+    chmodSync(keyPath, 0o600);
+    chmodSync(pubPath, 0o644);
+
+    const fingerprint = getFingerprint(pubPath);
+    const publicKey = readFileSync(pubPath, "utf-8").trim();
+
+    updateAccountRecord(accountId, {});
+    // Update the account record with SSH info
+    const db = getDb();
+    db.update(schema.githubAccounts)
+      .set({ sshKeyPath: keyPath, sshFingerprint: fingerprint, sshKeyType: keyType, updatedAt: new Date().toISOString() })
+      .where(eq(schema.githubAccounts.id, accountId))
+      .run();
+
+    return { ok: true, fingerprint, publicKey };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : "Failed to generate SSH key" };
+  }
+}
+
+export function importAccountSSHKey(
+  accountId: string,
+  privateKey: string,
+): { ok: boolean; fingerprint?: string; publicKey?: string; error?: string } {
+  const account = getGitHubAccountById(accountId);
+  if (!account) return { ok: false, error: "Account not found." };
+
+  const keyPath = accountSshKeyPath(accountId);
+  const pubPath = keyPath + ".pub";
+
+  const dir = sshDir();
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true, mode: 0o700 });
+  if (existsSync(keyPath)) return { ok: false, error: "SSH key already exists for this account. Remove it first." };
+
+  try {
+    const normalized = privateKey.trimEnd() + "\n";
+    writeFileSync(keyPath, normalized, { mode: 0o600 });
+    const pubKey = execSync(`ssh-keygen -y -f "${keyPath}"`, { encoding: "utf-8" }).trim();
+    writeFileSync(pubPath, pubKey + "\n", { mode: 0o644 });
+
+    const fingerprint = getFingerprint(pubPath);
+    const keyType = pubKey.startsWith("ssh-ed25519") ? "ed25519" : "rsa";
+
+    const db = getDb();
+    db.update(schema.githubAccounts)
+      .set({ sshKeyPath: keyPath, sshFingerprint: fingerprint, sshKeyType: keyType, updatedAt: new Date().toISOString() })
+      .where(eq(schema.githubAccounts.id, accountId))
+      .run();
+
+    return { ok: true, fingerprint, publicKey: pubKey };
+  } catch (error) {
+    try { if (existsSync(keyPath)) unlinkSync(keyPath); } catch { /* ignore */ }
+    try { if (existsSync(pubPath)) unlinkSync(pubPath); } catch { /* ignore */ }
+    return { ok: false, error: error instanceof Error ? error.message : "Failed to import SSH key" };
+  }
+}
+
+export function getAccountSSHPublicKey(accountId: string): { publicKey: string | null } {
+  const pubPath = accountSshPubKeyPath(accountId);
+  if (!existsSync(pubPath)) return { publicKey: null };
+  return { publicKey: readFileSync(pubPath, "utf-8").trim() };
+}
+
+export function removeAccountSSHKey(accountId: string): { ok: boolean; error?: string } {
+  try {
+    const keyPath = accountSshKeyPath(accountId);
+    const pubPath = accountSshPubKeyPath(accountId);
+
+    if (existsSync(keyPath)) unlinkSync(keyPath);
+    if (existsSync(pubPath)) unlinkSync(pubPath);
+
+    const db = getDb();
+    db.update(schema.githubAccounts)
+      .set({ sshKeyPath: null, sshFingerprint: null, sshKeyType: null, updatedAt: new Date().toISOString() })
+      .where(eq(schema.githubAccounts.id, accountId))
+      .run();
+
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : "Failed to remove SSH key" };
+  }
+}
+
+export function testAccountSSHConnection(accountId: string): { ok: boolean; username?: string; error?: string } {
+  const keyPath = accountSshKeyPath(accountId);
+  return testSSHConnectionForKey(keyPath);
 }

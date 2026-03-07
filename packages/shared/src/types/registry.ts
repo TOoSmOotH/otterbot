@@ -63,7 +63,21 @@ export interface Project {
   githubIssueMonitor: boolean;
   signCommits: boolean;
   show3d: boolean;
+  githubAccountId: string | null;
   rules: string[];
+  createdAt: string;
+}
+
+export interface GitHubAccount {
+  id: string;
+  label: string;
+  tokenSet: boolean;
+  username: string | null;
+  email: string | null;
+  sshKeySet: boolean;
+  sshFingerprint: string | null;
+  sshKeyType: string | null;
+  isDefault: boolean;
   createdAt: string;
 }
 

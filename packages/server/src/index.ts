@@ -9,6 +9,7 @@ import { resolve, dirname, join, sep, basename, extname } from "node:path";
 import { existsSync, readFileSync, writeFileSync, mkdirSync, createReadStream, createWriteStream, copyFileSync, unlinkSync, readdirSync, statSync } from "node:fs";
 import { pipeline } from "node:stream/promises";
 import { execSync } from "node:child_process";
+import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
 import type {
   ServerToClientEvents,
@@ -146,6 +147,12 @@ import {
   getSSHPublicKey,
   removeSSHKey,
   testSSHConnection,
+  testGitHubAccountConnection,
+  generateAccountSSHKey,
+  importAccountSSHKey,
+  getAccountSSHPublicKey,
+  removeAccountSSHKey,
+  testAccountSSHConnection,
   listCustomModels,
   createCustomModel,
   deleteCustomModel,
@@ -245,6 +252,17 @@ import {
   rejectPairing as rejectTelegramPairing,
   revokePairing as revokeTelegramPairing,
 } from "./telegram/pairing.js";
+import { BlueskyBridge } from "./bluesky/bluesky-bridge.js";
+import {
+  getBlueskySettings,
+  updateBlueskySettings,
+  testBlueskyConnection,
+} from "./bluesky/bluesky-settings.js";
+import {
+  approvePairing as approveBlueskyPairing,
+  rejectPairing as rejectBlueskyPairing,
+  revokePairing as revokeBlueskyPairing,
+} from "./bluesky/pairing.js";
 import { TlonBridge } from "./tlon/tlon-bridge.js";
 import {
   getTlonSettings,
@@ -280,6 +298,27 @@ import {
   rejectPairing as rejectNextcloudTalkPairing,
   revokePairing as revokeNextcloudTalkPairing,
 } from "./nextcloud-talk/pairing.js";
+import { MastodonBridge } from "./mastodon/mastodon-bridge.js";
+import {
+  getMastodonSettings,
+  updateMastodonSettings,
+  testMastodonConnection,
+} from "./mastodon/mastodon-settings.js";
+import {
+  approvePairing as approveMastodonPairing,
+  rejectPairing as rejectMastodonPairing,
+  revokePairing as revokeMastodonPairing,
+} from "./mastodon/pairing.js";
+import {
+  getXSettings,
+  updateXSettings,
+  testXConnection,
+} from "./x/x-settings.js";
+import {
+  approvePairing as approveXPairing,
+  rejectPairing as rejectXPairing,
+  revokePairing as revokeXPairing,
+} from "./x/pairing.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -385,6 +424,17 @@ async function main() {
       .run();
   }
   console.log("Database initialized.");
+
+  // Re-apply SSH config on startup (ensures allowedSignersFile exists for
+  // installs that were configured before this fix was added)
+  try {
+    const legacyKeyPath = join(homedir(), ".ssh", "otterbot_github.pub");
+    if (existsSync(legacyKeyPath)) {
+      applyGitSSHConfig();
+    }
+  } catch {
+    // Non-fatal — SSH signing is optional
+  }
 
   // Bootstrap passphrase from environment (one-time setup)
   if (!isPassphraseSet()) {
@@ -715,6 +765,31 @@ async function main() {
     }
   }
 
+  // Bluesky bridge (initialized when enabled + credentials set)
+  let blueskyBridge: BlueskyBridge | null = null;
+
+  function startBlueskyBridge() {
+    if (blueskyBridge || !coo) return;
+    const settings = getBlueskySettings();
+    if (!settings.enabled || !settings.credentialsSet) return;
+    const identifier = getConfig("bluesky:identifier");
+    const appPassword = getConfig("bluesky:app_password");
+    const service = getConfig("bluesky:service") ?? "https://bsky.social";
+    if (!identifier || !appPassword) return;
+    blueskyBridge = new BlueskyBridge({ bus, coo, io });
+    blueskyBridge.start({ identifier, appPassword, service }).catch((err) => {
+      console.error("[Bluesky] Failed to start bridge:", err);
+      blueskyBridge = null;
+    });
+  }
+
+  async function stopBlueskyBridge() {
+    if (blueskyBridge) {
+      await blueskyBridge.stop();
+      blueskyBridge = null;
+    }
+  }
+
   // Tlon bridge (initialized when enabled + config set)
   let tlonBridge: TlonBridge | null = null;
 
@@ -800,6 +875,30 @@ async function main() {
     if (nextcloudTalkBridge) {
       await nextcloudTalkBridge.stop();
       nextcloudTalkBridge = null;
+    }
+  }
+
+  // Mastodon bridge (initialized when enabled + credentials set)
+  let mastodonBridge: MastodonBridge | null = null;
+
+  function startMastodonBridge() {
+    if (mastodonBridge || !coo) return;
+    const settings = getMastodonSettings();
+    if (!settings.enabled || !settings.credentialsSet) return;
+    const instanceUrl = getConfig("mastodon:instance_url");
+    const accessToken = getConfig("mastodon:access_token");
+    if (!instanceUrl || !accessToken) return;
+    mastodonBridge = new MastodonBridge({ bus, coo, io });
+    mastodonBridge.start({ instanceUrl, accessToken }).catch((err) => {
+      console.error("[Mastodon] Failed to start bridge:", err);
+      mastodonBridge = null;
+    });
+  }
+
+  async function stopMastodonBridge() {
+    if (mastodonBridge) {
+      await mastodonBridge.stop();
+      mastodonBridge = null;
     }
   }
 
@@ -1203,10 +1302,12 @@ async function main() {
     startSlackBridge();
     startMattermostBridge();
     startTelegramBridge();
+    startBlueskyBridge();
     startTlonBridge();
     startWhatsAppBridge();
     startSignalBridge();
     startNextcloudTalkBridge();
+    startMastodonBridge();
 
     // Start mock scenario playback if configured
     if (process.env.MOCK_MODE === "true" && process.env.MOCK_SCENARIO && coo) {
@@ -1563,10 +1664,12 @@ async function main() {
     startSlackBridge();
     startMattermostBridge();
     startTelegramBridge();
+    startBlueskyBridge();
     startTlonBridge();
     startWhatsAppBridge();
     startSignalBridge();
     startNextcloudTalkBridge();
+    startMastodonBridge();
 
     return { ok: true };
   });
@@ -3933,6 +4036,29 @@ async function main() {
   });
 
   // =========================================================================
+  // Helper: apply git global identity from a GitHub account
+  // =========================================================================
+
+  async function applyGitIdentityFromAccount(accountId: string): Promise<void> {
+    try {
+      const { getGitHubAccountById, getGitHubAccounts } = await import("./github/account-resolver.js");
+      const account = getGitHubAccountById(accountId);
+      if (!account) return;
+      // Only set global config for the default account (or if it's the only one)
+      const allAccounts = getGitHubAccounts();
+      if (!account.isDefault && allAccounts.length > 1) return;
+
+      const name = account.username ?? account.label ?? "OtterBot";
+      const email = account.email ?? `${name}@users.noreply.github.com`;
+      const { execSync } = await import("node:child_process");
+      execSync(`git config --global user.name "${name}"`, { stdio: "ignore" });
+      execSync(`git config --global user.email "${email}"`, { stdio: "ignore" });
+    } catch {
+      // Non-fatal
+    }
+  }
+
+  // =========================================================================
   // GitHub settings routes
   // =========================================================================
 
@@ -3982,6 +4108,107 @@ async function main() {
 
   app.post("/api/settings/github/ssh/test", async () => {
     return testSSHConnection();
+  });
+
+  // --- GitHub Accounts ---
+
+  app.get("/api/settings/github/accounts", async () => {
+    const { getGitHubAccounts } = await import("./github/account-resolver.js");
+    const accounts = getGitHubAccounts();
+    return accounts.map((a) => ({
+      id: a.id,
+      label: a.label,
+      tokenSet: !!a.token,
+      username: a.username,
+      email: a.email,
+      sshKeySet: !!a.sshKeyPath,
+      sshFingerprint: a.sshFingerprint,
+      sshKeyType: a.sshKeyType,
+      isDefault: a.isDefault,
+      createdAt: a.createdAt,
+    }));
+  });
+
+  app.post<{
+    Body: { label: string; token: string; email?: string; isDefault?: boolean };
+  }>("/api/settings/github/accounts", async (req, reply) => {
+    const { createGitHubAccount } = await import("./github/account-resolver.js");
+    const { nanoid } = await import("nanoid");
+    if (!req.body.label || !req.body.token) {
+      reply.code(400);
+      return { error: "label and token are required" };
+    }
+    const account = createGitHubAccount({ id: nanoid(), ...req.body });
+    await applyGitIdentityFromAccount(account.id);
+    return { ok: true, id: account.id };
+  });
+
+  app.put<{
+    Params: { id: string };
+    Body: { label?: string; token?: string; email?: string };
+  }>("/api/settings/github/accounts/:id", async (req) => {
+    const { updateGitHubAccount: updateAcct } = await import("./github/account-resolver.js");
+    updateAcct(req.params.id, req.body);
+    await applyGitIdentityFromAccount(req.params.id);
+    return { ok: true };
+  });
+
+  app.delete<{
+    Params: { id: string };
+  }>("/api/settings/github/accounts/:id", async (req) => {
+    const { deleteGitHubAccount } = await import("./github/account-resolver.js");
+    return deleteGitHubAccount(req.params.id);
+  });
+
+  app.put<{
+    Params: { id: string };
+  }>("/api/settings/github/accounts/:id/default", async (req) => {
+    const { setDefaultGitHubAccount } = await import("./github/account-resolver.js");
+    setDefaultGitHubAccount(req.params.id);
+    await applyGitIdentityFromAccount(req.params.id);
+    return { ok: true };
+  });
+
+  app.post<{
+    Params: { id: string };
+  }>("/api/settings/github/accounts/:id/test", async (req) => {
+    return testGitHubAccountConnection(req.params.id);
+  });
+
+  app.post<{
+    Params: { id: string };
+    Body: { type?: "ed25519" | "rsa"; comment?: string };
+  }>("/api/settings/github/accounts/:id/ssh/generate", async (req) => {
+    return generateAccountSSHKey(req.params.id, req.body);
+  });
+
+  app.post<{
+    Params: { id: string };
+    Body: { privateKey: string };
+  }>("/api/settings/github/accounts/:id/ssh/import", async (req, reply) => {
+    if (!req.body.privateKey) {
+      reply.code(400);
+      return { error: "privateKey is required" };
+    }
+    return importAccountSSHKey(req.params.id, req.body.privateKey);
+  });
+
+  app.get<{
+    Params: { id: string };
+  }>("/api/settings/github/accounts/:id/ssh/public-key", async (req) => {
+    return getAccountSSHPublicKey(req.params.id);
+  });
+
+  app.delete<{
+    Params: { id: string };
+  }>("/api/settings/github/accounts/:id/ssh", async (req) => {
+    return removeAccountSSHKey(req.params.id);
+  });
+
+  app.post<{
+    Params: { id: string };
+  }>("/api/settings/github/accounts/:id/ssh/test", async (req) => {
+    return testAccountSSHConnection(req.params.id);
   });
 
   // =========================================================================
@@ -4404,6 +4631,73 @@ async function main() {
   });
 
   // =========================================================================
+  // Bluesky settings routes
+  // =========================================================================
+
+  app.get("/api/settings/bluesky", async () => {
+    return getBlueskySettings();
+  });
+
+  app.put<{
+    Body: {
+      enabled?: boolean;
+      identifier?: string;
+      appPassword?: string;
+      service?: string;
+    };
+  }>("/api/settings/bluesky", async (req) => {
+    const wasEnabled = getBlueskySettings().enabled && getBlueskySettings().credentialsSet;
+    updateBlueskySettings(req.body);
+    const nowEnabled = getBlueskySettings().enabled && getBlueskySettings().credentialsSet;
+
+    // Start or stop bridge based on state change
+    if (nowEnabled && !wasEnabled) {
+      startBlueskyBridge();
+    } else if (!nowEnabled && wasEnabled) {
+      await stopBlueskyBridge();
+    }
+
+    return { ok: true };
+  });
+
+  app.post("/api/settings/bluesky/test", async () => {
+    return testBlueskyConnection();
+  });
+
+  app.post<{
+    Body: { code: string };
+  }>("/api/settings/bluesky/pair/approve", async (req, reply) => {
+    const result = approveBlueskyPairing(req.body.code);
+    if (!result) {
+      reply.code(400);
+      return { ok: false, error: "Invalid or expired pairing code" };
+    }
+    return { ok: true, user: result };
+  });
+
+  app.post<{
+    Body: { code: string };
+  }>("/api/settings/bluesky/pair/reject", async (req, reply) => {
+    const ok = rejectBlueskyPairing(req.body.code);
+    if (!ok) {
+      reply.code(400);
+      return { ok: false, error: "Pairing code not found" };
+    }
+    return { ok: true };
+  });
+
+  app.delete<{
+    Params: { userId: string };
+  }>("/api/settings/bluesky/pair/:userId", async (req, reply) => {
+    const ok = revokeBlueskyPairing(req.params.userId);
+    if (!ok) {
+      reply.code(400);
+      return { ok: false, error: "User not found" };
+    }
+    return { ok: true };
+  });
+
+  // =========================================================================
   // Tlon settings routes
   // =========================================================================
 
@@ -4592,6 +4886,130 @@ async function main() {
     Params: { userId: string };
   }>("/api/settings/nextcloud-talk/pair/:userId", async (req, reply) => {
     const ok = revokeNextcloudTalkPairing(req.params.userId);
+    if (!ok) {
+      reply.code(400);
+      return { ok: false, error: "User not found" };
+    }
+    return { ok: true };
+  });
+
+  // =========================================================================
+  // Mastodon settings routes
+  // =========================================================================
+
+  app.get("/api/settings/mastodon", async () => {
+    return getMastodonSettings();
+  });
+
+  app.put<{
+    Body: {
+      enabled?: boolean;
+      instanceUrl?: string;
+      accessToken?: string;
+    };
+  }>("/api/settings/mastodon", async (req) => {
+    const wasEnabled = getMastodonSettings().enabled && getMastodonSettings().credentialsSet;
+    updateMastodonSettings(req.body);
+    const nowEnabled = getMastodonSettings().enabled && getMastodonSettings().credentialsSet;
+
+    // Start or stop bridge based on state change
+    if (nowEnabled && !wasEnabled) {
+      startMastodonBridge();
+    } else if (!nowEnabled && wasEnabled) {
+      await stopMastodonBridge();
+    }
+
+    return { ok: true };
+  });
+
+  app.post("/api/settings/mastodon/test", async () => {
+    return testMastodonConnection();
+  });
+
+  app.post<{
+    Body: { code: string };
+  }>("/api/settings/mastodon/pair/approve", async (req, reply) => {
+    const result = approveMastodonPairing(req.body.code);
+    if (!result) {
+      reply.code(400);
+      return { ok: false, error: "Invalid or expired pairing code" };
+    }
+    return { ok: true, user: result };
+  });
+
+  app.post<{
+    Body: { code: string };
+  }>("/api/settings/mastodon/pair/reject", async (req, reply) => {
+    const ok = rejectMastodonPairing(req.body.code);
+    if (!ok) {
+      reply.code(400);
+      return { ok: false, error: "Pairing code not found" };
+    }
+    return { ok: true };
+  });
+
+  app.delete<{
+    Params: { userId: string };
+  }>("/api/settings/mastodon/pair/:userId", async (req, reply) => {
+    const ok = revokeMastodonPairing(req.params.userId);
+    if (!ok) {
+      reply.code(400);
+      return { ok: false, error: "User not found" };
+    }
+    return { ok: true };
+  });
+
+  // =========================================================================
+  // X (Twitter) settings routes
+  // =========================================================================
+
+  app.get("/api/settings/x", async () => {
+    return getXSettings();
+  });
+
+  app.put<{
+    Body: {
+      enabled?: boolean;
+      apiKey?: string;
+      apiSecret?: string;
+      accessToken?: string;
+      accessTokenSecret?: string;
+    };
+  }>("/api/settings/x", async (req) => {
+    updateXSettings(req.body);
+    return { ok: true };
+  });
+
+  app.post("/api/settings/x/test", async () => {
+    return testXConnection();
+  });
+
+  app.post<{
+    Body: { code: string };
+  }>("/api/settings/x/pair/approve", async (req, reply) => {
+    const result = approveXPairing(req.body.code);
+    if (!result) {
+      reply.code(400);
+      return { ok: false, error: "Invalid or expired pairing code" };
+    }
+    return { ok: true, user: result };
+  });
+
+  app.post<{
+    Body: { code: string };
+  }>("/api/settings/x/pair/reject", async (req, reply) => {
+    const ok = rejectXPairing(req.body.code);
+    if (!ok) {
+      reply.code(400);
+      return { ok: false, error: "Pairing code not found" };
+    }
+    return { ok: true };
+  });
+
+  app.delete<{
+    Params: { userId: string };
+  }>("/api/settings/x/pair/:userId", async (req, reply) => {
+    const ok = revokeXPairing(req.params.userId);
     if (!ok) {
       reply.code(400);
       return { ok: false, error: "User not found" };
@@ -5699,6 +6117,7 @@ Respond with ONLY a JSON object (no markdown, no explanation) with these fields:
     await stopMattermostBridge();
     await stopSignalBridge();
     await stopNextcloudTalkBridge();
+    await stopMastodonBridge();
     await McpClientManager.stopAll();
     await closeBrowser();
     process.exit(0);

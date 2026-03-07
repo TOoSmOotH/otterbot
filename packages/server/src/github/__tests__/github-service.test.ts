@@ -10,6 +10,28 @@ vi.mock("../../auth/auth.js", () => ({
   setConfig: vi.fn((key: string, value: string) => configStore.set(key, value)),
 }));
 
+// Mock account resolver — falls back to legacy config
+vi.mock("../account-resolver.js", () => ({
+  resolveGitHubAccount: vi.fn(() => {
+    const token = configStore.get("github:token");
+    if (!token) return null;
+    return {
+      id: "__legacy__",
+      label: "Legacy",
+      token,
+      username: configStore.get("github:username") ?? null,
+      email: configStore.get("github:email") ?? null,
+      sshKeyPath: null,
+      sshFingerprint: null,
+      sshKeyType: null,
+      isDefault: true,
+    };
+  }),
+  resolveGitHubToken: vi.fn(() => configStore.get("github:token")),
+  resolveGitHubUsername: vi.fn(() => configStore.get("github:username")),
+  resolveGitHubEmail: vi.fn(() => configStore.get("github:email")),
+}));
+
 // Mock child_process execFileSync
 const mockExecFileSync = vi.fn();
 vi.mock("node:child_process", () => ({
