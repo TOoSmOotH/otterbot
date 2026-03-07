@@ -257,6 +257,30 @@ describe("project:set-show3d socket handler", () => {
     expect(callback).toHaveBeenCalledWith({ ok: true });
   });
 
+  it("does not emit zone-added when enabling and zone creation returns null", () => {
+    const worldLayout = {
+      removeZone: vi.fn(),
+      loadZoneConfig: vi.fn(() => null),
+      addZone: vi.fn(() => null),
+    };
+    const { mockIo } = setupHandler(worldLayout);
+    insertProject("proj-3b", false);
+
+    const handler = socketHandlers.get("project:set-show3d");
+    const callback = vi.fn();
+    handler?.({ projectId: "proj-3b", enabled: true }, callback);
+
+    const db = getDb();
+    const project = db.select().from(schema.projects).where(eq(schema.projects.id, "proj-3b")).get();
+
+    expect(project?.show3d).toBe(true);
+    expect(worldLayout.loadZoneConfig).toHaveBeenCalledWith("proj-3b");
+    expect(worldLayout.addZone).toHaveBeenCalledWith("proj-3b", "default-project-office", "Project 1");
+    expect(mockIo.emit).not.toHaveBeenCalledWith("world:zone-added", expect.anything());
+    expect(mockIo.emit).toHaveBeenCalledWith("project:updated", expect.objectContaining({ id: "proj-3b", show3d: true }));
+    expect(callback).toHaveBeenCalledWith({ ok: true });
+  });
+
   it("does not emit zone removal when disabling and no zone was removed", () => {
     const worldLayout = {
       removeZone: vi.fn(() => false),
