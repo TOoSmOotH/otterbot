@@ -928,6 +928,18 @@ export function setupSocketHandlers(
     socket.on("project:set-show3d", (data, callback) => {
       try {
         const db = getDb();
+
+        // Validate project exists to prevent path traversal via crafted projectId
+        const project = db
+          .select()
+          .from(schema.projects)
+          .where(eq(schema.projects.id, data.projectId))
+          .get();
+        if (!project) {
+          callback?.({ ok: false, error: "Project not found" });
+          return;
+        }
+
         db.update(schema.projects)
           .set({ show3d: !!data.enabled })
           .where(eq(schema.projects.id, data.projectId))
@@ -945,12 +957,7 @@ export function setupSocketHandlers(
             // Re-create the zone if it doesn't already exist
             const existing = worldLayout.loadZoneConfig(data.projectId);
             if (!existing) {
-              const project = db
-                .select()
-                .from(schema.projects)
-                .where(eq(schema.projects.id, data.projectId))
-                .get();
-              const zone = worldLayout.addZone(data.projectId, "default-project-office", project?.name ?? undefined);
+              const zone = worldLayout.addZone(data.projectId, "default-project-office", project.name ?? undefined);
               if (zone) {
                 io.emit("world:zone-added", { zone });
               }
@@ -958,7 +965,7 @@ export function setupSocketHandlers(
           }
         }
 
-        // Emit project:updated so UI refreshes
+        // Emit project:updated so UI refreshes (re-read to get updated show3d value)
         const updated = db
           .select()
           .from(schema.projects)
