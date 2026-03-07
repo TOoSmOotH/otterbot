@@ -71,6 +71,8 @@ export interface ServerToClientEvents {
   "signal:status": (data: { status: "connected" | "disconnected" | "error"; phoneNumber?: string }) => void;
   "nextcloud-talk:pairing-request": (data: { code: string; nextcloudUserId: string; nextcloudDisplayName: string }) => void;
   "nextcloud-talk:status": (data: { status: "connected" | "disconnected" | "error"; botUsername?: string }) => void;
+  "googlechat:pairing-request": (data: { code: string; googleChatUserId: string; googleChatUsername: string }) => void;
+  "googlechat:status": (data: { status: "connected" | "disconnected" | "error" }) => void;
   "merge-queue:updated": (data: { entries: MergeQueueEntry[] }) => void;
   "merge-queue:entry-updated": (entry: MergeQueueEntry) => void;
   "mcp:status": (runtime: McpServerRuntime) => void;
