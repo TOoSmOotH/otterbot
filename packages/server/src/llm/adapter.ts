@@ -3,6 +3,7 @@ import { createAnthropic } from "@ai-sdk/anthropic";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { createOpenAI } from "@ai-sdk/openai";
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
+import { createGateway } from "@ai-sdk/gateway";
 import { streamText, generateText, type LanguageModel, type CoreMessage } from "ai";
 import { getConfig } from "../auth/auth.js";
 import { getDb, schema } from "../db/index.js";
@@ -233,6 +234,16 @@ export function resolveModel(config: LLMConfig): LanguageModel {
         apiKey: config.apiKey ?? resolved.apiKey ?? "",
       });
       return mistral(config.model);
+    }
+
+    case "vercel-ai-gateway": {
+      const gateway = createGateway({
+        apiKey: config.apiKey ?? resolved.apiKey ?? "",
+        ...(config.baseUrl ?? resolved.baseUrl
+          ? { baseURL: config.baseUrl ?? resolved.baseUrl }
+          : {}),
+      });
+      return gateway(config.model) as unknown as LanguageModel;
     }
 
     case "claude-code":

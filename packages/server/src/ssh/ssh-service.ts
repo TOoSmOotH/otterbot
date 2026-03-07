@@ -1,4 +1,4 @@
-import { execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { writeFileSync, readFileSync, unlinkSync, existsSync, chmodSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { nanoid } from "nanoid";
@@ -81,8 +81,9 @@ export class SshService {
     const keyType = opts.keyType ?? "ed25519";
 
     // Generate key pair
-    execSync(
-      `ssh-keygen -t ${keyType} -f ${keyPath} -N "" -C "otterbot-${opts.name}"`,
+    execFileSync(
+      "ssh-keygen",
+      ["-t", keyType, "-f", keyPath, "-N", "", "-C", `otterbot-${opts.name}`],
       { stdio: "pipe" },
     );
 
@@ -91,7 +92,7 @@ export class SshService {
     chmodSync(`${keyPath}.pub`, 0o644);
 
     // Get fingerprint
-    const fingerprint = execSync(`ssh-keygen -lf ${keyPath}.pub`, { encoding: "utf-8" }).trim();
+    const fingerprint = execFileSync("ssh-keygen", ["-lf", `${keyPath}.pub`], { encoding: "utf-8" }).trim();
 
     const now = new Date().toISOString();
     const db = getDb();
@@ -139,8 +140,8 @@ export class SshService {
 
     // Derive public key
     try {
-      execSync(`ssh-keygen -y -f ${keyPath} > ${keyPath}.pub`, { stdio: "pipe" });
-      chmodSync(`${keyPath}.pub`, 0o644);
+      const pubKeyContent = execFileSync("ssh-keygen", ["-y", "-f", keyPath], { encoding: "utf-8" });
+      writeFileSync(`${keyPath}.pub`, pubKeyContent, { mode: 0o644 });
     } catch (err) {
       // Clean up on failure
       try { unlinkSync(keyPath); } catch { /* ignore */ }
@@ -148,7 +149,7 @@ export class SshService {
     }
 
     // Get fingerprint
-    const fingerprint = execSync(`ssh-keygen -lf ${keyPath}.pub`, { encoding: "utf-8" }).trim();
+    const fingerprint = execFileSync("ssh-keygen", ["-lf", `${keyPath}.pub`], { encoding: "utf-8" }).trim();
 
     // Detect key type from fingerprint line (e.g. "256 SHA256:... comment (ED25519)")
     let keyType: SshKeyType = "ed25519";
@@ -272,7 +273,6 @@ export class SshService {
     const timeout = Math.min(opts.timeout ?? DEFAULT_TIMEOUT, DEFAULT_TIMEOUT);
 
     const sshArgs = [
-      "ssh",
       "-i", keyPath,
       "-o", "BatchMode=yes",
       "-o", `ConnectTimeout=${CONNECT_TIMEOUT}`,
@@ -283,7 +283,7 @@ export class SshService {
     ];
 
     try {
-      let output = execSync(sshArgs.join(" "), {
+      let output = execFileSync("ssh", sshArgs, {
         encoding: "utf-8",
         timeout,
         stdio: ["pipe", "pipe", "pipe"],

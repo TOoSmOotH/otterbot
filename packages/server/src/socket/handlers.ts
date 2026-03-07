@@ -14,6 +14,7 @@ import type { BaseAgent } from "../agents/agent.js";
 import { getDb, schema } from "../db/index.js";
 import { isTTSEnabled, getConfiguredTTSProvider, stripMarkdown } from "../tts/tts.js";
 import { getConfig, setConfig, deleteConfig } from "../auth/auth.js";
+import { resolveGitHubAccount, resolveGitHubToken, resolveGitHubUsername } from "../github/account-resolver.js";
 import { SoulService } from "../memory/soul-service.js";
 import { MemoryService } from "../memory/memory-service.js";
 import { SoulAdvisor } from "../memory/soul-advisor.js";
@@ -507,10 +508,10 @@ export function setupSocketHandlers(
 
         if (hasGithubRepo) {
           // --- GitHub-linked path ---
-          const ghToken = getConfig("github:token");
-          const ghUsername = getConfig("github:username");
+          const ghToken = resolveGitHubToken();
+          const ghUsername = resolveGitHubUsername();
           if (!ghToken || !ghUsername) {
-            callback?.({ ok: false, error: "GitHub is not configured. Set up your PAT and username in Settings first." });
+            callback?.({ ok: false, error: "GitHub is not configured. Add a GitHub account in Settings first." });
             return;
           }
 
@@ -825,7 +826,7 @@ export function setupSocketHandlers(
         // Start or stop monitoring
         if (deps?.issueMonitor) {
           if (data.enabled) {
-            const ghUsername = getConfig("github:username");
+            const ghUsername = resolveGitHubUsername(data.projectId);
             if (ghUsername && project.githubRepo) {
               deps.issueMonitor.watchProject(data.projectId, project.githubRepo, ghUsername);
             }
@@ -850,6 +851,20 @@ export function setupSocketHandlers(
       }
     });
 
+    // Set GitHub account for a project
+    socket.on("project:set-github-account", (data, callback) => {
+      try {
+        const db = getDb();
+        db.update(schema.projects)
+          .set({ githubAccountId: data.accountId })
+          .where(eq(schema.projects.id, data.projectId))
+          .run();
+        callback?.({ ok: true });
+      } catch (err) {
+        callback?.({ ok: false, error: err instanceof Error ? err.message : "Failed to set GitHub account" });
+      }
+    });
+
     // Get sign-commits setting for a project
     socket.on("project:get-sign-commits", (data, callback) => {
       try {
@@ -860,9 +875,10 @@ export function setupSocketHandlers(
           .where(eq(schema.projects.id, data.projectId))
           .get();
 
+        const account = resolveGitHubAccount(data.projectId);
         callback({
           enabled: !!project?.signCommits,
-          hasSSHKey: hasSSHKey(),
+          hasSSHKey: hasSSHKey(account?.sshKeyPath ?? undefined),
         });
       } catch {
         callback({ enabled: false, hasSSHKey: false });
@@ -884,8 +900,11 @@ export function setupSocketHandlers(
           return;
         }
 
-        if (data.enabled && !hasSSHKey()) {
-          callback?.({ ok: false, error: "No SSH key configured. Generate or import one in Settings → GitHub first." });
+        const account = resolveGitHubAccount(data.projectId);
+        const accountKeyPath = account?.sshKeyPath ?? undefined;
+
+        if (data.enabled && !hasSSHKey(accountKeyPath)) {
+          callback?.({ ok: false, error: "No SSH key configured for this account. Generate or import one in Settings → GitHub first." });
           return;
         }
 
@@ -900,7 +919,7 @@ export function setupSocketHandlers(
           const repoPath = workspace.repoPath(data.projectId);
           if (existsSync(repoPath)) {
             try {
-              configureCommitSigning(repoPath, data.enabled);
+              configureCommitSigning(repoPath, data.enabled, accountKeyPath);
             } catch (e) {
               callback?.({ ok: false, error: e instanceof Error ? e.message : "Failed to configure git signing" });
               return;
@@ -921,6 +940,63 @@ export function setupSocketHandlers(
         callback?.({ ok: true });
       } catch (err) {
         callback?.({ ok: false, error: err instanceof Error ? err.message : "Failed to update sign commits setting" });
+      }
+    });
+
+    // Toggle 3D view visibility for a project
+    socket.on("project:set-show3d", (data, callback) => {
+      try {
+        const db = getDb();
+
+        // Validate project exists to prevent path traversal via crafted projectId
+        const project = db
+          .select()
+          .from(schema.projects)
+          .where(eq(schema.projects.id, data.projectId))
+          .get();
+        if (!project) {
+          callback?.({ ok: false, error: "Project not found" });
+          return;
+        }
+
+        db.update(schema.projects)
+          .set({ show3d: !!data.enabled })
+          .where(eq(schema.projects.id, data.projectId))
+          .run();
+
+        // When toggling 3D off, remove the zone; when toggling on, add it back
+        const worldLayout = deps?.worldLayout;
+        if (worldLayout) {
+          if (!data.enabled) {
+            const removed = worldLayout.removeZone(data.projectId);
+            if (removed) {
+              io.emit("world:zone-removed", { projectId: data.projectId });
+            }
+          } else {
+            // Re-create the zone if it doesn't already exist
+            const existing = worldLayout.loadZoneConfig(data.projectId);
+            if (!existing) {
+              const zone = worldLayout.addZone(data.projectId, "default-project-office", project.name ?? undefined);
+              if (zone) {
+                io.emit("world:zone-added", { zone });
+              }
+            }
+          }
+        }
+
+        // Emit project:updated so UI refreshes (re-read to get updated show3d value)
+        const updated = db
+          .select()
+          .from(schema.projects)
+          .where(eq(schema.projects.id, data.projectId))
+          .get();
+        if (updated) {
+          io.emit("project:updated", updated as any);
+        }
+
+        callback?.({ ok: true });
+      } catch (err) {
+        callback?.({ ok: false, error: err instanceof Error ? err.message : "Failed to update 3D visibility" });
       }
     });
 

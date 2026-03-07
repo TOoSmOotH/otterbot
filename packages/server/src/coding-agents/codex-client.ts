@@ -16,7 +16,7 @@ import type {
 import { TASK_COMPLETE_SENTINEL } from "./coding-agent-client.js";
 import { computeGitDiff } from "../utils/git.js";
 import { spawn } from "node:child_process";
-import { getConfig } from "../auth/auth.js";
+import { resolveGitHubToken } from "../github/account-resolver.js";
 
 export interface CodexConfig {
   workspacePath?: string | null;
@@ -72,7 +72,7 @@ export class CodexClient implements CodingAgentClient {
       if (this.config.apiKey) {
         env.OPENAI_API_KEY = this.config.apiKey;
       }
-      const ghToken = getConfig("github:token");
+      const ghToken = resolveGitHubToken();
       if (ghToken) {
         env.GH_TOKEN = ghToken;
         env.GITHUB_TOKEN = ghToken;
