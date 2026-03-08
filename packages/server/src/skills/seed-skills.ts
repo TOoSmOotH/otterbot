@@ -550,6 +550,100 @@ When creating tools:
     },
   },
   {
+    id: "builtin-skill-specialist-creation",
+    data: {
+      meta: {
+        name: "Specialist Creation",
+        description:
+          "Guides the COO through creating new specialist agents by delegating to coding workers.",
+        version: "1.0.0",
+        author: "otterbot",
+        tools: [
+          "create_project",
+          "send_directive",
+          "module_install",
+          "module_list",
+          "module_toggle",
+        ],
+        capabilities: ["specialist-creation", "module-building"],
+        parameters: {},
+        tags: ["built-in", "specialist"],
+      },
+      body: `You have the ability to create new specialist agents when a user asks for one.
+
+## Recognition
+
+Activate this workflow when the user asks to create, build, or make a specialist agent — for example:
+- "Make a specialist for X"
+- "I want an agent that can Y"
+- "Create a specialist that monitors Z"
+- "Build me a stock trading agent"
+
+## Workflow
+
+### Step 1: Gather Requirements
+Discuss with the user:
+- What is the specialist's purpose? (e.g., "monitor Hacker News for AI news")
+- What data sources does it need? (APIs, RSS feeds, databases, etc.)
+- What tools should it expose? (search, create, update, etc.)
+- Does it need API keys or credentials?
+- What should its polling interval be?
+
+Keep it conversational — don't ask all questions at once. Infer sensible defaults.
+
+### Step 2: Create a Project
+Use \`create_project\` with a clear charter describing:
+- The specialist's name and purpose
+- Required API integrations
+- Tools to expose
+- Data schema needs
+- Polling/webhook triggers
+
+### Step 3: Delegate to a Coding Team Lead
+Use \`send_directive\` to the Team Lead with detailed instructions:
+
+Include in the directive:
+1. **Specialist purpose and name**
+2. **Reference files the coding worker MUST read first:**
+   - \`docs/AGENTS-VS-MODULES.md\` — the specialist agent specification
+   - \`modules/github-discussions/src/index.ts\` — a complete working example
+   - \`packages/shared/src/types/module.ts\` — TypeScript types for all module interfaces
+   - \`modules/_template/\` — the starter scaffold to copy and modify
+3. **Instructions:**
+   - Copy \`modules/_template/\` to \`modules/<specialist-name>/\`
+   - Update \`package.json\`: change the name and otterbot.id fields
+   - Implement the specialist in \`src/index.ts\` using \`defineModule()\` from \`@otterbot/shared\`
+   - Write real API integrations, not placeholder code
+   - Add database migrations if the specialist needs structured storage
+   - Add custom tools for querying the specialist's data
+   - Write unit tests for all tools and handlers
+   - Build with \`cd modules/<specialist-name> && npx pnpm install && npx pnpm build\`
+   - Run tests and ensure they pass
+
+### Step 4: Install the Module
+After the coding worker reports success, install the specialist:
+\`\`\`
+module_install with:
+  source: "local"
+  path: "modules/<specialist-name>"
+  name: "<Specialist Name>"
+\`\`\`
+
+### Step 5: Enable and Verify
+- Use \`module_toggle\` to enable the specialist if not already enabled
+- Use \`module_list\` to confirm it appears and is active
+- Report the result to the user: what was created, what it can do, and how to interact with it
+
+## Important Notes
+- The coding worker writes REAL TypeScript code with actual API integrations
+- Each specialist gets its own isolated knowledge store (SQLite DB) automatically
+- Specialists can define custom tools that the specialist's agent can use
+- The \`onPoll\` handler fetches data on a schedule; \`onWebhook\` handles incoming webhooks
+- The \`onQuery\` handler lets other agents query the specialist's knowledge
+- Config values (API keys, etc.) are set by the user after installation via the web UI`,
+    },
+  },
+  {
     id: "builtin-skill-demo-recording",
     data: {
       meta: {
@@ -683,7 +777,7 @@ When done, report:
  * Mapping from built-in registry entry IDs to their assigned skill IDs.
  */
 const ENTRY_SKILL_ASSIGNMENTS: Record<string, string[]> = {
-  "builtin-coo": ["builtin-skill-coo-operations"],
+  "builtin-coo": ["builtin-skill-coo-operations", "builtin-skill-specialist-creation"],
   "builtin-team-lead": ["builtin-skill-team-lead-operations", "builtin-skill-github-tools"],
   "builtin-coder": ["builtin-skill-coding-tools", "builtin-skill-github-tools"],
   "builtin-researcher": ["builtin-skill-research-tools", "builtin-skill-github-tools"],
