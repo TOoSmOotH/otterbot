@@ -6,6 +6,7 @@ import { ProjectStatus } from "@otterbot/shared";
 import type { Project } from "@otterbot/shared";
 import { formatRelative } from "../../lib/format-relative";
 import { SetupChecklist } from "./SetupChecklist";
+import { SpecialistsIntro } from "./SpecialistsIntro";
 import type { SettingsSection } from "../settings/settings-nav";
 
 export function GlobalDashboard({
@@ -41,6 +42,7 @@ export function GlobalDashboard({
             </div>
 
             <SetupChecklist projects={projects} onOpenSettings={onOpenSettings} />
+            <SpecialistsIntro onOpenSettings={onOpenSettings} />
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 w-full max-w-lg">
               <QuickAction
@@ -82,6 +84,7 @@ export function GlobalDashboard({
             </div>
 
             <SetupChecklist projects={projects} onOpenSettings={onOpenSettings} />
+            <SpecialistsIntro onOpenSettings={onOpenSettings} />
 
             {/* Claude Code OAuth usage */}
             {showUsageCard && <ClaudeCodeUsageCard />}
