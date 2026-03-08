@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useUIModeStore } from "../../stores/ui-mode-store";
 import type { SettingsSection } from "../settings/settings-nav";
 import type { Project } from "@otterbot/shared";
 
@@ -9,7 +10,7 @@ interface ChecklistItem {
   id: string;
   label: string;
   description: string;
-  settingsTarget: SettingsSection | "new-project";
+  settingsTarget: SettingsSection | "new-project" | "toggle-advanced";
 }
 
 const ITEMS: ChecklistItem[] = [
@@ -48,6 +49,12 @@ const ITEMS: ChecklistItem[] = [
     label: "Create your first project",
     description: "Start a project to put your bot to work",
     settingsTarget: "new-project",
+  },
+  {
+    id: "advanced",
+    label: "Explore advanced mode",
+    description: "Switch to advanced mode for agent graph, activity stream, and more",
+    settingsTarget: "toggle-advanced",
   },
 ];
 
@@ -98,10 +105,15 @@ export function SetupChecklist({
     });
   };
 
+  const toggleMode = useUIModeStore((s) => s.toggleMode);
+
   const handleNavigate = (item: ChecklistItem) => {
     if (item.settingsTarget === "new-project") {
       const btn = document.querySelector<HTMLButtonElement>('[data-action="new-project"]');
       btn?.click();
+    } else if (item.settingsTarget === "toggle-advanced") {
+      const isBasic = useUIModeStore.getState().mode === "basic";
+      if (isBasic) toggleMode();
     } else {
       onOpenSettings?.(item.settingsTarget);
     }
