@@ -443,13 +443,16 @@ export async function removeLabelFromIssue(
   const found = existingLabels.find((l) => l.name === label);
   if (!found) return;
 
-  await fetch(
+  const res = await fetch(
     `${base}/api/v1/repos/${repoFullName}/issues/${issueNumber}/labels/${found.id}`,
     {
       method: "DELETE",
       headers: giteaHeaders(token),
     },
   );
+  if (!res.ok) {
+    throw new Error(`Gitea API error ${res.status}: ${await res.text()}`);
+  }
 }
 
 /**
@@ -522,21 +525,27 @@ export async function fetchAssignedIssues(
   since?: string,
 ): Promise<GiteaIssue[]> {
   const base = normalizeUrl(instanceUrl);
-  const params = new URLSearchParams({
-    state: "open",
-    type: "issues",
-    limit: "50",
-  });
-  if (since) params.set("since", since);
+  const all: GiteaIssue[] = [];
+  let page = 1;
+  for (;;) {
+    const params = new URLSearchParams({
+      state: "open",
+      type: "issues",
+      assignee,
+      limit: "50",
+      page: String(page),
+    });
+    if (since) params.set("since", since);
 
-  const issues = await giteaFetch<GiteaIssue[]>(
-    `${base}/api/v1/repos/${repoFullName}/issues?${params}`,
-    token,
-  );
-  // Filter to only issues assigned to the specified user
-  return issues.filter((i) =>
-    i.assignees?.some((a) => a.login.toLowerCase() === assignee.toLowerCase()),
-  );
+    const issues = await giteaFetch<GiteaIssue[]>(
+      `${base}/api/v1/repos/${repoFullName}/issues?${params}`,
+      token,
+    );
+    all.push(...issues);
+    if (issues.length < 50) break;
+    page++;
+  }
+  return all;
 }
 
 // ---------------------------------------------------------------------------

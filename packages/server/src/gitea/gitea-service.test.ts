@@ -192,7 +192,7 @@ describe("gitea-service", () => {
     expect(url).toContain("limit=15");
   });
 
-  it("filters assigned issues case-insensitively", async () => {
+  it("passes assignee param to the API and paginates", async () => {
     const mockFetch = vi.fn().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve([
@@ -202,17 +202,6 @@ describe("gitea-service", () => {
           body: null,
           labels: [],
           assignees: [{ login: "TestUser" }],
-          state: "open",
-          html_url: "",
-          created_at: "2026-01-01T00:00:00Z",
-          updated_at: "2026-01-01T00:00:00Z",
-        },
-        {
-          number: 2,
-          title: "Not mine",
-          body: null,
-          labels: [],
-          assignees: [{ login: "other" }],
           state: "open",
           html_url: "",
           created_at: "2026-01-01T00:00:00Z",
@@ -231,6 +220,10 @@ describe("gitea-service", () => {
 
     expect(issues).toHaveLength(1);
     expect(issues[0].number).toBe(1);
+    const url = mockFetch.mock.calls[0][0] as string;
+    expect(url).toContain("assignee=testuser");
+    expect(url).toContain("state=open");
+    expect(url).toContain("type=issues");
   });
 
   it("aggregates commit status correctly", () => {
