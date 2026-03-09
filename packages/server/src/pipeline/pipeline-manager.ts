@@ -1337,7 +1337,7 @@ export class PipelineManager {
           // Initial implementation
           parts.push(
             `\nCreate a feature branch named \`feat/issue-${state.issueNumber}-<short-description>\` (e.g. \`feat/issue-${state.issueNumber ?? "42"}-add-login-button\`), implement the solution, commit, and push.`,
-            `Do NOT reuse an existing branch. Always create a fresh branch from the default branch.`,
+            `Do NOT reuse an existing branch. Always create a fresh branch from \`${state.targetBranch}\`.`,
             `Do NOT create a pull request — a later stage will handle that.`,
             `\nFocus ONLY on the implementation code. Do NOT:`,
             `- Write or update tests (a dedicated Tester stage handles testing)`,
@@ -1349,7 +1349,7 @@ export class PipelineManager {
             parts.push(
               `\n[FORK MODE] You are contributing via a fork. Pushes go to \`origin\` (the fork).`,
               `The upstream repo is available as the \`upstream\` remote.`,
-              `Create your feature branch from the latest upstream default branch.`,
+              `Create your feature branch from \`upstream/${state.targetBranch}\`.`,
             );
           }
 

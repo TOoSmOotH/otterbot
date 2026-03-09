@@ -1634,7 +1634,11 @@ export class TeamLead extends BaseAgent {
       if (this.projectId) {
         // Prepare a git worktree for the worker to avoid file conflicts
         // For pipeline kickbacks (security/review), start from the feature branch so the worker can find existing code
-        workspacePath = this.workspace.prepareAgentWorktree(this.projectId, workerId, options?.sourceBranch);
+        const forkMode = getConfig(`project:${this.projectId}:github:fork_mode`) === "true";
+        workspacePath = this.workspace.prepareAgentWorktree(
+          this.projectId, workerId, options?.sourceBranch,
+          forkMode ? { forkMode: true, upstreamBranch: resolveProjectBranch(this.projectId) } : undefined,
+        );
 
         // Write project-scoped CLAUDE.md into worktree for coding agents that read it
         if (workspacePath) {
