@@ -700,8 +700,8 @@ export async function mergePullRequest(
   const payload: Record<string, unknown> = {
     Do: mergeMethod,
   };
-  if (commitTitle) payload.merge_message_field = commitTitle;
-  if (commitMessage) payload.merge_message_field = `${commitTitle ?? ""}\n\n${commitMessage}`;
+  if (commitTitle) payload.merge_title_field = commitTitle;
+  if (commitMessage) payload.merge_message_field = commitMessage;
 
   await giteaFetch<unknown>(
     `${base}/api/v1/repos/${repoFullName}/pulls/${prNumber}/merge`,
