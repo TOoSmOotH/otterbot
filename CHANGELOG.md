@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.15.0](https://github.com/TOoSmOotH/otterbot/compare/otterbot-v0.14.0...otterbot-v0.15.0) (2026-03-09)
+
+
+### Features
+
+* add dismissible specialists intro section to dashboard ([124d2f7](https://github.com/TOoSmOotH/otterbot/commit/124d2f7f1eb8beef2eaafcbbd744f777391daf11))
+* add explore advanced mode to setup checklist ([81cbad9](https://github.com/TOoSmOotH/otterbot/commit/81cbad986d823add8b00af431830334fbf292b9b))
+* add getting started setup checklist to dashboard ([9911f89](https://github.com/TOoSmOotH/otterbot/commit/9911f89c75761464a88c05dd5b31dcbd842e145e))
+* add specialist creation skill and module template ([7dfb7b5](https://github.com/TOoSmOotH/otterbot/commit/7dfb7b58c65b6f874f621280019650cb2ee614a6))
+* specialist creation skill, module template, and dashboard improvements ([17886ea](https://github.com/TOoSmOotH/otterbot/commit/17886ea837a8f343d8c5e3c2b144bdf6b53ee442))
+
+
+### Bug Fixes
+
+* exclude modules/_template from pnpm workspace ([de32247](https://github.com/TOoSmOotH/otterbot/commit/de322475488b7587048c9ada93f738eef0f960cc))
+* point setup checklist Google item to email settings ([75f86af](https://github.com/TOoSmOotH/otterbot/commit/75f86afdfcbe25c43f5e95cae5222b45409295e3))
+* switch setup checklist to manual checkboxes ([c8d43c8](https://github.com/TOoSmOotH/otterbot/commit/c8d43c818622e8baff2010e5ac7a801a4cb00679))
+
 ## [0.14.0](https://github.com/TOoSmOotH/otterbot/compare/otterbot-v0.13.0...otterbot-v0.14.0) (2026-03-07)
 
 
