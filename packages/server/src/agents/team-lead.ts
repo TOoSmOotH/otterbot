@@ -50,7 +50,7 @@ import {
   resolveProjectBranch,
 } from "../github/github-service.js";
 import type { PipelineManager } from "../pipeline/pipeline-manager.js";
-import { cleanTerminalOutput } from "../utils/terminal.js";
+import { cleanTerminalOutput, summarizeForGitHub } from "../utils/terminal.js";
 import { formatBotCommentWithDetails } from "../utils/github-comments.js";
 
 /** Tool descriptions for environment context injection */
@@ -507,9 +507,10 @@ export class TeamLead extends BaseAgent {
 
     // Post a comment summarizing the changes
     const cleaned = cleanTerminalOutput(completionReport);
+    const summary = await summarizeForGitHub(cleaned, "review-feedback");
     const commentBody = formatBotCommentWithDetails(
       "Review Feedback Addressed",
-      "I've addressed the review feedback and pushed updates to this PR.",
+      summary ?? "I've addressed the review feedback and pushed updates to this PR.",
       cleaned,
     );
 

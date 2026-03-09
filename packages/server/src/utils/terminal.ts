@@ -2,10 +2,15 @@
  * Shared terminal output cleaning utilities.
  *
  * Provides comprehensive ANSI stripping, terminal artifact removal,
- * and PTY buffer summarisation for use across the codebase.
+ * PTY buffer summarisation, and LLM-powered summarisation for use
+ * across the codebase.
  */
 
 /* eslint-disable no-control-regex */
+
+import { generateText } from "ai";
+import { getConfig } from "../auth/auth.js";
+import { resolveModel } from "../llm/adapter.js";
 
 /**
  * Comprehensive ANSI / terminal escape-sequence stripper.
@@ -158,4 +163,59 @@ export function extractPtySummary(
   }
 
   return parts.join("\n");
+}
+
+// ─── LLM-powered summarisation ──────────────────────────────────
+
+const STAGE_HINTS: Record<string, string> = {
+  coder:
+    "Summarize what was implemented or changed. Mention any PRs created. " +
+    "Focus on the files modified and the purpose of the changes.",
+  security:
+    "List security findings as bullet points with severity (critical/high/medium/low). " +
+    "If no issues were found, state that clearly.",
+  tester:
+    "Summarize test results: pass/fail counts, list any failures with the test name and a brief reason.",
+  reviewer:
+    "Summarize the review verdict (approve / request changes) and list key feedback points.",
+  "review-feedback":
+    "Summarize what review feedback was addressed and what changes were made in response.",
+};
+
+const SUMMARIZE_SYSTEM_PROMPT = `You summarize terminal output from a CI/CD pipeline stage for a GitHub comment.
+Output clean, concise GitHub-flavored markdown. Do NOT wrap in a code block.
+Keep it short — ideally under 15 lines. Omit ANSI artifacts, spinner characters, and noise.`;
+
+/**
+ * Use a lightweight LLM to produce a clean markdown summary of terminal output.
+ *
+ * Returns `null` on any error or if the input is too short to be worth summarizing,
+ * so callers can gracefully fall back to raw output.
+ */
+export async function summarizeForGitHub(
+  cleanedOutput: string,
+  stage: string,
+): Promise<string | null> {
+  if (cleanedOutput.length < 100) return null;
+
+  try {
+    const provider = getConfig("worker_provider") ?? "openai";
+    const modelName = getConfig("worker_model") ?? "gpt-4o-mini";
+
+    const model = resolveModel({ provider, model: modelName });
+
+    const stageHint = STAGE_HINTS[stage] ?? `Summarize the output from the "${stage}" stage.`;
+
+    const result = await generateText({
+      model,
+      system: `${SUMMARIZE_SYSTEM_PROMPT}\n\n${stageHint}`,
+      prompt: cleanedOutput,
+      maxTokens: 1024,
+    });
+
+    return result.text || null;
+  } catch (err) {
+    console.error(`[summarizeForGitHub] Failed to summarize ${stage} output:`, err);
+    return null;
+  }
 }

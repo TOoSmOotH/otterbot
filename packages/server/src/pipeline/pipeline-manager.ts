@@ -31,7 +31,7 @@ import {
 import type { COO } from "../agents/coo.js";
 import { resolveProjectBranch, type GitHubIssue } from "../github/github-service.js";
 import { SECURITY_PREAMBLE } from "../agents/prompts/security-preamble.js";
-import { cleanTerminalOutput } from "../utils/terminal.js";
+import { cleanTerminalOutput, summarizeForGitHub } from "../utils/terminal.js";
 import { formatBotComment, formatBotCommentWithDetails } from "../utils/github-comments.js";
 
 type TypedServer = Server<ClientToServerEvents, ServerToClientEvents>;
@@ -1557,17 +1557,9 @@ export class PipelineManager {
       };
       body = formatBotComment(startTitles[stage] ?? `Starting ${stage}`);
     } else {
-      // Completion — clean the report and put it in a collapsible section
+      // Completion — clean the report and summarize via LLM
       const cleaned = cleanTerminalOutput(report);
-      let preview: string;
-      if (cleaned.length > 500) {
-        // Try to break at a paragraph boundary (double newline) within 500 chars
-        const slice = cleaned.slice(0, 500);
-        const paraBreak = slice.lastIndexOf("\n\n");
-        preview = (paraBreak > 100 ? slice.slice(0, paraBreak) : slice) + "\n\n_(see details for full output)_";
-      } else {
-        preview = cleaned;
-      }
+      const summary = await summarizeForGitHub(cleaned, stage);
 
       const completeTitles: Record<string, string> = {
         coder: "Implementation Complete",
@@ -1579,9 +1571,23 @@ export class PipelineManager {
       };
       const title = completeTitles[stage] ?? `${stage} Complete`;
 
-      body = cleaned.length > 500
-        ? formatBotCommentWithDetails(title, preview, cleaned)
-        : formatBotComment(title, preview);
+      if (summary) {
+        // LLM summary as preview, raw output in collapsible details
+        body = formatBotCommentWithDetails(title, summary, cleaned);
+      } else {
+        // Fallback: truncated preview (same as before)
+        let preview: string;
+        if (cleaned.length > 500) {
+          const slice = cleaned.slice(0, 500);
+          const paraBreak = slice.lastIndexOf("\n\n");
+          preview = (paraBreak > 100 ? slice.slice(0, paraBreak) : slice) + "\n\n_(see details for full output)_";
+        } else {
+          preview = cleaned;
+        }
+        body = cleaned.length > 500
+          ? formatBotCommentWithDetails(title, preview, cleaned)
+          : formatBotComment(title, preview);
+      }
     }
 
     try {
