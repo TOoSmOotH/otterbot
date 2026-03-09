@@ -461,23 +461,30 @@ async function main() {
     // Non-fatal — account SSH signing is optional
   }
 
-  // Re-apply per-project signing config for cloned repos
+  // Re-apply per-project git user identity and signing config for cloned repos
   try {
     const { resolveGitHubAccount } = await import("./github/account-resolver.js");
     const { configureCommitSigning } = await import("./utils/git.js");
+    const { configureGitUser } = await import("./github/github-service.js");
     const db = getDb();
-    const signingProjects = db.select().from(schema.projects).all().filter(p => p.signCommits);
-    for (const project of signingProjects) {
+    const allProjects = db.select().from(schema.projects).all();
+    for (const project of allProjects) {
       const repoPath = join(
         process.env.WORKSPACE_ROOT ?? resolve(__dirname, "../../../docker/otterbot"),
         "projects", project.id, "repo",
       );
       if (existsSync(join(repoPath, ".git"))) {
         try {
-          const account = resolveGitHubAccount(project.id);
-          const projUsage = account?.sshKeyUsage ?? "both";
-          if (projUsage !== "auth") {
-            configureCommitSigning(repoPath, true, account?.sshKeyPath ?? undefined);
+          // Always re-apply git user identity (email/name may have changed)
+          configureGitUser(repoPath, project.id);
+
+          // Re-apply signing config if enabled
+          if (project.signCommits) {
+            const account = resolveGitHubAccount(project.id);
+            const projUsage = account?.sshKeyUsage ?? "both";
+            if (projUsage !== "auth") {
+              configureCommitSigning(repoPath, true, account?.sshKeyPath ?? undefined);
+            }
           }
         } catch {
           // Non-fatal per-project
@@ -485,7 +492,7 @@ async function main() {
       }
     }
   } catch {
-    // Non-fatal — project signing is optional
+    // Non-fatal — project config is optional
   }
 
   // Bootstrap passphrase from environment (one-time setup)
@@ -4124,6 +4131,7 @@ async function main() {
   async function applyGitIdentityFromAccount(accountId: string): Promise<void> {
     try {
       const { getGitHubAccountById, getGitHubAccounts } = await import("./github/account-resolver.js");
+      const { configureGitUser } = await import("./github/github-service.js");
       const account = getGitHubAccountById(accountId);
       if (!account) return;
       // Only set global config for the default account (or if it's the only one)
@@ -4135,6 +4143,23 @@ async function main() {
       const { execFileSync } = await import("node:child_process");
       execFileSync("git", ["config", "--global", "user.name", name], { stdio: "ignore" });
       execFileSync("git", ["config", "--global", "user.email", email], { stdio: "ignore" });
+
+      // Also update local config on all cloned repos that use this account
+      const db = getDb();
+      const projects = db.select().from(schema.projects).all();
+      for (const project of projects) {
+        // Update repos bound to this account, or all repos if this is the default/only account
+        if (project.githubAccountId !== accountId && account.isDefault === false && allAccounts.length > 1) continue;
+        const repoPath = join(
+          process.env.WORKSPACE_ROOT ?? resolve(__dirname, "../../../docker/otterbot"),
+          "projects", project.id, "repo",
+        );
+        if (existsSync(join(repoPath, ".git"))) {
+          try {
+            configureGitUser(repoPath, project.id);
+          } catch { /* non-fatal */ }
+        }
+      }
     } catch {
       // Non-fatal
     }

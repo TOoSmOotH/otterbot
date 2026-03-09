@@ -105,7 +105,7 @@ function applySigningIfEnabled(targetDir: string, projectId?: string): void {
 /**
  * Configure git user identity in a cloned repo.
  */
-function configureGitUser(targetDir: string, projectId?: string): void {
+export function configureGitUser(targetDir: string, projectId?: string): void {
   const account = resolveGitHubAccount(projectId);
   const userName = account?.username ?? getConfig("github:username") ?? "otterbot";
   const userEmail =
