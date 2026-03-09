@@ -171,6 +171,8 @@ import { createBackupArchive, restoreFromArchive, looksLikeZip } from "./backup/
 import { writeOpenCodeConfig } from "./opencode/opencode-manager.js";
 import { GitHubIssueMonitor } from "./github/issue-monitor.js";
 import { GitHubPRMonitor } from "./github/pr-monitor.js";
+import { GiteaIssueMonitor } from "./gitea/issue-monitor.js";
+import { GiteaPRMonitor } from "./gitea/pr-monitor.js";
 import { PipelineManager } from "./pipeline/pipeline-manager.js";
 import { MergeQueue } from "./merge-queue/merge-queue.js";
 import { ReminderScheduler } from "./reminders/reminder-scheduler.js";
@@ -581,6 +583,8 @@ async function main() {
   let coo: COO | null = null;
   let issueMonitor: GitHubIssueMonitor | null = null;
   let prMonitor: GitHubPRMonitor | null = null;
+  let giteaIssueMonitor: GiteaIssueMonitor | null = null;
+  let giteaPrMonitor: GiteaPRMonitor | null = null;
   const schedulerRegistry = new SchedulerRegistry(io);
   let customTaskScheduler: CustomTaskScheduler | null = null;
 
@@ -1088,6 +1092,8 @@ async function main() {
       // Create issue monitor, PR monitor, and pipeline manager
       issueMonitor = new GitHubIssueMonitor(coo, io);
       prMonitor = new GitHubPRMonitor(coo, io);
+      giteaIssueMonitor = new GiteaIssueMonitor(coo, io);
+      giteaPrMonitor = new GiteaPRMonitor(coo, io);
       const pipelineManager = new PipelineManager(coo, io);
       pipelineManager.init().catch((err) => {
         console.error("[PipelineManager] Init failed:", err);
@@ -1096,6 +1102,9 @@ async function main() {
       issueMonitor.setPipelineManager(pipelineManager);
       prMonitor.setPipelineManager(pipelineManager);
       prMonitor.setMergeQueue(mergeQueue);
+      giteaIssueMonitor.setPipelineManager(pipelineManager);
+      giteaPrMonitor.setPipelineManager(pipelineManager);
+      giteaPrMonitor.setMergeQueue(mergeQueue);
       pipelineManager.setMergeQueue(mergeQueue);
       mergeQueue.setPipelineManager(pipelineManager);
       mergeQueue.setCoo(coo);
@@ -1175,7 +1184,7 @@ async function main() {
           callback?.({ messageId: confirmMsg.id, conversationId: conversationId ?? "" });
           return true;
         },
-      }, { workspace, issueMonitor: issueMonitor!, mergeQueue, worldLayout });
+      }, { workspace, issueMonitor: issueMonitor!, giteaIssueMonitor: giteaIssueMonitor!, mergeQueue, worldLayout });
       console.log(`COO agent started. (model=${coo.toData().model}, provider=${coo.toData().provider})`);
 
       // Spawn AdminAssistant alongside COO
@@ -1290,6 +1299,25 @@ async function main() {
         schedulerRegistry.register("github-prs", prMonitor, {
           name: "GitHub PR Monitor",
           description: "Monitors open PRs for merge status and review feedback.",
+          defaultIntervalMs: 120_000,
+          minIntervalMs: 30_000,
+        });
+      }
+
+      if (giteaIssueMonitor) {
+        giteaIssueMonitor.loadFromDb();
+        schedulerRegistry.register("gitea-issues", giteaIssueMonitor, {
+          name: "Gitea Issue Monitor",
+          description: "Polls Gitea for new and updated issues on watched projects.",
+          defaultIntervalMs: 60_000,
+          minIntervalMs: 5_000,
+        });
+      }
+
+      if (giteaPrMonitor) {
+        schedulerRegistry.register("gitea-prs", giteaPrMonitor, {
+          name: "Gitea PR Monitor",
+          description: "Monitors open Gitea PRs for merge status and review feedback.",
           defaultIntervalMs: 120_000,
           minIntervalMs: 30_000,
         });
