@@ -344,7 +344,7 @@ export async function fetchIssues(
   params.set("type", "issues"); // Gitea: exclude PRs
   if (opts?.state) params.set("state", opts.state);
   if (opts?.labels) params.set("labels", opts.labels);
-  if (opts?.assignee) params.set("assigned_by", opts.assignee);
+  if (opts?.assignee) params.set("assignee", opts.assignee);
   params.set("limit", String(opts?.per_page ?? 30));
 
   return giteaFetch<GiteaIssue[]>(
