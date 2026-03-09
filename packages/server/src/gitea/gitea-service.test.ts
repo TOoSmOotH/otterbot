@@ -49,9 +49,11 @@ import {
   gitEnvWithPAT,
   gitCredentialArgs,
   cloneRepo,
+  cloneForForkContribution,
   getRepoDefaultBranch,
   fetchIssues,
   fetchAssignedIssues,
+  fetchCompareCommitsDiff,
   aggregateCommitStatus,
   resolveProjectBranch,
 } from "./gitea-service.js";
@@ -269,5 +271,118 @@ describe("gitea-service", () => {
 
     const project = db.select().from(schema.projects).where(eq(schema.projects.id, "proj-1")).get();
     expect(project?.giteaBranch).toBe("develop");
+  });
+
+  it("clones fork contribution repo and wires upstream remote", () => {
+    const targetDir = join(tmpDir, "fork-repo");
+    configStore.set("gitea:token", "pat");
+    configStore.set("gitea:instance_url", "https://git.example.com");
+    configStore.set("gitea:username", "bot");
+    configStore.set("gitea:email", "bot@example.com");
+
+    cloneForForkContribution(
+      "upstream/repo",
+      "my-user/repo",
+      targetDir,
+      "https://git.example.com/",
+      "feature/test",
+    );
+
+    const argArrays = mockExecFileSync.mock.calls.map((c: any[]) => c[1] as string[]);
+
+    expect(
+      argArrays.some((a: string[]) =>
+        a.includes("clone")
+        && a.includes("--branch")
+        && a.includes("feature/test")
+        && a.includes("--")
+        && a.includes("https://git.example.com/my-user/repo.git"),
+      ),
+    ).toBe(true);
+    expect(
+      argArrays.some((a: string[]) =>
+        a.includes("remote")
+        && a.includes("add")
+        && a.includes("upstream")
+        && a.includes("https://git.example.com/upstream/repo.git"),
+      ),
+    ).toBe(true);
+    expect(
+      argArrays.some((a: string[]) => a.includes("fetch") && a.includes("upstream")),
+    ).toBe(true);
+    expect(
+      argArrays.some((a: string[]) => a.includes("user.name") && a.includes("bot")),
+    ).toBe(true);
+    expect(
+      argArrays.some((a: string[]) => a.includes("user.email") && a.includes("bot@example.com")),
+    ).toBe(true);
+  });
+
+  it("rejects invalid repo/branch names for fork clone and compare APIs", async () => {
+    configStore.set("gitea:token", "pat");
+
+    expect(() =>
+      cloneForForkContribution(
+        "upstream/repo",
+        "--upload-pack=evil",
+        join(tmpDir, "bad-fork"),
+        "https://git.example.com",
+      ),
+    ).toThrow(/Invalid repository name/);
+
+    expect(() =>
+      cloneForForkContribution(
+        "upstream/repo",
+        "owner/repo",
+        join(tmpDir, "bad-branch"),
+        "https://git.example.com",
+        "bad branch name",
+      ),
+    ).toThrow(/Invalid branch name/);
+
+    await expect(
+      fetchCompareCommitsDiff(
+        "owner/repo",
+        "pat",
+        "main",
+        "bad branch name",
+        "https://git.example.com",
+      ),
+    ).rejects.toThrow(/Invalid branch name/);
+
+    expect(mockExecFileSync).not.toHaveBeenCalled();
+  });
+
+  it("returns mapped file diff entries from compare endpoint", async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () =>
+        Promise.resolve({
+          files: [
+            { filename: "src/app.ts", status: "modified", contents_url: "https://x" },
+            { filename: "README.md", status: "added" },
+          ],
+        }),
+    });
+    vi.stubGlobal("fetch", mockFetch);
+
+    const files = await fetchCompareCommitsDiff(
+      "owner/repo",
+      "pat",
+      "main",
+      "feature/new-ui",
+      "https://git.example.com/",
+    );
+
+    expect(files).toEqual([
+      { filename: "src/app.ts", status: "modified" },
+      { filename: "README.md", status: "added" },
+    ]);
+    expect(mockFetch).toHaveBeenCalledWith(
+      "https://git.example.com/api/v1/repos/owner/repo/compare/main...feature%2Fnew-ui",
+      expect.objectContaining({
+        headers: expect.objectContaining({ Authorization: "token pat" }),
+      }),
+    );
   });
 });
