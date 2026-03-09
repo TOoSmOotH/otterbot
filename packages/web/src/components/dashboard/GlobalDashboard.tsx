@@ -5,6 +5,9 @@ import { useClaudeUsageStore } from "../../stores/claude-usage-store";
 import { ProjectStatus } from "@otterbot/shared";
 import type { Project } from "@otterbot/shared";
 import { formatRelative } from "../../lib/format-relative";
+import { SetupChecklist } from "./SetupChecklist";
+import { SpecialistsIntro } from "./SpecialistsIntro";
+import type { SettingsSection } from "../settings/settings-nav";
 
 export function GlobalDashboard({
   projects,
@@ -13,7 +16,7 @@ export function GlobalDashboard({
 }: {
   projects: Project[];
   onEnterProject: (projectId: string) => void;
-  onOpenSettings?: () => void;
+  onOpenSettings?: (section?: SettingsSection) => void;
 }) {
   const agents = useAgentStore((s) => s.agents);
   const claudeCodeEnabled = useSettingsStore((s) => s.claudeCodeEnabled);
@@ -37,6 +40,9 @@ export function GlobalDashboard({
                 Your personal AI assistant. Create a project to get started, or explore the settings to connect your tools.
               </p>
             </div>
+
+            <SetupChecklist projects={projects} onOpenSettings={onOpenSettings} />
+            <SpecialistsIntro onOpenSettings={onOpenSettings} />
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 w-full max-w-lg">
               <QuickAction
@@ -76,6 +82,9 @@ export function GlobalDashboard({
               <StatCard label="Completed" value={completedProjects.length} accent="green" />
               <StatCard label="Active Agents" value={agents.size} accent="yellow" />
             </div>
+
+            <SetupChecklist projects={projects} onOpenSettings={onOpenSettings} />
+            <SpecialistsIntro onOpenSettings={onOpenSettings} />
 
             {/* Claude Code OAuth usage */}
             {showUsageCard && <ClaudeCodeUsageCard />}

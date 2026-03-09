@@ -1,3 +1,4 @@
 packages:
   - "packages/*"
   - "modules/*"
+  - "!modules/_template"
