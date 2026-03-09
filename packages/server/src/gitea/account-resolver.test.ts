@@ -171,6 +171,34 @@ describe("gitea/account-resolver", () => {
     expect(resolveGiteaInstanceUrl("proj-work")).toBe("https://git.work");
   });
 
+  it("falls back to default when project-bound account is missing", () => {
+    createGiteaAccount({
+      id: "gitea-default",
+      label: "Default",
+      token: "pat-default",
+      instanceUrl: "https://git.default",
+      isDefault: true,
+    });
+
+    const db = getDb();
+    db.insert(schema.projects)
+      .values({
+        id: "proj-stale-binding",
+        name: "Stale Binding",
+        description: "",
+        status: "active",
+        giteaAccountId: "missing-account",
+        rules: [],
+        createdAt: new Date().toISOString(),
+      })
+      .run();
+
+    const account = resolveGiteaAccount("proj-stale-binding");
+    expect(account?.id).toBe("gitea-default");
+    expect(resolveGiteaToken("proj-stale-binding")).toBe("pat-default");
+    expect(resolveGiteaInstanceUrl("proj-stale-binding")).toBe("https://git.default");
+  });
+
   it("falls back to legacy config when no accounts exist", () => {
     configStore.set("gitea:token", "legacy-pat");
     configStore.set("gitea:instance_url", "https://git.legacy");

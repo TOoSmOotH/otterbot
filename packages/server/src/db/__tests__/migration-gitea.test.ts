@@ -109,4 +109,34 @@ describe("DB Migration — Gitea columns and table", () => {
     expect(account!.isDefault).toBe(true);
     expect(account!.username).toBe("dev");
   });
+
+  it("is idempotent when migration runs multiple times", async () => {
+    await migrateDb();
+
+    const db = getDb();
+    db.insert(schema.projects)
+      .values({
+        id: "proj-gitea-idempotent",
+        name: "Gitea Idempotent",
+        description: "desc",
+        giteaRepo: "team/repo",
+        giteaBranch: "main",
+        giteaIssueMonitor: true,
+        giteaAccountId: "acct-2",
+        createdAt: new Date().toISOString(),
+      })
+      .run();
+
+    const project = db
+      .select()
+      .from(schema.projects)
+      .where(eq(schema.projects.id, "proj-gitea-idempotent"))
+      .get();
+
+    expect(project).toBeDefined();
+    expect(project!.giteaRepo).toBe("team/repo");
+    expect(project!.giteaBranch).toBe("main");
+    expect(project!.giteaIssueMonitor).toBe(true);
+    expect(project!.giteaAccountId).toBe("acct-2");
+  });
 });
