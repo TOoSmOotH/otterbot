@@ -10,6 +10,7 @@ import { AgentGraph } from "./components/graph/AgentGraph";
 import { LiveView } from "./components/live-view/LiveView";
 import { MessageStream } from "./components/stream/MessageStream";
 import { SettingsPage } from "./components/settings/SettingsPage";
+import type { SettingsSection } from "./components/settings/settings-nav";
 import { LoginScreen } from "./components/auth/LoginScreen";
 import { ChangeTemporaryPassphraseScreen } from "./components/auth/ChangeTemporaryPassphraseScreen";
 import { SetupWizard } from "./components/setup/SetupWizard";
@@ -129,7 +130,7 @@ function MainApp() {
   const toggleMode = useUIModeStore((s) => s.toggleMode);
   const unreadCount = useWhatsNewStore((s) => s.unreadCount);
   const fetchReleases = useWhatsNewStore((s) => s.fetchReleases);
-  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState<SettingsSection | true | false>(false);
   const [whatsNewOpen, setWhatsNewOpen] = useState(false);
   const [userProfile, setUserProfile] = useState<UserProfile | undefined>();
   const [centerView, setCenterView] = useState<CenterView>("dashboard");
@@ -426,7 +427,7 @@ function MainApp() {
 
       {/* Full-page settings or three-panel layout */}
       {settingsOpen ? (
-        <SettingsPage onClose={handleSettingsClose} />
+        <SettingsPage onClose={handleSettingsClose} initialSection={typeof settingsOpen === "string" ? settingsOpen : undefined} />
       ) : (
         <main className="flex-1 overflow-hidden">
           <ResizableLayout
@@ -438,7 +439,7 @@ function MainApp() {
             setCenterView={setCenterView}
             onEnterProject={handleEnterProject}
             cooName={userProfile?.cooName}
-            onOpenSettings={() => setSettingsOpen(true)}
+            onOpenSettings={(section?: SettingsSection) => setSettingsOpen(section ?? true)}
             isBasic={isBasic}
           />
         </main>
@@ -501,7 +502,7 @@ function ResizableLayout({
   setCenterView: (view: CenterView) => void;
   onEnterProject: (projectId: string) => void;
   cooName?: string;
-  onOpenSettings?: () => void;
+  onOpenSettings?: (section?: SettingsSection) => void;
   isBasic?: boolean;
 }) {
   const { defaultLayout, onLayoutChanged } = useDefaultLayout({

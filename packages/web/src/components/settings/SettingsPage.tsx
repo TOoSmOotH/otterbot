@@ -38,10 +38,11 @@ import type { SettingsSearchHandle } from "./SettingsSearch";
 
 interface SettingsPageProps {
   onClose: () => void;
+  initialSection?: SettingsSection;
 }
 
-export function SettingsPage({ onClose }: SettingsPageProps) {
-  const [activeSection, setActiveSection] = useState<SettingsSection>("overview");
+export function SettingsPage({ onClose, initialSection }: SettingsPageProps) {
+  const [activeSection, setActiveSection] = useState<SettingsSection>(initialSection ?? "overview");
   const loadSettings = useSettingsStore((s) => s.loadSettings);
   const loading = useSettingsStore((s) => s.loading);
   const contentRef = useRef<HTMLDivElement>(null);
