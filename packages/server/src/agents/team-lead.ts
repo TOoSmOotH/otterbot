@@ -1608,13 +1608,41 @@ export class TeamLead extends BaseAgent {
         const wGhBranch = resolveProjectBranch(this.projectId);
         const wGhRulesRaw = getConfig(`project:${this.projectId}:github:rules`);
         if (wGhRepo) {
+          const wForkMode = getConfig(`project:${this.projectId}:github:fork_mode`) === "true";
+          const wForkUpstreamPr = getConfig(`project:${this.projectId}:github:fork_upstream_pr`) !== "false";
+          const wForkRepo = getConfig(`project:${this.projectId}:github:fork_repo`);
+
           const parts: string[] = [
             `\n\n## GitHub Workflow`,
             `Repository: ${wGhRepo}`,
-            `Create a feature branch from \`${wGhBranch}\`.`,
-            `After completing your work, push your branch and create a pull request targeting \`${wGhBranch}\`.`,
-            `Use conventional commits and reference issue numbers where applicable.`,
           ];
+
+          if (wForkMode) {
+            parts.push(
+              `[FORK MODE] You are contributing via a fork. Pushes go to \`origin\` (the fork).`,
+              `The upstream repo is available as the \`upstream\` remote.`,
+              `Create a feature branch from \`upstream/${wGhBranch}\`.`,
+            );
+            if (wForkUpstreamPr && wForkRepo) {
+              const forkOwner = wForkRepo.split("/")[0];
+              parts.push(
+                `After completing your work, push your branch and create a pull request targeting \`${wGhBranch}\` on the upstream repo.`,
+                `Use \`${forkOwner}:<branch>\` as the head ref when creating the PR.`,
+              );
+            } else {
+              parts.push(
+                `After completing your work, push your branch to the fork. Do NOT create a pull request — upstream PR creation is disabled.`,
+              );
+            }
+          } else {
+            parts.push(
+              `Create a feature branch from \`${wGhBranch}\`.`,
+              `After completing your work, push your branch and create a pull request targeting \`${wGhBranch}\`.`,
+            );
+          }
+          parts.push(
+            `Use conventional commits and reference issue numbers where applicable.`,
+          );
           if (wGhRulesRaw) {
             try {
               const rules = JSON.parse(wGhRulesRaw) as string[];

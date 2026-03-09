@@ -688,6 +688,30 @@ export function setupSocketHandlers(
       }
     });
 
+    // Get fork settings for a project
+    socket.on("project:get-fork-settings", (data, callback) => {
+      try {
+        const forkMode = getConfig(`project:${data.projectId}:github:fork_mode`) === "true";
+        const forkRepo = getConfig(`project:${data.projectId}:github:fork_repo`) ?? null;
+        const forkUpstreamPrRaw = getConfig(`project:${data.projectId}:github:fork_upstream_pr`);
+        // Default to true (enabled) when not explicitly set
+        const forkUpstreamPr = forkUpstreamPrRaw !== "false";
+        callback({ forkMode, forkRepo, forkUpstreamPr });
+      } catch {
+        callback({ forkMode: false, forkRepo: null, forkUpstreamPr: true });
+      }
+    });
+
+    // Set fork upstream PR setting for a project
+    socket.on("project:set-fork-upstream-pr", (data, callback) => {
+      try {
+        setConfig(`project:${data.projectId}:github:fork_upstream_pr`, data.enabled ? "true" : "false");
+        callback?.({ ok: true });
+      } catch (err) {
+        callback?.({ ok: false, error: err instanceof Error ? err.message : "Failed to save fork upstream PR setting" });
+      }
+    });
+
     // Retrieve agent activity (bus messages + persisted activity records)
     socket.on("agent:activity", (data, callback) => {
       const db = getDb();

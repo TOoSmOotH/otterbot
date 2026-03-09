@@ -255,7 +255,25 @@ export function createGitHubCreatePRTool(ctx: ToolContext) {
       try {
         const { repo, token } = getGitHubContext(ctx);
         const targetBase = resolveProjectBranch(ctx.projectId);
-        const pr = await createPullRequest(repo, token, head, targetBase, title, body);
+
+        // In fork mode, format head as "forkowner:branch" for cross-fork PRs
+        let prHead = head;
+        const forkMode = getConfig(`project:${ctx.projectId}:github:fork_mode`);
+        if (forkMode === "true") {
+          // Check if upstream PR creation is disabled
+          const forkUpstreamPr = getConfig(`project:${ctx.projectId}:github:fork_upstream_pr`);
+          if (forkUpstreamPr === "false") {
+            return `Upstream PR creation is disabled for this fork project. Changes have been pushed to the fork only.`;
+          }
+
+          const forkRepo = getConfig(`project:${ctx.projectId}:github:fork_repo`);
+          if (forkRepo && !head.includes(":")) {
+            const forkOwner = forkRepo.split("/")[0];
+            prHead = `${forkOwner}:${head}`;
+          }
+        }
+
+        const pr = await createPullRequest(repo, token, prHead, targetBase, title, body);
         return `Pull request created: #${pr.number} — ${pr.html_url}`;
       } catch (err) {
         return `Error creating PR: ${err instanceof Error ? err.message : String(err)}`;

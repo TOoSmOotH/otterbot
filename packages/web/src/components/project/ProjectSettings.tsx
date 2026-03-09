@@ -38,6 +38,8 @@ export function ProjectSettings({ projectId }: { projectId: string }) {
   const [error, setError] = useState<string | null>(null);
   const [isGitHubProject, setIsGitHubProject] = useState(false);
   const [targetBranch, setTargetBranch] = useState("");
+  const [isForkMode, setIsForkMode] = useState(false);
+  const [forkUpstreamPr, setForkUpstreamPr] = useState(true);
 
   const openCodeEnabled = useSettingsStore((s) => s.openCodeEnabled);
   const claudeCodeEnabled = useSettingsStore((s) => s.claudeCodeEnabled);
@@ -56,6 +58,12 @@ export function ProjectSettings({ projectId }: { projectId: string }) {
     // Load target branch
     socket.emit("project:get-branch", { projectId }, (result) => {
       setTargetBranch(result?.branch ?? "");
+    });
+
+    // Load fork settings
+    socket.emit("project:get-fork-settings", { projectId }, (result) => {
+      setIsForkMode(!!result?.forkMode);
+      setForkUpstreamPr(result?.forkUpstreamPr !== false);
     });
 
     // Load agent assignments (for non-pipeline mode)
@@ -162,6 +170,11 @@ export function ProjectSettings({ projectId }: { projectId: string }) {
         socket.emit("project:set-branch", { projectId, branch: targetBranch.trim() });
       }
 
+      // Save fork upstream PR setting
+      if (isForkMode) {
+        socket.emit("project:set-fork-upstream-pr", { projectId, enabled: forkUpstreamPr });
+      }
+
       // Also save agent assignments (for non-pipeline mode)
       socket.emit("project:set-agent-assignments", { projectId, assignments }, (ack2) => {
         setSaving(false);
@@ -198,6 +211,30 @@ export function ProjectSettings({ projectId }: { projectId: string }) {
               placeholder="main"
               className="mt-2 text-sm bg-secondary border border-border rounded px-3 py-1.5 w-full max-w-xs focus:outline-none focus:ring-1 focus:ring-primary"
             />
+          </div>
+        )}
+
+        {/* Fork: PR Upstream toggle (shown only for fork-mode projects) */}
+        {isGitHubProject && isForkMode && (
+          <div>
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-sm font-semibold">PR Upstream</h2>
+                <p className="text-xs text-muted-foreground mt-1">
+                  When enabled, pull requests are created against the upstream repository.
+                  Disable to only push changes to your fork without opening upstream PRs.
+                </p>
+              </div>
+              <label className="relative inline-flex items-center cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={forkUpstreamPr}
+                  onChange={(e) => { setForkUpstreamPr(e.target.checked); setSaved(false); }}
+                  className="sr-only peer"
+                />
+                <div className="w-9 h-5 bg-muted rounded-full peer peer-checked:bg-primary transition-colors after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:after:translate-x-full" />
+              </label>
+            </div>
           </div>
         )}
 
