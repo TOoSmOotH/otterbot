@@ -11,4 +11,6 @@ export interface ToolContext {
   role: AgentRole;
   /** If true, web_browse allows navigation to localhost/private IPs (e.g. for demo recording) */
   allowLocalBrowsing?: boolean;
+  /** GitHub repo slug (owner/repo) for project-scoped access control */
+  projectRepo?: string;
 }

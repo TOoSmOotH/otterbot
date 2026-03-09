@@ -11,6 +11,7 @@ import { createTools } from "../tools/tool-factory.js";
 import { debug } from "../utils/debug.js";
 import { getConfig } from "../auth/auth.js";
 import { stripAnsi } from "../utils/terminal.js";
+import { auditGitRemotes } from "../utils/command-guard.js";
 
 export interface WorkerDependencies {
   id?: string;
@@ -212,6 +213,7 @@ export class Worker extends BaseAgent {
 
     const ptyClient = new OpenCodePtyClient({
       workspacePath: this.workspacePath,
+      projectId: this.projectId,
       onData: (data) => {
         this._onTerminalData?.(this.id, data);
 
@@ -267,6 +269,15 @@ export class Worker extends BaseAgent {
       },
     });
 
+    // Post-execution: audit git remotes for unauthorized modifications
+    if (result.success && this.workspacePath) {
+      const unexpectedRemotes = auditGitRemotes(this.workspacePath);
+      if (unexpectedRemotes.length > 0) {
+        console.warn(`[Worker ${this.id}] SECURITY: Unexpected git remotes detected: ${unexpectedRemotes.join(", ")}`);
+        return `SECURITY WARNING: Unexpected git remotes found in worktree (${unexpectedRemotes.join(", ")}). Task flagged for human review. PR creation blocked.`;
+      }
+    }
+
     if (result.success) {
       const filesChanged = result.diff?.files?.length ?? 0;
       let report = `OpenCode completed successfully.\n\nSummary: ${result.summary}\n\nFiles changed: ${filesChanged}`;
@@ -300,6 +311,7 @@ export class Worker extends BaseAgent {
 
     const ptyClient = new CodexPtyClient({
       workspacePath: this.workspacePath,
+      projectId: this.projectId,
       onData: (data) => {
         this._onTerminalData?.(this.id, data);
 
@@ -352,6 +364,15 @@ export class Worker extends BaseAgent {
       },
     });
 
+    // Post-execution: audit git remotes for unauthorized modifications
+    if (result.success && this.workspacePath) {
+      const unexpectedRemotes = auditGitRemotes(this.workspacePath);
+      if (unexpectedRemotes.length > 0) {
+        console.warn(`[Worker ${this.id}] SECURITY: Unexpected git remotes detected: ${unexpectedRemotes.join(", ")}`);
+        return `SECURITY WARNING: Unexpected git remotes found in worktree (${unexpectedRemotes.join(", ")}). Task flagged for human review. PR creation blocked.`;
+      }
+    }
+
     if (result.success) {
       const filesChanged = result.diff?.files?.length ?? 0;
       let report = `Codex completed successfully.\n\nSummary: ${result.summary}\n\nFiles changed: ${filesChanged}`;
@@ -385,6 +406,7 @@ export class Worker extends BaseAgent {
 
     const ptyClient = new GeminiCliPtyClient({
       workspacePath: this.workspacePath,
+      projectId: this.projectId,
       onData: (data) => {
         this._onTerminalData?.(this.id, data);
 
@@ -436,6 +458,15 @@ export class Worker extends BaseAgent {
         error: result.error,
       },
     });
+
+    // Post-execution: audit git remotes for unauthorized modifications
+    if (result.success && this.workspacePath) {
+      const unexpectedRemotes = auditGitRemotes(this.workspacePath);
+      if (unexpectedRemotes.length > 0) {
+        console.warn(`[Worker ${this.id}] SECURITY: Unexpected git remotes detected: ${unexpectedRemotes.join(", ")}`);
+        return `SECURITY WARNING: Unexpected git remotes found in worktree (${unexpectedRemotes.join(", ")}). Task flagged for human review. PR creation blocked.`;
+      }
+    }
 
     if (result.success) {
       const filesChanged = result.diff?.files?.length ?? 0;
@@ -489,6 +520,7 @@ export class Worker extends BaseAgent {
 
     const ptyClient = new ClaudeCodePtyClient({
       workspacePath: this.workspacePath,
+      projectId: this.projectId,
       onData: (data) => {
         this._onTerminalData?.(this.id, data);
 
@@ -543,6 +575,15 @@ export class Worker extends BaseAgent {
         error: result.error,
       },
     });
+
+    // Post-execution: audit git remotes for unauthorized modifications
+    if (result.success && this.workspacePath) {
+      const unexpectedRemotes = auditGitRemotes(this.workspacePath);
+      if (unexpectedRemotes.length > 0) {
+        console.warn(`[Worker ${this.id}] SECURITY: Unexpected git remotes detected: ${unexpectedRemotes.join(", ")}`);
+        return `SECURITY WARNING: Unexpected git remotes found in worktree (${unexpectedRemotes.join(", ")}). Task flagged for human review. PR creation blocked.`;
+      }
+    }
 
     if (result.success) {
       const filesChanged = result.diff?.files?.length ?? 0;
