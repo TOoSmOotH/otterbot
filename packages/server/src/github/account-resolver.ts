@@ -18,6 +18,7 @@ export interface ResolvedGitHubAccount {
   sshKeyPath: string | null;
   sshFingerprint: string | null;
   sshKeyType: string | null;
+  sshKeyUsage: string | null;
   isDefault: boolean;
 }
 
@@ -57,6 +58,7 @@ export function resolveGitHubAccount(projectId?: string): ResolvedGitHubAccount 
       sshKeyPath: null,
       sshFingerprint: null,
       sshKeyType: null,
+      sshKeyUsage: null,
       isDefault: true,
     };
   }

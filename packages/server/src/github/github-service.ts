@@ -133,8 +133,11 @@ export function cloneRepo(
   if (branch) validateBranchName(branch);
 
   const token = resolveGitHubToken(projectId) ?? (getConfig("github:token") as string | undefined);
+  // Only use SSH key for cloning if it's configured for auth (not signing-only)
+  const account = resolveGitHubAccount(projectId);
+  const accountUsage = account?.sshKeyUsage ?? "both";
   const sshKeyPath = join(homedir(), ".ssh", "otterbot_github");
-  const sshKeyExists = existsSync(sshKeyPath);
+  const sshKeyExists = existsSync(sshKeyPath) && accountUsage !== "signing";
 
   if (existsSync(targetDir + "/.git")) {
     // Already cloned — fetch and checkout using whatever remote is configured
@@ -963,8 +966,10 @@ export function cloneForForkContribution(
   if (branch) validateBranchName(branch);
 
   const token = resolveGitHubToken(projectId) ?? (getConfig("github:token") as string | undefined);
+  const forkAccount = resolveGitHubAccount(projectId);
+  const forkAccountUsage = forkAccount?.sshKeyUsage ?? "both";
   const sshKeyPath = join(homedir(), ".ssh", "otterbot_github");
-  const sshKeyExists = existsSync(sshKeyPath);
+  const sshKeyExists = existsSync(sshKeyPath) && forkAccountUsage !== "signing";
   const branchArgs = branch ? ["--branch", branch] : [];
 
   // Clone the fork

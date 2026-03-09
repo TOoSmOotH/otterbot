@@ -19,6 +19,8 @@ export interface TestResult {
   testing: boolean;
 }
 
+export type SshKeyUsage = "auth" | "signing" | "both";
+
 export interface GitHubAccountState {
   id: string;
   label: string;
@@ -28,12 +30,13 @@ export interface GitHubAccountState {
   sshKeySet: boolean;
   sshFingerprint: string | null;
   sshKeyType: string | null;
+  sshKeyUsage: SshKeyUsage;
   isDefault: boolean;
   createdAt: string;
   // Local UI state
   testResult?: TestResult & { username?: string };
   sshPublicKey?: string | null;
-  sshTestResult?: TestResult & { username?: string };
+  sshTestResult?: TestResult & { username?: string; signingOnly?: boolean };
 }
 
 export interface ScheduledTaskInfo {
@@ -451,11 +454,12 @@ interface SettingsState {
   deleteGitHubAccount: (id: string) => Promise<{ ok: boolean; error?: string }>;
   setDefaultGitHubAccount: (id: string) => Promise<void>;
   testGitHubAccount: (id: string) => Promise<void>;
-  generateAccountSSHKey: (accountId: string, type?: "ed25519" | "rsa") => Promise<void>;
-  importAccountSSHKey: (accountId: string, privateKey: string) => Promise<void>;
+  generateAccountSSHKey: (accountId: string, type?: "ed25519" | "rsa", usage?: SshKeyUsage) => Promise<void>;
+  importAccountSSHKey: (accountId: string, privateKey: string, usage?: SshKeyUsage) => Promise<void>;
   getAccountSSHPublicKey: (accountId: string) => Promise<void>;
   removeAccountSSHKey: (accountId: string) => Promise<void>;
   testAccountSSHConnection: (accountId: string) => Promise<void>;
+  updateAccountSSHUsage: (accountId: string, usage: SshKeyUsage) => Promise<void>;
 
   // Discord actions
   loadDiscordSettings: () => Promise<void>;
@@ -1941,13 +1945,13 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     }
   },
 
-  generateAccountSSHKey: async (accountId, type) => {
+  generateAccountSSHKey: async (accountId, type, usage) => {
     set({ error: null });
     try {
       const res = await fetch(`/api/settings/github/accounts/${accountId}/ssh/generate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ type: type ?? "ed25519" }),
+        body: JSON.stringify({ type: type ?? "ed25519", usage: usage ?? "both" }),
       });
       const data = await res.json();
       if (!data.ok) {
@@ -1965,13 +1969,13 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     }
   },
 
-  importAccountSSHKey: async (accountId, privateKey) => {
+  importAccountSSHKey: async (accountId, privateKey, usage) => {
     set({ error: null });
     try {
       const res = await fetch(`/api/settings/github/accounts/${accountId}/ssh/import`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ privateKey }),
+        body: JSON.stringify({ privateKey, usage: usage ?? "both" }),
       });
       const data = await res.json();
       if (!data.ok) {
@@ -2040,7 +2044,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       set({
         gitHubAccounts: get().gitHubAccounts.map((a) =>
           a.id === accountId
-            ? { ...a, sshTestResult: { ok: data.ok, error: data.error, username: data.username, testing: false } }
+            ? { ...a, sshTestResult: { ok: data.ok, error: data.error, username: data.username, signingOnly: data.signingOnly, testing: false } }
             : a,
         ),
       });
@@ -2052,6 +2056,29 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
             : a,
         ),
       });
+    }
+  },
+
+  updateAccountSSHUsage: async (accountId, usage) => {
+    set({ error: null });
+    try {
+      const res = await fetch(`/api/settings/github/accounts/${accountId}/ssh/usage`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ usage }),
+      });
+      const data = await res.json();
+      if (!data.ok) {
+        set({ error: data.error ?? "Failed to update key usage" });
+        return;
+      }
+      set({
+        gitHubAccounts: get().gitHubAccounts.map((a) =>
+          a.id === accountId ? { ...a, sshKeyUsage: usage } : a,
+        ),
+      });
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "Unknown error" });
     }
   },
 

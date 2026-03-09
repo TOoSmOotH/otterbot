@@ -453,7 +453,8 @@ async function main() {
     const { getGitHubAccounts } = await import("./github/account-resolver.js");
     const accounts = getGitHubAccounts();
     const defaultAccount = accounts.find(a => a.isDefault) ?? accounts[0];
-    if (defaultAccount?.sshKeyPath && existsSync(defaultAccount.sshKeyPath + ".pub")) {
+    const accountUsage = defaultAccount?.sshKeyUsage ?? "both";
+    if (defaultAccount?.sshKeyPath && existsSync(defaultAccount.sshKeyPath + ".pub") && accountUsage !== "auth") {
       applyAccountSSHConfig(defaultAccount);
     }
   } catch {
@@ -474,7 +475,10 @@ async function main() {
       if (existsSync(join(repoPath, ".git"))) {
         try {
           const account = resolveGitHubAccount(project.id);
-          configureCommitSigning(repoPath, true, account?.sshKeyPath ?? undefined);
+          const projUsage = account?.sshKeyUsage ?? "both";
+          if (projUsage !== "auth") {
+            configureCommitSigning(repoPath, true, account?.sshKeyPath ?? undefined);
+          }
         } catch {
           // Non-fatal per-project
         }
@@ -4202,6 +4206,7 @@ async function main() {
       sshKeySet: !!a.sshKeyPath,
       sshFingerprint: a.sshFingerprint,
       sshKeyType: a.sshKeyType,
+      sshKeyUsage: a.sshKeyUsage ?? "both",
       isDefault: a.isDefault,
       createdAt: a.createdAt,
     }));
@@ -4255,20 +4260,32 @@ async function main() {
 
   app.post<{
     Params: { id: string };
-    Body: { type?: "ed25519" | "rsa"; comment?: string };
+    Body: { type?: "ed25519" | "rsa"; comment?: string; usage?: "auth" | "signing" | "both" };
   }>("/api/settings/github/accounts/:id/ssh/generate", async (req) => {
     return generateAccountSSHKey(req.params.id, req.body);
   });
 
   app.post<{
     Params: { id: string };
-    Body: { privateKey: string };
+    Body: { privateKey: string; usage?: "auth" | "signing" | "both" };
   }>("/api/settings/github/accounts/:id/ssh/import", async (req, reply) => {
     if (!req.body.privateKey) {
       reply.code(400);
       return { error: "privateKey is required" };
     }
-    return importAccountSSHKey(req.params.id, req.body.privateKey);
+    return importAccountSSHKey(req.params.id, req.body.privateKey, req.body.usage);
+  });
+
+  app.put<{
+    Params: { id: string };
+    Body: { usage: "auth" | "signing" | "both" };
+  }>("/api/settings/github/accounts/:id/ssh/usage", async (req, reply) => {
+    const { updateAccountSSHUsage } = await import("./settings/settings.js");
+    if (!req.body.usage || !["auth", "signing", "both"].includes(req.body.usage)) {
+      reply.code(400);
+      return { error: "usage must be 'auth', 'signing', or 'both'" };
+    }
+    return updateAccountSSHUsage(req.params.id, req.body.usage);
   });
 
   app.get<{

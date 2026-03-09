@@ -130,6 +130,7 @@ export const githubAccounts = sqliteTable("github_accounts", {
   sshKeyPath: text("ssh_key_path"),
   sshFingerprint: text("ssh_fingerprint"),
   sshKeyType: text("ssh_key_type"),
+  sshKeyUsage: text("ssh_key_usage").default("both"),
   isDefault: integer("is_default", { mode: "boolean" }).notNull().default(false),
   createdAt: text("created_at")
     .notNull()

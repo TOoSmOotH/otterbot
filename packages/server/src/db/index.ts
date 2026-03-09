@@ -751,6 +751,13 @@ export async function migrateDb() {
     // Column already exists — ignore
   }
 
+  // Idempotent migration: add ssh_key_usage to github_accounts
+  try {
+    db.run(sql`ALTER TABLE github_accounts ADD COLUMN ssh_key_usage TEXT DEFAULT 'both'`);
+  } catch {
+    // Column already exists — ignore
+  }
+
   // One-time migration: move provider credentials from config KV to providers table
   await migrateProviders(db);
 

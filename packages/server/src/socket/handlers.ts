@@ -908,6 +908,11 @@ export function setupSocketHandlers(
           return;
         }
 
+        if (data.enabled && account?.sshKeyUsage === "auth") {
+          callback?.({ ok: false, error: "SSH key is configured for authentication only. Update key purpose to 'Signing' or 'Both' in Settings → GitHub." });
+          return;
+        }
+
         db.update(schema.projects)
           .set({ signCommits: data.enabled })
           .where(eq(schema.projects.id, data.projectId))
