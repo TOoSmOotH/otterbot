@@ -1867,8 +1867,11 @@ export interface GitHubSettingsResponse {
 }
 
 export function getGitHubSettings(): GitHubSettingsResponse {
+  // Derive enabled from legacy config OR from having any accounts in the DB
+  const legacyEnabled = getConfig("github:enabled") === "true";
+  const hasAccounts = getGitHubAccounts().length > 0;
   return {
-    enabled: getConfig("github:enabled") === "true",
+    enabled: legacyEnabled || hasAccounts,
     tokenSet: !!getConfig("github:token"),
     username: getConfig("github:username") ?? null,
     sshKeySet: existsSync(join(homedir(), ".ssh", "otterbot_github")),
