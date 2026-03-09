@@ -157,6 +157,7 @@ import {
   createCustomModel,
   deleteCustomModel,
   applyGitSSHConfig,
+  applyAccountSSHConfig,
   getClaudeCodeOAuthUsage,
   getAgentModelOverrides,
   setAgentModelOverride,
@@ -445,6 +446,42 @@ async function main() {
     }
   } catch {
     // Non-fatal — SSH signing is optional
+  }
+
+  // Re-apply SSH signing config for per-account keys (not just legacy)
+  try {
+    const { getGitHubAccounts } = await import("./github/account-resolver.js");
+    const accounts = getGitHubAccounts();
+    const defaultAccount = accounts.find(a => a.isDefault) ?? accounts[0];
+    if (defaultAccount?.sshKeyPath && existsSync(defaultAccount.sshKeyPath + ".pub")) {
+      applyAccountSSHConfig(defaultAccount);
+    }
+  } catch {
+    // Non-fatal — account SSH signing is optional
+  }
+
+  // Re-apply per-project signing config for cloned repos
+  try {
+    const { resolveGitHubAccount } = await import("./github/account-resolver.js");
+    const { configureCommitSigning } = await import("./utils/git.js");
+    const db = getDb();
+    const signingProjects = db.select().from(schema.projects).all().filter(p => p.signCommits);
+    for (const project of signingProjects) {
+      const repoPath = join(
+        process.env.WORKSPACE_ROOT ?? resolve(__dirname, "../../../docker/otterbot"),
+        "projects", project.id, "repo",
+      );
+      if (existsSync(join(repoPath, ".git"))) {
+        try {
+          const account = resolveGitHubAccount(project.id);
+          configureCommitSigning(repoPath, true, account?.sshKeyPath ?? undefined);
+        } catch {
+          // Non-fatal per-project
+        }
+      }
+    }
+  } catch {
+    // Non-fatal — project signing is optional
   }
 
   // Bootstrap passphrase from environment (one-time setup)

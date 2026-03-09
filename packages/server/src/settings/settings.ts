@@ -2159,6 +2159,34 @@ export function applyGitSSHConfig(): void {
   configureGitSSH();
 }
 
+/**
+ * Apply global SSH signing config using a specific account's SSH key.
+ * Sets gpg.format, user.signingkey, commit.gpgsign, tag.gpgsign globally
+ * and writes the allowed_signers file.
+ */
+export function applyAccountSSHConfig(account: { sshKeyPath: string | null }): void {
+  if (!account.sshKeyPath) return;
+  const pubKeyPath = account.sshKeyPath + ".pub";
+  if (!existsSync(pubKeyPath)) return;
+
+  // Write allowed signers file
+  const allowedSignersPath = join(sshDir(), "allowed_signers");
+  const pubKeyContent = readFileSync(pubKeyPath, "utf-8").trim();
+  writeFileSync(allowedSignersPath, `* ${pubKeyContent}\n`, { mode: 0o644 });
+
+  // Set global git signing config
+  const gitCmds: string[][] = [
+    ["config", "--global", "gpg.format", "ssh"],
+    ["config", "--global", "user.signingkey", pubKeyPath],
+    ["config", "--global", "commit.gpgsign", "true"],
+    ["config", "--global", "tag.gpgsign", "true"],
+    ["config", "--global", "gpg.ssh.allowedSignersFile", allowedSignersPath],
+  ];
+  for (const args of gitCmds) {
+    execFileSync("git", args, { stdio: "pipe" });
+  }
+}
+
 export function testSSHConnection(): { ok: boolean; username?: string; error?: string } {
   return testSSHConnectionForKey(sshKeyPath());
 }

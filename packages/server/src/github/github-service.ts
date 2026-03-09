@@ -6,6 +6,7 @@ import { eq } from "drizzle-orm";
 import { getConfig } from "../auth/auth.js";
 import { getDb, schema } from "../db/index.js";
 import { resolveGitHubAccount, resolveGitHubToken, resolveGitHubUsername } from "./account-resolver.js";
+import { configureCommitSigning } from "../utils/git.js";
 
 // Input validation patterns
 const REPO_NAME_RE = /^[a-zA-Z0-9._-]+\/[a-zA-Z0-9._-]+$/;
@@ -80,6 +81,24 @@ function validateRepoName(name: string): void {
 function validateBranchName(name: string): void {
   if (!BRANCH_NAME_RE.test(name)) {
     throw new Error(`Invalid branch name: ${name}`);
+  }
+}
+
+/**
+ * If the project has signCommits enabled, re-apply local signing config.
+ * Called after clone/re-clone so signing survives fresh .git/config.
+ */
+function applySigningIfEnabled(targetDir: string, projectId?: string): void {
+  if (!projectId) return;
+  try {
+    const db = getDb();
+    const project = db.select().from(schema.projects).where(eq(schema.projects.id, projectId)).get();
+    if (project?.signCommits) {
+      const account = resolveGitHubAccount(projectId);
+      configureCommitSigning(targetDir, true, account?.sshKeyPath ?? undefined);
+    }
+  } catch {
+    // Non-fatal — signing is optional
   }
 }
 
@@ -169,6 +188,7 @@ export function cloneRepo(
         },
       );
       configureGitUser(targetDir, projectId);
+      applySigningIfEnabled(targetDir, projectId);
       return;
     } catch (err) {
       httpsErr = err;
@@ -185,6 +205,7 @@ export function cloneRepo(
       env: { ...process.env },
     });
     configureGitUser(targetDir, projectId);
+    applySigningIfEnabled(targetDir, projectId);
     return;
   }
 
