@@ -13,10 +13,12 @@ const statusColors: Record<ProjectStatus, string> = {
 export function ProjectList({
   projects,
   onEnterProject,
+  onProjectCreated,
   cooName,
 }: {
   projects: Project[];
   onEnterProject: (projectId: string) => void;
+  onProjectCreated?: (projectId: string) => void;
   cooName?: string;
 }) {
   const [showForm, setShowForm] = useState(false);
@@ -142,6 +144,7 @@ export function ProjectList({
       <CreateProjectDialog
         open={showGitHubDialog}
         onClose={() => setShowGitHubDialog(false)}
+        onCreated={onProjectCreated}
       />
     </div>
   );
