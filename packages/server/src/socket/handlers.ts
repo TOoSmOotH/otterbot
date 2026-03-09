@@ -15,11 +15,13 @@ import { getDb, schema } from "../db/index.js";
 import { isTTSEnabled, getConfiguredTTSProvider, stripMarkdown } from "../tts/tts.js";
 import { getConfig, setConfig, deleteConfig } from "../auth/auth.js";
 import { resolveGitHubAccount, resolveGitHubToken, resolveGitHubUsername } from "../github/account-resolver.js";
+import { resolveGiteaUsername } from "../gitea/account-resolver.js";
 import { SoulService } from "../memory/soul-service.js";
 import { MemoryService } from "../memory/memory-service.js";
 import { SoulAdvisor } from "../memory/soul-advisor.js";
 import type { WorkspaceManager } from "../workspace/workspace.js";
 import type { GitHubIssueMonitor } from "../github/issue-monitor.js";
+import type { GiteaIssueMonitor } from "../gitea/issue-monitor.js";
 import type { MergeQueue } from "../merge-queue/merge-queue.js";
 import type { WorldLayoutManager } from "../models3d/world-layout.js";
 import {
@@ -98,7 +100,7 @@ export function setupSocketHandlers(
   coo: COO,
   registry: Registry,
   hooks?: SocketHooks,
-  deps?: { workspace?: WorkspaceManager; issueMonitor?: GitHubIssueMonitor; mergeQueue?: MergeQueue; worldLayout?: WorldLayoutManager },
+  deps?: { workspace?: WorkspaceManager; issueMonitor?: GitHubIssueMonitor; giteaIssueMonitor?: GiteaIssueMonitor; mergeQueue?: MergeQueue; worldLayout?: WorldLayoutManager },
 ) {
   // Track conversation IDs used by background tasks so we can suppress
   // the COO's response in that same conversation.
@@ -862,6 +864,68 @@ export function setupSocketHandlers(
         callback?.({ ok: true });
       } catch (err) {
         callback?.({ ok: false, error: err instanceof Error ? err.message : "Failed to set GitHub account" });
+      }
+    });
+
+    // Toggle Gitea issue monitoring for a project
+    socket.on("project:set-gitea-issue-monitor", (data, callback) => {
+      try {
+        const db = getDb();
+        const project = db
+          .select()
+          .from(schema.projects)
+          .where(eq(schema.projects.id, data.projectId))
+          .get();
+        if (!project) {
+          callback?.({ ok: false, error: "Project not found" });
+          return;
+        }
+        if (!project.giteaRepo) {
+          callback?.({ ok: false, error: "No Gitea repo configured for this project" });
+          return;
+        }
+        db.update(schema.projects)
+          .set({ giteaIssueMonitor: data.enabled })
+          .where(eq(schema.projects.id, data.projectId))
+          .run();
+
+        if (deps?.giteaIssueMonitor) {
+          if (data.enabled) {
+            const username = resolveGiteaUsername(data.projectId);
+            if (username) {
+              deps.giteaIssueMonitor.watchProject(data.projectId, project.giteaRepo, username);
+            }
+          } else {
+            deps.giteaIssueMonitor.unwatchProject(data.projectId);
+          }
+        }
+
+        const updated = db
+          .select()
+          .from(schema.projects)
+          .where(eq(schema.projects.id, data.projectId))
+          .get();
+        if (updated) {
+          io.emit("project:updated", updated as any);
+        }
+
+        callback?.({ ok: true });
+      } catch (err) {
+        callback?.({ ok: false, error: err instanceof Error ? err.message : "Failed to update Gitea issue monitor setting" });
+      }
+    });
+
+    // Set Gitea account for a project
+    socket.on("project:set-gitea-account", (data, callback) => {
+      try {
+        const db = getDb();
+        db.update(schema.projects)
+          .set({ giteaAccountId: data.accountId })
+          .where(eq(schema.projects.id, data.projectId))
+          .run();
+        callback?.({ ok: true });
+      } catch (err) {
+        callback?.({ ok: false, error: err instanceof Error ? err.message : "Failed to set Gitea account" });
       }
     });
 

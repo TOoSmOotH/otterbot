@@ -112,6 +112,10 @@ export const projects = sqliteTable("projects", {
   signCommits: integer("sign_commits", { mode: "boolean" }).notNull().default(false),
   show3d: integer("show_3d", { mode: "boolean" }).notNull().default(true),
   githubAccountId: text("github_account_id"),
+  giteaRepo: text("gitea_repo"),
+  giteaBranch: text("gitea_branch"),
+  giteaIssueMonitor: integer("gitea_issue_monitor", { mode: "boolean" }).notNull().default(false),
+  giteaAccountId: text("gitea_account_id"),
   rules: text("rules", { mode: "json" })
     .$type<string[]>()
     .notNull()
@@ -131,6 +135,22 @@ export const githubAccounts = sqliteTable("github_accounts", {
   sshFingerprint: text("ssh_fingerprint"),
   sshKeyType: text("ssh_key_type"),
   sshKeyUsage: text("ssh_key_usage").default("both"),
+  isDefault: integer("is_default", { mode: "boolean" }).notNull().default(false),
+  createdAt: text("created_at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+  updatedAt: text("updated_at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+});
+
+export const giteaAccounts = sqliteTable("gitea_accounts", {
+  id: text("id").primaryKey(),
+  label: text("label").notNull(),
+  token: text("token").notNull(),
+  username: text("username"),
+  email: text("email"),
+  instanceUrl: text("instance_url").notNull(),
   isDefault: integer("is_default", { mode: "boolean" }).notNull().default(false),
   createdAt: text("created_at")
     .notNull()

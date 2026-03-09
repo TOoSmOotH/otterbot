@@ -64,7 +64,22 @@ export interface Project {
   signCommits: boolean;
   show3d: boolean;
   githubAccountId: string | null;
+  giteaRepo: string | null;
+  giteaBranch: string | null;
+  giteaIssueMonitor: boolean;
+  giteaAccountId: string | null;
   rules: string[];
+  createdAt: string;
+}
+
+export interface GiteaAccount {
+  id: string;
+  label: string;
+  tokenSet: boolean;
+  username: string | null;
+  email: string | null;
+  instanceUrl: string;
+  isDefault: boolean;
   createdAt: string;
 }
 
