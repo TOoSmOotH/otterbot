@@ -2208,15 +2208,16 @@ function testSSHConnectionForKey(keyPath: string): { ok: boolean; username?: str
     const match = result.match(/Hi (\S+)!/);
     return { ok: true, username: match?.[1] };
   } catch (error: unknown) {
-    // ssh -T returns exit code 1 on successful auth
-    const stderr = (error as { stdout?: string })?.stdout ?? String(error);
-    const match = stderr.match(/Hi (\S+)!/);
+    // ssh -T returns exit code 1 on successful auth — "Hi username!" is on stderr
+    const errObj = error as { stderr?: string; stdout?: string };
+    const output = errObj.stderr || errObj.stdout || String(error);
+    const match = output.match(/Hi (\S+)!/);
     if (match) {
       return { ok: true, username: match[1] };
     }
     return {
       ok: false,
-      error: stderr.slice(0, 200) || "SSH connection failed",
+      error: output.slice(0, 200) || "SSH connection failed",
     };
   }
 }
