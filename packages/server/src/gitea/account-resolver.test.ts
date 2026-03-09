@@ -203,4 +203,52 @@ describe("gitea/account-resolver", () => {
     expect(getGiteaAccountById("g-1")?.isDefault).toBe(false);
     expect(getGiteaAccountById("g-2")?.isDefault).toBe(true);
   });
+
+  it("rejects account creation with non-http(s) instance URL", () => {
+    expect(() =>
+      createGiteaAccount({
+        id: "bad-1",
+        label: "Bad",
+        token: "pat",
+        instanceUrl: "--upload-pack=evil",
+      }),
+    ).toThrow(/must start with http:\/\/ or https:\/\//);
+  });
+
+  it("rejects account creation with empty token", () => {
+    expect(() =>
+      createGiteaAccount({
+        id: "bad-2",
+        label: "Bad",
+        token: "  ",
+        instanceUrl: "https://git.example.com",
+      }),
+    ).toThrow(/token must not be empty/);
+  });
+
+  it("rejects account update with non-http(s) instance URL", () => {
+    createGiteaAccount({
+      id: "g-valid",
+      label: "Valid",
+      token: "pat",
+      instanceUrl: "https://git.example.com",
+    });
+
+    expect(() =>
+      updateGiteaAccount("g-valid", { instanceUrl: "ftp://evil.com" }),
+    ).toThrow(/must start with http:\/\/ or https:\/\//);
+  });
+
+  it("rejects account update with empty token", () => {
+    createGiteaAccount({
+      id: "g-valid2",
+      label: "Valid",
+      token: "pat",
+      instanceUrl: "https://git.example.com",
+    });
+
+    expect(() =>
+      updateGiteaAccount("g-valid2", { token: "" }),
+    ).toThrow(/token must not be empty/);
+  });
 });

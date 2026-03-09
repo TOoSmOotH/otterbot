@@ -106,6 +106,7 @@ describe("gitea-service", () => {
     expect(cloneArgs).toContain("clone");
     expect(cloneArgs).toContain("--branch");
     expect(cloneArgs).toContain("main");
+    expect(cloneArgs).toContain("--");
     expect(cloneArgs).toContain("https://git.example.com/owner/repo.git");
 
     const allArgArrays = mockExecFileSync.mock.calls.map((c: any[]) => c[1] as string[]);
@@ -133,6 +134,16 @@ describe("gitea-service", () => {
     const targetDir = join(tmpDir, "missing-auth");
     expect(() => cloneRepo("owner/repo", targetDir)).toThrow(
       /no Gitea token or instance URL configured/,
+    );
+  });
+
+  it("rejects instance URLs that do not start with http(s)://", () => {
+    const targetDir = join(tmpDir, "bad-url");
+    configStore.set("gitea:token", "pat");
+    configStore.set("gitea:instance_url", "--upload-pack=evil");
+
+    expect(() => cloneRepo("owner/repo", targetDir)).toThrow(
+      /must start with http:\/\/ or https:\/\//,
     );
   });
 

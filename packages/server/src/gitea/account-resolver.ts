@@ -82,6 +82,22 @@ export function resolveGiteaInstanceUrl(projectId?: string): string | undefined 
 }
 
 // ---------------------------------------------------------------------------
+// Validation
+// ---------------------------------------------------------------------------
+
+function validateInstanceUrl(url: string): void {
+  if (!/^https?:\/\//i.test(url)) {
+    throw new Error("Invalid Gitea instance URL: must start with http:// or https://");
+  }
+}
+
+function validateToken(token: string): void {
+  if (!token || token.trim().length === 0) {
+    throw new Error("Gitea token must not be empty");
+  }
+}
+
+// ---------------------------------------------------------------------------
 // CRUD
 // ---------------------------------------------------------------------------
 
@@ -106,6 +122,9 @@ export function createGiteaAccount(data: {
   email?: string;
   isDefault?: boolean;
 }): typeof schema.giteaAccounts.$inferSelect {
+  validateToken(data.token);
+  validateInstanceUrl(data.instanceUrl);
+
   const db = getDb();
   const now = new Date().toISOString();
 
@@ -138,6 +157,9 @@ export function updateGiteaAccount(
   id: string,
   data: { label?: string; token?: string; instanceUrl?: string; email?: string; username?: string },
 ): void {
+  if (data.token !== undefined) validateToken(data.token);
+  if (data.instanceUrl !== undefined) validateInstanceUrl(data.instanceUrl);
+
   const db = getDb();
   const updates: Record<string, unknown> = { updatedAt: new Date().toISOString() };
   if (data.label !== undefined) updates.label = data.label;

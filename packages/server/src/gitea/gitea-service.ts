@@ -80,21 +80,21 @@ function validateBranchName(name: string): void {
 }
 
 /**
- * Normalize a Gitea instance URL: strip trailing slashes.
+ * Validate that a URL starts with http:// or https:// to prevent
+ * option injection when the URL is passed to git commands.
  */
-function normalizeUrl(url: string): string {
-  return url.replace(/\/+$/, "");
+function validateInstanceUrl(url: string): void {
+  if (!/^https?:\/\//i.test(url)) {
+    throw new Error(`Invalid Gitea instance URL: must start with http:// or https://`);
+  }
 }
 
 /**
- * Extract the hostname from a Gitea instance URL for SSH operations.
+ * Normalize a Gitea instance URL: validate scheme and strip trailing slashes.
  */
-function hostnameFromUrl(url: string): string {
-  try {
-    return new URL(url).hostname;
-  } catch {
-    return url.replace(/^https?:\/\//, "").split("/")[0].split(":")[0];
-  }
+function normalizeUrl(url: string): string {
+  validateInstanceUrl(url);
+  return url.replace(/\/+$/, "");
 }
 
 /**
@@ -172,7 +172,7 @@ export function cloneRepo(
 
   execFileSync(
     "git",
-    ["clone", ...gitCredentialArgs(), ...branchArgs, httpsUrl, targetDir],
+    ["clone", ...gitCredentialArgs(), ...branchArgs, "--", httpsUrl, targetDir],
     {
       stdio: "pipe",
       timeout: 300_000,
@@ -913,7 +913,7 @@ export function cloneForForkContribution(
 
   execFileSync(
     "git",
-    ["clone", ...gitCredentialArgs(), ...branchArgs, forkUrl, targetDir],
+    ["clone", ...gitCredentialArgs(), ...branchArgs, "--", forkUrl, targetDir],
     {
       stdio: "pipe",
       timeout: 300_000,
