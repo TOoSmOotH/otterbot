@@ -19,6 +19,7 @@ vi.mock("../../github/github-service.js", () => ({
   fetchCompareCommitsDiff: vi.fn().mockResolvedValue([]),
   fetchPullRequests: vi.fn().mockResolvedValue([]),
   fetchIssueComments: vi.fn().mockResolvedValue([]),
+  fetchRepoTree: vi.fn().mockResolvedValue(["src/index.ts", "package.json"]),
   resolveProjectBranch: vi.fn(() => "main"),
 }));
 

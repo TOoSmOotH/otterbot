@@ -21,6 +21,7 @@ import {
   fetchCompareCommitsDiff,
   fetchPullRequests,
   fetchIssueComments,
+  fetchRepoTree,
   checkHasPushAccess,
   createFork,
   waitForFork,
@@ -383,6 +384,19 @@ export class PipelineManager {
     const entry = registry.get(agentId) ?? registry.get("builtin-triage");
     if (!entry) return;
 
+    // Fetch the repository file tree to give the triage agent source code context
+    let fileTreeSection = "";
+    try {
+      const files = await fetchRepoTree(repo, token);
+      fileTreeSection =
+        `\n<repository-file-tree>\n` +
+        files.join("\n") +
+        `\n</repository-file-tree>`;
+    } catch (err) {
+      console.warn(`[PipelineManager] Failed to fetch repo tree for triage of #${issue.number}:`, err);
+      fileTreeSection = "\n<repository-file-tree>\n(unavailable)\n</repository-file-tree>";
+    }
+
     // Build prompt — wrap in XML delimiters to isolate untrusted content
     const issueText =
       `<github-issue>\n` +
@@ -390,7 +404,8 @@ export class PipelineManager {
       `${issue.body ?? "(no description)"}\n\n` +
       `Labels: ${issue.labels.map((l) => l.name).join(", ") || "none"}\n` +
       `Assignees: ${issue.assignees.map((a) => a.login).join(", ") || "none"}\n` +
-      `</github-issue>`;
+      `</github-issue>` +
+      fileTreeSection;
 
     try {
       const model = resolveModel({
@@ -453,6 +468,21 @@ export class PipelineManager {
         } catch (err) {
           console.error(`[PipelineManager] Failed to apply labels to #${issue.number}:`, err);
         }
+      }
+
+      // Post the triage analysis as a comment on the issue for review
+      try {
+        const heading = parsed.shouldProceed
+          ? `Triage: ${parsed.classification}`
+          : `Triage: ${parsed.classification}`;
+        await createIssueComment(
+          repo,
+          token,
+          issue.number,
+          formatBotComment(heading, parsed.comment),
+        );
+      } catch (err) {
+        console.error(`[PipelineManager] Failed to post triage comment on #${issue.number}:`, err);
       }
 
       // Apply "triaged" label so we don't re-process

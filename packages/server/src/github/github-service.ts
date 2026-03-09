@@ -246,6 +246,41 @@ export async function getRepoDefaultBranch(
 }
 
 /**
+ * Fetch the repository file tree (recursive) from the GitHub API.
+ * Returns a flat list of file paths, truncated to `maxEntries` to keep prompt size manageable.
+ */
+export async function fetchRepoTree(
+  repoFullName: string,
+  token: string,
+  branch?: string,
+  maxEntries = 500,
+): Promise<string[]> {
+  const ref = branch ?? await getRepoDefaultBranch(repoFullName, token);
+  const res = await fetch(
+    `https://api.github.com/repos/${repoFullName}/git/trees/${ref}?recursive=1`,
+    {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+      },
+    },
+  );
+  if (!res.ok) {
+    throw new Error(`GitHub API error ${res.status}: ${await res.text()}`);
+  }
+  const data = (await res.json()) as {
+    tree: Array<{ path: string; type: string }>;
+    truncated: boolean;
+  };
+  // Only return blobs (files), not trees (directories)
+  const files = data.tree
+    .filter((entry) => entry.type === "blob")
+    .map((entry) => entry.path);
+  return files.slice(0, maxEntries);
+}
+
+/**
  * Fetch open issues assigned to a user, optionally filtering by `since`.
  */
 export async function fetchAssignedIssues(
