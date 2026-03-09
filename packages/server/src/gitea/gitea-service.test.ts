@@ -54,6 +54,9 @@ import {
   fetchIssues,
   fetchAssignedIssues,
   fetchCompareCommitsDiff,
+  fetchAllOpenIssueNumbers,
+  fetchCommitStatusesForRef,
+  mergePullRequest,
   aggregateCommitStatus,
   resolveProjectBranch,
 } from "./gitea-service.js";
@@ -382,6 +385,72 @@ describe("gitea-service", () => {
       "https://git.example.com/api/v1/repos/owner/repo/compare/main...feature%2Fnew-ui",
       expect.objectContaining({
         headers: expect.objectContaining({ Authorization: "token pat" }),
+      }),
+    );
+  });
+
+  it("paginates when fetching all open issue numbers", async () => {
+    const mockFetch = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(Array.from({ length: 50 }, (_, i) => ({ number: i + 1 }))),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve([{ number: 51 }, { number: 52 }]),
+      });
+    vi.stubGlobal("fetch", mockFetch);
+
+    const numbers = await fetchAllOpenIssueNumbers("owner/repo", "pat", "https://git.example.com");
+
+    expect(numbers).toEqual(new Set(Array.from({ length: 52 }, (_, i) => i + 1)));
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+    expect(String(mockFetch.mock.calls[0][0])).toContain("page=1");
+    expect(String(mockFetch.mock.calls[1][0])).toContain("page=2");
+  });
+
+  it("normalizes null commit-status payloads to an empty list", async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ statuses: null }),
+    });
+    vi.stubGlobal("fetch", mockFetch);
+
+    const statuses = await fetchCommitStatusesForRef(
+      "owner/repo",
+      "pat",
+      "feature/branch",
+      "https://git.example.com/",
+    );
+
+    expect(statuses).toEqual([]);
+    expect(String(mockFetch.mock.calls[0][0])).toContain("feature%2Fbranch");
+  });
+
+  it("sends title and body as separate merge fields", async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({}),
+    });
+    vi.stubGlobal("fetch", mockFetch);
+
+    await mergePullRequest(
+      "owner/repo",
+      "pat",
+      42,
+      "https://git.example.com",
+      "squash",
+      "PR title",
+      "PR body",
+    );
+
+    const init = mockFetch.mock.calls[0][1] as RequestInit;
+    const payload = JSON.parse(String(init.body));
+    expect(payload).toEqual(
+      expect.objectContaining({
+        Do: "squash",
+        merge_title_field: "PR title",
+        merge_message_field: "PR body",
       }),
     );
   });
