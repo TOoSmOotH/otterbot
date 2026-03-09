@@ -512,12 +512,15 @@ export class PipelineManager {
     projectId: string,
     issueNumber: number | null,
     repo: string | null,
-  ): Promise<void> {
+    options?: { skipFallback?: boolean },
+  ): Promise<boolean> {
     const config = this.getConfig(projectId);
     if (!config?.enabled) {
       // Fallback: send existing direct directive to TeamLead
-      this.sendFallbackDirective(taskId, projectId);
-      return;
+      if (!options?.skipFallback) {
+        this.sendFallbackDirective(taskId, projectId);
+      }
+      return false;
     }
 
     // Build ordered list of enabled implementation stages
@@ -532,8 +535,10 @@ export class PipelineManager {
 
     if (enabledStages.length === 0) {
       // No stages enabled — fall back
-      this.sendFallbackDirective(taskId, projectId);
-      return;
+      if (!options?.skipFallback) {
+        this.sendFallbackDirective(taskId, projectId);
+      }
+      return false;
     }
 
     // Initialize pipeline state
@@ -614,6 +619,7 @@ export class PipelineManager {
 
     // Send directive for the first stage
     await this.sendStageDirective(state);
+    return true;
   }
 
   /**

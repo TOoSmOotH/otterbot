@@ -1560,6 +1560,40 @@ export class TeamLead extends BaseAgent {
         }
       }
 
+      // Route coding workers through pipeline when enabled
+      if (
+        !options?.pipelineOverride &&
+        taskId &&
+        CODING_AGENT_IDS.has(registryEntryId) &&
+        this.projectId &&
+        this._pipelineManager?.isEnabled(this.projectId) &&
+        !this._pipelineManager.isPipelineTask(taskId)
+      ) {
+        const repo = getConfig(`project:${this.projectId}:github:repo`) ?? null;
+        const pipelineDb = getDb();
+        const kanbanTask = pipelineDb
+          .select()
+          .from(schema.kanbanTasks)
+          .where(eq(schema.kanbanTasks.id, taskId))
+          .get();
+        const labels = Array.isArray(kanbanTask?.labels) ? kanbanTask.labels as string[] : [];
+        const issueLabel = labels.find((l: string) => l.startsWith("github-issue-"));
+        const issueNumber = issueLabel
+          ? parseInt(issueLabel.replace("github-issue-", ""), 10)
+          : null;
+
+        console.log(
+          `[TeamLead ${this.id}] Routing task ${taskId} through pipeline (repo=${repo}, issue=${issueNumber})`,
+        );
+        const routed = await this._pipelineManager.startImplementation(
+          taskId, this.projectId, issueNumber, repo, { skipFallback: true },
+        );
+        if (routed) {
+          return `Routed task ${taskId} through pipeline. The pipeline will orchestrate coding, security review, testing, and code review stages.`;
+        }
+        console.log(`[TeamLead ${this.id}] Pipeline declined task ${taskId} — spawning worker directly`);
+      }
+
       // Enforce max concurrent coding workers
       if (CODING_AGENT_IDS.has(registryEntryId)) {
         const maxCoders = parseInt(getConfig("max_coding_workers") ?? "2", 10) || 2;
