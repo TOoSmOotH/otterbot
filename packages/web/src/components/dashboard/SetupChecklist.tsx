@@ -23,8 +23,8 @@ const ITEMS: ChecklistItem[] = [
   {
     id: "google",
     label: "Connect Google",
-    description: "Link your Google account for email & calendar",
-    settingsTarget: "google",
+    description: "Set up email sending and receiving via IMAP/SMTP",
+    settingsTarget: "email",
   },
   {
     id: "github",
