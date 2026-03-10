@@ -63,17 +63,26 @@ export class GiteaIssueMonitor {
       .where(eq(schema.projects.status, "active"))
       .all();
 
-    for (const project of projects) {
-      if (project.giteaRepo && project.giteaIssueMonitor) {
-        const assignee = resolveGiteaUsername(project.id);
-        if (!assignee) continue;
-        this.watchProject(project.id, project.giteaRepo, assignee);
+    const eligible = projects.filter((p) => p.giteaRepo && p.giteaIssueMonitor);
+    console.log(`[GiteaIssueMonitor] Found ${eligible.length} active project(s) with Gitea issue monitoring enabled`);
+
+    for (const project of eligible) {
+      const assignee = resolveGiteaUsername(project.id);
+      if (!assignee) {
+        console.warn(`[GiteaIssueMonitor] Skipping project "${project.name}" (${project.id}) — no Gitea username resolved`);
+        continue;
       }
+      this.watchProject(project.id, project.giteaRepo!, assignee);
     }
+
+    console.log(`[GiteaIssueMonitor] Now watching ${this.watched.size} project(s)`);
   }
 
   start(pollIntervalMs = 300_000): void {
-    if (this.intervalId) return;
+    if (this.intervalId) {
+      console.log("[GiteaIssueMonitor] start() called but polling is already active — ignoring");
+      return;
+    }
     this.intervalId = setInterval(() => {
       this.poll().catch((err) => {
         console.error("[GiteaIssueMonitor] Poll error:", err);
@@ -90,10 +99,18 @@ export class GiteaIssueMonitor {
   }
 
   private async poll(): Promise<void> {
+    if (this.watched.size === 0) {
+      console.log("[GiteaIssueMonitor] Poll skipped — no projects being watched");
+      return;
+    }
+
     for (const [projectId, watched] of this.watched) {
       const token = resolveGiteaToken(projectId);
       const instanceUrl = resolveGiteaInstanceUrl(projectId);
-      if (!token || !instanceUrl) continue;
+      if (!token || !instanceUrl) {
+        console.warn(`[GiteaIssueMonitor] Skipping project ${projectId} (${watched.repo}) — no Gitea token or instance URL resolved`);
+        continue;
+      }
 
       try {
         await this.pollForTriage(projectId, watched, token, instanceUrl);
@@ -413,8 +430,9 @@ export class GiteaIssueMonitor {
         (t) => (t.labels as string[]).includes(label) && t.column === "triage",
       );
 
+      // Allow re-assigned issues whose previous task is in "done" to create a new task
       const alreadyInProgress = existingTasks.some(
-        (t) => (t.labels as string[]).includes(label) && t.column !== "triage",
+        (t) => (t.labels as string[]).includes(label) && t.column !== "triage" && t.column !== "done",
       );
       if (alreadyInProgress) continue;
 

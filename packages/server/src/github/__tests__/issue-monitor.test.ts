@@ -960,4 +960,145 @@ describe("triage collaborator check", () => {
     expect(mockFetchOpenIssues).not.toHaveBeenCalled();
   });
 });
+
+describe("diagnostic logging", () => {
+  it("warns when loadFromDb skips a project due to missing username", () => {
+    const db = getDb();
+    const warnSpy = vi.spyOn(console, "warn");
+
+    db.insert(schema.projects)
+      .values({
+        id: "proj-no-user-log",
+        name: "No User Log",
+        description: "test",
+        status: "active",
+        githubRepo: "owner/repo",
+        githubBranch: "main",
+        githubIssueMonitor: true,
+        rules: [],
+        createdAt: new Date().toISOString(),
+      })
+      .run();
+
+    // No github:username configured
+    monitor.loadFromDb();
+
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('Skipping project "No User Log"'),
+    );
+    warnSpy.mockRestore();
+  });
+
+  it("logs when poll() finds no watched projects", async () => {
+    const logSpy = vi.spyOn(console, "log");
+
+    await (monitor as any).poll();
+
+    expect(logSpy).toHaveBeenCalledWith(
+      expect.stringContaining("no projects being watched"),
+    );
+    logSpy.mockRestore();
+  });
+
+  it("warns when poll() skips a project due to missing token", async () => {
+    const warnSpy = vi.spyOn(console, "warn");
+
+    monitor.watchProject("proj-no-tok", "owner/repo", "testuser");
+    // No github:token configured
+
+    await (monitor as any).poll();
+
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("no GitHub token resolved"),
+    );
+    warnSpy.mockRestore();
+  });
+
+  it("logs when start() is called while already running", () => {
+    vi.useFakeTimers();
+    const logSpy = vi.spyOn(console, "log");
+
+    monitor.start(10_000);
+    logSpy.mockClear();
+    monitor.start(10_000);
+
+    expect(logSpy).toHaveBeenCalledWith(
+      expect.stringContaining("already active"),
+    );
+
+    monitor.stop();
+    vi.useRealTimers();
+    logSpy.mockRestore();
+  });
+});
+
+describe("done column fix", () => {
+  it("creates a new task when re-assigned issue has a completed (done) task", async () => {
+    const db = getDb();
+
+    db.insert(schema.projects)
+      .values({
+        id: "proj-reopen",
+        name: "Reopen Project",
+        description: "test",
+        status: "active",
+        githubRepo: "owner/repo",
+        githubBranch: "main",
+        githubIssueMonitor: true,
+        rules: [],
+        createdAt: new Date().toISOString(),
+      })
+      .run();
+
+    // Pre-existing completed task for issue #30
+    db.insert(schema.kanbanTasks)
+      .values({
+        id: "done-task-30",
+        projectId: "proj-reopen",
+        title: "#30: Previously completed",
+        description: "",
+        column: "done",
+        position: 0,
+        labels: ["github-issue-30"],
+        blockedBy: [],
+        retryCount: 0,
+        completionReport: "Done previously",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      })
+      .run();
+
+    monitor.watchProject("proj-reopen", "owner/repo", "testuser");
+    configStore.set("github:token", "ghp_test");
+
+    mockFetchAssignedIssues.mockResolvedValue([
+      {
+        number: 30,
+        title: "Re-assigned issue",
+        body: "This issue was re-opened and re-assigned",
+        labels: [],
+        assignees: [{ login: "testuser" }],
+        state: "open",
+        html_url: "https://github.com/owner/repo/issues/30",
+        created_at: "2026-01-01T00:00:00Z",
+        updated_at: "2026-03-01T00:00:00Z",
+      },
+    ]);
+
+    await (monitor as any).poll();
+
+    const tasks = db
+      .select()
+      .from(schema.kanbanTasks)
+      .where(eq(schema.kanbanTasks.projectId, "proj-reopen"))
+      .all();
+
+    // Should have 2 tasks: the old done one and a new backlog one
+    expect(tasks).toHaveLength(2);
+    const backlogTask = tasks.find((t) => t.column === "backlog");
+    expect(backlogTask).toBeDefined();
+    expect(backlogTask!.title).toBe("#30: Re-assigned issue");
+    expect((backlogTask!.labels as string[])).toContain("github-issue-30");
+  });
+});
 });

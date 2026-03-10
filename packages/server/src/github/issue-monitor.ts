@@ -68,18 +68,27 @@ export class GitHubIssueMonitor {
       .where(eq(schema.projects.status, "active"))
       .all();
 
-    for (const project of projects) {
-      if (project.githubRepo && project.githubIssueMonitor) {
-        const assignee = resolveGitHubUsername(project.id);
-        if (!assignee) continue;
-        this.watchProject(project.id, project.githubRepo, assignee);
+    const eligible = projects.filter((p) => p.githubRepo && p.githubIssueMonitor);
+    console.log(`[IssueMonitor] Found ${eligible.length} active project(s) with GitHub issue monitoring enabled`);
+
+    for (const project of eligible) {
+      const assignee = resolveGitHubUsername(project.id);
+      if (!assignee) {
+        console.warn(`[IssueMonitor] Skipping project "${project.name}" (${project.id}) — no GitHub username resolved`);
+        continue;
       }
+      this.watchProject(project.id, project.githubRepo!, assignee);
     }
+
+    console.log(`[IssueMonitor] Now watching ${this.watched.size} project(s)`);
   }
 
   /** Start the polling loop */
   start(pollIntervalMs = 300_000): void {
-    if (this.intervalId) return;
+    if (this.intervalId) {
+      console.log("[IssueMonitor] start() called but polling is already active — ignoring");
+      return;
+    }
     this.intervalId = setInterval(() => {
       this.poll().catch((err) => {
         console.error("[IssueMonitor] Poll error:", err);
@@ -97,9 +106,17 @@ export class GitHubIssueMonitor {
   }
 
   private async poll(): Promise<void> {
+    if (this.watched.size === 0) {
+      console.log("[IssueMonitor] Poll skipped — no projects being watched");
+      return;
+    }
+
     for (const [projectId, watched] of this.watched) {
       const token = resolveGitHubToken(projectId);
-      if (!token) continue;
+      if (!token) {
+        console.warn(`[IssueMonitor] Skipping project ${projectId} (${watched.repo}) — no GitHub token resolved`);
+        continue;
+      }
 
       try {
         // Run triage on all new issues (if pipeline is enabled)
@@ -485,9 +502,10 @@ export class GitHubIssueMonitor {
         (t) => (t.labels as string[]).includes(label) && t.column === "triage",
       );
 
-      // Check if already tracked in a non-triage column (backlog, in_progress, etc.)
+      // Check if already tracked in an active column (backlog, in_progress, etc.)
+      // Allow re-assigned issues whose previous task is in "done" to create a new task
       const alreadyInProgress = existingTasks.some(
-        (t) => (t.labels as string[]).includes(label) && t.column !== "triage",
+        (t) => (t.labels as string[]).includes(label) && t.column !== "triage" && t.column !== "done",
       );
       if (alreadyInProgress) continue;
 
