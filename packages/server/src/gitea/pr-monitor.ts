@@ -42,12 +42,27 @@ export class GiteaPRMonitor {
 
   start(pollIntervalMs = 120_000): void {
     if (this.intervalId) return;
+    if (!this.hasGiteaProjects()) {
+      console.log("[GiteaPRMonitor] No Gitea projects configured — polling not started");
+      return;
+    }
     this.intervalId = setInterval(() => {
       this.poll().catch((err) => {
         console.error("[GiteaPRMonitor] Poll error:", err);
       });
     }, pollIntervalMs);
     console.log(`[GiteaPRMonitor] Started polling every ${pollIntervalMs / 1000}s`);
+  }
+
+  private hasGiteaProjects(): boolean {
+    const db = getDb();
+    const project = db
+      .select()
+      .from(schema.projects)
+      .where(eq(schema.projects.status, "active"))
+      .all()
+      .find((p) => !!p.giteaRepo);
+    return !!project;
   }
 
   stop(): void {

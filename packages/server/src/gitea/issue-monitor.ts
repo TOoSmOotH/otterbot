@@ -74,6 +74,10 @@ export class GiteaIssueMonitor {
 
   start(pollIntervalMs = 300_000): void {
     if (this.intervalId) return;
+    if (this.watched.size === 0) {
+      console.log("[GiteaIssueMonitor] No Gitea projects configured — polling not started");
+      return;
+    }
     this.intervalId = setInterval(() => {
       this.poll().catch((err) => {
         console.error("[GiteaIssueMonitor] Poll error:", err);
@@ -90,6 +94,7 @@ export class GiteaIssueMonitor {
   }
 
   private async poll(): Promise<void> {
+    if (this.watched.size === 0) return;
     for (const [projectId, watched] of this.watched) {
       const token = resolveGiteaToken(projectId);
       const instanceUrl = resolveGiteaInstanceUrl(projectId);

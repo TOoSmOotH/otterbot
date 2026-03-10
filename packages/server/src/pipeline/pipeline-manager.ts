@@ -947,6 +947,18 @@ export class PipelineManager {
       return;
     }
 
+    // Concurrency refusals are not real errors — just return to backlog silently
+    // so the task can be picked up when a worker becomes available.
+    const isConcurrencyRefusal = errorMessage.includes("REFUSED") && errorMessage.toLowerCase().includes("already running");
+    if (isConcurrencyRefusal) {
+      console.log(
+        `[PipelineManager] All coding workers busy for task ${taskId} — returning to backlog`,
+      );
+      this.resetTaskToBacklog(taskId);
+      this.pipelines.delete(taskId);
+      return;
+    }
+
     // Max retries exhausted — for re-reviews, fail gracefully instead of backlog
     if (state.isReReview && this.mergeQueue) {
       console.error(`[PipelineManager] Re-review spawn failed for task ${taskId} — aborting re-review`);
