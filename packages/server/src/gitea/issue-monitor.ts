@@ -36,6 +36,8 @@ export class GiteaIssueMonitor {
   private pipelineManager: PipelineManager | null = null;
   private collaboratorCache = new Map<string, { isCollaborator: boolean; checkedAt: number }>();
   private static readonly COLLABORATOR_CACHE_TTL_MS = 600_000; // 10 minutes
+  private pollIntervalMs = 300_000;
+  private started = false;
 
   constructor(coo: COO, io: TypedServer) {
     this.coo = coo;
@@ -49,10 +51,20 @@ export class GiteaIssueMonitor {
   watchProject(projectId: string, repo: string, assignee: string): void {
     this.watched.set(projectId, { projectId, repo, assignee });
     console.log(`[GiteaIssueMonitor] Watching ${repo} for issues assigned to ${assignee} (project ${projectId})`);
+    // Auto-start polling if start() was called but no interval is running
+    if (this.started && !this.intervalId) {
+      this.startInterval();
+    }
   }
 
   unwatchProject(projectId: string): void {
     this.watched.delete(projectId);
+    // Auto-stop polling if no projects are left
+    if (this.watched.size === 0 && this.intervalId) {
+      console.log("[GiteaIssueMonitor] No projects left to watch — pausing polling");
+      clearInterval(this.intervalId);
+      this.intervalId = null;
+    }
   }
 
   loadFromDb(): void {
@@ -79,28 +91,42 @@ export class GiteaIssueMonitor {
   }
 
   start(pollIntervalMs = 300_000): void {
+    this.started = true;
+    this.pollIntervalMs = pollIntervalMs;
     if (this.intervalId) {
       console.log("[GiteaIssueMonitor] start() called but polling is already active — ignoring");
       return;
     }
-    this.intervalId = setInterval(() => {
-      this.poll().catch((err) => {
-        console.error("[GiteaIssueMonitor] Poll error:", err);
-      });
-    }, pollIntervalMs);
-    console.log(`[GiteaIssueMonitor] Started polling every ${pollIntervalMs / 1000}s`);
+    if (this.watched.size === 0) {
+      console.log("[GiteaIssueMonitor] No projects to watch — polling deferred until a project is added");
+      return;
+    }
+    this.startInterval();
   }
 
   stop(): void {
+    this.started = false;
     if (this.intervalId) {
       clearInterval(this.intervalId);
       this.intervalId = null;
     }
   }
 
+  private startInterval(): void {
+    if (this.intervalId) return;
+    this.intervalId = setInterval(() => {
+      this.poll().catch((err) => {
+        console.error("[GiteaIssueMonitor] Poll error:", err);
+      });
+    }, this.pollIntervalMs);
+    console.log(`[GiteaIssueMonitor] Started polling every ${this.pollIntervalMs / 1000}s`);
+  }
+
   private async poll(): Promise<void> {
     if (this.watched.size === 0) {
-      console.log("[GiteaIssueMonitor] Poll skipped — no projects being watched");
+      console.log("[GiteaIssueMonitor] No projects being watched — pausing polling");
+      clearInterval(this.intervalId!);
+      this.intervalId = null;
       return;
     }
 
