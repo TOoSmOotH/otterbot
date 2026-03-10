@@ -212,7 +212,81 @@ export class GitHubIssueMonitor {
 
     await this.syncTriageTasks(projectId, watched.repo, token);
 
+    // Detect orphaned issues: open issues that have no "triaged" label AND no kanban task.
+    // This catches issues where a previous triage attempt failed and the since-timestamp moved past them.
+    await this.triageOrphanedIssues(projectId, watched, token);
+
     setConfig(triageSinceKey, new Date().toISOString());
+  }
+
+  /**
+   * Find and triage open issues that slipped through — no "triaged" label and no kanban task.
+   * Fetches all open issue numbers, compares against existing kanban tasks,
+   * then fetches and triages any orphans.
+   */
+  private async triageOrphanedIssues(
+    projectId: string,
+    watched: WatchedProject,
+    token: string,
+  ): Promise<void> {
+    try {
+      const allOpenNumbers = await fetchAllOpenIssueNumbers(watched.repo, token);
+
+      // Get all kanban tasks for this project
+      const db = getDb();
+      const allTasks = db
+        .select()
+        .from(schema.kanbanTasks)
+        .where(eq(schema.kanbanTasks.projectId, projectId))
+        .all();
+
+      const trackedIssueNumbers = new Set<number>();
+      const issueLabel = /^github-issue-(\d+)$/;
+      for (const task of allTasks) {
+        for (const label of task.labels as string[]) {
+          const match = issueLabel.exec(label);
+          if (match) trackedIssueNumbers.add(Number(match[1]));
+        }
+      }
+
+      // Find orphans: open issues not tracked by any kanban task
+      const orphanNumbers: number[] = [];
+      for (const num of allOpenNumbers) {
+        if (!trackedIssueNumbers.has(num)) {
+          orphanNumbers.push(num);
+        }
+      }
+
+      if (orphanNumbers.length === 0) return;
+
+      console.log(`[IssueMonitor] Found ${orphanNumbers.length} orphaned issue(s) to triage: ${orphanNumbers.join(", ")}`);
+
+      for (const issueNum of orphanNumbers) {
+        let issue;
+        try {
+          issue = await fetchIssue(watched.repo, token, issueNum);
+        } catch {
+          continue;
+        }
+
+        // Skip if already triaged (has the label but no task — syncTriageTasks handles this case separately)
+        if (issue.labels.some((l) => l.name === "triaged")) continue;
+        // Skip pull requests
+        if ((issue as any).pull_request) continue;
+
+        try {
+          await this.pipelineManager!.runTriage(projectId, watched.repo, issue);
+          console.log(`[IssueMonitor] Triaged orphaned issue #${issueNum}`);
+        } catch (err) {
+          console.error(`[IssueMonitor] Triage failed for orphaned issue #${issueNum}:`, err);
+          this.pipelineManager!.createTriageTask(
+            projectId, issueNum, issue.title, "", issue.body ?? "",
+          );
+        }
+      }
+    } catch (err) {
+      console.error(`[IssueMonitor] Failed to check for orphaned issues:`, err);
+    }
   }
 
   /**
@@ -463,6 +537,83 @@ export class GitHubIssueMonitor {
       .get();
     if (updated) {
       this.io.emit("kanban:task-updated", updated as unknown as KanbanTask);
+    }
+  }
+
+  /**
+   * Manually re-triage a specific issue by number.
+   * Removes the existing "triaged" label and kanban task, then runs triage fresh.
+   */
+  async retriageIssue(projectId: string, issueNumber: number): Promise<{ ok: boolean; error?: string }> {
+    const watched = this.watched.get(projectId);
+    if (!watched) return { ok: false, error: "Project not watched" };
+
+    const token = resolveGitHubToken(projectId);
+    if (!token) return { ok: false, error: "No GitHub token" };
+
+    if (!this.pipelineManager?.isEnabled(projectId)) {
+      return { ok: false, error: "Pipeline not enabled" };
+    }
+
+    const config = this.pipelineManager.getConfig(projectId);
+    if (!config?.stages?.triage?.enabled) {
+      return { ok: false, error: "Triage stage not enabled" };
+    }
+
+    // Fetch the issue
+    let issue;
+    try {
+      issue = await fetchIssue(watched.repo, token, issueNumber);
+    } catch (err) {
+      return { ok: false, error: `Failed to fetch issue #${issueNumber}` };
+    }
+
+    if (issue.state !== "open") {
+      return { ok: false, error: `Issue #${issueNumber} is not open` };
+    }
+
+    // Remove "triaged" label if present
+    if (issue.labels.some((l) => l.name === "triaged")) {
+      try {
+        await removeLabelFromIssue(watched.repo, token, issueNumber, "triaged");
+        issue.labels = issue.labels.filter((l) => l.name !== "triaged");
+      } catch (err) {
+        console.error(`[IssueMonitor] Failed to remove triaged label from #${issueNumber}:`, err);
+        // Continue anyway — the triage will re-apply it
+      }
+    }
+
+    // Delete existing kanban task so createTriageTask can create a fresh one
+    const db = getDb();
+    const label = `github-issue-${issueNumber}`;
+    const existingTasks = db
+      .select()
+      .from(schema.kanbanTasks)
+      .where(eq(schema.kanbanTasks.projectId, projectId))
+      .all();
+
+    const triageTask = existingTasks.find(
+      (t) => (t.labels as string[]).includes(label) && t.column === "triage",
+    );
+    if (triageTask) {
+      db.delete(schema.kanbanTasks)
+        .where(eq(schema.kanbanTasks.id, triageTask.id))
+        .run();
+      this.io.emit("kanban:task-deleted", { taskId: triageTask.id, projectId });
+    }
+
+    // Run triage
+    try {
+      await this.pipelineManager.runTriage(projectId, watched.repo, issue);
+      console.log(`[IssueMonitor] Re-triaged issue #${issueNumber} via manual request`);
+      return { ok: true };
+    } catch (err) {
+      console.error(`[IssueMonitor] Re-triage failed for issue #${issueNumber}:`, err);
+      // Create a triage task anyway as fallback
+      this.pipelineManager.createTriageTask(
+        projectId, issueNumber, issue.title, "", issue.body ?? "",
+      );
+      return { ok: false, error: `Triage LLM failed, created basic task instead` };
     }
   }
 

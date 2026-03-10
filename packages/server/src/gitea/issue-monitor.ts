@@ -185,7 +185,72 @@ export class GiteaIssueMonitor {
     }
 
     await this.syncTriageTasks(projectId, watched.repo, token, instanceUrl);
+
+    // Detect orphaned issues: open issues that have no "triaged" label AND no kanban task.
+    await this.triageOrphanedIssues(projectId, watched, token, instanceUrl);
+
     setConfig(triageSinceKey, new Date().toISOString());
+  }
+
+  /**
+   * Find and triage open issues that slipped through — no "triaged" label and no kanban task.
+   */
+  private async triageOrphanedIssues(
+    projectId: string,
+    watched: WatchedProject,
+    token: string,
+    instanceUrl: string,
+  ): Promise<void> {
+    try {
+      const allOpenNumbers = await fetchAllOpenIssueNumbers(watched.repo, token, instanceUrl);
+
+      const db = getDb();
+      const allTasks = db
+        .select()
+        .from(schema.kanbanTasks)
+        .where(eq(schema.kanbanTasks.projectId, projectId))
+        .all();
+
+      const trackedIssueNumbers = new Set<number>();
+      const issueLabel = /^gitea-issue-(\d+)$/;
+      for (const task of allTasks) {
+        for (const label of task.labels as string[]) {
+          const match = issueLabel.exec(label);
+          if (match) trackedIssueNumbers.add(Number(match[1]));
+        }
+      }
+
+      const orphanNumbers: number[] = [];
+      for (const num of allOpenNumbers) {
+        if (!trackedIssueNumbers.has(num)) {
+          orphanNumbers.push(num);
+        }
+      }
+
+      if (orphanNumbers.length === 0) return;
+
+      console.log(`[GiteaIssueMonitor] Found ${orphanNumbers.length} orphaned issue(s) to triage: ${orphanNumbers.join(", ")}`);
+
+      for (const issueNum of orphanNumbers) {
+        let issue;
+        try {
+          issue = await fetchIssue(watched.repo, token, issueNum, instanceUrl);
+        } catch {
+          continue;
+        }
+
+        if (issue.labels.some((l) => l.name === "triaged")) continue;
+        if ((issue as any).pull_request) continue;
+
+        // Create triage task (Gitea uses direct task creation, not LLM triage)
+        this.pipelineManager!.createTriageTask(
+          projectId, issueNum, issue.title, "", issue.body ?? "",
+        );
+        console.log(`[GiteaIssueMonitor] Triaged orphaned issue #${issueNum}`);
+      }
+    } catch (err) {
+      console.error(`[GiteaIssueMonitor] Failed to check for orphaned issues:`, err);
+    }
   }
 
   private async syncTriageTasks(
@@ -396,6 +461,75 @@ export class GiteaIssueMonitor {
     if (updated) {
       this.io.emit("kanban:task-updated", updated as unknown as KanbanTask);
     }
+  }
+
+  /**
+   * Manually re-triage a specific issue by number.
+   * Removes the existing "triaged" label and kanban task, then creates a fresh triage task.
+   */
+  async retriageIssue(projectId: string, issueNumber: number): Promise<{ ok: boolean; error?: string }> {
+    const watched = this.watched.get(projectId);
+    if (!watched) return { ok: false, error: "Project not watched" };
+
+    const token = resolveGiteaToken(projectId);
+    const instanceUrl = resolveGiteaInstanceUrl(projectId);
+    if (!token || !instanceUrl) return { ok: false, error: "No Gitea token or instance URL" };
+
+    if (!this.pipelineManager?.isEnabled(projectId)) {
+      return { ok: false, error: "Pipeline not enabled" };
+    }
+
+    const config = this.pipelineManager.getConfig(projectId);
+    if (!config?.stages?.triage?.enabled) {
+      return { ok: false, error: "Triage stage not enabled" };
+    }
+
+    let issue;
+    try {
+      issue = await fetchIssue(watched.repo, token, issueNumber, instanceUrl);
+    } catch (err) {
+      return { ok: false, error: `Failed to fetch issue #${issueNumber}` };
+    }
+
+    if (issue.state !== "open") {
+      return { ok: false, error: `Issue #${issueNumber} is not open` };
+    }
+
+    // Remove "triaged" label if present
+    if (issue.labels.some((l) => l.name === "triaged")) {
+      try {
+        await removeLabelFromIssue(watched.repo, token, issueNumber, "triaged", instanceUrl);
+      } catch (err) {
+        console.error(`[GiteaIssueMonitor] Failed to remove triaged label from #${issueNumber}:`, err);
+      }
+    }
+
+    // Delete existing kanban task so createTriageTask can create a fresh one
+    const db = getDb();
+    const label = `gitea-issue-${issueNumber}`;
+    const existingTasks = db
+      .select()
+      .from(schema.kanbanTasks)
+      .where(eq(schema.kanbanTasks.projectId, projectId))
+      .all();
+
+    const triageTask = existingTasks.find(
+      (t) => (t.labels as string[]).includes(label) && t.column === "triage",
+    );
+    if (triageTask) {
+      db.delete(schema.kanbanTasks)
+        .where(eq(schema.kanbanTasks.id, triageTask.id))
+        .run();
+      this.io.emit("kanban:task-deleted", { taskId: triageTask.id, projectId });
+    }
+
+    // Create fresh triage task
+    this.pipelineManager.createTriageTask(
+      projectId, issueNumber, issue.title, "", issue.body ?? "",
+    );
+
+    console.log(`[GiteaIssueMonitor] Re-triaged issue #${issueNumber} via manual request`);
+    return { ok: true };
   }
 
   private async pollForAssigned(

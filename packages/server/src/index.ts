@@ -2607,6 +2607,51 @@ async function main() {
     },
   );
 
+  // Re-triage endpoint: manually trigger re-triage for a specific issue
+  app.post<{
+    Params: { projectId: string; issueNumber: string };
+  }>(
+    "/api/projects/:projectId/retriage/:issueNumber",
+    async (req, reply) => {
+      const { projectId, issueNumber } = req.params;
+      const issueNum = parseInt(issueNumber, 10);
+      if (isNaN(issueNum) || issueNum <= 0) {
+        reply.code(400);
+        return { error: "Invalid issue number" };
+      }
+
+      // Determine which monitor handles this project (GitHub or Gitea)
+      const { getDb, schema } = await import("./db/index.js");
+      const { eq } = await import("drizzle-orm");
+      const db = getDb();
+      const project = db
+        .select()
+        .from(schema.projects)
+        .where(eq(schema.projects.id, projectId))
+        .get();
+
+      if (!project) {
+        reply.code(404);
+        return { error: "Project not found" };
+      }
+
+      let result: { ok: boolean; error?: string } = { ok: false, error: "No issue monitor available" };
+
+      if (project.githubRepo && issueMonitor) {
+        result = await issueMonitor.retriageIssue(projectId, issueNum);
+      } else if (project.giteaRepo && giteaIssueMonitor) {
+        result = await giteaIssueMonitor.retriageIssue(projectId, issueNum);
+      }
+
+      if (!result.ok) {
+        reply.code(result.error === "Project not found" ? 404 : 400);
+        return { error: result.error };
+      }
+
+      return { ok: true, message: `Issue #${issueNum} re-triaged successfully` };
+    },
+  );
+
   // Package manifest endpoints
   app.get("/api/packages", async () => {
     return listPackages();
