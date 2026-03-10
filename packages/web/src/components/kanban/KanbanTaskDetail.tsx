@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import type { KanbanTask } from "@otterbot/shared";
 import { KanbanColumn } from "@otterbot/shared";
 import { useProjectStore } from "../../stores/project-store";
+import { getSocket } from "../../lib/socket";
 
 const STATUS_CONFIG: Record<KanbanColumn, { label: string; className: string }> = {
   [KanbanColumn.Triage]: {
@@ -74,6 +75,21 @@ export function KanbanTaskDetail({
 
   const [deleting, setDeleting] = useState(false);
   const [moving, setMoving] = useState(false);
+  const [retriaging, setRetriaging] = useState(false);
+
+  const showRetriage =
+    task.column === KanbanColumn.Triage &&
+    task.labels.some((l) => /^github-issue-\d+$/.test(l));
+
+  const handleRetriage = useCallback(async () => {
+    setRetriaging(true);
+    try {
+      const socket = getSocket();
+      socket.emit("task:retriage", { taskId: task.id, projectId });
+    } finally {
+      setRetriaging(false);
+    }
+  }, [task.id, projectId]);
 
   const handleRemoveBlocker = useCallback(
     async (blockerId: string) => {
@@ -169,6 +185,15 @@ export function KanbanTaskDetail({
             </div>
           </div>
           <div className="flex items-center gap-1 shrink-0 mt-0.5">
+            {showRetriage && (
+              <button
+                onClick={handleRetriage}
+                disabled={retriaging}
+                className="text-xs text-violet-400 hover:text-violet-300 disabled:opacity-50 px-1.5 py-0.5 rounded hover:bg-violet-500/10 transition-colors"
+              >
+                {retriaging ? "Re-triaging..." : "Re-triage"}
+              </button>
+            )}
             <button
               onClick={handleDelete}
               disabled={deleting}

@@ -106,11 +106,21 @@ export function KanbanCard({
     socket.emit("merge-queue:approve", { taskId: task.id });
   };
 
+  const handleRetriage = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const socket = getSocket();
+    socket.emit("task:retriage", { taskId: task.id, projectId: task.projectId });
+  };
+
   const showApproveButton =
     task.column === "in_review" &&
     task.prNumber != null &&
     task.prBranch != null &&
     !mqEntry;
+
+  const showRetriageButton =
+    task.column === "triage" &&
+    task.labels.some((l) => /^github-issue-\d+$/.test(l));
 
   return (
     <div
@@ -201,6 +211,14 @@ export function KanbanCard({
           onClick={handleApproveForMerge}
         >
           Approve for Merge
+        </button>
+      )}
+      {showRetriageButton && (
+        <button
+          className="mt-2 w-full text-[11px] font-medium bg-violet-500/15 text-violet-400 hover:bg-violet-500/25 rounded px-2 py-1 transition-colors"
+          onClick={handleRetriage}
+        >
+          Re-triage
         </button>
       )}
     </div>

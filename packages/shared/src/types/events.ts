@@ -264,6 +264,12 @@ export interface ClientToServerEvents {
     callback?: (ack: { ok: boolean; error?: string }) => void,
   ) => void;
 
+  // Re-triage a task
+  "task:retriage": (
+    data: { taskId: string; projectId: string },
+    callback?: (ack: { ok: boolean; error?: string }) => void,
+  ) => void;
+
   // Issue monitor toggle
   "project:set-issue-monitor": (
     data: { projectId: string; enabled: boolean },

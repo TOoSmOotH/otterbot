@@ -32,7 +32,10 @@ import {
   waitForFork,
   syncFork,
   cloneForForkContribution,
+  fetchIssue,
+  removeLabelFromIssue,
 } from "../github/github-service.js";
+import type { PipelineManager } from "../pipeline/pipeline-manager.js";
 import { initGitRepo, createInitialCommit, configureCommitSigning, hasSSHKey } from "../utils/git.js";
 import { NO_REPORT_SENTINEL } from "../schedulers/custom-task-scheduler.js";
 import { ProjectStatus, CharterStatus } from "@otterbot/shared";
@@ -100,7 +103,7 @@ export function setupSocketHandlers(
   coo: COO,
   registry: Registry,
   hooks?: SocketHooks,
-  deps?: { workspace?: WorkspaceManager; issueMonitor?: GitHubIssueMonitor; giteaIssueMonitor?: GiteaIssueMonitor; mergeQueue?: MergeQueue; worldLayout?: WorldLayoutManager },
+  deps?: { workspace?: WorkspaceManager; issueMonitor?: GitHubIssueMonitor; giteaIssueMonitor?: GiteaIssueMonitor; mergeQueue?: MergeQueue; worldLayout?: WorldLayoutManager; pipelineManager?: PipelineManager },
 ) {
   // Track conversation IDs used by background tasks so we can suppress
   // the COO's response in that same conversation.
@@ -1350,6 +1353,90 @@ export function setupSocketHandlers(
         callback?.({ ok: reordered, error: reordered ? undefined : "Entry not found" });
       });
     }
+
+    // ─── Re-triage ─────────────────────────────────────────────
+    const pm = deps?.pipelineManager ?? null;
+    socket.on("task:retriage", async (data, callback) => {
+      if (!pm) {
+        callback?.({ ok: false, error: "Pipeline manager not available" });
+        return;
+      }
+
+      try {
+        const db = getDb();
+        const task = db
+          .select()
+          .from(schema.kanbanTasks)
+          .where(eq(schema.kanbanTasks.id, data.taskId))
+          .get();
+
+        if (!task) {
+          callback?.({ ok: false, error: "Task not found" });
+          return;
+        }
+
+        if (task.column !== "triage") {
+          callback?.({ ok: false, error: "Only tasks in the triage column can be re-triaged" });
+          return;
+        }
+
+        // Extract issue number from labels (github-issue-NNN)
+        const labels = task.labels as string[];
+        const issueLabel = labels.find((l) => /^github-issue-\d+$/.test(l));
+        if (!issueLabel) {
+          callback?.({ ok: false, error: "No GitHub issue linked to this task" });
+          return;
+        }
+        const issueNumber = Number(issueLabel.replace("github-issue-", ""));
+
+        // Look up project to get repo
+        const project = db
+          .select()
+          .from(schema.projects)
+          .where(eq(schema.projects.id, data.projectId))
+          .get();
+
+        if (!project?.githubRepo) {
+          callback?.({ ok: false, error: "Project has no GitHub repo configured" });
+          return;
+        }
+
+        const token = resolveGitHubToken(data.projectId);
+        if (!token) {
+          callback?.({ ok: false, error: "No GitHub token configured for this project" });
+          return;
+        }
+
+        // Fetch fresh issue data from GitHub
+        const issue = await fetchIssue(project.githubRepo, token, issueNumber);
+
+        // Remove "triaged" label if present so runTriage can re-apply it
+        const hasTriagedLabel = issue.labels.some((l) => l.name === "triaged");
+        if (hasTriagedLabel) {
+          try {
+            await removeLabelFromIssue(project.githubRepo, token, issueNumber, "triaged");
+            issue.labels = issue.labels.filter((l) => l.name !== "triaged");
+          } catch (err) {
+            console.error(`[Retriage] Failed to remove triaged label from #${issueNumber}:`, err);
+          }
+        }
+
+        // Delete the existing triage task so runTriage can recreate it
+        db.delete(schema.kanbanTasks)
+          .where(eq(schema.kanbanTasks.id, task.id))
+          .run();
+        io.emit("kanban:task-deleted", { taskId: task.id, projectId: data.projectId });
+
+        // Re-run triage
+        await pm.runTriage(data.projectId, project.githubRepo, issue);
+
+        callback?.({ ok: true });
+        console.log(`[Retriage] Re-triaged issue #${issueNumber} for project ${data.projectId}`);
+      } catch (err) {
+        console.error("[Retriage] Error:", err);
+        callback?.({ ok: false, error: err instanceof Error ? err.message : "Re-triage failed" });
+      }
+    });
 
     // ─── SSH session events ────────────────────────────────────
     socket.on("ssh:connect", async (data, callback) => {
