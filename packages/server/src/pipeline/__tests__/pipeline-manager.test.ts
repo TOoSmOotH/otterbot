@@ -525,6 +525,48 @@ describe("PipelineManager", () => {
       expect(call.content).toContain("After review, do NOT create a pull request.");
       expect(call.content).toContain("Upstream PR creation is disabled for this project.");
     });
+
+    it("includes strong branch checkout instruction on security kickback", async () => {
+      const task = insertTask({ id: "task-kickback-branch", column: "in_progress", title: "Fix vulnerability" });
+      insertProject();
+      setPipelineConfig(PROJECT_ID);
+      const state = createPipelineState({
+        taskId: task.id,
+        stages: ["coder", "security", "reviewer"],
+        currentStageIndex: 0,
+        lastKickbackSource: "security",
+        prBranch: "feat/issue-10-fix-vuln",
+      });
+      (pm as any).pipelines.set(task.id, state);
+
+      await (pm as any).sendStageDirective(state, "Found SQL injection in query.ts");
+
+      const call = (bus.send as any).mock.calls[0][0];
+      expect(call.content).toContain("IMPORTANT");
+      expect(call.content).toContain("check out the EXISTING branch");
+      expect(call.content).toContain("feat/issue-10-fix-vuln");
+      expect(call.content).toContain("Do NOT create a new branch");
+    });
+
+    it("includes warning about missing branch on kickback when prBranch is null", async () => {
+      const task = insertTask({ id: "task-kickback-nobranch", column: "in_progress", title: "Fix issue" });
+      insertProject();
+      setPipelineConfig(PROJECT_ID);
+      const state = createPipelineState({
+        taskId: task.id,
+        stages: ["coder", "security", "reviewer"],
+        currentStageIndex: 0,
+        lastKickbackSource: "tester",
+        prBranch: null,
+      });
+      (pm as any).pipelines.set(task.id, state);
+
+      await (pm as any).sendStageDirective(state, "Tests failed");
+
+      const call = (bus.send as any).mock.calls[0][0];
+      expect(call.content).toContain("WARNING");
+      expect(call.content).toContain("No feature branch was tracked");
+    });
   });
 
   // ─── sendStageDirective (CI failure) ─────────────────────────
@@ -760,13 +802,15 @@ describe("PipelineManager", () => {
   // ─── persistPipelineState ──────────────────────────────────
 
   describe("persistPipelineState", () => {
-    it("persists stageReports, lastKickbackSource, spawnRetryCount to DB", () => {
+    it("persists stageReports, lastKickbackSource, spawnRetryCount, prBranch, and prNumber to DB", () => {
       const task = insertTask({ id: "task-persist-1", column: "in_progress" });
       const state = createPipelineState({
         taskId: task.id,
         spawnRetryCount: 2,
         lastKickbackSource: "security",
         stageReports: new Map([["coder", "coder report here"]]),
+        prBranch: "feat/issue-42-fix-login",
+        prNumber: 99,
       });
 
       (pm as any).persistPipelineState(state);
@@ -775,6 +819,28 @@ describe("PipelineManager", () => {
       expect(dbTask?.spawnRetryCount).toBe(2);
       expect(dbTask?.lastKickbackSource).toBe("security");
       expect((dbTask?.stageReports as Record<string, string>)?.coder).toBe("coder report here");
+      expect(dbTask?.prBranch).toBe("feat/issue-42-fix-login");
+      expect(dbTask?.prNumber).toBe(99);
+    });
+
+    it("persists null prBranch and prNumber when not set", () => {
+      const task = insertTask({
+        id: "task-persist-null",
+        column: "in_progress",
+        prBranch: "old-branch",
+        prNumber: 50,
+      });
+      const state = createPipelineState({
+        taskId: task.id,
+        prBranch: null,
+        prNumber: null,
+      });
+
+      (pm as any).persistPipelineState(state);
+
+      const dbTask = getTask(task.id);
+      expect(dbTask?.prBranch).toBeNull();
+      expect(dbTask?.prNumber).toBeNull();
     });
   });
 

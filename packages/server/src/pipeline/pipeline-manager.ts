@@ -150,6 +150,8 @@ export class PipelineManager {
         stageReports: Object.fromEntries(state.stageReports),
         lastKickbackSource: state.lastKickbackSource,
         spawnRetryCount: state.spawnRetryCount,
+        prBranch: state.prBranch,
+        prNumber: state.prNumber,
         updatedAt: new Date().toISOString(),
       })
       .where(eq(schema.kanbanTasks.id, state.taskId))
@@ -764,6 +766,9 @@ export class PipelineManager {
             state.currentStageIndex = coderIndex;
             state.lastKickbackSource = "security";
             state.spawnRetryCount = 0;
+            if (!state.prBranch) {
+              console.warn(`[PipelineManager] Kickback from security to coder for task ${taskId} with NO tracked branch`);
+            }
             this.persistPipelineState(state);
             this.updateTaskPipelineStage(taskId, "coder");
             if (state.issueNumber && state.repo) {
@@ -797,6 +802,9 @@ export class PipelineManager {
             state.currentStageIndex = coderIndex;
             state.lastKickbackSource = "tester";
             state.spawnRetryCount = 0;
+            if (!state.prBranch) {
+              console.warn(`[PipelineManager] Kickback from tester to coder for task ${taskId} with NO tracked branch`);
+            }
             this.persistPipelineState(state);
             this.updateTaskPipelineStage(taskId, "coder");
             if (state.issueNumber && state.repo) {
@@ -830,6 +838,9 @@ export class PipelineManager {
             state.currentStageIndex = coderIndex;
             state.lastKickbackSource = "reviewer";
             state.spawnRetryCount = 0;
+            if (!state.prBranch) {
+              console.warn(`[PipelineManager] Kickback from reviewer to coder for task ${taskId} with NO tracked branch`);
+            }
             this.persistPipelineState(state);
             this.updateTaskPipelineStage(taskId, "coder");
             if (state.issueNumber && state.repo) {
@@ -1294,7 +1305,9 @@ export class PipelineManager {
           parts.push(
             `\n[SECURITY KICKBACK — Fix Required]`,
             `The security reviewer found issues. Address the findings below.`,
-            state.prBranch ? `Work on branch \`${state.prBranch}\`.` : "",
+            state.prBranch
+              ? `IMPORTANT: You MUST check out the EXISTING branch \`${state.prBranch}\` before making any changes. Do NOT create a new branch. Push all fixes to \`${state.prBranch}\`.`
+              : `WARNING: No feature branch was tracked for this task. Look for the most recent feature branch related to this issue and work on it.`,
             `Do NOT create a PR — just fix and push.`,
           );
           if (extraContext) {
@@ -1306,7 +1319,9 @@ export class PipelineManager {
             `\n[TEST FAILURE KICKBACK — Fix Required]`,
             `The tester wrote tests for your implementation and they revealed bugs. Fix your implementation code so the tests pass.`,
             `Do NOT modify or delete the test files — only fix the implementation.`,
-            state.prBranch ? `Work on branch \`${state.prBranch}\`.` : "",
+            state.prBranch
+              ? `IMPORTANT: You MUST check out the EXISTING branch \`${state.prBranch}\` before making any changes. Do NOT create a new branch. Push all fixes to \`${state.prBranch}\`.`
+              : `WARNING: No feature branch was tracked for this task. Look for the most recent feature branch related to this issue and work on it.`,
             `Do NOT create a PR — just fix and push.`,
           );
           if (extraContext) {
@@ -1317,7 +1332,9 @@ export class PipelineManager {
           parts.push(
             `\n[REVIEW KICKBACK — Fix Required]`,
             `The code reviewer found quality issues. Address the findings below.`,
-            state.prBranch ? `Work on branch \`${state.prBranch}\`.` : "",
+            state.prBranch
+              ? `IMPORTANT: You MUST check out the EXISTING branch \`${state.prBranch}\` before making any changes. Do NOT create a new branch. Push all fixes to \`${state.prBranch}\`.`
+              : `WARNING: No feature branch was tracked for this task. Look for the most recent feature branch related to this issue and work on it.`,
             `Do NOT create a PR — just fix and push.`,
           );
           if (extraContext) {
@@ -1538,7 +1555,7 @@ export class PipelineManager {
             pipelineForkRepo: state.forkRepo ?? undefined,
           },
         });
-        console.log(`[PipelineManager] Sent ${currentStage} directive for task ${state.taskId}`);
+        console.log(`[PipelineManager] Sent ${currentStage} directive for task ${state.taskId} (branch=${state.prBranch ?? "none"}, pr=${state.prNumber ?? "none"})`);
       }
     } else {
       console.error(
