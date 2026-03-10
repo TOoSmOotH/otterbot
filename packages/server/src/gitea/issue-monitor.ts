@@ -55,6 +55,10 @@ export class GiteaIssueMonitor {
     this.watched.delete(projectId);
   }
 
+  get hasWatchedProjects(): boolean {
+    return this.watched.size > 0;
+  }
+
   loadFromDb(): void {
     const db = getDb();
     const projects = db
@@ -90,6 +94,7 @@ export class GiteaIssueMonitor {
   }
 
   private async poll(): Promise<void> {
+    if (this.watched.size === 0) return;
     for (const [projectId, watched] of this.watched) {
       const token = resolveGiteaToken(projectId);
       const instanceUrl = resolveGiteaInstanceUrl(projectId);

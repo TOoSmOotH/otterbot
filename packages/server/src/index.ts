@@ -1354,15 +1354,17 @@ async function main() {
 
       if (giteaIssueMonitor) {
         giteaIssueMonitor.loadFromDb();
-        schedulerRegistry.register("gitea-issues", giteaIssueMonitor, {
-          name: "Gitea Issue Monitor",
-          description: "Polls Gitea for new and updated issues on watched projects.",
-          defaultIntervalMs: 60_000,
-          minIntervalMs: 5_000,
-        });
+        if (giteaIssueMonitor.hasWatchedProjects) {
+          schedulerRegistry.register("gitea-issues", giteaIssueMonitor, {
+            name: "Gitea Issue Monitor",
+            description: "Polls Gitea for new and updated issues on watched projects.",
+            defaultIntervalMs: 60_000,
+            minIntervalMs: 5_000,
+          });
+        }
       }
 
-      if (giteaPrMonitor) {
+      if (giteaPrMonitor && giteaIssueMonitor?.hasWatchedProjects) {
         schedulerRegistry.register("gitea-prs", giteaPrMonitor, {
           name: "Gitea PR Monitor",
           description: "Monitors open Gitea PRs for merge status and review feedback.",
