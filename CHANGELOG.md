@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.14.0](https://github.com/TOoSmOotH/otterbot/compare/otterbot-v0.13.0...otterbot-v0.14.0) (2026-03-10)
+## [0.16.0](https://github.com/TOoSmOotH/otterbot/compare/otterbot-v0.15.0...otterbot-v0.16.0) (2026-03-10)
 
 
 ### Features
