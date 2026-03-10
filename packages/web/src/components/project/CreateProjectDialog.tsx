@@ -5,9 +5,10 @@ import { useSettingsStore } from "../../stores/settings-store";
 interface CreateProjectDialogProps {
   open: boolean;
   onClose: () => void;
+  onCreated?: (projectId: string) => void;
 }
 
-export function CreateProjectDialog({ open, onClose }: CreateProjectDialogProps) {
+export function CreateProjectDialog({ open, onClose, onCreated }: CreateProjectDialogProps) {
   const [githubRepo, setGithubRepo] = useState("");
   const [branch, setBranch] = useState("");
   const [name, setName] = useState("");
@@ -88,7 +89,11 @@ export function CreateProjectDialog({ open, onClose }: CreateProjectDialogProps)
       (ack: { ok: boolean; projectId?: string; error?: string }) => {
         setLoading(false);
         if (ack.ok) {
+          const createdProjectId = ack.projectId;
           handleClose();
+          if (createdProjectId && onCreated) {
+            onCreated(createdProjectId);
+          }
         } else {
           setError(ack.error ?? "Failed to create project.");
         }

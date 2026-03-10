@@ -100,8 +100,8 @@ ARG OTTERBOT_GID=1000
 ENV OTTERBOT_UID=${OTTERBOT_UID}
 ENV OTTERBOT_GID=${OTTERBOT_GID}
 RUN (getent group ${OTTERBOT_GID} || groupadd -g ${OTTERBOT_GID} otterbot) \
-    && useradd -u ${OTTERBOT_UID} -g ${OTTERBOT_GID} -m otterbot 2>/dev/null \
-    || useradd -u ${OTTERBOT_UID} -g ${OTTERBOT_GID} -m -o otterbot
+    && useradd -u ${OTTERBOT_UID} -g ${OTTERBOT_GID} -m -d /otterbot/home otterbot 2>/dev/null \
+    || useradd -u ${OTTERBOT_UID} -g ${OTTERBOT_GID} -m -o -d /otterbot/home otterbot
 
 # Sudoers configuration is handled at runtime in entrypoint.sh (SUDO_MODE env var)
 

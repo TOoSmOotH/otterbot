@@ -3,7 +3,7 @@ import { z } from "zod";
 import { execSync } from "node:child_process";
 import type { ToolContext } from "./tool-context.js";
 import { resolveGitHubToken } from "../github/account-resolver.js";
-import { checkBlockedCommand, normalizeCommand } from "../utils/command-guard.js";
+import { checkBlockedCommand, checkGitPushTarget, checkWorkspaceBoundary, normalizeCommand } from "../utils/command-guard.js";
 
 const DEFAULT_TIMEOUT = 30_000; // 30 seconds
 const MAX_TIMEOUT = 120_000; // 2 minutes
@@ -80,6 +80,23 @@ export function createShellExecTool(ctx: ToolContext) {
       if (blocked) {
         console.warn(`[shell-exec] Blocked command: ${command}`);
         return blocked;
+      }
+
+      // Block git push to unauthorized remotes
+      const pushBlocked = checkGitPushTarget(command);
+      if (pushBlocked) {
+        console.warn(`[shell-exec] Blocked git push: ${command}`);
+        return pushBlocked;
+      }
+
+      // Block cross-project path access
+      if (ctx.workspacePath) {
+        const workspaceRoot = process.env.WORKSPACE_ROOT ?? "./data";
+        const boundaryBlocked = checkWorkspaceBoundary(command, ctx.workspacePath, workspaceRoot);
+        if (boundaryBlocked) {
+          console.warn(`[shell-exec] Blocked cross-project access: ${command}`);
+          return boundaryBlocked;
+        }
       }
 
       const effectiveTimeout = Math.min(

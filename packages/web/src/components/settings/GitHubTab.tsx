@@ -14,6 +14,7 @@ function AccountCard({ accountId }: { accountId: string }) {
   const getAccountSSHPublicKey = useSettingsStore((s) => s.getAccountSSHPublicKey);
   const removeAccountSSHKey = useSettingsStore((s) => s.removeAccountSSHKey);
   const testAccountSSHConnection = useSettingsStore((s) => s.testAccountSSHConnection);
+  const updateAccountSSHUsage = useSettingsStore((s) => s.updateAccountSSHUsage);
 
   const [expanded, setExpanded] = useState(false);
   const [editLabel, setEditLabel] = useState("");
@@ -29,6 +30,7 @@ function AccountCard({ accountId }: { accountId: string }) {
   const [removing, setRemoving] = useState(false);
   const [confirmRemoveSSH, setConfirmRemoveSSH] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [sshUsage, setSshUsage] = useState<"auth" | "signing" | "both">("both");
 
   useEffect(() => {
     if (expanded && account?.sshKeySet && !account.sshPublicKey) {
@@ -200,9 +202,25 @@ function AccountCard({ accountId }: { accountId: string }) {
 
             {!account.sshKeySet ? (
               <div className="space-y-2">
+                <div className="flex items-center gap-3 text-xs">
+                  <span className="text-muted-foreground">Purpose:</span>
+                  {(["both", "auth", "signing"] as const).map((v) => (
+                    <label key={v} className="flex items-center gap-1 cursor-pointer">
+                      <input
+                        type="radio"
+                        name={`ssh-usage-${accountId}`}
+                        value={v}
+                        checked={sshUsage === v}
+                        onChange={() => setSshUsage(v)}
+                        className="accent-primary"
+                      />
+                      {v === "both" ? "Auth + Signing" : v === "auth" ? "Auth only" : "Signing only"}
+                    </label>
+                  ))}
+                </div>
                 <div className="flex items-center gap-2">
                   <button
-                    onClick={async () => { setGenerating(true); await generateAccountSSHKey(accountId); setGenerating(false); }}
+                    onClick={async () => { setGenerating(true); await generateAccountSSHKey(accountId, undefined, sshUsage); setGenerating(false); }}
                     disabled={generating}
                     className="text-xs bg-primary text-primary-foreground px-3 py-1.5 rounded-md hover:bg-primary/90 disabled:opacity-50"
                   >
@@ -224,7 +242,7 @@ function AccountCard({ accountId }: { accountId: string }) {
                       className="w-full bg-secondary rounded-md px-3 py-2 text-xs outline-none focus:ring-1 ring-primary font-mono h-28 resize-none"
                     />
                     <button
-                      onClick={async () => { setImporting(true); await importAccountSSHKey(accountId, importKey); setImportKey(""); setShowImport(false); setImporting(false); }}
+                      onClick={async () => { setImporting(true); await importAccountSSHKey(accountId, importKey, sshUsage); setImportKey(""); setShowImport(false); setImporting(false); }}
                       disabled={importing || !importKey.trim()}
                       className="text-xs bg-primary text-primary-foreground px-3 py-1.5 rounded-md hover:bg-primary/90 disabled:opacity-50"
                     >
@@ -238,6 +256,15 @@ function AccountCard({ accountId }: { accountId: string }) {
                 {account.sshKeyType && (
                   <div className="flex items-center gap-3 text-xs">
                     <span className="bg-secondary px-2 py-0.5 rounded font-mono uppercase">{account.sshKeyType}</span>
+                    <select
+                      value={account.sshKeyUsage ?? "both"}
+                      onChange={(e) => updateAccountSSHUsage(accountId, e.target.value as "auth" | "signing" | "both")}
+                      className="bg-secondary px-2 py-0.5 rounded text-xs cursor-pointer outline-none"
+                    >
+                      <option value="both">Auth + Signing</option>
+                      <option value="auth">Auth only</option>
+                      <option value="signing">Signing only</option>
+                    </select>
                     {account.sshFingerprint && (
                       <span className="text-muted-foreground font-mono text-[11px]">{account.sshFingerprint}</span>
                     )}
@@ -288,9 +315,11 @@ function AccountCard({ accountId }: { accountId: string }) {
                   {account.sshTestResult && !account.sshTestResult.testing && (
                     <span className={cn("text-xs", account.sshTestResult.ok ? "text-green-500" : "text-red-500")}>
                       {account.sshTestResult.ok
-                        ? account.sshTestResult.username
-                          ? `\u2713 @${account.sshTestResult.username}`
-                          : "\u2713 OK"
+                        ? account.sshTestResult.signingOnly
+                          ? "\u2713 Signing OK"
+                          : account.sshTestResult.username
+                            ? `\u2713 @${account.sshTestResult.username}`
+                            : "\u2713 OK"
                         : `\u2717 ${account.sshTestResult.error ?? "Failed"}`}
                     </span>
                   )}

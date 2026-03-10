@@ -15,11 +15,13 @@ import { getDb, schema } from "../db/index.js";
 import { isTTSEnabled, getConfiguredTTSProvider, stripMarkdown } from "../tts/tts.js";
 import { getConfig, setConfig, deleteConfig } from "../auth/auth.js";
 import { resolveGitHubAccount, resolveGitHubToken, resolveGitHubUsername } from "../github/account-resolver.js";
+import { resolveGiteaUsername } from "../gitea/account-resolver.js";
 import { SoulService } from "../memory/soul-service.js";
 import { MemoryService } from "../memory/memory-service.js";
 import { SoulAdvisor } from "../memory/soul-advisor.js";
 import type { WorkspaceManager } from "../workspace/workspace.js";
 import type { GitHubIssueMonitor } from "../github/issue-monitor.js";
+import type { GiteaIssueMonitor } from "../gitea/issue-monitor.js";
 import type { MergeQueue } from "../merge-queue/merge-queue.js";
 import type { WorldLayoutManager } from "../models3d/world-layout.js";
 import {
@@ -98,7 +100,7 @@ export function setupSocketHandlers(
   coo: COO,
   registry: Registry,
   hooks?: SocketHooks,
-  deps?: { workspace?: WorkspaceManager; issueMonitor?: GitHubIssueMonitor; mergeQueue?: MergeQueue; worldLayout?: WorldLayoutManager },
+  deps?: { workspace?: WorkspaceManager; issueMonitor?: GitHubIssueMonitor; giteaIssueMonitor?: GiteaIssueMonitor; mergeQueue?: MergeQueue; worldLayout?: WorldLayoutManager },
 ) {
   // Track conversation IDs used by background tasks so we can suppress
   // the COO's response in that same conversation.
@@ -798,6 +800,58 @@ export function setupSocketHandlers(
       }
     });
 
+    // Get fork settings for a project
+    socket.on("project:get-fork-settings", (data, callback) => {
+      try {
+        const projectId = data.projectId;
+        if (!projectId || typeof projectId !== "string") {
+          callback({ forkMode: false, forkRepo: null, forkUpstreamPr: true });
+          return;
+        }
+        // Verify the project exists
+        const db = getDb();
+        const project = db.select({ id: schema.projects.id }).from(schema.projects).where(eq(schema.projects.id, projectId)).get();
+        if (!project) {
+          callback({ forkMode: false, forkRepo: null, forkUpstreamPr: true });
+          return;
+        }
+        const forkMode = getConfig(`project:${projectId}:github:fork_mode`) === "true";
+        const forkRepo = getConfig(`project:${projectId}:github:fork_repo`) ?? null;
+        const forkUpstreamPrRaw = getConfig(`project:${projectId}:github:fork_upstream_pr`);
+        // Default to true (enabled) when not explicitly set
+        const forkUpstreamPr = forkUpstreamPrRaw !== "false";
+        callback({ forkMode, forkRepo, forkUpstreamPr });
+      } catch {
+        callback({ forkMode: false, forkRepo: null, forkUpstreamPr: true });
+      }
+    });
+
+    // Set fork upstream PR setting for a project
+    socket.on("project:set-fork-upstream-pr", (data, callback) => {
+      try {
+        const projectId = data.projectId;
+        if (!projectId || typeof projectId !== "string") {
+          callback?.({ ok: false, error: "Invalid project ID" });
+          return;
+        }
+        // Verify the project exists
+        const db = getDb();
+        const project = db.select({ id: schema.projects.id }).from(schema.projects).where(eq(schema.projects.id, projectId)).get();
+        if (!project) {
+          callback?.({ ok: false, error: "Project not found" });
+          return;
+        }
+        if (typeof data.enabled !== "boolean") {
+          callback?.({ ok: false, error: "Invalid enabled value" });
+          return;
+        }
+        setConfig(`project:${projectId}:github:fork_upstream_pr`, data.enabled ? "true" : "false");
+        callback?.({ ok: true });
+      } catch (err) {
+        callback?.({ ok: false, error: err instanceof Error ? err.message : "Failed to save fork upstream PR setting" });
+      }
+    });
+
     // Toggle issue monitor for a project
     socket.on("project:set-issue-monitor", (data, callback) => {
       try {
@@ -865,6 +919,68 @@ export function setupSocketHandlers(
       }
     });
 
+    // Toggle Gitea issue monitoring for a project
+    socket.on("project:set-gitea-issue-monitor", (data, callback) => {
+      try {
+        const db = getDb();
+        const project = db
+          .select()
+          .from(schema.projects)
+          .where(eq(schema.projects.id, data.projectId))
+          .get();
+        if (!project) {
+          callback?.({ ok: false, error: "Project not found" });
+          return;
+        }
+        if (!project.giteaRepo) {
+          callback?.({ ok: false, error: "No Gitea repo configured for this project" });
+          return;
+        }
+        db.update(schema.projects)
+          .set({ giteaIssueMonitor: data.enabled })
+          .where(eq(schema.projects.id, data.projectId))
+          .run();
+
+        if (deps?.giteaIssueMonitor) {
+          if (data.enabled) {
+            const username = resolveGiteaUsername(data.projectId);
+            if (username) {
+              deps.giteaIssueMonitor.watchProject(data.projectId, project.giteaRepo, username);
+            }
+          } else {
+            deps.giteaIssueMonitor.unwatchProject(data.projectId);
+          }
+        }
+
+        const updated = db
+          .select()
+          .from(schema.projects)
+          .where(eq(schema.projects.id, data.projectId))
+          .get();
+        if (updated) {
+          io.emit("project:updated", updated as any);
+        }
+
+        callback?.({ ok: true });
+      } catch (err) {
+        callback?.({ ok: false, error: err instanceof Error ? err.message : "Failed to update Gitea issue monitor setting" });
+      }
+    });
+
+    // Set Gitea account for a project
+    socket.on("project:set-gitea-account", (data, callback) => {
+      try {
+        const db = getDb();
+        db.update(schema.projects)
+          .set({ giteaAccountId: data.accountId })
+          .where(eq(schema.projects.id, data.projectId))
+          .run();
+        callback?.({ ok: true });
+      } catch (err) {
+        callback?.({ ok: false, error: err instanceof Error ? err.message : "Failed to set Gitea account" });
+      }
+    });
+
     // Get sign-commits setting for a project
     socket.on("project:get-sign-commits", (data, callback) => {
       try {
@@ -905,6 +1021,11 @@ export function setupSocketHandlers(
 
         if (data.enabled && !hasSSHKey(accountKeyPath)) {
           callback?.({ ok: false, error: "No SSH key configured for this account. Generate or import one in Settings → GitHub first." });
+          return;
+        }
+
+        if (data.enabled && account?.sshKeyUsage === "auth") {
+          callback?.({ ok: false, error: "SSH key is configured for authentication only. Update key purpose to 'Signing' or 'Both' in Settings → GitHub." });
           return;
         }
 

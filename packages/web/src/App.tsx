@@ -236,6 +236,32 @@ function MainApp() {
     [enterProject, setCenterView, clearChat, loadConversationMessages, setCurrentConversation],
   );
 
+  const handleProjectCreated = useCallback(
+    (projectId: string) => {
+      clearChat();
+      const cached = useProjectStore.getState().projects.find((p) => p.id === projectId);
+      if (cached) {
+        enterProject(projectId, cached, [], []);
+        setCenterView("settings");
+      }
+      const socket = getSocket();
+      socket.emit("project:enter", { projectId }, (result) => {
+        if (result.project) {
+          enterProject(projectId, result.project, result.conversations, result.tasks);
+          setCenterView("settings");
+          if (result.conversations.length > 0) {
+            const latest = result.conversations[0];
+            socket.emit("ceo:load-conversation", { conversationId: latest.id }, (convResult) => {
+              loadConversationMessages(convResult.messages);
+              setCurrentConversation(latest.id);
+            });
+          }
+        }
+      });
+    },
+    [enterProject, setCenterView, clearChat, loadConversationMessages, setCurrentConversation],
+  );
+
   const handleExitProject = useCallback(() => {
     clearChat();
     exitProject();
@@ -438,6 +464,7 @@ function MainApp() {
             centerView={centerView}
             setCenterView={setCenterView}
             onEnterProject={handleEnterProject}
+            onProjectCreated={handleProjectCreated}
             cooName={userProfile?.cooName}
             onOpenSettings={(section?: SettingsSection) => setSettingsOpen(section ?? true)}
             isBasic={isBasic}
@@ -490,6 +517,7 @@ function ResizableLayout({
   centerView,
   setCenterView,
   onEnterProject,
+  onProjectCreated,
   cooName,
   onOpenSettings,
   isBasic,
@@ -501,6 +529,7 @@ function ResizableLayout({
   centerView: CenterView;
   setCenterView: (view: CenterView) => void;
   onEnterProject: (projectId: string) => void;
+  onProjectCreated?: (projectId: string) => void;
   cooName?: string;
   onOpenSettings?: (section?: SettingsSection) => void;
   isBasic?: boolean;
@@ -593,7 +622,7 @@ function ResizableLayout({
           {/* Project list — compact, scrollable */}
           {!activeProjectId && (
             <div className="shrink-0 max-h-[40%] border-b border-border overflow-y-auto">
-              <ProjectList projects={projects} onEnterProject={onEnterProject} cooName={cooName} />
+              <ProjectList projects={projects} onEnterProject={onEnterProject} onProjectCreated={onProjectCreated} cooName={cooName} />
             </div>
           )}
           {/* CEO Chat fills remaining space */}

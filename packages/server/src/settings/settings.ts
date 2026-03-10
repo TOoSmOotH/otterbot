@@ -1867,8 +1867,11 @@ export interface GitHubSettingsResponse {
 }
 
 export function getGitHubSettings(): GitHubSettingsResponse {
+  // Derive enabled from legacy config OR from having any accounts in the DB
+  const legacyEnabled = getConfig("github:enabled") === "true";
+  const hasAccounts = getGitHubAccounts().length > 0;
   return {
-    enabled: getConfig("github:enabled") === "true",
+    enabled: legacyEnabled || hasAccounts,
     tokenSet: !!getConfig("github:token"),
     username: getConfig("github:username") ?? null,
     sshKeySet: existsSync(join(homedir(), ".ssh", "otterbot_github")),
@@ -2159,15 +2162,44 @@ export function applyGitSSHConfig(): void {
   configureGitSSH();
 }
 
-export function testSSHConnection(): { ok: boolean; username?: string; error?: string } {
+/**
+ * Apply global SSH signing config using a specific account's SSH key.
+ * Sets gpg.format, user.signingkey, commit.gpgsign, tag.gpgsign globally
+ * and writes the allowed_signers file.
+ */
+export function applyAccountSSHConfig(account: { sshKeyPath: string | null }): void {
+  if (!account.sshKeyPath) return;
+  const pubKeyPath = account.sshKeyPath + ".pub";
+  if (!existsSync(pubKeyPath)) return;
+
+  // Write allowed signers file
+  const allowedSignersPath = join(sshDir(), "allowed_signers");
+  const pubKeyContent = readFileSync(pubKeyPath, "utf-8").trim();
+  writeFileSync(allowedSignersPath, `* ${pubKeyContent}\n`, { mode: 0o644 });
+
+  // Set global git signing config
+  const gitCmds: string[][] = [
+    ["config", "--global", "gpg.format", "ssh"],
+    ["config", "--global", "user.signingkey", pubKeyPath],
+    ["config", "--global", "commit.gpgsign", "true"],
+    ["config", "--global", "tag.gpgsign", "true"],
+    ["config", "--global", "gpg.ssh.allowedSignersFile", allowedSignersPath],
+  ];
+  for (const args of gitCmds) {
+    execFileSync("git", args, { stdio: "pipe" });
+  }
+}
+
+export function testSSHConnection(): { ok: boolean; username?: string; signingOnly?: boolean; error?: string } {
   return testSSHConnectionForKey(sshKeyPath());
 }
 
-function testSSHConnectionForKey(keyPath: string): { ok: boolean; username?: string; error?: string } {
+function testSSHConnectionForKey(keyPath: string): { ok: boolean; username?: string; signingOnly?: boolean; error?: string } {
   if (!existsSync(keyPath)) {
     return { ok: false, error: `SSH key not found at ${keyPath}` };
   }
 
+  // 1. Try SSH authentication to GitHub
   try {
     // ssh -T git@github.com exits with code 1 on success (it prints "Hi username!")
     // Explicitly specify the identity file to avoid relying on ssh-agent or config ordering
@@ -2180,16 +2212,69 @@ function testSSHConnectionForKey(keyPath: string): { ok: boolean; username?: str
     const match = result.match(/Hi (\S+)!/);
     return { ok: true, username: match?.[1] };
   } catch (error: unknown) {
-    // ssh -T returns exit code 1 on successful auth
-    const stderr = (error as { stdout?: string })?.stdout ?? String(error);
-    const match = stderr.match(/Hi (\S+)!/);
+    // ssh -T returns exit code 1 on successful auth — "Hi username!" is on stderr
+    const errObj = error as { stderr?: string; stdout?: string };
+    const output = errObj.stderr || errObj.stdout || String(error);
+    const match = output.match(/Hi (\S+)!/);
     if (match) {
       return { ok: true, username: match[1] };
     }
+
+    // 2. Auth failed — check if the key can at least sign (signing-only key)
+    if (testSSHSigningForKey(keyPath)) {
+      return { ok: true, signingOnly: true };
+    }
+
     return {
       ok: false,
-      error: stderr.slice(0, 200) || "SSH connection failed",
+      error: output.slice(0, 200) || "SSH connection failed",
     };
+  }
+}
+
+/**
+ * Test whether an SSH key can produce a valid signature.
+ * Used as a fallback when SSH auth fails — the key may be registered
+ * on GitHub only as a signing key, not an authentication key.
+ */
+function testSSHSigningForKey(keyPath: string): boolean {
+  const pubKeyPath = keyPath + ".pub";
+  if (!existsSync(pubKeyPath)) return false;
+
+  try {
+    // Create a temporary allowed_signers for verification
+    const pubKeyContent = readFileSync(pubKeyPath, "utf-8").trim();
+    const tmpSigners = join(sshDir(), "allowed_signers_test");
+    const tmpData = join(sshDir(), "sign_test_data");
+    const tmpSig = join(sshDir(), "sign_test_data.sig");
+
+    try {
+      writeFileSync(tmpSigners, `test@test ${pubKeyContent}\n`, { mode: 0o644 });
+      writeFileSync(tmpData, "otterbot-signing-test\n", { mode: 0o644 });
+
+      // Sign
+      execFileSync(
+        "ssh-keygen",
+        ["-Y", "sign", "-f", keyPath, "-n", "git", tmpData],
+        { stdio: "pipe", timeout: 5_000 },
+      );
+
+      // Verify
+      execFileSync(
+        "ssh-keygen",
+        ["-Y", "verify", "-f", tmpSigners, "-I", "test@test", "-n", "git", "-s", tmpSig],
+        { input: readFileSync(tmpData), stdio: ["pipe", "pipe", "pipe"], timeout: 5_000 },
+      );
+
+      return true;
+    } finally {
+      // Clean up temp files
+      for (const f of [tmpSigners, tmpData, tmpSig]) {
+        try { if (existsSync(f)) unlinkSync(f); } catch { /* ignore */ }
+      }
+    }
+  } catch {
+    return false;
   }
 }
 
@@ -2292,9 +2377,11 @@ export async function testGitHubAccountConnection(accountId: string): Promise<Te
   }
 }
 
+export type SshKeyUsage = "auth" | "signing" | "both";
+
 export function generateAccountSSHKey(
   accountId: string,
-  data?: { type?: "ed25519" | "rsa"; comment?: string },
+  data?: { type?: "ed25519" | "rsa"; comment?: string; usage?: SshKeyUsage },
 ): { ok: boolean; fingerprint?: string; publicKey?: string; error?: string } {
   const account = getGitHubAccountById(accountId);
   if (!account) return { ok: false, error: "Account not found." };
@@ -2320,7 +2407,7 @@ export function generateAccountSSHKey(
     // Update the account record with SSH info
     const db = getDb();
     db.update(schema.githubAccounts)
-      .set({ sshKeyPath: keyPath, sshFingerprint: fingerprint, sshKeyType: keyType, updatedAt: new Date().toISOString() })
+      .set({ sshKeyPath: keyPath, sshFingerprint: fingerprint, sshKeyType: keyType, sshKeyUsage: data?.usage ?? "both", updatedAt: new Date().toISOString() })
       .where(eq(schema.githubAccounts.id, accountId))
       .run();
 
@@ -2333,6 +2420,7 @@ export function generateAccountSSHKey(
 export function importAccountSSHKey(
   accountId: string,
   privateKey: string,
+  usage?: SshKeyUsage,
 ): { ok: boolean; fingerprint?: string; publicKey?: string; error?: string } {
   const account = getGitHubAccountById(accountId);
   if (!account) return { ok: false, error: "Account not found." };
@@ -2355,7 +2443,7 @@ export function importAccountSSHKey(
 
     const db = getDb();
     db.update(schema.githubAccounts)
-      .set({ sshKeyPath: keyPath, sshFingerprint: fingerprint, sshKeyType: keyType, updatedAt: new Date().toISOString() })
+      .set({ sshKeyPath: keyPath, sshFingerprint: fingerprint, sshKeyType: keyType, sshKeyUsage: usage ?? "both", updatedAt: new Date().toISOString() })
       .where(eq(schema.githubAccounts.id, accountId))
       .run();
 
@@ -2383,7 +2471,7 @@ export function removeAccountSSHKey(accountId: string): { ok: boolean; error?: s
 
     const db = getDb();
     db.update(schema.githubAccounts)
-      .set({ sshKeyPath: null, sshFingerprint: null, sshKeyType: null, updatedAt: new Date().toISOString() })
+      .set({ sshKeyPath: null, sshFingerprint: null, sshKeyType: null, sshKeyUsage: null, updatedAt: new Date().toISOString() })
       .where(eq(schema.githubAccounts.id, accountId))
       .run();
 
@@ -2393,7 +2481,31 @@ export function removeAccountSSHKey(accountId: string): { ok: boolean; error?: s
   }
 }
 
-export function testAccountSSHConnection(accountId: string): { ok: boolean; username?: string; error?: string } {
+export function updateAccountSSHUsage(accountId: string, usage: SshKeyUsage): { ok: boolean; error?: string } {
+  const account = getGitHubAccountById(accountId);
+  if (!account) return { ok: false, error: "Account not found." };
+  if (!account.sshKeyPath) return { ok: false, error: "No SSH key configured for this account." };
+
+  const db = getDb();
+  db.update(schema.githubAccounts)
+    .set({ sshKeyUsage: usage, updatedAt: new Date().toISOString() })
+    .where(eq(schema.githubAccounts.id, accountId))
+    .run();
+  return { ok: true };
+}
+
+export function testAccountSSHConnection(accountId: string): { ok: boolean; username?: string; signingOnly?: boolean; error?: string } {
+  const account = getGitHubAccountById(accountId);
   const keyPath = accountSshKeyPath(accountId);
+  const usage = account?.sshKeyUsage ?? "both";
+
+  if (usage === "signing") {
+    // Only test signing capability, not SSH auth
+    if (testSSHSigningForKey(keyPath)) {
+      return { ok: true, signingOnly: true };
+    }
+    return { ok: false, error: "Key cannot produce a valid signature" };
+  }
+
   return testSSHConnectionForKey(keyPath);
 }

@@ -751,6 +751,48 @@ export async function migrateDb() {
     // Column already exists — ignore
   }
 
+  // Idempotent migration: add ssh_key_usage to github_accounts
+  try {
+    db.run(sql`ALTER TABLE github_accounts ADD COLUMN ssh_key_usage TEXT DEFAULT 'both'`);
+  } catch {
+    // Column already exists — ignore
+  }
+
+  // Gitea accounts table
+  db.run(sql`CREATE TABLE IF NOT EXISTS gitea_accounts (
+    id TEXT PRIMARY KEY,
+    label TEXT NOT NULL,
+    token TEXT NOT NULL,
+    username TEXT,
+    email TEXT,
+    instance_url TEXT NOT NULL,
+    is_default INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  )`);
+
+  // Idempotent migration: add Gitea fields to projects
+  try {
+    db.run(sql`ALTER TABLE projects ADD COLUMN gitea_repo TEXT`);
+  } catch {
+    // Column already exists — ignore
+  }
+  try {
+    db.run(sql`ALTER TABLE projects ADD COLUMN gitea_branch TEXT`);
+  } catch {
+    // Column already exists — ignore
+  }
+  try {
+    db.run(sql`ALTER TABLE projects ADD COLUMN gitea_issue_monitor INTEGER NOT NULL DEFAULT 0`);
+  } catch {
+    // Column already exists — ignore
+  }
+  try {
+    db.run(sql`ALTER TABLE projects ADD COLUMN gitea_account_id TEXT`);
+  } catch {
+    // Column already exists — ignore
+  }
+
   // One-time migration: move provider credentials from config KV to providers table
   await migrateProviders(db);
 
