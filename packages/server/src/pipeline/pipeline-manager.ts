@@ -535,6 +535,14 @@ export class PipelineManager {
       .get();
     if (!task) return false;
 
+    // Verify the task belongs to this project (prevent cross-project IDOR)
+    if (task.projectId !== projectId) {
+      console.warn(
+        `[PipelineManager] retriageTask: task ${taskId} belongs to project "${task.projectId}", not "${projectId}" — refusing cross-project re-triage`,
+      );
+      return false;
+    }
+
     // Extract issue number from labels
     const labels = Array.isArray(task.labels) ? (task.labels as string[]) : [];
     const issueLabel = labels.find((l: string) => l.startsWith("github-issue-"));

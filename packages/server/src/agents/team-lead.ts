@@ -1349,6 +1349,13 @@ export class TeamLead extends BaseAgent {
               .from(schema.kanbanTasks)
               .where(eq(schema.kanbanTasks.id, taskId))
               .get();
+            // Verify the task belongs to this project (prevent cross-project operations)
+            if (existingTask && this.projectId && existingTask.projectId !== this.projectId) {
+              const eLabel = this.taskLabel(existingTask);
+              this._toolCallCounts.set("spawn_worker_refused", (refusals) + 1);
+              this._shouldAbortThink = true;
+              return `REFUSED: ${eLabel} (${taskId}) belongs to a different project. Cannot operate on tasks from other projects.`;
+            }
             if (existingTask?.column === "done") {
               const eLabel = this.taskLabel(existingTask);
               this._toolCallCounts.set("spawn_worker_refused", (refusals) + 1);
@@ -1590,13 +1597,20 @@ export class TeamLead extends BaseAgent {
           .from(schema.kanbanTasks)
           .where(eq(schema.kanbanTasks.id, taskId))
           .get();
+        // Only route through pipeline if the task belongs to this project (prevent cross-project operations)
+        const taskBelongsToProject = kanbanTask && kanbanTask.projectId === this.projectId;
+        if (kanbanTask && !taskBelongsToProject) {
+          console.warn(
+            `[TeamLead ${this.id}] Task ${taskId} belongs to project "${kanbanTask.projectId}", not "${this.projectId}" — skipping pipeline routing`,
+          );
+        }
         const labels = Array.isArray(kanbanTask?.labels) ? kanbanTask.labels as string[] : [];
         const issueLabel = labels.find((l: string) => l.startsWith("github-issue-"));
         const issueNumber = issueLabel
           ? parseInt(issueLabel.replace("github-issue-", ""), 10)
           : null;
 
-        if (CODING_AGENT_IDS.has(registryEntryId)) {
+        if (taskBelongsToProject && CODING_AGENT_IDS.has(registryEntryId)) {
           // Coding agents → route through implementation pipeline (coder → security → tester → reviewer)
           console.log(
             `[TeamLead ${this.id}] Routing coding task ${taskId} through pipeline (repo=${repo}, issue=${issueNumber})`,
@@ -1608,7 +1622,7 @@ export class TeamLead extends BaseAgent {
             return `Routed task ${taskId} through pipeline. The pipeline will orchestrate coding, security review, testing, and code review stages.`;
           }
           console.log(`[TeamLead ${this.id}] Pipeline declined task ${taskId} — spawning worker directly`);
-        } else if (NON_CODING_PIPELINE_AGENT_IDS.has(registryEntryId)) {
+        } else if (taskBelongsToProject && NON_CODING_PIPELINE_AGENT_IDS.has(registryEntryId)) {
           // Non-coding agents (researcher, triage) on a pipeline-enabled project task →
           // re-triage via pipeline instead of spawning a standalone worker.
           // This ensures the task follows the pipeline's rules of engagement
