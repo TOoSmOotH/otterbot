@@ -11,10 +11,17 @@ import {
   fetchPullRequestReviewComments,
   fetchCheckRunsForRef,
   aggregateCheckRunStatus,
+  createIssueComment,
+  gitEnvWithPAT,
+  gitCredentialArgs,
+  resolveProjectBranch,
 } from "./github-service.js";
+import { rebaseBranch, forcePushBranch } from "../utils/git.js";
+import { formatBotComment } from "../utils/github-comments.js";
 import type { COO } from "../agents/coo.js";
 import type { PipelineManager } from "../pipeline/pipeline-manager.js";
 import type { MergeQueue } from "../merge-queue/merge-queue.js";
+import type { WorkspaceManager } from "../workspace/workspace.js";
 
 type TypedServer = Server<ClientToServerEvents, ServerToClientEvents>;
 
@@ -26,8 +33,11 @@ export class GitHubPRMonitor {
   private processedReviewIds = new Set<number>();
   /** Track HEAD SHAs for which we already processed a CI failure */
   private processedCIFailureSHAs = new Set<string>();
+  /** Track HEAD SHAs for which we already attempted a conflict rebase */
+  private processedConflictSHAs = new Set<string>();
   private pipelineManager: PipelineManager | null = null;
   private mergeQueue: MergeQueue | null = null;
+  private workspace: WorkspaceManager | null = null;
 
   constructor(coo: COO, io: TypedServer) {
     this.coo = coo;
@@ -42,6 +52,11 @@ export class GitHubPRMonitor {
   /** Inject the merge queue (avoids circular dependency) */
   setMergeQueue(mq: MergeQueue): void {
     this.mergeQueue = mq;
+  }
+
+  /** Inject the workspace manager for conflict resolution */
+  setWorkspace(ws: WorkspaceManager): void {
+    this.workspace = ws;
   }
 
   /** Start the polling loop */
@@ -274,6 +289,9 @@ export class GitHubPRMonitor {
 
     // Check CI status on the PR's HEAD commit
     await this.checkCIStatus(task, project, pr, token);
+
+    // Check for merge conflicts and auto-rebase if possible
+    await this.checkMergeable(task, project, pr, token);
   }
 
   private async checkCIStatus(
@@ -351,6 +369,68 @@ export class GitHubPRMonitor {
 
     // Non-pipeline path: use the COO/TeamLead to fix
     await this.ciFailureWorker(task, project, pr, feedback);
+  }
+
+  private async checkMergeable(
+    task: typeof schema.kanbanTasks.$inferSelect,
+    project: typeof schema.projects.$inferSelect,
+    pr: Awaited<ReturnType<typeof fetchPullRequest>>,
+    token: string,
+  ): Promise<void> {
+    if (!project.githubRepo) return;
+    // null means GitHub is still computing — skip
+    if (pr.mergeable !== false) return;
+    if (!this.workspace) return;
+
+    const headSHA = pr.head.sha;
+    if (this.processedConflictSHAs.has(headSHA)) return;
+
+    const prNumber = task.prNumber ?? pr.number;
+    const branchName = task.prBranch || pr.head.ref;
+    const baseBranch = resolveProjectBranch(task.projectId);
+    const repoPath = this.workspace.repoPath(task.projectId);
+    const gitEnv = gitEnvWithPAT(token);
+    const credArgs = gitCredentialArgs();
+
+    this.processedConflictSHAs.add(headSHA);
+
+    const rebaseOk = rebaseBranch(repoPath, branchName, baseBranch, gitEnv, credArgs);
+    if (rebaseOk) {
+      try {
+        forcePushBranch(repoPath, branchName, gitEnv, credArgs);
+        console.log(`[PRMonitor] Auto-rebased PR #${prNumber} onto ${baseBranch}`);
+      } catch (err) {
+        console.error(`[PRMonitor] Force push failed for PR #${prNumber}:`, err);
+      }
+    } else {
+      // Rebase conflict — post a comment and move task to backlog
+      try {
+        await createIssueComment(
+          project.githubRepo,
+          token,
+          prNumber,
+          formatBotComment(
+            "Merge Conflict Detected",
+            `Could not automatically rebase \`${branchName}\` onto \`${baseBranch}\`. ` +
+            `Please resolve the conflicts manually.`,
+          ),
+        );
+      } catch { /* best effort */ }
+
+      const db = getDb();
+      const now = new Date().toISOString();
+      db.update(schema.kanbanTasks)
+        .set({ column: "backlog", assigneeAgentId: null, updatedAt: now })
+        .where(eq(schema.kanbanTasks.id, task.id))
+        .run();
+
+      const updated = db.select().from(schema.kanbanTasks).where(eq(schema.kanbanTasks.id, task.id)).get();
+      if (updated) {
+        this.io.emit("kanban:task-updated", updated as unknown as KanbanTask);
+      }
+
+      console.log(`[PRMonitor] Merge conflict on PR #${prNumber} — task ${task.id} → backlog`);
+    }
   }
 
   private async ciFailureWorker(

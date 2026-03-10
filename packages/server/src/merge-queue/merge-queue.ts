@@ -260,8 +260,12 @@ export class MergeQueue implements Scheduler {
     this.processing = true;
 
     try {
-      await this.syncExternalState();
-      await this.processNext();
+      const rebaseEntryId = await this.syncExternalState();
+      if (rebaseEntryId) {
+        await this.doProactiveRebase(rebaseEntryId);
+      } else {
+        await this.processNext();
+      }
     } finally {
       this.processing = false;
     }
@@ -269,14 +273,29 @@ export class MergeQueue implements Scheduler {
 
   /**
    * Check GitHub for PRs that were merged/closed externally.
+   * Returns the ID of a queued entry with conflicts that can be proactively rebased
+   * (not the next-in-line entry, which processNext handles).
    */
-  private async syncExternalState(): Promise<void> {
+  private async syncExternalState(): Promise<string | null> {
     const db = getDb();
     const activeEntries = db
       .select()
       .from(schema.mergeQueue)
       .all()
       .filter((e) => !["merged", "failed"].includes(e.status));
+
+    // Collect queued entries with conflicts for proactive rebase.
+    // We sort by position so the first conflicting non-next-in-line entry is returned.
+    const conflictingEntries: { id: string; position: number }[] = [];
+
+    // Find the lowest-position queued entry (next-in-line for processNext)
+    const allQueued = db
+      .select()
+      .from(schema.mergeQueue)
+      .where(eq(schema.mergeQueue.status, "queued"))
+      .all()
+      .sort((a, b) => a.position - b.position);
+    const nextInLineId = allQueued[0]?.id ?? null;
 
     for (const entry of activeEntries) {
       try {
@@ -337,11 +356,22 @@ export class MergeQueue implements Scheduler {
 
           this.emitQueueUpdated();
           console.log(`[MergeQueue] PR #${entry.prNumber} closed — task ${entry.taskId} → backlog`);
+        } else if (entry.status === "queued" && pr.mergeable === false && entry.id !== nextInLineId) {
+          // Queued entry with conflicts — candidate for proactive rebase
+          conflictingEntries.push({ id: entry.id, position: entry.position });
         }
       } catch (err) {
         console.error(`[MergeQueue] Error syncing PR #${entry.prNumber}:`, err);
       }
     }
+
+    // Return the first conflicting entry that is NOT next-in-line
+    if (conflictingEntries.length > 0) {
+      conflictingEntries.sort((a, b) => a.position - b.position);
+      return conflictingEntries[0]!.id;
+    }
+
+    return null;
   }
 
   /**
@@ -402,35 +432,7 @@ export class MergeQueue implements Scheduler {
     );
 
     if (!rebaseSuccess) {
-      // Rebase conflict
-      await this.updateEntryStatus(entryId, "conflict", "Rebase conflict with base branch");
-
-      // Post comment on PR
-      try {
-        await createIssueComment(
-          project.githubRepo,
-          token,
-          entry.prNumber,
-          formatBotComment(
-            "Merge Queue: Rebase Conflict",
-            `Could not automatically rebase \`${entry.prBranch}\` onto \`${entry.baseBranch}\`. ` +
-            `Please resolve the conflicts manually and re-approve for merge.`,
-          ),
-        );
-      } catch { /* best effort */ }
-
-      // Move task to backlog for attention
-      const now = new Date().toISOString();
-      db.update(schema.kanbanTasks)
-        .set({ column: "backlog", assigneeAgentId: null, updatedAt: now })
-        .where(eq(schema.kanbanTasks.id, entry.taskId))
-        .run();
-      const updated = db.select().from(schema.kanbanTasks).where(eq(schema.kanbanTasks.id, entry.taskId)).get();
-      if (updated) {
-        this.io.emit("kanban:task-updated", updated as unknown as KanbanTask);
-      }
-
-      console.log(`[MergeQueue] Rebase conflict for PR #${entry.prNumber}`);
+      await this.handleRebaseConflict(entryId);
       return;
     }
 
@@ -461,6 +463,81 @@ export class MergeQueue implements Scheduler {
     // Step 3: Merge (if no pipeline, or pipeline start failed)
     await this.updateEntryStatus(entryId, "merging");
     await this.doMerge(entryId);
+  }
+
+  /**
+   * Proactively rebase a queued entry that has conflicts with the base branch.
+   * This runs on non-next-in-line entries so they're ready when their turn comes.
+   */
+  private async doProactiveRebase(entryId: string): Promise<void> {
+    const db = getDb();
+    const entry = db.select().from(schema.mergeQueue).where(eq(schema.mergeQueue.id, entryId)).get();
+    if (!entry) return;
+
+    const token = resolveGitHubToken(entry.projectId);
+    if (!token) return;
+
+    const repoPath = this.workspace.repoPath(entry.projectId);
+    const gitEnv = gitEnvWithPAT(token);
+    const credArgs = gitCredentialArgs();
+
+    const rebaseOk = rebaseBranch(repoPath, entry.prBranch, entry.baseBranch, gitEnv, credArgs);
+    if (rebaseOk) {
+      try {
+        forcePushBranch(repoPath, entry.prBranch, gitEnv, credArgs);
+        console.log(`[MergeQueue] Proactive rebase succeeded for PR #${entry.prNumber}`);
+      } catch (err) {
+        console.error(`[MergeQueue] Proactive rebase push failed for PR #${entry.prNumber}:`, err);
+      }
+    } else {
+      await this.handleRebaseConflict(entryId);
+    }
+  }
+
+  /**
+   * Handle a rebase conflict: mark as conflict, post comment, move task to backlog.
+   * Shared by processEntry and doProactiveRebase.
+   */
+  private async handleRebaseConflict(entryId: string): Promise<void> {
+    const db = getDb();
+    const entry = db.select().from(schema.mergeQueue).where(eq(schema.mergeQueue.id, entryId)).get();
+    if (!entry) return;
+
+    const project = db.select().from(schema.projects).where(eq(schema.projects.id, entry.projectId)).get();
+    if (!project?.githubRepo) return;
+
+    const token = resolveGitHubToken(entry.projectId);
+
+    await this.updateEntryStatus(entryId, "conflict", "Rebase conflict with base branch");
+
+    // Post comment on PR
+    if (token) {
+      try {
+        await createIssueComment(
+          project.githubRepo,
+          token,
+          entry.prNumber,
+          formatBotComment(
+            "Merge Queue: Rebase Conflict",
+            `Could not automatically rebase \`${entry.prBranch}\` onto \`${entry.baseBranch}\`. ` +
+            `Please resolve the conflicts manually and re-approve for merge.`,
+          ),
+        );
+      } catch { /* best effort */ }
+    }
+
+    // Move task to backlog for attention
+    const now = new Date().toISOString();
+    db.update(schema.kanbanTasks)
+      .set({ column: "backlog", assigneeAgentId: null, updatedAt: now })
+      .where(eq(schema.kanbanTasks.id, entry.taskId))
+      .run();
+    const updated = db.select().from(schema.kanbanTasks).where(eq(schema.kanbanTasks.id, entry.taskId)).get();
+    if (updated) {
+      this.io.emit("kanban:task-updated", updated as unknown as KanbanTask);
+    }
+
+    console.log(`[MergeQueue] Rebase conflict for PR #${entry.prNumber}`);
   }
 
   /**

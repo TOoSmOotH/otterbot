@@ -19,6 +19,7 @@ const mockFetchPullRequestReviews = vi.fn().mockResolvedValue([]);
 const mockFetchPullRequestReviewComments = vi.fn().mockResolvedValue([]);
 const mockFetchCheckRunsForRef = vi.fn();
 const mockAggregateCheckRunStatus = vi.fn();
+const mockCreateIssueComment = vi.fn();
 
 vi.mock("../github-service.js", () => ({
   fetchPullRequest: (...args: any[]) => mockFetchPullRequest(...args),
@@ -26,8 +27,23 @@ vi.mock("../github-service.js", () => ({
   fetchPullRequestReviewComments: (...args: any[]) => mockFetchPullRequestReviewComments(...args),
   fetchCheckRunsForRef: (...args: any[]) => mockFetchCheckRunsForRef(...args),
   aggregateCheckRunStatus: (...args: any[]) => mockAggregateCheckRunStatus(...args),
+  createIssueComment: (...args: any[]) => mockCreateIssueComment(...args),
   cloneRepo: vi.fn(),
   getRepoDefaultBranch: vi.fn().mockResolvedValue("main"),
+  resolveProjectBranch: vi.fn(() => "main"),
+  gitEnvWithPAT: vi.fn(() => ({})),
+  gitCredentialArgs: vi.fn(() => []),
+}));
+
+const mockRebaseBranch = vi.fn();
+const mockForcePushBranch = vi.fn();
+vi.mock("../../utils/git.js", () => ({
+  rebaseBranch: (...args: any[]) => mockRebaseBranch(...args),
+  forcePushBranch: (...args: any[]) => mockForcePushBranch(...args),
+}));
+
+vi.mock("../../utils/github-comments.js", () => ({
+  formatBotComment: vi.fn((...args: string[]) => args.join(" | ")),
 }));
 
 import { GitHubPRMonitor } from "../pr-monitor.js";
@@ -109,6 +125,9 @@ describe("GitHubPRMonitor", () => {
     mockFetchPullRequest.mockReset();
     mockFetchPullRequestReviews.mockReset().mockResolvedValue([]);
     mockFetchPullRequestReviewComments.mockReset().mockResolvedValue([]);
+    mockCreateIssueComment.mockReset().mockResolvedValue(undefined);
+    mockRebaseBranch.mockReset();
+    mockForcePushBranch.mockReset();
     process.env.DATABASE_URL = `file:${join(tmpDir, "test.db")}`;
     process.env.OTTERBOT_DB_KEY = "test-key";
     await migrateDb();
@@ -435,6 +454,181 @@ describe("GitHubPRMonitor", () => {
 
       monitor.stop();
       vi.useRealTimers();
+    });
+  });
+
+  describe("merge conflict detection", () => {
+    function createMockWorkspace() {
+      return {
+        repoPath: vi.fn((projectId: string) => `/workspace/${projectId}/repo`),
+      } as any;
+    }
+
+    it("auto-rebases when PR has mergeable=false", async () => {
+      const db = getDb();
+      insertProject(db, "proj-1", "owner/repo");
+      insertTask(db, {
+        id: "task-conflict-1",
+        projectId: "proj-1",
+        title: "#60: Conflict test",
+        column: "in_review",
+        prNumber: 60,
+        prBranch: "feat/conflict-60",
+      });
+
+      monitor.setWorkspace(createMockWorkspace());
+      configStore.set("github:token", "ghp_test");
+
+      mockFetchPullRequest.mockResolvedValue({
+        number: 60,
+        state: "open",
+        merged: false,
+        mergeable: false,
+        head: { ref: "feat/conflict-60", sha: "conflict123" },
+        base: { ref: "main" },
+      });
+
+      mockFetchCheckRunsForRef.mockResolvedValue([]);
+      mockAggregateCheckRunStatus.mockReturnValue(null);
+      mockRebaseBranch.mockReturnValue(true);
+      mockForcePushBranch.mockReturnValue(undefined);
+
+      await (monitor as any).poll();
+
+      expect(mockRebaseBranch).toHaveBeenCalledWith(
+        "/workspace/proj-1/repo",
+        "feat/conflict-60",
+        "main",
+        expect.any(Object),
+        expect.any(Array),
+      );
+      expect(mockForcePushBranch).toHaveBeenCalled();
+
+      // Task should remain in_review (conflict resolved)
+      const task = db
+        .select()
+        .from(schema.kanbanTasks)
+        .where(eq(schema.kanbanTasks.id, "task-conflict-1"))
+        .get();
+      expect(task?.column).toBe("in_review");
+    });
+
+    it("moves task to backlog when rebase fails (true conflict)", async () => {
+      const db = getDb();
+      insertProject(db, "proj-1", "owner/repo");
+      insertTask(db, {
+        id: "task-conflict-2",
+        projectId: "proj-1",
+        title: "#61: Real conflict",
+        column: "in_review",
+        prNumber: 61,
+        prBranch: "feat/real-conflict",
+      });
+
+      monitor.setWorkspace(createMockWorkspace());
+      configStore.set("github:token", "ghp_test");
+
+      mockFetchPullRequest.mockResolvedValue({
+        number: 61,
+        state: "open",
+        merged: false,
+        mergeable: false,
+        head: { ref: "feat/real-conflict", sha: "realconflict123" },
+        base: { ref: "main" },
+      });
+
+      mockFetchCheckRunsForRef.mockResolvedValue([]);
+      mockAggregateCheckRunStatus.mockReturnValue(null);
+      mockRebaseBranch.mockReturnValue(false); // conflict
+
+      await (monitor as any).poll();
+
+      const task = db
+        .select()
+        .from(schema.kanbanTasks)
+        .where(eq(schema.kanbanTasks.id, "task-conflict-2"))
+        .get();
+      expect(task?.column).toBe("backlog");
+      expect(mockCreateIssueComment).toHaveBeenCalled();
+    });
+
+    it("skips when mergeable is null (GitHub computing)", async () => {
+      const db = getDb();
+      insertProject(db, "proj-1", "owner/repo");
+      insertTask(db, {
+        id: "task-conflict-3",
+        projectId: "proj-1",
+        title: "#62: Computing",
+        column: "in_review",
+        prNumber: 62,
+        prBranch: "feat/computing",
+      });
+
+      monitor.setWorkspace(createMockWorkspace());
+      configStore.set("github:token", "ghp_test");
+
+      mockFetchPullRequest.mockResolvedValue({
+        number: 62,
+        state: "open",
+        merged: false,
+        mergeable: null,
+        head: { ref: "feat/computing", sha: "computing123" },
+        base: { ref: "main" },
+      });
+
+      mockFetchCheckRunsForRef.mockResolvedValue([]);
+      mockAggregateCheckRunStatus.mockReturnValue(null);
+
+      await (monitor as any).poll();
+
+      expect(mockRebaseBranch).not.toHaveBeenCalled();
+    });
+
+    it("does not re-attempt rebase on same HEAD sha", async () => {
+      const db = getDb();
+      insertProject(db, "proj-1", "owner/repo");
+      insertTask(db, {
+        id: "task-conflict-4",
+        projectId: "proj-1",
+        title: "#63: Dedup conflict",
+        column: "in_review",
+        prNumber: 63,
+        prBranch: "feat/dedup-conflict",
+      });
+
+      monitor.setWorkspace(createMockWorkspace());
+      configStore.set("github:token", "ghp_test");
+
+      const prData = {
+        number: 63,
+        state: "open",
+        merged: false,
+        mergeable: false,
+        head: { ref: "feat/dedup-conflict", sha: "samesha123" },
+        base: { ref: "main" },
+      };
+
+      mockFetchPullRequest.mockResolvedValue(prData);
+      mockFetchCheckRunsForRef.mockResolvedValue([]);
+      mockAggregateCheckRunStatus.mockReturnValue(null);
+      mockRebaseBranch.mockReturnValue(false);
+
+      // First poll
+      await (monitor as any).poll();
+      expect(mockRebaseBranch).toHaveBeenCalledTimes(1);
+
+      // Reset task back to in_review for second poll
+      db.update(schema.kanbanTasks)
+        .set({ column: "in_review" })
+        .where(eq(schema.kanbanTasks.id, "task-conflict-4"))
+        .run();
+
+      mockRebaseBranch.mockClear();
+      mockFetchPullRequest.mockResolvedValue(prData);
+
+      // Second poll with same SHA — should NOT re-attempt
+      await (monitor as any).poll();
+      expect(mockRebaseBranch).not.toHaveBeenCalled();
     });
   });
 

@@ -1150,6 +1150,7 @@ async function main() {
       issueMonitor.setPipelineManager(pipelineManager);
       prMonitor.setPipelineManager(pipelineManager);
       prMonitor.setMergeQueue(mergeQueue);
+      prMonitor.setWorkspace(workspace);
       giteaIssueMonitor.setPipelineManager(pipelineManager);
       giteaPrMonitor.setPipelineManager(pipelineManager);
       giteaPrMonitor.setMergeQueue(mergeQueue);

@@ -514,6 +514,125 @@ describe("MergeQueue", () => {
     });
   });
 
+  // ─── proactive rebase ────────────────────────────────────────
+
+  describe("proactive rebase", () => {
+    it("rebases a non-next-in-line queued entry with conflicts", async () => {
+      const task1 = insertTask({ id: "task-pr-1", prNumber: 70, prBranch: "feat/first" });
+      const task2 = insertTask({ id: "task-pr-2", prNumber: 71, prBranch: "feat/second" });
+      insertProject();
+      // task1 is next-in-line (position 1), task2 is behind (position 2)
+      insertMergeQueueEntry({
+        id: "entry-pr-1",
+        taskId: task1.id,
+        prNumber: 70,
+        prBranch: "feat/first",
+        position: 1,
+        status: "queued",
+      });
+      insertMergeQueueEntry({
+        id: "entry-pr-2",
+        taskId: task2.id,
+        prNumber: 71,
+        prBranch: "feat/second",
+        position: 2,
+        status: "queued",
+      });
+      configStore.set("github:token", "test-token");
+
+      // task1's PR is mergeable, task2's PR has conflicts
+      mockFetchPullRequest
+        .mockResolvedValueOnce({ merged: false, state: "open", mergeable: true })
+        .mockResolvedValueOnce({ merged: false, state: "open", mergeable: false });
+      mockRebaseBranch.mockReturnValue(true);
+      mockForcePushBranch.mockReturnValue(undefined);
+
+      await (mq as any).poll();
+
+      // Should have proactively rebased entry-pr-2 (not next-in-line)
+      expect(mockRebaseBranch).toHaveBeenCalledWith(
+        "/workspace/test-project/repo",
+        "feat/second",
+        "main",
+        expect.any(Object),
+        expect.any(Array),
+      );
+      expect(mockForcePushBranch).toHaveBeenCalledWith(
+        "/workspace/test-project/repo",
+        "feat/second",
+        expect.any(Object),
+        expect.any(Array),
+      );
+    });
+
+    it("skips next-in-line entry for proactive rebase (lets processNext handle it)", async () => {
+      const task1 = insertTask({ id: "task-pr-only", prNumber: 72, prBranch: "feat/only" });
+      insertProject();
+      // Only one queued entry — it's next-in-line
+      insertMergeQueueEntry({
+        id: "entry-pr-only",
+        taskId: task1.id,
+        prNumber: 72,
+        prBranch: "feat/only",
+        position: 1,
+        status: "queued",
+      });
+      configStore.set("github:token", "test-token");
+
+      // PR has conflicts but it's the only (next-in-line) entry
+      mockFetchPullRequest.mockResolvedValue({ merged: false, state: "open", mergeable: false });
+      mockRebaseBranch.mockReturnValue(true);
+      mockForcePushBranch.mockReturnValue(undefined);
+      mockMergePullRequest.mockResolvedValue(undefined);
+
+      const processEntrySpy = vi.spyOn(mq as any, "processEntry");
+
+      await (mq as any).poll();
+
+      // Should have called processEntry (not doProactiveRebase) for next-in-line
+      expect(processEntrySpy).toHaveBeenCalledWith("entry-pr-only");
+    });
+
+    it("handles conflict during proactive rebase — marks conflict, moves task to backlog", async () => {
+      const task1 = insertTask({ id: "task-pr-c1", prNumber: 73, prBranch: "feat/c1" });
+      const task2 = insertTask({ id: "task-pr-c2", prNumber: 74, prBranch: "feat/c2" });
+      insertProject();
+      insertMergeQueueEntry({
+        id: "entry-pr-c1",
+        taskId: task1.id,
+        prNumber: 73,
+        prBranch: "feat/c1",
+        position: 1,
+        status: "queued",
+      });
+      insertMergeQueueEntry({
+        id: "entry-pr-c2",
+        taskId: task2.id,
+        prNumber: 74,
+        prBranch: "feat/c2",
+        position: 2,
+        status: "queued",
+      });
+      configStore.set("github:token", "test-token");
+
+      mockFetchPullRequest
+        .mockResolvedValueOnce({ merged: false, state: "open", mergeable: true })
+        .mockResolvedValueOnce({ merged: false, state: "open", mergeable: false });
+      mockRebaseBranch.mockReturnValue(false); // conflict
+      mockCreateIssueComment.mockResolvedValue(undefined);
+
+      await (mq as any).poll();
+
+      const dbEntry = getMergeQueueEntry("entry-pr-c2");
+      expect(dbEntry?.status).toBe("conflict");
+
+      const dbTask = getTask(task2.id);
+      expect(dbTask?.column).toBe("backlog");
+
+      expect(mockCreateIssueComment).toHaveBeenCalled();
+    });
+  });
+
   // ─── syncExternalState ─────────────────────────────────────
 
   describe("syncExternalState", () => {
