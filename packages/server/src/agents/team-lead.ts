@@ -30,7 +30,7 @@ import { Registry } from "../registry/registry.js";
 import { SkillService } from "../skills/skill-service.js";
 import type { MessageBus } from "../bus/message-bus.js";
 import type { WorkspaceManager } from "../workspace/workspace.js";
-import { eq } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import { getConfig, setConfig, deleteConfig } from "../auth/auth.js";
 import { resolveGitHubToken, resolveGitHubUsername } from "../github/account-resolver.js";
 import { execSync } from "node:child_process";
@@ -1450,6 +1450,17 @@ export class TeamLead extends BaseAgent {
               } else {
                 return `No kanban task found for issue #${issueNumber}. Run triage first (action: "triage") to create the task, then implement.`;
               }
+            } else {
+              // Validate that the provided taskId belongs to this project
+              const db = getDb();
+              const taskRecord = db
+                .select()
+                .from(schema.kanbanTasks)
+                .where(and(eq(schema.kanbanTasks.id, resolvedTaskId), eq(schema.kanbanTasks.projectId, this.projectId)))
+                .get();
+              if (!taskRecord) {
+                return `REFUSED: Task ${resolvedTaskId} does not belong to this project or does not exist.`;
+              }
             }
 
             // Check if already in pipeline
@@ -1680,7 +1691,7 @@ export class TeamLead extends BaseAgent {
         const kanbanTask = pipelineDb
           .select()
           .from(schema.kanbanTasks)
-          .where(eq(schema.kanbanTasks.id, taskId))
+          .where(and(eq(schema.kanbanTasks.id, taskId), eq(schema.kanbanTasks.projectId, this.projectId)))
           .get();
         const labels = Array.isArray(kanbanTask?.labels) ? kanbanTask.labels as string[] : [];
         const issueLabel = labels.find((l: string) => l.startsWith("github-issue-"));
