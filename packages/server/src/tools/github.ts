@@ -12,6 +12,7 @@ import {
   resolveProjectBranch,
 } from "../github/github-service.js";
 import type { ToolContext } from "./tool-context.js";
+import { extractForkOwner } from "../utils/sanitize.js";
 
 function getGitHubContext(ctx: ToolContext): { repo: string; token: string; username: string } {
   const token = getConfig("github:token");
@@ -268,8 +269,10 @@ export function createGitHubCreatePRTool(ctx: ToolContext) {
 
           const forkRepo = getConfig(`project:${ctx.projectId}:github:fork_repo`);
           if (forkRepo && !head.includes(":")) {
-            const forkOwner = forkRepo.split("/")[0];
-            prHead = `${forkOwner}:${head}`;
+            const forkOwner = extractForkOwner(forkRepo);
+            if (forkOwner) {
+              prHead = `${forkOwner}:${head}`;
+            }
           }
         }
 

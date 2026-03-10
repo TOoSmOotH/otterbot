@@ -9,6 +9,8 @@ import { getDb, schema } from "../db/index.js";
 // Input validation patterns
 const REPO_NAME_RE = /^[a-zA-Z0-9._-]+\/[a-zA-Z0-9._-]+$/;
 const BRANCH_NAME_RE = /^[a-zA-Z0-9._\/-]+$/;
+// Cross-fork ref format: "owner:branch" used by GitHub's compare/PR APIs
+const CROSS_FORK_REF_RE = /^[a-zA-Z0-9._-]+:[a-zA-Z0-9._\/-]+$/;
 
 export interface GitHubIssue {
   number: number;
@@ -647,7 +649,10 @@ export async function fetchCompareCommitsDiff(
 ): Promise<{ filename: string; status: string; patch?: string }[]> {
   validateRepoName(repoFullName);
   validateBranchName(base);
-  validateBranchName(head);
+  // head may be a cross-fork ref ("owner:branch") or a plain branch name
+  if (!BRANCH_NAME_RE.test(head) && !CROSS_FORK_REF_RE.test(head)) {
+    throw new Error(`Invalid branch name: ${head}`);
+  }
 
   const data = await ghFetch<{
     files?: { filename: string; status: string; patch?: string }[];

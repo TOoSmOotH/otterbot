@@ -34,6 +34,7 @@ import { getConfig, setConfig, deleteConfig } from "../auth/auth.js";
 import { execSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { getAgentModelOverride } from "../settings/settings.js";
+import { sanitizeForPrompt, extractForkOwner } from "../utils/sanitize.js";
 import { getConfiguredSearchProvider } from "../tools/search/providers.js";
 import { isDesktopEnabled } from "../desktop/desktop.js";
 import { TEAM_LEAD_PROMPT } from "./prompts/team-lead.js";
@@ -239,11 +240,13 @@ export class TeamLead extends BaseAgent {
     const ghBranch = resolveProjectBranch(deps.projectId);
     const ghRulesRaw = getConfig(`project:${deps.projectId}:github:rules`);
     if (ghRepo) {
+      const safeRepo = sanitizeForPrompt(ghRepo);
+      const safeBranch = sanitizeForPrompt(ghBranch);
       const sections: string[] = [
         `\n\n## GitHub Integration`,
-        `Repository: ${ghRepo}`,
-        `Target branch: ${ghBranch}`,
-        `**PR Workflow:** Workers must create feature branches from \`${ghBranch}\`, commit, push, and open a PR targeting \`${ghBranch}\`.`,
+        `Repository: ${safeRepo}`,
+        `Target branch: ${safeBranch}`,
+        `**PR Workflow:** Workers must create feature branches from \`${safeBranch}\`, commit, push, and open a PR targeting \`${safeBranch}\`.`,
         `Use conventional commits and reference issue numbers.`,
       ];
       if (ghRulesRaw) {
@@ -1612,21 +1615,24 @@ export class TeamLead extends BaseAgent {
           const wForkUpstreamPr = getConfig(`project:${this.projectId}:github:fork_upstream_pr`) !== "false";
           const wForkRepo = getConfig(`project:${this.projectId}:github:fork_repo`);
 
+          const safeWRepo = sanitizeForPrompt(wGhRepo);
+          const safeWBranch = sanitizeForPrompt(wGhBranch);
+
           const parts: string[] = [
             `\n\n## GitHub Workflow`,
-            `Repository: ${wGhRepo}`,
+            `Repository: ${safeWRepo}`,
           ];
 
           if (wForkMode) {
             parts.push(
               `[FORK MODE] You are contributing via a fork. Pushes go to \`origin\` (the fork).`,
               `The upstream repo is available as the \`upstream\` remote.`,
-              `Create a feature branch from \`upstream/${wGhBranch}\`.`,
+              `Create a feature branch from \`upstream/${safeWBranch}\`.`,
             );
-            if (wForkUpstreamPr && wForkRepo) {
-              const forkOwner = wForkRepo.split("/")[0];
+            const forkOwner = wForkRepo ? extractForkOwner(wForkRepo) : null;
+            if (wForkUpstreamPr && forkOwner) {
               parts.push(
-                `After completing your work, push your branch and create a pull request targeting \`${wGhBranch}\` on the upstream repo.`,
+                `After completing your work, push your branch and create a pull request targeting \`${safeWBranch}\` on the upstream repo.`,
                 `Use \`${forkOwner}:<branch>\` as the head ref when creating the PR.`,
               );
             } else {
@@ -1636,8 +1642,8 @@ export class TeamLead extends BaseAgent {
             }
           } else {
             parts.push(
-              `Create a feature branch from \`${wGhBranch}\`.`,
-              `After completing your work, push your branch and create a pull request targeting \`${wGhBranch}\`.`,
+              `Create a feature branch from \`${safeWBranch}\`.`,
+              `After completing your work, push your branch and create a pull request targeting \`${safeWBranch}\`.`,
             );
           }
           parts.push(

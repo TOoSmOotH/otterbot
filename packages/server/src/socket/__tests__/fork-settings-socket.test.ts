@@ -15,6 +15,17 @@ vi.mock("../../auth/auth.js", () => ({
   deleteConfig: vi.fn(),
 }));
 
+// Mock DB so project-existence checks pass
+const mockDbGet = vi.fn();
+vi.mock("../../db/index.js", () => ({
+  getDb: () => ({
+    select: () => ({ from: () => ({ where: () => ({ get: () => mockDbGet() }) }) }),
+  }),
+  schema: {
+    projects: { id: "id" },
+  },
+}));
+
 import { setupSocketHandlers } from "../handlers.js";
 
 type SocketHandler = (...args: any[]) => void | Promise<void>;
@@ -92,6 +103,8 @@ describe("fork settings socket handlers", () => {
     configStore.clear();
     throwOnGetConfig = false;
     mockSetConfig.mockClear();
+    // Default: project exists
+    mockDbGet.mockReturnValue({ id: "proj-1" });
   });
 
   it("returns fork settings and defaults forkUpstreamPr to true when unset", () => {
@@ -150,5 +163,56 @@ describe("fork settings socket handlers", () => {
     handler?.({ projectId: "proj-1", enabled: true }, callback);
 
     expect(callback).toHaveBeenCalledWith({ ok: false, error: "write failed" });
+  });
+
+  it("returns defaults when projectId is missing for get-fork-settings", () => {
+    setupHandlers();
+    const handler = socketHandlers.get("project:get-fork-settings");
+    const callback = vi.fn();
+
+    handler?.({}, callback);
+
+    expect(callback).toHaveBeenCalledWith({
+      forkMode: false,
+      forkRepo: null,
+      forkUpstreamPr: true,
+    });
+  });
+
+  it("returns defaults when project does not exist for get-fork-settings", () => {
+    mockDbGet.mockReturnValue(undefined);
+    setupHandlers();
+    const handler = socketHandlers.get("project:get-fork-settings");
+    const callback = vi.fn();
+
+    handler?.({ projectId: "nonexistent" }, callback);
+
+    expect(callback).toHaveBeenCalledWith({
+      forkMode: false,
+      forkRepo: null,
+      forkUpstreamPr: true,
+    });
+  });
+
+  it("returns error when project does not exist for set-fork-upstream-pr", () => {
+    mockDbGet.mockReturnValue(undefined);
+    setupHandlers();
+    const handler = socketHandlers.get("project:set-fork-upstream-pr");
+    const callback = vi.fn();
+
+    handler?.({ projectId: "nonexistent", enabled: true }, callback);
+
+    expect(callback).toHaveBeenCalledWith({ ok: false, error: "Project not found" });
+  });
+
+  it("rejects non-boolean enabled value for set-fork-upstream-pr", () => {
+    setupHandlers();
+    const handler = socketHandlers.get("project:set-fork-upstream-pr");
+    const callback = vi.fn();
+
+    handler?.({ projectId: "proj-1", enabled: "yes" }, callback);
+
+    expect(callback).toHaveBeenCalledWith({ ok: false, error: "Invalid enabled value" });
+    expect(mockSetConfig).not.toHaveBeenCalled();
   });
 });
