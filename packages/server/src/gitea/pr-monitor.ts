@@ -59,6 +59,16 @@ export class GiteaPRMonitor {
 
   private async poll(): Promise<void> {
     const db = getDb();
+
+    // Skip polling if no active projects use Gitea
+    const hasGiteaProjects = db
+      .select()
+      .from(schema.projects)
+      .where(eq(schema.projects.status, "active"))
+      .all()
+      .some((p) => !!p.giteaRepo);
+    if (!hasGiteaProjects) return;
+
     const tasks = db
       .select()
       .from(schema.kanbanTasks)
