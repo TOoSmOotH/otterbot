@@ -46,6 +46,10 @@ import { createSshListKeysTool } from "./ssh-list-keys.js";
 import { createSshListHostsTool } from "./ssh-list-hosts.js";
 import { createSshConnectTool } from "./ssh-connect.js";
 import { createGetCurrentTimeTool } from "./get-current-time.js";
+import { createScheduleListTool } from "./schedule-list.js";
+import { createScheduleCreateTool } from "./schedule-create.js";
+import { createScheduleUpdateTool } from "./schedule-update.js";
+import { createScheduleDeleteTool } from "./schedule-delete.js";
 import { McpClientManager } from "../mcp/mcp-client-manager.js";
 import { McpServerService as McpServerServiceRef } from "../mcp/mcp-service.js";
 
@@ -100,6 +104,11 @@ const CONTEXTLESS_TOOL_REGISTRY: Record<string, () => unknown> = {
   ssh_list_keys: createSshListKeysTool,
   ssh_list_hosts: createSshListHostsTool,
   ssh_connect: createSshConnectTool,
+  // Schedule tools
+  schedule_list: createScheduleListTool,
+  schedule_create: createScheduleCreateTool,
+  schedule_update: createScheduleUpdateTool,
+  schedule_delete: createScheduleDeleteTool,
 };
 
 /**
@@ -551,6 +560,45 @@ export function getToolsWithMeta(): {
       parameters: [
         { name: "keyId", type: "string", required: true, description: "The SSH key ID to authenticate with" },
         { name: "host", type: "string", required: true, description: "The remote hostname or IP" },
+      ],
+    },
+    schedule_list: {
+      description: "List all scheduled tasks stored in the database.",
+      category: "Schedule",
+      parameters: [
+        { name: "enabledOnly", type: "boolean", required: false, description: "If true, only return enabled tasks" },
+      ],
+    },
+    schedule_create: {
+      description: "Create a new recurring scheduled task stored in the database.",
+      category: "Schedule",
+      parameters: [
+        { name: "name", type: "string", required: true, description: "Name for the scheduled task" },
+        { name: "message", type: "string", required: true, description: "The message/prompt to send when the task fires" },
+        { name: "intervalMinutes", type: "number", required: true, description: "How often the task should run, in minutes" },
+        { name: "mode", type: "string", required: false, description: "Delivery mode: coo-prompt, coo-background, notification, module-agent" },
+        { name: "description", type: "string", required: false, description: "Description of the task" },
+        { name: "enabled", type: "boolean", required: false, description: "Whether the task starts enabled" },
+        { name: "moduleAgentId", type: "string", required: false, description: "Module agent ID for module-agent mode" },
+      ],
+    },
+    schedule_update: {
+      description: "Update an existing scheduled task by ID.",
+      category: "Schedule",
+      parameters: [
+        { name: "id", type: "string", required: true, description: "The scheduled task ID to update" },
+        { name: "name", type: "string", required: false, description: "New name" },
+        { name: "message", type: "string", required: false, description: "New message" },
+        { name: "intervalMinutes", type: "number", required: false, description: "New interval in minutes" },
+        { name: "mode", type: "string", required: false, description: "New delivery mode" },
+        { name: "enabled", type: "boolean", required: false, description: "Enable or disable" },
+      ],
+    },
+    schedule_delete: {
+      description: "Delete a scheduled task by ID.",
+      category: "Schedule",
+      parameters: [
+        { name: "id", type: "string", required: true, description: "The scheduled task ID to delete" },
       ],
     },
   };

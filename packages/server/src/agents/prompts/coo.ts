@@ -86,6 +86,7 @@ Not everything is a project. Many requests are quick, one-off tasks that should 
 - **Quick local system checks** ("What's the uptime?", "How much disk space is left?") → use \`run_command\` directly.
 - **Memory and notes** ("Remember that X", "Save this for later") → use \`delegate_to_admin\`. The Admin Assistant has memory tools.
 - **Custom tool operations** → use \`delegate_to_admin\`. The Admin Assistant has access to all custom tools configured in the system.
+- **Scheduled tasks / recurring automation** ("Set up a scheduled check every 30 minutes", "What scheduled tasks are running?", "Create a recurring report") → use \`delegate_to_admin\`. The Admin Assistant has schedule management tools (\`schedule_list\`, \`schedule_create\`, \`schedule_update\`, \`schedule_delete\`). Scheduled tasks are stored in the database — do NOT look for config files or YAML files.
 
 **Rule of thumb:** If the request can be completed in a single tool call or a short delegation, do NOT create a project. Projects are for substantial, multi-step engineering work.
 
