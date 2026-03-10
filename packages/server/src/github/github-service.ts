@@ -11,6 +11,8 @@ import { configureCommitSigning } from "../utils/git.js";
 // Input validation patterns
 const REPO_NAME_RE = /^[a-zA-Z0-9._-]+\/[a-zA-Z0-9._-]+$/;
 const BRANCH_NAME_RE = /^[a-zA-Z0-9._\/-]+$/;
+// Cross-fork ref format: "owner:branch" used by GitHub's compare/PR APIs
+const CROSS_FORK_REF_RE = /^[a-zA-Z0-9._-]+:[a-zA-Z0-9._\/-]+$/;
 // Cross-fork compare ref: "owner:branch" or plain branch name
 const COMPARE_REF_RE = /^[a-zA-Z0-9._\/-]+(:[a-zA-Z0-9._\/-]+)?$/;
 
@@ -724,7 +726,7 @@ export async function fetchCompareCommitsDiff(
 ): Promise<{ filename: string; status: string; patch?: string }[]> {
   validateRepoName(repoFullName);
   validateBranchName(base);
-  // head may be a cross-fork ref like "owner:branch"
+  // head may be a cross-fork ref ("owner:branch") or a plain branch name
   if (!COMPARE_REF_RE.test(head)) {
     throw new Error(`Invalid compare ref: ${head}`);
   }

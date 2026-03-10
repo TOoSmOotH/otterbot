@@ -313,6 +313,14 @@ export interface ClientToServerEvents {
     data: { projectId: string; branch: string },
     callback?: (ack: { ok: boolean; error?: string }) => void,
   ) => void;
+  "project:get-fork-settings": (
+    data: { projectId: string },
+    callback: (result: { forkMode: boolean; forkRepo: string | null; forkUpstreamPr: boolean }) => void,
+  ) => void;
+  "project:set-fork-upstream-pr": (
+    data: { projectId: string; enabled: boolean },
+    callback?: (ack: { ok: boolean; error?: string }) => void,
+  ) => void;
 
   // SSH sessions
   "ssh:connect": (

@@ -201,6 +201,8 @@ interface PipelineState {
   prNumber: number | null;
   targetBranch: string;
   isReReview?: boolean;
+  forkMode?: boolean;
+  forkRepo?: string | null;
 }
 
 function createPipelineState(overrides: Partial<PipelineState> = {}): PipelineState {
@@ -218,6 +220,8 @@ function createPipelineState(overrides: Partial<PipelineState> = {}): PipelineSt
     prNumber: overrides.prNumber ?? null,
     targetBranch: overrides.targetBranch ?? "main",
     isReReview: overrides.isReReview ?? false,
+    forkMode: overrides.forkMode ?? false,
+    forkRepo: overrides.forkRepo ?? null,
   };
 }
 
@@ -460,6 +464,66 @@ describe("PipelineManager", () => {
       expect(dbTask?.column).toBe("backlog");
       expect((pm2 as any).pipelines.has(task.id)).toBe(false);
       pm2.dispose();
+    });
+
+    it("includes fork mode guidance for coder stage", async () => {
+      const task = insertTask({ id: "task-dir-fork-coder", column: "in_progress", title: "Implement feature" });
+      insertProject();
+      setPipelineConfig(PROJECT_ID);
+      const state = createPipelineState({
+        taskId: task.id,
+        stages: ["coder", "reviewer"],
+        currentStageIndex: 0,
+        forkMode: true,
+      });
+      (pm as any).pipelines.set(task.id, state);
+
+      await (pm as any).sendStageDirective(state);
+
+      const call = (bus.send as any).mock.calls[0][0];
+      expect(call.content).toContain("[FORK MODE] You are contributing via a fork");
+      expect(call.content).toContain("Create your feature branch from `upstream/main`.");
+    });
+
+    it("instructs reviewer to open cross-fork PR when enabled", async () => {
+      const task = insertTask({ id: "task-dir-fork-review", column: "in_progress", title: "Review feature" });
+      insertProject();
+      setPipelineConfig(PROJECT_ID);
+      const state = createPipelineState({
+        taskId: task.id,
+        stages: ["reviewer"],
+        currentStageIndex: 0,
+        forkMode: true,
+        forkRepo: "botuser/repo-name",
+      });
+      (pm as any).pipelines.set(task.id, state);
+
+      await (pm as any).sendStageDirective(state);
+
+      const call = (bus.send as any).mock.calls[0][0];
+      expect(call.content).toContain("After review, create a pull request for this branch targeting `main`.");
+      expect(call.content).toContain("Use `botuser:<branch>` as the head ref");
+    });
+
+    it("instructs reviewer not to create PR when fork upstream PR is disabled", async () => {
+      const task = insertTask({ id: "task-dir-fork-review-disabled", column: "in_progress", title: "Review feature" });
+      insertProject();
+      setPipelineConfig(PROJECT_ID);
+      configStore.set(`project:${PROJECT_ID}:github:fork_upstream_pr`, "false");
+      const state = createPipelineState({
+        taskId: task.id,
+        stages: ["reviewer"],
+        currentStageIndex: 0,
+        forkMode: true,
+        forkRepo: "botuser/repo-name",
+      });
+      (pm as any).pipelines.set(task.id, state);
+
+      await (pm as any).sendStageDirective(state);
+
+      const call = (bus.send as any).mock.calls[0][0];
+      expect(call.content).toContain("After review, do NOT create a pull request.");
+      expect(call.content).toContain("Upstream PR creation is disabled for this project.");
     });
   });
 
@@ -874,6 +938,8 @@ describe("PipelineManager", () => {
   describe("recoverPipelines", () => {
     it("reconstructs in-memory pipeline state from DB", () => {
       insertProject();
+      configStore.set(`project:${PROJECT_ID}:github:fork_mode`, "true");
+      configStore.set(`project:${PROJECT_ID}:github:fork_repo`, "botuser/repo-name");
       insertTask({
         id: "task-recover-1",
         column: "in_progress",
@@ -899,6 +965,8 @@ describe("PipelineManager", () => {
       expect(state.prBranch).toBe("feat/issue-55");
       expect(state.prNumber).toBe(88);
       expect(state.issueNumber).toBe(55);
+      expect(state.forkMode).toBe(true);
+      expect(state.forkRepo).toBe("botuser/repo-name");
     });
 
     it("skips tasks with invalid/missing stage index", () => {

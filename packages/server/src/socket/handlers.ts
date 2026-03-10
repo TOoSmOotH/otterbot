@@ -800,6 +800,58 @@ export function setupSocketHandlers(
       }
     });
 
+    // Get fork settings for a project
+    socket.on("project:get-fork-settings", (data, callback) => {
+      try {
+        const projectId = data.projectId;
+        if (!projectId || typeof projectId !== "string") {
+          callback({ forkMode: false, forkRepo: null, forkUpstreamPr: true });
+          return;
+        }
+        // Verify the project exists
+        const db = getDb();
+        const project = db.select({ id: schema.projects.id }).from(schema.projects).where(eq(schema.projects.id, projectId)).get();
+        if (!project) {
+          callback({ forkMode: false, forkRepo: null, forkUpstreamPr: true });
+          return;
+        }
+        const forkMode = getConfig(`project:${projectId}:github:fork_mode`) === "true";
+        const forkRepo = getConfig(`project:${projectId}:github:fork_repo`) ?? null;
+        const forkUpstreamPrRaw = getConfig(`project:${projectId}:github:fork_upstream_pr`);
+        // Default to true (enabled) when not explicitly set
+        const forkUpstreamPr = forkUpstreamPrRaw !== "false";
+        callback({ forkMode, forkRepo, forkUpstreamPr });
+      } catch {
+        callback({ forkMode: false, forkRepo: null, forkUpstreamPr: true });
+      }
+    });
+
+    // Set fork upstream PR setting for a project
+    socket.on("project:set-fork-upstream-pr", (data, callback) => {
+      try {
+        const projectId = data.projectId;
+        if (!projectId || typeof projectId !== "string") {
+          callback?.({ ok: false, error: "Invalid project ID" });
+          return;
+        }
+        // Verify the project exists
+        const db = getDb();
+        const project = db.select({ id: schema.projects.id }).from(schema.projects).where(eq(schema.projects.id, projectId)).get();
+        if (!project) {
+          callback?.({ ok: false, error: "Project not found" });
+          return;
+        }
+        if (typeof data.enabled !== "boolean") {
+          callback?.({ ok: false, error: "Invalid enabled value" });
+          return;
+        }
+        setConfig(`project:${projectId}:github:fork_upstream_pr`, data.enabled ? "true" : "false");
+        callback?.({ ok: true });
+      } catch (err) {
+        callback?.({ ok: false, error: err instanceof Error ? err.message : "Failed to save fork upstream PR setting" });
+      }
+    });
+
     // Toggle issue monitor for a project
     socket.on("project:set-issue-monitor", (data, callback) => {
       try {

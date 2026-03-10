@@ -33,6 +33,7 @@ import { resolveProjectBranch, type GitHubIssue } from "../github/github-service
 import { SECURITY_PREAMBLE } from "../agents/prompts/security-preamble.js";
 import { cleanTerminalOutput, summarizeForGitHub } from "../utils/terminal.js";
 import { formatBotComment, formatBotCommentWithDetails } from "../utils/github-comments.js";
+import { sanitizeForPrompt, extractForkOwner } from "../utils/sanitize.js";
 
 type TypedServer = Server<ClientToServerEvents, ServerToClientEvents>;
 
@@ -1346,10 +1347,11 @@ export class PipelineManager {
             `If the issue description mentions tests, PRs, or reviews, ignore those — other pipeline stages will handle them.`,
           );
           if (state.forkMode) {
+            const safeBranch = sanitizeForPrompt(state.targetBranch);
             parts.push(
               `\n[FORK MODE] You are contributing via a fork. Pushes go to \`origin\` (the fork).`,
               `The upstream repo is available as the \`upstream\` remote.`,
-              `Create your feature branch from \`upstream/${state.targetBranch}\`.`,
+              `Create your feature branch from \`upstream/${safeBranch}\`.`,
             );
           }
 
@@ -1473,12 +1475,20 @@ export class PipelineManager {
           );
         }
         if (isLastStage) {
-          if (state.forkMode && state.forkRepo) {
-            const forkOwner = state.forkRepo.split("/")[0];
-            parts.push(
-              `After review, create a pull request for this branch targeting \`${state.targetBranch}\`.`,
-              `[FORK MODE] This is a cross-fork PR. Use \`${forkOwner}:<branch>\` as the head ref when creating the PR against the upstream repo \`${state.targetBranch}\` branch.`,
-            );
+          const forkUpstreamPr = getConfig(`project:${state.projectId}:github:fork_upstream_pr`) !== "false";
+          const forkOwner = state.forkRepo ? extractForkOwner(state.forkRepo) : null;
+          if (state.forkMode && forkOwner) {
+            if (forkUpstreamPr) {
+              parts.push(
+                `After review, create a pull request for this branch targeting \`${state.targetBranch}\`.`,
+                `[FORK MODE] This is a cross-fork PR. Use \`${forkOwner}:<branch>\` as the head ref when creating the PR against the upstream repo \`${state.targetBranch}\` branch.`,
+              );
+            } else {
+              parts.push(
+                `After review, do NOT create a pull request. The changes have been pushed to the fork only.`,
+                `[FORK MODE] Upstream PR creation is disabled for this project. Just report on the review.`,
+              );
+            }
           } else {
             parts.push(`After review, create a pull request for this branch targeting \`${state.targetBranch}\`.`);
           }
@@ -1676,18 +1686,19 @@ export class PipelineManager {
     if (!token) return null;
 
     try {
-      // In fork mode, the branch lives on the fork repo — use cross-fork
-      // compare syntax (forkOwner:branch) so the upstream API can find it.
-      let head = state.prBranch;
+      // In fork mode, GitHub's compare API needs "owner:branch" for cross-repo diffs
+      let compareHead = state.prBranch;
       if (state.forkMode && state.forkRepo) {
-        const forkOwner = state.forkRepo.split("/")[0];
-        head = `${forkOwner}:${state.prBranch}`;
+        const forkOwner = extractForkOwner(state.forkRepo);
+        if (forkOwner && !compareHead.includes(":")) {
+          compareHead = `${forkOwner}:${compareHead}`;
+        }
       }
       const files = await fetchCompareCommitsDiff(
         state.repo,
         token,
         state.targetBranch,
-        head,
+        compareHead,
       );
 
       if (files.length === 0) return null;
