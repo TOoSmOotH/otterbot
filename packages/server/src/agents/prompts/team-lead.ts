@@ -107,6 +107,13 @@ Coding workers are required to write unit tests and run them before reporting ba
 
 For simple non-coding tasks (research, browser automation), you may mark them done based on the report alone.
 
+## Pipeline-Aware Task Routing
+When a project has a **pipeline enabled**, ALL work on kanban tasks must go through the pipeline:
+- **Coding tasks** → automatically routed through the implementation pipeline (coder → security → tester → reviewer)
+- **Re-triage / research requests** → automatically routed back to the pipeline's triage stage. The task moves to the triage column, gets re-analyzed, and waits for assignment before proceeding.
+- **Do NOT spawn standalone researcher or triage workers** for tasks that belong to a pipeline-enabled project. The system will intercept these and route them through the pipeline automatically.
+- If you need to re-triage an issue, spawn the worker with the kanban taskId — the pipeline will handle the rest.
+
 ## Rules
 - **NEVER do work yourself** — always spawn a worker
 - **NEVER poll** — when workers are in progress with no backlog, stop and return immediately

@@ -18,9 +18,11 @@ import { Registry } from "../registry/registry.js";
 import {
   createIssueComment,
   addLabelsToIssue,
+  removeLabelFromIssue,
   fetchCompareCommitsDiff,
   fetchPullRequests,
   fetchIssueComments,
+  fetchIssue,
   fetchRepoTree,
   checkHasPushAccess,
   createFork,
@@ -502,6 +504,117 @@ export class PipelineManager {
     } catch (err) {
       console.error(`[PipelineManager] Triage LLM call failed for #${issue.number}:`, err);
     }
+  }
+
+  // ─── Re-triage ──────────────────────────────────────────────────
+
+  /**
+   * Re-triage a kanban task by moving it back to the triage column,
+   * re-running the triage LLM on the associated GitHub issue, and
+   * updating the task description with fresh analysis.
+   *
+   * Called when a non-coding agent (e.g. researcher) is spawned for a task
+   * in a pipeline-enabled project — instead of spawning a standalone worker,
+   * we route the task back through the pipeline's triage stage.
+   */
+  async retriageTask(
+    taskId: string,
+    projectId: string,
+  ): Promise<boolean> {
+    const config = this.getConfig(projectId);
+    if (!config?.enabled) return false;
+
+    const triageStage = config.stages?.triage;
+    if (!triageStage?.enabled) return false;
+
+    const db = getDb();
+    const task = db
+      .select()
+      .from(schema.kanbanTasks)
+      .where(eq(schema.kanbanTasks.id, taskId))
+      .get();
+    if (!task) return false;
+
+    // Extract issue number from labels
+    const labels = Array.isArray(task.labels) ? (task.labels as string[]) : [];
+    const issueLabel = labels.find((l: string) => l.startsWith("github-issue-"));
+    const issueNumber = issueLabel
+      ? parseInt(issueLabel.replace("github-issue-", ""), 10)
+      : null;
+
+    if (!issueNumber) return false; // Can't retriage without an issue
+
+    const repo = getConfig(`project:${projectId}:github:repo`);
+    if (!repo) return false;
+
+    const token = resolveGitHubToken(projectId);
+    if (!token) return false;
+
+    console.log(
+      `[PipelineManager] Re-triaging task ${taskId} (issue #${issueNumber}) via pipeline`,
+    );
+
+    // Move task back to triage column, clear pipeline state
+    const now = new Date().toISOString();
+    db.update(schema.kanbanTasks)
+      .set({
+        column: "triage",
+        pipelineStage: null,
+        pipelineStages: [],
+        assigneeAgentId: null,
+        updatedAt: now,
+      })
+      .where(eq(schema.kanbanTasks.id, taskId))
+      .run();
+
+    // Remove from in-memory pipeline tracking
+    this.pipelines.delete(taskId);
+
+    const updated = db
+      .select()
+      .from(schema.kanbanTasks)
+      .where(eq(schema.kanbanTasks.id, taskId))
+      .get();
+    if (updated) {
+      this.io.emit("kanban:task-updated", updated as unknown as KanbanTask);
+    }
+
+    // Remove "triaged" label so runTriage will re-apply it
+    try {
+      await removeLabelFromIssue(repo, token, issueNumber, "triaged");
+    } catch {
+      // Label may not exist — that's fine
+    }
+
+    // Fetch the issue fresh from GitHub and re-run triage
+    try {
+      const issue = await fetchIssue(repo, token, issueNumber);
+      // Strip the "triaged" label from the fetched issue so runTriage processes it
+      issue.labels = issue.labels.filter((l) => l.name !== "triaged");
+      await this.runTriage(projectId, repo, issue);
+
+      // runTriage creates a new kanban task if one doesn't exist with the label,
+      // but since our task already has the label, it won't create a duplicate.
+      // Update the existing task description with the new triage analysis.
+      const retriagedTask = db
+        .select()
+        .from(schema.kanbanTasks)
+        .where(eq(schema.kanbanTasks.id, taskId))
+        .get();
+      if (retriagedTask) {
+        this.io.emit("kanban:task-updated", retriagedTask as unknown as KanbanTask);
+      }
+    } catch (err) {
+      console.error(
+        `[PipelineManager] Re-triage LLM call failed for task ${taskId} (issue #${issueNumber}):`,
+        err,
+      );
+    }
+
+    console.log(
+      `[PipelineManager] Task ${taskId} re-triaged — now in triage column awaiting assignment`,
+    );
+    return true;
   }
 
   // ─── Implementation pipeline ─────────────────────────────────────

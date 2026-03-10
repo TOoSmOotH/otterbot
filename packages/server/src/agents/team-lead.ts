@@ -14,6 +14,13 @@ import { Worker, CODING_AGENT_REGISTRY_IDS } from "./worker.js";
 /** All coding agent IDs including the fallback builtin-coder */
 const CODING_AGENT_IDS = CODING_AGENT_REGISTRY_IDS;
 
+/** Non-coding agent IDs that should be routed through pipeline re-triage
+ *  when spawned for a task in a pipeline-enabled project */
+const NON_CODING_PIPELINE_AGENT_IDS = new Set([
+  "builtin-researcher",
+  "builtin-triage",
+]);
+
 /** Check whether an external coding agent is currently enabled in settings */
 function isCodingAgentEnabled(registryEntryId: string): boolean {
   switch (registryEntryId) {
@@ -1355,10 +1362,14 @@ export class TeamLead extends BaseAgent {
               return `REFUSED: ${eLabel} (${taskId}) is IN REVIEW — PR #${(existingTask as any).prNumber ?? "?"} is awaiting reviewer approval. Do NOT spawn a worker. The PR monitor handles this automatically.`;
             }
             if (existingTask?.column === "triage") {
-              const eLabel = this.taskLabel(existingTask);
-              this._toolCallCounts.set("spawn_worker_refused", (refusals) + 1);
-              this._shouldAbortThink = true;
-              return `REFUSED: ${eLabel} (${taskId}) is in TRIAGE — it has not been assigned yet. Only work on tasks in the backlog or in_progress columns.`;
+              // Allow non-coding pipeline agents (researcher, triage) to proceed —
+              // they'll be routed to pipeline re-triage in spawnWorker()
+              if (!NON_CODING_PIPELINE_AGENT_IDS.has(registryEntryId)) {
+                const eLabel = this.taskLabel(existingTask);
+                this._toolCallCounts.set("spawn_worker_refused", (refusals) + 1);
+                this._shouldAbortThink = true;
+                return `REFUSED: ${eLabel} (${taskId}) is in TRIAGE — it has not been assigned yet. Only work on tasks in the backlog or in_progress columns.`;
+              }
             }
           }
           const result = await this.spawnWorker(registryEntryId, task, taskId);
@@ -1564,11 +1575,10 @@ export class TeamLead extends BaseAgent {
         }
       }
 
-      // Route coding workers through pipeline when enabled
+      // Route workers through pipeline when enabled for this project
       if (
         !options?.pipelineOverride &&
         taskId &&
-        CODING_AGENT_IDS.has(registryEntryId) &&
         this.projectId &&
         this._pipelineManager?.isEnabled(this.projectId) &&
         !this._pipelineManager.isPipelineTask(taskId)
@@ -1586,16 +1596,34 @@ export class TeamLead extends BaseAgent {
           ? parseInt(issueLabel.replace("github-issue-", ""), 10)
           : null;
 
-        console.log(
-          `[TeamLead ${this.id}] Routing task ${taskId} through pipeline (repo=${repo}, issue=${issueNumber})`,
-        );
-        const routed = await this._pipelineManager.startImplementation(
-          taskId, this.projectId, issueNumber, repo, { skipFallback: true },
-        );
-        if (routed) {
-          return `Routed task ${taskId} through pipeline. The pipeline will orchestrate coding, security review, testing, and code review stages.`;
+        if (CODING_AGENT_IDS.has(registryEntryId)) {
+          // Coding agents → route through implementation pipeline (coder → security → tester → reviewer)
+          console.log(
+            `[TeamLead ${this.id}] Routing coding task ${taskId} through pipeline (repo=${repo}, issue=${issueNumber})`,
+          );
+          const routed = await this._pipelineManager.startImplementation(
+            taskId, this.projectId, issueNumber, repo, { skipFallback: true },
+          );
+          if (routed) {
+            return `Routed task ${taskId} through pipeline. The pipeline will orchestrate coding, security review, testing, and code review stages.`;
+          }
+          console.log(`[TeamLead ${this.id}] Pipeline declined task ${taskId} — spawning worker directly`);
+        } else if (NON_CODING_PIPELINE_AGENT_IDS.has(registryEntryId)) {
+          // Non-coding agents (researcher, triage) on a pipeline-enabled project task →
+          // re-triage via pipeline instead of spawning a standalone worker.
+          // This ensures the task follows the pipeline's rules of engagement
+          // (triage → wait for assignment → implement through pipeline stages).
+          console.log(
+            `[TeamLead ${this.id}] Non-coding agent "${registryEntryId}" requested for pipeline-enabled task ${taskId} — routing to pipeline re-triage`,
+          );
+          const routed = await this._pipelineManager.retriageTask(
+            taskId, this.projectId,
+          );
+          if (routed) {
+            return `Routed task ${taskId} through pipeline re-triage. The task has been moved back to triage and will be re-analyzed. It will wait for assignment before proceeding through the pipeline stages.`;
+          }
+          console.log(`[TeamLead ${this.id}] Pipeline re-triage declined task ${taskId} — spawning worker directly`);
         }
-        console.log(`[TeamLead ${this.id}] Pipeline declined task ${taskId} — spawning worker directly`);
       }
 
       // Enforce max concurrent coding workers
