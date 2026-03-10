@@ -11,6 +11,8 @@ import { configureCommitSigning } from "../utils/git.js";
 // Input validation patterns
 const REPO_NAME_RE = /^[a-zA-Z0-9._-]+\/[a-zA-Z0-9._-]+$/;
 const BRANCH_NAME_RE = /^[a-zA-Z0-9._\/-]+$/;
+// Cross-fork compare ref: "owner:branch" or plain branch name
+const COMPARE_REF_RE = /^[a-zA-Z0-9._\/-]+(:[a-zA-Z0-9._\/-]+)?$/;
 
 export interface GitHubIssue {
   number: number;
@@ -722,7 +724,10 @@ export async function fetchCompareCommitsDiff(
 ): Promise<{ filename: string; status: string; patch?: string }[]> {
   validateRepoName(repoFullName);
   validateBranchName(base);
-  validateBranchName(head);
+  // head may be a cross-fork ref like "owner:branch"
+  if (!COMPARE_REF_RE.test(head)) {
+    throw new Error(`Invalid compare ref: ${head}`);
+  }
 
   const data = await ghFetch<{
     files?: { filename: string; status: string; patch?: string }[];

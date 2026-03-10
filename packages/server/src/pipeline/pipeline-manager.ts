@@ -1476,11 +1476,11 @@ export class PipelineManager {
           if (state.forkMode && state.forkRepo) {
             const forkOwner = state.forkRepo.split("/")[0];
             parts.push(
-              `After review, create a pull request for this branch.`,
-              `[FORK MODE] This is a cross-fork PR. Use \`${forkOwner}:<branch>\` as the head ref when creating the PR against the upstream repo.`,
+              `After review, create a pull request for this branch targeting \`${state.targetBranch}\`.`,
+              `[FORK MODE] This is a cross-fork PR. Use \`${forkOwner}:<branch>\` as the head ref when creating the PR against the upstream repo \`${state.targetBranch}\` branch.`,
             );
           } else {
-            parts.push(`After review, create a pull request for this branch.`);
+            parts.push(`After review, create a pull request for this branch targeting \`${state.targetBranch}\`.`);
           }
         }
         parts.push(
@@ -1676,11 +1676,18 @@ export class PipelineManager {
     if (!token) return null;
 
     try {
+      // In fork mode, the branch lives on the fork repo — use cross-fork
+      // compare syntax (forkOwner:branch) so the upstream API can find it.
+      let head = state.prBranch;
+      if (state.forkMode && state.forkRepo) {
+        const forkOwner = state.forkRepo.split("/")[0];
+        head = `${forkOwner}:${state.prBranch}`;
+      }
       const files = await fetchCompareCommitsDiff(
         state.repo,
         token,
         state.targetBranch,
-        state.prBranch,
+        head,
       );
 
       if (files.length === 0) return null;
