@@ -1723,16 +1723,37 @@ export class PipelineManager {
 
   /** Extract a branch name from a worker report */
   private extractBranchName(report: string): string | null {
+    // Words that should never be treated as branch names — common English words
+    // that follow "branch" in natural language (e.g. "branch is ready", "branch was created")
+    const INVALID_BRANCH_NAMES = new Set([
+      "is", "was", "has", "had", "will", "would", "should", "could", "can",
+      "may", "might", "shall", "do", "does", "did", "be", "been", "being",
+      "are", "were", "not", "no", "yes", "the", "a", "an", "and", "or",
+      "for", "to", "from", "with", "that", "this", "it", "of", "in", "on",
+      "at", "by", "if", "so", "up", "out", "off", "all", "but", "yet",
+      "already", "also", "just", "still", "now", "here", "there", "then",
+      "name", "named", "called", "ready", "created", "deleted", "merged",
+      "protection", "protected", "set", "updated", "exists", "found",
+    ]);
+
     const patterns = [
-      /branch[:\s]+`?([a-zA-Z0-9._\/#-]+)`?/i,
+      /branch:\s*`?([a-zA-Z0-9._\/#-]+)`?/i,
       /created branch\s+`?([a-zA-Z0-9._\/#-]+)`?/i,
       /git checkout -b\s+`?([a-zA-Z0-9._\/#-]+)`?/i,
       /pushed to\s+`?([a-zA-Z0-9._\/#-]+)`?/i,
       /on branch\s+`?([a-zA-Z0-9._\/#-]+)`?/i,
+      /branch\s+`([a-zA-Z0-9._\/#-]+)`/i,
     ];
     for (const pattern of patterns) {
       const match = report.match(pattern);
-      if (match) return match[1];
+      if (match) {
+        const candidate = match[1];
+        if (INVALID_BRANCH_NAMES.has(candidate.toLowerCase())) continue;
+        // Reject single-word candidates that don't look like branch names
+        // (real branches typically contain / or - or digits)
+        if (!/[\/\-\d.]/.test(candidate) && candidate.length < 4) continue;
+        return candidate;
+      }
     }
     return null;
   }
