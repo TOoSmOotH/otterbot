@@ -465,10 +465,10 @@ export class TeamLead extends BaseAgent {
   private extractPRBranch(report: string): string | null {
     // Match common patterns for branch names in worker reports
     const patterns = [
-      /branch[:\s]+([a-zA-Z0-9._\/-]+)/i,
-      /created branch\s+([a-zA-Z0-9._\/-]+)/i,
-      /git checkout -b\s+([a-zA-Z0-9._\/-]+)/i,
-      /pushed to\s+([a-zA-Z0-9._\/-]+)/i,
+      /branch[:\s]+([a-zA-Z0-9._\/-]+)(?=[\s`\)]|$)/i,
+      /created branch\s+([a-zA-Z0-9._\/-]+)(?=[\s`\)]|$)/i,
+      /git checkout -b\s+([a-zA-Z0-9._\/-]+)(?=[\s`\)]|$)/i,
+      /pushed to\s+([a-zA-Z0-9._\/-]+)(?=[\s`\)]|$)/i,
     ];
     for (const pattern of patterns) {
       const match = report.match(pattern);
@@ -1638,8 +1638,9 @@ export class TeamLead extends BaseAgent {
         // Prepare a git worktree for the worker to avoid file conflicts
         // For pipeline kickbacks (security/review), start from the feature branch so the worker can find existing code
         const forkMode = getConfig(`project:${this.projectId}:github:fork_mode`) === "true";
+        const effectiveSourceBranch = options?.sourceBranch ?? resolveProjectBranch(this.projectId);
         workspacePath = this.workspace.prepareAgentWorktree(
-          this.projectId, workerId, options?.sourceBranch,
+          this.projectId, workerId, effectiveSourceBranch,
           forkMode ? { forkMode: true, upstreamBranch: resolveProjectBranch(this.projectId) } : undefined,
         );
 

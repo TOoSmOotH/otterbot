@@ -1864,12 +1864,12 @@ export class PipelineManager {
     ]);
 
     const patterns = [
-      /branch:\s*`?([a-zA-Z0-9._\/#-]+)`?/i,
-      /created branch\s+`?([a-zA-Z0-9._\/#-]+)`?/i,
-      /git checkout -b\s+`?([a-zA-Z0-9._\/#-]+)`?/i,
-      /pushed to\s+`?([a-zA-Z0-9._\/#-]+)`?/i,
-      /on branch\s+`?([a-zA-Z0-9._\/#-]+)`?/i,
-      /branch\s+`([a-zA-Z0-9._\/#-]+)`/i,
+      /branch:\s*`?([a-zA-Z0-9._\/#-]+)`?(?=[\s`\)]|$)/i,
+      /created branch\s+`?([a-zA-Z0-9._\/#-]+)`?(?=[\s`\)]|$)/i,
+      /git checkout -b\s+`?([a-zA-Z0-9._\/#-]+)`?(?=[\s`\)]|$)/i,
+      /pushed to\s+`?([a-zA-Z0-9._\/#-]+)`?(?=[\s`\)]|$)/i,
+      /on branch\s+`?([a-zA-Z0-9._\/#-]+)`?(?=[\s`\)]|$)/i,
+      /branch\s+`([a-zA-Z0-9._\/#-]+)`(?=[\s`\)]|$)/i,
     ];
     for (const pattern of patterns) {
       const match = report.match(pattern);
