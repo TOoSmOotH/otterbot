@@ -88,12 +88,31 @@ function createMockWorkspace(): WorkspaceManager {
     repoPath: vi.fn((projectId: string) => `/workspace/projects/${projectId}/repo`),
     projectPath: vi.fn((projectId: string) => `/workspace/projects/${projectId}`),
     createProject: vi.fn(),
+    prepareAgentWorktree: vi.fn(() => null),
     validateAccess: vi.fn(() => true),
     ensureProject: vi.fn(),
   } as unknown as WorkspaceManager;
 }
 
 const PROJECT_ID = "test-github-project";
+
+function ensureRegistryEntry(id: string) {
+  const db = getDb();
+  db.insert(schema.registryEntries)
+    .values({
+      id,
+      name: "Test Worker",
+      description: "Worker used by tests",
+      systemPrompt: "You are a worker.",
+      defaultModel: "gpt-5-mini",
+      defaultProvider: "openai",
+      builtIn: false,
+      role: "worker",
+      createdAt: new Date().toISOString(),
+    })
+    .onConflictDoNothing()
+    .run();
+}
 
 describe("TeamLead — GitHub context injection", () => {
   let tmpDir: string;
@@ -396,5 +415,85 @@ describe("COO — spawnTeamLeadForManualProject", () => {
     expect(content).not.toContain("Project rules");
 
     coo.destroy();
+  });
+});
+
+describe("TeamLead — worker GitHub fork workflow", () => {
+  let tmpDir: string;
+  let bus: MessageBus;
+
+  beforeEach(async () => {
+    tmpDir = mkdtempSync(join(tmpdir(), "otterbot-tl-fork-worker-test-"));
+    resetDb();
+    configStore.clear();
+    process.env.DATABASE_URL = `file:${join(tmpDir, "test.db")}`;
+    process.env.OTTERBOT_DB_KEY = "test-key";
+    await migrateDb();
+    bus = createMockBus();
+  });
+
+  afterEach(() => {
+    resetDb();
+    delete process.env.DATABASE_URL;
+    delete process.env.OTTERBOT_DB_KEY;
+    rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it("instructs spawned workers to open upstream PRs in fork mode when enabled", async () => {
+    ensureRegistryEntry("test-worker-upstream-pr");
+    configStore.set(`project:${PROJECT_ID}:github:repo`, "upstream-org/upstream-repo");
+    configStore.set(`project:${PROJECT_ID}:github:branch`, "main");
+    configStore.set(`project:${PROJECT_ID}:github:fork_mode`, "true");
+    configStore.set(`project:${PROJECT_ID}:github:fork_repo`, "botuser/upstream-repo");
+    configStore.set(`project:${PROJECT_ID}:github:fork_upstream_pr`, "true");
+
+    const spawned: any[] = [];
+    const tl = new TeamLead({
+      bus,
+      workspace: createMockWorkspace(),
+      projectId: PROJECT_ID,
+      parentId: "coo-1",
+      onAgentSpawned: (agent) => spawned.push(agent),
+    });
+
+    const result = await (tl as any).spawnWorker("test-worker-upstream-pr", "Implement issue #405");
+    expect(result).toContain("Spawned");
+    expect(spawned).toHaveLength(1);
+    const prompt = spawned[0].toData().systemPrompt;
+    expect(prompt).toContain("[FORK MODE] You are contributing via a fork");
+    expect(prompt).toContain("Create a feature branch from `upstream/main`.");
+    expect(prompt).toContain("create a pull request targeting `main` on the upstream repo");
+    expect(prompt).toContain("Use `botuser:<branch>` as the head ref");
+
+    tl.destroy();
+  });
+
+  it("instructs spawned workers not to create upstream PRs when disabled", async () => {
+    ensureRegistryEntry("test-worker-no-upstream-pr");
+    configStore.set(`project:${PROJECT_ID}:github:repo`, "upstream-org/upstream-repo");
+    configStore.set(`project:${PROJECT_ID}:github:branch`, "main");
+    configStore.set(`project:${PROJECT_ID}:github:fork_mode`, "true");
+    configStore.set(`project:${PROJECT_ID}:github:fork_repo`, "botuser/upstream-repo");
+    configStore.set(`project:${PROJECT_ID}:github:fork_upstream_pr`, "false");
+
+    const spawned: any[] = [];
+    const tl = new TeamLead({
+      bus,
+      workspace: createMockWorkspace(),
+      projectId: PROJECT_ID,
+      parentId: "coo-1",
+      onAgentSpawned: (agent) => spawned.push(agent),
+    });
+
+    const result = await (tl as any).spawnWorker("test-worker-no-upstream-pr", "Implement issue #405");
+    expect(result).toContain("Spawned");
+    expect(spawned).toHaveLength(1);
+    const prompt = spawned[0].toData().systemPrompt;
+    expect(prompt).toContain("push your branch to the fork");
+    expect(prompt).toContain("Do NOT create a pull request");
+    expect(prompt).toContain("upstream PR creation is disabled");
+    expect(prompt).not.toContain("Use `botuser:<branch>` as the head ref");
+
+    tl.destroy();
   });
 });

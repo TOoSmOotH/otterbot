@@ -20,6 +20,7 @@ import {
   cloneRepo,
   getRepoDefaultBranch,
   fetchAssignedIssues,
+  fetchCompareCommitsDiff,
   checkIsCollaborator,
   fetchCheckRunsForRef,
   aggregateCheckRunStatus,
@@ -265,6 +266,40 @@ describe("github-service", () => {
       ).rejects.toThrow("GitHub API error 401");
 
       vi.unstubAllGlobals();
+    });
+  });
+
+  describe("fetchCompareCommitsDiff", () => {
+    it("accepts cross-fork head refs in owner:branch format", async () => {
+      const mockFetch = vi.fn().mockResolvedValue({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            files: [{ filename: "src/app.ts", status: "modified", patch: "@@ -1 +1 @@" }],
+          }),
+      });
+      vi.stubGlobal("fetch", mockFetch);
+
+      const files = await fetchCompareCommitsDiff(
+        "owner/repo",
+        "ghp_test",
+        "main",
+        "botuser:feat/issue-405",
+      );
+
+      expect(files).toEqual([
+        { filename: "src/app.ts", status: "modified", patch: "@@ -1 +1 @@" },
+      ]);
+      const calledUrl = mockFetch.mock.calls[0][0] as string;
+      expect(calledUrl).toContain("compare/main...botuser%3Afeat%2Fissue-405");
+
+      vi.unstubAllGlobals();
+    });
+
+    it("rejects invalid cross-fork head refs", async () => {
+      await expect(
+        fetchCompareCommitsDiff("owner/repo", "ghp_test", "main", "bad owner:feat/issue-405"),
+      ).rejects.toThrow("Invalid branch name: bad owner:feat/issue-405");
     });
   });
 
