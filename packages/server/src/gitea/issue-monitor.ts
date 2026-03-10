@@ -90,6 +90,8 @@ export class GiteaIssueMonitor {
   }
 
   private async poll(): Promise<void> {
+    if (this.watched.size === 0) return;
+
     for (const [projectId, watched] of this.watched) {
       const token = resolveGiteaToken(projectId);
       const instanceUrl = resolveGiteaInstanceUrl(projectId);

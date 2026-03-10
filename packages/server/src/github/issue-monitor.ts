@@ -97,6 +97,8 @@ export class GitHubIssueMonitor {
   }
 
   private async poll(): Promise<void> {
+    if (this.watched.size === 0) return;
+
     for (const [projectId, watched] of this.watched) {
       const token = resolveGitHubToken(projectId);
       if (!token) continue;
