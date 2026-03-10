@@ -276,6 +276,18 @@ export interface ClientToServerEvents {
     callback?: (ack: { ok: boolean; error?: string }) => void,
   ) => void;
 
+  // Gitea issue monitor toggle
+  "project:set-gitea-issue-monitor": (
+    data: { projectId: string; enabled: boolean },
+    callback?: (ack: { ok: boolean; error?: string }) => void,
+  ) => void;
+
+  // Gitea account assignment
+  "project:set-gitea-account": (
+    data: { projectId: string; accountId: string | null },
+    callback?: (ack: { ok: boolean; error?: string }) => void,
+  ) => void;
+
   // Sign commits toggle
   "project:get-sign-commits": (
     data: { projectId: string },
@@ -299,6 +311,14 @@ export interface ClientToServerEvents {
   ) => void;
   "project:set-branch": (
     data: { projectId: string; branch: string },
+    callback?: (ack: { ok: boolean; error?: string }) => void,
+  ) => void;
+  "project:get-fork-settings": (
+    data: { projectId: string },
+    callback: (result: { forkMode: boolean; forkRepo: string | null; forkUpstreamPr: boolean }) => void,
+  ) => void;
+  "project:set-fork-upstream-pr": (
+    data: { projectId: string; enabled: boolean },
     callback?: (ack: { ok: boolean; error?: string }) => void,
   ) => void;
 

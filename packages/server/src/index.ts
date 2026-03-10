@@ -157,6 +157,7 @@ import {
   createCustomModel,
   deleteCustomModel,
   applyGitSSHConfig,
+  applyAccountSSHConfig,
   getClaudeCodeOAuthUsage,
   getAgentModelOverrides,
   setAgentModelOverride,
@@ -171,6 +172,8 @@ import { createBackupArchive, restoreFromArchive, looksLikeZip } from "./backup/
 import { writeOpenCodeConfig } from "./opencode/opencode-manager.js";
 import { GitHubIssueMonitor } from "./github/issue-monitor.js";
 import { GitHubPRMonitor } from "./github/pr-monitor.js";
+import { GiteaIssueMonitor } from "./gitea/issue-monitor.js";
+import { GiteaPRMonitor } from "./gitea/pr-monitor.js";
 import { PipelineManager } from "./pipeline/pipeline-manager.js";
 import { MergeQueue } from "./merge-queue/merge-queue.js";
 import { ReminderScheduler } from "./reminders/reminder-scheduler.js";
@@ -447,6 +450,53 @@ async function main() {
     // Non-fatal — SSH signing is optional
   }
 
+  // Re-apply SSH signing config for per-account keys (not just legacy)
+  try {
+    const { getGitHubAccounts } = await import("./github/account-resolver.js");
+    const accounts = getGitHubAccounts();
+    const defaultAccount = accounts.find(a => a.isDefault) ?? accounts[0];
+    const accountUsage = defaultAccount?.sshKeyUsage ?? "both";
+    if (defaultAccount?.sshKeyPath && existsSync(defaultAccount.sshKeyPath + ".pub") && accountUsage !== "auth") {
+      applyAccountSSHConfig(defaultAccount);
+    }
+  } catch {
+    // Non-fatal — account SSH signing is optional
+  }
+
+  // Re-apply per-project git user identity and signing config for cloned repos
+  try {
+    const { resolveGitHubAccount } = await import("./github/account-resolver.js");
+    const { configureCommitSigning } = await import("./utils/git.js");
+    const { configureGitUser } = await import("./github/github-service.js");
+    const db = getDb();
+    const allProjects = db.select().from(schema.projects).all();
+    for (const project of allProjects) {
+      const repoPath = join(
+        process.env.WORKSPACE_ROOT ?? resolve(__dirname, "../../../docker/otterbot"),
+        "projects", project.id, "repo",
+      );
+      if (existsSync(join(repoPath, ".git"))) {
+        try {
+          // Always re-apply git user identity (email/name may have changed)
+          configureGitUser(repoPath, project.id);
+
+          // Re-apply signing config if enabled
+          if (project.signCommits) {
+            const account = resolveGitHubAccount(project.id);
+            const projUsage = account?.sshKeyUsage ?? "both";
+            if (projUsage !== "auth") {
+              configureCommitSigning(repoPath, true, account?.sshKeyPath ?? undefined);
+            }
+          }
+        } catch {
+          // Non-fatal per-project
+        }
+      }
+    }
+  } catch {
+    // Non-fatal — project config is optional
+  }
+
   // Bootstrap passphrase from environment (one-time setup)
   if (!isPassphraseSet()) {
     let bootstrapPassphrase: string | undefined;
@@ -581,6 +631,8 @@ async function main() {
   let coo: COO | null = null;
   let issueMonitor: GitHubIssueMonitor | null = null;
   let prMonitor: GitHubPRMonitor | null = null;
+  let giteaIssueMonitor: GiteaIssueMonitor | null = null;
+  let giteaPrMonitor: GiteaPRMonitor | null = null;
   const schedulerRegistry = new SchedulerRegistry(io);
   let customTaskScheduler: CustomTaskScheduler | null = null;
 
@@ -1088,6 +1140,8 @@ async function main() {
       // Create issue monitor, PR monitor, and pipeline manager
       issueMonitor = new GitHubIssueMonitor(coo, io);
       prMonitor = new GitHubPRMonitor(coo, io);
+      giteaIssueMonitor = new GiteaIssueMonitor(coo, io);
+      giteaPrMonitor = new GiteaPRMonitor(coo, io);
       const pipelineManager = new PipelineManager(coo, io);
       pipelineManager.init().catch((err) => {
         console.error("[PipelineManager] Init failed:", err);
@@ -1096,6 +1150,9 @@ async function main() {
       issueMonitor.setPipelineManager(pipelineManager);
       prMonitor.setPipelineManager(pipelineManager);
       prMonitor.setMergeQueue(mergeQueue);
+      giteaIssueMonitor.setPipelineManager(pipelineManager);
+      giteaPrMonitor.setPipelineManager(pipelineManager);
+      giteaPrMonitor.setMergeQueue(mergeQueue);
       pipelineManager.setMergeQueue(mergeQueue);
       mergeQueue.setPipelineManager(pipelineManager);
       mergeQueue.setCoo(coo);
@@ -1175,7 +1232,7 @@ async function main() {
           callback?.({ messageId: confirmMsg.id, conversationId: conversationId ?? "" });
           return true;
         },
-      }, { workspace, issueMonitor: issueMonitor!, mergeQueue, worldLayout });
+      }, { workspace, issueMonitor: issueMonitor!, giteaIssueMonitor: giteaIssueMonitor!, mergeQueue, worldLayout });
       console.log(`COO agent started. (model=${coo.toData().model}, provider=${coo.toData().provider})`);
 
       // Spawn AdminAssistant alongside COO
@@ -1290,6 +1347,25 @@ async function main() {
         schedulerRegistry.register("github-prs", prMonitor, {
           name: "GitHub PR Monitor",
           description: "Monitors open PRs for merge status and review feedback.",
+          defaultIntervalMs: 120_000,
+          minIntervalMs: 30_000,
+        });
+      }
+
+      if (giteaIssueMonitor) {
+        giteaIssueMonitor.loadFromDb();
+        schedulerRegistry.register("gitea-issues", giteaIssueMonitor, {
+          name: "Gitea Issue Monitor",
+          description: "Polls Gitea for new and updated issues on watched projects.",
+          defaultIntervalMs: 60_000,
+          minIntervalMs: 5_000,
+        });
+      }
+
+      if (giteaPrMonitor) {
+        schedulerRegistry.register("gitea-prs", giteaPrMonitor, {
+          name: "Gitea PR Monitor",
+          description: "Monitors open Gitea PRs for merge status and review feedback.",
           defaultIntervalMs: 120_000,
           minIntervalMs: 30_000,
         });
@@ -4083,6 +4159,7 @@ async function main() {
   async function applyGitIdentityFromAccount(accountId: string): Promise<void> {
     try {
       const { getGitHubAccountById, getGitHubAccounts } = await import("./github/account-resolver.js");
+      const { configureGitUser } = await import("./github/github-service.js");
       const account = getGitHubAccountById(accountId);
       if (!account) return;
       // Only set global config for the default account (or if it's the only one)
@@ -4094,6 +4171,23 @@ async function main() {
       const { execFileSync } = await import("node:child_process");
       execFileSync("git", ["config", "--global", "user.name", name], { stdio: "ignore" });
       execFileSync("git", ["config", "--global", "user.email", email], { stdio: "ignore" });
+
+      // Also update local config on all cloned repos that use this account
+      const db = getDb();
+      const projects = db.select().from(schema.projects).all();
+      for (const project of projects) {
+        // Update repos bound to this account, or all repos if this is the default/only account
+        if (project.githubAccountId !== accountId && account.isDefault === false && allAccounts.length > 1) continue;
+        const repoPath = join(
+          process.env.WORKSPACE_ROOT ?? resolve(__dirname, "../../../docker/otterbot"),
+          "projects", project.id, "repo",
+        );
+        if (existsSync(join(repoPath, ".git"))) {
+          try {
+            configureGitUser(repoPath, project.id);
+          } catch { /* non-fatal */ }
+        }
+      }
     } catch {
       // Non-fatal
     }
@@ -4165,6 +4259,7 @@ async function main() {
       sshKeySet: !!a.sshKeyPath,
       sshFingerprint: a.sshFingerprint,
       sshKeyType: a.sshKeyType,
+      sshKeyUsage: a.sshKeyUsage ?? "both",
       isDefault: a.isDefault,
       createdAt: a.createdAt,
     }));
@@ -4218,20 +4313,32 @@ async function main() {
 
   app.post<{
     Params: { id: string };
-    Body: { type?: "ed25519" | "rsa"; comment?: string };
+    Body: { type?: "ed25519" | "rsa"; comment?: string; usage?: "auth" | "signing" | "both" };
   }>("/api/settings/github/accounts/:id/ssh/generate", async (req) => {
     return generateAccountSSHKey(req.params.id, req.body);
   });
 
   app.post<{
     Params: { id: string };
-    Body: { privateKey: string };
+    Body: { privateKey: string; usage?: "auth" | "signing" | "both" };
   }>("/api/settings/github/accounts/:id/ssh/import", async (req, reply) => {
     if (!req.body.privateKey) {
       reply.code(400);
       return { error: "privateKey is required" };
     }
-    return importAccountSSHKey(req.params.id, req.body.privateKey);
+    return importAccountSSHKey(req.params.id, req.body.privateKey, req.body.usage);
+  });
+
+  app.put<{
+    Params: { id: string };
+    Body: { usage: "auth" | "signing" | "both" };
+  }>("/api/settings/github/accounts/:id/ssh/usage", async (req, reply) => {
+    const { updateAccountSSHUsage } = await import("./settings/settings.js");
+    if (!req.body.usage || !["auth", "signing", "both"].includes(req.body.usage)) {
+      reply.code(400);
+      return { error: "usage must be 'auth', 'signing', or 'both'" };
+    }
+    return updateAccountSSHUsage(req.params.id, req.body.usage);
   });
 
   app.get<{

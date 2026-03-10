@@ -19,6 +19,7 @@ vi.mock("../../github/github-service.js", () => ({
   fetchCompareCommitsDiff: vi.fn().mockResolvedValue([]),
   fetchPullRequests: vi.fn().mockResolvedValue([]),
   fetchIssueComments: vi.fn().mockResolvedValue([]),
+  fetchRepoTree: vi.fn().mockResolvedValue(["src/index.ts", "package.json"]),
   resolveProjectBranch: vi.fn(() => "main"),
 }));
 
@@ -200,6 +201,8 @@ interface PipelineState {
   prNumber: number | null;
   targetBranch: string;
   isReReview?: boolean;
+  forkMode?: boolean;
+  forkRepo?: string | null;
 }
 
 function createPipelineState(overrides: Partial<PipelineState> = {}): PipelineState {
@@ -217,6 +220,8 @@ function createPipelineState(overrides: Partial<PipelineState> = {}): PipelineSt
     prNumber: overrides.prNumber ?? null,
     targetBranch: overrides.targetBranch ?? "main",
     isReReview: overrides.isReReview ?? false,
+    forkMode: overrides.forkMode ?? false,
+    forkRepo: overrides.forkRepo ?? null,
   };
 }
 
@@ -460,6 +465,108 @@ describe("PipelineManager", () => {
       expect((pm2 as any).pipelines.has(task.id)).toBe(false);
       pm2.dispose();
     });
+
+    it("includes fork mode guidance for coder stage", async () => {
+      const task = insertTask({ id: "task-dir-fork-coder", column: "in_progress", title: "Implement feature" });
+      insertProject();
+      setPipelineConfig(PROJECT_ID);
+      const state = createPipelineState({
+        taskId: task.id,
+        stages: ["coder", "reviewer"],
+        currentStageIndex: 0,
+        forkMode: true,
+      });
+      (pm as any).pipelines.set(task.id, state);
+
+      await (pm as any).sendStageDirective(state);
+
+      const call = (bus.send as any).mock.calls[0][0];
+      expect(call.content).toContain("[FORK MODE] You are contributing via a fork");
+      expect(call.content).toContain("Create your feature branch from `upstream/main`.");
+    });
+
+    it("instructs reviewer to open cross-fork PR when enabled", async () => {
+      const task = insertTask({ id: "task-dir-fork-review", column: "in_progress", title: "Review feature" });
+      insertProject();
+      setPipelineConfig(PROJECT_ID);
+      const state = createPipelineState({
+        taskId: task.id,
+        stages: ["reviewer"],
+        currentStageIndex: 0,
+        forkMode: true,
+        forkRepo: "botuser/repo-name",
+      });
+      (pm as any).pipelines.set(task.id, state);
+
+      await (pm as any).sendStageDirective(state);
+
+      const call = (bus.send as any).mock.calls[0][0];
+      expect(call.content).toContain("After review, create a pull request for this branch targeting `main`.");
+      expect(call.content).toContain("Use `botuser:<branch>` as the head ref");
+    });
+
+    it("instructs reviewer not to create PR when fork upstream PR is disabled", async () => {
+      const task = insertTask({ id: "task-dir-fork-review-disabled", column: "in_progress", title: "Review feature" });
+      insertProject();
+      setPipelineConfig(PROJECT_ID);
+      configStore.set(`project:${PROJECT_ID}:github:fork_upstream_pr`, "false");
+      const state = createPipelineState({
+        taskId: task.id,
+        stages: ["reviewer"],
+        currentStageIndex: 0,
+        forkMode: true,
+        forkRepo: "botuser/repo-name",
+      });
+      (pm as any).pipelines.set(task.id, state);
+
+      await (pm as any).sendStageDirective(state);
+
+      const call = (bus.send as any).mock.calls[0][0];
+      expect(call.content).toContain("After review, do NOT create a pull request.");
+      expect(call.content).toContain("Upstream PR creation is disabled for this project.");
+    });
+
+    it("includes strong branch checkout instruction on security kickback", async () => {
+      const task = insertTask({ id: "task-kickback-branch", column: "in_progress", title: "Fix vulnerability" });
+      insertProject();
+      setPipelineConfig(PROJECT_ID);
+      const state = createPipelineState({
+        taskId: task.id,
+        stages: ["coder", "security", "reviewer"],
+        currentStageIndex: 0,
+        lastKickbackSource: "security",
+        prBranch: "feat/issue-10-fix-vuln",
+      });
+      (pm as any).pipelines.set(task.id, state);
+
+      await (pm as any).sendStageDirective(state, "Found SQL injection in query.ts");
+
+      const call = (bus.send as any).mock.calls[0][0];
+      expect(call.content).toContain("IMPORTANT");
+      expect(call.content).toContain("check out the EXISTING branch");
+      expect(call.content).toContain("feat/issue-10-fix-vuln");
+      expect(call.content).toContain("Do NOT create a new branch");
+    });
+
+    it("includes warning about missing branch on kickback when prBranch is null", async () => {
+      const task = insertTask({ id: "task-kickback-nobranch", column: "in_progress", title: "Fix issue" });
+      insertProject();
+      setPipelineConfig(PROJECT_ID);
+      const state = createPipelineState({
+        taskId: task.id,
+        stages: ["coder", "security", "reviewer"],
+        currentStageIndex: 0,
+        lastKickbackSource: "tester",
+        prBranch: null,
+      });
+      (pm as any).pipelines.set(task.id, state);
+
+      await (pm as any).sendStageDirective(state, "Tests failed");
+
+      const call = (bus.send as any).mock.calls[0][0];
+      expect(call.content).toContain("WARNING");
+      expect(call.content).toContain("No feature branch was tracked");
+    });
   });
 
   // ─── sendStageDirective (CI failure) ─────────────────────────
@@ -695,13 +802,15 @@ describe("PipelineManager", () => {
   // ─── persistPipelineState ──────────────────────────────────
 
   describe("persistPipelineState", () => {
-    it("persists stageReports, lastKickbackSource, spawnRetryCount to DB", () => {
+    it("persists stageReports, lastKickbackSource, spawnRetryCount, prBranch, and prNumber to DB", () => {
       const task = insertTask({ id: "task-persist-1", column: "in_progress" });
       const state = createPipelineState({
         taskId: task.id,
         spawnRetryCount: 2,
         lastKickbackSource: "security",
         stageReports: new Map([["coder", "coder report here"]]),
+        prBranch: "feat/issue-42-fix-login",
+        prNumber: 99,
       });
 
       (pm as any).persistPipelineState(state);
@@ -710,6 +819,28 @@ describe("PipelineManager", () => {
       expect(dbTask?.spawnRetryCount).toBe(2);
       expect(dbTask?.lastKickbackSource).toBe("security");
       expect((dbTask?.stageReports as Record<string, string>)?.coder).toBe("coder report here");
+      expect(dbTask?.prBranch).toBe("feat/issue-42-fix-login");
+      expect(dbTask?.prNumber).toBe(99);
+    });
+
+    it("persists null prBranch and prNumber when not set", () => {
+      const task = insertTask({
+        id: "task-persist-null",
+        column: "in_progress",
+        prBranch: "old-branch",
+        prNumber: 50,
+      });
+      const state = createPipelineState({
+        taskId: task.id,
+        prBranch: null,
+        prNumber: null,
+      });
+
+      (pm as any).persistPipelineState(state);
+
+      const dbTask = getTask(task.id);
+      expect(dbTask?.prBranch).toBeNull();
+      expect(dbTask?.prNumber).toBeNull();
     });
   });
 
@@ -873,6 +1004,8 @@ describe("PipelineManager", () => {
   describe("recoverPipelines", () => {
     it("reconstructs in-memory pipeline state from DB", () => {
       insertProject();
+      configStore.set(`project:${PROJECT_ID}:github:fork_mode`, "true");
+      configStore.set(`project:${PROJECT_ID}:github:fork_repo`, "botuser/repo-name");
       insertTask({
         id: "task-recover-1",
         column: "in_progress",
@@ -898,6 +1031,8 @@ describe("PipelineManager", () => {
       expect(state.prBranch).toBe("feat/issue-55");
       expect(state.prNumber).toBe(88);
       expect(state.issueNumber).toBe(55);
+      expect(state.forkMode).toBe(true);
+      expect(state.forkRepo).toBe("botuser/repo-name");
     });
 
     it("skips tasks with invalid/missing stage index", () => {

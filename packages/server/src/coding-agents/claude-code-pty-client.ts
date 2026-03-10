@@ -22,6 +22,8 @@ const RING_BUFFER_SIZE = 100 * 1024;
 
 export interface ClaudeCodePtyConfig {
   workspacePath?: string | null;
+  /** Project ID for scoping GitHub token resolution */
+  projectId?: string | null;
   /** Callback for raw PTY data — stream to Socket.IO clients */
   onData?: (data: string) => void;
   /** Callback when process exits */
@@ -54,7 +56,7 @@ export class ClaudeCodePtyClient implements CodingAgentClient {
       if (apiKey) {
         env.ANTHROPIC_API_KEY = apiKey;
       }
-      const ghToken = resolveGitHubToken();
+      const ghToken = resolveGitHubToken(this.config.projectId ?? undefined);
       if (ghToken) {
         env.GH_TOKEN = ghToken;
         env.GITHUB_TOKEN = ghToken;

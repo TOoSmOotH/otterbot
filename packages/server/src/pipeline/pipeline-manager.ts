@@ -21,6 +21,7 @@ import {
   fetchCompareCommitsDiff,
   fetchPullRequests,
   fetchIssueComments,
+  fetchRepoTree,
   checkHasPushAccess,
   createFork,
   waitForFork,
@@ -30,8 +31,9 @@ import {
 import type { COO } from "../agents/coo.js";
 import { resolveProjectBranch, type GitHubIssue } from "../github/github-service.js";
 import { SECURITY_PREAMBLE } from "../agents/prompts/security-preamble.js";
-import { cleanTerminalOutput } from "../utils/terminal.js";
+import { cleanTerminalOutput, summarizeForGitHub } from "../utils/terminal.js";
 import { formatBotComment, formatBotCommentWithDetails } from "../utils/github-comments.js";
+import { sanitizeForPrompt, extractForkOwner } from "../utils/sanitize.js";
 
 type TypedServer = Server<ClientToServerEvents, ServerToClientEvents>;
 
@@ -148,6 +150,8 @@ export class PipelineManager {
         stageReports: Object.fromEntries(state.stageReports),
         lastKickbackSource: state.lastKickbackSource,
         spawnRetryCount: state.spawnRetryCount,
+        prBranch: state.prBranch,
+        prNumber: state.prNumber,
         updatedAt: new Date().toISOString(),
       })
       .where(eq(schema.kanbanTasks.id, state.taskId))
@@ -383,6 +387,19 @@ export class PipelineManager {
     const entry = registry.get(agentId) ?? registry.get("builtin-triage");
     if (!entry) return;
 
+    // Fetch the repository file tree to give the triage agent source code context
+    let fileTreeSection = "";
+    try {
+      const files = await fetchRepoTree(repo, token);
+      fileTreeSection =
+        `\n<repository-file-tree>\n` +
+        files.join("\n") +
+        `\n</repository-file-tree>`;
+    } catch (err) {
+      console.warn(`[PipelineManager] Failed to fetch repo tree for triage of #${issue.number}:`, err);
+      fileTreeSection = "\n<repository-file-tree>\n(unavailable)\n</repository-file-tree>";
+    }
+
     // Build prompt — wrap in XML delimiters to isolate untrusted content
     const issueText =
       `<github-issue>\n` +
@@ -390,7 +407,8 @@ export class PipelineManager {
       `${issue.body ?? "(no description)"}\n\n` +
       `Labels: ${issue.labels.map((l) => l.name).join(", ") || "none"}\n` +
       `Assignees: ${issue.assignees.map((a) => a.login).join(", ") || "none"}\n` +
-      `</github-issue>`;
+      `</github-issue>` +
+      fileTreeSection;
 
     try {
       const model = resolveModel({
@@ -455,6 +473,21 @@ export class PipelineManager {
         }
       }
 
+      // Post the triage analysis as a comment on the issue for review
+      try {
+        const heading = parsed.shouldProceed
+          ? `Triage: ${parsed.classification}`
+          : `Triage: ${parsed.classification}`;
+        await createIssueComment(
+          repo,
+          token,
+          issue.number,
+          formatBotComment(heading, parsed.comment),
+        );
+      } catch (err) {
+        console.error(`[PipelineManager] Failed to post triage comment on #${issue.number}:`, err);
+      }
+
       // Apply "triaged" label so we don't re-process
       try {
         await addLabelsToIssue(repo, token, issue.number, ["triaged"]);
@@ -482,12 +515,15 @@ export class PipelineManager {
     projectId: string,
     issueNumber: number | null,
     repo: string | null,
-  ): Promise<void> {
+    options?: { skipFallback?: boolean },
+  ): Promise<boolean> {
     const config = this.getConfig(projectId);
     if (!config?.enabled) {
       // Fallback: send existing direct directive to TeamLead
-      this.sendFallbackDirective(taskId, projectId);
-      return;
+      if (!options?.skipFallback) {
+        this.sendFallbackDirective(taskId, projectId);
+      }
+      return false;
     }
 
     // Build ordered list of enabled implementation stages
@@ -502,8 +538,10 @@ export class PipelineManager {
 
     if (enabledStages.length === 0) {
       // No stages enabled — fall back
-      this.sendFallbackDirective(taskId, projectId);
-      return;
+      if (!options?.skipFallback) {
+        this.sendFallbackDirective(taskId, projectId);
+      }
+      return false;
     }
 
     // Initialize pipeline state
@@ -584,6 +622,7 @@ export class PipelineManager {
 
     // Send directive for the first stage
     await this.sendStageDirective(state);
+    return true;
   }
 
   /**
@@ -727,6 +766,9 @@ export class PipelineManager {
             state.currentStageIndex = coderIndex;
             state.lastKickbackSource = "security";
             state.spawnRetryCount = 0;
+            if (!state.prBranch) {
+              console.warn(`[PipelineManager] Kickback from security to coder for task ${taskId} with NO tracked branch`);
+            }
             this.persistPipelineState(state);
             this.updateTaskPipelineStage(taskId, "coder");
             if (state.issueNumber && state.repo) {
@@ -760,6 +802,9 @@ export class PipelineManager {
             state.currentStageIndex = coderIndex;
             state.lastKickbackSource = "tester";
             state.spawnRetryCount = 0;
+            if (!state.prBranch) {
+              console.warn(`[PipelineManager] Kickback from tester to coder for task ${taskId} with NO tracked branch`);
+            }
             this.persistPipelineState(state);
             this.updateTaskPipelineStage(taskId, "coder");
             if (state.issueNumber && state.repo) {
@@ -793,6 +838,9 @@ export class PipelineManager {
             state.currentStageIndex = coderIndex;
             state.lastKickbackSource = "reviewer";
             state.spawnRetryCount = 0;
+            if (!state.prBranch) {
+              console.warn(`[PipelineManager] Kickback from reviewer to coder for task ${taskId} with NO tracked branch`);
+            }
             this.persistPipelineState(state);
             this.updateTaskPipelineStage(taskId, "coder");
             if (state.issueNumber && state.repo) {
@@ -1257,7 +1305,9 @@ export class PipelineManager {
           parts.push(
             `\n[SECURITY KICKBACK — Fix Required]`,
             `The security reviewer found issues. Address the findings below.`,
-            state.prBranch ? `Work on branch \`${state.prBranch}\`.` : "",
+            state.prBranch
+              ? `IMPORTANT: You MUST check out the EXISTING branch \`${state.prBranch}\` before making any changes. Do NOT create a new branch. Push all fixes to \`${state.prBranch}\`.`
+              : `WARNING: No feature branch was tracked for this task. Look for the most recent feature branch related to this issue and work on it.`,
             `Do NOT create a PR — just fix and push.`,
           );
           if (extraContext) {
@@ -1269,7 +1319,9 @@ export class PipelineManager {
             `\n[TEST FAILURE KICKBACK — Fix Required]`,
             `The tester wrote tests for your implementation and they revealed bugs. Fix your implementation code so the tests pass.`,
             `Do NOT modify or delete the test files — only fix the implementation.`,
-            state.prBranch ? `Work on branch \`${state.prBranch}\`.` : "",
+            state.prBranch
+              ? `IMPORTANT: You MUST check out the EXISTING branch \`${state.prBranch}\` before making any changes. Do NOT create a new branch. Push all fixes to \`${state.prBranch}\`.`
+              : `WARNING: No feature branch was tracked for this task. Look for the most recent feature branch related to this issue and work on it.`,
             `Do NOT create a PR — just fix and push.`,
           );
           if (extraContext) {
@@ -1280,7 +1332,9 @@ export class PipelineManager {
           parts.push(
             `\n[REVIEW KICKBACK — Fix Required]`,
             `The code reviewer found quality issues. Address the findings below.`,
-            state.prBranch ? `Work on branch \`${state.prBranch}\`.` : "",
+            state.prBranch
+              ? `IMPORTANT: You MUST check out the EXISTING branch \`${state.prBranch}\` before making any changes. Do NOT create a new branch. Push all fixes to \`${state.prBranch}\`.`
+              : `WARNING: No feature branch was tracked for this task. Look for the most recent feature branch related to this issue and work on it.`,
             `Do NOT create a PR — just fix and push.`,
           );
           if (extraContext) {
@@ -1301,7 +1355,7 @@ export class PipelineManager {
           // Initial implementation
           parts.push(
             `\nCreate a feature branch named \`feat/issue-${state.issueNumber}-<short-description>\` (e.g. \`feat/issue-${state.issueNumber ?? "42"}-add-login-button\`), implement the solution, commit, and push.`,
-            `Do NOT reuse an existing branch. Always create a fresh branch from the default branch.`,
+            `Do NOT reuse an existing branch. Always create a fresh branch from \`${state.targetBranch}\`.`,
             `Do NOT create a pull request — a later stage will handle that.`,
             `\nFocus ONLY on the implementation code. Do NOT:`,
             `- Write or update tests (a dedicated Tester stage handles testing)`,
@@ -1310,10 +1364,11 @@ export class PipelineManager {
             `If the issue description mentions tests, PRs, or reviews, ignore those — other pipeline stages will handle them.`,
           );
           if (state.forkMode) {
+            const safeBranch = sanitizeForPrompt(state.targetBranch);
             parts.push(
               `\n[FORK MODE] You are contributing via a fork. Pushes go to \`origin\` (the fork).`,
               `The upstream repo is available as the \`upstream\` remote.`,
-              `Create your feature branch from the latest upstream default branch.`,
+              `Create your feature branch from \`upstream/${safeBranch}\`.`,
             );
           }
 
@@ -1437,14 +1492,22 @@ export class PipelineManager {
           );
         }
         if (isLastStage) {
-          if (state.forkMode && state.forkRepo) {
-            const forkOwner = state.forkRepo.split("/")[0];
-            parts.push(
-              `After review, create a pull request for this branch.`,
-              `[FORK MODE] This is a cross-fork PR. Use \`${forkOwner}:<branch>\` as the head ref when creating the PR against the upstream repo.`,
-            );
+          const forkUpstreamPr = getConfig(`project:${state.projectId}:github:fork_upstream_pr`) !== "false";
+          const forkOwner = state.forkRepo ? extractForkOwner(state.forkRepo) : null;
+          if (state.forkMode && forkOwner) {
+            if (forkUpstreamPr) {
+              parts.push(
+                `After review, create a pull request for this branch targeting \`${state.targetBranch}\`.`,
+                `[FORK MODE] This is a cross-fork PR. Use \`${forkOwner}:<branch>\` as the head ref when creating the PR against the upstream repo \`${state.targetBranch}\` branch.`,
+              );
+            } else {
+              parts.push(
+                `After review, do NOT create a pull request. The changes have been pushed to the fork only.`,
+                `[FORK MODE] Upstream PR creation is disabled for this project. Just report on the review.`,
+              );
+            }
           } else {
-            parts.push(`After review, create a pull request for this branch.`);
+            parts.push(`After review, create a pull request for this branch targeting \`${state.targetBranch}\`.`);
           }
         }
         parts.push(
@@ -1492,7 +1555,7 @@ export class PipelineManager {
             pipelineForkRepo: state.forkRepo ?? undefined,
           },
         });
-        console.log(`[PipelineManager] Sent ${currentStage} directive for task ${state.taskId}`);
+        console.log(`[PipelineManager] Sent ${currentStage} directive for task ${state.taskId} (branch=${state.prBranch ?? "none"}, pr=${state.prNumber ?? "none"})`);
       }
     } else {
       console.error(
@@ -1527,17 +1590,9 @@ export class PipelineManager {
       };
       body = formatBotComment(startTitles[stage] ?? `Starting ${stage}`);
     } else {
-      // Completion — clean the report and put it in a collapsible section
+      // Completion — clean the report and summarize via LLM
       const cleaned = cleanTerminalOutput(report);
-      let preview: string;
-      if (cleaned.length > 500) {
-        // Try to break at a paragraph boundary (double newline) within 500 chars
-        const slice = cleaned.slice(0, 500);
-        const paraBreak = slice.lastIndexOf("\n\n");
-        preview = (paraBreak > 100 ? slice.slice(0, paraBreak) : slice) + "\n\n_(see details for full output)_";
-      } else {
-        preview = cleaned;
-      }
+      const summary = await summarizeForGitHub(cleaned, stage);
 
       const completeTitles: Record<string, string> = {
         coder: "Implementation Complete",
@@ -1549,9 +1604,23 @@ export class PipelineManager {
       };
       const title = completeTitles[stage] ?? `${stage} Complete`;
 
-      body = cleaned.length > 500
-        ? formatBotCommentWithDetails(title, preview, cleaned)
-        : formatBotComment(title, preview);
+      if (summary) {
+        // LLM summary as preview, raw output in collapsible details
+        body = formatBotCommentWithDetails(title, summary, cleaned);
+      } else {
+        // Fallback: truncated preview (same as before)
+        let preview: string;
+        if (cleaned.length > 500) {
+          const slice = cleaned.slice(0, 500);
+          const paraBreak = slice.lastIndexOf("\n\n");
+          preview = (paraBreak > 100 ? slice.slice(0, paraBreak) : slice) + "\n\n_(see details for full output)_";
+        } else {
+          preview = cleaned;
+        }
+        body = cleaned.length > 500
+          ? formatBotCommentWithDetails(title, preview, cleaned)
+          : formatBotComment(title, preview);
+      }
     }
 
     try {
@@ -1634,11 +1703,19 @@ export class PipelineManager {
     if (!token) return null;
 
     try {
+      // In fork mode, GitHub's compare API needs "owner:branch" for cross-repo diffs
+      let compareHead = state.prBranch;
+      if (state.forkMode && state.forkRepo) {
+        const forkOwner = extractForkOwner(state.forkRepo);
+        if (forkOwner && !compareHead.includes(":")) {
+          compareHead = `${forkOwner}:${compareHead}`;
+        }
+      }
       const files = await fetchCompareCommitsDiff(
         state.repo,
         token,
         state.targetBranch,
-        state.prBranch,
+        compareHead,
       );
 
       if (files.length === 0) return null;

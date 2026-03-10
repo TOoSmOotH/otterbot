@@ -13,6 +13,7 @@ import {
 } from "../github/github-service.js";
 import { resolveGitHubAccount } from "../github/account-resolver.js";
 import type { ToolContext } from "./tool-context.js";
+import { extractForkOwner } from "../utils/sanitize.js";
 
 function getGitHubContext(ctx: ToolContext): { repo: string; token: string; username: string } {
   const account = resolveGitHubAccount(ctx.projectId);
@@ -259,10 +260,18 @@ export function createGitHubCreatePRTool(ctx: ToolContext) {
         let prHead = head;
         const forkMode = getConfig(`project:${ctx.projectId}:github:fork_mode`);
         if (forkMode === "true") {
+          // Check if upstream PR creation is disabled
+          const forkUpstreamPr = getConfig(`project:${ctx.projectId}:github:fork_upstream_pr`);
+          if (forkUpstreamPr === "false") {
+            return `Upstream PR creation is disabled for this fork project. Changes have been pushed to the fork only.`;
+          }
+
           const forkRepo = getConfig(`project:${ctx.projectId}:github:fork_repo`);
           if (forkRepo && !head.includes(":")) {
-            const forkOwner = forkRepo.split("/")[0];
-            prHead = `${forkOwner}:${head}`;
+            const forkOwner = extractForkOwner(forkRepo);
+            if (forkOwner) {
+              prHead = `${forkOwner}:${head}`;
+            }
           }
         }
 

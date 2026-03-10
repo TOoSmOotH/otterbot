@@ -6,10 +6,15 @@ import { eq } from "drizzle-orm";
 import { getConfig } from "../auth/auth.js";
 import { getDb, schema } from "../db/index.js";
 import { resolveGitHubAccount, resolveGitHubToken, resolveGitHubUsername } from "./account-resolver.js";
+import { configureCommitSigning } from "../utils/git.js";
 
 // Input validation patterns
 const REPO_NAME_RE = /^[a-zA-Z0-9._-]+\/[a-zA-Z0-9._-]+$/;
 const BRANCH_NAME_RE = /^[a-zA-Z0-9._\/-]+$/;
+// Cross-fork ref format: "owner:branch" used by GitHub's compare/PR APIs
+const CROSS_FORK_REF_RE = /^[a-zA-Z0-9._-]+:[a-zA-Z0-9._\/-]+$/;
+// Cross-fork compare ref: "owner:branch" or plain branch name
+const COMPARE_REF_RE = /^[a-zA-Z0-9._\/-]+(:[a-zA-Z0-9._\/-]+)?$/;
 
 export interface GitHubIssue {
   number: number;
@@ -84,9 +89,27 @@ function validateBranchName(name: string): void {
 }
 
 /**
+ * If the project has signCommits enabled, re-apply local signing config.
+ * Called after clone/re-clone so signing survives fresh .git/config.
+ */
+function applySigningIfEnabled(targetDir: string, projectId?: string): void {
+  if (!projectId) return;
+  try {
+    const db = getDb();
+    const project = db.select().from(schema.projects).where(eq(schema.projects.id, projectId)).get();
+    if (project?.signCommits) {
+      const account = resolveGitHubAccount(projectId);
+      configureCommitSigning(targetDir, true, account?.sshKeyPath ?? undefined);
+    }
+  } catch {
+    // Non-fatal — signing is optional
+  }
+}
+
+/**
  * Configure git user identity in a cloned repo.
  */
-function configureGitUser(targetDir: string, projectId?: string): void {
+export function configureGitUser(targetDir: string, projectId?: string): void {
   const account = resolveGitHubAccount(projectId);
   const userName = account?.username ?? getConfig("github:username") ?? "otterbot";
   const userEmail =
@@ -114,8 +137,11 @@ export function cloneRepo(
   if (branch) validateBranchName(branch);
 
   const token = resolveGitHubToken(projectId) ?? (getConfig("github:token") as string | undefined);
+  // Only use SSH key for cloning if it's configured for auth (not signing-only)
+  const account = resolveGitHubAccount(projectId);
+  const accountUsage = account?.sshKeyUsage ?? "both";
   const sshKeyPath = join(homedir(), ".ssh", "otterbot_github");
-  const sshKeyExists = existsSync(sshKeyPath);
+  const sshKeyExists = existsSync(sshKeyPath) && accountUsage !== "signing";
 
   if (existsSync(targetDir + "/.git")) {
     // Already cloned — fetch and checkout using whatever remote is configured
@@ -169,6 +195,7 @@ export function cloneRepo(
         },
       );
       configureGitUser(targetDir, projectId);
+      applySigningIfEnabled(targetDir, projectId);
       return;
     } catch (err) {
       httpsErr = err;
@@ -185,6 +212,7 @@ export function cloneRepo(
       env: { ...process.env },
     });
     configureGitUser(targetDir, projectId);
+    applySigningIfEnabled(targetDir, projectId);
     return;
   }
 
@@ -219,6 +247,41 @@ export async function getRepoDefaultBranch(
   }
   const data = (await res.json()) as { default_branch: string };
   return data.default_branch;
+}
+
+/**
+ * Fetch the repository file tree (recursive) from the GitHub API.
+ * Returns a flat list of file paths, truncated to `maxEntries` to keep prompt size manageable.
+ */
+export async function fetchRepoTree(
+  repoFullName: string,
+  token: string,
+  branch?: string,
+  maxEntries = 500,
+): Promise<string[]> {
+  const ref = branch ?? await getRepoDefaultBranch(repoFullName, token);
+  const res = await fetch(
+    `https://api.github.com/repos/${repoFullName}/git/trees/${ref}?recursive=1`,
+    {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+      },
+    },
+  );
+  if (!res.ok) {
+    throw new Error(`GitHub API error ${res.status}: ${await res.text()}`);
+  }
+  const data = (await res.json()) as {
+    tree: Array<{ path: string; type: string }>;
+    truncated: boolean;
+  };
+  // Only return blobs (files), not trees (directories)
+  const files = data.tree
+    .filter((entry) => entry.type === "blob")
+    .map((entry) => entry.path);
+  return files.slice(0, maxEntries);
 }
 
 /**
@@ -663,7 +726,10 @@ export async function fetchCompareCommitsDiff(
 ): Promise<{ filename: string; status: string; patch?: string }[]> {
   validateRepoName(repoFullName);
   validateBranchName(base);
-  validateBranchName(head);
+  // head may be a cross-fork ref ("owner:branch") or a plain branch name
+  if (!COMPARE_REF_RE.test(head)) {
+    throw new Error(`Invalid compare ref: ${head}`);
+  }
 
   const data = await ghFetch<{
     files?: { filename: string; status: string; patch?: string }[];
@@ -942,8 +1008,10 @@ export function cloneForForkContribution(
   if (branch) validateBranchName(branch);
 
   const token = resolveGitHubToken(projectId) ?? (getConfig("github:token") as string | undefined);
+  const forkAccount = resolveGitHubAccount(projectId);
+  const forkAccountUsage = forkAccount?.sshKeyUsage ?? "both";
   const sshKeyPath = join(homedir(), ".ssh", "otterbot_github");
-  const sshKeyExists = existsSync(sshKeyPath);
+  const sshKeyExists = existsSync(sshKeyPath) && forkAccountUsage !== "signing";
   const branchArgs = branch ? ["--branch", branch] : [];
 
   // Clone the fork
