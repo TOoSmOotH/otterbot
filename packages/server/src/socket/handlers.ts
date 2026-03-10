@@ -1318,6 +1318,48 @@ export function setupSocketHandlers(
       }
     });
 
+    // ─── Re-triage handler ──────────────────────────────────────────
+    socket.on("kanban:retriage", async (data, callback) => {
+      try {
+        const { projectId, taskId } = data;
+        if (!projectId || !taskId) {
+          callback?.({ ok: false, error: "Missing projectId or taskId" });
+          return;
+        }
+
+        // Determine which issue monitor to use based on the task's labels
+        const db = getDb();
+        const task = db
+          .select()
+          .from(schema.kanbanTasks)
+          .where(eq(schema.kanbanTasks.id, taskId))
+          .get();
+
+        if (!task) {
+          callback?.({ ok: false, error: "Task not found" });
+          return;
+        }
+
+        const labels = task.labels as string[];
+        const isGitea = labels.some((l) => l.startsWith("gitea-issue-"));
+        const isGitHub = labels.some((l) => l.startsWith("github-issue-"));
+
+        if (isGitea && deps?.giteaIssueMonitor) {
+          await deps.giteaIssueMonitor.retriageIssue(taskId, projectId);
+        } else if (isGitHub && deps?.issueMonitor) {
+          await deps.issueMonitor.retriageIssue(taskId, projectId);
+        } else {
+          callback?.({ ok: false, error: "No issue monitor available for this task" });
+          return;
+        }
+
+        callback?.({ ok: true });
+      } catch (err) {
+        console.error("[handlers] kanban:retriage error:", err);
+        callback?.({ ok: false, error: err instanceof Error ? err.message : "Unknown error" });
+      }
+    });
+
     // ─── Merge queue handlers ───────────────────────────────────────
     if (deps?.mergeQueue) {
       const mq = deps.mergeQueue;

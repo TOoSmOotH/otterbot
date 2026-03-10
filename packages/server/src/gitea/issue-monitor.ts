@@ -398,6 +398,65 @@ export class GiteaIssueMonitor {
     }
   }
 
+  /**
+   * Re-triage a specific issue by its kanban task ID.
+   * Deletes the existing triage task, fetches the issue from Gitea,
+   * and re-creates the triage task.
+   */
+  async retriageIssue(taskId: string, projectId: string): Promise<void> {
+    const watched = this.watched.get(projectId);
+    if (!watched) throw new Error("Project is not being watched");
+
+    const token = resolveGiteaToken(projectId);
+    const instanceUrl = resolveGiteaInstanceUrl(projectId);
+    if (!token || !instanceUrl) throw new Error("No Gitea token or instance URL resolved");
+
+    if (!this.pipelineManager) throw new Error("Pipeline manager not available");
+
+    const db = getDb();
+
+    // Find the triage task
+    const task = db
+      .select()
+      .from(schema.kanbanTasks)
+      .where(eq(schema.kanbanTasks.id, taskId))
+      .get();
+
+    if (!task) throw new Error("Task not found");
+    if (task.column !== "triage") throw new Error("Task is not in triage column");
+
+    // Extract issue number from labels
+    const labels = task.labels as string[];
+    const issueLabel = labels.find((l) => /^gitea-issue-\d+$/.test(l));
+    if (!issueLabel) throw new Error("Task has no gitea-issue label");
+    const issueNumber = Number(issueLabel.replace("gitea-issue-", ""));
+
+    // Delete existing triage task
+    db.delete(schema.kanbanTasks)
+      .where(eq(schema.kanbanTasks.id, taskId))
+      .run();
+    this.io.emit("kanban:task-deleted", { taskId, projectId });
+
+    // Fetch the issue from Gitea
+    const issue = await fetchIssue(watched.repo, token, issueNumber, instanceUrl);
+
+    // Remove "triaged" label if present
+    if (issue.labels?.some((l: { name: string }) => l.name === "triaged")) {
+      try {
+        await removeLabelFromIssue(watched.repo, token, issueNumber, "triaged", instanceUrl);
+      } catch (err) {
+        console.warn(`[GiteaIssueMonitor] Failed to remove triaged label from #${issueNumber} during re-triage:`, err);
+      }
+    }
+
+    // Re-create triage task (Gitea uses createTriageTask directly, not LLM-based runTriage)
+    this.pipelineManager.createTriageTask(
+      projectId, issueNumber, issue.title ?? "", "", issue.body ?? "",
+    );
+
+    console.log(`[GiteaIssueMonitor] Re-triaged issue #${issueNumber} (task ${taskId})`);
+  }
+
   private async pollForAssigned(
     projectId: string,
     watched: WatchedProject,

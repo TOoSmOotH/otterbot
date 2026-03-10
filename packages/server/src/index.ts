@@ -2572,6 +2572,49 @@ async function main() {
     },
   );
 
+  app.post<{ Params: { projectId: string; taskId: string } }>(
+    "/api/projects/:projectId/tasks/:taskId/retriage",
+    async (req, reply) => {
+      const { getDb, schema } = await import("./db/index.js");
+      const { eq } = await import("drizzle-orm");
+      const db = getDb();
+      const task = db
+        .select()
+        .from(schema.kanbanTasks)
+        .where(eq(schema.kanbanTasks.id, req.params.taskId))
+        .get();
+
+      if (!task) {
+        reply.code(404);
+        return { error: "Task not found" };
+      }
+
+      if (task.column !== "triage") {
+        reply.code(400);
+        return { error: "Only tasks in the triage column can be re-triaged" };
+      }
+
+      const labels = task.labels as string[];
+      const isGitea = labels.some((l) => l.startsWith("gitea-issue-"));
+      const isGitHub = labels.some((l) => l.startsWith("github-issue-"));
+
+      try {
+        if (isGitea && giteaIssueMonitor) {
+          await giteaIssueMonitor.retriageIssue(req.params.taskId, req.params.projectId);
+        } else if (isGitHub && issueMonitor) {
+          await issueMonitor.retriageIssue(req.params.taskId, req.params.projectId);
+        } else {
+          reply.code(400);
+          return { error: "No issue monitor available for this task" };
+        }
+        return { ok: true };
+      } catch (err) {
+        reply.code(500);
+        return { error: err instanceof Error ? err.message : "Re-triage failed" };
+      }
+    },
+  );
+
   app.post<{
     Params: { projectId: string };
     Body: { column: string; taskIds: string[] };

@@ -467,6 +467,71 @@ export class GitHubIssueMonitor {
   }
 
   /**
+   * Re-triage a specific issue by its kanban task ID.
+   * Deletes the existing triage task, fetches the issue from GitHub,
+   * and re-runs the full triage pipeline.
+   */
+  async retriageIssue(taskId: string, projectId: string): Promise<void> {
+    const watched = this.watched.get(projectId);
+    if (!watched) throw new Error("Project is not being watched");
+
+    const token = resolveGitHubToken(projectId);
+    if (!token) throw new Error("No GitHub token resolved");
+
+    if (!this.pipelineManager) throw new Error("Pipeline manager not available");
+
+    const db = getDb();
+
+    // Find the triage task
+    const task = db
+      .select()
+      .from(schema.kanbanTasks)
+      .where(eq(schema.kanbanTasks.id, taskId))
+      .get();
+
+    if (!task) throw new Error("Task not found");
+    if (task.column !== "triage") throw new Error("Task is not in triage column");
+
+    // Extract issue number from labels
+    const labels = task.labels as string[];
+    const issueLabel = labels.find((l) => /^github-issue-\d+$/.test(l));
+    if (!issueLabel) throw new Error("Task has no github-issue label");
+    const issueNumber = Number(issueLabel.replace("github-issue-", ""));
+
+    // Delete existing triage task
+    db.delete(schema.kanbanTasks)
+      .where(eq(schema.kanbanTasks.id, taskId))
+      .run();
+    this.io.emit("kanban:task-deleted", { taskId, projectId });
+
+    // Fetch the issue from GitHub
+    const issue = await fetchIssue(watched.repo, token, issueNumber);
+
+    // Remove "triaged" label if present so runTriage re-applies it
+    if (issue.labels.some((l: { name: string }) => l.name === "triaged")) {
+      try {
+        await removeLabelFromIssue(watched.repo, token, issueNumber, "triaged");
+        issue.labels = issue.labels.filter((l: { name: string }) => l.name !== "triaged");
+      } catch (err) {
+        console.warn(`[IssueMonitor] Failed to remove triaged label from #${issueNumber} during re-triage:`, err);
+      }
+    }
+
+    // Re-run triage
+    try {
+      await this.pipelineManager.runTriage(projectId, watched.repo, issue);
+    } catch (err) {
+      console.error(`[IssueMonitor] Re-triage failed for issue #${issueNumber}:`, err);
+      // Create a basic triage task as fallback
+      this.pipelineManager.createTriageTask(
+        projectId, issueNumber, issue.title, "", issue.body ?? "",
+      );
+    }
+
+    console.log(`[IssueMonitor] Re-triaged issue #${issueNumber} (task ${taskId})`);
+  }
+
+  /**
    * Poll for issues assigned to the configured user — existing behavior.
    * Creates kanban tasks and starts implementation (via pipeline or direct directive).
    */

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import type { KanbanTask } from "@otterbot/shared";
 import { KanbanColumn } from "@otterbot/shared";
 import { useProjectStore } from "../../stores/project-store";
+import { getSocket } from "../../lib/socket";
 
 const STATUS_CONFIG: Record<KanbanColumn, { label: string; className: string }> = {
   [KanbanColumn.Triage]: {
@@ -74,6 +75,30 @@ export function KanbanTaskDetail({
 
   const [deleting, setDeleting] = useState(false);
   const [moving, setMoving] = useState(false);
+  const [retriaging, setRetriaging] = useState(false);
+
+  const isTriageTask = task.column === KanbanColumn.Triage;
+  const hasIssueLabel = task.labels.some(
+    (l) => l.startsWith("github-issue-") || l.startsWith("gitea-issue-"),
+  );
+
+  const handleRetriage = useCallback(async () => {
+    if (!window.confirm("Re-triage this issue? The existing triage data will be replaced.")) return;
+    setRetriaging(true);
+    try {
+      const socket = getSocket();
+      socket.emit("kanban:retriage", { taskId: task.id, projectId }, (ack) => {
+        setRetriaging(false);
+        if (ack?.ok) {
+          onClose();
+        } else {
+          alert(`Re-triage failed: ${ack?.error ?? "Unknown error"}`);
+        }
+      });
+    } catch {
+      setRetriaging(false);
+    }
+  }, [projectId, task.id, onClose]);
 
   const handleRemoveBlocker = useCallback(
     async (blockerId: string) => {
@@ -169,6 +194,15 @@ export function KanbanTaskDetail({
             </div>
           </div>
           <div className="flex items-center gap-1 shrink-0 mt-0.5">
+            {isTriageTask && hasIssueLabel && (
+              <button
+                onClick={handleRetriage}
+                disabled={retriaging}
+                className="text-xs text-muted-foreground hover:text-violet-400 disabled:opacity-50 px-1.5 py-0.5 rounded hover:bg-violet-500/10 transition-colors"
+              >
+                {retriaging ? "Re-triaging..." : "Re-triage"}
+              </button>
+            )}
             <button
               onClick={handleDelete}
               disabled={deleting}
