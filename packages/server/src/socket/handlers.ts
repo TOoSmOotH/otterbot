@@ -1375,6 +1375,12 @@ export function setupSocketHandlers(
           return;
         }
 
+        // Validate task belongs to the specified project
+        if (task.projectId !== data.projectId) {
+          callback?.({ ok: false, error: "Task does not belong to this project" });
+          return;
+        }
+
         if (task.column !== "triage") {
           callback?.({ ok: false, error: "Only tasks in the triage column can be re-triaged" });
           return;
@@ -1428,7 +1434,17 @@ export function setupSocketHandlers(
         io.emit("kanban:task-deleted", { taskId: task.id, projectId: data.projectId });
 
         // Re-run triage
-        await pm.runTriage(data.projectId, project.githubRepo, issue);
+        try {
+          await pm.runTriage(data.projectId, project.githubRepo, issue);
+        } catch (triageErr) {
+          // Restore the deleted task so the issue isn't lost
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          db.insert(schema.kanbanTasks).values(task as any).run();
+          io.emit("kanban:task-created", task as any);
+          console.error(`[Retriage] Triage failed for issue #${issueNumber}, task restored:`, triageErr);
+          callback?.({ ok: false, error: "Re-triage failed; task has been restored" });
+          return;
+        }
 
         callback?.({ ok: true });
         console.log(`[Retriage] Re-triaged issue #${issueNumber} for project ${data.projectId}`);
