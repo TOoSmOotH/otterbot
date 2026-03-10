@@ -1,5 +1,8 @@
 import { useState, type KeyboardEvent } from "react";
 import { useAuthStore } from "../../stores/auth-store";
+import { PasswordInput } from "../ui/PasswordInput";
+import { StrengthMeter } from "../ui/StrengthMeter";
+import { scorePassword } from "../../utils/password-strength";
 
 export function ChangeTemporaryPassphraseScreen() {
   const { changeTemporaryPassphrase, error } = useAuthStore();
@@ -7,14 +10,21 @@ export function ChangeTemporaryPassphraseScreen() {
   const [confirmPassphrase, setConfirmPassphrase] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
+  const strength = scorePassword(newPassphrase);
+  const matches = newPassphrase && newPassphrase === confirmPassphrase;
+  const canSubmit =
+    newPassphrase.length >= 8 &&
+    matches &&
+    !submitting;
+
   const handleSubmit = async () => {
-    if (!newPassphrase || !confirmPassphrase || submitting) return;
-    
+    if (!canSubmit) return;
+
     if (newPassphrase.length < 8) {
       useAuthStore.getState().setError("Passphrase must be at least 8 characters");
       return;
     }
-    
+
     if (newPassphrase !== confirmPassphrase) {
       useAuthStore.getState().setError("Passphrases do not match");
       return;
@@ -40,49 +50,82 @@ export function ChangeTemporaryPassphraseScreen() {
             <h1 className="text-lg font-semibold tracking-tight">Otterbot</h1>
           </div>
 
+          {/* Hidden username anchor for password managers */}
+          <input
+            type="text"
+            autoComplete="username"
+            value="otterbot"
+            readOnly
+            hidden
+            tabIndex={-1}
+          />
+
           <div className="space-y-4">
             <div className="text-center">
               <h2 className="text-sm font-medium mb-1">Change Your Passphrase</h2>
               <p className="text-xs text-muted-foreground">
-                You logged in with a temporary passphrase. Set your own passphrase to continue.
+                You logged in with a temporary passphrase. Set your own
+                passphrase to continue. This passphrase protects access to
+                the Otterbot UI.
               </p>
             </div>
 
             <div>
               <label
-                htmlFor="newPassphrase"
-                className="block text-sm text-muted-foreground mb-1.5"
+                htmlFor="change-new-passphrase"
+                className="block text-sm font-medium text-muted-foreground mb-1.5"
               >
                 New Passphrase
               </label>
-              <input
-                id="newPassphrase"
-                type="password"
+              <PasswordInput
+                id="change-new-passphrase"
+                name="newPassphrase"
+                autoComplete="new-password"
                 value={newPassphrase}
-                onChange={(e) => setNewPassphrase(e.target.value)}
-                placeholder="Enter a new passphrase"
+                onChange={(e) => setNewPassphrase(e.currentTarget.value)}
+                placeholder="Enter a new passphrase (min. 8 characters)"
                 autoFocus
-                className="w-full px-3 py-2 bg-background border border-input rounded-md text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                minLength={8}
+                required
               />
+              {newPassphrase && (
+                <div className="mt-2">
+                  <StrengthMeter strength={strength} />
+                </div>
+              )}
             </div>
 
             <div>
               <label
-                htmlFor="confirmPassphrase"
-                className="block text-sm text-muted-foreground mb-1.5"
+                htmlFor="change-confirm-passphrase"
+                className="block text-sm font-medium text-muted-foreground mb-1.5"
               >
                 Confirm Passphrase
               </label>
-              <input
-                id="confirmPassphrase"
-                type="password"
+              <PasswordInput
+                id="change-confirm-passphrase"
+                name="confirmPassphrase"
+                autoComplete="new-password"
                 value={confirmPassphrase}
-                onChange={(e) => setConfirmPassphrase(e.target.value)}
+                onChange={(e) => setConfirmPassphrase(e.currentTarget.value)}
                 onKeyDown={handleKeyDown}
                 placeholder="Confirm your passphrase"
-                className="w-full px-3 py-2 bg-background border border-input rounded-md text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                minLength={8}
+                required
               />
+              {confirmPassphrase && (
+                <p className={`mt-1.5 text-xs ${matches ? "text-green-500" : "text-destructive"}`}>
+                  {matches
+                    ? "Passphrases match"
+                    : "Passphrases do not match"}
+                </p>
+              )}
             </div>
+
+            <p className="text-xs text-muted-foreground">
+              There is no recovery mechanism — if you forget this passphrase
+              you will need to reset it.
+            </p>
 
             {error && (
               <p className="text-sm text-destructive">{error}</p>
@@ -90,10 +133,10 @@ export function ChangeTemporaryPassphraseScreen() {
 
             <button
               onClick={handleSubmit}
-              disabled={!newPassphrase || !confirmPassphrase || submitting}
+              disabled={!canSubmit}
               className="w-full px-4 py-2 bg-primary text-primary-foreground text-sm font-medium rounded-md hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
-              {submitting ? "Saving..." : "Continue"}
+              {submitting ? "Saving..." : "Set Passphrase"}
             </button>
           </div>
         </div>

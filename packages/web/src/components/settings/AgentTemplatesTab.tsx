@@ -7,12 +7,22 @@ import type { RegistryEntry, GearConfig } from "@otterbot/shared";
 import { CharacterSelect } from "../character-select/CharacterSelect";
 import { ModelCombobox } from "./ModelCombobox";
 
-interface AgentTemplatesTabProps {
-  onNavigateToSkill?: (skillId: string) => void;
+interface SpecialistSummary {
+  id: string;
+  name: string;
+  hasAgent: boolean;
+  enabled: boolean;
+  documents: number;
 }
 
-export function AgentTemplatesTab({ onNavigateToSkill }: AgentTemplatesTabProps) {
+interface AgentTemplatesTabProps {
+  onNavigateToSkill?: (skillId: string) => void;
+  onNavigateToSpecialist?: (specialistId: string) => void;
+}
+
+export function AgentTemplatesTab({ onNavigateToSkill, onNavigateToSpecialist }: AgentTemplatesTabProps) {
   const [entries, setEntries] = useState<RegistryEntry[]>([]);
+  const [specialists, setSpecialists] = useState<SpecialistSummary[]>([]);
   const [selected, setSelected] = useState<RegistryEntry | null>(null);
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState({
@@ -40,7 +50,27 @@ export function AgentTemplatesTab({ onNavigateToSkill }: AgentTemplatesTabProps)
     loadEntries();
     loadPacks();
     loadSkills();
+    loadSpecialists();
   }, []);
+
+  const loadSpecialists = async () => {
+    try {
+      const res = await fetch("/api/modules");
+      if (!res.ok) return;
+      const data = await res.json();
+      setSpecialists(
+        (data.modules ?? []).map((m: { id: string; name: string; enabled: boolean; agent?: { enabled: boolean }; stats?: { documents: number } }) => ({
+          id: m.id,
+          name: m.name,
+          hasAgent: !!m.agent?.enabled,
+          enabled: m.enabled,
+          documents: m.stats?.documents ?? 0,
+        })),
+      );
+    } catch {
+      // modules endpoint may not exist yet
+    }
+  };
 
   // Fetch models when the selected provider changes
   useEffect(() => {
@@ -241,6 +271,41 @@ export function AgentTemplatesTab({ onNavigateToSkill }: AgentTemplatesTabProps)
                 selected={selected?.id === entry.id}
                 onClick={() => selectEntry(entry)}
               />
+            ))}
+          </SidebarGroup>
+        )}
+
+        {specialists.length > 0 && (
+          <SidebarGroup label="Specialists">
+            {specialists.map((sp) => (
+              <button
+                key={sp.id}
+                onClick={() => onNavigateToSpecialist?.(sp.id)}
+                className="w-full text-left px-3 py-2 text-sm transition-colors hover:bg-secondary/50 text-muted-foreground"
+              >
+                <div className="flex items-center gap-1.5">
+                  <svg
+                    className="w-3 h-3 text-muted-foreground/50 shrink-0"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <ellipse cx="12" cy="5" rx="9" ry="3" />
+                    <path d="M3 5V19A9 3 0 0 0 21 19V5" />
+                    <path d="M3 12A9 3 0 0 0 21 12" />
+                  </svg>
+                  <span className="font-medium text-xs truncate">{sp.name}</span>
+                  {!sp.enabled && (
+                    <span className="text-[8px] uppercase text-muted-foreground/60">off</span>
+                  )}
+                </div>
+                <div className="text-[10px] text-muted-foreground truncate">
+                  {sp.documents} documents{sp.hasAgent ? " · agent" : ""}
+                </div>
+              </button>
             ))}
           </SidebarGroup>
         )}

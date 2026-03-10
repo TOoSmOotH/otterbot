@@ -11,6 +11,7 @@ import type {
 import { MessageType, PIPELINE_STAGES } from "@otterbot/shared";
 import { getDb, schema } from "../db/index.js";
 import { getConfig, setConfig } from "../auth/auth.js";
+import { resolveGitHubToken, resolveGitHubUsername } from "../github/account-resolver.js";
 import { getAgentModelOverride } from "../settings/settings.js";
 import { resolveModel } from "../llm/adapter.js";
 import { Registry } from "../registry/registry.js";
@@ -19,11 +20,18 @@ import {
   addLabelsToIssue,
   fetchCompareCommitsDiff,
   fetchPullRequests,
+  fetchIssueComments,
+  fetchRepoTree,
+  checkHasPushAccess,
+  createFork,
+  waitForFork,
+  syncFork,
+  cloneForForkContribution,
 } from "../github/github-service.js";
 import type { COO } from "../agents/coo.js";
 import { resolveProjectBranch, type GitHubIssue } from "../github/github-service.js";
 import { SECURITY_PREAMBLE } from "../agents/prompts/security-preamble.js";
-import { cleanTerminalOutput } from "../utils/terminal.js";
+import { cleanTerminalOutput, summarizeForGitHub } from "../utils/terminal.js";
 import { formatBotComment, formatBotCommentWithDetails } from "../utils/github-comments.js";
 import { sanitizeForPrompt, extractForkOwner } from "../utils/sanitize.js";
 
@@ -364,7 +372,7 @@ export class PipelineManager {
     repo: string,
     issue: GitHubIssue,
   ): Promise<void> {
-    const token = getConfig("github:token");
+    const token = resolveGitHubToken(projectId);
     if (!token) return;
 
     const config = this.getConfig(projectId);
@@ -377,14 +385,17 @@ export class PipelineManager {
     const entry = registry.get(agentId) ?? registry.get("builtin-triage");
     if (!entry) return;
 
-    // Post start comment
+    // Fetch the repository file tree to give the triage agent source code context
+    let fileTreeSection = "";
     try {
-      await createIssueComment(
-        repo, token, issue.number,
-        formatBotComment("Analyzing Issue"),
-      );
+      const files = await fetchRepoTree(repo, token);
+      fileTreeSection =
+        `\n<repository-file-tree>\n` +
+        files.join("\n") +
+        `\n</repository-file-tree>`;
     } catch (err) {
-      console.error(`[PipelineManager] Failed to post triage start comment on #${issue.number}:`, err);
+      console.warn(`[PipelineManager] Failed to fetch repo tree for triage of #${issue.number}:`, err);
+      fileTreeSection = "\n<repository-file-tree>\n(unavailable)\n</repository-file-tree>";
     }
 
     // Build prompt — wrap in XML delimiters to isolate untrusted content
@@ -394,7 +405,8 @@ export class PipelineManager {
       `${issue.body ?? "(no description)"}\n\n` +
       `Labels: ${issue.labels.map((l) => l.name).join(", ") || "none"}\n` +
       `Assignees: ${issue.assignees.map((a) => a.login).join(", ") || "none"}\n` +
-      `</github-issue>`;
+      `</github-issue>` +
+      fileTreeSection;
 
     try {
       const model = resolveModel({
@@ -459,6 +471,21 @@ export class PipelineManager {
         }
       }
 
+      // Post the triage analysis as a comment on the issue for review
+      try {
+        const heading = parsed.shouldProceed
+          ? `Triage: ${parsed.classification}`
+          : `Triage: ${parsed.classification}`;
+        await createIssueComment(
+          repo,
+          token,
+          issue.number,
+          formatBotComment(heading, parsed.comment),
+        );
+      } catch (err) {
+        console.error(`[PipelineManager] Failed to post triage comment on #${issue.number}:`, err);
+      }
+
       // Apply "triaged" label so we don't re-process
       try {
         await addLabelsToIssue(repo, token, issue.number, ["triaged"]);
@@ -466,21 +493,10 @@ export class PipelineManager {
         console.error(`[PipelineManager] Failed to apply triaged label to #${issue.number}:`, err);
       }
 
-      // Post classification comment — no truncation; use the full markdown comment
-      const triageTitle = `Triage: ${parsed.classification}`;
-      const comment = typeof parsed.comment === "string" ? parsed.comment : "";
-      const commentBody = formatBotComment(triageTitle, comment);
-
-      try {
-        await createIssueComment(repo, token, issue.number, commentBody);
-      } catch (err) {
-        console.error(`[PipelineManager] Failed to post triage comment on #${issue.number}:`, err);
-      }
-
       console.log(`[PipelineManager] Triaged issue #${issue.number} as "${parsed.classification}" (proceed=${parsed.shouldProceed})`);
 
       // Create a kanban task in the Triage column (read-only view of all open issues)
-      this.createTriageTask(projectId, issue.number, issue.title, parsed.classification, issue.body ?? "");
+      this.createTriageTask(projectId, issue.number, issue.title, parsed.classification, issue.body ?? "", parsed.comment);
     } catch (err) {
       console.error(`[PipelineManager] Triage LLM call failed for #${issue.number}:`, err);
     }
@@ -497,12 +513,15 @@ export class PipelineManager {
     projectId: string,
     issueNumber: number | null,
     repo: string | null,
-  ): Promise<void> {
+    options?: { skipFallback?: boolean },
+  ): Promise<boolean> {
     const config = this.getConfig(projectId);
     if (!config?.enabled) {
       // Fallback: send existing direct directive to TeamLead
-      this.sendFallbackDirective(taskId, projectId);
-      return;
+      if (!options?.skipFallback) {
+        this.sendFallbackDirective(taskId, projectId);
+      }
+      return false;
     }
 
     // Build ordered list of enabled implementation stages
@@ -517,8 +536,10 @@ export class PipelineManager {
 
     if (enabledStages.length === 0) {
       // No stages enabled — fall back
-      this.sendFallbackDirective(taskId, projectId);
-      return;
+      if (!options?.skipFallback) {
+        this.sendFallbackDirective(taskId, projectId);
+      }
+      return false;
     }
 
     // Initialize pipeline state
@@ -529,9 +550,44 @@ export class PipelineManager {
       .where(eq(schema.projects.id, projectId))
       .get();
 
-    // Detect fork mode from project config
-    const forkMode = getConfig(`project:${projectId}:github:fork_mode`) === "true";
-    const forkRepo = getConfig(`project:${projectId}:github:fork_repo`) ?? null;
+    // Detect fork mode from project config, re-checking push access
+    let forkMode = getConfig(`project:${projectId}:github:fork_mode`) === "true";
+    let forkRepo = getConfig(`project:${projectId}:github:fork_repo`) ?? null;
+    const token = resolveGitHubToken(projectId);
+
+    if (repo && token) {
+      const hasPush = await checkHasPushAccess(repo, token);
+      if (hasPush && forkMode) {
+        // Gained push access since setup — disable fork mode
+        forkMode = false;
+        forkRepo = null;
+      } else if (!hasPush && !forkMode) {
+        // Lost push access (or never had it) — set up fork mode now
+        try {
+          const fork = await createFork(repo, token);
+          await waitForFork(fork.full_name, token);
+          forkMode = true;
+          forkRepo = fork.full_name;
+          setConfig(`project:${projectId}:github:fork_mode`, "true");
+          setConfig(`project:${projectId}:github:fork_repo`, fork.full_name);
+          console.log(`[PipelineManager] Set up fork mode for ${repo}: ${fork.full_name}`);
+        } catch (err) {
+          console.error(`[PipelineManager] Failed to set up fork for ${repo}:`, err);
+          // Continue without fork mode — push will fail later but at least
+          // the pipeline can attempt the work
+        }
+      }
+
+      // Sync fork before starting implementation
+      if (forkMode && forkRepo) {
+        try {
+          const targetBranch = resolveProjectBranch(projectId);
+          await syncFork(forkRepo, token, targetBranch);
+        } catch (err) {
+          console.warn(`[PipelineManager] Failed to sync fork ${forkRepo}:`, err);
+        }
+      }
+    }
 
     const state: PipelineState = {
       taskId,
@@ -562,23 +618,9 @@ export class PipelineManager {
       this.io.emit("kanban:task-updated", updated as unknown as KanbanTask);
     }
 
-    // Post start comment on GitHub issue
-    if (issueNumber && repo) {
-      const token = getConfig("github:token");
-      if (token) {
-        try {
-          await createIssueComment(
-            repo, token, issueNumber,
-            formatBotComment("Pipeline Started", `Stages: ${enabledStages.map(s => `\`${s}\``).join(" → ")}`),
-          );
-        } catch (err) {
-          console.error(`[PipelineManager] Failed to post pipeline start comment:`, err);
-        }
-      }
-    }
-
     // Send directive for the first stage
     await this.sendStageDirective(state);
+    return true;
   }
 
   /**
@@ -633,7 +675,20 @@ export class PipelineManager {
 
       // Fallback: look for an open PR referencing this issue
       if (!state.prBranch && state.issueNumber && state.repo) {
-        state.prBranch = await this.resolveIssueBranch(state.repo, state.issueNumber);
+        state.prBranch = await this.resolveIssueBranch(state.repo, state.issueNumber, state.projectId);
+      }
+
+      // Check for branch collision with other active pipelines
+      if (state.prBranch) {
+        for (const [otherId, otherState] of this.pipelines) {
+          if (otherId !== taskId && otherState.prBranch === state.prBranch) {
+            console.warn(
+              `[PipelineManager] Branch collision: "${state.prBranch}" already used by task ${otherId} — clearing for task ${taskId}`,
+            );
+            state.prBranch = null;
+            break;
+          }
+        }
       }
 
       // Persist to DB so it survives server restarts and is available to later stages
@@ -661,9 +716,6 @@ export class PipelineManager {
       }
     }
 
-    // Post completion comment on GitHub issue
-    await this.postStageComment(state, currentStage, workerReport, "complete");
-
     // Parse structured verdict from report
     const verdict = this.parseVerdict(workerReport);
     const coderIndex = state.stages.indexOf("coder");
@@ -679,7 +731,7 @@ export class PipelineManager {
           // Coder failed — move to backlog
           console.warn(`[PipelineManager] Coder FAIL for task ${taskId} — moving to backlog`);
           if (state.issueNumber && state.repo) {
-            const token = getConfig("github:token");
+            const token = resolveGitHubToken(state.projectId);
             if (token) {
               try {
                 await createIssueComment(
@@ -715,7 +767,7 @@ export class PipelineManager {
             this.persistPipelineState(state);
             this.updateTaskPipelineStage(taskId, "coder");
             if (state.issueNumber && state.repo) {
-              const token = getConfig("github:token");
+              const token = resolveGitHubToken(state.projectId);
               if (token) {
                 try {
                   await createIssueComment(
@@ -748,7 +800,7 @@ export class PipelineManager {
             this.persistPipelineState(state);
             this.updateTaskPipelineStage(taskId, "coder");
             if (state.issueNumber && state.repo) {
-              const token = getConfig("github:token");
+              const token = resolveGitHubToken(state.projectId);
               if (token) {
                 try {
                   await createIssueComment(
@@ -781,7 +833,7 @@ export class PipelineManager {
             this.persistPipelineState(state);
             this.updateTaskPipelineStage(taskId, "coder");
             if (state.issueNumber && state.repo) {
-              const token = getConfig("github:token");
+              const token = resolveGitHubToken(state.projectId);
               if (token) {
                 try {
                   await createIssueComment(
@@ -821,12 +873,15 @@ export class PipelineManager {
 
       // Post completion comment
       if (state.issueNumber && state.repo) {
-        const token = getConfig("github:token");
+        const token = resolveGitHubToken(state.projectId);
         if (token) {
           try {
+            const prRef = state.prNumber
+              ? ` — see PR [#${state.prNumber}](https://github.com/${state.repo}/pull/${state.prNumber}) for details.`
+              : "";
             await createIssueComment(
               state.repo, token, state.issueNumber,
-              formatBotComment("Pipeline Complete"),
+              formatBotComment("Done", `Implementation complete${prRef}`),
             );
           } catch { /* best effort */ }
         }
@@ -908,7 +963,7 @@ export class PipelineManager {
 
     // Post GitHub comment
     if (state.issueNumber && state.repo) {
-      const token = getConfig("github:token");
+      const token = resolveGitHubToken(state.projectId);
       if (token) {
         try {
           await createIssueComment(
@@ -999,7 +1054,7 @@ export class PipelineManager {
 
     // Post comment on issue
     if (issueNumber && state.repo) {
-      const token = getConfig("github:token");
+      const token = resolveGitHubToken(state.projectId);
       if (token) {
         try {
           await createIssueComment(
@@ -1043,23 +1098,15 @@ export class PipelineManager {
     const issueLabel = (task.labels as string[]).find((l) => l.startsWith("github-issue-"));
     const issueNumber = issueLabel ? parseInt(issueLabel.replace("github-issue-", ""), 10) : null;
 
-    // Build enabled stages
-    const enabledStages: string[] = [];
-    for (const stageKey of IMPLEMENTATION_STAGE_KEYS) {
-      const stageConfig = config.stages[stageKey];
-      if (stageConfig?.enabled !== false) {
-        enabledStages.push(stageKey);
-      }
-    }
-
-    // Create a new pipeline state starting at coder
+    // CI failure fix only needs the coder stage — once the fix is pushed,
+    // CI will re-run automatically and the pipeline completes.
     const state: PipelineState = {
       taskId,
       projectId: task.projectId,
       issueNumber,
       repo: project?.githubRepo ?? null,
-      stages: enabledStages,
-      currentStageIndex: enabledStages.indexOf("coder"),
+      stages: ["coder"],
+      currentStageIndex: 0,
       spawnRetryCount: 0,
       lastKickbackSource: null,
       stageReports: new Map(),
@@ -1085,7 +1132,7 @@ export class PipelineManager {
 
     // Post comment on issue
     if (issueNumber && state.repo) {
-      const token = getConfig("github:token");
+      const token = resolveGitHubToken(state.projectId);
       if (token) {
         try {
           await createIssueComment(
@@ -1276,10 +1323,22 @@ export class PipelineManager {
           if (extraContext) {
             parts.push(`\n--- REVIEW FINDINGS ---\n${extraContext}\n--- END REVIEW FINDINGS ---`);
           }
+        } else if (state.prBranch && state.stageReports.has("ci_failure")) {
+          // CI failure — fix on existing branch
+          parts.push(
+            `\n[CI FAILURE — Fix Required]`,
+            `CI checks failed on the PR. Investigate and fix the failures on branch \`${state.prBranch}\`.`,
+            `Do NOT create a new branch or PR — just fix the issues, commit, and push to the existing branch.`,
+          );
+          const ciReport = state.stageReports.get("ci_failure");
+          if (ciReport) {
+            parts.push(`\n--- CI FAILURE DETAILS ---\n${ciReport}\n--- END CI FAILURE DETAILS ---`);
+          }
         } else {
           // Initial implementation
           parts.push(
-            `\nCreate a feature branch, implement the solution, commit, and push.`,
+            `\nCreate a feature branch named \`feat/issue-${state.issueNumber}-<short-description>\` (e.g. \`feat/issue-${state.issueNumber ?? "42"}-add-login-button\`), implement the solution, commit, and push.`,
+            `Do NOT reuse an existing branch. Always create a fresh branch from \`${state.targetBranch}\`.`,
             `Do NOT create a pull request — a later stage will handle that.`,
             `\nFocus ONLY on the implementation code. Do NOT:`,
             `- Write or update tests (a dedicated Tester stage handles testing)`,
@@ -1294,6 +1353,39 @@ export class PipelineManager {
               `The upstream repo is available as the \`upstream\` remote.`,
               `Create your feature branch from \`upstream/${safeBranch}\`.`,
             );
+          }
+
+          // Fetch and include issue comments for additional context
+          if (state.issueNumber && state.repo) {
+            const token = resolveGitHubToken(state.projectId);
+            const botUsername = resolveGitHubUsername(state.projectId);
+            if (token) {
+              try {
+                const allComments = await fetchIssueComments(state.repo, token, state.issueNumber);
+                // Filter out bot comments (matching bot username or ### prefix from formatBotComment)
+                const userComments = allComments.filter((c) => {
+                  if (botUsername && c.user.login === botUsername) return false;
+                  if (c.body.startsWith("### ")) return false;
+                  return true;
+                });
+                if (userComments.length > 0) {
+                  const last5 = userComments.slice(-5);
+                  const formatted = last5
+                    .map((c) => {
+                      const body = c.body.length > 3000 ? c.body.slice(0, 3000) + "..." : c.body;
+                      return `@${c.user.login} (${c.created_at}):\n${body}`;
+                    })
+                    .join("\n\n");
+                  parts.push(
+                    `\nThe following comments are from the GitHub issue discussion. User comments contain`,
+                    `clarifications and additional requirements — incorporate them into your implementation.`,
+                    `\n<issue-comments>\n${formatted}\n</issue-comments>`,
+                  );
+                }
+              } catch (err) {
+                console.error(`[PipelineManager] Failed to fetch issue comments for #${state.issueNumber}:`, err);
+              }
+            }
           }
         }
         parts.push(
@@ -1388,8 +1480,8 @@ export class PipelineManager {
           if (state.forkMode && forkOwner) {
             if (forkUpstreamPr) {
               parts.push(
-                `After review, create a pull request for this branch.`,
-                `[FORK MODE] This is a cross-fork PR. Use \`${forkOwner}:<branch>\` as the head ref when creating the PR against the upstream repo.`,
+                `After review, create a pull request for this branch targeting \`${state.targetBranch}\`.`,
+                `[FORK MODE] This is a cross-fork PR. Use \`${forkOwner}:<branch>\` as the head ref when creating the PR against the upstream repo \`${state.targetBranch}\` branch.`,
               );
             } else {
               parts.push(
@@ -1398,7 +1490,7 @@ export class PipelineManager {
               );
             }
           } else {
-            parts.push(`After review, create a pull request for this branch.`);
+            parts.push(`After review, create a pull request for this branch targeting \`${state.targetBranch}\`.`);
           }
         }
         parts.push(
@@ -1414,9 +1506,6 @@ export class PipelineManager {
         break;
       }
     }
-
-    // Post start comment on GitHub issue
-    await this.postStageComment(state, currentStage, "", "start");
 
     // Determine which agent to use for this stage
     let registryEntryId: string = stageInfo?.defaultAgentId ?? "builtin-coder";
@@ -1445,6 +1534,8 @@ export class PipelineManager {
             pipelineTaskId: state.taskId,
             pipelineBranch: state.prBranch ?? state.targetBranch,
             pipelineIsReReview: !!state.isReReview,
+            pipelineForkMode: !!state.forkMode,
+            pipelineForkRepo: state.forkRepo ?? undefined,
           },
         });
         console.log(`[PipelineManager] Sent ${currentStage} directive for task ${state.taskId}`);
@@ -1468,7 +1559,7 @@ export class PipelineManager {
     phase: "start" | "complete",
   ): Promise<void> {
     if (!state.issueNumber || !state.repo) return;
-    const token = getConfig("github:token");
+    const token = resolveGitHubToken(state.projectId);
     if (!token) return;
 
     let body: string;
@@ -1482,17 +1573,9 @@ export class PipelineManager {
       };
       body = formatBotComment(startTitles[stage] ?? `Starting ${stage}`);
     } else {
-      // Completion — clean the report and put it in a collapsible section
+      // Completion — clean the report and summarize via LLM
       const cleaned = cleanTerminalOutput(report);
-      let preview: string;
-      if (cleaned.length > 500) {
-        // Try to break at a paragraph boundary (double newline) within 500 chars
-        const slice = cleaned.slice(0, 500);
-        const paraBreak = slice.lastIndexOf("\n\n");
-        preview = (paraBreak > 100 ? slice.slice(0, paraBreak) : slice) + "\n\n_(see details for full output)_";
-      } else {
-        preview = cleaned;
-      }
+      const summary = await summarizeForGitHub(cleaned, stage);
 
       const completeTitles: Record<string, string> = {
         coder: "Implementation Complete",
@@ -1504,9 +1587,23 @@ export class PipelineManager {
       };
       const title = completeTitles[stage] ?? `${stage} Complete`;
 
-      body = cleaned.length > 500
-        ? formatBotCommentWithDetails(title, preview, cleaned)
-        : formatBotComment(title, preview);
+      if (summary) {
+        // LLM summary as preview, raw output in collapsible details
+        body = formatBotCommentWithDetails(title, summary, cleaned);
+      } else {
+        // Fallback: truncated preview (same as before)
+        let preview: string;
+        if (cleaned.length > 500) {
+          const slice = cleaned.slice(0, 500);
+          const paraBreak = slice.lastIndexOf("\n\n");
+          preview = (paraBreak > 100 ? slice.slice(0, paraBreak) : slice) + "\n\n_(see details for full output)_";
+        } else {
+          preview = cleaned;
+        }
+        body = cleaned.length > 500
+          ? formatBotCommentWithDetails(title, preview, cleaned)
+          : formatBotComment(title, preview);
+      }
     }
 
     try {
@@ -1528,6 +1625,7 @@ export class PipelineManager {
     issueTitle: string,
     classification: string,
     body: string,
+    triageComment?: string,
   ): void {
     const db = getDb();
     const label = `github-issue-${issueNumber}`;
@@ -1556,7 +1654,9 @@ export class PipelineManager {
       id: nanoid(),
       projectId,
       title: `#${issueNumber}: ${issueTitle}`,
-      description: classification ? `Triage: ${classification}\n\n${body}` : body,
+      description: classification
+        ? `Triage: ${classification}\n\n${body}${triageComment ? `\n\n--- TRIAGE ANALYSIS ---\nThe following is a prior triage agent's analysis. Review it for context but form your own implementation approach.\n\n${triageComment}\n--- END TRIAGE ANALYSIS ---` : ""}`
+        : body,
       column: "triage" as const,
       position: maxPos + 1,
       assigneeAgentId: null,
@@ -1582,7 +1682,7 @@ export class PipelineManager {
 
   private async fetchDiffSection(state: PipelineState): Promise<string | null> {
     if (!state.prBranch || !state.repo) return null;
-    const token = getConfig("github:token");
+    const token = resolveGitHubToken(state.projectId);
     if (!token) return null;
 
     try {
@@ -1772,8 +1872,8 @@ export class PipelineManager {
    * Find the feature branch for an issue by looking for open PRs that reference it.
    * Falls back to the conventional feat/<issueNumber>-* branch naming pattern.
    */
-  private async resolveIssueBranch(repo: string, issueNumber: number): Promise<string | null> {
-    const token = getConfig("github:token");
+  private async resolveIssueBranch(repo: string, issueNumber: number, projectId: string): Promise<string | null> {
+    const token = resolveGitHubToken(projectId);
     if (!token) return null;
 
     try {
@@ -1842,7 +1942,7 @@ export class PipelineManager {
 
     // If we have a branch but no PR number, try to resolve it via GitHub API
     if (task.prBranch && !task.prNumber) {
-      const token = getConfig("github:token");
+      const token = resolveGitHubToken(state.projectId);
       const project = db
         .select()
         .from(schema.projects)
@@ -1868,6 +1968,34 @@ export class PipelineManager {
     }
 
     const now = new Date().toISOString();
+
+    // Guard: if we have a branch but still no PR number after resolution,
+    // send the task back to backlog for retry rather than leaving it stuck in in_review
+    if (task.prBranch && !(task as any).prNumber) {
+      console.warn(
+        `[PipelineManager] Task ${taskId} has branch "${task.prBranch}" but no PR number — sending back to backlog for retry`,
+      );
+      db.update(schema.kanbanTasks)
+        .set({
+          column: "backlog",
+          pipelineStage: null,
+          updatedAt: now,
+        })
+        .where(eq(schema.kanbanTasks.id, taskId))
+        .run();
+
+      const rolledBack = db
+        .select()
+        .from(schema.kanbanTasks)
+        .where(eq(schema.kanbanTasks.id, taskId))
+        .get();
+      if (rolledBack) {
+        this.io.emit("kanban:task-updated", rolledBack as unknown as KanbanTask);
+      }
+      this.pipelines.delete(taskId);
+      return;
+    }
+
     const hasPR = !!task.prNumber || !!task.prBranch;
     const targetColumn = hasPR ? "in_review" : "done";
 

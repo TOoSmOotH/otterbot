@@ -5,12 +5,16 @@ import { join } from "node:path";
 import { eq } from "drizzle-orm";
 import { getConfig } from "../auth/auth.js";
 import { getDb, schema } from "../db/index.js";
+import { resolveGitHubAccount, resolveGitHubToken, resolveGitHubUsername } from "./account-resolver.js";
+import { configureCommitSigning } from "../utils/git.js";
 
 // Input validation patterns
 const REPO_NAME_RE = /^[a-zA-Z0-9._-]+\/[a-zA-Z0-9._-]+$/;
 const BRANCH_NAME_RE = /^[a-zA-Z0-9._\/-]+$/;
 // Cross-fork ref format: "owner:branch" used by GitHub's compare/PR APIs
 const CROSS_FORK_REF_RE = /^[a-zA-Z0-9._-]+:[a-zA-Z0-9._\/-]+$/;
+// Cross-fork compare ref: "owner:branch" or plain branch name
+const COMPARE_REF_RE = /^[a-zA-Z0-9._\/-]+(:[a-zA-Z0-9._\/-]+)?$/;
 
 export interface GitHubIssue {
   number: number;
@@ -85,12 +89,31 @@ function validateBranchName(name: string): void {
 }
 
 /**
+ * If the project has signCommits enabled, re-apply local signing config.
+ * Called after clone/re-clone so signing survives fresh .git/config.
+ */
+function applySigningIfEnabled(targetDir: string, projectId?: string): void {
+  if (!projectId) return;
+  try {
+    const db = getDb();
+    const project = db.select().from(schema.projects).where(eq(schema.projects.id, projectId)).get();
+    if (project?.signCommits) {
+      const account = resolveGitHubAccount(projectId);
+      configureCommitSigning(targetDir, true, account?.sshKeyPath ?? undefined);
+    }
+  } catch {
+    // Non-fatal — signing is optional
+  }
+}
+
+/**
  * Configure git user identity in a cloned repo.
  */
-function configureGitUser(targetDir: string): void {
-  const userName = getConfig("github:username") ?? "otterbot";
+export function configureGitUser(targetDir: string, projectId?: string): void {
+  const account = resolveGitHubAccount(projectId);
+  const userName = account?.username ?? getConfig("github:username") ?? "otterbot";
   const userEmail =
-    getConfig("github:email") ?? `${userName}@users.noreply.github.com`;
+    account?.email ?? getConfig("github:email") ?? `${userName}@users.noreply.github.com`;
   execFileSync("git", ["-C", targetDir, "config", "user.name", userName], {
     stdio: "pipe",
   });
@@ -108,13 +131,17 @@ export function cloneRepo(
   repoFullName: string,
   targetDir: string,
   branch?: string,
+  projectId?: string,
 ): void {
   validateRepoName(repoFullName);
   if (branch) validateBranchName(branch);
 
-  const token = getConfig("github:token") as string | undefined;
+  const token = resolveGitHubToken(projectId) ?? (getConfig("github:token") as string | undefined);
+  // Only use SSH key for cloning if it's configured for auth (not signing-only)
+  const account = resolveGitHubAccount(projectId);
+  const accountUsage = account?.sshKeyUsage ?? "both";
   const sshKeyPath = join(homedir(), ".ssh", "otterbot_github");
-  const sshKeyExists = existsSync(sshKeyPath);
+  const sshKeyExists = existsSync(sshKeyPath) && accountUsage !== "signing";
 
   if (existsSync(targetDir + "/.git")) {
     // Already cloned — fetch and checkout using whatever remote is configured
@@ -167,7 +194,8 @@ export function cloneRepo(
           env: gitEnvWithPAT(token),
         },
       );
-      configureGitUser(targetDir);
+      configureGitUser(targetDir, projectId);
+      applySigningIfEnabled(targetDir, projectId);
       return;
     } catch (err) {
       httpsErr = err;
@@ -183,7 +211,8 @@ export function cloneRepo(
       timeout: 300_000,
       env: { ...process.env },
     });
-    configureGitUser(targetDir);
+    configureGitUser(targetDir, projectId);
+    applySigningIfEnabled(targetDir, projectId);
     return;
   }
 
@@ -218,6 +247,41 @@ export async function getRepoDefaultBranch(
   }
   const data = (await res.json()) as { default_branch: string };
   return data.default_branch;
+}
+
+/**
+ * Fetch the repository file tree (recursive) from the GitHub API.
+ * Returns a flat list of file paths, truncated to `maxEntries` to keep prompt size manageable.
+ */
+export async function fetchRepoTree(
+  repoFullName: string,
+  token: string,
+  branch?: string,
+  maxEntries = 500,
+): Promise<string[]> {
+  const ref = branch ?? await getRepoDefaultBranch(repoFullName, token);
+  const res = await fetch(
+    `https://api.github.com/repos/${repoFullName}/git/trees/${ref}?recursive=1`,
+    {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+      },
+    },
+  );
+  if (!res.ok) {
+    throw new Error(`GitHub API error ${res.status}: ${await res.text()}`);
+  }
+  const data = (await res.json()) as {
+    tree: Array<{ path: string; type: string }>;
+    truncated: boolean;
+  };
+  // Only return blobs (files), not trees (directories)
+  const files = data.tree
+    .filter((entry) => entry.type === "blob")
+    .map((entry) => entry.path);
+  return files.slice(0, maxEntries);
 }
 
 /**
@@ -333,6 +397,19 @@ export async function getRepoPermissions(
   if (!res.ok) return null;
   const data = await res.json();
   return (data as any).permissions ?? null;
+}
+
+/**
+ * Check if the authenticated user has push (write) access on a repo.
+ * Returns true if the user has push, maintain, or admin permissions.
+ */
+export async function checkHasPushAccess(
+  repoFullName: string,
+  token: string,
+): Promise<boolean> {
+  const perms = await getRepoPermissions(repoFullName, token);
+  if (!perms) return false;
+  return perms.push || perms.maintain || perms.admin;
 }
 
 /**
@@ -650,8 +727,8 @@ export async function fetchCompareCommitsDiff(
   validateRepoName(repoFullName);
   validateBranchName(base);
   // head may be a cross-fork ref ("owner:branch") or a plain branch name
-  if (!BRANCH_NAME_RE.test(head) && !CROSS_FORK_REF_RE.test(head)) {
-    throw new Error(`Invalid branch name: ${head}`);
+  if (!COMPARE_REF_RE.test(head)) {
+    throw new Error(`Invalid compare ref: ${head}`);
   }
 
   const data = await ghFetch<{
@@ -799,5 +876,196 @@ export function resolveProjectBranch(projectId: string): string {
     ?? getDb().select().from(schema.projects)
         .where(eq(schema.projects.id, projectId)).get()?.githubBranch
     ?? "main";
+}
+
+// ---------------------------------------------------------------------------
+// Fork-based contribution workflow
+// ---------------------------------------------------------------------------
+
+export interface ForkInfo {
+  full_name: string;
+  clone_url: string;
+  ssh_url: string;
+  owner: string;
+  default_branch: string;
+}
+
+/**
+ * Create a fork of a repository. GitHub's fork API is idempotent —
+ * if a fork already exists, it returns the existing fork.
+ */
+export async function createFork(
+  repoFullName: string,
+  token: string,
+): Promise<ForkInfo> {
+  const res = await fetch(
+    `https://api.github.com/repos/${repoFullName}/forks`,
+    {
+      method: "POST",
+      headers: {
+        ...GITHUB_HEADERS(token),
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({}),
+    },
+  );
+  if (!res.ok) {
+    const body = await res.text();
+    if (res.status === 403) {
+      throw new Error(`This repository does not allow forking (403): ${body}`);
+    }
+    throw new Error(`GitHub API error ${res.status} creating fork: ${body}`);
+  }
+  const data = (await res.json()) as {
+    full_name: string;
+    clone_url: string;
+    ssh_url: string;
+    owner: { login: string };
+    default_branch: string;
+  };
+  return {
+    full_name: data.full_name,
+    clone_url: data.clone_url,
+    ssh_url: data.ssh_url,
+    owner: data.owner.login,
+    default_branch: data.default_branch,
+  };
+}
+
+/**
+ * Wait for a fork to become available. Fork creation is async on GitHub
+ * and can take seconds to minutes. Polls with exponential backoff.
+ */
+export async function waitForFork(
+  forkFullName: string,
+  token: string,
+  maxWaitMs = 300_000, // 5 minutes
+): Promise<void> {
+  const startTime = Date.now();
+  let delay = 2_000; // Start with 2s
+
+  while (Date.now() - startTime < maxWaitMs) {
+    const res = await fetch(
+      `https://api.github.com/repos/${forkFullName}`,
+      { headers: GITHUB_HEADERS(token) },
+    );
+    if (res.ok) return;
+
+    // Wait with exponential backoff (max 30s)
+    await new Promise((resolve) => setTimeout(resolve, delay));
+    delay = Math.min(delay * 1.5, 30_000);
+  }
+
+  throw new Error(
+    `Fork ${forkFullName} not available after ${Math.round(maxWaitMs / 1000)}s. ` +
+    `GitHub may still be processing the fork — try again later.`,
+  );
+}
+
+/**
+ * Sync a fork's default branch with its upstream parent.
+ * Uses GitHub's merge-upstream API.
+ */
+export async function syncFork(
+  forkFullName: string,
+  token: string,
+  branch?: string,
+): Promise<void> {
+  const targetBranch = branch ?? "main";
+  const res = await fetch(
+    `https://api.github.com/repos/${forkFullName}/merge-upstream`,
+    {
+      method: "POST",
+      headers: {
+        ...GITHUB_HEADERS(token),
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ branch: targetBranch }),
+    },
+  );
+  if (!res.ok) {
+    // 409 means already up to date — not an error
+    if (res.status === 409) return;
+    const body = await res.text();
+    console.warn(`[GitHub] syncFork ${forkFullName}/${targetBranch} failed (${res.status}): ${body}`);
+    // Non-fatal: fork may still be usable even if sync fails
+  }
+}
+
+/**
+ * Clone a fork as origin and add the upstream repo as a remote.
+ * Sets up the repo for fork-based contribution.
+ */
+export function cloneForForkContribution(
+  upstreamRepo: string,
+  forkRepo: string,
+  targetDir: string,
+  branch?: string,
+  projectId?: string,
+): void {
+  validateRepoName(upstreamRepo);
+  validateRepoName(forkRepo);
+  if (branch) validateBranchName(branch);
+
+  const token = resolveGitHubToken(projectId) ?? (getConfig("github:token") as string | undefined);
+  const forkAccount = resolveGitHubAccount(projectId);
+  const forkAccountUsage = forkAccount?.sshKeyUsage ?? "both";
+  const sshKeyPath = join(homedir(), ".ssh", "otterbot_github");
+  const sshKeyExists = existsSync(sshKeyPath) && forkAccountUsage !== "signing";
+  const branchArgs = branch ? ["--branch", branch] : [];
+
+  // Clone the fork
+  if (token) {
+    const forkUrl = `https://github.com/${forkRepo}.git`;
+    execFileSync(
+      "git",
+      ["clone", ...gitCredentialArgs(), ...branchArgs, forkUrl, targetDir],
+      {
+        stdio: "pipe",
+        timeout: 300_000,
+        env: gitEnvWithPAT(token),
+      },
+    );
+  } else if (sshKeyExists) {
+    const forkUrl = `git@github.com:${forkRepo}.git`;
+    execFileSync("git", ["clone", ...branchArgs, forkUrl, targetDir], {
+      stdio: "pipe",
+      timeout: 300_000,
+      env: { ...process.env },
+    });
+  } else {
+    throw new Error(`Cannot clone fork ${forkRepo}: no PAT or SSH key available`);
+  }
+
+  // Add upstream remote
+  if (token) {
+    const upstreamUrl = `https://github.com/${upstreamRepo}.git`;
+    execFileSync("git", ["-C", targetDir, "remote", "add", "upstream", upstreamUrl], {
+      stdio: "pipe",
+    });
+  } else {
+    const upstreamUrl = `git@github.com:${upstreamRepo}.git`;
+    execFileSync("git", ["-C", targetDir, "remote", "add", "upstream", upstreamUrl], {
+      stdio: "pipe",
+    });
+  }
+
+  // Fetch upstream
+  const fetchOpts: { stdio: "pipe"; timeout: number; env?: Record<string, string> } = {
+    stdio: "pipe",
+    timeout: 120_000,
+  };
+  if (token) {
+    fetchOpts.env = gitEnvWithPAT(token);
+    execFileSync(
+      "git",
+      [...gitCredentialArgs(), "-C", targetDir, "fetch", "upstream"],
+      fetchOpts,
+    );
+  } else {
+    execFileSync("git", ["-C", targetDir, "fetch", "upstream"], fetchOpts);
+  }
+
+  configureGitUser(targetDir, projectId);
 }
 

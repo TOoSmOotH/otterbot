@@ -5,7 +5,7 @@ export const agents = sqliteTable("agents", {
   id: text("id").primaryKey(),
   name: text("name"),
   registryEntryId: text("registry_entry_id"),
-  role: text("role", { enum: ["coo", "team_lead", "worker", "admin_assistant", "scheduler"] }).notNull(),
+  role: text("role", { enum: ["coo", "team_lead", "worker", "admin_assistant", "scheduler", "module_agent"] }).notNull(),
   parentId: text("parent_id"),
   status: text("status", {
     enum: ["idle", "thinking", "acting", "awaiting_input", "done", "error"],
@@ -73,7 +73,7 @@ export const registryEntries = sqliteTable("registry_entries", {
     .notNull()
     .default([]),
   builtIn: integer("built_in", { mode: "boolean" }).notNull().default(false),
-  role: text("role", { enum: ["coo", "team_lead", "worker", "admin_assistant", "scheduler"] })
+  role: text("role", { enum: ["coo", "team_lead", "worker", "admin_assistant", "scheduler", "module_agent"] })
     .notNull()
     .default("worker"),
   modelPackId: text("model_pack_id"),
@@ -109,11 +109,53 @@ export const projects = sqliteTable("projects", {
   githubRepo: text("github_repo"),
   githubBranch: text("github_branch"),
   githubIssueMonitor: integer("github_issue_monitor", { mode: "boolean" }).notNull().default(false),
+  signCommits: integer("sign_commits", { mode: "boolean" }).notNull().default(false),
+  show3d: integer("show_3d", { mode: "boolean" }).notNull().default(true),
+  githubAccountId: text("github_account_id"),
+  giteaRepo: text("gitea_repo"),
+  giteaBranch: text("gitea_branch"),
+  giteaIssueMonitor: integer("gitea_issue_monitor", { mode: "boolean" }).notNull().default(false),
+  giteaAccountId: text("gitea_account_id"),
   rules: text("rules", { mode: "json" })
     .$type<string[]>()
     .notNull()
     .default([]),
   createdAt: text("created_at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+});
+
+export const githubAccounts = sqliteTable("github_accounts", {
+  id: text("id").primaryKey(),
+  label: text("label").notNull(),
+  token: text("token").notNull(),
+  username: text("username"),
+  email: text("email"),
+  sshKeyPath: text("ssh_key_path"),
+  sshFingerprint: text("ssh_fingerprint"),
+  sshKeyType: text("ssh_key_type"),
+  sshKeyUsage: text("ssh_key_usage").default("both"),
+  isDefault: integer("is_default", { mode: "boolean" }).notNull().default(false),
+  createdAt: text("created_at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+  updatedAt: text("updated_at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+});
+
+export const giteaAccounts = sqliteTable("gitea_accounts", {
+  id: text("id").primaryKey(),
+  label: text("label").notNull(),
+  token: text("token").notNull(),
+  username: text("username"),
+  email: text("email"),
+  instanceUrl: text("instance_url").notNull(),
+  isDefault: integer("is_default", { mode: "boolean" }).notNull().default(false),
+  createdAt: text("created_at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+  updatedAt: text("updated_at")
     .notNull()
     .$defaultFn(() => new Date().toISOString()),
 });
@@ -274,7 +316,7 @@ export const providers = sqliteTable("providers", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
   type: text("type", {
-    enum: ["anthropic", "openai", "google", "ollama", "openai-compatible", "openrouter", "github-copilot", "huggingface", "nvidia", "minimax", "xai", "zai", "perplexity", "deepgram", "bedrock", "lmstudio", "deepseek", "mistral"],
+    enum: ["anthropic", "openai", "google", "ollama", "openai-compatible", "openrouter", "github-copilot", "huggingface", "nvidia", "minimax", "xai", "zai", "perplexity", "deepgram", "bedrock", "lmstudio", "deepseek", "mistral", "vercel-ai-gateway", "claude-code", "opencode", "codex", "gemini-cli"],
   }).notNull(),
   apiKey: text("api_key"),
   baseUrl: text("base_url"),
@@ -444,7 +486,8 @@ export const customScheduledTasks = sqliteTable("custom_scheduled_tasks", {
   name: text("name").notNull(),
   description: text("description").notNull().default(""),
   message: text("message").notNull(),
-  mode: text("mode", { enum: ["coo-prompt", "coo-background", "notification"] }).notNull().default("notification"),
+  mode: text("mode", { enum: ["coo-prompt", "coo-background", "notification", "module-agent"] }).notNull().default("notification"),
+  moduleAgentId: text("module_agent_id"),
   intervalMs: integer("interval_ms").notNull(),
   enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),
   lastRunAt: text("last_run_at"),

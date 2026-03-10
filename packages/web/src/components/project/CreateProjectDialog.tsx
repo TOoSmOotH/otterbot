@@ -1,12 +1,14 @@
-import { useState, type FormEvent } from "react";
+import { useState, useEffect, type FormEvent } from "react";
 import { getSocket } from "../../lib/socket";
+import { useSettingsStore } from "../../stores/settings-store";
 
 interface CreateProjectDialogProps {
   open: boolean;
   onClose: () => void;
+  onCreated?: (projectId: string) => void;
 }
 
-export function CreateProjectDialog({ open, onClose }: CreateProjectDialogProps) {
+export function CreateProjectDialog({ open, onClose, onCreated }: CreateProjectDialogProps) {
   const [githubRepo, setGithubRepo] = useState("");
   const [branch, setBranch] = useState("");
   const [name, setName] = useState("");
@@ -15,6 +17,26 @@ export function CreateProjectDialog({ open, onClose }: CreateProjectDialogProps)
   const [issueMonitor, setIssueMonitor] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // PAT inline config state
+  const [showPatSection, setShowPatSection] = useState(false);
+  const [localToken, setLocalToken] = useState("");
+  const [savingToken, setSavingToken] = useState(false);
+  const [tokenSaved, setTokenSaved] = useState(false);
+
+  const gitHubTokenSet = useSettingsStore((s) => s.gitHubTokenSet);
+  const gitHubUsername = useSettingsStore((s) => s.gitHubUsername);
+  const gitHubTestResult = useSettingsStore((s) => s.gitHubTestResult);
+  const loadGitHubSettings = useSettingsStore((s) => s.loadGitHubSettings);
+  const updateGitHubSettings = useSettingsStore((s) => s.updateGitHubSettings);
+  const testGitHubConnection = useSettingsStore((s) => s.testGitHubConnection);
+
+  // Load GitHub settings when dialog opens
+  useEffect(() => {
+    if (open) {
+      loadGitHubSettings();
+    }
+  }, [open]);
 
   const reset = () => {
     setGithubRepo("");
@@ -25,6 +47,10 @@ export function CreateProjectDialog({ open, onClose }: CreateProjectDialogProps)
     setIssueMonitor(false);
     setLoading(false);
     setError(null);
+    setShowPatSection(false);
+    setLocalToken("");
+    setSavingToken(false);
+    setTokenSaved(false);
   };
 
   const handleClose = () => {
@@ -63,7 +89,11 @@ export function CreateProjectDialog({ open, onClose }: CreateProjectDialogProps)
       (ack: { ok: boolean; projectId?: string; error?: string }) => {
         setLoading(false);
         if (ack.ok) {
+          const createdProjectId = ack.projectId;
           handleClose();
+          if (createdProjectId && onCreated) {
+            onCreated(createdProjectId);
+          }
         } else {
           setError(ack.error ?? "Failed to create project.");
         }
@@ -120,6 +150,117 @@ export function CreateProjectDialog({ open, onClose }: CreateProjectDialogProps)
               className="w-full text-xs bg-secondary rounded-md px-3 py-2 outline-none placeholder:text-muted-foreground border border-transparent focus:border-primary/50 transition-colors"
             />
           </div>
+
+          {/* PAT inline section — collapsible dropdown */}
+          {hasRepo && (
+            <div className="border border-border rounded-lg overflow-hidden">
+              <button
+                type="button"
+                onClick={() => setShowPatSection(!showPatSection)}
+                className="w-full flex items-center justify-between px-3 py-2 text-xs hover:bg-secondary/50 transition-colors"
+              >
+                <span className="flex items-center gap-2">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <rect width="18" height="11" x="3" y="11" rx="2" ry="2" />
+                    <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                  </svg>
+                  <span className="font-medium">Personal Access Token (PAT)</span>
+                  {gitHubTokenSet ? (
+                    <span className="text-green-500 text-[10px]">
+                      {gitHubUsername ? `Connected as @${gitHubUsername}` : "Configured"}
+                    </span>
+                  ) : (
+                    <span className="text-yellow-500 text-[10px]">Not set</span>
+                  )}
+                </span>
+                <svg
+                  width="12"
+                  height="12"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  className={`transition-transform ${showPatSection ? "rotate-180" : ""}`}
+                >
+                  <path d="m6 9 6 6 6-6" />
+                </svg>
+              </button>
+
+              {showPatSection && (
+                <div className="px-3 pb-3 pt-1 space-y-2 border-t border-border">
+                  <p className="text-[10px] text-muted-foreground">
+                    A GitHub PAT is required to clone private repos, manage issues, and create pull requests.
+                  </p>
+                  <input
+                    type="password"
+                    value={localToken}
+                    onChange={(e) => { setLocalToken(e.target.value); setTokenSaved(false); }}
+                    placeholder={
+                      gitHubTokenSet
+                        ? "Enter new token to update"
+                        : "ghp_xxxxxxxxxxxxxxxxxxxx"
+                    }
+                    className="w-full bg-secondary rounded-md px-3 py-1.5 text-xs outline-none focus:ring-1 ring-primary font-mono border border-transparent focus:border-primary/50 transition-colors"
+                  />
+                  <p className="text-[10px] text-muted-foreground">
+                    Required scopes: <code className="bg-secondary px-1 rounded">repo</code>,{" "}
+                    <code className="bg-secondary px-1 rounded">read:org</code>,{" "}
+                    <code className="bg-secondary px-1 rounded">workflow</code>
+                  </p>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        if (!localToken.trim()) return;
+                        setSavingToken(true);
+                        setTokenSaved(false);
+                        await updateGitHubSettings({ token: localToken, enabled: true });
+                        setLocalToken("");
+                        setSavingToken(false);
+                        setTokenSaved(true);
+                      }}
+                      disabled={savingToken || !localToken.trim()}
+                      className="text-[11px] bg-primary text-primary-foreground px-2.5 py-1 rounded-md hover:bg-primary/90 disabled:opacity-50 transition-colors"
+                    >
+                      {savingToken ? "Saving..." : "Save Token"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => testGitHubConnection()}
+                      disabled={!gitHubTokenSet || gitHubTestResult?.testing}
+                      className="text-[11px] bg-secondary text-foreground px-2.5 py-1 rounded-md hover:bg-secondary/80 disabled:opacity-50 transition-colors"
+                    >
+                      {gitHubTestResult?.testing ? "Testing..." : "Test"}
+                    </button>
+                    {tokenSaved && (
+                      <span className="text-[10px] text-green-500">Saved</span>
+                    )}
+                    {gitHubTestResult && !gitHubTestResult.testing && (
+                      <span
+                        className={`text-[10px] ${gitHubTestResult.ok ? "text-green-500" : "text-red-500"}`}
+                      >
+                        {gitHubTestResult.ok
+                          ? gitHubUsername
+                            ? `\u2713 @${gitHubUsername}`
+                            : "\u2713 Connected"
+                          : `\u2717 ${gitHubTestResult.error ?? "Failed"}`}
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-[10px] text-muted-foreground">
+                    <a
+                      href="https://github.com/settings/tokens/new"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-primary hover:underline"
+                    >
+                      Create a new token on GitHub &rarr;
+                    </a>
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Branch */}
           <div>

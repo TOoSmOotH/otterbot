@@ -13,6 +13,17 @@ vi.mock("../../auth/auth.js", () => ({
   deleteConfig: vi.fn((key: string) => configStore.delete(key)),
 }));
 
+// Mock account resolver — delegates to configStore for legacy behavior
+vi.mock("../account-resolver.js", () => ({
+  resolveGitHubToken: vi.fn((_projectId?: string) => configStore.get("github:token")),
+  resolveGitHubUsername: vi.fn((_projectId?: string) => configStore.get("github:username")),
+  resolveGitHubAccount: vi.fn((_projectId?: string) => {
+    const token = configStore.get("github:token");
+    if (!token) return null;
+    return { id: "__legacy__", token, username: configStore.get("github:username") ?? null };
+  }),
+}));
+
 // Mock github-service
 const mockFetchAssignedIssues = vi.fn().mockResolvedValue([]);
 const mockCreateIssueComment = vi.fn().mockResolvedValue({
@@ -165,7 +176,7 @@ describe("GitHubIssueMonitor", () => {
   });
 
   describe("loadFromDb", () => {
-    it("loads all projects with a githubRepo regardless of githubIssueMonitor flag", async () => {
+    it("only loads projects with githubIssueMonitor enabled", async () => {
       const db = getDb();
       configStore.set("github:username", "testuser");
 
@@ -184,7 +195,7 @@ describe("GitHubIssueMonitor", () => {
         })
         .run();
 
-      // Insert a project without issue monitoring — should still be watched
+      // Insert a project without issue monitoring — should NOT be watched
       db.insert(schema.projects)
         .values({
           id: "proj-no-monitor",
@@ -201,18 +212,12 @@ describe("GitHubIssueMonitor", () => {
 
       monitor.loadFromDb();
 
-      // Verify both projects are watched for assigned issues
+      // Verify only the project with issue monitoring enabled is watched
       configStore.set("github:token", "ghp_test");
       await (monitor as any).poll();
-      expect(mockFetchAssignedIssues).toHaveBeenCalledTimes(2);
+      expect(mockFetchAssignedIssues).toHaveBeenCalledTimes(1);
       expect(mockFetchAssignedIssues).toHaveBeenCalledWith(
         "owner/repo",
-        "ghp_test",
-        "testuser",
-        undefined,
-      );
-      expect(mockFetchAssignedIssues).toHaveBeenCalledWith(
-        "owner/other",
         "ghp_test",
         "testuser",
         undefined,
@@ -480,7 +485,7 @@ describe("GitHubIssueMonitor", () => {
         "owner/repo",
         "ghp_test",
         112,
-        expect.stringContaining("Looking into this issue"),
+        expect.stringContaining("Working on this issue now"),
       );
     });
 

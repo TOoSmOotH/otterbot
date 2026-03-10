@@ -11,7 +11,7 @@ vi.mock("../../auth/auth.js", () => ({
     }
     return configStore.get(key);
   }),
-  setConfig: (...args: unknown[]) => mockSetConfig(...args),
+  setConfig: (...args: [string, string]) => mockSetConfig(...args),
   deleteConfig: vi.fn(),
 }));
 

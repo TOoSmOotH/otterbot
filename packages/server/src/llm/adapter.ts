@@ -3,11 +3,12 @@ import { createAnthropic } from "@ai-sdk/anthropic";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { createOpenAI } from "@ai-sdk/openai";
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
-import { createOllama } from "ollama-ai-provider";
+import { createGateway } from "@ai-sdk/gateway";
 import { streamText, generateText, type LanguageModel, type CoreMessage } from "ai";
 import { getConfig } from "../auth/auth.js";
 import { getDb, schema } from "../db/index.js";
 import { eq } from "drizzle-orm";
+import { CodingAgentModel } from "./coding-agent-model.js";
 
 export interface LLMConfig {
   provider: string;
@@ -88,7 +89,7 @@ export function resolveModel(config: LLMConfig): LanguageModel {
         apiKey: config.apiKey ?? resolved.apiKey ?? "",
         ...(baseUrl ? { baseURL: baseUrl } : {}),
       });
-      return openai(config.model);
+      return openai(config.model, { structuredOutputs: false });
     }
 
     case "google": {
@@ -99,11 +100,12 @@ export function resolveModel(config: LLMConfig): LanguageModel {
     }
 
     case "ollama": {
-      const ollama = createOllama({
+      const ollama = createOpenAI({
         baseURL:
           config.baseUrl ??
           resolved.baseUrl ??
-          "http://localhost:11434/api",
+          "http://localhost:11434/v1",
+        apiKey: "ollama",
       });
       return ollama(config.model);
     }
@@ -234,6 +236,25 @@ export function resolveModel(config: LLMConfig): LanguageModel {
       return mistral(config.model);
     }
 
+    case "vercel-ai-gateway": {
+      const gateway = createGateway({
+        apiKey: config.apiKey ?? resolved.apiKey ?? "",
+        ...(config.baseUrl ?? resolved.baseUrl
+          ? { baseURL: config.baseUrl ?? resolved.baseUrl }
+          : {}),
+      });
+      return gateway(config.model) as unknown as LanguageModel;
+    }
+
+    case "claude-code":
+    case "opencode":
+    case "codex":
+    case "gemini-cli":
+      return new CodingAgentModel({
+        agentType: resolved.type as "claude-code" | "opencode" | "codex" | "gemini-cli",
+        modelId: config.model,
+      });
+
     default:
       throw new Error(`Unknown LLM provider: ${config.provider} (type: ${resolved.type})`);
   }
@@ -248,6 +269,48 @@ export function resolveModel(config: LLMConfig): LanguageModel {
  */
 export type ChatMessage = CoreMessage;
 
+/**
+ * Consolidate system messages so providers that don't support multiple
+ * system messages separated by user/assistant messages still work.
+ *
+ * Strategy: collect all system messages, merge their content into a single
+ * system message at the start, and remove the originals from the stream.
+ */
+function consolidateSystemMessages(messages: ChatMessage[]): ChatMessage[] {
+  const systemParts: string[] = [];
+  const nonSystem: ChatMessage[] = [];
+
+  for (const msg of messages) {
+    if (msg.role === "system") {
+      const text = typeof msg.content === "string"
+        ? msg.content
+        : JSON.stringify(msg.content);
+      systemParts.push(text);
+    } else {
+      nonSystem.push(msg);
+    }
+  }
+
+  if (systemParts.length <= 1) return messages;
+
+  return [
+    { role: "system" as const, content: systemParts.join("\n\n") },
+    ...nonSystem,
+  ];
+}
+
+/** Providers that require a single system message */
+const SINGLE_SYSTEM_PROVIDERS = new Set(["anthropic", "bedrock", "ollama", "claude-code", "opencode", "codex", "gemini-cli"]);
+
+/** Normalize messages for the target provider */
+function normalizeMessages(config: LLMConfig, messages: ChatMessage[]): ChatMessage[] {
+  const resolved = resolveProviderCredentials(config.provider);
+  if (SINGLE_SYSTEM_PROVIDERS.has(resolved.type)) {
+    return consolidateSystemMessages(messages);
+  }
+  return messages;
+}
+
 /** Generate a complete response (non-streaming) */
 export async function generate(
   config: LLMConfig,
@@ -257,7 +320,7 @@ export async function generate(
   const model = resolveModel(config);
   const result = await generateText({
     model,
-    messages,
+    messages: normalizeMessages(config, messages),
     temperature: config.temperature,
     maxRetries: config.maxRetries ?? 8,
     ...(tools ? { tools: tools as any } : {}),
@@ -279,7 +342,7 @@ export async function stream(
   const thinking = isThinkingModel(config);
   const result = streamText({
     model,
-    messages,
+    messages: normalizeMessages(config, messages),
     temperature: config.temperature,
     maxRetries: config.maxRetries ?? 8,
     ...(tools ? { tools: tools as any, maxSteps: config.maxSteps ?? 20 } : {}),

@@ -26,6 +26,14 @@ export interface BusMessage {
   timestamp: string;
 }
 
+export interface ChatAttachment {
+  id: string;
+  filename: string;
+  mimeType: string;
+  size: number;
+  url: string;
+}
+
 export interface Conversation {
   id: string;
   title: string;

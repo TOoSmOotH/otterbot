@@ -68,6 +68,9 @@ export function DetachedCeoChat() {
       .then(setProjects)
       .catch(console.error);
 
+    // Load module agents (for specialist selector)
+    useSettingsStore.getState().loadModuleAgents();
+
     // Load STT settings
     useSettingsStore.getState().loadOpenCodeSettings();
   }, [loadAgents, loadHistory, setConversations, loadConversationMessages, setCurrentConversation, setProjects]);

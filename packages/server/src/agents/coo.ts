@@ -1,4 +1,5 @@
 import { makeProjectId } from "../utils/slugify.js";
+import { checkBlockedCommand } from "../utils/command-guard.js";
 import { tool } from "ai";
 import { z } from "zod";
 import {
@@ -6,6 +7,7 @@ import {
   AgentStatus,
   MessageType,
   type BusMessage,
+  type ChatAttachment,
   ProjectStatus,
   CharterStatus,
   type Project,
@@ -23,6 +25,8 @@ import type { MessageBus } from "../bus/message-bus.js";
 import type { WorkspaceManager } from "../workspace/workspace.js";
 import { eq, and } from "drizzle-orm";
 import { getConfig } from "../auth/auth.js";
+import { resolveGitHubToken } from "../github/account-resolver.js";
+import { buildDateContext } from "./prompts/date-context.js";
 import {
   listPackages,
   installAptPackage,
@@ -97,6 +101,7 @@ export class COO extends BaseAgent {
   private workspace: WorkspaceManager;
   private onAgentSpawned?: (agent: BaseAgent) => void;
   private _moduleTools: Record<string, unknown> = {};
+  private _specialists: Array<{ moduleId: string; name: string; description: string }> = [];
   private onStream?: (token: string, messageId: string, conversationId: string | null) => void;
   private onThinking?: (token: string, messageId: string, conversationId: string | null) => void;
   private onThinkingEnd?: (messageId: string, conversationId: string | null) => void;
@@ -166,6 +171,9 @@ Chromium is already installed at \`${chromiumPath}\`. Do NOT try to install a br
 To launch it: use run_command with \`${chromiumPath} --no-sandbox --disable-dev-shm-usage <url> &\`
 The user can see everything on the desktop in real-time.`;
     }
+
+    // Inject current date/time context
+    systemPrompt += buildDateContext();
 
     // Inject user profile into system prompt if available
     const userName = getConfig("user_name");
@@ -250,6 +258,50 @@ The user can see everything on the desktop in real-time.`;
     this._moduleTools = tools;
   }
 
+  /** Inject specialist agent awareness into the system prompt so the COO can route by name. */
+  setSpecialistContext(
+    specialists: Array<{ moduleId: string; name: string; description: string }>,
+  ): void {
+    // Always store specialists so list_specialists tool can read them
+    this._specialists = specialists;
+
+    const lines = [
+      "\n\n## Active Specialist Agents (Module-Backed)",
+      "**These are your ONLY specialist agents.** Worker types (Coder, Researcher, Tester, Browser Agent) are NOT specialist agents — they are project workers spawned by Team Leads.",
+      "",
+    ];
+
+    if (specialists.length === 0) {
+      lines.push("No specialist agents are currently active. If the CEO asks about specialists, tell them none are installed.");
+    } else {
+      lines.push("Use `module_query` with the module ID to route requests to a specialist. Use `list_specialists` to get this list dynamically.");
+      lines.push("");
+      for (const s of specialists) {
+        lines.push(
+          `- **${s.name}** (module ID: \`${s.moduleId}\`) — ${s.description}`,
+        );
+      }
+      lines.push("");
+      lines.push(
+        'Example: If the CEO says "ask Steve about WebAssembly" and Steve is the Deep Research specialist, ' +
+        'call module_query(moduleId="deep-research", question="What do you know about WebAssembly?")',
+      );
+    }
+
+    this.systemPrompt += lines.join("\n");
+
+    // Update the system message in conversation history to match
+    if (
+      this.conversationHistory.length > 0 &&
+      this.conversationHistory[0].role === "system"
+    ) {
+      this.conversationHistory[0] = {
+        role: "system",
+        content: this.systemPrompt,
+      };
+    }
+  }
+
   async handleMessage(message: BusMessage): Promise<void> {
     console.log(`[COO] handleMessage type=${message.type} from=${message.fromAgentId ?? "CEO"}`);
     if (message.type === MessageType.Chat) {
@@ -325,7 +377,48 @@ The user can see everything on the desktop in real-time.`;
     const projectContext = this.getActiveProjectsSummary();
     const enrichedContent = message.content + currentProjectBlock + projectContext;
 
-    console.log(`[COO] Calling think() — model=${this.llmConfig.model} provider=${this.llmConfig.provider}`);
+    // Build image parts from attachments (for multi-modal LLM support)
+    const MAX_IMAGE_ATTACHMENTS = 5;
+    const MAX_IMAGE_FILE_SIZE = 5 * 1024 * 1024; // 5 MB per image for LLM processing
+    const attachments = (message.metadata?.attachments as ChatAttachment[] | undefined) ?? [];
+    const imageParts: Array<{ type: "image"; image: URL }> = [];
+    let imageCount = 0;
+    for (const att of attachments) {
+      if (att.mimeType.startsWith("image/")) {
+        if (imageCount >= MAX_IMAGE_ATTACHMENTS) {
+          console.warn(`[COO] Skipping image attachment — max ${MAX_IMAGE_ATTACHMENTS} images per message`);
+          continue;
+        }
+        try {
+          const { readFile, stat } = await import("node:fs/promises");
+          const { resolve, basename, sep } = await import("node:path");
+          const uploadsBase = resolve(process.env.WORKSPACE_ROOT ?? resolve(__dirname, "../../../../docker/otterbot"), "data", "uploads");
+          // Sanitize: use basename to strip any directory traversal from the URL
+          const filename = basename(att.url.split("/").pop() ?? "");
+          if (!filename) continue;
+          const filePath = resolve(uploadsBase, filename);
+          // Verify the resolved path stays within the uploads directory
+          if (!filePath.startsWith(uploadsBase + sep) && filePath !== uploadsBase) {
+            console.warn(`[COO] Rejected path traversal attempt: ${att.url}`);
+            continue;
+          }
+          // Check file size before reading to prevent memory exhaustion
+          const fileStat = await stat(filePath);
+          if (fileStat.size > MAX_IMAGE_FILE_SIZE) {
+            console.warn(`[COO] Skipping oversized image (${(fileStat.size / 1024 / 1024).toFixed(1)} MB > ${MAX_IMAGE_FILE_SIZE / 1024 / 1024} MB limit): ${filename}`);
+            continue;
+          }
+          const buf = await readFile(filePath);
+          const b64 = buf.toString("base64");
+          imageParts.push({ type: "image", image: new URL(`data:${att.mimeType};base64,${b64}`) });
+          imageCount++;
+        } catch (err) {
+          console.warn(`[COO] Failed to read attachment file ${att.url}:`, err);
+        }
+      }
+    }
+
+    console.log(`[COO] Calling think() — model=${this.llmConfig.model} provider=${this.llmConfig.provider}${attachments.length > 0 ? ` attachments=${attachments.length}` : ""}`);
     const { text, thinking } = await this.think(
       enrichedContent,
       (token, messageId) => {
@@ -337,14 +430,68 @@ The user can see everything on the desktop in real-time.`;
       (messageId) => {
         this.onThinkingEnd?.(messageId, this.currentConversationId);
       },
+      imageParts.length > 0 ? { imageParts } : undefined,
     );
     console.log(`[COO] think() returned (${text.length} chars): "${text.slice(0, 120)}"`);
+
+    // Strip base64 image data from conversation history to prevent memory bloat
+    // on subsequent turns. Replace multimodal entries with text-only equivalents.
+    if (imageParts.length > 0) {
+      for (let i = this.conversationHistory.length - 1; i >= 0; i--) {
+        const entry = this.conversationHistory[i];
+        if (entry.role === "user" && Array.isArray(entry.content)) {
+          const textPart = entry.content.find(
+            (p: { type: string }) => p.type === "text",
+          ) as { type: "text"; text: string } | undefined;
+          if (textPart) {
+            const imageCount = entry.content.filter(
+              (p: { type: string }) => p.type === "image",
+            ).length;
+            this.conversationHistory[i] = {
+              role: "user",
+              content: textPart.text + (imageCount > 0 ? ` [${imageCount} image(s) attached]` : ""),
+            };
+          }
+          break; // only strip the most recent multimodal message
+        }
+      }
+    }
+
+    // Guard: if think() produced raw JSON instead of natural language
+    // (e.g. from a forced synthesis after tool failures), re-synthesize.
+    let finalText = text;
+    const trimmed = text.trim();
+    if (
+      (trimmed.startsWith("{") || trimmed.startsWith("[")) &&
+      trimmed.length > 2
+    ) {
+      try {
+        JSON.parse(trimmed);
+        // It's valid JSON — re-synthesize as natural language
+        console.log("[COO] Detected raw JSON output, re-synthesizing as natural language");
+        const { text: resynthesized } = await this.thinkWithoutTools(
+          `[Your previous response was raw JSON. Rewrite it as a helpful, natural language response to the user. Here is the JSON:\n${trimmed}\n]`,
+          (token, messageId) => {
+            this.onStream?.(token, messageId, this.currentConversationId);
+          },
+          (token, messageId) => {
+            this.onThinking?.(token, messageId, this.currentConversationId);
+          },
+          (messageId) => {
+            this.onThinkingEnd?.(messageId, this.currentConversationId);
+          },
+        );
+        finalText = resynthesized || "I wasn't able to get a clear result. Could you rephrase your request?";
+      } catch {
+        // Not valid JSON after all — use the original text as-is
+      }
+    }
 
     // Send the response back through the bus (to CEO / null)
     this.sendMessage(
       null,
       MessageType.Chat,
-      text,
+      finalText,
       thinking ? { thinking } : undefined,
       this.currentConversationId ?? undefined,
     );
@@ -409,9 +556,10 @@ The user can see everything on the desktop in real-time.`;
     onToken?: (token: string, messageId: string) => void,
     onReasoning?: (token: string, messageId: string) => void,
     onReasoningEnd?: (messageId: string) => void,
+    options?: { imageParts?: Array<{ type: "image"; image: URL }> },
   ): Promise<{ text: string; thinking: string | undefined; hadToolCalls: boolean }> {
     this._runCommandCalls = 0;
-    return super.think(userMessage, onToken, onReasoning, onReasoningEnd);
+    return super.think(userMessage, onToken, onReasoning, onReasoningEnd, options);
   }
 
   /**
@@ -474,6 +622,11 @@ The user can see everything on the desktop in real-time.`;
           if (this._runCommandCalls > 1) {
             return "REFUSED: You already used your one command this turn. " +
               "STOP and use send_directive to delegate work to the Team Lead. Do NOT run more commands.";
+          }
+          const blocked = checkBlockedCommand(command);
+          if (blocked) {
+            console.warn(`[coo:run_command] Blocked command: ${command}`);
+            return blocked;
           }
           const effectiveTimeout = Math.min(timeout ?? 30_000, 120_000);
           let cwd: string | undefined;
@@ -1031,6 +1184,29 @@ The user can see everything on the desktop in real-time.`;
         },
       }),
 
+      list_specialists: tool({
+        description:
+          "List all active specialist agents. Specialist agents are module-backed autonomous agents with their own knowledge stores — they are NOT worker types (Coder, Researcher, etc.).",
+        parameters: z.object({}),
+        execute: async () => {
+          if (this._specialists.length === 0) {
+            return "No specialist agents are currently active. Specialist agents are powered by the module system and must be installed separately. Worker types (Coder, Researcher, Tester, Browser Agent) are NOT specialist agents — they are project workers spawned by Team Leads.";
+          }
+          const lines = [
+            `${this._specialists.length} specialist agent(s) active:\n`,
+          ];
+          for (const s of this._specialists) {
+            lines.push(
+              `- **${s.name}** (module ID: \`${s.moduleId}\`) — ${s.description}`,
+            );
+          }
+          lines.push(
+            "\nUse `module_query` with the module ID to communicate with a specialist.",
+          );
+          return lines.join("\n");
+        },
+      }),
+
       // Module tools (dynamically registered)
       ...this._moduleTools,
     };
@@ -1046,9 +1222,9 @@ The user can see everything on the desktop in real-time.`;
     projectId?: string | null,
     repo?: string | null,
   ): { repoFullName: string; token: string } {
-    const token = getConfig("github:token");
+    const token = resolveGitHubToken(projectId ?? undefined);
     if (!token) {
-      throw new Error("GitHub token not configured. Ask the CEO to set github:token in Settings.");
+      throw new Error("GitHub token not configured. Add a GitHub account in Settings.");
     }
     if (repo) {
       if (!repo.includes("/")) {

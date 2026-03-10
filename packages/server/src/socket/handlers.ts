@@ -6,7 +6,7 @@ import type {
 import { MessageType, type Agent, type AgentActivityRecord, type BusMessage, type Conversation, type Project, type KanbanTask, type Todo, type CodingAgentSession, type CodingAgentMessage, type CodingAgentPart, type CodingAgentFileDiff, type CodingAgentType } from "@otterbot/shared";
 import { nanoid } from "nanoid";
 import { makeProjectId } from "../utils/slugify.js";
-import { eq, or, desc, isNull } from "drizzle-orm";
+import { eq, or, and, desc, isNull } from "drizzle-orm";
 import type { MessageBus } from "../bus/message-bus.js";
 import type { COO } from "../agents/coo.js";
 import type { Registry } from "../registry/registry.js";
@@ -14,14 +14,26 @@ import type { BaseAgent } from "../agents/agent.js";
 import { getDb, schema } from "../db/index.js";
 import { isTTSEnabled, getConfiguredTTSProvider, stripMarkdown } from "../tts/tts.js";
 import { getConfig, setConfig, deleteConfig } from "../auth/auth.js";
+import { resolveGitHubAccount, resolveGitHubToken, resolveGitHubUsername } from "../github/account-resolver.js";
+import { resolveGiteaUsername } from "../gitea/account-resolver.js";
 import { SoulService } from "../memory/soul-service.js";
 import { MemoryService } from "../memory/memory-service.js";
 import { SoulAdvisor } from "../memory/soul-advisor.js";
 import type { WorkspaceManager } from "../workspace/workspace.js";
 import type { GitHubIssueMonitor } from "../github/issue-monitor.js";
+import type { GiteaIssueMonitor } from "../gitea/issue-monitor.js";
 import type { MergeQueue } from "../merge-queue/merge-queue.js";
-import { cloneRepo, getRepoDefaultBranch } from "../github/github-service.js";
-import { initGitRepo, createInitialCommit } from "../utils/git.js";
+import type { WorldLayoutManager } from "../models3d/world-layout.js";
+import {
+  cloneRepo,
+  getRepoDefaultBranch,
+  checkHasPushAccess,
+  createFork,
+  waitForFork,
+  syncFork,
+  cloneForForkContribution,
+} from "../github/github-service.js";
+import { initGitRepo, createInitialCommit, configureCommitSigning, hasSSHKey } from "../utils/git.js";
 import { NO_REPORT_SENTINEL } from "../schedulers/custom-task-scheduler.js";
 import { ProjectStatus, CharterStatus } from "@otterbot/shared";
 import { existsSync, rmSync } from "node:fs";
@@ -88,7 +100,7 @@ export function setupSocketHandlers(
   coo: COO,
   registry: Registry,
   hooks?: SocketHooks,
-  deps?: { workspace?: WorkspaceManager; issueMonitor?: GitHubIssueMonitor; mergeQueue?: MergeQueue },
+  deps?: { workspace?: WorkspaceManager; issueMonitor?: GitHubIssueMonitor; giteaIssueMonitor?: GiteaIssueMonitor; mergeQueue?: MergeQueue; worldLayout?: WorldLayoutManager },
 ) {
   // Track conversation IDs used by background tasks so we can suppress
   // the COO's response in that same conversation.
@@ -218,13 +230,17 @@ export function setupSocketHandlers(
           .run();
       }
 
+      const targetAgent = data.toAgentId ?? "coo";
+      const metadata: Record<string, unknown> = {};
+      if (projectId) metadata.projectId = projectId;
+      if (data.attachments && data.attachments.length > 0) metadata.attachments = data.attachments;
       const message = bus.send({
         fromAgentId: null, // CEO
-        toAgentId: "coo",
-        type: MessageType.Chat,
+        toAgentId: targetAgent,
+        type: targetAgent === "coo" ? MessageType.Chat : MessageType.Directive,
         content: data.content,
         conversationId,
-        metadata: projectId ? { projectId } : undefined,
+        metadata,
       });
 
       if (callback) {
@@ -294,6 +310,62 @@ export function setupSocketHandlers(
       }
       coo.loadConversation(data.conversationId, messages, projectId, charter);
       callback({ messages });
+    });
+
+    // Find the most recent conversation involving a specific agent
+    socket.on("ceo:find-agent-conversation", (data, callback) => {
+      const db = getDb();
+      const { agentId, projectId } = data;
+
+      // Find conversations that have messages involving this agent
+      // For COO (agentId=null), find conversations where messages are to/from "coo"
+      // For specialists, find conversations where messages are to/from the specialist agentId
+      const targetId = agentId ?? "coo";
+
+      // Find the most recent conversation that has messages involving this agent
+      const projectFilter = projectId
+        ? eq(schema.messages.projectId, projectId)
+        : isNull(schema.messages.projectId);
+
+      const matchingMessage = db
+        .select({ conversationId: schema.messages.conversationId })
+        .from(schema.messages)
+        .where(
+          and(
+            or(
+              eq(schema.messages.fromAgentId, targetId),
+              eq(schema.messages.toAgentId, targetId),
+            ),
+            projectFilter,
+          ),
+        )
+        .orderBy(desc(schema.messages.timestamp))
+        .limit(1)
+        .get();
+
+      if (matchingMessage?.conversationId) {
+        const convId = matchingMessage.conversationId;
+        const messages = bus.getConversationMessages(convId);
+        const conv = db
+          .select()
+          .from(schema.conversations)
+          .where(eq(schema.conversations.id, convId))
+          .get();
+        let charter: string | null = null;
+        const convProjectId = conv?.projectId ?? null;
+        if (convProjectId) {
+          const project = db
+            .select()
+            .from(schema.projects)
+            .where(eq(schema.projects.id, convProjectId))
+            .get();
+          charter = project?.charter ?? null;
+        }
+        coo.loadConversation(convId, messages, convProjectId, charter);
+        callback({ conversationId: convId, messages });
+      } else {
+        callback({ conversationId: null, messages: [] });
+      }
     });
 
     // Request registry entries
@@ -402,6 +474,15 @@ export function setupSocketHandlers(
       // Clear conversation contexts that reference this project
       coo.clearProjectConversations(data.projectId);
 
+      // Remove the 3D office zone for this project
+      const worldLayout = deps?.worldLayout;
+      if (worldLayout) {
+        const removed = worldLayout.removeZone(data.projectId);
+        if (removed) {
+          io.emit("world:zone-removed", { projectId: data.projectId });
+        }
+      }
+
       // Cascade-delete related DB records
       db.delete(schema.kanbanTasks).where(eq(schema.kanbanTasks.projectId, data.projectId)).run();
       db.delete(schema.agentActivity).where(eq(schema.agentActivity.projectId, data.projectId)).run();
@@ -429,10 +510,10 @@ export function setupSocketHandlers(
 
         if (hasGithubRepo) {
           // --- GitHub-linked path ---
-          const ghToken = getConfig("github:token");
-          const ghUsername = getConfig("github:username");
+          const ghToken = resolveGitHubToken();
+          const ghUsername = resolveGitHubUsername();
           if (!ghToken || !ghUsername) {
-            callback?.({ ok: false, error: "GitHub is not configured. Set up your PAT and username in Settings first." });
+            callback?.({ ok: false, error: "GitHub is not configured. Add a GitHub account in Settings first." });
             return;
           }
 
@@ -477,18 +558,49 @@ export function setupSocketHandlers(
           workspace.createProject(projectId);
 
           const repoPath = workspace.repoPath(projectId);
-          try {
-            cloneRepo(data.githubRepo!, repoPath, branch);
-          } catch (cloneErr) {
-            try { rmSync(workspace.projectPath(projectId), { recursive: true, force: true }); } catch { /* best effort */ }
-            db.delete(schema.projects).where(eq(schema.projects.id, projectId)).run();
-            const errMsg = cloneErr instanceof Error ? cloneErr.message : String(cloneErr);
-            callback?.({ ok: false, error: `Failed to clone repository: ${errMsg}` });
-            return;
+
+          // Check push access and set up fork if needed
+          let forkMode = false;
+          let forkRepo: string | null = null;
+          const hasPush = await checkHasPushAccess(data.githubRepo!, ghToken);
+
+          if (hasPush) {
+            // Direct push access — clone normally
+            try {
+              cloneRepo(data.githubRepo!, repoPath, branch);
+            } catch (cloneErr) {
+              try { rmSync(workspace.projectPath(projectId), { recursive: true, force: true }); } catch { /* best effort */ }
+              db.delete(schema.projects).where(eq(schema.projects.id, projectId)).run();
+              const errMsg = cloneErr instanceof Error ? cloneErr.message : String(cloneErr);
+              callback?.({ ok: false, error: `Failed to clone repository: ${errMsg}` });
+              return;
+            }
+          } else {
+            // No push access — fork and clone the fork
+            try {
+              console.log(`[project:create-manual] No push access to ${data.githubRepo} — creating fork`);
+              const fork = await createFork(data.githubRepo!, ghToken);
+              forkRepo = fork.full_name;
+              await waitForFork(fork.full_name, ghToken);
+              await syncFork(fork.full_name, ghToken, branch);
+              cloneForForkContribution(data.githubRepo!, fork.full_name, repoPath, branch);
+              forkMode = true;
+              console.log(`[project:create-manual] Fork set up: ${fork.full_name}`);
+            } catch (forkErr) {
+              try { rmSync(workspace.projectPath(projectId), { recursive: true, force: true }); } catch { /* best effort */ }
+              db.delete(schema.projects).where(eq(schema.projects.id, projectId)).run();
+              const errMsg = forkErr instanceof Error ? forkErr.message : String(forkErr);
+              callback?.({ ok: false, error: `Failed to set up fork: ${errMsg}` });
+              return;
+            }
           }
 
           setConfig(`project:${projectId}:github:repo`, data.githubRepo!);
           setConfig(`project:${projectId}:github:branch`, branch);
+          if (forkMode && forkRepo) {
+            setConfig(`project:${projectId}:github:fork_mode`, "true");
+            setConfig(`project:${projectId}:github:fork_repo`, forkRepo);
+          }
           setConfig(`project:${projectId}:github:rules`, JSON.stringify(rules));
 
           await coo.spawnTeamLeadForManualProject(projectId, data.githubRepo!, branch, rules);
@@ -737,6 +849,275 @@ export function setupSocketHandlers(
         callback?.({ ok: true });
       } catch (err) {
         callback?.({ ok: false, error: err instanceof Error ? err.message : "Failed to save fork upstream PR setting" });
+      }
+    });
+
+    // Toggle issue monitor for a project
+    socket.on("project:set-issue-monitor", (data, callback) => {
+      try {
+        const db = getDb();
+        const project = db
+          .select()
+          .from(schema.projects)
+          .where(eq(schema.projects.id, data.projectId))
+          .get();
+
+        if (!project) {
+          callback?.({ ok: false, error: "Project not found" });
+          return;
+        }
+
+        if (!project.githubRepo) {
+          callback?.({ ok: false, error: "Issue monitoring requires a GitHub repository" });
+          return;
+        }
+
+        db.update(schema.projects)
+          .set({ githubIssueMonitor: data.enabled })
+          .where(eq(schema.projects.id, data.projectId))
+          .run();
+
+        // Start or stop monitoring
+        if (deps?.issueMonitor) {
+          if (data.enabled) {
+            const ghUsername = resolveGitHubUsername(data.projectId);
+            if (ghUsername && project.githubRepo) {
+              deps.issueMonitor.watchProject(data.projectId, project.githubRepo, ghUsername);
+            }
+          } else {
+            deps.issueMonitor.unwatchProject(data.projectId);
+          }
+        }
+
+        // Emit project:updated so UI refreshes
+        const updated = db
+          .select()
+          .from(schema.projects)
+          .where(eq(schema.projects.id, data.projectId))
+          .get();
+        if (updated) {
+          io.emit("project:updated", updated as any);
+        }
+
+        callback?.({ ok: true });
+      } catch (err) {
+        callback?.({ ok: false, error: err instanceof Error ? err.message : "Failed to update issue monitor setting" });
+      }
+    });
+
+    // Set GitHub account for a project
+    socket.on("project:set-github-account", (data, callback) => {
+      try {
+        const db = getDb();
+        db.update(schema.projects)
+          .set({ githubAccountId: data.accountId })
+          .where(eq(schema.projects.id, data.projectId))
+          .run();
+        callback?.({ ok: true });
+      } catch (err) {
+        callback?.({ ok: false, error: err instanceof Error ? err.message : "Failed to set GitHub account" });
+      }
+    });
+
+    // Toggle Gitea issue monitoring for a project
+    socket.on("project:set-gitea-issue-monitor", (data, callback) => {
+      try {
+        const db = getDb();
+        const project = db
+          .select()
+          .from(schema.projects)
+          .where(eq(schema.projects.id, data.projectId))
+          .get();
+        if (!project) {
+          callback?.({ ok: false, error: "Project not found" });
+          return;
+        }
+        if (!project.giteaRepo) {
+          callback?.({ ok: false, error: "No Gitea repo configured for this project" });
+          return;
+        }
+        db.update(schema.projects)
+          .set({ giteaIssueMonitor: data.enabled })
+          .where(eq(schema.projects.id, data.projectId))
+          .run();
+
+        if (deps?.giteaIssueMonitor) {
+          if (data.enabled) {
+            const username = resolveGiteaUsername(data.projectId);
+            if (username) {
+              deps.giteaIssueMonitor.watchProject(data.projectId, project.giteaRepo, username);
+            }
+          } else {
+            deps.giteaIssueMonitor.unwatchProject(data.projectId);
+          }
+        }
+
+        const updated = db
+          .select()
+          .from(schema.projects)
+          .where(eq(schema.projects.id, data.projectId))
+          .get();
+        if (updated) {
+          io.emit("project:updated", updated as any);
+        }
+
+        callback?.({ ok: true });
+      } catch (err) {
+        callback?.({ ok: false, error: err instanceof Error ? err.message : "Failed to update Gitea issue monitor setting" });
+      }
+    });
+
+    // Set Gitea account for a project
+    socket.on("project:set-gitea-account", (data, callback) => {
+      try {
+        const db = getDb();
+        db.update(schema.projects)
+          .set({ giteaAccountId: data.accountId })
+          .where(eq(schema.projects.id, data.projectId))
+          .run();
+        callback?.({ ok: true });
+      } catch (err) {
+        callback?.({ ok: false, error: err instanceof Error ? err.message : "Failed to set Gitea account" });
+      }
+    });
+
+    // Get sign-commits setting for a project
+    socket.on("project:get-sign-commits", (data, callback) => {
+      try {
+        const db = getDb();
+        const project = db
+          .select()
+          .from(schema.projects)
+          .where(eq(schema.projects.id, data.projectId))
+          .get();
+
+        const account = resolveGitHubAccount(data.projectId);
+        callback({
+          enabled: !!project?.signCommits,
+          hasSSHKey: hasSSHKey(account?.sshKeyPath ?? undefined),
+        });
+      } catch {
+        callback({ enabled: false, hasSSHKey: false });
+      }
+    });
+
+    // Toggle commit signing for a project
+    socket.on("project:set-sign-commits", (data, callback) => {
+      try {
+        const db = getDb();
+        const project = db
+          .select()
+          .from(schema.projects)
+          .where(eq(schema.projects.id, data.projectId))
+          .get();
+
+        if (!project) {
+          callback?.({ ok: false, error: "Project not found" });
+          return;
+        }
+
+        const account = resolveGitHubAccount(data.projectId);
+        const accountKeyPath = account?.sshKeyPath ?? undefined;
+
+        if (data.enabled && !hasSSHKey(accountKeyPath)) {
+          callback?.({ ok: false, error: "No SSH key configured for this account. Generate or import one in Settings → GitHub first." });
+          return;
+        }
+
+        if (data.enabled && account?.sshKeyUsage === "auth") {
+          callback?.({ ok: false, error: "SSH key is configured for authentication only. Update key purpose to 'Signing' or 'Both' in Settings → GitHub." });
+          return;
+        }
+
+        db.update(schema.projects)
+          .set({ signCommits: data.enabled })
+          .where(eq(schema.projects.id, data.projectId))
+          .run();
+
+        // Apply local git config to the project's repo
+        const workspace = deps?.workspace;
+        if (workspace) {
+          const repoPath = workspace.repoPath(data.projectId);
+          if (existsSync(repoPath)) {
+            try {
+              configureCommitSigning(repoPath, data.enabled, accountKeyPath);
+            } catch (e) {
+              callback?.({ ok: false, error: e instanceof Error ? e.message : "Failed to configure git signing" });
+              return;
+            }
+          }
+        }
+
+        // Emit project:updated so UI refreshes
+        const updated = db
+          .select()
+          .from(schema.projects)
+          .where(eq(schema.projects.id, data.projectId))
+          .get();
+        if (updated) {
+          io.emit("project:updated", updated as any);
+        }
+
+        callback?.({ ok: true });
+      } catch (err) {
+        callback?.({ ok: false, error: err instanceof Error ? err.message : "Failed to update sign commits setting" });
+      }
+    });
+
+    // Toggle 3D view visibility for a project
+    socket.on("project:set-show3d", (data, callback) => {
+      try {
+        const db = getDb();
+
+        // Validate project exists to prevent path traversal via crafted projectId
+        const project = db
+          .select()
+          .from(schema.projects)
+          .where(eq(schema.projects.id, data.projectId))
+          .get();
+        if (!project) {
+          callback?.({ ok: false, error: "Project not found" });
+          return;
+        }
+
+        db.update(schema.projects)
+          .set({ show3d: !!data.enabled })
+          .where(eq(schema.projects.id, data.projectId))
+          .run();
+
+        // When toggling 3D off, remove the zone; when toggling on, add it back
+        const worldLayout = deps?.worldLayout;
+        if (worldLayout) {
+          if (!data.enabled) {
+            const removed = worldLayout.removeZone(data.projectId);
+            if (removed) {
+              io.emit("world:zone-removed", { projectId: data.projectId });
+            }
+          } else {
+            // Re-create the zone if it doesn't already exist
+            const existing = worldLayout.loadZoneConfig(data.projectId);
+            if (!existing) {
+              const zone = worldLayout.addZone(data.projectId, "default-project-office", project.name ?? undefined);
+              if (zone) {
+                io.emit("world:zone-added", { zone });
+              }
+            }
+          }
+        }
+
+        // Emit project:updated so UI refreshes (re-read to get updated show3d value)
+        const updated = db
+          .select()
+          .from(schema.projects)
+          .where(eq(schema.projects.id, data.projectId))
+          .get();
+        if (updated) {
+          io.emit("project:updated", updated as any);
+        }
+
+        callback?.({ ok: true });
+      } catch (err) {
+        callback?.({ ok: false, error: err instanceof Error ? err.message : "Failed to update 3D visibility" });
       }
     });
 

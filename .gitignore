@@ -17,6 +17,9 @@ dist/
 # MCP
 .mcp.json
 
+# Claude Code
+.claude/
+
 # IDE
 .vscode/
 .idea/
@@ -39,6 +42,9 @@ playwright-report/
 # E2E credentials and auth state
 .credentials
 e2e/.auth-state.json
+
+# Generated scene files (test artifacts)
+assets/scenes/zone-test-app-*.json
 
 # Docker data
 data/

@@ -3,7 +3,7 @@ import type { Server } from "socket.io";
 import type { ServerToClientEvents, ClientToServerEvents, KanbanTask } from "@otterbot/shared";
 import { MessageType } from "@otterbot/shared";
 import { getDb, schema } from "../db/index.js";
-import { getConfig } from "../auth/auth.js";
+import { resolveGitHubToken } from "./account-resolver.js";
 import {
   fetchPullRequest,
   fetchPullRequests,
@@ -64,9 +64,6 @@ export class GitHubPRMonitor {
   }
 
   private async poll(): Promise<void> {
-    const token = getConfig("github:token");
-    if (!token) return;
-
     const db = getDb();
     // Find all tasks in "in_review" with a prNumber or prBranch set
     const tasks = db
@@ -77,6 +74,8 @@ export class GitHubPRMonitor {
 
     for (const task of tasks) {
       try {
+        const token = resolveGitHubToken(task.projectId);
+        if (!token) continue;
         await this.checkPR(task, token);
       } catch (err) {
         console.error(`[PRMonitor] Error checking PR for task ${task.id}:`, err);
@@ -150,6 +149,12 @@ export class GitHubPRMonitor {
       }
 
       console.log(`[PRMonitor] PR #${prNumber} merged — task ${task.id} → done`);
+
+      // Notify TeamLead to spawn backlog workers
+      const teamLead = this.coo.getTeamLeads().get(task.projectId);
+      if (teamLead) {
+        await teamLead.notifyTaskDone(task.id);
+      }
       return;
     }
 

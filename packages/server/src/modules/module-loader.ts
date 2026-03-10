@@ -8,6 +8,7 @@ import type {
   ModuleDefinition,
   ModuleContext,
   InstalledModule,
+  GenerateResponseOptions,
 } from "@otterbot/shared";
 import { ModuleKnowledgeStore } from "./module-knowledge-store.js";
 import { runMigrations } from "./module-migrations.js";
@@ -37,7 +38,7 @@ function createModuleContext(
     knowledge: knowledgeStore,
     getConfig(key: string): string | undefined {
       // Try module-specific config first, then fall back to global
-      return getConfig(`module:${moduleId}:${key}`);
+      return getConfig(`module:${moduleId}:${key}`) ?? getConfig(key);
     },
     log(...args: unknown[]) {
       console.log(`[module:${moduleId}]`, ...args);
@@ -47,6 +48,38 @@ function createModuleContext(
     },
     error(...args: unknown[]) {
       console.error(`[module:${moduleId}]`, ...args);
+    },
+    async generateResponse(options: GenerateResponseOptions) {
+      const provider = getConfig(`module:${moduleId}:agent_provider`)
+        ?? getConfig("worker_provider")
+        ?? getConfig("coo_provider")
+        ?? "anthropic";
+      const model = getConfig(`module:${moduleId}:agent_model`)
+        ?? getConfig("worker_model")
+        ?? getConfig("coo_model")
+        ?? "claude-sonnet-4-5-20250929";
+
+      const { generate } = await import("../llm/adapter.js");
+      const messages = [
+        { role: "system" as const, content: options.systemPrompt },
+        ...options.messages.map((m) => ({
+          role: m.role as "user" | "assistant" | "system",
+          content: m.content,
+        })),
+      ];
+
+      const result = await generate(
+        {
+          provider,
+          model,
+          temperature: options.temperature ?? 0.3,
+          maxRetries: 3,
+          maxSteps: options.maxSteps ?? 8,
+        },
+        messages,
+      );
+
+      return { text: result.text };
     },
   };
 }
@@ -97,6 +130,65 @@ export class ModuleLoader {
     // Dynamic import
     const { loadModuleDefinition } = await import("./module-installer.js");
     const definition = await loadModuleDefinition(modulePath);
+
+    // Auto-inject agent config fields into config schema if module declares an agent
+    if (definition.agent) {
+      if (!definition.configSchema) {
+        definition.configSchema = {};
+      }
+      if (!definition.configSchema.agent_enabled) {
+        definition.configSchema.agent_enabled = {
+          type: "boolean",
+          description: "Enable the module's AI agent for reasoned queries",
+          required: false,
+          default: true,
+        };
+      }
+      if (!definition.configSchema.agent_name) {
+        definition.configSchema.agent_name = {
+          type: "string",
+          description: "Display name for the module agent",
+          required: false,
+          default: definition.agent.defaultName,
+        };
+      }
+      if (!definition.configSchema.agent_prompt) {
+        definition.configSchema.agent_prompt = {
+          type: "string",
+          description: "System prompt for the module agent",
+          required: false,
+          default: definition.agent.defaultPrompt,
+        };
+      }
+      if (!definition.configSchema.agent_model) {
+        definition.configSchema.agent_model = {
+          type: "string",
+          description: "LLM model for the module agent (leave empty for system default)",
+          required: false,
+        };
+      }
+      if (!definition.configSchema.agent_provider) {
+        definition.configSchema.agent_provider = {
+          type: "string",
+          description: "LLM provider for the module agent (leave empty for system default)",
+          required: false,
+        };
+      }
+      if (!definition.configSchema.agent_posting_mode) {
+        definition.configSchema.agent_posting_mode = {
+          type: "select",
+          description: "Controls when the module agent responds to queries",
+          required: false,
+          default: "respond",
+          options: [
+            { value: "respond", label: "Always respond" },
+            { value: "lurk", label: "Lurk (index only, never respond)" },
+            { value: "new_chats", label: "New conversations only" },
+            { value: "permission", label: "Ask COO for permission" },
+          ],
+        };
+      }
+    }
 
     // Create knowledge store (data dir is always in ./data/modules/<id>/)
     const dataDir = resolve(modulesDir(), id);

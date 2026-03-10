@@ -1,6 +1,7 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useSettingsStore } from "../../stores/settings-store";
 import { SettingsNav } from "./SettingsNav";
+import { SettingsOverview } from "./SettingsOverview";
 import { AppearanceTab } from "./AppearanceTab";
 import { ProvidersTab } from "./ProvidersTab";
 import { ModelsTab } from "./ModelsTab";
@@ -23,23 +24,30 @@ import { SlackSection } from "./SlackSection";
 import { MattermostSection } from "./MattermostSection";
 import { NextcloudTalkSection } from "./NextcloudTalkSection";
 import { TelegramSection } from "./TelegramSection";
+import { BlueskySection } from "./BlueskySection";
+import { MastodonSection } from "./MastodonSection";
+import { XSection } from "./XSection";
 import { GoogleSection } from "./GoogleSection";
 import { SecuritySection } from "./SecuritySection";
-import { ModulesSection } from "./ModulesSection";
 import { WorkerNamesSection } from "./WorkerNamesSection";
 import { McpServersSection } from "./McpServersSection";
 import { SshTab } from "./SshTab";
+import { useSettingsStatus } from "./useSettingsStatus";
 import type { SettingsSection } from "./settings-nav";
+import type { SettingsSearchHandle } from "./SettingsSearch";
 
 interface SettingsPageProps {
   onClose: () => void;
+  initialSection?: SettingsSection;
 }
 
-export function SettingsPage({ onClose }: SettingsPageProps) {
-  const [activeSection, setActiveSection] = useState<SettingsSection>("profile");
+export function SettingsPage({ onClose, initialSection }: SettingsPageProps) {
+  const [activeSection, setActiveSection] = useState<SettingsSection>(initialSection ?? "overview");
   const loadSettings = useSettingsStore((s) => s.loadSettings);
   const loading = useSettingsStore((s) => s.loading);
   const contentRef = useRef<HTMLDivElement>(null);
+  const searchRef = useRef<SettingsSearchHandle>(null);
+  const statusMap = useSettingsStatus();
 
   useEffect(() => {
     loadSettings();
@@ -50,13 +58,26 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
     contentRef.current?.scrollTo(0, 0);
   }, [activeSection]);
 
+  // Keyboard shortcut: "/" focuses search (when not in an input)
+  const handleKeyDown = useCallback((e: KeyboardEvent) => {
+    if (e.key === "/" && !(e.target instanceof HTMLInputElement) && !(e.target instanceof HTMLTextAreaElement)) {
+      e.preventDefault();
+      searchRef.current?.focus();
+    }
+  }, []);
+
+  useEffect(() => {
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [handleKeyDown]);
+
   const renderContent = () => {
+    if (activeSection === "overview") return <SettingsOverview onSelect={setActiveSection} statusMap={statusMap} />;
     if (activeSection === "appearance") return <AppearanceTab />;
     if (activeSection === "profile") return <ProfileSection />;
     if (activeSection === "system") return <SystemSection />;
     if (activeSection === "channels") return <ChannelsSection />;
     if (activeSection === "scheduled") return <ScheduledTasksSection />;
-    if (activeSection === "modules") return <ModulesSection />;
     if (activeSection === "email") return <EmailSection />;
     if (activeSection === "google") return <GoogleSection />;
     if (activeSection === "github") return <GitHubTab />;
@@ -65,6 +86,9 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
     if (activeSection === "slack") return <SlackSection />;
     if (activeSection === "mattermost") return <MattermostSection />;
     if (activeSection === "nextcloud-talk") return <NextcloudTalkSection />;
+    if (activeSection === "bluesky") return <BlueskySection />;
+    if (activeSection === "mastodon") return <MastodonSection />;
+    if (activeSection === "x") return <XSection />;
     if (activeSection === "worker-names") return <WorkerNamesSection />;
     if (activeSection === "mcp-servers") return <McpServersSection />;
     if (activeSection === "ssh") return <SshTab />;
@@ -109,6 +133,8 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
         activeSection={activeSection}
         onSelect={setActiveSection}
         onBack={onClose}
+        statusMap={statusMap}
+        searchRef={searchRef}
       />
       <div ref={contentRef} className="flex-1 overflow-y-auto">
         <div className="max-w-3xl mx-auto">

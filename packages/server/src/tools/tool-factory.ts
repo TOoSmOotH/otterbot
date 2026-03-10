@@ -6,18 +6,19 @@ import { createFileWriteTool } from "./file-write.js";
 import { createShellExecTool } from "./shell-exec.js";
 import { createWebSearchTool } from "./web-search.js";
 import { createWebBrowseTool } from "./web-browse.js";
+import { createDemoRecordTool } from "./demo-record.js";
 import { createInstallPackageTool } from "./install-package.js";
 import { createOpenCodeTaskTool } from "./opencode-task.js";
 import { createTodoListTool } from "./todo-list.js";
 import { createTodoCreateTool } from "./todo-create.js";
 import { createTodoUpdateTool } from "./todo-update.js";
 import { createTodoDeleteTool } from "./todo-delete.js";
-import { createGmailListTool } from "./gmail-list.js";
-import { createGmailReadTool } from "./gmail-read.js";
-import { createGmailSendTool } from "./gmail-send.js";
-import { createGmailReplyTool } from "./gmail-reply.js";
-import { createGmailLabelTool } from "./gmail-label.js";
-import { createGmailArchiveTool } from "./gmail-archive.js";
+import { createEmailListTool } from "./email-list.js";
+import { createEmailReadTool } from "./email-read.js";
+import { createEmailSendTool } from "./email-send.js";
+import { createEmailReplyTool } from "./email-reply.js";
+import { createEmailFolderTool } from "./email-label.js";
+import { createEmailArchiveTool } from "./email-archive.js";
 import { createCalendarListEventsTool } from "./calendar-list-events.js";
 import { createCalendarCreateEventTool } from "./calendar-create-event.js";
 import { createCalendarUpdateEventTool } from "./calendar-update-event.js";
@@ -33,12 +34,18 @@ import {
 } from "./github.js";
 import { SkillService } from "../skills/skill-service.js";
 import { CustomToolService } from "./custom-tool-service.js";
-import { executeCustomTool } from "./custom-tool-executor.js";
+// Lazy import — isolated-vm (used by custom-tool-executor) requires native
+// binaries that may not be available in all environments.
+const lazyExecuteCustomTool = async (...args: Parameters<typeof import("./custom-tool-executor.js").executeCustomTool>) => {
+  const { executeCustomTool } = await import("./custom-tool-executor.js");
+  return executeCustomTool(...args);
+};
 import { createMemorySaveTool } from "./memory-save.js";
 import { createSshExecTool } from "./ssh-exec.js";
 import { createSshListKeysTool } from "./ssh-list-keys.js";
 import { createSshListHostsTool } from "./ssh-list-hosts.js";
 import { createSshConnectTool } from "./ssh-connect.js";
+import { createGetCurrentTimeTool } from "./get-current-time.js";
 import { McpClientManager } from "../mcp/mcp-client-manager.js";
 import { McpServerService as McpServerServiceRef } from "../mcp/mcp-service.js";
 
@@ -53,6 +60,7 @@ const TOOL_REGISTRY: Record<string, ToolCreator> = {
   web_browse: createWebBrowseTool,
   install_package: createInstallPackageTool,
   opencode_task: createOpenCodeTaskTool,
+  demo_record: createDemoRecordTool,
   github_get_issue: createGitHubGetIssueTool,
   github_list_issues: createGitHubListIssuesTool,
   github_get_pr: createGitHubGetPRTool,
@@ -67,12 +75,12 @@ const CONTEXTLESS_TOOL_REGISTRY: Record<string, () => unknown> = {
   todo_create: createTodoCreateTool,
   todo_update: createTodoUpdateTool,
   todo_delete: createTodoDeleteTool,
-  gmail_list: createGmailListTool,
-  gmail_read: createGmailReadTool,
-  gmail_send: createGmailSendTool,
-  gmail_reply: createGmailReplyTool,
-  gmail_label: createGmailLabelTool,
-  gmail_archive: createGmailArchiveTool,
+  email_list: createEmailListTool,
+  email_read: createEmailReadTool,
+  email_send: createEmailSendTool,
+  email_reply: createEmailReplyTool,
+  email_folder: createEmailFolderTool,
+  email_archive: createEmailArchiveTool,
   calendar_list_events: createCalendarListEventsTool,
   calendar_create_event: createCalendarCreateEventTool,
   calendar_update_event: createCalendarUpdateEventTool,
@@ -83,6 +91,8 @@ const CONTEXTLESS_TOOL_REGISTRY: Record<string, () => unknown> = {
   list_custom_tools: createListCustomToolsTool,
   update_custom_tool: createUpdateCustomToolTool,
   test_custom_tool: createTestCustomToolTool,
+  // Time tools
+  get_current_time: createGetCurrentTimeTool,
   // Memory tools
   memory_save: createMemorySaveTool,
   // SSH tools
@@ -283,6 +293,22 @@ export function getToolsWithMeta(): {
         { name: "task", type: "string", required: true, description: "Detailed description of the coding task" },
       ],
     },
+    demo_record: {
+      description: "Record video demos of web applications with optional voiceover narration. Can start/stop dev servers and produces YouTube-ready MP4 videos.",
+      category: "Browser",
+      parameters: [
+        { name: "action", type: "string", required: true, description: "Action: start_server, stop_server, start, narrate, wait, stop, run_script, status" },
+        { name: "url", type: "string", required: false, description: "URL to navigate to (for start)" },
+        { name: "text", type: "string", required: false, description: "Narration text (for narrate)" },
+        { name: "seconds", type: "number", required: false, description: "Wait duration in seconds (for wait)" },
+        { name: "resolution", type: "string", required: false, description: "Video resolution: 720p or 1080p (for start)" },
+        { name: "filename", type: "string", required: false, description: "Output filename without extension (for stop)" },
+        { name: "script", type: "string", required: false, description: "JSON demo script (for run_script)" },
+        { name: "command", type: "string", required: false, description: "Shell command to start the dev server (for start_server)" },
+        { name: "port", type: "number", required: false, description: "Preferred port for the server (for start_server). If busy or omitted, a free port is auto-selected." },
+        { name: "cwd", type: "string", required: false, description: "Working directory for the server command (for start_server)" },
+      ],
+    },
     github_get_issue: {
       description: "Fetch a GitHub issue by number, including its comments.",
       category: "GitHub",
@@ -370,23 +396,23 @@ export function getToolsWithMeta(): {
         { name: "id", type: "string", required: true, description: "The todo ID to delete" },
       ],
     },
-    gmail_list: {
-      description: "List Gmail messages from the inbox, with optional query filtering.",
+    email_list: {
+      description: "List email messages from the inbox.",
       category: "Email",
       parameters: [
-        { name: "query", type: "string", required: false, description: "Gmail search query (e.g. 'is:unread', 'from:user@example.com')" },
+        { name: "query", type: "string", required: false, description: "Search query (reserved for future use)" },
         { name: "maxResults", type: "number", required: false, description: "Maximum number of messages to return (default: 10)" },
       ],
     },
-    gmail_read: {
-      description: "Read the full content of a specific Gmail message by ID.",
+    email_read: {
+      description: "Read the full content of a specific email message by ID.",
       category: "Email",
       parameters: [
-        { name: "messageId", type: "string", required: true, description: "The Gmail message ID" },
+        { name: "messageId", type: "string", required: true, description: "The email message ID (UID)" },
       ],
     },
-    gmail_send: {
-      description: "Send a new email via Gmail.",
+    email_send: {
+      description: "Send a new email via SMTP.",
       category: "Email",
       parameters: [
         { name: "to", type: "string", required: true, description: "Recipient email address" },
@@ -394,25 +420,24 @@ export function getToolsWithMeta(): {
         { name: "body", type: "string", required: true, description: "Email body (plain text)" },
       ],
     },
-    gmail_reply: {
-      description: "Reply to an existing Gmail message.",
+    email_reply: {
+      description: "Reply to an existing email message.",
       category: "Email",
       parameters: [
         { name: "messageId", type: "string", required: true, description: "The message ID to reply to" },
         { name: "body", type: "string", required: true, description: "Reply body (plain text)" },
       ],
     },
-    gmail_label: {
-      description: "Add or remove labels on Gmail messages.",
+    email_folder: {
+      description: "Move an email to a different folder.",
       category: "Email",
       parameters: [
         { name: "messageId", type: "string", required: true, description: "The message ID" },
-        { name: "addLabels", type: "string[]", required: false, description: "Labels to add" },
-        { name: "removeLabels", type: "string[]", required: false, description: "Labels to remove" },
+        { name: "folder", type: "string", required: true, description: "Target folder name" },
       ],
     },
-    gmail_archive: {
-      description: "Archive Gmail messages by removing the INBOX label.",
+    email_archive: {
+      description: "Archive an email (move out of inbox).",
       category: "Email",
       parameters: [
         { name: "messageId", type: "string", required: true, description: "The message ID to archive" },
@@ -492,6 +517,11 @@ export function getToolsWithMeta(): {
         { name: "id", type: "string", required: true, description: "The tool ID to test" },
         { name: "params", type: "object", required: true, description: "Parameters to pass to the tool" },
       ],
+    },
+    get_current_time: {
+      description: "Get the current date and time. Use this when you need an up-to-date timestamp.",
+      category: "Utility",
+      parameters: [],
     },
     ssh_exec: {
       description: "Execute a command on a remote host via SSH. Output capped at 50KB, timeout 2 minutes.",
@@ -593,7 +623,7 @@ function createCustomToolWrapper(customTool: import("@otterbot/shared").CustomTo
     description: customTool.description,
     parameters: z.object(shape),
     execute: async (params: Record<string, unknown>) => {
-      return executeCustomTool(customTool, params);
+      return lazyExecuteCustomTool(customTool, params);
     },
   });
 }
@@ -687,7 +717,7 @@ function createTestCustomToolTool() {
       const customTool = svc.get(id);
       if (!customTool) return JSON.stringify({ error: "Tool not found" });
       try {
-        const result = await executeCustomTool(customTool, params);
+        const result = await lazyExecuteCustomTool(customTool, params);
         return JSON.stringify({ result });
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);

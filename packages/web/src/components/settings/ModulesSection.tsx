@@ -1,5 +1,8 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { cn } from "../../lib/utils";
+import { useSettingsStore } from "../../stores/settings-store";
+import { ModelCombobox } from "./ModelCombobox";
+import { ModuleAgentChat } from "./ModuleAgentChat";
 
 interface InstalledModule {
   id: string;
@@ -12,8 +15,458 @@ interface InstalledModule {
   loaded: boolean;
   documents: number;
   hasQuery: boolean;
+  hasAgent: boolean;
   installedAt: string;
   updatedAt: string;
+}
+
+interface ConfigField {
+  type: "string" | "number" | "boolean" | "secret" | "select";
+  description: string;
+  required: boolean;
+  default?: string | number | boolean;
+  options?: { value: string; label: string }[];
+}
+
+interface ModuleConfig {
+  schema: Record<string, ConfigField>;
+  values: Record<string, string | undefined>;
+}
+
+interface DbTableInfo {
+  name: string;
+  rowCount: number;
+}
+
+function ModuleDbInfo({ moduleId }: { moduleId: string }) {
+  const [tables, setTables] = useState<DbTableInfo[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch(`/api/modules/${moduleId}/db-info`);
+        if (res.ok) {
+          const data = await res.json();
+          setTables(data.tables ?? []);
+        }
+      } catch {
+        /* ignore */
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, [moduleId]);
+
+  if (loading) return null;
+  if (tables.length === 0) return null;
+
+  return (
+    <div className="border-t border-border pt-3 space-y-2">
+      <div className="text-[10px] text-muted-foreground uppercase tracking-wider font-medium">
+        Database
+      </div>
+      <div className="grid grid-cols-2 gap-x-4 gap-y-1">
+        {tables.map((t) => (
+          <div key={t.name} className="flex items-center justify-between text-[10px]">
+            <span className="text-muted-foreground font-mono">{t.name}</span>
+            <span className="text-muted-foreground/60 font-mono">{t.rowCount.toLocaleString()} rows</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ModuleQueryBox({ moduleId }: { moduleId: string }) {
+  const [question, setQuestion] = useState("");
+  const [asking, setAsking] = useState(false);
+  const [lastQ, setLastQ] = useState<string | null>(null);
+  const [lastA, setLastA] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleAsk = async () => {
+    const q = question.trim();
+    if (!q || asking) return;
+    setAsking(true);
+    setError(null);
+    setLastQ(q);
+    setLastA(null);
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 150_000);
+      const res = await fetch(`/api/modules/${moduleId}/query`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ question: q }),
+        signal: controller.signal,
+      });
+      clearTimeout(timeout);
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error ?? "Query failed");
+      } else {
+        setLastA(data.answer ?? "(no answer returned)");
+        setQuestion("");
+      }
+    } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") {
+        setError("Request timed out — the agent may be busy.");
+      } else {
+        setError(err instanceof Error ? err.message : "Query failed");
+      }
+    } finally {
+      setAsking(false);
+    }
+  };
+
+  return (
+    <div className="border-t border-border pt-3 space-y-2">
+      <div className="text-[10px] text-muted-foreground uppercase tracking-wider font-medium">
+        Ask Agent
+      </div>
+      <div className="flex items-center gap-2">
+        <input
+          type="text"
+          value={question}
+          onChange={(e) => setQuestion(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && handleAsk()}
+          placeholder="Ask a question..."
+          disabled={asking}
+          className="flex-1 bg-secondary rounded-md px-3 py-1.5 text-xs outline-none focus:ring-1 ring-primary"
+        />
+        <button
+          onClick={handleAsk}
+          disabled={asking || !question.trim()}
+          className="text-xs bg-primary text-primary-foreground px-3 py-1.5 rounded-md hover:bg-primary/90 disabled:opacity-50"
+        >
+          {asking ? "Asking..." : "Ask"}
+        </button>
+      </div>
+      {error && <div className="text-xs text-red-500">{error}</div>}
+      {lastQ && asking && (
+        <div className="bg-secondary/50 rounded-md p-3 space-y-2">
+          <div className="text-[10px] text-muted-foreground">Q: {lastQ}</div>
+          <div className="text-xs text-muted-foreground animate-pulse">
+            Thinking... this may take a minute while the agent reasons.
+          </div>
+        </div>
+      )}
+      {lastQ && !asking && lastA !== null && (
+        <div className="bg-secondary/50 rounded-md p-3 space-y-2">
+          <div className="text-[10px] text-muted-foreground">Q: {lastQ}</div>
+          <div className="text-xs text-foreground whitespace-pre-wrap">{lastA || "(empty response)"}</div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ModuleConfigPanel({ moduleId }: { moduleId: string }) {
+  const [config, setConfig] = useState<ModuleConfig | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [editValues, setEditValues] = useState<Record<string, string>>({});
+  const [dirty, setDirty] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState(false);
+
+  const providers = useSettingsStore((s) => s.providers);
+  const models = useSettingsStore((s) => s.models);
+  const fetchModels = useSettingsStore((s) => s.fetchModels);
+  const loadSettings = useSettingsStore((s) => s.loadSettings);
+
+  // Load providers on mount
+  useEffect(() => {
+    if (providers.length === 0) {
+      loadSettings();
+    }
+  }, [providers.length, loadSettings]);
+
+  const loadConfig = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/modules/${moduleId}/config`);
+      if (res.ok) {
+        const data = await res.json();
+        setConfig(data);
+        // Initialize edit values from current values
+        const vals: Record<string, string> = {};
+        for (const [key, field] of Object.entries(data.schema as Record<string, ConfigField>)) {
+          vals[key] = data.values[key] ?? (field.default != null ? String(field.default) : "");
+        }
+        setEditValues(vals);
+        setDirty(false);
+      }
+    } catch {
+      /* ignore */
+    } finally {
+      setLoading(false);
+    }
+  }, [moduleId]);
+
+  useEffect(() => {
+    loadConfig();
+  }, [loadConfig]);
+
+  // Fetch models when provider changes
+  const selectedProvider = editValues.agent_provider;
+  useEffect(() => {
+    if (selectedProvider) {
+      const provider = providers.find((p) => p.id === selectedProvider);
+      if (provider && !models[provider.id]) {
+        fetchModels(provider.id);
+      }
+    }
+  }, [selectedProvider, providers, models, fetchModels]);
+
+  const handleSave = async () => {
+    if (!config) return;
+    setSaving(true);
+    setError(null);
+    setSuccess(false);
+    try {
+      const updates: Record<string, string | null> = {};
+      for (const key of Object.keys(config.schema)) {
+        const newVal = editValues[key] ?? "";
+        const oldVal = config.values[key] ?? "";
+        if (newVal !== oldVal) {
+          updates[key] = newVal || null;
+        }
+      }
+      if (Object.keys(updates).length === 0) {
+        setDirty(false);
+        return;
+      }
+      const res = await fetch(`/api/modules/${moduleId}/config`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(updates),
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        setError(data.error ?? "Save failed");
+      } else {
+        setDirty(false);
+        setSuccess(true);
+        setTimeout(() => setSuccess(false), 2000);
+        await loadConfig();
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Save failed");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (loading) {
+    return <div className="text-[10px] text-muted-foreground py-2">Loading config...</div>;
+  }
+
+  if (!config || Object.keys(config.schema).length === 0) {
+    return null;
+  }
+
+  // Separate core config from agent config
+  const coreFields = Object.entries(config.schema).filter(([key]) => !key.startsWith("agent_"));
+  const agentFields = Object.entries(config.schema).filter(([key]) => key.startsWith("agent_"));
+
+  const renderField = ([key, field]: [string, ConfigField]) => {
+    // Special handling for agent_provider
+    if (key === "agent_provider") {
+      return (
+        <div key={key}>
+          <label className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1 flex items-center gap-1.5">
+            {key.replace(/_/g, " ")}
+          </label>
+          <p className="text-[10px] text-muted-foreground/60 mb-1">{field.description}</p>
+          <select
+            value={editValues[key] ?? ""}
+            onChange={(e) => {
+              setEditValues({ ...editValues, [key]: e.target.value });
+              setDirty(true);
+              // Fetch models for newly selected provider
+              if (e.target.value) {
+                fetchModels(e.target.value);
+              }
+            }}
+            className="w-full bg-secondary rounded-md px-3 py-1.5 text-xs outline-none focus:ring-1 ring-primary"
+          >
+            <option value="">System default</option>
+            {providers.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name} ({p.type})
+              </option>
+            ))}
+          </select>
+        </div>
+      );
+    }
+
+    // Special handling for agent_model
+    if (key === "agent_model") {
+      const provId = editValues.agent_provider;
+      const modelOptions = provId ? (models[provId] ?? []) : [];
+      return (
+        <div key={key}>
+          <label className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1 flex items-center gap-1.5">
+            {key.replace(/_/g, " ")}
+          </label>
+          <p className="text-[10px] text-muted-foreground/60 mb-1">{field.description}</p>
+          <ModelCombobox
+            value={editValues[key] ?? ""}
+            options={modelOptions}
+            onChange={(val) => {
+              setEditValues({ ...editValues, [key]: val });
+              setDirty(true);
+            }}
+            placeholder="System default"
+          />
+        </div>
+      );
+    }
+
+    // Special handling for agent_prompt — multi-line textarea
+    if (key === "agent_prompt") {
+      return (
+        <div key={key}>
+          <label className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1 flex items-center gap-1.5">
+            {key.replace(/_/g, " ")}
+          </label>
+          <p className="text-[10px] text-muted-foreground/60 mb-1">{field.description}</p>
+          <textarea
+            value={editValues[key] ?? ""}
+            onChange={(e) => {
+              setEditValues({ ...editValues, [key]: e.target.value });
+              setDirty(true);
+            }}
+            placeholder={field.default != null ? String(field.default) : undefined}
+            rows={8}
+            className="w-full bg-secondary rounded-md px-3 py-1.5 text-xs outline-none focus:ring-1 ring-primary font-mono resize-y"
+          />
+        </div>
+      );
+    }
+
+    // Generic select field
+    if (field.type === "select" && field.options) {
+      return (
+        <div key={key}>
+          <label className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1 flex items-center gap-1.5">
+            {key.replace(/_/g, " ")}
+            {field.required && <span className="text-red-400">*</span>}
+          </label>
+          <p className="text-[10px] text-muted-foreground/60 mb-1">{field.description}</p>
+          <select
+            value={editValues[key] ?? ""}
+            onChange={(e) => {
+              setEditValues({ ...editValues, [key]: e.target.value });
+              setDirty(true);
+            }}
+            className="w-full bg-secondary rounded-md px-3 py-1.5 text-xs outline-none focus:ring-1 ring-primary"
+          >
+            {field.options.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
+        </div>
+      );
+    }
+
+    // Boolean toggle
+    if (field.type === "boolean") {
+      return (
+        <div key={key}>
+          <label className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1 flex items-center gap-1.5">
+            {key.replace(/_/g, " ")}
+            {field.required && <span className="text-red-400">*</span>}
+          </label>
+          <p className="text-[10px] text-muted-foreground/60 mb-1">{field.description}</p>
+          <button
+            onClick={() => {
+              const newVal = editValues[key] === "true" ? "false" : "true";
+              setEditValues({ ...editValues, [key]: newVal });
+              setDirty(true);
+            }}
+            className={cn(
+              "relative w-9 h-5 rounded-full transition-colors",
+              editValues[key] === "true" ? "bg-primary" : "bg-secondary",
+            )}
+          >
+            <span
+              className={cn(
+                "absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full transition-transform",
+                editValues[key] === "true" && "translate-x-4",
+              )}
+            />
+          </button>
+        </div>
+      );
+    }
+
+    // Default: text/number/secret input
+    return (
+      <div key={key}>
+        <label className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1 flex items-center gap-1.5">
+          {key.replace(/_/g, " ")}
+          {field.required && <span className="text-red-400">*</span>}
+          {field.type === "secret" && (
+            <span className="text-yellow-500 normal-case">(secret)</span>
+          )}
+        </label>
+        <p className="text-[10px] text-muted-foreground/60 mb-1">{field.description}</p>
+        <input
+          type={field.type === "secret" ? "password" : "text"}
+          value={editValues[key] ?? ""}
+          onChange={(e) => {
+            setEditValues({ ...editValues, [key]: e.target.value });
+            setDirty(true);
+          }}
+          placeholder={field.default != null ? String(field.default) : undefined}
+          className="w-full bg-secondary rounded-md px-3 py-1.5 text-xs outline-none focus:ring-1 ring-primary font-mono"
+        />
+      </div>
+    );
+  };
+
+  return (
+    <div className="border-t border-border pt-3 space-y-3">
+      <div className="text-[10px] text-muted-foreground uppercase tracking-wider font-medium">
+        Configuration
+      </div>
+
+      {coreFields.length > 0 && (
+        <div className="space-y-3">
+          {coreFields.map(renderField)}
+        </div>
+      )}
+
+      {agentFields.length > 0 && (
+        <details className="group">
+          <summary className="text-[10px] text-muted-foreground uppercase tracking-wider font-medium cursor-pointer hover:text-foreground">
+            Agent Settings
+          </summary>
+          <div className="space-y-3 mt-3">
+            {agentFields.map(renderField)}
+          </div>
+        </details>
+      )}
+
+      <div className="flex items-center gap-2">
+        <button
+          onClick={handleSave}
+          disabled={!dirty || saving}
+          className="text-xs bg-primary text-primary-foreground px-3 py-1.5 rounded-md hover:bg-primary/90 disabled:opacity-50"
+        >
+          {saving ? "Saving..." : "Save"}
+        </button>
+        {error && <span className="text-xs text-red-500">{error}</span>}
+        {success && <span className="text-xs text-green-500">Saved</span>}
+      </div>
+
+    </div>
+  );
 }
 
 export function ModulesSection() {
@@ -32,6 +485,10 @@ export function ModulesSection() {
   const [duplicateError, setDuplicateError] = useState<string | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [syncingId, setSyncingId] = useState<string | null>(null);
+  const [syncResult, setSyncResult] = useState<{ id: string; items: number } | null>(null);
+  const [showAgentChat, setShowAgentChat] = useState(false);
 
   const loadModules = async () => {
     try {
@@ -150,6 +607,28 @@ export function ModulesSection() {
     }
   };
 
+  const handleSync = async (id: string) => {
+    setSyncingId(id);
+    setSyncResult(null);
+    try {
+      const res = await fetch(`/api/modules/${id}/poll`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fullSync: true }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setSyncResult({ id, items: data.items });
+        setTimeout(() => setSyncResult(null), 5000);
+        await loadModules();
+      }
+    } catch {
+      /* ignore */
+    } finally {
+      setSyncingId(null);
+    }
+  };
+
   return (
     <div className="p-5 space-y-4">
       <p className="text-xs text-muted-foreground">
@@ -157,7 +636,7 @@ export function ModulesSection() {
         into isolated knowledge stores, queryable by the COO via tools.
       </p>
 
-      {/* Install button */}
+      {/* Install button + Agent Chat */}
       <div className="flex items-center gap-2">
         <button
           onClick={() => setShowInstall(!showInstall)}
@@ -165,6 +644,14 @@ export function ModulesSection() {
         >
           {showInstall ? "Cancel" : "Install Module"}
         </button>
+        {modules.some((m) => m.loaded && (m.hasAgent || m.hasQuery)) && (
+          <button
+            onClick={() => setShowAgentChat(true)}
+            className="text-xs bg-secondary text-foreground px-3 py-1.5 rounded-md hover:bg-secondary/80"
+          >
+            Agent Chat
+          </button>
+        )}
       </div>
 
       {/* Install form */}
@@ -315,6 +802,25 @@ export function ModulesSection() {
                   {!mod.loaded && mod.enabled && (
                     <span className="text-[10px] text-yellow-500">Not loaded</span>
                   )}
+                  {mod.loaded && (
+                    <button
+                      onClick={() => handleSync(mod.id)}
+                      disabled={syncingId === mod.id}
+                      className="text-xs text-muted-foreground hover:text-foreground px-2 py-1"
+                    >
+                      {syncingId === mod.id
+                        ? "Syncing..."
+                        : syncResult?.id === mod.id
+                          ? `Synced ${syncResult.items} items`
+                          : "Sync Now"}
+                    </button>
+                  )}
+                  <button
+                    onClick={() => setExpandedId(expandedId === mod.id ? null : mod.id)}
+                    className="text-xs text-muted-foreground hover:text-foreground px-2 py-1"
+                  >
+                    {expandedId === mod.id ? "Hide Config" : "Config"}
+                  </button>
                 </div>
               </div>
 
@@ -335,6 +841,19 @@ export function ModulesSection() {
                 <div className="text-[10px] text-muted-foreground font-mono truncate">
                   {mod.sourceUri}
                 </div>
+              )}
+
+              {/* Database stats (always visible when loaded) */}
+              {mod.loaded && <ModuleDbInfo moduleId={mod.id} />}
+
+              {/* Inline query box for modules with agent or query handler */}
+              {mod.loaded && (mod.hasAgent || mod.hasQuery) && (
+                <ModuleQueryBox moduleId={mod.id} />
+              )}
+
+              {/* Config panel */}
+              {expandedId === mod.id && (
+                <ModuleConfigPanel moduleId={mod.id} />
               )}
 
               {/* Duplicate inline form */}
@@ -404,6 +923,16 @@ export function ModulesSection() {
             </div>
           ))}
         </div>
+      )}
+
+      {/* Agent Chat modal */}
+      {showAgentChat && (
+        <ModuleAgentChat
+          modules={modules
+            .filter((m) => m.loaded && (m.hasAgent || m.hasQuery))
+            .map((m) => ({ id: m.id, name: m.name }))}
+          onClose={() => setShowAgentChat(false)}
+        />
       )}
     </div>
   );

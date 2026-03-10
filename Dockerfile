@@ -10,10 +10,14 @@ COPY packages/shared/package.json ./packages/shared/
 COPY packages/server/package.json ./packages/server/
 COPY packages/web/package.json ./packages/web/
 COPY modules/github-discussions/package.json ./modules/github-discussions/
+COPY modules/deep-research/package.json ./modules/deep-research/
+COPY modules/discord-support/package.json ./modules/discord-support/
 RUN pnpm install --frozen-lockfile
 
 # Build
 FROM deps AS build
+ARG BUILD_VERSION
+ENV VITE_APP_VERSION=${BUILD_VERSION}
 COPY . .
 RUN pnpm build
 
@@ -96,8 +100,8 @@ ARG OTTERBOT_GID=1000
 ENV OTTERBOT_UID=${OTTERBOT_UID}
 ENV OTTERBOT_GID=${OTTERBOT_GID}
 RUN (getent group ${OTTERBOT_GID} || groupadd -g ${OTTERBOT_GID} otterbot) \
-    && useradd -u ${OTTERBOT_UID} -g ${OTTERBOT_GID} -m otterbot 2>/dev/null \
-    || useradd -u ${OTTERBOT_UID} -g ${OTTERBOT_GID} -m -o otterbot
+    && useradd -u ${OTTERBOT_UID} -g ${OTTERBOT_GID} -m -d /otterbot/home otterbot 2>/dev/null \
+    || useradd -u ${OTTERBOT_UID} -g ${OTTERBOT_GID} -m -o -d /otterbot/home otterbot
 
 # Sudoers configuration is handled at runtime in entrypoint.sh (SUDO_MODE env var)
 
@@ -114,9 +118,18 @@ COPY --from=build /app/packages/web/package.json ./packages/web/
 COPY --from=build /app/assets ./assets
 COPY --from=build /app/modules/github-discussions/dist ./modules/github-discussions/dist
 COPY --from=build /app/modules/github-discussions/package.json ./modules/github-discussions/
+COPY --from=build /app/modules/deep-research/dist ./modules/deep-research/dist
+COPY --from=build /app/modules/deep-research/package.json ./modules/deep-research/
+COPY --from=build /app/modules/discord-support/dist ./modules/discord-support/dist
+COPY --from=build /app/modules/discord-support/package.json ./modules/discord-support/
+COPY --from=build /app/modules/discord-support/node_modules ./modules/discord-support/node_modules
 # Link @otterbot/shared so built-in modules can resolve it at runtime
 RUN mkdir -p modules/github-discussions/node_modules/@otterbot \
-    && ln -s /app/packages/shared modules/github-discussions/node_modules/@otterbot/shared
+    && ln -sf /app/packages/shared modules/github-discussions/node_modules/@otterbot/shared \
+    && mkdir -p modules/deep-research/node_modules/@otterbot \
+    && ln -sf /app/packages/shared modules/deep-research/node_modules/@otterbot/shared \
+    && mkdir -p modules/discord-support/node_modules/@otterbot \
+    && ln -sf /app/packages/shared modules/discord-support/node_modules/@otterbot/shared
 
 # Install Playwright Chromium browser (headless, for agent web browsing)
 # Use a fixed path so both root (build) and otterbot (runtime) can find it

@@ -46,6 +46,11 @@ const DEFAULT_MODEL_PRICES: Record<string, ModelPrice> = {
   "gemini-2.5-pro": { inputPerMillion: 1.25, outputPerMillion: 10 },
   "gemini-2.5-flash": { inputPerMillion: 0.15, outputPerMillion: 0.6 },
   "gemini-2.0-flash": { inputPerMillion: 0.1, outputPerMillion: 0.4 },
+  // Coding agent CLIs (billing handled externally by the CLI tool)
+  "claude-code": { inputPerMillion: 0, outputPerMillion: 0 },
+  "opencode": { inputPerMillion: 0, outputPerMillion: 0 },
+  "codex": { inputPerMillion: 0, outputPerMillion: 0 },
+  "gemini-cli": { inputPerMillion: 0, outputPerMillion: 0 },
 };
 
 /** Get user-overridden price for a model, or null if not overridden */

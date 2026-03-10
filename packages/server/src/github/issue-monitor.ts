@@ -5,6 +5,7 @@ import type { ServerToClientEvents, ClientToServerEvents, KanbanTask } from "@ot
 import { MessageType } from "@otterbot/shared";
 import { getDb, schema } from "../db/index.js";
 import { getConfig, setConfig } from "../auth/auth.js";
+import { resolveGitHubToken, resolveGitHubUsername } from "./account-resolver.js";
 import {
   fetchAssignedIssues,
   fetchOpenIssues,
@@ -67,11 +68,10 @@ export class GitHubIssueMonitor {
       .where(eq(schema.projects.status, "active"))
       .all();
 
-    const assignee = getConfig("github:username");
-    if (!assignee) return;
-
     for (const project of projects) {
-      if (project.githubRepo) {
+      if (project.githubRepo && project.githubIssueMonitor) {
+        const assignee = resolveGitHubUsername(project.id);
+        if (!assignee) continue;
         this.watchProject(project.id, project.githubRepo, assignee);
       }
     }
@@ -97,10 +97,10 @@ export class GitHubIssueMonitor {
   }
 
   private async poll(): Promise<void> {
-    const token = getConfig("github:token");
-    if (!token) return;
-
     for (const [projectId, watched] of this.watched) {
+      const token = resolveGitHubToken(projectId);
+      if (!token) continue;
+
       try {
         // Run triage on all new issues (if pipeline is enabled)
         await this.pollForTriage(projectId, watched, token);
@@ -129,7 +129,7 @@ export class GitHubIssueMonitor {
     // Only triage issues if the bot is a collaborator on the repo.
     // This prevents the bot from triaging issues in repos where it has no
     // contributor relationship and will never be assigned work.
-    const botUsername = getConfig("github:username") ?? null;
+    const botUsername = resolveGitHubUsername(projectId) ?? null;
     if (!botUsername) return;
 
     const isCollaborator = await this.isRepoCollaborator(watched.repo, token, botUsername);
@@ -595,7 +595,7 @@ export class GitHubIssueMonitor {
           watched.repo,
           token,
           issue.number,
-          formatBotComment("Issue Acknowledged", "Looking into this issue and will begin working on a fix shortly."),
+          formatBotComment("Working on It", "Working on this issue now."),
         );
       } catch (commentErr) {
         console.error(

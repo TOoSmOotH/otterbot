@@ -10,6 +10,41 @@ vi.mock("../../auth/auth.js", () => ({
   setConfig: vi.fn((key: string, value: string) => configStore.set(key, value)),
 }));
 
+// Mock account resolver — falls back to legacy config
+vi.mock("../account-resolver.js", () => ({
+  resolveGitHubAccount: vi.fn(() => {
+    const token = configStore.get("github:token");
+    if (!token) return null;
+    return {
+      id: "__legacy__",
+      label: "Legacy",
+      token,
+      username: configStore.get("github:username") ?? null,
+      email: configStore.get("github:email") ?? null,
+      sshKeyPath: null,
+      sshFingerprint: null,
+      sshKeyType: null,
+      isDefault: true,
+    };
+  }),
+  resolveGitHubToken: vi.fn(() => configStore.get("github:token")),
+  resolveGitHubUsername: vi.fn(() => configStore.get("github:username")),
+  resolveGitHubEmail: vi.fn(() => configStore.get("github:email")),
+}));
+
+// Mock node:fs — keep real implementations but allow spying on existsSync
+const mockExistsSync = vi.fn<(p: string) => boolean>();
+vi.mock("node:fs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs")>();
+  return {
+    ...actual,
+    existsSync: (p: string) =>
+      mockExistsSync.getMockImplementation()
+        ? mockExistsSync(p)
+        : actual.existsSync(p),
+  };
+});
+
 // Mock child_process execFileSync
 const mockExecFileSync = vi.fn();
 vi.mock("node:child_process", () => ({
@@ -33,6 +68,7 @@ describe("github-service", () => {
     tmpDir = mkdtempSync(join(tmpdir(), "otterbot-gh-test-"));
     configStore.clear();
     mockExecFileSync.mockReset();
+    mockExistsSync.mockReset();
   });
 
   afterEach(() => {
@@ -118,6 +154,7 @@ describe("github-service", () => {
 
     it("throws descriptive error when no PAT or SSH key configured", () => {
       const targetDir = join(tmpDir, "no-auth-repo");
+      mockExistsSync.mockReturnValue(false);
       expect(() => cloneRepo("owner/repo", targetDir)).toThrow(
         /no GitHub PAT configured and no SSH key found/,
       );
@@ -299,7 +336,7 @@ describe("github-service", () => {
     it("rejects invalid cross-fork head refs", async () => {
       await expect(
         fetchCompareCommitsDiff("owner/repo", "ghp_test", "main", "bad owner:feat/issue-405"),
-      ).rejects.toThrow("Invalid branch name: bad owner:feat/issue-405");
+      ).rejects.toThrow("Invalid compare ref: bad owner:feat/issue-405");
     });
   });
 

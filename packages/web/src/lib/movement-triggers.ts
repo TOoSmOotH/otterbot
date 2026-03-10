@@ -314,6 +314,37 @@ export function processAgentSpawn(agent: Agent) {
 }
 
 /**
+ * Process an agent departure: walk it to the main office center before exploding.
+ * Returns true if a walk was started, false if there's no scene/graph
+ * (caller should handle immediate explosion in that case).
+ */
+export function processAgentDeparture(agent: Agent): boolean {
+  const scene = useEnvironmentStore.getState().getActiveScene();
+  if (!scene?.waypointGraph || !scene?.zones) return false;
+
+  const graph = scene.waypointGraph;
+  const zones = scene.zones;
+
+  const mainZone = zones.find((z) => z.projectId === null && z.id !== BREAK_ROOM_ZONE_ID);
+  if (!mainZone) return false;
+
+  const centerWps = findWaypointsByZoneAndTag(graph, mainZone.id, "center");
+  if (centerWps.length === 0) return false;
+
+  // Find nearest waypoint to the agent's current position as starting point
+  const lastPos = useMovementStore.getState().getLastKnownPosition(agent.id);
+  const fromWp = lastPos
+    ? findNearestWaypoint(graph, lastPos)
+    : null;
+
+  if (fromWp) {
+    useMovementStore.getState().interruptAndMoveTo(agent.id, graph, fromWp.id, centerWps[0].id);
+    return true;
+  }
+  return false;
+}
+
+/**
  * Re-evaluate team leads in a project when worker activity changes.
  * If a worker starts working, the team lead should leave the break room and go to their project office.
  * If all workers become idle, the team lead should go to the break room.
@@ -350,6 +381,17 @@ export function initMovementTriggers() {
       const prev = agentPrevStatus.get(id);
       const prevAgent = prevState.agents.get(id);
 
+      // Departing agents: walk to center before exploding
+      if (agent.status === "done" && prev !== "done") {
+        const walkStarted = processAgentDeparture(agent);
+        if (!walkStarted) {
+          // No waypoint graph — remove immediately (departure watcher will
+          // see isAgentBusy=false on next frame and trigger the explosion).
+        }
+        agentPrevStatus.set(id, agent.status);
+        continue;
+      }
+
       // Detect projectId change (zone reassignment)
       if (prevAgent && prevAgent.projectId !== agent.projectId) {
         processAgentMovement(agent, prev);
@@ -364,12 +406,15 @@ export function initMovementTriggers() {
       agentPrevStatus.set(id, agent.status);
     }
 
-    // Clean up removed agents
+    // Clean up removed agents (but not departing ones — they're still walking)
     for (const [id] of prevState.agents) {
       if (!state.agents.has(id)) {
         agentZoneMap.delete(id);
         agentPrevStatus.delete(id);
-        useMovementStore.getState().cancelMovement(id);
+        // Only cancel movement if the agent wasn't departing (explosion already handled it)
+        if (!prevState._departingIds.has(id)) {
+          useMovementStore.getState().cancelMovement(id);
+        }
       }
     }
   });

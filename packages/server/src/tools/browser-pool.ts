@@ -18,7 +18,7 @@ const desktopEnabled = process.env.ENABLE_DESKTOP !== "false";
 /**
  * Parse viewport dimensions from DESKTOP_RESOLUTION env var (e.g. "1280x720x24").
  */
-function getViewportFromResolution(): { width: number; height: number } {
+export function getViewportFromResolution(): { width: number; height: number } {
   const res = process.env.DESKTOP_RESOLUTION ?? "1280x720x24";
   const parts = res.split("x");
   const width = parseInt(parts[0], 10) || 1280;
@@ -74,6 +74,30 @@ export async function createBrowserContext(): Promise<BrowserContext> {
     userAgent:
       "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     viewport,
+  });
+}
+
+/**
+ * Create a browser context with video recording enabled.
+ * Videos are saved as WebM files in the specified directory.
+ * The video is finalized when the page or context is closed.
+ */
+export async function createRecordingBrowserContext(
+  videoDir: string,
+  videoSize?: { width: number; height: number },
+): Promise<BrowserContext> {
+  const browser = await getBrowser();
+  const viewport = getViewportFromResolution();
+  const size = videoSize ?? viewport;
+
+  return browser.newContext({
+    userAgent:
+      "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    viewport,
+    recordVideo: {
+      dir: videoDir,
+      size,
+    },
   });
 }
 

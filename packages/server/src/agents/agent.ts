@@ -14,6 +14,7 @@ import { stream, resolveProviderCredentials } from "../llm/adapter.js";
 import { RetryError } from "ai";
 import {
   containsKimiToolMarkup,
+  CODING_AGENT_PROVIDER_TYPES,
   findToolMarkupStart,
   formatToolsForPrompt,
   parseKimiToolCalls,
@@ -28,6 +29,7 @@ import { MemoryService } from "../memory/memory-service.js";
 import { MemoryExtractor } from "../memory/memory-extractor.js";
 import { MemoryCompactor } from "../memory/memory-compactor.js";
 import { SECURITY_PREAMBLE } from "./prompts/security-preamble.js";
+import { buildDateContext } from "./prompts/date-context.js";
 
 export interface AgentOptions {
   id?: string;
@@ -197,15 +199,43 @@ export abstract class BaseAgent {
   /** Hook for long-lived agents (COO, TeamLead) to re-read model/provider from config before each think() call. */
   protected refreshLlmConfig(): void {}
 
+  /**
+   * Date-context pattern used by buildDateContext().
+   * Matches both the old format ("## Current Date … Current time: …")
+   * and the new format ("## Current Date & Time … Approximate time: …").
+   */
+  private static DATE_CONTEXT_RE = /\n\n## Current Date(?: & Time)?\n[\s\S]*?(?:Current|Approximate) time: [^\n]+/;
+
+  /**
+   * Replace the stale date/time block inside the system message (conversationHistory[0])
+   * with a freshly generated one.  This ensures long-lived agents always report the
+   * current wall-clock time rather than the time they were constructed.
+   */
+  private refreshDateContext(): void {
+    const sysMsg = this.conversationHistory[0];
+    if (!sysMsg || sysMsg.role !== "system" || typeof sysMsg.content !== "string") return;
+    if (!BaseAgent.DATE_CONTEXT_RE.test(sysMsg.content)) return;
+
+    sysMsg.content = sysMsg.content.replace(
+      BaseAgent.DATE_CONTEXT_RE,
+      buildDateContext(),
+    );
+  }
+
   /** Run LLM inference with the current conversation and stream the response */
   protected async think(
     userMessage: string,
     onToken?: (token: string, messageId: string) => void,
     onReasoning?: (token: string, messageId: string) => void,
     onReasoningEnd?: (messageId: string) => void,
+    options?: { imageParts?: Array<{ type: "image"; image: URL }> },
   ): Promise<{ text: string; thinking: string | undefined; hadToolCalls: boolean; isError?: boolean; timedOut?: boolean }> {
     // Re-read model/provider from config (no-op for short-lived workers)
     this.refreshLlmConfig();
+
+    // Refresh the date/time block in the system prompt so long-lived agents
+    // (COO, TeamLead) always report the current time, not the startup time.
+    this.refreshDateContext();
 
     // Reset abort flag at the start of each think cycle
     this._shouldAbortThink = false;
@@ -262,14 +292,28 @@ export abstract class BaseAgent {
       console.warn(`[Agent ${this.id}] Failed to inject memories:`, err);
     }
 
-    this.conversationHistory.push({ role: "user", content: userMessage });
+    if (options?.imageParts && options.imageParts.length > 0) {
+      this.conversationHistory.push({
+        role: "user",
+        content: [
+          { type: "text", text: userMessage },
+          ...options.imageParts,
+        ],
+      });
+    } else {
+      this.conversationHistory.push({ role: "user", content: userMessage });
+    }
     this.setStatus(AgentStatus.Thinking);
     console.log(`[Agent ${this.id}] think() — provider=${this.llmConfig.provider} model=${this.llmConfig.model}`);
 
     try {
       const tools = this.getTools();
       const hasTools = Object.keys(tools).length > 0;
-      const textToolMode = hasTools && usesTextToolCalling(this.llmConfig.model);
+      const resolvedType = resolveProviderCredentials(this.llmConfig.provider).type;
+      const textToolMode = hasTools && (
+        usesTextToolCalling(this.llmConfig.model) ||
+        CODING_AGENT_PROVIDER_TYPES.has(resolvedType)
+      );
 
       // For models that use text-based tool calling (e.g. Kimi K2.5), skip the
       // SDK-tools call entirely — it always returns empty. Go straight to text injection.
@@ -292,6 +336,17 @@ export abstract class BaseAgent {
           onReasoningEnd,
         ));
         getCircuitBreaker(this.llmConfig.provider).recordSuccess();
+      }
+
+      // Detect garbled responses (raw template tokens leaking) — indicates the
+      // model's chat template can't handle SDK tool formatting (common with Ollama).
+      // Treat as if the response was empty so we retry without SDK tools.
+      const garbledToolResponse = hasTools && !hadToolCalls && text &&
+        /\<\|(?:start_header_id|end_header_id|eot_id|im_start|im_end)\|>/.test(text);
+      if (garbledToolResponse) {
+        console.warn(`[Agent ${this.id}] Garbled response detected (raw template tokens) — retrying without tools`);
+        // Remove the garbled assistant message from history if it was appended
+        text = "";
       }
 
       // If tools were available but the stream produced NO text AND NO tool calls,
@@ -358,8 +413,27 @@ export abstract class BaseAgent {
         return { text: retry.text, thinking: retry.thinking, hadToolCalls: false };
       }
 
-      // If tools were called but final text is empty, synthesize a placeholder
-      // so callers have something to work with.
+      // If tools were called but the model never produced a final text response
+      // (e.g. it exhausted maxSteps on tool calls), do one more call WITHOUT tools
+      // to force the model to synthesize an answer from the tool results already
+      // in the conversation history.
+      if (!text && hadToolCalls) {
+        console.log(`[Agent ${this.id}] Tool calls produced no text — forcing synthesis without tools`);
+        const synthesis = await this.runStream(
+          undefined,
+          onToken,
+          onReasoning,
+          onReasoningEnd,
+        );
+        getCircuitBreaker(this.llmConfig.provider).recordSuccess();
+        text = synthesis.text;
+        if (synthesis.thinking) {
+          thinking = thinking
+            ? thinking + "\n\n" + synthesis.thinking
+            : synthesis.thinking;
+        }
+      }
+
       const finalText = text || (hadToolCalls ? "(tool calls executed)" : "");
 
       this.conversationHistory.push({
@@ -369,7 +443,7 @@ export abstract class BaseAgent {
       this.setStatus(AgentStatus.Idle);
 
       // Fire-and-forget: extract memories from this conversation turn
-      if (finalText && !hadToolCalls) {
+      if (finalText && finalText !== "(tool calls executed)") {
         new MemoryExtractor()
           .extract(userMessage, finalText, this.role, this.projectId)
           .catch(() => {}); // swallow errors silently

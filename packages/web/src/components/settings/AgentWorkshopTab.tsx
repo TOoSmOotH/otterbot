@@ -3,19 +3,22 @@ import { cn } from "../../lib/utils";
 import { AgentTemplatesTab } from "./AgentTemplatesTab";
 import { SkillsSubView } from "./SkillsSubView";
 import { ToolsSubView } from "./tools/ToolsSubView";
+import { SpecialistsSubView } from "./SpecialistsSubView";
 
-type WorkshopScope = "agents" | "skills" | "tools";
+type WorkshopScope = "agents" | "skills" | "tools" | "specialists";
 
 const SCOPE_TABS: { id: WorkshopScope; label: string }[] = [
   { id: "agents", label: "Agents" },
   { id: "skills", label: "Skills" },
   { id: "tools", label: "Tools" },
+  { id: "specialists", label: "Specialists" },
 ];
 
 export function AgentWorkshopTab() {
   const [activeScope, setActiveScope] = useState<WorkshopScope>("agents");
   const [navigateToSkillId, setNavigateToSkillId] = useState<string | null>(null);
   const [navigateToTool, setNavigateToTool] = useState<string | null>(null);
+  const [navigateToSpecialistId, setNavigateToSpecialistId] = useState<string | null>(null);
 
   const handleNavigateToSkill = useCallback((skillId: string) => {
     setNavigateToSkillId(skillId);
@@ -27,11 +30,17 @@ export function AgentWorkshopTab() {
     setActiveScope("tools");
   }, []);
 
+  const handleNavigateToSpecialist = useCallback((specialistId: string) => {
+    setNavigateToSpecialistId(specialistId);
+    setActiveScope("specialists");
+  }, []);
+
   // Clear navigation targets when the user manually switches tabs
   const handleScopeChange = useCallback((scope: WorkshopScope) => {
     setActiveScope(scope);
     if (scope !== "skills") setNavigateToSkillId(null);
     if (scope !== "tools") setNavigateToTool(null);
+    if (scope !== "specialists") setNavigateToSpecialistId(null);
   }, []);
 
   return (
@@ -57,7 +66,10 @@ export function AgentWorkshopTab() {
       {/* Sub-view */}
       <div className="flex-1 overflow-hidden">
         {activeScope === "agents" && (
-          <AgentTemplatesTab onNavigateToSkill={handleNavigateToSkill} />
+          <AgentTemplatesTab
+            onNavigateToSkill={handleNavigateToSkill}
+            onNavigateToSpecialist={handleNavigateToSpecialist}
+          />
         )}
         {activeScope === "skills" && (
           <SkillsSubView
@@ -70,6 +82,12 @@ export function AgentWorkshopTab() {
           <ToolsSubView
             navigateToName={navigateToTool}
             onNavigatedTo={() => setNavigateToTool(null)}
+          />
+        )}
+        {activeScope === "specialists" && (
+          <SpecialistsSubView
+            navigateToId={navigateToSpecialistId}
+            onNavigatedTo={() => setNavigateToSpecialistId(null)}
           />
         )}
       </div>

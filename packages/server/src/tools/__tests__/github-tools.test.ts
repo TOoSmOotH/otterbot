@@ -9,6 +9,15 @@ vi.mock("../../auth/auth.js", () => ({
   getConfig: vi.fn((key: string) => configStore.get(key)),
 }));
 
+vi.mock("../../github/account-resolver.js", () => ({
+  resolveGitHubAccount: vi.fn((projectId?: string) => {
+    const token = configStore.get("github:token");
+    const username = configStore.get("github:username");
+    if (!token) return null;
+    return { token, username, email: null, sshKeyPath: null, sshKeyUsage: "both" };
+  }),
+}));
+
 vi.mock("../../github/github-service.js", () => ({
   fetchIssue: vi.fn(),
   fetchIssues: vi.fn(),

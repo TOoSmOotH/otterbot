@@ -13,7 +13,7 @@ export interface RegistryEntry {
   /** Derived from assigned skills — not stored on the entry directly */
   tools: string[];
   builtIn: boolean;
-  role: "coo" | "team_lead" | "worker";
+  role: "coo" | "team_lead" | "worker" | "module_agent";
   modelPackId: string | null;
   gearConfig: GearConfig | null;
   clonedFromId: string | null;
@@ -27,7 +27,7 @@ export interface RegistryEntryCreate {
   promptAddendum?: string | null;
   defaultModel: string;
   defaultProvider: string;
-  role?: "coo" | "team_lead" | "worker";
+  role?: "coo" | "team_lead" | "worker" | "module_agent";
   clonedFromId?: string | null;
   modelPackId?: string | null;
   gearConfig?: GearConfig | null;
@@ -61,7 +61,38 @@ export interface Project {
   githubRepo: string | null;
   githubBranch: string | null;
   githubIssueMonitor: boolean;
+  signCommits: boolean;
+  show3d: boolean;
+  githubAccountId: string | null;
+  giteaRepo: string | null;
+  giteaBranch: string | null;
+  giteaIssueMonitor: boolean;
+  giteaAccountId: string | null;
   rules: string[];
+  createdAt: string;
+}
+
+export interface GiteaAccount {
+  id: string;
+  label: string;
+  tokenSet: boolean;
+  username: string | null;
+  email: string | null;
+  instanceUrl: string;
+  isDefault: boolean;
+  createdAt: string;
+}
+
+export interface GitHubAccount {
+  id: string;
+  label: string;
+  tokenSet: boolean;
+  username: string | null;
+  email: string | null;
+  sshKeySet: boolean;
+  sshFingerprint: string | null;
+  sshKeyType: string | null;
+  isDefault: boolean;
   createdAt: string;
 }
 

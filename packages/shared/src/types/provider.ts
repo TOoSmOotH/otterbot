@@ -1,4 +1,4 @@
-export type ProviderType = "anthropic" | "openai" | "google" | "ollama" | "openai-compatible" | "openrouter" | "github-copilot" | "huggingface" | "nvidia" | "minimax" | "xai" | "zai" | "perplexity" | "deepgram" | "bedrock" | "lmstudio" | "deepseek" | "mistral";
+export type ProviderType = "anthropic" | "openai" | "google" | "ollama" | "openai-compatible" | "openrouter" | "github-copilot" | "huggingface" | "nvidia" | "minimax" | "xai" | "zai" | "perplexity" | "deepgram" | "bedrock" | "lmstudio" | "deepseek" | "mistral" | "vercel-ai-gateway" | "claude-code" | "opencode" | "codex" | "gemini-cli";
 
 export interface NamedProvider {
   id: string;
@@ -29,6 +29,14 @@ export interface ModelOption {
   modelId: string;
   label?: string;
   source: "discovered" | "custom";
+}
+
+/** Provider entry submitted during setup wizard (multi-provider). */
+export interface SetupProviderEntry {
+  type: string;
+  name: string;
+  apiKey?: string;
+  baseUrl?: string;
 }
 
 /** Per-agent-type model/provider override (stored in config table) */

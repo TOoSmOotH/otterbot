@@ -5,8 +5,6 @@ on:
     branches: [beta]
 
 permissions:
-  contents: write
-  pull-requests: write
   packages: write
 
 concurrency:
@@ -18,31 +16,52 @@ jobs:
     name: Test & Build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - uses: ./.github/actions/test-and-build
 
-  release-please:
-    name: Release Please
+  compute-version:
+    name: Compute Version
     needs: test-and-build
     runs-on: ubuntu-latest
     outputs:
-      release_created: ${{ steps.release.outputs.release_created }}
-      tag_name: ${{ steps.release.outputs.tag_name }}
+      version: ${{ steps.version.outputs.version }}
+      docker_tag: ${{ steps.version.outputs.docker_tag }}
     steps:
-      - uses: googleapis/release-please-action@c3fc4de07084f75a2b61a5b933069bda6edf3d5c # v4
-        id: release
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          target-branch: beta
-          config-file: release-please-config-beta.json
-          manifest-file: .release-please-manifest.json
+          fetch-depth: 0
+
+      - name: Derive version from git
+        id: version
+        run: |
+          # Find latest stable tag across all branches (tags on main aren't ancestors of beta)
+          BASE_TAG=$(git tag -l 'otterbot-v[0-9]*.[0-9]*.[0-9]' --sort=-version:refname | grep -E '^otterbot-v[0-9]+\.[0-9]+\.[0-9]+$' | head -1)
+          if [ -n "$BASE_TAG" ]; then
+            BASE_VERSION=${BASE_TAG#otterbot-v}
+            # Count commits on beta since it diverged from the tagged commit
+            MERGE_BASE=$(git merge-base "$BASE_TAG" HEAD 2>/dev/null || echo "")
+            if [ -n "$MERGE_BASE" ]; then
+              COMMIT_COUNT=$(git rev-list ${MERGE_BASE}..HEAD --count)
+            else
+              COMMIT_COUNT=$(git rev-list HEAD --count)
+            fi
+          else
+            BASE_VERSION="0.0.0"
+            COMMIT_COUNT=$(git rev-list HEAD --count)
+          fi
+          SHORT_SHA=$(git rev-parse --short HEAD)
+          VERSION="${BASE_VERSION}-beta.${COMMIT_COUNT}+${SHORT_SHA}"
+          DOCKER_TAG="${BASE_VERSION}-beta.${COMMIT_COUNT}-${SHORT_SHA}"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "docker_tag=${DOCKER_TAG}" >> "$GITHUB_OUTPUT"
+          echo "Computed version: ${VERSION}"
 
   publish:
     name: Publish Container
-    needs: release-please
-    if: needs.release-please.outputs.release_created == 'true'
+    needs: compute-version
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Log in to GHCR
         uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
@@ -50,6 +69,9 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
@@ -59,8 +81,11 @@ jobs:
         with:
           context: .
           push: true
+          platforms: linux/amd64,linux/arm64
+          build-args: |
+            BUILD_VERSION=${{ needs.compute-version.outputs.version }}
           tags: |
             ghcr.io/toosmooth/otterbot:beta
-            ghcr.io/toosmooth/otterbot:${{ needs.release-please.outputs.tag_name }}
+            ghcr.io/toosmooth/otterbot:${{ needs.compute-version.outputs.docker_tag }}
           cache-from: type=gha
           cache-to: type=gha,mode=max

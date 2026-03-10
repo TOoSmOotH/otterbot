@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from "react";
-import { useSettingsStore, type ScheduledTaskInfo, type CustomTaskInfo } from "../../stores/settings-store";
+import { useSettingsStore, type ScheduledTaskInfo, type CustomTaskInfo, type ModuleAgentInfo } from "../../stores/settings-store";
 
 function formatInterval(ms: number): { value: number; unit: string; unitMs: number } {
   if (ms >= 3_600_000) {
@@ -116,7 +116,8 @@ interface CustomTaskFormData {
   name: string;
   description: string;
   message: string;
-  mode: "coo-prompt" | "coo-background" | "notification";
+  mode: "coo-prompt" | "coo-background" | "notification" | "module-agent";
+  moduleAgentId: string;
   intervalValue: string;
   intervalUnit: number; // ms per unit
 }
@@ -126,6 +127,7 @@ const EMPTY_FORM: CustomTaskFormData = {
   description: "",
   message: "",
   mode: "notification",
+  moduleAgentId: "",
   intervalValue: "5",
   intervalUnit: 60_000,
 };
@@ -143,9 +145,15 @@ function CustomTaskForm({
 }) {
   const [form, setForm] = useState<CustomTaskFormData>(initial ?? EMPTY_FORM);
   const [saving, setSaving] = useState(false);
+  const { moduleAgents, loadModuleAgents } = useSettingsStore();
+
+  useEffect(() => {
+    loadModuleAgents();
+  }, []);
 
   const handleSubmit = async () => {
     if (!form.name.trim() || !form.message.trim()) return;
+    if (form.mode === "module-agent" && !form.moduleAgentId) return;
     const num = parseFloat(form.intervalValue);
     if (isNaN(num) || num <= 0) return;
     setSaving(true);
@@ -179,21 +187,44 @@ function CustomTaskForm({
         />
       </div>
 
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-3 flex-wrap">
         <div className="flex items-center gap-2">
           <label className="text-[10px] text-muted-foreground uppercase tracking-wider whitespace-nowrap">
             Mode
           </label>
           <select
             value={form.mode}
-            onChange={(e) => setForm({ ...form, mode: e.target.value as "coo-prompt" | "coo-background" | "notification" })}
+            onChange={(e) => setForm({ ...form, mode: e.target.value as CustomTaskFormData["mode"] })}
             className="bg-secondary rounded-md px-2 py-1 text-xs outline-none focus:ring-1 ring-primary"
           >
             <option value="coo-prompt">Send to COO</option>
             <option value="coo-background">Background check</option>
             <option value="notification">Notification only</option>
+            {moduleAgents.length > 0 && (
+              <option value="module-agent">Module Agent</option>
+            )}
           </select>
         </div>
+
+        {form.mode === "module-agent" && (
+          <div className="flex items-center gap-2">
+            <label className="text-[10px] text-muted-foreground uppercase tracking-wider whitespace-nowrap">
+              Agent
+            </label>
+            <select
+              value={form.moduleAgentId}
+              onChange={(e) => setForm({ ...form, moduleAgentId: e.target.value })}
+              className="bg-secondary rounded-md px-2 py-1 text-xs outline-none focus:ring-1 ring-primary"
+            >
+              <option value="">Select agent...</option>
+              {moduleAgents.map((a) => (
+                <option key={a.agentId} value={a.agentId}>
+                  {a.name ?? a.moduleId}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
 
         <div className="flex items-center gap-2">
           <label className="text-[10px] text-muted-foreground uppercase tracking-wider whitespace-nowrap">
@@ -222,7 +253,7 @@ function CustomTaskForm({
       <div className="flex items-center gap-2 pt-1">
         <button
           onClick={handleSubmit}
-          disabled={saving || !form.name.trim() || !form.message.trim()}
+          disabled={saving || !form.name.trim() || !form.message.trim() || (form.mode === "module-agent" && !form.moduleAgentId)}
           className="px-3 py-1 text-xs rounded-md bg-primary text-primary-foreground hover:opacity-90 disabled:opacity-50"
         >
           {saving ? "Saving..." : submitLabel}
@@ -267,6 +298,7 @@ function CustomTaskCard({ task }: { task: CustomTaskInfo }) {
           description: task.description,
           message: task.message,
           mode: task.mode,
+          moduleAgentId: task.moduleAgentId ?? "",
           intervalValue: String(formatted.value),
           intervalUnit: formatted.unitMs,
         }}
@@ -279,6 +311,7 @@ function CustomTaskCard({ task }: { task: CustomTaskInfo }) {
             description: form.description,
             message: form.message,
             mode: form.mode,
+            moduleAgentId: form.mode === "module-agent" ? form.moduleAgentId : undefined,
             intervalMs: Math.round(num * form.intervalUnit),
           });
           setEditing(false);
@@ -300,9 +333,11 @@ function CustomTaskCard({ task }: { task: CustomTaskInfo }) {
               ? "bg-blue-500/20 text-blue-400"
               : task.mode === "coo-background"
                 ? "bg-purple-500/20 text-purple-400"
-                : "bg-amber-500/20 text-amber-400"
+                : task.mode === "module-agent"
+                  ? "bg-green-500/20 text-green-400"
+                  : "bg-amber-500/20 text-amber-400"
           }`}>
-            {task.mode === "coo-prompt" ? "COO Prompt" : task.mode === "coo-background" ? "Background Check" : "Notification"}
+            {task.mode === "coo-prompt" ? "COO Prompt" : task.mode === "coo-background" ? "Background Check" : task.mode === "module-agent" ? "Module Agent" : "Notification"}
           </span>
         </div>
         <div className="flex items-center gap-2">
@@ -426,6 +461,7 @@ export function ScheduledTasksSection() {
                   description: form.description,
                   message: form.message,
                   mode: form.mode,
+                  moduleAgentId: form.mode === "module-agent" ? form.moduleAgentId : undefined,
                   intervalMs: Math.round(num * form.intervalUnit),
                 });
                 setShowForm(false);

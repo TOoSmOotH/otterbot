@@ -1,5 +1,5 @@
 import type { Agent, AgentStatus, AgentActivityRecord } from "./agent.js";
-import type { BusMessage, Conversation } from "./message.js";
+import type { BusMessage, Conversation, ChatAttachment } from "./message.js";
 import type { RegistryEntry, Project, ProjectAgentAssignments, ProjectPipelineConfig } from "./registry.js";
 import type { KanbanTask } from "./kanban.js";
 import type { SceneZone } from "./environment.js";
@@ -66,11 +66,17 @@ export interface ServerToClientEvents {
   "mattermost:status": (data: { status: "connected" | "disconnected" | "error"; botUsername?: string }) => void;
   "telegram:pairing-request": (data: { code: string; telegramUserId: string; telegramUsername: string }) => void;
   "telegram:status": (data: { status: "connected" | "disconnected" | "error"; botUsername?: string }) => void;
+  "bluesky:pairing-request": (data: { code: string; blueskyDid: string; blueskyHandle: string }) => void;
+  "bluesky:status": (data: { status: "connected" | "disconnected" | "error"; handle?: string }) => void;
   "whatsapp:status": (data: { status: "connected" | "disconnected" | "qr" | "authenticated" | "auth_failure"; qr?: string }) => void;
   "signal:pairing-request": (data: { code: string; signalNumber: string }) => void;
   "signal:status": (data: { status: "connected" | "disconnected" | "error"; phoneNumber?: string }) => void;
   "nextcloud-talk:pairing-request": (data: { code: string; nextcloudUserId: string; nextcloudDisplayName: string }) => void;
   "nextcloud-talk:status": (data: { status: "connected" | "disconnected" | "error"; botUsername?: string }) => void;
+  "googlechat:pairing-request": (data: { code: string; googleChatUserId: string; googleChatUsername: string }) => void;
+  "googlechat:status": (data: { status: "connected" | "disconnected" | "error" }) => void;
+  "mastodon:pairing-request": (data: { code: string; mastodonId: string; mastodonAcct: string }) => void;
+  "mastodon:status": (data: { status: "connected" | "disconnected" | "error"; acct?: string }) => void;
   "merge-queue:updated": (data: { entries: MergeQueueEntry[] }) => void;
   "merge-queue:entry-updated": (entry: MergeQueueEntry) => void;
   "mcp:status": (runtime: McpServerRuntime) => void;
@@ -84,7 +90,7 @@ export interface ServerToClientEvents {
 /** Events emitted from client to server */
 export interface ClientToServerEvents {
   "ceo:message": (
-    data: { content: string; conversationId?: string; projectId?: string },
+    data: { content: string; conversationId?: string; projectId?: string; toAgentId?: string; attachments?: ChatAttachment[] },
     callback?: (ack: { messageId: string; conversationId: string }) => void,
   ) => void;
   "ceo:new-chat": (
@@ -100,6 +106,10 @@ export interface ClientToServerEvents {
   "ceo:load-conversation": (
     data: { conversationId: string },
     callback: (result: { messages: BusMessage[] }) => void,
+  ) => void;
+  "ceo:find-agent-conversation": (
+    data: { agentId: string | null; projectId?: string },
+    callback: (result: { conversationId: string | null; messages: BusMessage[] }) => void,
   ) => void;
   "project:list": (
     callback: (projects: Project[]) => void,
@@ -251,6 +261,46 @@ export interface ClientToServerEvents {
   ) => void;
   "merge-queue:reorder": (
     data: { entryId: string; newPosition: number },
+    callback?: (ack: { ok: boolean; error?: string }) => void,
+  ) => void;
+
+  // Issue monitor toggle
+  "project:set-issue-monitor": (
+    data: { projectId: string; enabled: boolean },
+    callback?: (ack: { ok: boolean; error?: string }) => void,
+  ) => void;
+
+  // GitHub account assignment
+  "project:set-github-account": (
+    data: { projectId: string; accountId: string | null },
+    callback?: (ack: { ok: boolean; error?: string }) => void,
+  ) => void;
+
+  // Gitea issue monitor toggle
+  "project:set-gitea-issue-monitor": (
+    data: { projectId: string; enabled: boolean },
+    callback?: (ack: { ok: boolean; error?: string }) => void,
+  ) => void;
+
+  // Gitea account assignment
+  "project:set-gitea-account": (
+    data: { projectId: string; accountId: string | null },
+    callback?: (ack: { ok: boolean; error?: string }) => void,
+  ) => void;
+
+  // Sign commits toggle
+  "project:get-sign-commits": (
+    data: { projectId: string },
+    callback: (result: { enabled: boolean; hasSSHKey: boolean }) => void,
+  ) => void;
+  "project:set-sign-commits": (
+    data: { projectId: string; enabled: boolean },
+    callback?: (ack: { ok: boolean; error?: string }) => void,
+  ) => void;
+
+  // 3D view visibility
+  "project:set-show3d": (
+    data: { projectId: string; enabled: boolean },
     callback?: (ack: { ok: boolean; error?: string }) => void,
   ) => void;
 

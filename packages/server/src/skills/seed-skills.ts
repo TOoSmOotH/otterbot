@@ -12,7 +12,7 @@ const SEED_SKILLS: Array<{ id: string; data: SkillCreate }> = [
       meta: {
         name: "COO Operations",
         description:
-          "Management tools for the COO: project creation, directives, model/search/package management, and shell commands.",
+          "Management tools for the COO: project creation, directives, model/search/package management, shell commands, specialist agent listing, and module management.",
         version: "1.0.0",
         author: "otterbot",
         tools: [
@@ -32,6 +32,11 @@ const SEED_SKILLS: Array<{ id: string; data: SkillCreate }> = [
           "github_get_issue",
           "github_list_prs",
           "github_get_pr",
+          "list_specialists",
+          "module_list",
+          "module_query",
+          "module_install",
+          "module_toggle",
         ],
         capabilities: ["management", "delegation", "coordination", "github"],
         parameters: {},
@@ -544,13 +549,235 @@ When creating tools:
 5. Return structured JSON strings when appropriate`,
     },
   },
+  {
+    id: "builtin-skill-specialist-creation",
+    data: {
+      meta: {
+        name: "Specialist Creation",
+        description:
+          "Guides the COO through creating new specialist agents by delegating to coding workers.",
+        version: "1.0.0",
+        author: "otterbot",
+        tools: [
+          "create_project",
+          "send_directive",
+          "module_install",
+          "module_list",
+          "module_toggle",
+        ],
+        capabilities: ["specialist-creation", "module-building"],
+        parameters: {},
+        tags: ["built-in", "specialist"],
+      },
+      body: `You have the ability to create new specialist agents when a user asks for one.
+
+## Recognition
+
+Activate this workflow when the user asks to create, build, or make a specialist agent — for example:
+- "Make a specialist for X"
+- "I want an agent that can Y"
+- "Create a specialist that monitors Z"
+- "Build me a stock trading agent"
+
+## Workflow
+
+### Step 1: Gather Requirements
+Discuss with the user:
+- What is the specialist's purpose? (e.g., "monitor Hacker News for AI news")
+- What data sources does it need? (APIs, RSS feeds, databases, etc.)
+- What tools should it expose? (search, create, update, etc.)
+- Does it need API keys or credentials?
+- What should its polling interval be?
+
+Keep it conversational — don't ask all questions at once. Infer sensible defaults.
+
+### Step 2: Create a Project
+Use \`create_project\` with a clear charter describing:
+- The specialist's name and purpose
+- Required API integrations
+- Tools to expose
+- Data schema needs
+- Polling/webhook triggers
+
+### Step 3: Delegate to a Coding Team Lead
+Use \`send_directive\` to the Team Lead with detailed instructions:
+
+Include in the directive:
+1. **Specialist purpose and name**
+2. **Reference files the coding worker MUST read first:**
+   - \`docs/AGENTS-VS-MODULES.md\` — the specialist agent specification
+   - \`modules/github-discussions/src/index.ts\` — a complete working example
+   - \`packages/shared/src/types/module.ts\` — TypeScript types for all module interfaces
+   - \`modules/_template/\` — the starter scaffold to copy and modify
+3. **Instructions:**
+   - Copy \`modules/_template/\` to \`modules/<specialist-name>/\`
+   - Update \`package.json\`: change the name and otterbot.id fields
+   - Implement the specialist in \`src/index.ts\` using \`defineModule()\` from \`@otterbot/shared\`
+   - Write real API integrations, not placeholder code
+   - Add database migrations if the specialist needs structured storage
+   - Add custom tools for querying the specialist's data
+   - Write unit tests for all tools and handlers
+   - Build with \`cd modules/<specialist-name> && npx pnpm install && npx pnpm build\`
+   - Run tests and ensure they pass
+
+### Step 4: Install the Module
+After the coding worker reports success, install the specialist:
+\`\`\`
+module_install with:
+  source: "local"
+  path: "modules/<specialist-name>"
+  name: "<Specialist Name>"
+\`\`\`
+
+### Step 5: Enable and Verify
+- Use \`module_toggle\` to enable the specialist if not already enabled
+- Use \`module_list\` to confirm it appears and is active
+- Report the result to the user: what was created, what it can do, and how to interact with it
+
+## Important Notes
+- The coding worker writes REAL TypeScript code with actual API integrations
+- Each specialist gets its own isolated knowledge store (SQLite DB) automatically
+- Specialists can define custom tools that the specialist's agent can use
+- The \`onPoll\` handler fetches data on a schedule; \`onWebhook\` handles incoming webhooks
+- The \`onQuery\` handler lets other agents query the specialist's knowledge
+- Config values (API keys, etc.) are set by the user after installation via the web UI`,
+    },
+  },
+  {
+    id: "builtin-skill-demo-recording",
+    data: {
+      meta: {
+        name: "Demo Recording",
+        description:
+          "Record video demos of running web applications with optional voiceover narration. Produces YouTube-ready MP4 videos.",
+        version: "1.0.0",
+        author: "otterbot",
+        tools: ["demo_record", "web_browse", "shell_exec", "file_read", "file_write"],
+        capabilities: [
+          "demo",
+          "video-recording",
+          "browser",
+          "screen-recording",
+          "voiceover",
+        ],
+        parameters: {},
+        tags: ["built-in", "demo", "browser", "video"],
+      },
+      body: `You are a demo recording specialist. You create polished video demos of running web applications, optionally with voiceover narration. Your videos should be YouTube-ready.
+
+## Server Management
+
+You can start and stop dev servers directly — no need for shell_exec or curl.
+
+### Starting a dev server
+Use \`demo_record start_server\` with the command and port:
+- **command**: The shell command to run (e.g. "npm run dev", "pnpm dev", "python -m http.server 3000")
+- **port**: The preferred port (e.g. 3000). If the port is already in use or omitted, a free port is auto-selected. The tool sets \`PORT=<actualPort>\` in the environment so most frameworks will bind to it automatically.
+- **cwd**: Optional subdirectory within the workspace (e.g. "packages/web")
+
+The tool spawns the server in the background and waits up to 60 seconds for the port to accept connections. It returns the actual port and URL when the server is ready — **always use the URL from the response**, not the port you requested, since it may have changed.
+
+### Discovering the dev command
+Before starting the server, read the project's package.json (or equivalent) to find the correct dev command:
+1. \`file_read\` the workspace root's package.json to check for \`scripts.dev\`, \`scripts.start\`, etc.
+2. If it's a monorepo, check the relevant package's package.json
+3. Common patterns: \`npm run dev\`, \`pnpm dev\`, \`yarn dev\`, \`python manage.py runserver\`
+
+### Stopping the server
+Use \`demo_record stop_server\` when you're done. This kills the background process.
+
+## Recording Modes
+
+You support three recording modes. Choose the best one based on your task:
+
+### 1. Silent Recording (no narration)
+Best for quick captures or when narration isn't needed.
+1. \`demo_record start_server\` to launch the dev server
+2. \`demo_record start\` with the app URL (e.g. http://localhost:3000)
+3. Use \`web_browse\` to interact with the app (navigate, click, fill forms)
+4. Use \`demo_record wait\` between actions for watchable pacing
+5. \`demo_record stop\` to finalize the MP4
+6. \`demo_record stop_server\` to shut down the dev server
+
+### 2. Ad-hoc Narration
+Best for exploratory demos where you narrate as you go.
+1. \`demo_record start_server\` to launch the dev server
+2. \`demo_record start\` with the app URL
+3. Before each interaction, call \`demo_record narrate\` to explain what you're about to do
+4. Use \`web_browse\` to perform the action
+5. Repeat narrate → act for each step
+6. \`demo_record stop\` to finalize with voiceover
+7. \`demo_record stop_server\` to shut down the dev server
+
+### 3. Scripted Demo
+Best for polished, repeatable demos. Write the script first, then execute it.
+
+**Step 1: Write the script** (or receive one from the task description)
+\`\`\`json
+[
+  {
+    "narration": "Welcome to our project management dashboard. Let me show you how to create a new project.",
+    "actions": [
+      { "type": "navigate", "url": "http://localhost:3000" },
+      { "type": "wait", "seconds": 1 }
+    ],
+    "waitAfter": 2
+  },
+  {
+    "narration": "Click the New Project button to get started.",
+    "actions": [
+      { "type": "click", "selector": "#new-project-btn" }
+    ],
+    "waitAfter": 1.5
+  },
+  {
+    "narration": "Fill in the project name and description.",
+    "actions": [
+      { "type": "fill", "selector": "#project-name", "value": "My Demo Project" },
+      { "type": "fill", "selector": "#description", "value": "A sample project to showcase features" }
+    ]
+  }
+]
+\`\`\`
+
+**Step 2: Execute**
+1. \`demo_record start_server\` to launch the dev server
+2. \`demo_record start\` with the app URL
+3. \`demo_record run_script\` with the JSON script
+4. \`demo_record stop\` to finalize
+5. \`demo_record stop_server\` to shut down the dev server
+
+## Pacing & Quality Tips
+- **Be deliberate**: Add 1-2 second pauses between actions so viewers can follow
+- **Follow a logical flow**: Start at the homepage, then drill into features — like a real user
+- **Use realistic data**: When filling forms, use plausible names, emails, descriptions
+- **Narrate clearly**: Write narration as if speaking to someone watching the video for the first time
+- **Keep narration concise**: Short sentences work best for TTS — avoid complex clauses
+- **Resolution**: Default is 720p. Use 1080p for detailed UIs: \`demo_record start url=... resolution=1080p\`
+
+## Cleanup
+ALWAYS clean up when you're done:
+1. \`demo_record stop\` to finalize the video (if recording is in progress)
+2. \`demo_record stop_server\` to shut down the dev server (if you started one)
+
+If an error occurs during recording, still try to stop the server to avoid orphaned processes.
+
+## Reporting
+When done, report:
+- The path to the final MP4 video file
+- What was demonstrated (summary of the flow)
+- Duration of the recording
+- Number of narration segments (if any)
+- Any issues encountered`,
+    },
+  },
 ];
 
 /**
  * Mapping from built-in registry entry IDs to their assigned skill IDs.
  */
 const ENTRY_SKILL_ASSIGNMENTS: Record<string, string[]> = {
-  "builtin-coo": ["builtin-skill-coo-operations"],
+  "builtin-coo": ["builtin-skill-coo-operations", "builtin-skill-specialist-creation"],
   "builtin-team-lead": ["builtin-skill-team-lead-operations", "builtin-skill-github-tools"],
   "builtin-coder": ["builtin-skill-coding-tools", "builtin-skill-github-tools"],
   "builtin-researcher": ["builtin-skill-research-tools", "builtin-skill-github-tools"],
@@ -566,6 +793,7 @@ const ENTRY_SKILL_ASSIGNMENTS: Record<string, string[]> = {
   "builtin-browser-agent": ["builtin-skill-browser-automation"],
   "builtin-ssh-administrator": ["builtin-skill-ssh-administration"],
   "builtin-tool-builder": ["builtin-skill-tool-building"],
+  "builtin-demo-recorder": ["builtin-skill-demo-recording"],
 };
 
 /**

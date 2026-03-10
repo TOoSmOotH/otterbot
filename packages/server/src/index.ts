@@ -5,10 +5,11 @@ import fastifyCookie from "@fastify/cookie";
 import fastifyStatic from "@fastify/static";
 import multipart from "@fastify/multipart";
 import { Server } from "socket.io";
-import { resolve, dirname, join, sep } from "node:path";
-import { existsSync, readFileSync, writeFileSync, mkdirSync, createReadStream, createWriteStream, copyFileSync, unlinkSync } from "node:fs";
+import { resolve, dirname, join, sep, basename, extname } from "node:path";
+import { existsSync, readFileSync, writeFileSync, mkdirSync, createReadStream, createWriteStream, copyFileSync, unlinkSync, readdirSync, statSync } from "node:fs";
 import { pipeline } from "node:stream/promises";
 import { execSync } from "node:child_process";
+import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
 import type {
   ServerToClientEvents,
@@ -27,7 +28,12 @@ import { SkillService } from "./skills/skill-service.js";
 import { scanSkillContent } from "./skills/skill-scanner.js";
 import { getAvailableToolNames, getToolsWithMeta } from "./tools/tool-factory.js";
 import { CustomToolService } from "./tools/custom-tool-service.js";
-import { executeCustomTool } from "./tools/custom-tool-executor.js";
+// Lazy import — isolated-vm (used by custom-tool-executor) requires native
+// binaries that may not be available in all environments (e.g. local dev).
+const lazyExecuteCustomTool = async (...args: Parameters<typeof import("./tools/custom-tool-executor.js").executeCustomTool>) => {
+  const { executeCustomTool } = await import("./tools/custom-tool-executor.js");
+  return executeCustomTool(...args);
+};
 import { TOOL_EXAMPLES } from "./tools/tool-examples.js";
 import { COO } from "./agents/coo.js";
 import { AdminAssistant } from "./agents/admin-assistant.js";
@@ -141,10 +147,17 @@ import {
   getSSHPublicKey,
   removeSSHKey,
   testSSHConnection,
+  testGitHubAccountConnection,
+  generateAccountSSHKey,
+  importAccountSSHKey,
+  getAccountSSHPublicKey,
+  removeAccountSSHKey,
+  testAccountSSHConnection,
   listCustomModels,
   createCustomModel,
   deleteCustomModel,
   applyGitSSHConfig,
+  applyAccountSSHConfig,
   getClaudeCodeOAuthUsage,
   getAgentModelOverrides,
   setAgentModelOverride,
@@ -159,6 +172,8 @@ import { createBackupArchive, restoreFromArchive, looksLikeZip } from "./backup/
 import { writeOpenCodeConfig } from "./opencode/opencode-manager.js";
 import { GitHubIssueMonitor } from "./github/issue-monitor.js";
 import { GitHubPRMonitor } from "./github/pr-monitor.js";
+import { GiteaIssueMonitor } from "./gitea/issue-monitor.js";
+import { GiteaPRMonitor } from "./gitea/pr-monitor.js";
 import { PipelineManager } from "./pipeline/pipeline-manager.js";
 import { MergeQueue } from "./merge-queue/merge-queue.js";
 import { ReminderScheduler } from "./reminders/reminder-scheduler.js";
@@ -183,6 +198,15 @@ import {
   getIrcConfig,
 } from "./irc/irc-settings.js";
 import {
+  getEmailSettings,
+  updateEmailSettings as updateEmailSettingsFn,
+  getEmailConnectionConfig,
+} from "./email/email-settings.js";
+import {
+  startEmailConnection,
+  stopEmailConnection,
+} from "./email/imap-client.js";
+import {
   approvePairing as approveIrcPairing,
   rejectPairing as rejectIrcPairing,
   revokePairing as revokeIrcPairing,
@@ -198,6 +222,17 @@ import {
   rejectPairing as rejectTeamsPairing,
   revokePairing as revokeTeamsPairing,
 } from "./teams/pairing.js";
+import { GoogleChatBridge } from "./googlechat/google-chat-bridge.js";
+import {
+  getGoogleChatSettings,
+  updateGoogleChatSettings,
+  testGoogleChatConnection,
+} from "./googlechat/google-chat-settings.js";
+import {
+  approvePairing as approveGoogleChatPairing,
+  rejectPairing as rejectGoogleChatPairing,
+  revokePairing as revokeGoogleChatPairing,
+} from "./googlechat/pairing.js";
 import { SlackBridge } from "./slack/slack-bridge.js";
 import {
   getSlackSettings,
@@ -231,6 +266,17 @@ import {
   rejectPairing as rejectTelegramPairing,
   revokePairing as revokeTelegramPairing,
 } from "./telegram/pairing.js";
+import { BlueskyBridge } from "./bluesky/bluesky-bridge.js";
+import {
+  getBlueskySettings,
+  updateBlueskySettings,
+  testBlueskyConnection,
+} from "./bluesky/bluesky-settings.js";
+import {
+  approvePairing as approveBlueskyPairing,
+  rejectPairing as rejectBlueskyPairing,
+  revokePairing as revokeBlueskyPairing,
+} from "./bluesky/pairing.js";
 import { TlonBridge } from "./tlon/tlon-bridge.js";
 import {
   getTlonSettings,
@@ -266,6 +312,27 @@ import {
   rejectPairing as rejectNextcloudTalkPairing,
   revokePairing as revokeNextcloudTalkPairing,
 } from "./nextcloud-talk/pairing.js";
+import { MastodonBridge } from "./mastodon/mastodon-bridge.js";
+import {
+  getMastodonSettings,
+  updateMastodonSettings,
+  testMastodonConnection,
+} from "./mastodon/mastodon-settings.js";
+import {
+  approvePairing as approveMastodonPairing,
+  rejectPairing as rejectMastodonPairing,
+  revokePairing as revokeMastodonPairing,
+} from "./mastodon/pairing.js";
+import {
+  getXSettings,
+  updateXSettings,
+  testXConnection,
+} from "./x/x-settings.js";
+import {
+  approvePairing as approveXPairing,
+  rejectPairing as rejectXPairing,
+  revokePairing as revokeXPairing,
+} from "./x/pairing.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -309,7 +376,7 @@ const authLimiter = new RateLimiter(5, 60_000);
 // Public API path whitelist (no auth required)
 // ---------------------------------------------------------------------------
 
-const PUBLIC_PATHS = ["/api/setup/status", "/api/setup/passphrase", "/api/auth/login", "/api/oauth/google/callback"];
+const PUBLIC_PATHS = ["/api/setup/status", "/api/setup/passphrase", "/api/auth/login", "/api/oauth/google/callback", "/api/googlechat/webhook"];
 
 // ---------------------------------------------------------------------------
 // Cookie helper for Socket.IO (parse raw Cookie header)
@@ -354,6 +421,12 @@ async function main() {
   // Initialize database
   await migrateDb();
 
+  // Seed mock data if in mock mode (before anything reads config)
+  if (process.env.MOCK_MODE === "true") {
+    const { seedMockData } = await import("./mock/mock-seed.js");
+    await seedMockData();
+  }
+
   // Mark stale agents from previous runs as "done"
   {
     const { getDb, schema } = await import("./db/index.js");
@@ -365,6 +438,64 @@ async function main() {
       .run();
   }
   console.log("Database initialized.");
+
+  // Re-apply SSH config on startup (ensures allowedSignersFile exists for
+  // installs that were configured before this fix was added)
+  try {
+    const legacyKeyPath = join(homedir(), ".ssh", "otterbot_github.pub");
+    if (existsSync(legacyKeyPath)) {
+      applyGitSSHConfig();
+    }
+  } catch {
+    // Non-fatal — SSH signing is optional
+  }
+
+  // Re-apply SSH signing config for per-account keys (not just legacy)
+  try {
+    const { getGitHubAccounts } = await import("./github/account-resolver.js");
+    const accounts = getGitHubAccounts();
+    const defaultAccount = accounts.find(a => a.isDefault) ?? accounts[0];
+    const accountUsage = defaultAccount?.sshKeyUsage ?? "both";
+    if (defaultAccount?.sshKeyPath && existsSync(defaultAccount.sshKeyPath + ".pub") && accountUsage !== "auth") {
+      applyAccountSSHConfig(defaultAccount);
+    }
+  } catch {
+    // Non-fatal — account SSH signing is optional
+  }
+
+  // Re-apply per-project git user identity and signing config for cloned repos
+  try {
+    const { resolveGitHubAccount } = await import("./github/account-resolver.js");
+    const { configureCommitSigning } = await import("./utils/git.js");
+    const { configureGitUser } = await import("./github/github-service.js");
+    const db = getDb();
+    const allProjects = db.select().from(schema.projects).all();
+    for (const project of allProjects) {
+      const repoPath = join(
+        process.env.WORKSPACE_ROOT ?? resolve(__dirname, "../../../docker/otterbot"),
+        "projects", project.id, "repo",
+      );
+      if (existsSync(join(repoPath, ".git"))) {
+        try {
+          // Always re-apply git user identity (email/name may have changed)
+          configureGitUser(repoPath, project.id);
+
+          // Re-apply signing config if enabled
+          if (project.signCommits) {
+            const account = resolveGitHubAccount(project.id);
+            const projUsage = account?.sshKeyUsage ?? "both";
+            if (projUsage !== "auth") {
+              configureCommitSigning(repoPath, true, account?.sshKeyPath ?? undefined);
+            }
+          }
+        } catch {
+          // Non-fatal per-project
+        }
+      }
+    }
+  } catch {
+    // Non-fatal — project config is optional
+  }
 
   // Bootstrap passphrase from environment (one-time setup)
   if (!isPassphraseSet()) {
@@ -413,6 +544,7 @@ async function main() {
 
   // Serve 3D assets (model packs)
   const assetsRoot = resolve(__dirname, "../../../assets");
+  const worldLayout = new WorldLayoutManager(assetsRoot);
   console.log(`3D assets root: ${assetsRoot} (exists: ${existsSync(assetsRoot)})`);
   if (existsSync(assetsRoot)) {
     await app.register(fastifyStatic, {
@@ -499,6 +631,8 @@ async function main() {
   let coo: COO | null = null;
   let issueMonitor: GitHubIssueMonitor | null = null;
   let prMonitor: GitHubPRMonitor | null = null;
+  let giteaIssueMonitor: GiteaIssueMonitor | null = null;
+  let giteaPrMonitor: GiteaPRMonitor | null = null;
   const schedulerRegistry = new SchedulerRegistry(io);
   let customTaskScheduler: CustomTaskScheduler | null = null;
 
@@ -587,6 +721,15 @@ async function main() {
     }
   }
 
+  // Email IMAP connection (initialized when enabled + config set)
+  function startEmailImap() {
+    const config = getEmailConnectionConfig();
+    if (!config) return;
+    startEmailConnection(config).catch((err) => {
+      console.error("[Email] Failed to start IMAP connection:", err);
+    });
+  }
+
   // Teams bridge (initialized when enabled + credentials set)
   let teamsBridge: TeamsBridge | null = null;
 
@@ -609,6 +752,34 @@ async function main() {
     if (teamsBridge) {
       await teamsBridge.stop();
       teamsBridge = null;
+    }
+  }
+
+  // Google Chat bridge (initialized when enabled + service account key set)
+  let googleChatBridge: GoogleChatBridge | null = null;
+
+  function startGoogleChatBridge() {
+    if (googleChatBridge || !coo) return;
+    const settings = getGoogleChatSettings();
+    if (!settings.enabled || !settings.serviceAccountKeySet) return;
+    const serviceAccountKey = getConfig("googlechat:service_account_key");
+    if (!serviceAccountKey) return;
+    const projectNumber = getConfig("googlechat:project_number") ?? "";
+    if (!projectNumber) {
+      console.error("[Google Chat] Project number not configured — bridge will not start");
+      return;
+    }
+    googleChatBridge = new GoogleChatBridge({ bus, coo, io });
+    googleChatBridge.start({ serviceAccountKey: JSON.parse(serviceAccountKey), projectNumber }).catch((err) => {
+      console.error("[Google Chat] Failed to start bridge:", err);
+      googleChatBridge = null;
+    });
+  }
+
+  async function stopGoogleChatBridge() {
+    if (googleChatBridge) {
+      await googleChatBridge.stop();
+      googleChatBridge = null;
     }
   }
 
@@ -682,6 +853,31 @@ async function main() {
     if (telegramBridge) {
       await telegramBridge.stop();
       telegramBridge = null;
+    }
+  }
+
+  // Bluesky bridge (initialized when enabled + credentials set)
+  let blueskyBridge: BlueskyBridge | null = null;
+
+  function startBlueskyBridge() {
+    if (blueskyBridge || !coo) return;
+    const settings = getBlueskySettings();
+    if (!settings.enabled || !settings.credentialsSet) return;
+    const identifier = getConfig("bluesky:identifier");
+    const appPassword = getConfig("bluesky:app_password");
+    const service = getConfig("bluesky:service") ?? "https://bsky.social";
+    if (!identifier || !appPassword) return;
+    blueskyBridge = new BlueskyBridge({ bus, coo, io });
+    blueskyBridge.start({ identifier, appPassword, service }).catch((err) => {
+      console.error("[Bluesky] Failed to start bridge:", err);
+      blueskyBridge = null;
+    });
+  }
+
+  async function stopBlueskyBridge() {
+    if (blueskyBridge) {
+      await blueskyBridge.stop();
+      blueskyBridge = null;
     }
   }
 
@@ -770,6 +966,30 @@ async function main() {
     if (nextcloudTalkBridge) {
       await nextcloudTalkBridge.stop();
       nextcloudTalkBridge = null;
+    }
+  }
+
+  // Mastodon bridge (initialized when enabled + credentials set)
+  let mastodonBridge: MastodonBridge | null = null;
+
+  function startMastodonBridge() {
+    if (mastodonBridge || !coo) return;
+    const settings = getMastodonSettings();
+    if (!settings.enabled || !settings.credentialsSet) return;
+    const instanceUrl = getConfig("mastodon:instance_url");
+    const accessToken = getConfig("mastodon:access_token");
+    if (!instanceUrl || !accessToken) return;
+    mastodonBridge = new MastodonBridge({ bus, coo, io });
+    mastodonBridge.start({ instanceUrl, accessToken }).catch((err) => {
+      console.error("[Mastodon] Failed to start bridge:", err);
+      mastodonBridge = null;
+    });
+  }
+
+  async function stopMastodonBridge() {
+    if (mastodonBridge) {
+      await mastodonBridge.stop();
+      mastodonBridge = null;
     }
   }
 
@@ -920,6 +1140,8 @@ async function main() {
       // Create issue monitor, PR monitor, and pipeline manager
       issueMonitor = new GitHubIssueMonitor(coo, io);
       prMonitor = new GitHubPRMonitor(coo, io);
+      giteaIssueMonitor = new GiteaIssueMonitor(coo, io);
+      giteaPrMonitor = new GiteaPRMonitor(coo, io);
       const pipelineManager = new PipelineManager(coo, io);
       pipelineManager.init().catch((err) => {
         console.error("[PipelineManager] Init failed:", err);
@@ -928,8 +1150,12 @@ async function main() {
       issueMonitor.setPipelineManager(pipelineManager);
       prMonitor.setPipelineManager(pipelineManager);
       prMonitor.setMergeQueue(mergeQueue);
+      giteaIssueMonitor.setPipelineManager(pipelineManager);
+      giteaPrMonitor.setPipelineManager(pipelineManager);
+      giteaPrMonitor.setMergeQueue(mergeQueue);
       pipelineManager.setMergeQueue(mergeQueue);
       mergeQueue.setPipelineManager(pipelineManager);
+      mergeQueue.setCoo(coo);
       coo.setPipelineManager(pipelineManager);
 
       setupSocketHandlers(io, bus, coo, registry, {
@@ -1006,7 +1232,7 @@ async function main() {
           callback?.({ messageId: confirmMsg.id, conversationId: conversationId ?? "" });
           return true;
         },
-      }, { workspace, issueMonitor: issueMonitor!, mergeQueue });
+      }, { workspace, issueMonitor: issueMonitor!, giteaIssueMonitor: giteaIssueMonitor!, mergeQueue, worldLayout });
       console.log(`COO agent started. (model=${coo.toData().model}, provider=${coo.toData().provider})`);
 
       // Spawn AdminAssistant alongside COO
@@ -1075,6 +1301,8 @@ async function main() {
           .where(eq(schema.projects.status, "active"))
           .all();
         for (const project of activeProjects) {
+          // Skip zone creation for projects with 3D view disabled
+          if (project.show3d === false) continue;
           const existing = worldLayout.loadZoneConfig(project.id);
           if (!existing) {
             const zone = worldLayout.addZone(project.id, undefined, project.name);
@@ -1124,6 +1352,25 @@ async function main() {
         });
       }
 
+      if (giteaIssueMonitor) {
+        giteaIssueMonitor.loadFromDb();
+        schedulerRegistry.register("gitea-issues", giteaIssueMonitor, {
+          name: "Gitea Issue Monitor",
+          description: "Polls Gitea for new and updated issues on watched projects.",
+          defaultIntervalMs: 60_000,
+          minIntervalMs: 5_000,
+        });
+      }
+
+      if (giteaPrMonitor) {
+        schedulerRegistry.register("gitea-prs", giteaPrMonitor, {
+          name: "Gitea PR Monitor",
+          description: "Monitors open Gitea PRs for merge status and review feedback.",
+          defaultIntervalMs: 120_000,
+          minIntervalMs: 30_000,
+        });
+      }
+
       schedulerRegistry.register("merge-queue", mergeQueue, {
         name: "Merge Queue",
         description: "Processes approved PRs: rebase, re-review, and auto-merge sequentially.",
@@ -1152,7 +1399,7 @@ async function main() {
 
       // Initialize module system (non-blocking)
       import("./modules/index.js").then(async ({ initModules }) => {
-        await initModules(coo!, app);
+        await initModules(coo!, app, bus, io);
       }).catch((err) => {
         console.warn("[modules] Failed to initialize module system:", err);
       });
@@ -1165,14 +1412,33 @@ async function main() {
     startCoo();
     startDiscordBridge();
     startIrcBridge();
+    startEmailImap();
     startTeamsBridge();
+    startGoogleChatBridge();
     startSlackBridge();
     startMattermostBridge();
     startTelegramBridge();
+    startBlueskyBridge();
     startTlonBridge();
     startWhatsAppBridge();
     startSignalBridge();
     startNextcloudTalkBridge();
+    startMastodonBridge();
+
+    // Start mock scenario playback if configured
+    if (process.env.MOCK_MODE === "true" && process.env.MOCK_SCENARIO && coo) {
+      // Import scenarios to register them, then run
+      import("./mock/scenarios/demo-scenario.js").catch(() => {});
+      import("./mock/scenarios/test-scenario.js").catch(() => {});
+      // Small delay to let scenario imports register
+      setTimeout(async () => {
+        const { ScenarioRunner } = await import("./mock/scenario-runner.js");
+        const runner = new ScenarioRunner(bus, coo!, io);
+        runner.start(process.env.MOCK_SCENARIO!).catch((err) => {
+          console.error("[scenario-runner] Failed:", err);
+        });
+      }, 1000);
+    }
   } else {
     console.log("Setup not complete. Waiting for setup wizard...");
   }
@@ -1335,6 +1601,7 @@ async function main() {
       openCodeApiKey?: string;
       openCodeBaseUrl?: string;
       openCodeInteractive?: boolean;
+      additionalProviders?: Array<{ type: string; name: string; apiKey?: string; baseUrl?: string }>;
     };
   }>("/api/setup/complete", async (req, reply) => {
     if (isSetupComplete()) {
@@ -1347,7 +1614,7 @@ async function main() {
       return { error: "Passphrase not set. Start setup from the beginning." };
     }
 
-    const { provider, providerName, model, apiKey, baseUrl, userName, userAvatar, userBio, userTimezone, ttsVoice, ttsProvider, userModelPackId, userGearConfig, cooName, cooModelPackId, cooGearConfig, searchProvider, searchApiKey, searchBaseUrl, adminName, adminModelPackId, adminGearConfig, openCodeEnabled, openCodeProvider, openCodeModel, openCodeApiKey, openCodeBaseUrl, openCodeInteractive } = req.body;
+    const { provider, providerName, model, apiKey, baseUrl, userName, userAvatar, userBio, userTimezone, ttsVoice, ttsProvider, userModelPackId, userGearConfig, cooName, cooModelPackId, cooGearConfig, searchProvider, searchApiKey, searchBaseUrl, adminName, adminModelPackId, adminGearConfig, openCodeEnabled, openCodeProvider, openCodeModel, openCodeApiKey, openCodeBaseUrl, openCodeInteractive, additionalProviders } = req.body;
 
     if (!provider || !model) {
       reply.code(400);
@@ -1377,6 +1644,20 @@ async function main() {
       apiKey: apiKey,
       baseUrl: baseUrl,
     });
+
+    // Create additional providers selected in the wizard
+    if (additionalProviders && Array.isArray(additionalProviders)) {
+      for (const ap of additionalProviders) {
+        if (ap.type && ap.name) {
+          createProvider({
+            name: ap.name,
+            type: ap.type as ProviderType,
+            apiKey: ap.apiKey,
+            baseUrl: ap.baseUrl,
+          });
+        }
+      }
+    }
 
     setConfig("coo_provider", namedProvider.id);
     setConfig("coo_model", model);
@@ -1494,14 +1775,18 @@ async function main() {
     startCoo();
     startDiscordBridge();
     startIrcBridge();
+    startEmailImap();
     startTeamsBridge();
+    startGoogleChatBridge();
     startSlackBridge();
     startMattermostBridge();
     startTelegramBridge();
+    startBlueskyBridge();
     startTlonBridge();
     startWhatsAppBridge();
     startSignalBridge();
     startNextcloudTalkBridge();
+    startMastodonBridge();
 
     return { ok: true };
   });
@@ -1650,6 +1935,29 @@ async function main() {
     }
   });
 
+  // CSRF protection: validate Origin header on state-changing requests
+  app.addHook("onRequest", async (req, reply) => {
+    if (req.method === "GET" || req.method === "HEAD" || req.method === "OPTIONS") return;
+    if (!req.url.startsWith("/api/")) return;
+    // Allow auth endpoints (login needs to work cross-origin in some setups)
+    if (req.url.startsWith("/api/auth/")) return;
+
+    const origin = req.headers.origin;
+    if (origin) {
+      try {
+        const originHost = new URL(origin).host;
+        const requestHost = req.headers.host ?? req.headers[":authority"];
+        if (requestHost && originHost !== requestHost) {
+          reply.code(403).send({ error: "CSRF validation failed: origin mismatch" });
+          return;
+        }
+      } catch {
+        reply.code(403).send({ error: "CSRF validation failed: invalid origin" });
+        return;
+      }
+    }
+  });
+
   // =========================================================================
   // Protected routes
   // =========================================================================
@@ -1786,6 +2094,105 @@ async function main() {
       .from(schema.conversations)
       .orderBy(desc(schema.conversations.updatedAt))
       .all();
+  });
+
+  // =========================================================================
+  // Chat file upload
+  // =========================================================================
+
+  const uploadsDir = join(dataDir, "data", "uploads");
+  mkdirSync(uploadsDir, { recursive: true });
+
+  // Allowed upload extensions (lowercase, with dot)
+  const ALLOWED_UPLOAD_EXTS = new Set([
+    ".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".svg",
+    ".pdf", ".txt", ".md", ".json", ".csv", ".xml", ".yaml", ".yml",
+    ".js", ".ts", ".jsx", ".tsx", ".py", ".go", ".rs", ".java", ".c", ".cpp", ".h",
+    ".html", ".css",
+  ]);
+  const MAX_UPLOAD_SIZE = 10 * 1024 * 1024; // 10 MB per file
+  const MAX_TOTAL_UPLOAD_BYTES = 500 * 1024 * 1024; // 500 MB total upload quota
+
+  /** Calculate total size of all files in the uploads directory */
+  function getUploadsDirSize(): number {
+    try {
+      const files = readdirSync(uploadsDir);
+      let total = 0;
+      for (const f of files) {
+        try {
+          const s = statSync(join(uploadsDir, f));
+          if (s.isFile()) total += s.size;
+        } catch { /* skip unreadable files */ }
+      }
+      return total;
+    } catch { return 0; }
+  }
+
+  // Serve uploaded files with security headers (auth-protected)
+  app.addHook("onRequest", async (req, reply) => {
+    if (!req.url.startsWith("/uploads/")) return;
+    const token = req.cookies.sb_session;
+    if (!validateSession(token)) {
+      reply.code(401).send({ error: "Unauthorized" });
+    }
+  });
+
+  await app.register(fastifyStatic, {
+    root: uploadsDir,
+    prefix: "/uploads/",
+    decorateReply: false,
+    setHeaders(res) {
+      res.setHeader("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'");
+      res.setHeader("X-Content-Type-Options", "nosniff");
+      res.setHeader("Cache-Control", "private, no-cache");
+    },
+  });
+
+  app.post("/api/chat/upload", async (req) => {
+    // Check total upload quota before accepting new files
+    const currentUsage = getUploadsDirSize();
+    if (currentUsage >= MAX_TOTAL_UPLOAD_BYTES) {
+      throw new Error(`Upload quota exceeded (${Math.round(currentUsage / 1024 / 1024)} MB / ${MAX_TOTAL_UPLOAD_BYTES / 1024 / 1024} MB). Delete old files to free space.`);
+    }
+
+    const file = await req.file({ limits: { fileSize: MAX_UPLOAD_SIZE } });
+    if (!file) throw new Error("No file uploaded");
+
+    // Sanitize: use only basename to prevent path traversal, then extract extension
+    const safeName = basename(file.filename);
+    const ext = extname(safeName).toLowerCase();
+
+    if (ext && !ALLOWED_UPLOAD_EXTS.has(ext)) {
+      throw new Error(`File type '${ext}' is not allowed`);
+    }
+
+    const { nanoid } = await import("nanoid");
+    const id = nanoid();
+    const storedName = `${id}${ext}`;
+    const destPath = join(uploadsDir, storedName);
+
+    // Verify the resolved path is within the uploads directory
+    const resolvedDest = resolve(destPath);
+    const resolvedUploads = resolve(uploadsDir);
+    if (!resolvedDest.startsWith(resolvedUploads + sep) && resolvedDest !== resolvedUploads) {
+      throw new Error("Invalid file path");
+    }
+
+    await pipeline(file.file, createWriteStream(destPath));
+
+    // Check if file was truncated (exceeded size limit)
+    if (file.file.truncated) {
+      unlinkSync(destPath);
+      throw new Error(`File exceeds maximum size of ${MAX_UPLOAD_SIZE / 1024 / 1024} MB`);
+    }
+
+    return {
+      id,
+      filename: safeName,
+      mimeType: file.mimetype,
+      size: file.file.bytesRead,
+      url: `/uploads/${storedName}`,
+    };
   });
 
   // =========================================================================
@@ -2303,7 +2710,6 @@ async function main() {
   });
 
   // World layout API
-  const worldLayout = new WorldLayoutManager(assetsRoot);
 
   app.get("/api/world", async () => {
     const composite = worldLayout.getCompositeWorld();
@@ -2334,6 +2740,56 @@ async function main() {
     io.emit("world:zone-removed", { projectId });
 
     return { ok: true };
+  });
+
+  // GitHub releases endpoint (cached for 1 hour)
+  let releasesCache: { data: unknown; fetchedAt: number } | null = null;
+  const RELEASES_CACHE_MS = 60 * 60 * 1000; // 1 hour
+
+  app.get("/api/releases", async (_req, reply) => {
+    const now = Date.now();
+    if (releasesCache && now - releasesCache.fetchedAt < RELEASES_CACHE_MS) {
+      return releasesCache.data;
+    }
+    try {
+      const res = await fetch(
+        "https://api.github.com/repos/TOoSmOotH/otterbot/releases?per_page=20",
+        {
+          headers: {
+            Accept: "application/vnd.github+json",
+            "User-Agent": "otterbot-server",
+          },
+        },
+      );
+      if (!res.ok) {
+        reply.code(502);
+        return { error: "Failed to fetch releases from GitHub" };
+      }
+      const raw = (await res.json()) as Array<{
+        tag_name: string;
+        name: string;
+        body: string;
+        published_at: string;
+        html_url: string;
+        prerelease: boolean;
+        draft: boolean;
+      }>;
+      const releases = raw
+        .filter((r) => !r.draft)
+        .map((r) => ({
+          tag: r.tag_name,
+          name: r.name || r.tag_name,
+          body: r.body || "",
+          publishedAt: r.published_at,
+          url: r.html_url,
+          prerelease: r.prerelease,
+        }));
+      releasesCache = { data: { releases }, fetchedAt: now };
+      return { releases };
+    } catch (err) {
+      reply.code(502);
+      return { error: "Failed to fetch releases" };
+    }
   });
 
   // User profile endpoint
@@ -2603,13 +3059,26 @@ async function main() {
   // =========================================================================
 
   app.get("/api/settings/scheduled-tasks", async () => {
-    return { tasks: schedulerRegistry.getAll() };
+    const { getModuleScheduler } = await import("./modules/index.js");
+    const moduleTasks = getModuleScheduler()?.getAll() ?? [];
+    return { tasks: [...schedulerRegistry.getAll(), ...moduleTasks] };
   });
 
   app.put<{ Params: { taskId: string }; Body: { enabled?: boolean; intervalMs?: number } }>(
     "/api/settings/scheduled-tasks/:taskId",
     async (req, reply) => {
       const { taskId } = req.params;
+
+      if (taskId.startsWith("module-poll:")) {
+        const { getModuleScheduler } = await import("./modules/index.js");
+        const result = getModuleScheduler()?.update(taskId, req.body) ?? null;
+        if (!result) {
+          reply.code(404);
+          return { error: "Unknown module poll scheduler" };
+        }
+        return { ok: true, task: result };
+      }
+
       const result = schedulerRegistry.update(taskId, req.body);
       if (!result) {
         reply.code(404);
@@ -2618,6 +3087,24 @@ async function main() {
       return { ok: true, task: result };
     },
   );
+
+  // =========================================================================
+  // Module Agents
+  // =========================================================================
+
+  app.get("/api/settings/module-agents", async () => {
+    try {
+      const { getActiveModuleAgents } = await import("./modules/index.js");
+      const agents = getActiveModuleAgents();
+      const items = Array.from(agents.entries()).map(([moduleId, agent]) => {
+        const a = agent as { id: string; name: string };
+        return { moduleId, agentId: a.id, name: a.name };
+      });
+      return { agents: items };
+    } catch {
+      return { agents: [] };
+    }
+  });
 
   // =========================================================================
   // Custom Scheduled Tasks CRUD
@@ -2639,7 +3126,7 @@ async function main() {
       enabled?: boolean;
     };
   }>("/api/settings/custom-tasks", async (req, reply) => {
-    const { name, description, message, mode, intervalMs, enabled } = req.body;
+    const { name, description, message, mode, intervalMs, enabled, moduleAgentId } = req.body as any;
     if (!name || !message || !intervalMs) {
       reply.code(400);
       return { error: "name, message, and intervalMs are required" };
@@ -2654,10 +3141,11 @@ async function main() {
       name,
       description: description ?? "",
       message,
-      mode: (mode ?? "notification") as "coo-prompt" | "coo-background" | "notification",
+      mode: (mode ?? "notification") as "coo-prompt" | "coo-background" | "notification" | "module-agent",
       intervalMs: clampedInterval,
       enabled: enabled ?? true,
       lastRunAt: null,
+      moduleAgentId: moduleAgentId ?? null,
       createdAt: now,
       updatedAt: now,
     };
@@ -2674,9 +3162,10 @@ async function main() {
       name?: string;
       description?: string;
       message?: string;
-      mode?: "coo-prompt" | "coo-background" | "notification";
+      mode?: "coo-prompt" | "coo-background" | "notification" | "module-agent";
       intervalMs?: number;
       enabled?: boolean;
+      moduleAgentId?: string;
     };
   }>("/api/settings/custom-tasks/:id", async (req, reply) => {
     const { eq } = await import("drizzle-orm");
@@ -2700,6 +3189,7 @@ async function main() {
       patch.intervalMs = Math.max(req.body.intervalMs, MIN_CUSTOM_TASK_INTERVAL_MS);
     }
     if (req.body.enabled !== undefined) patch.enabled = req.body.enabled;
+    if (req.body.moduleAgentId !== undefined) patch.moduleAgentId = req.body.moduleAgentId;
     db.update(schema.customScheduledTasks)
       .set(patch)
       .where(eq(schema.customScheduledTasks.id, id))
@@ -3663,6 +4153,47 @@ async function main() {
   });
 
   // =========================================================================
+  // Helper: apply git global identity from a GitHub account
+  // =========================================================================
+
+  async function applyGitIdentityFromAccount(accountId: string): Promise<void> {
+    try {
+      const { getGitHubAccountById, getGitHubAccounts } = await import("./github/account-resolver.js");
+      const { configureGitUser } = await import("./github/github-service.js");
+      const account = getGitHubAccountById(accountId);
+      if (!account) return;
+      // Only set global config for the default account (or if it's the only one)
+      const allAccounts = getGitHubAccounts();
+      if (!account.isDefault && allAccounts.length > 1) return;
+
+      const name = account.username ?? account.label ?? "OtterBot";
+      const email = account.email ?? `${name}@users.noreply.github.com`;
+      const { execFileSync } = await import("node:child_process");
+      execFileSync("git", ["config", "--global", "user.name", name], { stdio: "ignore" });
+      execFileSync("git", ["config", "--global", "user.email", email], { stdio: "ignore" });
+
+      // Also update local config on all cloned repos that use this account
+      const db = getDb();
+      const projects = db.select().from(schema.projects).all();
+      for (const project of projects) {
+        // Update repos bound to this account, or all repos if this is the default/only account
+        if (project.githubAccountId !== accountId && account.isDefault === false && allAccounts.length > 1) continue;
+        const repoPath = join(
+          process.env.WORKSPACE_ROOT ?? resolve(__dirname, "../../../docker/otterbot"),
+          "projects", project.id, "repo",
+        );
+        if (existsSync(join(repoPath, ".git"))) {
+          try {
+            configureGitUser(repoPath, project.id);
+          } catch { /* non-fatal */ }
+        }
+      }
+    } catch {
+      // Non-fatal
+    }
+  }
+
+  // =========================================================================
   // GitHub settings routes
   // =========================================================================
 
@@ -3712,6 +4243,120 @@ async function main() {
 
   app.post("/api/settings/github/ssh/test", async () => {
     return testSSHConnection();
+  });
+
+  // --- GitHub Accounts ---
+
+  app.get("/api/settings/github/accounts", async () => {
+    const { getGitHubAccounts } = await import("./github/account-resolver.js");
+    const accounts = getGitHubAccounts();
+    return accounts.map((a) => ({
+      id: a.id,
+      label: a.label,
+      tokenSet: !!a.token,
+      username: a.username,
+      email: a.email,
+      sshKeySet: !!a.sshKeyPath,
+      sshFingerprint: a.sshFingerprint,
+      sshKeyType: a.sshKeyType,
+      sshKeyUsage: a.sshKeyUsage ?? "both",
+      isDefault: a.isDefault,
+      createdAt: a.createdAt,
+    }));
+  });
+
+  app.post<{
+    Body: { label: string; token: string; email?: string; isDefault?: boolean };
+  }>("/api/settings/github/accounts", async (req, reply) => {
+    const { createGitHubAccount } = await import("./github/account-resolver.js");
+    const { nanoid } = await import("nanoid");
+    if (!req.body.label || !req.body.token) {
+      reply.code(400);
+      return { error: "label and token are required" };
+    }
+    const account = createGitHubAccount({ id: nanoid(), ...req.body });
+    await applyGitIdentityFromAccount(account.id);
+    return { ok: true, id: account.id };
+  });
+
+  app.put<{
+    Params: { id: string };
+    Body: { label?: string; token?: string; email?: string };
+  }>("/api/settings/github/accounts/:id", async (req) => {
+    const { updateGitHubAccount: updateAcct } = await import("./github/account-resolver.js");
+    updateAcct(req.params.id, req.body);
+    await applyGitIdentityFromAccount(req.params.id);
+    return { ok: true };
+  });
+
+  app.delete<{
+    Params: { id: string };
+  }>("/api/settings/github/accounts/:id", async (req) => {
+    const { deleteGitHubAccount } = await import("./github/account-resolver.js");
+    return deleteGitHubAccount(req.params.id);
+  });
+
+  app.put<{
+    Params: { id: string };
+  }>("/api/settings/github/accounts/:id/default", async (req) => {
+    const { setDefaultGitHubAccount } = await import("./github/account-resolver.js");
+    setDefaultGitHubAccount(req.params.id);
+    await applyGitIdentityFromAccount(req.params.id);
+    return { ok: true };
+  });
+
+  app.post<{
+    Params: { id: string };
+  }>("/api/settings/github/accounts/:id/test", async (req) => {
+    return testGitHubAccountConnection(req.params.id);
+  });
+
+  app.post<{
+    Params: { id: string };
+    Body: { type?: "ed25519" | "rsa"; comment?: string; usage?: "auth" | "signing" | "both" };
+  }>("/api/settings/github/accounts/:id/ssh/generate", async (req) => {
+    return generateAccountSSHKey(req.params.id, req.body);
+  });
+
+  app.post<{
+    Params: { id: string };
+    Body: { privateKey: string; usage?: "auth" | "signing" | "both" };
+  }>("/api/settings/github/accounts/:id/ssh/import", async (req, reply) => {
+    if (!req.body.privateKey) {
+      reply.code(400);
+      return { error: "privateKey is required" };
+    }
+    return importAccountSSHKey(req.params.id, req.body.privateKey, req.body.usage);
+  });
+
+  app.put<{
+    Params: { id: string };
+    Body: { usage: "auth" | "signing" | "both" };
+  }>("/api/settings/github/accounts/:id/ssh/usage", async (req, reply) => {
+    const { updateAccountSSHUsage } = await import("./settings/settings.js");
+    if (!req.body.usage || !["auth", "signing", "both"].includes(req.body.usage)) {
+      reply.code(400);
+      return { error: "usage must be 'auth', 'signing', or 'both'" };
+    }
+    return updateAccountSSHUsage(req.params.id, req.body.usage);
+  });
+
+  app.get<{
+    Params: { id: string };
+  }>("/api/settings/github/accounts/:id/ssh/public-key", async (req) => {
+    return getAccountSSHPublicKey(req.params.id);
+  });
+
+  app.delete<{
+    Params: { id: string };
+  }>("/api/settings/github/accounts/:id/ssh", async (req) => {
+    return removeAccountSSHKey(req.params.id);
+  });
+
+  app.post<{
+    Params: { id: string };
+  }>("/api/settings/github/accounts/:id/ssh/test", async (req) => {
+    return testAccountSSHConnection(req.params.id);
   });
 
   // =========================================================================
@@ -3931,6 +4576,89 @@ async function main() {
   });
 
   // =========================================================================
+  // Google Chat settings routes
+  // =========================================================================
+
+  app.get("/api/settings/googlechat", async () => {
+    return getGoogleChatSettings();
+  });
+
+  app.put<{
+    Body: {
+      enabled?: boolean;
+      serviceAccountKey?: string;
+      projectNumber?: string;
+    };
+  }>("/api/settings/googlechat", async (req) => {
+    const wasEnabled = getGoogleChatSettings().enabled && getGoogleChatSettings().serviceAccountKeySet;
+    updateGoogleChatSettings(req.body);
+    const nowEnabled = getGoogleChatSettings().enabled && getGoogleChatSettings().serviceAccountKeySet;
+
+    if (nowEnabled && !wasEnabled) {
+      startGoogleChatBridge();
+    } else if (!nowEnabled && wasEnabled) {
+      await stopGoogleChatBridge();
+    }
+
+    return { ok: true };
+  });
+
+  app.post("/api/settings/googlechat/test", async () => {
+    return testGoogleChatConnection();
+  });
+
+  app.post<{
+    Body: { code: string };
+  }>("/api/settings/googlechat/pair/approve", async (req, reply) => {
+    const result = approveGoogleChatPairing(req.body.code);
+    if (!result) {
+      reply.code(400);
+      return { ok: false, error: "Invalid or expired pairing code" };
+    }
+    return { ok: true, user: result };
+  });
+
+  app.post<{
+    Body: { code: string };
+  }>("/api/settings/googlechat/pair/reject", async (req, reply) => {
+    const ok = rejectGoogleChatPairing(req.body.code);
+    if (!ok) {
+      reply.code(400);
+      return { ok: false, error: "Pairing code not found" };
+    }
+    return { ok: true };
+  });
+
+  app.delete<{
+    Params: { userId: string };
+  }>("/api/settings/googlechat/pair/:userId", async (req, reply) => {
+    const ok = revokeGoogleChatPairing(req.params.userId);
+    if (!ok) {
+      reply.code(400);
+      return { ok: false, error: "User not found" };
+    }
+    return { ok: true };
+  });
+
+  // Google Chat webhook endpoint
+  // This is in PUBLIC_PATHS — authentication is handled by verifying the
+  // Bearer token (JWT signed by Google) inside the bridge.
+  app.post("/api/googlechat/webhook", async (req, reply) => {
+    if (!googleChatBridge) {
+      reply.code(503);
+      return { error: "Google Chat bridge not started" };
+    }
+    try {
+      const result = await googleChatBridge.handleWebhook(req.body, req.headers.authorization);
+      return result ?? {};
+    } catch (err) {
+      console.error("[Google Chat] Webhook auth failed:", err);
+      reply.code(401);
+      return { error: "Unauthorized" };
+    }
+  });
+
+  // =========================================================================
   // Slack settings routes
   // =========================================================================
 
@@ -4126,6 +4854,73 @@ async function main() {
     Params: { userId: string };
   }>("/api/settings/telegram/pair/:userId", async (req, reply) => {
     const ok = revokeTelegramPairing(req.params.userId);
+    if (!ok) {
+      reply.code(400);
+      return { ok: false, error: "User not found" };
+    }
+    return { ok: true };
+  });
+
+  // =========================================================================
+  // Bluesky settings routes
+  // =========================================================================
+
+  app.get("/api/settings/bluesky", async () => {
+    return getBlueskySettings();
+  });
+
+  app.put<{
+    Body: {
+      enabled?: boolean;
+      identifier?: string;
+      appPassword?: string;
+      service?: string;
+    };
+  }>("/api/settings/bluesky", async (req) => {
+    const wasEnabled = getBlueskySettings().enabled && getBlueskySettings().credentialsSet;
+    updateBlueskySettings(req.body);
+    const nowEnabled = getBlueskySettings().enabled && getBlueskySettings().credentialsSet;
+
+    // Start or stop bridge based on state change
+    if (nowEnabled && !wasEnabled) {
+      startBlueskyBridge();
+    } else if (!nowEnabled && wasEnabled) {
+      await stopBlueskyBridge();
+    }
+
+    return { ok: true };
+  });
+
+  app.post("/api/settings/bluesky/test", async () => {
+    return testBlueskyConnection();
+  });
+
+  app.post<{
+    Body: { code: string };
+  }>("/api/settings/bluesky/pair/approve", async (req, reply) => {
+    const result = approveBlueskyPairing(req.body.code);
+    if (!result) {
+      reply.code(400);
+      return { ok: false, error: "Invalid or expired pairing code" };
+    }
+    return { ok: true, user: result };
+  });
+
+  app.post<{
+    Body: { code: string };
+  }>("/api/settings/bluesky/pair/reject", async (req, reply) => {
+    const ok = rejectBlueskyPairing(req.body.code);
+    if (!ok) {
+      reply.code(400);
+      return { ok: false, error: "Pairing code not found" };
+    }
+    return { ok: true };
+  });
+
+  app.delete<{
+    Params: { userId: string };
+  }>("/api/settings/bluesky/pair/:userId", async (req, reply) => {
+    const ok = revokeBlueskyPairing(req.params.userId);
     if (!ok) {
       reply.code(400);
       return { ok: false, error: "User not found" };
@@ -4330,6 +5125,130 @@ async function main() {
   });
 
   // =========================================================================
+  // Mastodon settings routes
+  // =========================================================================
+
+  app.get("/api/settings/mastodon", async () => {
+    return getMastodonSettings();
+  });
+
+  app.put<{
+    Body: {
+      enabled?: boolean;
+      instanceUrl?: string;
+      accessToken?: string;
+    };
+  }>("/api/settings/mastodon", async (req) => {
+    const wasEnabled = getMastodonSettings().enabled && getMastodonSettings().credentialsSet;
+    updateMastodonSettings(req.body);
+    const nowEnabled = getMastodonSettings().enabled && getMastodonSettings().credentialsSet;
+
+    // Start or stop bridge based on state change
+    if (nowEnabled && !wasEnabled) {
+      startMastodonBridge();
+    } else if (!nowEnabled && wasEnabled) {
+      await stopMastodonBridge();
+    }
+
+    return { ok: true };
+  });
+
+  app.post("/api/settings/mastodon/test", async () => {
+    return testMastodonConnection();
+  });
+
+  app.post<{
+    Body: { code: string };
+  }>("/api/settings/mastodon/pair/approve", async (req, reply) => {
+    const result = approveMastodonPairing(req.body.code);
+    if (!result) {
+      reply.code(400);
+      return { ok: false, error: "Invalid or expired pairing code" };
+    }
+    return { ok: true, user: result };
+  });
+
+  app.post<{
+    Body: { code: string };
+  }>("/api/settings/mastodon/pair/reject", async (req, reply) => {
+    const ok = rejectMastodonPairing(req.body.code);
+    if (!ok) {
+      reply.code(400);
+      return { ok: false, error: "Pairing code not found" };
+    }
+    return { ok: true };
+  });
+
+  app.delete<{
+    Params: { userId: string };
+  }>("/api/settings/mastodon/pair/:userId", async (req, reply) => {
+    const ok = revokeMastodonPairing(req.params.userId);
+    if (!ok) {
+      reply.code(400);
+      return { ok: false, error: "User not found" };
+    }
+    return { ok: true };
+  });
+
+  // =========================================================================
+  // X (Twitter) settings routes
+  // =========================================================================
+
+  app.get("/api/settings/x", async () => {
+    return getXSettings();
+  });
+
+  app.put<{
+    Body: {
+      enabled?: boolean;
+      apiKey?: string;
+      apiSecret?: string;
+      accessToken?: string;
+      accessTokenSecret?: string;
+    };
+  }>("/api/settings/x", async (req) => {
+    updateXSettings(req.body);
+    return { ok: true };
+  });
+
+  app.post("/api/settings/x/test", async () => {
+    return testXConnection();
+  });
+
+  app.post<{
+    Body: { code: string };
+  }>("/api/settings/x/pair/approve", async (req, reply) => {
+    const result = approveXPairing(req.body.code);
+    if (!result) {
+      reply.code(400);
+      return { ok: false, error: "Invalid or expired pairing code" };
+    }
+    return { ok: true, user: result };
+  });
+
+  app.post<{
+    Body: { code: string };
+  }>("/api/settings/x/pair/reject", async (req, reply) => {
+    const ok = rejectXPairing(req.body.code);
+    if (!ok) {
+      reply.code(400);
+      return { ok: false, error: "Pairing code not found" };
+    }
+    return { ok: true };
+  });
+
+  app.delete<{
+    Params: { userId: string };
+  }>("/api/settings/x/pair/:userId", async (req, reply) => {
+    const ok = revokeXPairing(req.params.userId);
+    if (!ok) {
+      reply.code(400);
+      return { ok: false, error: "User not found" };
+    }
+    return { ok: true };
+  });
+
+  // =========================================================================
   // Google settings routes
   // =========================================================================
 
@@ -4479,14 +5398,24 @@ async function main() {
   });
 
   // =========================================================================
-  // Gmail REST routes
+  // Email (IMAP/SMTP) REST routes
   // =========================================================================
 
-  app.get<{
-    Querystring: { q?: string; maxResults?: string; pageToken?: string };
-  }>("/api/gmail/messages", async (req, reply) => {
+  app.get("/api/email/folders", async (_req, reply) => {
     try {
-      const { listEmails } = await import("./google/gmail-client.js");
+      const { listFolders } = await import("./email/imap-client.js");
+      return await listFolders();
+    } catch (err) {
+      reply.code(500);
+      return { error: err instanceof Error ? err.message : "Failed to list folders" };
+    }
+  });
+
+  app.get<{
+    Querystring: { q?: string; maxResults?: string; pageToken?: string; folder?: string };
+  }>("/api/email/messages", async (req, reply) => {
+    try {
+      const { listEmails } = await import("./email/imap-client.js");
       return await listEmails(req.query);
     } catch (err) {
       reply.code(500);
@@ -4496,10 +5425,11 @@ async function main() {
 
   app.get<{
     Params: { id: string };
-  }>("/api/gmail/messages/:id", async (req, reply) => {
+    Querystring: { folder?: string };
+  }>("/api/email/messages/:id", async (req, reply) => {
     try {
-      const { readEmail } = await import("./google/gmail-client.js");
-      const email = await readEmail(req.params.id);
+      const { readEmail } = await import("./email/imap-client.js");
+      const email = await readEmail(req.params.id, req.query.folder);
       if (!email) { reply.code(404); return { error: "Email not found" }; }
       return email;
     } catch (err) {
@@ -4510,10 +5440,13 @@ async function main() {
 
   app.post<{
     Body: { to: string; subject: string; body: string; cc?: string; bcc?: string; inReplyTo?: string; threadId?: string };
-  }>("/api/gmail/send", async (req, reply) => {
+  }>("/api/email/send", async (req, reply) => {
     try {
-      const { sendEmail } = await import("./google/gmail-client.js");
-      return await sendEmail(req.body);
+      const { sendEmail } = await import("./email/imap-client.js");
+      const { getEmailConnectionConfig } = await import("./email/email-settings.js");
+      const config = getEmailConnectionConfig();
+      if (!config) { reply.code(400); return { error: "Email not configured" }; }
+      return await sendEmail(config, req.body);
     } catch (err) {
       reply.code(500);
       return { error: err instanceof Error ? err.message : "Failed to send email" };
@@ -4522,9 +5455,9 @@ async function main() {
 
   app.post<{
     Params: { id: string };
-  }>("/api/gmail/messages/:id/archive", async (req, reply) => {
+  }>("/api/email/messages/:id/archive", async (req, reply) => {
     try {
-      const { archiveEmail } = await import("./google/gmail-client.js");
+      const { archiveEmail } = await import("./email/imap-client.js");
       await archiveEmail(req.params.id);
       return { ok: true };
     } catch (err) {
@@ -4533,13 +5466,67 @@ async function main() {
     }
   });
 
-  app.get("/api/gmail/labels", async (req, reply) => {
+  // =========================================================================
+  // Email settings routes
+  // =========================================================================
+
+  app.get("/api/settings/email", async () => {
+    const { getEmailSettings } = await import("./email/email-settings.js");
+    return getEmailSettings();
+  });
+
+  app.put<{
+    Body: {
+      enabled?: boolean;
+      imapServer?: string;
+      imapPort?: number;
+      imapTls?: boolean;
+      smtpServer?: string;
+      smtpPort?: number;
+      smtpTls?: boolean;
+      username?: string;
+      password?: string;
+      fromName?: string;
+    };
+  }>("/api/settings/email", async (req) => {
+    const { updateEmailSettings, getEmailConnectionConfig } = await import("./email/email-settings.js");
+    const { startEmailConnection, stopEmailConnection } = await import("./email/imap-client.js");
+    updateEmailSettings(req.body);
+    // Reconnect IMAP if settings changed
+    const config = getEmailConnectionConfig();
+    if (config) {
+      try { await startEmailConnection(config); } catch { /* will show in test */ }
+    } else {
+      await stopEmailConnection();
+    }
+    const { getEmailSettings } = await import("./email/email-settings.js");
+    return getEmailSettings();
+  });
+
+  app.post("/api/settings/email/test", async (req, reply) => {
     try {
-      const { listLabels } = await import("./google/gmail-client.js");
-      return await listLabels();
+      const { getEmailConnectionConfig } = await import("./email/email-settings.js");
+      const { testImapConnection, testSmtpConnection } = await import("./email/imap-client.js");
+      const config = getEmailConnectionConfig();
+      if (!config) { reply.code(400); return { error: "Email not fully configured" }; }
+
+      const results: { imap: string; smtp: string } = { imap: "ok", smtp: "ok" };
+      try {
+        await testImapConnection(config);
+      } catch (err) {
+        results.imap = err instanceof Error ? err.message : "IMAP connection failed";
+      }
+      try {
+        await testSmtpConnection(config);
+      } catch (err) {
+        results.smtp = err instanceof Error ? err.message : "SMTP connection failed";
+      }
+      const ok = results.imap === "ok" && results.smtp === "ok";
+      if (!ok) reply.code(400);
+      return { ok, ...results };
     } catch (err) {
       reply.code(500);
-      return { error: err instanceof Error ? err.message : "Failed to list labels" };
+      return { error: err instanceof Error ? err.message : "Test failed" };
     }
   });
 
@@ -4756,7 +5743,7 @@ async function main() {
         return { error: "Not found" };
       }
       try {
-        const result = await executeCustomTool(tool, req.body.params ?? {});
+        const result = await lazyExecuteCustomTool(tool, req.body.params ?? {});
         return { result };
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);
@@ -4886,7 +5873,7 @@ Respond with ONLY a JSON object (no markdown, no explanation) with these fields:
   // ─── Module REST API ────────────────────────────────────────────────────────
 
   app.get("/api/modules", async () => {
-    const { getModuleLoader } = await import("./modules/index.js");
+    const { getModuleLoader, getModuleAgent } = await import("./modules/index.js");
     const { listModules } = await import("./modules/module-manifest.js");
     const loader = getModuleLoader();
     const installed = listModules();
@@ -4898,6 +5885,7 @@ Respond with ONLY a JSON object (no markdown, no explanation) with these fields:
         loaded: !!loaded,
         documents: loaded ? loaded.knowledgeStore.count() : 0,
         hasQuery: loaded ? !!loaded.definition.onQuery : false,
+        hasAgent: !!getModuleAgent(m.id),
       };
     });
   });
@@ -4991,6 +5979,333 @@ Respond with ONLY a JSON object (no markdown, no explanation) with these fields:
     },
   );
 
+  // Module config: get schema + current values
+  app.get<{ Params: { id: string } }>(
+    "/api/modules/:id/config",
+    async (req, reply) => {
+      const { getModuleLoader } = await import("./modules/index.js");
+      const { getModule } = await import("./modules/module-manifest.js");
+      const { loadModuleDefinition } = await import("./modules/module-installer.js");
+      const { getConfig: getConfigValue } = await import("./auth/auth.js");
+
+      const entry = getModule(req.params.id);
+      if (!entry) return reply.status(404).send({ error: "Module not found" });
+
+      try {
+        // Try loaded module first, fall back to loading definition from disk
+        const loader = getModuleLoader();
+        const loaded = loader?.get(req.params.id);
+        let configSchema = loaded?.definition.configSchema;
+
+        if (!configSchema) {
+          // Load definition from disk to get configSchema (even when module is disabled)
+          const definition = await loadModuleDefinition(entry.modulePath);
+          configSchema = definition.configSchema;
+
+          // Auto-inject agent config fields (same logic as module-loader.ts)
+          if (definition.agent && configSchema) {
+            if (!configSchema.agent_enabled) {
+              configSchema.agent_enabled = { type: "boolean", description: "Enable the module's AI agent", required: false, default: true };
+            }
+            if (!configSchema.agent_name) {
+              configSchema.agent_name = { type: "string", description: "Display name for the module agent", required: false, default: definition.agent.defaultName };
+            }
+            if (!configSchema.agent_prompt) {
+              configSchema.agent_prompt = { type: "string", description: "System prompt for the module agent", required: false, default: definition.agent.defaultPrompt };
+            }
+            if (!configSchema.agent_model) {
+              configSchema.agent_model = { type: "string", description: "LLM model for the module agent", required: false };
+            }
+            if (!configSchema.agent_provider) {
+              configSchema.agent_provider = { type: "string", description: "LLM provider for the module agent", required: false };
+            }
+            if (!configSchema.agent_posting_mode) {
+              configSchema.agent_posting_mode = {
+                type: "select",
+                description: "Controls when the module agent responds to queries",
+                required: false,
+                default: "respond",
+                options: [
+                  { value: "respond", label: "Always respond" },
+                  { value: "lurk", label: "Lurk (index only, never respond)" },
+                  { value: "new_chats", label: "New conversations only" },
+                  { value: "permission", label: "Ask COO for permission" },
+                ],
+              };
+            }
+          }
+        }
+
+        if (!configSchema || Object.keys(configSchema).length === 0) {
+          return { schema: {}, values: {} };
+        }
+
+        // Get current values for each config field, masking secrets
+        const values: Record<string, string | undefined> = {};
+        for (const key of Object.keys(configSchema)) {
+          const raw = getConfigValue(`module:${req.params.id}:${key}`);
+          const field = configSchema[key] as { type?: string } | undefined;
+          if (field?.type === "secret" && raw) {
+            // Return a placeholder so the UI knows a value is set, but never expose the secret
+            values[key] = "••••••••";
+          } else {
+            values[key] = raw;
+          }
+        }
+
+        return { schema: configSchema, values };
+      } catch (err) {
+        return reply
+          .status(500)
+          .send({ error: err instanceof Error ? err.message : String(err) });
+      }
+    },
+  );
+
+  // Module database info
+  app.get<{ Params: { id: string } }>(
+    "/api/modules/:id/db-info",
+    async (req, reply) => {
+      const { getModuleLoader } = await import("./modules/index.js");
+
+      const loader = getModuleLoader();
+      const loaded = loader?.get(req.params.id);
+      if (!loaded) {
+        return { tables: [] };
+      }
+
+      try {
+        const db = loaded.knowledgeStore.db;
+        const tableRows = db.prepare(
+          "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'",
+        ).all() as { name: string }[];
+
+        const tables = tableRows.map((row) => {
+          const countRow = db.prepare(`SELECT count(*) as cnt FROM "${row.name}"`).get() as { cnt: number } | undefined;
+          return { name: row.name, rowCount: countRow?.cnt ?? 0 };
+        });
+
+        return { tables };
+      } catch (err) {
+        return reply
+          .status(500)
+          .send({ error: err instanceof Error ? err.message : String(err) });
+      }
+    },
+  );
+
+  // Query a module's agent / knowledge base
+  app.post<{ Params: { id: string }; Body: { question: string } }>(
+    "/api/modules/:id/query",
+    async (req, reply) => {
+      const { getModuleLoader, getModuleAgent, getModuleBus } = await import("./modules/index.js");
+      const loader = getModuleLoader();
+
+      if (!loader) {
+        return reply.status(503).send({ error: "Module system not initialized" });
+      }
+
+      const loaded = loader.get(req.params.id);
+      if (!loaded) {
+        return reply.status(400).send({ error: "Module not loaded" });
+      }
+
+      const question = req.body?.question;
+      if (!question || typeof question !== "string") {
+        return reply.status(400).send({ error: "question is required" });
+      }
+
+      try {
+        // If the module has an active agent, route through it
+        const moduleAgent = getModuleAgent(req.params.id);
+        if (moduleAgent) {
+          const bus = getModuleBus();
+          if (bus) {
+            const { MessageType } = await import("@otterbot/shared");
+            const agentId = `module-agent-${req.params.id}`;
+            const replyMsg = await bus.request(
+              {
+                fromAgentId: "ui",
+                toAgentId: agentId,
+                type: MessageType.Directive,
+                content: question,
+                metadata: { source: "ui_query" },
+              },
+              120_000,
+            );
+            if (replyMsg) {
+              return { ok: true, answer: replyMsg.content };
+            }
+            // Agent timed out — fall through to simpler handlers
+            // but if there's no fallback, return a timeout message
+            if (!loaded.definition.onQuery) {
+              return { ok: true, answer: "The agent did not respond in time. It may be busy or unavailable." };
+            }
+          }
+        }
+
+        // Fall back to onQuery handler
+        if (loaded.definition.onQuery) {
+          const answer = await loaded.definition.onQuery(question, loaded.context);
+          return { ok: true, answer };
+        }
+
+        // Fall back to knowledge store search
+        const results = await loaded.knowledgeStore.search(question, 5);
+        if (results.length === 0) {
+          return { ok: true, answer: `No results found for: ${question}` };
+        }
+
+        const answer = results
+          .map((doc) => {
+            const meta = doc.metadata;
+            const url = meta?.url ? ` (${meta.url})` : "";
+            return `---\n${doc.content}${url}\n`;
+          })
+          .join("\n");
+
+        return { ok: true, answer };
+      } catch (err) {
+        return reply
+          .status(500)
+          .send({ error: err instanceof Error ? err.message : String(err) });
+      }
+    },
+  );
+
+  // Trigger a poll (or full sync) for a module
+  app.post<{ Params: { id: string }; Body: { fullSync?: boolean } }>(
+    "/api/modules/:id/poll",
+    async (req, reply) => {
+      const { getModuleLoader, getModuleScheduler } = await import("./modules/index.js");
+      const loader = getModuleLoader();
+      const scheduler = getModuleScheduler();
+
+      if (!loader || !scheduler) {
+        return reply.status(503).send({ error: "Module system not initialized" });
+      }
+
+      const loaded = loader.get(req.params.id);
+      if (!loaded) {
+        return reply.status(400).send({ error: "Module not loaded" });
+      }
+
+      try {
+        const fullSync = req.body?.fullSync ?? false;
+        const items = await scheduler.executePoll(req.params.id, loaded, fullSync);
+        return { ok: true, items };
+      } catch (err) {
+        return reply
+          .status(500)
+          .send({ error: err instanceof Error ? err.message : String(err) });
+      }
+    },
+  );
+
+  // Module config: set values
+  app.post<{ Params: { id: string }; Body: Record<string, string | null> }>(
+    "/api/modules/:id/config",
+    async (req, reply) => {
+      const { getModule } = await import("./modules/module-manifest.js");
+      const { getConfig: getConfigValue, setConfig: setConfigValue } = await import("./auth/auth.js");
+
+      const entry = getModule(req.params.id);
+      if (!entry) return reply.status(404).send({ error: "Module not found" });
+
+      try {
+        const updates = req.body;
+        for (const [key, value] of Object.entries(updates)) {
+          // Skip masked secret placeholders — the UI sends "••••••••" when the
+          // user hasn't changed a secret field.
+          if (value === "••••••••") continue;
+
+          if (value === null || value === "") {
+            // Delete config by setting empty — getConfig returns undefined for missing keys
+            // Use the DB directly to delete the row
+            const { getDb } = await import("./db/index.js");
+            const { sql } = await import("drizzle-orm");
+            const db = getDb();
+            db.run(sql`DELETE FROM config WHERE key = ${"module:" + req.params.id + ":" + key}`);
+          } else {
+            setConfigValue(`module:${req.params.id}:${key}`, value);
+          }
+        }
+        return { ok: true };
+      } catch (err) {
+        return reply
+          .status(500)
+          .send({ error: err instanceof Error ? err.message : String(err) });
+      }
+    },
+  );
+
+  // Module webhooks — registered here (before app.listen) so the route exists early.
+  // The actual handler delegates to the loaded module's onWebhook at runtime.
+  app.post<{ Params: { moduleId: string } }>(
+    "/api/modules/:moduleId/webhook",
+    async (req, reply) => {
+      const { getModuleLoader } = await import("./modules/index.js");
+      const { getConfig: getConfigValue } = await import("./auth/auth.js");
+
+      const loader = getModuleLoader();
+      if (!loader) {
+        return reply.status(503).send({ error: "Module system not initialized" });
+      }
+
+      const loaded = loader.get(req.params.moduleId);
+      if (!loaded) {
+        return reply.status(404).send({ error: `Module not found: ${req.params.moduleId}` });
+      }
+
+      if (!loaded.definition.onWebhook) {
+        return reply.status(400).send({ error: `Module ${req.params.moduleId} does not handle webhooks` });
+      }
+
+      // Verify webhook secret if configured
+      const expectedSecret = getConfigValue(`module:${req.params.moduleId}:webhook_secret`);
+      if (expectedSecret) {
+        const providedSecret =
+          (req.headers["x-webhook-secret"] as string) ??
+          (req.headers["x-hub-signature-256"] as string);
+
+        if (!providedSecret || providedSecret !== expectedSecret) {
+          return reply.status(401).send({ error: "Invalid webhook secret" });
+        }
+      }
+
+      const webhookReq = {
+        method: req.method,
+        headers: req.headers as Record<string, string | string[] | undefined>,
+        body: req.body,
+        params: req.params as Record<string, string>,
+        query: req.query as Record<string, string>,
+      };
+
+      try {
+        const result = await loaded.definition.onWebhook(webhookReq, loaded.context);
+
+        // Auto-ingest items if returned
+        if (result.items) {
+          for (const item of result.items) {
+            const content = `# ${item.title}\n\n${item.content}`;
+            const metadata: Record<string, unknown> = {
+              ...item.metadata,
+              ...(item.url ? { url: item.url } : {}),
+              title: item.title,
+            };
+            await loaded.knowledgeStore.upsert(item.id, content, metadata);
+          }
+          loaded.context.log(`Webhook ingested ${result.items.length} items`);
+        }
+
+        return reply.status(result.status ?? 200).send(result.body ?? { ok: true });
+      } catch (err) {
+        loaded.context.error("Webhook handler failed:", err);
+        return reply.status(500).send({ error: "Webhook handler failed" });
+      }
+    },
+  );
+
   // SPA fallback for client-side routing (only for page navigation, not JS/CSS/API requests)
   if (existsSync(webDistPath)) {
     app.setNotFoundHandler(async (req, reply) => {
@@ -5027,12 +6342,14 @@ Respond with ONLY a JSON object (no markdown, no explanation) with these fields:
     await stopDiscordBridge();
     await stopIrcBridge();
     await stopTeamsBridge();
+    await stopGoogleChatBridge();
     await stopSlackBridge();
     await stopTlonBridge();
     await stopWhatsAppBridge();
     await stopMattermostBridge();
     await stopSignalBridge();
     await stopNextcloudTalkBridge();
+    await stopMastodonBridge();
     await McpClientManager.stopAll();
     await closeBrowser();
     process.exit(0);

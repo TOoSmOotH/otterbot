@@ -9,7 +9,7 @@ import type {
   MergeQueueStatus,
 } from "@otterbot/shared";
 import { getDb, schema } from "../db/index.js";
-import { getConfig } from "../auth/auth.js";
+import { resolveGitHubToken } from "../github/account-resolver.js";
 import { resolveProjectBranch } from "../github/github-service.js";
 import {
   fetchPullRequest,
@@ -23,6 +23,7 @@ import { formatBotComment } from "../utils/github-comments.js";
 import type { Scheduler } from "../schedulers/scheduler-registry.js";
 import type { PipelineManager } from "../pipeline/pipeline-manager.js";
 import type { WorkspaceManager } from "../workspace/workspace.js";
+import type { COO } from "../agents/coo.js";
 
 type TypedServer = Server<ClientToServerEvents, ServerToClientEvents>;
 
@@ -31,6 +32,7 @@ export class MergeQueue implements Scheduler {
   private workspace: WorkspaceManager;
   private intervalId: ReturnType<typeof setInterval> | null = null;
   private pipelineManager: PipelineManager | null = null;
+  private coo: COO | null = null;
   private processing = false;
 
   constructor(io: TypedServer, workspace: WorkspaceManager) {
@@ -40,6 +42,10 @@ export class MergeQueue implements Scheduler {
 
   setPipelineManager(pm: PipelineManager): void {
     this.pipelineManager = pm;
+  }
+
+  setCoo(coo: COO): void {
+    this.coo = coo;
   }
 
   // ─── Scheduler interface ──────────────────────────────────────────
@@ -265,9 +271,6 @@ export class MergeQueue implements Scheduler {
    * Check GitHub for PRs that were merged/closed externally.
    */
   private async syncExternalState(): Promise<void> {
-    const token = getConfig("github:token");
-    if (!token) return;
-
     const db = getDb();
     const activeEntries = db
       .select()
@@ -277,6 +280,9 @@ export class MergeQueue implements Scheduler {
 
     for (const entry of activeEntries) {
       try {
+        const token = resolveGitHubToken(entry.projectId);
+        if (!token) continue;
+
         const project = db.select().from(schema.projects).where(eq(schema.projects.id, entry.projectId)).get();
         if (!project?.githubRepo) continue;
 
@@ -306,6 +312,14 @@ export class MergeQueue implements Scheduler {
           }
 
           console.log(`[MergeQueue] PR #${entry.prNumber} merged externally — task ${entry.taskId} → done`);
+
+          // Notify TeamLead to spawn backlog workers
+          if (this.coo) {
+            const teamLead = this.coo.getTeamLeads().get(entry.projectId);
+            if (teamLead) {
+              await teamLead.notifyTaskDone(entry.taskId);
+            }
+          }
         } else if (pr.state === "closed") {
           // Closed without merge — remove from queue, task → backlog
           db.delete(schema.mergeQueue).where(eq(schema.mergeQueue.id, entry.id)).run();
@@ -369,7 +383,7 @@ export class MergeQueue implements Scheduler {
     const project = db.select().from(schema.projects).where(eq(schema.projects.id, entry.projectId)).get();
     if (!project?.githubRepo) return;
 
-    const token = getConfig("github:token");
+    const token = resolveGitHubToken(entry.projectId);
     if (!token) return;
 
     // Step 1: Rebase
@@ -460,7 +474,7 @@ export class MergeQueue implements Scheduler {
     const project = db.select().from(schema.projects).where(eq(schema.projects.id, entry.projectId)).get();
     if (!project?.githubRepo) return;
 
-    const token = getConfig("github:token");
+    const token = resolveGitHubToken(entry.projectId);
     if (!token) return;
 
     const task = db.select().from(schema.kanbanTasks).where(eq(schema.kanbanTasks.id, entry.taskId)).get();
@@ -504,6 +518,14 @@ export class MergeQueue implements Scheduler {
       this.emitQueueUpdated();
 
       console.log(`[MergeQueue] PR #${entry.prNumber} merged successfully`);
+
+      // Notify TeamLead to spawn backlog workers
+      if (this.coo) {
+        const teamLead = this.coo.getTeamLeads().get(entry.projectId);
+        if (teamLead) {
+          await teamLead.notifyTaskDone(entry.taskId);
+        }
+      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
 

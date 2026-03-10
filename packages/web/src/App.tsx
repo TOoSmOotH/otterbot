@@ -10,6 +10,7 @@ import { AgentGraph } from "./components/graph/AgentGraph";
 import { LiveView } from "./components/live-view/LiveView";
 import { MessageStream } from "./components/stream/MessageStream";
 import { SettingsPage } from "./components/settings/SettingsPage";
+import type { SettingsSection } from "./components/settings/settings-nav";
 import { LoginScreen } from "./components/auth/LoginScreen";
 import { ChangeTemporaryPassphraseScreen } from "./components/auth/ChangeTemporaryPassphraseScreen";
 import { SetupWizard } from "./components/setup/SetupWizard";
@@ -39,6 +40,10 @@ import { getCenterTabs, centerViewLabels } from "./lib/get-center-tabs";
 import type { CenterView } from "./lib/get-center-tabs";
 import { Group, Panel, Separator, useDefaultLayout, usePanelRef } from "react-resizable-panels";
 import { disconnectSocket, getSocket } from "./lib/socket";
+import { Tooltip } from "./components/ui/Tooltip";
+import { useUIModeStore } from "./stores/ui-mode-store";
+import { useWhatsNewStore } from "./stores/whats-new-store";
+import { WhatsNewPanel } from "./components/whats-new/WhatsNewPanel";
 
 export default function App() {
   const screen = useAuthStore((s) => s.screen);
@@ -121,7 +126,12 @@ function MainApp() {
   const enterProject = useProjectStore((s) => s.enterProject);
   const exitProject = useProjectStore((s) => s.exitProject);
   const projects = useProjectStore((s) => s.projects);
-  const [settingsOpen, setSettingsOpen] = useState(false);
+  const isBasic = useUIModeStore((s) => s.mode === "basic");
+  const toggleMode = useUIModeStore((s) => s.toggleMode);
+  const unreadCount = useWhatsNewStore((s) => s.unreadCount);
+  const fetchReleases = useWhatsNewStore((s) => s.fetchReleases);
+  const [settingsOpen, setSettingsOpen] = useState<SettingsSection | true | false>(false);
+  const [whatsNewOpen, setWhatsNewOpen] = useState(false);
   const [userProfile, setUserProfile] = useState<UserProfile | undefined>();
   const [centerView, setCenterView] = useState<CenterView>("dashboard");
 
@@ -184,6 +194,9 @@ function MainApp() {
     // Check desktop environment status
     useDesktopStore.getState().checkStatus();
 
+    // Fetch release info for What's New badge
+    fetchReleases();
+
     // Initialize movement trigger system
     initMovementTriggers();
     initBreakRoomRoaming();
@@ -210,6 +223,32 @@ function MainApp() {
           enterProject(projectId, result.project, result.conversations, result.tasks);
           if (!cached) setCenterView("dashboard");
           // Auto-load most recent project conversation
+          if (result.conversations.length > 0) {
+            const latest = result.conversations[0];
+            socket.emit("ceo:load-conversation", { conversationId: latest.id }, (convResult) => {
+              loadConversationMessages(convResult.messages);
+              setCurrentConversation(latest.id);
+            });
+          }
+        }
+      });
+    },
+    [enterProject, setCenterView, clearChat, loadConversationMessages, setCurrentConversation],
+  );
+
+  const handleProjectCreated = useCallback(
+    (projectId: string) => {
+      clearChat();
+      const cached = useProjectStore.getState().projects.find((p) => p.id === projectId);
+      if (cached) {
+        enterProject(projectId, cached, [], []);
+        setCenterView("settings");
+      }
+      const socket = getSocket();
+      socket.emit("project:enter", { projectId }, (result) => {
+        if (result.project) {
+          enterProject(projectId, result.project, result.conversations, result.tasks);
+          setCenterView("settings");
           if (result.conversations.length > 0) {
             const latest = result.conversations[0];
             socket.emit("ceo:load-conversation", { conversationId: latest.id }, (convResult) => {
@@ -282,68 +321,139 @@ function MainApp() {
             </div>
           )}
         </div>
-        <div className="flex items-center gap-1">
-          <button
-            onClick={() => {
-              setCenterView("desktop");
-              setSettingsOpen(false);
-            }}
-            className={`text-xs transition-colors px-2 py-1 rounded ${
-              !settingsOpen && centerView === "desktop"
-                ? "text-primary bg-primary/10"
-                : "text-muted-foreground hover:text-foreground hover:bg-secondary"
-            }`}
-          >
-            Desktop
-          </button>
-          <button
-            onClick={() => {
-              setCenterView("graph");
-              setSettingsOpen(false);
-            }}
-            className={`text-xs transition-colors px-2 py-1 rounded ${
-              !settingsOpen && centerView === "graph"
-                ? "text-primary bg-primary/10"
-                : "text-muted-foreground hover:text-foreground hover:bg-secondary"
-            }`}
-          >
-            Graph
-          </button>
-          <button
-            onClick={() => {
-              setCenterView("live3d");
-              setSettingsOpen(false);
-            }}
-            className={`text-xs transition-colors px-2 py-1 rounded ${
-              !settingsOpen && centerView === "live3d"
-                ? "text-primary bg-primary/10"
-                : "text-muted-foreground hover:text-foreground hover:bg-secondary"
-            }`}
-          >
-            3D View
-          </button>
-          <button
-            onClick={() => setSettingsOpen(!settingsOpen)}
-            className={`text-xs transition-colors px-2 py-1 rounded ${
-              settingsOpen
-                ? "text-primary bg-primary/10"
-                : "text-muted-foreground hover:text-foreground hover:bg-secondary"
-            }`}
-          >
-            Settings
-          </button>
-          <button
-            onClick={handleLogout}
-            className="text-xs text-muted-foreground hover:text-foreground transition-colors px-2 py-1 rounded hover:bg-secondary"
-          >
-            Logout
-          </button>
+        <div className="flex items-center gap-0.5">
+          {!isBasic && (
+            <>
+              <Tooltip label="Desktop">
+                <button
+                  onClick={() => {
+                    setCenterView("desktop");
+                    setSettingsOpen(false);
+                  }}
+                  className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${
+                    !settingsOpen && centerView === "desktop"
+                      ? "text-primary bg-primary/10"
+                      : "text-muted-foreground hover:text-foreground hover:bg-secondary"
+                  }`}
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <rect x="2" y="3" width="20" height="14" rx="2" ry="2" /><line x1="8" y1="21" x2="16" y2="21" /><line x1="12" y1="17" x2="12" y2="21" />
+                  </svg>
+                </button>
+              </Tooltip>
+              <Tooltip label="Agent Graph">
+                <button
+                  onClick={() => {
+                    setCenterView("graph");
+                    setSettingsOpen(false);
+                  }}
+                  className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${
+                    !settingsOpen && centerView === "graph"
+                      ? "text-primary bg-primary/10"
+                      : "text-muted-foreground hover:text-foreground hover:bg-secondary"
+                  }`}
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <circle cx="18" cy="18" r="3" /><circle cx="6" cy="6" r="3" /><circle cx="18" cy="6" r="3" /><line x1="8.59" y1="7.41" x2="15.42" y2="14.59" /><line x1="15.41" y1="7.41" x2="8.59" y2="14.59" />
+                  </svg>
+                </button>
+              </Tooltip>
+            </>
+          )}
+          <Tooltip label="3D View">
+            <button
+              onClick={() => {
+                setCenterView("live3d");
+                setSettingsOpen(false);
+              }}
+              className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${
+                !settingsOpen && centerView === "live3d"
+                  ? "text-primary bg-primary/10"
+                  : "text-muted-foreground hover:text-foreground hover:bg-secondary"
+              }`}
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" /><polyline points="3.27 6.96 12 12.01 20.73 6.96" /><line x1="12" y1="22.08" x2="12" y2="12" />
+              </svg>
+            </button>
+          </Tooltip>
+
+          <Tooltip label={isBasic ? "Switch to Advanced" : "Switch to Basic"}>
+            <button
+              onClick={toggleMode}
+              className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${
+                !isBasic
+                  ? "text-primary bg-primary/10"
+                  : "text-muted-foreground hover:text-foreground hover:bg-secondary"
+              }`}
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="4" y1="21" x2="4" y2="14" /><line x1="4" y1="10" x2="4" y2="3" /><line x1="12" y1="21" x2="12" y2="12" /><line x1="12" y1="8" x2="12" y2="3" /><line x1="20" y1="21" x2="20" y2="16" /><line x1="20" y1="12" x2="20" y2="3" /><line x1="1" y1="14" x2="7" y2="14" /><line x1="9" y1="8" x2="15" y2="8" /><line x1="17" y1="16" x2="23" y2="16" />
+              </svg>
+            </button>
+          </Tooltip>
+
+          <div className="relative">
+            <Tooltip label="What's New">
+              <button
+                onClick={() => {
+                  setWhatsNewOpen((prev) => !prev);
+                  setSettingsOpen(false);
+                }}
+                className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${
+                  whatsNewOpen
+                    ? "text-primary bg-primary/10"
+                    : "text-muted-foreground hover:text-foreground hover:bg-secondary"
+                }`}
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2z" />
+                </svg>
+                {unreadCount > 0 && (
+                  <span className="absolute -top-0.5 -right-0.5 min-w-[16px] h-4 flex items-center justify-center rounded-full bg-primary text-[9px] font-bold text-primary-foreground px-1">
+                    {unreadCount > 9 ? "9+" : unreadCount}
+                  </span>
+                )}
+              </button>
+            </Tooltip>
+            <WhatsNewPanel open={whatsNewOpen} onClose={() => setWhatsNewOpen(false)} />
+          </div>
+
+          <div className="w-px h-4 bg-border mx-1" />
+
+          <Tooltip label="Settings">
+            <button
+              onClick={() => {
+                setSettingsOpen(!settingsOpen);
+                setWhatsNewOpen(false);
+              }}
+              className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${
+                settingsOpen
+                  ? "text-primary bg-primary/10"
+                  : "text-muted-foreground hover:text-foreground hover:bg-secondary"
+              }`}
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+              </svg>
+            </button>
+          </Tooltip>
+          <Tooltip label="Logout">
+            <button
+              onClick={handleLogout}
+              className="w-8 h-8 rounded-lg flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><polyline points="16 17 21 12 16 7" /><line x1="21" y1="12" x2="9" y2="12" />
+              </svg>
+            </button>
+          </Tooltip>
         </div>
       </header>
 
       {/* Full-page settings or three-panel layout */}
       {settingsOpen ? (
-        <SettingsPage onClose={handleSettingsClose} />
+        <SettingsPage onClose={handleSettingsClose} initialSection={typeof settingsOpen === "string" ? settingsOpen : undefined} />
       ) : (
         <main className="flex-1 overflow-hidden">
           <ResizableLayout
@@ -354,7 +464,10 @@ function MainApp() {
             centerView={centerView}
             setCenterView={setCenterView}
             onEnterProject={handleEnterProject}
+            onProjectCreated={handleProjectCreated}
             cooName={userProfile?.cooName}
+            onOpenSettings={(section?: SettingsSection) => setSettingsOpen(section ?? true)}
+            isBasic={isBasic}
           />
         </main>
       )}
@@ -373,7 +486,7 @@ function CollapsedStreamStrip({ onExpand }: { onExpand: () => void }) {
     <button
       onClick={onExpand}
       className="h-full w-full flex flex-col items-center justify-center gap-2 bg-card hover:bg-secondary/50 transition-colors cursor-pointer border-l border-border"
-      title="Expand Message Bus"
+      title="Expand Activity"
     >
       <svg
         width="14"
@@ -390,7 +503,7 @@ function CollapsedStreamStrip({ onExpand }: { onExpand: () => void }) {
         className="text-[10px] text-muted-foreground font-medium tracking-wide"
         style={{ writingMode: "vertical-rl" }}
       >
-        Message Bus
+        Activity
       </span>
     </button>
   );
@@ -404,7 +517,10 @@ function ResizableLayout({
   centerView,
   setCenterView,
   onEnterProject,
+  onProjectCreated,
   cooName,
+  onOpenSettings,
+  isBasic,
 }: {
   userProfile?: UserProfile;
   activeProjectId: string | null;
@@ -413,7 +529,10 @@ function ResizableLayout({
   centerView: CenterView;
   setCenterView: (view: CenterView) => void;
   onEnterProject: (projectId: string) => void;
+  onProjectCreated?: (projectId: string) => void;
   cooName?: string;
+  onOpenSettings?: (section?: SettingsSection) => void;
+  isBasic?: boolean;
 }) {
   const { defaultLayout, onLayoutChanged } = useDefaultLayout({
     id: "otterbot-layout",
@@ -423,7 +542,12 @@ function ResizableLayout({
 
   const desktopEnabled = useDesktopStore((s) => s.enabled);
   const streamPanelRef = usePanelRef();
-  const [streamCollapsed, setStreamCollapsed] = useState(false);
+  const [streamCollapsed, setStreamCollapsed] = useState(true);
+
+  // Start with Activity panel collapsed
+  useEffect(() => {
+    streamPanelRef.current?.collapse();
+  }, []);
 
   // Reset to graph from project-only views when no project is active
   useEffect(() => {
@@ -438,7 +562,7 @@ function ResizableLayout({
         return activeProjectId ? (
           <ProjectDashboard projectId={activeProjectId} />
         ) : (
-          <GlobalDashboard projects={projects} onEnterProject={onEnterProject} />
+          <GlobalDashboard projects={projects} onEnterProject={onEnterProject} onOpenSettings={onOpenSettings} />
         );
       case "charter":
         return activeProject ? (
@@ -498,7 +622,7 @@ function ResizableLayout({
           {/* Project list — compact, scrollable */}
           {!activeProjectId && (
             <div className="shrink-0 max-h-[40%] border-b border-border overflow-y-auto">
-              <ProjectList projects={projects} onEnterProject={onEnterProject} cooName={cooName} />
+              <ProjectList projects={projects} onEnterProject={onEnterProject} onProjectCreated={onProjectCreated} cooName={cooName} />
             </div>
           )}
           {/* CEO Chat fills remaining space */}
@@ -515,7 +639,7 @@ function ResizableLayout({
         <div className="h-full flex flex-col">
           {/* Tab bar */}
           <div className="flex items-center gap-1 px-3 py-1.5 border-b border-border bg-card">
-              {getCenterTabs(activeProjectId).map((tab) => (
+              {getCenterTabs(activeProjectId, isBasic).map((tab) => (
                   <button
                     key={tab}
                     onClick={() => setCenterView(tab)}
@@ -535,32 +659,36 @@ function ResizableLayout({
         </div>
       </Panel>
 
-      <Separator className="panel-resize-handle" />
+      {!isBasic && (
+        <>
+          <Separator className="panel-resize-handle" />
 
-      {/* Right: Message Stream (collapsible) */}
-      <Panel
-        id="stream"
-        minSize="15%"
-        maxSize="40%"
-        collapsible
-        collapsedSize="40px"
-        panelRef={streamPanelRef}
-        onResize={() => {
-          const collapsed = streamPanelRef.current?.isCollapsed() ?? false;
-          setStreamCollapsed(collapsed);
-        }}
-      >
-        {streamCollapsed ? (
-          <CollapsedStreamStrip onExpand={() => streamPanelRef.current?.expand()} />
-        ) : (
-          <div className="h-full relative">
-            <MessageStream
-              userProfile={userProfile}
-              onCollapse={() => streamPanelRef.current?.collapse()}
-            />
-          </div>
-        )}
-      </Panel>
+          {/* Right: Message Stream (collapsible) */}
+          <Panel
+            id="stream"
+            minSize="15%"
+            maxSize="40%"
+            collapsible
+            collapsedSize="40px"
+            panelRef={streamPanelRef}
+            onResize={() => {
+              const collapsed = streamPanelRef.current?.isCollapsed() ?? false;
+              setStreamCollapsed(collapsed);
+            }}
+          >
+            {streamCollapsed ? (
+              <CollapsedStreamStrip onExpand={() => streamPanelRef.current?.expand()} />
+            ) : (
+              <div className="h-full relative">
+                <MessageStream
+                  userProfile={userProfile}
+                  onCollapse={() => streamPanelRef.current?.collapse()}
+                />
+              </div>
+            )}
+          </Panel>
+        </>
+      )}
     </Group>
   );
 }

@@ -37,12 +37,6 @@ vi.mock("@ai-sdk/google", () => ({
   createGoogleGenerativeAI: vi.fn(() => mockGoogleFactory),
 }));
 
-const mockOllamaModel = { modelId: "ollama-model" };
-const mockOllamaFactory = vi.fn(() => mockOllamaModel);
-vi.mock("ollama-ai-provider", () => ({
-  createOllama: vi.fn(() => mockOllamaFactory),
-}));
-
 const mockCompatibleModel = { modelId: "compatible-model" };
 const mockCompatibleFactory = vi.fn(() => mockCompatibleModel);
 vi.mock("@ai-sdk/openai-compatible", () => ({
@@ -258,6 +252,38 @@ describe("adapter – resolveModel", () => {
     });
   });
 
+  it("creates an OpenAI-based model for ollama provider type", () => {
+    const config: LLMConfig = {
+      provider: "ollama",
+      model: "llama3.1",
+    };
+
+    const model = resolveModel(config);
+
+    expect(createOpenAI).toHaveBeenCalledWith({
+      baseURL: "http://localhost:11434/v1",
+      apiKey: "ollama",
+    });
+    expect(mockOpenAIFactory).toHaveBeenCalledWith("llama3.1");
+    expect(model).toBe(mockOpenAIModel);
+  });
+
+  it("allows overriding the ollama baseUrl", () => {
+    const config: LLMConfig = {
+      provider: "ollama",
+      model: "mistral",
+      baseUrl: "http://192.168.1.100:11434/v1",
+    };
+
+    resolveModel(config);
+
+    expect(createOpenAI).toHaveBeenCalledWith({
+      baseURL: "http://192.168.1.100:11434/v1",
+      apiKey: "ollama",
+    });
+    expect(mockOpenAIFactory).toHaveBeenCalledWith("mistral");
+  });
+
   it("throws for unknown provider type", () => {
     const config: LLMConfig = {
       provider: "nonexistent",
@@ -320,6 +346,12 @@ describe("adapter – isThinkingModel", () => {
   it("returns false for lmstudio models", () => {
     expect(
       isThinkingModel({ provider: "lmstudio", model: "llama-3.1-8b-instruct" }),
+    ).toBe(false);
+  });
+
+  it("returns false for ollama models", () => {
+    expect(
+      isThinkingModel({ provider: "ollama", model: "llama3.1" }),
     ).toBe(false);
   });
 });
