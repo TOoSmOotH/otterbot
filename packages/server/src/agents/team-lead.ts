@@ -5,6 +5,7 @@ import {
   AgentRole,
   AgentStatus,
   MessageType,
+  PIPELINE_STAGES,
   type BusMessage,
   type KanbanTask,
 } from "@otterbot/shared";
@@ -50,6 +51,7 @@ import {
   requestPullRequestReviewers,
   createIssueComment,
   resolveProjectBranch,
+  fetchIssue,
 } from "../github/github-service.js";
 import type { PipelineManager } from "../pipeline/pipeline-manager.js";
 import { cleanTerminalOutput, summarizeForGitHub } from "../utils/terminal.js";
@@ -405,6 +407,25 @@ export class TeamLead extends BaseAgent {
       enrichedDirective =
         `[CURRENT KANBAN BOARD]\n${board.summary}\n[/CURRENT KANBAN BOARD]\n\n` +
         `New directive: ${message.content}`;
+    }
+
+    // Inject pipeline awareness when pipeline is enabled for this project
+    if (this.projectId && this._pipelineManager?.isEnabled(this.projectId)) {
+      const pipelineConfig = this._pipelineManager.getConfig(this.projectId);
+      const enabledStages = pipelineConfig
+        ? PIPELINE_STAGES
+            .filter((s) => pipelineConfig.stages[s.key]?.enabled !== false)
+            .map((s) => s.label)
+        : [];
+      enrichedDirective =
+        `[PIPELINE ACTIVE]\n` +
+        `This project has an active pipeline with stages: ${enabledStages.join(" → ")}.\n` +
+        `When work involves a GitHub issue, you MUST route it through the pipeline instead of spawning standalone workers:\n` +
+        `- For triage or re-triage requests: use the \`route_to_pipeline\` tool with action "triage"\n` +
+        `- For implementation/coding requests: use the \`route_to_pipeline\` tool with action "implement"\n` +
+        `Do NOT spawn research workers or standalone coding workers for GitHub issue work — the pipeline handles the full lifecycle including triage, coding, security review, testing, and code review.\n` +
+        `[/PIPELINE ACTIVE]\n\n` +
+        enrichedDirective;
     }
 
     const { text } = await this.thinkWithContinuation(
@@ -1369,6 +1390,85 @@ export class TeamLead extends BaseAgent {
           return result;
         },
       }),
+      route_to_pipeline: tool({
+        description:
+          "Route a GitHub issue through this project's pipeline. Use this instead of spawning standalone workers when the project has an active pipeline. " +
+          "Action 'triage' runs the pipeline's triage stage (classification, labeling, analysis). " +
+          "Action 'implement' starts the full implementation pipeline (coding → security → testing → review).",
+        parameters: z.object({
+          action: z.enum(["triage", "implement"]).describe("Pipeline action: 'triage' to run triage analysis, 'implement' to start implementation pipeline"),
+          issueNumber: z.number().describe("GitHub issue number to route through the pipeline"),
+          taskId: z.string().optional().describe("Existing kanban task ID for this issue (if one exists)"),
+        }),
+        execute: async ({ action, issueNumber, taskId }) => {
+          if (!this.projectId) {
+            return "REFUSED: No project context — cannot route through pipeline.";
+          }
+          if (!this._pipelineManager) {
+            return "REFUSED: Pipeline manager not available.";
+          }
+          if (!this._pipelineManager.isEnabled(this.projectId)) {
+            return "REFUSED: Pipeline is not enabled for this project. Use spawn_worker instead.";
+          }
+
+          const repo = getConfig(`project:${this.projectId}:github:repo`) ?? null;
+          if (!repo) {
+            return "REFUSED: No GitHub repo configured for this project.";
+          }
+          const token = resolveGitHubToken(this.projectId);
+          if (!token) {
+            return "REFUSED: No GitHub token available for this project.";
+          }
+
+          if (action === "triage") {
+            try {
+              const issue = await fetchIssue(repo, token, issueNumber);
+              await this._pipelineManager.runTriage(this.projectId, repo, issue);
+              return `Routed issue #${issueNumber} through pipeline triage. The triage stage will classify the issue, apply labels, and create/update the kanban task.`;
+            } catch (err) {
+              return `Failed to run pipeline triage for issue #${issueNumber}: ${err instanceof Error ? err.message : String(err)}`;
+            }
+          }
+
+          if (action === "implement") {
+            // Find or use the provided task ID
+            let resolvedTaskId = taskId;
+            if (!resolvedTaskId) {
+              // Look for an existing kanban task linked to this issue
+              const db = getDb();
+              const label = `github-issue-${issueNumber}`;
+              const tasks = db
+                .select()
+                .from(schema.kanbanTasks)
+                .where(eq(schema.kanbanTasks.projectId, this.projectId))
+                .all();
+              const linked = tasks.find((t) =>
+                (t.labels as string[]).includes(label),
+              );
+              if (linked) {
+                resolvedTaskId = linked.id;
+              } else {
+                return `No kanban task found for issue #${issueNumber}. Run triage first (action: "triage") to create the task, then implement.`;
+              }
+            }
+
+            // Check if already in pipeline
+            if (this._pipelineManager.isPipelineTask(resolvedTaskId)) {
+              return `Task ${resolvedTaskId} is already being managed by the pipeline. Do not re-route it.`;
+            }
+
+            const routed = await this._pipelineManager.startImplementation(
+              resolvedTaskId, this.projectId, issueNumber, repo, { skipFallback: true },
+            );
+            if (routed) {
+              return `Routed task ${resolvedTaskId} (issue #${issueNumber}) through the implementation pipeline. The pipeline will orchestrate coding, security review, testing, and code review stages.`;
+            }
+            return `Pipeline declined to route task ${resolvedTaskId}. The pipeline may be disabled or have no enabled stages. Use spawn_worker as fallback.`;
+          }
+
+          return "Unknown action.";
+        },
+      }),
       web_search: tool({
         description:
           "Search the web for information. Returns relevant results for the query.",
@@ -1564,11 +1664,13 @@ export class TeamLead extends BaseAgent {
         }
       }
 
-      // Route coding workers through pipeline when enabled
+      // Route workers through pipeline when enabled — applies to ALL worker types
+      // (not just coding agents) when the task is linked to a GitHub issue.
+      // This prevents standalone workers from bypassing the pipeline's lifecycle
+      // management (triage, security review, testing, code review).
       if (
         !options?.pipelineOverride &&
         taskId &&
-        CODING_AGENT_IDS.has(registryEntryId) &&
         this.projectId &&
         this._pipelineManager?.isEnabled(this.projectId) &&
         !this._pipelineManager.isPipelineTask(taskId)
@@ -1586,16 +1688,19 @@ export class TeamLead extends BaseAgent {
           ? parseInt(issueLabel.replace("github-issue-", ""), 10)
           : null;
 
-        console.log(
-          `[TeamLead ${this.id}] Routing task ${taskId} through pipeline (repo=${repo}, issue=${issueNumber})`,
-        );
-        const routed = await this._pipelineManager.startImplementation(
-          taskId, this.projectId, issueNumber, repo, { skipFallback: true },
-        );
-        if (routed) {
-          return `Routed task ${taskId} through pipeline. The pipeline will orchestrate coding, security review, testing, and code review stages.`;
+        // For issue-linked tasks OR coding agents, route through pipeline
+        if (issueNumber !== null || CODING_AGENT_IDS.has(registryEntryId)) {
+          console.log(
+            `[TeamLead ${this.id}] Routing task ${taskId} through pipeline (repo=${repo}, issue=${issueNumber}, agent=${registryEntryId})`,
+          );
+          const routed = await this._pipelineManager.startImplementation(
+            taskId, this.projectId, issueNumber, repo, { skipFallback: true },
+          );
+          if (routed) {
+            return `Routed task ${taskId} through pipeline. The pipeline will orchestrate coding, security review, testing, and code review stages. Do NOT spawn standalone workers for this task.`;
+          }
+          console.log(`[TeamLead ${this.id}] Pipeline declined task ${taskId} — spawning worker directly`);
         }
-        console.log(`[TeamLead ${this.id}] Pipeline declined task ${taskId} — spawning worker directly`);
       }
 
       // Enforce max concurrent coding workers
