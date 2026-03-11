@@ -16,9 +16,11 @@ vi.mock("../../auth/auth.js", () => ({
 vi.mock("../../github/github-service.js", () => ({
   createIssueComment: vi.fn().mockResolvedValue(undefined),
   addLabelsToIssue: vi.fn().mockResolvedValue(undefined),
+  removeLabelFromIssue: vi.fn().mockResolvedValue(undefined),
   fetchCompareCommitsDiff: vi.fn().mockResolvedValue([]),
   fetchPullRequests: vi.fn().mockResolvedValue([]),
   fetchIssueComments: vi.fn().mockResolvedValue([]),
+  fetchIssue: vi.fn(),
   fetchRepoTree: vi.fn().mockResolvedValue(["src/index.ts", "package.json"]),
   resolveProjectBranch: vi.fn(() => "main"),
 }));
@@ -60,7 +62,12 @@ vi.mock("../../utils/github-comments.js", () => ({
 }));
 
 import { PipelineManager } from "../pipeline-manager.js";
-import { createIssueComment, fetchIssueComments } from "../../github/github-service.js";
+import {
+  createIssueComment,
+  fetchIssueComments,
+  fetchIssue,
+  removeLabelFromIssue,
+} from "../../github/github-service.js";
 import type { COO } from "../../agents/coo.js";
 import { MessageType } from "@otterbot/shared";
 
@@ -1047,6 +1054,96 @@ describe("PipelineManager", () => {
       (pm as any).recoverPipelines();
 
       expect((pm as any).pipelines.has("task-recover-bad")).toBe(false);
+    });
+  });
+
+  // ─── retriage ──────────────────────────────────────────────
+
+  describe("retriage", () => {
+    beforeEach(() => {
+      vi.mocked(removeLabelFromIssue).mockClear();
+      vi.mocked(fetchIssue).mockClear();
+    });
+
+    it("re-triages by issue number from label, not task id, and returns recreated task", async () => {
+      insertProject({ id: PROJECT_ID, githubRepo: "owner/repo" });
+      configStore.set("github:token", "test-token");
+      insertTask({
+        id: "internal-task-abc123",
+        column: "triage",
+        title: "#439: Internal task IDs should never be shared",
+        labels: ["github-issue-439", "triaged"],
+      });
+
+      vi.mocked(fetchIssue).mockResolvedValueOnce({
+        number: 439,
+        title: "Internal task IDs should never be shared",
+        body: "Issue body",
+        labels: [{ name: "triaged" }, { name: "bug" }],
+        assignees: [],
+        state: "open",
+        state_reason: null,
+        html_url: "https://github.com/owner/repo/issues/439",
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      });
+
+      const runTriageSpy = vi
+        .spyOn(pm, "runTriage")
+        .mockImplementation(async (projectId, _repo, issue: any) => {
+          pm.createTriageTask(projectId, issue.number, issue.title, "bug", issue.body ?? "", "");
+        });
+
+      const recreated = await pm.retriage("internal-task-abc123");
+
+      expect(removeLabelFromIssue).toHaveBeenCalledWith("owner/repo", "test-token", 439, "triaged");
+      expect(fetchIssue).toHaveBeenCalledWith("owner/repo", "test-token", 439);
+      expect(runTriageSpy).toHaveBeenCalledTimes(1);
+      expect(runTriageSpy.mock.calls[0]?.[2].labels).toEqual([{ name: "bug" }]);
+      expect(getTask("internal-task-abc123")).toBeUndefined();
+      expect(io.emit).toHaveBeenCalledWith("kanban:task-deleted", { taskId: "internal-task-abc123", projectId: PROJECT_ID });
+      expect(recreated).toBeTruthy();
+      expect(recreated?.labels).toContain("github-issue-439");
+    });
+
+    it("recreates a basic triage task when GitHub fetch fails", async () => {
+      insertProject({ id: PROJECT_ID, githubRepo: "owner/repo" });
+      configStore.set("github:token", "test-token");
+      insertTask({
+        id: "task-retriage-fetch-fail",
+        column: "triage",
+        title: "#439: Internal task IDs should never be shared",
+        labels: ["github-issue-439"],
+      });
+
+      vi.mocked(fetchIssue).mockRejectedValueOnce(new Error("GitHub API unavailable"));
+
+      const recreated = await pm.retriage("task-retriage-fetch-fail");
+
+      expect(removeLabelFromIssue).toHaveBeenCalledWith("owner/repo", "test-token", 439, "triaged");
+      expect(fetchIssue).toHaveBeenCalledWith("owner/repo", "test-token", 439);
+      expect(getTask("task-retriage-fetch-fail")).toBeUndefined();
+      expect(recreated).toBeTruthy();
+      expect(recreated?.title).toBe("#439: Internal task IDs should never be shared");
+      expect(recreated?.labels).toContain("github-issue-439");
+    });
+
+    it("returns null for tasks that are not GitHub issue-backed", async () => {
+      insertProject({ id: PROJECT_ID, githubRepo: "owner/repo" });
+      configStore.set("github:token", "test-token");
+      insertTask({
+        id: "task-non-github",
+        column: "triage",
+        title: "Manual triage task",
+        labels: ["manual"],
+      });
+
+      const result = await pm.retriage("task-non-github");
+
+      expect(result).toBeNull();
+      expect(removeLabelFromIssue).not.toHaveBeenCalled();
+      expect(fetchIssue).not.toHaveBeenCalled();
+      expect(getTask("task-non-github")).toBeTruthy();
     });
   });
 });
