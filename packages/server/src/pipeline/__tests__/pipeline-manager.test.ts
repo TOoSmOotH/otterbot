@@ -1145,5 +1145,45 @@ describe("PipelineManager", () => {
       expect(fetchIssue).not.toHaveBeenCalled();
       expect(getTask("task-non-github")).toBeTruthy();
     });
+
+    it("continues retriage when removing triaged label fails", async () => {
+      insertProject({ id: PROJECT_ID, githubRepo: "owner/repo" });
+      configStore.set("github:token", "test-token");
+      insertTask({
+        id: "task-retriage-remove-label-fail",
+        column: "triage",
+        title: "#439: Internal task IDs should never be shared",
+        labels: ["github-issue-439", "triaged"],
+      });
+
+      vi.mocked(removeLabelFromIssue).mockRejectedValueOnce(new Error("remove failed"));
+      vi.mocked(fetchIssue).mockResolvedValueOnce({
+        number: 439,
+        title: "Internal task IDs should never be shared",
+        body: "Issue body",
+        labels: [{ name: "triaged" }, { name: "bug" }],
+        assignees: [],
+        state: "open",
+        state_reason: null,
+        html_url: "https://github.com/owner/repo/issues/439",
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      });
+
+      const runTriageSpy = vi
+        .spyOn(pm, "runTriage")
+        .mockImplementation(async (projectId, _repo, issue: any) => {
+          pm.createTriageTask(projectId, issue.number, issue.title, "bug", issue.body ?? "", "");
+        });
+
+      const recreated = await pm.retriage("task-retriage-remove-label-fail");
+
+      expect(removeLabelFromIssue).toHaveBeenCalledWith("owner/repo", "test-token", 439, "triaged");
+      expect(fetchIssue).toHaveBeenCalledWith("owner/repo", "test-token", 439);
+      expect(runTriageSpy).toHaveBeenCalledTimes(1);
+      expect(getTask("task-retriage-remove-label-fail")).toBeUndefined();
+      expect(recreated).toBeTruthy();
+      expect(recreated?.labels).toContain("github-issue-439");
+    });
   });
 });
