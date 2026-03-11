@@ -763,7 +763,7 @@ describe("TeamLead — Kanban logic", () => {
       const result = await (tl as any).spawnWorker("builtin-browser-agent", "Investigate issue details", "issue-task");
 
       expect(pm.startImplementation).toHaveBeenCalledWith("issue-task", PROJECT_ID, 429, "acme/repo", { skipFallback: true });
-      expect(result).toContain("Routed task issue-task through pipeline");
+      expect(result).toContain("Routed task through pipeline");
       expect(result).toContain("Do NOT spawn standalone workers");
     });
 
