@@ -106,10 +106,23 @@ export function KanbanCard({
     socket.emit("merge-queue:approve", { taskId: task.id });
   };
 
+  const handleResetPipeline = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const socket = getSocket();
+    socket.emit("kanban:reset-pipeline", { taskId: task.id });
+  };
+
   const showApproveButton =
     task.column === "in_review" &&
     task.prNumber != null &&
     task.prBranch != null &&
+    !mqEntry;
+
+  // Show reset button when task has pipeline stages and is not actively being processed
+  const showResetButton =
+    task.pipelineStages?.length > 0 &&
+    !task.assigneeAgentId &&
+    task.column !== "triage" &&
     !mqEntry;
 
   return (
@@ -201,6 +214,14 @@ export function KanbanCard({
           onClick={handleApproveForMerge}
         >
           Approve for Merge
+        </button>
+      )}
+      {showResetButton && (
+        <button
+          className="mt-2 w-full text-[11px] font-medium bg-orange-500/15 text-orange-400 hover:bg-orange-500/25 rounded px-2 py-1 transition-colors"
+          onClick={handleResetPipeline}
+        >
+          Reset Pipeline
         </button>
       )}
     </div>

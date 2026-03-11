@@ -336,6 +336,52 @@ export class PipelineManager {
     console.log(`[PipelineManager] Reset task ${taskId} to backlog`);
   }
 
+  /**
+   * Fully reset a task's pipeline state so it can be re-run through the pipeline.
+   * Clears in-memory pipeline tracking, resets all DB pipeline fields, and moves
+   * the task back to backlog. Increments pipelineAttempt for tracking.
+   */
+  resetPipeline(taskId: string): KanbanTask | null {
+    // Remove in-memory pipeline state
+    this.pipelines.delete(taskId);
+
+    const db = getDb();
+    const task = db
+      .select()
+      .from(schema.kanbanTasks)
+      .where(eq(schema.kanbanTasks.id, taskId))
+      .get();
+    if (!task) return null;
+
+    const now = new Date().toISOString();
+    db.update(schema.kanbanTasks)
+      .set({
+        column: "backlog",
+        pipelineStage: null,
+        assigneeAgentId: null,
+        prBranch: null,
+        prNumber: null,
+        completionReport: null,
+        stageReports: {},
+        pipelineAttempt: (task.pipelineAttempt ?? 0) + 1,
+        updatedAt: now,
+      })
+      .where(eq(schema.kanbanTasks.id, taskId))
+      .run();
+
+    const updated = db
+      .select()
+      .from(schema.kanbanTasks)
+      .where(eq(schema.kanbanTasks.id, taskId))
+      .get();
+    if (updated) {
+      this.io.emit("kanban:task-updated", updated as unknown as KanbanTask);
+    }
+
+    console.log(`[PipelineManager] Pipeline reset for task ${taskId} (attempt ${(task.pipelineAttempt ?? 0) + 1})`);
+    return updated as unknown as KanbanTask ?? null;
+  }
+
   // ─── Config helpers ──────────────────────────────────────────────
 
   /** Load pipeline config for a project from config KV */

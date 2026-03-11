@@ -23,6 +23,7 @@ import type { WorkspaceManager } from "../workspace/workspace.js";
 import type { GitHubIssueMonitor } from "../github/issue-monitor.js";
 import type { GiteaIssueMonitor } from "../gitea/issue-monitor.js";
 import type { MergeQueue } from "../merge-queue/merge-queue.js";
+import type { PipelineManager } from "../pipeline/pipeline-manager.js";
 import type { WorldLayoutManager } from "../models3d/world-layout.js";
 import {
   cloneRepo,
@@ -100,7 +101,7 @@ export function setupSocketHandlers(
   coo: COO,
   registry: Registry,
   hooks?: SocketHooks,
-  deps?: { workspace?: WorkspaceManager; issueMonitor?: GitHubIssueMonitor; giteaIssueMonitor?: GiteaIssueMonitor; mergeQueue?: MergeQueue; worldLayout?: WorldLayoutManager },
+  deps?: { workspace?: WorkspaceManager; issueMonitor?: GitHubIssueMonitor; giteaIssueMonitor?: GiteaIssueMonitor; mergeQueue?: MergeQueue; pipelineManager?: PipelineManager; worldLayout?: WorldLayoutManager },
 ) {
   // Track conversation IDs used by background tasks so we can suppress
   // the COO's response in that same conversation.
@@ -1315,6 +1316,24 @@ export function setupSocketHandlers(
         callback?.({ ok: true });
       } else {
         callback?.({ ok: false, error: "No active PTY session" });
+      }
+    });
+
+    // ─── Pipeline reset handler ────────────────────────────────────
+    socket.on("kanban:reset-pipeline", (data, callback) => {
+      if (!deps?.pipelineManager) {
+        callback?.({ ok: false, error: "Pipeline manager not available" });
+        return;
+      }
+      try {
+        const updated = deps.pipelineManager.resetPipeline(data.taskId);
+        if (updated) {
+          callback?.({ ok: true });
+        } else {
+          callback?.({ ok: false, error: "Task not found" });
+        }
+      } catch (err) {
+        callback?.({ ok: false, error: err instanceof Error ? err.message : "Unknown error" });
       }
     });
 
