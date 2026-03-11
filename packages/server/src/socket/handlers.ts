@@ -1337,6 +1337,24 @@ export function setupSocketHandlers(
       }
     });
 
+    // ─── Re-triage handler ──────────────────────────────────────────
+    socket.on("kanban:retriage", async (data, callback) => {
+      if (!deps?.pipelineManager) {
+        callback?.({ ok: false, error: "Pipeline manager not available" });
+        return;
+      }
+      try {
+        const updated = await deps.pipelineManager.retriage(data.taskId);
+        if (updated) {
+          callback?.({ ok: true });
+        } else {
+          callback?.({ ok: false, error: "Task not found or not a GitHub issue task" });
+        }
+      } catch (err) {
+        callback?.({ ok: false, error: err instanceof Error ? err.message : "Unknown error" });
+      }
+    });
+
     // ─── Merge queue handlers ───────────────────────────────────────
     if (deps?.mergeQueue) {
       const mq = deps.mergeQueue;

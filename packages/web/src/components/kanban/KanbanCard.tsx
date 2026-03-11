@@ -112,6 +112,12 @@ export function KanbanCard({
     socket.emit("kanban:reset-pipeline", { taskId: task.id });
   };
 
+  const handleRetriage = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const socket = getSocket();
+    socket.emit("kanban:retriage", { taskId: task.id });
+  };
+
   const showApproveButton =
     task.column === "in_review" &&
     task.prNumber != null &&
@@ -124,6 +130,11 @@ export function KanbanCard({
     !task.assigneeAgentId &&
     task.column !== "triage" &&
     !mqEntry;
+
+  // Show re-triage button for tasks in the triage column that are linked to a GitHub issue
+  const showRetriageButton =
+    task.column === "triage" &&
+    task.labels.some((l) => l.startsWith("github-issue-"));
 
   return (
     <div
@@ -222,6 +233,14 @@ export function KanbanCard({
           onClick={handleResetPipeline}
         >
           Reset Pipeline
+        </button>
+      )}
+      {showRetriageButton && (
+        <button
+          className="mt-2 w-full text-[11px] font-medium bg-cyan-500/15 text-cyan-400 hover:bg-cyan-500/25 rounded px-2 py-1 transition-colors"
+          onClick={handleRetriage}
+        >
+          Re-triage
         </button>
       )}
     </div>
