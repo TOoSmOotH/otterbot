@@ -22,6 +22,7 @@ import type { COO } from "../agents/coo.js";
 import type { PipelineManager } from "../pipeline/pipeline-manager.js";
 import type { MergeQueue } from "../merge-queue/merge-queue.js";
 import type { WorkspaceManager } from "../workspace/workspace.js";
+import { debug } from "../utils/debug.js";
 
 type TypedServer = Server<ClientToServerEvents, ServerToClientEvents>;
 
@@ -81,16 +82,20 @@ export class GitHubPRMonitor {
   private async poll(): Promise<void> {
     const db = getDb();
     // Find all tasks in "in_review" with a prNumber or prBranch set
+    debug("pr-monitor", "poll() starting");
     const tasks = db
       .select()
       .from(schema.kanbanTasks)
       .all()
       .filter((t) => t.column === "in_review" && (t.prNumber != null || t.prBranch != null));
 
+    debug("pr-monitor", `poll() found ${tasks.length} in_review task(s) to check`);
+
     for (const task of tasks) {
       try {
         const token = resolveGitHubToken(task.projectId);
         if (!token) continue;
+        debug("pr-monitor", `checkPR task=${task.id} prNumber=${task.prNumber} prBranch=${task.prBranch}`);
         await this.checkPR(task, token);
       } catch (err) {
         console.error(`[PRMonitor] Error checking PR for task ${task.id}:`, err);

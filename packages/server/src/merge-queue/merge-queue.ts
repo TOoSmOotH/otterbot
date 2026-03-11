@@ -24,6 +24,7 @@ import type { Scheduler } from "../schedulers/scheduler-registry.js";
 import type { PipelineManager } from "../pipeline/pipeline-manager.js";
 import type { WorkspaceManager } from "../workspace/workspace.js";
 import type { COO } from "../agents/coo.js";
+import { debug } from "../utils/debug.js";
 
 type TypedServer = Server<ClientToServerEvents, ServerToClientEvents>;
 
@@ -261,6 +262,7 @@ export class MergeQueue implements Scheduler {
 
     try {
       const rebaseEntryId = await this.syncExternalState();
+      debug("merge-queue", `poll() syncExternalState returned rebaseEntryId=${rebaseEntryId ?? "null"}`);
       if (rebaseEntryId) {
         await this.doProactiveRebase(rebaseEntryId);
       } else {

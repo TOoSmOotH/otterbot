@@ -357,6 +357,7 @@ export class TeamLead extends BaseAgent {
   }
 
   async handleMessage(message: BusMessage): Promise<void> {
+    debug("team-lead", `handleMessage id=${this.id} type=${message.type} from=${message.fromAgentId ?? "unknown"} content=${message.content.slice(0, 200)}${message.content.length > 200 ? "..." : ""}`);
     if (message.type === MessageType.Directive) {
       await this.handleDirective(message);
     } else if (message.type === MessageType.Report) {
@@ -378,6 +379,7 @@ export class TeamLead extends BaseAgent {
     // instead of relying on LLM interpretation of the text hint.
     const pipelineRegistryEntryId = message.metadata?.pipelineRegistryEntryId as string | undefined;
     const pipelineTaskId = message.metadata?.pipelineTaskId as string | undefined;
+    debug("team-lead", `handleDirective id=${this.id} isPipeline=${!!(pipelineRegistryEntryId && pipelineTaskId)} pipelineTask=${pipelineTaskId ?? "none"} recovery=${!!message.metadata?.isRecovery}`);
     if (pipelineRegistryEntryId && pipelineTaskId) {
       // Extract the worker directive from the message content
       const directiveMatch = message.content.match(/Worker directive:\n([\s\S]+)/);
@@ -1639,6 +1641,7 @@ export class TeamLead extends BaseAgent {
     taskId?: string,
     options?: { pipelineOverride?: boolean; sourceBranch?: string; skipAutoAssign?: boolean },
   ): Promise<string> {
+    debug("team-lead", `spawnWorker id=${this.id} registry=${registryEntryId} taskId=${taskId ?? "none"} pipeline=${!!options?.pipelineOverride} sourceBranch=${options?.sourceBranch ?? "none"} task=${task.slice(0, 200)}`);
     try {
       const originalRequestedId = registryEntryId;
 

@@ -147,6 +147,7 @@ export class Worker extends BaseAgent {
   }
 
   async handleMessage(message: BusMessage): Promise<void> {
+    debug("worker", `handleMessage id=${this.id} type=${message.type} from=${message.fromAgentId ?? "unknown"} registry=${this.registryEntryId}`);
     if (message.type === MessageType.Directive) {
       await this.handleTask(message);
     } else if (message.type === MessageType.StatusRequest) {
@@ -773,6 +774,7 @@ ${cleanOutput.slice(-2000)}`,
 
   private async handleTask(message: BusMessage) {
     console.log(`[Worker ${this.id}] handleTask starting (registry=${this.registryEntryId})`);
+    debug("worker", `handleTask id=${this.id} registry=${this.registryEntryId} workspace=${this.workspacePath ?? "none"} taskContent=${message.content.slice(0, 300)}`);
 
     // Set up abort controller for this task
     this._taskAbortController = new AbortController();

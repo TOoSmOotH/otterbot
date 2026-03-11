@@ -34,6 +34,7 @@ import { SECURITY_PREAMBLE } from "../agents/prompts/security-preamble.js";
 import { cleanTerminalOutput, summarizeForGitHub } from "../utils/terminal.js";
 import { formatBotComment, formatBotCommentWithDetails } from "../utils/github-comments.js";
 import { sanitizeForPrompt, extractForkOwner } from "../utils/sanitize.js";
+import { debug } from "../utils/debug.js";
 
 type TypedServer = Server<ClientToServerEvents, ServerToClientEvents>;
 
@@ -164,6 +165,7 @@ export class PipelineManager {
    * Must be called after construction (DB must be ready).
    */
   async init(): Promise<void> {
+    debug("pipeline", "init() — recovering pipelines and starting sweep");
     this.recoverPipelines();
     this.sweepTimer = setInterval(() => {
       this.sweepStalePipelines().catch((err) => {
@@ -517,6 +519,7 @@ export class PipelineManager {
     repo: string | null,
     options?: { skipFallback?: boolean },
   ): Promise<boolean> {
+    debug("pipeline", `startImplementation taskId=${taskId} project=${projectId} issue=${issueNumber ?? "none"} repo=${repo ?? "none"}`);
     const config = this.getConfig(projectId);
     if (!config?.enabled) {
       // Fallback: send existing direct directive to TeamLead
@@ -634,6 +637,7 @@ export class PipelineManager {
     detectedBranch?: string | null,
   ): Promise<void> {
     let state = this.pipelines.get(taskId);
+    debug("pipeline", `advancePipeline taskId=${taskId} hasState=${!!state} detectedBranch=${detectedBranch ?? "none"} report=${workerReport.slice(0, 200)}`);
     if (!state) {
       console.warn(`[PipelineManager] advancePipeline: no in-memory state for task ${taskId} — attempting recovery`);
       const recovered = this.tryRecoverPipeline(taskId);
@@ -721,6 +725,7 @@ export class PipelineManager {
     // Parse structured verdict from report
     const verdict = this.parseVerdict(workerReport);
     const coderIndex = state.stages.indexOf("coder");
+    debug("pipeline", `advancePipeline taskId=${taskId} stage=${currentStage} verdict=${verdict ?? "none"} prBranch=${state.prBranch ?? "none"} prNumber=${state.prNumber ?? "none"} stageIndex=${state.currentStageIndex}/${state.stages.length}`);
 
     // Stage-specific verdict handling with kickback support
     // For re-review pipelines (merge queue), failures abort instead of kicking back to coder
@@ -867,6 +872,8 @@ export class PipelineManager {
     state.currentStageIndex++;
     this.persistPipelineState(state);
 
+    debug("pipeline", `stage passed taskId=${taskId} completedStage=${currentStage} nextIndex=${state.currentStageIndex}/${state.stages.length} isComplete=${state.currentStageIndex >= state.stages.length}`);
+
     if (state.currentStageIndex >= state.stages.length) {
       // Pipeline complete — update DB first, then clean up memory
       this.updateTaskPipelineStage(taskId, null);
@@ -912,6 +919,7 @@ export class PipelineManager {
    * Retries with backoff up to MAX_SPAWN_RETRIES, then moves to backlog.
    */
   async handleSpawnFailure(taskId: string, errorMessage: string): Promise<void> {
+    debug("pipeline", `handleSpawnFailure taskId=${taskId} error=${errorMessage.slice(0, 200)}`);
     const state = this.pipelines.get(taskId);
     if (!state) {
       console.warn(`[PipelineManager] handleSpawnFailure: no state for task ${taskId}`);
@@ -1255,6 +1263,7 @@ export class PipelineManager {
     extraContext?: string,
   ): Promise<void> {
     const currentStage = state.stages[state.currentStageIndex];
+    debug("pipeline", `sendStageDirective taskId=${state.taskId} stage=${currentStage} stageIndex=${state.currentStageIndex}/${state.stages.length} prBranch=${state.prBranch ?? "none"} kickbackSource=${state.lastKickbackSource ?? "none"}`);
     const isLastStage = state.currentStageIndex === state.stages.length - 1;
     const config = this.getConfig(state.projectId);
 
