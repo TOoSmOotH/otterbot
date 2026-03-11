@@ -1414,7 +1414,8 @@ export class PipelineManager {
     if (!task) return;
 
     parts.push(`[PIPELINE STAGE: ${currentStage.toUpperCase()}]`);
-    parts.push(`Task: "${task.title}" (${state.taskId})`);
+    const taskRef = state.issueNumber ? `#${state.issueNumber}` : (task.taskNumber ? `#${task.taskNumber}` : task.title);
+    parts.push(`Task: "${task.title}" (${taskRef})`);
     if (state.issueNumber) {
       parts.push(`GitHub Issue: #${state.issueNumber}`);
     }
@@ -1680,7 +1681,7 @@ export class PipelineManager {
           toAgentId: teamLead.id,
           type: MessageType.Directive,
           content:
-            `[PIPELINE] Spawn a "${stageInfo?.label ?? currentStage}" worker for task "${task.title}" (${state.taskId}).\n` +
+            `[PIPELINE] Spawn a "${stageInfo?.label ?? currentStage}" worker for task "${task.title}" (${taskRef}).\n` +
             `Use registry entry: ${registryEntryId}\n\n` +
             `Worker directive:\n${directiveContent}`,
           projectId: state.projectId,
@@ -2244,9 +2245,12 @@ export class PipelineManager {
     if (teamLead) {
       const bus = (this.coo as any).bus;
       if (bus) {
-        // Extract issue number from labels
+        // Extract issue number from labels for display
         const issueLabel = (task.labels as string[]).find((l) => l.startsWith("github-issue-"));
         const issueNum = issueLabel ? issueLabel.replace("github-issue-", "") : "";
+        const giteaLabel = !issueNum ? (task.labels as string[]).find((l) => l.startsWith("gitea-issue-")) : null;
+        const giteaNum = giteaLabel ? giteaLabel.replace("gitea-issue-", "") : "";
+        const displayRef = issueNum ? `issue #${issueNum}` : (giteaNum ? `issue #${giteaNum}` : ((task as any).taskNumber ? `task #${(task as any).taskNumber}` : `"${task.title}"`));
 
         bus.send({
           fromAgentId: "coo",
@@ -2255,7 +2259,7 @@ export class PipelineManager {
           content:
             `New task: "${task.title}"\n\n` +
             `${task.description || "(no description)"}\n\n` +
-            `Task created on kanban board (${taskId}). ` +
+            `Task created on kanban board for ${displayRef}. ` +
             `Spawn a worker to create a feature branch, implement the fix, and open a PR.`,
           projectId,
         });

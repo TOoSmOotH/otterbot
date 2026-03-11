@@ -538,7 +538,7 @@ export class GiteaIssueMonitor {
               content:
                 `New Gitea issue #${issue.number} assigned: "${issue.title}"\n\n` +
                 `${issue.body ?? "(no description)"}\n\n` +
-                `Task created on kanban board (${taskId}). ` +
+                `Task created on kanban board for issue #${issue.number}. ` +
                 `Spawn a worker to create a feature branch, implement the fix, and open a PR.`,
               projectId,
             });
