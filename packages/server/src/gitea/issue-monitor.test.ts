@@ -137,4 +137,46 @@ describe("GiteaIssueMonitor", () => {
       undefined,
     );
   });
+
+  describe("polling lifecycle", () => {
+    it("defers polling when start() is called without watched projects", () => {
+      vi.useFakeTimers();
+      const setIntervalSpy = vi.spyOn(globalThis, "setInterval");
+
+      monitor.start(1_000);
+
+      expect(setIntervalSpy).not.toHaveBeenCalled();
+
+      setIntervalSpy.mockRestore();
+      vi.useRealTimers();
+    });
+
+    it("auto-starts polling when a project is watched after deferred start()", () => {
+      vi.useFakeTimers();
+      const setIntervalSpy = vi.spyOn(globalThis, "setInterval");
+
+      monitor.start(1_234);
+      monitor.watchProject("proj-auto-start", "owner/repo", "bot");
+
+      expect(setIntervalSpy).toHaveBeenCalledTimes(1);
+      expect(setIntervalSpy).toHaveBeenCalledWith(expect.any(Function), 1_234);
+
+      setIntervalSpy.mockRestore();
+      vi.useRealTimers();
+    });
+
+    it("pauses polling when the final watched project is removed", () => {
+      vi.useFakeTimers();
+      const clearIntervalSpy = vi.spyOn(globalThis, "clearInterval");
+
+      monitor.watchProject("proj-stop", "owner/repo", "bot");
+      monitor.start(1_000);
+      monitor.unwatchProject("proj-stop");
+
+      expect(clearIntervalSpy).toHaveBeenCalledTimes(1);
+
+      clearIntervalSpy.mockRestore();
+      vi.useRealTimers();
+    });
+  });
 });
