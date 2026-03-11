@@ -363,6 +363,9 @@ export class PipelineManager {
         prNumber: null,
         completionReport: null,
         stageReports: {},
+        spawnCount: 0,
+        spawnRetryCount: 0,
+        lastKickbackSource: null,
         pipelineAttempt: (task.pipelineAttempt ?? 0) + 1,
         updatedAt: now,
       })
