@@ -31,6 +31,7 @@ interface WatchedProject {
 export class GitHubIssueMonitor {
   private watched = new Map<string, WatchedProject>();
   private intervalId: ReturnType<typeof setInterval> | null = null;
+  private pollIntervalMs: number | null = null;
   private coo: COO;
   private io: TypedServer;
   private pipelineManager: PipelineManager | null = null;
@@ -52,11 +53,21 @@ export class GitHubIssueMonitor {
   watchProject(projectId: string, repo: string, assignee: string): void {
     this.watched.set(projectId, { projectId, repo, assignee });
     console.log(`[IssueMonitor] Watching ${repo} for issues assigned to ${assignee} (project ${projectId})`);
+    // Auto-start polling if we have a stored interval and the timer isn't running
+    if (this.pollIntervalMs && !this.intervalId) {
+      this.startInterval(this.pollIntervalMs);
+    }
   }
 
   /** Unregister a project from issue monitoring */
   unwatchProject(projectId: string): void {
     this.watched.delete(projectId);
+    // Auto-stop polling when no projects remain
+    if (this.watched.size === 0 && this.intervalId) {
+      console.log("[IssueMonitor] No projects being watched — pausing polling");
+      clearInterval(this.intervalId);
+      this.intervalId = null;
+    }
   }
 
   /** Load watched projects from DB on startup */
@@ -85,10 +96,19 @@ export class GitHubIssueMonitor {
 
   /** Start the polling loop */
   start(pollIntervalMs = 300_000): void {
+    this.pollIntervalMs = pollIntervalMs;
     if (this.intervalId) {
       console.log("[IssueMonitor] start() called but polling is already active — ignoring");
       return;
     }
+    if (this.watched.size === 0) {
+      console.log("[IssueMonitor] No projects being watched — polling deferred until a project is added");
+      return;
+    }
+    this.startInterval(pollIntervalMs);
+  }
+
+  private startInterval(pollIntervalMs: number): void {
     this.intervalId = setInterval(() => {
       this.poll().catch((err) => {
         console.error("[IssueMonitor] Poll error:", err);
@@ -107,7 +127,6 @@ export class GitHubIssueMonitor {
 
   private async poll(): Promise<void> {
     if (this.watched.size === 0) {
-      console.log("[IssueMonitor] Poll skipped — no projects being watched");
       return;
     }
 

@@ -173,6 +173,46 @@ describe("GitHubIssueMonitor", () => {
       // Should NOT have been called since we unwatched
       expect(mockFetchAssignedIssues).not.toHaveBeenCalled();
     });
+
+    it("defers polling when start() is called without watched projects", () => {
+      vi.useFakeTimers();
+      const setIntervalSpy = vi.spyOn(globalThis, "setInterval");
+
+      monitor.start(2_000);
+
+      expect(setIntervalSpy).not.toHaveBeenCalled();
+
+      setIntervalSpy.mockRestore();
+      vi.useRealTimers();
+    });
+
+    it("auto-starts polling when a project is watched after deferred start()", () => {
+      vi.useFakeTimers();
+      const setIntervalSpy = vi.spyOn(globalThis, "setInterval");
+
+      monitor.start(2_345);
+      monitor.watchProject("proj-auto-start", "owner/repo", "testuser");
+
+      expect(setIntervalSpy).toHaveBeenCalledTimes(1);
+      expect(setIntervalSpy).toHaveBeenCalledWith(expect.any(Function), 2_345);
+
+      setIntervalSpy.mockRestore();
+      vi.useRealTimers();
+    });
+
+    it("pauses polling when the final watched project is removed", () => {
+      vi.useFakeTimers();
+      const clearIntervalSpy = vi.spyOn(globalThis, "clearInterval");
+
+      monitor.watchProject("proj-stop", "owner/repo", "testuser");
+      monitor.start(2_000);
+      monitor.unwatchProject("proj-stop");
+
+      expect(clearIntervalSpy).toHaveBeenCalledTimes(1);
+
+      clearIntervalSpy.mockRestore();
+      vi.useRealTimers();
+    });
   });
 
   describe("loadFromDb", () => {
@@ -739,6 +779,7 @@ describe("GitHubIssueMonitor", () => {
   describe("start / stop", () => {
     it("starts and stops the polling interval", () => {
       vi.useFakeTimers();
+      monitor.watchProject("proj-start-stop", "owner/repo", "testuser");
 
       monitor.start(10_000);
 
@@ -753,6 +794,7 @@ describe("GitHubIssueMonitor", () => {
 
     it("does not start a second interval if already started", () => {
       vi.useFakeTimers();
+      monitor.watchProject("proj-start-twice", "owner/repo", "testuser");
 
       monitor.start(10_000);
       const firstId = (monitor as any).intervalId;
@@ -989,12 +1031,12 @@ describe("diagnostic logging", () => {
     warnSpy.mockRestore();
   });
 
-  it("logs when poll() finds no watched projects", async () => {
+  it("does not log when poll() finds no watched projects", async () => {
     const logSpy = vi.spyOn(console, "log");
 
     await (monitor as any).poll();
 
-    expect(logSpy).toHaveBeenCalledWith(
+    expect(logSpy).not.toHaveBeenCalledWith(
       expect.stringContaining("no projects being watched"),
     );
     logSpy.mockRestore();
@@ -1017,6 +1059,7 @@ describe("diagnostic logging", () => {
   it("logs when start() is called while already running", () => {
     vi.useFakeTimers();
     const logSpy = vi.spyOn(console, "log");
+    monitor.watchProject("proj-already-running", "owner/repo", "testuser");
 
     monitor.start(10_000);
     logSpy.mockClear();
