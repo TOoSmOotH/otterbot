@@ -814,7 +814,7 @@ export class TeamLead extends BaseAgent {
     let taskNotice = "";
     if (reportingTaskTitle && reportingTaskId) {
       const reportingTask = getDb().select().from(schema.kanbanTasks).where(eq(schema.kanbanTasks.id, reportingTaskId)).get();
-      const label = reportingTask ? this.taskLabel(reportingTask) : `"${reportingTaskTitle}" (${reportingTaskId})`;
+      const label = reportingTask ? this.taskLabel(reportingTask) : `"${reportingTaskTitle}"`;
       taskNotice = `[${label} is still in_progress — YOU must evaluate and move it.]\n\n`;
     }
 
@@ -1369,19 +1369,19 @@ export class TeamLead extends BaseAgent {
               const eLabel = this.taskLabel(existingTask);
               this._toolCallCounts.set("spawn_worker_refused", (refusals) + 1);
               this._shouldAbortThink = true;
-              return `REFUSED: ${eLabel} (${taskId}) is already DONE. Do not re-spawn workers for completed tasks.`;
+              return `REFUSED: ${eLabel} is already DONE. Do not re-spawn workers for completed tasks.`;
             }
             if (existingTask?.column === "in_review") {
               const eLabel = this.taskLabel(existingTask);
               this._toolCallCounts.set("spawn_worker_refused", (refusals) + 1);
               this._shouldAbortThink = true;
-              return `REFUSED: ${eLabel} (${taskId}) is IN REVIEW — PR #${(existingTask as any).prNumber ?? "?"} is awaiting reviewer approval. Do NOT spawn a worker. The PR monitor handles this automatically.`;
+              return `REFUSED: ${eLabel} is IN REVIEW — PR #${(existingTask as any).prNumber ?? "?"} is awaiting reviewer approval. Do NOT spawn a worker. The PR monitor handles this automatically.`;
             }
             if (existingTask?.column === "triage") {
               const eLabel = this.taskLabel(existingTask);
               this._toolCallCounts.set("spawn_worker_refused", (refusals) + 1);
               this._shouldAbortThink = true;
-              return `REFUSED: ${eLabel} (${taskId}) is in TRIAGE — it has not been assigned yet. Only work on tasks in the backlog or in_progress columns.`;
+              return `REFUSED: ${eLabel} is in TRIAGE — it has not been assigned yet. Only work on tasks in the backlog or in_progress columns.`;
             }
           }
           const result = await this.spawnWorker(registryEntryId, task, taskId);
@@ -1711,7 +1711,7 @@ export class TeamLead extends BaseAgent {
             taskId, this.projectId, issueNumber, repo, { skipFallback: true },
           );
           if (routed) {
-            return `Routed task ${taskId} through pipeline. The pipeline will orchestrate coding, security review, testing, and code review stages. Do NOT spawn standalone workers for this task.`;
+            return `Routed task through pipeline. The pipeline will orchestrate coding, security review, testing, and code review stages. Do NOT spawn standalone workers for this task.`;
           }
           console.log(`[TeamLead ${this.id}] Pipeline declined task ${taskId} — spawning worker directly`);
         }
@@ -1958,7 +1958,7 @@ export class TeamLead extends BaseAgent {
       let assignedMsg = "";
       if (taskId) {
         const kanbanT = db.select().from(schema.kanbanTasks).where(eq(schema.kanbanTasks.id, taskId)).get();
-        assignedMsg = kanbanT ? ` ${this.taskLabel(kanbanT)} moved to in_progress.` : ` Task ${taskId} moved to in_progress.`;
+        assignedMsg = kanbanT ? ` ${this.taskLabel(kanbanT)} moved to in_progress.` : ` Task moved to in_progress.`;
       }
       console.log(`[TeamLead ${this.id}] Worker ${workerId} spawned and directive sent`);
       return `Spawned ${entry.name} worker "${workerName}" and assigned task.${assignedMsg}`;
@@ -2019,7 +2019,7 @@ export class TeamLead extends BaseAgent {
 
     if (!task) {
       console.warn(`[TeamLead ${this.id}] autoAssignTask: task ${taskId} not found`);
-      return `Task ${taskId} not found.`;
+      return `Task not found.`;
     }
 
     const tLabel = this.taskLabel(task);
@@ -2086,9 +2086,9 @@ export class TeamLead extends BaseAgent {
     return num ? `Issue #${num}: ${task.title}` : task.title;
   }
 
-  /** Short reference like "Issue #3" or the nanoid fallback */
-  private taskRef(task: { taskNumber?: number | null; id: string }): string {
-    return task.taskNumber ? `Issue #${task.taskNumber}` : task.id;
+  /** Short reference like "Issue #3" or the task title fallback */
+  private taskRef(task: { taskNumber?: number | null; id: string; title?: string }): string {
+    return task.taskNumber ? `Issue #${task.taskNumber}` : `"${task.title ?? "unknown"}"`;
   }
 
   /** Get the next task number for a project */
@@ -2203,7 +2203,8 @@ export class TeamLead extends BaseAgent {
     this.onKanbanChange?.("created", task as unknown as KanbanTask);
     const label = this.taskLabel(task);
     const blockedInfo = blockedBy?.length ? ` (blocked by: ${blockedBy.join(", ")})` : "";
-    return `Created ${label} (ID=${taskId}) in ${col}.${blockedInfo} Use ID "${taskId}" when referencing this task in blockedBy.`;
+    const ref = this.taskRef(task);
+    return `Created ${label} (${ref}) in ${col}.${blockedInfo} Use ID "${taskId}" when referencing this task in blockedBy.`;
   }
 
   private updateKanbanTask(
@@ -2216,7 +2217,7 @@ export class TeamLead extends BaseAgent {
       .from(schema.kanbanTasks)
       .where(eq(schema.kanbanTasks.id, taskId))
       .get();
-    if (!existing) return `Task ${taskId} not found.`;
+    if (!existing) return `Task not found.`;
 
     // Guard: no-op if already in the target column (prevents redundant updates)
     if (updates.column && updates.column === existing.column && !updates.description && !updates.title && updates.assigneeAgentId === undefined) {
@@ -2317,7 +2318,7 @@ export class TeamLead extends BaseAgent {
             this.parentId,
             MessageType.Report,
             `⚠️ TASK FAILED after ${MAX_TASK_RETRIES} attempts — manual intervention needed.\n` +
-            `Task: "${existing.title}" (${taskId})\n` +
+            `Task: "${existing.title}" (${this.taskRef(existing)})\n` +
             `Last error: ${snippet.slice(0, 300)}\n` +
             `This task has been marked as FAILED and will not be retried automatically.`,
           );
@@ -2383,7 +2384,7 @@ export class TeamLead extends BaseAgent {
       .from(schema.kanbanTasks)
       .where(eq(schema.kanbanTasks.id, taskId))
       .get();
-    if (!existing) return `Task ${taskId} not found.`;
+    if (!existing) return `Task not found.`;
 
     // Delete the task
     db.delete(schema.kanbanTasks)
