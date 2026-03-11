@@ -1337,6 +1337,20 @@ export function setupSocketHandlers(
       }
     });
 
+    // ─── Re-triage handler ──────────────────────────────────────────
+    socket.on("kanban:retriage", async (data, callback) => {
+      if (!deps?.pipelineManager) {
+        callback?.({ ok: false, error: "Pipeline manager not available" });
+        return;
+      }
+      try {
+        await deps.pipelineManager.retriage(data.taskId);
+        callback?.({ ok: true });
+      } catch (err) {
+        callback?.({ ok: false, error: err instanceof Error ? err.message : "Unknown error" });
+      }
+    });
+
     // ─── Merge queue handlers ───────────────────────────────────────
     if (deps?.mergeQueue) {
       const mq = deps.mergeQueue;
