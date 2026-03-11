@@ -252,6 +252,12 @@ export interface ClientToServerEvents {
     callback?: (ack: { ok: boolean; error?: string }) => void,
   ) => void;
 
+  // Re-triage
+  "kanban:retriage": (
+    data: { taskId: string },
+    callback?: (ack: { ok: boolean; error?: string }) => void,
+  ) => void;
+
   // Merge queue
   "merge-queue:approve": (
     data: { taskId: string },

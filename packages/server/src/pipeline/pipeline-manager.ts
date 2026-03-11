@@ -20,8 +20,10 @@ import {
   addLabelsToIssue,
   fetchCompareCommitsDiff,
   fetchPullRequests,
+  fetchIssue,
   fetchIssueComments,
   fetchRepoTree,
+  removeLabelFromIssue,
   checkHasPushAccess,
   createFork,
   waitForFork,
@@ -393,6 +395,74 @@ export class PipelineManager {
     await this.startImplementation(taskId, task.projectId, task.taskNumber ?? null, repo);
 
     return updated as unknown as KanbanTask ?? null;
+  }
+
+  /**
+   * Re-triage a task: fetch the GitHub issue, remove the "triaged" label,
+   * delete the existing triage task, and re-run triage from scratch.
+   */
+  async retriage(taskId: string): Promise<KanbanTask | null> {
+    const db = getDb();
+    const task = db
+      .select()
+      .from(schema.kanbanTasks)
+      .where(eq(schema.kanbanTasks.id, taskId))
+      .get();
+    if (!task) return null;
+
+    // Extract issue number from labels
+    const issueLabel = (task.labels as string[]).find((l) => l.startsWith("github-issue-"));
+    if (!issueLabel) {
+      throw new Error("Task has no associated GitHub issue");
+    }
+    const issueNumber = parseInt(issueLabel.replace("github-issue-", ""), 10);
+
+    // Look up project for repo info
+    const project = db
+      .select()
+      .from(schema.projects)
+      .where(eq(schema.projects.id, task.projectId))
+      .get();
+    const repo = project?.githubRepo;
+    if (!repo) {
+      throw new Error("Project has no GitHub repo configured");
+    }
+
+    const token = resolveGitHubToken(task.projectId);
+    if (!token) {
+      throw new Error("No GitHub token available for this project");
+    }
+
+    // Remove "triaged" label from GitHub issue so triage can re-apply it
+    try {
+      await removeLabelFromIssue(repo, token, issueNumber, "triaged");
+    } catch (err) {
+      // Label may not exist — that's fine
+      debug("pipeline", `retriage: failed to remove triaged label from #${issueNumber}: ${err}`);
+    }
+
+    // Delete the existing triage task
+    db.delete(schema.kanbanTasks)
+      .where(eq(schema.kanbanTasks.id, taskId))
+      .run();
+    this.io.emit("kanban:task-deleted", { taskId, projectId: task.projectId });
+
+    // Fetch fresh issue data from GitHub and re-run triage
+    const issue = await fetchIssue(repo, token, issueNumber);
+    // Remove stale "triaged" label from fetched issue data
+    issue.labels = issue.labels.filter((l) => l.name !== "triaged");
+
+    await this.runTriage(task.projectId, repo, issue);
+
+    // Return the newly created task (if triage created one)
+    const newTask = db
+      .select()
+      .from(schema.kanbanTasks)
+      .where(eq(schema.kanbanTasks.projectId, task.projectId))
+      .all()
+      .find((t) => (t.labels as string[]).includes(issueLabel));
+
+    return (newTask as unknown as KanbanTask) ?? null;
   }
 
   // ─── Config helpers ──────────────────────────────────────────────
