@@ -1320,13 +1320,13 @@ export function setupSocketHandlers(
     });
 
     // ─── Pipeline reset handler ────────────────────────────────────
-    socket.on("kanban:reset-pipeline", (data, callback) => {
+    socket.on("kanban:reset-pipeline", async (data, callback) => {
       if (!deps?.pipelineManager) {
         callback?.({ ok: false, error: "Pipeline manager not available" });
         return;
       }
       try {
-        const updated = deps.pipelineManager.resetPipeline(data.taskId);
+        const updated = await deps.pipelineManager.resetPipeline(data.taskId);
         if (updated) {
           callback?.({ ok: true });
         } else {

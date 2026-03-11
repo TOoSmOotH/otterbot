@@ -338,10 +338,10 @@ export class PipelineManager {
 
   /**
    * Fully reset a task's pipeline state so it can be re-run through the pipeline.
-   * Clears in-memory pipeline tracking, resets all DB pipeline fields, and moves
-   * the task back to backlog. Increments pipelineAttempt for tracking.
+   * Clears in-memory pipeline tracking, resets all DB pipeline fields, moves
+   * the task back to backlog, then re-starts the implementation pipeline.
    */
-  resetPipeline(taskId: string): KanbanTask | null {
+  async resetPipeline(taskId: string): Promise<KanbanTask | null> {
     // Remove in-memory pipeline state
     this.pipelines.delete(taskId);
 
@@ -379,6 +379,16 @@ export class PipelineManager {
     }
 
     console.log(`[PipelineManager] Pipeline reset for task ${taskId} (attempt ${(task.pipelineAttempt ?? 0) + 1})`);
+
+    // Re-start the pipeline for the task
+    const project = db
+      .select()
+      .from(schema.projects)
+      .where(eq(schema.projects.id, task.projectId))
+      .get();
+    const repo = project?.githubRepo ?? null;
+    await this.startImplementation(taskId, task.projectId, task.taskNumber ?? null, repo);
+
     return updated as unknown as KanbanTask ?? null;
   }
 
