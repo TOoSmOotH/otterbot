@@ -2086,9 +2086,9 @@ export class TeamLead extends BaseAgent {
     return num ? `Issue #${num}: ${task.title}` : task.title;
   }
 
-  /** Short reference like "Issue #3" or the nanoid fallback */
-  private taskRef(task: { taskNumber?: number | null; id: string }): string {
-    return task.taskNumber ? `Issue #${task.taskNumber}` : task.id;
+  /** Short reference like "Issue #3" or the task title fallback */
+  private taskRef(task: { taskNumber?: number | null; id: string; title?: string }): string {
+    return task.taskNumber ? `Issue #${task.taskNumber}` : `"${task.title ?? "unknown"}"`;
   }
 
   /** Get the next task number for a project */
