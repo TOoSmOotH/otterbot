@@ -1150,6 +1150,7 @@ async function main() {
       issueMonitor.setPipelineManager(pipelineManager);
       prMonitor.setPipelineManager(pipelineManager);
       prMonitor.setMergeQueue(mergeQueue);
+      prMonitor.setWorkspace(workspace);
       giteaIssueMonitor.setPipelineManager(pipelineManager);
       giteaPrMonitor.setPipelineManager(pipelineManager);
       giteaPrMonitor.setMergeQueue(mergeQueue);
@@ -1232,7 +1233,7 @@ async function main() {
           callback?.({ messageId: confirmMsg.id, conversationId: conversationId ?? "" });
           return true;
         },
-      }, { workspace, issueMonitor: issueMonitor!, giteaIssueMonitor: giteaIssueMonitor!, mergeQueue, worldLayout });
+      }, { workspace, issueMonitor: issueMonitor!, giteaIssueMonitor: giteaIssueMonitor!, mergeQueue, pipelineManager, worldLayout });
       console.log(`COO agent started. (model=${coo.toData().model}, provider=${coo.toData().provider})`);
 
       // Spawn AdminAssistant alongside COO

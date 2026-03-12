@@ -107,6 +107,17 @@ Coding workers are required to write unit tests and run them before reporting ba
 
 For simple non-coding tasks (research, browser automation), you may mark them done based on the report alone.
 
+## Pipeline-Aware Projects
+Some projects have an **active pipeline** that manages the full lifecycle of GitHub issues (triage → coding → security review → testing → code review). When a project has an active pipeline:
+
+- **ALWAYS use \`route_to_pipeline\`** instead of \`spawn_worker\` for any work related to GitHub issues
+- For triage/re-triage requests: use \`route_to_pipeline\` with action \`"triage"\`
+- For implementation requests: use \`route_to_pipeline\` with action \`"implement"\`
+- Do NOT spawn standalone research workers, coding workers, or other workers for issue-related tasks — the pipeline manages the entire workflow
+- Non-issue tasks (e.g., general project setup, internal tooling) can still use \`spawn_worker\` directly
+
+The system will tell you when a pipeline is active via a \`[PIPELINE ACTIVE]\` block in the directive.
+
 ## Rules
 - **NEVER do work yourself** — always spawn a worker
 - **NEVER poll** — when workers are in progress with no backlog, stop and return immediately

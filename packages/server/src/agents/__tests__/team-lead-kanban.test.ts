@@ -70,9 +70,18 @@ vi.mock("../../tools/opencode-client.js", () => ({
   })),
 }));
 
+vi.mock("../../github/github-service.js", async () => {
+  const actual = await vi.importActual<typeof import("../../github/github-service.js")>("../../github/github-service.js");
+  return {
+    ...actual,
+    fetchIssue: vi.fn(),
+  };
+});
+
 import { TeamLead } from "../team-lead.js";
 import type { MessageBus } from "../../bus/message-bus.js";
 import type { WorkspaceManager } from "../../workspace/workspace.js";
+import { fetchIssue } from "../../github/github-service.js";
 
 function createMockBus(): MessageBus {
   return {
@@ -635,6 +644,154 @@ describe("TeamLead — Kanban logic", () => {
       expect(result).toContain("builtin-claude-code-coder");
       expect(result).not.toContain("builtin-opencode-coder");
       expect(result).not.toContain("builtin-codex-coder");
+    });
+  });
+
+  describe("pipeline-aware routing", () => {
+    function setupPipelineManager() {
+      const pm = {
+        isEnabled: vi.fn(() => true),
+        getConfig: vi.fn(() => ({
+          enabled: true,
+          stages: {
+            triage: { agentId: "builtin-triage", enabled: true },
+            coder: { agentId: "builtin-coder", enabled: true },
+            security: { agentId: "builtin-security-reviewer", enabled: true },
+            tester: { agentId: "builtin-tester", enabled: true },
+            reviewer: { agentId: "builtin-reviewer", enabled: false },
+          },
+        })),
+        runTriage: vi.fn(),
+        startImplementation: vi.fn(async () => true),
+        isPipelineTask: vi.fn(() => false),
+      };
+      (tl as any)._pipelineManager = pm;
+      return pm;
+    }
+
+    it("injects PIPELINE ACTIVE instructions into directives when pipeline is enabled", async () => {
+      setupPipelineManager();
+      const thinkSpy = vi.spyOn(tl as any, "thinkWithContinuation").mockResolvedValue({
+        text: "ok",
+        thinking: undefined,
+        hadToolCalls: false,
+      });
+
+      await (tl as any).handleDirective({
+        id: "m-1",
+        fromAgentId: "coo-1",
+        toAgentId: "team-lead-1",
+        type: "directive",
+        content: "Please re-triage issue #429",
+        timestamp: new Date().toISOString(),
+      });
+
+      expect(thinkSpy).toHaveBeenCalled();
+      const enriched = thinkSpy.mock.calls[0][0] as string;
+      expect(enriched).toContain("[PIPELINE ACTIVE]");
+      expect(enriched).toContain("route_to_pipeline");
+      expect(enriched).toContain('action "triage"');
+      expect(enriched).toContain('action "implement"');
+    });
+
+    it("route_to_pipeline triage fetches the issue and runs triage", async () => {
+      const pm = setupPipelineManager();
+      configStore.set(`project:${PROJECT_ID}:github:repo`, "acme/repo");
+      configStore.set("github:token", "gh-token");
+      vi.mocked(fetchIssue).mockResolvedValue({ number: 429, title: "Bug", body: "" } as any);
+
+      const tools = (tl as any).getAllTeamLeadTools();
+      const result = await tools.route_to_pipeline.execute({ action: "triage", issueNumber: 429 });
+
+      expect(fetchIssue).toHaveBeenCalledWith("acme/repo", "gh-token", 429);
+      expect(pm.runTriage).toHaveBeenCalledWith(PROJECT_ID, "acme/repo", expect.objectContaining({ number: 429 }));
+      expect(result).toContain("Routed issue #429 through pipeline triage");
+    });
+
+    it("route_to_pipeline implement resolves linked task by github-issue label", async () => {
+      const pm = setupPipelineManager();
+      configStore.set(`project:${PROJECT_ID}:github:repo`, "acme/repo");
+      configStore.set("github:token", "gh-token");
+      insertTask({ id: "task-429", labels: ["github-issue-429"] });
+
+      const tools = (tl as any).getAllTeamLeadTools();
+      const result = await tools.route_to_pipeline.execute({ action: "implement", issueNumber: 429 });
+
+      expect(pm.startImplementation).toHaveBeenCalledWith("task-429", PROJECT_ID, 429, "acme/repo", { skipFallback: true });
+      expect(result).toContain("Routed task task-429 (issue #429) through the implementation pipeline");
+    });
+
+    it("route_to_pipeline implement refuses a taskId from another project", async () => {
+      const pm = setupPipelineManager();
+      configStore.set(`project:${PROJECT_ID}:github:repo`, "acme/repo");
+      configStore.set("github:token", "gh-token");
+      const db = getDb();
+      const now = new Date().toISOString();
+      db.insert(schema.kanbanTasks).values({
+        id: "other-project-task",
+        projectId: "other-project",
+        title: "Other task",
+        description: "",
+        column: "backlog",
+        position: 0,
+        assigneeAgentId: null,
+        createdBy: "test",
+        labels: ["github-issue-429"],
+        blockedBy: [],
+        retryCount: 0,
+        completionReport: null,
+        createdAt: now,
+        updatedAt: now,
+      }).run();
+
+      const tools = (tl as any).getAllTeamLeadTools();
+      const result = await tools.route_to_pipeline.execute({
+        action: "implement",
+        issueNumber: 429,
+        taskId: "other-project-task",
+      });
+
+      expect(result).toBe("REFUSED: Task other-project-task does not belong to this project or does not exist.");
+      expect(pm.startImplementation).not.toHaveBeenCalled();
+    });
+
+    it("spawnWorker routes non-coding issue-linked tasks through pipeline when enabled", async () => {
+      const pm = setupPipelineManager();
+      configStore.set(`project:${PROJECT_ID}:github:repo`, "acme/repo");
+      insertTask({ id: "issue-task", labels: ["github-issue-429"] });
+
+      const result = await (tl as any).spawnWorker("builtin-browser-agent", "Investigate issue details", "issue-task");
+
+      expect(pm.startImplementation).toHaveBeenCalledWith("issue-task", PROJECT_ID, 429, "acme/repo", { skipFallback: true });
+      expect(result).toContain("Routed task through pipeline");
+      expect(result).toContain("Do NOT spawn standalone workers");
+    });
+
+    it("spawnWorker does not route non-coding tasks from another project", async () => {
+      const pm = setupPipelineManager();
+      configStore.set(`project:${PROJECT_ID}:github:repo`, "acme/repo");
+      const db = getDb();
+      const now = new Date().toISOString();
+      db.insert(schema.kanbanTasks).values({
+        id: "foreign-issue-task",
+        projectId: "other-project",
+        title: "Foreign issue",
+        description: "",
+        column: "backlog",
+        position: 0,
+        assigneeAgentId: null,
+        createdBy: "test",
+        labels: ["github-issue-999"],
+        blockedBy: [],
+        retryCount: 0,
+        completionReport: null,
+        createdAt: now,
+        updatedAt: now,
+      }).run();
+
+      await (tl as any).spawnWorker("builtin-browser-agent", "Investigate issue details", "foreign-issue-task");
+
+      expect(pm.startImplementation).not.toHaveBeenCalled();
     });
   });
 });

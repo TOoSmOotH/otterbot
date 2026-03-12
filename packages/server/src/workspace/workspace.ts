@@ -3,6 +3,7 @@ import { mkdirSync, existsSync } from "node:fs";
 import { resolve, normalize, relative } from "node:path";
 import type { AgentRole } from "@otterbot/shared";
 import { createWorktree, removeWorktree } from "../utils/git.js";
+import { debug } from "../utils/debug.js";
 
 export class WorkspaceManager {
   private root: string;
@@ -66,6 +67,7 @@ export class WorkspaceManager {
     // We use a branch name convention "agent/<agentId>"
     const branchName = `agent/${agentId}`;
 
+    debug("workspace", `prepareAgentWorktree project=${projectId} agent=${agentId} branch=${branchName} source=${sourceBranch ?? "none"} forkMode=${!!options?.forkMode}`);
     createWorktree(repoPath, agentWorktreePath, branchName, sourceBranch);
 
     // In fork mode, reset the worktree to upstream's branch so new feature branches
@@ -90,6 +92,7 @@ export class WorkspaceManager {
    * cleanup a git worktree for a coding agent.
    */
   cleanupAgentWorktree(projectId: string, agentId: string): void {
+    debug("workspace", `cleanupAgentWorktree project=${projectId} agent=${agentId}`);
     const repoPath = this.repoPath(projectId);
     const worktreesPath = this.worktreesPath(projectId);
     const agentWorktreePath = resolve(worktreesPath, agentId);

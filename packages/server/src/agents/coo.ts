@@ -60,6 +60,7 @@ import { isDesktopEnabled } from "../desktop/desktop.js";
 import { resolveProjectBranch } from "../github/github-service.js";
 import { execSync } from "node:child_process";
 import { existsSync, rmSync } from "node:fs";
+import { debug } from "../utils/debug.js";
 
 export interface PendingProjectApproval {
   name: string;
@@ -304,6 +305,7 @@ The user can see everything on the desktop in real-time.`;
 
   async handleMessage(message: BusMessage): Promise<void> {
     console.log(`[COO] handleMessage type=${message.type} from=${message.fromAgentId ?? "CEO"}`);
+    debug("coo", `handleMessage id=${message.id} type=${message.type} from=${message.fromAgentId ?? "CEO"} content=${message.content.slice(0, 300)}${message.content.length > 300 ? "..." : ""}`);
     if (message.type === MessageType.Chat) {
       // CEO is talking to us
       await this.handleCeoMessage(message);
@@ -351,6 +353,7 @@ The user can see everything on the desktop in real-time.`;
   }
 
   private async handleCeoMessage(message: BusMessage) {
+    debug("coo", `handleCeoMessage conversationId=${message.conversationId ?? "none"} content=${message.content.slice(0, 200)}`);
     // Track conversation from inbound message
     if (message.conversationId) {
       this.currentConversationId = message.conversationId;
@@ -498,6 +501,7 @@ The user can see everything on the desktop in real-time.`;
   }
 
   private async handleTeamLeadReport(message: BusMessage) {
+    debug("coo", `handleTeamLeadReport from=${message.fromAgentId} content=${message.content.slice(0, 300)}`);
     // Reset per-turn guards for this new think cycle
     this.projectStatusCheckedThisTurn = false;
 

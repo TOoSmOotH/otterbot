@@ -2,6 +2,7 @@ import { nanoid } from "nanoid";
 import { eq } from "drizzle-orm";
 import { getDb, schema } from "../db/index.js";
 import type { BusMessage, MessageType } from "@otterbot/shared";
+import { debug } from "../utils/debug.js";
 
 type MessageHandler = (message: BusMessage) => void | Promise<void>;
 
@@ -15,11 +16,13 @@ export class MessageBus {
 
   /** Register a handler for messages to a specific agent */
   subscribe(agentId: string, handler: MessageHandler): void {
+    debug("bus", `subscribe agent=${agentId}`);
     this.handlers.set(agentId, handler);
   }
 
   /** Unsubscribe an agent's handler */
   unsubscribe(agentId: string): void {
+    debug("bus", `unsubscribe agent=${agentId}`);
     this.handlers.delete(agentId);
   }
 
@@ -62,6 +65,8 @@ export class MessageBus {
     // 1. Persist
     this.persist(message);
 
+    debug("bus", `send id=${message.id} type=${params.type} from=${params.fromAgentId ?? "null"} → to=${params.toAgentId ?? "broadcast"} content=${params.content.slice(0, 200)}${params.content.length > 200 ? "..." : ""}${params.correlationId ? ` corr=${params.correlationId}` : ""}`);
+
     // 2. Check if this is a correlated reply
     let correlationHandled = false;
     if (message.correlationId) {
@@ -69,6 +74,7 @@ export class MessageBus {
         message.correlationId,
       );
       if (correlationHandler) {
+        debug("bus", `correlated reply id=${message.id} corr=${message.correlationId}`);
         correlationHandler(message);
         // If the handler consumed the reply (deleted itself), skip agent routing
         if (!this.correlationHandlers.has(message.correlationId)) {
@@ -122,8 +128,11 @@ export class MessageBus {
   ): Promise<BusMessage | null> {
     const correlationId = nanoid();
 
+    debug("bus", `request from=${params.fromAgentId ?? "null"} → to=${params.toAgentId ?? "null"} type=${params.type} timeout=${timeoutMs}ms corr=${correlationId}`);
+
     return new Promise<BusMessage | null>((resolve) => {
       const timer = setTimeout(() => {
+        debug("bus", `request timeout corr=${correlationId}`);
         this.correlationHandlers.delete(correlationId);
         resolve(null);
       }, timeoutMs);

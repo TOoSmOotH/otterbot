@@ -31,6 +31,7 @@ interface WatchedProject {
 export class GiteaIssueMonitor {
   private watched = new Map<string, WatchedProject>();
   private intervalId: ReturnType<typeof setInterval> | null = null;
+  private pollIntervalMs: number | null = null;
   private coo: COO;
   private io: TypedServer;
   private pipelineManager: PipelineManager | null = null;
@@ -49,10 +50,20 @@ export class GiteaIssueMonitor {
   watchProject(projectId: string, repo: string, assignee: string): void {
     this.watched.set(projectId, { projectId, repo, assignee });
     console.log(`[GiteaIssueMonitor] Watching ${repo} for issues assigned to ${assignee} (project ${projectId})`);
+    // Auto-start polling if we have a stored interval and the timer isn't running
+    if (this.pollIntervalMs && !this.intervalId) {
+      this.startInterval(this.pollIntervalMs);
+    }
   }
 
   unwatchProject(projectId: string): void {
     this.watched.delete(projectId);
+    // Auto-stop polling when no projects remain
+    if (this.watched.size === 0 && this.intervalId) {
+      console.log("[GiteaIssueMonitor] No projects being watched — pausing polling");
+      clearInterval(this.intervalId);
+      this.intervalId = null;
+    }
   }
 
   loadFromDb(): void {
@@ -63,17 +74,35 @@ export class GiteaIssueMonitor {
       .where(eq(schema.projects.status, "active"))
       .all();
 
-    for (const project of projects) {
-      if (project.giteaRepo && project.giteaIssueMonitor) {
-        const assignee = resolveGiteaUsername(project.id);
-        if (!assignee) continue;
-        this.watchProject(project.id, project.giteaRepo, assignee);
+    const eligible = projects.filter((p) => p.giteaRepo && p.giteaIssueMonitor);
+    console.log(`[GiteaIssueMonitor] Found ${eligible.length} active project(s) with Gitea issue monitoring enabled`);
+
+    for (const project of eligible) {
+      const assignee = resolveGiteaUsername(project.id);
+      if (!assignee) {
+        console.warn(`[GiteaIssueMonitor] Skipping project "${project.name}" (${project.id}) — no Gitea username resolved`);
+        continue;
       }
+      this.watchProject(project.id, project.giteaRepo!, assignee);
     }
+
+    console.log(`[GiteaIssueMonitor] Now watching ${this.watched.size} project(s)`);
   }
 
   start(pollIntervalMs = 300_000): void {
-    if (this.intervalId) return;
+    this.pollIntervalMs = pollIntervalMs;
+    if (this.intervalId) {
+      console.log("[GiteaIssueMonitor] start() called but polling is already active — ignoring");
+      return;
+    }
+    if (this.watched.size === 0) {
+      console.log("[GiteaIssueMonitor] No projects being watched — polling deferred until a project is added");
+      return;
+    }
+    this.startInterval(pollIntervalMs);
+  }
+
+  private startInterval(pollIntervalMs: number): void {
     this.intervalId = setInterval(() => {
       this.poll().catch((err) => {
         console.error("[GiteaIssueMonitor] Poll error:", err);
@@ -90,10 +119,17 @@ export class GiteaIssueMonitor {
   }
 
   private async poll(): Promise<void> {
+    if (this.watched.size === 0) {
+      return;
+    }
+
     for (const [projectId, watched] of this.watched) {
       const token = resolveGiteaToken(projectId);
       const instanceUrl = resolveGiteaInstanceUrl(projectId);
-      if (!token || !instanceUrl) continue;
+      if (!token || !instanceUrl) {
+        console.warn(`[GiteaIssueMonitor] Skipping project ${projectId} (${watched.repo}) — no Gitea token or instance URL resolved`);
+        continue;
+      }
 
       try {
         await this.pollForTriage(projectId, watched, token, instanceUrl);
@@ -413,8 +449,9 @@ export class GiteaIssueMonitor {
         (t) => (t.labels as string[]).includes(label) && t.column === "triage",
       );
 
+      // Allow re-assigned issues whose previous task is in "done" to create a new task
       const alreadyInProgress = existingTasks.some(
-        (t) => (t.labels as string[]).includes(label) && t.column !== "triage",
+        (t) => (t.labels as string[]).includes(label) && t.column !== "triage" && t.column !== "done",
       );
       if (alreadyInProgress) continue;
 
@@ -501,7 +538,7 @@ export class GiteaIssueMonitor {
               content:
                 `New Gitea issue #${issue.number} assigned: "${issue.title}"\n\n` +
                 `${issue.body ?? "(no description)"}\n\n` +
-                `Task created on kanban board (${taskId}). ` +
+                `Task created on kanban board for issue #${issue.number}. ` +
                 `Spawn a worker to create a feature branch, implement the fix, and open a PR.`,
               projectId,
             });
