@@ -690,6 +690,10 @@ Default to WORKING unless there is a clear, explicit question.
 
 TERMINAL OUTPUT (last lines):
 ${cleanOutput.slice(-2000)}`,
+        undefined,
+        undefined,
+        undefined,
+        { disableTools: true },
       );
 
       if (text.startsWith("INPUT:")) {

@@ -472,7 +472,7 @@ The user can see everything on the desktop in real-time.`;
         JSON.parse(trimmed);
         // It's valid JSON — re-synthesize as natural language
         console.log("[COO] Detected raw JSON output, re-synthesizing as natural language");
-        const { text: resynthesized } = await this.thinkWithoutTools(
+        const { text: resynthesized } = await this.think(
           `[Your previous response was raw JSON. Rewrite it as a helpful, natural language response to the user. Here is the JSON:\n${trimmed}\n]`,
           (token, messageId) => {
             this.onStream?.(token, messageId, this.currentConversationId);
@@ -483,6 +483,7 @@ The user can see everything on the desktop in real-time.`;
           (messageId) => {
             this.onThinkingEnd?.(messageId, this.currentConversationId);
           },
+          { disableTools: true },
         );
         finalText = resynthesized || "I wasn't able to get a clear result. Could you rephrase your request?";
       } catch {
@@ -511,10 +512,10 @@ The user can see everything on the desktop in real-time.`;
     this.conversationHistory = [];
 
     // Process the Team Lead's report with a strong instruction to relay.
-    // Use thinkWithoutTools so the COO just summarises instead of looping
+    // Use disableTools so the COO just summarises instead of looping
     // on get_project_status or other tools — it only needs to relay.
     const summary = `[IMPORTANT: Summarize this report and relay it to the CEO immediately. Do NOT call any tools — just write your summary.]\n\n[Report from Team Lead ${this.getAgentName(message.fromAgentId ?? '')}]: ${message.content}`;
-    const { text, thinking } = await this.thinkWithoutTools(
+    const { text, thinking } = await this.think(
       summary,
       (token, messageId) => {
         this.onStream?.(token, messageId, this.currentConversationId);
@@ -525,6 +526,7 @@ The user can see everything on the desktop in real-time.`;
       (messageId) => {
         this.onThinkingEnd?.(messageId, this.currentConversationId);
       },
+      { disableTools: true },
     );
 
     // Restore original history (don't pollute it with the report exchange)
@@ -560,30 +562,10 @@ The user can see everything on the desktop in real-time.`;
     onToken?: (token: string, messageId: string) => void,
     onReasoning?: (token: string, messageId: string) => void,
     onReasoningEnd?: (messageId: string) => void,
-    options?: { imageParts?: Array<{ type: "image"; image: URL }> },
+    options?: { imageParts?: Array<{ type: "image"; image: URL }>; disableTools?: boolean },
   ): Promise<{ text: string; thinking: string | undefined; hadToolCalls: boolean }> {
     this._runCommandCalls = 0;
     return super.think(userMessage, onToken, onReasoning, onReasoningEnd, options);
-  }
-
-  /**
-   * Run LLM inference WITHOUT tools — prevents the LLM from looping on
-   * tool calls when it only needs to summarise or relay information.
-   */
-  private async thinkWithoutTools(
-    userMessage: string,
-    onToken?: (token: string, messageId: string) => void,
-    onReasoning?: (token: string, messageId: string) => void,
-    onReasoningEnd?: (messageId: string) => void,
-  ): Promise<{ text: string; thinking: string | undefined; hadToolCalls: boolean }> {
-    // Temporarily disable tools by swapping getTools
-    const origGetTools = this.getTools.bind(this);
-    this.getTools = () => ({});
-    try {
-      return await super.think(userMessage, onToken, onReasoning, onReasoningEnd);
-    } finally {
-      this.getTools = origGetTools;
-    }
   }
 
   protected getTools(): Record<string, unknown> {
