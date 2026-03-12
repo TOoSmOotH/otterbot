@@ -1860,6 +1860,9 @@ async function main() {
         resultPayload = JSON.stringify(result);
       }
 
+      // Escape '<' to prevent reflected XSS via </script> injection
+      const safeResultPayload = resultPayload.replace(/</g, "\\u003c");
+
       // Return an HTML page that posts the result back to the opener window
       reply.type("text/html");
       return `<!DOCTYPE html>
@@ -1867,7 +1870,7 @@ async function main() {
 <body>
 <p>Completing authentication...</p>
 <script>
-  window.opener && window.opener.postMessage({ type: "google-oauth-callback", payload: ${resultPayload} }, "*");
+  window.opener && window.opener.postMessage({ type: "google-oauth-callback", payload: ${safeResultPayload} }, "*");
   window.close();
 </script>
 </body></html>`;
