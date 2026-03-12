@@ -1,0 +1,24 @@
+{
+  "name": "otterbot-module-blender-specialist",
+  "version": "0.1.0",
+  "description": "Blender specialist agent that learns modeling techniques from web sources and guides MCP-based model creation",
+  "type": "module",
+  "main": "dist/index.js",
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch"
+  },
+  "otterbot": {
+    "id": "blender-specialist"
+  },
+  "dependencies": {
+    "@otterbot/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.3",
+    "@types/better-sqlite3": "^7.6.13"
+  }
+}
