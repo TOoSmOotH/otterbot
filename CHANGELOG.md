@@ -1,5 +1,40 @@
 # Changelog
 
+## [0.18.0](https://github.com/TOoSmOotH/otterbot/compare/otterbot-v0.17.0...otterbot-v0.18.0) (2026-03-12)
+
+
+### Features
+
+* add pipeline reset button to kanban cards ([68bc8ef](https://github.com/TOoSmOotH/otterbot/commit/68bc8ef427b1937a23c4ed73f6ad94ffa99caf76))
+* add re-triage button for issues stuck in triage column ([777e47c](https://github.com/TOoSmOotH/otterbot/commit/777e47c4a8aa08319df24305937577848d394185))
+* add re-triage button for issues stuck in triage column ([c53ef84](https://github.com/TOoSmOotH/otterbot/commit/c53ef841143f36c30dfd382bf030eedb7fb9eb9b)), closes [#125](https://github.com/TOoSmOotH/otterbot/issues/125)
+* add vim to Docker image ([7245678](https://github.com/TOoSmOotH/otterbot/commit/72456786a9dc43e044b1097e58502a5b143d9bca))
+* add vim to Docker image ([f8e2908](https://github.com/TOoSmOotH/otterbot/commit/f8e29086ff80a642de7c4f0684ef65edd3d400ea)), closes [#418](https://github.com/TOoSmOotH/otterbot/issues/418)
+* include issue comments in triage prompt so triage adapts to feedback ([616fab7](https://github.com/TOoSmOotH/otterbot/commit/616fab743c479d11b61c2767288b86346ae7a519)), closes [#431](https://github.com/TOoSmOotH/otterbot/issues/431)
+* proactive conflict resolution across PR pipeline ([7b3d265](https://github.com/TOoSmOotH/otterbot/commit/7b3d265af9a20d5a8b381fb3db0a8af5569c0a8f))
+* triage adapts to issue comments ([#431](https://github.com/TOoSmOotH/otterbot/issues/431)) ([8ae8772](https://github.com/TOoSmOotH/otterbot/commit/8ae8772b42c11969f349abafbe26e6b729e4540e))
+
+
+### Bug Fixes
+
+* add comprehensive debug logging across all components ([23c580d](https://github.com/TOoSmOotH/otterbot/commit/23c580de1d0fd7dc90187d8e54df91eb0835bbdd)), closes [#425](https://github.com/TOoSmOotH/otterbot/issues/425)
+* add diagnostic logging to issue monitors and fix done-column bug ([80443fd](https://github.com/TOoSmOotH/otterbot/commit/80443fdd3b40a688449d99a43fed4a1f7fe9ff59))
+* add projectId validation to prevent cross-project task manipulation ([591beb6](https://github.com/TOoSmOotH/otterbot/commit/591beb6d5e502afd976599dee45dd38372c8ee41))
+* add route_to_pipeline to Team Lead skill tools list ([ce83837](https://github.com/TOoSmOotH/otterbot/commit/ce838370afa41013f2a1262e9acaf02a5cf8ee55))
+* add schedule management tools so agents use DB instead of YAML files ([56f0b62](https://github.com/TOoSmOotH/otterbot/commit/56f0b622a27ad3c6ee4fda089f4a9c37c98074e1))
+* add schedule management tools so agents use DB instead of YAML files ([61422f7](https://github.com/TOoSmOotH/otterbot/commit/61422f7dcbf13df8f56ff28e5dc89b5546da31cc)), closes [#424](https://github.com/TOoSmOotH/otterbot/issues/424)
+* auto-restart pipeline after reset instead of leaving task in backlog ([655c24b](https://github.com/TOoSmOotH/otterbot/commit/655c24b75a383d13dc1efd991282f66598ef8c42))
+* make non-pipeline tasks pipeline-aware in pipeline-enabled projects ([3879ec4](https://github.com/TOoSmOotH/otterbot/commit/3879ec4f8f569c948211a256f588530f6480527d))
+* make non-pipeline tasks pipeline-aware in pipeline-enabled projects ([29e6f76](https://github.com/TOoSmOotH/otterbot/commit/29e6f766ce9769a8ef26bbafb4ab59793f1ced0f)), closes [#429](https://github.com/TOoSmOotH/otterbot/issues/429)
+* replace internal task IDs with issue numbers in external messages ([8d09277](https://github.com/TOoSmOotH/otterbot/commit/8d0927746593d824ac2c01eba8da3743b7d33b8e))
+* replace internal task IDs with issue numbers in external-facing messages ([33456f7](https://github.com/TOoSmOotH/otterbot/commit/33456f7b06bdb84f63590f281c5629ad175d89af)), closes [#129](https://github.com/TOoSmOotH/otterbot/issues/129)
+* reset spawnCount on pipeline reset to clear spawn cap limit ([dae6d00](https://github.com/TOoSmOotH/otterbot/commit/dae6d00d29a809317b6eebaf579797ebf396754e))
+* skip issue monitor polling when no projects are watched ([35a64b1](https://github.com/TOoSmOotH/otterbot/commit/35a64b1629c4dd83585328d688a069d384d7e4d9))
+* skip polling when no projects are being watched ([5978d5a](https://github.com/TOoSmOotH/otterbot/commit/5978d5a6135ca82f5da20edec166ab0a5d95d8a5)), closes [#123](https://github.com/TOoSmOotH/otterbot/issues/123)
+* taskRef fallback uses title instead of internal task ID ([0a27168](https://github.com/TOoSmOotH/otterbot/commit/0a27168058ad3a5e4a9ea44cc64e7c47a996c66b)), closes [#129](https://github.com/TOoSmOotH/otterbot/issues/129)
+* update test to match new pipeline routing message format ([e34aec4](https://github.com/TOoSmOotH/otterbot/commit/e34aec4e9b1777e432608b781c8cd6e9e9e28461))
+* use project target branch for worktrees and fix branch name regex over-matching ([cb7bf7f](https://github.com/TOoSmOotH/otterbot/commit/cb7bf7f7486733d8693d57b3b63abee8acd85a79))
+
 ## [0.17.0](https://github.com/TOoSmOotH/otterbot/compare/otterbot-v0.16.0...otterbot-v0.17.0) (2026-03-10)
 
 
