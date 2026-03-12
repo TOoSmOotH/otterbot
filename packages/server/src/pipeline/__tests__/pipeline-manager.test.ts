@@ -36,14 +36,14 @@ vi.mock("ai", () => ({
 }));
 
 vi.mock("../../registry/registry.js", () => ({
-  Registry: vi.fn().mockImplementation(() => ({
-    get: vi.fn(() => ({
+  Registry: class {
+    get = vi.fn(() => ({
       id: "builtin-triage",
       systemPrompt: "test",
       defaultProvider: "anthropic",
       defaultModel: "test-model",
-    })),
-  })),
+    }));
+  },
 }));
 
 vi.mock("../../agents/prompts/security-preamble.js", () => ({
@@ -63,6 +63,7 @@ import { PipelineManager } from "../pipeline-manager.js";
 import { createIssueComment, fetchIssueComments } from "../../github/github-service.js";
 import type { COO } from "../../agents/coo.js";
 import { MessageType } from "@otterbot/shared";
+import { generateText } from "ai";
 
 // --- Factory helpers ---
 
@@ -1047,6 +1048,103 @@ describe("PipelineManager", () => {
       (pm as any).recoverPipelines();
 
       expect((pm as any).pipelines.has("task-recover-bad")).toBe(false);
+    });
+  });
+
+  // ─── runTriage (issue comments) ────────────────────────────
+
+  describe("runTriage (issue comments)", () => {
+    const issue = {
+      number: 431,
+      title: "Triage should adapt to comments",
+      body: "Issue body",
+      labels: [],
+      assignees: [],
+    } as any;
+
+    beforeEach(() => {
+      vi.mocked(generateText).mockClear();
+      vi.mocked(fetchIssueComments).mockClear();
+    });
+
+    it("includes non-bot issue comments in triage prompt", async () => {
+      insertProject();
+      setPipelineConfig(PROJECT_ID, { triage: { enabled: true } });
+      configStore.set("github:token", "test-token");
+      configStore.set("github:username", "otterbot");
+
+      vi.mocked(generateText).mockResolvedValueOnce({
+        text: JSON.stringify({
+          classification: "feature",
+          shouldProceed: true,
+          comment: "Looks good",
+          labels: ["feature"],
+        }),
+      } as any);
+
+      (fetchIssueComments as any).mockResolvedValueOnce([
+        { id: 1, user: { login: "otterbot" }, body: "Bot triage output", created_at: "2026-03-01T00:00:00Z" },
+        { id: 2, user: { login: "renovate[bot]" }, body: "Automated bot message", created_at: "2026-03-02T00:00:00Z" },
+        { id: 3, user: { login: "alice" }, body: "Can we use the database instead?", created_at: "2026-03-03T00:00:00Z" },
+      ]);
+
+      await pm.runTriage(PROJECT_ID, "owner/repo", issue);
+
+      const call = vi.mocked(generateText).mock.calls.at(-1)?.[0] as any;
+      expect(call.prompt).toContain("<issue-comments>");
+      expect(call.prompt).toContain("@alice (2026-03-03T00:00:00Z):");
+      expect(call.prompt).toContain("Can we use the database instead?");
+      expect(call.prompt).not.toContain("Bot triage output");
+      expect(call.prompt).not.toContain("Automated bot message");
+    });
+
+    it("omits issue-comments section when only bot comments exist", async () => {
+      insertProject();
+      setPipelineConfig(PROJECT_ID, { triage: { enabled: true } });
+      configStore.set("github:token", "test-token");
+      configStore.set("github:username", "otterbot");
+
+      vi.mocked(generateText).mockResolvedValueOnce({
+        text: JSON.stringify({
+          classification: "question",
+          shouldProceed: false,
+          comment: "Need clarification",
+          labels: ["question"],
+        }),
+      } as any);
+
+      (fetchIssueComments as any).mockResolvedValueOnce([
+        { id: 1, user: { login: "otterbot" }, body: "Bot triage output", created_at: "2026-03-01T00:00:00Z" },
+        { id: 2, user: { login: "dependabot[bot]" }, body: "Automated update", created_at: "2026-03-02T00:00:00Z" },
+      ]);
+
+      await pm.runTriage(PROJECT_ID, "owner/repo", issue);
+
+      const call = vi.mocked(generateText).mock.calls.at(-1)?.[0] as any;
+      expect(call.prompt).not.toContain("<issue-comments>");
+    });
+
+    it("continues triage when fetching comments fails", async () => {
+      insertProject();
+      setPipelineConfig(PROJECT_ID, { triage: { enabled: true } });
+      configStore.set("github:token", "test-token");
+
+      vi.mocked(generateText).mockResolvedValueOnce({
+        text: JSON.stringify({
+          classification: "bug",
+          shouldProceed: true,
+          comment: "Proceed",
+          labels: ["bug"],
+        }),
+      } as any);
+
+      (fetchIssueComments as any).mockRejectedValueOnce(new Error("comments API down"));
+
+      await expect(pm.runTriage(PROJECT_ID, "owner/repo", issue)).resolves.toBeUndefined();
+
+      expect(generateText).toHaveBeenCalled();
+      const call = vi.mocked(generateText).mock.calls.at(-1)?.[0] as any;
+      expect(call.prompt).not.toContain("<issue-comments>");
     });
   });
 });

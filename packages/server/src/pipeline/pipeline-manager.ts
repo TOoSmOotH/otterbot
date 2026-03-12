@@ -531,6 +531,29 @@ export class PipelineManager {
       fileTreeSection = "\n<repository-file-tree>\n(unavailable)\n</repository-file-tree>";
     }
 
+    // Fetch issue comments to provide conversation context (especially for re-triage)
+    let commentsSection = "";
+    const botUsername = resolveGitHubUsername(projectId) ?? null;
+    try {
+      const comments = await fetchIssueComments(repo, token, issue.number);
+      const relevantComments = comments.filter((c) => {
+        // Skip bot comments — focus on human feedback
+        if (botUsername && c.user.login === botUsername) return false;
+        if (c.user.login.endsWith("[bot]")) return false;
+        return true;
+      });
+      if (relevantComments.length > 0) {
+        commentsSection =
+          `\n<issue-comments>\n` +
+          relevantComments
+            .map((c) => `@${c.user.login} (${c.created_at}):\n${c.body}`)
+            .join("\n\n---\n\n") +
+          `\n</issue-comments>`;
+      }
+    } catch (err) {
+      console.warn(`[PipelineManager] Failed to fetch comments for triage of #${issue.number}:`, err);
+    }
+
     // Build prompt — wrap in XML delimiters to isolate untrusted content
     const issueText =
       `<github-issue>\n` +
@@ -539,6 +562,7 @@ export class PipelineManager {
       `Labels: ${issue.labels.map((l) => l.name).join(", ") || "none"}\n` +
       `Assignees: ${issue.assignees.map((a) => a.login).join(", ") || "none"}\n` +
       `</github-issue>` +
+      commentsSection +
       fileTreeSection;
 
     try {
