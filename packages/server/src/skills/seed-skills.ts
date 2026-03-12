@@ -57,6 +57,7 @@ const SEED_SKILLS: Array<{ id: string; data: SkillCreate }> = [
         tools: [
           "search_registry",
           "spawn_worker",
+          "route_to_pipeline",
           "web_search",
           "report_to_coo",
           "create_task",

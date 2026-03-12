@@ -314,6 +314,7 @@ export abstract class BaseAgent {
         usesTextToolCalling(this.llmConfig.model) ||
         CODING_AGENT_PROVIDER_TYPES.has(resolvedType)
       );
+      debug("agent", `think() agent=${this.id} role=${this.role} provider=${this.llmConfig.provider} model=${this.llmConfig.model} tools=${Object.keys(tools).length} textToolMode=${textToolMode} historyLen=${this.conversationHistory.length}`);
 
       // For models that use text-based tool calling (e.g. Kimi K2.5), skip the
       // SDK-tools call entirely — it always returns empty. Go straight to text injection.
@@ -354,6 +355,7 @@ export abstract class BaseAgent {
       // IMPORTANT: If tool calls were made (hadToolCalls), do NOT retry — the SDK
       // already executed the tools via their `execute` callbacks during the stream.
       if (hasTools && !text && !hadToolCalls) {
+        debug("agent", `think() agent=${this.id} — empty response with ${Object.keys(tools).length} tools, no tool calls — retrying with text injection`);
         if (!textToolMode) {
           console.warn(`[Agent ${this.id}] Empty response with tools and no tool calls — retrying without tools`);
         }

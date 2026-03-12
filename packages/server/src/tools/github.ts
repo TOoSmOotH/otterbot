@@ -10,10 +10,13 @@ import {
   fetchPullRequests,
   createPullRequest,
   resolveProjectBranch,
+  gitEnvWithPAT,
+  gitCredentialArgs,
 } from "../github/github-service.js";
 import { resolveGitHubAccount } from "../github/account-resolver.js";
 import type { ToolContext } from "./tool-context.js";
 import { extractForkOwner } from "../utils/sanitize.js";
+import { rebaseBranch, forcePushBranch } from "../utils/git.js";
 
 function getGitHubContext(ctx: ToolContext): { repo: string; token: string; username: string } {
   const account = resolveGitHubAccount(ctx.projectId);
@@ -259,7 +262,8 @@ export function createGitHubCreatePRTool(ctx: ToolContext) {
         // In fork mode, format head as "forkowner:branch" for cross-fork PRs
         let prHead = head;
         const forkMode = getConfig(`project:${ctx.projectId}:github:fork_mode`);
-        if (forkMode === "true") {
+        const isForkMode = forkMode === "true";
+        if (isForkMode) {
           // Check if upstream PR creation is disabled
           const forkUpstreamPr = getConfig(`project:${ctx.projectId}:github:fork_upstream_pr`);
           if (forkUpstreamPr === "false") {
@@ -272,6 +276,21 @@ export function createGitHubCreatePRTool(ctx: ToolContext) {
             if (forkOwner) {
               prHead = `${forkOwner}:${head}`;
             }
+          }
+        }
+
+        // Rebase onto latest base branch before creating the PR (skip for fork-mode)
+        if (!isForkMode && ctx.workspacePath) {
+          const gitEnv = gitEnvWithPAT(token);
+          const credArgs = gitCredentialArgs();
+          const rebaseOk = rebaseBranch(ctx.workspacePath, head, targetBase, gitEnv, credArgs);
+          if (!rebaseOk) {
+            return `Rebase conflict: could not rebase \`${head}\` onto \`${targetBase}\`. Please resolve conflicts manually before creating the PR.`;
+          }
+          try {
+            forcePushBranch(ctx.workspacePath, head, gitEnv, credArgs);
+          } catch (pushErr) {
+            return `Rebase succeeded but force-push failed: ${pushErr instanceof Error ? pushErr.message : String(pushErr)}. Please push manually before creating the PR.`;
           }
         }
 

@@ -106,11 +106,33 @@ export function KanbanCard({
     socket.emit("merge-queue:approve", { taskId: task.id });
   };
 
+  const handleResetPipeline = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const socket = getSocket();
+    socket.emit("kanban:reset-pipeline", { taskId: task.id });
+  };
+
+  const handleRetriage = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const socket = getSocket();
+    socket.emit("kanban:retriage", { taskId: task.id });
+  };
+
   const showApproveButton =
     task.column === "in_review" &&
     task.prNumber != null &&
     task.prBranch != null &&
     !mqEntry;
+
+  // Show reset button when task has pipeline stages and is not actively being processed
+  const showResetButton =
+    task.pipelineStages?.length > 0 &&
+    !task.assigneeAgentId &&
+    task.column !== "triage" &&
+    !mqEntry;
+
+  // Show re-triage button for tasks in the triage column
+  const showRetriageButton = task.column === "triage";
 
   return (
     <div
@@ -201,6 +223,22 @@ export function KanbanCard({
           onClick={handleApproveForMerge}
         >
           Approve for Merge
+        </button>
+      )}
+      {showResetButton && (
+        <button
+          className="mt-2 w-full text-[11px] font-medium bg-orange-500/15 text-orange-400 hover:bg-orange-500/25 rounded px-2 py-1 transition-colors"
+          onClick={handleResetPipeline}
+        >
+          Reset Pipeline
+        </button>
+      )}
+      {showRetriageButton && (
+        <button
+          className="mt-2 w-full text-[11px] font-medium bg-blue-500/15 text-blue-400 hover:bg-blue-500/25 rounded px-2 py-1 transition-colors"
+          onClick={handleRetriage}
+        >
+          Re-triage
         </button>
       )}
     </div>

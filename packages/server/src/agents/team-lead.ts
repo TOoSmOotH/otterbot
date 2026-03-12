@@ -5,6 +5,7 @@ import {
   AgentRole,
   AgentStatus,
   MessageType,
+  PIPELINE_STAGES,
   type BusMessage,
   type KanbanTask,
 } from "@otterbot/shared";
@@ -29,7 +30,7 @@ import { Registry } from "../registry/registry.js";
 import { SkillService } from "../skills/skill-service.js";
 import type { MessageBus } from "../bus/message-bus.js";
 import type { WorkspaceManager } from "../workspace/workspace.js";
-import { eq } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import { getConfig, setConfig, deleteConfig } from "../auth/auth.js";
 import { resolveGitHubToken, resolveGitHubUsername } from "../github/account-resolver.js";
 import { execSync } from "node:child_process";
@@ -50,6 +51,7 @@ import {
   requestPullRequestReviewers,
   createIssueComment,
   resolveProjectBranch,
+  fetchIssue,
 } from "../github/github-service.js";
 import type { PipelineManager } from "../pipeline/pipeline-manager.js";
 import { cleanTerminalOutput, summarizeForGitHub } from "../utils/terminal.js";
@@ -355,6 +357,7 @@ export class TeamLead extends BaseAgent {
   }
 
   async handleMessage(message: BusMessage): Promise<void> {
+    debug("team-lead", `handleMessage id=${this.id} type=${message.type} from=${message.fromAgentId ?? "unknown"} content=${message.content.slice(0, 200)}${message.content.length > 200 ? "..." : ""}`);
     if (message.type === MessageType.Directive) {
       await this.handleDirective(message);
     } else if (message.type === MessageType.Report) {
@@ -376,6 +379,7 @@ export class TeamLead extends BaseAgent {
     // instead of relying on LLM interpretation of the text hint.
     const pipelineRegistryEntryId = message.metadata?.pipelineRegistryEntryId as string | undefined;
     const pipelineTaskId = message.metadata?.pipelineTaskId as string | undefined;
+    debug("team-lead", `handleDirective id=${this.id} isPipeline=${!!(pipelineRegistryEntryId && pipelineTaskId)} pipelineTask=${pipelineTaskId ?? "none"} recovery=${!!message.metadata?.isRecovery}`);
     if (pipelineRegistryEntryId && pipelineTaskId) {
       // Extract the worker directive from the message content
       const directiveMatch = message.content.match(/Worker directive:\n([\s\S]+)/);
@@ -405,6 +409,25 @@ export class TeamLead extends BaseAgent {
       enrichedDirective =
         `[CURRENT KANBAN BOARD]\n${board.summary}\n[/CURRENT KANBAN BOARD]\n\n` +
         `New directive: ${message.content}`;
+    }
+
+    // Inject pipeline awareness when pipeline is enabled for this project
+    if (this.projectId && this._pipelineManager?.isEnabled(this.projectId)) {
+      const pipelineConfig = this._pipelineManager.getConfig(this.projectId);
+      const enabledStages = pipelineConfig
+        ? PIPELINE_STAGES
+            .filter((s) => pipelineConfig.stages[s.key]?.enabled !== false)
+            .map((s) => s.label)
+        : [];
+      enrichedDirective =
+        `[PIPELINE ACTIVE]\n` +
+        `This project has an active pipeline with stages: ${enabledStages.join(" → ")}.\n` +
+        `When work involves a GitHub issue, you MUST route it through the pipeline instead of spawning standalone workers:\n` +
+        `- For triage or re-triage requests: use the \`route_to_pipeline\` tool with action "triage"\n` +
+        `- For implementation/coding requests: use the \`route_to_pipeline\` tool with action "implement"\n` +
+        `Do NOT spawn research workers or standalone coding workers for GitHub issue work — the pipeline handles the full lifecycle including triage, coding, security review, testing, and code review.\n` +
+        `[/PIPELINE ACTIVE]\n\n` +
+        enrichedDirective;
     }
 
     const { text } = await this.thinkWithContinuation(
@@ -465,10 +488,10 @@ export class TeamLead extends BaseAgent {
   private extractPRBranch(report: string): string | null {
     // Match common patterns for branch names in worker reports
     const patterns = [
-      /branch[:\s]+([a-zA-Z0-9._\/-]+)/i,
-      /created branch\s+([a-zA-Z0-9._\/-]+)/i,
-      /git checkout -b\s+([a-zA-Z0-9._\/-]+)/i,
-      /pushed to\s+([a-zA-Z0-9._\/-]+)/i,
+      /branch[:\s]+([a-zA-Z0-9._\/-]+)(?=[\s`\)]|$)/i,
+      /created branch\s+([a-zA-Z0-9._\/-]+)(?=[\s`\)]|$)/i,
+      /git checkout -b\s+([a-zA-Z0-9._\/-]+)(?=[\s`\)]|$)/i,
+      /pushed to\s+([a-zA-Z0-9._\/-]+)(?=[\s`\)]|$)/i,
     ];
     for (const pattern of patterns) {
       const match = report.match(pattern);
@@ -791,7 +814,7 @@ export class TeamLead extends BaseAgent {
     let taskNotice = "";
     if (reportingTaskTitle && reportingTaskId) {
       const reportingTask = getDb().select().from(schema.kanbanTasks).where(eq(schema.kanbanTasks.id, reportingTaskId)).get();
-      const label = reportingTask ? this.taskLabel(reportingTask) : `"${reportingTaskTitle}" (${reportingTaskId})`;
+      const label = reportingTask ? this.taskLabel(reportingTask) : `"${reportingTaskTitle}"`;
       taskNotice = `[${label} is still in_progress — YOU must evaluate and move it.]\n\n`;
     }
 
@@ -1346,19 +1369,19 @@ export class TeamLead extends BaseAgent {
               const eLabel = this.taskLabel(existingTask);
               this._toolCallCounts.set("spawn_worker_refused", (refusals) + 1);
               this._shouldAbortThink = true;
-              return `REFUSED: ${eLabel} (${taskId}) is already DONE. Do not re-spawn workers for completed tasks.`;
+              return `REFUSED: ${eLabel} is already DONE. Do not re-spawn workers for completed tasks.`;
             }
             if (existingTask?.column === "in_review") {
               const eLabel = this.taskLabel(existingTask);
               this._toolCallCounts.set("spawn_worker_refused", (refusals) + 1);
               this._shouldAbortThink = true;
-              return `REFUSED: ${eLabel} (${taskId}) is IN REVIEW — PR #${(existingTask as any).prNumber ?? "?"} is awaiting reviewer approval. Do NOT spawn a worker. The PR monitor handles this automatically.`;
+              return `REFUSED: ${eLabel} is IN REVIEW — PR #${(existingTask as any).prNumber ?? "?"} is awaiting reviewer approval. Do NOT spawn a worker. The PR monitor handles this automatically.`;
             }
             if (existingTask?.column === "triage") {
               const eLabel = this.taskLabel(existingTask);
               this._toolCallCounts.set("spawn_worker_refused", (refusals) + 1);
               this._shouldAbortThink = true;
-              return `REFUSED: ${eLabel} (${taskId}) is in TRIAGE — it has not been assigned yet. Only work on tasks in the backlog or in_progress columns.`;
+              return `REFUSED: ${eLabel} is in TRIAGE — it has not been assigned yet. Only work on tasks in the backlog or in_progress columns.`;
             }
           }
           const result = await this.spawnWorker(registryEntryId, task, taskId);
@@ -1367,6 +1390,96 @@ export class TeamLead extends BaseAgent {
             this._shouldAbortThink = true;
           }
           return result;
+        },
+      }),
+      route_to_pipeline: tool({
+        description:
+          "Route a GitHub issue through this project's pipeline. Use this instead of spawning standalone workers when the project has an active pipeline. " +
+          "Action 'triage' runs the pipeline's triage stage (classification, labeling, analysis). " +
+          "Action 'implement' starts the full implementation pipeline (coding → security → testing → review).",
+        parameters: z.object({
+          action: z.enum(["triage", "implement"]).describe("Pipeline action: 'triage' to run triage analysis, 'implement' to start implementation pipeline"),
+          issueNumber: z.number().describe("GitHub issue number to route through the pipeline"),
+          taskId: z.string().optional().describe("Existing kanban task ID for this issue (if one exists)"),
+        }),
+        execute: async ({ action, issueNumber, taskId }) => {
+          if (!this.projectId) {
+            return "REFUSED: No project context — cannot route through pipeline.";
+          }
+          if (!this._pipelineManager) {
+            return "REFUSED: Pipeline manager not available.";
+          }
+          if (!this._pipelineManager.isEnabled(this.projectId)) {
+            return "REFUSED: Pipeline is not enabled for this project. Use spawn_worker instead.";
+          }
+
+          const repo = getConfig(`project:${this.projectId}:github:repo`) ?? null;
+          if (!repo) {
+            return "REFUSED: No GitHub repo configured for this project.";
+          }
+          const token = resolveGitHubToken(this.projectId);
+          if (!token) {
+            return "REFUSED: No GitHub token available for this project.";
+          }
+
+          if (action === "triage") {
+            try {
+              const issue = await fetchIssue(repo, token, issueNumber);
+              await this._pipelineManager.runTriage(this.projectId, repo, issue);
+              return `Routed issue #${issueNumber} through pipeline triage. The triage stage will classify the issue, apply labels, and create/update the kanban task.`;
+            } catch (err) {
+              return `Failed to run pipeline triage for issue #${issueNumber}: ${err instanceof Error ? err.message : String(err)}`;
+            }
+          }
+
+          if (action === "implement") {
+            // Find or use the provided task ID
+            let resolvedTaskId = taskId;
+            if (!resolvedTaskId) {
+              // Look for an existing kanban task linked to this issue
+              const db = getDb();
+              const label = `github-issue-${issueNumber}`;
+              const tasks = db
+                .select()
+                .from(schema.kanbanTasks)
+                .where(eq(schema.kanbanTasks.projectId, this.projectId))
+                .all();
+              const linked = tasks.find((t) =>
+                (t.labels as string[]).includes(label),
+              );
+              if (linked) {
+                resolvedTaskId = linked.id;
+              } else {
+                return `No kanban task found for issue #${issueNumber}. Run triage first (action: "triage") to create the task, then implement.`;
+              }
+            } else {
+              // Validate that the provided taskId belongs to this project
+              const db = getDb();
+              const taskRecord = db
+                .select()
+                .from(schema.kanbanTasks)
+                .where(and(eq(schema.kanbanTasks.id, resolvedTaskId), eq(schema.kanbanTasks.projectId, this.projectId)))
+                .get();
+              if (!taskRecord) {
+                return `REFUSED: Task ${resolvedTaskId} does not belong to this project or does not exist.`;
+              }
+            }
+
+            // Check if already in pipeline
+            if (this._pipelineManager.isPipelineTask(resolvedTaskId)) {
+              return `Task ${resolvedTaskId} is already being managed by the pipeline. Do not re-route it.`;
+            }
+
+            const routed = await this._pipelineManager.startImplementation(
+              resolvedTaskId, this.projectId, issueNumber, repo, { skipFallback: true },
+            );
+            if (routed) {
+              return `Routed task ${resolvedTaskId} (issue #${issueNumber}) through the implementation pipeline. The pipeline will orchestrate coding, security review, testing, and code review stages.`;
+            }
+            return `Pipeline declined to route task ${resolvedTaskId}. The pipeline may be disabled or have no enabled stages. Use spawn_worker as fallback.`;
+          }
+
+          return "Unknown action.";
         },
       }),
       web_search: tool({
@@ -1528,6 +1641,7 @@ export class TeamLead extends BaseAgent {
     taskId?: string,
     options?: { pipelineOverride?: boolean; sourceBranch?: string; skipAutoAssign?: boolean },
   ): Promise<string> {
+    debug("team-lead", `spawnWorker id=${this.id} registry=${registryEntryId} taskId=${taskId ?? "none"} pipeline=${!!options?.pipelineOverride} sourceBranch=${options?.sourceBranch ?? "none"} task=${task.slice(0, 200)}`);
     try {
       const originalRequestedId = registryEntryId;
 
@@ -1564,11 +1678,13 @@ export class TeamLead extends BaseAgent {
         }
       }
 
-      // Route coding workers through pipeline when enabled
+      // Route workers through pipeline when enabled — applies to ALL worker types
+      // (not just coding agents) when the task is linked to a GitHub issue.
+      // This prevents standalone workers from bypassing the pipeline's lifecycle
+      // management (triage, security review, testing, code review).
       if (
         !options?.pipelineOverride &&
         taskId &&
-        CODING_AGENT_IDS.has(registryEntryId) &&
         this.projectId &&
         this._pipelineManager?.isEnabled(this.projectId) &&
         !this._pipelineManager.isPipelineTask(taskId)
@@ -1578,7 +1694,7 @@ export class TeamLead extends BaseAgent {
         const kanbanTask = pipelineDb
           .select()
           .from(schema.kanbanTasks)
-          .where(eq(schema.kanbanTasks.id, taskId))
+          .where(and(eq(schema.kanbanTasks.id, taskId), eq(schema.kanbanTasks.projectId, this.projectId)))
           .get();
         const labels = Array.isArray(kanbanTask?.labels) ? kanbanTask.labels as string[] : [];
         const issueLabel = labels.find((l: string) => l.startsWith("github-issue-"));
@@ -1586,16 +1702,19 @@ export class TeamLead extends BaseAgent {
           ? parseInt(issueLabel.replace("github-issue-", ""), 10)
           : null;
 
-        console.log(
-          `[TeamLead ${this.id}] Routing task ${taskId} through pipeline (repo=${repo}, issue=${issueNumber})`,
-        );
-        const routed = await this._pipelineManager.startImplementation(
-          taskId, this.projectId, issueNumber, repo, { skipFallback: true },
-        );
-        if (routed) {
-          return `Routed task ${taskId} through pipeline. The pipeline will orchestrate coding, security review, testing, and code review stages.`;
+        // For issue-linked tasks OR coding agents, route through pipeline
+        if (issueNumber !== null || CODING_AGENT_IDS.has(registryEntryId)) {
+          console.log(
+            `[TeamLead ${this.id}] Routing task ${taskId} through pipeline (repo=${repo}, issue=${issueNumber}, agent=${registryEntryId})`,
+          );
+          const routed = await this._pipelineManager.startImplementation(
+            taskId, this.projectId, issueNumber, repo, { skipFallback: true },
+          );
+          if (routed) {
+            return `Routed task through pipeline. The pipeline will orchestrate coding, security review, testing, and code review stages. Do NOT spawn standalone workers for this task.`;
+          }
+          console.log(`[TeamLead ${this.id}] Pipeline declined task ${taskId} — spawning worker directly`);
         }
-        console.log(`[TeamLead ${this.id}] Pipeline declined task ${taskId} — spawning worker directly`);
       }
 
       // Enforce max concurrent coding workers
@@ -1638,8 +1757,9 @@ export class TeamLead extends BaseAgent {
         // Prepare a git worktree for the worker to avoid file conflicts
         // For pipeline kickbacks (security/review), start from the feature branch so the worker can find existing code
         const forkMode = getConfig(`project:${this.projectId}:github:fork_mode`) === "true";
+        const effectiveSourceBranch = options?.sourceBranch ?? resolveProjectBranch(this.projectId);
         workspacePath = this.workspace.prepareAgentWorktree(
-          this.projectId, workerId, options?.sourceBranch,
+          this.projectId, workerId, effectiveSourceBranch,
           forkMode ? { forkMode: true, upstreamBranch: resolveProjectBranch(this.projectId) } : undefined,
         );
 
@@ -1838,7 +1958,7 @@ export class TeamLead extends BaseAgent {
       let assignedMsg = "";
       if (taskId) {
         const kanbanT = db.select().from(schema.kanbanTasks).where(eq(schema.kanbanTasks.id, taskId)).get();
-        assignedMsg = kanbanT ? ` ${this.taskLabel(kanbanT)} moved to in_progress.` : ` Task ${taskId} moved to in_progress.`;
+        assignedMsg = kanbanT ? ` ${this.taskLabel(kanbanT)} moved to in_progress.` : ` Task moved to in_progress.`;
       }
       console.log(`[TeamLead ${this.id}] Worker ${workerId} spawned and directive sent`);
       return `Spawned ${entry.name} worker "${workerName}" and assigned task.${assignedMsg}`;
@@ -1899,7 +2019,7 @@ export class TeamLead extends BaseAgent {
 
     if (!task) {
       console.warn(`[TeamLead ${this.id}] autoAssignTask: task ${taskId} not found`);
-      return `Task ${taskId} not found.`;
+      return `Task not found.`;
     }
 
     const tLabel = this.taskLabel(task);
@@ -1966,9 +2086,9 @@ export class TeamLead extends BaseAgent {
     return num ? `Issue #${num}: ${task.title}` : task.title;
   }
 
-  /** Short reference like "Issue #3" or the nanoid fallback */
-  private taskRef(task: { taskNumber?: number | null; id: string }): string {
-    return task.taskNumber ? `Issue #${task.taskNumber}` : task.id;
+  /** Short reference like "Issue #3" or the task title fallback */
+  private taskRef(task: { taskNumber?: number | null; id: string; title?: string }): string {
+    return task.taskNumber ? `Issue #${task.taskNumber}` : `"${task.title ?? "unknown"}"`;
   }
 
   /** Get the next task number for a project */
@@ -2083,7 +2203,8 @@ export class TeamLead extends BaseAgent {
     this.onKanbanChange?.("created", task as unknown as KanbanTask);
     const label = this.taskLabel(task);
     const blockedInfo = blockedBy?.length ? ` (blocked by: ${blockedBy.join(", ")})` : "";
-    return `Created ${label} (ID=${taskId}) in ${col}.${blockedInfo} Use ID "${taskId}" when referencing this task in blockedBy.`;
+    const ref = this.taskRef(task);
+    return `Created ${label} (${ref}) in ${col}.${blockedInfo} Use ID "${taskId}" when referencing this task in blockedBy.`;
   }
 
   private updateKanbanTask(
@@ -2096,7 +2217,7 @@ export class TeamLead extends BaseAgent {
       .from(schema.kanbanTasks)
       .where(eq(schema.kanbanTasks.id, taskId))
       .get();
-    if (!existing) return `Task ${taskId} not found.`;
+    if (!existing) return `Task not found.`;
 
     // Guard: no-op if already in the target column (prevents redundant updates)
     if (updates.column && updates.column === existing.column && !updates.description && !updates.title && updates.assigneeAgentId === undefined) {
@@ -2197,7 +2318,7 @@ export class TeamLead extends BaseAgent {
             this.parentId,
             MessageType.Report,
             `⚠️ TASK FAILED after ${MAX_TASK_RETRIES} attempts — manual intervention needed.\n` +
-            `Task: "${existing.title}" (${taskId})\n` +
+            `Task: "${existing.title}" (${this.taskRef(existing)})\n` +
             `Last error: ${snippet.slice(0, 300)}\n` +
             `This task has been marked as FAILED and will not be retried automatically.`,
           );
@@ -2263,7 +2384,7 @@ export class TeamLead extends BaseAgent {
       .from(schema.kanbanTasks)
       .where(eq(schema.kanbanTasks.id, taskId))
       .get();
-    if (!existing) return `Task ${taskId} not found.`;
+    if (!existing) return `Task not found.`;
 
     // Delete the task
     db.delete(schema.kanbanTasks)

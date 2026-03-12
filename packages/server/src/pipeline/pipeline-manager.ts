@@ -20,8 +20,10 @@ import {
   addLabelsToIssue,
   fetchCompareCommitsDiff,
   fetchPullRequests,
+  fetchIssue,
   fetchIssueComments,
   fetchRepoTree,
+  removeLabelFromIssue,
   checkHasPushAccess,
   createFork,
   waitForFork,
@@ -34,6 +36,7 @@ import { SECURITY_PREAMBLE } from "../agents/prompts/security-preamble.js";
 import { cleanTerminalOutput, summarizeForGitHub } from "../utils/terminal.js";
 import { formatBotComment, formatBotCommentWithDetails } from "../utils/github-comments.js";
 import { sanitizeForPrompt, extractForkOwner } from "../utils/sanitize.js";
+import { debug } from "../utils/debug.js";
 
 type TypedServer = Server<ClientToServerEvents, ServerToClientEvents>;
 
@@ -164,6 +167,7 @@ export class PipelineManager {
    * Must be called after construction (DB must be ready).
    */
   async init(): Promise<void> {
+    debug("pipeline", "init() — recovering pipelines and starting sweep");
     this.recoverPipelines();
     this.sweepTimer = setInterval(() => {
       this.sweepStalePipelines().catch((err) => {
@@ -334,6 +338,133 @@ export class PipelineManager {
     console.log(`[PipelineManager] Reset task ${taskId} to backlog`);
   }
 
+  /**
+   * Fully reset a task's pipeline state so it can be re-run through the pipeline.
+   * Clears in-memory pipeline tracking, resets all DB pipeline fields, moves
+   * the task back to backlog, then re-starts the implementation pipeline.
+   */
+  async resetPipeline(taskId: string): Promise<KanbanTask | null> {
+    // Remove in-memory pipeline state
+    this.pipelines.delete(taskId);
+
+    const db = getDb();
+    const task = db
+      .select()
+      .from(schema.kanbanTasks)
+      .where(eq(schema.kanbanTasks.id, taskId))
+      .get();
+    if (!task) return null;
+
+    const now = new Date().toISOString();
+    db.update(schema.kanbanTasks)
+      .set({
+        column: "backlog",
+        pipelineStage: null,
+        assigneeAgentId: null,
+        prBranch: null,
+        prNumber: null,
+        completionReport: null,
+        stageReports: {},
+        spawnCount: 0,
+        spawnRetryCount: 0,
+        lastKickbackSource: null,
+        pipelineAttempt: (task.pipelineAttempt ?? 0) + 1,
+        updatedAt: now,
+      })
+      .where(eq(schema.kanbanTasks.id, taskId))
+      .run();
+
+    const updated = db
+      .select()
+      .from(schema.kanbanTasks)
+      .where(eq(schema.kanbanTasks.id, taskId))
+      .get();
+    if (updated) {
+      this.io.emit("kanban:task-updated", updated as unknown as KanbanTask);
+    }
+
+    console.log(`[PipelineManager] Pipeline reset for task ${taskId} (attempt ${(task.pipelineAttempt ?? 0) + 1})`);
+
+    // Re-start the pipeline for the task
+    const project = db
+      .select()
+      .from(schema.projects)
+      .where(eq(schema.projects.id, task.projectId))
+      .get();
+    const repo = project?.githubRepo ?? null;
+    await this.startImplementation(taskId, task.projectId, task.taskNumber ?? null, repo);
+
+    return updated as unknown as KanbanTask ?? null;
+  }
+
+  /**
+   * Re-triage a task: fetch the GitHub issue, remove the "triaged" label,
+   * delete the existing triage task, and re-run triage from scratch.
+   */
+  async retriage(taskId: string): Promise<KanbanTask | null> {
+    const db = getDb();
+    const task = db
+      .select()
+      .from(schema.kanbanTasks)
+      .where(eq(schema.kanbanTasks.id, taskId))
+      .get();
+    if (!task) return null;
+
+    // Extract issue number from labels
+    const issueLabel = (task.labels as string[]).find((l) => l.startsWith("github-issue-"));
+    if (!issueLabel) {
+      throw new Error("Task has no associated GitHub issue");
+    }
+    const issueNumber = parseInt(issueLabel.replace("github-issue-", ""), 10);
+
+    // Look up project for repo info
+    const project = db
+      .select()
+      .from(schema.projects)
+      .where(eq(schema.projects.id, task.projectId))
+      .get();
+    const repo = project?.githubRepo;
+    if (!repo) {
+      throw new Error("Project has no GitHub repo configured");
+    }
+
+    const token = resolveGitHubToken(task.projectId);
+    if (!token) {
+      throw new Error("No GitHub token available for this project");
+    }
+
+    // Remove "triaged" label from GitHub issue so triage can re-apply it
+    try {
+      await removeLabelFromIssue(repo, token, issueNumber, "triaged");
+    } catch (err) {
+      // Label may not exist — that's fine
+      debug("pipeline", `retriage: failed to remove triaged label from #${issueNumber}: ${err}`);
+    }
+
+    // Delete the existing triage task
+    db.delete(schema.kanbanTasks)
+      .where(eq(schema.kanbanTasks.id, taskId))
+      .run();
+    this.io.emit("kanban:task-deleted", { taskId, projectId: task.projectId });
+
+    // Fetch fresh issue data from GitHub and re-run triage
+    const issue = await fetchIssue(repo, token, issueNumber);
+    // Remove stale "triaged" label from fetched issue data
+    issue.labels = issue.labels.filter((l) => l.name !== "triaged");
+
+    await this.runTriage(task.projectId, repo, issue);
+
+    // Return the newly created task (if triage created one)
+    const newTask = db
+      .select()
+      .from(schema.kanbanTasks)
+      .where(eq(schema.kanbanTasks.projectId, task.projectId))
+      .all()
+      .find((t) => (t.labels as string[]).includes(issueLabel));
+
+    return (newTask as unknown as KanbanTask) ?? null;
+  }
+
   // ─── Config helpers ──────────────────────────────────────────────
 
   /** Load pipeline config for a project from config KV */
@@ -400,6 +531,29 @@ export class PipelineManager {
       fileTreeSection = "\n<repository-file-tree>\n(unavailable)\n</repository-file-tree>";
     }
 
+    // Fetch issue comments to provide conversation context (especially for re-triage)
+    let commentsSection = "";
+    const botUsername = resolveGitHubUsername(projectId) ?? null;
+    try {
+      const comments = await fetchIssueComments(repo, token, issue.number);
+      const relevantComments = comments.filter((c) => {
+        // Skip bot comments — focus on human feedback
+        if (botUsername && c.user.login === botUsername) return false;
+        if (c.user.login.endsWith("[bot]")) return false;
+        return true;
+      });
+      if (relevantComments.length > 0) {
+        commentsSection =
+          `\n<issue-comments>\n` +
+          relevantComments
+            .map((c) => `@${c.user.login} (${c.created_at}):\n${c.body}`)
+            .join("\n\n---\n\n") +
+          `\n</issue-comments>`;
+      }
+    } catch (err) {
+      console.warn(`[PipelineManager] Failed to fetch comments for triage of #${issue.number}:`, err);
+    }
+
     // Build prompt — wrap in XML delimiters to isolate untrusted content
     const issueText =
       `<github-issue>\n` +
@@ -408,6 +562,7 @@ export class PipelineManager {
       `Labels: ${issue.labels.map((l) => l.name).join(", ") || "none"}\n` +
       `Assignees: ${issue.assignees.map((a) => a.login).join(", ") || "none"}\n` +
       `</github-issue>` +
+      commentsSection +
       fileTreeSection;
 
     try {
@@ -517,6 +672,7 @@ export class PipelineManager {
     repo: string | null,
     options?: { skipFallback?: boolean },
   ): Promise<boolean> {
+    debug("pipeline", `startImplementation taskId=${taskId} project=${projectId} issue=${issueNumber ?? "none"} repo=${repo ?? "none"}`);
     const config = this.getConfig(projectId);
     if (!config?.enabled) {
       // Fallback: send existing direct directive to TeamLead
@@ -634,6 +790,7 @@ export class PipelineManager {
     detectedBranch?: string | null,
   ): Promise<void> {
     let state = this.pipelines.get(taskId);
+    debug("pipeline", `advancePipeline taskId=${taskId} hasState=${!!state} detectedBranch=${detectedBranch ?? "none"} report=${workerReport.slice(0, 200)}`);
     if (!state) {
       console.warn(`[PipelineManager] advancePipeline: no in-memory state for task ${taskId} — attempting recovery`);
       const recovered = this.tryRecoverPipeline(taskId);
@@ -721,6 +878,7 @@ export class PipelineManager {
     // Parse structured verdict from report
     const verdict = this.parseVerdict(workerReport);
     const coderIndex = state.stages.indexOf("coder");
+    debug("pipeline", `advancePipeline taskId=${taskId} stage=${currentStage} verdict=${verdict ?? "none"} prBranch=${state.prBranch ?? "none"} prNumber=${state.prNumber ?? "none"} stageIndex=${state.currentStageIndex}/${state.stages.length}`);
 
     // Stage-specific verdict handling with kickback support
     // For re-review pipelines (merge queue), failures abort instead of kicking back to coder
@@ -867,6 +1025,8 @@ export class PipelineManager {
     state.currentStageIndex++;
     this.persistPipelineState(state);
 
+    debug("pipeline", `stage passed taskId=${taskId} completedStage=${currentStage} nextIndex=${state.currentStageIndex}/${state.stages.length} isComplete=${state.currentStageIndex >= state.stages.length}`);
+
     if (state.currentStageIndex >= state.stages.length) {
       // Pipeline complete — update DB first, then clean up memory
       this.updateTaskPipelineStage(taskId, null);
@@ -912,6 +1072,7 @@ export class PipelineManager {
    * Retries with backoff up to MAX_SPAWN_RETRIES, then moves to backlog.
    */
   async handleSpawnFailure(taskId: string, errorMessage: string): Promise<void> {
+    debug("pipeline", `handleSpawnFailure taskId=${taskId} error=${errorMessage.slice(0, 200)}`);
     const state = this.pipelines.get(taskId);
     if (!state) {
       console.warn(`[PipelineManager] handleSpawnFailure: no state for task ${taskId}`);
@@ -1255,6 +1416,7 @@ export class PipelineManager {
     extraContext?: string,
   ): Promise<void> {
     const currentStage = state.stages[state.currentStageIndex];
+    debug("pipeline", `sendStageDirective taskId=${state.taskId} stage=${currentStage} stageIndex=${state.currentStageIndex}/${state.stages.length} prBranch=${state.prBranch ?? "none"} kickbackSource=${state.lastKickbackSource ?? "none"}`);
     const isLastStage = state.currentStageIndex === state.stages.length - 1;
     const config = this.getConfig(state.projectId);
 
@@ -1276,7 +1438,8 @@ export class PipelineManager {
     if (!task) return;
 
     parts.push(`[PIPELINE STAGE: ${currentStage.toUpperCase()}]`);
-    parts.push(`Task: "${task.title}" (${state.taskId})`);
+    const taskRef = state.issueNumber ? `#${state.issueNumber}` : (task.taskNumber ? `#${task.taskNumber}` : task.title);
+    parts.push(`Task: "${task.title}" (${taskRef})`);
     if (state.issueNumber) {
       parts.push(`GitHub Issue: #${state.issueNumber}`);
     }
@@ -1542,7 +1705,7 @@ export class PipelineManager {
           toAgentId: teamLead.id,
           type: MessageType.Directive,
           content:
-            `[PIPELINE] Spawn a "${stageInfo?.label ?? currentStage}" worker for task "${task.title}" (${state.taskId}).\n` +
+            `[PIPELINE] Spawn a "${stageInfo?.label ?? currentStage}" worker for task "${task.title}" (${taskRef}).\n` +
             `Use registry entry: ${registryEntryId}\n\n` +
             `Worker directive:\n${directiveContent}`,
           projectId: state.projectId,
@@ -1864,12 +2027,12 @@ export class PipelineManager {
     ]);
 
     const patterns = [
-      /branch:\s*`?([a-zA-Z0-9._\/#-]+)`?/i,
-      /created branch\s+`?([a-zA-Z0-9._\/#-]+)`?/i,
-      /git checkout -b\s+`?([a-zA-Z0-9._\/#-]+)`?/i,
-      /pushed to\s+`?([a-zA-Z0-9._\/#-]+)`?/i,
-      /on branch\s+`?([a-zA-Z0-9._\/#-]+)`?/i,
-      /branch\s+`([a-zA-Z0-9._\/#-]+)`/i,
+      /branch:\s*`?([a-zA-Z0-9._\/#-]+)`?(?=[\s`\)]|$)/i,
+      /created branch\s+`?([a-zA-Z0-9._\/#-]+)`?(?=[\s`\)]|$)/i,
+      /git checkout -b\s+`?([a-zA-Z0-9._\/#-]+)`?(?=[\s`\)]|$)/i,
+      /pushed to\s+`?([a-zA-Z0-9._\/#-]+)`?(?=[\s`\)]|$)/i,
+      /on branch\s+`?([a-zA-Z0-9._\/#-]+)`?(?=[\s`\)]|$)/i,
+      /branch\s+`([a-zA-Z0-9._\/#-]+)`(?=[\s`\)]|$)/i,
     ];
     for (const pattern of patterns) {
       const match = report.match(pattern);
@@ -2106,9 +2269,12 @@ export class PipelineManager {
     if (teamLead) {
       const bus = (this.coo as any).bus;
       if (bus) {
-        // Extract issue number from labels
+        // Extract issue number from labels for display
         const issueLabel = (task.labels as string[]).find((l) => l.startsWith("github-issue-"));
         const issueNum = issueLabel ? issueLabel.replace("github-issue-", "") : "";
+        const giteaLabel = !issueNum ? (task.labels as string[]).find((l) => l.startsWith("gitea-issue-")) : null;
+        const giteaNum = giteaLabel ? giteaLabel.replace("gitea-issue-", "") : "";
+        const displayRef = issueNum ? `issue #${issueNum}` : (giteaNum ? `issue #${giteaNum}` : ((task as any).taskNumber ? `task #${(task as any).taskNumber}` : `"${task.title}"`));
 
         bus.send({
           fromAgentId: "coo",
@@ -2117,7 +2283,7 @@ export class PipelineManager {
           content:
             `New task: "${task.title}"\n\n` +
             `${task.description || "(no description)"}\n\n` +
-            `Task created on kanban board (${taskId}). ` +
+            `Task created on kanban board for ${displayRef}. ` +
             `Spawn a worker to create a feature branch, implement the fix, and open a PR.`,
           projectId,
         });
