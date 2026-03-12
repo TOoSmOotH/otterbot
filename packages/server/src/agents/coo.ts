@@ -1,5 +1,5 @@
 import { makeProjectId } from "../utils/slugify.js";
-import { checkBlockedCommand } from "../utils/command-guard.js";
+import { checkBlockedCommand, checkGitPushTarget, checkWorkspaceBoundary, normalizeCommand } from "../utils/command-guard.js";
 import { tool } from "ai";
 import { z } from "zod";
 import {
@@ -614,11 +614,30 @@ The user can see everything on the desktop in real-time.`;
             console.warn(`[coo:run_command] Blocked command: ${command}`);
             return blocked;
           }
+          // Block git push to unauthorized remotes
+          const pushBlocked = checkGitPushTarget(command);
+          if (pushBlocked) {
+            console.warn(`[coo:run_command] Blocked git push: ${command}`);
+            return pushBlocked;
+          }
           const effectiveTimeout = Math.min(timeout ?? 30_000, 120_000);
-          let cwd: string | undefined;
+          const workspaceRoot = process.env.WORKSPACE_ROOT ?? "./data";
+          let cwd: string = workspaceRoot;
           if (projectId) {
             const repoDir = this.workspace.repoPath(projectId);
             cwd = existsSync(repoDir) ? repoDir : this.workspace.projectPath(projectId);
+          }
+          // Block commands that escape the workspace boundary
+          const boundaryBlocked = checkWorkspaceBoundary(command, cwd, workspaceRoot);
+          if (boundaryBlocked) {
+            console.warn(`[coo:run_command] Blocked path access: ${command}`);
+            return boundaryBlocked;
+          }
+          // Block binding to the reserved Otterbot server port
+          const portStr = String(parseInt(process.env.PORT ?? "62626", 10));
+          const portPattern = new RegExp(`(?:--|:|=|\\s)${portStr}(?:\\s|$|"|\\')`);
+          if (portPattern.test(normalizeCommand(command))) {
+            return `BLOCKED: Port ${portStr} is reserved for the Otterbot server.`;
           }
           try {
             const output = execSync(command, {
@@ -626,7 +645,14 @@ The user can see everything on the desktop in real-time.`;
               timeout: effectiveTimeout,
               stdio: "pipe",
               maxBuffer: 1024 * 1024,
-              env: { ...process.env },
+              env: {
+                ...process.env,
+                HOME: cwd,
+                OTTERBOT_DB_KEY: undefined,
+                OTTERBOT_PASSPHRASE: undefined,
+                SESSION_SECRET: undefined,
+                DATABASE_URL: undefined,
+              },
             });
             const text = output.toString();
             if (text.length > 50_000) {
