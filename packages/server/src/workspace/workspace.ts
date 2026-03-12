@@ -1,4 +1,4 @@
-import { execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { mkdirSync, existsSync } from "node:fs";
 import { resolve, normalize, relative } from "node:path";
 import type { AgentRole } from "@otterbot/shared";
@@ -75,7 +75,7 @@ export class WorkspaceManager {
     if (options?.forkMode && !sourceBranch) {
       const upstreamRef = `upstream/${options.upstreamBranch ?? "main"}`;
       try {
-        execSync(`git reset --hard "${upstreamRef}"`, {
+        execFileSync("git", ["reset", "--hard", upstreamRef], {
           cwd: agentWorktreePath,
           stdio: "ignore",
           timeout: 30_000,

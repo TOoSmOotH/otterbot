@@ -1,8 +1,19 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { WorkspaceManager } from "./workspace.js";
 import { mkdtempSync, rmSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { execFileSync } from "node:child_process";
+import { createWorktree, removeWorktree } from "../utils/git.js";
+
+vi.mock("node:child_process", () => ({
+  execFileSync: vi.fn(),
+}));
+
+vi.mock("../utils/git.js", () => ({
+  createWorktree: vi.fn(),
+  removeWorktree: vi.fn(),
+}));
 
 describe("WorkspaceManager", () => {
   let tmpDir: string;
@@ -15,6 +26,7 @@ describe("WorkspaceManager", () => {
 
   afterEach(() => {
     rmSync(tmpDir, { recursive: true, force: true });
+    vi.clearAllMocks();
   });
 
   describe("createProject", () => {
@@ -110,5 +122,36 @@ describe("WorkspaceManager", () => {
       expect(ws.repoPath("proj-1")).toBe(join(tmpDir, "projects", "proj-1", "repo"));
     });
 
+  });
+
+  describe("prepareAgentWorktree", () => {
+    it("uses execFileSync with argument array in fork mode, preventing shell injection", () => {
+      ws.createProject("proj-1");
+
+      const maliciousBranch = '$(rm -rf /)';
+      ws.prepareAgentWorktree("proj-1", "agent-1", undefined, {
+        forkMode: true,
+        upstreamBranch: maliciousBranch,
+      });
+
+      expect(createWorktree).toHaveBeenCalledOnce();
+      expect(execFileSync).toHaveBeenCalledWith(
+        "git",
+        ["reset", "--hard", `upstream/${maliciousBranch}`],
+        expect.objectContaining({
+          stdio: "ignore",
+          timeout: 30_000,
+        }),
+      );
+    });
+
+    it("does not call execFileSync when forkMode is false", () => {
+      ws.createProject("proj-1");
+
+      ws.prepareAgentWorktree("proj-1", "agent-1");
+
+      expect(createWorktree).toHaveBeenCalledOnce();
+      expect(execFileSync).not.toHaveBeenCalled();
+    });
   });
 });

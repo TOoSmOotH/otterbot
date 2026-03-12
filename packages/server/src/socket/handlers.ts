@@ -778,6 +778,10 @@ export function setupSocketHandlers(
           callback?.({ ok: false, error: "Branch name cannot be empty" });
           return;
         }
+        if (!/^[\w.\-/]+$/.test(branch)) {
+          callback?.({ ok: false, error: "Branch name contains invalid characters" });
+          return;
+        }
         // Update config key (used at runtime by pipeline consumers)
         setConfig(`project:${data.projectId}:github:branch`, branch);
         // Update DB column to keep in sync
