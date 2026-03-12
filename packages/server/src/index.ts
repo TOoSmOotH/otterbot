@@ -378,6 +378,11 @@ const authLimiter = new RateLimiter(5, 60_000);
 
 const PUBLIC_PATHS = ["/api/setup/status", "/api/setup/passphrase", "/api/auth/login", "/api/oauth/google/callback", "/api/googlechat/webhook"];
 
+function isLoopbackIp(ip: string): boolean {
+  const normalized = ip.startsWith("::ffff:") ? ip.slice(7) : ip;
+  return normalized === "127.0.0.1" || normalized === "::1";
+}
+
 // ---------------------------------------------------------------------------
 // Cookie helper for Socket.IO (parse raw Cookie header)
 // ---------------------------------------------------------------------------
@@ -1914,6 +1919,17 @@ async function main() {
 
   app.addHook("onRequest", async (req, reply) => {
     if (!req.url.startsWith("/api/")) return;
+
+    // Block remote access to setup-mutating endpoints before setup is complete
+    if (
+      !isSetupComplete() &&
+      req.url.startsWith("/api/setup/") &&
+      !req.url.startsWith("/api/setup/status") &&
+      !isLoopbackIp(req.ip)
+    ) {
+      reply.code(403).send({ error: "Setup must be completed from localhost" });
+      return;
+    }
 
     if (PUBLIC_PATHS.some((p) => req.url.startsWith(p))) return;
 
