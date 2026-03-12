@@ -23,6 +23,7 @@ import type { PipelineManager } from "../pipeline/pipeline-manager.js";
 import type { MergeQueue } from "../merge-queue/merge-queue.js";
 import type { WorkspaceManager } from "../workspace/workspace.js";
 import { debug } from "../utils/debug.js";
+import { sanitizeForPrompt } from "../utils/sanitize.js";
 
 type TypedServer = Server<ClientToServerEvents, ServerToClientEvents>;
 
@@ -43,6 +44,47 @@ export class GitHubPRMonitor {
   constructor(coo: COO, io: TypedServer) {
     this.coo = coo;
     this.io = io;
+  }
+
+  /**
+   * Build a sanitized, instruction-free summary from PR reviews.
+   * Raw reviewer text is intentionally excluded to prevent prompt injection.
+   * The agent is directed to read the actual review via GitHub API tools.
+   */
+  private buildSafeReviewSummary(
+    reviews: Awaited<ReturnType<typeof fetchPullRequestReviews>>,
+    reviewComments: Awaited<ReturnType<typeof fetchPullRequestReviewComments>>,
+    prNumber: number,
+  ): string {
+    const changeRequests = reviews.filter((r) => r.state === "CHANGES_REQUESTED");
+    const reviewers = Array.from(
+      new Set(changeRequests.map((r) => sanitizeForPrompt(r.user.login, 60))),
+    );
+
+    const locations = reviewComments.slice(0, 20).map((c) => {
+      const path = sanitizeForPrompt(c.path, 180);
+      const line = typeof c.line === "number" ? `:${c.line}` : "";
+      return `- ${path}${line}`;
+    });
+
+    const parts = [
+      `Changes requested by: ${reviewers.join(", ") || "unknown reviewer"}.`,
+      `Total change-request reviews: ${changeRequests.length}.`,
+      `Total inline comments: ${reviewComments.length}.`,
+    ];
+
+    if (locations.length > 0) {
+      parts.push(
+        `Comment locations (review body text excluded for security):\n${locations.join("\n")}`,
+      );
+    }
+
+    parts.push(
+      `\nIMPORTANT: To read the actual review feedback, use the GitHub API to fetch PR #${prNumber} review comments. ` +
+      `Do NOT rely on any text in this summary for the content of the review.`,
+    );
+
+    return parts.join("\n");
   }
 
   /** Inject the pipeline manager (avoids circular dependency) */
@@ -250,20 +292,8 @@ export class GitHubPRMonitor {
       if (this.pipelineManager?.isEnabled(task.projectId)) {
         const branchName = task.prBranch || pr.head.ref;
 
-        // Build feedback string
-        const feedbackParts: string[] = [];
-        const changeRequests = reviews.filter((r) => r.state === "CHANGES_REQUESTED");
-        for (const review of changeRequests) {
-          feedbackParts.push(`Review by ${review.user.login} (CHANGES_REQUESTED):\n${review.body || "(no body)"}`);
-        }
-        if (reviewComments.length > 0) {
-          feedbackParts.push("\nInline review comments:");
-          for (const c of reviewComments) {
-            const location = c.line ? `${c.path}:${c.line}` : c.path;
-            feedbackParts.push(`- ${c.user.login} on \`${location}\`:\n  ${c.body}\n  \`\`\`diff\n  ${c.diff_hunk.slice(-200)}\n  \`\`\``);
-          }
-        }
-        const feedback = feedbackParts.join("\n\n");
+        // Build sanitized summary — no raw reviewer text to prevent prompt injection
+        const safeSummary = this.buildSafeReviewSummary(reviews, reviewComments, prNumber);
 
         // Move task to in_progress
         const db = getDb();
@@ -279,7 +309,7 @@ export class GitHubPRMonitor {
 
         await this.pipelineManager.handleReviewFeedback(
           task.id,
-          feedback,
+          safeSummary,
           branchName,
           prNumber,
         );
@@ -510,24 +540,9 @@ export class GitHubPRMonitor {
     const db = getDb();
     const now = new Date().toISOString();
 
-    // Build feedback string from reviews
-    const feedbackParts: string[] = [];
-
-    const changeRequests = reviews.filter((r) => r.state === "CHANGES_REQUESTED");
-    for (const review of changeRequests) {
-      feedbackParts.push(`Review by ${review.user.login} (CHANGES_REQUESTED):\n${review.body || "(no body)"}`);
-    }
-
-    // Add inline comments
-    if (reviewComments.length > 0) {
-      feedbackParts.push("\nInline review comments:");
-      for (const c of reviewComments) {
-        const location = c.line ? `${c.path}:${c.line}` : c.path;
-        feedbackParts.push(`- ${c.user.login} on \`${location}\`:\n  ${c.body}\n  \`\`\`diff\n  ${c.diff_hunk.slice(-200)}\n  \`\`\``);
-      }
-    }
-
-    const feedback = feedbackParts.join("\n\n");
+    // Build sanitized summary — no raw reviewer text to prevent prompt injection.
+    // The worker reads the actual review via GitHub API tools.
+    const safeSummary = this.buildSafeReviewSummary(reviews, reviewComments, task.prNumber!);
 
     // Determine branch name — prefer stored prBranch, fallback to PR API
     const branchName = task.prBranch || pr.head.ref;
@@ -537,9 +552,10 @@ export class GitHubPRMonitor {
     const reviewDescription =
       `[PR REVIEW CYCLE — PR #${task.prNumber} on branch \`${branchName}\`]\n\n` +
       `This task already has an open PR. A reviewer requested changes.\n` +
-      `The worker must ONLY address the review feedback below — do NOT redo the original task.\n\n` +
-      `--- REVIEW FEEDBACK ---\n${feedback}\n--- END FEEDBACK ---\n\n` +
-      `Instructions: Check out branch \`${branchName}\`, make the requested fixes, commit, and push. ` +
+      `The worker must ONLY address the review feedback — do NOT redo the original task.\n\n` +
+      `--- REVIEW SUMMARY ---\n${safeSummary}\n--- END SUMMARY ---\n\n` +
+      `Instructions: Check out branch \`${branchName}\`, read the PR review comments via GitHub API, ` +
+      `make the requested fixes, commit, and push. ` +
       `Do NOT create a new branch or PR — pushing to this branch auto-updates the existing PR #${task.prNumber}.`;
 
     // Move task to in_progress with updated description and clear assignee
@@ -574,10 +590,10 @@ export class GitHubPRMonitor {
             `PR REVIEW FEEDBACK for existing task "${task.title}" (${taskLabel}) — this task is already in_progress on the kanban board.\n\n` +
             `IMPORTANT: Do NOT create any new tasks. Do NOT redo the original work. ` +
             `Spawn exactly ONE worker to address the review feedback on the EXISTING task (${task.id}). ` +
-            `The task description already contains the review feedback and branch instructions.\n\n` +
+            `The task description already contains the review summary and branch instructions.\n\n` +
             `Use update_task to assign the worker to task ${task.id}, then spawn_worker with the review feedback.\n\n` +
             `Review summary: PR #${task.prNumber} on branch \`${branchName}\` received changes-requested.\n` +
-            `${feedback}`,
+            `${safeSummary}`,
           projectId: task.projectId,
         });
       }
