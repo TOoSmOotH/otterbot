@@ -13,7 +13,7 @@
 import { tool } from "ai";
 import { z } from "zod";
 import { mkdirSync, writeFileSync, readdirSync, unlinkSync } from "node:fs";
-import { resolve, join } from "node:path";
+import { resolve, join, normalize } from "node:path";
 import { spawn, type ChildProcess } from "node:child_process";
 import { createConnection, createServer } from "node:net";
 import type { BrowserContext, Page } from "playwright";
@@ -31,6 +31,7 @@ import {
 } from "./demo-ffmpeg.js";
 import { getConfiguredTTSProvider } from "../tts/tts.js";
 import { getConfig } from "../auth/auth.js";
+import { checkBlockedCommand, normalizeCommand } from "../utils/command-guard.js";
 
 // ---------------------------------------------------------------------------
 // Per-agent recording session state
@@ -59,6 +60,38 @@ interface ServerProcess {
 }
 
 const serverProcesses: Map<string, ServerProcess> = new Map();
+
+// Port reserved for the Otterbot server — dev servers must not bind to it
+const RESERVED_PORT = parseInt(process.env.PORT ?? "62626", 10);
+
+/**
+ * Check a command against the shared blocklist, then also reject commands
+ * that reference the reserved Otterbot port.
+ */
+function checkBlockedServerCommand(command: string): string | null {
+  const blocked = checkBlockedCommand(command);
+  if (blocked) return blocked;
+
+  const normalized = normalizeCommand(command);
+  const portStr = String(RESERVED_PORT);
+  const portPattern = new RegExp(`(?:--|:|=|\\s)${portStr}(?:\\s|$|"|\\')`);
+  if (portPattern.test(normalized)) {
+    return `BLOCKED: Port ${portStr} is reserved for the Otterbot server. Use a different port.`;
+  }
+
+  return null;
+}
+
+/**
+ * Find a free TCP port, retrying if the OS assigns the reserved port.
+ */
+async function findFreeNonReservedPort(): Promise<number> {
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const port = await findFreePort();
+    if (port !== RESERVED_PORT) return port;
+  }
+  throw new Error(`Unable to find a free port that is not the reserved port (${RESERVED_PORT}).`);
+}
 
 /** Kill a managed server process and remove it from the map. */
 function killServerProcess(agentId: string): boolean {
@@ -599,23 +632,38 @@ export function createDemoRecordTool(ctx: ToolContext) {
               return `Error: A server is already running (PID ${existing.process.pid}, port ${existing.port}). Stop it first with stop_server.`;
             }
 
+            // --- Security: command guard ---
+            const blocked = checkBlockedServerCommand(command);
+            if (blocked) return `Error: ${blocked}`;
+
+            // --- Security: workspace boundary for cwd ---
+            const workDir = cwd
+              ? normalize(resolve(ctx.workspacePath, cwd))
+              : ctx.workspacePath;
+
+            const normalizedWorkspace = normalize(resolve(ctx.workspacePath));
+            if (!workDir.startsWith(normalizedWorkspace)) {
+              return `Error: BLOCKED: Working directory "${cwd}" resolves outside workspace boundary (${ctx.workspacePath}).`;
+            }
+
+            // --- Security: block reserved port ---
+            if (port === RESERVED_PORT) {
+              return `Error: BLOCKED: Port ${RESERVED_PORT} is reserved for the Otterbot server. Use a different port.`;
+            }
+
             // Determine which port to use. If the requested port is busy
             // (or none was specified), auto-pick a free one.
             let actualPort: number;
             if (port && !(await isPortInUse(port))) {
               actualPort = port;
             } else {
-              actualPort = await findFreePort();
+              actualPort = await findFreeNonReservedPort();
               if (port) {
                 console.log(
                   `[demo-record] Requested port ${port} is in use — using free port ${actualPort} instead.`,
                 );
               }
             }
-
-            const workDir = cwd
-              ? resolve(ctx.workspacePath, cwd)
-              : ctx.workspacePath;
 
             // Parse command into executable + args
             const parts = command.match(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g) ?? [command];
@@ -628,13 +676,14 @@ export function createDemoRecordTool(ctx: ToolContext) {
             // binds to the correct port (works for most Node/Python frameworks).
             const childEnv = { ...process.env, PORT: String(actualPort) };
 
-            // Spawn detached so it survives agent termination until we kill it
+            // Spawn detached so it survives agent termination until we kill it.
+            // shell: false prevents shell metacharacter injection.
             const child = spawn(exe, args, {
               cwd: workDir,
               detached: true,
               stdio: ["ignore", "pipe", "pipe"],
               env: childEnv,
-              shell: true,
+              shell: false,
             });
 
             // Collect output for diagnostics

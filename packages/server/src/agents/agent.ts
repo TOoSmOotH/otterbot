@@ -228,7 +228,7 @@ export abstract class BaseAgent {
     onToken?: (token: string, messageId: string) => void,
     onReasoning?: (token: string, messageId: string) => void,
     onReasoningEnd?: (messageId: string) => void,
-    options?: { imageParts?: Array<{ type: "image"; image: URL }> },
+    options?: { imageParts?: Array<{ type: "image"; image: URL }>; disableTools?: boolean },
   ): Promise<{ text: string; thinking: string | undefined; hadToolCalls: boolean; isError?: boolean; timedOut?: boolean }> {
     // Re-read model/provider from config (no-op for short-lived workers)
     this.refreshLlmConfig();
@@ -307,7 +307,7 @@ export abstract class BaseAgent {
     console.log(`[Agent ${this.id}] think() — provider=${this.llmConfig.provider} model=${this.llmConfig.model}`);
 
     try {
-      const tools = this.getTools();
+      const tools = options?.disableTools ? {} : this.getTools();
       const hasTools = Object.keys(tools).length > 0;
       const resolvedType = resolveProviderCredentials(this.llmConfig.provider).type;
       const textToolMode = hasTools && (

@@ -1284,13 +1284,14 @@ export class TeamLead extends BaseAgent {
     onToken?: (token: string, messageId: string) => void,
     onReasoning?: (token: string, messageId: string) => void,
     onReasoningEnd?: (messageId: string) => void,
+    options?: { imageParts?: Array<{ type: "image"; image: URL }>; disableTools?: boolean },
   ): Promise<{ text: string; thinking: string | undefined; hadToolCalls: boolean; isError?: boolean }> {
     this._toolCallCounts.clear();
     this.pruneConversationHistory(40);
     this._abortController = new AbortController();
     this._externalAbortController = this._abortController;
     try {
-      return await super.think(userMessage, onToken, onReasoning, onReasoningEnd);
+      return await super.think(userMessage, onToken, onReasoning, onReasoningEnd, options);
     } finally {
       this._abortController = null;
       this._externalAbortController = null;

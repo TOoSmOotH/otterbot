@@ -118,7 +118,7 @@ describe("WhatsAppBridge", () => {
 
   const testConfig = {
     dataPath: "/tmp/whatsapp-test",
-    allowedNumbers: [] as string[],
+    allowedNumbers: ["1234567890", "120363001234567890"] as string[],
   };
 
   beforeEach(async () => {
@@ -352,7 +352,7 @@ describe("WhatsAppBridge", () => {
       expect(bus.send).toHaveBeenCalledOnce();
     });
 
-    it("allows all numbers when allowedNumbers is empty", async () => {
+    it("blocks all numbers when allowedNumbers is empty", async () => {
       await bridge.start({ ...testConfig, allowedNumbers: [] });
       await new Promise((r) => setTimeout(r, 50));
 
@@ -364,7 +364,7 @@ describe("WhatsAppBridge", () => {
         from: "5555555555@c.us",
       });
       await new Promise((r) => setTimeout(r, 50));
-      expect(bus.send).toHaveBeenCalledOnce();
+      expect(bus.send).not.toHaveBeenCalled();
     });
 
     it("creates a conversation for new messages", async () => {

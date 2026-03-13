@@ -41,7 +41,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Install GitHub CLI (gh)
 RUN install -m 0755 -d /etc/apt/keyrings \
-    && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg -o /etc/apt/keyrings/githubcli-archive-keyring.gpg \
+    && curl -fsSL --retry 3 --retry-delay 5 https://cli.github.com/packages/githubcli-archive-keyring.gpg -o /etc/apt/keyrings/githubcli-archive-keyring.gpg \
     && chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg \
     && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
        > /etc/apt/sources.list.d/github-cli.list \
@@ -50,7 +50,7 @@ RUN install -m 0755 -d /etc/apt/keyrings \
 
 # Install Go
 ENV GOLANG_VERSION=1.24.0
-RUN curl -fsSL "https://go.dev/dl/go${GOLANG_VERSION}.linux-$(dpkg --print-architecture).tar.gz" \
+RUN curl -fsSL --retry 3 --retry-delay 5 "https://go.dev/dl/go${GOLANG_VERSION}.linux-$(dpkg --print-architecture).tar.gz" \
     | tar xz -C /usr/local \
     && ln -s /usr/local/go/bin/go /usr/local/bin/go \
     && ln -s /usr/local/go/bin/gofmt /usr/local/bin/gofmt
@@ -58,7 +58,7 @@ RUN curl -fsSL "https://go.dev/dl/go${GOLANG_VERSION}.linux-$(dpkg --print-archi
 # Install Rust via rustup (shared location so all users can access it)
 ENV RUSTUP_HOME=/usr/local/rustup
 ENV CARGO_HOME=/usr/local/cargo
-RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+RUN curl --proto '=https' --tlsv1.2 -sSf --retry 3 --retry-delay 5 https://sh.rustup.rs \
     | sh -s -- -y --default-toolchain stable --profile minimal --no-modify-path \
     && chmod -R a+rX /usr/local/rustup /usr/local/cargo
 ENV PATH="/usr/local/cargo/bin:$PATH"
@@ -88,7 +88,7 @@ RUN mkdir -p /usr/local/lib/otterbot-tools /otterbot/home
 RUN npm install -g opencode-ai@latest
 RUN npm install -g @openai/codex@latest
 RUN npm install -g @google/gemini-cli@latest
-RUN HOME=/otterbot/home curl -fsSL https://claude.ai/install.sh | HOME=/otterbot/home bash
+RUN HOME=/otterbot/home curl -fsSL --retry 3 --retry-delay 5 https://claude.ai/install.sh | HOME=/otterbot/home bash
 
 # Install puppeteer globally so coding agents can import it from any workspace.
 # Skip bundled Chromium download — we reuse Playwright's Chromium via PUPPETEER_EXECUTABLE_PATH.
@@ -150,7 +150,7 @@ RUN CHROME_BIN=$(find /opt/playwright -name chrome -type f -path '*/chrome-linux
 
 # Download noVNC ES module source (native ESM — served as static files for the web viewer)
 # Both core/ and vendor/ are needed because core/inflator.js imports ../vendor/pako/
-RUN curl -fsSL https://github.com/novnc/noVNC/archive/refs/tags/v1.5.0.tar.gz | tar xz -C /tmp \
+RUN curl -fsSL --retry 3 --retry-delay 5 https://github.com/novnc/noVNC/archive/refs/tags/v1.5.0.tar.gz | tar xz -C /tmp \
     && mkdir -p /app/novnc \
     && mv /tmp/noVNC-1.5.0/core /app/novnc/core \
     && mv /tmp/noVNC-1.5.0/vendor /app/novnc/vendor \
