@@ -814,6 +814,13 @@ export class PipelineManager {
       return;
     }
 
+    // Auth/login errors are non-retryable — skip directly to backlog with a clear message
+    if (workerReport.startsWith("CODING_AGENT_AUTH_ERROR:")) {
+      console.error(`[PipelineManager] Auth error for task ${taskId}: ${workerReport}`);
+      await this.handleAuthFailure(taskId, workerReport, state);
+      return;
+    }
+
     // Extract branch name from the worker report (any stage may mention it)
     if (!state.prBranch) {
       state.prBranch = this.extractBranchName(workerReport);
@@ -1143,6 +1150,52 @@ export class PipelineManager {
             formatBotComment(
               "Pipeline Spawn Failed",
               `Failed after ${MAX_SPAWN_RETRIES} retries at stage \`${currentStage}\`. Task moved to backlog for review.\n\nError: ${errorMessage}`,
+            ),
+          );
+        } catch { /* best effort */ }
+      }
+    }
+
+    this.resetTaskToBacklog(taskId);
+    this.pipelines.delete(taskId);
+  }
+
+  /**
+   * Handle a non-retryable auth/login failure from a coding agent.
+   * Moves the task to backlog immediately without retries and posts a clear error.
+   */
+  private async handleAuthFailure(
+    taskId: string,
+    errorMessage: string,
+    state: PipelineState,
+  ): Promise<void> {
+    const currentStage = state.stages[state.currentStageIndex];
+    console.error(
+      `[PipelineManager] Coding agent auth failure for task ${taskId} at stage ${currentStage} — skipping retries`,
+    );
+
+    // Append error note to task description
+    const db = getDb();
+    const task = db.select().from(schema.kanbanTasks).where(eq(schema.kanbanTasks.id, taskId)).get();
+    if (task) {
+      const errorNote = `\n\n---\n🔑 Coding agent authentication error at stage "${currentStage}" (no retries — requires configuration fix): ${errorMessage}`;
+      const updatedDesc = (task.description ?? "") + errorNote;
+      db.update(schema.kanbanTasks)
+        .set({ description: updatedDesc, updatedAt: new Date().toISOString() })
+        .where(eq(schema.kanbanTasks.id, taskId))
+        .run();
+    }
+
+    // Post GitHub comment
+    if (state.issueNumber && state.repo) {
+      const token = resolveGitHubToken(state.projectId);
+      if (token) {
+        try {
+          await createIssueComment(
+            state.repo, token, state.issueNumber,
+            formatBotComment(
+              "Coding Agent Authentication Error",
+              `The coding agent failed to authenticate at stage \`${currentStage}\`. This is a configuration issue that requires manual intervention — retries will not help.\n\n**Error:** ${errorMessage}\n\nPlease check the API key configuration in settings and retry.`,
             ),
           );
         } catch { /* best effort */ }
