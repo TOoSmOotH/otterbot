@@ -22,7 +22,7 @@ const WHATSAPP_MAX_LENGTH = 4096; // WhatsApp message character limit
 export interface WhatsAppConfig {
   /** Directory to store WhatsApp session data for LocalAuth. */
   dataPath: string;
-  /** Phone numbers allowed to interact with the bot (E.164 format without +). Empty = allow all. */
+  /** Phone numbers allowed to interact with the bot (E.164 format without +). Empty = allow none. */
   allowedNumbers: string[];
 }
 
@@ -137,12 +137,9 @@ export class WhatsAppBridge {
     const phoneNumber = chatId.split("@")[0];
     if (!phoneNumber) return;
 
-    // Check allowlist
-    if (
-      this.config?.allowedNumbers &&
-      this.config.allowedNumbers.length > 0 &&
-      !this.config.allowedNumbers.includes(phoneNumber)
-    ) {
+    // Check allowlist (deny-by-default: empty list blocks all senders)
+    const allowedNumbers = this.config?.allowedNumbers ?? [];
+    if (allowedNumbers.length === 0 || !allowedNumbers.includes(phoneNumber)) {
       return;
     }
 
