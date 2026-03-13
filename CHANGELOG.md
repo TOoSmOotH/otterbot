@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.18.1](https://github.com/TOoSmOotH/otterbot/compare/otterbot-v0.18.0...otterbot-v0.18.1) (2026-03-13)
+
+
+### Bug Fixes
+
+* disable tools in terminal monitor LLM calls to prevent prompt injection ([a4bff76](https://github.com/TOoSmOotH/otterbot/commit/a4bff76ad4ee3a9b46a6d1245dd3fdb53f6544d6))
+* escape JSON in Google OAuth callback script to prevent reflected XSS ([99fc785](https://github.com/TOoSmOotH/otterbot/commit/99fc785bb01e9acf2518058e4465d01606307f63))
+* harden COO run_command with same guardrails as worker shell_exec ([5f519a0](https://github.com/TOoSmOotH/otterbot/commit/5f519a0fd2546a573418c6da0ee6a916d3628616))
+* harden demo_record start_server with command-guard and workspace boundary checks ([57583fa](https://github.com/TOoSmOotH/otterbot/commit/57583fac85605ffc496b463c878026bd651c15e9))
+* make WhatsApp allowlist deny-by-default when empty ([a8ef643](https://github.com/TOoSmOotH/otterbot/commit/a8ef643ed5f5374de100cc012d29922343786372))
+* pin docker/setup-qemu-action to commit SHA to mitigate supply-chain risk ([aa1cfbc](https://github.com/TOoSmOotH/otterbot/commit/aa1cfbcdb8d3aad71b0dcd68980c347ff7158efd))
+* prevent command injection via unsanitized branch name in fork-mode worktree reset ([c077a36](https://github.com/TOoSmOotH/otterbot/commit/c077a366a3112d45565a243b21de017d6a1f56cc))
+* prevent prompt injection in PR review directives and task descriptions ([fbdfe37](https://github.com/TOoSmOotH/otterbot/commit/fbdfe37ab512831f0c51a35be61f0bca45e96481)), closes [#449](https://github.com/TOoSmOotH/otterbot/issues/449)
+* restrict setup endpoints to localhost to prevent first-run takeover ([9d23590](https://github.com/TOoSmOotH/otterbot/commit/9d235908a5252cc31ea80e5e2281e2d80e489cc8))
+* security hardening and CI improvements ([e2a0470](https://github.com/TOoSmOotH/otterbot/commit/e2a04707f836835adfb12a4a1dabb71096d67e1b))
+
 ## [0.18.0](https://github.com/TOoSmOotH/otterbot/compare/otterbot-v0.17.0...otterbot-v0.18.0) (2026-03-12)
 
 
