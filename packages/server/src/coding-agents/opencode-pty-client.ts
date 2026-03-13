@@ -10,8 +10,9 @@ import type {
   CodingAgentClient,
   CodingAgentTaskResult,
 } from "./coding-agent-client.js";
+import { detectAuthError } from "./coding-agent-client.js";
 import { computeGitDiff } from "../utils/git.js";
-import { extractPtySummary } from "../utils/terminal.js";
+import { extractPtySummary, stripAnsi } from "../utils/terminal.js";
 import { getConfig } from "../auth/auth.js";
 import { resolveGitHubToken } from "../github/account-resolver.js";
 
@@ -106,12 +107,19 @@ export class OpenCodePtyClient implements CodingAgentClient {
 
           const success = exitCode === 0 || !this._killed;
 
+          // Check for auth/login errors in terminal output on failure
+          const authErrorMsg = !success ? detectAuthError(stripAnsi(this.ringBuffer)) : null;
+          if (authErrorMsg) {
+            console.error(`[${label}] Auth error detected: ${authErrorMsg}`);
+          }
+
           resolve({
             success,
             sessionId,
             summary: success ? extractPtySummary(this.ringBuffer) : `Process exited with code ${exitCode}`,
             diff,
             usage: null,
+            ...(authErrorMsg ? { authError: true, error: authErrorMsg } : {}),
           });
 
           this.ptyProcess = null;
