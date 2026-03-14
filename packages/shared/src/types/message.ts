@@ -41,3 +41,9 @@ export interface Conversation {
   createdAt: string;
   updatedAt: string;
 }
+
+export interface ConversationContextSize {
+  messageCount: number;
+  estimatedTokens: number;
+  compacted: boolean;
+}

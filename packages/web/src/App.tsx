@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { useSocket } from "./hooks/use-socket";
 import { useMessageStore } from "./stores/message-store";
 import { useAgentStore } from "./stores/agent-store";
@@ -34,6 +34,7 @@ import { DetachedCeoChat } from "./components/chat/DetachedCeoChat";
 import { useDesktopStore } from "./stores/desktop-store";
 import { useOpenCodeStore } from "./stores/opencode-store";
 import { useSettingsStore } from "./stores/settings-store";
+import { estimateConversationContextSize } from "./lib/estimate-context-size";
 import { initMovementTriggers } from "./lib/movement-triggers";
 import { initBreakRoomRoaming } from "./lib/break-room-roaming";
 import { getCenterTabs, centerViewLabels } from "./lib/get-center-tabs";
@@ -121,6 +122,7 @@ function MainApp() {
   const loadPacks = useModelPackStore((s) => s.loadPacks);
   const logout = useAuthStore((s) => s.logout);
   const setProjects = useProjectStore((s) => s.setProjects);
+  const setProjectConversations = useProjectStore((s) => s.setProjectConversations);
   const activeProjectId = useProjectStore((s) => s.activeProjectId);
   const activeProject = useProjectStore((s) => s.activeProject);
   const enterProject = useProjectStore((s) => s.enterProject);
@@ -134,6 +136,7 @@ function MainApp() {
   const [whatsNewOpen, setWhatsNewOpen] = useState(false);
   const [userProfile, setUserProfile] = useState<UserProfile | undefined>();
   const [centerView, setCenterView] = useState<CenterView>("dashboard");
+  const conversationLoadRequest = useRef(0);
 
   // Load initial data
   useEffect(() => {
@@ -147,9 +150,32 @@ function MainApp() {
       .then(loadAgents)
       .catch(console.error);
 
-    fetch("/api/conversations")
+    const requestId = ++conversationLoadRequest.current;
+    const conversationsUrl = activeProjectId
+      ? `/api/conversations?projectId=${encodeURIComponent(activeProjectId)}`
+      : "/api/conversations";
+    const setConversationList = activeProjectId ? setProjectConversations : setConversations;
+    fetch(conversationsUrl)
       .then((r) => r.json())
-      .then(setConversations)
+      .then((convs) => {
+        if (requestId !== conversationLoadRequest.current) return;
+        setConversationList(convs);
+        if (convs.length > 0) {
+          const latest = convs[0];
+          const socket = getSocket();
+          socket.emit("ceo:load-conversation", { conversationId: latest.id }, (result) => {
+            if (requestId !== conversationLoadRequest.current) return;
+            loadConversationMessages(
+              result.messages,
+              result.contextSize ?? estimateConversationContextSize(result.messages),
+              latest.id,
+            );
+            setCurrentConversation(latest.id);
+          });
+        } else {
+          setCurrentConversation(null);
+        }
+      })
       .catch(console.error);
 
     fetch("/api/profile")
@@ -205,10 +231,12 @@ function MainApp() {
   const clearChat = useMessageStore((s) => s.clearChat);
   const loadConversationMessages = useMessageStore((s) => s.loadConversationMessages);
   const setCurrentConversation = useMessageStore((s) => s.setCurrentConversation);
+  const projectSwitchRequest = conversationLoadRequest;
 
   const handleEnterProject = useCallback(
     (projectId: string) => {
       clearChat();
+      const requestId = ++projectSwitchRequest.current;
       // Optimistically switch view using the already-loaded project data
       // so the UI responds immediately even if the server event loop is busy.
       const cached = useProjectStore.getState().projects.find((p) => p.id === projectId);
@@ -219,6 +247,7 @@ function MainApp() {
       // Then fetch full data (conversations + tasks) from the server
       const socket = getSocket();
       socket.emit("project:enter", { projectId }, (result) => {
+        if (requestId !== projectSwitchRequest.current) return;
         if (result.project) {
           enterProject(projectId, result.project, result.conversations, result.tasks);
           if (!cached) setCenterView("dashboard");
@@ -226,10 +255,19 @@ function MainApp() {
           if (result.conversations.length > 0) {
             const latest = result.conversations[0];
             socket.emit("ceo:load-conversation", { conversationId: latest.id }, (convResult) => {
-              loadConversationMessages(convResult.messages);
+              if (requestId !== projectSwitchRequest.current) return;
+              loadConversationMessages(
+                convResult.messages,
+                convResult.contextSize ?? estimateConversationContextSize(convResult.messages),
+                latest.id,
+              );
               setCurrentConversation(latest.id);
             });
+          } else {
+            setCurrentConversation(null);
           }
+        } else {
+          setCurrentConversation(null);
         }
       });
     },
@@ -239,6 +277,7 @@ function MainApp() {
   const handleProjectCreated = useCallback(
     (projectId: string) => {
       clearChat();
+      const requestId = ++projectSwitchRequest.current;
       const cached = useProjectStore.getState().projects.find((p) => p.id === projectId);
       if (cached) {
         enterProject(projectId, cached, [], []);
@@ -246,16 +285,26 @@ function MainApp() {
       }
       const socket = getSocket();
       socket.emit("project:enter", { projectId }, (result) => {
+        if (requestId !== projectSwitchRequest.current) return;
         if (result.project) {
           enterProject(projectId, result.project, result.conversations, result.tasks);
           setCenterView("settings");
           if (result.conversations.length > 0) {
             const latest = result.conversations[0];
             socket.emit("ceo:load-conversation", { conversationId: latest.id }, (convResult) => {
-              loadConversationMessages(convResult.messages);
+              if (requestId !== projectSwitchRequest.current) return;
+              loadConversationMessages(
+                convResult.messages,
+                convResult.contextSize ?? estimateConversationContextSize(convResult.messages),
+                latest.id,
+              );
               setCurrentConversation(latest.id);
             });
+          } else {
+            setCurrentConversation(null);
           }
+        } else {
+          setCurrentConversation(null);
         }
       });
     },
@@ -264,18 +313,27 @@ function MainApp() {
 
   const handleExitProject = useCallback(() => {
     clearChat();
+    const requestId = ++projectSwitchRequest.current;
     exitProject();
     setCenterView("dashboard");
     // Reload global conversations and auto-load the most recent one
     const socket = getSocket();
     socket.emit("ceo:list-conversations", undefined, (conversations) => {
+      if (requestId !== projectSwitchRequest.current) return;
       setConversations(conversations);
       if (conversations.length > 0) {
         const latest = conversations[0];
         socket.emit("ceo:load-conversation", { conversationId: latest.id }, (result) => {
-          loadConversationMessages(result.messages);
+          if (requestId !== projectSwitchRequest.current) return;
+          loadConversationMessages(
+            result.messages,
+            result.contextSize ?? estimateConversationContextSize(result.messages),
+            latest.id,
+          );
           setCurrentConversation(latest.id);
         });
+      } else {
+        setCurrentConversation(null);
       }
     });
   }, [exitProject, setConversations, clearChat, loadConversationMessages, setCurrentConversation]);

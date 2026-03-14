@@ -6,6 +6,7 @@ import { useAgentStore } from "../../stores/agent-store";
 import { useProjectStore } from "../../stores/project-store";
 import { useSettingsStore } from "../../stores/settings-store";
 import { getSocket } from "../../lib/socket";
+import { estimateConversationContextSize } from "../../lib/estimate-context-size";
 
 interface UserProfile {
   name: string | null;
@@ -55,9 +56,15 @@ export function DetachedCeoChat() {
           const latest = convs[0];
           const socket = getSocket();
           socket.emit("ceo:load-conversation", { conversationId: latest.id }, (result) => {
-            loadConversationMessages(result.messages);
+            loadConversationMessages(
+              result.messages,
+              result.contextSize ?? estimateConversationContextSize(result.messages),
+              latest.id,
+            );
             setCurrentConversation(latest.id);
           });
+        } else {
+          setCurrentConversation(null);
         }
       })
       .catch(console.error);

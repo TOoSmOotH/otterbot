@@ -150,7 +150,7 @@ export function useSocket() {
     });
 
     socket.on("conversation:switched", ({ conversationId, messages }) => {
-      loadConversationMessages(messages);
+      loadConversationMessages(messages, undefined, conversationId);
       setCurrentConversation(conversationId);
     });
 

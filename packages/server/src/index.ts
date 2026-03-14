@@ -2105,13 +2105,25 @@ async function main() {
   });
 
   // Conversations endpoint
-  app.get("/api/conversations", async () => {
+  app.get<{ Querystring: { projectId?: string } }>("/api/conversations", async (req) => {
+    const rawProjectId = req.query.projectId;
+    const projectId =
+      typeof rawProjectId === "string" && rawProjectId.trim() ? rawProjectId.trim() : undefined;
     const { getDb, schema } = await import("./db/index.js");
     const { desc } = await import("drizzle-orm");
     const db = getDb();
+    if (projectId) {
+      return db
+        .select()
+        .from(schema.conversations)
+        .where(eq(schema.conversations.projectId, projectId))
+        .orderBy(desc(schema.conversations.updatedAt))
+        .all();
+    }
     return db
       .select()
       .from(schema.conversations)
+      .where(eq(schema.conversations.projectId, null))
       .orderBy(desc(schema.conversations.updatedAt))
       .all();
   });

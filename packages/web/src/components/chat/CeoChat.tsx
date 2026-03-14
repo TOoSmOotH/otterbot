@@ -5,6 +5,7 @@ import { useSettingsStore } from "../../stores/settings-store";
 import { useProjectStore } from "../../stores/project-store";
 import { useSpeechToText } from "../../hooks/use-speech-to-text";
 import { getSocket } from "../../lib/socket";
+import { estimateConversationContextSize } from "../../lib/estimate-context-size";
 import { cancelTts } from "../../hooks/use-socket";
 import { cn } from "../../lib/utils";
 import { MarkdownContent } from "./MarkdownContent";
@@ -57,6 +58,7 @@ const ThinkingDisclosure: FC<{ thinking: string }> = ({ thinking }) => {
 };
 
 export function CeoChat({ cooName, detached }: { cooName?: string; detached?: boolean }) {
+  const DEFAULT_COMPACT_KEEP_LATEST = 20;
   const isBasic = useUIModeStore((s) => s.mode === "basic");
   const [input, setInput] = useState("");
   const [showHistory, setShowHistory] = useState(false);
@@ -70,6 +72,7 @@ export function CeoChat({ cooName, detached }: { cooName?: string; detached?: bo
   const streamingMessageId = useMessageStore((s) => s.streamingMessageId);
   const thinkingContent = useMessageStore((s) => s.thinkingContent);
   const isThinking = useMessageStore((s) => s.isThinking);
+  const currentConversationContextSize = useMessageStore((s) => s.currentConversationContextSize);
   const clearChat = useMessageStore((s) => s.clearChat);
   const currentConversationId = useMessageStore((s) => s.currentConversationId);
   const setCurrentConversation = useMessageStore((s) => s.setCurrentConversation);
@@ -88,6 +91,7 @@ export function CeoChat({ cooName, detached }: { cooName?: string; detached?: bo
 
   // Use project conversations when in a project context, global otherwise
   const displayedConversations = activeProjectId ? projectConversations : conversations;
+  const conversationScopeRequest = useRef(0);
 
   const sttEnabled = useSettingsStore((s) => s.sttEnabled);
   const activeSTTProvider = useSettingsStore((s) => s.activeSTTProvider);
@@ -137,13 +141,16 @@ export function CeoChat({ cooName, detached }: { cooName?: string; detached?: bo
   // Refresh conversation list when history panel opens
   useEffect(() => {
     if (!showHistory) return;
+    const requestId = ++conversationScopeRequest.current;
     const socket = getSocket();
     if (activeProjectId) {
       socket.emit("project:conversations", { projectId: activeProjectId }, (convs) => {
+        if (requestId !== conversationScopeRequest.current) return;
         setProjectConversations(convs);
       });
     } else {
       socket.emit("ceo:list-conversations", undefined, (convs) => {
+        if (requestId !== conversationScopeRequest.current) return;
         setConversations(convs);
       });
     }
@@ -207,6 +214,22 @@ export function CeoChat({ cooName, detached }: { cooName?: string; detached?: bo
     setPendingFiles((prev) => prev.filter((f) => f.id !== id));
   }, []);
 
+  const openConversation = useCallback(
+    (conversationId: string, requestId: number) => {
+      const socket = getSocket();
+      socket.emit("ceo:load-conversation", { conversationId }, (result) => {
+        if (requestId !== conversationScopeRequest.current) return;
+        loadConversationMessages(
+          result.messages,
+          result.contextSize ?? estimateConversationContextSize(result.messages),
+          conversationId,
+        );
+        setCurrentConversation(conversationId);
+      });
+    },
+    [loadConversationMessages, setCurrentConversation],
+  );
+
   const isStreaming = !!streamingContent;
 
   useEffect(() => {
@@ -256,6 +279,43 @@ export function CeoChat({ cooName, detached }: { cooName?: string; detached?: bo
     setShowHistory(false);
   }, [clearChat]);
 
+  const handleCompactConversation = useCallback(() => {
+    if (!currentConversationId) return;
+    const requestId = ++conversationScopeRequest.current;
+    const socket = getSocket();
+    socket.emit(
+      "ceo:compact-conversation",
+      { conversationId: currentConversationId, keepLatest: DEFAULT_COMPACT_KEEP_LATEST },
+      (result) => {
+        if (requestId !== conversationScopeRequest.current) return;
+        loadConversationMessages(
+          result.messages,
+          result.contextSize,
+          currentConversationId,
+        );
+        setCurrentConversation(currentConversationId);
+        if (activeProjectId) {
+          socket.emit("project:conversations", { projectId: activeProjectId }, (convs) => {
+            if (requestId !== conversationScopeRequest.current) return;
+            setProjectConversations(convs);
+          });
+        } else {
+          socket.emit("ceo:list-conversations", undefined, (convs) => {
+            if (requestId !== conversationScopeRequest.current) return;
+            setConversations(convs);
+          });
+        }
+      },
+    );
+  }, [
+    activeProjectId,
+    currentConversationId,
+    loadConversationMessages,
+    setConversations,
+    setCurrentConversation,
+    setProjectConversations,
+  ]);
+
   const handlePopOut = useCallback(() => {
     window.open(
       `${window.location.origin}?detached-chat=true`,
@@ -267,6 +327,7 @@ export function CeoChat({ cooName, detached }: { cooName?: string; detached?: bo
   const handleSwitchContext = useCallback(
     (projectId: string | null) => {
       const socket = getSocket();
+      const requestId = ++conversationScopeRequest.current;
       clearChat();
       if (projectId) {
         // Switch to project context
@@ -275,41 +336,49 @@ export function CeoChat({ cooName, detached }: { cooName?: string; detached?: bo
           enterProject(projectId, cached, [], []);
         }
         socket.emit("project:enter", { projectId }, (result) => {
+          if (requestId !== conversationScopeRequest.current) return;
           if (result.project) {
             enterProject(projectId, result.project, result.conversations, result.tasks);
             if (result.conversations.length > 0) {
               const latest = result.conversations[0];
-              socket.emit("ceo:load-conversation", { conversationId: latest.id }, (convResult) => {
-                loadConversationMessages(convResult.messages);
-                setCurrentConversation(latest.id);
-              });
+              openConversation(latest.id, requestId);
+            } else {
+              setCurrentConversation(null);
             }
+          } else {
+            setCurrentConversation(null);
           }
         });
       } else {
         // Switch to global context
         exitProject();
         socket.emit("ceo:list-conversations", undefined, (convs) => {
+          if (requestId !== conversationScopeRequest.current) return;
           setConversations(convs);
           if (convs.length > 0) {
             const latest = convs[0];
-            socket.emit("ceo:load-conversation", { conversationId: latest.id }, (result) => {
-              loadConversationMessages(result.messages);
-              setCurrentConversation(latest.id);
-            });
+            openConversation(latest.id, requestId);
+          } else {
+            setCurrentConversation(null);
           }
         });
       }
       setShowHistory(false);
     },
-    [clearChat, projects, enterProject, exitProject, loadConversationMessages, setCurrentConversation, setConversations],
+    [clearChat, projects, enterProject, exitProject, openConversation, setConversations, setCurrentConversation],
   );
 
   const handleLoadConversation = useCallback(
     (conversationId: string) => {
+      const requestId = ++conversationScopeRequest.current;
       const socket = getSocket();
       socket.emit("ceo:load-conversation", { conversationId }, (result) => {
-        loadConversationMessages(result.messages);
+        if (requestId !== conversationScopeRequest.current) return;
+        loadConversationMessages(
+          result.messages,
+          result.contextSize ?? estimateConversationContextSize(result.messages),
+          conversationId,
+        );
         setCurrentConversation(conversationId);
         setShowHistory(false);
       });
@@ -346,6 +415,13 @@ export function CeoChat({ cooName, detached }: { cooName?: string; detached?: bo
           {activeProject && !showHistory && (
             <span className="text-[10px] text-muted-foreground bg-secondary rounded px-1.5 py-0.5">
               project
+            </span>
+          )}
+          {!showHistory && (
+            <span className="text-[10px] text-muted-foreground">
+              {currentConversationContextSize.messageCount} messages / ~
+              {currentConversationContextSize.estimatedTokens} tokens
+              {currentConversationContextSize.compacted && " (compacted)"}
             </span>
           )}
         </div>
@@ -400,10 +476,24 @@ export function CeoChat({ cooName, detached }: { cooName?: string; detached?: bo
               <polyline points="12 6 12 12 16 14" />
             </svg>
           </button>
+          {/* Compact conversation */}
+          <button
+            onClick={handleCompactConversation}
+            disabled={!currentConversationId || currentConversationContextSize.messageCount === 0 || isStreaming}
+            title="Compact current chat"
+            className={cn(
+              "h-7 rounded-lg px-2 text-[11px] transition-colors",
+              currentConversationId && !isStreaming
+                ? "text-muted-foreground hover:text-foreground hover:bg-secondary"
+                : "text-muted-foreground cursor-not-allowed opacity-50",
+            )}
+          >
+            Compact current chat
+          </button>
           {/* New Chat */}
           <button
             onClick={handleNewChat}
-            title="New Chat"
+            title="Start new chat"
             className="w-7 h-7 rounded-lg flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors"
           >
             <svg
@@ -633,7 +723,7 @@ export function CeoChat({ cooName, detached }: { cooName?: string; detached?: bo
                       { agentId: newAgentId, projectId: activeProjectId ?? undefined },
                       (result) => {
                         if (result.conversationId) {
-                          loadConversationMessages(result.messages);
+                          loadConversationMessages(result.messages, undefined, result.conversationId);
                           setCurrentConversation(result.conversationId);
                         } else {
                           // No existing conversation — start fresh

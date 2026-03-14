@@ -3,10 +3,10 @@ import type {
   ServerToClientEvents,
   ClientToServerEvents,
 } from "@otterbot/shared";
-import { MessageType, type Agent, type AgentActivityRecord, type BusMessage, type Conversation, type Project, type KanbanTask, type Todo, type CodingAgentSession, type CodingAgentMessage, type CodingAgentPart, type CodingAgentFileDiff, type CodingAgentType } from "@otterbot/shared";
+import { MessageType, type Agent, type AgentActivityRecord, type BusMessage, type Conversation, type ConversationContextSize, type Project, type KanbanTask, type Todo, type CodingAgentSession, type CodingAgentMessage, type CodingAgentPart, type CodingAgentFileDiff, type CodingAgentType } from "@otterbot/shared";
 import { nanoid } from "nanoid";
 import { makeProjectId } from "../utils/slugify.js";
-import { eq, or, and, desc, isNull } from "drizzle-orm";
+import { and, asc, desc, eq, isNull, lt, or } from "drizzle-orm";
 import type { MessageBus } from "../bus/message-bus.js";
 import type { COO } from "../agents/coo.js";
 import type { Registry } from "../registry/registry.js";
@@ -45,6 +45,56 @@ type TypedSocket = Socket<ClientToServerEvents, ServerToClientEvents>;
 /** Monotonically increasing counter; bumped on cancel to suppress in-flight TTS */
 let ttsGeneration = 0;
 type TypedServer = Server<ClientToServerEvents, ServerToClientEvents>;
+
+const DEFAULT_COMPACT_KEEP_LATEST = 20;
+const EMPTY_CONTEXT_SIZE: ConversationContextSize = {
+  messageCount: 0,
+  estimatedTokens: 0,
+  compacted: false,
+};
+const APPROX_CHARACTERS_PER_TOKEN = 4;
+
+function isCeoChatMessage(message: BusMessage): boolean {
+  const isModuleAgent =
+    message.fromAgentId?.startsWith("module-agent-") ||
+    message.toAgentId?.startsWith("module-agent-");
+  const isCeoDirective =
+    message.type === "directive" &&
+    message.fromAgentId === null &&
+    message.toAgentId?.startsWith("module-agent-");
+  return (
+    (message.type === "chat" || (message.type === "report" && isModuleAgent) || isCeoDirective) &&
+    (message.fromAgentId === null ||
+      message.fromAgentId === "coo" ||
+      message.fromAgentId?.startsWith("module-agent-")) &&
+    (message.toAgentId === null ||
+      message.toAgentId === "coo" ||
+      message.toAgentId?.startsWith("module-agent-"))
+  );
+}
+
+function estimateTokenCount(text: string): number {
+  if (!text) return 0;
+  return Math.max(0, Math.ceil(text.length / APPROX_CHARACTERS_PER_TOKEN));
+}
+
+function estimateConversationContextSize(messages: BusMessage[]): ConversationContextSize {
+  const chatMessages = messages.filter(isCeoChatMessage);
+  return {
+    messageCount: chatMessages.length,
+    estimatedTokens: chatMessages.reduce((acc, message) => acc + estimateTokenCount(message.content), 0),
+    compacted: chatMessages.some((message) => message.metadata?.compacted === true),
+  };
+}
+
+function resolveConversationContext(projectId: string | null, db: ReturnType<typeof getDb>) {
+  if (!projectId) return null;
+  return db
+    .select()
+    .from(schema.projects)
+    .where(eq(schema.projects.id, projectId))
+    .get();
+}
 
 // Server-side part accumulator (mirrors client's partBuffers)
 // Key: `${agentId}:${messageId}:${partId}`
@@ -268,7 +318,8 @@ export function setupSocketHandlers(
     // List conversations (optionally filtered by projectId)
     socket.on("ceo:list-conversations", (data, callback) => {
       const db = getDb();
-      const projectId = data?.projectId;
+      const rawProjectId = data?.projectId;
+      const projectId = typeof rawProjectId === "string" && rawProjectId.trim() ? rawProjectId.trim() : undefined;
       let conversations;
       if (projectId) {
         conversations = db
@@ -292,6 +343,13 @@ export function setupSocketHandlers(
     // Load a specific conversation
     socket.on("ceo:load-conversation", (data, callback) => {
       const db = getDb();
+      if (!data?.conversationId || typeof data.conversationId !== "string") {
+        callback({
+          messages: [],
+          contextSize: EMPTY_CONTEXT_SIZE,
+        });
+        return;
+      }
       const messages = bus.getConversationMessages(data.conversationId);
       // Look up conversation to get projectId and charter
       const conv = db
@@ -299,6 +357,13 @@ export function setupSocketHandlers(
         .from(schema.conversations)
         .where(eq(schema.conversations.id, data.conversationId))
         .get();
+      if (!conv) {
+        callback({
+          messages: [],
+          contextSize: EMPTY_CONTEXT_SIZE,
+        });
+        return;
+      }
       let charter: string | null = null;
       const projectId = conv?.projectId ?? null;
       if (projectId) {
@@ -310,7 +375,126 @@ export function setupSocketHandlers(
         charter = project?.charter ?? null;
       }
       coo.loadConversation(data.conversationId, messages, projectId, charter);
-      callback({ messages });
+      callback({
+        messages,
+        contextSize: estimateConversationContextSize(messages),
+      });
+    });
+
+    // Compact a conversation context while preserving recent messages
+    socket.on("ceo:compact-conversation", (data, callback) => {
+      if (!data || typeof data.conversationId !== "string") {
+        callback({
+          messages: [],
+          contextSize: EMPTY_CONTEXT_SIZE,
+        });
+        return;
+      }
+      const db = getDb();
+      const conversation = db
+        .select()
+        .from(schema.conversations)
+        .where(eq(schema.conversations.id, data.conversationId))
+        .get() as Conversation | undefined;
+      if (!conversation) {
+        callback({
+          messages: [],
+          contextSize: EMPTY_CONTEXT_SIZE,
+        });
+        return;
+      }
+
+      const allMessages = db
+        .select()
+        .from(schema.messages)
+        .where(eq(schema.messages.conversationId, data.conversationId))
+        .orderBy(asc(schema.messages.timestamp))
+        .all();
+
+      const keepLatest = Math.max(
+        1,
+        Number.isFinite(data.keepLatest) && data.keepLatest > 0 ? Math.floor(data.keepLatest) : DEFAULT_COMPACT_KEEP_LATEST,
+      );
+
+      if (allMessages.length <= keepLatest) {
+        callback({
+          messages: allMessages,
+          contextSize: estimateConversationContextSize(allMessages as BusMessage[]),
+        });
+        return;
+      }
+
+      const trimmedMessages = allMessages.slice(0, -keepLatest);
+      const keptMessages = allMessages.slice(-keepLatest);
+      const firstKept = keptMessages[0];
+      const trimmedSummary = trimmedMessages
+        .map((message) => {
+          const sender =
+            message.fromAgentId === null
+              ? "CEO"
+              : message.fromAgentId === "coo"
+                ? "COO"
+                : message.fromAgentId;
+          return `${sender}: ${message.content}`;
+        })
+        .slice(-8)
+        .join("\n");
+      const markerText = [
+        "[COMPACTED CONTEXT]",
+        `Summarized ${trimmedMessages.length} older messages and preserved the latest ${keepLatest}.`,
+        "",
+        trimmedSummary
+          ? "Recent omitted context:"
+          : "Recent omitted context: <empty>",
+        trimmedSummary
+          ? trimmedSummary.slice(0, 2000)
+          : "",
+      ]
+        .filter(Boolean)
+        .join("\n");
+
+      if (allMessages.length > keepLatest && firstKept) {
+        db.delete(schema.messages)
+          .where(
+            and(
+              eq(schema.messages.conversationId, data.conversationId),
+              lt(schema.messages.timestamp, firstKept.timestamp),
+            ),
+          )
+          .run();
+        db.insert(schema.messages)
+          .values({
+            id: nanoid(),
+            fromAgentId: "coo",
+            toAgentId: null,
+            type: MessageType.Chat,
+            content: markerText,
+            metadata: { compacted: true, compactedFromCount: trimmedMessages.length },
+            projectId: conversation.projectId,
+            conversationId: data.conversationId,
+            correlationId: null,
+            timestamp: new Date(new Date(firstKept.timestamp).getTime() - 1).toISOString(),
+          })
+          .run();
+      }
+
+      const messages = db
+        .select()
+        .from(schema.messages)
+        .where(eq(schema.messages.conversationId, data.conversationId))
+        .orderBy(asc(schema.messages.timestamp))
+        .all();
+      const messagesWithMetadata = messages as BusMessage[];
+      const updatedAt = new Date().toISOString();
+      db.update(schema.conversations)
+        .set({ updatedAt })
+        .where(eq(schema.conversations.id, data.conversationId))
+        .run();
+      coo.loadConversation(data.conversationId, messagesWithMetadata, conversation.projectId, resolveConversationContext(conversation.projectId, db)?.charter ?? null);
+      callback({
+        messages: messagesWithMetadata,
+        contextSize: estimateConversationContextSize(messagesWithMetadata),
+      });
     });
 
     // Find the most recent conversation involving a specific agent

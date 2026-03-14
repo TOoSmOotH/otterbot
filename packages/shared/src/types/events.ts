@@ -1,5 +1,5 @@
 import type { Agent, AgentStatus, AgentActivityRecord } from "./agent.js";
-import type { BusMessage, Conversation, ChatAttachment } from "./message.js";
+import type { BusMessage, Conversation, ChatAttachment, ConversationContextSize } from "./message.js";
 import type { RegistryEntry, Project, ProjectAgentAssignments, ProjectPipelineConfig } from "./registry.js";
 import type { KanbanTask } from "./kanban.js";
 import type { SceneZone } from "./environment.js";
@@ -105,7 +105,11 @@ export interface ClientToServerEvents {
   ) => void;
   "ceo:load-conversation": (
     data: { conversationId: string },
-    callback: (result: { messages: BusMessage[] }) => void,
+    callback: (result: { messages: BusMessage[]; contextSize?: ConversationContextSize }) => void,
+  ) => void;
+  "ceo:compact-conversation": (
+    data: { conversationId: string; keepLatest?: number },
+    callback: (result: { messages: BusMessage[]; contextSize: ConversationContextSize }) => void,
   ) => void;
   "ceo:find-agent-conversation": (
     data: { agentId: string | null; projectId?: string },

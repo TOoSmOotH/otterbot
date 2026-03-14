@@ -1,25 +1,10 @@
 import { create } from "zustand";
-import type { BusMessage, Conversation } from "@otterbot/shared";
-
-/** Returns true if the message should appear in the CEO chat panel */
-function isCeoChatMessage(m: BusMessage): boolean {
-  const isModuleAgent =
-    m.fromAgentId?.startsWith("module-agent-") ||
-    m.toAgentId?.startsWith("module-agent-");
-  const isCeoDirective =
-    m.type === "directive" &&
-    m.fromAgentId === null &&
-    m.toAgentId?.startsWith("module-agent-");
-  return (
-    (m.type === "chat" || (m.type === "report" && isModuleAgent) || isCeoDirective) &&
-    (m.fromAgentId === null ||
-      m.fromAgentId === "coo" ||
-      m.fromAgentId?.startsWith("module-agent-")) &&
-    (m.toAgentId === null ||
-      m.toAgentId === "coo" ||
-      m.toAgentId?.startsWith("module-agent-"))
-  );
-}
+import type { BusMessage, Conversation, ConversationContextSize } from "@otterbot/shared";
+import {
+  EMPTY_CONTEXT_SIZE,
+  estimateConversationContextSize,
+  isCeoChatMessage,
+} from "../lib/estimate-context-size";
 
 interface MessageState {
   /** All bus messages (for the stream panel) */
@@ -41,6 +26,8 @@ interface MessageState {
   /** Conversation tracking */
   currentConversationId: string | null;
   conversations: Conversation[];
+  conversationContextSizes: Record<string, ConversationContextSize>;
+  currentConversationContextSize: ConversationContextSize;
 
   addMessage: (message: BusMessage) => void;
   setCooResponse: (message: BusMessage) => void;
@@ -54,7 +41,8 @@ interface MessageState {
   setCurrentConversation: (id: string | null) => void;
   setConversations: (conversations: Conversation[]) => void;
   addConversation: (conversation: Conversation) => void;
-  loadConversationMessages: (messages: BusMessage[]) => void;
+  setConversationContextSize: (conversationId: string, contextSize: ConversationContextSize) => void;
+  loadConversationMessages: (messages: BusMessage[], contextSize?: ConversationContextSize, conversationId?: string | null) => void;
 }
 
 export const useMessageStore = create<MessageState>((set) => ({
@@ -70,14 +58,34 @@ export const useMessageStore = create<MessageState>((set) => ({
   agentFilter: null,
   currentConversationId: null,
   conversations: [],
+  conversationContextSizes: {},
+  currentConversationContextSize: EMPTY_CONTEXT_SIZE,
 
   addMessage: (message) =>
     set((state) => {
       const newMessages = [...state.messages, message];
-
-      const newChat = isCeoChatMessage(message)
+      const updatedChatMessages = isCeoChatMessage(message)
         ? [...state.chatMessages, message]
         : state.chatMessages;
+
+      const targetConversationId = message.conversationId ?? state.currentConversationId;
+      const shouldTrackContext = targetConversationId ? isCeoChatMessage(message) : false;
+      const nextContextSizeByConversationId = shouldTrackContext
+        ? {
+            ...state.conversationContextSizes,
+            [targetConversationId]: estimateConversationContextSize(
+              newMessages.filter(
+                (entry) =>
+                  isCeoChatMessage(entry) && (entry.conversationId ?? null) === targetConversationId,
+              ),
+            ),
+          }
+        : state.conversationContextSizes;
+      const nextCurrentContextSize = shouldTrackContext
+        ? targetConversationId === state.currentConversationId
+          ? nextContextSizeByConversationId[targetConversationId]
+          : state.currentConversationContextSize
+        : state.currentConversationContextSize;
 
       // Clear streaming if this is the final agent response for the current conversation
       const clearStream =
@@ -87,7 +95,9 @@ export const useMessageStore = create<MessageState>((set) => ({
 
       return {
         messages: newMessages,
-        chatMessages: newChat,
+        chatMessages: updatedChatMessages,
+        conversationContextSizes: nextContextSizeByConversationId,
+        currentConversationContextSize: nextCurrentContextSize,
         ...(clearStream
           ? {
               streamingContent: "",
@@ -180,10 +190,16 @@ export const useMessageStore = create<MessageState>((set) => ({
       thinkingMessageId: null,
       isThinking: false,
       currentConversationId: null,
+      currentConversationContextSize: EMPTY_CONTEXT_SIZE,
     }),
 
   setCurrentConversation: (id) =>
-    set({ currentConversationId: id }),
+    set((state) => ({
+      currentConversationId: id,
+      currentConversationContextSize: id
+        ? state.conversationContextSizes[id] ?? EMPTY_CONTEXT_SIZE
+        : EMPTY_CONTEXT_SIZE,
+    })),
 
   setConversations: (conversations) =>
     set({ conversations }),
@@ -193,14 +209,43 @@ export const useMessageStore = create<MessageState>((set) => ({
       conversations: [conversation, ...state.conversations],
     })),
 
-  loadConversationMessages: (messages) =>
-    set({
-      chatMessages: messages.filter(isCeoChatMessage),
-      streamingContent: "",
-      streamingMessageId: null,
-      streamingConversationId: null,
-      thinkingContent: "",
-      thinkingMessageId: null,
-      isThinking: false,
+  setConversationContextSize: (conversationId, contextSize) =>
+    set((state) => {
+      const nextContextSizes = {
+        ...state.conversationContextSizes,
+        [conversationId]: contextSize,
+      };
+      return {
+        conversationContextSizes: nextContextSizes,
+        ...(state.currentConversationId === conversationId
+          ? { currentConversationContextSize: contextSize }
+          : {}),
+      };
+    }),
+
+  loadConversationMessages: (messages, contextSize, conversationId) =>
+    set((state) => {
+      const targetConversationId = conversationId ?? state.currentConversationId;
+      const resolvedContextSize = contextSize ?? estimateConversationContextSize(messages);
+      const nextContextSizes = targetConversationId
+        ? {
+            ...state.conversationContextSizes,
+            [targetConversationId]: resolvedContextSize,
+          }
+        : state.conversationContextSizes;
+      return {
+        chatMessages: messages.filter(isCeoChatMessage),
+        streamingContent: "",
+        streamingMessageId: null,
+        streamingConversationId: null,
+        thinkingContent: "",
+        thinkingMessageId: null,
+        isThinking: false,
+        conversationContextSizes: nextContextSizes,
+        currentConversationContextSize:
+          targetConversationId && state.currentConversationId === targetConversationId
+            ? resolvedContextSize
+            : state.currentConversationContextSize,
+      };
     }),
 }));
