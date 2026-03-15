@@ -6,11 +6,12 @@
  * replacement for the SDK-based ClaudeCodeClient.
  */
 
-import { extractPtySummary } from "../utils/terminal.js";
+import { extractPtySummary, stripAnsi } from "../utils/terminal.js";
 import type {
   CodingAgentClient,
   CodingAgentTaskResult,
 } from "./coding-agent-client.js";
+import { detectAuthError } from "./coding-agent-client.js";
 import { computeGitDiff } from "../utils/git.js";
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
@@ -121,12 +122,19 @@ export class ClaudeCodePtyClient implements CodingAgentClient {
 
           const success = exitCode === 0 || !this._killed;
 
+          // Check for auth/login errors in terminal output on failure
+          const authErrorMsg = !success ? detectAuthError(stripAnsi(this.ringBuffer)) : null;
+          if (authErrorMsg) {
+            console.error(`[${label}] Auth error detected: ${authErrorMsg}`);
+          }
+
           resolve({
             success,
             sessionId,
             summary: success ? extractPtySummary(this.ringBuffer) : `Process exited with code ${exitCode}`,
             diff,
             usage: null,
+            ...(authErrorMsg ? { authError: true, error: authErrorMsg } : {}),
           });
 
           this.ptyProcess = null;

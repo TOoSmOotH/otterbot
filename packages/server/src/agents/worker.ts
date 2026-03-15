@@ -12,6 +12,10 @@ import { debug } from "../utils/debug.js";
 import { getConfig } from "../auth/auth.js";
 import { stripAnsi } from "../utils/terminal.js";
 import { auditGitRemotes } from "../utils/command-guard.js";
+import { detectAuthError } from "../coding-agents/coding-agent-client.js";
+
+/** Prefix for auth error reports — signals non-retryable failure to the pipeline */
+export const CODING_AGENT_AUTH_ERROR_PREFIX = "CODING_AGENT_AUTH_ERROR:";
 
 export interface WorkerDependencies {
   id?: string;
@@ -270,6 +274,11 @@ export class Worker extends BaseAgent {
       },
     });
 
+    // Auth error: non-retryable failure — report immediately
+    if (result.authError) {
+      return `${CODING_AGENT_AUTH_ERROR_PREFIX} OpenCode authentication failed: ${result.error}. Please check your API key configuration.`;
+    }
+
     // Post-execution: audit git remotes for unauthorized modifications
     if (result.success && this.workspacePath) {
       const unexpectedRemotes = auditGitRemotes(this.workspacePath);
@@ -365,6 +374,11 @@ export class Worker extends BaseAgent {
       },
     });
 
+    // Auth error: non-retryable failure — report immediately
+    if (result.authError) {
+      return `${CODING_AGENT_AUTH_ERROR_PREFIX} Codex authentication failed: ${result.error}. Please check your API key configuration.`;
+    }
+
     // Post-execution: audit git remotes for unauthorized modifications
     if (result.success && this.workspacePath) {
       const unexpectedRemotes = auditGitRemotes(this.workspacePath);
@@ -459,6 +473,11 @@ export class Worker extends BaseAgent {
         error: result.error,
       },
     });
+
+    // Auth error: non-retryable failure — report immediately
+    if (result.authError) {
+      return `${CODING_AGENT_AUTH_ERROR_PREFIX} Gemini CLI authentication failed: ${result.error}. Please check your API key configuration.`;
+    }
 
     // Post-execution: audit git remotes for unauthorized modifications
     if (result.success && this.workspacePath) {
@@ -577,6 +596,11 @@ export class Worker extends BaseAgent {
       },
     });
 
+    // Auth error: non-retryable failure — report immediately
+    if (result.authError) {
+      return `${CODING_AGENT_AUTH_ERROR_PREFIX} Claude Code authentication failed: ${result.error}. Please check your API key configuration.`;
+    }
+
     // Post-execution: audit git remotes for unauthorized modifications
     if (result.success && this.workspacePath) {
       const unexpectedRemotes = auditGitRemotes(this.workspacePath);
@@ -637,6 +661,15 @@ export class Worker extends BaseAgent {
       const hasOpenCodeCompletion = tailSegments.some(l =>
         /\b(Build|Bake|Think)\s+[·•]\s+\S+.*[·•]\s+\d+[ms]/i.test(l),
       );
+
+      // Check for auth/login errors — kill the process immediately to avoid wasting time
+      const authErr = detectAuthError(cleanOutput);
+      if (authErr) {
+        console.error(`[Worker ${this.id}] Terminal idle — auth error detected: ${authErr}`);
+        this._terminalExiting = true;
+        ptyClient.kill();
+        return;
+      }
 
       console.log(`[Worker ${this.id}] Terminal idle check — tail segments: ${JSON.stringify(tailSegments.slice(-8))}, prompt=${isReplPrompt}, completion=${hasCompletionSignal}, opencode=${hasOpenCodeCompletion}`);
 

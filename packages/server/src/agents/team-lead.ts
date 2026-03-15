@@ -569,6 +569,8 @@ export class TeamLead extends BaseAgent {
 
   private isFailureReport(report: string): boolean {
     if (!report.trim()) return true;
+    // Auth errors are always failures — non-retryable
+    if (report.startsWith("CODING_AGENT_AUTH_ERROR:")) return true;
     // PR creation is a definitive success signal — overrides any false-positive failure matches
     if (this.isPRCreated(report)) return false;
     const lower = report.toLowerCase();
