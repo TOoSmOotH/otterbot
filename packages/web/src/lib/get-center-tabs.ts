@@ -1,6 +1,7 @@
 export type CenterView =
   | "graph"
   | "live3d"
+  | "live2d"
   | "charter"
   | "kanban"
   | "desktop"
@@ -18,6 +19,7 @@ export type CenterView =
 export const centerViewLabels: Record<CenterView, string> = {
   graph: "Graph",
   live3d: "Live",
+  live2d: "2D",
   dashboard: "Dashboard",
   charter: "Charter",
   kanban: "Board",

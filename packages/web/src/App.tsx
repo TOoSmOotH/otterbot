@@ -8,6 +8,7 @@ import { useProjectStore } from "./stores/project-store";
 import { CeoChat } from "./components/chat/CeoChat";
 import { AgentGraph } from "./components/graph/AgentGraph";
 import { LiveView } from "./components/live-view/LiveView";
+import { Live2DView } from "./components/live-2d-view/Live2DView";
 import { MessageStream } from "./components/stream/MessageStream";
 import { SettingsPage } from "./components/settings/SettingsPage";
 import type { SettingsSection } from "./components/settings/settings-nav";
@@ -418,6 +419,23 @@ function MainApp() {
               </Tooltip>
             </>
           )}
+          <Tooltip label="2D View">
+            <button
+              onClick={() => {
+                setCenterView("live2d");
+                setSettingsOpen(false);
+              }}
+              className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${
+                !settingsOpen && centerView === "live2d"
+                  ? "text-primary bg-primary/10"
+                  : "text-muted-foreground hover:text-foreground hover:bg-secondary"
+              }`}
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="3" width="18" height="18" rx="2" /><line x1="3" y1="9" x2="21" y2="9" /><line x1="9" y1="3" x2="9" y2="21" />
+              </svg>
+            </button>
+          </Tooltip>
           <Tooltip label="3D View">
             <button
               onClick={() => {
@@ -656,6 +674,10 @@ function ResizableLayout({
         return activeProjectId ? (
           <MergeQueueView projectId={activeProjectId} />
         ) : null;
+      case "live2d":
+        return (
+          <Live2DView userProfile={userProfile} onToggleView={() => setCenterView("graph")} />
+        );
       case "live3d":
         return (
           <LiveView userProfile={userProfile} onToggleView={() => setCenterView("graph")} />
