@@ -56,20 +56,20 @@ const APPROX_CHARACTERS_PER_TOKEN = 4;
 
 function isCeoChatMessage(message: BusMessage): boolean {
   const isModuleAgent =
-    message.fromAgentId?.startsWith("module-agent-") ||
-    message.toAgentId?.startsWith("module-agent-");
+    (message.fromAgentId?.startsWith("module-agent-") ?? false) ||
+    (message.toAgentId?.startsWith("module-agent-") ?? false);
   const isCeoDirective =
     message.type === "directive" &&
     message.fromAgentId === null &&
-    message.toAgentId?.startsWith("module-agent-");
+    (message.toAgentId?.startsWith("module-agent-") ?? false);
   return (
     (message.type === "chat" || (message.type === "report" && isModuleAgent) || isCeoDirective) &&
     (message.fromAgentId === null ||
       message.fromAgentId === "coo" ||
-      message.fromAgentId?.startsWith("module-agent-")) &&
+      (message.fromAgentId?.startsWith("module-agent-") ?? false)) &&
     (message.toAgentId === null ||
       message.toAgentId === "coo" ||
-      message.toAgentId?.startsWith("module-agent-"))
+      (message.toAgentId?.startsWith("module-agent-") ?? false))
   );
 }
 
@@ -411,15 +411,16 @@ export function setupSocketHandlers(
         .orderBy(asc(schema.messages.timestamp))
         .all();
 
+      const rawKeepLatest = data.keepLatest as number | undefined;
       const keepLatest = Math.max(
         1,
-        Number.isFinite(data.keepLatest) && data.keepLatest > 0 ? Math.floor(data.keepLatest) : DEFAULT_COMPACT_KEEP_LATEST,
+        Number.isFinite(rawKeepLatest) && rawKeepLatest != null && rawKeepLatest > 0 ? Math.floor(rawKeepLatest) : DEFAULT_COMPACT_KEEP_LATEST,
       );
 
       if (allMessages.length <= keepLatest) {
         callback({
-          messages: allMessages,
-          contextSize: estimateConversationContextSize(allMessages as BusMessage[]),
+          messages: allMessages as unknown as BusMessage[],
+          contextSize: estimateConversationContextSize(allMessages as unknown as BusMessage[]),
         });
         return;
       }

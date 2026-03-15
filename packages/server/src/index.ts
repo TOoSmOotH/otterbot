@@ -2110,7 +2110,7 @@ async function main() {
     const projectId =
       typeof rawProjectId === "string" && rawProjectId.trim() ? rawProjectId.trim() : undefined;
     const { getDb, schema } = await import("./db/index.js");
-    const { desc } = await import("drizzle-orm");
+    const { desc, eq, isNull } = await import("drizzle-orm");
     const db = getDb();
     if (projectId) {
       return db
@@ -2123,7 +2123,7 @@ async function main() {
     return db
       .select()
       .from(schema.conversations)
-      .where(eq(schema.conversations.projectId, null))
+      .where(isNull(schema.conversations.projectId))
       .orderBy(desc(schema.conversations.updatedAt))
       .all();
   });
