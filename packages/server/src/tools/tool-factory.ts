@@ -55,6 +55,10 @@ import { createGameBuildTool } from "./game-build.js";
 import { createGamePreviewTool } from "./game-preview.js";
 import { createGameListTool } from "./game-list.js";
 import { createGameListTemplatesTool } from "./game-list-templates.js";
+import { createGameGenTextureTool } from "./game-gen-texture.js";
+import { createGameGenSpriteTool } from "./game-gen-sprite.js";
+import { createGameGenModelTool } from "./game-gen-model.js";
+import { createGameGenSoundTool } from "./game-gen-sound.js";
 import { McpClientManager } from "../mcp/mcp-client-manager.js";
 import { McpServerService as McpServerServiceRef } from "../mcp/mcp-service.js";
 
@@ -81,6 +85,11 @@ const TOOL_REGISTRY: Record<string, ToolCreator> = {
   game_build: createGameBuildTool,
   game_preview: createGamePreviewTool,
   game_list: createGameListTool,
+  // Game Studio — asset generation tools
+  game_gen_texture: createGameGenTextureTool,
+  game_gen_sprite: createGameGenSpriteTool,
+  game_gen_model: createGameGenModelTool,
+  game_gen_sound: createGameGenSoundTool,
 };
 
 /** Tools that don't require a workspace context (admin/personal tools) */
@@ -653,6 +662,51 @@ export function getToolsWithMeta(): {
       category: "Game Studio",
       parameters: [
         { name: "engine", type: "string", required: false, description: "Filter by engine: threejs, babylonjs, phaser, playcanvas, canvas" },
+      ],
+    },
+    game_gen_texture: {
+      description: "Generate a texture image for a game using AI or procedural generation.",
+      category: "Game Studio",
+      parameters: [
+        { name: "gameId", type: "string", required: true, description: "The game ID" },
+        { name: "prompt", type: "string", required: true, description: "Description of the texture to generate" },
+        { name: "filename", type: "string", required: false, description: "Output filename (without extension)" },
+        { name: "width", type: "number", required: false, description: "Width in pixels (default: 256)" },
+        { name: "height", type: "number", required: false, description: "Height in pixels (default: 256)" },
+        { name: "style", type: "string", required: false, description: "Style hint: pixel-art, photorealistic, cartoon" },
+      ],
+    },
+    game_gen_sprite: {
+      description: "Generate a 2D sprite or sprite sheet for a game.",
+      category: "Game Studio",
+      parameters: [
+        { name: "gameId", type: "string", required: true, description: "The game ID" },
+        { name: "prompt", type: "string", required: true, description: "Description of the sprite" },
+        { name: "filename", type: "string", required: false, description: "Output filename (without extension)" },
+        { name: "width", type: "number", required: false, description: "Width in pixels (default: 64)" },
+        { name: "height", type: "number", required: false, description: "Height in pixels (default: 64)" },
+        { name: "style", type: "string", required: false, description: "Style: pixel-art (default), cartoon, etc." },
+      ],
+    },
+    game_gen_model: {
+      description: "Generate a 3D model (GLB) for a game using procedural or AI generation.",
+      category: "Game Studio",
+      parameters: [
+        { name: "gameId", type: "string", required: true, description: "The game ID" },
+        { name: "prompt", type: "string", required: true, description: "Description of the 3D model" },
+        { name: "filename", type: "string", required: false, description: "Output filename (without extension)" },
+        { name: "format", type: "string", required: false, description: "Output format: glb (default), gltf, obj" },
+      ],
+    },
+    game_gen_sound: {
+      description: "Generate a sound effect or music clip for a game.",
+      category: "Game Studio",
+      parameters: [
+        { name: "gameId", type: "string", required: true, description: "The game ID" },
+        { name: "prompt", type: "string", required: true, description: "Description of the sound" },
+        { name: "filename", type: "string", required: false, description: "Output filename (without extension)" },
+        { name: "durationSeconds", type: "number", required: false, description: "Duration in seconds" },
+        { name: "category", type: "string", required: false, description: "Sound category: sfx, music, ambient" },
       ],
     },
   };

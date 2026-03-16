@@ -5422,6 +5422,44 @@ async function main() {
   });
 
   // =========================================================================
+  // Asset Provider Settings REST routes
+  // =========================================================================
+
+  app.get("/api/settings/asset-providers", async () => {
+    const { getAssetProviderConfig } = await import("./games/asset-providers/asset-adapter.js");
+    const { ASSET_PROVIDER_META } = await import("./games/asset-providers/types.js");
+    return {
+      providers: ASSET_PROVIDER_META,
+      config: getAssetProviderConfig(),
+    };
+  });
+
+  app.put<{
+    Body: { image?: string; model?: string; sound?: string };
+  }>("/api/settings/asset-providers", async (req) => {
+    const { setConfig } = await import("./auth/auth.js");
+    if (req.body.image) setConfig("asset:image:provider", req.body.image);
+    if (req.body.model) setConfig("asset:model:provider", req.body.model);
+    if (req.body.sound) setConfig("asset:sound:provider", req.body.sound);
+    const { getAssetProviderConfig } = await import("./games/asset-providers/asset-adapter.js");
+    return { config: getAssetProviderConfig() };
+  });
+
+  app.put<{
+    Body: { providerType: string; apiKey?: string; baseUrl?: string };
+  }>("/api/settings/asset-providers/credentials", async (req, reply) => {
+    const { setConfig } = await import("./auth/auth.js");
+    const { providerType, apiKey, baseUrl } = req.body;
+    if (!providerType) {
+      reply.code(400);
+      return { error: "providerType is required" };
+    }
+    if (apiKey !== undefined) setConfig(`asset:${providerType}:api_key`, apiKey);
+    if (baseUrl !== undefined) setConfig(`asset:${providerType}:base_url`, baseUrl);
+    return { ok: true };
+  });
+
+  // =========================================================================
   // Todos REST routes
   // =========================================================================
 

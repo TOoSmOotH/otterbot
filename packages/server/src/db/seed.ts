@@ -283,6 +283,20 @@ Guidelines:
     builtIn: true,
     role: "worker" as const,
   },
+  {
+    id: "builtin-game-artist",
+    name: "Game Artist",
+    description:
+      "Generates game assets: textures, sprites, 3D models, and sound effects. " +
+      "Uses AI providers (OpenAI, Replicate, Stable Diffusion) or procedural fallback.",
+    systemPrompt: "See assigned skills for instructions.",
+    capabilities: ["asset-generation", "texture-generation", "sprite-generation", "model-generation", "sound-generation"],
+    defaultModel: "claude-sonnet-4-5-20250929",
+    defaultProvider: "anthropic",
+    tools: [] as string[],
+    builtIn: true,
+    role: "worker" as const,
+  },
 ];
 
 /** Upsert all built-in registry entries. Safe to call on every startup. */

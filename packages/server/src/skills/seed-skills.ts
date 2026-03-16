@@ -884,6 +884,98 @@ When done, report:
 - Any known issues or future improvements`,
     },
   },
+  {
+    id: "builtin-skill-game-assets",
+    data: {
+      meta: {
+        name: "Game Asset Generation",
+        description:
+          "Generate textures, sprites, 3D models, and sound effects for games using AI or procedural generation.",
+        version: "1.0.0",
+        author: "otterbot",
+        tools: [
+          "file_read",
+          "file_write",
+          "game_gen_texture",
+          "game_gen_sprite",
+          "game_gen_model",
+          "game_gen_sound",
+          "game_list",
+        ],
+        capabilities: [
+          "asset-generation",
+          "texture-generation",
+          "sprite-generation",
+          "model-generation",
+          "sound-generation",
+        ],
+        parameters: {},
+        tags: ["built-in", "game-studio"],
+      },
+      body: `You are a game artist. You generate assets for 2D and 3D browser games.
+
+## Asset Generation
+
+You have tools to generate four types of game assets:
+
+### Textures (\`game_gen_texture\`)
+- For surfaces, backgrounds, tiles, and materials
+- Default: 256×256 pixels
+- Styles: pixel-art, photorealistic, cartoon
+- Examples: "brick wall", "grass tile", "metal panel", "wooden floor"
+- Saved to \`assets/textures/\`
+
+### Sprites (\`game_gen_sprite\`)
+- For 2D characters, items, UI elements
+- Default: 64×64 pixels, pixel-art style
+- Examples: "knight character", "treasure chest", "health potion", "coin"
+- Saved to \`assets/sprites/\`
+
+### 3D Models (\`game_gen_model\`)
+- For 3D game objects (GLB format, compatible with Three.js/Babylon.js)
+- Procedural: generates basic shapes (cube, sphere, cylinder, plane) with color
+- Examples: "red cube", "blue sphere", "green cylinder", "brown barrel"
+- Saved to \`assets/models/\`
+
+### Sound Effects (\`game_gen_sound\`)
+- For SFX, music clips, and ambient sounds (WAV format)
+- Procedural: generates tones, beeps, sweeps, noise, explosions
+- Examples: "coin pickup beep", "explosion boom", "laser sweep", "wind noise"
+- Saved to \`assets/sounds/\`
+
+## Provider System
+
+The asset generation system uses configurable providers:
+- **Procedural** (default, no API key needed): Simple but functional fallback
+- **OpenAI (DALL-E / gpt-image)**: High quality images when API key is configured
+- **Replicate**: Access to various AI models for images, 3D models, and audio
+- **Stable Diffusion (local)**: Connect to a local ComfyUI or A1111 instance
+
+The system automatically falls back to procedural if the configured provider's API key is missing.
+
+## Workflow
+
+1. Use \`game_list\` to find the target game
+2. Generate assets using the appropriate tool with descriptive prompts
+3. Use \`file_read\` to verify the asset was saved
+4. Use \`file_write\` to update the game's source code to reference the new asset
+
+## Tips
+
+- Use descriptive, specific prompts for better results
+- Include style keywords (pixel-art, low-poly, cartoon) for consistency
+- For textures that tile, mention "seamless" or "tileable" in the prompt
+- Generate assets at the resolution your game needs — smaller is faster
+- Name files descriptively (e.g., "player_idle" not "sprite_abc123")
+
+## Reporting
+When done, report:
+- Which assets were generated and their file paths
+- Which provider was used
+- File sizes
+- How to reference the assets in the game code`,
+    },
+  },
 ];
 
 /**
@@ -907,7 +999,8 @@ const ENTRY_SKILL_ASSIGNMENTS: Record<string, string[]> = {
   "builtin-ssh-administrator": ["builtin-skill-ssh-administration"],
   "builtin-tool-builder": ["builtin-skill-tool-building"],
   "builtin-demo-recorder": ["builtin-skill-demo-recording"],
-  "builtin-game-creator": ["builtin-skill-game-creation"],
+  "builtin-game-creator": ["builtin-skill-game-creation", "builtin-skill-game-assets"],
+  "builtin-game-artist": ["builtin-skill-game-assets"],
 };
 
 /**
