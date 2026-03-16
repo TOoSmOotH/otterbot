@@ -93,6 +93,7 @@ describe("CreateProjectDialog PAT dropdown", () => {
         "", // description
         "", // rules
         false, // issueMonitor
+        [], // studios
         false, // loading
         null, // error
         true, // showPatSection
@@ -120,6 +121,7 @@ describe("CreateProjectDialog PAT dropdown", () => {
         "", // description
         "", // rules
         false, // issueMonitor
+        [], // studios
         false, // loading
         null, // error
         true, // showPatSection
@@ -147,6 +149,7 @@ describe("CreateProjectDialog PAT dropdown", () => {
         "", // description
         "", // rules
         false, // issueMonitor
+        [], // studios
         false, // loading
         null, // error
         true, // showPatSection
@@ -170,6 +173,7 @@ describe("CreateProjectDialog PAT dropdown", () => {
         "", // description
         "", // rules
         false, // issueMonitor
+        [], // studios
         false, // loading
         null, // error
         true, // showPatSection

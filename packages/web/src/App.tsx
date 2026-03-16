@@ -34,6 +34,8 @@ import { GameStudio } from "./components/games/GameStudio";
 import { AppStudio } from "./components/apps/AppStudio";
 import { VideoStudio } from "./components/videos/VideoStudio";
 import { DetachedLiveView } from "./components/live-view/DetachedLiveView";
+import { DetachedLive2DView } from "./components/live-2d-view/DetachedLive2DView";
+import { DetachedAgentGraph } from "./components/graph/DetachedAgentGraph";
 import { DetachedCeoChat } from "./components/chat/DetachedCeoChat";
 import { useDesktopStore } from "./stores/desktop-store";
 import { useOpenCodeStore } from "./stores/opencode-store";
@@ -72,6 +74,18 @@ export default function App() {
   const isDetached3D = new URLSearchParams(window.location.search).has("detached-3d");
   if (isDetached3D && screen === "app") {
     return <DetachedLiveView />;
+  }
+
+  // Detached 2D view mode
+  const isDetached2D = new URLSearchParams(window.location.search).has("detached-2d");
+  if (isDetached2D && screen === "app") {
+    return <DetachedLive2DView />;
+  }
+
+  // Detached agent graph mode
+  const isDetachedGraph = new URLSearchParams(window.location.search).has("detached-graph");
+  if (isDetachedGraph && screen === "app") {
+    return <DetachedAgentGraph />;
   }
 
   // Detached chat mode
