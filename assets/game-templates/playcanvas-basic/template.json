@@ -1,0 +1,7 @@
+{
+  "id": "playcanvas-basic",
+  "engine": "playcanvas",
+  "name": "PlayCanvas Basic",
+  "description": "A minimal PlayCanvas 3D game template with entity-component system and input handling.",
+  "files": ["index.html", "src/main.js"]
+}

@@ -8,6 +8,7 @@ import { useEnvironmentStore } from "../stores/environment-store";
 import { useCodingAgentStore } from "../stores/coding-agent-store";
 import { useTodoStore } from "../stores/todo-store";
 import { useMergeQueueStore } from "../stores/merge-queue-store";
+import { useGameStore } from "../stores/game-store";
 
 // Module-level TTS state (singleton — useSocket only initializes once)
 const ttsState = {
@@ -99,6 +100,9 @@ export function useSocket() {
   const removeTodo = useTodoStore((s) => s.removeTodo);
   const setMergeQueueEntries = useMergeQueueStore((s) => s.setEntries);
   const updateMergeQueueEntry = useMergeQueueStore((s) => s.updateEntry);
+  const addGame = useGameStore((s) => s.addGame);
+  const updateGame = useGameStore((s) => s.updateGame);
+  const removeGame = useGameStore((s) => s.removeGame);
 
   useEffect(() => {
     if (initialized.current) return;
@@ -214,6 +218,18 @@ export function useSocket() {
       // The COO chat message already shows via coo:response broadcast
     });
 
+    socket.on("game:created", (game) => {
+      addGame(game);
+    });
+
+    socket.on("game:updated", (game) => {
+      updateGame(game);
+    });
+
+    socket.on("game:deleted", ({ gameId }) => {
+      removeGame(gameId);
+    });
+
     socket.on("agent:stream", ({ agentId, token, messageId }) => {
       appendAgentStream(agentId, token, messageId);
     });
@@ -297,6 +313,9 @@ export function useSocket() {
       socket.off("todo:updated");
       socket.off("todo:deleted");
       socket.off("reminder:fired");
+      socket.off("game:created");
+      socket.off("game:updated");
+      socket.off("game:deleted");
       socket.off("agent:stream");
       socket.off("agent:thinking");
       socket.off("agent:thinking-end");

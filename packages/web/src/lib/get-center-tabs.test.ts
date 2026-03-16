@@ -9,7 +9,7 @@ describe("getCenterTabs", () => {
 
   it("returns global tabs when no project is active (null)", () => {
     const tabs = getCenterTabs(null);
-    expect(tabs).toEqual(["dashboard", "todos", "inbox", "calendar", "usage"]);
+    expect(tabs).toEqual(["dashboard", "todos", "inbox", "calendar", "games", "usage"]);
   });
 
   it("includes 'code' in project tabs only", () => {
@@ -73,7 +73,7 @@ describe("centerViewLabels", () => {
   it("has a label for every CenterView value", () => {
     const allViews = [
       "graph", "live3d", "dashboard", "charter", "kanban",
-      "files", "todos", "inbox", "calendar", "code", "ssh", "settings", "merge-queue", "usage", "desktop",
+      "files", "todos", "inbox", "calendar", "code", "ssh", "settings", "merge-queue", "usage", "desktop", "games",
     ] as const;
     for (const view of allViews) {
       expect(centerViewLabels[view]).toBeDefined();

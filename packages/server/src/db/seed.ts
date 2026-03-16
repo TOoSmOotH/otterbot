@@ -269,6 +269,20 @@ Guidelines:
     builtIn: true,
     role: "worker" as const,
   },
+  {
+    id: "builtin-game-creator",
+    name: "Game Creator",
+    description:
+      "Creates 2D and 3D browser games using various engines (Three.js, Babylon.js, Phaser, PlayCanvas, Canvas). " +
+      "Scaffolds projects from templates, implements game mechanics, generates assets, and produces playable builds.",
+    systemPrompt: "See assigned skills for instructions.",
+    capabilities: ["game-development", "3d-graphics", "2d-graphics", "threejs", "babylonjs", "phaser", "playcanvas"],
+    defaultModel: "claude-sonnet-4-5-20250929",
+    defaultProvider: "anthropic",
+    tools: [] as string[],
+    builtIn: true,
+    role: "worker" as const,
+  },
 ];
 
 /** Upsert all built-in registry entries. Safe to call on every startup. */

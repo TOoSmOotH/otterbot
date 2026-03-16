@@ -9,6 +9,7 @@ import type { Todo } from "./todo.js";
 import type { MergeQueueEntry } from "./merge-queue.js";
 import type { McpServerRuntime } from "./mcp-server.js";
 import type { SshSessionStatus } from "./ssh.js";
+import type { GameManifest, PlaytestResult } from "./game.js";
 
 /** Events emitted from server to client */
 export interface ServerToClientEvents {
@@ -85,6 +86,13 @@ export interface ServerToClientEvents {
   "ssh:chat-stream": (data: { sessionId: string; token: string; messageId: string }) => void;
   "ssh:chat-response": (data: { sessionId: string; messageId: string; content: string; command?: string }) => void;
   "ssh:chat-analyzing": (data: { sessionId: string; command: string }) => void;
+
+  // Game Studio
+  "game:created": (game: GameManifest) => void;
+  "game:updated": (game: GameManifest) => void;
+  "game:deleted": (data: { gameId: string; projectId: string }) => void;
+  "game:build-status": (data: { gameId: string; projectId: string; status: string; error?: string }) => void;
+  "game:playtest-result": (data: { gameId: string; projectId: string; result: PlaytestResult }) => void;
 }
 
 /** Events emitted from client to server */

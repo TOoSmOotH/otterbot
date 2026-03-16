@@ -50,6 +50,11 @@ import { createScheduleListTool } from "./schedule-list.js";
 import { createScheduleCreateTool } from "./schedule-create.js";
 import { createScheduleUpdateTool } from "./schedule-update.js";
 import { createScheduleDeleteTool } from "./schedule-delete.js";
+import { createGameCreateTool } from "./game-create.js";
+import { createGameBuildTool } from "./game-build.js";
+import { createGamePreviewTool } from "./game-preview.js";
+import { createGameListTool } from "./game-list.js";
+import { createGameListTemplatesTool } from "./game-list-templates.js";
 import { McpClientManager } from "../mcp/mcp-client-manager.js";
 import { McpServerService as McpServerServiceRef } from "../mcp/mcp-service.js";
 
@@ -71,6 +76,11 @@ const TOOL_REGISTRY: Record<string, ToolCreator> = {
   github_list_prs: createGitHubListPRsTool,
   github_comment: createGitHubCommentTool,
   github_create_pr: createGitHubCreatePRTool,
+  // Game Studio tools
+  game_create: createGameCreateTool,
+  game_build: createGameBuildTool,
+  game_preview: createGamePreviewTool,
+  game_list: createGameListTool,
 };
 
 /** Tools that don't require a workspace context (admin/personal tools) */
@@ -109,6 +119,8 @@ const CONTEXTLESS_TOOL_REGISTRY: Record<string, () => unknown> = {
   schedule_create: createScheduleCreateTool,
   schedule_update: createScheduleUpdateTool,
   schedule_delete: createScheduleDeleteTool,
+  // Game Studio (contextless)
+  game_list_templates: createGameListTemplatesTool,
 };
 
 /**
@@ -599,6 +611,48 @@ export function getToolsWithMeta(): {
       category: "Schedule",
       parameters: [
         { name: "id", type: "string", required: true, description: "The scheduled task ID to delete" },
+      ],
+    },
+    // Game Studio tools
+    game_create: {
+      description: "Create a new game project from a template with engine-specific starter code.",
+      category: "Game Studio",
+      parameters: [
+        { name: "name", type: "string", required: true, description: "Name of the game" },
+        { name: "engine", type: "string", required: true, description: "Engine: threejs, babylonjs, phaser, playcanvas, canvas, custom" },
+        { name: "description", type: "string", required: false, description: "Short description" },
+        { name: "templateId", type: "string", required: false, description: "Template ID (defaults to <engine>-basic)" },
+        { name: "tags", type: "string[]", required: false, description: "Tags for categorization" },
+      ],
+    },
+    game_build: {
+      description: "Build a game project into a self-contained playable package.",
+      category: "Game Studio",
+      parameters: [
+        { name: "gameId", type: "string", required: true, description: "The game ID to build" },
+      ],
+    },
+    game_preview: {
+      description: "Start or stop a local preview server for a game.",
+      category: "Game Studio",
+      parameters: [
+        { name: "action", type: "string", required: true, description: "Action: start or stop" },
+        { name: "gameId", type: "string", required: true, description: "The game ID to preview" },
+        { name: "autoBuild", type: "boolean", required: false, description: "Auto-build before preview (default: true)" },
+      ],
+    },
+    game_list: {
+      description: "List all games in the current project workspace.",
+      category: "Game Studio",
+      parameters: [
+        { name: "status", type: "string", required: false, description: "Filter by status: draft, building, playable, testing, published" },
+      ],
+    },
+    game_list_templates: {
+      description: "List available game engine templates.",
+      category: "Game Studio",
+      parameters: [
+        { name: "engine", type: "string", required: false, description: "Filter by engine: threejs, babylonjs, phaser, playcanvas, canvas" },
       ],
     },
   };

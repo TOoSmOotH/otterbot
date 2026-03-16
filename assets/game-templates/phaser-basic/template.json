@@ -1,0 +1,7 @@
+{
+  "id": "phaser-basic",
+  "engine": "phaser",
+  "name": "Phaser Basic",
+  "description": "A minimal Phaser 3 2D game template with scene lifecycle, input handling, and sprite support.",
+  "files": ["index.html", "src/main.js"]
+}

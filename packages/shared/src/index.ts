@@ -20,3 +20,4 @@ export * from "./types/module.js";
 export * from "./types/merge-queue.js";
 export * from "./types/mcp-server.js";
 export * from "./types/ssh.js";
+export * from "./types/game.js";

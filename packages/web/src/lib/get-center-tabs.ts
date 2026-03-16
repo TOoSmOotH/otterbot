@@ -14,7 +14,8 @@ export type CenterView =
   | "ssh"
   | "settings"
   | "merge-queue"
-  | "dashboard";
+  | "dashboard"
+  | "games";
 
 export const centerViewLabels: Record<CenterView, string> = {
   graph: "Graph",
@@ -33,10 +34,11 @@ export const centerViewLabels: Record<CenterView, string> = {
   "merge-queue": "Merge Queue",
   usage: "Usage",
   desktop: "Desktop",
+  games: "Games",
 };
 
 const projectTabs: CenterView[] = ["dashboard", "kanban", "charter", "files", "code", "ssh", "settings", "merge-queue"];
-const globalTabs: CenterView[] = ["dashboard", "todos", "inbox", "calendar", "usage"];
+const globalTabs: CenterView[] = ["dashboard", "todos", "inbox", "calendar", "games", "usage"];
 
 const basicProjectTabs: CenterView[] = ["dashboard", "kanban", "files", "settings"];
 const basicGlobalTabs: CenterView[] = ["dashboard", "todos"];

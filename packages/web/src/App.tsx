@@ -30,6 +30,7 @@ import { CodeView } from "./components/code/CodeView";
 import { SshView } from "./components/ssh/SshView";
 import { ProjectSettings } from "./components/project/ProjectSettings";
 import { MergeQueueView } from "./components/project/MergeQueueView";
+import { GameStudio } from "./components/games/GameStudio";
 import { DetachedLiveView } from "./components/live-view/DetachedLiveView";
 import { DetachedCeoChat } from "./components/chat/DetachedCeoChat";
 import { useDesktopStore } from "./stores/desktop-store";
@@ -656,6 +657,8 @@ function ResizableLayout({
         return <UsageDashboard />;
       case "todos":
         return <TodoView />;
+      case "games":
+        return <GameStudio />;
       case "inbox":
         return <InboxView />;
       case "calendar":

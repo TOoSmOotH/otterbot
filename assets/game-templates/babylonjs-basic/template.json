@@ -1,0 +1,7 @@
+{
+  "id": "babylonjs-basic",
+  "engine": "babylonjs",
+  "name": "Babylon.js Basic",
+  "description": "A minimal Babylon.js 3D game template with built-in physics support and scene inspector.",
+  "files": ["index.html", "src/main.js"]
+}

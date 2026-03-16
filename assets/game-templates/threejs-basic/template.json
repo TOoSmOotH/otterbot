@@ -1,0 +1,7 @@
+{
+  "id": "threejs-basic",
+  "engine": "threejs",
+  "name": "Three.js Basic",
+  "description": "A minimal Three.js 3D game template with scene, camera, renderer, and game loop.",
+  "files": ["index.html", "src/main.js", "src/input.js"]
+}

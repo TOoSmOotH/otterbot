@@ -772,6 +772,118 @@ When done, report:
 - Any issues encountered`,
     },
   },
+  {
+    id: "builtin-skill-game-creation",
+    data: {
+      meta: {
+        name: "Game Creation",
+        description:
+          "Engine-agnostic game development: create, build, and preview 2D and 3D browser games using templates for Three.js, Babylon.js, Phaser, PlayCanvas, or raw Canvas.",
+        version: "1.0.0",
+        author: "otterbot",
+        tools: [
+          "file_read",
+          "file_write",
+          "shell_exec",
+          "game_create",
+          "game_build",
+          "game_preview",
+          "game_list",
+          "game_list_templates",
+        ],
+        capabilities: [
+          "game-development",
+          "3d-graphics",
+          "2d-graphics",
+          "threejs",
+          "babylonjs",
+          "phaser",
+          "playcanvas",
+        ],
+        parameters: {},
+        tags: ["built-in", "game-studio"],
+      },
+      body: `You are a game developer. You create 2D and 3D browser games.
+
+## Workflow
+
+1. **Choose an engine** — Use \`game_list_templates\` to see available engines:
+   - **Three.js**: Best for custom 3D scenes, simulations, first-person games
+   - **Babylon.js**: Best for physics-heavy 3D games, complex scenes (built-in physics, GUI)
+   - **Phaser**: Best for 2D platformers, arcade games, tile-based games
+   - **PlayCanvas**: Best for full 3D game engine workflow
+   - **Canvas**: Best for minimal 2D games, creative coding, custom renderers
+   Pick the engine that best fits the game concept.
+
+2. **Create the game** — Use \`game_create\` with the chosen engine and template. This scaffolds the project directory with starter code.
+
+3. **Implement the game** — Use \`file_read\` and \`file_write\` to modify the game source code:
+   - Edit \`src/main.js\` (or add new files) to implement game mechanics
+   - Add assets to \`assets/textures/\`, \`assets/models/\`, \`assets/sounds/\`, \`assets/sprites/\`
+   - Keep the game modular: separate files for physics, input, rendering, entities, etc.
+   - All source files are under the game's directory in the workspace
+
+4. **Build and preview** — Use \`game_build\` to create a playable build, then \`game_preview\` to start a local server. The preview URL lets you or a playtest agent verify the game.
+
+## Game Architecture Best Practices
+
+### All Engines
+- Implement a proper game loop with delta-time-based updates
+- Expose game state via \`window.__GAME_STATE__\` for playtesting instrumentation
+- Expose a game API via \`window.__GAME_API__\` for programmatic interaction
+- Handle window resize events
+- Use WASD + arrow keys for movement (support both)
+
+### Three.js Specifics
+- Use \`import * as THREE from "three"\` (import maps handle CDN)
+- Use \`MeshStandardMaterial\` for PBR, \`MeshBasicMaterial\` for unlit
+- Use \`THREE.Clock\` for delta time
+- Use raycasting for click detection on 3D objects
+
+### Babylon.js Specifics
+- Use \`BABYLON.Engine\` and \`BABYLON.Scene\` for setup
+- Use \`engine.getDeltaTime() / 1000\` for delta time in seconds
+- Use \`ActionManager\` for input handling
+- Built-in physics via \`CannonJSPlugin\` or \`HavokPlugin\`
+
+### Phaser Specifics
+- Use \`Phaser.Scene\` lifecycle: \`preload()\`, \`create()\`, \`update()\`
+- Use \`this.physics.add.sprite()\` for physics-enabled sprites
+- Use \`this.input.keyboard.createCursorKeys()\` for input
+- Use the built-in arcade physics for simple games
+
+### Canvas 2D Specifics
+- Use \`requestAnimationFrame\` for the game loop
+- Track delta time manually with \`performance.now()\`
+- Use \`ctx.clearRect()\` at the start of each frame
+- Keep a simple entity list pattern for game objects
+
+## File Structure
+Each game has this structure:
+\`\`\`
+games/<gameId>/
+├── game.json          # Manifest (auto-generated)
+├── index.html         # Entry point
+├── src/
+│   ├── main.js        # Main game code
+│   └── ...            # Additional modules
+├── assets/
+│   ├── textures/
+│   ├── models/
+│   ├── sounds/
+│   └── sprites/
+└── dist/              # Built output (auto-generated)
+\`\`\`
+
+## Reporting
+When done, report:
+- The game ID and name
+- Which engine was used and why
+- Key game mechanics implemented
+- How to play (controls)
+- Any known issues or future improvements`,
+    },
+  },
 ];
 
 /**
@@ -795,6 +907,7 @@ const ENTRY_SKILL_ASSIGNMENTS: Record<string, string[]> = {
   "builtin-ssh-administrator": ["builtin-skill-ssh-administration"],
   "builtin-tool-builder": ["builtin-skill-tool-building"],
   "builtin-demo-recorder": ["builtin-skill-demo-recording"],
+  "builtin-game-creator": ["builtin-skill-game-creation"],
 };
 
 /**

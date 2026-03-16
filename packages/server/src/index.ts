@@ -5314,6 +5314,114 @@ async function main() {
   });
 
   // =========================================================================
+  // Game Studio REST routes
+  // =========================================================================
+
+  app.get("/api/game-templates", async () => {
+    const { listTemplates } = await import("./games/game-service.js");
+    return listTemplates();
+  });
+
+  app.get<{
+    Querystring: { projectId?: string };
+  }>("/api/games", async (req) => {
+    const { listGames } = await import("./games/game-service.js");
+    const projectId = req.query.projectId;
+    if (projectId) {
+      const wsPath = workspace.projectPath(projectId);
+      return listGames(wsPath);
+    }
+    // List from all projects
+    const db = getDb();
+    const projects = db.select().from(schema.projects).all();
+    const allGames = [];
+    for (const p of projects) {
+      const wsPath = workspace.projectPath(p.id);
+      const games = listGames(wsPath);
+      allGames.push(...games);
+    }
+    return allGames;
+  });
+
+  app.get<{
+    Params: { projectId: string; gameId: string };
+  }>("/api/games/:projectId/:gameId", async (req, reply) => {
+    const { getGame } = await import("./games/game-service.js");
+    const wsPath = workspace.projectPath(req.params.projectId);
+    const game = getGame(wsPath, req.params.gameId);
+    if (!game) {
+      reply.code(404);
+      return { error: "Game not found" };
+    }
+    return game;
+  });
+
+  app.delete<{
+    Params: { projectId: string; gameId: string };
+  }>("/api/games/:projectId/:gameId", async (req, reply) => {
+    const { deleteGame } = await import("./games/game-service.js");
+    const wsPath = workspace.projectPath(req.params.projectId);
+    const ok = deleteGame(wsPath, req.params.gameId);
+    if (!ok) {
+      reply.code(404);
+      return { error: "Game not found" };
+    }
+    return { ok: true };
+  });
+
+  // Serve game static files for playing
+  app.get<{
+    Params: { projectId: string; gameId: string; "*": string };
+  }>("/api/games/:projectId/:gameId/play/*", async (req, reply) => {
+    const { getGameDistPath, getGameSourcePath } = await import("./games/game-service.js");
+    const pathMod = await import("node:path");
+    const fsMod = await import("node:fs");
+
+    const wsPath = workspace.projectPath(req.params.projectId);
+    let basePath = getGameDistPath(wsPath, req.params.gameId);
+    if (!basePath) basePath = getGameSourcePath(wsPath, req.params.gameId);
+    if (!basePath) {
+      reply.code(404);
+      return { error: "Game not found" };
+    }
+
+    const filePath = req.params["*"] || "index.html";
+    const fullPath = pathMod.join(basePath, filePath);
+
+    // Prevent directory traversal
+    if (!fullPath.startsWith(basePath)) {
+      reply.code(403);
+      return { error: "Forbidden" };
+    }
+
+    if (!fsMod.existsSync(fullPath)) {
+      reply.code(404);
+      return { error: "File not found" };
+    }
+
+    const MIME_TYPES: Record<string, string> = {
+      ".html": "text/html",
+      ".js": "application/javascript",
+      ".mjs": "application/javascript",
+      ".css": "text/css",
+      ".json": "application/json",
+      ".png": "image/png",
+      ".jpg": "image/jpeg",
+      ".gif": "image/gif",
+      ".svg": "image/svg+xml",
+      ".wav": "audio/wav",
+      ".mp3": "audio/mpeg",
+      ".glb": "model/gltf-binary",
+      ".gltf": "model/gltf+json",
+    };
+
+    const ext = pathMod.extname(fullPath).toLowerCase();
+    const contentType = MIME_TYPES[ext] || "application/octet-stream";
+    const content = fsMod.readFileSync(fullPath);
+    reply.type(contentType).send(content);
+  });
+
+  // =========================================================================
   // Todos REST routes
   // =========================================================================
 

@@ -1,0 +1,7 @@
+{
+  "id": "canvas-basic",
+  "engine": "canvas",
+  "name": "Raw Canvas 2D",
+  "description": "A minimal HTML5 Canvas 2D game template with no external dependencies.",
+  "files": ["index.html", "src/main.js"]
+}
