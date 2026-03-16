@@ -14,16 +14,31 @@ interface Live2DViewProps {
 
 export function Live2DView({ userProfile, onToggleView }: Live2DViewProps) {
   const positions = useAgentPositions(userProfile);
+  const loadEnvironment = useEnvironmentStore((s) => s.loadEnvironment);
   const activeScene = useEnvironmentStore((s) => s.getActiveScene());
   const zones = activeScene?.zones ?? [];
+
+  // Ensure environment is loaded (scenes + world) so zones and waypoints are available
+  useEffect(() => {
+    loadEnvironment();
+  }, [loadEnvironment]);
   const [camera, setCamera] = useState<Camera2D>(createCamera);
   const fittedRef = useRef(false);
+  const fittedWithZonesRef = useRef(false);
 
-  // Auto-fit camera to show all zones on first load
+  // Auto-fit camera to show all zones + agents
+  // Re-fit when zones first become available (they load async)
   useEffect(() => {
-    if (fittedRef.current) return;
-    if (zones.length === 0 && positions.length === 0) return;
+    const hasZones = zones.length > 0;
+    // Skip if we've already fitted with zones
+    if (fittedWithZonesRef.current) return;
+    // Skip if nothing to fit
+    if (!hasZones && positions.length === 0) return;
+    // If we already fitted without zones, only re-fit when zones arrive
+    if (fittedRef.current && !hasZones) return;
+
     fittedRef.current = true;
+    if (hasZones) fittedWithZonesRef.current = true;
 
     // Compute bounding box of all zones + agent positions
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
