@@ -297,6 +297,21 @@ Guidelines:
     builtIn: true,
     role: "worker" as const,
   },
+  {
+    id: "builtin-game-tester",
+    name: "Game Tester",
+    description:
+      "Playtests games using automated browser testing. Runs headless Playwright sessions, " +
+      "simulates player input, captures performance metrics (FPS, load time), detects bugs, " +
+      "and inspects game state via instrumentation hooks.",
+    systemPrompt: "See assigned skills for instructions.",
+    capabilities: ["playtesting", "performance-analysis", "bug-detection", "browser-automation"],
+    defaultModel: "claude-sonnet-4-5-20250929",
+    defaultProvider: "anthropic",
+    tools: [] as string[],
+    builtIn: true,
+    role: "worker" as const,
+  },
 ];
 
 /** Upsert all built-in registry entries. Safe to call on every startup. */

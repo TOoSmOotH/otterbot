@@ -59,6 +59,8 @@ import { createGameGenTextureTool } from "./game-gen-texture.js";
 import { createGameGenSpriteTool } from "./game-gen-sprite.js";
 import { createGameGenModelTool } from "./game-gen-model.js";
 import { createGameGenSoundTool } from "./game-gen-sound.js";
+import { createGamePlaytestTool } from "./game-playtest.js";
+import { createGameInspectTool } from "./game-inspect.js";
 import { McpClientManager } from "../mcp/mcp-client-manager.js";
 import { McpServerService as McpServerServiceRef } from "../mcp/mcp-service.js";
 
@@ -90,6 +92,9 @@ const TOOL_REGISTRY: Record<string, ToolCreator> = {
   game_gen_sprite: createGameGenSpriteTool,
   game_gen_model: createGameGenModelTool,
   game_gen_sound: createGameGenSoundTool,
+  // Game Studio — playtesting tools
+  game_playtest: createGamePlaytestTool,
+  game_inspect: createGameInspectTool,
 };
 
 /** Tools that don't require a workspace context (admin/personal tools) */
@@ -707,6 +712,26 @@ export function getToolsWithMeta(): {
         { name: "filename", type: "string", required: false, description: "Output filename (without extension)" },
         { name: "durationSeconds", type: "number", required: false, description: "Duration in seconds" },
         { name: "category", type: "string", required: false, description: "Sound category: sfx, music, ambient" },
+      ],
+    },
+    game_playtest: {
+      description: "Automated playtest: builds game, launches in headless browser, simulates input, captures metrics.",
+      category: "Game Studio",
+      parameters: [
+        { name: "gameId", type: "string", required: true, description: "The game ID to playtest" },
+        { name: "durationSeconds", type: "number", required: false, description: "Playtest duration in seconds (default: 10)" },
+        { name: "captureScreenshots", type: "boolean", required: false, description: "Capture before/after screenshots (default: true)" },
+      ],
+    },
+    game_inspect: {
+      description: "Inspect a running game's state via window.__GAME_STATE__ and window.__GAME_API__.",
+      category: "Game Studio",
+      parameters: [
+        { name: "gameId", type: "string", required: true, description: "The game ID" },
+        { name: "previewUrl", type: "string", required: true, description: "URL where the game is running" },
+        { name: "action", type: "string", required: false, description: "Action: state, api, call, screenshot, evaluate" },
+        { name: "method", type: "string", required: false, description: "API method name (for 'call')" },
+        { name: "script", type: "string", required: false, description: "JavaScript to evaluate (for 'evaluate')" },
       ],
     },
   };
