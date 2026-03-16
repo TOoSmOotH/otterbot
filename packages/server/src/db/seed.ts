@@ -312,6 +312,73 @@ Guidelines:
     builtIn: true,
     role: "worker" as const,
   },
+  // Video Studio registry entries
+  {
+    id: "builtin-video-creator",
+    name: "Video Creator",
+    description:
+      "Creates composed videos with slides, screen recordings, narration, and transitions.",
+    systemPrompt: "See assigned skills for instructions.",
+    capabilities: ["video-production", "screen-recording", "narration"] as string[],
+    defaultModel: "claude-sonnet-4-5-20250929",
+    defaultProvider: "anthropic",
+    tools: [] as string[],
+    builtIn: true,
+    role: "worker" as const,
+  },
+  {
+    id: "builtin-video-narrator",
+    name: "Video Narrator",
+    description:
+      "Writes scripts and generates narration for video projects.",
+    systemPrompt: "See assigned skills for instructions.",
+    capabilities: ["narration", "script-writing", "tts"] as string[],
+    defaultModel: "claude-sonnet-4-5-20250929",
+    defaultProvider: "anthropic",
+    tools: [] as string[],
+    builtIn: true,
+    role: "worker" as const,
+  },
+  // App Studio registry entries
+  {
+    id: "builtin-app-creator",
+    name: "App Creator",
+    description:
+      "Creates web applications from templates. Proficient in HTML, React, Vue, and other modern frameworks.",
+    systemPrompt: "See assigned skills for instructions.",
+    capabilities: ["web-development", "react", "vue", "html", "css"] as string[],
+    defaultModel: "claude-sonnet-4-5-20250929",
+    defaultProvider: "anthropic",
+    tools: [] as string[],
+    builtIn: true,
+    role: "worker" as const,
+  },
+  {
+    id: "builtin-app-tester",
+    name: "App Tester",
+    description:
+      "Tests web applications for responsiveness across viewports and accessibility compliance.",
+    systemPrompt: "See assigned skills for instructions.",
+    capabilities: ["accessibility", "responsive-design", "testing"] as string[],
+    defaultModel: "claude-sonnet-4-5-20250929",
+    defaultProvider: "anthropic",
+    tools: [] as string[],
+    builtIn: true,
+    role: "worker" as const,
+  },
+  {
+    id: "builtin-app-deployer",
+    name: "App Deployer",
+    description:
+      "Deploys web applications to hosting services.",
+    systemPrompt: "See assigned skills for instructions.",
+    capabilities: ["deployment", "hosting"] as string[],
+    defaultModel: "claude-sonnet-4-5-20250929",
+    defaultProvider: "anthropic",
+    tools: [] as string[],
+    builtIn: true,
+    role: "worker" as const,
+  },
 ];
 
 /** Upsert all built-in registry entries. Safe to call on every startup. */

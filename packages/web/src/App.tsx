@@ -31,6 +31,8 @@ import { SshView } from "./components/ssh/SshView";
 import { ProjectSettings } from "./components/project/ProjectSettings";
 import { MergeQueueView } from "./components/project/MergeQueueView";
 import { GameStudio } from "./components/games/GameStudio";
+import { AppStudio } from "./components/apps/AppStudio";
+import { VideoStudio } from "./components/videos/VideoStudio";
 import { DetachedLiveView } from "./components/live-view/DetachedLiveView";
 import { DetachedCeoChat } from "./components/chat/DetachedCeoChat";
 import { useDesktopStore } from "./stores/desktop-store";
@@ -659,6 +661,10 @@ function ResizableLayout({
         return <TodoView />;
       case "games":
         return <GameStudio />;
+      case "apps":
+        return <AppStudio />;
+      case "videos":
+        return <VideoStudio />;
       case "inbox":
         return <InboxView />;
       case "calendar":
@@ -722,7 +728,7 @@ function ResizableLayout({
         <div className="h-full flex flex-col">
           {/* Tab bar */}
           <div className="flex items-center gap-1 px-3 py-1.5 border-b border-border bg-card">
-              {getCenterTabs(activeProjectId, isBasic).map((tab) => (
+              {getCenterTabs(activeProjectId, isBasic, activeProject?.studios ?? []).map((tab) => (
                   <button
                     key={tab}
                     onClick={() => setCenterView(tab)}

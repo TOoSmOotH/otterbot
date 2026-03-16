@@ -5422,6 +5422,191 @@ async function main() {
   });
 
   // =========================================================================
+  // App Studio REST routes
+  // =========================================================================
+
+  app.get("/api/app-templates", async () => {
+    const { listAppTemplates } = await import("./apps/app-service.js");
+    return listAppTemplates();
+  });
+
+  app.get<{
+    Querystring: { projectId?: string };
+  }>("/api/apps", async (req) => {
+    const { listApps } = await import("./apps/app-service.js");
+    const projectId = req.query.projectId;
+    if (projectId) {
+      const wsPath = workspace.projectPath(projectId);
+      return listApps(wsPath, projectId);
+    }
+    // List from all projects
+    const db = getDb();
+    const projects = db.select().from(schema.projects).all();
+    const allApps = [];
+    for (const p of projects) {
+      const wsPath = workspace.projectPath(p.id);
+      const { listApps: listAppsFromService } = await import("./apps/app-service.js");
+      const apps = listAppsFromService(wsPath);
+      allApps.push(...apps);
+    }
+    return allApps;
+  });
+
+  app.get<{
+    Params: { projectId: string; appId: string };
+  }>("/api/apps/:projectId/:appId", async (req, reply) => {
+    const { getApp } = await import("./apps/app-service.js");
+    const wsPath = workspace.projectPath(req.params.projectId);
+    const appManifest = getApp(wsPath, req.params.appId);
+    if (!appManifest) {
+      reply.code(404);
+      return { error: "App not found" };
+    }
+    return appManifest;
+  });
+
+  app.delete<{
+    Params: { projectId: string; appId: string };
+  }>("/api/apps/:projectId/:appId", async (req, reply) => {
+    const { deleteApp } = await import("./apps/app-service.js");
+    const wsPath = workspace.projectPath(req.params.projectId);
+    const ok = deleteApp(wsPath, req.params.appId);
+    if (!ok) {
+      reply.code(404);
+      return { error: "App not found" };
+    }
+    return { ok: true };
+  });
+
+  // Serve app static files for preview
+  app.get<{
+    Params: { projectId: string; appId: string; "*": string };
+  }>("/api/apps/:projectId/:appId/preview/*", async (req, reply) => {
+    const { getAppDistPath, getAppSourcePath } = await import("./apps/app-service.js");
+    const pathMod = await import("node:path");
+    const fsMod = await import("node:fs");
+
+    const wsPath = workspace.projectPath(req.params.projectId);
+    let basePath = getAppDistPath(wsPath, req.params.appId);
+    if (!basePath) basePath = getAppSourcePath(wsPath, req.params.appId);
+    if (!basePath) {
+      reply.code(404);
+      return { error: "App not found" };
+    }
+
+    const filePath = req.params["*"] || "index.html";
+    const fullPath = pathMod.join(basePath, filePath);
+
+    // Prevent directory traversal
+    if (!fullPath.startsWith(basePath)) {
+      reply.code(403);
+      return { error: "Forbidden" };
+    }
+
+    if (!fsMod.existsSync(fullPath)) {
+      reply.code(404);
+      return { error: "File not found" };
+    }
+
+    const MIME_TYPES: Record<string, string> = {
+      ".html": "text/html",
+      ".js": "application/javascript",
+      ".mjs": "application/javascript",
+      ".css": "text/css",
+      ".json": "application/json",
+      ".png": "image/png",
+      ".jpg": "image/jpeg",
+      ".gif": "image/gif",
+      ".svg": "image/svg+xml",
+      ".ico": "image/x-icon",
+      ".woff": "font/woff",
+      ".woff2": "font/woff2",
+      ".webp": "image/webp",
+    };
+
+    const ext = pathMod.extname(fullPath).toLowerCase();
+    const contentType = MIME_TYPES[ext] || "application/octet-stream";
+    const content = fsMod.readFileSync(fullPath);
+    reply.type(contentType).send(content);
+  });
+
+  // =========================================================================
+  // Video Studio REST routes
+  // =========================================================================
+
+  app.get<{
+    Querystring: { projectId?: string };
+  }>("/api/videos", async (req) => {
+    const { listVideos } = await import("./video/video-service.js");
+    const projectId = req.query.projectId;
+    if (projectId) {
+      const wsPath = workspace.projectPath(projectId);
+      return listVideos(wsPath, projectId);
+    }
+    // List from all projects
+    const db = getDb();
+    const projects = db.select().from(schema.projects).all();
+    const allVideos = [];
+    for (const p of projects) {
+      const wsPath = workspace.projectPath(p.id);
+      const videos = listVideos(wsPath, p.id);
+      allVideos.push(...videos);
+    }
+    return allVideos;
+  });
+
+  app.get<{
+    Params: { projectId: string; videoId: string };
+  }>("/api/videos/:projectId/:videoId", async (req, reply) => {
+    const { getVideo } = await import("./video/video-service.js");
+    const wsPath = workspace.projectPath(req.params.projectId);
+    const video = getVideo(wsPath, req.params.videoId);
+    if (!video) {
+      reply.code(404);
+      return { error: "Video not found" };
+    }
+    return video;
+  });
+
+  app.delete<{
+    Params: { projectId: string; videoId: string };
+  }>("/api/videos/:projectId/:videoId", async (req, reply) => {
+    const { deleteVideo } = await import("./video/video-service.js");
+    const wsPath = workspace.projectPath(req.params.projectId);
+    const ok = deleteVideo(wsPath, req.params.videoId);
+    if (!ok) {
+      reply.code(404);
+      return { error: "Video not found" };
+    }
+    return { ok: true };
+  });
+
+  app.get<{
+    Params: { projectId: string; videoId: string };
+  }>("/api/videos/:projectId/:videoId/output", async (req, reply) => {
+    const { getVideoDir } = await import("./video/video-service.js");
+    const pathMod = await import("node:path");
+    const fsMod = await import("node:fs");
+
+    const wsPath = workspace.projectPath(req.params.projectId);
+    const videoDir = getVideoDir(wsPath, req.params.videoId);
+    const outputPath = pathMod.join(videoDir, "output.mp4");
+
+    if (!fsMod.existsSync(outputPath)) {
+      reply.code(404);
+      return { error: "Video output not found. Render the video first." };
+    }
+
+    const stream = fsMod.createReadStream(outputPath);
+    const stat = fsMod.statSync(outputPath);
+    reply
+      .type("video/mp4")
+      .header("Content-Length", stat.size)
+      .header("Content-Disposition", `inline; filename="output.mp4"`)
+      .send(stream);
+  });
+
+  // =========================================================================
   // Asset Provider Settings REST routes
   // =========================================================================
 

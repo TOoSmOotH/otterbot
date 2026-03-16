@@ -44,6 +44,7 @@ export function ProjectSettings({ projectId }: { projectId: string }) {
   const [isForkMode, setIsForkMode] = useState(false);
   const [forkUpstreamPr, setForkUpstreamPr] = useState(true);
   const [show3d, setShow3d] = useState(true);
+  const [studios, setStudios] = useState<string[]>([]);
   const [githubAccountId, setGithubAccountId] = useState<string | null>(null);
 
   const gitHubAccounts = useSettingsStore((s) => s.gitHubAccounts);
@@ -62,6 +63,7 @@ export function ProjectSettings({ projectId }: { projectId: string }) {
       setIsGitHubProject(!!project?.githubRepo);
       setIssueMonitor(!!project?.githubIssueMonitor);
       setShow3d(project?.show3d !== false);
+      setStudios((project as any)?.studios ?? []);
       setGithubAccountId((project as any)?.githubAccountId ?? null);
     });
     loadGitHubAccounts();
@@ -204,6 +206,9 @@ export function ProjectSettings({ projectId }: { projectId: string }) {
       // Save 3D view visibility
       socket.emit("project:set-show3d", { projectId, enabled: show3d });
 
+      // Save studios configuration
+      socket.emit("project:update-studios", { projectId, studios });
+
       // Also save agent assignments (for non-pipeline mode)
       socket.emit("project:set-agent-assignments", { projectId, assignments }, (ack2) => {
         setSaving(false);
@@ -343,6 +348,38 @@ export function ProjectSettings({ projectId }: { projectId: string }) {
               />
               <div className="w-9 h-5 bg-muted rounded-full peer peer-checked:bg-primary transition-colors after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:after:translate-x-full" />
             </label>
+          </div>
+        </div>
+
+        {/* Studios */}
+        <div>
+          <h2 className="text-sm font-semibold">Studios</h2>
+          <p className="text-xs text-muted-foreground mt-1">
+            Enable creative studios for this project. Each studio adds team orchestration capabilities.
+          </p>
+          <div className="mt-2 space-y-2">
+            {[
+              { key: "game", label: "Game Studio" },
+              { key: "app", label: "App Studio" },
+              { key: "video", label: "Video Studio" },
+            ].map(({ key, label }) => (
+              <label key={key} className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={studios.includes(key)}
+                  onChange={(e) => {
+                    setStudios((prev) =>
+                      e.target.checked
+                        ? [...prev, key]
+                        : prev.filter((s) => s !== key),
+                    );
+                    setSaved(false);
+                  }}
+                  className="rounded border-border"
+                />
+                <span className="text-sm">{label}</span>
+              </label>
+            ))}
           </div>
         </div>
 

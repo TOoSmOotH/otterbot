@@ -1,0 +1,1 @@
+{"id":"react-vite","framework":"react","name":"React + Vite","description":"React app with Vite and Tailwind CSS","files":["index.html","package.json","vite.config.js","src/main.jsx","src/App.jsx","src/index.css","tailwind.config.js","postcss.config.js"]}

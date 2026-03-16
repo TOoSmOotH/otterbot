@@ -69,6 +69,7 @@ export interface Project {
   giteaIssueMonitor: boolean;
   giteaAccountId: string | null;
   rules: string[];
+  studios: string[];
   createdAt: string;
 }
 

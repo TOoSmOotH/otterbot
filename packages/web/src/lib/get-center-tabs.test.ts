@@ -2,14 +2,33 @@ import { describe, it, expect } from "vitest";
 import { getCenterTabs, centerViewLabels } from "./get-center-tabs";
 
 describe("getCenterTabs", () => {
-  it("returns project-scoped tabs when a project is active", () => {
+  it("returns project-scoped tabs when a project is active (no studios)", () => {
     const tabs = getCenterTabs("project-123");
     expect(tabs).toEqual(["dashboard", "kanban", "charter", "files", "code", "ssh", "settings", "merge-queue"]);
   });
 
+  it("returns project-scoped tabs with studio tabs when studios are enabled", () => {
+    const tabs = getCenterTabs("project-123", false, ["games", "apps", "videos"]);
+    expect(tabs).toContain("games");
+    expect(tabs).toContain("apps");
+    expect(tabs).toContain("videos");
+    expect(tabs).toEqual(["dashboard", "kanban", "charter", "files", "code", "ssh", "settings", "merge-queue", "games", "apps", "videos"]);
+  });
+
+  it("returns only selected studio tabs", () => {
+    const tabs = getCenterTabs("project-123", false, ["games"]);
+    expect(tabs).toContain("games");
+    expect(tabs).not.toContain("apps");
+    expect(tabs).not.toContain("videos");
+  });
+
   it("returns global tabs when no project is active (null)", () => {
     const tabs = getCenterTabs(null);
-    expect(tabs).toEqual(["dashboard", "todos", "inbox", "calendar", "games", "usage"]);
+    expect(tabs).toEqual(["dashboard", "todos", "inbox", "calendar", "usage"]);
+  });
+
+  it("does not include games in global tabs (studios are project-scoped)", () => {
+    expect(getCenterTabs(null)).not.toContain("games");
   });
 
   it("includes 'code' in project tabs only", () => {
@@ -35,6 +54,12 @@ describe("getCenterTabs", () => {
     expect(getCenterTabs("proj-1")).toContain("settings");
     expect(getCenterTabs(null)).not.toContain("settings");
   });
+
+  it("ignores invalid studio names", () => {
+    const tabs = getCenterTabs("proj-1", false, ["games", "invalid-studio"]);
+    expect(tabs).toContain("games");
+    expect(tabs).not.toContain("invalid-studio");
+  });
 });
 
 describe("getCenterTabs — basic mode", () => {
@@ -43,9 +68,15 @@ describe("getCenterTabs — basic mode", () => {
     expect(tabs).toEqual(["dashboard", "todos"]);
   });
 
-  it("returns simplified project tabs in basic mode", () => {
+  it("returns simplified project tabs in basic mode (no studios)", () => {
     const tabs = getCenterTabs("proj-1", true);
     expect(tabs).toEqual(["dashboard", "kanban", "files", "settings"]);
+  });
+
+  it("includes studio tabs in basic project mode when enabled", () => {
+    const tabs = getCenterTabs("proj-1", true, ["apps"]);
+    expect(tabs).toContain("apps");
+    expect(tabs).toEqual(["dashboard", "kanban", "files", "settings", "apps"]);
   });
 
   it("hides inbox, calendar, and usage in basic global mode", () => {
@@ -72,8 +103,9 @@ describe("getCenterTabs — basic mode", () => {
 describe("centerViewLabels", () => {
   it("has a label for every CenterView value", () => {
     const allViews = [
-      "graph", "live3d", "dashboard", "charter", "kanban",
-      "files", "todos", "inbox", "calendar", "code", "ssh", "settings", "merge-queue", "usage", "desktop", "games",
+      "graph", "live3d", "live2d", "dashboard", "charter", "kanban",
+      "files", "todos", "inbox", "calendar", "code", "ssh", "settings",
+      "merge-queue", "usage", "desktop", "games", "apps", "videos",
     ] as const;
     for (const view of allViews) {
       expect(centerViewLabels[view]).toBeDefined();
@@ -84,12 +116,16 @@ describe("centerViewLabels", () => {
   it("has a label for the live3d view used by the header 3D View link", () => {
     expect(centerViewLabels.live3d).toBe("Live");
   });
+
+  it("has labels for studio views", () => {
+    expect(centerViewLabels.games).toBe("Games");
+    expect(centerViewLabels.apps).toBe("Apps");
+    expect(centerViewLabels.videos).toBe("Videos");
+  });
 });
 
 describe("header navigation views", () => {
   it("graph, live3d, and desktop are all valid CenterView values with labels", () => {
-    // The header provides direct navigation to graph, live3d, and desktop views
-    // (outside the tab bar). All must remain valid CenterView values.
     expect(centerViewLabels["graph"]).toBeDefined();
     expect(centerViewLabels["live3d"]).toBeDefined();
     expect(centerViewLabels["desktop"]).toBeDefined();

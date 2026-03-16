@@ -61,6 +61,21 @@ import { createGameGenModelTool } from "./game-gen-model.js";
 import { createGameGenSoundTool } from "./game-gen-sound.js";
 import { createGamePlaytestTool } from "./game-playtest.js";
 import { createGameInspectTool } from "./game-inspect.js";
+import { createVideoCreateTool } from "./video-create.js";
+import { createVideoListTool } from "./video-list.js";
+import { createVideoAddSceneTool } from "./video-add-scene.js";
+import { createVideoGenNarrationTool } from "./video-gen-narration.js";
+import { createVideoRecordSceneTool } from "./video-record-scene.js";
+import { createVideoRenderTool } from "./video-render.js";
+import { createAppCreateTool } from "./app-create.js";
+import { createAppBuildTool } from "./app-build.js";
+import { createAppPreviewTool } from "./app-preview.js";
+import { createAppListTool } from "./app-list.js";
+import { createAppListTemplatesTool } from "./app-list-templates.js";
+import { createAppGenAssetTool } from "./app-gen-asset.js";
+import { createAppTestResponsiveTool } from "./app-test-responsive.js";
+import { createAppTestA11yTool } from "./app-test-a11y.js";
+import { createAppDeployTool } from "./app-deploy.js";
 import { McpClientManager } from "../mcp/mcp-client-manager.js";
 import { McpServerService as McpServerServiceRef } from "../mcp/mcp-service.js";
 
@@ -95,6 +110,22 @@ const TOOL_REGISTRY: Record<string, ToolCreator> = {
   // Game Studio — playtesting tools
   game_playtest: createGamePlaytestTool,
   game_inspect: createGameInspectTool,
+  // Video Studio tools
+  video_create: createVideoCreateTool,
+  video_list: createVideoListTool,
+  video_add_scene: createVideoAddSceneTool,
+  video_gen_narration: createVideoGenNarrationTool,
+  video_record_scene: createVideoRecordSceneTool,
+  video_render: createVideoRenderTool,
+  // App Studio tools
+  app_create: createAppCreateTool,
+  app_build: createAppBuildTool,
+  app_preview: createAppPreviewTool,
+  app_list: createAppListTool,
+  app_gen_asset: createAppGenAssetTool,
+  app_test_responsive: createAppTestResponsiveTool,
+  app_test_a11y: createAppTestA11yTool,
+  app_deploy: createAppDeployTool,
 };
 
 /** Tools that don't require a workspace context (admin/personal tools) */
@@ -135,6 +166,8 @@ const CONTEXTLESS_TOOL_REGISTRY: Record<string, () => unknown> = {
   schedule_delete: createScheduleDeleteTool,
   // Game Studio (contextless)
   game_list_templates: createGameListTemplatesTool,
+  // App Studio (contextless)
+  app_list_templates: createAppListTemplatesTool,
 };
 
 /**
@@ -732,6 +765,142 @@ export function getToolsWithMeta(): {
         { name: "action", type: "string", required: false, description: "Action: state, api, call, screenshot, evaluate" },
         { name: "method", type: "string", required: false, description: "API method name (for 'call')" },
         { name: "script", type: "string", required: false, description: "JavaScript to evaluate (for 'evaluate')" },
+      ],
+    },
+    // Video Studio tools
+    video_create: {
+      description: "Create a new video project with directory structure and manifest for composing scenes.",
+      category: "Video Studio",
+      parameters: [
+        { name: "name", type: "string", required: true, description: "Name of the video project" },
+        { name: "description", type: "string", required: false, description: "Short description" },
+        { name: "aspectRatio", type: "string", required: false, description: "Aspect ratio: 16:9, 9:16, 1:1 (default: 16:9)" },
+        { name: "resolution", type: "string", required: false, description: "Resolution: 720p, 1080p (default: 1080p)" },
+      ],
+    },
+    video_list: {
+      description: "List all video projects in the current workspace.",
+      category: "Video Studio",
+      parameters: [],
+    },
+    video_add_scene: {
+      description: "Add a scene (title, slide, or screen-record) to a video project.",
+      category: "Video Studio",
+      parameters: [
+        { name: "videoId", type: "string", required: true, description: "The video project ID" },
+        { name: "type", type: "string", required: true, description: "Scene type: slide, screen-record, title" },
+        { name: "imagePath", type: "string", required: false, description: "Image path for slide scenes" },
+        { name: "text", type: "string", required: false, description: "Title text for title scenes" },
+        { name: "subtitle", type: "string", required: false, description: "Subtitle for title scenes" },
+        { name: "url", type: "string", required: false, description: "URL for screen-record scenes" },
+        { name: "narration", type: "string", required: false, description: "Narration text for TTS voiceover" },
+        { name: "duration", type: "number", required: false, description: "Scene duration in seconds (default: 5)" },
+        { name: "transition", type: "string", required: false, description: "Transition: fade, dissolve, cut, slide-left" },
+        { name: "backgroundColor", type: "string", required: false, description: "Background color for title scenes" },
+        { name: "textOverlay", type: "string", required: false, description: "Text overlay for slide scenes" },
+      ],
+    },
+    video_gen_narration: {
+      description: "Generate TTS narration audio for a video scene from its narration text.",
+      category: "Video Studio",
+      parameters: [
+        { name: "videoId", type: "string", required: true, description: "The video project ID" },
+        { name: "sceneId", type: "string", required: true, description: "The scene ID" },
+      ],
+    },
+    video_record_scene: {
+      description: "Record a screen capture for a screen-record scene using a headless browser.",
+      category: "Video Studio",
+      parameters: [
+        { name: "videoId", type: "string", required: true, description: "The video project ID" },
+        { name: "sceneId", type: "string", required: true, description: "The scene ID to record" },
+        { name: "duration", type: "number", required: false, description: "Recording duration in seconds (default: 10)" },
+      ],
+    },
+    video_render: {
+      description: "Render a video project into a final MP4, compositing all scenes with narration.",
+      category: "Video Studio",
+      parameters: [
+        { name: "videoId", type: "string", required: true, description: "The video project ID to render" },
+      ],
+    },
+    // App Studio tools
+    app_create: {
+      description: "Create a new web application from a template with framework-specific starter code.",
+      category: "App Studio",
+      parameters: [
+        { name: "name", type: "string", required: true, description: "Name of the application" },
+        { name: "framework", type: "string", required: true, description: "Framework: html, react, nextjs, astro, vue, custom" },
+        { name: "templateId", type: "string", required: false, description: "Template ID (e.g. html-basic, react-vite)" },
+        { name: "description", type: "string", required: false, description: "Short description" },
+      ],
+    },
+    app_build: {
+      description: "Build a web application. Copies source to dist/ for HTML apps, runs build command for framework apps.",
+      category: "App Studio",
+      parameters: [
+        { name: "appId", type: "string", required: true, description: "The app ID to build" },
+      ],
+    },
+    app_preview: {
+      description: "Start or stop a local preview server for a web application.",
+      category: "App Studio",
+      parameters: [
+        { name: "action", type: "string", required: true, description: "Action: start or stop" },
+        { name: "appId", type: "string", required: true, description: "The app ID to preview" },
+        { name: "port", type: "number", required: false, description: "Preferred port (auto-selects if omitted)" },
+        { name: "autoBuild", type: "boolean", required: false, description: "Auto-build before preview (default: true)" },
+      ],
+    },
+    app_list: {
+      description: "List all web applications in the current project workspace.",
+      category: "App Studio",
+      parameters: [
+        { name: "status", type: "string", required: false, description: "Filter by status: draft, building, preview, testing, deployed" },
+      ],
+    },
+    app_list_templates: {
+      description: "List available web application templates.",
+      category: "App Studio",
+      parameters: [
+        { name: "framework", type: "string", required: false, description: "Filter by framework: html, react, nextjs, astro, vue" },
+      ],
+    },
+    app_gen_asset: {
+      description: "Generate a visual asset (logo, favicon, hero image, OG image, icon) for a web application.",
+      category: "App Studio",
+      parameters: [
+        { name: "appId", type: "string", required: true, description: "The app ID" },
+        { name: "prompt", type: "string", required: true, description: "Description of the image to generate" },
+        { name: "assetType", type: "string", required: true, description: "Asset type: logo, favicon, hero, og-image, icon" },
+        { name: "filename", type: "string", required: false, description: "Output filename (without extension)" },
+        { name: "width", type: "number", required: false, description: "Width in pixels" },
+        { name: "height", type: "number", required: false, description: "Height in pixels" },
+      ],
+    },
+    app_test_responsive: {
+      description: "Test a web application's responsiveness at mobile, tablet, and desktop viewports.",
+      category: "App Studio",
+      parameters: [
+        { name: "appId", type: "string", required: true, description: "The app ID to test" },
+        { name: "previewUrl", type: "string", required: true, description: "URL where the app is running" },
+      ],
+    },
+    app_test_a11y: {
+      description: "Test a web application for accessibility issues using axe-core.",
+      category: "App Studio",
+      parameters: [
+        { name: "appId", type: "string", required: true, description: "The app ID to test" },
+        { name: "previewUrl", type: "string", required: true, description: "URL where the app is running" },
+      ],
+    },
+    app_deploy: {
+      description: "Deploy a web application to a local directory.",
+      category: "App Studio",
+      parameters: [
+        { name: "appId", type: "string", required: true, description: "The app ID to deploy" },
+        { name: "target", type: "string", required: true, description: "Deployment target: local, directory" },
+        { name: "outputPath", type: "string", required: false, description: "Custom output directory path" },
       ],
     },
   };

@@ -15,6 +15,7 @@ export function CreateProjectDialog({ open, onClose, onCreated }: CreateProjectD
   const [description, setDescription] = useState("");
   const [rules, setRules] = useState("");
   const [issueMonitor, setIssueMonitor] = useState(false);
+  const [studios, setStudios] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -45,6 +46,7 @@ export function CreateProjectDialog({ open, onClose, onCreated }: CreateProjectD
     setDescription("");
     setRules("");
     setIssueMonitor(false);
+    setStudios([]);
     setLoading(false);
     setError(null);
     setShowPatSection(false);
@@ -85,6 +87,7 @@ export function CreateProjectDialog({ open, onClose, onCreated }: CreateProjectD
         githubBranch: repo ? (branch.trim() || undefined) : undefined,
         rules: rules.trim() ? rules.trim().split("\n").map((r) => r.trim()).filter(Boolean) : undefined,
         issueMonitor: repo ? issueMonitor : false,
+        studios: studios.length > 0 ? studios : undefined,
       } as any,
       (ack: { ok: boolean; projectId?: string; error?: string }) => {
         setLoading(false);
@@ -317,6 +320,42 @@ export function CreateProjectDialog({ open, onClose, onCreated }: CreateProjectD
               rows={3}
               className="w-full text-xs bg-secondary rounded-md px-3 py-2 outline-none resize-none placeholder:text-muted-foreground border border-transparent focus:border-primary/50 transition-colors font-mono"
             />
+          </div>
+
+          {/* Studios */}
+          <div>
+            <label className="block text-[11px] font-medium text-muted-foreground uppercase tracking-wider mb-1.5">
+              Studios
+            </label>
+            <div className="flex flex-wrap gap-2">
+              {([
+                { id: "games", label: "Game Studio", icon: "🎮" },
+                { id: "apps", label: "App Studio", icon: "🌐" },
+                { id: "videos", label: "Video Studio", icon: "🎬" },
+              ] as const).map((studio) => (
+                <button
+                  key={studio.id}
+                  type="button"
+                  onClick={() =>
+                    setStudios((prev) =>
+                      prev.includes(studio.id)
+                        ? prev.filter((s) => s !== studio.id)
+                        : [...prev, studio.id],
+                    )
+                  }
+                  className={`text-xs px-3 py-1.5 rounded-md border transition-colors ${
+                    studios.includes(studio.id)
+                      ? "bg-primary/20 border-primary/50 text-primary"
+                      : "bg-secondary border-transparent text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  {studio.icon} {studio.label}
+                </button>
+              ))}
+            </div>
+            <p className="text-[10px] text-muted-foreground mt-1">
+              Select studios to enable for this project. Can be changed later in settings.
+            </p>
           </div>
 
           {/* Issue Monitor */}

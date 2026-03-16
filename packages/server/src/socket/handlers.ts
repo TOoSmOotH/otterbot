@@ -724,6 +724,7 @@ export function setupSocketHandlers(
 
           const projectId = makeProjectId(name);
           const db = getDb();
+          const studios = Array.isArray(data.studios) ? data.studios : [];
 
           db.insert(schema.projects)
             .values({
@@ -737,6 +738,7 @@ export function setupSocketHandlers(
               githubBranch: branch,
               githubIssueMonitor: issueMonitor,
               rules,
+              studios,
               createdAt: new Date().toISOString(),
             })
             .run();
@@ -815,6 +817,7 @@ export function setupSocketHandlers(
 
           const description = data.description?.trim() || `Local project: ${name}`;
           const rules = data.rules ?? [];
+          const localStudios = Array.isArray(data.studios) ? data.studios : [];
 
           const projectId = makeProjectId(name);
           const db = getDb();
@@ -831,6 +834,7 @@ export function setupSocketHandlers(
               githubBranch: null,
               githubIssueMonitor: false,
               rules,
+              studios: localStudios,
               createdAt: new Date().toISOString(),
             })
             .run();
@@ -1308,6 +1312,42 @@ export function setupSocketHandlers(
         callback?.({ ok: true });
       } catch (err) {
         callback?.({ ok: false, error: err instanceof Error ? err.message : "Failed to update 3D visibility" });
+      }
+    });
+
+    // Update studios configuration for a project
+    socket.on("project:update-studios", (data, callback) => {
+      try {
+        const db = getDb();
+
+        // Validate project exists
+        const project = db
+          .select()
+          .from(schema.projects)
+          .where(eq(schema.projects.id, data.projectId))
+          .get();
+        if (!project) {
+          callback?.({ ok: false, error: "Project not found" });
+          return;
+        }
+
+        db.update(schema.projects)
+          .set({ studios: data.studios })
+          .where(eq(schema.projects.id, data.projectId))
+          .run();
+
+        const updated = db
+          .select()
+          .from(schema.projects)
+          .where(eq(schema.projects.id, data.projectId))
+          .get();
+        if (updated) {
+          io.emit("project:updated", updated as any);
+        }
+
+        callback?.({ ok: true });
+      } catch (err) {
+        callback?.({ ok: false, error: err instanceof Error ? err.message : String(err) });
       }
     });
 

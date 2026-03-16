@@ -21,3 +21,5 @@ export * from "./types/merge-queue.js";
 export * from "./types/mcp-server.js";
 export * from "./types/ssh.js";
 export * from "./types/game.js";
+export * from "./types/app.js";
+export * from "./types/video.js";

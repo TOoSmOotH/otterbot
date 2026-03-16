@@ -10,6 +10,8 @@ import type { MergeQueueEntry } from "./merge-queue.js";
 import type { McpServerRuntime } from "./mcp-server.js";
 import type { SshSessionStatus } from "./ssh.js";
 import type { GameManifest, PlaytestResult } from "./game.js";
+import type { AppManifest, AppTestResult } from "./app.js";
+import type { VideoManifest } from "./video.js";
 
 /** Events emitted from server to client */
 export interface ServerToClientEvents {
@@ -93,6 +95,20 @@ export interface ServerToClientEvents {
   "game:deleted": (data: { gameId: string; projectId: string }) => void;
   "game:build-status": (data: { gameId: string; projectId: string; status: string; error?: string }) => void;
   "game:playtest-result": (data: { gameId: string; projectId: string; result: PlaytestResult }) => void;
+
+  // App Studio
+  "app:created": (app: AppManifest) => void;
+  "app:updated": (app: AppManifest) => void;
+  "app:deleted": (data: { appId: string; projectId: string }) => void;
+  "app:build-status": (data: { appId: string; projectId: string; status: string; error?: string }) => void;
+  "app:test-result": (data: { appId: string; projectId: string; result: AppTestResult }) => void;
+
+  // Video Studio
+  "video:created": (video: VideoManifest) => void;
+  "video:updated": (video: VideoManifest) => void;
+  "video:deleted": (data: { videoId: string; projectId: string }) => void;
+  "video:render-progress": (data: { videoId: string; projectId: string; percent: number; stage: string }) => void;
+  "video:render-complete": (data: { videoId: string; projectId: string; outputPath: string; duration: number }) => void;
 }
 
 /** Events emitted from client to server */
@@ -189,6 +205,7 @@ export interface ClientToServerEvents {
       githubBranch?: string;
       rules?: string[];
       issueMonitor?: boolean;
+      studios?: string[];
     },
     callback?: (ack: { ok: boolean; projectId?: string; error?: string }) => void,
   ) => void;
@@ -325,6 +342,12 @@ export interface ClientToServerEvents {
   // 3D view visibility
   "project:set-show3d": (
     data: { projectId: string; enabled: boolean },
+    callback?: (ack: { ok: boolean; error?: string }) => void,
+  ) => void;
+
+  // Studios configuration
+  "project:update-studios": (
+    data: { projectId: string; studios: string[] },
     callback?: (ack: { ok: boolean; error?: string }) => void,
   ) => void;
 

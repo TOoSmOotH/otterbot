@@ -15,7 +15,9 @@ export type CenterView =
   | "settings"
   | "merge-queue"
   | "dashboard"
-  | "games";
+  | "games"
+  | "apps"
+  | "videos";
 
 export const centerViewLabels: Record<CenterView, string> = {
   graph: "Graph",
@@ -35,17 +37,30 @@ export const centerViewLabels: Record<CenterView, string> = {
   usage: "Usage",
   desktop: "Desktop",
   games: "Games",
+  apps: "Apps",
+  videos: "Videos",
 };
 
-const projectTabs: CenterView[] = ["dashboard", "kanban", "charter", "files", "code", "ssh", "settings", "merge-queue"];
-const globalTabs: CenterView[] = ["dashboard", "todos", "inbox", "calendar", "games", "usage"];
+/** Maps studio id to its corresponding CenterView tab */
+const STUDIO_TABS: Record<string, CenterView> = {
+  games: "games",
+  apps: "apps",
+  videos: "videos",
+};
+
+const baseProjectTabs: CenterView[] = ["dashboard", "kanban", "charter", "files", "code", "ssh", "settings", "merge-queue"];
+const globalTabs: CenterView[] = ["dashboard", "todos", "inbox", "calendar", "usage"];
 
 const basicProjectTabs: CenterView[] = ["dashboard", "kanban", "files", "settings"];
 const basicGlobalTabs: CenterView[] = ["dashboard", "todos"];
 
-export function getCenterTabs(activeProjectId: string | null, isBasic = false): CenterView[] {
+export function getCenterTabs(activeProjectId: string | null, isBasic = false, studios: string[] = []): CenterView[] {
   if (isBasic) {
-    return activeProjectId ? basicProjectTabs : basicGlobalTabs;
+    if (!activeProjectId) return basicGlobalTabs;
+    const studioTabs = studios.map((s) => STUDIO_TABS[s]).filter((t): t is CenterView => !!t);
+    return [...basicProjectTabs, ...studioTabs];
   }
-  return activeProjectId ? projectTabs : globalTabs;
+  if (!activeProjectId) return globalTabs;
+  const studioTabs = studios.map((s) => STUDIO_TABS[s]).filter((t): t is CenterView => !!t);
+  return [...baseProjectTabs, ...studioTabs];
 }

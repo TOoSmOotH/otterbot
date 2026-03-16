@@ -1,0 +1,1 @@
+{"id":"vue-vite","framework":"vue","name":"Vue + Vite","description":"Vue 3 app with Vite","files":["index.html","package.json","vite.config.js","src/main.js","src/App.vue","src/style.css"]}

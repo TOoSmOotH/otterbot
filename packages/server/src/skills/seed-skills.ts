@@ -1193,6 +1193,251 @@ After each game is complete, report:
 - Suggestions for future improvements`,
     },
   },
+  // =========================================================================
+  // Video Studio skills
+  // =========================================================================
+  {
+    id: "builtin-skill-video-creation",
+    data: {
+      meta: {
+        name: "Video Creation",
+        description: "Create composed videos with scenes, narration, and screen recordings",
+        version: "1.0.0",
+        author: "otterbot",
+        tools: ["video_create", "video_list", "video_add_scene", "video_gen_narration", "video_record_scene", "video_render", "file_read", "file_write", "web_browse"],
+        capabilities: ["video-production", "screen-recording", "narration"],
+        parameters: {},
+        tags: ["built-in", "video"],
+      },
+      body: `You are a video producer. You create composed videos from scenes.
+
+## Workflow
+1. Use video_create to start a new video project
+2. Add scenes with video_add_scene:
+   - "title" scenes for intro/outro cards
+   - "slide" scenes for image-based content
+   - "screen-record" scenes to capture web app demos
+3. Use video_gen_narration to add TTS voiceover to scenes
+4. Use video_record_scene to capture screen recordings
+5. Use video_render to composite everything into a final MP4
+
+## Scene Types
+- **Title**: Text on solid background. Great for intros, section breaks, outros.
+- **Slide**: Image with optional text overlay and narration.
+- **Screen Record**: Capture a live website/app demo via headless browser.
+
+## Tips
+- Keep title scenes short (3-5 seconds)
+- Add narration to explain what's happening
+- Use transitions between scenes for polish
+- Start with a title scene, end with an outro`,
+    },
+  },
+  {
+    id: "builtin-skill-video-assets",
+    data: {
+      meta: {
+        name: "Video Asset Generation",
+        description: "Generate visual and audio assets for video production",
+        version: "1.0.0",
+        author: "otterbot",
+        tools: ["video_create", "video_list", "game_gen_texture", "game_gen_sound", "file_read", "file_write"],
+        capabilities: ["image-generation", "sound-generation", "video-assets"],
+        parameters: {},
+        tags: ["built-in", "video"],
+      },
+      body: `You generate assets for video production including background images, scene illustrations, and background music/sound effects.
+
+## Asset Types
+- Use game_gen_texture for background images and scene illustrations
+- Use game_gen_sound for background music and sound effects
+- Save generated assets to the video project's assets/ directory`,
+    },
+  },
+  // =========================================================================
+  // App Studio skills
+  // =========================================================================
+  {
+    id: "builtin-skill-app-creation",
+    data: {
+      meta: {
+        name: "App Creation",
+        description: "Create and build web applications from templates",
+        version: "1.0.0",
+        author: "otterbot",
+        tools: ["app_create", "app_build", "app_preview", "app_list", "app_list_templates", "file_read", "file_write", "shell_exec", "install_package"],
+        capabilities: ["web-development", "react", "vue", "html", "css"],
+        parameters: {},
+        tags: ["built-in", "app"],
+      },
+      body: `You are a web application developer. You create websites and web apps using modern frameworks.
+
+## Workflow
+1. Use app_list_templates to see available templates
+2. Use app_create to scaffold a new app from a template
+3. Edit files with file_write to customize the app
+4. Use app_build to build the app
+5. Use app_preview to start a preview server
+6. Iterate on the code based on feedback
+
+## Framework Guidelines
+- **HTML**: Simple static sites. No build step needed — files are served directly.
+- **React (Vite)**: Use JSX, functional components, hooks. Build with Vite.
+- **Vue (Vite)**: Use Vue 3 Composition API, SFCs. Build with Vite.
+- **Landing Page**: Marketing sites with hero, features, CTA sections.
+
+## Best Practices
+- Write semantic HTML with proper heading hierarchy
+- Use responsive design (mobile-first)
+- Ensure accessible markup (alt text, ARIA labels, proper contrast)
+- Keep CSS organized with custom properties
+- Minimize JavaScript — progressive enhancement`,
+    },
+  },
+  {
+    id: "builtin-skill-app-testing",
+    data: {
+      meta: {
+        name: "App Testing",
+        description: "Test web applications for responsiveness and accessibility",
+        version: "1.0.0",
+        author: "otterbot",
+        tools: ["app_test_responsive", "app_test_a11y", "app_preview", "app_build", "app_list", "file_read"],
+        capabilities: ["accessibility", "responsive-design", "testing"],
+        parameters: {},
+        tags: ["built-in", "app"],
+      },
+      body: `You are a web application tester specializing in responsiveness and accessibility.
+
+## Workflow
+1. Use app_preview to get the app URL
+2. Use app_test_responsive to capture screenshots at mobile, tablet, and desktop viewports
+3. Use app_test_a11y to run accessibility audits
+4. Report findings with specific issues and remediation suggestions
+
+## Accessibility Standards
+- WCAG 2.1 Level AA compliance
+- Check: color contrast, alt text, form labels, keyboard navigation, heading hierarchy
+- Report violations by severity (critical, serious, moderate, minor)`,
+    },
+  },
+  {
+    id: "builtin-skill-app-assets",
+    data: {
+      meta: {
+        name: "App Asset Generation",
+        description: "Generate visual assets for web applications",
+        version: "1.0.0",
+        author: "otterbot",
+        tools: ["app_gen_asset", "app_list", "file_read", "file_write"],
+        capabilities: ["image-generation", "branding", "web-assets"],
+        parameters: {},
+        tags: ["built-in", "app"],
+      },
+      body: `You generate visual assets for web applications including logos, favicons, hero images, and Open Graph images.
+
+## Asset Types
+- **logo**: Brand logo, typically square, transparent background
+- **favicon**: 32x32 or 16x16 icon for browser tabs
+- **hero**: Wide banner image for landing pages (1200x630 or similar)
+- **og-image**: Open Graph image for social sharing (1200x630)
+- **icon**: Generic icon for UI elements`,
+    },
+  },
+  {
+    id: "builtin-skill-app-deployment",
+    data: {
+      meta: {
+        name: "App Deployment",
+        description: "Deploy web applications to hosting services",
+        version: "1.0.0",
+        author: "otterbot",
+        tools: ["app_deploy", "app_build", "app_list", "shell_exec"],
+        capabilities: ["deployment", "hosting"],
+        parameters: {},
+        tags: ["built-in", "app"],
+      },
+      body: `You deploy web applications to hosting services.
+
+## Workflow
+1. Ensure the app is built (app_build)
+2. Use app_deploy to deploy to the target
+3. Verify the deployment URL is accessible`,
+    },
+  },
+  // =========================================================================
+  // Phase 3: Team orchestration skills (App Studio + Video Studio)
+  // =========================================================================
+  {
+    id: "builtin-skill-app-team-management",
+    data: {
+      meta: {
+        name: "App Team Management",
+        description: "Orchestrate app development teams — coordinate creators, testers, and deployers",
+        version: "1.0.0",
+        author: "otterbot",
+        tools: ["send_directive", "get_project_status", "app_list", "app_list_templates"],
+        capabilities: ["team-management", "app-orchestration"],
+        parameters: {},
+        tags: ["built-in", "app-studio"],
+      },
+      body: `You manage a team building web applications.
+
+## Pipeline
+1. **Design**: Understand the requirements, select a framework, plan the structure
+2. **Create**: App Creator scaffolds and codes the application
+3. **Asset Generation**: App Creator generates needed visual assets (logos, heroes)
+4. **Build**: App Creator builds the app
+5. **Test**: App Tester runs responsive and accessibility tests
+6. **Fix Issues**: Route issues back to App Creator
+7. **Deploy**: App Deployer deploys the final build
+8. **Demo**: Optionally use Video Creator to record a demo
+
+## Available Workers
+- **App Creator**: Scaffolds and codes web apps, generates assets
+- **App Tester**: Tests responsiveness and accessibility
+- **App Deployer**: Deploys to hosting
+
+## Coordination
+- Use send_directive to assign work to workers
+- Use get_project_status to track progress
+- Use app_list to monitor app status
+- Iterate until app passes testing`,
+    },
+  },
+  {
+    id: "builtin-skill-video-team-management",
+    data: {
+      meta: {
+        name: "Video Team Management",
+        description: "Orchestrate video production teams — coordinate creators, narrators, and asset generators",
+        version: "1.0.0",
+        author: "otterbot",
+        tools: ["send_directive", "get_project_status", "video_list"],
+        capabilities: ["team-management", "video-orchestration"],
+        parameters: {},
+        tags: ["built-in", "video-studio"],
+      },
+      body: `You manage a team producing videos.
+
+## Pipeline
+1. **Script**: Plan the video structure — scenes, narration, visuals
+2. **Assets**: Generate images, backgrounds, and sound effects
+3. **Record**: Capture any screen recordings needed
+4. **Narrate**: Generate TTS narration for scenes
+5. **Render**: Composite everything into final MP4
+6. **Review**: Check output quality, iterate if needed
+
+## Available Workers
+- **Video Creator**: Creates projects, adds scenes, records, renders
+- **Video Narrator**: Writes scripts and narration text
+
+## Coordination
+- Use send_directive to assign work to workers
+- Use video_list to monitor video project status
+- Iterate until video quality is satisfactory`,
+    },
+  },
 ];
 
 /**
@@ -1200,7 +1445,7 @@ After each game is complete, report:
  */
 const ENTRY_SKILL_ASSIGNMENTS: Record<string, string[]> = {
   "builtin-coo": ["builtin-skill-coo-operations", "builtin-skill-specialist-creation"],
-  "builtin-team-lead": ["builtin-skill-team-lead-operations", "builtin-skill-github-tools", "builtin-skill-game-team-management"],
+  "builtin-team-lead": ["builtin-skill-team-lead-operations", "builtin-skill-github-tools", "builtin-skill-game-team-management", "builtin-skill-app-team-management", "builtin-skill-video-team-management"],
   "builtin-coder": ["builtin-skill-coding-tools", "builtin-skill-github-tools"],
   "builtin-researcher": ["builtin-skill-research-tools", "builtin-skill-github-tools"],
   "builtin-reviewer": ["builtin-skill-review-tools", "builtin-skill-github-tools"],
@@ -1219,6 +1464,13 @@ const ENTRY_SKILL_ASSIGNMENTS: Record<string, string[]> = {
   "builtin-game-creator": ["builtin-skill-game-creation", "builtin-skill-game-assets"],
   "builtin-game-artist": ["builtin-skill-game-assets"],
   "builtin-game-tester": ["builtin-skill-game-playtest"],
+  // Video Studio
+  "builtin-video-creator": ["builtin-skill-video-creation", "builtin-skill-video-assets"],
+  "builtin-video-narrator": ["builtin-skill-video-creation"],
+  // App Studio
+  "builtin-app-creator": ["builtin-skill-app-creation", "builtin-skill-app-assets"],
+  "builtin-app-tester": ["builtin-skill-app-testing"],
+  "builtin-app-deployer": ["builtin-skill-app-deployment"],
 };
 
 /**

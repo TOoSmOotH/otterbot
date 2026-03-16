@@ -120,6 +120,10 @@ export const projects = sqliteTable("projects", {
     .$type<string[]>()
     .notNull()
     .default([]),
+  studios: text("studios", { mode: "json" })
+    .$type<string[]>()
+    .notNull()
+    .default([]),
   createdAt: text("created_at")
     .notNull()
     .$defaultFn(() => new Date().toISOString()),

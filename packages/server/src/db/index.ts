@@ -793,6 +793,13 @@ export async function migrateDb() {
     // Column already exists — ignore
   }
 
+  // Idempotent migration: add studios to projects
+  try {
+    db.run(sql`ALTER TABLE projects ADD COLUMN studios TEXT NOT NULL DEFAULT '[]'`);
+  } catch {
+    // Column already exists — ignore
+  }
+
   // One-time migration: move provider credentials from config KV to providers table
   await migrateProviders(db);
 

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useGameStore } from "../../stores/game-store";
+import { useProjectStore } from "../../stores/project-store";
 import type { GameManifest } from "@otterbot/shared";
 
 const ENGINE_LABELS: Record<string, string> = {
@@ -95,6 +96,7 @@ function GameCard({ game, onPlay, onDelete }: {
 }
 
 export function GameStudio() {
+  const activeProjectId = useProjectStore((s) => s.activeProjectId);
   const games = useGameStore((s) => s.games);
   const loading = useGameStore((s) => s.loading);
   const loadGames = useGameStore((s) => s.loadGames);
@@ -104,9 +106,9 @@ export function GameStudio() {
   const [playingGame, setPlayingGame] = useState<GameManifest | null>(null);
 
   useEffect(() => {
-    loadGames();
+    loadGames(activeProjectId ?? undefined);
     loadTemplates();
-  }, [loadGames, loadTemplates]);
+  }, [loadGames, loadTemplates, activeProjectId]);
 
   const filteredGames = filterEngine
     ? games.filter((g) => g.engine === filterEngine)

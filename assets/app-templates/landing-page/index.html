@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{APP_NAME}}</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="site-header">
+    <nav class="nav container">
+      <a href="#" class="nav-brand">{{APP_NAME}}</a>
+      <button class="nav-toggle" aria-label="Toggle navigation">&#9776;</button>
+      <ul class="nav-links">
+        <li><a href="#features">Features</a></li>
+        <li><a href="#pricing">Pricing</a></li>
+        <li><a href="#cta">Get Started</a></li>
+      </ul>
+    </nav>
+  </header>
+
+  <main>
+    <!-- Hero Section -->
+    <section class="hero">
+      <div class="container">
+        <h1>{{APP_NAME}}</h1>
+        <p class="hero-subtitle">{{APP_DESCRIPTION}}</p>
+        <div class="hero-actions">
+          <a href="#cta" class="btn btn-primary">Get Started</a>
+          <a href="#features" class="btn btn-outline">Learn More</a>
+        </div>
+      </div>
+    </section>
+
+    <!-- Features Section -->
+    <section id="features" class="section">
+      <div class="container">
+        <h2 class="section-title">Features</h2>
+        <p class="section-subtitle">Everything you need to get started</p>
+        <div class="features-grid">
+          <div class="feature-card">
+            <div class="feature-icon">&#9889;</div>
+            <h3>Fast & Reliable</h3>
+            <p>Built for performance with lightning-fast load times and a rock-solid foundation.</p>
+          </div>
+          <div class="feature-card">
+            <div class="feature-icon">&#127912;</div>
+            <h3>Beautiful Design</h3>
+            <p>Modern, responsive design that looks great on every device and screen size.</p>
+          </div>
+          <div class="feature-card">
+            <div class="feature-icon">&#128274;</div>
+            <h3>Secure</h3>
+            <p>Security-first approach with best practices baked in from the start.</p>
+          </div>
+          <div class="feature-card">
+            <div class="feature-icon">&#128640;</div>
+            <h3>Easy to Deploy</h3>
+            <p>Deploy anywhere with zero configuration. Works with any hosting provider.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Pricing Section -->
+    <section id="pricing" class="section section-alt">
+      <div class="container">
+        <h2 class="section-title">Simple Pricing</h2>
+        <p class="section-subtitle">Choose the plan that works for you</p>
+        <div class="pricing-grid">
+          <div class="pricing-card">
+            <h3>Starter</h3>
+            <div class="price">Free</div>
+            <ul class="pricing-features">
+              <li>Basic features</li>
+              <li>Community support</li>
+              <li>1 project</li>
+            </ul>
+            <a href="#cta" class="btn btn-outline">Get Started</a>
+          </div>
+          <div class="pricing-card pricing-featured">
+            <h3>Pro</h3>
+            <div class="price">$19<span>/mo</span></div>
+            <ul class="pricing-features">
+              <li>All features</li>
+              <li>Priority support</li>
+              <li>Unlimited projects</li>
+              <li>Analytics</li>
+            </ul>
+            <a href="#cta" class="btn btn-primary">Get Started</a>
+          </div>
+          <div class="pricing-card">
+            <h3>Enterprise</h3>
+            <div class="price">Custom</div>
+            <ul class="pricing-features">
+              <li>Everything in Pro</li>
+              <li>Dedicated support</li>
+              <li>Custom integrations</li>
+              <li>SLA</li>
+            </ul>
+            <a href="#cta" class="btn btn-outline">Contact Us</a>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- CTA Section -->
+    <section id="cta" class="section cta-section">
+      <div class="container">
+        <h2>Ready to get started?</h2>
+        <p>Join thousands of happy users building with {{APP_NAME}}.</p>
+        <a href="#" class="btn btn-primary btn-lg">Start Free Trial</a>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container">
+      <p>&copy; 2026 {{APP_NAME}}. All rights reserved.</p>
+    </div>
+  </footer>
+
+  <script src="main.js"></script>
+</body>
+</html>

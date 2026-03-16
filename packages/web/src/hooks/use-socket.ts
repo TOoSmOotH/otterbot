@@ -9,6 +9,8 @@ import { useCodingAgentStore } from "../stores/coding-agent-store";
 import { useTodoStore } from "../stores/todo-store";
 import { useMergeQueueStore } from "../stores/merge-queue-store";
 import { useGameStore } from "../stores/game-store";
+import { useAppStore } from "../stores/app-store";
+import { useVideoStore } from "../stores/video-store";
 
 // Module-level TTS state (singleton — useSocket only initializes once)
 const ttsState = {
@@ -103,6 +105,12 @@ export function useSocket() {
   const addGame = useGameStore((s) => s.addGame);
   const updateGame = useGameStore((s) => s.updateGame);
   const removeGame = useGameStore((s) => s.removeGame);
+  const addApp = useAppStore((s) => s.addApp);
+  const updateApp = useAppStore((s) => s.updateApp);
+  const removeApp = useAppStore((s) => s.removeApp);
+  const addVideo = useVideoStore((s) => s.addVideo);
+  const updateVideo = useVideoStore((s) => s.updateVideo);
+  const removeVideo = useVideoStore((s) => s.removeVideo);
 
   useEffect(() => {
     if (initialized.current) return;
@@ -230,6 +238,30 @@ export function useSocket() {
       removeGame(gameId);
     });
 
+    socket.on("app:created", (app) => {
+      addApp(app);
+    });
+
+    socket.on("app:updated", (app) => {
+      updateApp(app);
+    });
+
+    socket.on("app:deleted", ({ appId }) => {
+      removeApp(appId);
+    });
+
+    socket.on("video:created", (video) => {
+      addVideo(video);
+    });
+
+    socket.on("video:updated", (video) => {
+      updateVideo(video);
+    });
+
+    socket.on("video:deleted", ({ videoId }) => {
+      removeVideo(videoId);
+    });
+
     socket.on("agent:stream", ({ agentId, token, messageId }) => {
       appendAgentStream(agentId, token, messageId);
     });
@@ -316,6 +348,12 @@ export function useSocket() {
       socket.off("game:created");
       socket.off("game:updated");
       socket.off("game:deleted");
+      socket.off("app:created");
+      socket.off("app:updated");
+      socket.off("app:deleted");
+      socket.off("video:created");
+      socket.off("video:updated");
+      socket.off("video:deleted");
       socket.off("agent:stream");
       socket.off("agent:thinking");
       socket.off("agent:thinking-end");
