@@ -344,6 +344,13 @@ export async function migrateDb() {
     // Column already exists — ignore
   }
 
+  // Idempotent migration: add triage_status to kanban_tasks
+  try {
+    db.run(sql`ALTER TABLE kanban_tasks ADD COLUMN triage_status TEXT`);
+  } catch {
+    // Column already exists — ignore
+  }
+
   // Backfill task_number for existing tasks that don't have one
   {
     const unnumbered = db
@@ -792,6 +799,16 @@ export async function migrateDb() {
   } catch {
     // Column already exists — ignore
   }
+
+  // Triage messages table
+  db.run(sql`CREATE TABLE IF NOT EXISTS triage_messages (
+    id TEXT PRIMARY KEY,
+    task_id TEXT NOT NULL,
+    role TEXT NOT NULL,
+    content TEXT NOT NULL,
+    metadata TEXT DEFAULT '{}',
+    created_at TEXT NOT NULL
+  )`);
 
   // Idempotent migration: add studios to projects
   try {

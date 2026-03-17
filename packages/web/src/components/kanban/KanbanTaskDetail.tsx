@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import type { KanbanTask } from "@otterbot/shared";
 import { KanbanColumn } from "@otterbot/shared";
 import { useProjectStore } from "../../stores/project-store";
+import { TriageChat } from "./TriageChat";
 
 const STATUS_CONFIG: Record<KanbanColumn, { label: string; className: string }> = {
   [KanbanColumn.Triage]: {
@@ -187,8 +188,15 @@ export function KanbanTaskDetail({
 
         {/* Body */}
         <div className="flex-1 overflow-y-auto px-5 py-4 space-y-5 text-sm">
-          {/* Description */}
-          {task.description && (
+          {/* Triage Chat or Description */}
+          {task.column === KanbanColumn.Triage ? (
+            <section>
+              <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1.5">
+                Triage Discussion
+              </h3>
+              <TriageChat task={task} />
+            </section>
+          ) : task.description ? (
             <section>
               <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1.5">
                 Description
@@ -197,7 +205,7 @@ export function KanbanTaskDetail({
                 {task.description}
               </p>
             </section>
-          )}
+          ) : null}
 
           {/* Completion Report */}
           {task.completionReport && (

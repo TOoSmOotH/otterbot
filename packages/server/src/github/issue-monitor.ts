@@ -531,6 +531,12 @@ export class GitHubIssueMonitor {
       let taskId: string;
 
       if (existingTriageTask) {
+        // Only promote if triage has been approved (or has no triage status — legacy tasks)
+        if (existingTriageTask.triageStatus === "pending") {
+          console.log(`[IssueMonitor] Skipping promotion of issue #${issue.number} — triage pending approval`);
+          continue;
+        }
+
         // Promote triage task to backlog
         taskId = existingTriageTask.id;
         const now = new Date().toISOString();
