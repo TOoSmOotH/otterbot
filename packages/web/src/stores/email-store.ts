@@ -18,6 +18,7 @@ interface EmailState {
   nextPageToken: string | null;
   folders: EmailFolder[];
   currentFolder: string;
+  notConfigured: boolean;
 
   loadFolders: () => Promise<void>;
   selectFolder: (path: string) => void;
@@ -44,13 +45,17 @@ export const useEmailStore = create<EmailState>((set, get) => ({
   nextPageToken: null,
   folders: [],
   currentFolder: "INBOX",
+  notConfigured: false,
 
   loadFolders: async () => {
     try {
       const res = await fetch("/api/email/folders");
-      if (!res.ok) return;
+      if (!res.ok) {
+        if (res.status === 503) set({ notConfigured: true });
+        return;
+      }
       const data = await res.json();
-      set({ folders: data });
+      set({ folders: data, notConfigured: false });
     } catch {
       // Silently fail — folders are non-critical
     }
@@ -75,12 +80,19 @@ export const useEmailStore = create<EmailState>((set, get) => ({
       params.set("maxResults", "20");
       if (currentFolder !== "INBOX") params.set("folder", currentFolder);
       const res = await fetch(`/api/email/messages?${params}`);
-      if (!res.ok) throw new Error("Failed to load emails");
+      if (!res.ok) {
+        if (res.status === 503) {
+          set({ loading: false, notConfigured: true });
+          return;
+        }
+        throw new Error("Failed to load emails");
+      }
       const data = await res.json();
       set({
         messages: data.messages,
         nextPageToken: data.nextPageToken,
         loading: false,
+        notConfigured: false,
       });
     } catch (err) {
       set({
@@ -118,7 +130,13 @@ export const useEmailStore = create<EmailState>((set, get) => ({
       if (currentFolder !== "INBOX") params.set("folder", currentFolder);
       const qs = params.toString();
       const res = await fetch(`/api/email/messages/${id}${qs ? `?${qs}` : ""}`);
-      if (!res.ok) throw new Error("Failed to read email");
+      if (!res.ok) {
+        if (res.status === 503) {
+          set({ loadingDetail: false, notConfigured: true });
+          return;
+        }
+        throw new Error("Failed to read email");
+      }
       const email = await res.json();
       set({ selectedMessage: email, loadingDetail: false });
     } catch (err) {
