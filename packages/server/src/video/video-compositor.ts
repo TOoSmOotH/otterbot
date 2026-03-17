@@ -9,7 +9,7 @@
 import { spawn } from "node:child_process";
 import path from "node:path";
 import fs from "node:fs";
-import type { VideoManifest } from "@otterbot/shared";
+import type { VideoManifest, VideoAudioTrack } from "@otterbot/shared";
 
 /** Run an FFmpeg command and return a promise */
 function runFfmpeg(args: string[]): Promise<void> {
@@ -119,6 +119,98 @@ export async function concatenateClips(
   }
 }
 
+/**
+ * Mix global audio tracks (background music, ambient, SFX) into a video.
+ *
+ * Builds an FFmpeg complex filter graph that:
+ * - Extracts existing audio from the video (narration) and applies narrationVolume
+ * - Adds each audio track with volume, looping, delay, and fade filters
+ * - Mixes all audio streams together
+ */
+async function mixGlobalAudio(
+  videoPath: string,
+  videoDir: string,
+  audioTracks: VideoAudioTrack[],
+  narrationVolume: number,
+  musicVolume: number,
+  outputPath: string,
+): Promise<void> {
+  // Input 0 is the video file (may contain narration audio)
+  const inputArgs = ["-i", videoPath];
+  const filterParts: string[] = [];
+  const audioLabels: string[] = [];
+  let inputIndex = 1;
+
+  // Extract and scale existing audio (narration) from the video
+  filterParts.push(`[0:a]volume=${narrationVolume}[narration]`);
+  audioLabels.push("[narration]");
+
+  // Add each audio track as an input
+  for (const track of audioTracks) {
+    const trackPath = path.join(videoDir, track.audioPath);
+    if (!fs.existsSync(trackPath)) continue;
+
+    inputArgs.push("-i", trackPath);
+    const idx = inputIndex++;
+    let label = `[${idx}:a]`;
+    const filters: string[] = [];
+
+    // Volume: apply per-track volume scaled by global musicVolume
+    const vol = (track.volume ?? 1.0) * (track.type === "background-music" || track.type === "ambient" ? musicVolume : 1.0);
+    filters.push(`volume=${vol}`);
+
+    // Loop if needed — repeat audio enough times to cover the video
+    if (track.loop) {
+      // aloop: loop=-1 means infinite, but we use a large count; nsamples=0 uses full input
+      filters.push("aloop=loop=-1:size=2147483647");
+    }
+
+    // Delay if startTime is set (adelay takes milliseconds)
+    if (track.startTime && track.startTime > 0) {
+      const delayMs = Math.round(track.startTime * 1000);
+      filters.push(`adelay=${delayMs}|${delayMs}`);
+    }
+
+    // Fade in
+    if (track.fadeIn && track.fadeIn > 0) {
+      filters.push(`afade=t=in:d=${track.fadeIn}`);
+    }
+
+    // Fade out
+    if (track.fadeOut && track.fadeOut > 0) {
+      filters.push(`afade=t=out:st=0:d=${track.fadeOut}`);
+    }
+
+    const trackLabel = `a_track${idx}`;
+    filterParts.push(`${label}${filters.join(",")}[${trackLabel}]`);
+    audioLabels.push(`[${trackLabel}]`);
+  }
+
+  if (audioLabels.length <= 1) {
+    // No valid audio tracks to mix — just copy
+    fs.copyFileSync(videoPath, outputPath);
+    return;
+  }
+
+  // Mix all audio streams
+  const mixInputs = audioLabels.join("");
+  filterParts.push(
+    `${mixInputs}amix=inputs=${audioLabels.length}:duration=first:dropout_transition=0[aout]`,
+  );
+
+  const filterGraph = filterParts.join(";");
+
+  await runFfmpeg([
+    ...inputArgs,
+    "-filter_complex", filterGraph,
+    "-map", "0:v",
+    "-map", "[aout]",
+    "-c:v", "copy",
+    "-c:a", "aac", "-b:a", "192k",
+    "-y", outputPath,
+  ]);
+}
+
 /** Render a complete video from its manifest */
 export async function renderVideo(
   videoDir: string,
@@ -160,7 +252,6 @@ export async function renderVideo(
         break;
       case "screen-record":
         if (scene.videoClipPath) {
-          // Already recorded — transcode to consistent format
           const srcPath = path.join(videoDir, scene.videoClipPath);
           await runFfmpeg([
             "-i", srcPath,
@@ -172,7 +263,6 @@ export async function renderVideo(
             "-y", clipPath,
           ]);
         } else {
-          // Create a placeholder title for unrecorded scenes
           await createTitleClip(
             "Screen Recording",
             scene.url,
@@ -188,7 +278,34 @@ export async function renderVideo(
     clipPaths.push(clipPath);
   }
 
-  const outputPath = path.join(videoDir, "output.mp4");
-  await concatenateClips(clipPaths, outputPath);
-  return outputPath;
+  // Concatenate scene clips
+  const hasAudioTracks = manifest.audioTracks && manifest.audioTracks.length > 0;
+  const concatenatedPath = hasAudioTracks
+    ? path.join(clipsDir, "concatenated.mp4")
+    : path.join(videoDir, "output.mp4");
+
+  await concatenateClips(clipPaths, concatenatedPath);
+
+  // Mix global audio tracks if present
+  if (hasAudioTracks) {
+    const outputPath = path.join(videoDir, "output.mp4");
+    try {
+      await mixGlobalAudio(
+        concatenatedPath,
+        videoDir,
+        manifest.audioTracks!,
+        manifest.narrationVolume ?? 1.0,
+        manifest.musicVolume ?? 0.3,
+        outputPath,
+      );
+    } catch {
+      // If mixing fails (e.g. no audio stream in concatenated video), fall back
+      fs.copyFileSync(concatenatedPath, outputPath);
+    }
+    // Clean up intermediate file
+    try { fs.unlinkSync(concatenatedPath); } catch { /* ignore */ }
+    return outputPath;
+  }
+
+  return concatenatedPath;
 }

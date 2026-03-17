@@ -937,10 +937,15 @@ You have tools to generate four types of game assets:
 - Examples: "red cube", "blue sphere", "green cylinder", "brown barrel"
 - Saved to \`assets/models/\`
 
-### Sound Effects (\`game_gen_sound\`)
+### Sound Effects & Music (\`game_gen_sound\`)
 - For SFX, music clips, and ambient sounds (WAV format)
-- Procedural: generates tones, beeps, sweeps, noise, explosions
-- Examples: "coin pickup beep", "explosion boom", "laser sweep", "wind noise"
+- Use category "sfx" for sound effects: tones, beeps, sweeps, noise, explosions
+- Use category "music" for procedural music with bass, chords, arpeggios, and rhythm
+  - Supports mood, style, tempo, and key options for musical control
+  - Styles: chiptune, orchestral, lo-fi, electronic
+- Use category "ambient" for ambient soundscapes with drones and textures
+- With Replicate configured: AI-powered audio via MusicGen and AudioGen
+- Examples: "coin pickup beep", "upbeat chiptune background", "forest ambient", "dramatic orchestral"
 - Saved to \`assets/sounds/\`
 
 ## Provider System
@@ -1137,6 +1142,7 @@ Provide a structured playtest report:
 - Coordinate art style consistency (provide style keywords)
 - For 2D games: focus on sprites and tilesets
 - For 3D games: focus on models and textures
+- For sound/music: generate SFX (beeps, explosions), background music (chiptune, orchestral), and ambient audio
 
 ### Phase 4: Implementation
 - Delegate to Game Creator: implement game mechanics
@@ -1204,12 +1210,12 @@ After each game is complete, report:
         description: "Create composed videos with scenes, narration, and screen recordings",
         version: "1.0.0",
         author: "otterbot",
-        tools: ["video_create", "video_list", "video_add_scene", "video_gen_narration", "video_record_scene", "video_render", "file_read", "file_write", "web_browse"],
-        capabilities: ["video-production", "screen-recording", "narration"],
+        tools: ["video_create", "video_list", "video_add_scene", "video_gen_narration", "video_gen_music", "video_add_audio", "video_record_scene", "video_render", "file_read", "file_write", "web_browse"],
+        capabilities: ["video-production", "screen-recording", "narration", "sound-engineering"],
         parameters: {},
         tags: ["built-in", "video"],
       },
-      body: `You are a video producer. You create composed videos from scenes.
+      body: `You are a video producer. You create composed videos from scenes with narration and background music.
 
 ## Workflow
 1. Use video_create to start a new video project
@@ -1218,8 +1224,19 @@ After each game is complete, report:
    - "slide" scenes for image-based content
    - "screen-record" scenes to capture web app demos
 3. Use video_gen_narration to add TTS voiceover to scenes
-4. Use video_record_scene to capture screen recordings
-5. Use video_render to composite everything into a final MP4
+4. Use video_gen_music to add background music or ambient audio
+   - Specify mood and style for best results (e.g. "upbeat corporate", "cinematic orchestral")
+   - Background music defaults to volume 0.3 so it doesn't overpower narration
+   - Use loop=true if the music is shorter than the video
+   - Add fadeIn/fadeOut for smooth transitions
+5. Use video_add_audio to add existing audio files with precise timing control
+6. Use video_record_scene to capture screen recordings
+7. Use video_render to composite everything into a final MP4
+
+## Audio Mixing
+- Background music and ambient tracks are mixed with narration during rendering
+- Use narrationVolume and musicVolume on the manifest for global mix control
+- Per-track volume can be set individually (0.0-1.0)
 
 ## Scene Types
 - **Title**: Text on solid background. Great for intros, section breaks, outros.
@@ -1229,6 +1246,7 @@ After each game is complete, report:
 ## Tips
 - Keep title scenes short (3-5 seconds)
 - Add narration to explain what's happening
+- Add background music early — it sets the tone for the entire video
 - Use transitions between scenes for polish
 - Start with a title scene, end with an outro`,
     },
@@ -1241,16 +1259,19 @@ After each game is complete, report:
         description: "Generate visual and audio assets for video production",
         version: "1.0.0",
         author: "otterbot",
-        tools: ["video_create", "video_list", "game_gen_texture", "game_gen_sound", "file_read", "file_write"],
-        capabilities: ["image-generation", "sound-generation", "video-assets"],
+        tools: ["video_create", "video_list", "video_gen_music", "game_gen_texture", "game_gen_sound", "file_read", "file_write"],
+        capabilities: ["image-generation", "sound-generation", "music-generation", "video-assets"],
         parameters: {},
         tags: ["built-in", "video"],
       },
-      body: `You generate assets for video production including background images, scene illustrations, and background music/sound effects.
+      body: `You generate assets for video production including background images, scene illustrations, background music, and sound effects.
 
 ## Asset Types
 - Use game_gen_texture for background images and scene illustrations
-- Use game_gen_sound for background music and sound effects
+- Use video_gen_music for background music and ambient audio (adds directly to video manifest)
+  - Supports mood/style hints: "upbeat", "melancholy", "chiptune", "orchestral", "lo-fi", "electronic"
+  - Can auto-compute duration from video scenes
+- Use game_gen_sound for standalone sound effects
 - Save generated assets to the video project's assets/ directory`,
     },
   },
@@ -1418,23 +1439,25 @@ After each game is complete, report:
         parameters: {},
         tags: ["built-in", "video-studio"],
       },
-      body: `You manage a team producing videos.
+      body: `You manage a team producing videos with full sound engineering.
 
 ## Pipeline
-1. **Script**: Plan the video structure — scenes, narration, visuals
-2. **Assets**: Generate images, backgrounds, and sound effects
+1. **Script**: Plan the video structure — scenes, narration, visuals, and audio
+2. **Assets**: Generate images, backgrounds, sound effects, and background music
 3. **Record**: Capture any screen recordings needed
-4. **Narrate**: Generate TTS narration for scenes
-5. **Render**: Composite everything into final MP4
-6. **Review**: Check output quality, iterate if needed
+4. **Sound Design**: Generate background music and ambient audio for the video
+5. **Narrate**: Generate TTS narration for scenes
+6. **Render**: Composite everything (video + narration + music) into final MP4
+7. **Review**: Check output quality, iterate if needed
 
 ## Available Workers
-- **Video Creator**: Creates projects, adds scenes, records, renders
+- **Video Creator**: Creates projects, adds scenes, generates music, records, renders
 - **Video Narrator**: Writes scripts and narration text
 
 ## Coordination
 - Use send_directive to assign work to workers
 - Use video_list to monitor video project status
+- Ensure background music complements narration (default music volume is 0.3)
 - Iterate until video quality is satisfactory`,
     },
   },

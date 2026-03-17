@@ -67,6 +67,8 @@ import { createVideoAddSceneTool } from "./video-add-scene.js";
 import { createVideoGenNarrationTool } from "./video-gen-narration.js";
 import { createVideoRecordSceneTool } from "./video-record-scene.js";
 import { createVideoRenderTool } from "./video-render.js";
+import { createVideoGenMusicTool } from "./video-gen-music.js";
+import { createVideoAddAudioTool } from "./video-add-audio.js";
 import { createAppCreateTool } from "./app-create.js";
 import { createAppBuildTool } from "./app-build.js";
 import { createAppPreviewTool } from "./app-preview.js";
@@ -117,6 +119,8 @@ const TOOL_REGISTRY: Record<string, ToolCreator> = {
   video_gen_narration: createVideoGenNarrationTool,
   video_record_scene: createVideoRecordSceneTool,
   video_render: createVideoRenderTool,
+  video_gen_music: createVideoGenMusicTool,
+  video_add_audio: createVideoAddAudioTool,
   // App Studio tools
   app_create: createAppCreateTool,
   app_build: createAppBuildTool,
@@ -822,6 +826,37 @@ export function getToolsWithMeta(): {
       category: "Video Studio",
       parameters: [
         { name: "videoId", type: "string", required: true, description: "The video project ID to render" },
+      ],
+    },
+    video_gen_music: {
+      description: "Generate background music, ambient sound, or SFX for a video project using AI or procedural synthesis.",
+      category: "Video Studio",
+      parameters: [
+        { name: "videoId", type: "string", required: true, description: "The video project ID" },
+        { name: "prompt", type: "string", required: true, description: "Description of desired audio" },
+        { name: "durationSeconds", type: "number", required: false, description: "Duration in seconds (auto-computed from scenes if omitted)" },
+        { name: "category", type: "string", required: false, description: "Track type: background-music, sfx, ambient" },
+        { name: "volume", type: "number", required: false, description: "Volume 0.0-1.0 (default: 0.3 for music)" },
+        { name: "loop", type: "boolean", required: false, description: "Loop if shorter than video" },
+        { name: "fadeIn", type: "number", required: false, description: "Fade-in seconds" },
+        { name: "fadeOut", type: "number", required: false, description: "Fade-out seconds" },
+        { name: "mood", type: "string", required: false, description: "Mood hint (upbeat, melancholy, tense)" },
+        { name: "style", type: "string", required: false, description: "Style hint (chiptune, orchestral, lo-fi, electronic)" },
+      ],
+    },
+    video_add_audio: {
+      description: "Add an existing audio file as a track to a video project with timing and volume control.",
+      category: "Video Studio",
+      parameters: [
+        { name: "videoId", type: "string", required: true, description: "The video project ID" },
+        { name: "audioPath", type: "string", required: true, description: "Path to audio file" },
+        { name: "type", type: "string", required: true, description: "Track type: background-music, sfx, ambient" },
+        { name: "startTime", type: "number", required: false, description: "Start offset in seconds" },
+        { name: "endTime", type: "number", required: false, description: "End time in seconds" },
+        { name: "volume", type: "number", required: false, description: "Volume 0.0-1.0" },
+        { name: "loop", type: "boolean", required: false, description: "Loop if shorter than video" },
+        { name: "fadeIn", type: "number", required: false, description: "Fade-in seconds" },
+        { name: "fadeOut", type: "number", required: false, description: "Fade-out seconds" },
       ],
     },
     // App Studio tools

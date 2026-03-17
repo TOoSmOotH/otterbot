@@ -21,6 +21,7 @@ import { ProceduralModelProvider } from "./procedural-model-provider.js";
 import { ProceduralSoundProvider } from "./procedural-sound-provider.js";
 import { OpenAIImageProvider } from "./openai-image-provider.js";
 import { ReplicateImageProvider } from "./replicate-image-provider.js";
+import { ReplicateSoundProvider } from "./replicate-sound-provider.js";
 import { StableDiffusionImageProvider } from "./sd-image-provider.js";
 
 // Config keys used by the asset system
@@ -132,7 +133,15 @@ export function getSoundProvider(): SoundGenProvider {
   const providerType = (getConfig(CONFIG_SOUND_PROVIDER) ?? "procedural") as AssetProviderType;
 
   switch (providerType) {
-    // Future: Replicate sound generation (e.g., MusicGen, AudioGen)
+    case "replicate": {
+      const apiKey = resolveApiKey("replicate");
+      if (!apiKey) {
+        console.warn("[asset-adapter] Replicate sound provider configured but no API key found, falling back to procedural");
+        return proceduralSound;
+      }
+      const musicModel = getConfig("asset:replicate:sound_model") ?? undefined;
+      return new ReplicateSoundProvider(apiKey, musicModel, musicModel);
+    }
     case "procedural":
     default:
       return proceduralSound;

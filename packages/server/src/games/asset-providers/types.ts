@@ -87,6 +87,16 @@ export interface SoundGenOptions {
   category?: "sfx" | "music" | "ambient";
   /** Desired format */
   format?: "wav" | "mp3" | "ogg";
+  /** Tempo in BPM (60-200, for music generation) */
+  tempo?: number;
+  /** Musical key hint (e.g. "C major", "A minor") */
+  key?: string;
+  /** Mood descriptor (e.g. "upbeat", "melancholy", "tense") */
+  mood?: string;
+  /** Genre/style hint (e.g. "chiptune", "orchestral", "lo-fi", "electronic") */
+  style?: string;
+  /** Instrument hints for procedural music layers */
+  instruments?: string[];
 }
 
 export interface SoundGenResult {
