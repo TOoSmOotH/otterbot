@@ -3,6 +3,7 @@ import { simpleParser } from "mailparser";
 import { createTransport } from "nodemailer";
 import type { EmailSummary, EmailDetail } from "@otterbot/shared";
 import type { EmailConnectionConfig } from "./email-settings.js";
+import { getEmailConnectionConfig } from "./email-settings.js";
 
 // ---------------------------------------------------------------------------
 // Singleton IMAP connection
@@ -10,6 +11,15 @@ import type { EmailConnectionConfig } from "./email-settings.js";
 
 let imapClient: ImapFlow | null = null;
 let currentConfig: EmailConnectionConfig | null = null;
+
+function loadConfigFromSettings(): EmailConnectionConfig {
+  const config = getEmailConnectionConfig();
+  if (!config) {
+    throw new Error("Email not configured. Set up IMAP/SMTP in Settings > Email.");
+  }
+  currentConfig = config;
+  return config;
+}
 
 function createImapClient(config: EmailConnectionConfig): ImapFlow {
   const client = new ImapFlow({
@@ -54,7 +64,7 @@ export async function disconnectImap(): Promise<void> {
 
 function ensureConfig(): EmailConnectionConfig {
   if (!currentConfig) {
-    throw new Error("Email not configured. Set up IMAP/SMTP in Settings > Email.");
+    return loadConfigFromSettings();
   }
   return currentConfig;
 }

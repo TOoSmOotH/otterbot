@@ -203,6 +203,7 @@ export const kanbanTasks = sqliteTable("kanban_tasks", {
     .default({}),
   lastKickbackSource: text("last_kickback_source"),
   spawnRetryCount: integer("spawn_retry_count").notNull().default(0),
+  triageStatus: text("triage_status"),
   createdAt: text("created_at")
     .notNull()
     .$defaultFn(() => new Date().toISOString()),
@@ -586,6 +587,19 @@ export const sshSessions = sqliteTable("ssh_sessions", {
   completedAt: text("completed_at"),
   terminalBuffer: text("terminal_buffer"),
   initiatedBy: text("initiated_by").notNull().default("user"),
+  createdAt: text("created_at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+});
+
+export const triageMessages = sqliteTable("triage_messages", {
+  id: text("id").primaryKey(),
+  taskId: text("task_id").notNull(),
+  role: text("role", { enum: ["user", "assistant"] }).notNull(),
+  content: text("content").notNull(),
+  metadata: text("metadata", { mode: "json" })
+    .$type<Record<string, unknown>>()
+    .default({}),
   createdAt: text("created_at")
     .notNull()
     .$defaultFn(() => new Date().toISOString()),

@@ -34,6 +34,7 @@ export function InboxView() {
   const currentFolder = useEmailStore((s) => s.currentFolder);
   const loadFolders = useEmailStore((s) => s.loadFolders);
   const selectFolder = useEmailStore((s) => s.selectFolder);
+  const notConfigured = useEmailStore((s) => s.notConfigured);
 
   const [searchQuery, setSearchQuery] = useState("");
   const [showCompose, setShowCompose] = useState(false);
@@ -72,6 +73,18 @@ export function InboxView() {
   const folderLabel = activeFolderName
     ? folderDisplayName(activeFolderName)
     : currentFolder;
+
+  if (notConfigured) {
+    return (
+      <div className="h-full flex items-center justify-center p-4">
+        <div className="text-center space-y-2">
+          <p className="text-xs text-muted-foreground">
+            Configure email in Settings &gt; Email to use the inbox.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   if (error && messages.length === 0 && folders.length === 0) {
     return (

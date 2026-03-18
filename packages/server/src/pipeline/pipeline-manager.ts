@@ -441,6 +441,11 @@ export class PipelineManager {
       debug("pipeline", `retriage: failed to remove triaged label from #${issueNumber}: ${err}`);
     }
 
+    // Delete all triage messages for the old task
+    db.delete(schema.triageMessages)
+      .where(eq(schema.triageMessages.taskId, taskId))
+      .run();
+
     // Delete the existing triage task
     db.delete(schema.kanbanTasks)
       .where(eq(schema.kanbanTasks.id, taskId))
@@ -463,6 +468,234 @@ export class PipelineManager {
       .find((t) => (t.labels as string[]).includes(issueLabel));
 
     return (newTask as unknown as KanbanTask) ?? null;
+  }
+
+  /**
+   * Send a follow-up message in a triage conversation and get an AI reply.
+   */
+  async triageReply(taskId: string, userMessage: string): Promise<void> {
+    const db = getDb();
+    const task = db
+      .select()
+      .from(schema.kanbanTasks)
+      .where(eq(schema.kanbanTasks.id, taskId))
+      .get();
+    if (!task) throw new Error("Task not found");
+
+    // Extract issue number and project info
+    const issueLabel = (task.labels as string[]).find((l) => l.startsWith("github-issue-"));
+    if (!issueLabel) throw new Error("Task has no associated GitHub issue");
+    const issueNumber = parseInt(issueLabel.replace("github-issue-", ""), 10);
+
+    const project = db
+      .select()
+      .from(schema.projects)
+      .where(eq(schema.projects.id, task.projectId))
+      .get();
+    const repo = project?.githubRepo;
+    if (!repo) throw new Error("Project has no GitHub repo configured");
+
+    const token = resolveGitHubToken(task.projectId);
+    if (!token) throw new Error("No GitHub token available");
+
+    // Store user message
+    const userMsgId = nanoid();
+    const userNow = new Date().toISOString();
+    db.insert(schema.triageMessages).values({
+      id: userMsgId,
+      taskId,
+      role: "user",
+      content: userMessage,
+      createdAt: userNow,
+    }).run();
+
+    const userTriageMsg = { id: userMsgId, taskId, role: "user" as const, content: userMessage, createdAt: userNow };
+    this.io.emit("triage:message", { taskId, message: userTriageMsg });
+
+    // Load conversation history
+    const history = db
+      .select()
+      .from(schema.triageMessages)
+      .where(eq(schema.triageMessages.taskId, taskId))
+      .all();
+
+    // Build LLM messages from conversation history
+    const config = this.getConfig(task.projectId);
+    const triageStage = config?.stages?.triage;
+    const registry = new Registry();
+    const agentId = triageStage?.agentId || "builtin-triage";
+    const entry = registry.get(agentId) ?? registry.get("builtin-triage");
+    if (!entry) throw new Error("Triage agent not found");
+
+    // Fetch repo tree for context
+    let fileTreeSection = "";
+    try {
+      const files = await fetchRepoTree(repo, token);
+      fileTreeSection = `\n<repository-file-tree>\n${files.join("\n")}\n</repository-file-tree>`;
+    } catch {
+      fileTreeSection = "\n<repository-file-tree>\n(unavailable)\n</repository-file-tree>";
+    }
+
+    // Fetch the original issue
+    const issue = await fetchIssue(repo, token, issueNumber);
+    const issueText =
+      `<github-issue>\n` +
+      `Issue #${issue.number}: ${issue.title}\n\n` +
+      `${issue.body ?? "(no description)"}\n\n` +
+      `Labels: ${issue.labels.map((l: { name: string }) => l.name).join(", ") || "none"}\n` +
+      `Assignees: ${issue.assignees.map((a: { login: string }) => a.login).join(", ") || "none"}\n` +
+      `</github-issue>` +
+      fileTreeSection;
+
+    // Build message array: system + issue context + conversation
+    const llmMessages = [
+      { role: "user" as const, content: issueText },
+      ...history.map((m) => ({
+        role: m.role as "user" | "assistant",
+        content: m.content,
+      })),
+    ];
+
+    const model = resolveModel({
+      provider:
+        getAgentModelOverride(entry.id)?.provider ??
+        getConfig("worker_provider") ??
+        getConfig("coo_provider") ??
+        entry.defaultProvider,
+      model:
+        getAgentModelOverride(entry.id)?.model ??
+        getConfig("worker_model") ??
+        getConfig("coo_model") ??
+        entry.defaultModel,
+    });
+
+    const result = await generateText({
+      model,
+      system: `${SECURITY_PREAMBLE}\n${entry.systemPrompt}`,
+      messages: llmMessages,
+      maxTokens: 4000,
+    });
+
+    // Parse and store AI response
+    let parsed: TriageResult;
+    try {
+      parsed = extractTriageJson(result.text);
+    } catch {
+      // If no JSON found, treat the entire response as a conversational reply
+      parsed = {
+        classification: "question",
+        shouldProceed: false,
+        comment: result.text.trim(),
+        labels: [],
+      };
+    }
+
+    const aiMsgId = nanoid();
+    const aiNow = new Date().toISOString();
+    db.insert(schema.triageMessages).values({
+      id: aiMsgId,
+      taskId,
+      role: "assistant",
+      content: parsed.comment,
+      metadata: parsed as unknown as Record<string, unknown>,
+      createdAt: aiNow,
+    }).run();
+
+    const aiTriageMsg = { id: aiMsgId, taskId, role: "assistant" as const, content: parsed.comment, metadata: parsed as unknown as Record<string, unknown>, createdAt: aiNow };
+    this.io.emit("triage:message", { taskId, message: aiTriageMsg });
+  }
+
+  /**
+   * Approve a triage analysis: post the comment to GitHub, apply labels, mark as approved.
+   */
+  async approveTriage(taskId: string): Promise<void> {
+    const db = getDb();
+    const task = db
+      .select()
+      .from(schema.kanbanTasks)
+      .where(eq(schema.kanbanTasks.id, taskId))
+      .get();
+    if (!task) throw new Error("Task not found");
+
+    // Extract issue number
+    const issueLabel = (task.labels as string[]).find((l) => l.startsWith("github-issue-"));
+    if (!issueLabel) throw new Error("Task has no associated GitHub issue");
+    const issueNumber = parseInt(issueLabel.replace("github-issue-", ""), 10);
+
+    const project = db
+      .select()
+      .from(schema.projects)
+      .where(eq(schema.projects.id, task.projectId))
+      .get();
+    const repo = project?.githubRepo;
+    if (!repo) throw new Error("Project has no GitHub repo configured");
+
+    const token = resolveGitHubToken(task.projectId);
+    if (!token) throw new Error("No GitHub token available");
+
+    // Find the latest assistant message with metadata
+    const messages = db
+      .select()
+      .from(schema.triageMessages)
+      .where(eq(schema.triageMessages.taskId, taskId))
+      .all();
+
+    const lastAssistant = [...messages]
+      .reverse()
+      .find((m) => m.role === "assistant" && m.metadata);
+
+    const metadata = lastAssistant?.metadata as TriageResult | undefined;
+
+    // Apply labels to GitHub issue
+    if (metadata?.labels && metadata.labels.length > 0) {
+      try {
+        await addLabelsToIssue(repo, token, issueNumber, metadata.labels);
+      } catch (err) {
+        console.error(`[PipelineManager] Failed to apply labels to #${issueNumber}:`, err);
+      }
+    }
+
+    // Post the triage analysis as a comment
+    const comment = metadata?.comment ?? lastAssistant?.content ?? "";
+    if (comment) {
+      try {
+        const heading = `Triage: ${metadata?.classification ?? "analysis"}`;
+        await createIssueComment(
+          repo,
+          token,
+          issueNumber,
+          formatBotComment(heading, comment),
+        );
+      } catch (err) {
+        console.error(`[PipelineManager] Failed to post triage comment on #${issueNumber}:`, err);
+      }
+    }
+
+    // Apply "triaged" label
+    try {
+      await addLabelsToIssue(repo, token, issueNumber, ["triaged"]);
+    } catch (err) {
+      console.error(`[PipelineManager] Failed to apply triaged label to #${issueNumber}:`, err);
+    }
+
+    // Update task status
+    const now = new Date().toISOString();
+    db.update(schema.kanbanTasks)
+      .set({ triageStatus: "approved", updatedAt: now })
+      .where(eq(schema.kanbanTasks.id, taskId))
+      .run();
+
+    const updated = db
+      .select()
+      .from(schema.kanbanTasks)
+      .where(eq(schema.kanbanTasks.id, taskId))
+      .get();
+    if (updated) {
+      this.io.emit("kanban:task-updated", updated as unknown as KanbanTask);
+    }
+    this.io.emit("triage:status-changed", { taskId, status: "approved" });
+
+    console.log(`[PipelineManager] Triage approved for task ${taskId} (issue #${issueNumber})`);
   }
 
   // ─── Config helpers ──────────────────────────────────────────────
@@ -619,41 +852,36 @@ export class PipelineManager {
 
       parsed.shouldProceed = !!parsed.shouldProceed;
 
-      // Apply labels
-      if (parsed.labels && parsed.labels.length > 0) {
-        try {
-          await addLabelsToIssue(repo, token, issue.number, parsed.labels);
-        } catch (err) {
-          console.error(`[PipelineManager] Failed to apply labels to #${issue.number}:`, err);
-        }
-      }
-
-      // Post the triage analysis as a comment on the issue for review
-      try {
-        const heading = parsed.shouldProceed
-          ? `Triage: ${parsed.classification}`
-          : `Triage: ${parsed.classification}`;
-        await createIssueComment(
-          repo,
-          token,
-          issue.number,
-          formatBotComment(heading, parsed.comment),
-        );
-      } catch (err) {
-        console.error(`[PipelineManager] Failed to post triage comment on #${issue.number}:`, err);
-      }
-
-      // Apply "triaged" label so we don't re-process
-      try {
-        await addLabelsToIssue(repo, token, issue.number, ["triaged"]);
-      } catch (err) {
-        console.error(`[PipelineManager] Failed to apply triaged label to #${issue.number}:`, err);
-      }
-
       console.log(`[PipelineManager] Triaged issue #${issue.number} as "${parsed.classification}" (proceed=${parsed.shouldProceed})`);
 
-      // Create a kanban task in the Triage column (read-only view of all open issues)
-      this.createTriageTask(projectId, issue.number, issue.title, parsed.classification, issue.body ?? "", parsed.comment);
+      // Create a kanban task in the Triage column with pending status
+      this.createTriageTask(projectId, issue.number, issue.title, parsed.classification, issue.body ?? "", parsed.comment, "pending");
+
+      // Store the AI analysis as a triage message for the interactive chat
+      const triageDb = getDb();
+      const label = `github-issue-${issue.number}`;
+      const triageTask = triageDb
+        .select()
+        .from(schema.kanbanTasks)
+        .where(eq(schema.kanbanTasks.projectId, projectId))
+        .all()
+        .find((t: { labels: unknown }) => (t.labels as string[]).includes(label));
+
+      if (triageTask) {
+        const msgId = nanoid();
+        const now = new Date().toISOString();
+        triageDb.insert(schema.triageMessages).values({
+          id: msgId,
+          taskId: triageTask.id,
+          role: "assistant",
+          content: parsed.comment,
+          metadata: parsed as unknown as Record<string, unknown>,
+          createdAt: now,
+        }).run();
+
+        const triageMsg = { id: msgId, taskId: triageTask.id, role: "assistant" as const, content: parsed.comment, metadata: parsed as unknown as Record<string, unknown>, createdAt: now };
+        this.io.emit("triage:message", { taskId: triageTask.id, message: triageMsg });
+      }
     } catch (err) {
       console.error(`[PipelineManager] Triage LLM call failed for #${issue.number}:`, err);
     }
@@ -1859,6 +2087,7 @@ export class PipelineManager {
     classification: string,
     body: string,
     triageComment?: string,
+    triageStatus?: "pending" | "approved" | null,
   ): void {
     const db = getDb();
     const label = `github-issue-${issueNumber}`;
@@ -1903,6 +2132,7 @@ export class PipelineManager {
       pipelineStage: null,
       pipelineStages: [] as string[],
       pipelineAttempt: 0,
+      triageStatus: triageStatus ?? null,
       createdAt: now,
       updatedAt: now,
     };

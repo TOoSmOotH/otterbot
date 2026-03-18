@@ -1,7 +1,7 @@
 import type { Agent, AgentStatus, AgentActivityRecord } from "./agent.js";
 import type { BusMessage, Conversation, ChatAttachment, ConversationContextSize } from "./message.js";
 import type { RegistryEntry, Project, ProjectAgentAssignments, ProjectPipelineConfig } from "./registry.js";
-import type { KanbanTask } from "./kanban.js";
+import type { KanbanTask, TriageMessage } from "./kanban.js";
 import type { SceneZone } from "./environment.js";
 import type { CodingAgentSession, CodingAgentMessage, CodingAgentFileDiff, CodingAgentPermission } from "./coding-agent.js";
 import type { SoulDocument, Memory, MemoryEpisode, SoulSuggestion } from "./memory.js";
@@ -80,6 +80,10 @@ export interface ServerToClientEvents {
   "googlechat:status": (data: { status: "connected" | "disconnected" | "error" }) => void;
   "mastodon:pairing-request": (data: { code: string; mastodonId: string; mastodonAcct: string }) => void;
   "mastodon:status": (data: { status: "connected" | "disconnected" | "error"; acct?: string }) => void;
+  // Triage chat
+  "triage:message": (data: { taskId: string; message: TriageMessage }) => void;
+  "triage:status-changed": (data: { taskId: string; status: string }) => void;
+
   "merge-queue:updated": (data: { entries: MergeQueueEntry[] }) => void;
   "merge-queue:entry-updated": (entry: MergeQueueEntry) => void;
   "mcp:status": (runtime: McpServerRuntime) => void;
@@ -285,6 +289,20 @@ export interface ClientToServerEvents {
   "kanban:retriage": (
     data: { taskId: string },
     callback?: (ack: { ok: boolean; error?: string }) => void,
+  ) => void;
+
+  // Triage chat
+  "triage:send-message": (
+    data: { taskId: string; content: string },
+    callback?: (ack: { ok: boolean; error?: string }) => void,
+  ) => void;
+  "triage:approve": (
+    data: { taskId: string },
+    callback?: (ack: { ok: boolean; error?: string }) => void,
+  ) => void;
+  "triage:load-messages": (
+    data: { taskId: string },
+    callback: (messages: TriageMessage[]) => void,
   ) => void;
 
   // Merge queue

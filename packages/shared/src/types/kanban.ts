@@ -24,8 +24,18 @@ export interface KanbanTask {
   pipelineStages: string[];
   taskNumber: number | null;
   pipelineAttempt: number;
+  triageStatus: "pending" | "approved" | null;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface TriageMessage {
+  id: string;
+  taskId: string;
+  role: "user" | "assistant";
+  content: string;
+  metadata?: Record<string, unknown>;
+  createdAt: string;
 }
 
 export interface KanbanTaskCreate {

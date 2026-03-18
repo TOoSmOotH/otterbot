@@ -198,6 +198,16 @@ export function KanbanCard({
             {MERGE_QUEUE_STATUS_CONFIG[mqEntry.status].label}
           </span>
         )}
+        {task.column === "triage" && task.triageStatus === "pending" && (
+          <span className="text-[10px] bg-yellow-500/15 text-yellow-400 rounded px-1.5 py-0.5 font-medium">
+            Pending
+          </span>
+        )}
+        {task.column === "triage" && task.triageStatus === "approved" && (
+          <span className="text-[10px] bg-emerald-500/15 text-emerald-400 rounded px-1.5 py-0.5 font-medium">
+            Approved
+          </span>
+        )}
         {task.column === "backlog" && task.blockedBy?.length > 0 && (
           <span className="text-[10px] bg-destructive/15 text-destructive rounded px-1.5 py-0.5 font-medium">
             Blocked

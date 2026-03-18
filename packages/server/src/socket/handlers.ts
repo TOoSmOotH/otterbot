@@ -1580,6 +1580,50 @@ export function setupSocketHandlers(
       }
     });
 
+    // ─── Triage chat handlers ─────────────────────────────────────
+    socket.on("triage:send-message", async (data, callback) => {
+      if (!deps?.pipelineManager) {
+        callback?.({ ok: false, error: "Pipeline manager not available" });
+        return;
+      }
+      try {
+        await deps.pipelineManager.triageReply(data.taskId, data.content);
+        callback?.({ ok: true });
+      } catch (err) {
+        callback?.({ ok: false, error: err instanceof Error ? err.message : "Unknown error" });
+      }
+    });
+
+    socket.on("triage:approve", async (data, callback) => {
+      if (!deps?.pipelineManager) {
+        callback?.({ ok: false, error: "Pipeline manager not available" });
+        return;
+      }
+      try {
+        await deps.pipelineManager.approveTriage(data.taskId);
+        callback?.({ ok: true });
+      } catch (err) {
+        callback?.({ ok: false, error: err instanceof Error ? err.message : "Unknown error" });
+      }
+    });
+
+    socket.on("triage:load-messages", (data, callback) => {
+      const db = getDb();
+      const messages = db
+        .select()
+        .from(schema.triageMessages)
+        .where(eq(schema.triageMessages.taskId, data.taskId))
+        .all();
+      callback(messages.map((m) => ({
+        id: m.id,
+        taskId: m.taskId,
+        role: m.role as "user" | "assistant",
+        content: m.content,
+        metadata: m.metadata as Record<string, unknown> | undefined,
+        createdAt: m.createdAt,
+      })));
+    });
+
     // ─── Merge queue handlers ───────────────────────────────────────
     if (deps?.mergeQueue) {
       const mq = deps.mergeQueue;
