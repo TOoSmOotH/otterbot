@@ -79,6 +79,7 @@ import { createAppTestResponsiveTool } from "./app-test-responsive.js";
 import { createAppTestA11yTool } from "./app-test-a11y.js";
 import { createAppDeployTool } from "./app-deploy.js";
 import { McpClientManager } from "../mcp/mcp-client-manager.js";
+import { resolveStudioConfig } from "../studios/studio-config-service.js";
 import { McpServerService as McpServerServiceRef } from "../mcp/mcp-service.js";
 
 type ToolCreator = (ctx: ToolContext) => unknown;
@@ -228,6 +229,24 @@ export function createAdminTools(): Record<string, unknown> {
 }
 
 /**
+ * Remove studio tools that have been disabled via studio configuration.
+ * Checks each studio type's resolved config and removes disabled tools from the set.
+ */
+function filterDisabledStudioTools(toolNames: Set<string>): void {
+  try {
+    const studioTypes = ["game", "video", "app"] as const;
+    for (const type of studioTypes) {
+      const resolved = resolveStudioConfig(type);
+      for (const disabled of resolved.disabledTools) {
+        toolNames.delete(disabled);
+      }
+    }
+  } catch {
+    // DB may not be ready during startup — ignore
+  }
+}
+
+/**
  * Create tools for an agent, merging tools from assigned skills.
  * Returns the tools and any additional system prompt content from skills.
  */
@@ -261,6 +280,9 @@ export function createToolsForAgent(
       console.warn("[tool-factory] Failed to load agent skills:", err);
     }
   }
+
+  // Filter out studio tools that have been disabled in studio config
+  filterDisabledStudioTools(allToolNames);
 
   const tools = createTools([...allToolNames], ctx);
   return { tools, skillPromptContent };

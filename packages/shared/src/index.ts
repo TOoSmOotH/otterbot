@@ -23,3 +23,4 @@ export * from "./types/ssh.js";
 export * from "./types/game.js";
 export * from "./types/app.js";
 export * from "./types/video.js";
+export * from "./types/studio-config.js";

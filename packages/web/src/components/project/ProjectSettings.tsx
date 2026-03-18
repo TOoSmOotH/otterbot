@@ -381,6 +381,20 @@ export function ProjectSettings({ projectId }: { projectId: string }) {
               </label>
             ))}
           </div>
+          <p className="text-xs text-muted-foreground mt-2">
+            Configure studio models, tools, and providers in{" "}
+            <button
+              type="button"
+              onClick={() => {
+                // Navigate to settings studios tab
+                const event = new CustomEvent("navigate-settings", { detail: "studios" });
+                window.dispatchEvent(event);
+              }}
+              className="text-blue-400 hover:text-blue-300 underline"
+            >
+              Settings &rarr; Studios
+            </button>
+          </p>
         </div>
 
         {/* Show in 3D View toggle */}

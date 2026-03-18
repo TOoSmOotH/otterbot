@@ -30,7 +30,8 @@ export type SettingsSection =
   | "mcp-servers"
   | "ssh"
   | "security"
-  | "asset-gen";
+  | "asset-gen"
+  | "studios";
 
 export type ConfigStatus = "connected" | "configured" | "partial" | "unconfigured" | "none";
 
@@ -69,6 +70,7 @@ const ICONS = {
   "mcp-servers": ["M12 22v-5", "M9 8V2", "M15 8V2", "M18 8v5a6 6 0 0 1-6 6h0a6 6 0 0 1-6-6V8z"],
   ssh: ["M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"],
   "asset-gen": ["M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z", "M3.27 6.96L12 12.01l8.73-5.05", "M12 22.08V12"],
+  studios: ["M4 4h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z", "M2 10h20", "M12 10v10"],
 } as const;
 
 export type NavIconId = keyof typeof ICONS;
@@ -233,6 +235,13 @@ export const SETTINGS_NAV: NavGroup[] = [
         description: "SSH key management for Git",
         icon: "ssh",
         keywords: ["key", "git", "deploy", "fingerprint"],
+      },
+      {
+        id: "studios",
+        label: "Studios",
+        description: "LLM models, tools, and providers per studio type",
+        icon: "studios",
+        keywords: ["studio", "game", "video", "app", "tool", "model", "override", "sound", "music"],
       },
       {
         id: "asset-gen",

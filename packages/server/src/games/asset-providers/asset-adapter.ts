@@ -16,6 +16,8 @@ import type {
   ModelGenProvider,
   SoundGenProvider,
 } from "./types.js";
+import type { StudioType } from "@otterbot/shared";
+import { resolveStudioConfig } from "../../studios/studio-config-service.js";
 import { ProceduralImageProvider } from "./procedural-image-provider.js";
 import { ProceduralModelProvider } from "./procedural-model-provider.js";
 import { ProceduralSoundProvider } from "./procedural-sound-provider.js";
@@ -82,12 +84,34 @@ function resolveBaseUrl(providerType: AssetProviderType): string | undefined {
 }
 
 // ---------------------------------------------------------------------------
+// Studio config helper
+// ---------------------------------------------------------------------------
+
+/** Resolve the effective asset provider type, checking studio overrides first. */
+function resolveAssetProviderType(
+  configKey: string,
+  assetCategory: "image" | "model" | "sound",
+  studioType?: StudioType,
+): AssetProviderType {
+  if (studioType) {
+    try {
+      const resolved = resolveStudioConfig(studioType);
+      const override = resolved.asset[assetCategory];
+      if (override && override !== "") return override as AssetProviderType;
+    } catch {
+      // studio config not available — fall through
+    }
+  }
+  return (getConfig(configKey) ?? "procedural") as AssetProviderType;
+}
+
+// ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 
 /** Get the configured image generation provider (falls back to procedural). */
-export function getImageProvider(): ImageGenProvider {
-  const providerType = (getConfig(CONFIG_IMAGE_PROVIDER) ?? "procedural") as AssetProviderType;
+export function getImageProvider(studioType?: StudioType): ImageGenProvider {
+  const providerType = resolveAssetProviderType(CONFIG_IMAGE_PROVIDER, "image", studioType);
 
   switch (providerType) {
     case "openai": {
@@ -117,8 +141,8 @@ export function getImageProvider(): ImageGenProvider {
 }
 
 /** Get the configured 3D model generation provider (falls back to procedural). */
-export function getModelProvider(): ModelGenProvider {
-  const providerType = (getConfig(CONFIG_MODEL_PROVIDER) ?? "procedural") as AssetProviderType;
+export function getModelProvider(studioType?: StudioType): ModelGenProvider {
+  const providerType = resolveAssetProviderType(CONFIG_MODEL_PROVIDER, "model", studioType);
 
   switch (providerType) {
     // Future: Replicate 3D model generation (e.g., TripoSR, InstantMesh)
@@ -129,8 +153,8 @@ export function getModelProvider(): ModelGenProvider {
 }
 
 /** Get the configured sound generation provider (falls back to procedural). */
-export function getSoundProvider(): SoundGenProvider {
-  const providerType = (getConfig(CONFIG_SOUND_PROVIDER) ?? "procedural") as AssetProviderType;
+export function getSoundProvider(studioType?: StudioType): SoundGenProvider {
+  const providerType = resolveAssetProviderType(CONFIG_SOUND_PROVIDER, "sound", studioType);
 
   switch (providerType) {
     case "replicate": {

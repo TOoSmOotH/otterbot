@@ -5645,6 +5645,46 @@ async function main() {
   });
 
   // =========================================================================
+  // Studio Configuration REST routes
+  // =========================================================================
+
+  app.get("/api/settings/studio-config", async () => {
+    const { getStudioConfigBundle } = await import("./studios/studio-config-service.js");
+    return getStudioConfigBundle();
+  });
+
+  app.put<{
+    Params: { scope: string };
+    Body: import("@otterbot/shared").StudioConfig;
+  }>("/api/settings/studio-config/:scope", async (req, reply) => {
+    const { scope } = req.params;
+    const validScopes = ["global", "game", "video", "app"];
+    if (!validScopes.includes(scope)) {
+      reply.code(400);
+      return { error: `Invalid scope: ${scope}. Must be one of: ${validScopes.join(", ")}` };
+    }
+    const { setStudioConfig } = await import("./studios/studio-config-service.js");
+    setStudioConfig(scope as "global" | import("@otterbot/shared").StudioType, req.body);
+    const { getStudioConfigBundle } = await import("./studios/studio-config-service.js");
+    return getStudioConfigBundle();
+  });
+
+  app.delete<{
+    Params: { scope: string };
+  }>("/api/settings/studio-config/:scope", async (req, reply) => {
+    const { scope } = req.params;
+    const validScopes = ["global", "game", "video", "app"];
+    if (!validScopes.includes(scope)) {
+      reply.code(400);
+      return { error: `Invalid scope: ${scope}. Must be one of: ${validScopes.join(", ")}` };
+    }
+    const { clearStudioConfig } = await import("./studios/studio-config-service.js");
+    clearStudioConfig(scope as "global" | import("@otterbot/shared").StudioType);
+    const { getStudioConfigBundle } = await import("./studios/studio-config-service.js");
+    return getStudioConfigBundle();
+  });
+
+  // =========================================================================
   // Todos REST routes
   // =========================================================================
 
