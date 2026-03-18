@@ -3,12 +3,12 @@ import { useSettingsStore } from "../../stores/settings-store";
 import { ModelCombobox } from "./ModelCombobox";
 import type { ModelOption } from "../../stores/settings-store";
 import type { SettingsSection } from "./settings-nav";
-import type { StudioConfigBundle, StudioConfig, StudioType } from "../../../../shared/src/types/studio-config";
+import type { StudioConfigBundle, StudioConfig, StudioType } from "@otterbot/shared";
 import {
   STUDIO_TOOLS,
   STUDIO_TOOL_LABELS,
   STUDIO_TYPE_LABELS,
-} from "../../../../shared/src/types/studio-config";
+} from "@otterbot/shared";
 
 const STUDIO_TYPES: StudioType[] = ["game", "video", "app"];
 

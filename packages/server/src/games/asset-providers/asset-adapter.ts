@@ -15,7 +15,7 @@ import type {
   ModelGenProvider,
   SoundGenProvider,
 } from "./types.js";
-import type { StudioType } from "../../../../shared/src/types/studio-config.js";
+import type { StudioType } from "@otterbot/shared";
 import { resolveStudioConfig } from "../../studios/studio-config-service.js";
 import { ProceduralImageProvider } from "./procedural-image-provider.js";
 import { ProceduralModelProvider } from "./procedural-model-provider.js";

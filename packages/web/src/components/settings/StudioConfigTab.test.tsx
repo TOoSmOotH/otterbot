@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
-import type { StudioConfigBundle } from "../../../../shared/src/types/studio-config";
+import type { StudioConfigBundle } from "@otterbot/shared";
 
 type HookStates = unknown[];
 

@@ -11,7 +11,7 @@ import type {
   StudioConfig,
   StudioConfigBundle,
   ResolvedStudioConfig,
-} from "../../../shared/src/types/studio-config.js";
+} from "@otterbot/shared";
 
 type Scope = "global" | StudioType;
 
