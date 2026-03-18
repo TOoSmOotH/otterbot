@@ -5611,11 +5611,15 @@ async function main() {
   // =========================================================================
 
   app.get("/api/settings/asset-providers", async () => {
-    const { getAssetProviderConfig } = await import("./games/asset-providers/asset-adapter.js");
+    const {
+      getAssetProviderConfig,
+      getAssetProviderCredentialStatuses,
+    } = await import("./games/asset-providers/asset-adapter.js");
     const { ASSET_PROVIDER_META } = await import("./games/asset-providers/types.js");
     return {
       providers: ASSET_PROVIDER_META,
       config: getAssetProviderConfig(),
+      credentialStatus: getAssetProviderCredentialStatuses(),
     };
   });
 

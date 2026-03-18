@@ -9,14 +9,13 @@
 
 import { getConfig } from "../../auth/auth.js";
 import { getDb, schema } from "../../db/index.js";
-import { eq } from "drizzle-orm";
 import type {
   AssetProviderType,
   ImageGenProvider,
   ModelGenProvider,
   SoundGenProvider,
 } from "./types.js";
-import type { StudioType } from "@otterbot/shared";
+import type { StudioType } from "../../../../shared/src/types/studio-config.js";
 import { resolveStudioConfig } from "../../studios/studio-config-service.js";
 import { ProceduralImageProvider } from "./procedural-image-provider.js";
 import { ProceduralModelProvider } from "./procedural-model-provider.js";
@@ -25,6 +24,16 @@ import { OpenAIImageProvider } from "./openai-image-provider.js";
 import { ReplicateImageProvider } from "./replicate-image-provider.js";
 import { ReplicateSoundProvider } from "./replicate-sound-provider.js";
 import { StableDiffusionImageProvider } from "./sd-image-provider.js";
+
+export interface AssetProviderCredentialStatus {
+  type: AssetProviderType;
+  dedicatedApiKeySet: boolean;
+  dedicatedBaseUrlSet: boolean;
+  providerApiKeySet: boolean;
+  providerBaseUrlSet: boolean;
+  apiKeyReady: boolean;
+  baseUrlReady: boolean;
+}
 
 // Config keys used by the asset system
 const CONFIG_IMAGE_PROVIDER = "asset:image:provider"; // "openai" | "replicate" | "stable-diffusion" | "procedural"
@@ -81,6 +90,26 @@ function resolveBaseUrl(providerType: AssetProviderType): string | undefined {
   }
 
   return undefined;
+}
+
+function getProviderTableCredentialStatus(providerType: AssetProviderType): {
+  apiKeySet: boolean;
+  baseUrlSet: boolean;
+} {
+  try {
+    const db = getDb();
+    const rows = db.select().from(schema.providers).all();
+    const row = rows.find((candidate) => candidate.type === providerType);
+    return {
+      apiKeySet: !!row?.apiKey,
+      baseUrlSet: !!row?.baseUrl,
+    };
+  } catch {
+    return {
+      apiKeySet: false,
+      baseUrlSet: false,
+    };
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -170,6 +199,31 @@ export function getSoundProvider(studioType?: StudioType): SoundGenProvider {
     default:
       return proceduralSound;
   }
+}
+
+export function getAssetProviderCredentialStatuses(): Record<AssetProviderType, AssetProviderCredentialStatus> {
+  const providerTypes: AssetProviderType[] = [
+    "openai",
+    "replicate",
+    "stable-diffusion",
+    "procedural",
+  ];
+
+  return Object.fromEntries(providerTypes.map((providerType) => {
+    const providerTableStatus = getProviderTableCredentialStatus(providerType);
+    const dedicatedApiKeySet = !!getConfig(`asset:${providerType}:api_key`);
+    const dedicatedBaseUrlSet = !!getConfig(`asset:${providerType}:base_url`);
+
+    return [providerType, {
+      type: providerType,
+      dedicatedApiKeySet,
+      dedicatedBaseUrlSet,
+      providerApiKeySet: providerTableStatus.apiKeySet,
+      providerBaseUrlSet: providerTableStatus.baseUrlSet,
+      apiKeyReady: dedicatedApiKeySet || providerTableStatus.apiKeySet,
+      baseUrlReady: dedicatedBaseUrlSet || providerTableStatus.baseUrlSet,
+    }];
+  })) as Record<AssetProviderType, AssetProviderCredentialStatus>;
 }
 
 /** Get the currently configured provider type for each asset category. */

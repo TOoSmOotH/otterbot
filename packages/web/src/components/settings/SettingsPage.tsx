@@ -73,6 +73,17 @@ export function SettingsPage({ onClose, initialSection }: SettingsPageProps) {
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [handleKeyDown]);
 
+  useEffect(() => {
+    const handleNavigateSettings = (event: Event) => {
+      const customEvent = event as CustomEvent<SettingsSection>;
+      if (!customEvent.detail) return;
+      setActiveSection(customEvent.detail);
+    };
+
+    window.addEventListener("navigate-settings", handleNavigateSettings);
+    return () => window.removeEventListener("navigate-settings", handleNavigateSettings);
+  }, []);
+
   const renderContent = () => {
     if (activeSection === "overview") return <SettingsOverview onSelect={setActiveSection} statusMap={statusMap} />;
     if (activeSection === "appearance") return <AppearanceTab />;
