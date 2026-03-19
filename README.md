@@ -574,6 +574,9 @@ pnpm docker:dev       # Start with hot-reload (dev mode)
 ./scripts/docker-stack.sh local-ai-nvidia   # Production + both sidecars + NVIDIA GPU
 ./scripts/docker-stack.sh local-ai-amd      # Production + both sidecars + AMD GPU
 ./scripts/docker-stack.sh local-ai --build  # Same, but rebuild images first
+./scripts/docker-stack.sh dev               # Dev stack with hot reload
+./scripts/docker-stack.sh dev-local-ai      # Dev stack + ComfyUI + TRELLIS
+./scripts/docker-stack.sh dev-local-ai-nvidia # Dev stack + both sidecars + NVIDIA GPU
 ```
 
 ## Environment Variables
