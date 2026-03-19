@@ -29,6 +29,7 @@ import {
   ComfyUIImageProvider,
   getComfyUiHealthStatus,
   listComfyPresets,
+  listComfyStarterPacks,
   listManagedComfyModels,
 } from "./comfyui.js";
 
@@ -54,6 +55,7 @@ export interface ComfyUiSettingsSummary {
   sidecarUrl: string;
   health: Awaited<ReturnType<typeof getComfyUiHealthStatus>>;
   presets: ReturnType<typeof listComfyPresets>;
+  starterPacks: ReturnType<typeof listComfyStarterPacks>;
   models: ReturnType<typeof listManagedComfyModels>;
 }
 
@@ -378,6 +380,7 @@ export async function getComfyUiSettingsSummary(): Promise<ComfyUiSettingsSummar
     sidecarUrl: process.env.OTTERBOT_COMFYUI_URL ?? "http://comfyui:8188",
     health: await getComfyUiHealthStatus(baseUrl),
     presets: listComfyPresets(),
+    starterPacks: listComfyStarterPacks(),
     models: listManagedComfyModels(),
   };
 }

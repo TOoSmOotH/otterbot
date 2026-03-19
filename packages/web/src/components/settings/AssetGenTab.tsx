@@ -69,6 +69,7 @@ interface ManagedComfyModel {
   status: "not-installed" | "installing" | "installed" | "error";
   installedPath?: string;
   checkpointName?: string;
+  starterPackId?: string;
   error?: string;
 }
 
@@ -81,6 +82,19 @@ interface ComfyUiHealth {
   baseUrl: string;
   message: string;
   checkpoints: string[];
+  gpuName?: string;
+  totalVramMb?: number;
+  freeVramMb?: number;
+  tier?: "cpu" | "low" | "medium" | "high";
+}
+
+interface ComfyStarterPack {
+  id: string;
+  label: string;
+  description: string;
+  recommendedTiers: Array<"cpu" | "low" | "medium" | "high">;
+  estimatedSizeGb: number;
+  presetIds: string[];
 }
 
 interface ComfyUiSummary {
@@ -88,6 +102,7 @@ interface ComfyUiSummary {
   sidecarUrl: string;
   health: ComfyUiHealth;
   presets: ComfyPreset[];
+  starterPacks: ComfyStarterPack[];
   models: ManagedComfyModel[];
 }
 
@@ -140,6 +155,7 @@ export function AssetGenTab() {
     filename: string;
   }>({ label: "", sourceUrl: "", modelType: "checkpoints", filename: "" });
   const [installingModelId, setInstallingModelId] = useState<string | null>(null);
+  const [installingPackId, setInstallingPackId] = useState<string | null>(null);
   const [addingModel, setAddingModel] = useState(false);
 
   useEffect(() => {
@@ -234,6 +250,16 @@ export function AssetGenTab() {
       await reloadComfyui();
     } finally {
       setInstallingModelId(null);
+    }
+  };
+
+  const handleInstallPack = async (id: string) => {
+    setInstallingPackId(id);
+    try {
+      await fetch(`/api/settings/comfyui/packs/${id}/install`, { method: "POST" });
+      await reloadComfyui();
+    } finally {
+      setInstallingPackId(null);
     }
   };
 
@@ -340,6 +366,13 @@ export function AssetGenTab() {
               <p>{comfyui.health.message}</p>
               <p>Configured endpoint: <code>{comfyui.baseUrl}</code></p>
               <p>Detected checkpoints: {comfyui.health.checkpoints.length > 0 ? comfyui.health.checkpoints.join(", ") : "none"}</p>
+              {(comfyui.health.gpuName || comfyui.health.totalVramMb || comfyui.health.freeVramMb) && (
+                <p>
+                  Sidecar compute: {comfyui.health.gpuName ?? "GPU"} · {comfyui.health.totalVramMb ? `${Math.round(comfyui.health.totalVramMb / 1024)} GB VRAM` : "VRAM unknown"}
+                  {comfyui.health.freeVramMb ? ` · ${Math.round(comfyui.health.freeVramMb / 1024)} GB free` : ""}
+                </p>
+              )}
+              {comfyui.health.tier && <p>Recommended tier: <span className="uppercase">{comfyui.health.tier}</span></p>}
               <p>Sidecar startup: <code>docker compose -f docker-compose.prod.yml -f docker-compose.comfyui.yml up -d</code></p>
             </div>
             <div className="rounded-lg bg-zinc-950/60 p-3 text-xs text-zinc-300 space-y-2">
@@ -363,9 +396,53 @@ export function AssetGenTab() {
 
           <div className="rounded-lg border border-zinc-700/60 bg-zinc-950/60 p-4 space-y-3">
             <div>
-              <h4 className="text-sm font-medium text-zinc-100">Managed Models</h4>
+              <h4 className="text-sm font-medium text-zinc-100">Starter Packs</h4>
               <p className="mt-1 text-xs text-zinc-400">
-                Add checkpoints, LoRAs, VAEs, or ControlNet weights by URL. Installation is explicit and writes into the shared ComfyUI model volume.
+                Start here. Otterbot installs a recommended local image pack instead of asking you to think about checkpoints first.
+              </p>
+            </div>
+            <div className="grid gap-3 lg:grid-cols-2">
+              {comfyui.starterPacks.map((pack) => {
+                const recommended = !comfyui.health.tier || pack.recommendedTiers.includes(comfyui.health.tier);
+                const installedModels = comfyui.models.filter((model) => model.starterPackId === pack.id && model.status === "installed");
+                const isInstalled = installedModels.length > 0;
+                return (
+                  <div key={pack.id} className="rounded border border-zinc-800 bg-zinc-900/70 p-3 text-xs text-zinc-300">
+                    <div className="flex items-center justify-between gap-2">
+                      <div>
+                        <p className="text-zinc-100">{pack.label}</p>
+                        <p className="mt-1 text-zinc-500">{pack.description}</p>
+                      </div>
+                      {recommended && (
+                        <span className="rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] text-emerald-300 uppercase">
+                          Recommended
+                        </span>
+                      )}
+                    </div>
+                    <p className="mt-2 text-zinc-500">
+                      Approx. {pack.estimatedSizeGb.toFixed(1)} GB · Presets: {pack.presetIds.join(", ")}
+                    </p>
+                    <div className="mt-3 flex items-center gap-2">
+                      <button
+                        onClick={() => handleInstallPack(pack.id)}
+                        disabled={installingPackId === pack.id}
+                        className="text-xs px-3 py-1 rounded bg-blue-600 text-blue-50 hover:bg-blue-500 transition-colors disabled:opacity-60"
+                      >
+                        {installingPackId === pack.id ? "Installing..." : isInstalled ? "Reinstall Pack" : "Install Pack"}
+                      </button>
+                      {isInstalled && <span className="text-emerald-300">Installed</span>}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="rounded-lg border border-zinc-700/60 bg-zinc-950/60 p-4 space-y-3">
+            <div>
+              <h4 className="text-sm font-medium text-zinc-100">Advanced Models</h4>
+              <p className="mt-1 text-xs text-zinc-400">
+                Advanced: add checkpoints, LoRAs, VAEs, or ControlNet weights by URL. Most users should start with a Starter Pack instead.
               </p>
             </div>
             <div className="grid gap-2 md:grid-cols-2">

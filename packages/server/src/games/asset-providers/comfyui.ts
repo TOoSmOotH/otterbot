@@ -38,6 +38,7 @@ export interface ManagedComfyModelRecord {
   status: ManagedModelStatus;
   installedPath?: string;
   checkpointName?: string;
+  starterPackId?: string;
   error?: string;
   createdAt: string;
   updatedAt: string;
@@ -50,6 +51,25 @@ export interface ComfyUiHealthStatus {
   baseUrl: string;
   message: string;
   checkpoints: string[];
+  gpuName?: string;
+  totalVramMb?: number;
+  freeVramMb?: number;
+  tier?: "cpu" | "low" | "medium" | "high";
+}
+
+export interface ComfyStarterPack {
+  id: string;
+  label: string;
+  description: string;
+  recommendedTiers: Array<"cpu" | "low" | "medium" | "high">;
+  estimatedSizeGb: number;
+  presetIds: string[];
+  models: Array<{
+    label: string;
+    sourceUrl: string;
+    modelType: ManagedComfyModelRecord["modelType"];
+    filename: string;
+  }>;
 }
 
 const PRESETS: ComfyPresetDefinition[] = [
@@ -99,6 +119,80 @@ const PRESETS: ComfyPresetDefinition[] = [
     defaults: { sampler: "euler", steps: 24, cfgScale: 7, width: 768, height: 768 },
   },
 ];
+
+const STARTER_PACKS: ComfyStarterPack[] = [
+  {
+    id: "logos-and-icons",
+    label: "Logos & Icons",
+    description: "General-purpose local image pack for app logos, icons, and simple marketing assets.",
+    recommendedTiers: ["low", "medium", "high"],
+    estimatedSizeGb: 2.1,
+    presetIds: ["icon-flat-v1", "general-image-v1"],
+    models: [
+      {
+        label: "SD 1.5 Base",
+        sourceUrl: "https://huggingface.co/runwayml/stable-diffusion-v1-5/resolve/main/v1-5-pruned-emaonly.ckpt",
+        modelType: "checkpoints",
+        filename: "sd15-base.ckpt",
+      },
+    ],
+  },
+  {
+    id: "game-textures",
+    label: "Game Textures",
+    description: "Starter pack for terrain, materials, tiles, and top-down texture generation.",
+    recommendedTiers: ["low", "medium", "high"],
+    estimatedSizeGb: 2.1,
+    presetIds: ["texture-tile-v1", "general-image-v1"],
+    models: [
+      {
+        label: "SD 1.5 Base",
+        sourceUrl: "https://huggingface.co/runwayml/stable-diffusion-v1-5/resolve/main/v1-5-pruned-emaonly.ckpt",
+        modelType: "checkpoints",
+        filename: "sd15-base.ckpt",
+      },
+    ],
+  },
+  {
+    id: "pixel-art",
+    label: "Pixel Art",
+    description: "Starter pack for sprites and simple pixel-art assets. Uses the sprite preset and a lightweight base model.",
+    recommendedTiers: ["low", "medium", "high"],
+    estimatedSizeGb: 2.1,
+    presetIds: ["sprite-pixel-v1"],
+    models: [
+      {
+        label: "SD 1.5 Base",
+        sourceUrl: "https://huggingface.co/runwayml/stable-diffusion-v1-5/resolve/main/v1-5-pruned-emaonly.ckpt",
+        modelType: "checkpoints",
+        filename: "sd15-base.ckpt",
+      },
+    ],
+  },
+  {
+    id: "hero-images",
+    label: "Hero Images",
+    description: "Larger-format pack for website hero art and concept imagery.",
+    recommendedTiers: ["medium", "high"],
+    estimatedSizeGb: 2.1,
+    presetIds: ["hero-concept-v1", "general-image-v1"],
+    models: [
+      {
+        label: "SD 1.5 Base",
+        sourceUrl: "https://huggingface.co/runwayml/stable-diffusion-v1-5/resolve/main/v1-5-pruned-emaonly.ckpt",
+        modelType: "checkpoints",
+        filename: "sd15-base.ckpt",
+      },
+    ],
+  },
+];
+
+function detectTier(totalVramMb?: number): "cpu" | "low" | "medium" | "high" {
+  if (!totalVramMb || totalVramMb <= 0) return "cpu";
+  if (totalVramMb < 8 * 1024) return "low";
+  if (totalVramMb < 16 * 1024) return "medium";
+  return "high";
+}
 
 function ensureParentDir(filePath: string): void {
   const dir = dirname(filePath);
@@ -168,6 +262,10 @@ export function listComfyPresets(): ComfyPresetDefinition[] {
       ? preset.description
       : `${preset.description} Best on ${preset.recommendedTiers.join(", ")} compute tiers.`,
   }));
+}
+
+export function listComfyStarterPacks(): ComfyStarterPack[] {
+  return STARTER_PACKS;
 }
 
 export function chooseComfyPreset(options?: ImageGenOptions): ComfyPresetDefinition {
@@ -245,14 +343,30 @@ async function getCheckpointNames(baseUrl: string): Promise<string[]> {
 export async function getComfyUiHealthStatus(baseUrl = getDefaultBaseUrl()): Promise<ComfyUiHealthStatus> {
   const cleanUrl = baseUrl.replace(/\/$/, "");
   try {
-    await fetchJson(`${cleanUrl}/system_stats`);
+    const systemStats = await fetchJson<{
+      devices?: Array<{
+        name?: string;
+        type?: string;
+        vram_total?: number;
+        vram_free?: number;
+        torch_vram_total?: number;
+        torch_vram_free?: number;
+      }>;
+    }>(`${cleanUrl}/system_stats`);
     const checkpoints = await getCheckpointNames(cleanUrl);
+    const gpu = systemStats.devices?.find((device) => (device.type ?? "").toLowerCase() !== "cpu") ?? systemStats.devices?.[0];
+    const totalVramMb = gpu?.vram_total ?? gpu?.torch_vram_total ? Math.round((gpu?.vram_total ?? gpu?.torch_vram_total ?? 0) / (1024 * 1024)) : undefined;
+    const freeVramMb = gpu?.vram_free ?? gpu?.torch_vram_free ? Math.round((gpu?.vram_free ?? gpu?.torch_vram_free ?? 0) / (1024 * 1024)) : undefined;
     return {
       configured: true,
       reachable: true,
       api: "comfyui",
       baseUrl: cleanUrl,
       checkpoints,
+      gpuName: gpu?.name,
+      totalVramMb,
+      freeVramMb,
+      tier: detectTier(totalVramMb),
       message: checkpoints.length > 0
         ? `ComfyUI sidecar reachable at ${cleanUrl} with ${checkpoints.length} checkpoint${checkpoints.length === 1 ? "" : "s"} available.`
         : `ComfyUI sidecar reachable at ${cleanUrl}, but no checkpoints were detected.`,
@@ -264,6 +378,7 @@ export async function getComfyUiHealthStatus(baseUrl = getDefaultBaseUrl()): Pro
       api: "unknown",
       baseUrl: cleanUrl,
       checkpoints: [],
+      tier: "cpu",
       message: `Configured ComfyUI sidecar at ${cleanUrl}, but it is not reachable.`,
     };
   }
@@ -282,22 +397,43 @@ export function addManagedComfyModel(input: {
   sourceUrl: string;
   modelType: ManagedComfyModelRecord["modelType"];
   filename?: string;
+  starterPackId?: string;
 }): ManagedComfyModelRecord {
+  const filename = sanitizeFilename(input.sourceUrl, input.filename);
+  const records = readManagedModels();
+  const existing = records.find((record) => record.sourceUrl === input.sourceUrl.trim() && record.filename === filename);
+  if (existing) return existing;
+
   const now = new Date().toISOString();
   const record: ManagedComfyModelRecord = {
     id: randomUUID(),
     label: input.label.trim(),
     sourceUrl: input.sourceUrl.trim(),
     modelType: input.modelType,
-    filename: sanitizeFilename(input.sourceUrl, input.filename),
+    filename,
+    starterPackId: input.starterPackId,
     status: "not-installed",
     createdAt: now,
     updatedAt: now,
   };
-  const records = readManagedModels();
   records.push(record);
   writeManagedModels(records);
   return record;
+}
+
+export async function installComfyStarterPack(packId: string): Promise<ManagedComfyModelRecord[]> {
+  const pack = STARTER_PACKS.find((candidate) => candidate.id === packId);
+  if (!pack) throw new Error(`Unknown ComfyUI starter pack: ${packId}`);
+
+  const installed: ManagedComfyModelRecord[] = [];
+  for (const model of pack.models) {
+    const record = addManagedComfyModel({
+      ...model,
+      starterPackId: pack.id,
+    });
+    installed.push(await installManagedComfyModel(record.id));
+  }
+  return installed;
 }
 
 export function removeManagedComfyModel(id: string): boolean {

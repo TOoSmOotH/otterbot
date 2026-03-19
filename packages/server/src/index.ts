@@ -5680,6 +5680,18 @@ async function main() {
 
   app.post<{
     Params: { id: string };
+  }>("/api/settings/comfyui/packs/:id/install", async (req, reply) => {
+    try {
+      const { installComfyStarterPack } = await import("./games/asset-providers/comfyui.js");
+      return { models: await installComfyStarterPack(req.params.id) };
+    } catch (error) {
+      reply.code(404);
+      return { error: error instanceof Error ? error.message : String(error) };
+    }
+  });
+
+  app.post<{
+    Params: { id: string };
   }>("/api/settings/comfyui/models/:id/install", async (req, reply) => {
     try {
       const { installManagedComfyModel } = await import("./games/asset-providers/comfyui.js");
