@@ -1,0 +1,105 @@
+<!-- Otterbot Logo v3: Geometric/stylized robotic otter
+     Clean geometric shapes, modern flat design aesthetic
+     Teal/green accent color scheme. Professional and brand-friendly. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120">
+  <style>
+    .bg { fill: none; }
+    .body-main { fill: #37474f; }
+    .body-light { fill: #455a64; }
+    .body-dark { fill: #263238; }
+    .accent { fill: #009688; }
+    .accent-light { fill: #4db6ac; }
+    .accent-bright { fill: #1de9b6; }
+    .white { fill: #eceff1; }
+    .muzzle { fill: #607d8b; }
+    .eye { fill: #1de9b6; }
+    .nose { fill: #263238; }
+    .geo-line { stroke: #009688; stroke-width: 0.6; fill: none; opacity: 0.5; }
+  </style>
+
+  <!-- Body - geometric trapezoid -->
+  <polygon class="body-main" points="40,72 80,72 88,110 32,110"/>
+  <!-- Belly panel -->
+  <polygon class="body-light" points="48,76 72,76 76,106 44,106"/>
+
+  <!-- Chest accent stripe -->
+  <polygon class="accent" points="55,76 65,76 67,106 53,106" opacity="0.3"/>
+
+  <!-- Arms - angular -->
+  <polygon class="body-main" points="40,76 28,88 32,100 40,96"/>
+  <polygon class="body-main" points="80,76 92,88 88,100 80,96"/>
+  <!-- Arm accents -->
+  <line class="geo-line" x1="34" y1="85" x2="38" y2="93" stroke-width="1.2"/>
+  <line class="geo-line" x1="86" y1="85" x2="82" y2="93" stroke-width="1.2"/>
+
+  <!-- Paws - hexagonal -->
+  <polygon class="body-dark" points="26,88 22,92 24,97 30,99 34,95 32,90"/>
+  <polygon class="body-dark" points="94,88 98,92 96,97 90,99 86,95 88,90"/>
+
+  <!-- Head - rounded hexagon shape -->
+  <path class="body-main" d="M60 18 L82 28 L88 52 L80 68 L40 68 L32 52 L38 28Z"/>
+
+  <!-- Ears - triangular -->
+  <polygon class="body-dark" points="38,28 28,14 36,22"/>
+  <polygon class="body-dark" points="82,28 92,14 84,22"/>
+  <!-- Ear inner -->
+  <polygon class="accent" points="36,25 30,16 35,22" opacity="0.6"/>
+  <polygon class="accent" points="84,25 90,16 85,22" opacity="0.6"/>
+  <!-- Ear tip lights -->
+  <circle class="accent-bright" cx="29" cy="15" r="2"/>
+  <circle class="accent-bright" cx="91" cy="15" r="2"/>
+
+  <!-- Forehead plate - angular -->
+  <polygon class="body-dark" points="48,28 72,28 76,38 60,42 44,38"/>
+  <!-- Forehead accent lines -->
+  <line class="geo-line" x1="54" y1="30" x2="54" y2="38" stroke-width="1"/>
+  <line class="geo-line" x1="60" y1="28" x2="60" y2="40" stroke-width="1"/>
+  <line class="geo-line" x1="66" y1="30" x2="66" y2="38" stroke-width="1"/>
+  <!-- Forehead dots -->
+  <circle class="accent-bright" cx="54" cy="30" r="1.2"/>
+  <circle class="accent-bright" cx="60" cy="28" r="1.5"/>
+  <circle class="accent-bright" cx="66" cy="30" r="1.2"/>
+
+  <!-- Muzzle - rounded rectangle area -->
+  <rect class="muzzle" x="44" y="48" width="32" height="16" rx="8"/>
+
+  <!-- Eyes - diamond/gem shaped -->
+  <polygon class="eye" points="48,42 52,38 56,42 52,46"/>
+  <polygon class="eye" points="68,42 72,38 76,42 72,46"/>
+  <!-- Eye inner highlights -->
+  <polygon class="white" points="51,40 52,39 53,40 52,41" opacity="0.8"/>
+  <polygon class="white" points="71,40 72,39 73,40 72,41" opacity="0.8"/>
+  <!-- Eye outer glow -->
+  <polygon points="48,42 52,38 56,42 52,46" fill="none" stroke="#1de9b6" stroke-width="0.8" opacity="0.5"/>
+  <polygon points="68,42 72,38 76,42 72,46" fill="none" stroke="#1de9b6" stroke-width="0.8" opacity="0.5"/>
+
+  <!-- Nose - small diamond -->
+  <polygon class="nose" points="60,52 62,50 64,52 62,54"/>
+
+  <!-- Mouth - simple angular -->
+  <polyline points="56,57 60,60 64,57" stroke="#455a64" stroke-width="1" fill="none" stroke-linejoin="round"/>
+
+  <!-- Whiskers - straight geometric -->
+  <line x1="44" y1="53" x2="28" y2="50" stroke="#546e7a" stroke-width="0.8"/>
+  <line x1="44" y1="56" x2="26" y2="57" stroke="#546e7a" stroke-width="0.8"/>
+  <line x1="76" y1="53" x2="92" y2="50" stroke="#546e7a" stroke-width="0.8"/>
+  <line x1="76" y1="56" x2="94" y2="57" stroke="#546e7a" stroke-width="0.8"/>
+
+  <!-- Side head circuits -->
+  <path class="geo-line" d="M36 36 L30 40 L30 50" stroke-width="1"/>
+  <path class="geo-line" d="M84 36 L90 40 L90 50" stroke-width="1"/>
+  <circle class="accent-bright" cx="30" cy="50" r="1.5"/>
+  <circle class="accent-bright" cx="90" cy="50" r="1.5"/>
+
+  <!-- Body circuit patterns -->
+  <path class="geo-line" d="M50 80 L50 90 L55 95" stroke-width="0.8"/>
+  <path class="geo-line" d="M70 80 L70 90 L65 95" stroke-width="0.8"/>
+  <path class="geo-line" d="M60 78 L60 100" stroke-width="0.8"/>
+  <circle class="accent-bright" cx="50" cy="80" r="1"/>
+  <circle class="accent-bright" cx="60" cy="78" r="1"/>
+  <circle class="accent-bright" cx="70" cy="80" r="1"/>
+
+  <!-- Tail - angular -->
+  <polygon class="body-main" points="32,100 20,108 18,116 24,114 34,106"/>
+  <line class="geo-line" x1="28" y1="104" x2="22" y2="112" stroke-width="1"/>
+</svg>

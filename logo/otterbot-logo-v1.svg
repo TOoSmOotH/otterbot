@@ -1,0 +1,63 @@
+<!-- Otterbot Logo v1: Minimal robotic otter head/bust icon
+     Metallic silver/blue color scheme with glowing cyan eyes
+     and subtle circuit line details. Optimized for small sizes (16-64px). -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <style>
+    .body { fill: #8a9bb0; }
+    .body-dark { fill: #6b7d94; }
+    .body-highlight { fill: #a8b8ca; }
+    .eye-glow { fill: #00e5ff; }
+    .eye-inner { fill: #ffffff; }
+    .nose { fill: #2a3a4a; }
+    .circuit { stroke: #00bcd4; stroke-width: 0.6; fill: none; opacity: 0.5; }
+    .ear { fill: #7a8da2; }
+    .whisker { stroke: #5a6d82; stroke-width: 0.7; stroke-linecap: round; fill: none; }
+    .chin { fill: #c8d4e0; }
+    .metal-plate { fill: #5a6d82; stroke: #4a5d72; stroke-width: 0.4; }
+  </style>
+  <!-- Ears -->
+  <ellipse class="ear" cx="16" cy="16" rx="8" ry="6" transform="rotate(-20 16 16)"/>
+  <ellipse class="ear" cx="48" cy="16" rx="8" ry="6" transform="rotate(20 48 16)"/>
+  <!-- Head shape -->
+  <ellipse class="body" cx="32" cy="30" rx="22" ry="20"/>
+  <!-- Forehead plate -->
+  <path class="metal-plate" d="M20 18 Q32 12 44 18 Q42 22 32 24 Q22 22 20 18Z"/>
+  <!-- Face highlight / muzzle area -->
+  <ellipse class="chin" cx="32" cy="38" rx="12" ry="9"/>
+  <!-- Eyes - outer glow -->
+  <circle class="eye-glow" cx="23" cy="28" r="4.5" opacity="0.3"/>
+  <circle class="eye-glow" cx="41" cy="28" r="4.5" opacity="0.3"/>
+  <!-- Eyes -->
+  <ellipse class="eye-glow" cx="23" cy="28" rx="3.5" ry="3.8"/>
+  <ellipse class="eye-glow" cx="41" cy="28" rx="3.5" ry="3.8"/>
+  <!-- Eye inner -->
+  <circle class="eye-inner" cx="24" cy="27" r="1.2"/>
+  <circle class="eye-inner" cx="42" cy="27" r="1.2"/>
+  <!-- Pupil -->
+  <circle cx="23" cy="29" r="1.5" fill="#0a2a3a"/>
+  <circle cx="41" cy="29" r="1.5" fill="#0a2a3a"/>
+  <!-- Nose -->
+  <ellipse class="nose" cx="32" cy="35" rx="3" ry="2"/>
+  <ellipse cx="32" cy="34.5" rx="1.5" ry="0.8" fill="#3a4a5a"/>
+  <!-- Mouth -->
+  <path d="M29 37.5 Q32 40 35 37.5" stroke="#4a5d72" stroke-width="0.8" fill="none"/>
+  <!-- Whiskers -->
+  <line class="whisker" x1="20" y1="35" x2="10" y2="33"/>
+  <line class="whisker" x1="20" y1="37" x2="9" y2="38"/>
+  <line class="whisker" x1="44" y1="35" x2="54" y2="33"/>
+  <line class="whisker" x1="44" y1="37" x2="55" y2="38"/>
+  <!-- Circuit details -->
+  <path class="circuit" d="M18 20 L14 24 L14 28"/>
+  <path class="circuit" d="M46 20 L50 24 L50 28"/>
+  <path class="circuit" d="M28 14 L28 10"/>
+  <path class="circuit" d="M36 14 L36 10"/>
+  <circle class="circuit" cx="14" cy="28" r="1" fill="#00bcd4" opacity="0.5"/>
+  <circle class="circuit" cx="50" cy="28" r="1" fill="#00bcd4" opacity="0.5"/>
+  <circle class="circuit" cx="28" cy="10" r="0.8" fill="#00bcd4" opacity="0.5"/>
+  <circle class="circuit" cx="36" cy="10" r="0.8" fill="#00bcd4" opacity="0.5"/>
+  <!-- Neck / bust -->
+  <path class="body-dark" d="M20 46 Q32 52 44 46 L46 56 Q32 62 18 56Z"/>
+  <path class="body" d="M22 44 Q32 48 42 44 L44 54 Q32 60 20 54Z"/>
+  <!-- Neck circuit -->
+  <path class="circuit" d="M28 48 L28 54 M36 48 L36 54 M32 46 L32 56"/>
+</svg>

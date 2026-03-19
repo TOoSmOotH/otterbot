@@ -1,0 +1,158 @@
+<!-- Otterbot Logo v2: Detailed robotic otter, 3/4 body view
+     Dark gray/charcoal body with blue/cyan accents
+     Visible circuit patterns and tech elements. For larger displays. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 240">
+  <defs>
+    <linearGradient id="bodyGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#4a4f5a"/>
+      <stop offset="50%" style="stop-color:#3a3f4a"/>
+      <stop offset="100%" style="stop-color:#2a2f3a"/>
+    </linearGradient>
+    <linearGradient id="bellyGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#6a7080"/>
+      <stop offset="100%" style="stop-color:#5a6070"/>
+    </linearGradient>
+    <radialGradient id="eyeGlow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" style="stop-color:#00e5ff"/>
+      <stop offset="60%" style="stop-color:#00bcd4"/>
+      <stop offset="100%" style="stop-color:#00838f;stop-opacity:0"/>
+    </radialGradient>
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="2" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+  <style>
+    .body { fill: url(#bodyGrad); }
+    .belly { fill: url(#bellyGrad); }
+    .plate { fill: #3a4550; stroke: #2a3540; stroke-width: 0.8; }
+    .circuit { stroke: #00bcd4; stroke-width: 0.8; fill: none; opacity: 0.6; }
+    .circuit-dot { fill: #00bcd4; opacity: 0.7; }
+    .accent { fill: #00bcd4; }
+    .accent-line { stroke: #00bcd4; stroke-width: 1; fill: none; opacity: 0.4; }
+    .dark { fill: #1a1f2a; }
+    .whisker { stroke: #5a6575; stroke-width: 1; stroke-linecap: round; fill: none; }
+    .claw { fill: #6a7585; }
+  </style>
+
+  <!-- Tail -->
+  <path class="body" d="M55 195 Q30 210 25 230 Q23 240 30 238 Q40 235 50 220 Q60 205 65 195" stroke="#2a2f3a" stroke-width="1"/>
+  <path class="circuit" d="M45 200 Q35 215 33 228"/>
+  <circle class="circuit-dot" cx="33" cy="228" r="1.5"/>
+
+  <!-- Back legs -->
+  <ellipse class="body" cx="70" cy="210" rx="20" ry="14" transform="rotate(-10 70 210)"/>
+  <ellipse class="body" cx="130" cy="210" rx="20" ry="14" transform="rotate(10 130 210)"/>
+  <!-- Feet -->
+  <ellipse class="plate" cx="58" cy="222" rx="14" ry="6"/>
+  <ellipse class="plate" cx="142" cy="222" rx="14" ry="6"/>
+  <!-- Toe claws -->
+  <ellipse class="claw" cx="48" cy="224" rx="3" ry="2"/>
+  <ellipse class="claw" cx="55" cy="226" rx="3" ry="2"/>
+  <ellipse class="claw" cx="62" cy="226" rx="3" ry="2"/>
+  <ellipse class="claw" cx="138" cy="226" rx="3" ry="2"/>
+  <ellipse class="claw" cx="145" cy="226" rx="3" ry="2"/>
+  <ellipse class="claw" cx="152" cy="224" rx="3" ry="2"/>
+
+  <!-- Body -->
+  <ellipse class="body" cx="100" cy="170" rx="50" ry="45"/>
+  <!-- Belly -->
+  <ellipse class="belly" cx="100" cy="175" rx="32" ry="30"/>
+
+  <!-- Body circuit patterns -->
+  <path class="circuit" d="M68 150 L60 160 L60 180 L65 190"/>
+  <path class="circuit" d="M132 150 L140 160 L140 180 L135 190"/>
+  <path class="circuit" d="M80 145 L80 155 L90 160"/>
+  <path class="circuit" d="M120 145 L120 155 L110 160"/>
+  <circle class="circuit-dot" cx="60" cy="160" r="2"/>
+  <circle class="circuit-dot" cx="140" cy="160" r="2"/>
+  <circle class="circuit-dot" cx="65" cy="190" r="1.5"/>
+  <circle class="circuit-dot" cx="135" cy="190" r="1.5"/>
+  <!-- Belly panel lines -->
+  <path class="accent-line" d="M82 158 Q100 152 118 158"/>
+  <path class="accent-line" d="M78 168 Q100 162 122 168"/>
+  <path class="accent-line" d="M80 178 Q100 172 120 178"/>
+
+  <!-- Front arms -->
+  <path class="body" d="M58 145 Q45 160 42 178 Q40 185 48 183 Q55 180 60 168 Q65 155 62 145"/>
+  <path class="body" d="M142 145 Q155 160 158 178 Q160 185 152 183 Q145 180 140 168 Q135 155 138 145"/>
+  <!-- Paws -->
+  <ellipse class="plate" cx="45" cy="182" rx="8" ry="5" transform="rotate(-15 45 182)"/>
+  <ellipse class="plate" cx="155" cy="182" rx="8" ry="5" transform="rotate(15 155 182)"/>
+  <!-- Arm circuits -->
+  <path class="circuit" d="M52 155 L48 168 L44 178"/>
+  <path class="circuit" d="M148 155 L152 168 L156 178"/>
+
+  <!-- Neck -->
+  <rect class="plate" x="82" y="118" width="36" height="14" rx="4"/>
+  <path class="circuit" d="M88 120 L88 130 M100 118 L100 132 M112 120 L112 130"/>
+  <circle class="circuit-dot" cx="88" cy="130" r="1.2"/>
+  <circle class="circuit-dot" cx="100" cy="132" r="1.2"/>
+  <circle class="circuit-dot" cx="112" cy="130" r="1.2"/>
+
+  <!-- Head -->
+  <ellipse class="body" cx="100" cy="80" rx="42" ry="38"/>
+
+  <!-- Ears -->
+  <ellipse cx="62" cy="50" rx="14" ry="10" fill="#3a4550" transform="rotate(-15 62 50)"/>
+  <ellipse cx="138" cy="50" rx="14" ry="10" fill="#3a4550" transform="rotate(15 138 50)"/>
+  <ellipse cx="62" cy="50" rx="9" ry="6" fill="#2a3540" transform="rotate(-15 62 50)"/>
+  <ellipse cx="138" cy="50" rx="9" ry="6" fill="#2a3540" transform="rotate(15 138 50)"/>
+  <!-- Ear antenna dots -->
+  <circle class="accent" cx="56" cy="42" r="2.5" filter="url(#glow)"/>
+  <circle class="accent" cx="144" cy="42" r="2.5" filter="url(#glow)"/>
+
+  <!-- Forehead plate -->
+  <path class="plate" d="M75 58 Q100 48 125 58 Q122 66 100 70 Q78 66 75 58Z"/>
+  <!-- Forehead circuit -->
+  <path class="circuit" d="M90 56 L90 50 L95 46"/>
+  <path class="circuit" d="M110 56 L110 50 L105 46"/>
+  <path class="circuit" d="M100 54 L100 48"/>
+  <circle class="circuit-dot" cx="95" cy="46" r="1.5"/>
+  <circle class="circuit-dot" cx="105" cy="46" r="1.5"/>
+  <circle class="circuit-dot" cx="100" cy="48" r="1.5"/>
+
+  <!-- Cheek / muzzle area -->
+  <ellipse cx="100" cy="90" rx="22" ry="16" fill="#5a6575"/>
+
+  <!-- Eyes - glow effect -->
+  <circle cx="82" cy="74" r="10" fill="url(#eyeGlow)" filter="url(#glow)"/>
+  <circle cx="118" cy="74" r="10" fill="url(#eyeGlow)" filter="url(#glow)"/>
+  <!-- Eyes - main -->
+  <ellipse cx="82" cy="74" rx="7" ry="8" fill="#00e5ff"/>
+  <ellipse cx="118" cy="74" rx="7" ry="8" fill="#00e5ff"/>
+  <!-- Eyes - inner ring -->
+  <ellipse cx="82" cy="74" rx="5" ry="6" fill="none" stroke="#004d5a" stroke-width="0.5"/>
+  <ellipse cx="118" cy="74" rx="5" ry="6" fill="none" stroke="#004d5a" stroke-width="0.5"/>
+  <!-- Pupils -->
+  <ellipse cx="82" cy="75" rx="3" ry="4" fill="#003a4a"/>
+  <ellipse cx="118" cy="75" rx="3" ry="4" fill="#003a4a"/>
+  <!-- Eye highlights -->
+  <circle cx="85" cy="71" r="2" fill="#ffffff" opacity="0.8"/>
+  <circle cx="121" cy="71" r="2" fill="#ffffff" opacity="0.8"/>
+  <circle cx="80" cy="77" r="1" fill="#ffffff" opacity="0.4"/>
+  <circle cx="116" cy="77" r="1" fill="#ffffff" opacity="0.4"/>
+
+  <!-- Nose -->
+  <ellipse cx="100" cy="88" rx="5" ry="3.5" fill="#1a1f2a"/>
+  <ellipse cx="100" cy="87" rx="2.5" ry="1.2" fill="#2a3040"/>
+  <!-- Mouth -->
+  <path d="M93 93 Q100 98 107 93" stroke="#3a4555" stroke-width="1.2" fill="none"/>
+
+  <!-- Whiskers -->
+  <line class="whisker" x1="80" y1="90" x2="55" y2="86"/>
+  <line class="whisker" x1="79" y1="94" x2="52" y2="94"/>
+  <line class="whisker" x1="80" y1="98" x2="56" y2="102"/>
+  <line class="whisker" x1="120" y1="90" x2="145" y2="86"/>
+  <line class="whisker" x1="121" y1="94" x2="148" y2="94"/>
+  <line class="whisker" x1="120" y1="98" x2="144" y2="102"/>
+
+  <!-- Side head circuits -->
+  <path class="circuit" d="M62 68 L55 72 L55 82 L58 88"/>
+  <path class="circuit" d="M138 68 L145 72 L145 82 L142 88"/>
+  <circle class="circuit-dot" cx="55" cy="72" r="1.5"/>
+  <circle class="circuit-dot" cx="145" cy="72" r="1.5"/>
+</svg>

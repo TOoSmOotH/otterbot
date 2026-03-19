@@ -1,0 +1,146 @@
+<!-- Otterbot Logo v4: Circular badge/emblem version
+     Robotic otter silhouette inside a circle with 'OTTERBOT' text
+     Good for social media avatars and badges. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
+  <defs>
+    <linearGradient id="ringGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#37474f"/>
+      <stop offset="100%" style="stop-color:#263238"/>
+    </linearGradient>
+    <linearGradient id="innerBg" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#1a2530"/>
+      <stop offset="100%" style="stop-color:#0d1520"/>
+    </linearGradient>
+    <radialGradient id="eyeGlowV4" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" style="stop-color:#00e5ff"/>
+      <stop offset="80%" style="stop-color:#00bcd4"/>
+      <stop offset="100%" style="stop-color:#00838f;stop-opacity:0"/>
+    </radialGradient>
+    <filter id="glowV4">
+      <feGaussianBlur stdDeviation="1.5" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+  <style>
+    .ring { fill: url(#ringGrad); }
+    .ring-accent { stroke: #00bcd4; stroke-width: 1.5; fill: none; }
+    .inner-bg { fill: url(#innerBg); }
+    .otter-body { fill: #546e7a; }
+    .otter-light { fill: #78909c; }
+    .otter-dark { fill: #37474f; }
+    .otter-muzzle { fill: #90a4ae; }
+    .eye-cyan { fill: #00e5ff; }
+    .nose-dark { fill: #1a2530; }
+    .circuit-v4 { stroke: #00bcd4; stroke-width: 0.7; fill: none; opacity: 0.6; }
+    .circuit-dot-v4 { fill: #00bcd4; opacity: 0.8; }
+    .text-main { fill: #b0bec5; font-family: 'Arial', 'Helvetica', sans-serif; font-weight: 700; letter-spacing: 6px; }
+    .text-accent { fill: #00bcd4; font-family: 'Arial', 'Helvetica', sans-serif; font-weight: 400; font-size: 8px; letter-spacing: 2px; }
+    .divider-dot { fill: #00bcd4; }
+  </style>
+
+  <!-- Outer ring -->
+  <circle class="ring" cx="100" cy="100" r="96"/>
+  <!-- Ring border -->
+  <circle cx="100" cy="100" r="96" fill="none" stroke="#455a64" stroke-width="2"/>
+  <circle class="ring-accent" cx="100" cy="100" r="93"/>
+
+  <!-- Inner circle background -->
+  <circle class="inner-bg" cx="100" cy="100" r="72"/>
+  <circle cx="100" cy="100" r="72" fill="none" stroke="#37474f" stroke-width="1"/>
+
+  <!-- Text along top arc: OTTERBOT -->
+  <path id="topArc" d="M 18,100 A 82,82 0 0,1 182,100" fill="none"/>
+  <text class="text-main" font-size="16">
+    <textPath href="#topArc" startOffset="50%" text-anchor="middle">OTTERBOT</textPath>
+  </text>
+
+  <!-- Divider dots -->
+  <circle class="divider-dot" cx="28" cy="120" r="2.5"/>
+  <circle class="divider-dot" cx="172" cy="120" r="2.5"/>
+
+  <!-- Subtitle along bottom arc -->
+  <path id="bottomArc" d="M 35,145 A 78,78 0 0,0 165,145" fill="none"/>
+  <text class="text-accent">
+    <textPath href="#bottomArc" startOffset="50%" text-anchor="middle">AI GAME ENGINE</textPath>
+  </text>
+
+  <!-- Otter silhouette - positioned in center circle -->
+  <!-- Ears -->
+  <polygon class="otter-dark" points="72,52 62,38 72,46"/>
+  <polygon class="otter-dark" points="128,52 138,38 128,46"/>
+  <polygon class="eye-cyan" points="64,40 62,38 66,42" opacity="0.5"/>
+  <polygon class="eye-cyan" points="136,40 138,38 134,42" opacity="0.5"/>
+
+  <!-- Head -->
+  <ellipse class="otter-body" cx="100" cy="72" rx="32" ry="28"/>
+
+  <!-- Forehead plate -->
+  <path class="otter-dark" d="M82 56 Q100 48 118 56 Q116 62 100 66 Q84 62 82 56Z"/>
+
+  <!-- Muzzle -->
+  <ellipse class="otter-muzzle" cx="100" cy="80" rx="16" ry="11"/>
+
+  <!-- Eyes -->
+  <circle cx="88" cy="68" r="7" fill="url(#eyeGlowV4)" filter="url(#glowV4)"/>
+  <circle cx="112" cy="68" r="7" fill="url(#eyeGlowV4)" filter="url(#glowV4)"/>
+  <ellipse class="eye-cyan" cx="88" cy="68" rx="5" ry="5.5"/>
+  <ellipse class="eye-cyan" cx="112" cy="68" rx="5" ry="5.5"/>
+  <!-- Pupils -->
+  <circle cx="88" cy="69" r="2.5" fill="#003a4a"/>
+  <circle cx="112" cy="69" r="2.5" fill="#003a4a"/>
+  <!-- Highlights -->
+  <circle cx="90" cy="66" r="1.5" fill="#ffffff" opacity="0.7"/>
+  <circle cx="114" cy="66" r="1.5" fill="#ffffff" opacity="0.7"/>
+
+  <!-- Nose -->
+  <ellipse class="nose-dark" cx="100" cy="78" rx="3.5" ry="2.5"/>
+  <ellipse cx="100" cy="77.5" rx="1.8" ry="0.8" fill="#2a3540"/>
+
+  <!-- Mouth -->
+  <path d="M95 83 Q100 87 105 83" stroke="#607d8b" stroke-width="0.8" fill="none"/>
+
+  <!-- Whiskers -->
+  <line x1="84" y1="80" x2="68" y2="77" stroke="#78909c" stroke-width="0.7"/>
+  <line x1="84" y1="83" x2="66" y2="84" stroke="#78909c" stroke-width="0.7"/>
+  <line x1="116" y1="80" x2="132" y2="77" stroke="#78909c" stroke-width="0.7"/>
+  <line x1="116" y1="83" x2="134" y2="84" stroke="#78909c" stroke-width="0.7"/>
+
+  <!-- Neck plate -->
+  <rect class="otter-dark" x="86" y="96" width="28" height="8" rx="3"/>
+  <path class="circuit-v4" d="M92 97 L92 103 M100 96 L100 104 M108 97 L108 103"/>
+
+  <!-- Body -->
+  <ellipse class="otter-body" cx="100" cy="122" rx="28" ry="22"/>
+  <ellipse class="otter-light" cx="100" cy="124" rx="18" ry="16"/>
+
+  <!-- Arms -->
+  <path class="otter-body" d="M74 110 Q62 120 64 132 Q66 136 70 134 Q72 130 74 120Z"/>
+  <path class="otter-body" d="M126 110 Q138 120 136 132 Q134 136 130 134 Q128 130 126 120Z"/>
+
+  <!-- Body circuits -->
+  <path class="circuit-v4" d="M90 115 L88 125 L92 130"/>
+  <path class="circuit-v4" d="M110 115 L112 125 L108 130"/>
+  <circle class="circuit-dot-v4" cx="88" cy="125" r="1.2"/>
+  <circle class="circuit-dot-v4" cx="112" cy="125" r="1.2"/>
+
+  <!-- Head circuits -->
+  <path class="circuit-v4" d="M72 58 L66 62 L66 70"/>
+  <path class="circuit-v4" d="M128 58 L134 62 L134 70"/>
+  <circle class="circuit-dot-v4" cx="66" cy="70" r="1.2"/>
+  <circle class="circuit-dot-v4" cx="134" cy="70" r="1.2"/>
+
+  <!-- Forehead circuit -->
+  <path class="circuit-v4" d="M94 52 L94 48 M100 50 L100 46 M106 52 L106 48"/>
+  <circle class="circuit-dot-v4" cx="94" cy="48" r="1"/>
+  <circle class="circuit-dot-v4" cx="100" cy="46" r="1.2"/>
+  <circle class="circuit-dot-v4" cx="106" cy="48" r="1"/>
+
+  <!-- Decorative ring notches -->
+  <circle class="divider-dot" cx="100" cy="6" r="2"/>
+  <circle class="divider-dot" cx="100" cy="194" r="2"/>
+  <circle class="divider-dot" cx="6" cy="100" r="2"/>
+  <circle class="divider-dot" cx="194" cy="100" r="2"/>
+</svg>
