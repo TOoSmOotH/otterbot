@@ -1,8 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { createWriteStream, existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, extname, resolve } from "node:path";
-import { Readable } from "node:stream";
-import { pipeline } from "node:stream/promises";
 import { getConfig } from "../../auth/auth.js";
 import { getLocalComputeStatus } from "../../local-compute/local-compute.js";
 import type { ImageGenOptions, ImageGenProvider, ImageGenResult } from "./types.js";
@@ -206,7 +204,30 @@ async function downloadToFile(url: string, destination: string): Promise<void> {
   if (!res.body) {
     throw new Error(`Download response had no body for ${url}`);
   }
-  await pipeline(Readable.fromWeb(res.body as globalThis.ReadableStream<Uint8Array>), createWriteStream(destination));
+  const writer = createWriteStream(destination);
+  const reader = res.body.getReader();
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value) continue;
+      await new Promise<void>((resolvePromise, rejectPromise) => {
+        writer.write(value, (error) => {
+          if (error) rejectPromise(error);
+          else resolvePromise();
+        });
+      });
+    }
+    await new Promise<void>((resolvePromise, rejectPromise) => {
+      writer.end((error) => {
+        if (error) rejectPromise(error);
+        else resolvePromise();
+      });
+    });
+  } catch (error) {
+    writer.destroy(error instanceof Error ? error : new Error(String(error)));
+    throw error;
+  }
 }
 
 async function getCheckpointNames(baseUrl: string): Promise<string[]> {
