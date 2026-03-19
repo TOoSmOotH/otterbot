@@ -567,10 +567,13 @@ pnpm docker:up        # Start container (detached)
 pnpm docker:up:search # Start container + SearXNG search engine
 pnpm docker:down      # Stop container
 pnpm docker:dev       # Start with hot-reload (dev mode)
-# Optional local image sidecar:
-docker compose -f docker-compose.prod.yml -f docker-compose.comfyui.yml up -d
-# Optional image-to-3D sidecar:
-docker compose -f docker-compose.prod.yml -f docker-compose.trellis.yml up -d
+./scripts/docker-stack.sh prod              # Production stack
+./scripts/docker-stack.sh comfyui           # Production + ComfyUI sidecar
+./scripts/docker-stack.sh trellis           # Production + TRELLIS sidecar
+./scripts/docker-stack.sh local-ai          # Production + ComfyUI + TRELLIS
+./scripts/docker-stack.sh local-ai-nvidia   # Production + both sidecars + NVIDIA GPU
+./scripts/docker-stack.sh local-ai-amd      # Production + both sidecars + AMD GPU
+./scripts/docker-stack.sh local-ai --build  # Same, but rebuild images first
 ```
 
 ## Environment Variables
