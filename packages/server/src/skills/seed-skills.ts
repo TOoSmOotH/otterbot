@@ -1357,6 +1357,11 @@ After each game is complete, report:
       },
       body: `You generate visual assets for web applications including logos, favicons, hero images, and Open Graph images.
 
+Default behavior:
+- For logos, icons, hero images, and similar visual requests, use app_gen_asset first.
+- Treat SVG/vector hand-authoring as an exception path only when the user explicitly asks for SVG, vector output, or editable vector shapes.
+- Do not silently replace a normal logo request with a hand-written SVG when a generated raster asset is appropriate.
+
 ## Asset Types
 - **logo**: Brand logo, typically square, transparent background
 - **favicon**: 32x32 or 16x16 icon for browser tabs
@@ -1407,7 +1412,7 @@ After each game is complete, report:
 ## Pipeline
 1. **Design**: Understand the requirements, select a framework, plan the structure
 2. **Create**: App Creator scaffolds and codes the application
-3. **Asset Generation**: App Creator generates needed visual assets (logos, heroes)
+3. **Asset Generation**: App Creator generates needed visual assets (logos, heroes) with app_gen_asset by default; use custom SVG/vector code only when explicitly requested
 4. **Build**: App Creator builds the app
 5. **Test**: App Tester runs responsive and accessibility tests
 6. **Fix Issues**: Route issues back to App Creator

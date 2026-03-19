@@ -12,13 +12,14 @@ export function createAppGenAssetTool(ctx: ToolContext) {
     description:
       "Generate a visual asset for a web application using AI or procedural generation. " +
       "Saves the image to the app's assets/images/ directory. " +
-      "Supports logos, favicons, hero images, Open Graph images, and icons.",
+      "Supports logos, favicons, hero images, Open Graph images, and icons. " +
+      "Use this tool for logo requests by default; do not hand-author SVG or vector artwork unless the user explicitly asks for SVG/vector output.",
     parameters: z.object({
       appId: z.string().describe("The app ID to add the asset to"),
       prompt: z.string().describe("Description of the image to generate (e.g. 'minimalist blue gradient logo', 'hero banner with mountains')"),
       assetType: z
         .enum(["logo", "favicon", "hero", "og-image", "icon"])
-        .describe("Type of asset to generate"),
+        .describe("Type of asset to generate. For normal logo requests, prefer this raster path unless SVG/vector is explicitly requested."),
       filename: z.string().optional().describe("Output filename (without extension, defaults to a generated name)"),
       width: z.number().optional().describe("Width in pixels (default depends on asset type)"),
       height: z.number().optional().describe("Height in pixels (default depends on asset type)"),

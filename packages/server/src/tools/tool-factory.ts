@@ -939,12 +939,12 @@ export function getToolsWithMeta(): {
       ],
     },
     app_gen_asset: {
-      description: "Generate a visual asset (logo, favicon, hero image, OG image, icon) for a web application.",
+      description: "Generate a visual asset (logo, favicon, hero image, OG image, icon) for a web application. Use this for logo requests by default; only hand-author SVG/vector artwork when the user explicitly asks for vector output.",
       category: "App Studio",
       parameters: [
         { name: "appId", type: "string", required: true, description: "The app ID" },
         { name: "prompt", type: "string", required: true, description: "Description of the image to generate" },
-        { name: "assetType", type: "string", required: true, description: "Asset type: logo, favicon, hero, og-image, icon" },
+        { name: "assetType", type: "string", required: true, description: "Asset type: logo, favicon, hero, og-image, icon. Prefer this tool for normal logo generation unless SVG/vector is explicitly requested." },
         { name: "filename", type: "string", required: false, description: "Output filename (without extension)" },
         { name: "width", type: "number", required: false, description: "Width in pixels" },
         { name: "height", type: "number", required: false, description: "Height in pixels" },
