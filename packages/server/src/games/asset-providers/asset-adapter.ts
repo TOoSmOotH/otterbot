@@ -23,7 +23,14 @@ import { ProceduralSoundProvider } from "./procedural-sound-provider.js";
 import { OpenAIImageProvider } from "./openai-image-provider.js";
 import { ReplicateImageProvider } from "./replicate-image-provider.js";
 import { ReplicateSoundProvider } from "./replicate-sound-provider.js";
-import { StableDiffusionImageProvider } from "./sd-image-provider.js";
+import { TrellisLocalModelProvider } from "./trellis-model-provider.js";
+import { getLocalComputeStatus } from "../../local-compute/local-compute.js";
+import {
+  ComfyUIImageProvider,
+  getComfyUiHealthStatus,
+  listComfyPresets,
+  listManagedComfyModels,
+} from "./comfyui.js";
 
 export interface AssetProviderCredentialStatus {
   type: AssetProviderType;
@@ -33,6 +40,21 @@ export interface AssetProviderCredentialStatus {
   providerBaseUrlSet: boolean;
   apiKeyReady: boolean;
   baseUrlReady: boolean;
+}
+
+export interface AssetProviderHealthStatus {
+  type: AssetProviderType;
+  ready: boolean;
+  status: "ready" | "needs-config" | "offline" | "fallback";
+  message: string;
+}
+
+export interface ComfyUiSettingsSummary {
+  baseUrl: string;
+  sidecarUrl: string;
+  health: Awaited<ReturnType<typeof getComfyUiHealthStatus>>;
+  presets: ReturnType<typeof listComfyPresets>;
+  models: ReturnType<typeof listManagedComfyModels>;
 }
 
 // Config keys used by the asset system
@@ -92,6 +114,33 @@ function resolveBaseUrl(providerType: AssetProviderType): string | undefined {
   return undefined;
 }
 
+function resolveComfyBaseUrl(): string {
+  return resolveBaseUrl("comfyui-local")
+    ?? process.env.OTTERBOT_COMFYUI_URL
+    ?? "http://comfyui:8188";
+}
+
+function resolveTrellisBaseUrl(): string {
+  return resolveBaseUrl("trellis-local")
+    ?? process.env.OTTERBOT_TRELLIS_URL
+    ?? "http://trellis:8080";
+}
+
+async function checkEndpoint(baseUrl: string, path = "/"): Promise<boolean> {
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 1500);
+    const res = await fetch(`${baseUrl.replace(/\/$/, "")}${path}`, {
+      method: "GET",
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
+    return res.ok || res.status < 500;
+  } catch {
+    return false;
+  }
+}
+
 function getProviderTableCredentialStatus(providerType: AssetProviderType): {
   apiKeySet: boolean;
   baseUrlSet: boolean;
@@ -143,6 +192,11 @@ export function getImageProvider(studioType?: StudioType): ImageGenProvider {
   const providerType = resolveAssetProviderType(CONFIG_IMAGE_PROVIDER, "image", studioType);
 
   switch (providerType) {
+    case "comfyui-local": {
+      const baseUrl = resolveComfyBaseUrl();
+      const checkpoint = getConfig("asset:comfyui-local:checkpoint") ?? undefined;
+      return new ComfyUIImageProvider(baseUrl, checkpoint);
+    }
     case "openai": {
       const apiKey = resolveApiKey("openai");
       if (!apiKey) {
@@ -160,8 +214,9 @@ export function getImageProvider(studioType?: StudioType): ImageGenProvider {
       return new ReplicateImageProvider(apiKey);
     }
     case "stable-diffusion": {
-      const baseUrl = resolveBaseUrl("stable-diffusion");
-      return new StableDiffusionImageProvider(baseUrl);
+      const baseUrl = resolveBaseUrl("stable-diffusion") ?? resolveComfyBaseUrl();
+      const checkpoint = getConfig("asset:comfyui-local:checkpoint") ?? undefined;
+      return new ComfyUIImageProvider(baseUrl, checkpoint);
     }
     case "procedural":
     default:
@@ -174,7 +229,10 @@ export function getModelProvider(studioType?: StudioType): ModelGenProvider {
   const providerType = resolveAssetProviderType(CONFIG_MODEL_PROVIDER, "model", studioType);
 
   switch (providerType) {
-    // Future: Replicate 3D model generation (e.g., TripoSR, InstantMesh)
+    case "trellis-local": {
+      const baseUrl = resolveTrellisBaseUrl();
+      return new TrellisLocalModelProvider(baseUrl);
+    }
     case "procedural":
     default:
       return proceduralModel;
@@ -203,8 +261,10 @@ export function getSoundProvider(studioType?: StudioType): SoundGenProvider {
 
 export function getAssetProviderCredentialStatuses(): Record<AssetProviderType, AssetProviderCredentialStatus> {
   const providerTypes: AssetProviderType[] = [
+    "comfyui-local",
     "openai",
     "replicate",
+    "trellis-local",
     "stable-diffusion",
     "procedural",
   ];
@@ -224,6 +284,132 @@ export function getAssetProviderCredentialStatuses(): Record<AssetProviderType, 
       baseUrlReady: dedicatedBaseUrlSet || providerTableStatus.baseUrlSet,
     }];
   })) as Record<AssetProviderType, AssetProviderCredentialStatus>;
+}
+
+export async function getAssetProviderHealthStatuses(): Promise<Record<AssetProviderType, AssetProviderHealthStatus>> {
+  const localCompute = getLocalComputeStatus();
+  const credentials = getAssetProviderCredentialStatuses();
+
+  const statuses: Record<AssetProviderType, AssetProviderHealthStatus> = {
+    "comfyui-local": {
+      type: "comfyui-local",
+      ready: false,
+      status: "needs-config",
+      message: "Set a ComfyUI sidecar base URL to enable local image generation.",
+    },
+    openai: {
+      type: "openai",
+      ready: credentials.openai.apiKeyReady,
+      status: credentials.openai.apiKeyReady ? "ready" : "needs-config",
+      message: credentials.openai.apiKeyReady ? "Ready for cloud image generation." : "Requires an OpenAI API key.",
+    },
+    replicate: {
+      type: "replicate",
+      ready: credentials.replicate.apiKeyReady,
+      status: credentials.replicate.apiKeyReady ? "ready" : "needs-config",
+      message: credentials.replicate.apiKeyReady ? "Ready for cloud image, 3D, and sound generation." : "Requires a Replicate API key.",
+    },
+    "trellis-local": {
+      type: "trellis-local",
+      ready: false,
+      status: localCompute.tier === "high" ? "needs-config" : "fallback",
+      message: localCompute.tier === "high"
+        ? "Set a local TRELLIS bridge URL to enable experimental 3D generation."
+        : `Experimental TRELLIS is best on high-VRAM GPUs; current tier is ${localCompute.tier}.`,
+    },
+    "stable-diffusion": {
+      type: "stable-diffusion",
+      ready: credentials["stable-diffusion"].baseUrlReady,
+      status: credentials["stable-diffusion"].baseUrlReady ? "ready" : "needs-config",
+      message: credentials["stable-diffusion"].baseUrlReady ? "Legacy local image alias configured." : "Set a legacy Stable Diffusion-compatible base URL or use the ComfyUI sidecar.",
+    },
+    procedural: {
+      type: "procedural",
+      ready: true,
+      status: "ready",
+      message: "Always available fallback for CPU-safe local generation.",
+    },
+  };
+
+  const comfyUrl = resolveComfyBaseUrl();
+  if (comfyUrl) {
+    const health = await getComfyUiHealthStatus(comfyUrl);
+    const hasCheckpoint = health.checkpoints.length > 0 || listManagedComfyModels().some((record) => record.status === "installed" && record.modelType === "checkpoints");
+    statuses["comfyui-local"] = {
+      type: "comfyui-local",
+      ready: health.reachable && hasCheckpoint,
+      status: !health.reachable
+        ? "offline"
+        : hasCheckpoint
+          ? "ready"
+          : "needs-config",
+      message: !health.reachable
+        ? health.message
+        : hasCheckpoint
+          ? health.message
+          : `${health.message} Install at least one checkpoint before selecting ComfyUI for generation.`,
+    };
+  }
+
+  const trellisUrl = resolveTrellisBaseUrl();
+  if (trellisUrl) {
+    const healthy = await checkEndpoint(trellisUrl, "/health");
+    statuses["trellis-local"] = {
+      type: "trellis-local",
+      ready: healthy && localCompute.tier === "high",
+      status: healthy
+        ? (localCompute.tier === "high" ? "ready" : "fallback")
+        : "offline",
+      message: !healthy
+        ? `Configured TRELLIS image-to-3D bridge at ${trellisUrl}, but it is not reachable.`
+        : localCompute.tier === "high"
+          ? `Experimental TRELLIS bridge reachable at ${trellisUrl} for text-to-3D and image-to-3D jobs.`
+          : `TRELLIS bridge is reachable, but current compute tier is ${localCompute.tier}; Otterbot may fall back to procedural 3D.`,
+    };
+  }
+
+  return statuses;
+}
+
+export async function getComfyUiSettingsSummary(): Promise<ComfyUiSettingsSummary> {
+  const baseUrl = resolveComfyBaseUrl();
+  return {
+    baseUrl,
+    sidecarUrl: process.env.OTTERBOT_COMFYUI_URL ?? "http://comfyui:8188",
+    health: await getComfyUiHealthStatus(baseUrl),
+    presets: listComfyPresets(),
+    models: listManagedComfyModels(),
+  };
+}
+
+export function getAssetGenerationRecommendations() {
+  const localCompute = getLocalComputeStatus();
+
+  switch (localCompute.tier) {
+    case "high":
+      return {
+        image: "comfyui-local" as AssetProviderType,
+        model: "trellis-local" as AssetProviderType,
+        sound: "procedural" as AssetProviderType,
+        summary: "High-VRAM local stack: ComfyUI for images, experimental TRELLIS for 3D, procedural audio.",
+      };
+    case "medium":
+    case "low":
+      return {
+        image: "comfyui-local" as AssetProviderType,
+        model: "procedural" as AssetProviderType,
+        sound: "procedural" as AssetProviderType,
+        summary: "Balanced local stack: ComfyUI for images, procedural 3D and audio.",
+      };
+    case "cpu":
+    default:
+      return {
+        image: "procedural" as AssetProviderType,
+        model: "procedural" as AssetProviderType,
+        sound: "procedural" as AssetProviderType,
+        summary: "CPU-safe local stack: procedural generation first, with optional local endpoints if you accept slower performance.",
+      };
+  }
 }
 
 /** Get the currently configured provider type for each asset category. */

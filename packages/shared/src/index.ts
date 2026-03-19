@@ -24,3 +24,4 @@ export * from "./types/game.js";
 export * from "./types/app.js";
 export * from "./types/video.js";
 export * from "./types/studio-config.js";
+export * from "./types/local-compute.js";

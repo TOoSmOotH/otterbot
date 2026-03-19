@@ -34,7 +34,7 @@ export function createGameGenSpriteTool(ctx: ToolContext) {
 
       const result = await provider.generate(
         `Game sprite, transparent background: ${prompt}`,
-        { width: spriteWidth, height: spriteHeight, style: spriteStyle },
+        { width: spriteWidth, height: spriteHeight, style: spriteStyle, taskType: "sprite" },
       );
 
       const name = filename ?? `sprite_${nanoid(8)}`;

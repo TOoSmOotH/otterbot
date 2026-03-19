@@ -12,8 +12,10 @@
 // ---------------------------------------------------------------------------
 
 export type AssetProviderType =
+  | "comfyui-local"
   | "openai"
   | "replicate"
+  | "trellis-local"
   | "stable-diffusion"
   | "procedural";
 
@@ -23,6 +25,10 @@ export interface AssetProviderMeta {
   needsApiKey: boolean;
   needsBaseUrl: boolean;
   capabilities: AssetCapability[];
+  local?: boolean;
+  recommendedFor?: ("cpu" | "low" | "medium" | "high")[];
+  experimental?: boolean;
+  notes?: string;
 }
 
 export type AssetCapability = "image" | "sprite" | "model-3d" | "sound";
@@ -38,6 +44,15 @@ export interface ImageGenOptions {
   style?: string;
   /** Number of images to generate (default 1) */
   count?: number;
+  /** Task category used to select a ComfyUI workflow/preset. */
+  taskType?: "texture" | "sprite" | "icon" | "hero" | "image";
+  /** Optional preset override for local ComfyUI generation. */
+  presetId?: string;
+  /** Optional advanced overrides for local ComfyUI generation. */
+  checkpoint?: string;
+  sampler?: string;
+  steps?: number;
+  cfgScale?: number;
 }
 
 export interface ImageGenResult {
@@ -63,6 +78,12 @@ export interface ModelGenOptions {
   format?: "glb" | "gltf" | "obj";
   /** Geometry complexity hint */
   complexity?: "low" | "medium" | "high";
+  /** Optional local image path to drive image-to-3D generation. */
+  sourceImagePath?: string;
+  /** Optional source image URL exposed by Otterbot uploads. */
+  sourceImageUrl?: string;
+  /** Optional Blender cleanup preset used by the sidecar. */
+  blenderPreset?: "preview" | "game-ready" | "high-detail";
 }
 
 export interface ModelGenResult {
@@ -116,6 +137,16 @@ export interface SoundGenProvider {
 
 export const ASSET_PROVIDER_META: AssetProviderMeta[] = [
   {
+    type: "comfyui-local",
+    label: "ComfyUI Sidecar (Local)",
+    needsApiKey: false,
+    needsBaseUrl: true,
+    capabilities: ["image", "sprite"],
+    local: true,
+    recommendedFor: ["low", "medium", "high"],
+    notes: "Real ComfyUI integration for local textures, sprites, icons, and concept art. Otterbot selects workflows and presets, and can manage local model downloads.",
+  },
+  {
     type: "openai",
     label: "OpenAI (DALL-E / gpt-image)",
     needsApiKey: true,
@@ -130,11 +161,25 @@ export const ASSET_PROVIDER_META: AssetProviderMeta[] = [
     capabilities: ["image", "sprite", "model-3d", "sound"],
   },
   {
+    type: "trellis-local",
+    label: "TRELLIS Bridge (Local, Experimental)",
+    needsApiKey: false,
+    needsBaseUrl: true,
+    capabilities: ["model-3d"],
+    local: true,
+    experimental: true,
+    recommendedFor: ["high"],
+    notes: "Local image-to-3D and text-to-3D through a TRELLIS sidecar, with optional Blender cleanup/export.",
+  },
+  {
     type: "stable-diffusion",
-    label: "Stable Diffusion (Local)",
+    label: "Stable Diffusion (Legacy Local)",
     needsApiKey: false,
     needsBaseUrl: true,
     capabilities: ["image", "sprite"],
+    local: true,
+    recommendedFor: ["low", "medium", "high"],
+    notes: "Legacy local image option kept for compatibility. New setups should prefer ComfyUI Sidecar (Local).",
   },
   {
     type: "procedural",
@@ -142,5 +187,8 @@ export const ASSET_PROVIDER_META: AssetProviderMeta[] = [
     needsApiKey: false,
     needsBaseUrl: false,
     capabilities: ["image", "sprite", "model-3d", "sound"],
+    local: true,
+    recommendedFor: ["cpu", "low", "medium", "high"],
+    notes: "Always available fallback with no local service required.",
   },
 ];

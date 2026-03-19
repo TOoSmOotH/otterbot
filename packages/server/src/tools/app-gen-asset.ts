@@ -41,7 +41,11 @@ export function createAppGenAssetTool(ctx: ToolContext) {
       const h = height ?? dim.h;
 
       const provider = getImageProvider();
-      const result = await provider.generate(prompt, { width: w, height: h });
+      const result = await provider.generate(prompt, {
+        width: w,
+        height: h,
+        taskType: assetType === "logo" || assetType === "favicon" || assetType === "icon" ? "icon" : "hero",
+      });
 
       // Save to app assets
       const name = filename ?? `${assetType}_${nanoid(8)}`;

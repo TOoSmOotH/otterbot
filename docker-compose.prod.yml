@@ -1,6 +1,13 @@
 # Production docker-compose for Otterbot
 # This is a reference template — the install script generates its own copy.
 # Usage: docker compose -f docker-compose.prod.yml up -d
+# Optional GPU overrides:
+#   NVIDIA: docker compose -f docker-compose.prod.yml -f docker-compose.gpu-nvidia.yml up -d
+#   AMD:    docker compose -f docker-compose.prod.yml -f docker-compose.gpu-amd.yml up -d
+# Optional ComfyUI sidecar:
+#   docker compose -f docker-compose.prod.yml -f docker-compose.comfyui.yml up -d
+# Optional TRELLIS sidecar:
+#   docker compose -f docker-compose.prod.yml -f docker-compose.trellis.yml up -d
 #
 # Requires a .env file with at minimum:
 #   OTTERBOT_DB_KEY=<random-hex-string>

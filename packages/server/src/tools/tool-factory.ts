@@ -58,6 +58,7 @@ import { createGameListTemplatesTool } from "./game-list-templates.js";
 import { createGameGenTextureTool } from "./game-gen-texture.js";
 import { createGameGenSpriteTool } from "./game-gen-sprite.js";
 import { createGameGenModelTool } from "./game-gen-model.js";
+import { createGameGenModelFromImageTool } from "./game-gen-model-from-image.js";
 import { createGameGenSoundTool } from "./game-gen-sound.js";
 import { createGamePlaytestTool } from "./game-playtest.js";
 import { createGameInspectTool } from "./game-inspect.js";
@@ -109,6 +110,7 @@ const TOOL_REGISTRY: Record<string, ToolCreator> = {
   game_gen_texture: createGameGenTextureTool,
   game_gen_sprite: createGameGenSpriteTool,
   game_gen_model: createGameGenModelTool,
+  game_gen_model_from_image: createGameGenModelFromImageTool,
   game_gen_sound: createGameGenSoundTool,
   // Game Studio — playtesting tools
   game_playtest: createGamePlaytestTool,
@@ -760,6 +762,19 @@ export function getToolsWithMeta(): {
         { name: "prompt", type: "string", required: true, description: "Description of the 3D model" },
         { name: "filename", type: "string", required: false, description: "Output filename (without extension)" },
         { name: "format", type: "string", required: false, description: "Output format: glb (default), gltf, obj" },
+      ],
+    },
+    game_gen_model_from_image: {
+      description: "Generate a 3D model from an uploaded or local reference image using the TRELLIS workflow.",
+      category: "Game Studio",
+      parameters: [
+        { name: "gameId", type: "string", required: true, description: "The game ID" },
+        { name: "imageRef", type: "string", required: true, description: "Uploaded image URL like /uploads/abc.png or a local workspace path" },
+        { name: "prompt", type: "string", required: false, description: "Optional extra guidance about the object, materials, or style" },
+        { name: "filename", type: "string", required: false, description: "Output filename (without extension)" },
+        { name: "format", type: "string", required: false, description: "Output format: glb (default), gltf, obj" },
+        { name: "complexity", type: "string", required: false, description: "Geometry complexity: low, medium, high" },
+        { name: "blenderPreset", type: "string", required: false, description: "Cleanup/export preset: preview, game-ready, high-detail" },
       ],
     },
     game_gen_sound: {

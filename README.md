@@ -567,6 +567,10 @@ pnpm docker:up        # Start container (detached)
 pnpm docker:up:search # Start container + SearXNG search engine
 pnpm docker:down      # Stop container
 pnpm docker:dev       # Start with hot-reload (dev mode)
+# Optional local image sidecar:
+docker compose -f docker-compose.prod.yml -f docker-compose.comfyui.yml up -d
+# Optional image-to-3D sidecar:
+docker compose -f docker-compose.prod.yml -f docker-compose.trellis.yml up -d
 ```
 
 ## Environment Variables
@@ -597,6 +601,10 @@ cp .env.example .env
 > **Persistent home directory:** The container's HOME is set to `/otterbot/home` (inside the bind mount). Place SSH keys at `$OTTERBOT_DATA_DIR/home/.ssh/`, Git config at `home/.gitconfig`, etc.
 
 > **Bootstrap script:** Create `$OTTERBOT_DATA_DIR/config/bootstrap.sh` to install OS packages or tools at container startup. The script runs as root on every start — `apt-get` and `npm install -g` both work.
+
+> **ComfyUI sidecar:** For fully managed local image generation, start the optional `docker-compose.comfyui.yml` override. Otterbot will talk to the sidecar at `http://comfyui:8188` by default and can write managed checkpoints into `$OTTERBOT_DATA_DIR/comfyui/models/`.
+
+> **TRELLIS sidecar:** For image-to-3D and text-to-3D workflows, start the optional `docker-compose.trellis.yml` override. Otterbot will talk to the sidecar at `http://trellis:8080` by default. The bridge image includes a Blender post-process path and an optional `TRELLIS_INFERENCE_CMD` hook for a real TRELLIS runtime; without that command the bridge returns a placeholder mesh so the orchestration path still works end-to-end.
 
 ## REST API
 

@@ -5614,13 +5614,31 @@ async function main() {
     const {
       getAssetProviderConfig,
       getAssetProviderCredentialStatuses,
+      getComfyUiSettingsSummary,
+      getAssetProviderHealthStatuses,
+      getAssetGenerationRecommendations,
     } = await import("./games/asset-providers/asset-adapter.js");
     const { ASSET_PROVIDER_META } = await import("./games/asset-providers/types.js");
+    const { getLocalComputeStatus } = await import("./local-compute/local-compute.js");
     return {
       providers: ASSET_PROVIDER_META,
       config: getAssetProviderConfig(),
       credentialStatus: getAssetProviderCredentialStatuses(),
+      healthStatus: await getAssetProviderHealthStatuses(),
+      recommendations: getAssetGenerationRecommendations(),
+      localCompute: getLocalComputeStatus(),
+      comfyui: await getComfyUiSettingsSummary(),
     };
+  });
+
+  app.get("/api/settings/comfyui", async () => {
+    const { getComfyUiSettingsSummary } = await import("./games/asset-providers/asset-adapter.js");
+    return getComfyUiSettingsSummary();
+  });
+
+  app.get("/api/settings/local-compute", async () => {
+    const { getLocalComputeStatus } = await import("./local-compute/local-compute.js");
+    return getLocalComputeStatus();
   });
 
   app.put<{
@@ -5645,6 +5663,42 @@ async function main() {
     }
     if (apiKey !== undefined) setConfig(`asset:${providerType}:api_key`, apiKey);
     if (baseUrl !== undefined) setConfig(`asset:${providerType}:base_url`, baseUrl);
+    return { ok: true };
+  });
+
+  app.post<{
+    Body: { label: string; sourceUrl: string; modelType: "checkpoints" | "loras" | "vae" | "upscale_models" | "controlnet"; filename?: string };
+  }>("/api/settings/comfyui/models", async (req, reply) => {
+    const { label, sourceUrl, modelType, filename } = req.body;
+    if (!label || !sourceUrl || !modelType) {
+      reply.code(400);
+      return { error: "label, sourceUrl, and modelType are required" };
+    }
+    const { addManagedComfyModel } = await import("./games/asset-providers/comfyui.js");
+    return { model: addManagedComfyModel({ label, sourceUrl, modelType, filename }) };
+  });
+
+  app.post<{
+    Params: { id: string };
+  }>("/api/settings/comfyui/models/:id/install", async (req, reply) => {
+    try {
+      const { installManagedComfyModel } = await import("./games/asset-providers/comfyui.js");
+      return { model: await installManagedComfyModel(req.params.id) };
+    } catch (error) {
+      reply.code(404);
+      return { error: error instanceof Error ? error.message : String(error) };
+    }
+  });
+
+  app.delete<{
+    Params: { id: string };
+  }>("/api/settings/comfyui/models/:id", async (req, reply) => {
+    const { removeManagedComfyModel } = await import("./games/asset-providers/comfyui.js");
+    const removed = removeManagedComfyModel(req.params.id);
+    if (!removed) {
+      reply.code(404);
+      return { error: "Model not found" };
+    }
     return { ok: true };
   });
 

@@ -11,7 +11,7 @@ import type { GameAsset } from "@otterbot/shared";
 export function createGameGenTextureTool(ctx: ToolContext) {
   return tool({
     description:
-      "Generate a texture image for a game using AI or procedural generation. " +
+      "Generate a texture image for a game using local AI, paid AI, or procedural generation. " +
       "Saves the image to the game's assets/textures/ directory. " +
       "The provider is determined by the system's asset generation settings.",
     parameters: z.object({
@@ -27,7 +27,7 @@ export function createGameGenTextureTool(ctx: ToolContext) {
       if (!game) return JSON.stringify({ error: `Game ${gameId} not found` });
 
       const provider = getImageProvider();
-      const result = await provider.generate(prompt, { width, height, style });
+      const result = await provider.generate(prompt, { width, height, style, taskType: "texture" });
 
       // Save to game assets
       const name = filename ?? `texture_${nanoid(8)}`;

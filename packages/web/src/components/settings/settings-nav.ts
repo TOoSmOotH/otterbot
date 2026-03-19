@@ -248,7 +248,7 @@ export const SETTINGS_NAV: NavGroup[] = [
         label: "Asset Generation",
         description: "AI image, 3D model, and sound providers for Game Studio",
         icon: "asset-gen",
-        keywords: ["game", "texture", "sprite", "model", "sound", "openai", "replicate", "stable-diffusion", "dall-e"],
+        keywords: ["game", "texture", "sprite", "model", "sound", "openai", "replicate", "stable-diffusion", "comfyui", "trellis", "gpu", "dall-e"],
       },
     ],
   },
