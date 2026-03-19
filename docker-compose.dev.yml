@@ -3,13 +3,14 @@ services:
     build:
       target: deps
     shm_size: "256m"
-    command: sh -c "pnpm install --frozen-lockfile && pnpm dev"
+    command: sh -c "pnpm install --frozen-lockfile && pnpm --filter @otterbot/shared build && { pnpm --filter @otterbot/shared dev & HOST=0.0.0.0 pnpm --filter @otterbot/server dev & pnpm --filter @otterbot/web dev -- --host 0.0.0.0; }"
     volumes:
       - .:/app
       - node_modules:/app/node_modules
       - ${OTTERBOT_DATA_DIR:-./docker/otterbot}:/otterbot
     environment:
       - NODE_ENV=development
+      - HOST=0.0.0.0
       - HOME=/otterbot/home
       - OTTERBOT_DB_KEY=${OTTERBOT_DB_KEY}
       - OTTERBOT_UID=${OTTERBOT_UID:-1000}
