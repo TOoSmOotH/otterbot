@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+
 usage() {
   cat <<'EOF'
 Usage:
@@ -119,7 +122,7 @@ fi
 
 docker_args=()
 for file in "${compose_files[@]}"; do
-  docker_args+=(-f "$file")
+  docker_args+=(-f "${REPO_ROOT}/${file}")
 done
 
 if [[ $# -gt 0 ]]; then
@@ -132,4 +135,5 @@ if [[ ${command[0]} == "up" && ${#build_flag[@]} -gt 0 ]]; then
   command+=("${build_flag[@]}")
 fi
 
+cd "${REPO_ROOT}"
 exec docker compose "${docker_args[@]}" "${command[@]}"
