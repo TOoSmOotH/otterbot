@@ -219,7 +219,7 @@ async function downloadToFile(url: string, destination: string): Promise<void> {
       });
     }
     await new Promise<void>((resolvePromise, rejectPromise) => {
-      writer.end((error) => {
+      writer.end((error: Error | null | undefined) => {
         if (error) rejectPromise(error);
         else resolvePromise();
       });
