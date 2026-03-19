@@ -568,9 +568,11 @@ pnpm docker:up:search # Start container + SearXNG search engine
 pnpm docker:down      # Stop container
 pnpm docker:dev       # Start with hot-reload (dev mode)
 ./scripts/docker-stack.sh prod              # Production stack
+./scripts/docker-stack.sh prod-local --build # Production stack, but build Otterbot locally
 ./scripts/docker-stack.sh comfyui           # Production + ComfyUI sidecar
 ./scripts/docker-stack.sh trellis           # Production + TRELLIS sidecar
 ./scripts/docker-stack.sh local-ai          # Production + ComfyUI + TRELLIS
+./scripts/docker-stack.sh local-ai-local-nvidia --build # Prod-style stack with local Otterbot build + NVIDIA GPU
 ./scripts/docker-stack.sh local-ai-nvidia   # Production + both sidecars + NVIDIA GPU
 ./scripts/docker-stack.sh local-ai-amd      # Production + both sidecars + AMD GPU
 ./scripts/docker-stack.sh local-ai --build  # Same, but rebuild images first
@@ -611,6 +613,8 @@ cp .env.example .env
 > **ComfyUI sidecar:** For fully managed local image generation, start the optional `docker-compose.comfyui.yml` override. Otterbot will talk to the sidecar at `http://comfyui:8188` by default and can write managed checkpoints into `$OTTERBOT_DATA_DIR/comfyui/models/`.
 
 > **TRELLIS sidecar:** For image-to-3D and text-to-3D workflows, start the optional `docker-compose.trellis.yml` override. Otterbot will talk to the sidecar at `http://trellis:8080` by default. The bridge image includes a Blender post-process path and an optional `TRELLIS_INFERENCE_CMD` hook for a real TRELLIS runtime; without that command the bridge returns a placeholder mesh so the orchestration path still works end-to-end.
+
+> **Local production-style builds:** The `*-local` stack names add `docker-compose.local-build.yml`, which replaces the published `ghcr.io/toosmooth/otterbot:latest` image with a local Docker build from your checkout. Use these when you want to test a production-style stack before CI publishes a new image.
 
 ## REST API
 

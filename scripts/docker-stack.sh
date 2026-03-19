@@ -11,9 +11,13 @@ Usage:
 
 Stacks:
   prod               Otterbot production stack
+  prod-local         Production stack, but build Otterbot locally
   comfyui            Otterbot + ComfyUI sidecar
   trellis            Otterbot + TRELLIS sidecar
   local-ai           Otterbot + ComfyUI + TRELLIS
+  comfyui-local      Production + ComfyUI, but build Otterbot locally
+  trellis-local      Production + TRELLIS, but build Otterbot locally
+  local-ai-local     Production + ComfyUI + TRELLIS, but build Otterbot locally
   dev                Otterbot development stack with hot reload
   dev-comfyui        Dev stack + ComfyUI sidecar
   dev-trellis        Dev stack + TRELLIS sidecar
@@ -22,6 +26,10 @@ Stacks:
   local-ai-nvidia    ComfyUI + TRELLIS with NVIDIA GPU passthrough
   comfyui-amd        ComfyUI stack with AMD GPU passthrough
   local-ai-amd       ComfyUI + TRELLIS with AMD GPU passthrough
+  comfyui-local-nvidia Production + ComfyUI + local Otterbot build + NVIDIA GPU
+  local-ai-local-nvidia Production + ComfyUI + TRELLIS + local Otterbot build + NVIDIA GPU
+  comfyui-local-amd  Production + ComfyUI + local Otterbot build + AMD GPU
+  local-ai-local-amd Production + ComfyUI + TRELLIS + local Otterbot build + AMD GPU
   dev-comfyui-nvidia Dev stack + ComfyUI + NVIDIA GPU passthrough
   dev-local-ai-nvidia Dev stack + ComfyUI + TRELLIS + NVIDIA GPU passthrough
   dev-comfyui-amd    Dev stack + ComfyUI + AMD GPU passthrough
@@ -29,6 +37,7 @@ Stacks:
 
 Examples:
   ./scripts/docker-stack.sh prod
+  ./scripts/docker-stack.sh prod-local --build
   ./scripts/docker-stack.sh comfyui --build
   ./scripts/docker-stack.sh dev-local-ai
   ./scripts/docker-stack.sh local-ai-nvidia
@@ -50,26 +59,50 @@ default_command=(up -d)
 case "$STACK" in
   prod)
     ;;
+  prod-local)
+    compose_files+=("docker-compose.local-build.yml")
+    ;;
   comfyui)
     compose_files+=("docker-compose.comfyui.yml")
+    ;;
+  comfyui-local)
+    compose_files+=("docker-compose.local-build.yml" "docker-compose.comfyui.yml")
     ;;
   trellis)
     compose_files+=("docker-compose.trellis.yml")
     ;;
+  trellis-local)
+    compose_files+=("docker-compose.local-build.yml" "docker-compose.trellis.yml")
+    ;;
   local-ai)
     compose_files+=("docker-compose.comfyui.yml" "docker-compose.trellis.yml")
+    ;;
+  local-ai-local)
+    compose_files+=("docker-compose.local-build.yml" "docker-compose.comfyui.yml" "docker-compose.trellis.yml")
     ;;
   comfyui-nvidia)
     compose_files+=("docker-compose.comfyui.yml" "docker-compose.gpu-nvidia.yml")
     ;;
+  comfyui-local-nvidia)
+    compose_files+=("docker-compose.local-build.yml" "docker-compose.comfyui.yml" "docker-compose.gpu-nvidia.yml")
+    ;;
   local-ai-nvidia)
     compose_files+=("docker-compose.comfyui.yml" "docker-compose.trellis.yml" "docker-compose.gpu-nvidia.yml")
+    ;;
+  local-ai-local-nvidia)
+    compose_files+=("docker-compose.local-build.yml" "docker-compose.comfyui.yml" "docker-compose.trellis.yml" "docker-compose.gpu-nvidia.yml")
     ;;
   comfyui-amd)
     compose_files+=("docker-compose.comfyui.yml" "docker-compose.gpu-amd.yml")
     ;;
+  comfyui-local-amd)
+    compose_files+=("docker-compose.local-build.yml" "docker-compose.comfyui.yml" "docker-compose.gpu-amd.yml")
+    ;;
   local-ai-amd)
     compose_files+=("docker-compose.comfyui.yml" "docker-compose.trellis.yml" "docker-compose.gpu-amd.yml")
+    ;;
+  local-ai-local-amd)
+    compose_files+=("docker-compose.local-build.yml" "docker-compose.comfyui.yml" "docker-compose.trellis.yml" "docker-compose.gpu-amd.yml")
     ;;
   dev)
     compose_files=("docker-compose.yml" "docker-compose.dev.yml")

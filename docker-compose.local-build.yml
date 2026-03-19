@@ -1,0 +1,8 @@
+services:
+  otterbot:
+    image: null
+    build:
+      context: .
+      args:
+        OTTERBOT_UID: ${OTTERBOT_UID:-1000}
+        OTTERBOT_GID: ${OTTERBOT_GID:-1000}
