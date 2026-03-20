@@ -7,8 +7,8 @@
  * - Credential resolution reuses the existing provider system
  */
 
-import { getConfig } from "../../auth/auth.js";
-import { getDb, schema } from "../../db/index.js";
+import { getConfig } from "../auth/auth.js";
+import { getDb, schema } from "../db/index.js";
 import type {
   AssetProviderType,
   ImageGenProvider,
@@ -16,7 +16,7 @@ import type {
   SoundGenProvider,
 } from "./types.js";
 import type { StudioType } from "@otterbot/shared";
-import { resolveStudioConfig } from "../../studios/studio-config-service.js";
+import { resolveStudioConfig } from "../studios/studio-config-service.js";
 import { ProceduralImageProvider } from "./procedural-image-provider.js";
 import { ProceduralModelProvider } from "./procedural-model-provider.js";
 import { ProceduralSoundProvider } from "./procedural-sound-provider.js";
@@ -24,7 +24,7 @@ import { OpenAIImageProvider } from "./openai-image-provider.js";
 import { ReplicateImageProvider } from "./replicate-image-provider.js";
 import { ReplicateSoundProvider } from "./replicate-sound-provider.js";
 import { TrellisLocalModelProvider } from "./trellis-model-provider.js";
-import { getLocalComputeStatus } from "../../local-compute/local-compute.js";
+import { getLocalComputeStatus } from "../local-compute/local-compute.js";
 import {
   ComfyUIImageProvider,
   getComfyUiHealthStatus,
@@ -425,5 +425,28 @@ export function getAssetProviderConfig(): {
     image: (getConfig(CONFIG_IMAGE_PROVIDER) ?? "procedural") as AssetProviderType,
     model: (getConfig(CONFIG_MODEL_PROVIDER) ?? "procedural") as AssetProviderType,
     sound: (getConfig(CONFIG_SOUND_PROVIDER) ?? "procedural") as AssetProviderType,
+  };
+}
+
+/** Lightweight sidecar + provider status for the gallery header. */
+export async function getAssetQuickStatus() {
+  const config = getAssetProviderConfig();
+  const comfyUrl = resolveComfyBaseUrl();
+  const trellisUrl = resolveTrellisBaseUrl();
+
+  const comfyConfigured = !!(getConfig("asset:comfyui-local:base_url") || process.env.OTTERBOT_COMFYUI_URL);
+  const trellisConfigured = !!(getConfig("asset:trellis-local:base_url") || process.env.OTTERBOT_TRELLIS_URL);
+
+  const [comfyReachable, trellisReachable] = await Promise.all([
+    comfyConfigured ? checkEndpoint(comfyUrl, "/system_stats") : Promise.resolve(false),
+    trellisConfigured ? checkEndpoint(trellisUrl, "/health") : Promise.resolve(false),
+  ]);
+
+  return {
+    providers: config,
+    sidecars: {
+      comfyui: { configured: comfyConfigured, reachable: comfyReachable },
+      trellis: { configured: trellisConfigured, reachable: trellisReachable },
+    },
   };
 }

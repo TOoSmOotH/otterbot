@@ -5,7 +5,7 @@ import path from "node:path";
 import { nanoid } from "nanoid";
 import type { ChatAttachment } from "@otterbot/shared";
 import type { ToolContext } from "./tool-context.js";
-import { getImageProvider } from "../games/asset-providers/asset-adapter.js";
+import { getImageProvider } from "../asset-providers/asset-adapter.js";
 import { uploadsRoot } from "./upload-paths.js";
 
 export function createImageGenTool(ctx: ToolContext) {
@@ -36,6 +36,16 @@ export function createImageGenTool(ctx: ToolContext) {
         style,
         taskType,
         presetId,
+        onProgress: ctx.emitEvent ? (progress) => {
+          ctx.emitEvent!("asset:progress", {
+            type: "image",
+            promptId: `img-${Date.now()}`,
+            step: progress.step,
+            totalSteps: progress.totalSteps,
+            percentage: progress.percentage,
+            stage: `Generating image... ${progress.percentage}%`,
+          });
+        } : undefined,
       });
 
       const name = filename ?? `image_${nanoid(8)}`;

@@ -9,6 +9,7 @@ import {
   STUDIO_TOOL_LABELS,
   STUDIO_TYPE_LABELS,
 } from "@otterbot/shared";
+import { AssetGenTab } from "./AssetGenTab";
 
 const STUDIO_TYPES: StudioType[] = ["game", "video", "app"];
 
@@ -256,10 +257,8 @@ export function StudioConfigTab() {
             body="Choose the LLM, enable or disable studio tools, and set per-studio media overrides."
           />
           <InfoCard
-            title="Asset Generation powers media"
-            body="This is where provider credentials and system-wide image, model, and sound defaults live."
-            actionLabel="Open Asset Generation"
-            onAction={() => navigateToSettings("asset-gen")}
+            title="Asset Providers power media"
+            body="Provider credentials and system-wide image, model, and sound defaults are configured below."
           />
           <InfoCard
             title="Coding Agents power code work"
@@ -333,6 +332,11 @@ export function StudioConfigTab() {
           </div>
         );
       })}
+
+      {/* Asset Providers Section (consolidated from former Asset Generation tab) */}
+      <div className="mt-6 border-t border-zinc-700/50 pt-2">
+        <AssetGenTab />
+      </div>
     </div>
   );
 }
@@ -520,15 +524,9 @@ function ScopeSection({
             <div>
               <h4 className="text-xs font-medium text-zinc-400 uppercase tracking-wide">Media Providers</h4>
               <p className="mt-1 text-xs text-zinc-500">
-                These settings choose which asset provider a studio uses. Credentials and system defaults are managed in Asset Generation.
+                These settings choose which asset provider a studio uses. Credentials and system defaults are configured in the Asset Providers section below.
               </p>
             </div>
-            <button
-              onClick={() => navigateToSettings("asset-gen")}
-              className="text-xs text-blue-300 hover:text-blue-200 transition-colors whitespace-nowrap"
-            >
-              Open Asset Generation
-            </button>
           </div>
 
           <div className="grid gap-3 md:grid-cols-2">

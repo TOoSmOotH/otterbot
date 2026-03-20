@@ -125,9 +125,9 @@ const CATEGORY_LABELS: Record<AssetCategory, string> = {
 };
 
 const CATEGORY_DESCRIPTIONS: Record<AssetCategory, string> = {
-  image: "Used by game_gen_texture, game_gen_sprite, and app_gen_asset.",
-  model: "Used by game_gen_model for GLB output.",
-  sound: "Used by game_gen_sound and video_gen_music.",
+  image: "Used by all studios for textures, sprites, and image assets.",
+  model: "Used by Game Studio for GLB 3D model output.",
+  sound: "Used by Game and Video Studios for music and sound effects.",
 };
 
 const STATUS_STYLES: Record<ProviderHealthStatus["status"], string> = {

@@ -32,7 +32,6 @@ import { SecuritySection } from "./SecuritySection";
 import { WorkerNamesSection } from "./WorkerNamesSection";
 import { McpServersSection } from "./McpServersSection";
 import { SshTab } from "./SshTab";
-import { AssetGenTab } from "./AssetGenTab";
 import { StudioConfigTab } from "./StudioConfigTab";
 import { useSettingsStatus } from "./useSettingsStatus";
 import type { SettingsSection } from "./settings-nav";
@@ -105,7 +104,6 @@ export function SettingsPage({ onClose, initialSection }: SettingsPageProps) {
     if (activeSection === "worker-names") return <WorkerNamesSection />;
     if (activeSection === "mcp-servers") return <McpServersSection />;
     if (activeSection === "ssh") return <SshTab />;
-    if (activeSection === "asset-gen") return <AssetGenTab />;
     if (activeSection === "studios") return <StudioConfigTab />;
     if (activeSection === "security") return <SecuritySection />;
     if (activeSection === "soul") return <SoulTab />;

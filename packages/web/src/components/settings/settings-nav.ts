@@ -30,7 +30,6 @@ export type SettingsSection =
   | "mcp-servers"
   | "ssh"
   | "security"
-  | "asset-gen"
   | "studios";
 
 export type ConfigStatus = "connected" | "configured" | "partial" | "unconfigured" | "none";
@@ -69,7 +68,6 @@ const ICONS = {
   x: ["M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"],
   "mcp-servers": ["M12 22v-5", "M9 8V2", "M15 8V2", "M18 8v5a6 6 0 0 1-6 6h0a6 6 0 0 1-6-6V8z"],
   ssh: ["M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"],
-  "asset-gen": ["M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z", "M3.27 6.96L12 12.01l8.73-5.05", "M12 22.08V12"],
   studios: ["M4 4h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z", "M2 10h20", "M12 10v10"],
 } as const;
 
@@ -238,17 +236,10 @@ export const SETTINGS_NAV: NavGroup[] = [
       },
       {
         id: "studios",
-        label: "Studios",
-        description: "LLM models, tools, and providers per studio type",
+        label: "Studios & Assets",
+        description: "Asset providers, AI models, and tools per studio type",
         icon: "studios",
-        keywords: ["studio", "game", "video", "app", "tool", "model", "override", "sound", "music"],
-      },
-      {
-        id: "asset-gen",
-        label: "Asset Generation",
-        description: "AI image, 3D model, and sound providers for Game Studio",
-        icon: "asset-gen",
-        keywords: ["game", "texture", "sprite", "model", "sound", "openai", "replicate", "stable-diffusion", "comfyui", "trellis", "gpu", "dall-e"],
+        keywords: ["studio", "game", "video", "app", "tool", "model", "override", "sound", "music", "texture", "sprite", "openai", "replicate", "stable-diffusion", "comfyui", "trellis", "gpu", "dall-e", "asset"],
       },
     ],
   },

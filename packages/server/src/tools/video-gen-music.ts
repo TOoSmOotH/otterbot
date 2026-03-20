@@ -6,7 +6,7 @@ import { nanoid } from "nanoid";
 import type { ToolContext } from "./tool-context.js";
 import type { VideoAudioTrack } from "@otterbot/shared";
 import { getVideo, updateManifest, getVideoDir } from "../video/video-service.js";
-import { getSoundProvider } from "../games/asset-providers/asset-adapter.js";
+import { getSoundProvider } from "../asset-providers/asset-adapter.js";
 
 export function createVideoGenMusicTool(ctx: ToolContext) {
   return tool({

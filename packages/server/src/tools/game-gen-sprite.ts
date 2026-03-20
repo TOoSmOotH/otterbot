@@ -4,7 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { nanoid } from "nanoid";
 import type { ToolContext } from "./tool-context.js";
-import { getImageProvider } from "../games/asset-providers/asset-adapter.js";
+import { getImageProvider } from "../asset-providers/asset-adapter.js";
 import { getGame } from "../games/game-service.js";
 import type { GameAsset } from "@otterbot/shared";
 
