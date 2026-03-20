@@ -177,17 +177,19 @@ else
   command=("${default_command[@]}")
 fi
 
-if [[ ${command[0]} == "up" && ${#build_flag[@]} -gt 0 ]]; then
-  command+=("${build_flag[@]}")
-fi
-
-if [[ ${command[0]} == "up" && ${#build_flag[@]} -gt 0 && ${#no_cache_flag[@]} -gt 0 ]]; then
-  command+=("${no_cache_flag[@]}")
-fi
-
 if [[ ${command[0]} == "build" && ${#no_cache_flag[@]} -gt 0 ]]; then
   command+=("${no_cache_flag[@]}")
 fi
 
 cd "${REPO_ROOT}"
+
+if [[ ${command[0]} == "up" && ${#build_flag[@]} -gt 0 && ${#no_cache_flag[@]} -gt 0 ]]; then
+  docker compose "${docker_args[@]}" build --no-cache
+  exec docker compose "${docker_args[@]}" "${command[@]}"
+fi
+
+if [[ ${command[0]} == "up" && ${#build_flag[@]} -gt 0 ]]; then
+  command+=("${build_flag[@]}")
+fi
+
 exec docker compose "${docker_args[@]}" "${command[@]}"

@@ -569,12 +569,12 @@ pnpm docker:down      # Stop container
 pnpm docker:dev       # Start with hot-reload (dev mode)
 ./scripts/docker-stack.sh prod              # Production stack
 ./scripts/docker-stack.sh prod-local --build # Production stack, but build Otterbot locally
-./scripts/docker-stack.sh prod-local --build --no-cache # Force a clean local rebuild
+./scripts/docker-stack.sh prod-local --build --no-cache # Run build --no-cache, then start
 ./scripts/docker-stack.sh comfyui           # Production + ComfyUI sidecar
 ./scripts/docker-stack.sh trellis           # Production + TRELLIS sidecar
 ./scripts/docker-stack.sh local-ai          # Production + ComfyUI + TRELLIS
 ./scripts/docker-stack.sh local-ai-local-nvidia --build # Prod-style stack with local Otterbot build + NVIDIA GPU
-./scripts/docker-stack.sh local-ai-local-nvidia --build --no-cache # Same, but no Docker build cache
+./scripts/docker-stack.sh local-ai-local-nvidia --build --no-cache # Clean local rebuild, then start
 ./scripts/docker-stack.sh local-ai-nvidia   # Production + both sidecars + NVIDIA GPU
 ./scripts/docker-stack.sh local-ai-amd      # Production + both sidecars + AMD GPU
 ./scripts/docker-stack.sh local-ai --build  # Same, but rebuild images first
