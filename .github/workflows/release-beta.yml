@@ -87,5 +87,31 @@ jobs:
           tags: |
             ghcr.io/toosmooth/otterbot:beta
             ghcr.io/toosmooth/otterbot:${{ needs.compute-version.outputs.docker_tag }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=otterbot
+          cache-to: type=gha,scope=otterbot,mode=max
+
+      - name: Build and push ComfyUI sidecar
+        uses: docker/build-push-action@d08e5c354a6adb9ed34480a06d141179aa583294 # v7.0.0
+        with:
+          context: .
+          file: docker/comfyui/Dockerfile
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: |
+            ghcr.io/toosmooth/otterbot-comfyui:beta
+            ghcr.io/toosmooth/otterbot-comfyui:${{ needs.compute-version.outputs.docker_tag }}
+          cache-from: type=gha,scope=comfyui
+          cache-to: type=gha,scope=comfyui,mode=max
+
+      - name: Build and push TRELLIS sidecar
+        uses: docker/build-push-action@d08e5c354a6adb9ed34480a06d141179aa583294 # v7.0.0
+        with:
+          context: .
+          file: docker/trellis/Dockerfile
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: |
+            ghcr.io/toosmooth/otterbot-trellis:beta
+            ghcr.io/toosmooth/otterbot-trellis:${{ needs.compute-version.outputs.docker_tag }}
+          cache-from: type=gha,scope=trellis
+          cache-to: type=gha,scope=trellis,mode=max

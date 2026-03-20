@@ -47,8 +47,10 @@ jobs:
         run: npx playwright install --with-deps chromium
 
       - name: Build and start mock server
-        run: docker compose -f docker-compose.mock.yml up -d --build --wait
+        run: docker compose -f docker-compose.e2e.yml up -d --build --wait
         env:
+          MOCK_MODE: "true"
+          MOCK_PASSPHRASE: test-passphrase-e2e
           MOCK_STREAM_DELAY: "0"
 
       - name: Run mock E2E tests
@@ -66,4 +68,4 @@ jobs:
 
       - name: Stop mock server
         if: always()
-        run: docker compose -f docker-compose.mock.yml down
+        run: docker compose -f docker-compose.e2e.yml down
