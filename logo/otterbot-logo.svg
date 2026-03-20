@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- Minimal flat-design otter logo for Otterbot -->
+
+  <!-- Ears -->
+  <circle cx="18" cy="14" r="7" fill="#1D4ED8"/>
+  <circle cx="46" cy="14" r="7" fill="#1D4ED8"/>
+  <circle cx="18" cy="14" r="4" fill="#93C5FD"/>
+  <circle cx="46" cy="14" r="4" fill="#93C5FD"/>
+
+  <!-- Head -->
+  <ellipse cx="32" cy="26" rx="20" ry="18" fill="#2563EB"/>
+
+  <!-- Muzzle -->
+  <ellipse cx="32" cy="32" rx="12" ry="9" fill="#BFDBFE"/>
+
+  <!-- Eyes -->
+  <circle cx="24" cy="24" r="3.5" fill="#FFFFFF"/>
+  <circle cx="40" cy="24" r="3.5" fill="#FFFFFF"/>
+  <circle cx="25" cy="24" r="2" fill="#1E3A5F"/>
+  <circle cx="41" cy="24" r="2" fill="#1E3A5F"/>
+
+  <!-- Nose -->
+  <ellipse cx="32" cy="29" rx="3" ry="2" fill="#1D4ED8"/>
+
+  <!-- Whiskers -->
+  <line x1="10" y1="30" x2="20" y2="31" stroke="#1D4ED8" stroke-width="1" stroke-linecap="round"/>
+  <line x1="10" y1="34" x2="20" y2="33" stroke="#1D4ED8" stroke-width="1" stroke-linecap="round"/>
+  <line x1="44" y1="31" x2="54" y2="30" stroke="#1D4ED8" stroke-width="1" stroke-linecap="round"/>
+  <line x1="44" y1="33" x2="54" y2="34" stroke="#1D4ED8" stroke-width="1" stroke-linecap="round"/>
+
+  <!-- Body -->
+  <ellipse cx="32" cy="50" rx="16" ry="12" fill="#2563EB"/>
+
+  <!-- Belly -->
+  <ellipse cx="32" cy="51" rx="10" ry="8" fill="#BFDBFE"/>
+
+  <!-- Feet -->
+  <ellipse cx="22" cy="59" rx="5" ry="3" fill="#1D4ED8"/>
+  <ellipse cx="42" cy="59" rx="5" ry="3" fill="#1D4ED8"/>
+</svg>
