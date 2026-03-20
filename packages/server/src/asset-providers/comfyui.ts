@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { createWriteStream, existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, extname, resolve } from "node:path";
-import { getConfig } from "../../auth/auth.js";
-import { getLocalComputeStatus } from "../../local-compute/local-compute.js";
+import { getConfig } from "../auth/auth.js";
+import { getLocalComputeStatus } from "../local-compute/local-compute.js";
 import type { ImageGenOptions, ImageGenProvider, ImageGenResult } from "./types.js";
 
 const DEFAULT_COMFYUI_URL = process.env.OTTERBOT_COMFYUI_URL ?? "http://comfyui:8188";
@@ -632,7 +632,10 @@ export class ComfyUIImageProvider implements ImageGenProvider {
       throw new Error("ComfyUI did not return a prompt ID");
     }
 
-    const image = await waitForImage(cleanUrl, submit.prompt_id);
+    // Try WebSocket-based waiting with progress, fall back to polling
+    await this.waitForCompletion(cleanUrl, submit.prompt_id, options?.onProgress);
+
+    const image = await this.fetchCompletedImage(cleanUrl, submit.prompt_id);
     const query = new URLSearchParams({
       filename: image.filename,
       type: image.type ?? "output",
@@ -642,5 +645,43 @@ export class ComfyUIImageProvider implements ImageGenProvider {
     const extension = extname(image.filename).toLowerCase();
     const mimeType = extension === ".jpg" || extension === ".jpeg" ? "image/jpeg" : "image/png";
     return { data, mimeType, provider: "comfyui-local" };
+  }
+
+  private async waitForCompletion(
+    baseUrl: string,
+    promptId: string,
+    onProgress?: ImageGenOptions["onProgress"],
+  ): Promise<void> {
+    try {
+      const { getComfyWsClient, waitForPromptViaWs } = await import("./comfyui-ws.js");
+      const client = getComfyWsClient(baseUrl);
+
+      if (client.connected) {
+        await waitForPromptViaWs(client, promptId, onProgress ? (p) => {
+          onProgress({ step: p.step, totalSteps: p.totalSteps, percentage: p.percentage });
+        } : undefined);
+        return;
+      }
+    } catch {
+      // WebSocket unavailable — fall back to polling
+    }
+
+    // Polling fallback
+    await waitForImage(baseUrl, promptId);
+  }
+
+  private async fetchCompletedImage(
+    baseUrl: string,
+    promptId: string,
+  ): Promise<{ filename: string; subfolder?: string; type?: string }> {
+    const history = await fetchJson<Record<string, {
+      outputs?: Record<string, { images?: Array<{ filename: string; subfolder?: string; type?: string }> }>;
+    }>>(`${baseUrl}/history/${promptId}`);
+    const entry = history[promptId];
+    const images = entry?.outputs
+      ? Object.values(entry.outputs).flatMap((output) => output.images ?? [])
+      : [];
+    if (images.length > 0) return images[0];
+    throw new Error("ComfyUI generation completed but no output images found");
   }
 }

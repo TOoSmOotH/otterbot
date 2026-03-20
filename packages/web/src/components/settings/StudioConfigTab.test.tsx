@@ -85,7 +85,7 @@ describe("StudioConfigTab", () => {
     });
 
     expect(html).toContain("Codex is not a media provider in Otterbot.");
-    expect(html).toContain("Open Asset Generation");
+    expect(html).toContain("Asset Providers power media");
     expect(html).toContain("Open Coding Agents");
     expect(html).toContain("Coding Agents power code work");
   });

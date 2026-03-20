@@ -568,16 +568,13 @@ pnpm docker:up:search # Start container + SearXNG search engine
 pnpm docker:down      # Stop container
 pnpm docker:dev       # Start with hot-reload (dev mode)
 ./scripts/docker-stack.sh prod              # Production stack
-./scripts/docker-stack.sh prod-local --build # Production stack, but build Otterbot locally
-./scripts/docker-stack.sh prod-local --build --no-cache # Run build --no-cache, then start
+./scripts/docker-stack.sh prod --build      # Production stack, build first
+./scripts/docker-stack.sh prod --build --no-cache # Clean build, then start
 ./scripts/docker-stack.sh comfyui           # Production + ComfyUI sidecar
 ./scripts/docker-stack.sh trellis           # Production + TRELLIS sidecar
 ./scripts/docker-stack.sh local-ai          # Production + ComfyUI + TRELLIS
-./scripts/docker-stack.sh local-ai-local-nvidia --build # Prod-style stack with local Otterbot build + NVIDIA GPU
-./scripts/docker-stack.sh local-ai-local-nvidia --build --no-cache # Clean local rebuild, then start
 ./scripts/docker-stack.sh local-ai-nvidia   # Production + both sidecars + NVIDIA GPU
 ./scripts/docker-stack.sh local-ai-amd      # Production + both sidecars + AMD GPU
-./scripts/docker-stack.sh local-ai --build  # Same, but rebuild images first
 ./scripts/docker-stack.sh dev               # Dev stack with hot reload
 ./scripts/docker-stack.sh dev-local-ai      # Dev stack + ComfyUI + TRELLIS
 ./scripts/docker-stack.sh dev-local-ai-nvidia # Dev stack + both sidecars + NVIDIA GPU
@@ -616,7 +613,7 @@ cp .env.example .env
 
 > **TRELLIS sidecar:** For image-to-3D and text-to-3D workflows, start the optional `docker-compose.trellis.yml` override. Otterbot will talk to the sidecar at `http://trellis:8080` by default. The bridge image includes a Blender post-process path and an optional `TRELLIS_INFERENCE_CMD` hook for a real TRELLIS runtime; without that command the bridge returns a placeholder mesh so the orchestration path still works end-to-end.
 
-> **Local production-style builds:** The `*-local` stack names add `docker-compose.local-build.yml`, which replaces the published `ghcr.io/toosmooth/otterbot:latest` image with a local Docker build from your checkout. Use these when you want to test a production-style stack before CI publishes a new image.
+> **Production builds:** The `docker-compose.prod.yml` builds locally from your checkout. Use `./scripts/docker-stack.sh prod --build` to build and run.
 
 ## REST API
 

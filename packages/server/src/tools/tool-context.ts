@@ -13,4 +13,6 @@ export interface ToolContext {
   allowLocalBrowsing?: boolean;
   /** GitHub repo slug (owner/repo) for project-scoped access control */
   projectRepo?: string;
+  /** Emit a Socket.IO event to all connected clients. */
+  emitEvent?: (event: string, data: unknown) => void;
 }

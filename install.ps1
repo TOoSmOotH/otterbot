@@ -4,11 +4,15 @@
     Otterbot installer for Windows — https://otterbot.ai
 .DESCRIPTION
     Usage: irm https://otterbot.ai/install.ps1 | iex
-    Or:    .\install.ps1 [-Dir <path>] [-Beta] [-NoStart] [-Help]
+    Or:    .\install.ps1 [-Dir <path>] [-Beta] [-ComfyUI] [-Trellis] [-NoStart] [-Help]
 .PARAMETER Dir
     Install directory (default: $env:USERPROFILE\otterbot)
 .PARAMETER Beta
     Use the :beta image tag instead of :latest
+.PARAMETER ComfyUI
+    Include ComfyUI image generation sidecar
+.PARAMETER Trellis
+    Include TRELLIS 3D generation sidecar
 .PARAMETER NoStart
     Generate files but don't pull/start the container
 .PARAMETER Help
@@ -18,6 +22,8 @@
 param(
     [string]$Dir,
     [switch]$Beta,
+    [switch]$ComfyUI,
+    [switch]$Trellis,
     [switch]$NoStart,
     [switch]$Help
 )
@@ -51,6 +57,8 @@ Usage:
 Options:
   -Dir <path>   Install directory (default: ~\otterbot)
   -Beta         Use the beta image tag
+  -ComfyUI      Include ComfyUI image generation sidecar
+  -Trellis      Include TRELLIS 3D generation sidecar
   -NoStart      Generate files but don't start the container
   -Help         Show this help message
 
@@ -172,7 +180,16 @@ OTTERBOT_ALLOWED_ORIGIN=https://localhost:62626
 
 # ── Generate docker-compose.yml ──────────────────────────────────────────────
 
-@"
+# Build extra environment variables for sidecar URLs
+$extraEnv = ''
+if ($ComfyUI) {
+    $extraEnv += "`n      - OTTERBOT_COMFYUI_URL=http://comfyui:8188"
+}
+if ($Trellis) {
+    $extraEnv += "`n      - OTTERBOT_TRELLIS_URL=http://trellis:8080"
+}
+
+$compose = @"
 services:
   otterbot:
     image: ${Image}:${Tag}
@@ -188,11 +205,54 @@ services:
       - ENABLE_DESKTOP=`${ENABLE_DESKTOP:-true}
       - DESKTOP_RESOLUTION=`${DESKTOP_RESOLUTION:-1280x720x24}
       - SUDO_MODE=`${SUDO_MODE:-restricted}
-      - OTTERBOT_ALLOWED_ORIGIN=`${OTTERBOT_ALLOWED_ORIGIN:-}
+      - OTTERBOT_ALLOWED_ORIGIN=`${OTTERBOT_ALLOWED_ORIGIN:-}${extraEnv}
     restart: unless-stopped
-"@ | Set-Content -Path $composeFile -Encoding UTF8
+"@
 
-Write-Info "Generated docker-compose.yml (image tag: $Tag)"
+if ($ComfyUI) {
+    $compose += @"
+
+  comfyui:
+    image: ghcr.io/toosmooth/otterbot-comfyui:${Tag}
+    environment:
+      - CLI_ARGS=--listen 0.0.0.0 --port 8188
+      - COMFYUI_DATA_ROOT=/data
+    volumes:
+      - `${OTTERBOT_DATA_DIR:-./data}/comfyui:/data
+    expose:
+      - "8188"
+    restart: unless-stopped
+"@
+}
+
+if ($Trellis) {
+    $compose += @"
+
+  trellis:
+    image: ghcr.io/toosmooth/otterbot-trellis:${Tag}
+    environment:
+      - TRELLIS_DATA_ROOT=/data
+      - TRELLIS_PORT=8080
+      - TRELLIS_MODEL_REF=microsoft/TRELLIS-image-large
+      - TRELLIS_INFERENCE_CMD=
+      - ENABLE_BLENDER_POSTPROCESS=true
+    volumes:
+      - `${OTTERBOT_DATA_DIR:-./data}/trellis:/data
+    expose:
+      - "8080"
+    restart: unless-stopped
+"@
+}
+
+$compose | Set-Content -Path $composeFile -Encoding UTF8
+
+$sidecarsMsg = ''
+if ($ComfyUI -or $Trellis) {
+    $sidecarsMsg = ' + sidecars:'
+    if ($ComfyUI) { $sidecarsMsg += ' comfyui' }
+    if ($Trellis) { $sidecarsMsg += ' trellis' }
+}
+Write-Info "Generated docker-compose.yml (image tag: $Tag$sidecarsMsg)"
 
 # ── Pull & start ─────────────────────────────────────────────────────────────
 
@@ -220,6 +280,12 @@ Write-Host ''
 Write-Host "  URL:      https://localhost:62626  (self-signed certificate)"
 Write-Host "  Data:     $dataDir"
 Write-Host "  Config:   $envFile"
+if ($ComfyUI) {
+    Write-Host "  ComfyUI:  enabled (port 8188 internal)"
+}
+if ($Trellis) {
+    Write-Host "  TRELLIS:  enabled (port 8080 internal)"
+}
 Write-Host ''
 Write-Host "  Stop:     cd $InstallDir; docker compose down"
 Write-Host "  Start:    cd $InstallDir; docker compose up -d"

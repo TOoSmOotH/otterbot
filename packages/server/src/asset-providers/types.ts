@@ -1,5 +1,5 @@
 /**
- * Asset generation provider interfaces for the Game Studio.
+ * Asset generation provider interfaces for all Studios.
  *
  * Follows the same adapter pattern as the LLM system:
  * - Provider interfaces define the contract
@@ -53,6 +53,8 @@ export interface ImageGenOptions {
   sampler?: string;
   steps?: number;
   cfgScale?: number;
+  /** Progress callback for providers that support it (e.g. ComfyUI). */
+  onProgress?: (progress: { step: number; totalSteps: number; percentage: number; stage?: string }) => void;
 }
 
 export interface ImageGenResult {

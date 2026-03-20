@@ -13,7 +13,11 @@
 #   OTTERBOT_DB_KEY=<random-hex-string>
 services:
   otterbot:
-    image: ghcr.io/toosmooth/otterbot:latest
+    build:
+      context: .
+      args:
+        OTTERBOT_UID: ${OTTERBOT_UID:-1000}
+        OTTERBOT_GID: ${OTTERBOT_GID:-1000}
     shm_size: "256m"
     ports:
       - "${PORT:-62626}:62626"

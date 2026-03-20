@@ -8,6 +8,8 @@
 # Flags:
 #   --dir <path>   — custom install directory
 #   --beta         — use :beta image tag instead of :latest
+#   --comfyui      — include ComfyUI image generation sidecar
+#   --trellis      — include TRELLIS 3D generation sidecar
 #   --no-start     — set up files but don't pull/start the container
 #   --no-open      — don't open the browser after starting
 #   --help         — show usage
@@ -21,6 +23,8 @@ TAG="latest"
 INSTALL_DIR="${OTTERBOT_DIR:-$HOME/otterbot}"
 NO_START=0
 NO_OPEN=0
+INCLUDE_COMFYUI=0
+INCLUDE_TRELLIS=0
 
 # ── Colours (disabled when not a tty) ────────────────────────────────────────
 
@@ -52,6 +56,8 @@ Usage:
 Options:
   --dir <path>   Install directory (default: \$HOME/otterbot)
   --beta         Use the beta image tag
+  --comfyui      Include ComfyUI image generation sidecar
+  --trellis      Include TRELLIS 3D generation sidecar
   --no-start     Generate files but don't start the container
   --no-open      Don't open the browser after starting
   --help         Show this help message
@@ -118,6 +124,12 @@ while [ $# -gt 0 ]; do
       ;;
     --beta)
       TAG="beta"
+      ;;
+    --comfyui)
+      INCLUDE_COMFYUI=1
+      ;;
+    --trellis)
+      INCLUDE_TRELLIS=1
       ;;
     --no-start)
       NO_START=1
@@ -277,6 +289,17 @@ fi
 
 # ── Generate docker-compose.yml ──────────────────────────────────────────────
 
+# Build extra environment variables for otterbot service when sidecars are enabled
+EXTRA_ENV=""
+if [ "$INCLUDE_COMFYUI" -eq 1 ]; then
+  EXTRA_ENV="${EXTRA_ENV}
+      - OTTERBOT_COMFYUI_URL=http://comfyui:8188"
+fi
+if [ "$INCLUDE_TRELLIS" -eq 1 ]; then
+  EXTRA_ENV="${EXTRA_ENV}
+      - OTTERBOT_TRELLIS_URL=http://trellis:8080"
+fi
+
 cat > "$INSTALL_DIR/docker-compose.yml" <<EOF
 services:
   otterbot:
@@ -294,11 +317,56 @@ services:
       - ENABLE_DESKTOP=\${ENABLE_DESKTOP:-true}
       - DESKTOP_RESOLUTION=\${DESKTOP_RESOLUTION:-1280x720x24}
       - SUDO_MODE=\${SUDO_MODE:-restricted}
-      - OTTERBOT_ALLOWED_ORIGIN=\${OTTERBOT_ALLOWED_ORIGIN:-}
+      - OTTERBOT_ALLOWED_ORIGIN=\${OTTERBOT_ALLOWED_ORIGIN:-}${EXTRA_ENV}
     restart: unless-stopped
 EOF
 
-info "Generated docker-compose.yml (image tag: ${TAG}, platform: ${DOCKER_PLATFORM})"
+# Append ComfyUI sidecar service
+if [ "$INCLUDE_COMFYUI" -eq 1 ]; then
+  cat >> "$INSTALL_DIR/docker-compose.yml" <<EOF
+
+  comfyui:
+    image: ghcr.io/toosmooth/otterbot-comfyui:${TAG}
+    platform: ${DOCKER_PLATFORM}
+    environment:
+      - CLI_ARGS=--listen 0.0.0.0 --port 8188
+      - COMFYUI_DATA_ROOT=/data
+    volumes:
+      - \${OTTERBOT_DATA_DIR:-./data}/comfyui:/data
+    expose:
+      - "8188"
+    restart: unless-stopped
+EOF
+fi
+
+# Append TRELLIS sidecar service
+if [ "$INCLUDE_TRELLIS" -eq 1 ]; then
+  cat >> "$INSTALL_DIR/docker-compose.yml" <<EOF
+
+  trellis:
+    image: ghcr.io/toosmooth/otterbot-trellis:${TAG}
+    platform: ${DOCKER_PLATFORM}
+    environment:
+      - TRELLIS_DATA_ROOT=/data
+      - TRELLIS_PORT=8080
+      - TRELLIS_MODEL_REF=microsoft/TRELLIS-image-large
+      - TRELLIS_INFERENCE_CMD=
+      - ENABLE_BLENDER_POSTPROCESS=true
+    volumes:
+      - \${OTTERBOT_DATA_DIR:-./data}/trellis:/data
+    expose:
+      - "8080"
+    restart: unless-stopped
+EOF
+fi
+
+SIDECARS_MSG=""
+if [ "$INCLUDE_COMFYUI" -eq 1 ] || [ "$INCLUDE_TRELLIS" -eq 1 ]; then
+  SIDECARS_MSG=" + sidecars:"
+  [ "$INCLUDE_COMFYUI" -eq 1 ] && SIDECARS_MSG="${SIDECARS_MSG} comfyui"
+  [ "$INCLUDE_TRELLIS" -eq 1 ] && SIDECARS_MSG="${SIDECARS_MSG} trellis"
+fi
+info "Generated docker-compose.yml (image tag: ${TAG}, platform: ${DOCKER_PLATFORM}${SIDECARS_MSG})"
 
 # ── Pull & start ─────────────────────────────────────────────────────────────
 
@@ -320,6 +388,12 @@ printf "\n"
 printf "  %-12s %s\n" "URL:" "https://localhost:62626  (self-signed certificate)"
 printf "  %-12s %s\n" "Data:" "$INSTALL_DIR/data"
 printf "  %-12s %s\n" "Config:" "$INSTALL_DIR/.env"
+if [ "$INCLUDE_COMFYUI" -eq 1 ]; then
+  printf "  %-12s %s\n" "ComfyUI:" "enabled (port 8188 internal)"
+fi
+if [ "$INCLUDE_TRELLIS" -eq 1 ]; then
+  printf "  %-12s %s\n" "TRELLIS:" "enabled (port 8080 internal)"
+fi
 printf "\n"
 printf "  %-12s %s\n" "Stop:" "cd $INSTALL_DIR && docker compose down"
 printf "  %-12s %s\n" "Start:" "cd $INSTALL_DIR && docker compose up -d"

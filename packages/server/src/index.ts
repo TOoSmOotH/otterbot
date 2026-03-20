@@ -5610,6 +5610,11 @@ async function main() {
   // Asset Provider Settings REST routes
   // =========================================================================
 
+  app.get("/api/asset-status", async () => {
+    const { getAssetQuickStatus } = await import("./asset-providers/asset-adapter.js");
+    return getAssetQuickStatus();
+  });
+
   app.get("/api/settings/asset-providers", async () => {
     const {
       getAssetProviderConfig,
@@ -5617,8 +5622,8 @@ async function main() {
       getComfyUiSettingsSummary,
       getAssetProviderHealthStatuses,
       getAssetGenerationRecommendations,
-    } = await import("./games/asset-providers/asset-adapter.js");
-    const { ASSET_PROVIDER_META } = await import("./games/asset-providers/types.js");
+    } = await import("./asset-providers/asset-adapter.js");
+    const { ASSET_PROVIDER_META } = await import("./asset-providers/types.js");
     const { getLocalComputeStatus } = await import("./local-compute/local-compute.js");
     return {
       providers: ASSET_PROVIDER_META,
@@ -5632,7 +5637,7 @@ async function main() {
   });
 
   app.get("/api/settings/comfyui", async () => {
-    const { getComfyUiSettingsSummary } = await import("./games/asset-providers/asset-adapter.js");
+    const { getComfyUiSettingsSummary } = await import("./asset-providers/asset-adapter.js");
     return getComfyUiSettingsSummary();
   });
 
@@ -5648,7 +5653,7 @@ async function main() {
     if (req.body.image) setConfig("asset:image:provider", req.body.image);
     if (req.body.model) setConfig("asset:model:provider", req.body.model);
     if (req.body.sound) setConfig("asset:sound:provider", req.body.sound);
-    const { getAssetProviderConfig } = await import("./games/asset-providers/asset-adapter.js");
+    const { getAssetProviderConfig } = await import("./asset-providers/asset-adapter.js");
     return { config: getAssetProviderConfig() };
   });
 
@@ -5674,7 +5679,7 @@ async function main() {
       reply.code(400);
       return { error: "label, sourceUrl, and modelType are required" };
     }
-    const { addManagedComfyModel } = await import("./games/asset-providers/comfyui.js");
+    const { addManagedComfyModel } = await import("./asset-providers/comfyui.js");
     return { model: addManagedComfyModel({ label, sourceUrl, modelType, filename }) };
   });
 
@@ -5682,7 +5687,7 @@ async function main() {
     Params: { id: string };
   }>("/api/settings/comfyui/packs/:id/install", async (req, reply) => {
     try {
-      const { installComfyStarterPack } = await import("./games/asset-providers/comfyui.js");
+      const { installComfyStarterPack } = await import("./asset-providers/comfyui.js");
       return { models: await installComfyStarterPack(req.params.id) };
     } catch (error) {
       reply.code(404);
@@ -5694,7 +5699,7 @@ async function main() {
     Params: { id: string };
   }>("/api/settings/comfyui/models/:id/install", async (req, reply) => {
     try {
-      const { installManagedComfyModel } = await import("./games/asset-providers/comfyui.js");
+      const { installManagedComfyModel } = await import("./asset-providers/comfyui.js");
       return { model: await installManagedComfyModel(req.params.id) };
     } catch (error) {
       reply.code(404);
@@ -5705,7 +5710,7 @@ async function main() {
   app.delete<{
     Params: { id: string };
   }>("/api/settings/comfyui/models/:id", async (req, reply) => {
-    const { removeManagedComfyModel } = await import("./games/asset-providers/comfyui.js");
+    const { removeManagedComfyModel } = await import("./asset-providers/comfyui.js");
     const removed = removeManagedComfyModel(req.params.id);
     if (!removed) {
       reply.code(404);
