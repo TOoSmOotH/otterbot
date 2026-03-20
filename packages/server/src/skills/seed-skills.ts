@@ -37,6 +37,7 @@ const SEED_SKILLS: Array<{ id: string; data: SkillCreate }> = [
           "module_query",
           "module_install",
           "module_toggle",
+          "image_gen",
         ],
         capabilities: ["management", "delegation", "coordination", "github"],
         parameters: {},
