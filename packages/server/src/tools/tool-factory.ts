@@ -60,6 +60,7 @@ import { createGameGenSpriteTool } from "./game-gen-sprite.js";
 import { createGameGenModelTool } from "./game-gen-model.js";
 import { createGameGenModelFromImageTool } from "./game-gen-model-from-image.js";
 import { createGameGenSoundTool } from "./game-gen-sound.js";
+import { createImageGenTool } from "./image-gen.js";
 import { createGamePlaytestTool } from "./game-playtest.js";
 import { createGameInspectTool } from "./game-inspect.js";
 import { createVideoCreateTool } from "./video-create.js";
@@ -112,6 +113,7 @@ const TOOL_REGISTRY: Record<string, ToolCreator> = {
   game_gen_model: createGameGenModelTool,
   game_gen_model_from_image: createGameGenModelFromImageTool,
   game_gen_sound: createGameGenSoundTool,
+  image_gen: createImageGenTool,
   // Game Studio — playtesting tools
   game_playtest: createGamePlaytestTool,
   game_inspect: createGameInspectTool,
@@ -786,6 +788,19 @@ export function getToolsWithMeta(): {
         { name: "filename", type: "string", required: false, description: "Output filename (without extension)" },
         { name: "durationSeconds", type: "number", required: false, description: "Duration in seconds" },
         { name: "category", type: "string", required: false, description: "Sound category: sfx, music, ambient" },
+      ],
+    },
+    image_gen: {
+      description: "Generate a one-off image without creating or modifying a game or app project. Use this for local ComfyUI smoke tests, mockups, standalone logos, concept art, textures, icons, or sprites.",
+      category: "Asset Generation",
+      parameters: [
+        { name: "prompt", type: "string", required: true, description: "Description of the image to generate" },
+        { name: "filename", type: "string", required: false, description: "Output filename without extension" },
+        { name: "width", type: "number", required: false, description: "Width in pixels (default: 1024)" },
+        { name: "height", type: "number", required: false, description: "Height in pixels (default: 1024)" },
+        { name: "style", type: "string", required: false, description: "Style hint such as pixel-art, photorealistic, cartoon, or minimal" },
+        { name: "taskType", type: "string", required: false, description: "Task category: image, icon, hero, sprite, texture" },
+        { name: "presetId", type: "string", required: false, description: "Optional preset override for local ComfyUI generation" },
       ],
     },
     game_playtest: {

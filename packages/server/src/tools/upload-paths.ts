@@ -1,10 +1,10 @@
 import { resolve, sep } from "node:path";
 
-function workspaceRoot(): string {
+export function workspaceRoot(): string {
   return resolve(process.env.WORKSPACE_ROOT ?? "./data");
 }
 
-function uploadsRoot(): string {
+export function uploadsRoot(): string {
   return resolve(workspaceRoot(), "data", "uploads");
 }
 

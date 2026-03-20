@@ -372,6 +372,7 @@ The user can see everything on the desktop in real-time.`;
       // Temporarily swap the base class history to this context's history
       this.conversationHistory = ctx.history;
     }
+    const historyStartIndex = this.conversationHistory.length;
 
     // Inject current project context so the LLM knows which project the user is in
     const currentProjectBlock = projectId ? this.getCurrentProjectContext(projectId) : "";
@@ -492,13 +493,50 @@ The user can see everything on the desktop in real-time.`;
     }
 
     // Send the response back through the bus (to CEO / null)
+    const generatedAttachments = this.extractToolAttachments(historyStartIndex);
     this.sendMessage(
       null,
       MessageType.Chat,
       finalText,
-      thinking ? { thinking } : undefined,
+      thinking || generatedAttachments.length > 0
+        ? {
+            ...(thinking ? { thinking } : {}),
+            ...(generatedAttachments.length > 0 ? { attachments: generatedAttachments } : {}),
+          }
+        : undefined,
       this.currentConversationId ?? undefined,
     );
+  }
+
+  private extractToolAttachments(historyStartIndex: number): ChatAttachment[] {
+    const attachments: ChatAttachment[] = [];
+    const seen = new Set<string>();
+
+    for (const entry of this.conversationHistory.slice(historyStartIndex)) {
+      if (entry.role !== "tool" || !Array.isArray(entry.content)) continue;
+
+      for (const part of entry.content as Array<{ type?: string; result?: string }>) {
+        if (part.type !== "tool-result" || typeof part.result !== "string") continue;
+
+        try {
+          const parsed = JSON.parse(part.result) as { chatAttachment?: ChatAttachment; chatAttachments?: ChatAttachment[] };
+          const candidates = [
+            ...(parsed.chatAttachment ? [parsed.chatAttachment] : []),
+            ...(Array.isArray(parsed.chatAttachments) ? parsed.chatAttachments : []),
+          ];
+
+          for (const attachment of candidates) {
+            if (!attachment?.id || seen.has(attachment.id)) continue;
+            seen.add(attachment.id);
+            attachments.push(attachment);
+          }
+        } catch {
+          // Ignore non-JSON tool results.
+        }
+      }
+    }
+
+    return attachments;
   }
 
   private async handleTeamLeadReport(message: BusMessage) {
