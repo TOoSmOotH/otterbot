@@ -53,6 +53,7 @@ import {
   testSearchProvider,
 } from "../settings/settings.js";
 import { createMemorySaveTool } from "../tools/memory-save.js";
+import { createImageGenTool } from "../tools/image-gen.js";
 import { getConfiguredSearchProvider } from "../tools/search/providers.js";
 import { getRandomModelPackId } from "../models3d/model-packs.js";
 import { pickWorkerName } from "../utils/worker-names.js";
@@ -625,6 +626,13 @@ The user can see everything on the desktop in real-time.`;
 
   /** All possible COO tools — filtered by skills in getTools() */
   private getAllCooTools(): Record<string, unknown> {
+    const sharedToolContext = {
+      workspacePath: this.workspace.getRoot(),
+      projectId: "",
+      agentId: this.id,
+      role: this.role,
+    } as const;
+
     return {
       run_command: tool({
         description:
@@ -918,6 +926,7 @@ The user can see everything on the desktop in real-time.`;
           return reply.content;
         },
       }),
+      image_gen: createImageGenTool(sharedToolContext),
       github_list_issues: tool({
         description:
           "List GitHub issues for a repository. Returns issue number, title, state, labels, and assignees.",
