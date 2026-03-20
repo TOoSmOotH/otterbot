@@ -7,7 +7,7 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 usage() {
   cat <<'EOF'
 Usage:
-  ./scripts/docker-stack.sh <stack> [--build] [up-args...]
+  ./scripts/docker-stack.sh <stack> [--build] [--no-cache] [up-args...]
 
 Stacks:
   prod               Otterbot production stack
@@ -38,6 +38,7 @@ Stacks:
 Examples:
   ./scripts/docker-stack.sh prod
   ./scripts/docker-stack.sh prod-local --build
+  ./scripts/docker-stack.sh prod-local --build --no-cache
   ./scripts/docker-stack.sh comfyui --build
   ./scripts/docker-stack.sh dev-local-ai
   ./scripts/docker-stack.sh local-ai-nvidia
@@ -148,10 +149,22 @@ case "$STACK" in
 esac
 
 build_flag=()
-if [[ ${1:-} == "--build" ]]; then
-  build_flag=(--build)
-  shift
-fi
+no_cache_flag=()
+while [[ $# -gt 0 ]]; do
+  case "${1}" in
+    --build)
+      build_flag=(--build)
+      shift
+      ;;
+    --no-cache)
+      no_cache_flag=(--no-cache)
+      shift
+      ;;
+    *)
+      break
+      ;;
+  esac
+done
 
 docker_args=()
 for file in "${compose_files[@]}"; do
@@ -166,6 +179,14 @@ fi
 
 if [[ ${command[0]} == "up" && ${#build_flag[@]} -gt 0 ]]; then
   command+=("${build_flag[@]}")
+fi
+
+if [[ ${command[0]} == "up" && ${#build_flag[@]} -gt 0 && ${#no_cache_flag[@]} -gt 0 ]]; then
+  command+=("${no_cache_flag[@]}")
+fi
+
+if [[ ${command[0]} == "build" && ${#no_cache_flag[@]} -gt 0 ]]; then
+  command+=("${no_cache_flag[@]}")
 fi
 
 cd "${REPO_ROOT}"
