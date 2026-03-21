@@ -5641,6 +5641,12 @@ async function main() {
     return getComfyUiSettingsSummary();
   });
 
+  // Lightweight endpoint for polling model statuses (no health check)
+  app.get("/api/settings/comfyui/models", async () => {
+    const { listManagedComfyModels } = await import("./asset-providers/comfyui.js");
+    return { models: listManagedComfyModels() };
+  });
+
   app.get("/api/settings/local-compute", async () => {
     const { getLocalComputeStatus } = await import("./local-compute/local-compute.js");
     return getLocalComputeStatus();
