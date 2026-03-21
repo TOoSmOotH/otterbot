@@ -5688,7 +5688,18 @@ async function main() {
   }>("/api/settings/comfyui/packs/:id/install", async (req, reply) => {
     try {
       const { installComfyStarterPack } = await import("./asset-providers/comfyui.js");
-      return { models: await installComfyStarterPack(req.params.id) };
+      const emitter = {
+        onProgress: (modelId: string, label: string, packId: string | undefined, bytesDownloaded: number, totalBytes: number) => {
+          io.emit("model:download-progress", { modelId, label, packId, bytesDownloaded, totalBytes, percentage: Math.round((bytesDownloaded / totalBytes) * 100) });
+        },
+        onComplete: (modelId: string, label: string, packId: string | undefined) => {
+          io.emit("model:download-complete", { modelId, label, packId });
+        },
+        onError: (modelId: string, label: string, packId: string | undefined, error: string) => {
+          io.emit("model:download-error", { modelId, label, packId, error });
+        },
+      };
+      return { models: await installComfyStarterPack(req.params.id, emitter) };
     } catch (error) {
       reply.code(404);
       return { error: error instanceof Error ? error.message : String(error) };
@@ -5700,7 +5711,18 @@ async function main() {
   }>("/api/settings/comfyui/models/:id/install", async (req, reply) => {
     try {
       const { installManagedComfyModel } = await import("./asset-providers/comfyui.js");
-      return { model: await installManagedComfyModel(req.params.id) };
+      const emitter = {
+        onProgress: (modelId: string, label: string, packId: string | undefined, bytesDownloaded: number, totalBytes: number) => {
+          io.emit("model:download-progress", { modelId, label, packId, bytesDownloaded, totalBytes, percentage: Math.round((bytesDownloaded / totalBytes) * 100) });
+        },
+        onComplete: (modelId: string, label: string, packId: string | undefined) => {
+          io.emit("model:download-complete", { modelId, label, packId });
+        },
+        onError: (modelId: string, label: string, packId: string | undefined, error: string) => {
+          io.emit("model:download-error", { modelId, label, packId, error });
+        },
+      };
+      return { model: await installManagedComfyModel(req.params.id, emitter) };
     } catch (error) {
       reply.code(404);
       return { error: error instanceof Error ? error.message : String(error) };

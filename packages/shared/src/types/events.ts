@@ -113,6 +113,11 @@ export interface ServerToClientEvents {
   "video:deleted": (data: { videoId: string; projectId: string }) => void;
   "video:render-progress": (data: { videoId: string; projectId: string; percent: number; stage: string }) => void;
   "video:render-complete": (data: { videoId: string; projectId: string; outputPath: string; duration: number }) => void;
+
+  // Model download progress (starter packs & managed models)
+  "model:download-progress": (data: { modelId: string; label: string; packId?: string; bytesDownloaded: number; totalBytes: number; percentage: number }) => void;
+  "model:download-complete": (data: { modelId: string; label: string; packId?: string }) => void;
+  "model:download-error": (data: { modelId: string; label: string; packId?: string; error: string }) => void;
 }
 
 /** Events emitted from client to server */
