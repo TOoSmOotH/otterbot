@@ -118,6 +118,8 @@ export interface ServerToClientEvents {
   "model:download-progress": (data: { modelId: string; label: string; packId?: string; bytesDownloaded: number; totalBytes: number; percentage: number }) => void;
   "model:download-complete": (data: { modelId: string; label: string; packId?: string }) => void;
   "model:download-error": (data: { modelId: string; label: string; packId?: string; error: string }) => void;
+  "model:pack-install-complete": (data: { packId: string }) => void;
+  "model:pack-install-error": (data: { packId: string; error: string }) => void;
 }
 
 /** Events emitted from client to server */
