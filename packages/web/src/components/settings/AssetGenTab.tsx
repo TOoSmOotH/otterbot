@@ -176,15 +176,15 @@ function InstallModal({
   } | null>(null);
   const closedRef = useRef(false);
 
-  // Poll server for model status every 2s
+  // Poll server for model status every 2s (lightweight endpoint, no health check)
   useEffect(() => {
     let timer: ReturnType<typeof setInterval>;
 
     const poll = async () => {
       try {
-        const res = await fetch("/api/settings/comfyui");
-        const data = await res.json() as ComfyUiSummary;
-        const packModels = data.models.filter((m) => m.starterPackId === packId);
+        const res = await fetch("/api/settings/comfyui/models");
+        const data = await res.json() as { models: ManagedComfyModel[] };
+        const packModels = (data.models ?? []).filter((m) => m.starterPackId === packId);
         setModels(packModels);
 
         // Auto-close when all models installed
