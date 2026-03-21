@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 interface AssetProviderMeta {
   type: string;
@@ -144,6 +144,174 @@ function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
 }
 
+const STATUS_ICONS: Record<string, string> = {
+  "not-installed": "\u25cb",
+  installing: "\u25d4",
+  installed: "\u2713",
+  error: "\u2717",
+};
+
+const STATUS_COLORS: Record<string, string> = {
+  "not-installed": "text-zinc-500",
+  installing: "text-blue-400",
+  installed: "text-emerald-400",
+  error: "text-red-400",
+};
+
+function InstallModal({
+  packLabel,
+  packId,
+  onClose,
+}: {
+  packLabel: string;
+  packId: string;
+  onClose: (installed: boolean) => void;
+}) {
+  const [models, setModels] = useState<ManagedComfyModel[]>([]);
+  const [downloadInfo, setDownloadInfo] = useState<{
+    modelId: string;
+    bytesDownloaded: number;
+    totalBytes: number;
+    percentage: number;
+  } | null>(null);
+  const closedRef = useRef(false);
+
+  // Poll server for model status every 2s
+  useEffect(() => {
+    let timer: ReturnType<typeof setInterval>;
+
+    const poll = async () => {
+      try {
+        const res = await fetch("/api/settings/comfyui");
+        const data = await res.json() as ComfyUiSummary;
+        const packModels = data.models.filter((m) => m.starterPackId === packId);
+        setModels(packModels);
+
+        // Auto-close when all models installed
+        if (packModels.length > 0 && packModels.every((m) => m.status === "installed") && !closedRef.current) {
+          closedRef.current = true;
+          onClose(true);
+        }
+      } catch {
+        // ignore polling errors
+      }
+    };
+
+    poll();
+    timer = setInterval(poll, 2000);
+    return () => clearInterval(timer);
+  }, [packId, onClose]);
+
+  // Listen for Socket.IO progress (optional enhancement on top of polling)
+  useEffect(() => {
+    const socket = (window as any).__otterbot_socket;
+    if (!socket) return;
+
+    const onProgress = (data: { modelId: string; bytesDownloaded: number; totalBytes: number; percentage: number }) => {
+      setDownloadInfo(data);
+    };
+    const onComplete = () => setDownloadInfo(null);
+    const onError = () => setDownloadInfo(null);
+
+    socket.on("model:download-progress", onProgress);
+    socket.on("model:download-complete", onComplete);
+    socket.on("model:download-error", onError);
+    return () => {
+      socket.off("model:download-progress", onProgress);
+      socket.off("model:download-complete", onComplete);
+      socket.off("model:download-error", onError);
+    };
+  }, []);
+
+  const allDone = models.length > 0 && models.every((m) => m.status === "installed" || m.status === "error");
+  const hasError = models.some((m) => m.status === "error");
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={() => onClose(allDone)}>
+      <div className="bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl w-full max-w-md mx-4" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between border-b border-zinc-700 px-4 py-3">
+          <h3 className="text-sm font-semibold text-zinc-100">Installing: {packLabel}</h3>
+          <button onClick={() => onClose(allDone)} className="text-zinc-400 hover:text-zinc-200 text-lg leading-none">&times;</button>
+        </div>
+
+        <div className="p-4 space-y-3">
+          {models.length === 0 && (
+            <div className="flex items-center gap-2 text-xs text-zinc-400">
+              <div className="h-3 w-3 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+              Starting download...
+            </div>
+          )}
+
+          {models.map((model) => {
+            const isDownloading = model.status === "installing";
+            const progress = isDownloading && downloadInfo?.modelId === model.id ? downloadInfo : null;
+
+            return (
+              <div key={model.id} className="space-y-1.5">
+                <div className="flex items-center justify-between text-xs">
+                  <div className="flex items-center gap-2">
+                    <span className={`${STATUS_COLORS[model.status]} ${isDownloading ? "animate-spin" : ""}`}>
+                      {STATUS_ICONS[model.status]}
+                    </span>
+                    <span className="text-zinc-200">{model.label}</span>
+                    <span className="text-zinc-600 text-[10px]">{model.filename}</span>
+                  </div>
+                  <span className={`text-[10px] uppercase ${STATUS_COLORS[model.status]}`}>
+                    {model.status === "error" ? model.error ?? "failed" : model.status}
+                  </span>
+                </div>
+
+                {isDownloading && (
+                  <div className="space-y-1">
+                    {progress ? (
+                      <>
+                        <div className="w-full h-1.5 bg-zinc-700 rounded-full overflow-hidden">
+                          {progress.totalBytes > 0 ? (
+                            <div
+                              className="h-full bg-blue-500 rounded-full transition-all duration-500"
+                              style={{ width: `${progress.percentage}%` }}
+                            />
+                          ) : (
+                            <div className="h-full bg-blue-500 rounded-full animate-pulse" style={{ width: "100%" }} />
+                          )}
+                        </div>
+                        <div className="text-[10px] text-zinc-500 text-right">
+                          {progress.totalBytes > 0
+                            ? `${progress.percentage}% \u00b7 ${formatBytes(progress.bytesDownloaded)} / ${formatBytes(progress.totalBytes)}`
+                            : `${formatBytes(progress.bytesDownloaded)} downloaded`}
+                        </div>
+                      </>
+                    ) : (
+                      <div className="w-full h-1.5 bg-zinc-700 rounded-full overflow-hidden">
+                        <div className="h-full bg-blue-500/60 rounded-full animate-pulse" style={{ width: "100%" }} />
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+
+        <div className="border-t border-zinc-700 px-4 py-3 flex justify-end">
+          <button
+            onClick={() => onClose(allDone)}
+            className={`text-xs px-4 py-1.5 rounded transition-colors ${
+              allDone
+                ? hasError
+                  ? "bg-amber-600 text-white hover:bg-amber-500"
+                  : "bg-emerald-600 text-white hover:bg-emerald-500"
+                : "bg-zinc-700 text-zinc-300 hover:bg-zinc-600"
+            }`}
+          >
+            {allDone ? (hasError ? "Close (errors occurred)" : "Done") : "Run in Background"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function AssetGenTab() {
   const [providers, setProviders] = useState<AssetProviderMeta[]>([]);
   const [config, setConfig] = useState<AssetProviderConfig>({ image: "procedural", model: "procedural", sound: "procedural" });
@@ -164,14 +332,7 @@ export function AssetGenTab() {
   const [installingModelId, setInstallingModelId] = useState<string | null>(null);
   const [installingPackId, setInstallingPackId] = useState<string | null>(null);
   const [addingModel, setAddingModel] = useState(false);
-  const [downloadProgress, setDownloadProgress] = useState<{
-    modelId: string;
-    label: string;
-    packId?: string;
-    percentage: number;
-    bytesDownloaded: number;
-    totalBytes: number;
-  } | null>(null);
+  const [installModalPack, setInstallModalPack] = useState<{ id: string; label: string } | null>(null);
 
   useEffect(() => {
     fetch("/api/settings/asset-providers")
@@ -194,47 +355,33 @@ export function AssetGenTab() {
     setComfyui(data);
   };
 
-  // Listen for model download progress via Socket.IO
+  // Listen for pack/model completion via Socket.IO to clear installing state
   useEffect(() => {
     const socket = (window as any).__otterbot_socket;
     if (!socket) return;
 
-    const onProgress = (data: { modelId: string; label: string; packId?: string; bytesDownloaded: number; totalBytes: number; percentage: number }) => {
-      setDownloadProgress(data);
-    };
     const onModelComplete = (data: { modelId: string }) => {
-      setDownloadProgress(null);
-      // Clear single-model installing state if this was a standalone install
       setInstallingModelId((current) => current === data.modelId ? null : current);
       reloadComfyui();
     };
     const onModelError = (data: { modelId: string }) => {
-      setDownloadProgress(null);
       setInstallingModelId((current) => current === data.modelId ? null : current);
       reloadComfyui();
     };
-    const onPackComplete = () => {
-      setDownloadProgress(null);
-      setInstallingPackId(null);
-      reloadComfyui();
-    };
-    const onPackError = () => {
-      setDownloadProgress(null);
+    const onPackDone = () => {
       setInstallingPackId(null);
       reloadComfyui();
     };
 
-    socket.on("model:download-progress", onProgress);
     socket.on("model:download-complete", onModelComplete);
     socket.on("model:download-error", onModelError);
-    socket.on("model:pack-install-complete", onPackComplete);
-    socket.on("model:pack-install-error", onPackError);
+    socket.on("model:pack-install-complete", onPackDone);
+    socket.on("model:pack-install-error", onPackDone);
     return () => {
-      socket.off("model:download-progress", onProgress);
       socket.off("model:download-complete", onModelComplete);
       socket.off("model:download-error", onModelError);
-      socket.off("model:pack-install-complete", onPackComplete);
-      socket.off("model:pack-install-error", onPackError);
+      socket.off("model:pack-install-complete", onPackDone);
+      socket.off("model:pack-install-error", onPackDone);
     };
   }, []);
 
@@ -308,11 +455,20 @@ export function AssetGenTab() {
     await fetch(`/api/settings/comfyui/models/${id}/install`, { method: "POST" });
   };
 
-  const handleInstallPack = async (id: string) => {
-    setInstallingPackId(id);
+  const handleInstallPack = async (pack: { id: string; label: string }) => {
+    setInstallingPackId(pack.id);
+    setInstallModalPack(pack);
     // Server returns 202 immediately; progress + completion come via Socket.IO
-    await fetch(`/api/settings/comfyui/packs/${id}/install`, { method: "POST" });
+    await fetch(`/api/settings/comfyui/packs/${pack.id}/install`, { method: "POST" });
   };
+
+  const handleInstallModalClose = useCallback((installed: boolean) => {
+    setInstallModalPack(null);
+    if (installed) {
+      setInstallingPackId(null);
+      reloadComfyui();
+    }
+  }, []);
 
   const getProvidersForCategory = (category: AssetCategory): AssetProviderMeta[] => {
     const categoryKey = category === "model" ? "model-3d" : category;
@@ -473,39 +629,15 @@ export function AssetGenTab() {
                     <p className="mt-2 text-zinc-500">
                       Approx. {pack.estimatedSizeGb.toFixed(1)} GB · Presets: {pack.presetIds.join(", ")}
                     </p>
-                    <div className="mt-3 space-y-2">
-                      <div className="flex items-center gap-2">
-                        <button
-                          onClick={() => handleInstallPack(pack.id)}
-                          disabled={installingPackId === pack.id}
-                          className="text-xs px-3 py-1 rounded bg-blue-600 text-blue-50 hover:bg-blue-500 transition-colors disabled:opacity-60"
-                        >
-                          {installingPackId === pack.id ? "Installing..." : isInstalled ? "Reinstall Pack" : "Install Pack"}
-                        </button>
-                        {isInstalled && !installingPackId && <span className="text-emerald-300">Installed</span>}
-                      </div>
-                      {installingPackId === pack.id && downloadProgress?.packId === pack.id && (
-                        <div className="space-y-1">
-                          <div className="flex items-center justify-between text-[10px] text-zinc-400">
-                            <span>Downloading: {downloadProgress.label}</span>
-                            {downloadProgress.totalBytes > 0 ? (
-                              <span>{downloadProgress.percentage}% · {formatBytes(downloadProgress.bytesDownloaded)} / {formatBytes(downloadProgress.totalBytes)}</span>
-                            ) : (
-                              <span>{formatBytes(downloadProgress.bytesDownloaded)} downloaded</span>
-                            )}
-                          </div>
-                          <div className="w-full h-1.5 bg-zinc-700 rounded-full overflow-hidden">
-                            {downloadProgress.totalBytes > 0 ? (
-                              <div
-                                className="h-full bg-blue-500 rounded-full transition-all duration-300"
-                                style={{ width: `${downloadProgress.percentage}%` }}
-                              />
-                            ) : (
-                              <div className="h-full bg-blue-500 rounded-full animate-pulse" style={{ width: "100%" }} />
-                            )}
-                          </div>
-                        </div>
-                      )}
+                    <div className="mt-3 flex items-center gap-2">
+                      <button
+                        onClick={() => handleInstallPack({ id: pack.id, label: pack.label })}
+                        disabled={installingPackId === pack.id}
+                        className="text-xs px-3 py-1 rounded bg-blue-600 text-blue-50 hover:bg-blue-500 transition-colors disabled:opacity-60"
+                      >
+                        {installingPackId === pack.id ? "Installing..." : isInstalled ? "Reinstall Pack" : "Install Pack"}
+                      </button>
+                      {isInstalled && !installingPackId && <span className="text-emerald-300">Installed</span>}
                     </div>
                   </div>
                 );
@@ -760,6 +892,14 @@ export function AssetGenTab() {
           <strong className="text-zinc-400">Paid providers</strong> — Optional overrides for higher fidelity or convenience, not prerequisites for using studios.
         </p>
       </div>
+
+      {installModalPack && (
+        <InstallModal
+          packId={installModalPack.id}
+          packLabel={installModalPack.label}
+          onClose={handleInstallModalClose}
+        />
+      )}
     </div>
   );
 }
