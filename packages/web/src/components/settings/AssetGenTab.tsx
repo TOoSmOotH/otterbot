@@ -202,21 +202,39 @@ export function AssetGenTab() {
     const onProgress = (data: { modelId: string; label: string; packId?: string; bytesDownloaded: number; totalBytes: number; percentage: number }) => {
       setDownloadProgress(data);
     };
-    const onComplete = () => {
+    const onModelComplete = (data: { modelId: string }) => {
       setDownloadProgress(null);
+      // Clear single-model installing state if this was a standalone install
+      setInstallingModelId((current) => current === data.modelId ? null : current);
       reloadComfyui();
     };
-    const onError = () => {
+    const onModelError = (data: { modelId: string }) => {
       setDownloadProgress(null);
+      setInstallingModelId((current) => current === data.modelId ? null : current);
+      reloadComfyui();
+    };
+    const onPackComplete = () => {
+      setDownloadProgress(null);
+      setInstallingPackId(null);
+      reloadComfyui();
+    };
+    const onPackError = () => {
+      setDownloadProgress(null);
+      setInstallingPackId(null);
+      reloadComfyui();
     };
 
     socket.on("model:download-progress", onProgress);
-    socket.on("model:download-complete", onComplete);
-    socket.on("model:download-error", onError);
+    socket.on("model:download-complete", onModelComplete);
+    socket.on("model:download-error", onModelError);
+    socket.on("model:pack-install-complete", onPackComplete);
+    socket.on("model:pack-install-error", onPackError);
     return () => {
       socket.off("model:download-progress", onProgress);
-      socket.off("model:download-complete", onComplete);
-      socket.off("model:download-error", onError);
+      socket.off("model:download-complete", onModelComplete);
+      socket.off("model:download-error", onModelError);
+      socket.off("model:pack-install-complete", onPackComplete);
+      socket.off("model:pack-install-error", onPackError);
     };
   }, []);
 
@@ -286,22 +304,14 @@ export function AssetGenTab() {
 
   const handleInstallModel = async (id: string) => {
     setInstallingModelId(id);
-    try {
-      await fetch(`/api/settings/comfyui/models/${id}/install`, { method: "POST" });
-      await reloadComfyui();
-    } finally {
-      setInstallingModelId(null);
-    }
+    // Server returns 202 immediately; progress + completion come via Socket.IO
+    await fetch(`/api/settings/comfyui/models/${id}/install`, { method: "POST" });
   };
 
   const handleInstallPack = async (id: string) => {
     setInstallingPackId(id);
-    try {
-      await fetch(`/api/settings/comfyui/packs/${id}/install`, { method: "POST" });
-      await reloadComfyui();
-    } finally {
-      setInstallingPackId(null);
-    }
+    // Server returns 202 immediately; progress + completion come via Socket.IO
+    await fetch(`/api/settings/comfyui/packs/${id}/install`, { method: "POST" });
   };
 
   const getProvidersForCategory = (category: AssetCategory): AssetProviderMeta[] => {
@@ -478,13 +488,21 @@ export function AssetGenTab() {
                         <div className="space-y-1">
                           <div className="flex items-center justify-between text-[10px] text-zinc-400">
                             <span>Downloading: {downloadProgress.label}</span>
-                            <span>{downloadProgress.percentage}% · {formatBytes(downloadProgress.bytesDownloaded)} / {formatBytes(downloadProgress.totalBytes)}</span>
+                            {downloadProgress.totalBytes > 0 ? (
+                              <span>{downloadProgress.percentage}% · {formatBytes(downloadProgress.bytesDownloaded)} / {formatBytes(downloadProgress.totalBytes)}</span>
+                            ) : (
+                              <span>{formatBytes(downloadProgress.bytesDownloaded)} downloaded</span>
+                            )}
                           </div>
                           <div className="w-full h-1.5 bg-zinc-700 rounded-full overflow-hidden">
-                            <div
-                              className="h-full bg-blue-500 rounded-full transition-all duration-300"
-                              style={{ width: `${downloadProgress.percentage}%` }}
-                            />
+                            {downloadProgress.totalBytes > 0 ? (
+                              <div
+                                className="h-full bg-blue-500 rounded-full transition-all duration-300"
+                                style={{ width: `${downloadProgress.percentage}%` }}
+                              />
+                            ) : (
+                              <div className="h-full bg-blue-500 rounded-full animate-pulse" style={{ width: "100%" }} />
+                            )}
                           </div>
                         </div>
                       )}

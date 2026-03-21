@@ -5683,23 +5683,34 @@ async function main() {
     return { model: addManagedComfyModel({ label, sourceUrl, modelType, filename }) };
   });
 
+  // Shared emitter factory for model download progress via Socket.IO
+  function createDownloadEmitter() {
+    return {
+      onProgress: (modelId: string, label: string, packId: string | undefined, bytesDownloaded: number, totalBytes: number) => {
+        const percentage = totalBytes > 0 ? Math.round((bytesDownloaded / totalBytes) * 100) : 0;
+        io.emit("model:download-progress", { modelId, label, packId, bytesDownloaded, totalBytes, percentage });
+      },
+      onComplete: (modelId: string, label: string, packId: string | undefined) => {
+        io.emit("model:download-complete", { modelId, label, packId });
+      },
+      onError: (modelId: string, label: string, packId: string | undefined, error: string) => {
+        io.emit("model:download-error", { modelId, label, packId, error });
+      },
+    };
+  }
+
   app.post<{
     Params: { id: string };
   }>("/api/settings/comfyui/packs/:id/install", async (req, reply) => {
+    const packId = req.params.id;
     try {
       const { installComfyStarterPack } = await import("./asset-providers/comfyui.js");
-      const emitter = {
-        onProgress: (modelId: string, label: string, packId: string | undefined, bytesDownloaded: number, totalBytes: number) => {
-          io.emit("model:download-progress", { modelId, label, packId, bytesDownloaded, totalBytes, percentage: Math.round((bytesDownloaded / totalBytes) * 100) });
-        },
-        onComplete: (modelId: string, label: string, packId: string | undefined) => {
-          io.emit("model:download-complete", { modelId, label, packId });
-        },
-        onError: (modelId: string, label: string, packId: string | undefined, error: string) => {
-          io.emit("model:download-error", { modelId, label, packId, error });
-        },
-      };
-      return { models: await installComfyStarterPack(req.params.id, emitter) };
+      // Return immediately — downloads run in background, progress via Socket.IO
+      installComfyStarterPack(packId, createDownloadEmitter())
+        .then(() => io.emit("model:pack-install-complete", { packId }))
+        .catch((err) => io.emit("model:pack-install-error", { packId, error: err instanceof Error ? err.message : String(err) }));
+      reply.code(202);
+      return { status: "installing", packId };
     } catch (error) {
       reply.code(404);
       return { error: error instanceof Error ? error.message : String(error) };
@@ -5709,20 +5720,14 @@ async function main() {
   app.post<{
     Params: { id: string };
   }>("/api/settings/comfyui/models/:id/install", async (req, reply) => {
+    const modelId = req.params.id;
     try {
       const { installManagedComfyModel } = await import("./asset-providers/comfyui.js");
-      const emitter = {
-        onProgress: (modelId: string, label: string, packId: string | undefined, bytesDownloaded: number, totalBytes: number) => {
-          io.emit("model:download-progress", { modelId, label, packId, bytesDownloaded, totalBytes, percentage: Math.round((bytesDownloaded / totalBytes) * 100) });
-        },
-        onComplete: (modelId: string, label: string, packId: string | undefined) => {
-          io.emit("model:download-complete", { modelId, label, packId });
-        },
-        onError: (modelId: string, label: string, packId: string | undefined, error: string) => {
-          io.emit("model:download-error", { modelId, label, packId, error });
-        },
-      };
-      return { model: await installManagedComfyModel(req.params.id, emitter) };
+      // Return immediately — download runs in background, progress via Socket.IO
+      installManagedComfyModel(modelId, createDownloadEmitter())
+        .catch((err) => io.emit("model:download-error", { modelId, label: "", packId: undefined, error: err instanceof Error ? err.message : String(err) }));
+      reply.code(202);
+      return { status: "installing", modelId };
     } catch (error) {
       reply.code(404);
       return { error: error instanceof Error ? error.message : String(error) };

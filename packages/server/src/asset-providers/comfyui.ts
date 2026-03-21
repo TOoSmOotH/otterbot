@@ -306,6 +306,8 @@ async function downloadToFile(url: string, destination: string, onProgress?: Dow
   }
   const contentLength = Number(res.headers.get("content-length") ?? 0);
   let bytesDownloaded = 0;
+  let lastProgressEmit = 0;
+  const THROTTLE_MS = 500; // emit progress at most every 500ms
   const writer = createWriteStream(destination);
   const reader = res.body.getReader();
   try {
@@ -314,8 +316,12 @@ async function downloadToFile(url: string, destination: string, onProgress?: Dow
       if (done) break;
       if (!value) continue;
       bytesDownloaded += value.byteLength;
-      if (onProgress && contentLength > 0) {
-        onProgress(bytesDownloaded, contentLength);
+      if (onProgress) {
+        const now = Date.now();
+        if (now - lastProgressEmit >= THROTTLE_MS) {
+          lastProgressEmit = now;
+          onProgress(bytesDownloaded, contentLength);
+        }
       }
       await new Promise<void>((resolvePromise, rejectPromise) => {
         writer.write(value, (error) => {
@@ -323,6 +329,10 @@ async function downloadToFile(url: string, destination: string, onProgress?: Dow
           else resolvePromise();
         });
       });
+    }
+    // Emit final progress so UI reaches 100%
+    if (onProgress) {
+      onProgress(bytesDownloaded, contentLength || bytesDownloaded);
     }
     await new Promise<void>((resolvePromise, rejectPromise) => {
       writer.end((error: Error | null | undefined) => {
