@@ -137,6 +137,13 @@ const STATUS_STYLES: Record<ProviderHealthStatus["status"], string> = {
   fallback: "bg-blue-500/10 text-blue-300 border-blue-500/20",
 };
 
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+}
+
 export function AssetGenTab() {
   const [providers, setProviders] = useState<AssetProviderMeta[]>([]);
   const [config, setConfig] = useState<AssetProviderConfig>({ image: "procedural", model: "procedural", sound: "procedural" });
@@ -157,6 +164,14 @@ export function AssetGenTab() {
   const [installingModelId, setInstallingModelId] = useState<string | null>(null);
   const [installingPackId, setInstallingPackId] = useState<string | null>(null);
   const [addingModel, setAddingModel] = useState(false);
+  const [downloadProgress, setDownloadProgress] = useState<{
+    modelId: string;
+    label: string;
+    packId?: string;
+    percentage: number;
+    bytesDownloaded: number;
+    totalBytes: number;
+  } | null>(null);
 
   useEffect(() => {
     fetch("/api/settings/asset-providers")
@@ -178,6 +193,32 @@ export function AssetGenTab() {
     const data = await res.json() as ComfyUiSummary;
     setComfyui(data);
   };
+
+  // Listen for model download progress via Socket.IO
+  useEffect(() => {
+    const socket = (window as any).__otterbot_socket;
+    if (!socket) return;
+
+    const onProgress = (data: { modelId: string; label: string; packId?: string; bytesDownloaded: number; totalBytes: number; percentage: number }) => {
+      setDownloadProgress(data);
+    };
+    const onComplete = () => {
+      setDownloadProgress(null);
+      reloadComfyui();
+    };
+    const onError = () => {
+      setDownloadProgress(null);
+    };
+
+    socket.on("model:download-progress", onProgress);
+    socket.on("model:download-complete", onComplete);
+    socket.on("model:download-error", onError);
+    return () => {
+      socket.off("model:download-progress", onProgress);
+      socket.off("model:download-complete", onComplete);
+      socket.off("model:download-error", onError);
+    };
+  }, []);
 
   const handleProviderChange = async (category: AssetCategory, providerType: string) => {
     setSaving(true);
@@ -422,15 +463,31 @@ export function AssetGenTab() {
                     <p className="mt-2 text-zinc-500">
                       Approx. {pack.estimatedSizeGb.toFixed(1)} GB · Presets: {pack.presetIds.join(", ")}
                     </p>
-                    <div className="mt-3 flex items-center gap-2">
-                      <button
-                        onClick={() => handleInstallPack(pack.id)}
-                        disabled={installingPackId === pack.id}
-                        className="text-xs px-3 py-1 rounded bg-blue-600 text-blue-50 hover:bg-blue-500 transition-colors disabled:opacity-60"
-                      >
-                        {installingPackId === pack.id ? "Installing..." : isInstalled ? "Reinstall Pack" : "Install Pack"}
-                      </button>
-                      {isInstalled && <span className="text-emerald-300">Installed</span>}
+                    <div className="mt-3 space-y-2">
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => handleInstallPack(pack.id)}
+                          disabled={installingPackId === pack.id}
+                          className="text-xs px-3 py-1 rounded bg-blue-600 text-blue-50 hover:bg-blue-500 transition-colors disabled:opacity-60"
+                        >
+                          {installingPackId === pack.id ? "Installing..." : isInstalled ? "Reinstall Pack" : "Install Pack"}
+                        </button>
+                        {isInstalled && !installingPackId && <span className="text-emerald-300">Installed</span>}
+                      </div>
+                      {installingPackId === pack.id && downloadProgress?.packId === pack.id && (
+                        <div className="space-y-1">
+                          <div className="flex items-center justify-between text-[10px] text-zinc-400">
+                            <span>Downloading: {downloadProgress.label}</span>
+                            <span>{downloadProgress.percentage}% · {formatBytes(downloadProgress.bytesDownloaded)} / {formatBytes(downloadProgress.totalBytes)}</span>
+                          </div>
+                          <div className="w-full h-1.5 bg-zinc-700 rounded-full overflow-hidden">
+                            <div
+                              className="h-full bg-blue-500 rounded-full transition-all duration-300"
+                              style={{ width: `${downloadProgress.percentage}%` }}
+                            />
+                          </div>
+                        </div>
+                      )}
                     </div>
                   </div>
                 );

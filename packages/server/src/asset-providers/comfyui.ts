@@ -294,7 +294,9 @@ async function fetchBuffer(url: string): Promise<Buffer> {
   return Buffer.from(await res.arrayBuffer());
 }
 
-async function downloadToFile(url: string, destination: string): Promise<void> {
+type DownloadProgressCallback = (bytesDownloaded: number, totalBytes: number) => void;
+
+async function downloadToFile(url: string, destination: string, onProgress?: DownloadProgressCallback): Promise<void> {
   const res = await fetch(url);
   if (!res.ok) {
     throw new Error(`Request failed (${res.status}) for ${url}`);
@@ -302,6 +304,8 @@ async function downloadToFile(url: string, destination: string): Promise<void> {
   if (!res.body) {
     throw new Error(`Download response had no body for ${url}`);
   }
+  const contentLength = Number(res.headers.get("content-length") ?? 0);
+  let bytesDownloaded = 0;
   const writer = createWriteStream(destination);
   const reader = res.body.getReader();
   try {
@@ -309,6 +313,10 @@ async function downloadToFile(url: string, destination: string): Promise<void> {
       const { done, value } = await reader.read();
       if (done) break;
       if (!value) continue;
+      bytesDownloaded += value.byteLength;
+      if (onProgress && contentLength > 0) {
+        onProgress(bytesDownloaded, contentLength);
+      }
       await new Promise<void>((resolvePromise, rejectPromise) => {
         writer.write(value, (error) => {
           if (error) rejectPromise(error);
@@ -421,7 +429,13 @@ export function addManagedComfyModel(input: {
   return record;
 }
 
-export async function installComfyStarterPack(packId: string): Promise<ManagedComfyModelRecord[]> {
+export interface ModelDownloadEmitter {
+  onProgress: (modelId: string, label: string, packId: string | undefined, bytesDownloaded: number, totalBytes: number) => void;
+  onComplete: (modelId: string, label: string, packId: string | undefined) => void;
+  onError: (modelId: string, label: string, packId: string | undefined, error: string) => void;
+}
+
+export async function installComfyStarterPack(packId: string, emitter?: ModelDownloadEmitter): Promise<ManagedComfyModelRecord[]> {
   const pack = STARTER_PACKS.find((candidate) => candidate.id === packId);
   if (!pack) throw new Error(`Unknown ComfyUI starter pack: ${packId}`);
 
@@ -431,7 +445,7 @@ export async function installComfyStarterPack(packId: string): Promise<ManagedCo
       ...model,
       starterPackId: pack.id,
     });
-    installed.push(await installManagedComfyModel(record.id));
+    installed.push(await installManagedComfyModel(record.id, emitter));
   }
   return installed;
 }
@@ -444,7 +458,7 @@ export function removeManagedComfyModel(id: string): boolean {
   return true;
 }
 
-export async function installManagedComfyModel(id: string): Promise<ManagedComfyModelRecord> {
+export async function installManagedComfyModel(id: string, emitter?: ModelDownloadEmitter): Promise<ManagedComfyModelRecord> {
   const records = readManagedModels();
   const index = records.findIndex((record) => record.id === id);
   if (index === -1) throw new Error(`Managed ComfyUI model not found: ${id}`);
@@ -461,9 +475,13 @@ export async function installManagedComfyModel(id: string): Promise<ManagedComfy
   records[index] = next;
   writeManagedModels(records);
 
+  const onProgress = emitter
+    ? (bytesDownloaded: number, totalBytes: number) => emitter.onProgress(current.id, current.label, current.starterPackId, bytesDownloaded, totalBytes)
+    : undefined;
+
   try {
     ensureParentDir(targetPath);
-    await downloadToFile(current.sourceUrl, tempPath);
+    await downloadToFile(current.sourceUrl, tempPath, onProgress);
     renameSync(tempPath, targetPath);
     const installed: ManagedComfyModelRecord = {
       ...next,
@@ -474,6 +492,7 @@ export async function installManagedComfyModel(id: string): Promise<ManagedComfy
     };
     records[index] = installed;
     writeManagedModels(records);
+    emitter?.onComplete(current.id, current.label, current.starterPackId);
     return installed;
   } catch (error) {
     try {
@@ -481,14 +500,16 @@ export async function installManagedComfyModel(id: string): Promise<ManagedComfy
     } catch {
       // ignore
     }
+    const errMsg = error instanceof Error ? error.message : String(error);
     const failed: ManagedComfyModelRecord = {
       ...next,
       status: "error",
-      error: error instanceof Error ? error.message : String(error),
+      error: errMsg,
       updatedAt: new Date().toISOString(),
     };
     records[index] = failed;
     writeManagedModels(records);
+    emitter?.onError(current.id, current.label, current.starterPackId, errMsg);
     return failed;
   }
 }
