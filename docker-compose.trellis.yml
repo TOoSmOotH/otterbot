@@ -7,6 +7,9 @@ services:
     build:
       context: .
       dockerfile: docker/trellis/Dockerfile
+      args:
+        CUDA_TAG: ${COMFYUI_CUDA_TAG:-11.8.0-runtime-ubuntu22.04}
+        TORCH_INDEX: ${COMFYUI_TORCH_INDEX:-https://download.pytorch.org/whl/cu118}
     environment:
       - TRELLIS_DATA_ROOT=/data
       - TRELLIS_PORT=8080
