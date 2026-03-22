@@ -317,6 +317,135 @@ function InstallModal({
   );
 }
 
+function TestGeneration() {
+  const [prompt, setPrompt] = useState("A cute otter holding a wrench, digital art");
+  const [taskType, setTaskType] = useState<string>("image");
+  const [generating, setGenerating] = useState(false);
+  const [result, setResult] = useState<{ url: string; provider: string; size: number; dimensions: { width: number; height: number } } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [progress, setProgress] = useState<{ percentage: number; stage: string } | null>(null);
+
+  // Listen for generation progress
+  useEffect(() => {
+    if (!generating) return;
+    const socket = (window as any).__otterbot_socket;
+    if (!socket) return;
+
+    const onProgress = (data: { promptId: string; percentage: number; stage: string }) => {
+      if (data.promptId === "test-gen") {
+        setProgress({ percentage: data.percentage, stage: data.stage });
+      }
+    };
+    socket.on("asset:progress", onProgress);
+    return () => { socket.off("asset:progress", onProgress); };
+  }, [generating]);
+
+  const handleGenerate = async () => {
+    setGenerating(true);
+    setResult(null);
+    setError(null);
+    setProgress(null);
+    try {
+      const res = await fetch("/api/settings/asset-providers/test-generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt: prompt.trim(), width: 512, height: 512, taskType }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error ?? `Request failed (${res.status})`);
+      } else {
+        setResult(data);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setGenerating(false);
+      setProgress(null);
+    }
+  };
+
+  return (
+    <div className="rounded-lg border border-zinc-700/60 bg-zinc-950/60 p-4 space-y-3">
+      <div>
+        <h4 className="text-sm font-medium text-zinc-100">Test Image Generation</h4>
+        <p className="mt-1 text-xs text-zinc-400">
+          Verify your image generation setup by running a quick test with the currently configured provider.
+        </p>
+      </div>
+
+      <div className="space-y-2">
+        <textarea
+          value={prompt}
+          onChange={(e) => setPrompt(e.target.value)}
+          rows={2}
+          className="w-full bg-zinc-900 border border-zinc-700 rounded px-3 py-2 text-xs text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-zinc-500 resize-none"
+          placeholder="Describe the image to generate..."
+        />
+
+        <div className="flex items-center gap-3">
+          <select
+            value={taskType}
+            onChange={(e) => setTaskType(e.target.value)}
+            className="bg-zinc-900 border border-zinc-700 rounded px-2 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-zinc-500"
+          >
+            <option value="image">General Image</option>
+            <option value="icon">Icon</option>
+            <option value="hero">Hero Image</option>
+            <option value="sprite">Sprite</option>
+            <option value="texture">Texture</option>
+          </select>
+
+          <button
+            onClick={handleGenerate}
+            disabled={generating || !prompt.trim()}
+            className="text-xs px-4 py-1.5 rounded bg-blue-600 text-blue-50 hover:bg-blue-500 transition-colors disabled:opacity-60"
+          >
+            {generating ? "Generating..." : "Generate Test Image"}
+          </button>
+        </div>
+      </div>
+
+      {generating && (
+        <div className="space-y-1">
+          <div className="w-full h-1.5 bg-zinc-700 rounded-full overflow-hidden">
+            {progress ? (
+              <div
+                className="h-full bg-blue-500 rounded-full transition-all duration-300"
+                style={{ width: `${progress.percentage}%` }}
+              />
+            ) : (
+              <div className="h-full bg-blue-500/60 rounded-full animate-pulse" style={{ width: "100%" }} />
+            )}
+          </div>
+          <p className="text-[10px] text-zinc-500">{progress?.stage ?? "Sending to provider..."}</p>
+        </div>
+      )}
+
+      {error && (
+        <div className="rounded border border-red-800/60 bg-red-950/40 px-3 py-2 text-xs text-red-300">
+          {error}
+        </div>
+      )}
+
+      {result && (
+        <div className="space-y-2">
+          <div className="rounded border border-zinc-700 overflow-hidden bg-zinc-900 inline-block">
+            <img
+              src={result.url}
+              alt="Test generation result"
+              className="max-w-full max-h-64 object-contain"
+            />
+          </div>
+          <p className="text-[10px] text-zinc-500">
+            Provider: {result.provider} · {result.dimensions.width}x{result.dimensions.height} · {formatBytes(result.size)}
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function AssetGenTab() {
   const [providers, setProviders] = useState<AssetProviderMeta[]>([]);
   const [config, setConfig] = useState<AssetProviderConfig>({ image: "procedural", model: "procedural", sound: "procedural" });
@@ -883,6 +1012,8 @@ export function AssetGenTab() {
           })}
         </div>
       )}
+
+      <TestGeneration />
 
       <div className="text-xs text-zinc-500 space-y-1 pt-4 border-t border-zinc-700/50">
         <p>

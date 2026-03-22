@@ -5677,6 +5677,65 @@ async function main() {
     return { ok: true };
   });
 
+  // Test image generation with the currently configured provider
+  app.post<{
+    Body: { prompt: string; width?: number; height?: number; style?: string; taskType?: string; presetId?: string };
+  }>("/api/settings/asset-providers/test-generate", async (req, reply) => {
+    const { prompt, width, height, style, taskType, presetId } = req.body;
+    if (!prompt?.trim()) {
+      reply.code(400);
+      return { error: "prompt is required" };
+    }
+    try {
+      const { getImageProvider } = await import("./asset-providers/asset-adapter.js");
+      const { uploadsRoot } = await import("./tools/upload-paths.js");
+      const { nanoid } = await import("nanoid");
+      const fs = await import("node:fs");
+      const path = await import("node:path");
+
+      const provider = getImageProvider();
+      console.log(`[test-generate] Using provider: ${provider.type}, prompt: "${prompt.trim().slice(0, 80)}"`);
+
+      const result = await provider.generate(prompt.trim(), {
+        width: width ?? 512,
+        height: height ?? 512,
+        style,
+        taskType: taskType as any,
+        presetId,
+        onProgress: (progress) => {
+          io.emit("asset:progress" as any, {
+            type: "image",
+            promptId: "test-gen",
+            step: progress.step,
+            totalSteps: progress.totalSteps,
+            percentage: progress.percentage,
+            stage: `Generating... ${progress.percentage}%`,
+          });
+        },
+      });
+
+      const uploadId = nanoid();
+      const ext = result.mimeType === "image/png" ? "png" : "jpg";
+      const uploadFilename = `${uploadId}.${ext}`;
+      const uploadPath = path.join(uploadsRoot(), uploadFilename);
+      fs.mkdirSync(path.dirname(uploadPath), { recursive: true });
+      fs.writeFileSync(uploadPath, result.data);
+
+      console.log(`[test-generate] Success: provider=${result.provider}, size=${result.data.length}, path=/uploads/${uploadFilename}`);
+      return {
+        url: `/uploads/${uploadFilename}`,
+        mimeType: result.mimeType,
+        provider: result.provider,
+        size: result.data.length,
+        dimensions: { width: width ?? 512, height: height ?? 512 },
+      };
+    } catch (error) {
+      console.error("[test-generate] Failed:", error);
+      reply.code(500);
+      return { error: error instanceof Error ? error.message : String(error) };
+    }
+  });
+
   app.post<{
     Body: { label: string; sourceUrl: string; modelType: "checkpoints" | "loras" | "vae" | "upscale_models" | "controlnet"; filename?: string };
   }>("/api/settings/comfyui/models", async (req, reply) => {
