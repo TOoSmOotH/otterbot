@@ -7,6 +7,9 @@ services:
     build:
       context: .
       dockerfile: docker/comfyui/Dockerfile
+      args:
+        CUDA_TAG: ${COMFYUI_CUDA_TAG:-11.8.0-runtime-ubuntu22.04}
+        TORCH_INDEX: ${COMFYUI_TORCH_INDEX:-https://download.pytorch.org/whl/cu118}
     environment:
       - CLI_ARGS=${COMFYUI_CLI_ARGS:---listen 0.0.0.0 --port 8188}
       - COMFYUI_DATA_ROOT=/data
