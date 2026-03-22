@@ -134,6 +134,60 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+# ── GPU detection for ComfyUI/TRELLIS CUDA builds ─────────────────────────
+# Detect GPU compute capability and select the right CUDA/PyTorch versions.
+# Pascal (6.x): cu118 only — CUDA 12 dropped Pascal support.
+# Turing+ (7.x+): cu124 for best performance.
+# Fallback: cu118 (broadest compatibility).
+detect_cuda_build_args() {
+  if ! command -v nvidia-smi &>/dev/null; then
+    echo "[gpu] nvidia-smi not found — using cu118 (CPU fallback)" >&2
+    echo "COMFYUI_CUDA_TAG=11.8.0-runtime-ubuntu22.04"
+    echo "COMFYUI_TORCH_INDEX=https://download.pytorch.org/whl/cu118"
+    return
+  fi
+  # Get the highest compute capability across all GPUs
+  local compute
+  compute=$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader,nounits 2>/dev/null | sort -rn | head -1)
+  if [[ -z "$compute" ]]; then
+    echo "[gpu] Could not query GPU compute capability — using cu118" >&2
+    echo "COMFYUI_CUDA_TAG=11.8.0-runtime-ubuntu22.04"
+    echo "COMFYUI_TORCH_INDEX=https://download.pytorch.org/whl/cu118"
+    return
+  fi
+  local major="${compute%%.*}"
+  echo "[gpu] Detected GPU compute capability: ${compute}" >&2
+  if [[ "$major" -le 6 ]]; then
+    # Pascal (sm_61): Tesla P4/P40, GTX 10xx — CUDA 12 dropped Pascal
+    echo "[gpu] Pascal GPU detected — using CUDA 11.8 / cu118" >&2
+    echo "COMFYUI_CUDA_TAG=11.8.0-runtime-ubuntu22.04"
+    echo "COMFYUI_TORCH_INDEX=https://download.pytorch.org/whl/cu118"
+  elif [[ "$major" -le 9 ]]; then
+    # Turing (sm_75): RTX 20xx — through Ada Lovelace (sm_89): RTX 40xx
+    echo "[gpu] Turing/Ampere/Ada GPU detected — using CUDA 12.4 / cu124" >&2
+    echo "COMFYUI_CUDA_TAG=12.4.1-runtime-ubuntu22.04"
+    echo "COMFYUI_TORCH_INDEX=https://download.pytorch.org/whl/cu124"
+  else
+    # Blackwell (sm_100+): RTX 50xx — needs CUDA 12.8+
+    echo "[gpu] Blackwell+ GPU detected — using CUDA 12.8 / cu128" >&2
+    echo "COMFYUI_CUDA_TAG=12.8.1-runtime-ubuntu22.04"
+    echo "COMFYUI_TORCH_INDEX=https://download.pytorch.org/whl/cu128"
+  fi
+}
+
+# Export build args if any compose file references comfyui or trellis
+needs_gpu_build=false
+for file in "${compose_files[@]}"; do
+  case "$file" in
+    *comfyui*|*trellis*|*gpu*|*local-ai*) needs_gpu_build=true ;;
+  esac
+done
+
+if [[ "$needs_gpu_build" == "true" ]]; then
+  eval "$(detect_cuda_build_args)"
+  export COMFYUI_CUDA_TAG COMFYUI_TORCH_INDEX
+fi
+
 docker_args=()
 for file in "${compose_files[@]}"; do
   docker_args+=(-f "${REPO_ROOT}/${file}")

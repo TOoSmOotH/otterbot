@@ -628,13 +628,26 @@ async function waitForImage(baseUrl: string, promptId: string): Promise<{ filena
       : [];
     if (images.length > 0) return images[0];
     if (entry?.status?.status_str === "error") {
-      // Extract error details from ComfyUI status messages
-      const errorMessages = (entry.status.messages ?? [])
-        .filter(([type]) => type === "execution_error" || type === "error")
-        .map(([, data]) => data?.message ?? data?.details ?? "unknown error")
-        .join("; ");
-      const detail = errorMessages || JSON.stringify(entry.status.messages ?? []);
-      console.error(`[comfyui] Generation failed for prompt ${promptId}:`, detail);
+      // Log the full status for debugging
+      console.error(`[comfyui] Generation failed for prompt ${promptId}. Full status:`, JSON.stringify(entry.status, null, 2));
+      // Also log full entry outputs/keys for context
+      console.error(`[comfyui] Full history entry keys:`, Object.keys(entry));
+
+      // Try to extract error details from various ComfyUI response formats
+      const messages = entry.status.messages ?? [];
+      const errorParts: string[] = [];
+      for (const msg of messages) {
+        if (Array.isArray(msg) && msg.length >= 2) {
+          const [type, data] = msg;
+          if (typeof data === "object" && data !== null) {
+            const d = data as Record<string, unknown>;
+            if (d.message) errorParts.push(`${type}: ${d.message}`);
+            else if (d.details) errorParts.push(`${type}: ${d.details}`);
+            else if (d.exception_message) errorParts.push(`${type}: ${d.exception_message}`);
+          }
+        }
+      }
+      const detail = errorParts.join("; ") || `status=error (check server logs for full response)`;
       throw new Error(`ComfyUI generation failed: ${detail}`);
     }
     await new Promise((resolvePromise) => setTimeout(resolvePromise, 1500));
