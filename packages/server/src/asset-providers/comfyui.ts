@@ -420,7 +420,10 @@ export function addManagedComfyModel(input: {
   const filename = sanitizeFilename(input.sourceUrl, input.filename);
   const records = readManagedModels();
   const existing = records.find((record) => record.sourceUrl === input.sourceUrl.trim() && record.filename === filename);
-  if (existing) return existing;
+  if (existing) {
+    console.log(`[comfyui] Model already exists: id=${existing.id}, status=${existing.status}, starterPackId=${existing.starterPackId}`);
+    return existing;
+  }
 
   const now = new Date().toISOString();
   const record: ManagedComfyModelRecord = {
@@ -449,14 +452,20 @@ export async function installComfyStarterPack(packId: string, emitter?: ModelDow
   const pack = STARTER_PACKS.find((candidate) => candidate.id === packId);
   if (!pack) throw new Error(`Unknown ComfyUI starter pack: ${packId}`);
 
+  console.log(`[comfyui] Installing starter pack "${pack.label}" (${packId}) with ${pack.models.length} model(s)`);
   const installed: ManagedComfyModelRecord[] = [];
   for (const model of pack.models) {
+    console.log(`[comfyui] Adding model "${model.label}" (${model.filename}) from ${model.sourceUrl}`);
     const record = addManagedComfyModel({
       ...model,
       starterPackId: pack.id,
     });
-    installed.push(await installManagedComfyModel(record.id, emitter));
+    console.log(`[comfyui] Model record id=${record.id}, status=${record.status}, starterPackId=${record.starterPackId}`);
+    const result = await installManagedComfyModel(record.id, emitter);
+    console.log(`[comfyui] Model "${model.label}" install result: status=${result.status}${result.error ? `, error=${result.error}` : ""}`);
+    installed.push(result);
   }
+  console.log(`[comfyui] Pack "${pack.label}" install complete: ${installed.filter((m) => m.status === "installed").length}/${installed.length} succeeded`);
   return installed;
 }
 
@@ -476,6 +485,8 @@ export async function installManagedComfyModel(id: string, emitter?: ModelDownlo
   const current = records[index];
   const targetPath = resolveModelPath(current);
   const tempPath = `${targetPath}.download`;
+  console.log(`[comfyui] Starting download: "${current.label}" → ${targetPath}`);
+  console.log(`[comfyui] Source URL: ${current.sourceUrl}`);
   const next: ManagedComfyModelRecord = {
     ...current,
     status: "installing",

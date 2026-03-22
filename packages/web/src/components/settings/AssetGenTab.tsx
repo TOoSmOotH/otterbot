@@ -95,6 +95,7 @@ interface ComfyStarterPack {
   recommendedTiers: Array<"cpu" | "low" | "medium" | "high">;
   estimatedSizeGb: number;
   presetIds: string[];
+  models: Array<{ sourceUrl: string; filename: string }>;
 }
 
 interface ComfyUiSummary {
@@ -161,10 +162,12 @@ const STATUS_COLORS: Record<string, string> = {
 function InstallModal({
   packLabel,
   packId,
+  packModelUrls,
   onClose,
 }: {
   packLabel: string;
   packId: string;
+  packModelUrls: string[];
   onClose: (installed: boolean) => void;
 }) {
   const [models, setModels] = useState<ManagedComfyModel[]>([]);
@@ -180,11 +183,13 @@ function InstallModal({
   useEffect(() => {
     let timer: ReturnType<typeof setInterval>;
 
+    const urlSet = new Set(packModelUrls);
+
     const poll = async () => {
       try {
         const res = await fetch("/api/settings/comfyui/models");
         const data = await res.json() as { models: ManagedComfyModel[] };
-        const packModels = (data.models ?? []).filter((m) => m.starterPackId === packId);
+        const packModels = (data.models ?? []).filter((m) => urlSet.has(m.sourceUrl));
         setModels(packModels);
 
         // Auto-close when all models installed
@@ -332,7 +337,7 @@ export function AssetGenTab() {
   const [installingModelId, setInstallingModelId] = useState<string | null>(null);
   const [installingPackId, setInstallingPackId] = useState<string | null>(null);
   const [addingModel, setAddingModel] = useState(false);
-  const [installModalPack, setInstallModalPack] = useState<{ id: string; label: string } | null>(null);
+  const [installModalPack, setInstallModalPack] = useState<ComfyStarterPack | null>(null);
 
   useEffect(() => {
     fetch("/api/settings/asset-providers")
@@ -455,7 +460,7 @@ export function AssetGenTab() {
     await fetch(`/api/settings/comfyui/models/${id}/install`, { method: "POST" });
   };
 
-  const handleInstallPack = async (pack: { id: string; label: string }) => {
+  const handleInstallPack = async (pack: ComfyStarterPack) => {
     setInstallingPackId(pack.id);
     setInstallModalPack(pack);
     // Server returns 202 immediately; progress + completion come via Socket.IO
@@ -611,8 +616,9 @@ export function AssetGenTab() {
             <div className="grid gap-3 lg:grid-cols-2">
               {comfyui.starterPacks.map((pack) => {
                 const recommended = !comfyui.health.tier || pack.recommendedTiers.includes(comfyui.health.tier);
-                const installedModels = comfyui.models.filter((model) => model.starterPackId === pack.id && model.status === "installed");
-                const isInstalled = installedModels.length > 0;
+                const packUrls = new Set(pack.models.map((m) => m.sourceUrl));
+                const installedModels = comfyui.models.filter((model) => packUrls.has(model.sourceUrl) && model.status === "installed");
+                const isInstalled = installedModels.length === pack.models.length;
                 return (
                   <div key={pack.id} className="rounded border border-zinc-800 bg-zinc-900/70 p-3 text-xs text-zinc-300">
                     <div className="flex items-center justify-between gap-2">
@@ -631,7 +637,7 @@ export function AssetGenTab() {
                     </p>
                     <div className="mt-3 flex items-center gap-2">
                       <button
-                        onClick={() => handleInstallPack({ id: pack.id, label: pack.label })}
+                        onClick={() => handleInstallPack(pack)}
                         disabled={installingPackId === pack.id}
                         className="text-xs px-3 py-1 rounded bg-blue-600 text-blue-50 hover:bg-blue-500 transition-colors disabled:opacity-60"
                       >
@@ -897,6 +903,7 @@ export function AssetGenTab() {
         <InstallModal
           packId={installModalPack.id}
           packLabel={installModalPack.label}
+          packModelUrls={installModalPack.models.map((m) => m.sourceUrl)}
           onClose={handleInstallModalClose}
         />
       )}

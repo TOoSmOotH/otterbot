@@ -5709,15 +5709,23 @@ async function main() {
     Params: { id: string };
   }>("/api/settings/comfyui/packs/:id/install", async (req, reply) => {
     const packId = req.params.id;
+    console.log(`[api] POST /api/settings/comfyui/packs/${packId}/install`);
     try {
       const { installComfyStarterPack } = await import("./asset-providers/comfyui.js");
       // Return immediately — downloads run in background, progress via Socket.IO
       installComfyStarterPack(packId, createDownloadEmitter())
-        .then(() => io.emit("model:pack-install-complete", { packId }))
-        .catch((err) => io.emit("model:pack-install-error", { packId, error: err instanceof Error ? err.message : String(err) }));
+        .then(() => {
+          console.log(`[api] Pack "${packId}" install complete, emitting model:pack-install-complete`);
+          io.emit("model:pack-install-complete", { packId });
+        })
+        .catch((err) => {
+          console.error(`[api] Pack "${packId}" install failed:`, err);
+          io.emit("model:pack-install-error", { packId, error: err instanceof Error ? err.message : String(err) });
+        });
       reply.code(202);
       return { status: "installing", packId };
     } catch (error) {
+      console.error(`[api] Pack "${packId}" endpoint error:`, error);
       reply.code(404);
       return { error: error instanceof Error ? error.message : String(error) };
     }
