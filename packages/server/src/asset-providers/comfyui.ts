@@ -620,7 +620,7 @@ async function waitForImage(baseUrl: string, promptId: string): Promise<{ filena
   while (Date.now() - started < 120_000) {
     const history = await fetchJson<Record<string, {
       outputs?: Record<string, { images?: Array<{ filename: string; subfolder?: string; type?: string }> }>;
-      status?: { status_str?: string };
+      status?: { status_str?: string; messages?: Array<[string, { message?: string; details?: string; node_type?: string }]> };
     }>>(`${baseUrl}/history/${promptId}`);
     const entry = history[promptId];
     const images = entry?.outputs
@@ -628,7 +628,14 @@ async function waitForImage(baseUrl: string, promptId: string): Promise<{ filena
       : [];
     if (images.length > 0) return images[0];
     if (entry?.status?.status_str === "error") {
-      throw new Error("ComfyUI generation failed");
+      // Extract error details from ComfyUI status messages
+      const errorMessages = (entry.status.messages ?? [])
+        .filter(([type]) => type === "execution_error" || type === "error")
+        .map(([, data]) => data?.message ?? data?.details ?? "unknown error")
+        .join("; ");
+      const detail = errorMessages || JSON.stringify(entry.status.messages ?? []);
+      console.error(`[comfyui] Generation failed for prompt ${promptId}:`, detail);
+      throw new Error(`ComfyUI generation failed: ${detail}`);
     }
     await new Promise((resolvePromise) => setTimeout(resolvePromise, 1500));
   }
@@ -660,8 +667,9 @@ export class ComfyUIImageProvider implements ImageGenProvider {
       throw new Error("ComfyUI is reachable but no checkpoint is installed. Add a managed checkpoint in Asset Generation first.");
     }
 
+    console.log(`[comfyui] Generating image: preset=${preset.id}, checkpoint="${checkpoint}", size=${options?.width ?? 1024}x${options?.height ?? 1024}`);
     const workflow = buildWorkflow(prompt, options, checkpoint, preset);
-    const submit = await fetchJson<{ prompt_id?: string }>(`${cleanUrl}/prompt`, {
+    const submit = await fetchJson<{ prompt_id?: string; error?: string; node_errors?: Record<string, unknown> }>(`${cleanUrl}/prompt`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -671,8 +679,11 @@ export class ComfyUIImageProvider implements ImageGenProvider {
     });
 
     if (!submit.prompt_id) {
-      throw new Error("ComfyUI did not return a prompt ID");
+      const errDetail = submit.error ?? (submit.node_errors ? JSON.stringify(submit.node_errors) : "no prompt_id returned");
+      console.error(`[comfyui] Prompt submission rejected:`, errDetail);
+      throw new Error(`ComfyUI rejected prompt: ${errDetail}`);
     }
+    console.log(`[comfyui] Prompt submitted: ${submit.prompt_id}`);
 
     // Try WebSocket-based waiting with progress, fall back to polling
     await this.waitForCompletion(cleanUrl, submit.prompt_id, options?.onProgress);
