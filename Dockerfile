@@ -3,7 +3,7 @@ FROM node:22 AS base
 RUN corepack enable && corepack prepare pnpm@latest --activate
 WORKDIR /app
 
-# Install dependencies
+# ── Stage 1: Install dependencies (cached unless lock/package.json change) ──
 FROM base AS deps
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
 COPY packages/shared/package.json ./packages/shared/
@@ -14,16 +14,19 @@ COPY modules/deep-research/package.json ./modules/deep-research/
 COPY modules/discord-support/package.json ./modules/discord-support/
 RUN pnpm install --frozen-lockfile
 
-# Build
+# ── Stage 2: Build (cached unless source changes) ──────────────────────────
 FROM deps AS build
 ARG BUILD_VERSION
 ENV VITE_APP_VERSION=${BUILD_VERSION}
 COPY . .
 RUN pnpm build
 
-# Production
+# ── Stage 3: Production image ──────────────────────────────────────────────
 FROM base AS production
+
+# Layer 1: ALL system packages in a single apt transaction
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    # Core tools
     tini git curl sudo gnupg apt-transport-https ca-certificates ffmpeg sqlite3 \
     build-essential pkg-config iproute2 net-tools vim \
     # Playwright/Chromium system dependencies
@@ -31,15 +34,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libdrm2 libdbus-1-3 libxkbcommon0 libatspi2.0-0 libxcomposite1 \
     libxdamage1 libxfixes3 libxrandr2 libgbm1 libpango-1.0-0 \
     libcairo2 libasound2 libwayland-client0 \
-    && rm -rf /var/lib/apt/lists/*
-
-# Desktop environment (conditionally started at runtime via ENABLE_DESKTOP)
-RUN apt-get update && apt-get install -y --no-install-recommends \
+    # Desktop environment
     xvfb xfce4 xfce4-terminal dbus-x11 x11vnc x11-utils \
     xdg-utils fonts-noto-color-emoji fonts-dejavu-core \
+    # Languages
+    python3 python3-pip python3-venv \
+    default-jdk-headless \
+    ruby-full \
     && rm -rf /var/lib/apt/lists/*
 
-# Install GitHub CLI (gh)
+# Layer 2: GitHub CLI (separate due to external keyring/repo setup)
 RUN install -m 0755 -d /etc/apt/keyrings \
     && curl -fsSL --retry 3 --retry-delay 5 https://cli.github.com/packages/githubcli-archive-keyring.gpg -o /etc/apt/keyrings/githubcli-archive-keyring.gpg \
     && chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg \
@@ -48,14 +52,13 @@ RUN install -m 0755 -d /etc/apt/keyrings \
     && apt-get update && apt-get install -y --no-install-recommends gh \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Go
+# Layer 3: Go + Rust (rarely change, large downloads — cached together)
 ENV GOLANG_VERSION=1.24.0
 RUN curl -fsSL --retry 3 --retry-delay 5 "https://go.dev/dl/go${GOLANG_VERSION}.linux-$(dpkg --print-architecture).tar.gz" \
     | tar xz -C /usr/local \
     && ln -s /usr/local/go/bin/go /usr/local/bin/go \
     && ln -s /usr/local/go/bin/gofmt /usr/local/bin/gofmt
 
-# Install Rust via rustup (shared location so all users can access it)
 ENV RUSTUP_HOME=/usr/local/rustup
 ENV CARGO_HOME=/usr/local/cargo
 RUN curl --proto '=https' --tlsv1.2 -sSf --retry 3 --retry-delay 5 https://sh.rustup.rs \
@@ -63,38 +66,15 @@ RUN curl --proto '=https' --tlsv1.2 -sSf --retry 3 --retry-delay 5 https://sh.ru
     && chmod -R a+rX /usr/local/rustup /usr/local/cargo
 ENV PATH="/usr/local/cargo/bin:$PATH"
 
-# Install Python 3 with pip and venv
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    python3 python3-pip python3-venv \
-    && rm -rf /var/lib/apt/lists/*
-
-# Install Java (OpenJDK headless)
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    default-jdk-headless \
-    && rm -rf /var/lib/apt/lists/*
-
-# Install Ruby
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    ruby-full \
-    && rm -rf /var/lib/apt/lists/*
-
-# Install coding agents
-# OpenCode + Codex go into /usr/local/lib/otterbot-tools via NPM_CONFIG_PREFIX
-# (NOT /otterbot/tools — that path is overlaid by bind-mounted volumes at runtime)
-# Claude Code uses the native installer → /usr/local/lib/otterbot-tools/claude-home/.local/bin/claude
+# Layer 4: All coding agents + global npm tools in one layer
 ENV NPM_CONFIG_PREFIX=/usr/local/lib/otterbot-tools
 ENV PATH="/usr/local/lib/otterbot-tools/bin:$PATH"
-RUN mkdir -p /usr/local/lib/otterbot-tools /otterbot/home
-RUN npm install -g opencode-ai@latest
-RUN npm install -g @openai/codex@latest
-RUN npm install -g @google/gemini-cli@latest
-RUN HOME=/otterbot/home curl -fsSL --retry 3 --retry-delay 5 https://claude.ai/install.sh | HOME=/otterbot/home bash
+RUN mkdir -p /usr/local/lib/otterbot-tools /otterbot/home \
+    && npm install -g opencode-ai@latest @openai/codex@latest @google/gemini-cli@latest \
+    && HOME=/otterbot/home curl -fsSL --retry 3 --retry-delay 5 https://claude.ai/install.sh | HOME=/otterbot/home bash \
+    && PUPPETEER_SKIP_DOWNLOAD=true npm install -g puppeteer
 
-# Install puppeteer globally so coding agents can import it from any workspace.
-# Skip bundled Chromium download — we reuse Playwright's Chromium via PUPPETEER_EXECUTABLE_PATH.
-RUN PUPPETEER_SKIP_DOWNLOAD=true npm install -g puppeteer
-
-# Create non-root user with configurable UID/GID
+# Layer 5: Create non-root user
 ARG OTTERBOT_UID=1000
 ARG OTTERBOT_GID=1000
 ENV OTTERBOT_UID=${OTTERBOT_UID}
@@ -103,8 +83,7 @@ RUN (getent group ${OTTERBOT_GID} || groupadd -g ${OTTERBOT_GID} otterbot) \
     && useradd -u ${OTTERBOT_UID} -g ${OTTERBOT_GID} -m -d /otterbot/home otterbot 2>/dev/null \
     || useradd -u ${OTTERBOT_UID} -g ${OTTERBOT_GID} -m -o -d /otterbot/home otterbot
 
-# Sudoers configuration is handled at runtime in entrypoint.sh (SUDO_MODE env var)
-
+# Layer 6: Copy build artifacts (changes every build)
 WORKDIR /app
 COPY --from=build /app/package.json /app/pnpm-workspace.yaml ./
 COPY --from=build /app/node_modules ./node_modules
@@ -131,13 +110,10 @@ RUN mkdir -p modules/github-discussions/node_modules/@otterbot \
     && mkdir -p modules/discord-support/node_modules/@otterbot \
     && ln -sf /app/packages/shared modules/discord-support/node_modules/@otterbot/shared
 
-# Install Playwright Chromium browser (headless, for agent web browsing)
-# Use a fixed path so both root (build) and otterbot (runtime) can find it
+# Layer 7: Playwright Chromium + browser setup
 ENV PLAYWRIGHT_BROWSERS_PATH=/opt/playwright
 RUN node packages/server/node_modules/playwright/cli.js install chromium
 
-# Make Playwright's Chromium available as the system default browser.
-# Wrapper script passes --no-sandbox (required in containers).
 RUN CHROME_BIN=$(find /opt/playwright -name chrome -type f -path '*/chrome-linux*/chrome' | head -1) \
     && printf '#!/bin/sh\nexec "%s" --no-sandbox --disable-dev-shm-usage --user-data-dir=/tmp/otterbot-desktop-browser "$@"\n' "$CHROME_BIN" \
        > /usr/local/bin/chromium-browser \
@@ -148,8 +124,7 @@ RUN CHROME_BIN=$(find /opt/playwright -name chrome -type f -path '*/chrome-linux
     && update-alternatives --install /usr/bin/x-www-browser x-www-browser /usr/local/bin/chromium-browser 200 \
     && update-alternatives --install /usr/bin/gnome-www-browser gnome-www-browser /usr/local/bin/chromium-browser 200
 
-# Download noVNC ES module source (native ESM — served as static files for the web viewer)
-# Both core/ and vendor/ are needed because core/inflator.js imports ../vendor/pako/
+# Layer 8: noVNC static files
 RUN curl -fsSL --retry 3 --retry-delay 5 https://github.com/novnc/noVNC/archive/refs/tags/v1.5.0.tar.gz | tar xz -C /tmp \
     && mkdir -p /app/novnc \
     && mv /tmp/noVNC-1.5.0/core /app/novnc/core \
@@ -157,7 +132,7 @@ RUN curl -fsSL --retry 3 --retry-delay 5 https://github.com/novnc/noVNC/archive/
     && rm -rf /tmp/noVNC-1.5.0 \
     && ls -la /app/novnc/core/rfb.js
 
-# Create data directories (use numeric UID:GID since group name may differ)
+# Layer 9: Data directories + entrypoint
 RUN mkdir -p /otterbot/config /otterbot/data /otterbot/projects /otterbot/logs /otterbot/home \
     && chown -R ${OTTERBOT_UID}:${OTTERBOT_GID} /otterbot /app
 
