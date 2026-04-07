@@ -14,7 +14,7 @@ const DEFAULT_LIMITS: Record<string, RateLimitConfig> = {
   "hn.algolia.com": { requestsPerMinute: 30, requestsPerHour: 1000 },
   "api.search.brave.com": { requestsPerMinute: 20, requestsPerHour: 200 },
   "api.tavily.com": { requestsPerMinute: 20, requestsPerHour: 200 },
-  "html.duckduckgo.com": { requestsPerMinute: 10, requestsPerHour: 60 },
+  "duckduckgo.com": { requestsPerMinute: 10, requestsPerHour: 60 },
 };
 
 const GENERAL_LIMIT: RateLimitConfig = {

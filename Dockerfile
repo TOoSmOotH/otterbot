@@ -180,6 +180,12 @@ if [ ! -f /otterbot/home/.venv/bin/activate ]; then
   python3 -m venv /otterbot/home/.venv
   chown -R "${PUID}:${PGID}" /otterbot/home/.venv
 fi
+# Ensure ddgs (DuckDuckGo search CLI) is available
+if ! /otterbot/home/.venv/bin/python3 -c "import ddgs" 2>/dev/null; then
+  echo "[otterbot] Installing ddgs..."
+  setpriv --reuid="${PUID}" --regid="${PGID}" --init-groups \
+    /otterbot/home/.venv/bin/pip install --quiet ddgs
+fi
 
 # ── Install packages from manifest ──────────────────────────────────
 # The COO agent (or user) writes /otterbot/config/packages.json with

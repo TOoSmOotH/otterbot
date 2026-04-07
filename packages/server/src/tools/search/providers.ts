@@ -5,6 +5,7 @@
  * `search:active_provider` config key.
  */
 
+import { execFile } from "node:child_process";
 import { getConfig } from "../../auth/auth.js";
 
 // ---------------------------------------------------------------------------
@@ -170,69 +171,68 @@ class TavilyProvider implements SearchProvider {
 }
 
 // ---------------------------------------------------------------------------
-// DuckDuckGo (free, no API key)
+// DuckDuckGo (free, no API key) — uses the `ddgs` Python package which
+// handles DuckDuckGo's bot-detection (CAPTCHAs / JS challenges).
 // ---------------------------------------------------------------------------
+
+/** Resolve the Python interpreter — prefer the venv, fall back to system. */
+function findPython(): string {
+  const venvPy = process.env.VIRTUAL_ENV
+    ? `${process.env.VIRTUAL_ENV}/bin/python3`
+    : null;
+  return venvPy ?? "python3";
+}
 
 class DuckDuckGoProvider implements SearchProvider {
   readonly id = "duckduckgo";
 
-  async search(query: string, maxResults: number): Promise<SearchResponse> {
-    const res = await fetch("https://html.duckduckgo.com/html/", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
-      },
-      body: `q=${encodeURIComponent(query)}`,
-      signal: AbortSignal.timeout(15_000),
-    });
-    if (!res.ok) {
-      throw new Error(`DuckDuckGo returned ${res.status}: ${res.statusText}`);
-    }
+  search(query: string, maxResults: number): Promise<SearchResponse> {
+    const python = findPython();
 
-    const html = await res.text();
-    const results: SearchResult[] = [];
+    // Inline script avoids needing a separate .py file to ship.
+    const script = `
+import json, sys
+try:
+    from ddgs import DDGS
+except ImportError:
+    from duckduckgo_search import DDGS
+results = list(DDGS().text(sys.argv[1], max_results=int(sys.argv[2])))
+print(json.dumps(results))
+`;
 
-    // Find each result link directly — avoids fragile block-level regex that
-    // breaks on nested <div>s inside DDG result blocks.
-    const linkRe =
-      /<a[^>]+class="result__a"[^>]+href="([^"]*)"[^>]*>([\s\S]*?)<\/a>/g;
-    let linkMatch: RegExpExecArray | null;
-    while (
-      (linkMatch = linkRe.exec(html)) !== null &&
-      results.length < maxResults
-    ) {
-      let url = linkMatch[1];
-      // DuckDuckGo wraps URLs in a redirect; extract the real one
-      const uddgMatch = url.match(/[?&]uddg=([^&]+)/);
-      if (uddgMatch) url = decodeURIComponent(uddgMatch[1]);
-
-      const title = linkMatch[2].replace(/<[^>]*>/g, "").trim();
-
-      // Look for the nearest snippet after this link
-      const afterLink = html.slice(linkMatch.index + linkMatch[0].length);
-      const snippetMatch = afterLink.match(
-        /<a[^>]+class="result__snippet"[^>]*>([\s\S]*?)<\/a>/,
+    return new Promise((resolve, reject) => {
+      execFile(
+        python,
+        ["-c", script, query, String(maxResults)],
+        { timeout: 30_000, maxBuffer: 1024 * 1024 },
+        (err, stdout, stderr) => {
+          if (err) {
+            const msg = stderr?.trim() || err.message;
+            reject(new Error(`DuckDuckGo search failed: ${msg}`));
+            return;
+          }
+          try {
+            const raw = JSON.parse(stdout) as Array<{
+              title?: string;
+              href?: string;
+              body?: string;
+            }>;
+            const results: SearchResult[] = raw.map((r) => ({
+              title: r.title ?? "",
+              url: r.href ?? "",
+              snippet: r.body ?? "",
+            }));
+            resolve({ results, provider: this.id, query });
+          } catch (parseErr) {
+            reject(
+              new Error(
+                `Failed to parse DuckDuckGo results: ${parseErr instanceof Error ? parseErr.message : String(parseErr)}`,
+              ),
+            );
+          }
+        },
       );
-      // Only use the snippet if it appears before the next result link
-      let snippet = "";
-      if (snippetMatch) {
-        const nextLinkInAfter = afterLink.indexOf('class="result__a"');
-        if (
-          nextLinkInAfter === -1 ||
-          snippetMatch.index! < nextLinkInAfter
-        ) {
-          snippet = snippetMatch[1].replace(/<[^>]*>/g, "").trim();
-        }
-      }
-
-      if (url && title) {
-        results.push({ title, url, snippet });
-      }
-    }
-
-    return { results, provider: this.id, query };
+    });
   }
 }
 
