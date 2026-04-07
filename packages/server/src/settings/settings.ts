@@ -451,7 +451,7 @@ export async function testProvider(
     try {
       const discovered = await fetchModels(providerId);
       if (discovered.length > 0) {
-        testModel = discovered[0].id;
+        testModel = discovered[0].modelId;
       }
     } catch {
       // ignore discovery errors; fall through to "test"
