@@ -56,6 +56,8 @@ function SearchProviderCard({
     (provider.apiKeySet || !provider.needsApiKey) &&
     (!!provider.baseUrl || !provider.needsBaseUrl);
 
+  const [removing, setRemoving] = useState(false);
+
   const handleSave = async () => {
     setSaving(true);
     const data: { apiKey?: string; baseUrl?: string } = {};
@@ -68,6 +70,19 @@ function SearchProviderCard({
     await updateSearchProvider(provider.id, data);
     setApiKey("");
     setSaving(false);
+  };
+
+  const handleRemoveKey = async () => {
+    setRemoving(true);
+    await updateSearchProvider(provider.id, { apiKey: "" });
+    setRemoving(false);
+  };
+
+  const handleRemoveUrl = async () => {
+    setRemoving(true);
+    await updateSearchProvider(provider.id, { baseUrl: "" });
+    setBaseUrl("");
+    setRemoving(false);
   };
 
   const handleTest = () => {
@@ -145,17 +160,28 @@ function SearchProviderCard({
               <label className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1 block">
                 API Key
               </label>
-              <input
-                type="password"
-                value={apiKey}
-                onChange={(e) => setApiKey(e.target.value)}
-                placeholder={
-                  provider.apiKeySet
-                    ? `Current: ${provider.apiKey}`
-                    : "Enter API key..."
-                }
-                className="w-full bg-secondary rounded-md px-3 py-1.5 text-sm outline-none focus:ring-1 ring-primary"
-              />
+              <div className="flex items-center gap-2">
+                <input
+                  type="password"
+                  value={apiKey}
+                  onChange={(e) => setApiKey(e.target.value)}
+                  placeholder={
+                    provider.apiKeySet
+                      ? `Current: ${provider.apiKey}`
+                      : "Enter API key..."
+                  }
+                  className="flex-1 bg-secondary rounded-md px-3 py-1.5 text-sm outline-none focus:ring-1 ring-primary"
+                />
+                {provider.apiKeySet && (
+                  <button
+                    onClick={handleRemoveKey}
+                    disabled={removing}
+                    className="text-xs text-red-500 hover:text-red-400 px-2 py-1.5 rounded-md hover:bg-red-500/10 disabled:opacity-50 whitespace-nowrap"
+                  >
+                    {removing ? "Removing..." : "Remove Key"}
+                  </button>
+                )}
+              </div>
             </div>
           )}
 
@@ -165,13 +191,24 @@ function SearchProviderCard({
               <label className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1 block">
                 Base URL
               </label>
-              <input
-                type="text"
-                value={baseUrl}
-                onChange={(e) => setBaseUrl(e.target.value)}
-                placeholder={placeholder}
-                className="w-full bg-secondary rounded-md px-3 py-1.5 text-sm outline-none focus:ring-1 ring-primary"
-              />
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  value={baseUrl}
+                  onChange={(e) => setBaseUrl(e.target.value)}
+                  placeholder={placeholder}
+                  className="flex-1 bg-secondary rounded-md px-3 py-1.5 text-sm outline-none focus:ring-1 ring-primary"
+                />
+                {provider.baseUrl && (
+                  <button
+                    onClick={handleRemoveUrl}
+                    disabled={removing}
+                    className="text-xs text-red-500 hover:text-red-400 px-2 py-1.5 rounded-md hover:bg-red-500/10 disabled:opacity-50 whitespace-nowrap"
+                  >
+                    {removing ? "Removing..." : "Remove URL"}
+                  </button>
+                )}
+              </div>
             </div>
           )}
 

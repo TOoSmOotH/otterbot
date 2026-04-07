@@ -948,7 +948,13 @@ export async function testSearchProvider(
     }
 
     const response = await provider.search("test", 1);
-    // Any non-error response counts as success
+    if (response.results.length === 0) {
+      return {
+        ok: false,
+        error: "Connected but no results returned — provider may be misconfigured or blocking requests.",
+        latencyMs: Date.now() - start,
+      };
+    }
     return {
       ok: true,
       latencyMs: Date.now() - start,
