@@ -1342,6 +1342,8 @@ The user can see everything on the desktop in real-time.`;
     const pending = this._pendingProjectApproval;
     if (!pending) return "No pending project to approve.";
     this._pendingProjectApproval = null;
+    // Bypass the "check status first" guard — CEO explicitly approved
+    this.projectStatusCheckedThisTurn = true;
     return this.createProject(pending.name, pending.description, pending.directive, pending.charter);
   }
 
