@@ -33,11 +33,15 @@ import {
   waitForFork,
   syncFork,
   cloneForForkContribution,
+  configureGitUser,
+  gitEnvWithPAT,
+  gitCredentialArgs,
 } from "../github/github-service.js";
-import { initGitRepo, createInitialCommit, configureCommitSigning, hasSSHKey } from "../utils/git.js";
+import { initGitRepo, createInitialCommit, configureCommitSigning, hasSSHKey, isGitRepo, hasRemote } from "../utils/git.js";
 import { NO_REPORT_SENTINEL } from "../schedulers/custom-task-scheduler.js";
 import { ProjectStatus, CharterStatus } from "@otterbot/shared";
 import { existsSync, rmSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import type { PtyClient } from "../agents/worker.js";
 
 type TypedSocket = Socket<ClientToServerEvents, ServerToClientEvents>;
@@ -1110,6 +1114,169 @@ export function setupSocketHandlers(
         callback?.({ ok: true });
       } catch (err) {
         callback?.({ ok: false, error: err instanceof Error ? err.message : "Failed to set GitHub account" });
+      }
+    });
+
+    // Link a GitHub repo to an existing local-only project
+    socket.on("project:link-github", async (data, callback) => {
+      try {
+        const workspace = deps?.workspace;
+        if (!workspace) {
+          callback?.({ ok: false, error: "Workspace not available." });
+          return;
+        }
+
+        const db = getDb();
+        const project = db
+          .select()
+          .from(schema.projects)
+          .where(eq(schema.projects.id, data.projectId))
+          .get();
+        if (!project) {
+          callback?.({ ok: false, error: "Project not found" });
+          return;
+        }
+        if (project.githubRepo) {
+          callback?.({ ok: false, error: "Project is already linked to a GitHub repository" });
+          return;
+        }
+
+        const ghToken = resolveGitHubToken();
+        const ghUsername = resolveGitHubUsername();
+        if (!ghToken || !ghUsername) {
+          callback?.({ ok: false, error: "GitHub is not configured. Add a GitHub account in Settings first." });
+          return;
+        }
+
+        if (!data.githubRepo.includes("/")) {
+          callback?.({ ok: false, error: "Invalid repo format. Use 'owner/repo'." });
+          return;
+        }
+
+        let branch = data.githubBranch?.trim();
+        if (!branch) {
+          try {
+            branch = await getRepoDefaultBranch(data.githubRepo, ghToken);
+          } catch {
+            branch = "main";
+          }
+        }
+
+        const repoPath = workspace.repoPath(data.projectId);
+        if (!existsSync(repoPath) || !isGitRepo(repoPath)) {
+          callback?.({ ok: false, error: "Project workspace not found or is not a git repository" });
+          return;
+        }
+
+        let forkMode = false;
+        let forkRepo: string | null = null;
+        const hasPush = await checkHasPushAccess(data.githubRepo, ghToken);
+
+        if (hasPush) {
+          // Direct push access — add origin remote
+          const remoteUrl = `https://github.com/${data.githubRepo}.git`;
+          if (hasRemote(repoPath, "origin")) {
+            execFileSync("git", ["-C", repoPath, "remote", "set-url", "origin", remoteUrl], { stdio: "pipe" });
+          } else {
+            execFileSync("git", ["-C", repoPath, "remote", "add", "origin", remoteUrl], { stdio: "pipe" });
+          }
+
+          // Fetch from origin
+          const fetchArgs = [...gitCredentialArgs(), "-C", repoPath, "fetch", "origin"];
+          execFileSync("git", fetchArgs, {
+            stdio: "pipe",
+            timeout: 120_000,
+            env: gitEnvWithPAT(ghToken),
+          });
+
+          // Best-effort push of local commits (non-fatal if remote has content)
+          try {
+            const pushArgs = [...gitCredentialArgs(), "-C", repoPath, "push", "-u", "origin", branch];
+            execFileSync("git", pushArgs, {
+              stdio: "pipe",
+              timeout: 120_000,
+              env: gitEnvWithPAT(ghToken),
+            });
+          } catch {
+            // Push failure is non-fatal — remote may have divergent history
+            console.log(`[project:link-github] Push to ${data.githubRepo} failed (non-fatal) — remote may have existing content`);
+          }
+        } else {
+          // No push access — fork and set up remotes
+          try {
+            console.log(`[project:link-github] No push access to ${data.githubRepo} — creating fork`);
+            const fork = await createFork(data.githubRepo, ghToken);
+            forkRepo = fork.full_name;
+            await waitForFork(fork.full_name, ghToken);
+            await syncFork(fork.full_name, ghToken, branch);
+
+            // Set origin to fork
+            const forkUrl = `https://github.com/${fork.full_name}.git`;
+            if (hasRemote(repoPath, "origin")) {
+              execFileSync("git", ["-C", repoPath, "remote", "set-url", "origin", forkUrl], { stdio: "pipe" });
+            } else {
+              execFileSync("git", ["-C", repoPath, "remote", "add", "origin", forkUrl], { stdio: "pipe" });
+            }
+
+            // Add upstream remote
+            const upstreamUrl = `https://github.com/${data.githubRepo}.git`;
+            if (hasRemote(repoPath, "upstream")) {
+              execFileSync("git", ["-C", repoPath, "remote", "set-url", "upstream", upstreamUrl], { stdio: "pipe" });
+            } else {
+              execFileSync("git", ["-C", repoPath, "remote", "add", "upstream", upstreamUrl], { stdio: "pipe" });
+            }
+
+            // Fetch both remotes
+            const fetchArgs = [...gitCredentialArgs(), "-C", repoPath, "fetch", "--all"];
+            execFileSync("git", fetchArgs, {
+              stdio: "pipe",
+              timeout: 120_000,
+              env: gitEnvWithPAT(ghToken),
+            });
+
+            forkMode = true;
+            console.log(`[project:link-github] Fork set up: ${fork.full_name}`);
+          } catch (forkErr) {
+            const errMsg = forkErr instanceof Error ? forkErr.message : String(forkErr);
+            callback?.({ ok: false, error: `Failed to set up fork: ${errMsg}` });
+            return;
+          }
+        }
+
+        configureGitUser(repoPath, data.projectId);
+
+        // Update database
+        db.update(schema.projects)
+          .set({ githubRepo: data.githubRepo, githubBranch: branch })
+          .where(eq(schema.projects.id, data.projectId))
+          .run();
+
+        // Set runtime config
+        setConfig(`project:${data.projectId}:github:repo`, data.githubRepo);
+        setConfig(`project:${data.projectId}:github:branch`, branch);
+        if (forkMode && forkRepo) {
+          setConfig(`project:${data.projectId}:github:fork_mode`, "true");
+          setConfig(`project:${data.projectId}:github:fork_repo`, forkRepo);
+        }
+
+        // Broadcast update
+        const updated = db
+          .select()
+          .from(schema.projects)
+          .where(eq(schema.projects.id, data.projectId))
+          .get();
+        if (updated) {
+          io.emit("project:updated", updated as unknown as Project);
+        }
+
+        // Start issue monitor if already enabled
+        if (deps?.issueMonitor && project.githubIssueMonitor) {
+          deps.issueMonitor.watchProject(data.projectId, data.githubRepo, ghUsername);
+        }
+
+        callback?.({ ok: true, forkMode, forkRepo: forkRepo ?? undefined });
+      } catch (err) {
+        callback?.({ ok: false, error: err instanceof Error ? err.message : "Failed to link GitHub repository" });
       }
     });
 

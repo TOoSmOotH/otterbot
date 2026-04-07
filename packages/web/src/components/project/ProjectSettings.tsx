@@ -46,6 +46,10 @@ export function ProjectSettings({ projectId }: { projectId: string }) {
   const [show3d, setShow3d] = useState(true);
   const [studios, setStudios] = useState<string[]>([]);
   const [githubAccountId, setGithubAccountId] = useState<string | null>(null);
+  const [linkRepo, setLinkRepo] = useState("");
+  const [linkBranch, setLinkBranch] = useState("");
+  const [linking, setLinking] = useState(false);
+  const [linkError, setLinkError] = useState<string | null>(null);
 
   const gitHubAccounts = useSettingsStore((s) => s.gitHubAccounts);
   const loadGitHubAccounts = useSettingsStore((s) => s.loadGitHubAccounts);
@@ -245,6 +249,60 @@ export function ProjectSettings({ projectId }: { projectId: string }) {
   return (
     <div className="h-full overflow-y-auto p-4">
       <div className="max-w-2xl mx-auto space-y-6">
+        {/* Connect GitHub Repository (local-only projects) */}
+        {!isGitHubProject && (
+          <div>
+            <h2 className="text-sm font-semibold">Connect GitHub Repository</h2>
+            <p className="text-xs text-muted-foreground mt-1">
+              Link this project to a GitHub repository. Your local work will be preserved.
+            </p>
+            <div className="mt-2 space-y-2">
+              <input
+                type="text"
+                value={linkRepo}
+                onChange={(e) => { setLinkRepo(e.target.value); setLinkError(null); }}
+                placeholder="owner/repo"
+                className="text-sm bg-secondary border border-border rounded px-3 py-1.5 w-full max-w-xs focus:outline-none focus:ring-1 focus:ring-primary"
+              />
+              <input
+                type="text"
+                value={linkBranch}
+                onChange={(e) => setLinkBranch(e.target.value)}
+                placeholder="Branch (default: auto-detect)"
+                className="text-sm bg-secondary border border-border rounded px-3 py-1.5 w-full max-w-xs focus:outline-none focus:ring-1 focus:ring-primary"
+              />
+              <div>
+                <button
+                  onClick={() => {
+                    if (!linkRepo.trim()) return;
+                    setLinking(true);
+                    setLinkError(null);
+                    const socket = getSocket();
+                    socket.emit("project:link-github", {
+                      projectId,
+                      githubRepo: linkRepo.trim(),
+                      githubBranch: linkBranch.trim() || undefined,
+                    }, (ack) => {
+                      setLinking(false);
+                      if (ack?.ok) {
+                        setIsGitHubProject(true);
+                        if (ack.forkMode) setIsForkMode(true);
+                      } else {
+                        setLinkError(ack?.error ?? "Failed to link repository");
+                      }
+                    });
+                  }}
+                  disabled={linking || !linkRepo.trim()}
+                  className="text-sm bg-primary text-primary-foreground rounded px-4 py-1.5 hover:opacity-90 disabled:opacity-50"
+                >
+                  {linking ? "Connecting..." : "Connect"}
+                </button>
+              </div>
+              {linkError && <p className="text-xs text-red-500">{linkError}</p>}
+            </div>
+          </div>
+        )}
+
         {/* GitHub Account (GitHub projects only) */}
         {isGitHubProject && gitHubAccounts.length > 0 && (
           <div>

@@ -336,6 +336,21 @@ export interface ClientToServerEvents {
     callback?: (ack: { ok: boolean; error?: string }) => void,
   ) => void;
 
+  // Link a GitHub repo to an existing local-only project
+  "project:link-github": (
+    data: {
+      projectId: string;
+      githubRepo: string;
+      githubBranch?: string;
+    },
+    callback?: (ack: {
+      ok: boolean;
+      error?: string;
+      forkMode?: boolean;
+      forkRepo?: string;
+    }) => void,
+  ) => void;
+
   // GitHub account assignment
   "project:set-github-account": (
     data: { projectId: string; accountId: string | null },
