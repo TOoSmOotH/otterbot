@@ -252,7 +252,7 @@ function getCli(
     case "opencode":
       return { command: "opencode", args: ["run", prompt] };
     case "codex":
-      return { command: "codex", args: ["exec", "--quiet", prompt] };
+      return { command: "codex", args: ["exec", prompt] };
     case "gemini-cli":
       return { command: "gemini", args: ["-p", prompt] };
   }
