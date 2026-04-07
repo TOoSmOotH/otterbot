@@ -427,10 +427,38 @@ export async function testProvider(
   }
 
   // Determine which model to test with
-  const testModel =
+  let testModel: string | undefined =
     model ??
     FALLBACK_MODELS[providerType]?.[0] ??
-    "test";
+    undefined;
+
+  // If no model yet, check if this provider is assigned to a role and use that role's model
+  if (!testModel && row?.id) {
+    for (const [providerKey, modelKey] of [
+      ["coo_provider", "coo_model"],
+      ["team_lead_provider", "team_lead_model"],
+      ["worker_provider", "worker_model"],
+    ] as const) {
+      if (getConfig(providerKey) === row.id) {
+        testModel = getConfig(modelKey) ?? undefined;
+        if (testModel) break;
+      }
+    }
+  }
+
+  // For openai-compatible providers, try discovering a model from the endpoint
+  if (!testModel && providerType === "openai-compatible") {
+    try {
+      const discovered = await fetchModels(providerId);
+      if (discovered.length > 0) {
+        testModel = discovered[0].id;
+      }
+    } catch {
+      // ignore discovery errors; fall through to "test"
+    }
+  }
+
+  testModel = testModel ?? "test";
 
   const config: LLMConfig = {
     provider: providerId,
