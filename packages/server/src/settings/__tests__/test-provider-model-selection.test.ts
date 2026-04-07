@@ -141,6 +141,7 @@ describe("testProvider model selection", () => {
       provider: "provider-1",
       model: "coo-model",
     });
+    expect(globalThis.fetch).not.toHaveBeenCalled();
   });
 
   it("continues role lookup when an earlier matching role has no model", async () => {
