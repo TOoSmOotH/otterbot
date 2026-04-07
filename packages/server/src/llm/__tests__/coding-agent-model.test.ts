@@ -1,3 +1,4 @@
+import { EventEmitter } from "node:events";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 /**
@@ -53,6 +54,12 @@ vi.mock("@ai-sdk/openai-compatible", () => ({
 }));
 vi.mock("@ai-sdk/amazon-bedrock", () => ({
   createAmazonBedrock: vi.fn(() => vi.fn()),
+}));
+
+const spawnMock = vi.fn();
+
+vi.mock("node:child_process", () => ({
+  spawn: spawnMock,
 }));
 
 // ---------------------------------------------------------------------------
@@ -186,6 +193,54 @@ describe("CodingAgentModel", () => {
       expect(result.text).toBe(mockQueryResult);
       expect(result.finishReason).toBe("stop");
       expect(result.usage).toEqual({ promptTokens: 0, completionTokens: 0 });
+    });
+
+    it("runs codex exec without --quiet", async () => {
+      const { CodingAgentModel } = await import("../coding-agent-model.js");
+
+      spawnMock.mockImplementation(() => {
+        const child = new EventEmitter() as EventEmitter & {
+          stdout: EventEmitter;
+          stderr: EventEmitter;
+          kill: ReturnType<typeof vi.fn>;
+        };
+        child.stdout = new EventEmitter();
+        child.stderr = new EventEmitter();
+        child.kill = vi.fn();
+
+        queueMicrotask(() => {
+          child.stdout.emit("data", Buffer.from("codex output"));
+          child.emit("close", 0);
+        });
+
+        return child;
+      });
+
+      const model = new CodingAgentModel({
+        agentType: "codex",
+        modelId: "gpt-5.3-codex-medium",
+      });
+
+      const result = await model.doGenerate({
+        inputFormat: "prompt",
+        mode: { type: "regular" },
+        prompt: [
+          { role: "user", content: [{ type: "text", text: "Hello" }] },
+        ],
+      } as any);
+
+      expect(result.text).toBe("codex output");
+      expect(spawnMock).toHaveBeenCalledTimes(1);
+      expect(spawnMock).toHaveBeenCalledWith(
+        "codex",
+        expect.arrayContaining(["exec"]),
+        expect.any(Object),
+      );
+
+      const codexArgs = spawnMock.mock.calls[0][1] as string[];
+      expect(codexArgs).not.toContain("--quiet");
+      expect(codexArgs[0]).toBe("exec");
+      expect(codexArgs).toHaveLength(2);
     });
   });
 
