@@ -723,7 +723,8 @@ The user can see everything on the desktop in real-time.`;
             .describe("Short project name"),
           description: z
             .string()
-            .describe("Detailed description of what needs to be done"),
+            .optional()
+            .describe("Brief one-line summary of the project (defaults to the project name if omitted)"),
           charter: z
             .string()
             .describe(
@@ -736,7 +737,7 @@ The user can see everything on the desktop in real-time.`;
             ),
         }),
         execute: async ({ name, description, charter, directive }) => {
-          return this.requestProjectApproval(name, description, charter, directive);
+          return this.requestProjectApproval(name, description ?? name, charter, directive);
         },
       }),
       send_directive: tool({
