@@ -70,7 +70,7 @@ export function writeOpenCodeConfig(opts: OpenCodeConfigOptions): void {
   if (needsCompat) {
     providerEntry.npm = "@ai-sdk/openai-compatible";
     // Custom/compat providers must explicitly register their models
-    providerEntry.models = { [opts.model]: {} };
+    providerEntry.models = { [`${openCodeProvider}/${opts.model}`]: {} };
   }
 
   const config: Record<string, unknown> = {
