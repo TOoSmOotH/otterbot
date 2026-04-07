@@ -881,6 +881,11 @@ export class PipelineManager {
 
         const triageMsg = { id: msgId, taskId: triageTask.id, role: "assistant" as const, content: parsed.comment, metadata: parsed as unknown as Record<string, unknown>, createdAt: now };
         this.io.emit("triage:message", { taskId: triageTask.id, message: triageMsg });
+
+        // Auto-approve if configured (default: true for backward compat)
+        if (triageStage.autoApprove !== false) {
+          await this.approveTriage(triageTask.id);
+        }
       }
     } catch (err) {
       console.error(`[PipelineManager] Triage LLM call failed for #${issue.number}:`, err);

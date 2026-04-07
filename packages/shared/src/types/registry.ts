@@ -114,6 +114,7 @@ export enum ProjectStatus {
 export interface PipelineStageConfig {
   agentId: string;   // registry entry ID
   enabled: boolean;
+  autoApprove?: boolean;  // default true — skip manual approval (e.g., triage posts to GitHub immediately)
 }
 
 export interface ProjectPipelineConfig {
