@@ -163,7 +163,11 @@ async function searchDuckDuckGo(
   await acquireSlot("html.duckduckgo.com");
   const res = await fetch("https://html.duckduckgo.com/html/", {
     method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+      "User-Agent":
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+    },
     body: `q=${encodeURIComponent(query)}`,
     signal: AbortSignal.timeout(timeout),
   });
@@ -174,32 +178,37 @@ async function searchDuckDuckGo(
   const html = await res.text();
   const results: SearchResult[] = [];
 
-  const blockRe =
-    /<div[^>]+class="[^"]*result [^"]*"[^>]*>([\s\S]*?)<\/div>\s*(?=<div[^>]+class="[^"]*result |$)/g;
-  let block: RegExpExecArray | null;
+  // Find each result link directly — avoids fragile block-level regex that
+  // breaks on nested <div>s inside DDG result blocks.
+  const linkRe =
+    /<a[^>]+class="result__a"[^>]+href="([^"]*)"[^>]*>([\s\S]*?)<\/a>/g;
+  let linkMatch: RegExpExecArray | null;
   while (
-    (block = blockRe.exec(html)) !== null &&
+    (linkMatch = linkRe.exec(html)) !== null &&
     results.length < maxResults
   ) {
-    const inner = block[1];
-
-    const linkMatch = inner.match(
-      /<a[^>]+class="result__a"[^>]+href="([^"]*)"[^>]*>([\s\S]*?)<\/a>/,
-    );
-    if (!linkMatch) continue;
-
     let url = linkMatch[1];
     const uddgMatch = url.match(/[?&]uddg=([^&]+)/);
     if (uddgMatch) url = decodeURIComponent(uddgMatch[1]);
 
     const title = linkMatch[2].replace(/<[^>]*>/g, "").trim();
 
-    const snippetMatch = inner.match(
+    // Look for the nearest snippet after this link
+    const afterLink = html.slice(linkMatch.index + linkMatch[0].length);
+    const snippetMatch = afterLink.match(
       /<a[^>]+class="result__snippet"[^>]*>([\s\S]*?)<\/a>/,
     );
-    const snippet = snippetMatch
-      ? snippetMatch[1].replace(/<[^>]*>/g, "").trim()
-      : "";
+    // Only use the snippet if it appears before the next result link
+    let snippet = "";
+    if (snippetMatch) {
+      const nextLinkInAfter = afterLink.indexOf('class="result__a"');
+      if (
+        nextLinkInAfter === -1 ||
+        snippetMatch.index! < nextLinkInAfter
+      ) {
+        snippet = snippetMatch[1].replace(/<[^>]*>/g, "").trim();
+      }
+    }
 
     if (url && title) {
       results.push({ title, url, snippet });

@@ -179,7 +179,11 @@ class DuckDuckGoProvider implements SearchProvider {
   async search(query: string, maxResults: number): Promise<SearchResponse> {
     const res = await fetch("https://html.duckduckgo.com/html/", {
       method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+      },
       body: `q=${encodeURIComponent(query)}`,
       signal: AbortSignal.timeout(15_000),
     });
@@ -190,19 +194,15 @@ class DuckDuckGoProvider implements SearchProvider {
     const html = await res.text();
     const results: SearchResult[] = [];
 
-    // Parse result blocks: each is a <div class="result ..."> containing
-    // an <a class="result__a"> (title + URL) and <a class="result__snippet"> (snippet).
-    const blockRe = /<div[^>]+class="[^"]*result [^"]*"[^>]*>([\s\S]*?)<\/div>\s*(?=<div[^>]+class="[^"]*result |$)/g;
-    let block: RegExpExecArray | null;
-    while ((block = blockRe.exec(html)) !== null && results.length < maxResults) {
-      const inner = block[1];
-
-      // Title + URL from <a class="result__a" href="...">Title</a>
-      const linkMatch = inner.match(
-        /<a[^>]+class="result__a"[^>]+href="([^"]*)"[^>]*>([\s\S]*?)<\/a>/,
-      );
-      if (!linkMatch) continue;
-
+    // Find each result link directly — avoids fragile block-level regex that
+    // breaks on nested <div>s inside DDG result blocks.
+    const linkRe =
+      /<a[^>]+class="result__a"[^>]+href="([^"]*)"[^>]*>([\s\S]*?)<\/a>/g;
+    let linkMatch: RegExpExecArray | null;
+    while (
+      (linkMatch = linkRe.exec(html)) !== null &&
+      results.length < maxResults
+    ) {
       let url = linkMatch[1];
       // DuckDuckGo wraps URLs in a redirect; extract the real one
       const uddgMatch = url.match(/[?&]uddg=([^&]+)/);
@@ -210,13 +210,22 @@ class DuckDuckGoProvider implements SearchProvider {
 
       const title = linkMatch[2].replace(/<[^>]*>/g, "").trim();
 
-      // Snippet from <a class="result__snippet" ...>
-      const snippetMatch = inner.match(
+      // Look for the nearest snippet after this link
+      const afterLink = html.slice(linkMatch.index + linkMatch[0].length);
+      const snippetMatch = afterLink.match(
         /<a[^>]+class="result__snippet"[^>]*>([\s\S]*?)<\/a>/,
       );
-      const snippet = snippetMatch
-        ? snippetMatch[1].replace(/<[^>]*>/g, "").trim()
-        : "";
+      // Only use the snippet if it appears before the next result link
+      let snippet = "";
+      if (snippetMatch) {
+        const nextLinkInAfter = afterLink.indexOf('class="result__a"');
+        if (
+          nextLinkInAfter === -1 ||
+          snippetMatch.index! < nextLinkInAfter
+        ) {
+          snippet = snippetMatch[1].replace(/<[^>]*>/g, "").trim();
+        }
+      }
 
       if (url && title) {
         results.push({ title, url, snippet });
