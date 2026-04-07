@@ -10,6 +10,7 @@ import type { MessageBus } from "../bus/message-bus.js";
 import { createTools } from "../tools/tool-factory.js";
 import { debug } from "../utils/debug.js";
 import { getConfig } from "../auth/auth.js";
+import { getAgentModelOverride } from "../settings/settings.js";
 import { stripAnsi } from "../utils/terminal.js";
 import { auditGitRemotes } from "../utils/command-guard.js";
 import { detectAuthError } from "../coding-agents/coding-agent-client.js";
@@ -112,6 +113,28 @@ export class Worker extends BaseAgent {
     this._onTerminalData = deps.onTerminalData;
     this._onPtySessionRegistered = deps.onPtySessionRegistered;
     this._onPtySessionUnregistered = deps.onPtySessionUnregistered;
+  }
+
+  /** Re-read model/provider from config so settings changes take effect for running workers */
+  protected override refreshLlmConfig(): void {
+    const registryEntryId = this.registryEntryId;
+    if (!registryEntryId) return;
+
+    const override = getAgentModelOverride(registryEntryId);
+    const newModel = override?.model
+      ?? getConfig("worker_model")
+      ?? getConfig("coo_model")
+      ?? this.llmConfig.model;
+    const newProvider = override?.provider
+      ?? getConfig("worker_provider")
+      ?? getConfig("coo_provider")
+      ?? this.llmConfig.provider;
+
+    if (newModel !== this.llmConfig.model || newProvider !== this.llmConfig.provider) {
+      console.log(`[Worker ${this.id}] LLM config changed: ${this.llmConfig.provider}/${this.llmConfig.model} → ${newProvider}/${newModel}`);
+      this.llmConfig.model = newModel;
+      this.llmConfig.provider = newProvider;
+    }
   }
 
   /**

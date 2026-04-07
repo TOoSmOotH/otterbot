@@ -111,6 +111,11 @@ export function AgentDetailPanel() {
           {agent && (
             <span className="text-[10px] text-muted-foreground capitalize">{agent.status}</span>
           )}
+          {agent?.model && (
+            <span className="text-[10px] text-muted-foreground font-mono bg-secondary px-1.5 py-0.5 rounded">
+              {agent.model}
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-1">
           {(agent?.role === "worker" || agent?.role === "team_lead") && ["acting", "thinking", "awaiting_input"].includes(agent.status) && (

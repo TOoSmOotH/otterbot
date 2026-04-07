@@ -85,6 +85,7 @@ function buildLayout(
           label: getRoleLabel(agent, userProfile?.cooName),
           role: agent.role,
           status: agent.status,
+          model: agent.model,
           onClick: onNodeClick ? () => onNodeClick(agent.id) : undefined,
         },
       });

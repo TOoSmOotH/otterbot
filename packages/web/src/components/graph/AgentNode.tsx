@@ -7,6 +7,7 @@ interface AgentNodeData {
   label: string;
   role: string;
   status: AgentStatus;
+  model?: string;
   avatarUrl?: string;
   onClick?: () => void;
   [key: string]: unknown;
@@ -103,6 +104,11 @@ export const AgentNode = memo(function AgentNode({
           <span className="text-[10px] text-muted-foreground capitalize">
             {role.replace("_", " ")}
           </span>
+          {data.model && (
+            <span className="text-[9px] text-muted-foreground font-mono truncate" title={data.model}>
+              {data.model}
+            </span>
+          )}
         </div>
         <div
           className={cn(
