@@ -156,6 +156,20 @@ export function ProjectSettings({ projectId }: { projectId: string }) {
     setSaved(false);
   };
 
+  const handleToggleAutoApprove = (stageKey: string, autoApprove: boolean) => {
+    setPipelineConfig((prev) => {
+      if (!prev) return null;
+      return {
+        ...prev,
+        stages: {
+          ...prev.stages,
+          [stageKey]: { ...prev.stages[stageKey], autoApprove },
+        },
+      };
+    });
+    setSaved(false);
+  };
+
   const handleStageAgent = (stageKey: string, agentId: string) => {
     setPipelineConfig((prev) => {
       if (!prev) return null;
@@ -559,6 +573,19 @@ export function ProjectSettings({ projectId }: { projectId: string }) {
                           </option>
                         ))}
                       </select>
+                    )}
+
+                    {/* Auto-approve toggle (triage only) */}
+                    {stage.key === "triage" && isEnabled && (
+                      <label className="flex items-center gap-1.5 text-xs text-muted-foreground shrink-0 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={stageConfig.autoApprove !== false}
+                          onChange={(e) => handleToggleAutoApprove(stage.key, e.target.checked)}
+                          className="accent-primary"
+                        />
+                        Auto-approve
+                      </label>
                     )}
                   </div>
                 );
