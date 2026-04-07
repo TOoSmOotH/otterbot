@@ -21,6 +21,8 @@ interface MessageState {
   thinkingContent: string;
   thinkingMessageId: string | null;
   isThinking: boolean;
+  /** Whether we're waiting for any response from the server */
+  isWaitingForResponse: boolean;
   /** Filter for stream panel */
   agentFilter: string | null;
   /** Conversation tracking */
@@ -41,6 +43,7 @@ interface MessageState {
   setCurrentConversation: (id: string | null) => void;
   setConversations: (conversations: Conversation[]) => void;
   addConversation: (conversation: Conversation) => void;
+  setWaitingForResponse: (waiting: boolean) => void;
   setConversationContextSize: (conversationId: string, contextSize: ConversationContextSize) => void;
   loadConversationMessages: (messages: BusMessage[], contextSize?: ConversationContextSize, conversationId?: string | null) => void;
 }
@@ -55,6 +58,7 @@ export const useMessageStore = create<MessageState>((set) => ({
   thinkingContent: "",
   thinkingMessageId: null,
   isThinking: false,
+  isWaitingForResponse: false,
   agentFilter: null,
   currentConversationId: null,
   conversations: [],
@@ -106,6 +110,7 @@ export const useMessageStore = create<MessageState>((set) => ({
               thinkingContent: "",
               thinkingMessageId: null,
               isThinking: false,
+              isWaitingForResponse: false,
             }
           : {}),
       };
@@ -115,15 +120,17 @@ export const useMessageStore = create<MessageState>((set) => ({
     set({
       streamingContent: "",
       streamingMessageId: null,
+      streamingConversationId: null,
       thinkingContent: "",
       thinkingMessageId: null,
       isThinking: false,
+      isWaitingForResponse: false,
     }),
 
   appendCooStream: (token, messageId, conversationId) =>
     set((state) => {
-      // Ignore tokens for a different conversation
-      if (conversationId && conversationId !== state.currentConversationId) {
+      // Ignore tokens for a different conversation (but accept if we haven't set one yet)
+      if (state.currentConversationId && conversationId && conversationId !== state.currentConversationId) {
         return state;
       }
       return {
@@ -133,13 +140,14 @@ export const useMessageStore = create<MessageState>((set) => ({
             : token,
         streamingMessageId: messageId,
         streamingConversationId: conversationId,
+        isWaitingForResponse: false,
       };
     }),
 
   appendCooThinking: (token, messageId, conversationId) =>
     set((state) => {
-      // Ignore tokens for a different conversation
-      if (conversationId && conversationId !== state.currentConversationId) {
+      // Ignore tokens for a different conversation (but accept if we haven't set one yet)
+      if (state.currentConversationId && conversationId && conversationId !== state.currentConversationId) {
         return state;
       }
       return {
@@ -149,13 +157,14 @@ export const useMessageStore = create<MessageState>((set) => ({
             : token,
         thinkingMessageId: messageId,
         isThinking: true,
+        isWaitingForResponse: false,
       };
     }),
 
   endCooThinking: (_messageId, conversationId) =>
     set((state) => {
-      // Ignore if for a different conversation
-      if (conversationId && conversationId !== state.currentConversationId) {
+      // Ignore if for a different conversation (but accept if we haven't set one yet)
+      if (state.currentConversationId && conversationId && conversationId !== state.currentConversationId) {
         return state;
       }
       return { isThinking: false };
@@ -189,13 +198,17 @@ export const useMessageStore = create<MessageState>((set) => ({
       thinkingContent: "",
       thinkingMessageId: null,
       isThinking: false,
+      isWaitingForResponse: false,
       currentConversationId: null,
       currentConversationContextSize: EMPTY_CONTEXT_SIZE,
     }),
 
+  setWaitingForResponse: (waiting) => set({ isWaitingForResponse: waiting }),
+
   setCurrentConversation: (id) =>
     set((state) => ({
       currentConversationId: id,
+      isWaitingForResponse: false,
       currentConversationContextSize: id
         ? state.conversationContextSizes[id] ?? EMPTY_CONTEXT_SIZE
         : EMPTY_CONTEXT_SIZE,
@@ -241,6 +254,7 @@ export const useMessageStore = create<MessageState>((set) => ({
         thinkingContent: "",
         thinkingMessageId: null,
         isThinking: false,
+        isWaitingForResponse: false,
         conversationContextSizes: nextContextSizes,
         currentConversationContextSize:
           targetConversationId && state.currentConversationId === targetConversationId

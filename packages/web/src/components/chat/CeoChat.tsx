@@ -72,6 +72,8 @@ export function CeoChat({ cooName, detached }: { cooName?: string; detached?: bo
   const streamingMessageId = useMessageStore((s) => s.streamingMessageId);
   const thinkingContent = useMessageStore((s) => s.thinkingContent);
   const isThinking = useMessageStore((s) => s.isThinking);
+  const isWaitingForResponse = useMessageStore((s) => s.isWaitingForResponse);
+  const setWaitingForResponse = useMessageStore((s) => s.setWaitingForResponse);
   const currentConversationContextSize = useMessageStore((s) => s.currentConversationContextSize);
   const clearChat = useMessageStore((s) => s.clearChat);
   const currentConversationId = useMessageStore((s) => s.currentConversationId);
@@ -234,7 +236,14 @@ export function CeoChat({ cooName, detached }: { cooName?: string; detached?: bo
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [chatMessages, streamingContent, thinkingContent]);
+  }, [chatMessages, streamingContent, thinkingContent, isWaitingForResponse]);
+
+  // Safety timeout: clear waiting state if server never responds
+  useEffect(() => {
+    if (!isWaitingForResponse) return;
+    const timer = setTimeout(() => setWaitingForResponse(false), 60_000);
+    return () => clearTimeout(timer);
+  }, [isWaitingForResponse, setWaitingForResponse]);
 
   const sendMessage = () => {
     const content = input.trim();
@@ -258,6 +267,7 @@ export function CeoChat({ cooName, detached }: { cooName?: string; detached?: bo
     );
     setInput("");
     setPendingFiles([]);
+    setWaitingForResponse(true);
 
     // Auto-resize textarea
     if (textareaRef.current) {
@@ -660,7 +670,7 @@ export function CeoChat({ cooName, detached }: { cooName?: string; detached?: bo
             })}
 
             {/* Thinking indicator */}
-            {isThinking && !streamingContent && (
+            {(isThinking || isWaitingForResponse) && !streamingContent && (
               <div className="max-w-[85%] mr-auto">
                 <div className="bg-secondary/60 border border-border/50 text-secondary-foreground rounded-xl px-3.5 py-2.5 text-sm leading-relaxed">
                   <div className="flex items-center gap-2 text-muted-foreground mb-1.5">
