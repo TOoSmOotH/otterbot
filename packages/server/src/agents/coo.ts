@@ -40,6 +40,7 @@ import {
   fetchIssue,
   fetchIssues,
   fetchIssueComments,
+  createIssue,
   fetchPullRequest,
   fetchPullRequests,
 } from "../github/github-service.js";
@@ -1025,6 +1026,44 @@ The user can see everything on the desktop in real-time.`;
             return result;
           } catch (err) {
             return `Error fetching issue: ${err instanceof Error ? err.message : String(err)}`;
+          }
+        },
+      }),
+      github_create_issue: tool({
+        description:
+          "Create a new GitHub issue in a repository. Returns the issue URL and number.",
+        parameters: z.object({
+          projectId: z
+            .string()
+            .nullable()
+            .optional()
+            .describe("Project ID — resolves repo from project config"),
+          repo: z
+            .string()
+            .nullable()
+            .optional()
+            .describe("Repository in owner/repo format (alternative to projectId)"),
+          title: z.string().describe("Issue title"),
+          body: z
+            .string()
+            .optional()
+            .describe("Issue description (Markdown supported)"),
+          labels: z
+            .array(z.string())
+            .optional()
+            .describe("Labels to apply to the issue"),
+          assignees: z
+            .array(z.string())
+            .optional()
+            .describe("GitHub usernames to assign"),
+        }),
+        execute: async ({ projectId, repo, title, body, labels, assignees }) => {
+          try {
+            const { repoFullName, token } = this.resolveGitHubRepo(projectId, repo);
+            const issue = await createIssue(repoFullName, token, title, body, labels, assignees);
+            return `Issue created: #${issue.number} — ${issue.html_url}`;
+          } catch (err) {
+            return `Error creating issue: ${err instanceof Error ? err.message : String(err)}`;
           }
         },
       }),

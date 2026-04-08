@@ -508,6 +508,33 @@ export async function createIssueComment(
 }
 
 /**
+ * Create a new issue on a GitHub repository.
+ */
+export async function createIssue(
+  repoFullName: string,
+  token: string,
+  title: string,
+  body?: string,
+  labels?: string[],
+  assignees?: string[],
+): Promise<GitHubIssue> {
+  const payload: Record<string, unknown> = { title };
+  if (body) payload.body = body;
+  if (labels?.length) payload.labels = labels;
+  if (assignees?.length) payload.assignees = assignees;
+
+  return ghFetch<GitHubIssue>(
+    `https://api.github.com/repos/${repoFullName}/issues`,
+    token,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+/**
  * Add labels to an issue (creates labels if they don't exist).
  */
 export async function addLabelsToIssue(

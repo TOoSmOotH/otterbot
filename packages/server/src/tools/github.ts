@@ -5,6 +5,7 @@ import {
   fetchIssue,
   fetchIssues,
   fetchIssueComments,
+  createIssue,
   createIssueComment,
   fetchPullRequest,
   fetchPullRequests,
@@ -120,6 +121,37 @@ export function createGitHubListIssuesTool(ctx: ToolContext) {
         return `Found ${issues.length} issue(s):\n${lines.join("\n")}`;
       } catch (err) {
         return `Error listing issues: ${err instanceof Error ? err.message : String(err)}`;
+      }
+    },
+  });
+}
+
+export function createGitHubCreateIssueTool(ctx: ToolContext) {
+  return tool({
+    description:
+      "Create a new GitHub issue in the project repository. Returns the issue URL and number.",
+    parameters: z.object({
+      title: z.string().describe("Issue title"),
+      body: z
+        .string()
+        .optional()
+        .describe("Issue description (Markdown supported)"),
+      labels: z
+        .array(z.string())
+        .optional()
+        .describe("Labels to apply to the issue"),
+      assignees: z
+        .array(z.string())
+        .optional()
+        .describe("GitHub usernames to assign"),
+    }),
+    execute: async ({ title, body, labels, assignees }) => {
+      try {
+        const { repo, token } = getGitHubContext(ctx);
+        const issue = await createIssue(repo, token, title, body, labels, assignees);
+        return `Issue created: #${issue.number} — ${issue.html_url}`;
+      } catch (err) {
+        return `Error creating issue: ${err instanceof Error ? err.message : String(err)}`;
       }
     },
   });

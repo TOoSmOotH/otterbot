@@ -27,6 +27,7 @@ import { createCalendarListCalendarsTool } from "./calendar-list-calendars.js";
 import {
   createGitHubGetIssueTool,
   createGitHubListIssuesTool,
+  createGitHubCreateIssueTool,
   createGitHubGetPRTool,
   createGitHubListPRsTool,
   createGitHubCommentTool,
@@ -98,6 +99,7 @@ const TOOL_REGISTRY: Record<string, ToolCreator> = {
   demo_record: createDemoRecordTool,
   github_get_issue: createGitHubGetIssueTool,
   github_list_issues: createGitHubListIssuesTool,
+  github_create_issue: createGitHubCreateIssueTool,
   github_get_pr: createGitHubGetPRTool,
   github_list_prs: createGitHubListPRsTool,
   github_comment: createGitHubCommentTool,
