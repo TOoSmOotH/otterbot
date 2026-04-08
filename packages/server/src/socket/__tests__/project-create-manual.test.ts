@@ -321,13 +321,8 @@ describe("project:create-manual socket handler", () => {
       "dev",
     );
 
-    // Verify TeamLead was spawned
-    expect(mockCoo.spawnTeamLeadForManualProject).toHaveBeenCalledWith(
-      projectId,
-      "owner/repo",
-      "dev",
-      ["Sign commits"],
-    );
+    // TeamLead is NOT spawned during creation — deferred to project:start
+    expect(mockCoo.spawnTeamLeadForManualProject).not.toHaveBeenCalled();
 
     // Verify project:created was emitted
     expect(mockIo.emit).toHaveBeenCalledWith(
@@ -433,13 +428,8 @@ describe("project:create-manual socket handler", () => {
     expect(mockInitGitRepo).toHaveBeenCalledWith(expect.stringContaining(projectId));
     expect(mockCreateInitialCommit).toHaveBeenCalledWith(expect.stringContaining(projectId));
 
-    // Verify TeamLead was spawned with null GitHub params
-    expect(mockCoo.spawnTeamLeadForManualProject).toHaveBeenCalledWith(
-      projectId,
-      null,
-      null,
-      ["Use TypeScript"],
-    );
+    // TeamLead is NOT spawned during creation — deferred to project:start
+    expect(mockCoo.spawnTeamLeadForManualProject).not.toHaveBeenCalled();
 
     // Verify project:created was emitted
     expect(mockIo.emit).toHaveBeenCalledWith(
@@ -485,7 +475,7 @@ describe("project:create-manual socket handler", () => {
     expect(callback).toHaveBeenCalledWith(
       expect.objectContaining({ ok: true }),
     );
-    expect(mockCoo.spawnTeamLeadForManualProject).toHaveBeenCalled();
+    expect(mockCoo.spawnTeamLeadForManualProject).not.toHaveBeenCalled();
   });
 
   it("cleans up on clone failure", async () => {

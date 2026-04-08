@@ -220,6 +220,10 @@ export interface ClientToServerEvents {
     },
     callback?: (ack: { ok: boolean; projectId?: string; error?: string }) => void,
   ) => void;
+  "project:start": (
+    data: { projectId: string },
+    callback?: (ack: { ok: boolean; error?: string }) => void,
+  ) => void;
   "agent:stop": (
     data: { agentId: string },
     callback?: (ack: { ok: boolean; error?: string }) => void,

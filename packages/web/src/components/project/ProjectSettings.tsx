@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
 import { useSettingsStore } from "../../stores/settings-store";
+import { useProjectStore } from "../../stores/project-store";
 import { getSocket } from "../../lib/socket";
 import type { ProjectAgentAssignments, ProjectPipelineConfig, PipelineStageConfig } from "@otterbot/shared";
 import { PIPELINE_STAGES } from "@otterbot/shared";
@@ -50,7 +51,9 @@ export function ProjectSettings({ projectId }: { projectId: string }) {
   const [linkBranch, setLinkBranch] = useState("");
   const [linking, setLinking] = useState(false);
   const [linkError, setLinkError] = useState<string | null>(null);
+  const [starting, setStarting] = useState(false);
 
+  const activeProject = useProjectStore((s) => s.activeProject);
   const gitHubAccounts = useSettingsStore((s) => s.gitHubAccounts);
   const loadGitHubAccounts = useSettingsStore((s) => s.loadGitHubAccounts);
   const openCodeEnabled = useSettingsStore((s) => s.openCodeEnabled);
@@ -188,6 +191,18 @@ export function ProjectSettings({ projectId }: { projectId: string }) {
     setSaved(false);
   };
 
+  const handleStart = () => {
+    setStarting(true);
+    setError(null);
+    const socket = getSocket();
+    socket.emit("project:start", { projectId }, (result: { ok: boolean; error?: string }) => {
+      setStarting(false);
+      if (!result?.ok) {
+        setError(result?.error ?? "Failed to start project");
+      }
+    });
+  };
+
   const handleSave = () => {
     if (!pipelineConfig) return;
     setSaving(true);
@@ -249,6 +264,25 @@ export function ProjectSettings({ projectId }: { projectId: string }) {
   return (
     <div className="h-full overflow-y-auto p-4">
       <div className="max-w-2xl mx-auto space-y-6">
+        {/* Start Project banner (setup projects) */}
+        {activeProject?.status === "setup" && (
+          <div className="bg-primary/10 border border-primary/30 rounded-lg p-4 flex items-center justify-between">
+            <div>
+              <h2 className="text-sm font-semibold text-primary">Project Setup</h2>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Configure your project settings below, then start it when ready.
+              </p>
+            </div>
+            <button
+              onClick={handleStart}
+              disabled={starting}
+              className="px-4 py-2 bg-primary text-primary-foreground rounded-md text-sm font-medium hover:bg-primary/90 disabled:opacity-50 transition-colors shrink-0 ml-4"
+            >
+              {starting ? "Starting..." : "Start Project"}
+            </button>
+          </div>
+        )}
+
         {/* Connect GitHub Repository (local-only projects) */}
         {!isGitHubProject && (
           <div>

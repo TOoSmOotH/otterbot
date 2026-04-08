@@ -1393,7 +1393,7 @@ The user can see everything on the desktop in real-time.`;
         id: projectId,
         name,
         description,
-        status: ProjectStatus.Active,
+        status: ProjectStatus.Setup,
         charter: charter ?? null,
         charterStatus: charter ? CharterStatus.Finalized : CharterStatus.Gathering,
         createdAt: new Date().toISOString(),
@@ -1403,49 +1403,9 @@ The user can see everything on the desktop in real-time.`;
     // Create workspace
     this.workspace.createProject(projectId);
 
-    // Spawn Team Lead
-    const teamLead = new TeamLead({
-      bus: this.bus,
-      workspace: this.workspace,
-      projectId,
-      parentId: this.id,
-      name: pickWorkerName(this.getUsedAgentNames()),
-      modelPackId: getRandomModelPackId(),
-      onAgentSpawned: this.onAgentSpawned,
-      onStatusChange: this.onStatusChange,
-      onKanbanChange: (event, task) => {
-        if (event === "created") this.onKanbanTaskCreated?.(task);
-        else if (event === "updated") this.onKanbanTaskUpdated?.(task);
-        else if (event === "deleted") this.onKanbanTaskDeleted?.(task.id, task.projectId);
-      },
-      onAgentStream: this._onAgentStream,
-      onAgentThinking: this._onAgentThinking,
-      onAgentThinkingEnd: this._onAgentThinkingEnd,
-      onAgentToolCall: this._onAgentToolCall,
-      onCodingAgentEvent: this._onCodingAgentEvent,
-      onCodingAgentAwaitingInput: this._onCodingAgentAwaitingInput,
-      onCodingAgentPermissionRequest: this._onCodingAgentPermissionRequest,
-      onTerminalData: this._onTerminalData,
-      onPtySessionRegistered: this._onPtySessionRegistered,
-      onPtySessionUnregistered: this._onPtySessionUnregistered,
-    });
-
-    this.teamLeads.set(projectId, teamLead);
-    if (this._pipelineManager) teamLead.setPipelineManager(this._pipelineManager);
-
-    if (this.onAgentSpawned) {
-      this.onAgentSpawned(teamLead);
-    }
-
     // Mark creation guards
     this.projectCreatedThisTurn = true;
     this.lastProjectCreatedAt = Date.now();
-
-    // Send directive to Team Lead
-    this.sendMessage(teamLead.id, MessageType.Directive, directive, {
-      projectId,
-      projectName: name,
-    });
 
     // Emit project:created event
     const project = db
@@ -1457,7 +1417,7 @@ The user can see everything on the desktop in real-time.`;
       this.onProjectCreated?.(project as unknown as Project);
     }
 
-    return `Project "${name}" created (${projectId}). Team Lead ${teamLead.id} assigned and directive sent.`;
+    return `Project "${name}" created (${projectId}) in setup mode. The user must configure settings and click "Start Project" before work begins.`;
   }
 
   private async getProjectStatus(projectId?: string | null): Promise<string> {

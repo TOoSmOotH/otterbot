@@ -306,6 +306,7 @@ function StatCard({
 
 function StatusBadge({ status }: { status: ProjectStatus }) {
   const styles: Record<ProjectStatus, string> = {
+    [ProjectStatus.Setup]: "bg-indigo-500/20 text-indigo-400",
     [ProjectStatus.Active]: "bg-blue-500/20 text-blue-400",
     [ProjectStatus.Completed]: "bg-green-500/20 text-green-400",
     [ProjectStatus.Failed]: "bg-red-500/20 text-red-400",

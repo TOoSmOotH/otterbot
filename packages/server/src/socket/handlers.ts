@@ -735,7 +735,7 @@ export function setupSocketHandlers(
               id: projectId,
               name,
               description,
-              status: ProjectStatus.Active,
+              status: ProjectStatus.Setup,
               charter: null,
               charterStatus: CharterStatus.Gathering,
               githubRepo: data.githubRepo!,
@@ -795,8 +795,6 @@ export function setupSocketHandlers(
           }
           setConfig(`project:${projectId}:github:rules`, JSON.stringify(rules));
 
-          await coo.spawnTeamLeadForManualProject(projectId, data.githubRepo!, branch, rules);
-
           const project = db
             .select()
             .from(schema.projects)
@@ -804,10 +802,6 @@ export function setupSocketHandlers(
             .get();
           if (project) {
             io.emit("project:created", project as unknown as Project);
-          }
-
-          if (deps?.issueMonitor) {
-            deps.issueMonitor.watchProject(projectId, data.githubRepo!, ghUsername);
           }
 
           callback?.({ ok: true, projectId });
@@ -831,7 +825,7 @@ export function setupSocketHandlers(
               id: projectId,
               name,
               description,
-              status: ProjectStatus.Active,
+              status: ProjectStatus.Setup,
               charter: null,
               charterStatus: CharterStatus.Gathering,
               githubRepo: null,
@@ -852,8 +846,6 @@ export function setupSocketHandlers(
 
           setConfig(`project:${projectId}:github:rules`, JSON.stringify(rules));
 
-          await coo.spawnTeamLeadForManualProject(projectId, null, null, rules);
-
           const project = db
             .select()
             .from(schema.projects)
@@ -868,6 +860,70 @@ export function setupSocketHandlers(
       } catch (err) {
         const errMsg = err instanceof Error ? err.message : String(err);
         console.error("[project:create-manual] Error:", err);
+        callback?.({ ok: false, error: errMsg });
+      }
+    });
+
+    // Start a project that is in "setup" status — spawns TeamLead and activates
+    socket.on("project:start", async (data, callback) => {
+      try {
+        const db = getDb();
+        const project = db
+          .select()
+          .from(schema.projects)
+          .where(eq(schema.projects.id, data.projectId))
+          .get();
+
+        if (!project) {
+          callback?.({ ok: false, error: "Project not found." });
+          return;
+        }
+
+        if (project.status !== "setup") {
+          callback?.({ ok: false, error: `Project is already ${project.status}.` });
+          return;
+        }
+
+        // Transition to active
+        db.update(schema.projects)
+          .set({ status: ProjectStatus.Active })
+          .where(eq(schema.projects.id, data.projectId))
+          .run();
+
+        // Read stored rules
+        const rulesRaw = getConfig(`project:${data.projectId}:github:rules`);
+        const rules: string[] = rulesRaw ? JSON.parse(rulesRaw) : [];
+
+        // Spawn TeamLead
+        await coo.spawnTeamLeadForManualProject(
+          data.projectId,
+          project.githubRepo ?? null,
+          project.githubBranch ?? null,
+          rules,
+        );
+
+        // Set up issue monitor if enabled
+        if (deps?.issueMonitor && project.githubRepo && project.githubIssueMonitor) {
+          const ghUsername = resolveGitHubUsername();
+          if (ghUsername) {
+            deps.issueMonitor.watchProject(data.projectId, project.githubRepo, ghUsername);
+          }
+        }
+
+        // Emit updated project
+        const updated = db
+          .select()
+          .from(schema.projects)
+          .where(eq(schema.projects.id, data.projectId))
+          .get();
+        if (updated) {
+          io.emit("project:updated", updated as unknown as Project);
+        }
+
+        callback?.({ ok: true });
+      } catch (err) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        console.error("[project:start] Error:", err);
         callback?.({ ok: false, error: errMsg });
       }
     });

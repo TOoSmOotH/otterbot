@@ -101,6 +101,7 @@ export interface GitHubAccount {
 export type ProjectAgentAssignments = Record<string, string>;
 
 export enum ProjectStatus {
+  Setup = "setup",
   Active = "active",
   Completed = "completed",
   Failed = "failed",

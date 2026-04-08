@@ -98,10 +98,10 @@ export const projects = sqliteTable("projects", {
   name: text("name").notNull(),
   description: text("description").notNull().default(""),
   status: text("status", {
-    enum: ["active", "completed", "failed", "cancelled"],
+    enum: ["setup", "active", "completed", "failed", "cancelled"],
   })
     .notNull()
-    .default("active"),
+    .default("setup"),
   charter: text("charter"),
   charterStatus: text("charter_status", {
     enum: ["gathering", "finalized"],
