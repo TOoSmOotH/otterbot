@@ -30,6 +30,7 @@ const SEED_SKILLS: Array<{ id: string; data: SkillCreate }> = [
           "memory_save",
           "github_list_issues",
           "github_get_issue",
+          "github_create_issue",
           "github_list_prs",
           "github_get_pr",
           "list_specialists",
@@ -451,6 +452,7 @@ When browsing:
         tools: [
           "github_get_issue",
           "github_list_issues",
+          "github_create_issue",
           "github_get_pr",
           "github_list_prs",
           "github_comment",
