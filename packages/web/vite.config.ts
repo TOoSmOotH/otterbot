@@ -1,18 +1,11 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
-import basicSsl from "@vitejs/plugin-basic-ssl";
 import { resolve } from "path";
-import rootPkg from "../../package.json";
 
-export default defineConfig(({ mode }) => ({
-  plugins: [react(), ...(process.env.VITE_NO_SSL ? [] : [basicSsl()])],
-  define: {
-    __APP_VERSION__: JSON.stringify(
-      mode === "development"
-        ? "dev"
-        : process.env.VITE_APP_VERSION || rootPkg.version
-    ),
-  },
+const API_TARGET = process.env.VITE_API_TARGET ?? "http://localhost:3001";
+
+export default defineConfig({
+  plugins: [react()],
   resolve: {
     alias: {
       "@": resolve(__dirname, "./src"),
@@ -21,28 +14,11 @@ export default defineConfig(({ mode }) => ({
   server: {
     port: 5173,
     proxy: {
-      "/api": {
-        target: "https://localhost:62626",
-        secure: false,
-      },
-      "/assets/3d": {
-        target: "https://localhost:62626",
-        secure: false,
-      },
-      "/socket.io": {
-        target: "https://localhost:62626",
-        ws: true,
-        secure: false,
-      },
-      "/novnc": {
-        target: "https://localhost:62626",
-        secure: false,
-      },
-      "/desktop/ws": {
-        target: "https://localhost:62626",
-        ws: true,
-        secure: false,
-      },
+      "/api": { target: API_TARGET, changeOrigin: true },
+      "/assets/3d": { target: API_TARGET, changeOrigin: true },
+      "/socket.io": { target: API_TARGET, ws: true, changeOrigin: true },
+      "/novnc": { target: API_TARGET, changeOrigin: true },
+      "/desktop/ws": { target: API_TARGET, ws: true, changeOrigin: true },
     },
   },
-}));
+});

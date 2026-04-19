@@ -1,8 +1,12 @@
 import { nanoid } from "nanoid";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import matter from "gray-matter";
+import { writeFileSync, mkdirSync, readFileSync, existsSync, readdirSync } from "node:fs";
+import { resolve, join } from "node:path";
 import { getDb, schema } from "../db/index.js";
 import { scanSkillContent } from "./skill-scanner.js";
+import { getMemoryService } from "../memory/memory-service.js";
+import { getConfig } from "../config.js";
 import type {
   Skill,
   SkillCreate,
@@ -15,13 +19,8 @@ import type {
 } from "@otterbot/shared";
 
 export class SkillService {
-  /**
-   * Parse a raw .md skill file into meta + body.
-   * Uses gray-matter for frontmatter extraction.
-   */
   parseSkillFile(raw: string): { meta: SkillMeta; body: string } {
     const { data, content } = matter(raw);
-
     const meta: SkillMeta = {
       name: data.name ?? "Untitled Skill",
       description: data.description ?? "",
@@ -29,18 +28,15 @@ export class SkillService {
       author: data.author ?? "",
       tools: Array.isArray(data.tools) ? data.tools : [],
       capabilities: Array.isArray(data.capabilities) ? data.capabilities : [],
-      parameters: (data.parameters && typeof data.parameters === "object")
-        ? data.parameters as Record<string, SkillParameterDef>
-        : {},
+      parameters:
+        data.parameters && typeof data.parameters === "object"
+          ? (data.parameters as Record<string, SkillParameterDef>)
+          : {},
       tags: Array.isArray(data.tags) ? data.tags : [],
     };
-
     return { meta, body: content.trim() };
   }
 
-  /**
-   * Serialize skill meta + body back to a .md file string.
-   */
   serializeSkillFile(meta: SkillMeta, body: string): string {
     const frontmatter: Record<string, unknown> = {
       name: meta.name,
@@ -48,37 +44,35 @@ export class SkillService {
       version: meta.version,
       author: meta.author,
     };
-    if (meta.tools.length > 0) frontmatter.tools = meta.tools;
-    if (meta.capabilities.length > 0) frontmatter.capabilities = meta.capabilities;
-    if (Object.keys(meta.parameters).length > 0) frontmatter.parameters = meta.parameters;
-    if (meta.tags.length > 0) frontmatter.tags = meta.tags;
-
+    if (meta.tools.length) frontmatter.tools = meta.tools;
+    if (meta.capabilities.length) frontmatter.capabilities = meta.capabilities;
+    if (Object.keys(meta.parameters).length) frontmatter.parameters = meta.parameters;
+    if (meta.tags.length) frontmatter.tags = meta.tags;
     return matter.stringify(body, frontmatter);
   }
 
   list(): Skill[] {
     const db = getDb();
-    const rows = db.select().from(schema.skills).all();
-    return rows.map(this.toSkill);
+    return db.select().from(schema.skills).all().map((r) => this.toSkill(r));
   }
 
   get(id: string): Skill | null {
     const db = getDb();
-    const row = db
-      .select()
-      .from(schema.skills)
-      .where(eq(schema.skills.id, id))
-      .get();
+    const row = db.select().from(schema.skills).where(eq(schema.skills.id, id)).get();
     return row ? this.toSkill(row) : null;
   }
 
-  create(data: SkillCreate, scanReport?: ScanReport, opts?: { id?: string; source?: SkillSource; clonedFromId?: string | null }): Skill {
+  create(data: SkillCreate, opts?: { id?: string; scanReport?: ScanReport }): Skill {
     const db = getDb();
     const now = new Date().toISOString();
+    const raw = this.serializeSkillFile(data.meta, data.body);
+    const scanReport = opts?.scanReport ?? scanSkillContent(raw);
     const scanStatus = this.deriveScanStatus(scanReport);
 
+    const id = opts?.id ?? nanoid();
+    const filePath = this.writeToDisk(id, raw);
     const row = {
-      id: opts?.id ?? nanoid(),
+      id,
       name: data.meta.name,
       description: data.meta.description,
       version: data.meta.version,
@@ -88,15 +82,16 @@ export class SkillService {
       parameters: data.meta.parameters as Record<string, unknown>,
       tags: data.meta.tags,
       body: data.body,
-      source: opts?.source ?? "created",
-      clonedFromId: opts?.clonedFromId ?? null,
+      source: (data.source ?? "authored") as SkillSource,
       scanStatus,
-      scanFindings: scanReport?.findings ?? [],
+      scanFindings: scanReport.findings,
+      useCount: 0,
+      filePath,
       createdAt: now,
       updatedAt: now,
     };
-
     db.insert(schema.skills).values(row).run();
+    this.indexFts(row);
     return this.toSkill(row);
   }
 
@@ -105,175 +100,168 @@ export class SkillService {
     const existing = this.get(id);
     if (!existing) return null;
 
-    const updates: Record<string, unknown> = {
-      updatedAt: new Date().toISOString(),
-    };
-
-    if (data.meta) {
-      if (data.meta.name !== undefined) updates.name = data.meta.name;
-      if (data.meta.description !== undefined) updates.description = data.meta.description;
-      if (data.meta.version !== undefined) updates.version = data.meta.version;
-      if (data.meta.author !== undefined) updates.author = data.meta.author;
-      if (data.meta.tools !== undefined) updates.tools = data.meta.tools;
-      if (data.meta.capabilities !== undefined) updates.capabilities = data.meta.capabilities;
-      if (data.meta.parameters !== undefined) updates.parameters = data.meta.parameters;
-      if (data.meta.tags !== undefined) updates.tags = data.meta.tags;
-    }
-
-    if (data.body !== undefined) updates.body = data.body;
-
-    // Re-scan after update
     const newMeta = { ...existing.meta, ...data.meta };
-    const newBody = data.body ?? existing.body;
+    const newBody =
+      data.body !== undefined
+        ? data.body
+        : data.appendNote
+          ? `${existing.body}\n\n## Note (${new Date().toISOString().slice(0, 10)})\n${data.appendNote}`
+          : existing.body;
     const raw = this.serializeSkillFile(newMeta, newBody);
     const scanReport = scanSkillContent(raw);
-    updates.scanStatus = this.deriveScanStatus(scanReport);
-    updates.scanFindings = scanReport.findings;
 
+    const updates: Record<string, unknown> = {
+      name: newMeta.name,
+      description: newMeta.description,
+      version: newMeta.version,
+      author: newMeta.author,
+      tools: newMeta.tools,
+      capabilities: newMeta.capabilities,
+      parameters: newMeta.parameters,
+      tags: newMeta.tags,
+      body: newBody,
+      scanStatus: this.deriveScanStatus(scanReport),
+      scanFindings: scanReport.findings,
+      updatedAt: new Date().toISOString(),
+    };
+    if (existing.meta.name !== newMeta.name) {
+      // Rewrite file on rename
+      this.writeToDisk(id, raw);
+    } else if (existing) {
+      const row = db.select().from(schema.skills).where(eq(schema.skills.id, id)).get();
+      if (row?.filePath) writeFileSync(row.filePath, raw, "utf8");
+    }
+
+    db.update(schema.skills).set(updates).where(eq(schema.skills.id, id)).run();
+    const updated = this.get(id);
+    if (updated) {
+      this.indexFts({
+        id: updated.id,
+        name: updated.meta.name,
+        description: updated.meta.description,
+        tags: updated.meta.tags,
+        body: updated.body,
+      });
+    }
+    return updated;
+  }
+
+  recordUse(id: string) {
+    const db = getDb();
     db.update(schema.skills)
-      .set(updates)
+      .set({ useCount: sql`use_count + 1` })
       .where(eq(schema.skills.id, id))
       .run();
-
-    return this.get(id);
   }
 
   delete(id: string): boolean {
     const db = getDb();
-    const existing = this.get(id);
-    if (!existing) return false;
-
-    // Remove agent skill assignments first
-    db.delete(schema.agentSkills)
-      .where(eq(schema.agentSkills.skillId, id))
-      .run();
-
-    const result = db
-      .delete(schema.skills)
-      .where(eq(schema.skills.id, id))
-      .run();
-    return result.changes > 0;
+    const res = db.delete(schema.skills).where(eq(schema.skills.id, id)).run();
+    getMemoryService().removeFts("skill", id);
+    return res.changes > 0;
   }
 
-  /**
-   * Clone a skill. Returns the new skill with source "cloned".
-   */
-  clone(id: string): Skill | null {
-    const source = this.get(id);
-    if (!source) return null;
-
-    return this.create(
-      { meta: { ...source.meta, name: `${source.meta.name} (Clone)` }, body: source.body },
-      undefined,
-      { source: "cloned", clonedFromId: id },
-    );
-  }
-
-  /**
-   * Upsert a built-in skill (for seeding on startup).
-   * If the skill already exists, updates it. Otherwise inserts it.
-   */
-  upsert(id: string, data: SkillCreate, source: SkillSource = "built-in"): Skill {
-    const db = getDb();
-    const now = new Date().toISOString();
-
-    db.insert(schema.skills)
-      .values({
-        id,
-        name: data.meta.name,
-        description: data.meta.description,
-        version: data.meta.version,
-        author: data.meta.author,
-        tools: data.meta.tools,
-        capabilities: data.meta.capabilities,
-        parameters: data.meta.parameters as Record<string, unknown>,
-        tags: data.meta.tags,
-        body: data.body,
-        source,
-        clonedFromId: null,
-        scanStatus: "clean",
-        scanFindings: [],
-        createdAt: now,
-        updatedAt: now,
-      })
-      .onConflictDoUpdate({
-        target: schema.skills.id,
-        set: {
-          name: data.meta.name,
-          description: data.meta.description,
-          version: data.meta.version,
-          author: data.meta.author,
-          tools: data.meta.tools,
-          capabilities: data.meta.capabilities,
-          parameters: data.meta.parameters as Record<string, unknown>,
-          tags: data.meta.tags,
-          body: data.body,
-          source,
-          scanStatus: "clean",
-          scanFindings: [],
-          updatedAt: now,
-        },
-      })
-      .run();
-
-    return this.get(id)!;
-  }
-
-  /**
-   * Export a skill as a markdown file string.
-   */
   exportAsMarkdown(id: string): string | null {
     const skill = this.get(id);
     if (!skill) return null;
     return this.serializeSkillFile(skill.meta, skill.body);
   }
 
-  /**
-   * Get skills assigned to an agent template.
-   */
-  getForAgent(registryEntryId: string): Skill[] {
-    const db = getDb();
-    const assignments = db
-      .select()
-      .from(schema.agentSkills)
-      .where(eq(schema.agentSkills.registryEntryId, registryEntryId))
-      .all();
-
-    const skills: Skill[] = [];
-    for (const assignment of assignments) {
-      const skill = this.get(assignment.skillId);
-      if (skill) skills.push(skill);
+  /** Load all .md skills from disk into the DB. Called once on startup. */
+  loadFromDisk(): number {
+    const dir = getConfig().skillsDir;
+    if (!existsSync(dir)) return 0;
+    let count = 0;
+    for (const name of readdirSync(dir)) {
+      if (!name.endsWith(".md")) continue;
+      const filePath = join(dir, name);
+      const raw = readFileSync(filePath, "utf8");
+      const { meta, body } = this.parseSkillFile(raw);
+      // Use the filename (minus .md) as a deterministic id so the same file
+      // yields the same DB row on reload.
+      const id = name.replace(/\.md$/, "");
+      const db = getDb();
+      const existing = db.select().from(schema.skills).where(eq(schema.skills.id, id)).get();
+      const scanReport = scanSkillContent(raw);
+      const now = new Date().toISOString();
+      const row = {
+        id,
+        name: meta.name,
+        description: meta.description,
+        version: meta.version,
+        author: meta.author,
+        tools: meta.tools,
+        capabilities: meta.capabilities,
+        parameters: meta.parameters as Record<string, unknown>,
+        tags: meta.tags,
+        body,
+        source: "authored" as SkillSource,
+        scanStatus: this.deriveScanStatus(scanReport),
+        scanFindings: scanReport.findings,
+        useCount: existing?.useCount ?? 0,
+        filePath,
+        createdAt: existing?.createdAt ?? now,
+        updatedAt: now,
+      };
+      if (existing) {
+        db.update(schema.skills).set(row).where(eq(schema.skills.id, id)).run();
+      } else {
+        db.insert(schema.skills).values(row).run();
+      }
+      this.indexFts(row);
+      count++;
     }
-    return skills;
+    return count;
   }
 
-  /**
-   * Set the skills assigned to an agent template (replaces all).
-   */
-  setAgentSkills(registryEntryId: string, skillIds: string[]): void {
-    const db = getDb();
-
-    // Remove existing assignments
-    db.delete(schema.agentSkills)
-      .where(eq(schema.agentSkills.registryEntryId, registryEntryId))
-      .run();
-
-    // Insert new assignments
-    for (const skillId of skillIds) {
-      db.insert(schema.agentSkills)
-        .values({ registryEntryId, skillId })
-        .run();
-    }
+  private writeToDisk(id: string, raw: string): string {
+    const dir = getConfig().skillsDir;
+    mkdirSync(dir, { recursive: true });
+    const filePath = resolve(dir, `${id}.md`);
+    writeFileSync(filePath, raw, "utf8");
+    return filePath;
   }
 
-  private deriveScanStatus(report?: ScanReport): SkillScanStatus {
-    if (!report) return "unscanned";
-    if (report.findings.some((f: { severity: string }) => f.severity === "error")) return "errors";
-    if (report.findings.some((f: { severity: string }) => f.severity === "warning")) return "warnings";
+  private indexFts(row: {
+    id: string;
+    name: string;
+    description: string;
+    tags: string[];
+    body: string;
+  }) {
+    getMemoryService().indexFts({
+      kind: "skill",
+      refId: row.id,
+      title: row.name,
+      body: `${row.description}\n\n${row.body}`,
+      tags: row.tags.join(" "),
+    });
+  }
+
+  private deriveScanStatus(report: ScanReport): SkillScanStatus {
+    if (report.findings.some((f) => f.severity === "error")) return "errors";
+    if (report.findings.some((f) => f.severity === "warning")) return "warnings";
     return "clean";
   }
 
-  private toSkill(row: any): Skill {
+  private toSkill(row: {
+    id: string;
+    name: string;
+    description: string;
+    version: string;
+    author: string;
+    tools: string[];
+    capabilities: string[];
+    parameters: Record<string, unknown>;
+    tags: string[];
+    body: string;
+    source: SkillSource;
+    scanStatus: SkillScanStatus;
+    scanFindings: ScanReport["findings"];
+    useCount: number;
+    createdAt: string;
+    updatedAt: string;
+  }): Skill {
     return {
       id: row.id,
       meta: {
@@ -281,18 +269,24 @@ export class SkillService {
         description: row.description,
         version: row.version,
         author: row.author,
-        tools: row.tools as string[],
-        capabilities: row.capabilities as string[],
+        tools: row.tools,
+        capabilities: row.capabilities,
         parameters: row.parameters as Record<string, SkillParameterDef>,
-        tags: row.tags as string[],
+        tags: row.tags,
       },
       body: row.body,
-      source: row.source ?? "created",
-      clonedFromId: row.clonedFromId ?? null,
+      source: row.source,
       scanStatus: row.scanStatus,
-      scanFindings: row.scanFindings as any[],
+      scanFindings: row.scanFindings,
+      useCount: row.useCount,
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
     };
   }
+}
+
+let _svc: SkillService | null = null;
+export function getSkillService(): SkillService {
+  if (!_svc) _svc = new SkillService();
+  return _svc;
 }

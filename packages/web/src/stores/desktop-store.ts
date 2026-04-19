@@ -2,33 +2,31 @@ import { create } from "zustand";
 
 interface DesktopState {
   enabled: boolean;
-  connected: boolean;
-  resolution: string;
   wsPath: string;
+  connected: boolean;
+  checked: boolean;
   checkStatus: () => Promise<void>;
-  setConnected: (connected: boolean) => void;
+  setConnected: (v: boolean) => void;
 }
 
-export const useDesktopStore = create<DesktopState>((set) => ({
+export const useDesktopStore = create<DesktopState>((set, get) => ({
   enabled: false,
-  connected: false,
-  resolution: "1280x720x24",
   wsPath: "/desktop/ws",
-
+  connected: false,
+  checked: false,
   checkStatus: async () => {
+    if (get().checked) return;
     try {
       const res = await fetch("/api/desktop/status");
-      if (!res.ok) return;
-      const data = await res.json();
+      const data = (await res.json()) as { enabled: boolean; wsPath?: string };
       set({
         enabled: data.enabled,
-        resolution: data.resolution,
-        wsPath: data.wsPath,
+        wsPath: data.wsPath ?? "/desktop/ws",
+        checked: true,
       });
     } catch {
-      // Ignore — desktop status is optional
+      set({ checked: true });
     }
   },
-
-  setConnected: (connected) => set({ connected }),
+  setConnected: (v) => set({ connected: v }),
 }));

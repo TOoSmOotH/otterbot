@@ -1,73 +1,45 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
-
 ## Project Overview
 
-Otterbot is a personal AI assistant — an open-source alternative to [OpenClaw](https://github.com/openclaw/openclaw). Like OpenClaw, it aims to be an autonomous AI agent that connects to messaging platforms (WhatsApp, Telegram, Slack, Discord, etc.) and performs tasks on the user's behalf, with data kept local and private.
+Otterbot v2 — a minimal personal AI assistant with persistent cross-session learning (memory, skills, user profile), backed by a local LM Studio model.
 
-## Current State
+## Architecture
 
-This project is in early initialization. The codebase is being built from scratch.
+- `packages/shared` — types (message, skill, memory, user-profile, agent-view)
+- `packages/server` — Fastify + Socket.IO; SQLite+FTS5; agent loop using `ai` SDK + `@ai-sdk/openai-compatible` pointing at LM Studio
+- `packages/web` — React + Zustand; chat UI + 2D/3D/Desktop visualization panes
 
-## Architecture Goals
+## Learning Loop
 
-The project draws inspiration from OpenClaw's gateway-centric architecture:
-- A central WebSocket control plane manages sessions, channels, tools, and events
-- Channel integrations connect to messaging platforms through dedicated adapters
-- Skills/tools provide the agent's capabilities (calendar, email, browser automation, etc.)
-- Configuration is file-based and local to the user's machine
+On each turn the system prompt is composed of: persona + user profile + top-K FTS memory hits + top-K matching skills + date.
+
+On session close (idle or `chat:close`), sequentially: summarize → extract facts → dialectic profile rebuild → optional `author_skill`.
+
+Tools available to the agent: `save_memory`, `list_skills`, `author_skill`, `update_skill`, `update_user_profile`.
+
+Interop: `/api/skills/import` (URL or raw markdown) and `/api/skills/:id/export` speak the agentskills.io frontmatter dialect.
 
 ## Environment
 
-`pnpm` is not on the default PATH. Always invoke it via `npx pnpm` (e.g. `npx pnpm test`, `npx pnpm build`, `npx pnpm dev`).
-
-## Development Commands
-
-```bash
-# Run all tests (vitest, from repo root)
-npx pnpm test
-
-# Run tests in watch mode
-npx pnpm test:watch
-
-# Type-check individual packages (no emit)
-npx tsc --noEmit -p packages/server/tsconfig.json
-npx tsc --noEmit -p packages/web/tsconfig.json
-npx tsc --noEmit -p packages/shared/tsconfig.json
-
-# Build all packages
-npx pnpm build
-
-# Dev mode (server + web)
-npx pnpm dev
+```
+LMSTUDIO_BASE_URL=http://localhost:1234/v1     # default
+LMSTUDIO_MODEL=<model id loaded in LM Studio>
+ENABLE_DESKTOP=false|true
+VNC_HOST=127.0.0.1
+VNC_PORT=5901
 ```
 
-**Note:** `packages/server` has a pre-existing type error in `src/tts/tts.ts` for the `kokoro-js` module — this is expected and can be ignored when type-checking.
+## Dev
 
-## Branching & CI/CD
+```bash
+pnpm install
+pnpm dev              # starts shared/server/web together
+pnpm --filter @otterbot/server dev
+pnpm --filter @otterbot/web dev
+pnpm test:e2e         # playwright — requires LM Studio running
+```
 
-The repo uses a three-branch promotion model: `dev` → `beta` → `main`.
+## CI/CD
 
-- **dev**: Push freely. CI runs tests + build on push.
-- **beta**: PRs required. Merging computes a git-derived version and publishes `:beta` container to GHCR.
-- **main**: PRs required. Merging triggers release-please (stable) and publishes `:latest` container to GHCR.
-
-Use conventional commits (`feat:`, `fix:`, `chore:`, etc.) — release-please uses them for automated versioning and changelogs.
-
-When promoting `beta` → `main`, use **squash merge** with a conventional commit title so release-please can parse it.
-
-## Pull Request Workflow
-
-When creating a PR that addresses a GitHub issue:
-
-1. **Link to the issue**: Include `Closes #<number>` in the PR body so the issue auto-closes on merge.
-2. **Verify CI passes**: After pushing and creating the PR, run `gh pr checks <pr-number> --watch` to wait for CI. If checks fail:
-   - View logs: `gh run view <run-id> --log-failed`
-   - Fix the issues locally
-   - Push fixes to the branch
-   - Repeat until CI is green
-
-## License
-
-MIT — Copyright 2026 Mike Reeves
+Branch is `v2`, cut from `dev`. Standard promote-via-PR flow.

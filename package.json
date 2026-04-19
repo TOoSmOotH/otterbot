@@ -1,8 +1,8 @@
 {
   "name": "otterbot",
-  "version": "0.16.0",
+  "version": "2.0.0",
   "private": true,
-  "description": "Open-source multi-agent AI orchestration system",
+  "description": "Personal AI assistant with persistent cross-session learning",
   "license": "MIT",
   "author": "Mike Reeves",
   "scripts": {
@@ -10,49 +10,16 @@
     "dev": "pnpm --filter @otterbot/shared build && { pnpm --filter @otterbot/shared dev & pnpm --filter @otterbot/server dev & pnpm --filter @otterbot/web dev; }",
     "dev:server": "pnpm --filter @otterbot/server dev",
     "dev:web": "pnpm --filter @otterbot/web dev",
-    "test": "vitest run",
-    "test:watch": "vitest",
-    "test:e2e": "pnpm --filter @otterbot/web test:e2e",
-    "lint": "pnpm -r lint",
-    "docker:build": "docker compose build",
-    "docker:up": "docker compose up -d",
-    "docker:down": "docker compose down",
-    "docker:dev": "docker compose -f docker-compose.yml -f docker-compose.dev.yml up",
-    "docker:up:search": "docker compose --profile search up -d",
-    "docker:prod": "docker compose -f docker-compose.prod.yml up -d",
-    "docker:prod:comfyui": "docker compose -f docker-compose.prod.yml -f docker-compose.comfyui.yml up -d",
-    "docker:prod:trellis": "docker compose -f docker-compose.prod.yml -f docker-compose.trellis.yml up -d",
-    "docker:prod:local-ai": "docker compose -f docker-compose.prod.yml -f docker-compose.comfyui.yml -f docker-compose.trellis.yml up -d",
-    "docker:prod:comfyui:nvidia": "docker compose -f docker-compose.prod.yml -f docker-compose.comfyui.yml -f docker-compose.gpu-nvidia.yml up -d",
-    "docker:prod:local-ai:nvidia": "docker compose -f docker-compose.prod.yml -f docker-compose.comfyui.yml -f docker-compose.trellis.yml -f docker-compose.gpu-nvidia.yml up -d",
-    "docker:prod:comfyui:amd": "docker compose -f docker-compose.prod.yml -f docker-compose.comfyui.yml -f docker-compose.gpu-amd.yml up -d",
-    "docker:prod:local-ai:amd": "docker compose -f docker-compose.prod.yml -f docker-compose.comfyui.yml -f docker-compose.trellis.yml -f docker-compose.gpu-amd.yml up -d",
-    "db:push": "pnpm --filter @otterbot/server db:push",
-    "db:seed": "pnpm --filter @otterbot/server db:seed",
-    "test:e2e:docker": "docker compose -f docker-compose.e2e.yml up -d --build --wait && npx playwright test -c e2e/playwright.config.ts; docker compose -f docker-compose.e2e.yml down",
-    "test:e2e:docker:up": "docker compose -f docker-compose.e2e.yml up -d --build --wait",
-    "test:e2e:docker:down": "docker compose -f docker-compose.e2e.yml down",
-    "test:e2e:docker:run": "npx playwright test -c e2e/playwright.config.ts",
-    "test:e2e:mock": "MOCK_MODE=true MOCK_PASSPHRASE=test-passphrase-e2e docker compose -f docker-compose.e2e.yml up -d --build --wait && npx playwright test -c e2e/playwright.config.ts e2e/tests/25-mock-mode.spec.ts; docker compose -f docker-compose.e2e.yml down",
-    "test:e2e:mock:up": "MOCK_MODE=true MOCK_PASSPHRASE=test-passphrase-e2e docker compose -f docker-compose.e2e.yml up -d --build --wait",
-    "test:e2e:mock:down": "docker compose -f docker-compose.e2e.yml down",
-    "test:e2e:mock:run": "npx playwright test -c e2e/playwright.config.ts e2e/tests/25-mock-mode.spec.ts"
+    "test:e2e": "pnpm --filter @otterbot/web test:e2e"
   },
   "devDependencies": {
     "@playwright/test": "^1.58.2",
-    "@vitest/coverage-v8": "^4.0.18",
-    "typescript": "^5.7.3",
-    "vitest": "^4.0.18"
+    "typescript": "^5.7.3"
   },
   "pnpm": {
     "onlyBuiltDependencies": [
-      "better-sqlite3",
       "better-sqlite3-multiple-ciphers",
-      "esbuild",
-      "isolated-vm",
-      "node-pty",
-      "onnxruntime-node",
-      "puppeteer"
+      "esbuild"
     ]
   },
   "packageManager": "pnpm@10.29.3",

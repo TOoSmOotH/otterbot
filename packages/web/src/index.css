@@ -1,265 +1,35 @@
-@import "highlight.js/styles/github-dark.css";
-
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 @layer base {
   :root {
-    --radius: 0.5rem;
+    --bg: 20 20 24;
+    --fg: 235 235 240;
+    --muted: 90 90 100;
+    --border: 55 55 65;
+    --accent: 99 140 255;
   }
 
-  /* Dark theme (default) — current values preserved exactly */
-  [data-theme="dark"] {
-    --background: 0 0% 7%;
-    --foreground: 0 0% 93%;
-    --card: 0 0% 9%;
-    --card-foreground: 0 0% 93%;
-    --primary: 217 92% 60%;
-    --primary-foreground: 0 0% 100%;
-    --secondary: 0 0% 15%;
-    --secondary-foreground: 0 0% 93%;
-    --muted: 0 0% 15%;
-    --muted-foreground: 0 0% 60%;
-    --accent: 0 0% 15%;
-    --accent-foreground: 0 0% 93%;
-    --destructive: 0 84% 60%;
-    --destructive-foreground: 0 0% 100%;
-    --border: 0 0% 18%;
-    --input: 0 0% 18%;
-    --ring: 217 92% 60%;
-    --scrollbar-thumb: 0 0% 25%;
-    --scrollbar-thumb-hover: 0 0% 35%;
-    --code-block-bg: rgba(255, 255, 255, 0.05);
+  html,
+  body,
+  #root {
+    height: 100%;
+    margin: 0;
+    background: rgb(var(--bg));
+    color: rgb(var(--fg));
+    font-family:
+      ui-sans-serif,
+      system-ui,
+      -apple-system,
+      "Segoe UI",
+      Roboto,
+      "Helvetica Neue",
+      Arial;
+    font-size: 14px;
   }
 
-  /* Otter theme — brand colors from otterbot-site */
-  [data-theme="otter"] {
-    --background: 216 57% 10%;
-    --foreground: 195 50% 94%;
-    --card: 216 62% 16%;
-    --card-foreground: 195 40% 85%;
-    --primary: 191 100% 50%;
-    --primary-foreground: 216 57% 10%;
-    --secondary: 216 63% 20%;
-    --secondary-foreground: 195 50% 94%;
-    --muted: 216 63% 20%;
-    --muted-foreground: 207 31% 60%;
-    --accent: 216 63% 20%;
-    --accent-foreground: 195 50% 94%;
-    --destructive: 0 84% 60%;
-    --destructive-foreground: 0 0% 100%;
-    --border: 216 50% 25%;
-    --input: 216 50% 25%;
-    --ring: 189 93% 36%;
-    --scrollbar-thumb: 216 50% 30%;
-    --scrollbar-thumb-hover: 216 50% 40%;
-    --code-block-bg: rgba(255, 255, 255, 0.06);
-  }
-
-  /* Light theme — inverted brand variant */
-  [data-theme="light"] {
-    --background: 195 30% 97%;
-    --foreground: 216 50% 15%;
-    --card: 0 0% 100%;
-    --card-foreground: 216 50% 15%;
-    --primary: 189 93% 36%;
-    --primary-foreground: 0 0% 100%;
-    --secondary: 195 20% 92%;
-    --secondary-foreground: 216 50% 15%;
-    --muted: 195 20% 92%;
-    --muted-foreground: 216 20% 45%;
-    --accent: 195 20% 92%;
-    --accent-foreground: 216 50% 15%;
-    --destructive: 0 84% 50%;
-    --destructive-foreground: 0 0% 100%;
-    --border: 195 20% 85%;
-    --input: 195 20% 85%;
-    --ring: 189 93% 36%;
-    --scrollbar-thumb: 195 15% 75%;
-    --scrollbar-thumb-hover: 195 15% 60%;
-    --code-block-bg: rgba(0, 0, 0, 0.04);
-  }
-}
-
-@layer base {
   * {
-    @apply border-border;
+    box-sizing: border-box;
   }
-  body {
-    @apply bg-background text-foreground;
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  }
-}
-
-/* Custom scrollbar */
-::-webkit-scrollbar {
-  width: 6px;
-}
-::-webkit-scrollbar-track {
-  background: transparent;
-}
-::-webkit-scrollbar-thumb {
-  background: hsl(var(--scrollbar-thumb));
-  border-radius: 3px;
-}
-::-webkit-scrollbar-thumb:hover {
-  background: hsl(var(--scrollbar-thumb-hover));
-}
-
-/* Panel resize handles */
-.panel-resize-handle {
-  width: 1px;
-  background: hsl(var(--border));
-  transition: background 150ms, width 150ms;
-  position: relative;
-}
-
-.panel-resize-handle::after {
-  content: "";
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: -3px;
-  right: -3px;
-}
-
-.panel-resize-handle[data-separator="hover"],
-.panel-resize-handle[data-separator="active"] {
-  width: 3px;
-  background: hsl(var(--primary));
-  cursor: col-resize;
-}
-
-/* Horizontal resize handle (for vertical panel groups) */
-.panel-resize-handle-horizontal {
-  height: 1px;
-  background: hsl(var(--border));
-  transition: background 150ms, height 150ms;
-  position: relative;
-}
-
-.panel-resize-handle-horizontal::after {
-  content: "";
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: -3px;
-  bottom: -3px;
-}
-
-.panel-resize-handle-horizontal[data-separator="hover"],
-.panel-resize-handle-horizontal[data-separator="active"] {
-  height: 3px;
-  background: hsl(var(--primary));
-  cursor: row-resize;
-}
-
-/* Prose overrides for chat bubbles — tighten spacing */
-.prose {
-  font-size: inherit;
-  line-height: inherit;
-}
-
-.prose :where(p):not(:where([class~="not-prose"], [class~="not-prose"] *)) {
-  margin-top: 0.5em;
-  margin-bottom: 0.5em;
-}
-
-.prose :where(p:first-child):not(:where([class~="not-prose"], [class~="not-prose"] *)) {
-  margin-top: 0;
-}
-
-.prose :where(p:last-child):not(:where([class~="not-prose"], [class~="not-prose"] *)) {
-  margin-bottom: 0;
-}
-
-.prose :where(h1, h2, h3, h4):not(:where([class~="not-prose"], [class~="not-prose"] *)) {
-  margin-top: 0.75em;
-  margin-bottom: 0.25em;
-}
-
-.prose :where(h1:first-child, h2:first-child, h3:first-child, h4:first-child):not(:where([class~="not-prose"], [class~="not-prose"] *)) {
-  margin-top: 0;
-}
-
-.prose :where(ul, ol):not(:where([class~="not-prose"], [class~="not-prose"] *)) {
-  margin-top: 0.25em;
-  margin-bottom: 0.25em;
-  padding-left: 1.25em;
-}
-
-.prose :where(li):not(:where([class~="not-prose"], [class~="not-prose"] *)) {
-  margin-top: 0.125em;
-  margin-bottom: 0.125em;
-}
-
-.prose :where(blockquote):not(:where([class~="not-prose"], [class~="not-prose"] *)) {
-  margin-top: 0.5em;
-  margin-bottom: 0.5em;
-}
-
-.prose :where(pre):not(:where([class~="not-prose"], [class~="not-prose"] *)) {
-  margin-top: 0.5em;
-  margin-bottom: 0.5em;
-  padding: 0.75em 1em;
-  border-radius: 0.5rem;
-  background: var(--code-block-bg);
-}
-
-/* Remove backtick decoration that prose adds to inline code */
-.prose :where(code):not(:where(pre code, [class~="not-prose"], [class~="not-prose"] *))::before,
-.prose :where(code):not(:where(pre code, [class~="not-prose"], [class~="not-prose"] *))::after {
-  content: none;
-}
-
-/* Compact table styling */
-.prose :where(table):not(:where([class~="not-prose"], [class~="not-prose"] *)) {
-  margin-top: 0.5em;
-  margin-bottom: 0.5em;
-  font-size: 0.8em;
-}
-
-.prose :where(th, td):not(:where([class~="not-prose"], [class~="not-prose"] *)) {
-  padding: 0.35em 0.625em;
-}
-
-/* Syntax highlighting overrides for light theme */
-[data-theme="light"] .hljs {
-  background: var(--code-block-bg);
-  color: #24292e;
-}
-[data-theme="light"] .hljs-comment,
-[data-theme="light"] .hljs-quote {
-  color: #6a737d;
-}
-[data-theme="light"] .hljs-keyword,
-[data-theme="light"] .hljs-selector-tag,
-[data-theme="light"] .hljs-type {
-  color: #d73a49;
-}
-[data-theme="light"] .hljs-string,
-[data-theme="light"] .hljs-addition {
-  color: #032f62;
-}
-[data-theme="light"] .hljs-number,
-[data-theme="light"] .hljs-literal,
-[data-theme="light"] .hljs-built_in {
-  color: #005cc5;
-}
-[data-theme="light"] .hljs-title,
-[data-theme="light"] .hljs-section,
-[data-theme="light"] .hljs-attr {
-  color: #6f42c1;
-}
-[data-theme="light"] .hljs-name,
-[data-theme="light"] .hljs-tag {
-  color: #22863a;
-}
-[data-theme="light"] .hljs-deletion {
-  color: #b31d28;
-}
-[data-theme="light"] .hljs-variable,
-[data-theme="light"] .hljs-template-variable {
-  color: #e36209;
 }

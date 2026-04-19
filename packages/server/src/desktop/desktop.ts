@@ -1,163 +1,66 @@
-/**
- * Desktop environment module — VNC WebSocket proxy and configuration.
- *
- * When ENABLE_DESKTOP=true, the Docker entrypoint starts Xvfb + XFCE + x11vnc.
- * This module provides:
- * - Configuration helpers (getDesktopConfig, isDesktopEnabled)
- * - A WebSocket proxy that bridges browser WebSocket ↔ VNC TCP socket
- *
- * The proxy piggybacks on Fastify's HTTP server (no extra ports) and validates
- * the sb_session cookie before allowing connections.
- */
-
 import type { FastifyInstance } from "fastify";
 import { Socket as NetSocket } from "node:net";
 import { WebSocketServer, WebSocket } from "ws";
-import { validateSession } from "../auth/auth.js";
-
-export interface DesktopConfig {
-  enabled: boolean;
-  vncPort: number;
-  resolution: string;
-}
-
-export function getDesktopConfig(): DesktopConfig {
-  return {
-    enabled: process.env.ENABLE_DESKTOP !== "false",
-    vncPort: parseInt(process.env.VNC_PORT ?? "5900", 10),
-    resolution: process.env.DESKTOP_RESOLUTION ?? "1280x720x24",
-  };
-}
-
-export function isDesktopEnabled(): boolean {
-  return process.env.ENABLE_DESKTOP !== "false";
-}
-
-function parseCookies(header: string | undefined): Record<string, string> {
-  if (!header) return {};
-  return Object.fromEntries(
-    header.split(";").map((c) => {
-      const [key, ...val] = c.trim().split("=");
-      return [key, val.join("=")];
-    }),
-  );
-}
+import { getConfig } from "../config.js";
 
 /**
- * Register the VNC WebSocket proxy on the Fastify server.
- *
- * Listens for WebSocket upgrades on /desktop/ws, authenticates via cookie,
- * then bridges the WebSocket to a TCP connection to x11vnc on localhost.
+ * VNC WebSocket proxy. Bridges /desktop/ws connections from the browser
+ * (noVNC RFB client) to the x11vnc TCP server on VNC_HOST:VNC_PORT.
+ * Single-user local app; no auth layer — the VNC server itself should be
+ * bound to localhost and/or set a VNC password if exposed.
  */
-export function registerDesktopProxy(app: FastifyInstance, allowedOrigins?: string[] | false): void {
-  const config = getDesktopConfig();
+export function registerDesktopProxy(app: FastifyInstance): void {
+  const cfg = getConfig();
+  if (!cfg.enableDesktop) {
+    app.get("/api/desktop/status", async () => ({ enabled: false }));
+    return;
+  }
 
   const wss = new WebSocketServer({ noServer: true });
 
+  app.get("/api/desktop/status", async () => ({
+    enabled: true,
+    wsPath: "/desktop/ws",
+  }));
+
   app.server.on("upgrade", (req, socket, head) => {
     const url = req.url ?? "";
-
-    // Only handle /desktop/ws — let Socket.IO handle /socket.io/
     if (!url.startsWith("/desktop/ws")) return;
-
-    // Verify Origin header to prevent cross-site WebSocket hijacking.
-    // Missing Origin is allowed (non-browser clients), but a present Origin must match.
-    const origin = req.headers.origin;
-    if (origin) {
-      let allowed = false;
-      if (allowedOrigins === false) {
-        // Same-origin mode: allow if Origin host matches the Host header
-        const host = req.headers.host;
-        if (host) {
-          try {
-            allowed = new URL(origin).host === host;
-          } catch {
-            allowed = false;
-          }
-        }
-      } else {
-        allowed = Array.isArray(allowedOrigins) && allowedOrigins.includes(origin);
-      }
-      if (!allowed) {
-        console.warn(`[desktop] WebSocket rejected: origin ${origin} not allowed`);
-        socket.write("HTTP/1.1 403 Forbidden\r\n\r\n");
-        socket.destroy();
-        return;
-      }
-    }
-
-    // Authenticate via cookie
-    const cookies = parseCookies(req.headers.cookie);
-    const token = cookies.sb_session;
-    if (!validateSession(token)) {
-      socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
-      socket.destroy();
-      return;
-    }
-
-    if (!config.enabled) {
-      socket.write("HTTP/1.1 503 Service Unavailable\r\n\r\n");
-      socket.destroy();
-      return;
-    }
-
     wss.handleUpgrade(req, socket, head, (ws) => {
       wss.emit("connection", ws, req);
     });
   });
 
   wss.on("connection", (ws) => {
-    // Open TCP connection to x11vnc
     const vnc = new NetSocket();
-
-    vnc.connect(config.vncPort, "127.0.0.1", () => {
-      console.log("[desktop] VNC WebSocket client connected");
+    vnc.connect(cfg.vncPort, cfg.vncHost, () => {
+      console.log(`[desktop] VNC client connected → ${cfg.vncHost}:${cfg.vncPort}`);
     });
 
-    // Bridge: VNC TCP → WebSocket
     vnc.on("data", (data: Buffer) => {
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.send(data);
-      }
+      if (ws.readyState === WebSocket.OPEN) ws.send(data);
     });
 
-    // Bridge: WebSocket → VNC TCP
     ws.on("message", (data: Buffer | ArrayBuffer | Buffer[]) => {
-      if (vnc.writable) {
-        if (Buffer.isBuffer(data)) {
-          vnc.write(data);
-        } else if (data instanceof ArrayBuffer) {
-          vnc.write(Buffer.from(data));
-        } else if (Array.isArray(data)) {
-          for (const chunk of data) {
-            vnc.write(chunk);
-          }
-        }
-      }
+      if (!vnc.writable) return;
+      if (Buffer.isBuffer(data)) vnc.write(data);
+      else if (data instanceof ArrayBuffer) vnc.write(Buffer.from(data));
+      else if (Array.isArray(data)) for (const chunk of data) vnc.write(chunk);
     });
 
-    // Cleanup on close
-    ws.on("close", () => {
-      console.log("[desktop] VNC WebSocket client disconnected");
-      vnc.destroy();
-    });
-
+    ws.on("close", () => vnc.destroy());
     ws.on("error", (err) => {
-      console.error("[desktop] WebSocket error:", err.message);
+      console.error("[desktop] ws error:", err.message);
       vnc.destroy();
     });
-
     vnc.on("error", (err) => {
-      console.error("[desktop] VNC TCP error:", err.message);
+      console.error("[desktop] vnc error:", err.message);
       ws.close();
     });
-
-    vnc.on("close", () => {
-      ws.close();
-    });
+    vnc.on("close", () => ws.close());
   });
 
   console.log(
-    `[desktop] VNC proxy registered on /desktop/ws (enabled=${config.enabled}, vncPort=${config.vncPort})`,
+    `[desktop] VNC proxy registered on /desktop/ws → ${cfg.vncHost}:${cfg.vncPort}`,
   );
 }
