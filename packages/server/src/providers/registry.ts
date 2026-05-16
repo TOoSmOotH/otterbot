@@ -7,9 +7,9 @@ import type { EmbeddingConfig } from "../embedding.js";
 import type { ModelRef, ProviderEndpoint } from "./types.js";
 import type { ModelRef as SharedModelRef } from "@otterbot/shared";
 
-/** Read a secret from the agent's `.env` map, falling back to the process env. */
+/** Read a credential from the agent's secrets (stored in the encrypted DB). */
 function secret(secrets: Map<string, string>, key: string): string {
-  return secrets.get(key) ?? process.env[key] ?? "";
+  return secrets.get(key) ?? "";
 }
 
 function lmstudioEndpoint(secrets: Map<string, string>): ProviderEndpoint {

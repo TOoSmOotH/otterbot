@@ -14,7 +14,9 @@ import { discoverModelPacks } from "./views/model-packs.js";
 import { discoverSceneConfigs } from "./views/scene-configs.js";
 import { discoverEnvironmentPacks } from "./views/environment-packs.js";
 import { importSkillFromRaw, importSkillFromUrl, exportAllSkills } from "./skills/skill-hub.js";
-import type { AgentProfile } from "@otterbot/shared";
+import { generateText } from "ai";
+import { resolveChatModel } from "./providers/registry.js";
+import type { AgentProfile, ProviderId } from "@otterbot/shared";
 
 /**
  * Build the Fastify HTTP API over a booted `Orchestrator`. Does not call
@@ -54,6 +56,42 @@ export async function buildServer(orch: Orchestrator, cfg: Config): Promise<Fast
 
   // --- Providers (for the model picker) ---
   app.get("/api/providers", async () => PROVIDERS);
+
+  // --- Setup / onboarding ---
+  app.get("/api/setup-state", async () => ({
+    onboardingComplete: orch.getSetting("onboarding_complete") === "true",
+    agentCount: orch.listSummaries().length,
+  }));
+
+  app.post("/api/setup-state/complete", async () => {
+    orch.setSetting("onboarding_complete", "true");
+    return { ok: true };
+  });
+
+  // Verify a provider/model/credential combination before saving it.
+  app.post<{
+    Body: { provider?: ProviderId; modelId?: string; secrets?: Record<string, string> };
+  }>("/api/test-model", async (req, reply) => {
+    const { provider, modelId, secrets } = req.body ?? {};
+    if (!provider || !modelId) {
+      reply.code(400);
+      return { ok: false, error: "provider and modelId are required" };
+    }
+    try {
+      const model = resolveChatModel(
+        { provider, modelId },
+        new Map(Object.entries(secrets ?? {}))
+      );
+      const { text } = await generateText({
+        model,
+        prompt: "Reply with exactly the word: ready",
+        maxTokens: 24,
+      });
+      return { ok: true, sample: text.trim().slice(0, 120) };
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  });
 
   // --- Agents ---
   app.get("/api/agents", async () => orch.listSummaries());

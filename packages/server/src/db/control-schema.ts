@@ -62,6 +62,23 @@ export const subagentTasks = sqliteTable("subagent_tasks", {
   finishedAt: text("finished_at"),
 });
 
+/**
+ * Per-agent credentials (API keys, tokens, SMTP, model endpoints). Stored here
+ * — encrypted at rest with the database key — instead of plaintext `.env`
+ * files. One row per (agent, key).
+ */
+export const agentSecrets = sqliteTable("agent_secrets", {
+  agentId: text("agent_id").notNull(),
+  key: text("key").notNull(),
+  value: text("value").notNull(),
+});
+
+/** App-level key/value settings (e.g. onboarding completion). */
+export const appSettings = sqliteTable("app_settings", {
+  key: text("key").primaryKey(),
+  value: text("value").notNull(),
+});
+
 /** Cron-scheduled prompts fired against an agent. */
 export const scheduledTasks = sqliteTable("scheduled_tasks", {
   id: text("id").primaryKey(),

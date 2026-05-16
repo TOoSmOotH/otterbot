@@ -112,23 +112,23 @@ export class ProfileStore {
     const { persona, ...json } = profile;
     writeFileSync(paths.profileJson, JSON.stringify(json, null, 2), "utf8");
     writeFileSync(paths.soulMd, persona, "utf8");
-    if (!existsSync(paths.envFile)) writeFileSync(paths.envFile, "", "utf8");
   }
 
-  /** Parse the profile's `.env` into an in-memory secrets map (never process.env). */
-  readSecrets(id: string): Map<string, string> {
+  /**
+   * Read a legacy plaintext `.env` from a profile directory, if one exists.
+   * Used once at boot to migrate old credentials into the encrypted database.
+   */
+  readLegacyEnv(id: string): Map<string, string> | null {
     const paths = profilePaths(this.root, id);
-    if (!existsSync(paths.envFile)) return new Map();
+    if (!existsSync(paths.envFile)) return null;
     const parsed = parseDotenv(readFileSync(paths.envFile, "utf8"));
     return new Map(Object.entries(parsed));
   }
 
-  /** Write the profile's `.env` from a secrets map. */
-  writeSecrets(id: string, secrets: Map<string, string>): void {
+  /** Delete a profile's legacy `.env` after its secrets have been migrated. */
+  removeLegacyEnv(id: string): void {
     const paths = profilePaths(this.root, id);
-    mkdirSync(paths.dir, { recursive: true });
-    const body = [...secrets.entries()].map(([k, v]) => `${k}=${v}`).join("\n");
-    writeFileSync(paths.envFile, body + (body ? "\n" : ""), "utf8");
+    if (existsSync(paths.envFile)) rmSync(paths.envFile, { force: true });
   }
 
   /** Scaffold a new profile directory and persist it. */
@@ -144,30 +144,15 @@ export class ProfileStore {
   }
 
   /**
-   * Ensure a default COO profile exists. On first run this migrates a legacy
-   * single-agent install: the old `otterbot.db` becomes the COO's `agent.db`
-   * and `data/skills/*.md` become the COO's skills.
+   * Ensure a default COO profile exists. Optionally seeds it with legacy
+   * skill markdown files from a previous install.
    */
-  ensureCooProfile(opts: {
-    chatModelId: string;
-    legacyDbPath?: string;
-    legacySkillsDir?: string;
-  }): AgentProfile {
+  ensureCooProfile(opts: { chatModelId: string; legacySkillsDir?: string }): AgentProfile {
     if (this.exists("coo")) return this.load("coo");
 
     const paths = profilePaths(this.root, "coo");
     mkdirSync(paths.dir, { recursive: true });
     mkdirSync(paths.skillsDir, { recursive: true });
-
-    // Migrate legacy database, if present.
-    if (opts.legacyDbPath && existsSync(opts.legacyDbPath) && !existsSync(paths.agentDb)) {
-      copyFileSync(opts.legacyDbPath, paths.agentDb);
-      for (const suffix of ["-wal", "-shm"]) {
-        const src = opts.legacyDbPath + suffix;
-        if (existsSync(src)) copyFileSync(src, paths.agentDb + suffix);
-      }
-      console.info("[profiles] migrated legacy database into the COO profile");
-    }
 
     // Migrate legacy skill files, if present.
     if (opts.legacySkillsDir && existsSync(opts.legacySkillsDir)) {

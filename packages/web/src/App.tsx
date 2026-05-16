@@ -5,8 +5,10 @@ import { AgentEditor } from "./components/agents/AgentEditor";
 import { AgentStudio } from "./components/agents/AgentStudio";
 import { ActivityView } from "./components/agents/ActivityView";
 import { AgentScene3D } from "./components/agents/AgentScene3D";
+import { OnboardingWizard } from "./components/agents/OnboardingWizard";
 import { useAgentsStore } from "./stores/agents-store";
 import { useChatStore } from "./stores/chat-store";
+import { useSetupStore } from "./stores/setup-store";
 
 type MainView = "chat" | "studio" | "activity" | "3d";
 
@@ -18,6 +20,9 @@ export default function App() {
   const setActive = useAgentsStore((s) => s.setActive);
   const activeAgentId = useAgentsStore((s) => s.activeAgentId);
   const connect = useChatStore((s) => s.connect);
+  const loadSetup = useSetupStore((s) => s.load);
+  const setupChecked = useSetupStore((s) => s.checked);
+  const onboardingComplete = useSetupStore((s) => s.onboardingComplete);
 
   const [createOpen, setCreateOpen] = useState(false);
   const [view, setView] = useState<MainView>("chat");
@@ -26,7 +31,10 @@ export default function App() {
     connect();
     bindSocket();
     void loadAgents();
-  }, [connect, bindSocket, loadAgents]);
+    void loadSetup();
+  }, [connect, bindSocket, loadAgents, loadSetup]);
+
+  const showOnboarding = setupChecked && !onboardingComplete;
 
   const openStudio = (id: string) => {
     setActive(id);
@@ -68,6 +76,7 @@ export default function App() {
       </div>
 
       {createOpen && <AgentEditor agentId={null} onClose={() => setCreateOpen(false)} />}
+      {showOnboarding && <OnboardingWizard />}
     </div>
   );
 }

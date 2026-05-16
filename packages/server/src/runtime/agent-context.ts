@@ -37,11 +37,13 @@ export interface BuildAgentContextInput {
   skillsDir: string;
   /** Embeddings endpoint config (resolved from the agent's embedding model). */
   embedding: EmbeddingConfig;
+  /** Database encryption key, if configured. */
+  dbKey?: string | null;
 }
 
 /** Construct an agent's runtime context, opening its isolated database. */
 export function buildAgentContext(input: BuildAgentContextInput): AgentContext {
-  const agentDb = openAgentDb(input.agentDbPath);
+  const agentDb = openAgentDb(input.agentDbPath, input.dbKey);
   const embedding = new EmbeddingService(input.embedding, agentDb);
   const vec = new VecIndex(agentDb.sqlite, embedding);
   const memory = new MemoryService(agentDb.db, agentDb.sqlite, vec);

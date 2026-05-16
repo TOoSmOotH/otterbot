@@ -18,6 +18,7 @@ import { setDefaultContext } from "../runtime/default-agent.js";
 import { MessageBus } from "../bus/bus.js";
 import { createTransport } from "../bus/transports/factory.js";
 import { Scheduler } from "../scheduler/scheduler.js";
+import { SecretsStore } from "../secrets/secrets-store.js";
 
 /** Input for creating a new agent profile. */
 export interface CreateAgentInput {
@@ -58,6 +59,7 @@ export class Orchestrator {
   private readonly pendingInits: Promise<void>[] = [];
   private readonly bus: MessageBus;
   private readonly scheduler: Scheduler;
+  private readonly secrets: SecretsStore;
   private readonly services: AgentServices;
   private subagentSeq = 0;
 
@@ -68,6 +70,7 @@ export class Orchestrator {
   ) {
     this.bus = new MessageBus(control, createTransport(cfg));
     this.scheduler = new Scheduler(control, (id) => this.runtimes.get(id));
+    this.secrets = new SecretsStore(control);
     this.bus.setDeliver((agentId, msg) => {
       if (agentId === "*") {
         for (const rt of this.runtimes.values()) {
@@ -103,6 +106,30 @@ export class Orchestrator {
     return this.scheduler;
   }
 
+  /** The per-agent credential store. */
+  getSecrets(): SecretsStore {
+    return this.secrets;
+  }
+
+  /** Read an app-level setting (e.g. onboarding state). */
+  getSetting(key: string): string | null {
+    const row = this.control.db
+      .select()
+      .from(controlSchema.appSettings)
+      .where(eq(controlSchema.appSettings.key, key))
+      .get();
+    return row?.value ?? null;
+  }
+
+  /** Write an app-level setting. */
+  setSetting(key: string, value: string): void {
+    this.control.db
+      .insert(controlSchema.appSettings)
+      .values({ key, value })
+      .onConflictDoUpdate({ target: controlSchema.appSettings.key, set: { value } })
+      .run();
+  }
+
   /** Stop the scheduler + bus and close every agent's database. */
   async shutdown(): Promise<void> {
     this.scheduler.stop();
@@ -123,9 +150,23 @@ export class Orchestrator {
   async boot(): Promise<void> {
     this.profiles.ensureCooProfile({
       chatModelId: this.cfg.model,
-      legacyDbPath: resolve(this.cfg.dataDir, "otterbot.db"),
       legacySkillsDir: this.cfg.skillsDir,
     });
+
+    // One-time migration: fold any legacy plaintext `.env` credential files
+    // into the encrypted secrets store, then delete them.
+    for (const id of this.profiles.listIds()) {
+      const legacy = this.profiles.readLegacyEnv(id);
+      if (legacy) {
+        if (legacy.size > 0) {
+          const merged = this.secrets.get(id);
+          for (const [k, v] of legacy) if (!merged.has(k)) merged.set(k, v);
+          this.secrets.set(id, merged);
+        }
+        this.profiles.removeLegacyEnv(id);
+        console.info(`[profiles] migrated legacy .env for ${id} into the secrets store`);
+      }
+    }
 
     for (const profile of this.profiles.list()) {
       this.startAgent(profile);
@@ -142,13 +183,14 @@ export class Orchestrator {
   /** Build and register a runtime + context for a profile. */
   private startAgent(profile: AgentProfile): AgentContext {
     const paths = this.profiles.pathsFor(profile.id);
-    const secrets = this.profiles.readSecrets(profile.id);
+    const secrets = this.secrets.get(profile.id);
     const ctx = buildAgentContext({
       profile,
       secrets,
       agentDbPath: paths.agentDb,
       skillsDir: paths.skillsDir,
       embedding: resolveEmbeddingConfig(profile.model.embedding, secrets),
+      dbKey: this.cfg.dbKey,
     });
     const runtime = new AgentRuntime(ctx, this.services);
     runtime.onStatus((status) => {
@@ -291,14 +333,15 @@ export class Orchestrator {
     this.contexts.delete(id);
     this.runtimes.delete(id);
     this.control.db.delete(controlSchema.agents).where(eq(controlSchema.agents.id, id)).run();
+    this.secrets.delete(id);
     this.profiles.delete(id);
     return true;
   }
 
-  /** Write an agent's secrets (`.env`) and restart it so they take effect. */
+  /** Store an agent's credentials in the encrypted DB and restart it. */
   setCredentials(id: string, secrets: Record<string, string>): boolean {
     if (!this.contexts.has(id)) return false;
-    this.profiles.writeSecrets(id, new Map(Object.entries(secrets)));
+    this.secrets.set(id, secrets);
     this.updateAgent(id, {});
     return true;
   }
@@ -350,7 +393,7 @@ export class Orchestrator {
     });
     this.profiles.create(subProfile);
     // Inherit the parent's secrets so the subagent reaches the same endpoints.
-    this.profiles.writeSecrets(subId, this.profiles.readSecrets(parentId));
+    this.secrets.set(subId, this.secrets.get(parentId));
     this.startAgent(subProfile);
 
     this.control.db

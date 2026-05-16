@@ -123,4 +123,34 @@ describe("HTTP API (e2e)", () => {
     const res = await app.inject({ method: "DELETE", url: "/api/agents/coo" });
     expect(res.statusCode).toBe(400);
   });
+
+  it("setup-state reports and updates onboarding status", async () => {
+    const before = await app.inject({ method: "GET", url: "/api/setup-state" });
+    expect(before.statusCode).toBe(200);
+    expect((before.json() as { onboardingComplete: boolean }).onboardingComplete).toBe(false);
+
+    await app.inject({ method: "POST", url: "/api/setup-state/complete" });
+
+    const after = await app.inject({ method: "GET", url: "/api/setup-state" });
+    expect((after.json() as { onboardingComplete: boolean }).onboardingComplete).toBe(true);
+  });
+
+  it("test-model rejects a request missing provider/modelId", async () => {
+    const res = await app.inject({ method: "POST", url: "/api/test-model", payload: {} });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it(
+    "test-model verifies a working model connection",
+    async () => {
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/test-model",
+        payload: { provider: "lmstudio", modelId: stack.cfg.model },
+      });
+      expect(res.statusCode).toBe(200);
+      expect((res.json() as { ok: boolean }).ok).toBe(true);
+    },
+    60_000
+  );
 });

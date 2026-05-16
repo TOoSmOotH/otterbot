@@ -4,6 +4,7 @@ import { dirname } from "node:path";
 import { mkdirSync } from "node:fs";
 import * as sqliteVec from "sqlite-vec";
 import * as schema from "./schema.js";
+import { applyDbKey } from "./crypto.js";
 
 export { schema };
 
@@ -24,9 +25,10 @@ export interface AgentDb {
  * `vec_memories` table has a fixed embedding dimension per database, and
  * different agents may pick embedding models with different dimensions.
  */
-export function openAgentDb(path: string): AgentDb {
+export function openAgentDb(path: string, key?: string | null): AgentDb {
   mkdirSync(dirname(path), { recursive: true });
   const sqlite = new Database(path);
+  applyDbKey(sqlite, key);
   sqlite.pragma("journal_mode = WAL");
   sqlite.pragma("foreign_keys = ON");
   const db = drizzle(sqlite, { schema });

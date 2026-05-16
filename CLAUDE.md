@@ -24,17 +24,25 @@ Each agent is an isolated directory under `data/profiles/<id>/`:
 ```
 profile.json   identity, role, model refs, allowedModels, transport, artwork
 SOUL.md        the agent's persona (system-prompt persona block)
-.env           per-agent secrets (provider keys, GitHub token, SMTP creds)
 agent.db       isolated SQLite — conversations, memories, skills, vectors
 skills/        per-agent markdown skill files
 ```
 
 `data/control.db` is the shared control plane: the agent registry, the
-agent-to-agent `bus_messages` log, `subagent_tasks`, and `scheduled_tasks`.
+agent-to-agent `bus_messages` log, `subagent_tasks`, `scheduled_tasks`,
+`agent_secrets` (per-agent credentials), and `app_settings`.
+
+**Credentials** are never on disk in plaintext — API keys, GitHub tokens, SMTP
+creds and model endpoints live in `agent_secrets` and are managed via the Agent
+Studio. All SQLite databases are encrypted with `OTTERBOT_DB_KEY` from `.env`
+(the only secret in `.env`); unset = unencrypted (dev only).
 
 Per-agent isolated databases are required because `sqlite-vec`'s `vec_memories`
 table has a fixed embedding dimension — different agents can use different
 embedding models.
+
+On first run an onboarding wizard walks the user through configuring their
+first agent (the COO): provider, model, credentials, persona.
 
 ### Server layout (`packages/server/src`)
 
@@ -64,8 +72,17 @@ skill, all into its own database.
 pnpm install
 pnpm dev                              # server + web
 pnpm --filter @otterbot/server build  # tsc
-pnpm --filter @otterbot/server test   # vitest
+pnpm --filter @otterbot/server test   # vitest — fake model by default
 pnpm --filter @otterbot/web build     # vite
+pnpm --filter @otterbot/web test:e2e  # playwright — self-contained fake model
+```
+
+Server tests run against a fake OpenAI-compatible server. To run them against
+a real model instead, set `OTTER_TEST_MODEL_URL` and `OTTER_TEST_MODEL`:
+
+```bash
+OTTER_TEST_MODEL_URL=http://host:1234/v1 OTTER_TEST_MODEL=some-model \
+  pnpm --filter @otterbot/server test
 ```
 
 Config: see `.env.example`. Global model fallback via `LMSTUDIO_BASE_URL` /

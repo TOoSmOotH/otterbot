@@ -17,6 +17,8 @@ export interface Config {
   vncPort: number;
   enableEmbeddings: boolean;
   logLevel: "debug" | "info" | "warn" | "error";
+  /** Encryption key for all SQLite databases. The only secret kept in .env. */
+  dbKey: string | null;
   /** Agent-to-agent transport: in-process bus, or a shared Discord channel. */
   agentTransport: "local" | "discord";
   discordBotToken: string | null;
@@ -45,6 +47,7 @@ export function loadConfig(): Config {
     vncPort: Number(process.env.VNC_PORT ?? 5901),
     enableEmbeddings: bool(process.env.ENABLE_EMBEDDINGS, false),
     logLevel: (process.env.LOG_LEVEL as Config["logLevel"]) ?? "info",
+    dbKey: process.env.OTTERBOT_DB_KEY ?? null,
     agentTransport: process.env.AGENT_TRANSPORT === "discord" ? "discord" : "local",
     discordBotToken: process.env.DISCORD_BOT_TOKEN ?? null,
     discordChannelId: process.env.DISCORD_CHANNEL_ID ?? null,

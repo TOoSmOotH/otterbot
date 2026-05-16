@@ -9,8 +9,15 @@ import { attachSocketServer } from "./socket.js";
 async function main() {
   const cfg = getConfig();
 
+  if (!cfg.dbKey) {
+    console.warn(
+      "[otterbot] OTTERBOT_DB_KEY is not set — databases will be UNENCRYPTED. " +
+        "Set it in .env for an encrypted credential store."
+    );
+  }
+
   // Control plane + orchestrator: load (or first-run migrate) every agent.
-  const control = openControlDb(resolve(cfg.dataDir, "control.db"));
+  const control = openControlDb(resolve(cfg.dataDir, "control.db"), cfg.dbKey);
   const profiles = new ProfileStore(resolve(cfg.dataDir, "profiles"));
   const orch = new Orchestrator(profiles, control, cfg);
   await orch.boot();

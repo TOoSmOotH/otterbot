@@ -3,6 +3,7 @@ import { drizzle } from "drizzle-orm/better-sqlite3";
 import { dirname } from "node:path";
 import { mkdirSync } from "node:fs";
 import * as controlSchema from "./control-schema.js";
+import { applyDbKey } from "./crypto.js";
 
 export { controlSchema };
 
@@ -15,9 +16,10 @@ export interface ControlDb {
   close(): void;
 }
 
-export function openControlDb(path: string): ControlDb {
+export function openControlDb(path: string, key?: string | null): ControlDb {
   mkdirSync(dirname(path), { recursive: true });
   const sqlite = new Database(path);
+  applyDbKey(sqlite, key);
   sqlite.pragma("journal_mode = WAL");
   sqlite.pragma("foreign_keys = ON");
   const db = drizzle(sqlite, { schema: controlSchema });
@@ -74,6 +76,16 @@ function ensureControlTables(sqlite: Database.Database) {
       enabled INTEGER NOT NULL DEFAULT 1,
       last_run_at TEXT,
       next_run_at TEXT
+    )`,
+    `CREATE TABLE IF NOT EXISTS agent_secrets (
+      agent_id TEXT NOT NULL,
+      key TEXT NOT NULL,
+      value TEXT NOT NULL,
+      PRIMARY KEY (agent_id, key)
+    )`,
+    `CREATE TABLE IF NOT EXISTS app_settings (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
     )`,
   ];
   for (const s of stmts) sqlite.exec(s);

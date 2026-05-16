@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, rmSync, existsSync, readFileSync } from "node:fs";
+import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ProfileStore, normalizeProfile } from "./profile-store.js";
@@ -46,12 +46,13 @@ describe("ProfileStore", () => {
     expect(store.list().map((p) => p.id).sort()).toEqual(["a", "b", "coo"]);
   });
 
-  it("reads and writes per-agent secrets without touching process.env", () => {
+  it("reads and removes a legacy .env for credential migration", () => {
     store.create(normalizeProfile({ id: "a", displayName: "A" }));
-    store.writeSecrets("a", new Map([["ANTHROPIC_API_KEY", "sk-test-123"]]));
-    const secrets = store.readSecrets("a");
-    expect(secrets.get("ANTHROPIC_API_KEY")).toBe("sk-test-123");
-    expect(process.env.ANTHROPIC_API_KEY).not.toBe("sk-test-123");
+    writeFileSync(store.pathsFor("a").envFile, "GITHUB_TOKEN=ghp_legacy\n");
+    const legacy = store.readLegacyEnv("a");
+    expect(legacy?.get("GITHUB_TOKEN")).toBe("ghp_legacy");
+    store.removeLegacyEnv("a");
+    expect(store.readLegacyEnv("a")).toBeNull();
   });
 
   it("deletes a profile directory", () => {

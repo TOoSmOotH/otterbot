@@ -470,8 +470,8 @@ function CredentialsTab({ agentId }: { agentId: string }) {
   return (
     <Form>
       <p style={hint}>
-        Secrets for this agent only — API keys, GitHub token, SMTP, model endpoints. Stored in the
-        agent's own <code>.env</code>. KEY=VALUE per line; saving replaces all secrets.
+        Secrets for this agent only — API keys, GitHub token, SMTP, model endpoints. Stored
+        encrypted in the database. KEY=VALUE per line; saving replaces all of this agent's secrets.
       </p>
       <textarea
         value={creds}
