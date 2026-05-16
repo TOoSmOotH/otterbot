@@ -1,7 +1,9 @@
 import { asc, eq } from "drizzle-orm";
 import { generateText } from "ai";
-import { getDb, schema } from "../db/index.js";
+import type { AgentDrizzle } from "../db/agent-db.js";
+import * as schema from "../db/schema.js";
 import { llm, hasLlm } from "../llm.js";
+import { getDefaultContext } from "../runtime/default-agent.js";
 import { emptyUserProfile, type UserProfile, type UserProfileFact } from "@otterbot/shared";
 
 const SINGLETON_ID = "singleton";
@@ -24,9 +26,12 @@ Return ONLY the updated profile JSON, matching this shape:
   "updatedAt": string
 }`;
 
+/** Per-agent user-profile service over the agent's isolated database. */
 export class UserProfileService {
+  constructor(private readonly db: AgentDrizzle) {}
+
   get(): UserProfile {
-    const db = getDb();
+    const db = this.db;
     const row = db
       .select()
       .from(schema.userProfile)
@@ -45,7 +50,7 @@ export class UserProfileService {
   }
 
   save(profile: UserProfile): UserProfile {
-    const db = getDb();
+    const db = this.db;
     const next = { ...profile, updatedAt: new Date().toISOString() };
     const json = JSON.stringify(next);
     db.insert(schema.userProfile)
@@ -92,7 +97,7 @@ export class UserProfileService {
   async rebuildFromSession(conversationId: string): Promise<UserProfile> {
     if (!hasLlm()) return this.get();
 
-    const db = getDb();
+    const db = this.db;
     const messages = db
       .select()
       .from(schema.messages)
@@ -176,8 +181,7 @@ function isFact(v: unknown): v is UserProfileFact {
   );
 }
 
-let _svc: UserProfileService | null = null;
+/** @deprecated Compatibility shim — resolves to the default (COO) agent's profile service. */
 export function getUserProfileService(): UserProfileService {
-  if (!_svc) _svc = new UserProfileService();
-  return _svc;
+  return getDefaultContext().userProfile;
 }

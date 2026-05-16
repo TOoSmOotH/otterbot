@@ -1,28 +1,19 @@
-import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
-import { getConfig } from "./config.js";
 import type { LanguageModelV1 } from "ai";
+import { getDefaultContext, hasDefaultContext } from "./runtime/default-agent.js";
+import { resolveChatModel } from "./providers/registry.js";
 
-let _provider: ReturnType<typeof createOpenAICompatible> | null = null;
-
-function provider() {
-  if (!_provider) {
-    const cfg = getConfig();
-    _provider = createOpenAICompatible({
-      name: "lmstudio",
-      baseURL: cfg.lmstudioBaseUrl,
-      // LM Studio doesn't require an API key; pass a placeholder for libs
-      // that enforce presence.
-      apiKey: cfg.lmstudioApiKey ?? "lm-studio",
-    });
-  }
-  return _provider;
-}
-
+/**
+ * @deprecated Compatibility shim for legacy single-agent code (extractor,
+ * summarizer, skill-author, user-profile rebuild). Resolves the default (COO)
+ * agent's chat model. New code should resolve a model from an explicit
+ * `AgentContext` via `resolveChatModel`.
+ */
 export function llm(): LanguageModelV1 {
-  return provider().chatModel(getConfig().model);
+  const ctx = getDefaultContext();
+  return resolveChatModel(ctx.profile.model.chat, ctx.secrets);
 }
 
+/** Whether a default agent context is available to resolve a model from. */
 export function hasLlm(): boolean {
-  const cfg = getConfig();
-  return Boolean(cfg.lmstudioBaseUrl);
+  return hasDefaultContext();
 }

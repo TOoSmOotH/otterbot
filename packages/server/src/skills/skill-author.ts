@@ -1,8 +1,8 @@
 import { asc, eq } from "drizzle-orm";
 import { generateText } from "ai";
-import { getDb, schema } from "../db/index.js";
-import { llm, hasLlm } from "../llm.js";
-import { getSkillService } from "./skill-service.js";
+import * as schema from "../db/schema.js";
+import { resolveChatModel } from "../providers/registry.js";
+import type { AgentContext } from "../runtime/agent-context.js";
 import type { Skill } from "@otterbot/shared";
 
 const AUTHOR_PROMPT = `You are a skill curator. After the assistant completes a task, decide whether the approach is worth crystallizing into a reusable skill document the assistant can read back on similar future tasks.
@@ -23,14 +23,14 @@ tags: [<lowercase, space-free tags>]
 Body: markdown steps / code examples.`;
 
 /**
- * Called after a session closes. Given the transcript, asks the LLM to
- * decide whether to distill a new skill. Returns the skill or null.
+ * Called after a session closes. Given the transcript, asks the agent's model
+ * to decide whether to distill a new skill into that agent's skill set.
  */
-export async function maybeAuthorSkill(conversationId: string): Promise<Skill | null> {
-  if (!hasLlm()) return null;
-
-  const db = getDb();
-  const messages = db
+export async function maybeAuthorSkill(
+  ctx: AgentContext,
+  conversationId: string
+): Promise<Skill | null> {
+  const messages = ctx.db
     .select()
     .from(schema.messages)
     .where(eq(schema.messages.conversationId, conversationId))
@@ -43,7 +43,7 @@ export async function maybeAuthorSkill(conversationId: string): Promise<Skill | 
     .map((m) => `${m.role.toUpperCase()}: ${m.content}`)
     .join("\n\n");
 
-  const existingSkills = getSkillService()
+  const existingSkills = ctx.skills
     .list()
     .slice(0, 40)
     .map((s) => `- ${s.meta.name}: ${s.meta.description}`)
@@ -51,19 +51,25 @@ export async function maybeAuthorSkill(conversationId: string): Promise<Skill | 
 
   const prompt = `Existing skills:\n${existingSkills || "(none)"}\n\nTranscript:\n${transcript}`;
 
-  const { text } = await generateText({
-    model: llm(),
-    system: AUTHOR_PROMPT,
-    prompt,
-    maxTokens: 1200,
-  });
+  let text: string;
+  try {
+    const res = await generateText({
+      model: resolveChatModel(ctx.profile.model.chat, ctx.secrets),
+      system: AUTHOR_PROMPT,
+      prompt,
+      maxTokens: 1200,
+    });
+    text = res.text;
+  } catch (err) {
+    console.warn("[skill-author] model call failed:", err);
+    return null;
+  }
 
   const trimmed = text.trim();
   if (trimmed === "SKIP" || trimmed.startsWith("SKIP")) return null;
   if (!trimmed.startsWith("---")) return null;
 
-  const svc = getSkillService();
-  const { meta, body } = svc.parseSkillFile(trimmed);
+  const { meta, body } = ctx.skills.parseSkillFile(trimmed);
   if (!meta.name || !body) return null;
-  return svc.create({ meta, body, source: "authored" });
+  return ctx.skills.create({ meta, body, source: "authored" });
 }

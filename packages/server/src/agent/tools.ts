@@ -1,43 +1,37 @@
-import { tool } from "ai";
+import { tool, type Tool } from "ai";
 import { z } from "zod";
-import { getMemoryService } from "../memory/memory-service.js";
-import { getSkillService } from "../skills/skill-service.js";
-import { getUserProfileService } from "../user-profile/user-profile-service.js";
+import { nanoid } from "nanoid";
+import type { AgentContext } from "../runtime/agent-context.js";
+import type { AgentServices } from "../runtime/agent-services.js";
+import { sendEmail } from "../integrations/email.js";
+import { createIssue, listIssues } from "../integrations/github.js";
 
-export function buildAgentTools() {
-  const mem = getMemoryService();
-  const skills = getSkillService();
-  const profile = getUserProfileService();
+/**
+ * Build the tool set for an agent, scoped to its own context. When cross-agent
+ * `services` are available, coordination tools (delegate, spawn, broadcast) are
+ * added — `delegate`/`broadcast` only for the COO.
+ */
+export function buildAgentTools(
+  ctx: AgentContext,
+  services?: AgentServices
+): Record<string, Tool> {
+  const skills = ctx.skills;
+  const profile = ctx.userProfile;
+  const memory = ctx.memory;
+  const isCoo = ctx.profile.role === "coo";
 
-  return {
-    save_memory: tool({
-      description:
-        "Save a durable fact, preference, or instruction about the user or their work for later recall. Use only for things worth remembering across sessions.",
-      parameters: z.object({
-        content: z.string().min(1),
-        category: z
-          .enum(["preference", "fact", "instruction", "relationship", "general"])
-          .default("general"),
-        importance: z.number().min(1).max(10).default(5),
-      }),
-      execute: async ({ content, category, importance }) => {
-        const entry = mem.save({ content, category, importance, source: "agent" });
-        return { id: entry.id, saved: true };
-      },
-    }),
-
+  const tools: Record<string, Tool> = {
     list_skills: tool({
       description: "List all skills available to the agent. Returns names, descriptions, and tags.",
       parameters: z.object({}),
-      execute: async () => {
-        return skills.list().map((s) => ({
+      execute: async () =>
+        skills.list().map((s) => ({
           id: s.id,
           name: s.meta.name,
           description: s.meta.description,
           tags: s.meta.tags,
           useCount: s.useCount,
-        }));
-      },
+        })),
     }),
 
     author_skill: tool({
@@ -55,7 +49,7 @@ export function buildAgentTools() {
             name,
             description,
             version: "1.0.0",
-            author: "otterbot",
+            author: ctx.profile.id,
             tools: [],
             capabilities: [],
             parameters: {},
@@ -100,5 +94,191 @@ export function buildAgentTools() {
         return { ok: true };
       },
     }),
+
+    search_memory: tool({
+      description:
+        "Search this agent's long-term memory (hybrid keyword + semantic search). Use to recall facts saved in earlier sessions.",
+      parameters: z.object({
+        query: z.string().min(1),
+        limit: z.number().int().min(1).max(20).default(6),
+      }),
+      execute: async ({ query, limit }) => {
+        const hits = await memory.search(query, { limit });
+        return hits.map((h) => ({
+          content: h.entry.content,
+          category: h.entry.category,
+          importance: h.entry.importance,
+          score: h.score,
+          via: h.via,
+        }));
+      },
+    }),
+
+    save_finding: tool({
+      description:
+        "Save an important finding to long-term memory so it is durable and semantically searchable later.",
+      parameters: z.object({
+        content: z.string().min(1),
+        importance: z.number().int().min(1).max(10).default(6),
+      }),
+      execute: async ({ content, importance }) => {
+        const entry = memory.save({ content, importance, source: "agent", category: "fact" });
+        return { ok: true, id: entry.id };
+      },
+    }),
+
+    send_email: tool({
+      description:
+        "Send an email from this agent's own email account. Requires SMTP credentials configured for the agent.",
+      parameters: z.object({
+        to: z.string().min(3),
+        subject: z.string().min(1),
+        text: z.string().min(1),
+      }),
+      execute: async ({ to, subject, text }) => {
+        try {
+          const res = await sendEmail(ctx.secrets, { to, subject, text });
+          return { ok: true, messageId: res.messageId };
+        } catch (err) {
+          return { ok: false, error: err instanceof Error ? err.message : String(err) };
+        }
+      },
+    }),
+
+    github_create_issue: tool({
+      description:
+        "Create a GitHub issue in owner/repo using this agent's GitHub token. Requires GITHUB_TOKEN configured.",
+      parameters: z.object({
+        repo: z.string().regex(/^[^/]+\/[^/]+$/, "must be owner/repo"),
+        title: z.string().min(1),
+        body: z.string().default(""),
+      }),
+      execute: async ({ repo, title, body }) => {
+        try {
+          const res = await createIssue(ctx.secrets, { repo, title, body });
+          return { ok: true, number: res.number, url: res.url };
+        } catch (err) {
+          return { ok: false, error: err instanceof Error ? err.message : String(err) };
+        }
+      },
+    }),
+
+    github_list_issues: tool({
+      description: "List open issues in a GitHub repo (owner/repo).",
+      parameters: z.object({
+        repo: z.string().regex(/^[^/]+\/[^/]+$/, "must be owner/repo"),
+      }),
+      execute: async ({ repo }) => {
+        try {
+          return { ok: true, issues: await listIssues(ctx.secrets, { repo }) };
+        } catch (err) {
+          return { ok: false, error: err instanceof Error ? err.message : String(err) };
+        }
+      },
+    }),
   };
+
+  if (!services) return tools;
+
+  tools.schedule_task = tool({
+    description:
+      "Schedule a recurring prompt for yourself using a cron expression (e.g. '0 9 * * *' for 9am daily). The prompt runs automatically on that schedule.",
+    parameters: z.object({
+      cron: z.string().min(1),
+      prompt: z.string().min(1),
+    }),
+    execute: async ({ cron, prompt }) => {
+      const task = services.scheduleTask(ctx.profile.id, cron, prompt);
+      if (!task) return { ok: false, error: `Invalid cron expression: ${cron}` };
+      return { ok: true, id: task.id, nextRunAt: task.nextRunAt };
+    },
+  });
+
+  tools.list_scheduled_tasks = tool({
+    description: "List your scheduled (cron) tasks.",
+    parameters: z.object({}),
+    execute: async () => services.listScheduledTasks(ctx.profile.id),
+  });
+
+  tools.cancel_scheduled_task = tool({
+    description: "Cancel one of your scheduled tasks by id.",
+    parameters: z.object({ id: z.string().min(1) }),
+    execute: async ({ id }) => ({ ok: services.cancelScheduledTask(id) }),
+  });
+
+  tools.list_agents = tool({
+    description:
+      "List the other agents you can coordinate with. Returns their id, name, role, and what they specialize in.",
+    parameters: z.object({}),
+    execute: async () => services.listAgents().filter((a) => a.id !== ctx.profile.id),
+  });
+
+  if (ctx.profile.canSpawnSubagents) {
+    tools.spawn_subagent = tool({
+      description:
+        "Spawn a temporary subagent to pursue a focused goal in parallel and report back its findings. Use for research fan-out — spawn several, each on a different source.",
+      parameters: z.object({ goal: z.string().min(1) }),
+      execute: async ({ goal }) => {
+        const res = await services.spawnSubagent(ctx.profile.id, goal);
+        return { ok: true, subagentId: res.subagentId, summary: res.summary };
+      },
+    });
+  }
+
+  if (isCoo) {
+    tools.delegate = tool({
+      description:
+        "Delegate a task to another agent by id and wait for its result. Use list_agents first to choose the right specialist.",
+      parameters: z.object({
+        agentId: z.string().min(1),
+        task: z.string().min(1),
+      }),
+      execute: async ({ agentId, task }) => {
+        const known = services.listAgents();
+        if (!known.some((a) => a.id === agentId)) {
+          return {
+            ok: false,
+            error: `No agent "${agentId}". Known agents: ${known.map((a) => a.id).join(", ")}`,
+          };
+        }
+        try {
+          const res = await services.bus.request({
+            id: nanoid(),
+            kind: "request",
+            from: ctx.profile.id,
+            to: agentId,
+            threadId: nanoid(),
+            correlationId: null,
+            rootSpawnId: null,
+            body: task,
+            transport: ctx.profile.transport,
+          });
+          return { ok: true, from: agentId, result: res.body };
+        } catch (err) {
+          return { ok: false, error: err instanceof Error ? err.message : String(err) };
+        }
+      },
+    });
+
+    tools.broadcast = tool({
+      description: "Send an announcement to every agent. Does not wait for replies.",
+      parameters: z.object({ message: z.string().min(1) }),
+      execute: async ({ message }) => {
+        services.bus.publish({
+          id: nanoid(),
+          kind: "broadcast",
+          from: ctx.profile.id,
+          to: null,
+          threadId: nanoid(),
+          correlationId: null,
+          rootSpawnId: null,
+          body: message,
+          transport: ctx.profile.transport,
+        });
+        return { ok: true };
+      },
+    });
+  }
+
+  return tools;
 }

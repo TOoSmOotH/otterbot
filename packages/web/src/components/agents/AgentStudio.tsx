@@ -1,0 +1,619 @@
+import { useEffect, useState } from "react";
+import type {
+  AgentProfile,
+  ProviderId,
+  Skill,
+  ScheduledTask,
+  MemoryEntry,
+} from "@otterbot/shared";
+import { useAgentsStore } from "../../stores/agents-store";
+import { useModelPacksStore } from "../../stores/model-packs-store";
+
+const PROVIDERS: ProviderId[] = ["anthropic", "openai", "lmstudio", "ollama"];
+const TABS = ["Identity", "Persona", "Model", "Skills", "Schedule", "Memory", "Credentials"] as const;
+type StudioTab = (typeof TABS)[number];
+
+/** Full-screen agent management surface — identity, persona, model, skills,
+ *  cron schedule, memory, and credentials for one agent. */
+export function AgentStudio({ agentId }: { agentId: string | null }) {
+  const [profile, setProfile] = useState<AgentProfile | null>(null);
+  const [tab, setTab] = useState<StudioTab>("Identity");
+  const reloadRoster = useAgentsStore((s) => s.load);
+  const removeAgent = useAgentsStore((s) => s.remove);
+
+  const loadProfile = () => {
+    if (!agentId) return;
+    void fetch(`/api/agents/${agentId}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((p: AgentProfile | null) => setProfile(p));
+  };
+
+  useEffect(loadProfile, [agentId]);
+
+  if (!agentId) {
+    return <Empty>Select an agent, then open the Studio.</Empty>;
+  }
+  if (!profile) {
+    return <Empty>Loading…</Empty>;
+  }
+
+  const onSaved = () => {
+    loadProfile();
+    void reloadRoster();
+  };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
+      <header
+        style={{
+          padding: "8px 12px",
+          borderBottom: "1px solid rgb(var(--border))",
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+        }}
+      >
+        <strong style={{ fontSize: 14 }}>{profile.displayName}</strong>
+        <span style={{ fontSize: 11, color: "rgb(var(--muted))" }}>Agent Studio</span>
+        <div style={{ marginLeft: "auto" }}>
+          {profile.role !== "coo" && (
+            <button
+              onClick={async () => {
+                if (confirm(`Delete "${profile.displayName}" and all its data?`)) {
+                  await removeAgent(profile.id);
+                }
+              }}
+              style={{ ...ghost, color: "#f87171" }}
+            >
+              Delete agent
+            </button>
+          )}
+        </div>
+      </header>
+
+      <nav style={{ display: "flex", gap: 4, padding: 6, borderBottom: "1px solid rgb(var(--border))", flexWrap: "wrap" }}>
+        {TABS.map((t) => (
+          <button
+            key={t}
+            data-testid={`studio-tab-${t}`}
+            onClick={() => setTab(t)}
+            style={{
+              background: tab === t ? "rgb(var(--accent))" : "transparent",
+              color: tab === t ? "white" : "rgb(var(--fg))",
+              border: "1px solid rgb(var(--border))",
+              padding: "3px 10px",
+              borderRadius: 6,
+              cursor: "pointer",
+              fontSize: 12,
+            }}
+          >
+            {t}
+          </button>
+        ))}
+      </nav>
+
+      <div style={{ flex: 1, overflowY: "auto", padding: 16 }}>
+        {tab === "Identity" && <IdentityTab profile={profile} onSaved={onSaved} />}
+        {tab === "Persona" && <PersonaTab profile={profile} onSaved={onSaved} />}
+        {tab === "Model" && <ModelTab profile={profile} onSaved={onSaved} />}
+        {tab === "Skills" && <SkillsTab agentId={profile.id} />}
+        {tab === "Schedule" && <ScheduleTab agentId={profile.id} />}
+        {tab === "Memory" && <MemoryTab agentId={profile.id} />}
+        {tab === "Credentials" && <CredentialsTab agentId={profile.id} />}
+      </div>
+    </div>
+  );
+}
+
+// --- Identity -------------------------------------------------------------
+
+function IdentityTab({ profile, onSaved }: TabProps) {
+  const update = useAgentsStore((s) => s.update);
+  const packs = useModelPacksStore((s) => s.packs);
+  const loadPacks = useModelPacksStore((s) => s.load);
+  useEffect(() => void loadPacks(), [loadPacks]);
+
+  const [displayName, setName] = useState(profile.displayName);
+  const [modelPack, setPack] = useState(profile.artwork.modelPack);
+  const [email, setEmail] = useState(profile.email ?? "");
+  const [transport, setTransport] = useState(profile.transport);
+  const [canSpawn, setCanSpawn] = useState(profile.canSpawnSubagents);
+  const [limit, setLimit] = useState(profile.subagentLimit);
+  const [saved, setSaved] = useState(false);
+
+  const save = async () => {
+    await update(profile.id, {
+      displayName,
+      artwork: { modelPack },
+      email: email.trim() || null,
+      transport,
+      canSpawnSubagents: canSpawn,
+      subagentLimit: limit,
+    });
+    setSaved(true);
+    onSaved();
+  };
+
+  return (
+    <Form>
+      <Field label="Display name">
+        <input value={displayName} onChange={(e) => setName(e.target.value)} style={input} />
+      </Field>
+      <Field label="Avatar">
+        <select value={modelPack} onChange={(e) => setPack(e.target.value)} style={input}>
+          {packs.length === 0 && <option value={modelPack}>{modelPack}</option>}
+          {packs.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.name}
+            </option>
+          ))}
+        </select>
+      </Field>
+      <Field label="Email address">
+        <input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="agent@otter.local" style={input} />
+      </Field>
+      <Field label="Agent-to-agent transport">
+        <select value={transport} onChange={(e) => setTransport(e.target.value as "local" | "discord")} style={input}>
+          <option value="local">local</option>
+          <option value="discord">discord</option>
+        </select>
+      </Field>
+      <label style={checkboxRow}>
+        <input type="checkbox" checked={canSpawn} onChange={(e) => setCanSpawn(e.target.checked)} />
+        Can spawn subagents
+      </label>
+      <Field label="Subagent limit">
+        <input
+          type="number"
+          min={0}
+          max={20}
+          value={limit}
+          onChange={(e) => setLimit(Number(e.target.value))}
+          style={{ ...input, width: 90 }}
+        />
+      </Field>
+      <SaveBar onSave={save} saved={saved} onDirty={() => setSaved(false)} />
+    </Form>
+  );
+}
+
+// --- Persona --------------------------------------------------------------
+
+function PersonaTab({ profile, onSaved }: TabProps) {
+  const update = useAgentsStore((s) => s.update);
+  const [persona, setPersona] = useState(profile.persona);
+  const [saved, setSaved] = useState(false);
+  return (
+    <Form>
+      <Field label="Persona (SOUL.md) — the agent's identity and behaviour">
+        <textarea
+          value={persona}
+          onChange={(e) => {
+            setPersona(e.target.value);
+            setSaved(false);
+          }}
+          rows={16}
+          style={{ ...input, resize: "vertical", fontFamily: "inherit", lineHeight: 1.5 }}
+        />
+      </Field>
+      <SaveBar
+        onSave={async () => {
+          await update(profile.id, { persona });
+          setSaved(true);
+          onSaved();
+        }}
+        saved={saved}
+        onDirty={() => setSaved(false)}
+      />
+    </Form>
+  );
+}
+
+// --- Model ----------------------------------------------------------------
+
+function ModelTab({ profile, onSaved }: TabProps) {
+  const update = useAgentsStore((s) => s.update);
+  const [cp, setCp] = useState<ProviderId>(profile.model.chat.provider);
+  const [cm, setCm] = useState(profile.model.chat.modelId);
+  const [ep, setEp] = useState<ProviderId>(profile.model.embedding.provider);
+  const [em, setEm] = useState(profile.model.embedding.modelId);
+  const [saved, setSaved] = useState(false);
+  const dirty = () => setSaved(false);
+
+  return (
+    <Form>
+      <p style={hint}>
+        Each agent picks its own models. Cloud providers read their API key from this agent's
+        Credentials; local providers (LM Studio / Ollama) use the endpoint configured there or the
+        global default.
+      </p>
+      <Field label="Chat model">
+        <div style={{ display: "flex", gap: 8 }}>
+          <select value={cp} onChange={(e) => { setCp(e.target.value as ProviderId); dirty(); }} style={{ ...input, flex: "0 0 130px" }}>
+            {PROVIDERS.map((p) => <option key={p}>{p}</option>)}
+          </select>
+          <input value={cm} onChange={(e) => { setCm(e.target.value); dirty(); }} style={input} />
+        </div>
+      </Field>
+      <Field label="Embedding model (for semantic memory)">
+        <div style={{ display: "flex", gap: 8 }}>
+          <select value={ep} onChange={(e) => { setEp(e.target.value as ProviderId); dirty(); }} style={{ ...input, flex: "0 0 130px" }}>
+            {PROVIDERS.map((p) => <option key={p}>{p}</option>)}
+          </select>
+          <input value={em} onChange={(e) => { setEm(e.target.value); dirty(); }} style={input} />
+        </div>
+      </Field>
+      <SaveBar
+        onSave={async () => {
+          await update(profile.id, {
+            model: {
+              chat: { provider: cp, modelId: cm.trim() },
+              embedding: { provider: ep, modelId: em.trim() },
+            },
+            allowedModels: [
+              { provider: cp, modelId: "*" },
+              { provider: ep, modelId: "*" },
+            ],
+          });
+          setSaved(true);
+          onSaved();
+        }}
+        saved={saved}
+        onDirty={dirty}
+      />
+    </Form>
+  );
+}
+
+// --- Skills ---------------------------------------------------------------
+
+function SkillsTab({ agentId }: { agentId: string }) {
+  const [skills, setSkills] = useState<Skill[]>([]);
+  const [raw, setRaw] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const load = () => {
+    void fetch(`/api/agents/${agentId}/skills`)
+      .then((r) => (r.ok ? r.json() : []))
+      .then(setSkills);
+  };
+  useEffect(load, [agentId]);
+
+  const addSkill = async () => {
+    if (!raw.trim()) return;
+    setBusy(true);
+    const res = await fetch(`/api/agents/${agentId}/skills`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ raw }),
+    });
+    setBusy(false);
+    if (res.ok) {
+      setRaw("");
+      load();
+    } else {
+      alert((await res.json())?.error ?? "Failed to add skill");
+    }
+  };
+
+  const del = async (id: string) => {
+    await fetch(`/api/agents/${agentId}/skills/${id}`, { method: "DELETE" });
+    load();
+  };
+
+  return (
+    <Form>
+      <p style={hint}>
+        Skills are reusable procedures the agent recalls on relevant tasks. The agent also authors
+        its own. Paste a skill in markdown (YAML frontmatter + body) to assign one.
+      </p>
+      {skills.length === 0 && <div style={hint}>No skills yet.</div>}
+      {skills.map((s) => (
+        <details key={s.id} style={card}>
+          <summary style={{ cursor: "pointer", display: "flex", gap: 8, alignItems: "center" }}>
+            <strong style={{ fontSize: 13 }}>{s.meta.name}</strong>
+            <span style={{ fontSize: 11, color: "rgb(var(--muted))" }}>used {s.useCount}×</span>
+            <button onClick={() => del(s.id)} style={{ ...ghost, marginLeft: "auto", color: "#f87171" }}>
+              Remove
+            </button>
+          </summary>
+          <div style={{ fontSize: 12, color: "rgb(var(--muted))", marginTop: 6 }}>
+            {s.meta.description}
+          </div>
+          <pre style={pre}>{s.body}</pre>
+        </details>
+      ))}
+      <Field label="Add a skill (markdown)">
+        <textarea
+          value={raw}
+          onChange={(e) => setRaw(e.target.value)}
+          rows={6}
+          placeholder={"---\nname: Summarize a repo\ndescription: ...\ntags: [research]\n---\n\n1. ...\n2. ..."}
+          style={{ ...input, resize: "vertical", fontFamily: "monospace", fontSize: 12 }}
+        />
+      </Field>
+      <button onClick={addSkill} disabled={busy} style={primary}>
+        {busy ? "Adding…" : "Add skill"}
+      </button>
+    </Form>
+  );
+}
+
+// --- Schedule -------------------------------------------------------------
+
+function ScheduleTab({ agentId }: { agentId: string }) {
+  const [tasks, setTasks] = useState<ScheduledTask[]>([]);
+  const [cron, setCron] = useState("0 9 * * *");
+  const [prompt, setPrompt] = useState("");
+
+  const load = () => {
+    void fetch(`/api/agents/${agentId}/scheduled-tasks`)
+      .then((r) => (r.ok ? r.json() : []))
+      .then(setTasks);
+  };
+  useEffect(load, [agentId]);
+
+  const add = async () => {
+    if (!prompt.trim()) return;
+    const res = await fetch(`/api/agents/${agentId}/scheduled-tasks`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ cron, prompt }),
+    });
+    if (res.ok) {
+      setPrompt("");
+      load();
+    } else {
+      alert((await res.json())?.error ?? "Failed");
+    }
+  };
+
+  const cancel = async (id: string) => {
+    await fetch(`/api/scheduled-tasks/${id}`, { method: "DELETE" });
+    load();
+  };
+
+  return (
+    <Form>
+      <p style={hint}>
+        Scheduled prompts run automatically on a cron expression — each fires a fresh turn for this
+        agent. e.g. <code>0 9 * * *</code> = 9am daily.
+      </p>
+      {tasks.filter((t) => t.enabled).length === 0 && <div style={hint}>No scheduled tasks.</div>}
+      {tasks
+        .filter((t) => t.enabled)
+        .map((t) => (
+          <div key={t.id} style={card}>
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <code style={{ fontSize: 12 }}>{t.cron}</code>
+              <button onClick={() => cancel(t.id)} style={{ ...ghost, marginLeft: "auto", color: "#f87171" }}>
+                Cancel
+              </button>
+            </div>
+            <div style={{ fontSize: 12, marginTop: 4 }}>{t.prompt}</div>
+            <div style={{ fontSize: 11, color: "rgb(var(--muted))", marginTop: 2 }}>
+              next: {t.nextRunAt ?? "—"} · last: {t.lastRunAt ?? "never"}
+            </div>
+          </div>
+        ))}
+      <Row>
+        <Field label="Cron">
+          <input value={cron} onChange={(e) => setCron(e.target.value)} style={{ ...input, fontFamily: "monospace" }} />
+        </Field>
+        <Field label="Prompt">
+          <input value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="What should the agent do?" style={input} />
+        </Field>
+      </Row>
+      <button onClick={add} style={primary}>
+        Schedule task
+      </button>
+    </Form>
+  );
+}
+
+// --- Memory ---------------------------------------------------------------
+
+function MemoryTab({ agentId }: { agentId: string }) {
+  const [memories, setMemories] = useState<MemoryEntry[]>([]);
+  const load = () => {
+    void fetch(`/api/agents/${agentId}/memories`)
+      .then((r) => (r.ok ? r.json() : []))
+      .then(setMemories);
+  };
+  useEffect(load, [agentId]);
+
+  const del = async (id: string) => {
+    await fetch(`/api/agents/${agentId}/memories/${id}`, { method: "DELETE" });
+    load();
+  };
+
+  return (
+    <Form>
+      <p style={hint}>{memories.length} memories. The agent extracts these automatically as it works.</p>
+      {memories.map((m) => (
+        <div key={m.id} style={card}>
+          <div style={{ display: "flex", gap: 8, fontSize: 11, color: "rgb(var(--muted))" }}>
+            <span>{m.category}</span>
+            <span>importance {m.importance}</span>
+            <button onClick={() => del(m.id)} style={{ ...ghost, marginLeft: "auto", color: "#f87171" }}>
+              Forget
+            </button>
+          </div>
+          <div style={{ fontSize: 13, marginTop: 4 }}>{m.content}</div>
+        </div>
+      ))}
+      {memories.length === 0 && <div style={hint}>No memories yet.</div>}
+    </Form>
+  );
+}
+
+// --- Credentials ----------------------------------------------------------
+
+function CredentialsTab({ agentId }: { agentId: string }) {
+  const [creds, setCreds] = useState("");
+  const [status, setStatus] = useState("");
+
+  const save = async () => {
+    const record: Record<string, string> = {};
+    for (const line of creds.split("\n")) {
+      const eq = line.indexOf("=");
+      if (eq > 0) record[line.slice(0, eq).trim()] = line.slice(eq + 1).trim();
+    }
+    const res = await fetch(`/api/agents/${agentId}/credentials`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(record),
+    });
+    setStatus(res.ok ? `Saved ${Object.keys(record).length} secret(s) — agent restarted.` : "Failed.");
+  };
+
+  return (
+    <Form>
+      <p style={hint}>
+        Secrets for this agent only — API keys, GitHub token, SMTP, model endpoints. Stored in the
+        agent's own <code>.env</code>. KEY=VALUE per line; saving replaces all secrets.
+      </p>
+      <textarea
+        value={creds}
+        onChange={(e) => setCreds(e.target.value)}
+        rows={8}
+        placeholder={"ANTHROPIC_API_KEY=...\nOPENAI_API_KEY=...\nGITHUB_TOKEN=...\nSMTP_HOST=...\nSMTP_USER=...\nSMTP_PASS=...\nLMSTUDIO_BASE_URL=..."}
+        style={{ ...input, resize: "vertical", fontFamily: "monospace", fontSize: 12 }}
+      />
+      <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+        <button onClick={save} style={primary}>
+          Save credentials
+        </button>
+        {status && <span style={{ fontSize: 12, color: "rgb(var(--muted))" }}>{status}</span>}
+      </div>
+    </Form>
+  );
+}
+
+// --- shared bits ----------------------------------------------------------
+
+interface TabProps {
+  profile: AgentProfile;
+  onSaved: () => void;
+}
+
+function Form({ children }: { children: React.ReactNode }) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 12, maxWidth: 620 }}>{children}</div>
+  );
+}
+
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, flex: 1 }}>
+      <span style={{ color: "rgb(var(--muted))" }}>{label}</span>
+      {children}
+    </label>
+  );
+}
+
+function Row({ children }: { children: React.ReactNode }) {
+  return <div style={{ display: "flex", gap: 10 }}>{children}</div>;
+}
+
+function SaveBar({
+  onSave,
+  saved,
+  onDirty,
+}: {
+  onSave: () => void;
+  saved: boolean;
+  onDirty: () => void;
+}) {
+  void onDirty;
+  return (
+    <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+      <button onClick={onSave} style={primary}>
+        Save
+      </button>
+      {saved && <span style={{ fontSize: 12, color: "#4ade80" }}>Saved ✓</span>}
+    </div>
+  );
+}
+
+function Empty({ children }: { children: React.ReactNode }) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        height: "100%",
+        color: "rgb(var(--muted))",
+        fontSize: 14,
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
+const input: React.CSSProperties = {
+  background: "rgb(var(--bg))",
+  color: "rgb(var(--fg))",
+  border: "1px solid rgb(var(--border))",
+  borderRadius: 6,
+  padding: "6px 8px",
+  fontSize: 13,
+  width: "100%",
+};
+
+const primary: React.CSSProperties = {
+  background: "rgb(var(--accent))",
+  color: "white",
+  border: "none",
+  padding: "7px 16px",
+  borderRadius: 7,
+  cursor: "pointer",
+  fontSize: 13,
+  fontWeight: 600,
+  alignSelf: "flex-start",
+};
+
+const ghost: React.CSSProperties = {
+  background: "transparent",
+  color: "rgb(var(--fg))",
+  border: "1px solid rgb(var(--border))",
+  padding: "3px 10px",
+  borderRadius: 6,
+  cursor: "pointer",
+  fontSize: 11,
+};
+
+const card: React.CSSProperties = {
+  border: "1px solid rgb(var(--border))",
+  borderRadius: 8,
+  padding: 10,
+};
+
+const pre: React.CSSProperties = {
+  background: "rgb(var(--bg))",
+  border: "1px solid rgb(var(--border))",
+  borderRadius: 6,
+  padding: 8,
+  fontSize: 11,
+  marginTop: 6,
+  whiteSpace: "pre-wrap",
+  wordBreak: "break-word",
+  maxHeight: 220,
+  overflowY: "auto",
+};
+
+const hint: React.CSSProperties = {
+  fontSize: 12,
+  color: "rgb(var(--muted))",
+  margin: 0,
+  lineHeight: 1.5,
+};
+
+const checkboxRow: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: 8,
+  fontSize: 13,
+};

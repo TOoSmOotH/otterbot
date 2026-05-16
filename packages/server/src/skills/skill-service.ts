@@ -3,10 +3,11 @@ import { eq, sql } from "drizzle-orm";
 import matter from "gray-matter";
 import { writeFileSync, mkdirSync, readFileSync, existsSync, readdirSync } from "node:fs";
 import { resolve, join } from "node:path";
-import { getDb, schema } from "../db/index.js";
+import type { AgentDrizzle } from "../db/agent-db.js";
+import * as schema from "../db/schema.js";
 import { scanSkillContent } from "./skill-scanner.js";
-import { getMemoryService } from "../memory/memory-service.js";
-import { getConfig } from "../config.js";
+import type { MemoryService } from "../memory/memory-service.js";
+import { getDefaultContext } from "../runtime/default-agent.js";
 import type {
   Skill,
   SkillCreate,
@@ -18,7 +19,18 @@ import type {
   SkillSource,
 } from "@otterbot/shared";
 
+/**
+ * Per-agent skill service. Skills live as markdown files in the agent's own
+ * `skills/` directory and are mirrored into the agent's database. One instance
+ * per agent.
+ */
 export class SkillService {
+  constructor(
+    private readonly db: AgentDrizzle,
+    private readonly skillsDir: string,
+    private readonly memory: MemoryService
+  ) {}
+
   parseSkillFile(raw: string): { meta: SkillMeta; body: string } {
     const { data, content } = matter(raw);
     const meta: SkillMeta = {
@@ -52,18 +64,19 @@ export class SkillService {
   }
 
   list(): Skill[] {
-    const db = getDb();
-    return db.select().from(schema.skills).all().map((r) => this.toSkill(r));
+    return this.db
+      .select()
+      .from(schema.skills)
+      .all()
+      .map((r) => this.toSkill(r));
   }
 
   get(id: string): Skill | null {
-    const db = getDb();
-    const row = db.select().from(schema.skills).where(eq(schema.skills.id, id)).get();
+    const row = this.db.select().from(schema.skills).where(eq(schema.skills.id, id)).get();
     return row ? this.toSkill(row) : null;
   }
 
   create(data: SkillCreate, opts?: { id?: string; scanReport?: ScanReport }): Skill {
-    const db = getDb();
     const now = new Date().toISOString();
     const raw = this.serializeSkillFile(data.meta, data.body);
     const scanReport = opts?.scanReport ?? scanSkillContent(raw);
@@ -90,13 +103,12 @@ export class SkillService {
       createdAt: now,
       updatedAt: now,
     };
-    db.insert(schema.skills).values(row).run();
+    this.db.insert(schema.skills).values(row).run();
     this.indexFts(row);
     return this.toSkill(row);
   }
 
   update(id: string, data: SkillUpdate): Skill | null {
-    const db = getDb();
     const existing = this.get(id);
     if (!existing) return null;
 
@@ -125,14 +137,13 @@ export class SkillService {
       updatedAt: new Date().toISOString(),
     };
     if (existing.meta.name !== newMeta.name) {
-      // Rewrite file on rename
       this.writeToDisk(id, raw);
-    } else if (existing) {
-      const row = db.select().from(schema.skills).where(eq(schema.skills.id, id)).get();
+    } else {
+      const row = this.db.select().from(schema.skills).where(eq(schema.skills.id, id)).get();
       if (row?.filePath) writeFileSync(row.filePath, raw, "utf8");
     }
 
-    db.update(schema.skills).set(updates).where(eq(schema.skills.id, id)).run();
+    this.db.update(schema.skills).set(updates).where(eq(schema.skills.id, id)).run();
     const updated = this.get(id);
     if (updated) {
       this.indexFts({
@@ -147,17 +158,16 @@ export class SkillService {
   }
 
   recordUse(id: string) {
-    const db = getDb();
-    db.update(schema.skills)
+    this.db
+      .update(schema.skills)
       .set({ useCount: sql`use_count + 1` })
       .where(eq(schema.skills.id, id))
       .run();
   }
 
   delete(id: string): boolean {
-    const db = getDb();
-    const res = db.delete(schema.skills).where(eq(schema.skills.id, id)).run();
-    getMemoryService().removeFts("skill", id);
+    const res = this.db.delete(schema.skills).where(eq(schema.skills.id, id)).run();
+    this.memory.removeFts("skill", id);
     return res.changes > 0;
   }
 
@@ -169,7 +179,7 @@ export class SkillService {
 
   /** Load all .md skills from disk into the DB. Called once on startup. */
   loadFromDisk(): number {
-    const dir = getConfig().skillsDir;
+    const dir = this.skillsDir;
     if (!existsSync(dir)) return 0;
     let count = 0;
     for (const name of readdirSync(dir)) {
@@ -177,11 +187,8 @@ export class SkillService {
       const filePath = join(dir, name);
       const raw = readFileSync(filePath, "utf8");
       const { meta, body } = this.parseSkillFile(raw);
-      // Use the filename (minus .md) as a deterministic id so the same file
-      // yields the same DB row on reload.
       const id = name.replace(/\.md$/, "");
-      const db = getDb();
-      const existing = db.select().from(schema.skills).where(eq(schema.skills.id, id)).get();
+      const existing = this.db.select().from(schema.skills).where(eq(schema.skills.id, id)).get();
       const scanReport = scanSkillContent(raw);
       const now = new Date().toISOString();
       const row = {
@@ -204,9 +211,9 @@ export class SkillService {
         updatedAt: now,
       };
       if (existing) {
-        db.update(schema.skills).set(row).where(eq(schema.skills.id, id)).run();
+        this.db.update(schema.skills).set(row).where(eq(schema.skills.id, id)).run();
       } else {
-        db.insert(schema.skills).values(row).run();
+        this.db.insert(schema.skills).values(row).run();
       }
       this.indexFts(row);
       count++;
@@ -215,9 +222,8 @@ export class SkillService {
   }
 
   private writeToDisk(id: string, raw: string): string {
-    const dir = getConfig().skillsDir;
-    mkdirSync(dir, { recursive: true });
-    const filePath = resolve(dir, `${id}.md`);
+    mkdirSync(this.skillsDir, { recursive: true });
+    const filePath = resolve(this.skillsDir, `${id}.md`);
     writeFileSync(filePath, raw, "utf8");
     return filePath;
   }
@@ -229,7 +235,7 @@ export class SkillService {
     tags: string[];
     body: string;
   }) {
-    getMemoryService().indexFts({
+    this.memory.indexFts({
       kind: "skill",
       refId: row.id,
       title: row.name,
@@ -285,8 +291,7 @@ export class SkillService {
   }
 }
 
-let _svc: SkillService | null = null;
+/** @deprecated Compatibility shim — resolves to the default (COO) agent's skill service. */
 export function getSkillService(): SkillService {
-  if (!_svc) _svc = new SkillService();
-  return _svc;
+  return getDefaultContext().skills;
 }

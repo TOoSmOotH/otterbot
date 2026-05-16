@@ -1,120 +1,73 @@
-import { useEffect } from "react";
-import { Chat } from "./components/chat/Chat";
-import { View2D } from "./components/views/View2D";
-import { View3D } from "./components/views/View3D";
-import { ViewDesktop } from "./components/views/ViewDesktop";
-import { useViewStore, type ViewPane } from "./stores/view-store";
-import { useUserProfileStore } from "./stores/user-profile-store";
-import { useSkillsStore } from "./stores/skills-store";
+import { useEffect, useState } from "react";
+import { AgentRoster } from "./components/agents/AgentRoster";
+import { AgentChat } from "./components/chat/AgentChat";
+import { AgentEditor } from "./components/agents/AgentEditor";
+import { AgentStudio } from "./components/agents/AgentStudio";
+import { ActivityView } from "./components/agents/ActivityView";
+import { AgentScene3D } from "./components/agents/AgentScene3D";
+import { useAgentsStore } from "./stores/agents-store";
+import { useChatStore } from "./stores/chat-store";
 
-const TABS: Array<{ key: ViewPane; label: string }> = [
-  { key: "none", label: "Chat only" },
-  { key: "2d", label: "2D" },
-  { key: "3d", label: "3D" },
-  { key: "desktop", label: "Desktop" },
-];
+type MainView = "chat" | "studio" | "activity" | "3d";
+
+const VIEWS: MainView[] = ["chat", "studio", "activity", "3d"];
 
 export default function App() {
-  const pane = useViewStore((s) => s.pane);
-  const setPane = useViewStore((s) => s.setPane);
-  const loadProfile = useUserProfileStore((s) => s.load);
-  const loadSkills = useSkillsStore((s) => s.load);
+  const loadAgents = useAgentsStore((s) => s.load);
+  const bindSocket = useAgentsStore((s) => s.bindSocket);
+  const setActive = useAgentsStore((s) => s.setActive);
+  const activeAgentId = useAgentsStore((s) => s.activeAgentId);
+  const connect = useChatStore((s) => s.connect);
+
+  const [createOpen, setCreateOpen] = useState(false);
+  const [view, setView] = useState<MainView>("chat");
 
   useEffect(() => {
-    void loadProfile();
-    void loadSkills();
-  }, [loadProfile, loadSkills]);
+    connect();
+    bindSocket();
+    void loadAgents();
+  }, [connect, bindSocket, loadAgents]);
 
-  const showPane = pane !== "none";
+  const openStudio = (id: string) => {
+    setActive(id);
+    setView("studio");
+  };
 
   return (
-    <div
-      style={{
-        height: "100%",
-        display: "grid",
-        gridTemplateColumns: showPane ? "380px 1fr" : "1fr",
-      }}
-    >
-      <Chat />
-      {showPane && (
-        <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
-          <nav
-            style={{
-              display: "flex",
-              gap: 4,
-              padding: 6,
-              borderBottom: "1px solid rgb(var(--border))",
-            }}
-          >
-            {TABS.map((t) => (
-              <button
-                key={t.key}
-                data-testid={`tab-${t.key}`}
-                onClick={() => setPane(t.key)}
-                style={{
-                  background: pane === t.key ? "rgb(var(--accent))" : "transparent",
-                  color: pane === t.key ? "white" : "rgb(var(--fg))",
-                  border: "1px solid rgb(var(--border))",
-                  padding: "4px 10px",
-                  borderRadius: 6,
-                  cursor: "pointer",
-                  fontSize: 12,
-                }}
-              >
-                {t.label}
-              </button>
-            ))}
-          </nav>
-          <div style={{ flex: 1, minHeight: 0 }}>
-            {pane === "2d" && <View2D />}
-            {pane === "3d" && <View3D />}
-            {pane === "desktop" && <ViewDesktop />}
-          </div>
+    <div style={{ height: "100%", display: "grid", gridTemplateColumns: "260px 1fr" }}>
+      <AgentRoster onNewAgent={() => setCreateOpen(true)} />
+
+      <div style={{ display: "flex", flexDirection: "column", minHeight: 0 }}>
+        <nav style={{ display: "flex", gap: 4, padding: 6, borderBottom: "1px solid rgb(var(--border))" }}>
+          {VIEWS.map((v) => (
+            <button
+              key={v}
+              data-testid={`view-${v}`}
+              onClick={() => setView(v)}
+              style={{
+                background: view === v ? "rgb(var(--accent))" : "transparent",
+                color: view === v ? "white" : "rgb(var(--fg))",
+                border: "1px solid rgb(var(--border))",
+                padding: "4px 12px",
+                borderRadius: 6,
+                cursor: "pointer",
+                fontSize: 12,
+                textTransform: "capitalize",
+              }}
+            >
+              {v}
+            </button>
+          ))}
+        </nav>
+        <div style={{ flex: 1, minHeight: 0 }}>
+          {view === "chat" && <AgentChat onEditAgent={openStudio} />}
+          {view === "studio" && <AgentStudio agentId={activeAgentId} />}
+          {view === "activity" && <ActivityView />}
+          {view === "3d" && <AgentScene3D />}
         </div>
-      )}
-      {!showPane && (
-        <></>
-      )}
-      <ViewTabsCorner />
-    </div>
-  );
-}
+      </div>
 
-/**
- * Floating tabs in the corner so users can open a pane when none is active.
- */
-function ViewTabsCorner() {
-  const pane = useViewStore((s) => s.pane);
-  const setPane = useViewStore((s) => s.setPane);
-  if (pane !== "none") return null;
-  return (
-    <div
-      style={{
-        position: "fixed",
-        bottom: 12,
-        right: 12,
-        display: "flex",
-        gap: 6,
-      }}
-    >
-      {TABS.filter((t) => t.key !== "none").map((t) => (
-        <button
-          key={t.key}
-          data-testid={`tab-open-${t.key}`}
-          onClick={() => setPane(t.key)}
-          style={{
-            background: "rgb(var(--border))",
-            color: "rgb(var(--fg))",
-            border: "none",
-            padding: "6px 10px",
-            borderRadius: 6,
-            cursor: "pointer",
-            fontSize: 12,
-          }}
-        >
-          {t.label}
-        </button>
-      ))}
+      {createOpen && <AgentEditor agentId={null} onClose={() => setCreateOpen(false)} />}
     </div>
   );
 }

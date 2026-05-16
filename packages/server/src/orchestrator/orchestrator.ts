@@ -1,0 +1,429 @@
+import { resolve } from "node:path";
+import { eq, desc } from "drizzle-orm";
+import { nanoid } from "nanoid";
+import type {
+  AgentProfile,
+  AgentProfileSummary,
+  AgentStatus,
+  AgentRole,
+} from "@otterbot/shared";
+import type { Config } from "../config.js";
+import { ProfileStore, normalizeProfile } from "../profiles/profile-store.js";
+import { controlSchema, type ControlDb } from "../db/control-db.js";
+import { buildAgentContext, type AgentContext } from "../runtime/agent-context.js";
+import { AgentRuntime } from "../runtime/agent-runtime.js";
+import type { AgentServices, SpawnResult } from "../runtime/agent-services.js";
+import { resolveEmbeddingConfig } from "../providers/registry.js";
+import { setDefaultContext } from "../runtime/default-agent.js";
+import { MessageBus } from "../bus/bus.js";
+import { createTransport } from "../bus/transports/factory.js";
+import { Scheduler } from "../scheduler/scheduler.js";
+
+/** Input for creating a new agent profile. */
+export interface CreateAgentInput {
+  displayName: string;
+  role?: AgentRole;
+  persona?: string;
+  model?: AgentProfile["model"];
+  allowedModels?: AgentProfile["allowedModels"];
+  allowedChatServices?: AgentProfile["allowedChatServices"];
+  transport?: AgentProfile["transport"];
+  email?: string | null;
+  artwork?: AgentProfile["artwork"];
+  canSpawnSubagents?: boolean;
+  subagentLimit?: number;
+  parentId?: string | null;
+}
+
+function slugify(name: string): string {
+  return (
+    name
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 40) || "agent"
+  );
+}
+
+/**
+ * Owns the lifecycle of every agent: builds one isolated `AgentContext` and
+ * `AgentRuntime` per profile, keeps the control DB registry in sync, and
+ * exposes create/update/delete. The COO is just the profile with role "coo".
+ */
+export class Orchestrator {
+  private readonly contexts = new Map<string, AgentContext>();
+  private readonly runtimes = new Map<string, AgentRuntime>();
+  private readonly statusListeners = new Set<(id: string, status: AgentStatus) => void>();
+  /** Background embedding-init promises, awaited on shutdown. */
+  private readonly pendingInits: Promise<void>[] = [];
+  private readonly bus: MessageBus;
+  private readonly scheduler: Scheduler;
+  private readonly services: AgentServices;
+  private subagentSeq = 0;
+
+  constructor(
+    private readonly profiles: ProfileStore,
+    private readonly control: ControlDb,
+    private readonly cfg: Config
+  ) {
+    this.bus = new MessageBus(control, createTransport(cfg));
+    this.scheduler = new Scheduler(control, (id) => this.runtimes.get(id));
+    this.bus.setDeliver((agentId, msg) => {
+      if (agentId === "*") {
+        for (const rt of this.runtimes.values()) {
+          if (rt.id !== msg.from) void rt.handleBusMessage(msg);
+        }
+      } else {
+        void this.runtimes.get(agentId)?.handleBusMessage(msg);
+      }
+    });
+    this.services = {
+      bus: this.bus,
+      listAgents: () =>
+        this.listProfiles().map((p) => ({
+          id: p.id,
+          displayName: p.displayName,
+          role: p.role,
+          summary: p.persona.split("\n").find((l) => l.trim())?.slice(0, 140) ?? "",
+        })),
+      spawnSubagent: (parentId, goal, opts) => this.spawnSubagent(parentId, goal, opts),
+      scheduleTask: (agentId, cron, prompt) => this.scheduler.add(agentId, cron, prompt),
+      listScheduledTasks: (agentId) => this.scheduler.list(agentId),
+      cancelScheduledTask: (id) => this.scheduler.cancel(id),
+    };
+  }
+
+  /** The agent-to-agent message bus. */
+  getBus(): MessageBus {
+    return this.bus;
+  }
+
+  /** The cron scheduler. */
+  getScheduler(): Scheduler {
+    return this.scheduler;
+  }
+
+  /** Stop the scheduler + bus and close every agent's database. */
+  async shutdown(): Promise<void> {
+    this.scheduler.stop();
+    await this.bus.stop();
+    await Promise.allSettled(this.pendingInits.splice(0));
+    for (const ctx of this.contexts.values()) {
+      try {
+        ctx.close();
+      } catch {
+        // already closed
+      }
+    }
+    this.contexts.clear();
+    this.runtimes.clear();
+  }
+
+  /** Load (or first-run migrate) every profile and start its runtime. */
+  async boot(): Promise<void> {
+    this.profiles.ensureCooProfile({
+      chatModelId: this.cfg.model,
+      legacyDbPath: resolve(this.cfg.dataDir, "otterbot.db"),
+      legacySkillsDir: this.cfg.skillsDir,
+    });
+
+    for (const profile of this.profiles.list()) {
+      this.startAgent(profile);
+    }
+
+    const coo = this.contexts.get("coo");
+    if (!coo) throw new Error("COO profile failed to load");
+    setDefaultContext(coo);
+
+    await this.bus.start();
+    this.scheduler.start();
+  }
+
+  /** Build and register a runtime + context for a profile. */
+  private startAgent(profile: AgentProfile): AgentContext {
+    const paths = this.profiles.pathsFor(profile.id);
+    const secrets = this.profiles.readSecrets(profile.id);
+    const ctx = buildAgentContext({
+      profile,
+      secrets,
+      agentDbPath: paths.agentDb,
+      skillsDir: paths.skillsDir,
+      embedding: resolveEmbeddingConfig(profile.model.embedding, secrets),
+    });
+    const runtime = new AgentRuntime(ctx, this.services);
+    runtime.onStatus((status) => {
+      this.persistStatus(profile.id, status);
+      for (const listener of this.statusListeners) listener(profile.id, status);
+    });
+    this.contexts.set(profile.id, ctx);
+    this.runtimes.set(profile.id, runtime);
+    this.registerInControl(profile, paths.dir);
+    this.pendingInits.push(ctx.embedding.init());
+    ctx.skills.loadFromDisk();
+    return ctx;
+  }
+
+  private registerInControl(profile: AgentProfile, profileDir: string): void {
+    this.control.db
+      .insert(controlSchema.agents)
+      .values({
+        id: profile.id,
+        displayName: profile.displayName,
+        role: profile.role,
+        profileDir,
+        status: "idle",
+        parentId: profile.parentId,
+        createdAt: profile.createdAt,
+      })
+      .onConflictDoUpdate({
+        target: controlSchema.agents.id,
+        set: {
+          displayName: profile.displayName,
+          role: profile.role,
+          parentId: profile.parentId,
+        },
+      })
+      .run();
+  }
+
+  private persistStatus(id: string, status: AgentStatus): void {
+    this.control.db
+      .update(controlSchema.agents)
+      .set({ status })
+      .where(eq(controlSchema.agents.id, id))
+      .run();
+  }
+
+  // --- Accessors -----------------------------------------------------------
+
+  getRuntime(id: string): AgentRuntime | undefined {
+    return this.runtimes.get(id);
+  }
+
+  getContext(id: string): AgentContext | undefined {
+    return this.contexts.get(id);
+  }
+
+  getCoo(): AgentRuntime {
+    const coo = this.runtimes.get("coo");
+    if (!coo) throw new Error("COO runtime not started");
+    return coo;
+  }
+
+  listProfiles(): AgentProfile[] {
+    return [...this.contexts.values()].map((c) => c.profile);
+  }
+
+  listSummaries(): AgentProfileSummary[] {
+    return [...this.runtimes.values()].map((r) => {
+      const p = r.ctx.profile;
+      return {
+        id: p.id,
+        displayName: p.displayName,
+        role: p.role,
+        status: r.status,
+        chatModel: p.model.chat,
+        artwork: p.artwork,
+        parentId: p.parentId,
+        activeSubagents: [...this.contexts.values()].filter(
+          (c) => c.profile.parentId === p.id
+        ).length,
+      };
+    });
+  }
+
+  onStatusChange(listener: (id: string, status: AgentStatus) => void): () => void {
+    this.statusListeners.add(listener);
+    return () => this.statusListeners.delete(listener);
+  }
+
+  // --- Mutations -----------------------------------------------------------
+
+  /** Create a new agent profile, scaffold its directory, and start it. */
+  createAgent(input: CreateAgentInput): AgentProfile {
+    let id = slugify(input.displayName);
+    let n = 2;
+    while (this.profiles.exists(id) || this.contexts.has(id)) {
+      id = `${slugify(input.displayName)}-${n++}`;
+    }
+    const profile = normalizeProfile({
+      id,
+      displayName: input.displayName,
+      role: input.role ?? "agent",
+      persona: input.persona,
+      model: input.model,
+      allowedModels: input.allowedModels,
+      allowedChatServices: input.allowedChatServices,
+      transport: input.transport,
+      email: input.email ?? null,
+      artwork: input.artwork,
+      canSpawnSubagents: input.canSpawnSubagents,
+      subagentLimit: input.subagentLimit,
+      parentId: input.parentId ?? null,
+      createdAt: new Date().toISOString(),
+    });
+    this.profiles.create(profile);
+    this.startAgent(profile);
+    return profile;
+  }
+
+  /** Update a profile and restart its runtime so model/persona changes apply. */
+  updateAgent(id: string, patch: Partial<AgentProfile>): AgentProfile | null {
+    const ctx = this.contexts.get(id);
+    if (!ctx) return null;
+    const updated = normalizeProfile({ ...ctx.profile, ...patch, id });
+    this.profiles.save(updated);
+
+    ctx.close();
+    this.contexts.delete(id);
+    this.runtimes.delete(id);
+    const fresh = this.startAgent(updated);
+    if (id === "coo") setDefaultContext(fresh);
+    return updated;
+  }
+
+  /** Delete an agent. The COO cannot be deleted. */
+  deleteAgent(id: string): boolean {
+    if (id === "coo") return false;
+    const ctx = this.contexts.get(id);
+    if (!ctx) return false;
+    ctx.close();
+    this.contexts.delete(id);
+    this.runtimes.delete(id);
+    this.control.db.delete(controlSchema.agents).where(eq(controlSchema.agents.id, id)).run();
+    this.profiles.delete(id);
+    return true;
+  }
+
+  /** Write an agent's secrets (`.env`) and restart it so they take effect. */
+  setCredentials(id: string, secrets: Record<string, string>): boolean {
+    if (!this.contexts.has(id)) return false;
+    this.profiles.writeSecrets(id, new Map(Object.entries(secrets)));
+    this.updateAgent(id, {});
+    return true;
+  }
+
+  /**
+   * Spawn an ephemeral subagent under `parentId` to pursue `goal`, run it to
+   * completion, and return its findings. The subagent inherits the parent's
+   * model + credentials, is tracked in `subagent_tasks`, and announces itself
+   * (`spawn`) and its result (`report`) on the bus.
+   */
+  async spawnSubagent(
+    parentId: string,
+    goal: string,
+    opts?: { modelRef?: AgentProfile["model"]["chat"] }
+  ): Promise<SpawnResult> {
+    const parentCtx = this.contexts.get(parentId);
+    if (!parentCtx) throw new Error(`Unknown agent: ${parentId}`);
+    if (!parentCtx.profile.canSpawnSubagents) {
+      throw new Error(`agent ${parentId} is not allowed to spawn subagents`);
+    }
+    const active = [...this.contexts.values()].filter(
+      (c) => c.profile.parentId === parentId && c.profile.role === "subagent"
+    ).length;
+    if (active >= parentCtx.profile.subagentLimit) {
+      throw new Error(`subagent limit (${parentCtx.profile.subagentLimit}) reached`);
+    }
+
+    const subId = `${parentId}__sub__${++this.subagentSeq}`;
+    const taskId = nanoid();
+    const now = new Date().toISOString();
+    const subProfile = normalizeProfile({
+      id: subId,
+      displayName: `${parentCtx.profile.displayName} · sub ${this.subagentSeq}`,
+      role: "subagent",
+      persona:
+        `You are a focused research subagent spawned by ${parentCtx.profile.displayName}. ` +
+        `Pursue exactly the goal you are given, use your tools (search_memory, save_finding), ` +
+        `and finish with a concise findings summary.`,
+      model: {
+        chat: opts?.modelRef ?? parentCtx.profile.model.chat,
+        embedding: parentCtx.profile.model.embedding,
+      },
+      allowedModels: parentCtx.profile.allowedModels,
+      transport: parentCtx.profile.transport,
+      artwork: parentCtx.profile.artwork,
+      parentId,
+      canSpawnSubagents: false,
+      createdAt: now,
+    });
+    this.profiles.create(subProfile);
+    // Inherit the parent's secrets so the subagent reaches the same endpoints.
+    this.profiles.writeSecrets(subId, this.profiles.readSecrets(parentId));
+    this.startAgent(subProfile);
+
+    this.control.db
+      .insert(controlSchema.subagentTasks)
+      .values({
+        id: taskId,
+        rootId: taskId,
+        parentTaskId: null,
+        parentAgentId: parentId,
+        subagentId: subId,
+        goal,
+        status: "running",
+        resultSummary: null,
+        createdAt: now,
+        finishedAt: null,
+      })
+      .run();
+
+    this.bus.publish({
+      id: nanoid(),
+      kind: "spawn",
+      from: parentId,
+      to: null,
+      threadId: taskId,
+      correlationId: null,
+      rootSpawnId: taskId,
+      body: `Spawned ${subId} for: ${goal}`,
+      transport: parentCtx.profile.transport,
+    });
+
+    const runtime = this.runtimes.get(subId);
+    let summary = "";
+    let status: "done" | "failed" = "done";
+    try {
+      if (!runtime) throw new Error("subagent runtime failed to start");
+      const res = await runtime.respond({
+        conversationId: `spawn-${taskId}`,
+        userMessage: goal,
+        onChunk: () => {},
+      });
+      summary = res.finalText || "(no findings)";
+    } catch (err) {
+      status = "failed";
+      summary = `Error: ${err instanceof Error ? err.message : String(err)}`;
+    }
+
+    this.control.db
+      .update(controlSchema.subagentTasks)
+      .set({ status, resultSummary: summary, finishedAt: new Date().toISOString() })
+      .where(eq(controlSchema.subagentTasks.id, taskId))
+      .run();
+
+    this.bus.publish({
+      id: nanoid(),
+      kind: "report",
+      from: subId,
+      to: parentId,
+      threadId: taskId,
+      correlationId: null,
+      rootSpawnId: taskId,
+      body: summary,
+      transport: parentCtx.profile.transport,
+    });
+
+    return { subagentId: subId, taskId, summary };
+  }
+
+  /** All subagent spawn tasks, newest first. */
+  listSubagentTasks(): Array<typeof controlSchema.subagentTasks.$inferSelect> {
+    return this.control.db
+      .select()
+      .from(controlSchema.subagentTasks)
+      .orderBy(desc(controlSchema.subagentTasks.createdAt))
+      .all();
+  }
+}

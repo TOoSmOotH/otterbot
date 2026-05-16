@@ -1,62 +1,48 @@
 import { test, expect } from "@playwright/test";
-import { openSessionAndWait } from "./helpers";
+import { gotoApp } from "./helpers";
 
 /**
- * Shell tests — do not require LM Studio. Verify the app boots, the
- * socket connects, the view panes toggle, and the API endpoints are
- * reachable. Skipping these would mean the server is not running.
+ * Shell tests — verify the multi-agent app boots, the roster renders, the
+ * main views switch, and the core API endpoints respond.
  */
 test.describe("shell", () => {
-  test("app loads and socket connects", async ({ page }) => {
-    await openSessionAndWait(page);
+  test("app loads with the COO in the roster", async ({ page }) => {
+    await gotoApp(page);
     await expect(page.getByText("otterbot")).toBeVisible();
-    const status = page.getByTestId("connection-status");
-    await expect(status).toContainText("●");
+    await expect(page.getByTestId("agent-card-coo")).toBeVisible();
   });
 
-  test("view tabs switch panes", async ({ page }) => {
-    await openSessionAndWait(page);
-    // With pane=none, corner tabs offer opening a pane.
-    await page.getByTestId("tab-open-2d").click();
-    await expect(page.getByTestId("view-2d, view-2d-empty").or(page.getByTestId("view-2d")).or(page.getByTestId("view-2d-empty"))).toBeVisible();
+  test("main views switch", async ({ page }) => {
+    await gotoApp(page);
 
-    await page.getByTestId("tab-3d").click();
-    await expect(page.getByTestId("view-3d").or(page.getByTestId("view-3d-empty"))).toBeVisible();
+    await page.getByTestId("view-activity").click();
+    await expect(page.getByText("Agent communication")).toBeVisible();
 
-    await page.getByTestId("tab-desktop").click();
-    const desktopEl = page
-      .getByTestId("view-desktop")
-      .or(page.getByTestId("view-desktop-placeholder"));
-    await expect(desktopEl).toBeVisible();
+    await page.getByTestId("view-3d").click();
+    await expect(page.getByTestId("agent-scene-3d")).toBeVisible();
+
+    await page.getByTestId("view-chat").click();
+    await expect(page.getByTestId("chat-input")).toBeVisible();
   });
 
-  test("scenes endpoint returns JSON", async ({ request }) => {
-    const res = await request.get("/api/scenes");
+  test("GET /api/agents includes the COO", async ({ request }) => {
+    const res = await request.get("/api/agents");
     expect(res.ok()).toBeTruthy();
-    const json = await res.json();
-    expect(Array.isArray(json)).toBeTruthy();
+    const json = (await res.json()) as Array<{ id: string; role: string }>;
+    expect(json.some((a) => a.id === "coo" && a.role === "coo")).toBeTruthy();
   });
 
-  test("skills endpoint returns JSON", async ({ request }) => {
-    const res = await request.get("/api/skills");
+  test("GET /api/providers lists model providers", async ({ request }) => {
+    const res = await request.get("/api/providers");
     expect(res.ok()).toBeTruthy();
-    const json = await res.json();
-    expect(Array.isArray(json)).toBeTruthy();
+    const json = (await res.json()) as Array<{ id: string }>;
+    expect(json.some((p) => p.id === "anthropic")).toBeTruthy();
+    expect(json.some((p) => p.id === "lmstudio")).toBeTruthy();
   });
 
-  test("user-profile endpoint returns profile shape", async ({ request }) => {
-    const res = await request.get("/api/user-profile");
+  test("GET /api/bus/messages returns an array", async ({ request }) => {
+    const res = await request.get("/api/bus/messages");
     expect(res.ok()).toBeTruthy();
-    const json = await res.json();
-    expect(json).toHaveProperty("preferences");
-    expect(json).toHaveProperty("goals");
-    expect(json).toHaveProperty("facts");
-  });
-
-  test("desktop status endpoint responds", async ({ request }) => {
-    const res = await request.get("/api/desktop/status");
-    expect(res.ok()).toBeTruthy();
-    const json = await res.json();
-    expect(json).toHaveProperty("enabled");
+    expect(Array.isArray(await res.json())).toBeTruthy();
   });
 });

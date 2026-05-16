@@ -4,113 +4,121 @@ import type { StreamChunk } from "@otterbot/shared";
 
 export interface ChatMessage {
   id: string;
-  role: "user" | "assistant";
+  role: "user" | "assistant" | "tool";
   content: string;
   pending?: boolean;
   error?: string;
 }
 
 interface ChatState {
-  conversationId: string | null;
-  messages: ChatMessage[];
-  streaming: boolean;
   connected: boolean;
-  toolEvents: Array<{ id: string; name: string; result?: unknown }>;
+  /** Message history per agent id. */
+  byAgent: Record<string, ChatMessage[]>;
+  /** Whether each agent is currently streaming a response. */
+  streaming: Record<string, boolean>;
+  socketBound: boolean;
+
   connect: () => void;
-  send: (text: string) => void;
-  reset: () => void;
+  join: (agentId: string) => void;
+  send: (agentId: string, text: string) => void;
+  reset: (agentId: string) => void;
+}
+
+function appendChunk(messages: ChatMessage[], chunk: StreamChunk): ChatMessage[] {
+  const next = messages.slice();
+  const last = next[next.length - 1];
+  switch (chunk.kind) {
+    case "token":
+      if (last && last.role === "assistant" && last.pending) {
+        next[next.length - 1] = { ...last, content: last.content + chunk.text };
+      } else {
+        next.push({
+          id: `a-${Date.now()}-${next.length}`,
+          role: "assistant",
+          content: chunk.text,
+          pending: true,
+        });
+      }
+      return next;
+    case "tool_start":
+      next.push({ id: `t-${chunk.id}`, role: "tool", content: `Used ${chunk.name}` });
+      return next;
+    case "tool_end":
+      return next;
+    case "error":
+      if (last && last.role === "assistant" && last.pending) {
+        next[next.length - 1] = { ...last, error: chunk.message, pending: false };
+      } else {
+        next.push({ id: `e-${Date.now()}`, role: "assistant", content: "", error: chunk.message });
+      }
+      return next;
+    default:
+      return next;
+  }
 }
 
 export const useChatStore = create<ChatState>((set, get) => ({
-  conversationId: null,
-  messages: [],
-  streaming: false,
   connected: false,
-  toolEvents: [],
+  byAgent: {},
+  streaming: {},
+  socketBound: false,
 
   connect: () => {
-    if (get().connected) return;
+    if (get().socketBound) return;
+    set({ socketBound: true });
     const socket = getSocket();
 
     socket.on("connect", () => set({ connected: true }));
     socket.on("disconnect", () => set({ connected: false }));
+    if (socket.connected) set({ connected: true });
 
-    socket.on("chat:joined", (payload: { conversationId: string }) => {
-      set({ conversationId: payload.conversationId });
-    });
-
-    socket.on("chat:stream", (chunk: StreamChunk) => {
-      set((state) => {
-        const messages = state.messages.slice();
-        const last = messages[messages.length - 1];
-        switch (chunk.kind) {
-          case "token":
-            if (last && last.role === "assistant" && last.pending) {
-              messages[messages.length - 1] = { ...last, content: last.content + chunk.text };
-            } else {
-              messages.push({
-                id: `tmp-${Date.now()}`,
-                role: "assistant",
-                content: chunk.text,
-                pending: true,
-              });
-            }
-            return { messages };
-          case "tool_start":
-            return {
-              toolEvents: [...state.toolEvents, { id: chunk.id, name: chunk.name }],
-              messages,
-            };
-          case "tool_end":
-            return {
-              toolEvents: state.toolEvents.map((e) =>
-                e.id === chunk.id ? { ...e, result: chunk.result } : e,
-              ),
-              messages,
-            };
-          case "error":
-            if (last && last.role === "assistant" && last.pending) {
-              messages[messages.length - 1] = { ...last, error: chunk.message, pending: false };
-            } else {
-              messages.push({
-                id: `err-${Date.now()}`,
-                role: "assistant",
-                content: "",
-                error: chunk.message,
-              });
-            }
-            return { messages };
-          default:
-            return { messages };
-        }
-      });
-    });
-
-    socket.on("chat:done", () => {
+    socket.on("chat:stream", (payload: { agentId: string; chunk: StreamChunk }) => {
       set((state) => ({
-        streaming: false,
-        messages: state.messages.map((m) => (m.pending ? { ...m, pending: false } : m)),
+        byAgent: {
+          ...state.byAgent,
+          [payload.agentId]: appendChunk(state.byAgent[payload.agentId] ?? [], payload.chunk),
+        },
       }));
     });
 
-    socket.emit("chat:join", {});
+    socket.on("chat:done", (payload: { agentId: string }) => {
+      set((state) => ({
+        streaming: { ...state.streaming, [payload.agentId]: false },
+        byAgent: {
+          ...state.byAgent,
+          [payload.agentId]: (state.byAgent[payload.agentId] ?? []).map((m) =>
+            m.pending ? { ...m, pending: false } : m
+          ),
+        },
+      }));
+    });
   },
 
-  send: (text: string) => {
+  join: (agentId) => {
+    getSocket().emit("chat:join", { agentId });
+  },
+
+  send: (agentId, text) => {
     const trimmed = text.trim();
     if (!trimmed) return;
     set((state) => ({
-      messages: [
-        ...state.messages,
-        { id: `user-${Date.now()}`, role: "user", content: trimmed },
-      ],
-      streaming: true,
+      byAgent: {
+        ...state.byAgent,
+        [agentId]: [
+          ...(state.byAgent[agentId] ?? []),
+          { id: `u-${Date.now()}`, role: "user", content: trimmed },
+        ],
+      },
+      streaming: { ...state.streaming, [agentId]: true },
     }));
-    getSocket().emit("chat:message", { text: trimmed });
+    getSocket().emit("chat:message", { agentId, text: trimmed });
   },
 
-  reset: () => {
-    getSocket().emit("chat:close");
-    set({ messages: [], toolEvents: [], streaming: false, conversationId: null });
+  reset: (agentId) => {
+    getSocket().emit("chat:close", { agentId });
+    set((state) => ({
+      byAgent: { ...state.byAgent, [agentId]: [] },
+      streaming: { ...state.streaming, [agentId]: false },
+    }));
   },
 }));

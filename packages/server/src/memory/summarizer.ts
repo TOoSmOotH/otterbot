@@ -1,9 +1,9 @@
 import { nanoid } from "nanoid";
 import { eq, asc } from "drizzle-orm";
 import { generateText } from "ai";
-import { getDb, schema } from "../db/index.js";
-import { llm, hasLlm } from "../llm.js";
-import { getMemoryService } from "./memory-service.js";
+import * as schema from "../db/schema.js";
+import { resolveChatModel } from "../providers/registry.js";
+import type { AgentContext } from "../runtime/agent-context.js";
 
 const SUMMARIZE_PROMPT = `You are a conversation summarizer. Given the transcript below, produce:
 
@@ -26,12 +26,14 @@ export interface SummarizeResult {
 }
 
 /**
- * Build a session summary for a conversation and index it in FTS.
- * Invoked when a session closes (idle or explicit). No-op if the conversation
- * has already been summarized or has no messages.
+ * Build a session summary for a conversation in the given agent's database and
+ * index it in FTS. No-op if already summarized or empty.
  */
-export async function summarizeConversation(conversationId: string): Promise<SummarizeResult | null> {
-  const db = getDb();
+export async function summarizeConversation(
+  ctx: AgentContext,
+  conversationId: string
+): Promise<SummarizeResult | null> {
+  const db = ctx.db;
   const existing = db
     .select()
     .from(schema.sessionSummaries)
@@ -59,35 +61,33 @@ export async function summarizeConversation(conversationId: string): Promise<Sum
     .map((m) => `${m.role.toUpperCase()}: ${m.content}`)
     .join("\n\n");
 
-  if (!hasLlm()) {
-    // Fallback: store the raw transcript as a summary so FTS still works.
-    return persist(conversationId, transcript.slice(0, 1500), []);
+  try {
+    const { text } = await generateText({
+      model: resolveChatModel(ctx.profile.model.chat, ctx.secrets),
+      system: SUMMARIZE_PROMPT,
+      prompt: transcript,
+      maxTokens: 800,
+    });
+    const { summary, keyPoints } = parseSummary(text);
+    return persist(ctx, conversationId, summary, keyPoints);
+  } catch (err) {
+    console.warn("[summarize] model call failed; storing raw transcript:", err);
+    return persist(ctx, conversationId, transcript.slice(0, 1500), []);
   }
-
-  const { text } = await generateText({
-    model: llm(),
-    system: SUMMARIZE_PROMPT,
-    prompt: transcript,
-    maxTokens: 800,
-  });
-
-  const { summary, keyPoints } = parseSummary(text);
-  return persist(conversationId, summary, keyPoints);
 }
 
-function persist(conversationId: string, summary: string, keyPoints: string[]): SummarizeResult {
-  const db = getDb();
+function persist(
+  ctx: AgentContext,
+  conversationId: string,
+  summary: string,
+  keyPoints: string[]
+): SummarizeResult {
   const id = nanoid();
-  db.insert(schema.sessionSummaries)
-    .values({
-      id,
-      conversationId,
-      summary,
-      keyPoints,
-      createdAt: new Date().toISOString(),
-    })
+  ctx.db
+    .insert(schema.sessionSummaries)
+    .values({ id, conversationId, summary, keyPoints, createdAt: new Date().toISOString() })
     .run();
-  getMemoryService().indexFts({
+  ctx.memory.indexFts({
     kind: "session_summary",
     refId: id,
     title: `Session ${conversationId.slice(0, 8)}`,

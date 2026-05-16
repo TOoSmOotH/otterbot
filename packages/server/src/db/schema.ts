@@ -53,6 +53,8 @@ export const memories = sqliteTable("memories", {
   importance: integer("importance").notNull().default(5),
   accessCount: integer("access_count").notNull().default(0),
   lastAccessedAt: text("last_accessed_at"),
+  entityRefs: text("entity_refs", { mode: "json" }).$type<string[]>().notNull().default([]),
+  temporalMarker: text("temporal_marker").$type<"current" | "past" | "upcoming">(),
   createdAt: text("created_at")
     .notNull()
     .$defaultFn(() => new Date().toISOString()),
@@ -108,8 +110,7 @@ export const userProfile = sqliteTable("user_profile", {
 
 /**
  * Optional vector embedding storage for a memory/summary/skill row.
- * Populated only if ENABLE_EMBEDDINGS is set; FTS remains the primary
- * recall channel.
+ * Legacy table; sqlite-vec vec0 virtual table is preferred for new installs.
  */
 export const embeddings = sqliteTable("embeddings", {
   id: text("id").primaryKey(),
@@ -117,6 +118,32 @@ export const embeddings = sqliteTable("embeddings", {
   refId: text("ref_id").notNull(),
   vector: text("vector").notNull(), // JSON-encoded Float32Array
   model: text("model").notNull(),
+  createdAt: text("created_at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+});
+
+/**
+ * Key-value store for vec0 configuration (e.g. embedding dimension).
+ */
+export const vecConfig = sqliteTable("vec_config", {
+  key: text("key").primaryKey(),
+  value: text("value").notNull(),
+});
+
+/**
+ * Inbound agent-to-agent messages queued for this agent's runtime to process.
+ * The runtime drains handled rows; the durable cross-agent log is `bus_messages`
+ * in the control DB.
+ */
+export const inbox = sqliteTable("inbox", {
+  id: text("id").primaryKey(),
+  fromAgentId: text("from_agent_id").notNull(),
+  threadId: text("thread_id").notNull(),
+  correlationId: text("correlation_id"),
+  body: text("body").notNull(),
+  payload: text("payload", { mode: "json" }).$type<unknown>().default(null),
+  handled: integer("handled", { mode: "boolean" }).notNull().default(false),
   createdAt: text("created_at")
     .notNull()
     .$defaultFn(() => new Date().toISOString()),

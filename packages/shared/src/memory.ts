@@ -25,5 +25,5 @@ export interface SessionSummary {
 export interface MemorySearchResult {
   entry: MemoryEntry;
   score: number;
-  via: "fts" | "vector" | "recent";
+  via: "fts" | "vector" | "recent" | "hybrid";
 }

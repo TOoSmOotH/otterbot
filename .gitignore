@@ -48,3 +48,7 @@ assets/scenes/zone-test-app-*.json
 
 # Docker data
 data/
+
+# E2E test data
+data-e2e/
+packages/server/data-e2e/

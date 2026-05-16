@@ -1,14 +1,13 @@
-import { getMemoryService } from "../memory/memory-service.js";
-import { getSkillService } from "../skills/skill-service.js";
-import { getUserProfileService } from "../user-profile/user-profile-service.js";
+import type { AgentContext } from "../runtime/agent-context.js";
 
-const BASE_PERSONA = `You are Otterbot, a personal AI assistant running locally on the user's machine. You remember things across sessions, author reusable skills when you learn something worth keeping, and build a model of the user over time.
+const FALLBACK_PERSONA = `You are an Otterbot agent. You remember things across sessions,
+author reusable skills when you learn something worth keeping, and build a model
+of the user over time.
 
 Principles:
 - Be direct and concrete. Prefer doing to describing.
-- When you learn something durable about the user, call save_memory.
-- When you complete a multi-step task in a way worth reusing, call author_skill.
-- When you use an existing skill and discover a refinement, call update_skill with appendNote.
+- Acknowledge durable preferences, facts, or instructions naturally ("Got it", "Noted").
+- When you complete a multi-step task worth reusing, call author_skill.
 - Never invent memories that weren't confirmed by the user.`;
 
 export interface BuildPromptArgs {
@@ -23,22 +22,29 @@ export interface BuiltPrompt {
   memoriesUsed: string[];
 }
 
-export function buildSystemPrompt(args: BuildPromptArgs): BuiltPrompt {
-  const mem = getMemoryService();
-  const skillSvc = getSkillService();
-  const profile = getUserProfileService();
+/**
+ * Compose an agent's system prompt: its persona (SOUL.md) + the user profile +
+ * top-K hybrid memory hits + top-K matching skills + the date. All data is read
+ * from the agent's own isolated context.
+ */
+export async function buildSystemPrompt(
+  ctx: AgentContext,
+  args: BuildPromptArgs
+): Promise<BuiltPrompt> {
+  const mem = ctx.memory;
+  const skillSvc = ctx.skills;
+  const profile = ctx.userProfile;
 
-  const skillHits = mem
-    .searchContent(args.userMessage, (args.skillsLimit ?? 3) + (args.memoriesLimit ?? 6))
-    .filter((h) => h.kind === "skill")
-    .slice(0, args.skillsLimit ?? 3);
+  const contentHits = await mem.searchContent(
+    args.userMessage,
+    (args.skillsLimit ?? 3) + (args.memoriesLimit ?? 6)
+  );
 
-  const memoryHits = mem
-    .searchContent(args.userMessage, (args.memoriesLimit ?? 6) + (args.skillsLimit ?? 3))
-    .filter((h) => h.kind !== "skill")
-    .slice(0, args.memoriesLimit ?? 6);
+  const skillHits = contentHits.filter((h) => h.kind === "skill").slice(0, args.skillsLimit ?? 3);
+  const memoryHits = contentHits.filter((h) => h.kind !== "skill").slice(0, args.memoriesLimit ?? 6);
 
-  const parts: string[] = [BASE_PERSONA];
+  const persona = ctx.profile.persona.trim() || FALLBACK_PERSONA;
+  const parts: string[] = [persona];
 
   const profileBlock = profile.renderForPrompt();
   if (profileBlock) parts.push(profileBlock);

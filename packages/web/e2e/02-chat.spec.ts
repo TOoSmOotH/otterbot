@@ -1,26 +1,24 @@
 import { test, expect } from "@playwright/test";
-import { lmstudioReachable, openSessionAndWait, sendChat, waitForAssistantReply } from "./helpers";
+import { gotoApp, sendChat } from "./helpers";
 
-test.describe("chat round trip (requires LM Studio)", () => {
-  test.beforeEach(async ({ request }) => {
-    test.skip(!(await lmstudioReachable(request)), "LM Studio not reachable; skipping LLM tests");
+/**
+ * Chat tests — send a message to the COO and verify the user message and a
+ * streamed assistant reply render. Runs against the fake model server, so the
+ * reply is deterministic.
+ */
+test.describe("chat", () => {
+  test("sending a message shows the user bubble", async ({ page }) => {
+    await gotoApp(page);
+    await page.getByTestId("agent-card-coo").click();
+    await sendChat(page, "hello otterbot");
+    await expect(page.getByTestId("message-user").last()).toContainText("hello otterbot");
   });
 
-  test("user message produces streamed assistant response", async ({ page }) => {
-    await openSessionAndWait(page);
-    await sendChat(page, "Say the single word: hello");
-    const reply = await waitForAssistantReply(page);
-    const text = (await reply.textContent()) ?? "";
-    expect(text.trim().length).toBeGreaterThan(0);
-  });
-
-  test("assistant supports multi-turn context in same session", async ({ page }) => {
-    await openSessionAndWait(page);
-    await sendChat(page, "My favorite color is teal. Remember that.");
-    await waitForAssistantReply(page);
-    await sendChat(page, "What color did I just say?");
-    const reply = await waitForAssistantReply(page);
-    const text = ((await reply.textContent()) ?? "").toLowerCase();
-    expect(text).toContain("teal");
+  test("the agent streams a reply", async ({ page }) => {
+    await gotoApp(page);
+    await page.getByTestId("agent-card-coo").click();
+    await sendChat(page, "give me a one line answer");
+    await expect(page.getByTestId("message-assistant").last()).toBeVisible({ timeout: 60_000 });
+    await expect(page.getByTestId("message-assistant").last()).not.toBeEmpty();
   });
 });

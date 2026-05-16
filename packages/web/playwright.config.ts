@@ -1,17 +1,17 @@
 import { defineConfig, devices } from "@playwright/test";
 
 /**
- * Playwright E2E config — drives the full server + web stack against a
- * local LM Studio instance at http://localhost:1234/v1.
+ * Playwright E2E config — drives the full server + web stack.
  *
- * Requirements:
- * - LM Studio running locally with a model loaded and the server enabled.
- * - LMSTUDIO_MODEL env var (defaults to `local-model`) matches a model id
- *   that LM Studio exposes.
- *
- * The test suite skips LLM-dependent assertions if LM Studio is unreachable,
- * so CI without a running model still passes the non-LLM spec file.
+ * The suite is self-contained: a fake OpenAI-compatible model server is
+ * started automatically, so no LM Studio or cloud API key is required.
+ * Set LMSTUDIO_BASE_URL to point at a real model instead if desired.
  */
+const FAKE_MODEL_PORT = 8745;
+const MODEL_URL = process.env.LMSTUDIO_BASE_URL ?? `http://127.0.0.1:${FAKE_MODEL_PORT}/v1`;
+const MODEL_ID = process.env.LMSTUDIO_MODEL ?? "fake-model";
+const useFakeModel = !process.env.LMSTUDIO_BASE_URL;
+
 export default defineConfig({
   testDir: "./e2e",
   fullyParallel: false,
@@ -33,18 +33,28 @@ export default defineConfig({
     },
   ],
   webServer: [
+    ...(useFakeModel
+      ? [
+          {
+            command: "pnpm --filter @otterbot/server exec tsx src/test/fake-model-server.ts",
+            port: FAKE_MODEL_PORT,
+            reuseExistingServer: !process.env.CI,
+            cwd: "../..",
+            timeout: 20_000,
+          },
+        ]
+      : []),
     {
       command: "pnpm --filter @otterbot/server dev",
       port: 3001,
       reuseExistingServer: !process.env.CI,
       cwd: "../..",
       env: {
-        LMSTUDIO_BASE_URL: process.env.LMSTUDIO_BASE_URL ?? "http://localhost:1234/v1",
-        LMSTUDIO_MODEL: process.env.LMSTUDIO_MODEL ?? "local-model",
-        DATA_DIR: process.env.E2E_DATA_DIR ?? "./data-e2e",
-        SKILLS_DIR: process.env.E2E_SKILLS_DIR ?? "./data-e2e/skills",
+        LMSTUDIO_BASE_URL: MODEL_URL,
+        LMSTUDIO_MODEL: MODEL_ID,
+        DATA_DIR: process.env.E2E_DATA_DIR ?? "./packages/server/data-e2e",
       },
-      timeout: 30_000,
+      timeout: 40_000,
     },
     {
       command: "pnpm --filter @otterbot/web dev",
