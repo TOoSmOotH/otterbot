@@ -93,7 +93,13 @@ profile's `.env`.
 
 - `GET/POST /api/agents`, `GET/PATCH/DELETE /api/agents/:id`
 - `GET /api/agents/:id/{memories,skills,scheduled-tasks}`, `POST .../credentials`
+- `POST/DELETE /api/agents/:id/memories[/:memId]` — curate an agent's memory
+- `GET /api/skill-catalog` (built-in Hermes skills), `POST /api/agents/:id/skills/install`
 - `POST/DELETE` scheduled tasks; `GET /api/bus/messages`, `/api/subagent-tasks`
 - `GET /api/providers`, `/api/model-packs`
+- `POST /api/test-model` (verify a model), `/api/provider-models` (list a
+  provider's served models)
+- `GET /api/auth/openai/status`, `POST /api/auth/openai/{login,signout}` —
+  ChatGPT subscription OAuth (instance-wide; see `auth/openai-auth-store.ts`)
 - Socket: `chat:join|message|close` (carry `agentId`), `chat:stream|done`,
   `agent:status`, `bus:message`.

@@ -153,4 +153,74 @@ describe("HTTP API (e2e)", () => {
     },
     60_000
   );
+
+  it("provider-models rejects a request missing provider", async () => {
+    const res = await app.inject({ method: "POST", url: "/api/provider-models", payload: {} });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it("provider-models lists the models a local server serves", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/provider-models",
+      payload: { provider: "lmstudio" },
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as { ok: boolean; models?: string[] };
+    expect(body.ok).toBe(true);
+    expect(body.models).toContain(stack.cfg.model);
+  });
+
+  it("GET /api/skill-catalog lists built-in and optional skills, omits hermes-agent", async () => {
+    const res = await app.inject({ method: "GET", url: "/api/skill-catalog" });
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as Array<{ id: string; category: string; pack: string }>;
+    expect(body.length).toBeGreaterThan(120);
+    expect(body.some((s) => s.id === "github-issues" && s.pack === "builtin")).toBe(true);
+    expect(body.some((s) => s.id === "whisper" && s.pack === "optional")).toBe(true);
+    expect(body.some((s) => s.id === "hermes-agent")).toBe(false);
+    expect(body.every((s) => typeof s.category === "string" && s.category.length > 0)).toBe(true);
+  });
+
+  it("skill install rejects an unknown catalog id and a missing agent", async () => {
+    const badSkill = await app.inject({
+      method: "POST",
+      url: "/api/agents/coo/skills/install",
+      payload: { catalogId: "does-not-exist" },
+    });
+    expect(badSkill.statusCode).toBe(400);
+
+    const badAgent = await app.inject({
+      method: "POST",
+      url: "/api/agents/nope/skills/install",
+      payload: { catalogId: "github-issues" },
+    });
+    expect(badAgent.statusCode).toBe(404);
+  });
+
+  it("reports ChatGPT OAuth status (disconnected by default)", async () => {
+    const res = await app.inject({ method: "GET", url: "/api/auth/openai/status" });
+    expect(res.statusCode).toBe(200);
+    expect((res.json() as { connected: boolean }).connected).toBe(false);
+  });
+
+  it("adds a memory manually and rejects empty content", async () => {
+    const empty = await app.inject({
+      method: "POST",
+      url: "/api/agents/coo/memories",
+      payload: { content: "   " },
+    });
+    expect(empty.statusCode).toBe(400);
+
+    const added = await app.inject({
+      method: "POST",
+      url: "/api/agents/coo/memories",
+      payload: { content: "The user's name is Mike.", category: "fact" },
+    });
+    expect(added.statusCode).toBe(200);
+
+    const list = await app.inject({ method: "GET", url: "/api/agents/coo/memories" });
+    const body = list.json() as Array<{ content: string; source: string }>;
+    expect(body.some((m) => m.content.includes("Mike") && m.source === "user")).toBe(true);
+  });
 });

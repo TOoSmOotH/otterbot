@@ -26,8 +26,10 @@ export function OnboardingWizard() {
   const [step, setStep] = useState(0);
   const [provider, setProvider] = useState<ProviderId>("lmstudio");
   const [modelId, setModelId] = useState("local-model");
+  const [embeddingModelId, setEmbeddingModelId] = useState("local-model");
   const [cred, setCred] = useState("http://localhost:1234/v1");
   const [test, setTest] = useState<TestState>({ status: "idle" });
+  const [models, setModels] = useState<string[]>([]);
   const [cooName, setCooName] = useState("Otterbot COO");
   const [persona, setPersona] = useState(
     "You are the COO — a friendly, decisive coordinator. You answer the user directly and delegate specialised work to other agents."
@@ -35,12 +37,48 @@ export function OnboardingWizard() {
   const [saving, setSaving] = useState(false);
 
   const credMeta = CRED[provider];
+  /** Local providers (LM Studio, Ollama) expose a `/models` list we can fetch. */
+  const isLocal = provider === "lmstudio" || provider === "ollama";
 
   const pickProvider = (p: ProviderId) => {
     setProvider(p);
     setTest({ status: "idle" });
+    setModels([]);
     setCred(p === "lmstudio" ? "http://localhost:1234/v1" : p === "ollama" ? "http://localhost:11434/v1" : "");
     setModelId(p === "anthropic" ? "claude-opus-4-7" : p === "openai" ? "gpt-4o" : "local-model");
+    setEmbeddingModelId(p === "openai" ? "text-embedding-3-small" : "local-embedding-model");
+  };
+
+  /** Fetch the model list a local server is currently serving. */
+  const loadModels = async () => {
+    setTest({ status: "testing" });
+    try {
+      const res = await fetch("/api/provider-models", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          provider,
+          secrets: cred.trim() ? { [credMeta.key]: cred.trim() } : {},
+        }),
+      });
+      const data = (await res.json()) as { ok: boolean; models?: string[]; error?: string };
+      if (data.ok && data.models && data.models.length > 0) {
+        const list = data.models;
+        setModels(list);
+        // Auto-pick: a non-embedding model for chat, an embedding-looking one for embeddings.
+        const chatGuess = list.find((m) => !/embed/i.test(m)) ?? list[0];
+        const embedGuess = list.find((m) => /embed/i.test(m)) ?? list[0];
+        setModelId((cur) => (list.includes(cur) ? cur : chatGuess));
+        setEmbeddingModelId((cur) => (list.includes(cur) ? cur : embedGuess));
+        setTest({ status: "ok", message: `Found ${list.length} model(s).` });
+      } else {
+        setModels([]);
+        setTest({ status: "fail", message: data.error ?? "No models found at that address." });
+      }
+    } catch (err) {
+      setModels([]);
+      setTest({ status: "fail", message: err instanceof Error ? err.message : String(err) });
+    }
   };
 
   const runTest = async () => {
@@ -69,7 +107,8 @@ export function OnboardingWizard() {
   const finish = async () => {
     setSaving(true);
     try {
-      const ref = { provider, modelId: modelId.trim() };
+      const chatRef = { provider, modelId: modelId.trim() };
+      const embeddingRef = { provider, modelId: embeddingModelId.trim() };
       if (cred.trim()) {
         await fetch("/api/agents/coo/credentials", {
           method: "POST",
@@ -83,7 +122,7 @@ export function OnboardingWizard() {
         body: JSON.stringify({
           displayName: cooName.trim() || "Otterbot COO",
           persona,
-          model: { chat: ref, embedding: ref },
+          model: { chat: chatRef, embedding: embeddingRef },
           allowedModels: [{ provider, modelId: "*" }],
         }),
       });
@@ -124,7 +163,7 @@ export function OnboardingWizard() {
               and credentials. Let's set up your first agent — the <strong>COO</strong>, who
               coordinates the rest.
             </p>
-            <p style={p}>You can create more agents and fine-tune everything later in the Studio.</p>
+            <p style={p}>You can create more agents and fine-tune everything later in the Agent Studio.</p>
             <Buttons>
               <button style={ghost} onClick={() => void markComplete()}>
                 Skip setup
@@ -157,9 +196,6 @@ export function OnboardingWizard() {
                 ))}
               </div>
             </Field>
-            <Field label="Model id">
-              <input value={modelId} onChange={(e) => setModelId(e.target.value)} style={input} />
-            </Field>
             <Field label={credMeta.label}>
               <input
                 type={credMeta.secret ? "password" : "text"}
@@ -167,25 +203,53 @@ export function OnboardingWizard() {
                 onChange={(e) => {
                   setCred(e.target.value);
                   setTest({ status: "idle" });
+                  setModels([]);
                 }}
                 placeholder={credMeta.placeholder}
                 style={input}
               />
             </Field>
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <button style={ghost} onClick={runTest} disabled={test.status === "testing"}>
-                {test.status === "testing" ? "Testing…" : "Test connection"}
+              <button
+                style={ghost}
+                onClick={isLocal ? loadModels : runTest}
+                disabled={test.status === "testing"}
+              >
+                {test.status === "testing"
+                  ? isLocal
+                    ? "Loading…"
+                    : "Testing…"
+                  : isLocal
+                    ? "Get models"
+                    : "Test connection"}
               </button>
               {test.status === "ok" && <span style={{ fontSize: 12, color: "#4ade80" }}>✓ {test.message}</span>}
               {test.status === "fail" && (
                 <span style={{ fontSize: 12, color: "#f87171" }}>✗ {test.message}</span>
               )}
             </div>
+            <ModelField
+              label="Chat model"
+              value={modelId}
+              onChange={setModelId}
+              models={isLocal ? models : []}
+            />
+            <ModelField
+              label="Embedding model"
+              hint="Used to index the COO's memory. On a local server this is usually a separate text-embedding model."
+              value={embeddingModelId}
+              onChange={setEmbeddingModelId}
+              models={isLocal ? models : []}
+            />
             <Buttons>
               <button style={ghost} onClick={() => setStep(0)}>
                 Back
               </button>
-              <button style={primary} onClick={() => setStep(2)} disabled={!modelId.trim()}>
+              <button
+                style={primary}
+                onClick={() => setStep(2)}
+                disabled={!modelId.trim() || !embeddingModelId.trim()}
+              >
                 Next
               </button>
             </Buttons>
@@ -227,6 +291,43 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
       <span style={{ color: "rgb(var(--muted))" }}>{label}</span>
       {children}
     </label>
+  );
+}
+
+/**
+ * A model-id input. When a fetched model list is available (local providers
+ * after "Get models") it renders a dropdown; otherwise a free-text input.
+ */
+function ModelField({
+  label,
+  hint,
+  value,
+  onChange,
+  models,
+}: {
+  label: string;
+  hint?: string;
+  value: string;
+  onChange: (v: string) => void;
+  models: string[];
+}) {
+  return (
+    <Field label={label}>
+      {models.length > 0 ? (
+        <select value={value} onChange={(e) => onChange(e.target.value)} style={input}>
+          {/* The current value may not be in the list yet (e.g. a custom id). */}
+          {!models.includes(value) && <option value={value}>{value}</option>}
+          {models.map((m) => (
+            <option key={m} value={m}>
+              {m}
+            </option>
+          ))}
+        </select>
+      ) : (
+        <input value={value} onChange={(e) => onChange(e.target.value)} style={input} />
+      )}
+      {hint && <span style={{ color: "rgb(var(--muted))", fontSize: 11 }}>{hint}</span>}
+    </Field>
   );
 }
 

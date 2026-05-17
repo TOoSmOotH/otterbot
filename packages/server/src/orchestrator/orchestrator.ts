@@ -378,7 +378,7 @@ export class Orchestrator {
       role: "subagent",
       persona:
         `You are a focused research subagent spawned by ${parentCtx.profile.displayName}. ` +
-        `Pursue exactly the goal you are given, use your tools (search_memory, save_finding), ` +
+        `Pursue exactly the goal you are given, use your tools (search_memory, save_memory), ` +
         `and finish with a concise findings summary.`,
       model: {
         chat: opts?.modelRef ?? parentCtx.profile.model.chat,

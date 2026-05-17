@@ -5,10 +5,25 @@ author reusable skills when you learn something worth keeping, and build a model
 of the user over time.
 
 Principles:
-- Be direct and concrete. Prefer doing to describing.
-- Acknowledge durable preferences, facts, or instructions naturally ("Got it", "Noted").
-- When you complete a multi-step task worth reusing, call author_skill.
-- Never invent memories that weren't confirmed by the user.`;
+- Be direct and concrete. Prefer doing to describing.`;
+
+/**
+ * Tool-usage rules appended to *every* agent's system prompt, independent of
+ * persona. The persona (SOUL.md) is user-editable, so behaviour that must
+ * always hold — like actually persisting memory — lives here, not in it.
+ */
+const OPERATING_GUIDE = `## Memory
+
+Your memory only carries across sessions if you write to it with the \`save_memory\` tool. Chat replies are forgotten; saved memories are not.
+
+Save a memory whenever the user:
+- tells you to remember something ("remember that…", "don't forget…", "make a note…"),
+- shares a durable fact about themselves — their name, role, location, the projects or people they mention,
+- states a preference or a standing instruction for how you should work.
+
+How to save: call \`save_memory\` in the same turn, before or alongside your reply, with \`content\` written as a clear standalone sentence. For example, if the user says "my name is Mike", call \`save_memory\` with \`content: "The user's name is Mike."\` and \`category: "fact"\`, then reply confirming you saved it. Replying "Got it" or "Noted" WITHOUT calling \`save_memory\` does not save anything — the fact is lost.
+
+Use \`search_memory\` to recall earlier facts before answering questions about the user or past sessions. When you complete a multi-step task worth reusing, call \`author_skill\`. Never save a memory the user did not actually confirm.`;
 
 export interface BuildPromptArgs {
   userMessage: string;
@@ -44,7 +59,7 @@ export async function buildSystemPrompt(
   const memoryHits = contentHits.filter((h) => h.kind !== "skill").slice(0, args.memoriesLimit ?? 6);
 
   const persona = ctx.profile.persona.trim() || FALLBACK_PERSONA;
-  const parts: string[] = [persona];
+  const parts: string[] = [persona, OPERATING_GUIDE];
 
   const profileBlock = profile.renderForPrompt();
   if (profileBlock) parts.push(profileBlock);

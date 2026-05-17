@@ -21,7 +21,7 @@ test.describe("agent studio", () => {
     await expect(page.getByText("Chat model")).toBeVisible();
 
     await page.getByTestId("studio-tab-Skills").click();
-    await expect(page.getByText(/Add a skill/)).toBeVisible();
+    await expect(page.getByText(/Skill catalog/)).toBeVisible();
 
     await page.getByTestId("studio-tab-Schedule").click();
     await expect(page.getByText(/Scheduled prompts run automatically/)).toBeVisible();

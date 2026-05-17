@@ -14,6 +14,13 @@ type MainView = "chat" | "studio" | "activity" | "3d";
 
 const VIEWS: MainView[] = ["chat", "studio", "activity", "3d"];
 
+const VIEW_LABELS: Record<MainView, string> = {
+  chat: "Chat",
+  studio: "Agent Studio",
+  activity: "Activity",
+  "3d": "3D",
+};
+
 export default function App() {
   const loadAgents = useAgentsStore((s) => s.load);
   const bindSocket = useAgentsStore((s) => s.bindSocket);
@@ -60,10 +67,9 @@ export default function App() {
                 borderRadius: 6,
                 cursor: "pointer",
                 fontSize: 12,
-                textTransform: "capitalize",
               }}
             >
-              {v}
+              {VIEW_LABELS[v]}
             </button>
           ))}
         </nav>

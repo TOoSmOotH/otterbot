@@ -31,7 +31,7 @@ export function AgentStudio({ agentId }: { agentId: string | null }) {
   useEffect(loadProfile, [agentId]);
 
   if (!agentId) {
-    return <Empty>Select an agent, then open the Studio.</Empty>;
+    return <Empty>Select an agent, then open the Agent Studio.</Empty>;
   }
   if (!profile) {
     return <Empty>Loading…</Empty>;
@@ -235,6 +235,15 @@ function ModelTab({ profile, onSaved }: TabProps) {
           <input value={cm} onChange={(e) => { setCm(e.target.value); dirty(); }} style={input} />
         </div>
       </Field>
+      {cp === "openai" && (
+        <OpenAiAuthPanel
+          chatModel={cm}
+          onPickModel={(m) => {
+            setCm(m);
+            dirty();
+          }}
+        />
+      )}
       <Field label="Embedding model (for semantic memory)">
         <div style={{ display: "flex", gap: 8 }}>
           <select value={ep} onChange={(e) => { setEp(e.target.value as ProviderId); dirty(); }} style={{ ...input, flex: "0 0 130px" }}>
@@ -265,10 +274,149 @@ function ModelTab({ profile, onSaved }: TabProps) {
   );
 }
 
+/** Connect a ChatGPT subscription (OpenAI OAuth) — account-wide, not per-agent. */
+function OpenAiAuthPanel({
+  chatModel,
+  onPickModel,
+}: {
+  chatModel: string;
+  onPickModel: (id: string) => void;
+}) {
+  const [status, setStatus] = useState<{ connected: boolean; accountId: string | null } | null>(null);
+  const [models, setModels] = useState<string[]>([]);
+  const [busy, setBusy] = useState(false);
+
+  const refresh = () =>
+    fetch("/api/auth/openai/status")
+      .then((r) => r.json())
+      .then(setStatus)
+      .catch(() => {});
+  useEffect(() => void refresh(), []);
+
+  // Once connected, discover the Codex model catalogue for this subscription.
+  useEffect(() => {
+    if (!status?.connected) {
+      setModels([]);
+      return;
+    }
+    void fetch("/api/provider-models", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ provider: "openai" }),
+    })
+      .then((r) => r.json())
+      .then((d: { ok: boolean; models?: string[] }) => setModels(d.ok && d.models ? d.models : []))
+      .catch(() => setModels([]));
+  }, [status?.connected]);
+
+  const signIn = async () => {
+    setBusy(true);
+    try {
+      const res = await fetch("/api/auth/openai/login", { method: "POST" });
+      const data = (await res.json()) as { authUrl?: string; error?: string };
+      if (!data.authUrl) {
+        alert(data.error ?? "Could not start sign-in.");
+        setBusy(false);
+        return;
+      }
+      window.open(data.authUrl, "_blank", "noopener");
+      // Poll until the loopback callback completes (or 5 min timeout).
+      const started = Date.now();
+      const timer = setInterval(async () => {
+        const s = await fetch("/api/auth/openai/status")
+          .then((r) => r.json())
+          .catch(() => null);
+        if (s?.connected || Date.now() - started > 300_000) {
+          clearInterval(timer);
+          if (s) setStatus(s);
+          setBusy(false);
+        }
+      }, 2000);
+    } catch {
+      setBusy(false);
+    }
+  };
+
+  const signOut = async () => {
+    await fetch("/api/auth/openai/signout", { method: "POST" });
+    setModels([]);
+    void refresh();
+  };
+
+  return (
+    <div style={{ ...card, display: "flex", flexDirection: "column", gap: 6 }}>
+      <strong style={{ fontSize: 12 }}>ChatGPT subscription</strong>
+      {status?.connected ? (
+        <>
+          <div style={{ fontSize: 12, color: "#4ade80" }}>
+            ✓ Connected{status.accountId ? ` · account ${status.accountId}` : ""}
+          </div>
+          {models.length > 0 && (
+            <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12 }}>
+              <span style={{ color: "rgb(var(--muted))" }}>Codex model</span>
+              <select
+                value={models.includes(chatModel) ? chatModel : ""}
+                onChange={(e) => onPickModel(e.target.value)}
+                style={input}
+              >
+                {!models.includes(chatModel) && <option value="">Pick a Codex model…</option>}
+                {models.map((m) => (
+                  <option key={m} value={m}>
+                    {m}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+          <button onClick={signOut} style={{ ...ghost, alignSelf: "flex-start" }}>
+            Sign out
+          </button>
+        </>
+      ) : (
+        <>
+          <div style={hint}>
+            Use a ChatGPT Plus/Pro subscription instead of an API key. Sign-in is account-wide —
+            it applies to every agent whose chat provider is OpenAI. Unofficial route; it may stop
+            working if OpenAI changes it.
+          </div>
+          <button onClick={signIn} disabled={busy} style={{ ...primary, alignSelf: "flex-start" }}>
+            {busy ? "Waiting for sign-in…" : "Sign in with ChatGPT"}
+          </button>
+        </>
+      )}
+    </div>
+  );
+}
+
 // --- Skills ---------------------------------------------------------------
+
+/** A skill catalog entry — mirrors the server's `CatalogSkill`. */
+interface CatalogSkill {
+  id: string;
+  category: string;
+  description: string;
+  pack: "builtin" | "optional";
+  requires?: "macos" | "heavy";
+}
+
+const REQUIRES_LABEL: Record<NonNullable<CatalogSkill["requires"]>, string> = {
+  macos: "macOS only",
+  heavy: "Heavy deps",
+};
+
+/** Lowercase-slug a skill name so installed skills can be matched to the catalog. */
+function slugify(s: string): string {
+  return s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+}
 
 function SkillsTab({ agentId }: { agentId: string }) {
   const [skills, setSkills] = useState<Skill[]>([]);
+  const [catalog, setCatalog] = useState<CatalogSkill[]>([]);
+  const [query, setQuery] = useState("");
+  const [category, setCategory] = useState("all");
+  const [packFilter, setPackFilter] = useState<"all" | "builtin" | "optional">("all");
+  const [addingId, setAddingId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [raw, setRaw] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -278,6 +426,30 @@ function SkillsTab({ agentId }: { agentId: string }) {
       .then(setSkills);
   };
   useEffect(load, [agentId]);
+  useEffect(() => {
+    void fetch("/api/skill-catalog")
+      .then((r) => (r.ok ? r.json() : []))
+      .then(setCatalog);
+  }, []);
+
+  // Skills already on the agent, matched to catalog ids by slugified name.
+  const installedSlugs = new Set(skills.map((s) => slugify(s.meta.name)));
+
+  const install = async (id: string) => {
+    setAddingId(id);
+    setError(null);
+    const res = await fetch(`/api/agents/${agentId}/skills/install`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ catalogId: id }),
+    });
+    setAddingId(null);
+    if (res.ok) {
+      load();
+    } else {
+      setError((await res.json())?.error ?? `Failed to install ${id}`);
+    }
+  };
 
   const addSkill = async () => {
     if (!raw.trim()) return;
@@ -301,17 +473,30 @@ function SkillsTab({ agentId }: { agentId: string }) {
     load();
   };
 
+  const categories = ["all", ...[...new Set(catalog.map((c) => c.category))].sort()];
+  const q = query.trim().toLowerCase();
+  const filtered = catalog.filter((c) => {
+    if (category !== "all" && c.category !== category) return false;
+    if (packFilter !== "all" && c.pack !== packFilter) return false;
+    if (!q) return true;
+    return c.id.includes(q) || c.description.toLowerCase().includes(q) || c.category.includes(q);
+  });
+
   return (
     <Form>
       <p style={hint}>
-        Skills are reusable procedures the agent recalls on relevant tasks. The agent also authors
-        its own. Paste a skill in markdown (YAML frontmatter + body) to assign one.
+        Skills are reusable procedures the agent recalls on relevant tasks. Install built-in skills
+        from the Hermes catalog below, paste your own, or let the agent author its own.
       </p>
-      {skills.length === 0 && <div style={hint}>No skills yet.</div>}
+
+      {/* --- Installed --- */}
+      <strong style={{ fontSize: 13 }}>Installed ({skills.length})</strong>
+      {skills.length === 0 && <div style={hint}>No skills installed yet.</div>}
       {skills.map((s) => (
         <details key={s.id} style={card}>
           <summary style={{ cursor: "pointer", display: "flex", gap: 8, alignItems: "center" }}>
             <strong style={{ fontSize: 13 }}>{s.meta.name}</strong>
+            <span style={badge}>{s.source}</span>
             <span style={{ fontSize: 11, color: "rgb(var(--muted))" }}>used {s.useCount}×</span>
             <button onClick={() => del(s.id)} style={{ ...ghost, marginLeft: "auto", color: "#f87171" }}>
               Remove
@@ -323,18 +508,104 @@ function SkillsTab({ agentId }: { agentId: string }) {
           <pre style={pre}>{s.body}</pre>
         </details>
       ))}
-      <Field label="Add a skill (markdown)">
-        <textarea
-          value={raw}
-          onChange={(e) => setRaw(e.target.value)}
-          rows={6}
-          placeholder={"---\nname: Summarize a repo\ndescription: ...\ntags: [research]\n---\n\n1. ...\n2. ..."}
-          style={{ ...input, resize: "vertical", fontFamily: "monospace", fontSize: 12 }}
+
+      {/* --- Hermes catalog --- */}
+      <strong style={{ fontSize: 13, marginTop: 8 }}>
+        Skill catalog{catalog.length > 0 ? ` (${catalog.length})` : ""}
+      </strong>
+      <p style={hint}>
+        Built-in skills from the{" "}
+        <a
+          href="https://hermes-agent.nousresearch.com/docs/skills/"
+          target="_blank"
+          rel="noreferrer"
+          style={{ color: "rgb(var(--accent))" }}
+        >
+          Hermes Agent catalog
+        </a>
+        . Each skill's definition is fetched from GitHub and security-scanned when you add it.
+        Skills tagged <em>macOS only</em> or <em>Heavy deps</em> may not run in this environment.
+      </p>
+      <Row>
+        <input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search skills…"
+          style={input}
         />
-      </Field>
-      <button onClick={addSkill} disabled={busy} style={primary}>
-        {busy ? "Adding…" : "Add skill"}
-      </button>
+        <select value={category} onChange={(e) => setCategory(e.target.value)} style={{ ...input, flex: "0 0 160px" }}>
+          {categories.map((c) => (
+            <option key={c} value={c}>
+              {c === "all" ? "All categories" : c}
+            </option>
+          ))}
+        </select>
+        <select
+          value={packFilter}
+          onChange={(e) => setPackFilter(e.target.value as typeof packFilter)}
+          style={{ ...input, flex: "0 0 120px" }}
+        >
+          <option value="all">Both packs</option>
+          <option value="builtin">Built-in</option>
+          <option value="optional">Optional</option>
+        </select>
+      </Row>
+      {error && <div style={{ ...hint, color: "#f87171" }}>{error}</div>}
+      {catalog.length === 0 && <div style={hint}>Loading catalog…</div>}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+        {filtered.map((c) => {
+          const installed = installedSlugs.has(c.id);
+          return (
+            <div key={c.id} style={{ ...card, display: "flex", flexDirection: "column", gap: 4 }}>
+              <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+                <strong style={{ fontSize: 12 }}>{c.id}</strong>
+                <span style={badge}>{c.category}</span>
+                {c.pack === "optional" && <span style={badge}>optional</span>}
+                {c.requires && (
+                  <span style={{ ...badge, color: "#fbbf24", borderColor: "#fbbf24" }}>
+                    {REQUIRES_LABEL[c.requires]}
+                  </span>
+                )}
+              </div>
+              <div style={{ fontSize: 11, color: "rgb(var(--muted))", flex: 1 }}>{c.description}</div>
+              <button
+                onClick={() => void install(c.id)}
+                disabled={installed || addingId === c.id}
+                style={{
+                  ...ghost,
+                  alignSelf: "flex-start",
+                  opacity: installed ? 0.6 : 1,
+                  cursor: installed ? "default" : "pointer",
+                }}
+              >
+                {installed ? "Installed ✓" : addingId === c.id ? "Adding…" : "Add to agent"}
+              </button>
+            </div>
+          );
+        })}
+      </div>
+      {catalog.length > 0 && filtered.length === 0 && <div style={hint}>No skills match.</div>}
+
+      {/* --- Custom skill --- */}
+      <details style={{ marginTop: 8 }}>
+        <summary style={{ cursor: "pointer", fontSize: 13, fontWeight: 600 }}>
+          Add a custom skill
+        </summary>
+        <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 8 }}>
+          <Field label="Skill markdown (YAML frontmatter + body)">
+            <textarea
+              value={raw}
+              onChange={(e) => setRaw(e.target.value)}
+              rows={6}
+              placeholder={"---\nname: Summarize a repo\ndescription: ...\ntags: [research]\n---\n\n1. ...\n2. ..."}
+              style={{ ...input, resize: "vertical", fontFamily: "monospace", fontSize: 12 }}
+            />
+          </Field>
+          <button onClick={addSkill} disabled={busy} style={primary}>
+            {busy ? "Adding…" : "Add skill"}
+          </button>
+        </div>
+      </details>
     </Form>
   );
 }
@@ -413,8 +684,16 @@ function ScheduleTab({ agentId }: { agentId: string }) {
 
 // --- Memory ---------------------------------------------------------------
 
+const MEMORY_CATEGORIES = ["fact", "preference", "instruction", "relationship", "general"] as const;
+type MemoryCategory = (typeof MEMORY_CATEGORIES)[number];
+
 function MemoryTab({ agentId }: { agentId: string }) {
   const [memories, setMemories] = useState<MemoryEntry[]>([]);
+  const [query, setQuery] = useState("");
+  const [draft, setDraft] = useState("");
+  const [category, setCategory] = useState<MemoryCategory>("fact");
+  const [busy, setBusy] = useState(false);
+
   const load = () => {
     void fetch(`/api/agents/${agentId}/memories`)
       .then((r) => (r.ok ? r.json() : []))
@@ -427,13 +706,80 @@ function MemoryTab({ agentId }: { agentId: string }) {
     load();
   };
 
+  const add = async () => {
+    if (!draft.trim()) return;
+    setBusy(true);
+    const res = await fetch(`/api/agents/${agentId}/memories`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ content: draft.trim(), category }),
+    });
+    setBusy(false);
+    if (res.ok) {
+      setDraft("");
+      load();
+    } else {
+      alert((await res.json())?.error ?? "Failed to add memory");
+    }
+  };
+
+  const q = query.trim().toLowerCase();
+  const filtered = q
+    ? memories.filter(
+        (m) => m.content.toLowerCase().includes(q) || m.category.toLowerCase().includes(q)
+      )
+    : memories;
+
   return (
     <Form>
-      <p style={hint}>{memories.length} memories. The agent extracts these automatically as it works.</p>
-      {memories.map((m) => (
+      <p style={hint}>
+        What this agent remembers across sessions. The agent saves memories as it works; you can
+        also add, search, and remove them here.
+      </p>
+
+      {/* --- Add a memory --- */}
+      <Field label="Add a memory">
+        <textarea
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          rows={2}
+          placeholder="e.g. The user's name is Mike."
+          style={{ ...input, resize: "vertical", fontFamily: "inherit" }}
+        />
+      </Field>
+      <Row>
+        <select
+          value={category}
+          onChange={(e) => setCategory(e.target.value as MemoryCategory)}
+          style={{ ...input, flex: "0 0 160px" }}
+        >
+          {MEMORY_CATEGORIES.map((c) => (
+            <option key={c} value={c}>
+              {c}
+            </option>
+          ))}
+        </select>
+        <button onClick={add} disabled={busy || !draft.trim()} style={primary}>
+          {busy ? "Saving…" : "Add memory"}
+        </button>
+      </Row>
+
+      {/* --- Search + list --- */}
+      <input
+        value={query}
+        onChange={(e) => setQuery(e.target.value)}
+        placeholder="Search memories…"
+        style={input}
+      />
+      <p style={hint}>
+        {q ? `${filtered.length} of ${memories.length}` : memories.length}{" "}
+        {memories.length === 1 ? "memory" : "memories"}.
+      </p>
+      {filtered.map((m) => (
         <div key={m.id} style={card}>
-          <div style={{ display: "flex", gap: 8, fontSize: 11, color: "rgb(var(--muted))" }}>
-            <span>{m.category}</span>
+          <div style={{ display: "flex", gap: 6, fontSize: 11, color: "rgb(var(--muted))", alignItems: "center" }}>
+            <span style={badge}>{m.category}</span>
+            <span style={badge}>via {m.source}</span>
             <span>importance {m.importance}</span>
             <button onClick={() => del(m.id)} style={{ ...ghost, marginLeft: "auto", color: "#f87171" }}>
               Forget
@@ -443,6 +789,7 @@ function MemoryTab({ agentId }: { agentId: string }) {
         </div>
       ))}
       {memories.length === 0 && <div style={hint}>No memories yet.</div>}
+      {memories.length > 0 && filtered.length === 0 && <div style={hint}>No memories match.</div>}
     </Form>
   );
 }
@@ -589,6 +936,14 @@ const card: React.CSSProperties = {
   border: "1px solid rgb(var(--border))",
   borderRadius: 8,
   padding: 10,
+};
+
+const badge: React.CSSProperties = {
+  fontSize: 10,
+  color: "rgb(var(--muted))",
+  border: "1px solid rgb(var(--border))",
+  borderRadius: 4,
+  padding: "1px 5px",
 };
 
 const pre: React.CSSProperties = {

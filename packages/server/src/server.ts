@@ -14,9 +14,12 @@ import { discoverModelPacks } from "./views/model-packs.js";
 import { discoverSceneConfigs } from "./views/scene-configs.js";
 import { discoverEnvironmentPacks } from "./views/environment-packs.js";
 import { importSkillFromRaw, importSkillFromUrl, exportAllSkills } from "./skills/skill-hub.js";
+import { scanSkillContent } from "./skills/skill-scanner.js";
+import { initOpenAiAuth, getOpenAiAuth } from "./auth/openai-auth-store.js";
+import { SKILL_CATALOG, getCatalogSkill, catalogSkillUrl } from "./skills/builtin-catalog.js";
 import { generateText } from "ai";
-import { resolveChatModel } from "./providers/registry.js";
-import type { AgentProfile, ProviderId } from "@otterbot/shared";
+import { resolveChatModel, listProviderModels } from "./providers/registry.js";
+import type { AgentProfile, ProviderId, MemoryCategory } from "@otterbot/shared";
 
 /**
  * Build the Fastify HTTP API over a booted `Orchestrator`. Does not call
@@ -27,6 +30,12 @@ export async function buildServer(orch: Orchestrator, cfg: Config): Promise<Fast
   const app = Fastify({ logger: { level: cfg.logLevel } });
 
   await app.register(fastifyCors, { origin: true, credentials: true });
+
+  // Instance-wide ChatGPT OAuth store, backed by control.db app_settings.
+  initOpenAiAuth({
+    getSetting: (k) => orch.getSetting(k),
+    setSetting: (k, v) => orch.setSetting(k, v),
+  });
 
   // Static assets (3D models, textures) under /assets/3d/*
   if (existsSync(cfg.assetsDir)) {
@@ -93,6 +102,48 @@ export async function buildServer(orch: Orchestrator, cfg: Config): Promise<Fast
     }
   });
 
+  // List the models a provider currently serves (for the model picker).
+  app.post<{
+    Body: { provider?: ProviderId; secrets?: Record<string, string> };
+  }>("/api/provider-models", async (req, reply) => {
+    const { provider, secrets } = req.body ?? {};
+    if (!provider) {
+      reply.code(400);
+      return { ok: false, error: "provider is required" };
+    }
+    try {
+      const models = await listProviderModels(provider, new Map(Object.entries(secrets ?? {})));
+      return { ok: true, models };
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  });
+
+  // --- ChatGPT subscription (OpenAI OAuth) ---
+  app.get("/api/auth/openai/status", async () => {
+    return getOpenAiAuth()?.status() ?? { connected: false, accountId: null, expiresAt: null };
+  });
+
+  // Start the browser login flow; returns the URL for the client to open.
+  app.post("/api/auth/openai/login", async (_req, reply) => {
+    const auth = getOpenAiAuth();
+    if (!auth) {
+      reply.code(500);
+      return { error: "auth store not initialised" };
+    }
+    try {
+      return auth.beginLogin();
+    } catch (err) {
+      reply.code(500);
+      return { error: err instanceof Error ? err.message : String(err) };
+    }
+  });
+
+  app.post("/api/auth/openai/signout", async () => {
+    getOpenAiAuth()?.signOut();
+    return { ok: true };
+  });
+
   // --- Agents ---
   app.get("/api/agents", async () => orch.listSummaries());
 
@@ -141,6 +192,29 @@ export async function buildServer(orch: Orchestrator, cfg: Config): Promise<Fast
       return { error: "not found" };
     }
     return ctx.memory.list(100);
+  });
+
+  // Manually add a memory to an agent (the user curating the agent's memory).
+  app.post<{
+    Params: { id: string };
+    Body: { content?: string; category?: MemoryCategory; importance?: number };
+  }>("/api/agents/:id/memories", async (req, reply) => {
+    const ctx = orch.getContext(req.params.id);
+    if (!ctx) {
+      reply.code(404);
+      return { error: "not found" };
+    }
+    const content = (req.body?.content ?? "").trim();
+    if (!content) {
+      reply.code(400);
+      return { error: "content is required" };
+    }
+    return ctx.memory.save({
+      content,
+      category: req.body?.category ?? "fact",
+      importance: req.body?.importance ?? 7,
+      source: "user",
+    });
   });
 
   app.get<{ Params: { id: string } }>("/api/agents/:id/skills", async (req, reply) => {
@@ -194,6 +268,51 @@ export async function buildServer(orch: Orchestrator, cfg: Config): Promise<Fast
       return { error: err instanceof Error ? err.message : String(err) };
     }
   });
+
+  // The Hermes skill catalog (built-in + optional) — index only; bodies fetched on install.
+  app.get("/api/skill-catalog", async () => SKILL_CATALOG);
+
+  // Install a catalog skill onto an agent: fetch its SKILL.md, scan it, store it.
+  app.post<{ Params: { id: string }; Body: { catalogId?: string } }>(
+    "/api/agents/:id/skills/install",
+    async (req, reply) => {
+      const ctx = orch.getContext(req.params.id);
+      if (!ctx) {
+        reply.code(404);
+        return { error: "not found" };
+      }
+      const entry = getCatalogSkill(req.body?.catalogId ?? "");
+      if (!entry) {
+        reply.code(400);
+        return { error: "unknown catalog skill" };
+      }
+      try {
+        const res = await fetch(catalogSkillUrl(entry), { redirect: "follow" });
+        if (!res.ok) {
+          reply.code(502);
+          return { error: `could not fetch skill from GitHub: ${res.status} ${res.statusText}` };
+        }
+        const raw = await res.text();
+        const scan = scanSkillContent(raw);
+        if (scan.findings.some((f) => f.severity === "error")) {
+          reply.code(400);
+          return {
+            error: "skill rejected by security scanner: " +
+              scan.findings.map((f) => f.message).join("; "),
+          };
+        }
+        const { meta, body } = ctx.skills.parseSkillFile(raw);
+        if (!meta.name || !body) {
+          reply.code(400);
+          return { error: "the fetched SKILL.md is missing frontmatter `name` or a body" };
+        }
+        return ctx.skills.create({ meta, body, source: "builtin" }, { scanReport: scan });
+      } catch (err) {
+        reply.code(502);
+        return { error: err instanceof Error ? err.message : String(err) };
+      }
+    }
+  );
 
   app.delete<{ Params: { id: string; skillId: string } }>(
     "/api/agents/:id/skills/:skillId",

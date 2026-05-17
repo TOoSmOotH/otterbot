@@ -4,8 +4,11 @@ import { createOpenAI } from "@ai-sdk/openai";
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import { getConfig } from "../config.js";
 import type { EmbeddingConfig } from "../embedding.js";
-import type { ModelRef, ProviderEndpoint } from "./types.js";
+import type { ModelRef, ProviderEndpoint, ProviderId } from "./types.js";
 import type { ModelRef as SharedModelRef } from "@otterbot/shared";
+import { randomUUID } from "node:crypto";
+import { getOpenAiAuth, type OpenAiAuthStore } from "../auth/openai-auth-store.js";
+import { CHATGPT_CODEX_BASE_URL, listCodexModels } from "../auth/openai-oauth.js";
 
 /** Read a credential from the agent's secrets (stored in the encrypted DB). */
 function secret(secrets: Map<string, string>, key: string): string {
@@ -42,6 +45,11 @@ export function resolveChatModel(
       return anthropic(ref.modelId);
     }
     case "openai": {
+      // A connected ChatGPT subscription (OAuth) takes precedence over an API key.
+      const auth = getOpenAiAuth();
+      if (auth?.isConnected()) {
+        return chatGptCodexModel(ref.modelId, auth);
+      }
       const openai = createOpenAI({ apiKey: secret(secrets, "OPENAI_API_KEY") });
       return openai(ref.modelId);
     }
@@ -66,6 +74,46 @@ export function resolveChatModel(
       throw new Error(`Unknown provider: ${String(exhaustive)}`);
     }
   }
+}
+
+/**
+ * An OpenAI model backed by a ChatGPT subscription (OAuth) rather than an API
+ * key. Routes through the ChatGPT Codex Responses backend, mirroring how the
+ * Codex CLI (and Hermes Agent) talk to it: bearer token + account id, the
+ * `codex_cli_rs` originator, a per-conversation `session_id`, and `store: false`
+ * forced into every request body. The token is injected — and refreshed — per
+ * request by the custom `fetch`.
+ *
+ * This path is unofficial (the OAuth flow is meant for the Codex CLI); treat
+ * failures here as a sign the upstream contract changed.
+ */
+function chatGptCodexModel(modelId: string, auth: OpenAiAuthStore): LanguageModelV1 {
+  const sessionId = randomUUID();
+  const provider = createOpenAI({
+    baseURL: CHATGPT_CODEX_BASE_URL,
+    apiKey: "chatgpt-oauth", // placeholder — real auth is injected by fetch below
+    fetch: async (input, init) => {
+      const token = await auth.accessToken();
+      const headers = new Headers(init?.headers);
+      headers.set("authorization", `Bearer ${token}`);
+      const account = auth.accountId();
+      if (account) headers.set("chatgpt-account-id", account);
+      headers.set("openai-beta", "responses=experimental");
+      headers.set("originator", "codex_cli_rs");
+      headers.set("session_id", sessionId);
+      // The Codex backend requires server-side response storage to be off.
+      let body = init?.body;
+      if (typeof body === "string") {
+        try {
+          body = JSON.stringify({ ...(JSON.parse(body) as object), store: false });
+        } catch {
+          /* non-JSON body — leave it untouched */
+        }
+      }
+      return fetch(input, { ...init, headers, body });
+    },
+  });
+  return provider.responses(modelId);
 }
 
 /**
@@ -105,6 +153,65 @@ export function resolveEmbeddingConfig(
       throw new Error(`Unknown provider: ${String(exhaustive)}`);
     }
   }
+}
+
+/**
+ * Resolve a provider to its OpenAI-compatible HTTP endpoint. Used to talk to a
+ * provider directly (e.g. listing models) rather than through the AI SDK.
+ */
+export function resolveProviderEndpoint(
+  provider: ProviderId,
+  secrets: Map<string, string>
+): ProviderEndpoint {
+  switch (provider) {
+    case "lmstudio":
+      return lmstudioEndpoint(secrets);
+    case "ollama":
+      return ollamaEndpoint(secrets);
+    case "openai":
+      return { baseUrl: "https://api.openai.com/v1", apiKey: secret(secrets, "OPENAI_API_KEY") };
+    case "anthropic":
+      return { baseUrl: "https://api.anthropic.com/v1", apiKey: secret(secrets, "ANTHROPIC_API_KEY") };
+    default: {
+      const exhaustive: never = provider;
+      throw new Error(`Unknown provider: ${String(exhaustive)}`);
+    }
+  }
+}
+
+/**
+ * List the model ids a provider currently serves by calling its `/models`
+ * endpoint. Local servers (LM Studio, Ollama) and OpenAI use the OpenAI-shaped
+ * `{ data: [{ id }] }` response; Anthropic uses its own auth header. When a
+ * ChatGPT subscription is connected, OpenAI resolves to the Codex catalogue.
+ */
+export async function listProviderModels(
+  provider: ProviderId,
+  secrets: Map<string, string>
+): Promise<string[]> {
+  if (provider === "openai") {
+    const auth = getOpenAiAuth();
+    if (auth?.isConnected()) {
+      return listCodexModels(await auth.accessToken());
+    }
+  }
+  const ep = resolveProviderEndpoint(provider, secrets);
+  const headers: Record<string, string> =
+    provider === "anthropic"
+      ? { "x-api-key": ep.apiKey, "anthropic-version": "2023-06-01" }
+      : { authorization: `Bearer ${ep.apiKey}` };
+  const res = await fetch(`${ep.baseUrl.replace(/\/+$/, "")}/models`, { headers });
+  if (!res.ok) {
+    throw new Error(`provider returned ${res.status} ${res.statusText}`);
+  }
+  const body = (await res.json()) as { data?: Array<{ id?: unknown }> };
+  return [
+    ...new Set(
+      (body.data ?? [])
+        .map((m) => m.id)
+        .filter((id): id is string => typeof id === "string" && id.length > 0)
+    ),
+  ].sort();
 }
 
 /** Check a `ModelRef` against an allowlist. `"*"` matches any model for a provider. */

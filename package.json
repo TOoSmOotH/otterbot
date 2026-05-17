@@ -10,6 +10,8 @@
     "dev": "pnpm --filter @otterbot/shared build && { pnpm --filter @otterbot/shared dev & pnpm --filter @otterbot/server dev & pnpm --filter @otterbot/web dev; }",
     "dev:server": "pnpm --filter @otterbot/server dev",
     "dev:web": "pnpm --filter @otterbot/web dev",
+    "dev:cli": "pnpm --filter @otterbot/cli dev",
+    "cli": "pnpm --filter @otterbot/cli start",
     "test:e2e": "pnpm --filter @otterbot/web test:e2e"
   },
   "devDependencies": {

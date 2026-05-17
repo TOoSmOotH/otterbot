@@ -114,15 +114,27 @@ export function buildAgentTools(
       },
     }),
 
-    save_finding: tool({
+    save_memory: tool({
       description:
-        "Save an important finding to long-term memory so it is durable and semantically searchable later.",
+        "Save something to long-term memory so you still know it in future sessions. Call this " +
+        "whenever the user tells you to remember something, or shares a durable fact, preference, " +
+        "or instruction about themselves or their work. Saving is the only way a memory persists " +
+        "— acknowledging it in chat does not save it.",
       parameters: z.object({
-        content: z.string().min(1),
+        content: z
+          .string()
+          .min(1)
+          .describe(
+            'The thing to remember, as a clear standalone statement. e.g. "The user\'s name is Mike."'
+          ),
+        category: z
+          .enum(["fact", "preference", "instruction", "relationship", "general"])
+          .default("fact")
+          .describe("What kind of memory this is."),
         importance: z.number().int().min(1).max(10).default(6),
       }),
-      execute: async ({ content, importance }) => {
-        const entry = memory.save({ content, importance, source: "agent", category: "fact" });
+      execute: async ({ content, category, importance }) => {
+        const entry = memory.save({ content, category, importance, source: "agent" });
         return { ok: true, id: entry.id };
       },
     }),
