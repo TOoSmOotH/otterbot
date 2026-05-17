@@ -55,7 +55,7 @@ export function resolveChatModel(
       if (openAiUsesOAuth(secrets)) {
         const auth = getOpenAiAuth();
         if (!auth?.isConnected()) {
-          throw new Error("OpenAI OAuth is selected but no ChatGPT account is connected");
+          return unavailableModel(ref.modelId, "OpenAI OAuth is selected but no ChatGPT account is connected");
         }
         return chatGptCodexModel(ref.modelId, auth);
       }
@@ -101,6 +101,21 @@ export function resolveChatModel(
  */
 function chatGptCodexModel(modelId: string, auth: OpenAiAuthStore): LanguageModelV1 {
   return new OpenAiCodexOAuthModel(modelId, auth);
+}
+
+function unavailableModel(modelId: string, message: string): LanguageModelV1 {
+  return {
+    specificationVersion: "v1",
+    provider: "unavailable",
+    modelId,
+    defaultObjectGenerationMode: undefined,
+    async doGenerate() {
+      throw new Error(message);
+    },
+    async doStream() {
+      throw new Error(message);
+    },
+  };
 }
 
 /**

@@ -5,6 +5,7 @@ import { ProfileStore } from "./profiles/profile-store.js";
 import { Orchestrator } from "./orchestrator/orchestrator.js";
 import { buildServer } from "./server.js";
 import { attachSocketServer } from "./socket.js";
+import { initOpenAiAuth } from "./auth/openai-auth-store.js";
 
 async function main() {
   const cfg = getConfig();
@@ -20,6 +21,10 @@ async function main() {
   const control = openControlDb(resolve(cfg.dataDir, "control.db"), cfg.dbKey);
   const profiles = new ProfileStore(resolve(cfg.dataDir, "profiles"));
   const orch = new Orchestrator(profiles, control, cfg);
+  initOpenAiAuth({
+    getSetting: (k) => orch.getSetting(k),
+    setSetting: (k, v) => orch.setSetting(k, v),
+  });
   await orch.boot();
 
   const app = await buildServer(orch, cfg);

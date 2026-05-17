@@ -6,6 +6,7 @@ import { getConfig, type Config } from "../config.js";
 import { openControlDb, type ControlDb } from "../db/control-db.js";
 import { ProfileStore } from "../profiles/profile-store.js";
 import { Orchestrator } from "../orchestrator/orchestrator.js";
+import { initOpenAiAuth } from "../auth/openai-auth-store.js";
 
 /**
  * A booted otterbot stack for tests.
@@ -73,6 +74,10 @@ export async function createTestStack(): Promise<TestStack> {
   const control = openControlDb(join(dataDir, "control.db"));
   const profiles = new ProfileStore(join(dataDir, "profiles"));
   const orch = new Orchestrator(profiles, control, cfg);
+  initOpenAiAuth({
+    getSetting: (k) => orch.getSetting(k),
+    setSetting: (k, v) => orch.setSetting(k, v),
+  });
   await orch.boot();
 
   return {

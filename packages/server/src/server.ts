@@ -32,11 +32,16 @@ export async function buildServer(orch: Orchestrator, cfg: Config): Promise<Fast
 
   await app.register(fastifyCors, { origin: true, credentials: true });
 
-  // Instance-wide ChatGPT OAuth store, backed by control.db app_settings.
-  initOpenAiAuth({
-    getSetting: (k) => orch.getSetting(k),
-    setSetting: (k, v) => orch.setSetting(k, v),
-  });
+  // Instance-wide ChatGPT OAuth store, backed by control.db app_settings. The
+  // real process initialises this before `orch.boot()` so agent runtimes and
+  // API routes share the same token owner; this fallback covers tests/tools
+  // that build the server around an already-booted orchestrator.
+  if (!getOpenAiAuth()) {
+    initOpenAiAuth({
+      getSetting: (k) => orch.getSetting(k),
+      setSetting: (k, v) => orch.setSetting(k, v),
+    });
+  }
 
   // Static assets (3D models, textures) under /assets/3d/*
   if (existsSync(cfg.assetsDir)) {

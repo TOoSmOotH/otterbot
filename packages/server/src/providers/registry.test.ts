@@ -26,13 +26,18 @@ describe("provider registry", () => {
     expect(model).toBeTruthy();
   });
 
-  it("requires a connected ChatGPT account when OpenAI OAuth is selected", () => {
-    expect(() =>
-      resolveChatModel(
-        { provider: "openai", modelId: "gpt-5" },
-        new Map([["OPENAI_AUTH_METHOD", "oauth"]])
-      )
-    ).toThrow(/OAuth is selected/);
+  it("resolves a boot-safe unavailable model when OpenAI OAuth is disconnected", async () => {
+    const model = resolveChatModel(
+      { provider: "openai", modelId: "gpt-5" },
+      new Map([["OPENAI_AUTH_METHOD", "oauth"]])
+    );
+    await expect(
+      model.doGenerate({
+        inputFormat: "messages",
+        mode: { type: "regular" },
+        prompt: [],
+      })
+    ).rejects.toThrow(/OAuth is selected/);
   });
 
   it("resolves an embeddings endpoint, falling back off anthropic", () => {
