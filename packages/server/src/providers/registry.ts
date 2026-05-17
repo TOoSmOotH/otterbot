@@ -30,6 +30,10 @@ function ollamaEndpoint(secrets: Map<string, string>): ProviderEndpoint {
   };
 }
 
+function openAiUsesOAuth(secrets: Map<string, string>): boolean {
+  return secrets.get("OPENAI_AUTH_METHOD") === "oauth";
+}
+
 /**
  * Resolve a `ModelRef` to an AI-SDK `LanguageModelV1`. Supports cloud providers
  * (Anthropic, OpenAI) and local OpenAI-compatible servers (LM Studio, Ollama).
@@ -48,9 +52,11 @@ export function resolveChatModel(
       return anthropic(ref.modelId);
     }
     case "openai": {
-      // A connected ChatGPT subscription (OAuth) takes precedence over an API key.
-      const auth = getOpenAiAuth();
-      if (auth?.isConnected()) {
+      if (openAiUsesOAuth(secrets)) {
+        const auth = getOpenAiAuth();
+        if (!auth?.isConnected()) {
+          throw new Error("OpenAI OAuth is selected but no ChatGPT account is connected");
+        }
         return chatGptCodexModel(ref.modelId, auth);
       }
       const openai = createOpenAI({
@@ -201,11 +207,12 @@ export async function listProviderModels(
   provider: ProviderId,
   secrets: Map<string, string>
 ): Promise<string[]> {
-  if (provider === "openai") {
+  if (provider === "openai" && openAiUsesOAuth(secrets)) {
     const auth = getOpenAiAuth();
-    if (auth?.isConnected()) {
-      return listCodexModels(await auth.accessToken());
+    if (!auth?.isConnected()) {
+      throw new Error("OpenAI OAuth is selected but no ChatGPT account is connected");
     }
+    return listCodexModels(await auth.accessToken());
   }
   const ep = resolveProviderEndpoint(provider, secrets);
   const headers: Record<string, string> =

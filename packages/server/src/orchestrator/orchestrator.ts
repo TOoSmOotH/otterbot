@@ -46,7 +46,11 @@ const DEFAULT_GLOBAL_SETTINGS: GlobalSettings = {
   defaultEmbeddingModel: { provider: "lmstudio", modelId: "local-model" },
   providers: {
     anthropic: { baseUrl: "https://api.anthropic.com/v1", apiKeyConfigured: false },
-    openai: { baseUrl: "https://api.openai.com/v1", apiKeyConfigured: false },
+    openai: {
+      baseUrl: "https://api.openai.com/v1",
+      apiKeyConfigured: false,
+      authMethod: "api-key",
+    },
     lmstudio: { baseUrl: "http://localhost:1234/v1", apiKeyConfigured: false },
     ollama: { baseUrl: "http://localhost:11434/v1", apiKeyConfigured: false },
   },
@@ -76,6 +80,9 @@ function normalizeGlobalSettings(input?: Partial<GlobalSettings> | null): Global
       ...incoming,
       apiKeyConfigured: Boolean(incoming?.apiKey || incoming?.apiKeyConfigured),
     };
+    if (provider === "openai" && nextProviders[provider].authMethod !== "oauth") {
+      nextProviders[provider].authMethod = "api-key";
+    }
   }
   return {
     theme: input?.theme ?? defaults.theme,
@@ -236,6 +243,9 @@ export class Orchestrator {
       const cfg = settings.providers[provider];
       if (cfg.apiKey) secrets.set(API_KEY_NAMES[provider], cfg.apiKey);
       if (cfg.baseUrl) secrets.set(BASE_URL_NAMES[provider], cfg.baseUrl);
+      if (provider === "openai" && cfg.authMethod) {
+        secrets.set("OPENAI_AUTH_METHOD", cfg.authMethod);
+      }
     }
     return secrets;
   }

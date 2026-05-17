@@ -302,7 +302,7 @@ function OpenAiAuthPanel({
     void fetch("/api/provider-models", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ provider: "openai" }),
+      body: JSON.stringify({ provider: "openai", secrets: { OPENAI_AUTH_METHOD: "oauth" } }),
     })
       .then((r) => r.json())
       .then((d: { ok: boolean; models?: string[] }) => setModels(d.ok && d.models ? d.models : []))

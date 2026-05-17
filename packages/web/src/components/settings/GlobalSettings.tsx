@@ -21,6 +21,8 @@ const API_KEY_LABELS: Record<ProviderId, string> = {
   ollama: "OLLAMA_API_KEY",
 };
 
+type OpenAiAuthStatus = { connected: boolean; accountId: string | null };
+
 export function GlobalSettings() {
   const savedSettings = useGlobalSettingsStore((s) => s.settings);
   const load = useGlobalSettingsStore((s) => s.load);
@@ -111,28 +113,57 @@ export function GlobalSettings() {
                 <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
                   <strong style={{ fontSize: 13 }}>{PROVIDER_LABELS[provider]}</strong>
                   <span style={badge}>
-                    {cfg.apiKeyConfigured ? "Key saved" : "No key"}
+                    {provider === "openai" && cfg.authMethod === "oauth"
+                      ? "OAuth"
+                      : cfg.apiKeyConfigured
+                        ? "Key saved"
+                        : "No key"}
                   </span>
                 </div>
-                <Field label="Base URL">
-                  <input
-                    value={cfg.baseUrl}
-                    onChange={(e) =>
-                      patchProvider(provider, { baseUrl: e.target.value }, draft, patch)
-                    }
-                    style={input}
-                  />
-                </Field>
-                <Field label={API_KEY_LABELS[provider]}>
-                  <input
-                    type="password"
-                    placeholder={cfg.apiKeyConfigured ? "Leave blank to keep existing key" : "Optional"}
-                    onChange={(e) =>
-                      patchProvider(provider, { apiKey: e.target.value }, draft, patch)
-                    }
-                    style={input}
-                  />
-                </Field>
+                {provider === "openai" && (
+                  <Field label="Authentication">
+                    <select
+                      value={cfg.authMethod ?? "api-key"}
+                      onChange={(e) =>
+                        patchProvider(
+                          provider,
+                          { authMethod: e.target.value as "api-key" | "oauth" },
+                          draft,
+                          patch
+                        )
+                      }
+                      style={input}
+                    >
+                      <option value="api-key">API key</option>
+                      <option value="oauth">ChatGPT OAuth</option>
+                    </select>
+                  </Field>
+                )}
+                {provider !== "openai" || cfg.authMethod !== "oauth" ? (
+                  <>
+                    <Field label="Base URL">
+                      <input
+                        value={cfg.baseUrl}
+                        onChange={(e) =>
+                          patchProvider(provider, { baseUrl: e.target.value }, draft, patch)
+                        }
+                        style={input}
+                      />
+                    </Field>
+                    <Field label={API_KEY_LABELS[provider]}>
+                      <input
+                        type="password"
+                        placeholder={cfg.apiKeyConfigured ? "Leave blank to keep existing key" : "Optional"}
+                        onChange={(e) =>
+                          patchProvider(provider, { apiKey: e.target.value }, draft, patch)
+                        }
+                        style={input}
+                      />
+                    </Field>
+                  </>
+                ) : (
+                  <OpenAiOAuthControls />
+                )}
               </div>
             );
           })}
@@ -140,6 +171,73 @@ export function GlobalSettings() {
       </section>
 
       {status && <div style={hint}>{status}</div>}
+    </div>
+  );
+}
+
+function OpenAiOAuthControls() {
+  const [status, setStatus] = useState<OpenAiAuthStatus | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const refresh = () =>
+    fetch("/api/auth/openai/status")
+      .then((r) => r.json())
+      .then(setStatus)
+      .catch(() => {});
+
+  useEffect(() => void refresh(), []);
+
+  const signIn = async () => {
+    setBusy(true);
+    try {
+      const res = await fetch("/api/auth/openai/login", { method: "POST" });
+      const data = (await res.json()) as { authUrl?: string; error?: string };
+      if (!data.authUrl) {
+        alert(data.error ?? "Could not start sign-in.");
+        setBusy(false);
+        return;
+      }
+      window.open(data.authUrl, "_blank", "noopener");
+      const started = Date.now();
+      const timer = setInterval(async () => {
+        const next = await fetch("/api/auth/openai/status")
+          .then((r) => r.json())
+          .catch(() => null);
+        if (next?.connected || Date.now() - started > 300_000) {
+          clearInterval(timer);
+          if (next) setStatus(next);
+          setBusy(false);
+        }
+      }, 2000);
+    } catch {
+      setBusy(false);
+    }
+  };
+
+  const signOut = async () => {
+    await fetch("/api/auth/openai/signout", { method: "POST" });
+    void refresh();
+  };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      <div style={hint}>
+        Uses the same ChatGPT subscription OAuth route as Hermes/Codex.
+      </div>
+      {status?.connected ? (
+        <>
+          <div style={{ fontSize: 12, color: "#4ade80" }}>
+            Connected{status.accountId ? ` - account ${status.accountId}` : ""}
+          </div>
+          <button onClick={signOut} style={{ ...ghostButton, alignSelf: "flex-start" }}>
+            Sign out
+          </button>
+        </>
+      ) : (
+        <button onClick={signIn} disabled={busy} style={{ ...primary, alignSelf: "flex-start" }}>
+          {busy ? "Waiting for sign-in..." : "Sign in with ChatGPT"}
+        </button>
+      )}
     </div>
   );
 }
@@ -257,6 +355,16 @@ const primary: React.CSSProperties = {
   fontWeight: 600,
 };
 
+const ghostButton: React.CSSProperties = {
+  background: "transparent",
+  color: "rgb(var(--fg))",
+  border: "1px solid rgb(var(--border))",
+  borderRadius: 7,
+  padding: "7px 11px",
+  cursor: "pointer",
+  fontSize: 13,
+};
+
 const themeButton: React.CSSProperties = {
   background: "transparent",
   color: "rgb(var(--fg))",
@@ -284,4 +392,3 @@ const badge: React.CSSProperties = {
   fontSize: 11,
   color: "rgb(var(--muted))",
 };
-

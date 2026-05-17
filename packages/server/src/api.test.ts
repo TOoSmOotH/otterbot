@@ -128,6 +128,7 @@ describe("HTTP API (e2e)", () => {
           openai: {
             baseUrl: "https://api.openai.com/v1",
             apiKeyConfigured: false,
+            authMethod: "oauth",
             apiKey: "sk-test",
           },
           lmstudio: {
@@ -145,13 +146,15 @@ describe("HTTP API (e2e)", () => {
     const updated = update.json() as {
       theme: string;
       defaultChatModel: { provider: string; modelId: string };
-      providers: { openai: { apiKey?: string; apiKeyConfigured: boolean } };
+      providers: { openai: { apiKey?: string; apiKeyConfigured: boolean; authMethod?: string } };
     };
     expect(updated.theme).toBe("forest");
     expect(updated.defaultChatModel).toEqual({ provider: "openai", modelId: "gpt-4o" });
     expect(updated.providers.openai.apiKey).toBeUndefined();
     expect(updated.providers.openai.apiKeyConfigured).toBe(true);
+    expect(updated.providers.openai.authMethod).toBe("oauth");
     expect(stack.orch.getGlobalProviderSecrets().get("OPENAI_API_KEY")).toBe("sk-test");
+    expect(stack.orch.getGlobalProviderSecrets().get("OPENAI_AUTH_METHOD")).toBe("oauth");
   });
 
   it("GET /api/bus/messages and /api/subagent-tasks return arrays", async () => {

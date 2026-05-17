@@ -26,6 +26,15 @@ describe("provider registry", () => {
     expect(model).toBeTruthy();
   });
 
+  it("requires a connected ChatGPT account when OpenAI OAuth is selected", () => {
+    expect(() =>
+      resolveChatModel(
+        { provider: "openai", modelId: "gpt-5" },
+        new Map([["OPENAI_AUTH_METHOD", "oauth"]])
+      )
+    ).toThrow(/OAuth is selected/);
+  });
+
   it("resolves an embeddings endpoint, falling back off anthropic", () => {
     const local = resolveEmbeddingConfig({ provider: "lmstudio", modelId: "nomic" }, new Map());
     expect(local.baseUrl).toContain("/v1");

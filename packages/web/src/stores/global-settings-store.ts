@@ -42,7 +42,11 @@ const DEFAULT_SETTINGS: GlobalSettings = {
   defaultEmbeddingModel: { provider: "lmstudio", modelId: "local-model" },
   providers: {
     anthropic: { baseUrl: "https://api.anthropic.com/v1", apiKeyConfigured: false },
-    openai: { baseUrl: "https://api.openai.com/v1", apiKeyConfigured: false },
+    openai: {
+      baseUrl: "https://api.openai.com/v1",
+      apiKeyConfigured: false,
+      authMethod: "api-key",
+    },
     lmstudio: { baseUrl: "http://localhost:1234/v1", apiKeyConfigured: false },
     ollama: { baseUrl: "http://localhost:11434/v1", apiKeyConfigured: false },
   },
@@ -102,4 +106,3 @@ export const useGlobalSettingsStore = create<GlobalSettingsState>((set, get) => 
     }
   },
 }));
-
