@@ -180,7 +180,7 @@ Socket.IO:
 
 ```bash
 pnpm build
-pnpm --filter @otterbot/server start
+pnpm start
 ```
 
 Server tests use a fake OpenAI-compatible model by default. To test against a

@@ -7,7 +7,7 @@
   "scripts": {
     "build": "tsc",
     "dev": "tsx watch src/index.ts",
-    "start": "node dist/index.js",
+    "start": "cd ../.. && node packages/server/dist/index.js",
     "test": "vitest run"
   },
   "dependencies": {
