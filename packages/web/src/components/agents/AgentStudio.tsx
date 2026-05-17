@@ -8,6 +8,7 @@ import type {
 } from "@otterbot/shared";
 import { useAgentsStore } from "../../stores/agents-store";
 import { useModelPacksStore } from "../../stores/model-packs-store";
+import { useGlobalSettingsStore } from "../../stores/global-settings-store";
 
 const PROVIDERS: ProviderId[] = ["anthropic", "openai", "lmstudio", "ollama"];
 const TABS = ["Identity", "Persona", "Model", "Skills", "Schedule", "Memory", "Credentials"] as const;
@@ -285,6 +286,11 @@ function OpenAiAuthPanel({
   const [status, setStatus] = useState<{ connected: boolean; accountId: string | null } | null>(null);
   const [models, setModels] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
+  const settings = useGlobalSettingsStore((s) => s.settings);
+  const settingsLoaded = useGlobalSettingsStore((s) => s.loaded);
+  const loadSettings = useGlobalSettingsStore((s) => s.load);
+  const saveSettings = useGlobalSettingsStore((s) => s.save);
+  const openAiUsesOAuth = settings.providers.openai.authMethod === "oauth";
 
   const refresh = () =>
     fetch("/api/auth/openai/status")
@@ -292,6 +298,18 @@ function OpenAiAuthPanel({
       .then(setStatus)
       .catch(() => {});
   useEffect(() => void refresh(), []);
+  useEffect(() => void loadSettings(), [loadSettings]);
+
+  useEffect(() => {
+    if (!status?.connected || !settingsLoaded || openAiUsesOAuth) return;
+    void saveSettings({
+      ...settings,
+      providers: {
+        ...settings.providers,
+        openai: { ...settings.providers.openai, authMethod: "oauth" },
+      },
+    });
+  }, [openAiUsesOAuth, saveSettings, settings, settingsLoaded, status?.connected]);
 
   // Once connected, discover the Codex model catalogue for this subscription.
   useEffect(() => {
@@ -350,6 +368,11 @@ function OpenAiAuthPanel({
         <>
           <div style={{ fontSize: 12, color: "#4ade80" }}>
             ✓ Connected{status.accountId ? ` · account ${status.accountId}` : ""}
+          </div>
+          <div style={hint}>
+            {openAiUsesOAuth
+              ? "OpenAI chats are using ChatGPT OAuth."
+              : "Switching OpenAI chats to ChatGPT OAuth..."}
           </div>
           {models.length > 0 && (
             <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12 }}>
