@@ -41,7 +41,10 @@ export function resolveChatModel(
 ): LanguageModelV1 {
   switch (ref.provider) {
     case "anthropic": {
-      const anthropic = createAnthropic({ apiKey: secret(secrets, "ANTHROPIC_API_KEY") });
+      const anthropic = createAnthropic({
+        apiKey: secret(secrets, "ANTHROPIC_API_KEY"),
+        baseURL: secrets.get("ANTHROPIC_BASE_URL"),
+      });
       return anthropic(ref.modelId);
     }
     case "openai": {
@@ -50,7 +53,10 @@ export function resolveChatModel(
       if (auth?.isConnected()) {
         return chatGptCodexModel(ref.modelId, auth);
       }
-      const openai = createOpenAI({ apiKey: secret(secrets, "OPENAI_API_KEY") });
+      const openai = createOpenAI({
+        apiKey: secret(secrets, "OPENAI_API_KEY"),
+        baseURL: secrets.get("OPENAI_BASE_URL"),
+      });
       return openai(ref.modelId);
     }
     case "lmstudio": {
@@ -136,7 +142,7 @@ export function resolveEmbeddingConfig(
     }
     case "openai": {
       return {
-        baseUrl: "https://api.openai.com/v1",
+        baseUrl: secrets.get("OPENAI_BASE_URL") ?? "https://api.openai.com/v1",
         apiKey: secret(secrets, "OPENAI_API_KEY"),
         model: ref.modelId,
       };
@@ -169,9 +175,15 @@ export function resolveProviderEndpoint(
     case "ollama":
       return ollamaEndpoint(secrets);
     case "openai":
-      return { baseUrl: "https://api.openai.com/v1", apiKey: secret(secrets, "OPENAI_API_KEY") };
+      return {
+        baseUrl: secrets.get("OPENAI_BASE_URL") ?? "https://api.openai.com/v1",
+        apiKey: secret(secrets, "OPENAI_API_KEY"),
+      };
     case "anthropic":
-      return { baseUrl: "https://api.anthropic.com/v1", apiKey: secret(secrets, "ANTHROPIC_API_KEY") };
+      return {
+        baseUrl: secrets.get("ANTHROPIC_BASE_URL") ?? "https://api.anthropic.com/v1",
+        apiKey: secret(secrets, "ANTHROPIC_API_KEY"),
+      };
     default: {
       const exhaustive: never = provider;
       throw new Error(`Unknown provider: ${String(exhaustive)}`);

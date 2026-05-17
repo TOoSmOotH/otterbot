@@ -19,7 +19,8 @@ import { initOpenAiAuth, getOpenAiAuth } from "./auth/openai-auth-store.js";
 import { SKILL_CATALOG, getCatalogSkill, catalogSkillUrl } from "./skills/builtin-catalog.js";
 import { generateText } from "ai";
 import { resolveChatModel, listProviderModels } from "./providers/registry.js";
-import type { AgentProfile, ProviderId, MemoryCategory } from "@otterbot/shared";
+import type { AgentProfile, ProviderId, MemoryCategory, GlobalSettings } from "@otterbot/shared";
+import { redactGlobalSettings } from "./orchestrator/orchestrator.js";
 
 /**
  * Build the Fastify HTTP API over a booted `Orchestrator`. Does not call
@@ -66,6 +67,16 @@ export async function buildServer(orch: Orchestrator, cfg: Config): Promise<Fast
   // --- Providers (for the model picker) ---
   app.get("/api/providers", async () => PROVIDERS);
 
+  app.get("/api/settings/global", async () => redactGlobalSettings(orch.getGlobalSettings()));
+
+  app.put<{ Body: GlobalSettings }>("/api/settings/global", async (req, reply) => {
+    if (!req.body?.defaultChatModel || !req.body.defaultEmbeddingModel || !req.body.providers) {
+      reply.code(400);
+      return { error: "theme, default models, and providers are required" };
+    }
+    return redactGlobalSettings(orch.setGlobalSettings(req.body));
+  });
+
   // --- Setup / onboarding ---
   app.get("/api/setup-state", async () => ({
     onboardingComplete: orch.getSetting("onboarding_complete") === "true",
@@ -87,9 +98,13 @@ export async function buildServer(orch: Orchestrator, cfg: Config): Promise<Fast
       return { ok: false, error: "provider and modelId are required" };
     }
     try {
+      const mergedSecrets = new Map([
+        ...orch.getGlobalProviderSecrets(),
+        ...Object.entries(secrets ?? {}),
+      ]);
       const model = resolveChatModel(
         { provider, modelId },
-        new Map(Object.entries(secrets ?? {}))
+        mergedSecrets
       );
       const { text } = await generateText({
         model,
@@ -112,7 +127,11 @@ export async function buildServer(orch: Orchestrator, cfg: Config): Promise<Fast
       return { ok: false, error: "provider is required" };
     }
     try {
-      const models = await listProviderModels(provider, new Map(Object.entries(secrets ?? {})));
+      const mergedSecrets = new Map([
+        ...orch.getGlobalProviderSecrets(),
+        ...Object.entries(secrets ?? {}),
+      ]);
+      const models = await listProviderModels(provider, mergedSecrets);
       return { ok: true, models };
     } catch (err) {
       return { ok: false, error: err instanceof Error ? err.message : String(err) };

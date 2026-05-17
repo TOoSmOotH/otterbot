@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { AgentProfile, AgentRole, ProviderId } from "@otterbot/shared";
 import { useAgentsStore } from "../../stores/agents-store";
+import { useGlobalSettingsStore } from "../../stores/global-settings-store";
 import { useModelPacksStore } from "../../stores/model-packs-store";
 
 const PROVIDERS: ProviderId[] = ["anthropic", "openai", "lmstudio", "ollama"];
@@ -39,6 +40,8 @@ export function AgentEditor({ agentId, onClose }: { agentId: string | null; onCl
   const update = useAgentsStore((s) => s.update);
   const remove = useAgentsStore((s) => s.remove);
   const packs = useModelPacksStore((s) => s.packs);
+  const globalSettings = useGlobalSettingsStore((s) => s.settings);
+  const loadGlobalSettings = useGlobalSettingsStore((s) => s.load);
 
   const [form, setForm] = useState<FormState>(BLANK);
   const [saving, setSaving] = useState(false);
@@ -48,7 +51,13 @@ export function AgentEditor({ agentId, onClose }: { agentId: string | null; onCl
 
   useEffect(() => {
     if (!agentId) {
-      setForm(BLANK);
+      setForm({
+        ...BLANK,
+        chatProvider: globalSettings.defaultChatModel.provider,
+        chatModel: globalSettings.defaultChatModel.modelId,
+        embeddingProvider: globalSettings.defaultEmbeddingModel.provider,
+        embeddingModel: globalSettings.defaultEmbeddingModel.modelId,
+      });
       return;
     }
     void fetch(`/api/agents/${agentId}`)
@@ -69,7 +78,9 @@ export function AgentEditor({ agentId, onClose }: { agentId: string | null; onCl
           canSpawnSubagents: p.canSpawnSubagents,
         });
       });
-  }, [agentId]);
+  }, [agentId, globalSettings]);
+
+  useEffect(() => void loadGlobalSettings(), [loadGlobalSettings]);
 
   const patch = (p: Partial<FormState>) => setForm((f) => ({ ...f, ...p }));
 

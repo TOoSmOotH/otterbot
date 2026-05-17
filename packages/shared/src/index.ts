@@ -6,3 +6,4 @@ export * from "./agent-view.js";
 export * from "./agent.js";
 export * from "./agent-message.js";
 export * from "./spawn.js";
+export * from "./settings.js";

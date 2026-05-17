@@ -6,6 +6,8 @@ import type {
   AgentProfileSummary,
   AgentStatus,
   AgentRole,
+  GlobalSettings,
+  ProviderId,
 } from "@otterbot/shared";
 import type { Config } from "../config.js";
 import { ProfileStore, normalizeProfile } from "../profiles/profile-store.js";
@@ -34,6 +36,65 @@ export interface CreateAgentInput {
   canSpawnSubagents?: boolean;
   subagentLimit?: number;
   parentId?: string | null;
+}
+
+export const GLOBAL_SETTINGS_KEY = "global_settings";
+
+const DEFAULT_GLOBAL_SETTINGS: GlobalSettings = {
+  theme: "obsidian",
+  defaultChatModel: { provider: "lmstudio", modelId: "local-model" },
+  defaultEmbeddingModel: { provider: "lmstudio", modelId: "local-model" },
+  providers: {
+    anthropic: { baseUrl: "https://api.anthropic.com/v1", apiKeyConfigured: false },
+    openai: { baseUrl: "https://api.openai.com/v1", apiKeyConfigured: false },
+    lmstudio: { baseUrl: "http://localhost:1234/v1", apiKeyConfigured: false },
+    ollama: { baseUrl: "http://localhost:11434/v1", apiKeyConfigured: false },
+  },
+};
+
+const API_KEY_NAMES: Record<ProviderId, string> = {
+  anthropic: "ANTHROPIC_API_KEY",
+  openai: "OPENAI_API_KEY",
+  lmstudio: "LMSTUDIO_API_KEY",
+  ollama: "OLLAMA_API_KEY",
+};
+
+const BASE_URL_NAMES: Record<ProviderId, string> = {
+  anthropic: "ANTHROPIC_BASE_URL",
+  openai: "OPENAI_BASE_URL",
+  lmstudio: "LMSTUDIO_BASE_URL",
+  ollama: "OLLAMA_BASE_URL",
+};
+
+function normalizeGlobalSettings(input?: Partial<GlobalSettings> | null): GlobalSettings {
+  const defaults = DEFAULT_GLOBAL_SETTINGS;
+  const nextProviders = { ...defaults.providers };
+  for (const provider of Object.keys(defaults.providers) as ProviderId[]) {
+    const incoming = input?.providers?.[provider];
+    nextProviders[provider] = {
+      ...defaults.providers[provider],
+      ...incoming,
+      apiKeyConfigured: Boolean(incoming?.apiKey || incoming?.apiKeyConfigured),
+    };
+  }
+  return {
+    theme: input?.theme ?? defaults.theme,
+    defaultChatModel: input?.defaultChatModel ?? defaults.defaultChatModel,
+    defaultEmbeddingModel: input?.defaultEmbeddingModel ?? defaults.defaultEmbeddingModel,
+    providers: nextProviders,
+  };
+}
+
+export function redactGlobalSettings(settings: GlobalSettings): GlobalSettings {
+  const providers = { ...settings.providers };
+  for (const provider of Object.keys(providers) as ProviderId[]) {
+    const { apiKey, ...rest } = providers[provider];
+    providers[provider] = {
+      ...rest,
+      apiKeyConfigured: Boolean(apiKey || rest.apiKeyConfigured),
+    };
+  }
+  return { ...settings, providers };
 }
 
 function slugify(name: string): string {
@@ -130,6 +191,55 @@ export class Orchestrator {
       .run();
   }
 
+  getGlobalSettings(): GlobalSettings {
+    const raw = this.getSetting(GLOBAL_SETTINGS_KEY);
+    if (!raw) {
+      const settings = normalizeGlobalSettings();
+      settings.providers.lmstudio.baseUrl = this.cfg.lmstudioBaseUrl;
+      settings.providers.lmstudio.apiKey = this.cfg.lmstudioApiKey ?? undefined;
+      settings.providers.lmstudio.apiKeyConfigured = Boolean(this.cfg.lmstudioApiKey);
+      return settings;
+    }
+    try {
+      return normalizeGlobalSettings(JSON.parse(raw) as Partial<GlobalSettings>);
+    } catch {
+      return normalizeGlobalSettings();
+    }
+  }
+
+  setGlobalSettings(settings: GlobalSettings): GlobalSettings {
+    const current = this.getGlobalSettings();
+    const mergedProviders = { ...current.providers };
+    for (const provider of Object.keys(settings.providers) as ProviderId[]) {
+      const incoming = settings.providers[provider];
+      mergedProviders[provider] = {
+        ...current.providers[provider],
+        ...incoming,
+        apiKey:
+          incoming.apiKey !== undefined
+            ? incoming.apiKey
+            : current.providers[provider].apiKey,
+      };
+      if (incoming.apiKey === "") delete mergedProviders[provider].apiKey;
+      mergedProviders[provider].apiKeyConfigured = Boolean(mergedProviders[provider].apiKey);
+    }
+    const next = normalizeGlobalSettings({ ...settings, providers: mergedProviders });
+    this.setSetting(GLOBAL_SETTINGS_KEY, JSON.stringify(next));
+    this.restartAgents();
+    return next;
+  }
+
+  getGlobalProviderSecrets(): Map<string, string> {
+    const settings = this.getGlobalSettings();
+    const secrets = new Map<string, string>();
+    for (const provider of Object.keys(settings.providers) as ProviderId[]) {
+      const cfg = settings.providers[provider];
+      if (cfg.apiKey) secrets.set(API_KEY_NAMES[provider], cfg.apiKey);
+      if (cfg.baseUrl) secrets.set(BASE_URL_NAMES[provider], cfg.baseUrl);
+    }
+    return secrets;
+  }
+
   /** Stop the scheduler + bus and close every agent's database. */
   async shutdown(): Promise<void> {
     this.scheduler.stop();
@@ -183,7 +293,7 @@ export class Orchestrator {
   /** Build and register a runtime + context for a profile. */
   private startAgent(profile: AgentProfile): AgentContext {
     const paths = this.profiles.pathsFor(profile.id);
-    const secrets = this.secrets.get(profile.id);
+    const secrets = new Map([...this.getGlobalProviderSecrets(), ...this.secrets.get(profile.id)]);
     const ctx = buildAgentContext({
       profile,
       secrets,
@@ -288,13 +398,21 @@ export class Orchestrator {
     while (this.profiles.exists(id) || this.contexts.has(id)) {
       id = `${slugify(input.displayName)}-${n++}`;
     }
+    const defaults = this.getGlobalSettings();
+    const model = input.model ?? {
+      chat: defaults.defaultChatModel,
+      embedding: defaults.defaultEmbeddingModel,
+    };
     const profile = normalizeProfile({
       id,
       displayName: input.displayName,
       role: input.role ?? "agent",
       persona: input.persona,
-      model: input.model,
-      allowedModels: input.allowedModels,
+      model,
+      allowedModels: input.allowedModels ?? [
+        { provider: model.chat.provider, modelId: "*" },
+        { provider: model.embedding.provider, modelId: "*" },
+      ],
       allowedChatServices: input.allowedChatServices,
       transport: input.transport,
       email: input.email ?? null,
@@ -344,6 +462,20 @@ export class Orchestrator {
     this.secrets.set(id, secrets);
     this.updateAgent(id, {});
     return true;
+  }
+
+  private restartAgents(): void {
+    const profiles = this.listProfiles();
+    for (const profile of profiles) {
+      const ctx = this.contexts.get(profile.id);
+      ctx?.close();
+      this.contexts.delete(profile.id);
+      this.runtimes.delete(profile.id);
+    }
+    for (const profile of profiles) {
+      const fresh = this.startAgent(profile);
+      if (profile.id === "coo") setDefaultContext(fresh);
+    }
   }
 
   /**

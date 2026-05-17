@@ -23,6 +23,9 @@ test.describe("shell", () => {
 
     await page.getByTestId("view-chat").click();
     await expect(page.getByTestId("chat-input")).toBeVisible();
+
+    await page.getByTestId("view-settings").click();
+    await expect(page.getByTestId("global-settings")).toBeVisible();
   });
 
   test("GET /api/agents includes the COO", async ({ request }) => {
@@ -38,6 +41,19 @@ test.describe("shell", () => {
     const json = (await res.json()) as Array<{ id: string }>;
     expect(json.some((p) => p.id === "anthropic")).toBeTruthy();
     expect(json.some((p) => p.id === "lmstudio")).toBeTruthy();
+  });
+
+  test("GET /api/settings/global returns redacted global settings", async ({ request }) => {
+    const res = await request.get("/api/settings/global");
+    expect(res.ok()).toBeTruthy();
+    const json = (await res.json()) as {
+      theme: string;
+      defaultChatModel: { provider: string };
+      providers: { openai: { apiKey?: string } };
+    };
+    expect(json.theme).toBeTruthy();
+    expect(json.defaultChatModel.provider).toBeTruthy();
+    expect(json.providers.openai.apiKey).toBeUndefined();
   });
 
   test("GET /api/bus/messages returns an array", async ({ request }) => {
