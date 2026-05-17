@@ -423,5 +423,47 @@ export async function buildServer(orch: Orchestrator, cfg: Config): Promise<Fast
   // --- Desktop ---
   registerDesktopProxy(app);
 
+  // --- Built web app (single-port production) ---
+  if (existsSync(resolve(cfg.webDistDir, "index.html"))) {
+    await app.register(fastifyStatic, {
+      root: cfg.webDistDir,
+      prefix: "/",
+      decorateReply: true,
+      wildcard: false,
+    });
+
+    app.setNotFoundHandler((req, reply) => {
+      if (shouldServeWebApp(req.method, req.url)) {
+        return reply.sendFile("index.html");
+      }
+      reply.code(404);
+      return { error: "not found" };
+    });
+  } else {
+    app.log.info(
+      `web build not found (${cfg.webDistDir}); serving API only. Run pnpm --filter @otterbot/web build for single-port mode.`
+    );
+  }
+
   return app;
+}
+
+function shouldServeWebApp(method: string, url: string): boolean {
+  if (method !== "GET" && method !== "HEAD") return false;
+  const path = url.split("?")[0] || "/";
+  if (
+    path.startsWith("/api/") ||
+    path === "/api" ||
+    path.startsWith("/socket.io/") ||
+    path === "/socket.io" ||
+    path.startsWith("/assets/3d/") ||
+    path === "/assets/3d" ||
+    path.startsWith("/novnc/") ||
+    path === "/novnc" ||
+    path.startsWith("/desktop/ws/") ||
+    path === "/desktop/ws"
+  ) {
+    return false;
+  }
+  return !path.split("/").pop()?.includes(".");
 }

@@ -27,7 +27,7 @@ test.describe("agent studio", () => {
     await expect(page.getByText(/Scheduled prompts run automatically/)).toBeVisible();
 
     await page.getByTestId("studio-tab-Memory").click();
-    await expect(page.getByText(/memories/)).toBeVisible();
+    await expect(page.getByText("What this agent remembers across sessions.")).toBeVisible();
 
     await page.getByTestId("studio-tab-Credentials").click();
     await expect(page.getByText(/Secrets for this agent/)).toBeVisible();

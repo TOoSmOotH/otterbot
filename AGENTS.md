@@ -30,7 +30,11 @@ pnpm --filter @otterbot/web test:e2e
 pnpm --filter @otterbot/cli build
 ```
 
-`pnpm dev` builds and watches `@otterbot/shared`, starts the server, and starts the Vite web app. The backend defaults to port `62626`; the frontend defaults to Vite's port `5173`.
+`pnpm dev` builds and watches `@otterbot/shared`, starts the server, and starts the Vite web app. The backend defaults to port `3001`; the frontend defaults to Vite's port `5173`.
+
+`pnpm dev` runs `scripts/ensure-env.mjs` first. That script creates `.env` from `.env.example` with a generated `OTTERBOT_DB_KEY` only when `.env` is missing; it must not overwrite an existing `.env`.
+
+For production-style single-port serving, run `pnpm build` and then `pnpm --filter @otterbot/server start`. The backend serves the built frontend from `WEB_DIST_DIR` when `index.html` exists there.
 
 Server tests use a fake model by default. To exercise a real OpenAI-compatible endpoint, set `OTTER_TEST_MODEL_URL` and `OTTER_TEST_MODEL`.
 

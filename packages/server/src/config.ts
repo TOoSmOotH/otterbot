@@ -8,6 +8,7 @@ export interface Config {
   host: string;
   dataDir: string;
   assetsDir: string;
+  webDistDir: string;
   skillsDir: string;
   lmstudioBaseUrl: string;
   lmstudioApiKey: string | null;
@@ -38,6 +39,7 @@ export function loadConfig(): Config {
     host: process.env.HOST ?? "0.0.0.0",
     dataDir,
     assetsDir: process.env.ASSETS_DIR ?? resolve(rootDir, "assets"),
+    webDistDir: process.env.WEB_DIST_DIR ?? resolve(rootDir, "packages/web/dist"),
     skillsDir: process.env.SKILLS_DIR ?? resolve(dataDir, "skills"),
     lmstudioBaseUrl: process.env.LMSTUDIO_BASE_URL ?? "http://localhost:1234/v1",
     lmstudioApiKey: process.env.LMSTUDIO_API_KEY ?? null,

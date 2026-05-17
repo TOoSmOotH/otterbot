@@ -8,7 +8,7 @@ import { gotoApp } from "./helpers";
 test.describe("shell", () => {
   test("app loads with the COO in the roster", async ({ page }) => {
     await gotoApp(page);
-    await expect(page.getByText("otterbot")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "otterbot", exact: true })).toBeVisible();
     await expect(page.getByTestId("agent-card-coo")).toBeVisible();
   });
 

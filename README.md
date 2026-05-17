@@ -100,7 +100,6 @@ Requirements:
 git clone https://github.com/TOoSmOotH/otterbot.git
 cd otterbot
 pnpm install
-cp .env.example .env
 pnpm dev
 ```
 
@@ -109,12 +108,14 @@ The dev command starts the backend and frontend:
 - Backend API and Socket.IO server: `http://localhost:3001`
 - Vite web app: `http://localhost:5173`
 
-On first launch, the onboarding wizard configures the COO profile. You can skip
-setup and configure agents later in Agent Studio.
+On first launch, `pnpm dev` creates `.env` from `.env.example` if needed and
+generates a local `OTTERBOT_DB_KEY`. The onboarding wizard then configures the
+COO profile. You can skip setup and configure agents later in Agent Studio.
 
 ## Configuration
 
-Create `.env` from `.env.example`.
+For development, `pnpm dev` creates `.env` from `.env.example` when `.env` is
+missing. To create or reset it manually:
 
 ```bash
 cp .env.example .env
@@ -129,6 +130,7 @@ Important variables:
 | `HOST` | `0.0.0.0` | Backend bind host |
 | `DATA_DIR` | `./data` | Runtime data directory |
 | `ASSETS_DIR` | `./assets` | Static 3D assets directory |
+| `WEB_DIST_DIR` | `./packages/web/dist` | Built frontend served by the backend for single-port mode |
 | `SKILLS_DIR` | `./data/skills` | Legacy/global skills directory used when bootstrapping the COO |
 | `LMSTUDIO_BASE_URL` | `http://localhost:1234/v1` | Default LM Studio/OpenAI-compatible endpoint |
 | `LMSTUDIO_MODEL` | `local-model` | Initial COO chat model fallback |
@@ -171,6 +173,15 @@ Package scripts:
 | `pnpm cli` | Runs the built CLI |
 | `pnpm --filter @otterbot/server test` | Runs server Vitest tests |
 | `pnpm --filter @otterbot/web test:e2e` | Runs Playwright e2e tests |
+
+For a single-port production-style run, build the web package first, then start
+the server. The backend serves `WEB_DIST_DIR` from the same port as the API and
+Socket.IO:
+
+```bash
+pnpm build
+pnpm --filter @otterbot/server start
+```
 
 Server tests use a fake OpenAI-compatible model by default. To test against a
 real local endpoint:
