@@ -1,5 +1,5 @@
 import { getSkillService } from "./skill-service.js";
-import { scanSkillContent } from "./skill-scanner.js";
+import { formatScanFindings, scanSkillContent } from "./skill-scanner.js";
 import type { Skill, SkillMeta } from "@otterbot/shared";
 
 /**
@@ -46,7 +46,7 @@ export function importSkillFromRaw(raw: string): Skill {
   const scan = scanSkillContent(raw);
   if (scan.findings.some((f) => f.severity === "error")) {
     throw new Error(
-      "Skill rejected by scanner: " + scan.findings.map((f) => f.message).join("; "),
+      "Skill rejected by scanner: " + formatScanFindings(scan.findings),
     );
   }
   const { meta, body } = fromAgentSkillsIo(raw);

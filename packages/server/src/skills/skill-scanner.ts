@@ -22,6 +22,20 @@ export function scanSkillContent(raw: string): ScanReport {
   };
 }
 
+export function formatScanFindings(findings: ScanFinding[]): string {
+  const seen = new Set<string>();
+  const formatted: string[] = [];
+
+  for (const finding of findings) {
+    const label = finding.line ? `${finding.message} (line ${finding.line})` : finding.message;
+    if (seen.has(label)) continue;
+    seen.add(label);
+    formatted.push(label);
+  }
+
+  return formatted.join("; ");
+}
+
 // ---------------------------------------------------------------------------
 // Pass 1: Hidden content detection
 // ---------------------------------------------------------------------------
@@ -280,7 +294,8 @@ function scanDangerousTools(raw: string, lines: string[], findings: ScanFinding[
 // ---------------------------------------------------------------------------
 
 const URL_RE = /https?:\/\/[^\s"'<>)]+/i;
-const CURL_FETCH_RE = /\b(curl|fetch|wget|http\.get|axios|request\.post)\b/i;
+const NETWORK_REQUEST_RE =
+  /(?:^|[\s`])(?:[$>]\s*)?(?:curl|wget)\s+(?:-|https?:\/\/|['"]https?:\/\/)|\b(?:fetch|http\.get|request\.post)\s*\(|\baxios(?:\.\w+)?\s*\(/i;
 const BASE64_ENCODE_RE = /\b(btoa|base64[._]?encode|Buffer\.from.*toString\s*\(\s*['"]base64['"])\b/i;
 const EXFIL_PATTERNS_RE = /\b(send to|upload to|post to|webhook|exfiltrate|phone home)\b/i;
 const CREDENTIAL_RE = /\b(api[_-]?key|password|token|secret|credential|private[_-]?key|access[_-]?key)\b/i;
@@ -304,7 +319,7 @@ function scanExfiltration(lines: string[], findings: ScanFinding[]): void {
       });
     }
 
-    if (CURL_FETCH_RE.test(line)) {
+    if (NETWORK_REQUEST_RE.test(line)) {
       findings.push({
         severity: "error",
         category: "exfiltration",

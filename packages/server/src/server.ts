@@ -14,7 +14,7 @@ import { discoverModelPacks } from "./views/model-packs.js";
 import { discoverSceneConfigs } from "./views/scene-configs.js";
 import { discoverEnvironmentPacks } from "./views/environment-packs.js";
 import { importSkillFromRaw, importSkillFromUrl, exportAllSkills } from "./skills/skill-hub.js";
-import { scanSkillContent } from "./skills/skill-scanner.js";
+import { formatScanFindings, scanSkillContent } from "./skills/skill-scanner.js";
 import { initOpenAiAuth, getOpenAiAuth } from "./auth/openai-auth-store.js";
 import { SKILL_CATALOG, getCatalogSkill, catalogSkillUrl } from "./skills/builtin-catalog.js";
 import { generateText } from "ai";
@@ -298,7 +298,7 @@ export async function buildServer(orch: Orchestrator, cfg: Config): Promise<Fast
           reply.code(400);
           return {
             error: "skill rejected by security scanner: " +
-              scan.findings.map((f) => f.message).join("; "),
+              formatScanFindings(scan.findings),
           };
         }
         const { meta, body } = ctx.skills.parseSkillFile(raw);
