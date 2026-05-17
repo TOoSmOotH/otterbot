@@ -28,7 +28,7 @@ export const CHATGPT_CODEX_BASE_URL = "https://chatgpt.com/backend-api/codex";
 
 /** Codex model slugs — used as a fallback when live discovery is unavailable. */
 export const CODEX_MODELS = [
-  "gpt-5.5",
+  "gpt-5.4-codex",
   "gpt-5.4",
   "gpt-5.4-mini",
   "gpt-5.3-codex",

@@ -109,9 +109,10 @@ function chatGptCodexModel(modelId: string, auth: OpenAiAuthStore): LanguageMode
       const headers = new Headers(init?.headers);
       headers.set("authorization", `Bearer ${token}`);
       const account = auth.accountId();
-      if (account) headers.set("chatgpt-account-id", account);
+      if (account) headers.set("ChatGPT-Account-ID", account);
       headers.set("openai-beta", "responses=experimental");
       headers.set("originator", "codex_cli_rs");
+      headers.set("User-Agent", "codex_cli_rs/0.0.0 (Otterbot)");
       headers.set("session_id", sessionId);
       // The Codex backend requires server-side response storage to be off.
       let body = init?.body;
@@ -122,10 +123,24 @@ function chatGptCodexModel(modelId: string, auth: OpenAiAuthStore): LanguageMode
           /* non-JSON body — leave it untouched */
         }
       }
-      return fetch(input, { ...init, headers, body });
+      const res = await fetch(input, { ...init, headers, body });
+      if (!res.ok) {
+        throw new Error(
+          `OpenAI OAuth request failed: ${res.status} ${res.statusText} ${await safeResponseText(res)}`
+        );
+      }
+      return res;
     },
   });
   return provider.responses(modelId);
+}
+
+async function safeResponseText(res: Response): Promise<string> {
+  try {
+    return (await res.clone().text()).slice(0, 500);
+  } catch {
+    return "";
+  }
 }
 
 /**

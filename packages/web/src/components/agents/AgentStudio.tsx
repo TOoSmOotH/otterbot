@@ -243,6 +243,21 @@ function ModelTab({ profile, onSaved }: TabProps) {
             setCm(m);
             dirty();
           }}
+          onUseCodexModel={async (m) => {
+            setCm(m);
+            await update(profile.id, {
+              model: {
+                chat: { provider: cp, modelId: m },
+                embedding: { provider: ep, modelId: em.trim() },
+              },
+              allowedModels: [
+                { provider: cp, modelId: "*" },
+                { provider: ep, modelId: "*" },
+              ],
+            });
+            setSaved(true);
+            onSaved();
+          }}
         />
       )}
       <Field label="Embedding model (for semantic memory)">
@@ -279,9 +294,11 @@ function ModelTab({ profile, onSaved }: TabProps) {
 function OpenAiAuthPanel({
   chatModel,
   onPickModel,
+  onUseCodexModel,
 }: {
   chatModel: string;
   onPickModel: (id: string) => void;
+  onUseCodexModel: (id: string) => Promise<void>;
 }) {
   const [status, setStatus] = useState<{ connected: boolean; accountId: string | null } | null>(null);
   const [models, setModels] = useState<string[]>([]);
@@ -291,6 +308,7 @@ function OpenAiAuthPanel({
   const loadSettings = useGlobalSettingsStore((s) => s.load);
   const saveSettings = useGlobalSettingsStore((s) => s.save);
   const openAiUsesOAuth = settings.providers.openai.authMethod === "oauth";
+  const [autoSavedModel, setAutoSavedModel] = useState("");
 
   const refresh = () =>
     fetch("/api/auth/openai/status")
@@ -323,9 +341,17 @@ function OpenAiAuthPanel({
       body: JSON.stringify({ provider: "openai", secrets: { OPENAI_AUTH_METHOD: "oauth" } }),
     })
       .then((r) => r.json())
-      .then((d: { ok: boolean; models?: string[] }) => setModels(d.ok && d.models ? d.models : []))
+      .then((d: { ok: boolean; models?: string[] }) => {
+        const list = d.ok && d.models ? d.models : [];
+        setModels(list);
+        const first = list[0];
+        if (first && !list.includes(chatModel) && autoSavedModel !== first) {
+          setAutoSavedModel(first);
+          void onUseCodexModel(first);
+        }
+      })
       .catch(() => setModels([]));
-  }, [status?.connected]);
+  }, [autoSavedModel, chatModel, onUseCodexModel, status?.connected]);
 
   const signIn = async () => {
     setBusy(true);
