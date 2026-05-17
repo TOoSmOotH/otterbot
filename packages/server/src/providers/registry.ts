@@ -6,9 +6,9 @@ import { getConfig } from "../config.js";
 import type { EmbeddingConfig } from "../embedding.js";
 import type { ModelRef, ProviderEndpoint, ProviderId } from "./types.js";
 import type { ModelRef as SharedModelRef } from "@otterbot/shared";
-import { randomUUID } from "node:crypto";
 import { getOpenAiAuth, type OpenAiAuthStore } from "../auth/openai-auth-store.js";
-import { CHATGPT_CODEX_BASE_URL, listCodexModels } from "../auth/openai-oauth.js";
+import { listCodexModels } from "../auth/openai-oauth.js";
+import { OpenAiCodexOAuthModel } from "./openai-codex-model.js";
 
 /** Read a credential from the agent's secrets (stored in the encrypted DB). */
 function secret(secrets: Map<string, string>, key: string): string {
@@ -100,47 +100,7 @@ export function resolveChatModel(
  * failures here as a sign the upstream contract changed.
  */
 function chatGptCodexModel(modelId: string, auth: OpenAiAuthStore): LanguageModelV1 {
-  const sessionId = randomUUID();
-  const provider = createOpenAI({
-    baseURL: CHATGPT_CODEX_BASE_URL,
-    apiKey: "chatgpt-oauth", // placeholder — real auth is injected by fetch below
-    fetch: async (input, init) => {
-      const token = await auth.accessToken();
-      const headers = new Headers(init?.headers);
-      headers.set("authorization", `Bearer ${token}`);
-      const account = auth.accountId();
-      if (account) headers.set("ChatGPT-Account-ID", account);
-      headers.set("openai-beta", "responses=experimental");
-      headers.set("originator", "codex_cli_rs");
-      headers.set("User-Agent", "codex_cli_rs/0.0.0 (Otterbot)");
-      headers.set("session_id", sessionId);
-      // The Codex backend requires server-side response storage to be off.
-      let body = init?.body;
-      if (typeof body === "string") {
-        try {
-          body = JSON.stringify({ ...(JSON.parse(body) as object), store: false });
-        } catch {
-          /* non-JSON body — leave it untouched */
-        }
-      }
-      const res = await fetch(input, { ...init, headers, body });
-      if (!res.ok) {
-        throw new Error(
-          `OpenAI OAuth request failed: ${res.status} ${res.statusText} ${await safeResponseText(res)}`
-        );
-      }
-      return res;
-    },
-  });
-  return provider.responses(modelId);
-}
-
-async function safeResponseText(res: Response): Promise<string> {
-  try {
-    return (await res.clone().text()).slice(0, 500);
-  } catch {
-    return "";
-  }
+  return new OpenAiCodexOAuthModel(modelId, auth);
 }
 
 /**
