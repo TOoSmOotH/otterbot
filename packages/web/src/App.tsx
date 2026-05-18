@@ -4,7 +4,6 @@ import { AgentChat } from "./components/chat/AgentChat";
 import { AgentEditor } from "./components/agents/AgentEditor";
 import { AgentStudio } from "./components/agents/AgentStudio";
 import { ActivityView } from "./components/agents/ActivityView";
-import { AgentScene3D } from "./components/agents/AgentScene3D";
 import { GlobalSettings } from "./components/settings/GlobalSettings";
 import { OnboardingWizard } from "./components/agents/OnboardingWizard";
 import { useAgentsStore } from "./stores/agents-store";
@@ -12,15 +11,14 @@ import { useChatStore } from "./stores/chat-store";
 import { useGlobalSettingsStore } from "./stores/global-settings-store";
 import { useSetupStore } from "./stores/setup-store";
 
-type MainView = "chat" | "studio" | "activity" | "3d" | "settings";
+type MainView = "chat" | "studio" | "activity" | "settings";
 
-const VIEWS: MainView[] = ["chat", "studio", "activity", "3d", "settings"];
+const VIEWS: MainView[] = ["chat", "studio", "activity", "settings"];
 
 const VIEW_LABELS: Record<MainView, string> = {
   chat: "Chat",
   studio: "Agent Studio",
   activity: "Activity",
-  "3d": "3D",
   settings: "Settings",
 };
 
@@ -82,7 +80,6 @@ export default function App() {
           {view === "chat" && <AgentChat onEditAgent={openStudio} />}
           {view === "studio" && <AgentStudio agentId={activeAgentId} />}
           {view === "activity" && <ActivityView />}
-          {view === "3d" && <AgentScene3D />}
           {view === "settings" && <GlobalSettings />}
         </div>
       </div>

@@ -2,7 +2,6 @@ import { useEffect, useState } from "react";
 import type { AgentPeerAccess, AgentProfile, AgentRole, ProviderId } from "@otterbot/shared";
 import { useAgentsStore } from "../../stores/agents-store";
 import { useGlobalSettingsStore } from "../../stores/global-settings-store";
-import { useModelPacksStore } from "../../stores/model-packs-store";
 
 const PROVIDERS: ProviderId[] = ["anthropic", "openai", "lmstudio", "ollama"];
 
@@ -14,7 +13,6 @@ interface FormState {
   chatModel: string;
   embeddingProvider: ProviderId;
   embeddingModel: string;
-  modelPack: string;
   transport: "local" | "discord";
   email: string;
   canSpawnSubagents: boolean;
@@ -37,7 +35,6 @@ const BLANK: FormState = {
   chatModel: "local-model",
   embeddingProvider: "lmstudio",
   embeddingModel: "local-model",
-  modelPack: "prototype-pete",
   transport: "local",
   email: "",
   canSpawnSubagents: true,
@@ -66,7 +63,6 @@ export function AgentEditor({ agentId, onClose }: { agentId: string | null; onCl
   const update = useAgentsStore((s) => s.update);
   const remove = useAgentsStore((s) => s.remove);
   const agents = useAgentsStore((s) => s.agents);
-  const packs = useModelPacksStore((s) => s.packs);
   const globalSettings = useGlobalSettingsStore((s) => s.settings);
   const loadGlobalSettings = useGlobalSettingsStore((s) => s.load);
 
@@ -99,7 +95,6 @@ export function AgentEditor({ agentId, onClose }: { agentId: string | null; onCl
           chatModel: p.model.chat.modelId,
           embeddingProvider: p.model.embedding.provider,
           embeddingModel: p.model.embedding.modelId,
-          modelPack: p.artwork.modelPack,
           transport: p.transport,
           email: p.email ?? "",
           canSpawnSubagents: p.canSpawnSubagents,
@@ -157,7 +152,6 @@ export function AgentEditor({ agentId, onClose }: { agentId: string | null; onCl
       ],
       transport: form.transport,
       email: form.email.trim() || null,
-      artwork: { modelPack: form.modelPack },
       canSpawnSubagents: form.canSpawnSubagents,
       slack: form.slackEnabled
         ? {
@@ -316,32 +310,17 @@ export function AgentEditor({ agentId, onClose }: { agentId: string | null; onCl
           </Field>
         </Row>
 
-        <Row>
-          <Field label="Avatar">
-            <select
-              value={form.modelPack}
-              onChange={(e) => patch({ modelPack: e.target.value })}
-              style={inputStyle}
-            >
-              {packs.length === 0 && <option value={form.modelPack}>{form.modelPack}</option>}
-              {packs.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
-              ))}
-            </select>
-          </Field>
-          <Field label="Transport">
-            <select
-              value={form.transport}
-              onChange={(e) => patch({ transport: e.target.value as "local" | "discord" })}
-              style={inputStyle}
-            >
-              <option value="local">local</option>
-              <option value="discord">discord</option>
-            </select>
-          </Field>
-        </Row>
+        <Field label="Agent-to-agent transport">
+          <select
+            value={form.transport}
+            onChange={(e) => patch({ transport: e.target.value as "local" | "discord" })}
+            style={inputStyle}
+          >
+            <option value="local">local</option>
+            <option value="discord">discord</option>
+          </select>
+        </Field>
+        <p style={hintStyle}>Set this agent's avatar in the Agent Studio → Identity tab.</p>
 
         <Field label="Email address">
           <input

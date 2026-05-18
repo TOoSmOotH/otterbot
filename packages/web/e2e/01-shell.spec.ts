@@ -18,9 +18,6 @@ test.describe("shell", () => {
     await page.getByTestId("view-activity").click();
     await expect(page.getByText("Agent communication")).toBeVisible();
 
-    await page.getByTestId("view-3d").click();
-    await expect(page.getByTestId("agent-scene-3d")).toBeVisible();
-
     await page.getByTestId("view-chat").click();
     await expect(page.getByTestId("chat-input")).toBeVisible();
 

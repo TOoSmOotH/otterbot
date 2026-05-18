@@ -2,7 +2,6 @@ export * from "./message.js";
 export * from "./skill.js";
 export * from "./memory.js";
 export * from "./user-profile.js";
-export * from "./agent-view.js";
 export * from "./agent.js";
 export * from "./agent-message.js";
 export * from "./spawn.js";

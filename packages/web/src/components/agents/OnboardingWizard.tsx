@@ -4,6 +4,7 @@ import { useSetupStore } from "../../stores/setup-store";
 import { useAgentsStore } from "../../stores/agents-store";
 import { useGlobalSettingsStore } from "../../stores/global-settings-store";
 import { BuiltinEmbedderControls } from "../BuiltinEmbedderControls";
+import { AvatarUpload } from "./AvatarUpload";
 
 /** Per-provider credential field metadata. */
 const CRED: Record<ProviderId, { label: string; key: string; placeholder: string; secret: boolean }> = {
@@ -419,6 +420,9 @@ export function OnboardingWizard() {
             <h2 style={h2}>Give the COO a personality</h2>
             <Field label="Name">
               <input value={cooName} onChange={(e) => setCooName(e.target.value)} style={input} />
+            </Field>
+            <Field label="Avatar (optional)">
+              <AvatarUpload agentId="coo" name={cooName} avatar={null} />
             </Field>
             <Field label="Persona">
               <textarea

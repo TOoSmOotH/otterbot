@@ -1,17 +1,15 @@
 import Fastify, { type FastifyInstance } from "fastify";
 import fastifyStatic from "@fastify/static";
 import fastifyCors from "@fastify/cors";
-import { resolve } from "node:path";
-import { existsSync } from "node:fs";
+import fastifyMultipart from "@fastify/multipart";
+import { resolve, extname } from "node:path";
+import { existsSync, createReadStream } from "node:fs";
 import type { Config } from "./config.js";
 import type { Orchestrator, CreateAgentInput } from "./orchestrator/orchestrator.js";
 import { PROVIDERS } from "./providers/types.js";
 import { getSkillService } from "./skills/skill-service.js";
 import { getMemoryService } from "./memory/memory-service.js";
 import { getUserProfileService } from "./user-profile/user-profile-service.js";
-import { discoverModelPacks } from "./views/model-packs.js";
-import { discoverSceneConfigs } from "./views/scene-configs.js";
-import { discoverEnvironmentPacks } from "./views/environment-packs.js";
 import { importSkillFromRaw, importSkillFromUrl, exportAllSkills } from "./skills/skill-hub.js";
 import { formatScanFindings, scanSkillContent } from "./skills/skill-scanner.js";
 import { initOpenAiAuth, getOpenAiAuth } from "./auth/openai-auth-store.js";
@@ -31,6 +29,8 @@ export async function buildServer(orch: Orchestrator, cfg: Config): Promise<Fast
   const app = Fastify({ logger: { level: cfg.logLevel } });
 
   await app.register(fastifyCors, { origin: true, credentials: true });
+  // Avatar uploads — capped well above any reasonable image.
+  await app.register(fastifyMultipart, { limits: { fileSize: 4 * 1024 * 1024, files: 1 } });
 
   // Instance-wide ChatGPT OAuth store, backed by control.db app_settings. The
   // real process initialises this before `orch.boot()` so agent runtimes and
@@ -42,22 +42,6 @@ export async function buildServer(orch: Orchestrator, cfg: Config): Promise<Fast
       setSetting: (k, v) => orch.setSetting(k, v),
     });
   }
-
-  // Static assets (3D models, textures) under /assets/3d/*
-  if (existsSync(cfg.assetsDir)) {
-    await app.register(fastifyStatic, {
-      root: cfg.assetsDir,
-      prefix: "/assets/3d/",
-      decorateReply: false,
-    });
-  } else {
-    app.log.warn(`assets dir not found (${cfg.assetsDir}); /assets/3d will 404`);
-  }
-
-  // --- Views (model packs / scenes / environment packs) ---
-  app.get("/api/model-packs", async () => discoverModelPacks(cfg.assetsDir));
-  app.get("/api/scenes", async () => discoverSceneConfigs(cfg.assetsDir));
-  app.get("/api/environment-packs", async () => discoverEnvironmentPacks(cfg.assetsDir));
 
   // --- Providers (for the model picker) ---
   app.get("/api/providers", async () => PROVIDERS);
@@ -225,6 +209,73 @@ export async function buildServer(orch: Orchestrator, cfg: Config): Promise<Fast
       return { error: req.params.id === "coo" ? "the COO cannot be deleted" : "not found" };
     }
     return { ok: true };
+  });
+
+  // --- Agent avatars ---
+  const AVATAR_EXT: Record<string, string> = {
+    "image/png": "png",
+    "image/jpeg": "jpg",
+    "image/webp": "webp",
+    "image/gif": "gif",
+  };
+  const AVATAR_MIME: Record<string, string> = {
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".webp": "image/webp",
+    ".gif": "image/gif",
+  };
+
+  app.post<{ Params: { id: string } }>("/api/agents/:id/avatar", async (req, reply) => {
+    let file;
+    try {
+      file = await req.file();
+    } catch {
+      reply.code(400);
+      return { error: "expected a multipart image upload" };
+    }
+    if (!file) {
+      reply.code(400);
+      return { error: "no image uploaded" };
+    }
+    const ext = AVATAR_EXT[file.mimetype];
+    if (!ext) {
+      reply.code(400);
+      return { error: "unsupported image type — use PNG, JPG, WebP or GIF" };
+    }
+    let data: Buffer;
+    try {
+      data = await file.toBuffer();
+    } catch {
+      reply.code(413);
+      return { error: "image is too large (max 4 MB)" };
+    }
+    const updated = orch.setAgentAvatar(req.params.id, data, ext);
+    if (!updated) {
+      reply.code(404);
+      return { error: "not found" };
+    }
+    return updated;
+  });
+
+  app.get<{ Params: { id: string } }>("/api/agents/:id/avatar", async (req, reply) => {
+    const file = orch.agentAvatarPath(req.params.id);
+    if (!file) {
+      reply.code(404);
+      return { error: "no avatar" };
+    }
+    reply.header("content-type", AVATAR_MIME[extname(file).toLowerCase()] ?? "application/octet-stream");
+    reply.header("cache-control", "no-cache");
+    return reply.send(createReadStream(file));
+  });
+
+  app.delete<{ Params: { id: string } }>("/api/agents/:id/avatar", async (req, reply) => {
+    const updated = orch.clearAgentAvatar(req.params.id);
+    if (!updated) {
+      reply.code(404);
+      return { error: "not found" };
+    }
+    return updated;
   });
 
   app.get<{ Params: { id: string } }>("/api/agents/:id/memories", async (req, reply) => {
@@ -494,9 +545,7 @@ function shouldServeWebApp(method: string, url: string): boolean {
     path.startsWith("/api/") ||
     path === "/api" ||
     path.startsWith("/socket.io/") ||
-    path === "/socket.io" ||
-    path.startsWith("/assets/3d/") ||
-    path === "/assets/3d"
+    path === "/socket.io"
   ) {
     return false;
   }

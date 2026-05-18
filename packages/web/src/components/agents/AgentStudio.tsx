@@ -7,9 +7,9 @@ import type {
   MemoryEntry,
 } from "@otterbot/shared";
 import { useAgentsStore } from "../../stores/agents-store";
-import { useModelPacksStore } from "../../stores/model-packs-store";
 import { useGlobalSettingsStore } from "../../stores/global-settings-store";
 import { BuiltinEmbedderControls } from "../BuiltinEmbedderControls";
+import { AvatarUpload } from "./AvatarUpload";
 
 const PROVIDERS: ProviderId[] = ["anthropic", "openai", "lmstudio", "ollama"];
 /** Providers offered for the embedding model (builtin = in-process CPU). */
@@ -113,12 +113,8 @@ export function AgentStudio({ agentId }: { agentId: string | null }) {
 
 function IdentityTab({ profile, onSaved }: TabProps) {
   const update = useAgentsStore((s) => s.update);
-  const packs = useModelPacksStore((s) => s.packs);
-  const loadPacks = useModelPacksStore((s) => s.load);
-  useEffect(() => void loadPacks(), [loadPacks]);
 
   const [displayName, setName] = useState(profile.displayName);
-  const [modelPack, setPack] = useState(profile.artwork.modelPack);
   const [email, setEmail] = useState(profile.email ?? "");
   const [transport, setTransport] = useState(profile.transport);
   const [canSpawn, setCanSpawn] = useState(profile.canSpawnSubagents);
@@ -128,7 +124,6 @@ function IdentityTab({ profile, onSaved }: TabProps) {
   const save = async () => {
     await update(profile.id, {
       displayName,
-      artwork: { modelPack },
       email: email.trim() || null,
       transport,
       canSpawnSubagents: canSpawn,
@@ -144,14 +139,12 @@ function IdentityTab({ profile, onSaved }: TabProps) {
         <input value={displayName} onChange={(e) => setName(e.target.value)} style={input} />
       </Field>
       <Field label="Avatar">
-        <select value={modelPack} onChange={(e) => setPack(e.target.value)} style={input}>
-          {packs.length === 0 && <option value={modelPack}>{modelPack}</option>}
-          {packs.map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.name}
-            </option>
-          ))}
-        </select>
+        <AvatarUpload
+          agentId={profile.id}
+          name={profile.displayName}
+          avatar={profile.artwork.avatar}
+          onChange={onSaved}
+        />
       </Field>
       <Field label="Email address">
         <input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="agent@otter.local" style={input} />

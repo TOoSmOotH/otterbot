@@ -11,19 +11,15 @@
   },
   "dependencies": {
     "@otterbot/shared": "workspace:*",
-    "@react-three/drei": "^10.7.7",
-    "@react-three/fiber": "^9.5.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "socket.io-client": "^4.8.1",
-    "three": "^0.182.0",
     "zustand": "^5.0.3"
   },
   "devDependencies": {
     "@playwright/test": "^1.50.1",
     "@types/react": "^19.0.8",
     "@types/react-dom": "^19.0.3",
-    "@types/three": "^0.182.0",
     "@vitejs/plugin-react": "^4.3.4",
     "autoprefixer": "^10.4.20",
     "postcss": "^8.5.1",

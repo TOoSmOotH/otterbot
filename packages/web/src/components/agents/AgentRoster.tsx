@@ -1,6 +1,4 @@
-import { useEffect } from "react";
 import { useAgentsStore } from "../../stores/agents-store";
-import { useModelPacksStore, packThumbnail } from "../../stores/model-packs-store";
 import { useChatStore } from "../../stores/chat-store";
 import { statusColor, initials } from "./agent-visual";
 
@@ -9,13 +7,7 @@ export function AgentRoster({ onNewAgent }: { onNewAgent: () => void }) {
   const agents = useAgentsStore((s) => s.agents);
   const activeAgentId = useAgentsStore((s) => s.activeAgentId);
   const setActive = useAgentsStore((s) => s.setActive);
-  const packs = useModelPacksStore((s) => s.packs);
   const connected = useChatStore((s) => s.connected);
-
-  const loadPacks = useModelPacksStore((s) => s.load);
-  useEffect(() => {
-    void loadPacks();
-  }, [loadPacks]);
 
   // COO pinned to the top, then the rest alphabetically.
   const ordered = [...agents].sort((a, b) => {
@@ -52,7 +44,7 @@ export function AgentRoster({ onNewAgent }: { onNewAgent: () => void }) {
 
       <div style={{ flex: 1, overflowY: "auto", padding: 8, display: "flex", flexDirection: "column", gap: 6 }}>
         {ordered.map((a) => {
-          const thumb = packThumbnail(packs, a.artwork.modelPack);
+          const thumb = a.artwork.avatar;
           const active = a.id === activeAgentId;
           return (
             <button

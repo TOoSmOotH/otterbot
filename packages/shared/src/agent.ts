@@ -50,10 +50,10 @@ export interface AgentModelConfig {
   embedding: ModelRef;
 }
 
-/** Which worker character art/GLB this agent renders as. */
+/** An agent's visual identity in the UI. */
 export interface AgentArtwork {
-  /** A modelPack id discovered from assets/workers/*. */
-  modelPack: string;
+  /** URL of the uploaded avatar image, or null to render initials instead. */
+  avatar: string | null;
 }
 
 /** Grants this agent permission to message a specific peer agent. */

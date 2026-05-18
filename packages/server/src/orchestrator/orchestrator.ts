@@ -1,4 +1,5 @@
-import { resolve } from "node:path";
+import { resolve, join } from "node:path";
+import { existsSync, readdirSync, writeFileSync, rmSync } from "node:fs";
 import { eq, desc } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import type {
@@ -559,6 +560,39 @@ export class Orchestrator {
     if (id === "coo") setDefaultContext(fresh);
     this.reconcileConnectors(updated);
     return updated;
+  }
+
+  /** Absolute path to an agent's stored avatar image, or null if it has none. */
+  agentAvatarPath(id: string): string | null {
+    if (!this.contexts.has(id)) return null;
+    const dir = this.profiles.pathsFor(id).dir;
+    if (!existsSync(dir)) return null;
+    const file = readdirSync(dir).find((n) => /^avatar\.(png|jpg|jpeg|webp|gif)$/i.test(n));
+    return file ? join(dir, file) : null;
+  }
+
+  /** Save an uploaded avatar image and point the agent's artwork at it. */
+  setAgentAvatar(id: string, data: Buffer, ext: string): AgentProfile | null {
+    if (!this.contexts.has(id)) return null;
+    const dir = this.profiles.pathsFor(id).dir;
+    this.clearAvatarFiles(dir);
+    writeFileSync(join(dir, `avatar.${ext}`), data);
+    // Cache-bust the URL so the browser refetches when the image changes.
+    return this.updateAgent(id, { artwork: { avatar: `/api/agents/${id}/avatar?v=${Date.now()}` } });
+  }
+
+  /** Remove an agent's avatar image; the UI falls back to initials. */
+  clearAgentAvatar(id: string): AgentProfile | null {
+    if (!this.contexts.has(id)) return null;
+    this.clearAvatarFiles(this.profiles.pathsFor(id).dir);
+    return this.updateAgent(id, { artwork: { avatar: null } });
+  }
+
+  private clearAvatarFiles(dir: string): void {
+    if (!existsSync(dir)) return;
+    for (const name of readdirSync(dir)) {
+      if (/^avatar\./i.test(name)) rmSync(join(dir, name), { force: true });
+    }
   }
 
   /** Delete an agent. The COO cannot be deleted. */
