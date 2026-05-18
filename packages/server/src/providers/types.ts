@@ -25,4 +25,5 @@ export const PROVIDERS: ProviderInfo[] = [
   { id: "openai", label: "OpenAI", needsApiKey: true, apiKeyName: "OPENAI_API_KEY", supportsEmbeddings: true },
   { id: "lmstudio", label: "LM Studio (local)", needsApiKey: false, supportsEmbeddings: true },
   { id: "ollama", label: "Ollama (local)", needsApiKey: false, supportsEmbeddings: true },
+  { id: "builtin", label: "Built-in (CPU)", needsApiKey: false, supportsEmbeddings: true },
 ];

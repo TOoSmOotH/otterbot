@@ -16,7 +16,7 @@ import { controlSchema, type ControlDb } from "../db/control-db.js";
 import { buildAgentContext, type AgentContext } from "../runtime/agent-context.js";
 import { AgentRuntime } from "../runtime/agent-runtime.js";
 import type { AgentServices, SpawnResult } from "../runtime/agent-services.js";
-import { resolveEmbeddingConfig } from "../providers/registry.js";
+import { resolveEmbedder } from "../providers/registry.js";
 import { setDefaultContext } from "../runtime/default-agent.js";
 import { MessageBus } from "../bus/bus.js";
 import { createTransport } from "../bus/transports/factory.js";
@@ -69,6 +69,8 @@ const DEFAULT_GLOBAL_SETTINGS: GlobalSettings = {
     },
     lmstudio: { baseUrl: "http://localhost:1234/v1", apiKeyConfigured: false },
     ollama: { baseUrl: "http://localhost:11434/v1", apiKeyConfigured: false },
+    // The built-in embedder is in-process — no endpoint, no credentials.
+    builtin: { baseUrl: "", apiKeyConfigured: false },
   },
 };
 
@@ -77,6 +79,7 @@ const API_KEY_NAMES: Record<ProviderId, string> = {
   openai: "OPENAI_API_KEY",
   lmstudio: "LMSTUDIO_API_KEY",
   ollama: "OLLAMA_API_KEY",
+  builtin: "BUILTIN_API_KEY",
 };
 
 const BASE_URL_NAMES: Record<ProviderId, string> = {
@@ -84,6 +87,7 @@ const BASE_URL_NAMES: Record<ProviderId, string> = {
   openai: "OPENAI_BASE_URL",
   lmstudio: "LMSTUDIO_BASE_URL",
   ollama: "OLLAMA_BASE_URL",
+  builtin: "BUILTIN_BASE_URL",
 };
 
 function normalizeGlobalSettings(input?: Partial<GlobalSettings> | null): GlobalSettings {
@@ -343,7 +347,7 @@ export class Orchestrator {
       secrets,
       agentDbPath: paths.agentDb,
       skillsDir: paths.skillsDir,
-      embedding: resolveEmbeddingConfig(profile.model.embedding, secrets),
+      embedder: resolveEmbedder(profile.model.embedding, secrets),
       dbKey: this.cfg.dbKey,
     });
     const runtime = new AgentRuntime(ctx, this.services);

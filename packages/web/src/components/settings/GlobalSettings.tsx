@@ -2,16 +2,19 @@ import { useEffect, useMemo, useState } from "react";
 import type { GlobalSettings as GlobalSettingsShape, ProviderId, ThemeId } from "@otterbot/shared";
 import {
   PROVIDERS,
+  EMBEDDING_PROVIDERS,
   THEMES,
   useGlobalSettingsStore,
   applyTheme,
 } from "../../stores/global-settings-store";
+import { BuiltinEmbedderControls } from "../BuiltinEmbedderControls";
 
 const PROVIDER_LABELS: Record<ProviderId, string> = {
   anthropic: "Anthropic",
   openai: "OpenAI",
   lmstudio: "LM Studio",
   ollama: "Ollama",
+  builtin: "Built-in (CPU)",
 };
 
 const API_KEY_LABELS: Record<ProviderId, string> = {
@@ -19,6 +22,7 @@ const API_KEY_LABELS: Record<ProviderId, string> = {
   openai: "OPENAI_API_KEY",
   lmstudio: "LMSTUDIO_API_KEY",
   ollama: "OLLAMA_API_KEY",
+  builtin: "—",
 };
 
 type OpenAiAuthStatus = { connected: boolean; accountId: string | null };
@@ -86,6 +90,7 @@ export function GlobalSettings() {
         <div style={grid}>
           <ModelPicker
             title="Chat"
+            providers={PROVIDERS}
             provider={draft.defaultChatModel.provider}
             modelId={draft.defaultChatModel.modelId}
             onChange={(provider, modelId) =>
@@ -94,6 +99,7 @@ export function GlobalSettings() {
           />
           <ModelPicker
             title="Embeddings"
+            providers={EMBEDDING_PROVIDERS}
             provider={draft.defaultEmbeddingModel.provider}
             modelId={draft.defaultEmbeddingModel.modelId}
             onChange={(provider, modelId) =>
@@ -167,6 +173,17 @@ export function GlobalSettings() {
               </div>
             );
           })}
+        </div>
+      </section>
+
+      <section style={section}>
+        <h2 style={h2}>Built-in Embedder</h2>
+        <p style={hint}>
+          A zero-setup embedding model that runs on your CPU — no API key, no server. Needed only
+          for agents whose embedding provider is "builtin". The model (~30 MB) downloads on demand.
+        </p>
+        <div style={panel}>
+          <BuiltinEmbedderControls />
         </div>
       </section>
 
@@ -244,11 +261,13 @@ function OpenAiOAuthControls() {
 
 function ModelPicker({
   title,
+  providers,
   provider,
   modelId,
   onChange,
 }: {
   title: string;
+  providers: ProviderId[];
   provider: ProviderId;
   modelId: string;
   onChange: (provider: ProviderId, modelId: string) => void;
@@ -262,7 +281,7 @@ function ModelPicker({
           onChange={(e) => onChange(e.target.value as ProviderId, modelId)}
           style={input}
         >
-          {PROVIDERS.map((p) => (
+          {providers.map((p) => (
             <option key={p} value={p}>
               {PROVIDER_LABELS[p]}
             </option>

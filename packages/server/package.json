@@ -25,6 +25,7 @@
     "discord.js": "^14.26.4",
     "dotenv": "^16.4.7",
     "drizzle-orm": "^0.38.4",
+    "fastembed": "^2.1.0",
     "fastify": "^5.2.1",
     "gray-matter": "^4.0.3",
     "nanoid": "^5.0.9",

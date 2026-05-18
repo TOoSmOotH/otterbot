@@ -9,8 +9,11 @@ import type {
 import { useAgentsStore } from "../../stores/agents-store";
 import { useModelPacksStore } from "../../stores/model-packs-store";
 import { useGlobalSettingsStore } from "../../stores/global-settings-store";
+import { BuiltinEmbedderControls } from "../BuiltinEmbedderControls";
 
 const PROVIDERS: ProviderId[] = ["anthropic", "openai", "lmstudio", "ollama"];
+/** Providers offered for the embedding model (builtin = in-process CPU). */
+const EMBEDDING_PROVIDERS: ProviderId[] = ["builtin", "openai", "lmstudio", "ollama"];
 const TABS = ["Identity", "Persona", "Model", "Skills", "Schedule", "Memory", "Credentials"] as const;
 type StudioTab = (typeof TABS)[number];
 
@@ -262,12 +265,28 @@ function ModelTab({ profile, onSaved }: TabProps) {
       )}
       <Field label="Embedding model (for semantic memory)">
         <div style={{ display: "flex", gap: 8 }}>
-          <select value={ep} onChange={(e) => { setEp(e.target.value as ProviderId); dirty(); }} style={{ ...input, flex: "0 0 130px" }}>
-            {PROVIDERS.map((p) => <option key={p}>{p}</option>)}
+          <select
+            value={ep}
+            onChange={(e) => {
+              const next = e.target.value as ProviderId;
+              setEp(next);
+              if (next === "builtin") setEm("all-MiniLM-L6-v2");
+              dirty();
+            }}
+            style={{ ...input, flex: "0 0 130px" }}
+          >
+            {EMBEDDING_PROVIDERS.map((p) => <option key={p}>{p}</option>)}
           </select>
-          <input value={em} onChange={(e) => { setEm(e.target.value); dirty(); }} style={input} />
+          <input
+            value={em}
+            onChange={(e) => { setEm(e.target.value); dirty(); }}
+            readOnly={ep === "builtin"}
+            placeholder="leave blank to disable semantic memory"
+            style={input}
+          />
         </div>
       </Field>
+      {ep === "builtin" && <BuiltinEmbedderControls />}
       <SaveBar
         onSave={async () => {
           await update(profile.id, {

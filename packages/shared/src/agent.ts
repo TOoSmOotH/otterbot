@@ -3,7 +3,11 @@
  * (config, persona, memory DB, skills, credentials) — modeled on Hermes profiles.
  */
 
-export type ProviderId = "anthropic" | "openai" | "lmstudio" | "ollama";
+/**
+ * A model provider. `builtin` is an embedding-only, in-process CPU embedder
+ * (all-MiniLM-L6-v2 via fastembed) — it is not valid as a chat provider.
+ */
+export type ProviderId = "anthropic" | "openai" | "lmstudio" | "ollama" | "builtin";
 
 export type AgentRole = "coo" | "agent" | "subagent";
 

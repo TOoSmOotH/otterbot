@@ -15,6 +15,7 @@ import { discoverEnvironmentPacks } from "./views/environment-packs.js";
 import { importSkillFromRaw, importSkillFromUrl, exportAllSkills } from "./skills/skill-hub.js";
 import { formatScanFindings, scanSkillContent } from "./skills/skill-scanner.js";
 import { initOpenAiAuth, getOpenAiAuth } from "./auth/openai-auth-store.js";
+import { builtinModelStatus, downloadBuiltinModel } from "./embedders/builtin-embedder.js";
 import { SKILL_CATALOG, getCatalogSkill, catalogSkillUrl } from "./skills/builtin-catalog.js";
 import { generateText } from "ai";
 import { resolveChatModel, listProviderModels } from "./providers/registry.js";
@@ -172,6 +173,17 @@ export async function buildServer(orch: Orchestrator, cfg: Config): Promise<Fast
   app.post("/api/auth/openai/signout", async () => {
     getOpenAiAuth()?.signOut();
     return { ok: true };
+  });
+
+  // --- Built-in embedder model ---
+  // The in-process CPU embedder's model is downloaded only on explicit
+  // request — never bundled, never auto-downloaded.
+  app.get("/api/embedder/builtin/status", async () => builtinModelStatus());
+
+  app.post("/api/embedder/builtin/download", async () => {
+    // Runs in the background; the client polls the status endpoint.
+    void downloadBuiltinModel();
+    return builtinModelStatus();
   });
 
   // --- Agents ---

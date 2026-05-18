@@ -9,24 +9,25 @@ export interface EmbeddingConfig {
 }
 
 /**
- * Per-agent embedding service. Talks to an OpenAI-compatible embeddings
- * endpoint and owns the agent DB's vec0 dimension lifecycle. One instance per
- * agent — replaces the former module-level singleton.
+ * Produces embedding vectors for memory indexing / semantic search.
+ * Implementations: HTTP (OpenAI-compatible), the in-process built-in embedder,
+ * or a null embedder that leaves vector search disabled.
  */
-export class EmbeddingService {
-  private dimension: number | null = null;
-  private available = false;
+export interface Embedder {
+  /** Probe for the embedding dimension; `null` when the embedder is unavailable. */
+  probeDimension(): Promise<number | null>;
+  /** Embed `text`; `null` when the embedder is unavailable or the call fails. */
+  generate(text: string): Promise<Float32Array | null>;
+}
 
-  constructor(
-    private readonly cfg: EmbeddingConfig,
-    private readonly agentDb: AgentDb
-  ) {}
+/** An embedder backed by an OpenAI-compatible `/embeddings` HTTP endpoint. */
+export class HttpEmbedder implements Embedder {
+  constructor(private readonly cfg: EmbeddingConfig) {}
 
   private get url(): string {
     return `${this.cfg.baseUrl.replace(/\/$/, "")}/embeddings`;
   }
 
-  /** Probe the endpoint for its embedding dimension. */
   async probeDimension(): Promise<number | null> {
     try {
       const res = await fetch(this.url, {
@@ -54,7 +55,6 @@ export class EmbeddingService {
     }
   }
 
-  /** Generate an embedding for the given text. */
   async generate(text: string): Promise<Float32Array | null> {
     try {
       const res = await fetch(this.url, {
@@ -77,6 +77,43 @@ export class EmbeddingService {
       console.warn("[embedding] generate error:", err instanceof Error ? err.message : String(err));
       return null;
     }
+  }
+}
+
+/**
+ * A no-op embedder. Used when an agent has embeddings turned off — vector
+ * search stays disabled and memory falls back to FTS5 keyword search.
+ */
+export class NullEmbedder implements Embedder {
+  async probeDimension(): Promise<number | null> {
+    return null;
+  }
+  async generate(): Promise<Float32Array | null> {
+    return null;
+  }
+}
+
+/**
+ * Per-agent embedding service. Wraps an {@link Embedder} and owns the agent
+ * DB's vec0 dimension lifecycle. One instance per agent.
+ */
+export class EmbeddingService {
+  private dimension: number | null = null;
+  private available = false;
+
+  constructor(
+    private readonly embedder: Embedder,
+    private readonly agentDb: AgentDb
+  ) {}
+
+  /** Probe the underlying embedder for its embedding dimension. */
+  probeDimension(): Promise<number | null> {
+    return this.embedder.probeDimension();
+  }
+
+  /** Generate an embedding for the given text. */
+  generate(text: string): Promise<Float32Array | null> {
+    return this.embedder.generate(text);
   }
 
   /** The cached dimension, falling back to the value persisted in vec_config. */
@@ -109,8 +146,8 @@ export class EmbeddingService {
   }
 
   /**
-   * Probe the endpoint and set up / rebuild the vec0 table as needed.
-   * Never rejects — any failure (unreachable endpoint, closed DB during
+   * Probe the embedder and set up / rebuild the vec0 table as needed.
+   * Never rejects — any failure (unavailable embedder, closed DB during
    * shutdown) just leaves vector search disabled.
    */
   async init(): Promise<void> {
@@ -127,7 +164,7 @@ export class EmbeddingService {
       const probedDim = await this.probeDimension();
 
       if (!probedDim) {
-        console.warn("[vec] embeddings endpoint unreachable; vector search disabled");
+        console.warn("[vec] embeddings unavailable; vector search disabled (keyword search still works)");
         return;
       }
 

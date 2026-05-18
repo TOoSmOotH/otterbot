@@ -3,7 +3,8 @@ import { createAnthropic } from "@ai-sdk/anthropic";
 import { createOpenAI } from "@ai-sdk/openai";
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import { getConfig } from "../config.js";
-import type { EmbeddingConfig } from "../embedding.js";
+import { HttpEmbedder, NullEmbedder, type Embedder, type EmbeddingConfig } from "../embedding.js";
+import { BuiltinEmbedder, BUILTIN_MODEL_ID } from "../embedders/builtin-embedder.js";
 import type { ModelRef, ProviderEndpoint, ProviderId } from "./types.js";
 import type { ModelRef as SharedModelRef } from "@otterbot/shared";
 import { getOpenAiAuth, type OpenAiAuthStore } from "../auth/openai-auth-store.js";
@@ -81,6 +82,8 @@ export function resolveChatModel(
         apiKey: ep.apiKey,
       }).chatModel(ref.modelId);
     }
+    case "builtin":
+      return unavailableModel(ref.modelId, "the built-in provider is embedding-only");
     default: {
       const exhaustive: never = ref.provider;
       throw new Error(`Unknown provider: ${String(exhaustive)}`);
@@ -150,11 +153,29 @@ export function resolveEmbeddingConfig(
       const ep = lmstudioEndpoint(secrets);
       return { baseUrl: ep.baseUrl, apiKey: ep.apiKey, model: ref.modelId };
     }
+    case "builtin":
+      // The built-in embedder runs in-process — it has no HTTP endpoint.
+      // `resolveEmbedder` handles `builtin` before reaching here.
+      throw new Error("builtin embeddings are in-process; resolveEmbeddingConfig does not apply");
     default: {
       const exhaustive: never = ref.provider;
       throw new Error(`Unknown provider: ${String(exhaustive)}`);
     }
   }
+}
+
+/**
+ * Resolve an embedding `ModelRef` to a runnable {@link Embedder}. An empty
+ * `modelId` means the agent has embeddings disabled (FTS-only memory); the
+ * `builtin` provider runs in-process; everything else talks HTTP.
+ */
+export function resolveEmbedder(
+  ref: ModelRef | SharedModelRef,
+  secrets: Map<string, string>
+): Embedder {
+  if (!ref.modelId.trim()) return new NullEmbedder();
+  if (ref.provider === "builtin") return new BuiltinEmbedder();
+  return new HttpEmbedder(resolveEmbeddingConfig(ref, secrets));
 }
 
 /**
@@ -180,6 +201,8 @@ export function resolveProviderEndpoint(
         baseUrl: secrets.get("ANTHROPIC_BASE_URL") ?? "https://api.anthropic.com/v1",
         apiKey: secret(secrets, "ANTHROPIC_API_KEY"),
       };
+    case "builtin":
+      throw new Error("the built-in provider has no HTTP endpoint");
     default: {
       const exhaustive: never = provider;
       throw new Error(`Unknown provider: ${String(exhaustive)}`);
@@ -197,6 +220,9 @@ export async function listProviderModels(
   provider: ProviderId,
   secrets: Map<string, string>
 ): Promise<string[]> {
+  if (provider === "builtin") {
+    return [BUILTIN_MODEL_ID];
+  }
   if (provider === "openai" && openAiUsesOAuth(secrets)) {
     const auth = getOpenAiAuth();
     if (!auth?.isConnected()) {

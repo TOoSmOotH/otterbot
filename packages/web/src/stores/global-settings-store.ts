@@ -34,7 +34,14 @@ export const THEMES: Record<ThemeId, { label: string; vars: Record<string, strin
   },
 };
 
+/** Providers usable as a chat model. */
 export const PROVIDERS: ProviderId[] = ["anthropic", "openai", "lmstudio", "ollama"];
+
+/**
+ * Providers usable as an embedding model. `builtin` is the zero-setup
+ * in-process CPU embedder; anthropic has no embeddings endpoint.
+ */
+export const EMBEDDING_PROVIDERS: ProviderId[] = ["builtin", "openai", "lmstudio", "ollama"];
 
 const DEFAULT_SETTINGS: GlobalSettings = {
   theme: "obsidian",
@@ -49,6 +56,7 @@ const DEFAULT_SETTINGS: GlobalSettings = {
     },
     lmstudio: { baseUrl: "http://localhost:1234/v1", apiKeyConfigured: false },
     ollama: { baseUrl: "http://localhost:11434/v1", apiKeyConfigured: false },
+    builtin: { baseUrl: "", apiKeyConfigured: false },
   },
 };
 

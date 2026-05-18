@@ -3,6 +3,7 @@ import type { ProviderId } from "@otterbot/shared";
 import { useSetupStore } from "../../stores/setup-store";
 import { useAgentsStore } from "../../stores/agents-store";
 import { useGlobalSettingsStore } from "../../stores/global-settings-store";
+import { BuiltinEmbedderControls } from "../BuiltinEmbedderControls";
 
 /** Per-provider credential field metadata. */
 const CRED: Record<ProviderId, { label: string; key: string; placeholder: string; secret: boolean }> = {
@@ -10,9 +11,14 @@ const CRED: Record<ProviderId, { label: string; key: string; placeholder: string
   openai: { label: "OpenAI API key", key: "OPENAI_API_KEY", placeholder: "sk-…", secret: true },
   lmstudio: { label: "LM Studio base URL", key: "LMSTUDIO_BASE_URL", placeholder: "http://localhost:1234/v1", secret: false },
   ollama: { label: "Ollama base URL", key: "OLLAMA_BASE_URL", placeholder: "http://localhost:11434/v1", secret: false },
+  builtin: { label: "Built-in (CPU)", key: "", placeholder: "", secret: false },
 };
 
-const PROVIDERS: ProviderId[] = ["anthropic", "openai", "lmstudio", "ollama"];
+/** Providers offered for the chat model and the embedding model. */
+const CHAT_PROVIDERS: ProviderId[] = ["anthropic", "openai", "lmstudio", "ollama"];
+const EMBEDDING_PROVIDERS: ProviderId[] = ["builtin", "openai", "lmstudio", "ollama"];
+/** The single model the built-in CPU embedder runs. */
+const BUILTIN_EMBED_MODEL = "all-MiniLM-L6-v2";
 
 type TestState = { status: "idle" | "testing" | "ok" | "fail"; message?: string };
 type AuthMethod = "api-key" | "oauth";
@@ -58,12 +64,15 @@ export function OnboardingWizard() {
   const [chatModels, setChatModels] = useState<string[]>([]);
   const [openAiAuth, setOpenAiAuth] = useState<AuthMethod>("api-key");
 
-  // Embedding model slot — may use a different provider than chat.
-  const [embProvider, setEmbProvider] = useState<ProviderId>("lmstudio");
-  const [embModelId, setEmbModelId] = useState("local-embedding-model");
-  const [embCred, setEmbCred] = useState(defaultCred("lmstudio"));
+  // Embedding model slot — may use a different provider than chat. Defaults to
+  // the zero-setup built-in CPU embedder.
+  const [embProvider, setEmbProvider] = useState<ProviderId>("builtin");
+  const [embModelId, setEmbModelId] = useState(BUILTIN_EMBED_MODEL);
+  const [embCred, setEmbCred] = useState("");
   const [embTest, setEmbTest] = useState<TestState>({ status: "idle" });
   const [embModels, setEmbModels] = useState<string[]>([]);
+  /** When true the user chose to skip embeddings (keyword-only memory). */
+  const [embSkipped, setEmbSkipped] = useState(false);
 
   // OpenAI ChatGPT-subscription OAuth (account-wide; chat only).
   const [oauthStatus, setOauthStatus] = useState<{ connected: boolean; accountId: string | null } | null>(null);
@@ -92,11 +101,18 @@ export function OnboardingWizard() {
 
   const pickEmbProvider = (p: ProviderId) => {
     setEmbProvider(p);
+    setEmbSkipped(false);
     setEmbTest({ status: "idle" });
     setEmbModels([]);
     // Reuse the chat credential when both slots share a (non-OAuth) provider.
     setEmbCred(p === chatProvider && !useChatOAuth ? chatCred : defaultCred(p));
-    setEmbModelId(p === "openai" ? "text-embedding-3-small" : "local-embedding-model");
+    setEmbModelId(
+      p === "builtin"
+        ? BUILTIN_EMBED_MODEL
+        : p === "openai"
+          ? "text-embedding-3-small"
+          : "local-embedding-model"
+    );
   };
 
   // --- OpenAI OAuth (ChatGPT subscription) -------------------------------
@@ -213,7 +229,11 @@ export function OnboardingWizard() {
     setSaving(true);
     try {
       const chatRef = { provider: chatProvider, modelId: chatModelId.trim() };
-      const embeddingRef = { provider: embProvider, modelId: embModelId.trim() };
+      // Skipped embeddings → empty modelId, which the server resolves to a
+      // disabled (null) embedder; memory falls back to keyword search.
+      const embeddingRef = embSkipped
+        ? { provider: "builtin" as ProviderId, modelId: "" }
+        : { provider: embProvider, modelId: embModelId.trim() };
 
       if (useChatOAuth) {
         // Tokens are stored server-side by the OAuth flow; flip the OpenAI
@@ -228,10 +248,15 @@ export function OnboardingWizard() {
         });
       }
 
-      // Collect credentials for both slots; a shared provider key is written once.
+      // Collect credentials for both slots; a shared provider key is written
+      // once. The built-in embedder has no credential (empty CRED key).
       const secrets: Record<string, string> = {};
-      if (!useChatOAuth && chatCred.trim()) secrets[CRED[chatProvider].key] = chatCred.trim();
-      if (embCred.trim()) secrets[CRED[embProvider].key] = embCred.trim();
+      if (!useChatOAuth && chatCred.trim() && CRED[chatProvider].key) {
+        secrets[CRED[chatProvider].key] = chatCred.trim();
+      }
+      if (!embSkipped && embCred.trim() && CRED[embeddingRef.provider].key) {
+        secrets[CRED[embeddingRef.provider].key] = embCred.trim();
+      }
       if (Object.keys(secrets).length > 0) {
         await fetch("/api/agents/coo/credentials", {
           method: "POST",
@@ -240,10 +265,9 @@ export function OnboardingWizard() {
         });
       }
 
-      const allowedModels = Array.from(new Set([chatProvider, embProvider])).map((p) => ({
-        provider: p,
-        modelId: "*",
-      }));
+      const allowedModels = Array.from(
+        new Set([chatRef.provider, embeddingRef.provider])
+      ).map((p) => ({ provider: p, modelId: "*" }));
 
       await fetch("/api/agents/coo", {
         method: "PATCH",
@@ -310,6 +334,7 @@ export function OnboardingWizard() {
             <p style={p}>Pick where the COO's intelligence comes from. You can change this anytime.</p>
             <ProviderFields
               kind="chat"
+              providers={CHAT_PROVIDERS}
               provider={chatProvider}
               onProvider={pickChatProvider}
               cred={chatCred}
@@ -342,11 +367,14 @@ export function OnboardingWizard() {
           <>
             <h2 style={h2}>Choose an embedding model</h2>
             <p style={p}>
-              Embeddings index the COO's memory for semantic search. This can be a different
-              provider than the chat model — a local text-embedding model works well.
+              Embeddings turn the COO's memories into vectors so it can recall them by{" "}
+              <em>meaning</em>, not just exact keywords. The <strong>built-in</strong> option runs
+              on your CPU with no setup. This step is optional — without an embedding model memory
+              still works, using keyword search.
             </p>
             <ProviderFields
               kind="embedding"
+              providers={EMBEDDING_PROVIDERS}
               provider={embProvider}
               onProvider={pickEmbProvider}
               cred={embCred}
@@ -358,13 +386,28 @@ export function OnboardingWizard() {
               models={embModels}
               onModels={setEmbModels}
               modelLabel="Embedding model"
-              modelHint="Anthropic has no embedding endpoint — pick OpenAI or a local text-embedding model."
             />
             <Buttons>
               <button style={ghost} onClick={() => setStep(1)}>
                 Back
               </button>
-              <button style={primary} onClick={() => setStep(3)} disabled={!embModelId.trim()}>
+              <button
+                style={ghost}
+                onClick={() => {
+                  setEmbSkipped(true);
+                  setStep(3);
+                }}
+              >
+                Skip — keyword search only
+              </button>
+              <button
+                style={primary}
+                onClick={() => {
+                  setEmbSkipped(false);
+                  setStep(3);
+                }}
+                disabled={!embModelId.trim()}
+              >
                 Next
               </button>
             </Buttons>
@@ -407,6 +450,7 @@ export function OnboardingWizard() {
  */
 function ProviderFields({
   kind,
+  providers,
   provider,
   onProvider,
   cred,
@@ -422,6 +466,7 @@ function ProviderFields({
   oauth,
 }: {
   kind: "chat" | "embedding";
+  providers: ProviderId[];
   provider: ProviderId;
   onProvider: (p: ProviderId) => void;
   cred: string;
@@ -500,7 +545,7 @@ function ProviderFields({
     <>
       <Field label="Provider">
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-          {PROVIDERS.map((pr) => (
+          {providers.map((pr) => (
             <button
               key={pr}
               onClick={() => onProvider(pr)}
@@ -539,7 +584,12 @@ function ProviderFields({
         </Field>
       )}
 
-      {useOAuth && oauth ? (
+      {provider === "builtin" ? (
+        <div style={oauthCard}>
+          <strong style={{ fontSize: 12 }}>Built-in embedder · all-MiniLM-L6-v2</strong>
+          <BuiltinEmbedderControls />
+        </div>
+      ) : useOAuth && oauth ? (
         <div style={oauthCard}>
           <strong style={{ fontSize: 12 }}>ChatGPT subscription</strong>
           {oauth.status?.connected ? (
@@ -636,13 +686,15 @@ function ProviderFields({
         </>
       )}
 
-      <ModelField
-        label={modelLabel}
-        hint={modelHint}
-        value={modelId}
-        onChange={onModelId}
-        models={useOAuth && oauth ? oauth.models : isLocal ? models : []}
-      />
+      {provider !== "builtin" && (
+        <ModelField
+          label={modelLabel}
+          hint={modelHint}
+          value={modelId}
+          onChange={onModelId}
+          models={useOAuth && oauth ? oauth.models : isLocal ? models : []}
+        />
+      )}
     </>
   );
 }

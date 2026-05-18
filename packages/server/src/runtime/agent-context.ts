@@ -1,7 +1,7 @@
 import type Database from "better-sqlite3-multiple-ciphers";
 import type { AgentProfile } from "@otterbot/shared";
 import { openAgentDb, type AgentDb, type AgentDrizzle } from "../db/agent-db.js";
-import { EmbeddingService, type EmbeddingConfig } from "../embedding.js";
+import { EmbeddingService, type Embedder } from "../embedding.js";
 import { VecIndex } from "../vec-index.js";
 import { MemoryService } from "../memory/memory-service.js";
 import { SkillService } from "../skills/skill-service.js";
@@ -35,8 +35,8 @@ export interface BuildAgentContextInput {
   agentDbPath: string;
   /** Path to this agent's `skills/` directory. */
   skillsDir: string;
-  /** Embeddings endpoint config (resolved from the agent's embedding model). */
-  embedding: EmbeddingConfig;
+  /** The embedder resolved from the agent's embedding model. */
+  embedder: Embedder;
   /** Database encryption key, if configured. */
   dbKey?: string | null;
 }
@@ -44,7 +44,7 @@ export interface BuildAgentContextInput {
 /** Construct an agent's runtime context, opening its isolated database. */
 export function buildAgentContext(input: BuildAgentContextInput): AgentContext {
   const agentDb = openAgentDb(input.agentDbPath, input.dbKey);
-  const embedding = new EmbeddingService(input.embedding, agentDb);
+  const embedding = new EmbeddingService(input.embedder, agentDb);
   const vec = new VecIndex(agentDb.sqlite, embedding);
   const memory = new MemoryService(agentDb.db, agentDb.sqlite, vec);
   const skills = new SkillService(agentDb.db, input.skillsDir, memory);
