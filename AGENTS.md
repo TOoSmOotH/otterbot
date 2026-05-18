@@ -38,6 +38,14 @@ For production-style single-port serving, run `pnpm build` and then `pnpm start`
 
 Server tests use a fake model by default. To exercise a real OpenAI-compatible endpoint, set `OTTER_TEST_MODEL_URL` and `OTTER_TEST_MODEL`.
 
+## Git Workflow
+
+- Prefer doing implementation work in a separate git worktree created from `dev`.
+- Use a task-focused feature branch for the worktree, keep the main repo checkout untouched where possible, and do not overwrite unrelated local changes.
+- When the work is finished and verified, merge the feature branch back into `dev` unless the user asks for a different target branch.
+- Before merging, summarize the changed scope, verification performed, and any conflicts or risks.
+- Ask before running networked commands such as `git pull` unless the user has already granted permission.
+
 ## Configuration And Data
 
 - Copy `.env.example` to `.env` for local development.
