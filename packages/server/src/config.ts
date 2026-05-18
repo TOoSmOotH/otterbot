@@ -30,14 +30,17 @@ function bool(v: string | undefined, fallback: boolean): boolean {
 
 export function loadConfig(): Config {
   const rootDir = resolve(process.cwd());
-  const dataDir = process.env.DATA_DIR ?? resolve(rootDir, "data");
+  // Resolve every path to absolute. Env values (e.g. the `.env.example`
+  // defaults) are often relative, but consumers like @fastify/static and
+  // SQLite need absolute paths. `resolve` leaves already-absolute paths intact.
+  const dataDir = resolve(rootDir, process.env.DATA_DIR ?? "data");
   return {
     port: Number(process.env.PORT ?? 3001),
     host: process.env.HOST ?? "0.0.0.0",
     dataDir,
-    assetsDir: process.env.ASSETS_DIR ?? resolve(rootDir, "assets"),
-    webDistDir: process.env.WEB_DIST_DIR ?? resolve(rootDir, "packages/web/dist"),
-    skillsDir: process.env.SKILLS_DIR ?? resolve(dataDir, "skills"),
+    assetsDir: resolve(rootDir, process.env.ASSETS_DIR ?? "assets"),
+    webDistDir: resolve(rootDir, process.env.WEB_DIST_DIR ?? "packages/web/dist"),
+    skillsDir: resolve(dataDir, process.env.SKILLS_DIR ?? "skills"),
     lmstudioBaseUrl: process.env.LMSTUDIO_BASE_URL ?? "http://localhost:1234/v1",
     lmstudioApiKey: process.env.LMSTUDIO_API_KEY ?? null,
     model: process.env.LMSTUDIO_MODEL ?? "local-model",
