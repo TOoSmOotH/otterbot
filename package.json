@@ -6,6 +6,7 @@
   "license": "MIT",
   "scripts": {
     "build": "pnpm -r build",
+    "prestart": "node scripts/ensure-env.mjs && pnpm --filter @otterbot/shared --filter @otterbot/server --filter @otterbot/web build",
     "start": "node packages/server/dist/index.js",
     "predev": "node scripts/ensure-env.mjs",
     "dev": "pnpm --filter @otterbot/shared build && { pnpm --filter @otterbot/shared dev & pnpm --filter @otterbot/server dev & pnpm --filter @otterbot/web dev; }",
