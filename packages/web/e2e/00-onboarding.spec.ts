@@ -13,6 +13,8 @@ test.describe("onboarding", () => {
     test.skip(!present, "onboarding already completed for this data directory");
 
     await page.getByRole("button", { name: "Get started" }).click();
+    // Step through: chat model → embedding model → personality.
+    await page.getByRole("button", { name: "Next" }).click();
     await page.getByRole("button", { name: "Next" }).click();
     await page.getByTestId("onboarding-finish").click();
 
