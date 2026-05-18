@@ -88,6 +88,35 @@ supports:
 Each agent stores its own credential set. Local provider URLs can be set per
 agent in Agent Studio, with `.env` values used as development defaults.
 
+## Install
+
+Otterbot ships to npm as a single self-contained package — the server, the web
+UI, and the CLI in one install.
+
+```bash
+npm install -g otterbot
+```
+
+`otterbot` runs as a background **daemon** that serves the web UI and chat on a
+single port, controlled by the CLI:
+
+```bash
+otterbot start      # start the daemon in the background
+otterbot status     # check whether it is running
+otterbot web        # open the web UI in a browser
+otterbot chat       # interactive terminal chat (the default with no command)
+otterbot logs -f    # follow the daemon log
+otterbot restart    # restart the daemon
+otterbot stop       # stop the daemon
+```
+
+State lives in `~/.otterbot/` — `otterbot.pid`, `otterbot.log`, a generated
+`OTTERBOT_DB_KEY` (in `.env`), and `data/` (agent profiles and databases). Set
+`OTTERBOT_HOME` to relocate it, or `PORT` / `HOST` to change where the daemon
+listens (default `3001` / `0.0.0.0`). On first run the daemon generates the
+encryption key, and the onboarding wizard in the web UI configures your first
+agent.
+
 ## Quick Start From Source
 
 Requirements:
@@ -138,9 +167,6 @@ Important variables:
 | `AGENT_TRANSPORT` | `local` | Agent bus transport: `local` or `discord` |
 | `DISCORD_BOT_TOKEN` | unset | Required only for Discord agent transport |
 | `DISCORD_CHANNEL_ID` | unset | Required only for Discord agent transport |
-| `ENABLE_DESKTOP` | `false` | Enables the noVNC desktop proxy if a VNC server is available |
-| `VNC_HOST` | `127.0.0.1` | VNC host used by the desktop proxy |
-| `VNC_PORT` | `5901` | VNC port used by the desktop proxy |
 | `LOG_LEVEL` | `info` | Fastify logger level |
 
 Credentials such as `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`,
@@ -333,4 +359,4 @@ include a browser or Playwright smoke check when practical.
 
 ## License
 
-MIT — Copyright 2026 Mike Reeves
+MIT — see [LICENSE](LICENSE).

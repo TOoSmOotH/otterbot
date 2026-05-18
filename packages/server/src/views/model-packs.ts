@@ -1,9 +1,6 @@
 import { readdirSync, existsSync } from "node:fs";
 import { resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 import type { ModelPack } from "@otterbot/shared";
-
-const __dirname = fileURLToPath(new URL(".", import.meta.url));
 
 export function discoverModelPacks(assetsRoot: string): ModelPack[] {
   const workersDir = resolve(assetsRoot, "workers");
@@ -94,11 +91,4 @@ export function discoverModelPacks(assetsRoot: string): ModelPack[] {
   }
 
   return packs;
-}
-
-export function getRandomModelPackId(): string | null {
-  const assetsRoot = resolve(__dirname, "../../../../assets");
-  const packs = discoverModelPacks(assetsRoot);
-  if (packs.length === 0) return null;
-  return packs[Math.floor(Math.random() * packs.length)].id;
 }

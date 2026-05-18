@@ -17,8 +17,6 @@ export default defineConfig({
       "/api": { target: API_TARGET, changeOrigin: true },
       "/assets/3d": { target: API_TARGET, changeOrigin: true },
       "/socket.io": { target: API_TARGET, ws: true, changeOrigin: true },
-      "/novnc": { target: API_TARGET, changeOrigin: true },
-      "/desktop/ws": { target: API_TARGET, ws: true, changeOrigin: true },
     },
   },
 });

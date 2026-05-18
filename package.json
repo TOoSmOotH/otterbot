@@ -4,7 +4,6 @@
   "private": true,
   "description": "Personal AI assistant with persistent cross-session learning",
   "license": "MIT",
-  "author": "Mike Reeves",
   "scripts": {
     "build": "pnpm -r build",
     "start": "node packages/server/dist/index.js",
@@ -14,6 +13,7 @@
     "dev:web": "pnpm --filter @otterbot/web dev",
     "dev:cli": "pnpm --filter @otterbot/cli dev",
     "cli": "pnpm --filter @otterbot/cli start",
+    "test": "pnpm -r test",
     "test:e2e": "pnpm --filter @otterbot/web test:e2e"
   },
   "devDependencies": {

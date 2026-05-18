@@ -3,8 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Terminal chat client for Otterbot",
+  "description": "CLI and daemon controller for Otterbot",
   "bin": {
+    "otterbot": "./dist/cli.js",
     "otter": "./dist/cli.js"
   },
   "files": ["dist"],

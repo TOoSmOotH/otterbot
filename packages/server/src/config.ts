@@ -13,9 +13,6 @@ export interface Config {
   lmstudioBaseUrl: string;
   lmstudioApiKey: string | null;
   model: string;
-  enableDesktop: boolean;
-  vncHost: string;
-  vncPort: number;
   enableEmbeddings: boolean;
   logLevel: "debug" | "info" | "warn" | "error";
   /** Encryption key for all SQLite databases. The only secret kept in .env. */
@@ -44,9 +41,6 @@ export function loadConfig(): Config {
     lmstudioBaseUrl: process.env.LMSTUDIO_BASE_URL ?? "http://localhost:1234/v1",
     lmstudioApiKey: process.env.LMSTUDIO_API_KEY ?? null,
     model: process.env.LMSTUDIO_MODEL ?? "local-model",
-    enableDesktop: bool(process.env.ENABLE_DESKTOP, false),
-    vncHost: process.env.VNC_HOST ?? "127.0.0.1",
-    vncPort: Number(process.env.VNC_PORT ?? 5901),
     enableEmbeddings: bool(process.env.ENABLE_EMBEDDINGS, false),
     logLevel: (process.env.LOG_LEVEL as Config["logLevel"]) ?? "info",
     dbKey: process.env.OTTERBOT_DB_KEY ?? null,

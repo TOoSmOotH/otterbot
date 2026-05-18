@@ -5,7 +5,8 @@ on:
     branches: [beta]
 
 permissions:
-  packages: write
+  contents: read
+  id-token: write
 
 concurrency:
   group: release-beta
@@ -19,26 +20,22 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - uses: ./.github/actions/test-and-build
 
-  compute-version:
-    name: Compute Version
+  publish:
+    name: Publish Beta to npm
     needs: test-and-build
     runs-on: ubuntu-latest
-    outputs:
-      version: ${{ steps.version.outputs.version }}
-      docker_tag: ${{ steps.version.outputs.docker_tag }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           fetch-depth: 0
 
-      - name: Derive version from git
+      - name: Derive beta version from git
         id: version
         run: |
-          # Find latest stable tag across all branches (tags on main aren't ancestors of beta)
+          # Latest stable tag, anywhere (tags on main aren't ancestors of beta).
           BASE_TAG=$(git tag -l 'otterbot-v[0-9]*.[0-9]*.[0-9]' --sort=-version:refname | grep -E '^otterbot-v[0-9]+\.[0-9]+\.[0-9]+$' | head -1)
           if [ -n "$BASE_TAG" ]; then
             BASE_VERSION=${BASE_TAG#otterbot-v}
-            # Count commits on beta since it diverged from the tagged commit
             MERGE_BASE=$(git merge-base "$BASE_TAG" HEAD 2>/dev/null || echo "")
             if [ -n "$MERGE_BASE" ]; then
               COMMIT_COUNT=$(git rev-list ${MERGE_BASE}..HEAD --count)
@@ -49,69 +46,31 @@ jobs:
             BASE_VERSION="0.0.0"
             COMMIT_COUNT=$(git rev-list HEAD --count)
           fi
-          SHORT_SHA=$(git rev-parse --short HEAD)
-          VERSION="${BASE_VERSION}-beta.${COMMIT_COUNT}+${SHORT_SHA}"
-          DOCKER_TAG="${BASE_VERSION}-beta.${COMMIT_COUNT}-${SHORT_SHA}"
+          VERSION="${BASE_VERSION}-beta.${COMMIT_COUNT}"
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
-          echo "docker_tag=${DOCKER_TAG}" >> "$GITHUB_OUTPUT"
-          echo "Computed version: ${VERSION}"
+          echo "Computed beta version: ${VERSION}"
 
-  publish:
-    name: Publish Container
-    needs: compute-version
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-
-      - name: Log in to GHCR
-        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+      - name: Setup Node 22
+        uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
         with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          node-version: 22
+          registry-url: https://registry.npmjs.org
 
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@ce360397dd3f832beb865e1373c09c0e9f86d70a # v4.0.0
+      - name: Setup pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5.0.0
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
 
-      - name: Build and push
-        uses: docker/build-push-action@d08e5c354a6adb9ed34480a06d141179aa583294 # v7.0.0
-        with:
-          context: .
-          push: true
-          platforms: linux/amd64,linux/arm64
-          build-args: |
-            BUILD_VERSION=${{ needs.compute-version.outputs.version }}
-          tags: |
-            ghcr.io/toosmooth/otterbot:beta
-            ghcr.io/toosmooth/otterbot:${{ needs.compute-version.outputs.docker_tag }}
-          cache-from: type=gha,scope=otterbot
-          cache-to: type=gha,scope=otterbot,mode=max
+      - name: Build
+        run: pnpm build
 
-      - name: Build and push ComfyUI sidecar
-        uses: docker/build-push-action@d08e5c354a6adb9ed34480a06d141179aa583294 # v7.0.0
-        with:
-          context: .
-          file: docker/comfyui/Dockerfile
-          push: true
-          platforms: linux/amd64,linux/arm64
-          tags: |
-            ghcr.io/toosmooth/otterbot-comfyui:beta
-            ghcr.io/toosmooth/otterbot-comfyui:${{ needs.compute-version.outputs.docker_tag }}
-          cache-from: type=gha,scope=comfyui
-          cache-to: type=gha,scope=comfyui,mode=max
+      - name: Assemble the npm package
+        run: node scripts/build-package.mjs
+        env:
+          OTTERBOT_PKG_VERSION: ${{ steps.version.outputs.version }}
 
-      - name: Build and push TRELLIS sidecar
-        uses: docker/build-push-action@d08e5c354a6adb9ed34480a06d141179aa583294 # v7.0.0
-        with:
-          context: .
-          file: docker/trellis/Dockerfile
-          push: true
-          platforms: linux/amd64,linux/arm64
-          tags: |
-            ghcr.io/toosmooth/otterbot-trellis:beta
-            ghcr.io/toosmooth/otterbot-trellis:${{ needs.compute-version.outputs.docker_tag }}
-          cache-from: type=gha,scope=trellis
-          cache-to: type=gha,scope=trellis,mode=max
+      - name: Publish beta to npm
+        run: npm publish ./dist-pkg --access public --tag beta --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

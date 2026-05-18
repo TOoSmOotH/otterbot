@@ -6,7 +6,6 @@ import { existsSync } from "node:fs";
 import type { Config } from "./config.js";
 import type { Orchestrator, CreateAgentInput } from "./orchestrator/orchestrator.js";
 import { PROVIDERS } from "./providers/types.js";
-import { registerDesktopProxy } from "./desktop/desktop.js";
 import { getSkillService } from "./skills/skill-service.js";
 import { getMemoryService } from "./memory/memory-service.js";
 import { getUserProfileService } from "./user-profile/user-profile-service.js";
@@ -52,16 +51,6 @@ export async function buildServer(orch: Orchestrator, cfg: Config): Promise<Fast
     });
   } else {
     app.log.warn(`assets dir not found (${cfg.assetsDir}); /assets/3d will 404`);
-  }
-
-  // Serve noVNC bundle, if installed.
-  const novncDir = resolve(process.cwd(), "node_modules/@novnc/novnc");
-  if (existsSync(novncDir)) {
-    await app.register(fastifyStatic, {
-      root: novncDir,
-      prefix: "/novnc/",
-      decorateReply: false,
-    });
   }
 
   // --- Views (model packs / scenes / environment packs) ---
@@ -444,9 +433,6 @@ export async function buildServer(orch: Orchestrator, cfg: Config): Promise<Fast
   app.get("/api/memories", async () => getMemoryService().list(100));
   app.get("/api/user-profile", async () => getUserProfileService().get());
 
-  // --- Desktop ---
-  registerDesktopProxy(app);
-
   // --- Built web app (single-port production) ---
   if (existsSync(resolve(cfg.webDistDir, "index.html"))) {
     await app.register(fastifyStatic, {
@@ -481,11 +467,7 @@ function shouldServeWebApp(method: string, url: string): boolean {
     path.startsWith("/socket.io/") ||
     path === "/socket.io" ||
     path.startsWith("/assets/3d/") ||
-    path === "/assets/3d" ||
-    path.startsWith("/novnc/") ||
-    path === "/novnc" ||
-    path.startsWith("/desktop/ws/") ||
-    path === "/desktop/ws"
+    path === "/assets/3d"
   ) {
     return false;
   }

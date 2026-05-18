@@ -3,7 +3,7 @@ import { Box, Text, useApp } from "ink";
 import Spinner from "ink-spinner";
 import type { CliOptions } from "../types.js";
 import { probeServer } from "../lifecycle/detect.js";
-import { spawnServer, type ServerHandle } from "../lifecycle/server-process.js";
+import { ensureDaemon } from "../lifecycle/daemon.js";
 import { openWeb } from "../lifecycle/web.js";
 import { useChat } from "../state/useChat.js";
 import { Header } from "./Header.js";
@@ -25,21 +25,13 @@ function isLocal(serverUrl: string): boolean {
   }
 }
 
-export function App({
-  options,
-  onServerHandle,
-}: {
-  options: CliOptions;
-  /** Report a CLI-started server so the entrypoint can shut it down. */
-  onServerHandle: (handle: ServerHandle) => void;
-}) {
+export function App({ options }: { options: CliOptions }) {
   const [phase, setPhase] = useState<Phase>("booting");
-  const [bootMessage, setBootMessage] = useState("Looking for the Otterbot server…");
-  const [bootElapsed, setBootElapsed] = useState(0);
+  const [bootMessage, setBootMessage] = useState("Looking for the otterbot daemon…");
   const [errorText, setErrorText] = useState("");
   const [rechecking, setRechecking] = useState(false);
 
-  // One-shot boot sequence: probe, then spawn a server if needed.
+  // One-shot boot sequence: probe, then start the daemon if needed.
   useEffect(() => {
     let cancelled = false;
     const settle = (next: Phase, detail?: string) => {
@@ -66,20 +58,11 @@ export function App({
         return;
       }
 
-      setBootMessage("Starting the Otterbot server…");
+      setBootMessage("Starting the otterbot daemon…");
       try {
-        const handle = await spawnServer({
-          serverUrl: options.serverUrl,
-          port: options.port,
-          onTick: (sec) => !cancelled && setBootElapsed(sec),
-        });
-        if (cancelled) {
-          handle.kill();
-          return;
-        }
-        onServerHandle(handle);
-        if (handle.devMode) setBootMessage("Server starting in dev mode (slower)…");
-        const after = await probeServer(options.serverUrl);
+        const result = await ensureDaemon({ port: options.port, host: options.host });
+        if (cancelled) return;
+        const after = await probeServer(result.url);
         settle(after.up && !after.onboardingComplete ? "onboarding" : "chat");
       } catch (err) {
         settle("error", err instanceof Error ? err.message : String(err));
@@ -89,10 +72,10 @@ export function App({
     return () => {
       cancelled = true;
     };
-  }, [options, onServerHandle]);
+  }, [options]);
 
   if (phase === "booting") {
-    return <BootScreen message={bootMessage} elapsed={bootElapsed} />;
+    return <BootScreen message={bootMessage} />;
   }
   if (phase === "error") {
     return <ErrorScreen text={errorText} />;
@@ -114,14 +97,13 @@ export function App({
   return <ChatView options={options} />;
 }
 
-function BootScreen({ message, elapsed }: { message: string; elapsed: number }) {
+function BootScreen({ message }: { message: string }) {
   return (
     <Box padding={1}>
       <Text color={colors.brand}>
         <Spinner type="dots" />{" "}
       </Text>
       <Text>{message}</Text>
-      {elapsed > 0 ? <Text color={colors.dim}> ({elapsed}s)</Text> : null}
     </Box>
   );
 }
