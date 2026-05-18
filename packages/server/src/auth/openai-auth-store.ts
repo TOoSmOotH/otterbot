@@ -118,6 +118,27 @@ export class OpenAiAuthStore {
     return { authUrl: buildAuthorizeUrl(pkce, state) };
   }
 
+  /**
+   * Complete a login from the callback URL the browser was redirected to.
+   * For when the loopback server is unreachable from the browser — e.g.
+   * otterbot running on a remote box, where `localhost:1455` resolves to the
+   * user's own machine. Accepts the full `http://localhost:1455/auth/callback`
+   * URL, a bare query string, or `code`/`state` params.
+   */
+  async completeManual(input: string): Promise<void> {
+    const pending = this.pending;
+    if (!pending) throw new Error("no login is in progress — start sign-in first");
+    const { code, state } = parseCallbackParams(input);
+    if (!code) throw new Error("could not find an authorization code in that input");
+    if (state !== pending.state) {
+      throw new Error("state mismatch — paste the URL from this sign-in attempt");
+    }
+    const tokens = await exchangeCode(code, pending.pkce);
+    this.persist(tokens);
+    this.pending = null;
+    this.closeServer();
+  }
+
   private startServer(): void {
     const server = createServer((req, res) => {
       void this.handleCallback(req.url ?? "", res);
@@ -167,6 +188,24 @@ export class OpenAiAuthStore {
       this.server = null;
     }
   }
+}
+
+/**
+ * Pull `code`/`state` out of whatever the user pasted: a full redirect URL,
+ * a bare `?code=…&state=…` query string, or just `code=…&state=…`.
+ */
+function parseCallbackParams(input: string): { code: string | null; state: string | null } {
+  const text = input.trim();
+  let search = "";
+  try {
+    search = new URL(text).search;
+  } catch {
+    const q = text.indexOf("?");
+    if (q >= 0) search = text.slice(q);
+    else if (/(^|&)(code|state)=/.test(text)) search = `?${text}`;
+  }
+  const params = new URLSearchParams(search);
+  return { code: params.get("code"), state: params.get("state") };
 }
 
 // --- module singleton -------------------------------------------------------

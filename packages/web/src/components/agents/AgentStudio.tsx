@@ -303,6 +303,8 @@ function OpenAiAuthPanel({
   const [status, setStatus] = useState<{ connected: boolean; accountId: string | null } | null>(null);
   const [models, setModels] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
+  const [paste, setPaste] = useState("");
+  const [completing, setCompleting] = useState(false);
   const settings = useGlobalSettingsStore((s) => s.settings);
   const settingsLoaded = useGlobalSettingsStore((s) => s.loaded);
   const loadSettings = useGlobalSettingsStore((s) => s.load);
@@ -381,9 +383,38 @@ function OpenAiAuthPanel({
     }
   };
 
+  // Manual completion: paste the redirect URL when the loopback callback
+  // can't be reached (otterbot running on a remote box).
+  const completeManual = async () => {
+    setCompleting(true);
+    try {
+      const res = await fetch("/api/auth/openai/complete", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ url: paste.trim() }),
+      });
+      const data = (await res.json()) as {
+        ok: boolean;
+        status?: { connected: boolean; accountId: string | null };
+        error?: string;
+      };
+      if (data.ok && data.status) {
+        setStatus(data.status);
+        setPaste("");
+      } else {
+        alert(data.error ?? "Could not complete sign-in.");
+      }
+    } catch (e) {
+      alert(e instanceof Error ? e.message : String(e));
+    } finally {
+      setCompleting(false);
+    }
+  };
+
   const signOut = async () => {
     await fetch("/api/auth/openai/signout", { method: "POST" });
     setModels([]);
+    setPaste("");
     void refresh();
   };
 
@@ -431,6 +462,34 @@ function OpenAiAuthPanel({
           <button onClick={signIn} disabled={busy} style={{ ...primary, alignSelf: "flex-start" }}>
             {busy ? "Waiting for sign-in…" : "Sign in with ChatGPT"}
           </button>
+          <div
+            style={{
+              borderTop: "1px solid rgb(var(--border))",
+              paddingTop: 6,
+              display: "flex",
+              flexDirection: "column",
+              gap: 6,
+            }}
+          >
+            <div style={hint}>
+              Running otterbot on a remote box? Your browser can't reach <code>localhost:1455</code>
+              . After approving, copy the URL it was redirected to (the page won't load) and paste
+              it here.
+            </div>
+            <input
+              value={paste}
+              onChange={(e) => setPaste(e.target.value)}
+              placeholder="http://localhost:1455/auth/callback?code=…"
+              style={input}
+            />
+            <button
+              onClick={completeManual}
+              disabled={completing || !paste.trim()}
+              style={{ ...ghost, alignSelf: "flex-start" }}
+            >
+              {completing ? "Completing…" : "Complete sign-in"}
+            </button>
+          </div>
         </>
       )}
     </div>

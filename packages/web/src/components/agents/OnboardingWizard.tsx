@@ -31,6 +31,11 @@ interface OAuthBundle {
   busy: boolean;
   signIn: () => void;
   signOut: () => void;
+  /** Manual completion (paste the redirect URL) — for remote-box installs. */
+  paste: string;
+  onPaste: (v: string) => void;
+  complete: () => void;
+  completing: boolean;
 }
 
 /**
@@ -64,6 +69,8 @@ export function OnboardingWizard() {
   const [oauthStatus, setOauthStatus] = useState<{ connected: boolean; accountId: string | null } | null>(null);
   const [oauthModels, setOauthModels] = useState<string[]>([]);
   const [oauthBusy, setOauthBusy] = useState(false);
+  const [oauthPaste, setOauthPaste] = useState("");
+  const [oauthCompleting, setOauthCompleting] = useState(false);
 
   const [cooName, setCooName] = useState("Otterbot COO");
   const [persona, setPersona] = useState(
@@ -155,7 +162,37 @@ export function OnboardingWizard() {
   const signOutOpenAi = async () => {
     await fetch("/api/auth/openai/signout", { method: "POST" });
     setOauthModels([]);
+    setOauthPaste("");
     void refreshOAuth();
+  };
+
+  // Manual completion: paste the redirect URL when the loopback callback
+  // can't be reached (otterbot running on a remote box).
+  const completeOpenAi = async () => {
+    setOauthCompleting(true);
+    try {
+      const res = await fetch("/api/auth/openai/complete", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ url: oauthPaste.trim() }),
+      });
+      const data = (await res.json()) as {
+        ok: boolean;
+        status?: { connected: boolean; accountId: string | null };
+        error?: string;
+      };
+      if (data.ok && data.status) {
+        setOauthStatus(data.status);
+        setOauthPaste("");
+        setChatTest({ status: "idle" });
+      } else {
+        setChatTest({ status: "fail", message: data.error ?? "Could not complete sign-in." });
+      }
+    } catch (err) {
+      setChatTest({ status: "fail", message: err instanceof Error ? err.message : String(err) });
+    } finally {
+      setOauthCompleting(false);
+    }
   };
 
   const oauthBundle: OAuthBundle = {
@@ -166,6 +203,10 @@ export function OnboardingWizard() {
     busy: oauthBusy,
     signIn: signInOpenAi,
     signOut: signOutOpenAi,
+    paste: oauthPaste,
+    onPaste: setOauthPaste,
+    complete: completeOpenAi,
+    completing: oauthCompleting,
   };
 
   const finish = async () => {
@@ -524,6 +565,34 @@ function ProviderFields({
               >
                 {oauth.busy ? "Waiting for sign-in…" : "Sign in with ChatGPT"}
               </button>
+              <div
+                style={{
+                  borderTop: "1px solid rgb(var(--border))",
+                  paddingTop: 8,
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 6,
+                }}
+              >
+                <span style={{ fontSize: 11, color: "rgb(var(--muted))", lineHeight: 1.5 }}>
+                  Running otterbot on a remote box? Your browser can't reach{" "}
+                  <code>localhost:1455</code>. After approving, copy the URL it was redirected to
+                  (the page won't load) and paste it here.
+                </span>
+                <input
+                  value={oauth.paste}
+                  onChange={(e) => oauth.onPaste(e.target.value)}
+                  placeholder="http://localhost:1455/auth/callback?code=…"
+                  style={input}
+                />
+                <button
+                  onClick={oauth.complete}
+                  disabled={oauth.completing || !oauth.paste.trim()}
+                  style={{ ...ghost, alignSelf: "flex-start" }}
+                >
+                  {oauth.completing ? "Completing…" : "Complete sign-in"}
+                </button>
+              </div>
               {test.status === "fail" && (
                 <span style={{ fontSize: 12, color: "#f87171" }}>✗ {test.message}</span>
               )}

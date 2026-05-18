@@ -152,6 +152,23 @@ export async function buildServer(orch: Orchestrator, cfg: Config): Promise<Fast
     }
   });
 
+  // Complete a login by pasting the redirect URL — for when the loopback
+  // callback is unreachable from the browser (otterbot on a remote box).
+  app.post<{ Body: { url?: string } }>("/api/auth/openai/complete", async (req, reply) => {
+    const auth = getOpenAiAuth();
+    if (!auth) {
+      reply.code(500);
+      return { ok: false, error: "auth store not initialised" };
+    }
+    try {
+      await auth.completeManual(req.body?.url ?? "");
+      return { ok: true, status: auth.status() };
+    } catch (err) {
+      reply.code(400);
+      return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  });
+
   app.post("/api/auth/openai/signout", async () => {
     getOpenAiAuth()?.signOut();
     return { ok: true };
