@@ -6,6 +6,7 @@ import type {
   AgentProfileSummary,
   AgentStatus,
   AgentRole,
+  ChannelBotConfig,
   GlobalSettings,
   ProviderId,
 } from "@otterbot/shared";
@@ -21,6 +22,18 @@ import { MessageBus } from "../bus/bus.js";
 import { createTransport } from "../bus/transports/factory.js";
 import { Scheduler } from "../scheduler/scheduler.js";
 import { SecretsStore } from "../secrets/secrets-store.js";
+import {
+  type ChannelConnector,
+  connectorSignature,
+} from "../integrations/channel-connector.js";
+import { SlackConnector } from "../integrations/slack-connector.js";
+import { DiscordConnector } from "../integrations/discord-connector.js";
+
+/** A live per-agent chat connector plus the signature it was started with. */
+interface TrackedConnector<C extends ChannelConnector> {
+  connector: C;
+  signature: string;
+}
 
 /** Input for creating a new agent profile. */
 export interface CreateAgentInput {
@@ -31,6 +44,9 @@ export interface CreateAgentInput {
   allowedModels?: AgentProfile["allowedModels"];
   allowedChatServices?: AgentProfile["allowedChatServices"];
   transport?: AgentProfile["transport"];
+  slack?: ChannelBotConfig | null;
+  discord?: ChannelBotConfig | null;
+  allowedPeers?: AgentProfile["allowedPeers"];
   email?: string | null;
   artwork?: AgentProfile["artwork"];
   canSpawnSubagents?: boolean;
@@ -129,6 +145,9 @@ export class Orchestrator {
   private readonly scheduler: Scheduler;
   private readonly secrets: SecretsStore;
   private readonly services: AgentServices;
+  /** Per-agent chat connectors, keyed by agent id. */
+  private readonly slackConnectors = new Map<string, TrackedConnector<SlackConnector>>();
+  private readonly discordConnectors = new Map<string, TrackedConnector<DiscordConnector>>();
   private subagentSeq = 0;
 
   constructor(
@@ -161,6 +180,11 @@ export class Orchestrator {
       scheduleTask: (agentId, cron, prompt) => this.scheduler.add(agentId, cron, prompt),
       listScheduledTasks: (agentId) => this.scheduler.list(agentId),
       cancelScheduledTask: (id) => this.scheduler.cancel(id),
+      searchPeerMemory: async (targetAgentId, query, limit) => {
+        const targetCtx = this.contexts.get(targetAgentId);
+        if (!targetCtx) return [];
+        return targetCtx.memory.search(query, { limit });
+      },
     };
   }
 
@@ -254,6 +278,12 @@ export class Orchestrator {
   async shutdown(): Promise<void> {
     this.scheduler.stop();
     await this.bus.stop();
+    await Promise.allSettled([
+      ...[...this.slackConnectors.values()].map((t) => t.connector.stop()),
+      ...[...this.discordConnectors.values()].map((t) => t.connector.stop()),
+    ]);
+    this.slackConnectors.clear();
+    this.discordConnectors.clear();
     await Promise.allSettled(this.pendingInits.splice(0));
     for (const ctx of this.contexts.values()) {
       try {
@@ -295,6 +325,10 @@ export class Orchestrator {
     const coo = this.contexts.get("coo");
     if (!coo) throw new Error("COO profile failed to load");
     setDefaultContext(coo);
+
+    for (const profile of this.listProfiles()) {
+      this.reconcileConnectors(profile);
+    }
 
     await this.bus.start();
     this.scheduler.start();
@@ -354,6 +388,72 @@ export class Orchestrator {
       .set({ status })
       .where(eq(controlSchema.agents.id, id))
       .run();
+  }
+
+  /**
+   * Bring an agent's Slack + Discord chat connectors in line with its profile
+   * and credentials. Connectors are deliberately decoupled from agent context
+   * lifecycle: a connector only reconnects when its channel/tokens actually
+   * change; a gate-only change (publicBot / allowedUserIds) is applied in place.
+   */
+  private reconcileConnectors(profile: AgentProfile): void {
+    const secrets = this.secrets.get(profile.id);
+    this.reconcileOne(
+      profile.id,
+      profile.slack,
+      [secrets.get("SLACK_BOT_TOKEN") ?? "", secrets.get("SLACK_APP_TOKEN") ?? ""],
+      this.slackConnectors,
+      (cfg, [bot, appToken]) =>
+        new SlackConnector(profile.id, cfg, bot, appToken, () =>
+          this.runtimes.get(profile.id)
+        )
+    );
+    this.reconcileOne(
+      profile.id,
+      profile.discord,
+      [secrets.get("DISCORD_BOT_TOKEN") ?? ""],
+      this.discordConnectors,
+      (cfg, [bot]) =>
+        new DiscordConnector(profile.id, cfg, bot, () => this.runtimes.get(profile.id))
+    );
+  }
+
+  private reconcileOne<C extends ChannelConnector>(
+    agentId: string,
+    cfg: ChannelBotConfig | null,
+    tokens: string[],
+    connectors: Map<string, TrackedConnector<C>>,
+    make: (cfg: ChannelBotConfig, tokens: string[]) => C
+  ): void {
+    const existing = connectors.get(agentId);
+    if (!cfg?.enabled || tokens.some((t) => !t)) {
+      if (existing) {
+        void existing.connector.stop();
+        connectors.delete(agentId);
+      }
+      return;
+    }
+    const signature = connectorSignature(cfg, tokens);
+    if (existing && existing.signature === signature) {
+      existing.connector.updateGate(cfg);
+      return;
+    }
+    if (existing) void existing.connector.stop();
+    const connector = make(cfg, tokens);
+    connectors.set(agentId, { connector, signature });
+    this.pendingInits.push(
+      connector
+        .start()
+        .catch((err) => console.warn(`[connector] start failed for ${agentId}:`, err))
+    );
+  }
+
+  private async stopConnectors(agentId: string): Promise<void> {
+    const slack = this.slackConnectors.get(agentId);
+    const discord = this.discordConnectors.get(agentId);
+    this.slackConnectors.delete(agentId);
+    this.discordConnectors.delete(agentId);
+    await Promise.allSettled([slack?.connector.stop(), discord?.connector.stop()]);
   }
 
   // --- Accessors -----------------------------------------------------------
@@ -425,6 +525,9 @@ export class Orchestrator {
       ],
       allowedChatServices: input.allowedChatServices,
       transport: input.transport,
+      slack: input.slack ?? null,
+      discord: input.discord ?? null,
+      allowedPeers: input.allowedPeers,
       email: input.email ?? null,
       artwork: input.artwork,
       canSpawnSubagents: input.canSpawnSubagents,
@@ -434,6 +537,7 @@ export class Orchestrator {
     });
     this.profiles.create(profile);
     this.startAgent(profile);
+    this.reconcileConnectors(profile);
     return profile;
   }
 
@@ -449,14 +553,16 @@ export class Orchestrator {
     this.runtimes.delete(id);
     const fresh = this.startAgent(updated);
     if (id === "coo") setDefaultContext(fresh);
+    this.reconcileConnectors(updated);
     return updated;
   }
 
   /** Delete an agent. The COO cannot be deleted. */
-  deleteAgent(id: string): boolean {
+  async deleteAgent(id: string): Promise<boolean> {
     if (id === "coo") return false;
     const ctx = this.contexts.get(id);
     if (!ctx) return false;
+    await this.stopConnectors(id);
     ctx.close();
     this.contexts.delete(id);
     this.runtimes.delete(id);

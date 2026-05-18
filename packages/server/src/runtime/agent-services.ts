@@ -1,4 +1,4 @@
-import type { ModelRef, ScheduledTask } from "@otterbot/shared";
+import type { MemorySearchResult, ModelRef, ScheduledTask } from "@otterbot/shared";
 import type { MessageBus } from "../bus/bus.js";
 
 export interface AgentDirectoryEntry {
@@ -36,4 +36,10 @@ export interface AgentServices {
   listScheduledTasks(agentId: string): ScheduledTask[];
   /** Cancel a scheduled task by id. */
   cancelScheduledTask(id: string): boolean;
+  /** Search another agent's memory, read-only. Returns that agent's own hits. */
+  searchPeerMemory(
+    targetAgentId: string,
+    query: string,
+    limit: number
+  ): Promise<MemorySearchResult[]>;
 }

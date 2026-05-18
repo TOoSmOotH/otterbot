@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { AgentProfile, AgentRole, ProviderId } from "@otterbot/shared";
+import type { AgentPeerAccess, AgentProfile, AgentRole, ProviderId } from "@otterbot/shared";
 import { useAgentsStore } from "../../stores/agents-store";
 import { useGlobalSettingsStore } from "../../stores/global-settings-store";
 import { useModelPacksStore } from "../../stores/model-packs-store";
@@ -18,6 +18,15 @@ interface FormState {
   transport: "local" | "discord";
   email: string;
   canSpawnSubagents: boolean;
+  slackEnabled: boolean;
+  slackChannelId: string;
+  slackPublicBot: boolean;
+  slackAllowedUserIds: string;
+  discordEnabled: boolean;
+  discordChannelId: string;
+  discordPublicBot: boolean;
+  discordAllowedUserIds: string;
+  allowedPeers: AgentPeerAccess[];
 }
 
 const BLANK: FormState = {
@@ -32,13 +41,31 @@ const BLANK: FormState = {
   transport: "local",
   email: "",
   canSpawnSubagents: true,
+  slackEnabled: false,
+  slackChannelId: "",
+  slackPublicBot: false,
+  slackAllowedUserIds: "",
+  discordEnabled: false,
+  discordChannelId: "",
+  discordPublicBot: false,
+  discordAllowedUserIds: "",
+  allowedPeers: [],
 };
+
+/** Split a comma/newline-separated user-id list into a trimmed array. */
+function parseUserIds(raw: string): string[] {
+  return raw
+    .split(/[\n,]/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
 
 /** Modal form for creating a new agent or editing an existing profile. */
 export function AgentEditor({ agentId, onClose }: { agentId: string | null; onClose: () => void }) {
   const create = useAgentsStore((s) => s.create);
   const update = useAgentsStore((s) => s.update);
   const remove = useAgentsStore((s) => s.remove);
+  const agents = useAgentsStore((s) => s.agents);
   const packs = useModelPacksStore((s) => s.packs);
   const globalSettings = useGlobalSettingsStore((s) => s.settings);
   const loadGlobalSettings = useGlobalSettingsStore((s) => s.load);
@@ -76,6 +103,15 @@ export function AgentEditor({ agentId, onClose }: { agentId: string | null; onCl
           transport: p.transport,
           email: p.email ?? "",
           canSpawnSubagents: p.canSpawnSubagents,
+          slackEnabled: p.slack?.enabled ?? false,
+          slackChannelId: p.slack?.channelId ?? "",
+          slackPublicBot: p.slack?.publicBot ?? false,
+          slackAllowedUserIds: (p.slack?.allowedUserIds ?? []).join("\n"),
+          discordEnabled: p.discord?.enabled ?? false,
+          discordChannelId: p.discord?.channelId ?? "",
+          discordPublicBot: p.discord?.publicBot ?? false,
+          discordAllowedUserIds: (p.discord?.allowedUserIds ?? []).join("\n"),
+          allowedPeers: p.allowedPeers ?? [],
         });
       });
   }, [agentId, globalSettings]);
@@ -83,6 +119,26 @@ export function AgentEditor({ agentId, onClose }: { agentId: string | null; onCl
   useEffect(() => void loadGlobalSettings(), [loadGlobalSettings]);
 
   const patch = (p: Partial<FormState>) => setForm((f) => ({ ...f, ...p }));
+
+  const setPeerMessage = (peerId: string, on: boolean) =>
+    setForm((f) => ({
+      ...f,
+      allowedPeers: on
+        ? f.allowedPeers.some((p) => p.agentId === peerId)
+          ? f.allowedPeers
+          : [...f.allowedPeers, { agentId: peerId, shareMemory: false }]
+        : f.allowedPeers.filter((p) => p.agentId !== peerId),
+    }));
+
+  const setPeerMemory = (peerId: string, on: boolean) =>
+    setForm((f) => ({
+      ...f,
+      allowedPeers: f.allowedPeers.map((p) =>
+        p.agentId === peerId ? { ...p, shareMemory: on } : p
+      ),
+    }));
+
+  const peerAgents = agents.filter((a) => a.id !== agentId);
 
   const onSave = async () => {
     if (!form.displayName.trim()) return;
@@ -103,6 +159,23 @@ export function AgentEditor({ agentId, onClose }: { agentId: string | null; onCl
       email: form.email.trim() || null,
       artwork: { modelPack: form.modelPack },
       canSpawnSubagents: form.canSpawnSubagents,
+      slack: form.slackEnabled
+        ? {
+            enabled: true,
+            channelId: form.slackChannelId.trim(),
+            publicBot: form.slackPublicBot,
+            allowedUserIds: parseUserIds(form.slackAllowedUserIds),
+          }
+        : null,
+      discord: form.discordEnabled
+        ? {
+            enabled: true,
+            channelId: form.discordChannelId.trim(),
+            publicBot: form.discordPublicBot,
+            allowedUserIds: parseUserIds(form.discordAllowedUserIds),
+          }
+        : null,
+      allowedPeers: form.allowedPeers,
     };
     if (isEdit && agentId) {
       await update(agentId, payload);
@@ -288,13 +361,93 @@ export function AgentEditor({ agentId, onClose }: { agentId: string | null; onCl
           Can spawn subagents
         </label>
 
+        <ChannelSection
+          label="Slack"
+          enabled={form.slackEnabled}
+          onEnabledChange={(v) => patch({ slackEnabled: v })}
+          channelId={form.slackChannelId}
+          onChannelIdChange={(v) => patch({ slackChannelId: v })}
+          publicBot={form.slackPublicBot}
+          onPublicBotChange={(v) => patch({ slackPublicBot: v })}
+          allowedUserIds={form.slackAllowedUserIds}
+          onAllowedUserIdsChange={(v) => patch({ slackAllowedUserIds: v })}
+        />
+
+        <ChannelSection
+          label="Discord"
+          enabled={form.discordEnabled}
+          onEnabledChange={(v) => patch({ discordEnabled: v })}
+          channelId={form.discordChannelId}
+          onChannelIdChange={(v) => patch({ discordChannelId: v })}
+          publicBot={form.discordPublicBot}
+          onPublicBotChange={(v) => patch({ discordPublicBot: v })}
+          allowedUserIds={form.discordAllowedUserIds}
+          onAllowedUserIdsChange={(v) => patch({ discordAllowedUserIds: v })}
+        />
+
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: 8,
+            border: "1px solid rgb(var(--border))",
+            borderRadius: 8,
+            padding: 10,
+          }}
+        >
+          <span style={{ fontSize: 12, color: "rgb(var(--muted))" }}>Peer access</span>
+          {agentId === "coo" ? (
+            <p style={hintStyle}>The COO can message and read the memory of every agent.</p>
+          ) : peerAgents.length === 0 ? (
+            <p style={hintStyle}>No other agents to grant access to yet.</p>
+          ) : (
+            <>
+              <p style={hintStyle}>
+                Choose which agents this agent may message. Reading a peer's memory
+                (read-only) requires message permission.
+              </p>
+              {peerAgents.map((a) => {
+                const peer = form.allowedPeers.find((p) => p.agentId === a.id);
+                const canMessage = peer !== undefined;
+                return (
+                  <div
+                    key={a.id}
+                    style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 13 }}
+                  >
+                    <span style={{ flex: 1 }}>{a.displayName}</span>
+                    <label style={checkboxRow}>
+                      <input
+                        type="checkbox"
+                        checked={canMessage}
+                        onChange={(e) => setPeerMessage(a.id, e.target.checked)}
+                      />
+                      Can message
+                    </label>
+                    <label style={{ ...checkboxRow, opacity: canMessage ? 1 : 0.5 }}>
+                      <input
+                        type="checkbox"
+                        checked={peer?.shareMemory ?? false}
+                        disabled={!canMessage}
+                        onChange={(e) => setPeerMemory(a.id, e.target.checked)}
+                      />
+                      Can read memory
+                    </label>
+                  </div>
+                );
+              })}
+            </>
+          )}
+        </div>
+
         {isEdit && (
           <Field label="Credentials (.env — KEY=VALUE per line; replaces all secrets)">
             <textarea
               value={creds}
               onChange={(e) => setCreds(e.target.value)}
               rows={4}
-              placeholder={"ANTHROPIC_API_KEY=...\nGITHUB_TOKEN=...\nSMTP_HOST=...\nLMSTUDIO_BASE_URL=..."}
+              placeholder={
+                "ANTHROPIC_API_KEY=...\nGITHUB_TOKEN=...\nSLACK_BOT_TOKEN=...\nSLACK_APP_TOKEN=...\nDISCORD_BOT_TOKEN=..."
+              }
               style={{ ...inputStyle, resize: "vertical", fontFamily: "monospace", fontSize: 12 }}
             />
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4 }}>
@@ -338,6 +491,98 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 function Row({ children }: { children: React.ReactNode }) {
   return <div style={{ display: "flex", gap: 10 }}>{children}</div>;
 }
+
+/** Slack/Discord channel connector config: enable, channel, and the public-bot gate. */
+function ChannelSection({
+  label,
+  enabled,
+  onEnabledChange,
+  channelId,
+  onChannelIdChange,
+  publicBot,
+  onPublicBotChange,
+  allowedUserIds,
+  onAllowedUserIdsChange,
+}: {
+  label: string;
+  enabled: boolean;
+  onEnabledChange: (v: boolean) => void;
+  channelId: string;
+  onChannelIdChange: (v: string) => void;
+  publicBot: boolean;
+  onPublicBotChange: (v: boolean) => void;
+  allowedUserIds: string;
+  onAllowedUserIdsChange: (v: string) => void;
+}) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: 8,
+        border: "1px solid rgb(var(--border))",
+        borderRadius: 8,
+        padding: 10,
+      }}
+    >
+      <label style={checkboxRow}>
+        <input
+          type="checkbox"
+          checked={enabled}
+          onChange={(e) => onEnabledChange(e.target.checked)}
+        />
+        Enable {label}
+      </label>
+      {enabled && (
+        <>
+          <Field label={`${label} channel ID`}>
+            <input
+              value={channelId}
+              onChange={(e) => onChannelIdChange(e.target.value)}
+              style={inputStyle}
+            />
+          </Field>
+          <label style={checkboxRow}>
+            <input
+              type="checkbox"
+              checked={publicBot}
+              onChange={(e) => onPublicBotChange(e.target.checked)}
+            />
+            Public bot
+          </label>
+          <p style={hintStyle}>
+            A public bot lets anyone in the channel talk to this agent — only enable it in
+            channels you trust. Otherwise leave it off and list the specific {label} user IDs
+            allowed to message the agent.
+          </p>
+          {!publicBot && (
+            <Field label={`Allowed ${label} user IDs (one per line)`}>
+              <textarea
+                value={allowedUserIds}
+                onChange={(e) => onAllowedUserIdsChange(e.target.value)}
+                rows={3}
+                style={{ ...inputStyle, resize: "vertical", fontFamily: "monospace", fontSize: 12 }}
+              />
+            </Field>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+const checkboxRow: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: 8,
+  fontSize: 13,
+};
+
+const hintStyle: React.CSSProperties = {
+  margin: "4px 0 0",
+  fontSize: 12,
+  color: "rgb(var(--muted))",
+};
 
 const inputStyle: React.CSSProperties = {
   background: "rgb(var(--bg))",

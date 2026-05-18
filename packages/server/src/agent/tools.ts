@@ -222,7 +222,13 @@ export function buildAgentTools(
     description:
       "List the other agents you can coordinate with. Returns their id, name, role, and what they specialize in.",
     parameters: z.object({}),
-    execute: async () => services.listAgents().filter((a) => a.id !== ctx.profile.id),
+    execute: async () => {
+      const others = services.listAgents().filter((a) => a.id !== ctx.profile.id);
+      // The COO may reach every agent; other agents see only their permitted peers.
+      if (isCoo) return others;
+      const peerIds = new Set(ctx.profile.allowedPeers.map((p) => p.agentId));
+      return others.filter((a) => peerIds.has(a.id));
+    },
   });
 
   if (ctx.profile.canSpawnSubagents) {
@@ -237,7 +243,7 @@ export function buildAgentTools(
     });
   }
 
-  if (isCoo) {
+  if (isCoo || ctx.profile.allowedPeers.length > 0) {
     tools.delegate = tool({
       description:
         "Delegate a task to another agent by id and wait for its result. Use list_agents first to choose the right specialist.",
@@ -251,6 +257,14 @@ export function buildAgentTools(
           return {
             ok: false,
             error: `No agent "${agentId}". Known agents: ${known.map((a) => a.id).join(", ")}`,
+          };
+        }
+        // The COO may message any agent; others only their permitted peers.
+        if (!isCoo && !ctx.profile.allowedPeers.some((p) => p.agentId === agentId)) {
+          const permitted = ctx.profile.allowedPeers.map((p) => p.agentId).join(", ") || "(none)";
+          return {
+            ok: false,
+            error: `Not permitted to message "${agentId}". Permitted peers: ${permitted}`,
           };
         }
         try {
@@ -271,7 +285,41 @@ export function buildAgentTools(
         }
       },
     });
+  }
 
+  if (isCoo || ctx.profile.allowedPeers.some((p) => p.shareMemory)) {
+    tools.search_peer_memory = tool({
+      description:
+        "Search another agent's long-term memory (read-only). Use list_agents to find agent ids you may access.",
+      parameters: z.object({
+        agentId: z.string().min(1),
+        query: z.string().min(1),
+        limit: z.number().int().min(1).max(20).default(6),
+      }),
+      execute: async ({ agentId, query, limit }) => {
+        // The COO may read any agent's memory; others need an explicit grant.
+        if (
+          !isCoo &&
+          !ctx.profile.allowedPeers.some((p) => p.agentId === agentId && p.shareMemory)
+        ) {
+          return { ok: false, error: `Not permitted to read the memory of "${agentId}".` };
+        }
+        const hits = await services.searchPeerMemory(agentId, query, limit);
+        return {
+          ok: true,
+          hits: hits.map((h) => ({
+            content: h.entry.content,
+            category: h.entry.category,
+            importance: h.entry.importance,
+            score: h.score,
+            via: h.via,
+          })),
+        };
+      },
+    });
+  }
+
+  if (isCoo) {
     tools.broadcast = tool({
       description: "Send an announcement to every agent. Does not wait for replies.",
       parameters: z.object({ message: z.string().min(1) }),

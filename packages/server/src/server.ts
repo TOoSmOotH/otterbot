@@ -201,7 +201,7 @@ export async function buildServer(orch: Orchestrator, cfg: Config): Promise<Fast
   );
 
   app.delete<{ Params: { id: string } }>("/api/agents/:id", async (req, reply) => {
-    const ok = orch.deleteAgent(req.params.id);
+    const ok = await orch.deleteAgent(req.params.id);
     if (!ok) {
       reply.code(req.params.id === "coo" ? 400 : 404);
       return { error: req.params.id === "coo" ? "the COO cannot be deleted" : "not found" };
