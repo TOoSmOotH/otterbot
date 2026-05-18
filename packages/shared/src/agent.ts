@@ -4,10 +4,33 @@
  */
 
 /**
- * A model provider. `builtin` is an embedding-only, in-process CPU embedder
- * (all-MiniLM-L6-v2 via fastembed) — it is not valid as a chat provider.
+ * A model provider id. Open by design — the server's provider catalog
+ * (`packages/server/src/providers/catalog.ts`) is the source of truth, so new
+ * providers can be added without changing this type. Built-in ids today:
+ * `anthropic`, `openai`, `lmstudio`, `ollama`, `builtin` (embedding-only).
  */
-export type ProviderId = "anthropic" | "openai" | "lmstudio" | "ollama" | "builtin";
+export type ProviderId = string;
+
+/**
+ * Serializable metadata describing one provider — exposed by `GET /api/providers`
+ * and consumed by the web UI to render provider pickers without hardcoding.
+ */
+export interface ProviderInfo {
+  id: ProviderId;
+  label: string;
+  /** Whether the provider can back a chat model. */
+  supportsChat: boolean;
+  /** Whether the provider can produce embeddings. */
+  supportsEmbeddings: boolean;
+  /** Whether the provider needs an API key credential. */
+  needsApiKey: boolean;
+  /** Secret/env key holding the API credential, or null. */
+  apiKeyEnv: string | null;
+  /** Secret/env key for a custom base URL, or null. */
+  baseUrlEnv: string | null;
+  /** Default base URL for HTTP providers, or null. */
+  defaultBaseUrl: string | null;
+}
 
 export type AgentRole = "coo" | "agent" | "subagent";
 

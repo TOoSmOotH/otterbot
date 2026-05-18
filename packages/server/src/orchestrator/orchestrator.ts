@@ -18,6 +18,7 @@ import { buildAgentContext, type AgentContext } from "../runtime/agent-context.j
 import { AgentRuntime } from "../runtime/agent-runtime.js";
 import type { AgentServices, SpawnResult } from "../runtime/agent-services.js";
 import { resolveEmbedder } from "../providers/registry.js";
+import { PROVIDER_CATALOG, findProvider } from "../providers/catalog.js";
 import { setDefaultContext } from "../runtime/default-agent.js";
 import { MessageBus } from "../bus/bus.js";
 import { createTransport } from "../bus/transports/factory.js";
@@ -57,38 +58,21 @@ export interface CreateAgentInput {
 
 export const GLOBAL_SETTINGS_KEY = "global_settings";
 
+/** Per-provider default settings, derived from the provider catalog. */
 const DEFAULT_GLOBAL_SETTINGS: GlobalSettings = {
   theme: "obsidian",
   defaultChatModel: { provider: "lmstudio", modelId: "local-model" },
   defaultEmbeddingModel: { provider: "lmstudio", modelId: "local-model" },
-  providers: {
-    anthropic: { baseUrl: "https://api.anthropic.com/v1", apiKeyConfigured: false },
-    openai: {
-      baseUrl: "https://api.openai.com/v1",
-      apiKeyConfigured: false,
-      authMethod: "api-key",
-    },
-    lmstudio: { baseUrl: "http://localhost:1234/v1", apiKeyConfigured: false },
-    ollama: { baseUrl: "http://localhost:11434/v1", apiKeyConfigured: false },
-    // The built-in embedder is in-process — no endpoint, no credentials.
-    builtin: { baseUrl: "", apiKeyConfigured: false },
-  },
-};
-
-const API_KEY_NAMES: Record<ProviderId, string> = {
-  anthropic: "ANTHROPIC_API_KEY",
-  openai: "OPENAI_API_KEY",
-  lmstudio: "LMSTUDIO_API_KEY",
-  ollama: "OLLAMA_API_KEY",
-  builtin: "BUILTIN_API_KEY",
-};
-
-const BASE_URL_NAMES: Record<ProviderId, string> = {
-  anthropic: "ANTHROPIC_BASE_URL",
-  openai: "OPENAI_BASE_URL",
-  lmstudio: "LMSTUDIO_BASE_URL",
-  ollama: "OLLAMA_BASE_URL",
-  builtin: "BUILTIN_BASE_URL",
+  providers: Object.fromEntries(
+    PROVIDER_CATALOG.map((p) => [
+      p.id,
+      {
+        baseUrl: p.defaultBaseUrl ?? "",
+        apiKeyConfigured: false,
+        ...(p.id === "openai" ? { authMethod: "api-key" as const } : {}),
+      },
+    ])
+  ),
 };
 
 function normalizeGlobalSettings(input?: Partial<GlobalSettings> | null): GlobalSettings {
@@ -268,10 +252,10 @@ export class Orchestrator {
   getGlobalProviderSecrets(): Map<string, string> {
     const settings = this.getGlobalSettings();
     const secrets = new Map<string, string>();
-    for (const provider of Object.keys(settings.providers) as ProviderId[]) {
-      const cfg = settings.providers[provider];
-      if (cfg.apiKey) secrets.set(API_KEY_NAMES[provider], cfg.apiKey);
-      if (cfg.baseUrl) secrets.set(BASE_URL_NAMES[provider], cfg.baseUrl);
+    for (const [provider, cfg] of Object.entries(settings.providers)) {
+      const def = findProvider(provider);
+      if (def?.apiKeyEnv && cfg.apiKey) secrets.set(def.apiKeyEnv, cfg.apiKey);
+      if (def?.baseUrlEnv && cfg.baseUrl) secrets.set(def.baseUrlEnv, cfg.baseUrl);
       if (provider === "openai" && cfg.authMethod) {
         secrets.set("OPENAI_AUTH_METHOD", cfg.authMethod);
       }
@@ -610,10 +594,22 @@ export class Orchestrator {
     return true;
   }
 
-  /** Store an agent's credentials in the encrypted DB and restart it. */
+  /** Replace an agent's credentials in the encrypted DB and restart it. */
   setCredentials(id: string, secrets: Record<string, string>): boolean {
     if (!this.contexts.has(id)) return false;
     this.secrets.set(id, secrets);
+    this.updateAgent(id, {});
+    return true;
+  }
+
+  /** Merge secrets into an agent's existing credentials, then restart it. */
+  mergeCredentials(id: string, secrets: Record<string, string>): boolean {
+    if (!this.contexts.has(id)) return false;
+    const merged = this.secrets.get(id);
+    for (const [key, value] of Object.entries(secrets)) {
+      if (key.trim()) merged.set(key.trim(), value);
+    }
+    this.secrets.set(id, merged);
     this.updateAgent(id, {});
     return true;
   }

@@ -8,13 +8,12 @@ import type {
 } from "@otterbot/shared";
 import { useAgentsStore } from "../../stores/agents-store";
 import { useGlobalSettingsStore } from "../../stores/global-settings-store";
+import { useProvidersStore } from "../../stores/providers-store";
 import { BuiltinEmbedderControls } from "../BuiltinEmbedderControls";
+import { ProviderOptions } from "../ProviderOptions";
 import { AvatarUpload } from "./AvatarUpload";
 
-const PROVIDERS: ProviderId[] = ["anthropic", "openai", "lmstudio", "ollama"];
-/** Providers offered for the embedding model (builtin = in-process CPU). */
-const EMBEDDING_PROVIDERS: ProviderId[] = ["builtin", "openai", "lmstudio", "ollama"];
-const TABS = ["Identity", "Persona", "Model", "Skills", "Schedule", "Memory", "Credentials"] as const;
+const TABS = ["Identity", "Persona", "Model", "Channels", "Skills", "Schedule", "Memory", "Credentials"] as const;
 type StudioTab = (typeof TABS)[number];
 
 /** Full-screen agent management surface — identity, persona, model, skills,
@@ -100,6 +99,7 @@ export function AgentStudio({ agentId }: { agentId: string | null }) {
         {tab === "Identity" && <IdentityTab profile={profile} onSaved={onSaved} />}
         {tab === "Persona" && <PersonaTab profile={profile} onSaved={onSaved} />}
         {tab === "Model" && <ModelTab profile={profile} onSaved={onSaved} />}
+        {tab === "Channels" && <ChannelsTab profile={profile} onSaved={onSaved} />}
         {tab === "Skills" && <SkillsTab agentId={profile.id} />}
         {tab === "Schedule" && <ScheduleTab agentId={profile.id} />}
         {tab === "Memory" && <MemoryTab agentId={profile.id} />}
@@ -174,6 +174,214 @@ function IdentityTab({ profile, onSaved }: TabProps) {
   );
 }
 
+// --- Channels -------------------------------------------------------------
+
+/** Split a comma/newline-separated id list into a trimmed array. */
+function parseIds(raw: string): string[] {
+  return raw
+    .split(/[\n,]/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+/** Slack / Discord chat connectors: tokens, channel id, and the access gate. */
+function ChannelsTab({ profile, onSaved }: TabProps) {
+  const update = useAgentsStore((s) => s.update);
+
+  const [slackEnabled, setSlackEnabled] = useState(profile.slack?.enabled ?? false);
+  const [slackChannel, setSlackChannel] = useState(profile.slack?.channelId ?? "");
+  const [slackPublic, setSlackPublic] = useState(profile.slack?.publicBot ?? false);
+  const [slackUsers, setSlackUsers] = useState((profile.slack?.allowedUserIds ?? []).join("\n"));
+  const [slackBotToken, setSlackBotToken] = useState("");
+  const [slackAppToken, setSlackAppToken] = useState("");
+
+  const [discordEnabled, setDiscordEnabled] = useState(profile.discord?.enabled ?? false);
+  const [discordChannel, setDiscordChannel] = useState(profile.discord?.channelId ?? "");
+  const [discordPublic, setDiscordPublic] = useState(profile.discord?.publicBot ?? false);
+  const [discordUsers, setDiscordUsers] = useState(
+    (profile.discord?.allowedUserIds ?? []).join("\n")
+  );
+  const [discordBotToken, setDiscordBotToken] = useState("");
+
+  const [saved, setSaved] = useState(false);
+  const [error, setError] = useState("");
+
+  const save = async () => {
+    setError("");
+    // 1. Channel config (channel id + access gate) lives on the profile.
+    await update(profile.id, {
+      slack: slackEnabled
+        ? {
+            enabled: true,
+            channelId: slackChannel.trim(),
+            publicBot: slackPublic,
+            allowedUserIds: parseIds(slackUsers),
+          }
+        : null,
+      discord: discordEnabled
+        ? {
+            enabled: true,
+            channelId: discordChannel.trim(),
+            publicBot: discordPublic,
+            allowedUserIds: parseIds(discordUsers),
+          }
+        : null,
+    });
+    // 2. Tokens are secrets — merge in only the ones that were entered.
+    const secrets: Record<string, string> = {};
+    if (slackBotToken.trim()) secrets.SLACK_BOT_TOKEN = slackBotToken.trim();
+    if (slackAppToken.trim()) secrets.SLACK_APP_TOKEN = slackAppToken.trim();
+    if (discordBotToken.trim()) secrets.DISCORD_BOT_TOKEN = discordBotToken.trim();
+    if (Object.keys(secrets).length > 0) {
+      const res = await fetch(`/api/agents/${profile.id}/credentials`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(secrets),
+      });
+      if (!res.ok) {
+        setError("Channel settings saved, but storing the tokens failed.");
+        return;
+      }
+    }
+    setSlackBotToken("");
+    setSlackAppToken("");
+    setDiscordBotToken("");
+    setSaved(true);
+    onSaved();
+  };
+
+  return (
+    <Form>
+      <p style={hint}>
+        Connect this agent to a Slack or Discord channel. Tokens are stored encrypted alongside the
+        agent's other credentials — leave a token blank to keep the one already saved.
+      </p>
+
+      <div style={channelCard}>
+        <label style={checkboxRow}>
+          <input
+            type="checkbox"
+            checked={slackEnabled}
+            onChange={(e) => setSlackEnabled(e.target.checked)}
+          />
+          Enable Slack
+        </label>
+        {slackEnabled && (
+          <>
+            <Field label="Bot OAuth token (xoxb-…)">
+              <input
+                type="password"
+                value={slackBotToken}
+                onChange={(e) => setSlackBotToken(e.target.value)}
+                placeholder={profile.slack ? "Leave blank to keep the saved token" : "xoxb-…"}
+                style={input}
+              />
+            </Field>
+            <Field label="App-level / Socket Mode token (xapp-…)">
+              <input
+                type="password"
+                value={slackAppToken}
+                onChange={(e) => setSlackAppToken(e.target.value)}
+                placeholder={profile.slack ? "Leave blank to keep the saved token" : "xapp-…"}
+                style={input}
+              />
+            </Field>
+            <Field label="Channel ID to join">
+              <input
+                value={slackChannel}
+                onChange={(e) => setSlackChannel(e.target.value)}
+                placeholder="C0123456789"
+                style={input}
+              />
+            </Field>
+            <label style={checkboxRow}>
+              <input
+                type="checkbox"
+                checked={slackPublic}
+                onChange={(e) => setSlackPublic(e.target.checked)}
+              />
+              Public bot — anyone in the channel may talk to this agent
+            </label>
+            {!slackPublic && (
+              <Field label="Allowed Slack user IDs (one per line)">
+                <textarea
+                  value={slackUsers}
+                  onChange={(e) => setSlackUsers(e.target.value)}
+                  rows={3}
+                  style={{ ...input, resize: "vertical", fontFamily: "monospace", fontSize: 12 }}
+                />
+              </Field>
+            )}
+          </>
+        )}
+      </div>
+
+      <div style={channelCard}>
+        <label style={checkboxRow}>
+          <input
+            type="checkbox"
+            checked={discordEnabled}
+            onChange={(e) => setDiscordEnabled(e.target.checked)}
+          />
+          Enable Discord
+        </label>
+        {discordEnabled && (
+          <>
+            <Field label="Bot token">
+              <input
+                type="password"
+                value={discordBotToken}
+                onChange={(e) => setDiscordBotToken(e.target.value)}
+                placeholder={
+                  profile.discord ? "Leave blank to keep the saved token" : "Discord bot token"
+                }
+                style={input}
+              />
+            </Field>
+            <Field label="Channel ID to join">
+              <input
+                value={discordChannel}
+                onChange={(e) => setDiscordChannel(e.target.value)}
+                style={input}
+              />
+            </Field>
+            <label style={checkboxRow}>
+              <input
+                type="checkbox"
+                checked={discordPublic}
+                onChange={(e) => setDiscordPublic(e.target.checked)}
+              />
+              Public bot — anyone in the channel may talk to this agent
+            </label>
+            {!discordPublic && (
+              <Field label="Allowed Discord user IDs (one per line)">
+                <textarea
+                  value={discordUsers}
+                  onChange={(e) => setDiscordUsers(e.target.value)}
+                  rows={3}
+                  style={{ ...input, resize: "vertical", fontFamily: "monospace", fontSize: 12 }}
+                />
+              </Field>
+            )}
+          </>
+        )}
+      </div>
+
+      {error && <span style={{ fontSize: 12, color: "#f87171" }}>{error}</span>}
+      <SaveBar onSave={save} saved={saved} onDirty={() => setSaved(false)} />
+    </Form>
+  );
+}
+
+const channelCard: React.CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  gap: 8,
+  border: "1px solid rgb(var(--border))",
+  borderRadius: 8,
+  padding: 12,
+};
+
 // --- Persona --------------------------------------------------------------
 
 function PersonaTab({ profile, onSaved }: TabProps) {
@@ -210,6 +418,12 @@ function PersonaTab({ profile, onSaved }: TabProps) {
 
 function ModelTab({ profile, onSaved }: TabProps) {
   const update = useAgentsStore((s) => s.update);
+  const providers = useProvidersStore((s) => s.providers);
+  const loadProviders = useProvidersStore((s) => s.load);
+  useEffect(() => void loadProviders(), [loadProviders]);
+  const chatProviders = providers.filter((p) => p.supportsChat);
+  const embeddingProviders = providers.filter((p) => p.supportsEmbeddings);
+
   const [cp, setCp] = useState<ProviderId>(profile.model.chat.provider);
   const [cm, setCm] = useState(profile.model.chat.modelId);
   const [ep, setEp] = useState<ProviderId>(profile.model.embedding.provider);
@@ -226,8 +440,8 @@ function ModelTab({ profile, onSaved }: TabProps) {
       </p>
       <Field label="Chat model">
         <div style={{ display: "flex", gap: 8 }}>
-          <select value={cp} onChange={(e) => { setCp(e.target.value as ProviderId); dirty(); }} style={{ ...input, flex: "0 0 130px" }}>
-            {PROVIDERS.map((p) => <option key={p}>{p}</option>)}
+          <select value={cp} onChange={(e) => { setCp(e.target.value); dirty(); }} style={{ ...input, flex: "0 0 130px" }}>
+            <ProviderOptions list={chatProviders} current={cp} />
           </select>
           <input value={cm} onChange={(e) => { setCm(e.target.value); dirty(); }} style={input} />
         </div>
@@ -261,14 +475,14 @@ function ModelTab({ profile, onSaved }: TabProps) {
           <select
             value={ep}
             onChange={(e) => {
-              const next = e.target.value as ProviderId;
+              const next = e.target.value;
               setEp(next);
               if (next === "builtin") setEm("all-MiniLM-L6-v2");
               dirty();
             }}
             style={{ ...input, flex: "0 0 130px" }}
           >
-            {EMBEDDING_PROVIDERS.map((p) => <option key={p}>{p}</option>)}
+            <ProviderOptions list={embeddingProviders} current={ep} />
           </select>
           <input
             value={em}

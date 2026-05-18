@@ -1,17 +1,13 @@
 import { describe, it, expect } from "vitest";
-import { resolveChatModel, resolveEmbeddingConfig, isModelAllowed } from "./registry.js";
-import type { ModelRef } from "@otterbot/shared";
+import { resolveChatModel, resolveEmbedder, isModelAllowed } from "./registry.js";
+import { PROVIDER_CATALOG } from "./catalog.js";
+import { HttpEmbedder, NullEmbedder } from "../embedding.js";
+import { BuiltinEmbedder } from "../embedders/builtin-embedder.js";
 
 describe("provider registry", () => {
-  it("resolves a chat model for every provider", () => {
-    const refs: ModelRef[] = [
-      { provider: "anthropic", modelId: "claude-x" },
-      { provider: "openai", modelId: "gpt-x" },
-      { provider: "lmstudio", modelId: "local-x" },
-      { provider: "ollama", modelId: "llama-x" },
-    ];
-    for (const ref of refs) {
-      const model = resolveChatModel(ref, new Map());
+  it("resolves a chat model for every chat-capable catalog provider", () => {
+    for (const def of PROVIDER_CATALOG.filter((p) => p.supportsChat)) {
+      const model = resolveChatModel({ provider: def.id, modelId: "x" }, new Map());
       expect(model).toBeTruthy();
       expect(typeof model.doStream).toBe("function");
     }
@@ -40,23 +36,22 @@ describe("provider registry", () => {
     ).rejects.toThrow(/OAuth is selected/);
   });
 
-  it("resolves an embeddings endpoint, falling back off anthropic", () => {
-    const local = resolveEmbeddingConfig({ provider: "lmstudio", modelId: "nomic" }, new Map());
-    expect(local.baseUrl).toContain("/v1");
-
-    const openai = resolveEmbeddingConfig({ provider: "openai", modelId: "text-embed" }, new Map());
-    expect(openai.baseUrl).toContain("openai.com");
-
-    // anthropic has no embeddings API — must fall back to a local embedder
-    const fallback = resolveEmbeddingConfig({ provider: "anthropic", modelId: "claude" }, new Map());
-    expect(fallback.baseUrl).toContain("/v1");
-    expect(fallback.baseUrl).not.toContain("openai.com");
+  it("resolves embedders by provider, disabling them on an empty modelId", () => {
+    expect(resolveEmbedder({ provider: "builtin", modelId: "" }, new Map())).toBeInstanceOf(
+      NullEmbedder
+    );
+    expect(
+      resolveEmbedder({ provider: "builtin", modelId: "all-MiniLM-L6-v2" }, new Map())
+    ).toBeInstanceOf(BuiltinEmbedder);
+    expect(resolveEmbedder({ provider: "lmstudio", modelId: "nomic" }, new Map())).toBeInstanceOf(
+      HttpEmbedder
+    );
   });
 
   it("enforces the allowedModels allowlist with wildcard support", () => {
     const allow = [
-      { provider: "anthropic" as const, modelId: "*" },
-      { provider: "lmstudio" as const, modelId: "exact-model" },
+      { provider: "anthropic", modelId: "*" },
+      { provider: "lmstudio", modelId: "exact-model" },
     ];
     expect(isModelAllowed({ provider: "anthropic", modelId: "anything" }, allow)).toBe(true);
     expect(isModelAllowed({ provider: "lmstudio", modelId: "exact-model" }, allow)).toBe(true);

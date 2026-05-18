@@ -1,44 +1,37 @@
 import { useEffect, useMemo, useState } from "react";
-import type { GlobalSettings as GlobalSettingsShape, ProviderId, ThemeId } from "@otterbot/shared";
-import {
-  PROVIDERS,
-  EMBEDDING_PROVIDERS,
-  THEMES,
-  useGlobalSettingsStore,
-  applyTheme,
-} from "../../stores/global-settings-store";
+import type {
+  GlobalSettings as GlobalSettingsShape,
+  ProviderId,
+  ProviderInfo,
+  ThemeId,
+} from "@otterbot/shared";
+import { THEMES, useGlobalSettingsStore, applyTheme } from "../../stores/global-settings-store";
+import { useProvidersStore } from "../../stores/providers-store";
 import { BuiltinEmbedderControls } from "../BuiltinEmbedderControls";
 
-const PROVIDER_LABELS: Record<ProviderId, string> = {
-  anthropic: "Anthropic",
-  openai: "OpenAI",
-  lmstudio: "LM Studio",
-  ollama: "Ollama",
-  builtin: "Built-in (CPU)",
-};
-
-const API_KEY_LABELS: Record<ProviderId, string> = {
-  anthropic: "ANTHROPIC_API_KEY",
-  openai: "OPENAI_API_KEY",
-  lmstudio: "LMSTUDIO_API_KEY",
-  ollama: "OLLAMA_API_KEY",
-  builtin: "—",
-};
-
 type OpenAiAuthStatus = { connected: boolean; accountId: string | null };
+
+const EMPTY_PROVIDER_CFG = { baseUrl: "", apiKeyConfigured: false };
 
 export function GlobalSettings() {
   const savedSettings = useGlobalSettingsStore((s) => s.settings);
   const load = useGlobalSettingsStore((s) => s.load);
   const saveSettings = useGlobalSettingsStore((s) => s.save);
   const saving = useGlobalSettingsStore((s) => s.saving);
+  const providers = useProvidersStore((s) => s.providers);
+  const loadProviders = useProvidersStore((s) => s.load);
   const [draft, setDraft] = useState<GlobalSettingsShape>(savedSettings);
   const [status, setStatus] = useState("");
 
   useEffect(() => void load(), [load]);
+  useEffect(() => void loadProviders(), [loadProviders]);
   useEffect(() => setDraft(savedSettings), [savedSettings]);
 
   const themeOptions = useMemo(() => Object.keys(THEMES) as ThemeId[], []);
+  const chatProviders = providers.filter((p) => p.supportsChat);
+  const embeddingProviders = providers.filter((p) => p.supportsEmbeddings);
+  // Providers with something to configure (the built-in embedder has nothing).
+  const credentialProviders = providers.filter((p) => p.needsApiKey || p.baseUrlEnv);
 
   const patch = (p: Partial<GlobalSettingsShape>) => {
     setDraft((current) => ({ ...current, ...p }));
@@ -90,7 +83,7 @@ export function GlobalSettings() {
         <div style={grid}>
           <ModelPicker
             title="Chat"
-            providers={PROVIDERS}
+            providers={chatProviders}
             provider={draft.defaultChatModel.provider}
             modelId={draft.defaultChatModel.modelId}
             onChange={(provider, modelId) =>
@@ -99,7 +92,7 @@ export function GlobalSettings() {
           />
           <ModelPicker
             title="Embeddings"
-            providers={EMBEDDING_PROVIDERS}
+            providers={embeddingProviders}
             provider={draft.defaultEmbeddingModel.provider}
             modelId={draft.defaultEmbeddingModel.modelId}
             onChange={(provider, modelId) =>
@@ -112,27 +105,30 @@ export function GlobalSettings() {
       <section style={section}>
         <h2 style={h2}>Model Providers</h2>
         <div style={providerGrid}>
-          {PROVIDERS.map((provider) => {
-            const cfg = draft.providers[provider];
+          {credentialProviders.length === 0 && (
+            <p style={hint}>Loading providers…</p>
+          )}
+          {credentialProviders.map((p) => {
+            const cfg = draft.providers[p.id] ?? EMPTY_PROVIDER_CFG;
             return (
-              <div key={provider} style={panel}>
+              <div key={p.id} style={panel}>
                 <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
-                  <strong style={{ fontSize: 13 }}>{PROVIDER_LABELS[provider]}</strong>
+                  <strong style={{ fontSize: 13 }}>{p.label}</strong>
                   <span style={badge}>
-                    {provider === "openai" && cfg.authMethod === "oauth"
+                    {p.id === "openai" && cfg.authMethod === "oauth"
                       ? "OAuth"
                       : cfg.apiKeyConfigured
                         ? "Key saved"
                         : "No key"}
                   </span>
                 </div>
-                {provider === "openai" && (
+                {p.id === "openai" && (
                   <Field label="Authentication">
                     <select
                       value={cfg.authMethod ?? "api-key"}
                       onChange={(e) =>
                         patchProvider(
-                          provider,
+                          p.id,
                           { authMethod: e.target.value as "api-key" | "oauth" },
                           draft,
                           patch
@@ -145,27 +141,33 @@ export function GlobalSettings() {
                     </select>
                   </Field>
                 )}
-                {provider !== "openai" || cfg.authMethod !== "oauth" ? (
+                {p.id !== "openai" || cfg.authMethod !== "oauth" ? (
                   <>
-                    <Field label="Base URL">
-                      <input
-                        value={cfg.baseUrl}
-                        onChange={(e) =>
-                          patchProvider(provider, { baseUrl: e.target.value }, draft, patch)
-                        }
-                        style={input}
-                      />
-                    </Field>
-                    <Field label={API_KEY_LABELS[provider]}>
-                      <input
-                        type="password"
-                        placeholder={cfg.apiKeyConfigured ? "Leave blank to keep existing key" : "Optional"}
-                        onChange={(e) =>
-                          patchProvider(provider, { apiKey: e.target.value }, draft, patch)
-                        }
-                        style={input}
-                      />
-                    </Field>
+                    {p.baseUrlEnv && (
+                      <Field label="Base URL">
+                        <input
+                          value={cfg.baseUrl}
+                          onChange={(e) =>
+                            patchProvider(p.id, { baseUrl: e.target.value }, draft, patch)
+                          }
+                          style={input}
+                        />
+                      </Field>
+                    )}
+                    {p.apiKeyEnv && (
+                      <Field label={p.apiKeyEnv}>
+                        <input
+                          type="password"
+                          placeholder={
+                            cfg.apiKeyConfigured ? "Leave blank to keep existing key" : "Optional"
+                          }
+                          onChange={(e) =>
+                            patchProvider(p.id, { apiKey: e.target.value }, draft, patch)
+                          }
+                          style={input}
+                        />
+                      </Field>
+                    )}
                   </>
                 ) : (
                   <OpenAiOAuthControls />
@@ -267,7 +269,7 @@ function ModelPicker({
   onChange,
 }: {
   title: string;
-  providers: ProviderId[];
+  providers: ProviderInfo[];
   provider: ProviderId;
   modelId: string;
   onChange: (provider: ProviderId, modelId: string) => void;
@@ -278,12 +280,14 @@ function ModelPicker({
       <div style={{ display: "grid", gridTemplateColumns: "140px 1fr", gap: 8 }}>
         <select
           value={provider}
-          onChange={(e) => onChange(e.target.value as ProviderId, modelId)}
+          onChange={(e) => onChange(e.target.value, modelId)}
           style={input}
         >
+          {/* The saved provider may not be in the list yet (still loading). */}
+          {!providers.some((p) => p.id === provider) && <option value={provider}>{provider}</option>}
           {providers.map((p) => (
-            <option key={p} value={p}>
-              {PROVIDER_LABELS[p]}
+            <option key={p.id} value={p.id}>
+              {p.label}
             </option>
           ))}
         </select>

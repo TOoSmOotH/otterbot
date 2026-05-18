@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { GlobalSettings, ProviderId, ThemeId } from "@otterbot/shared";
+import type { GlobalSettings, ThemeId } from "@otterbot/shared";
 
 export const THEMES: Record<ThemeId, { label: string; vars: Record<string, string> }> = {
   obsidian: {
@@ -34,30 +34,15 @@ export const THEMES: Record<ThemeId, { label: string; vars: Record<string, strin
   },
 };
 
-/** Providers usable as a chat model. */
-export const PROVIDERS: ProviderId[] = ["anthropic", "openai", "lmstudio", "ollama"];
-
 /**
- * Providers usable as an embedding model. `builtin` is the zero-setup
- * in-process CPU embedder; anthropic has no embeddings endpoint.
+ * Pre-load placeholder. The real settings — including the full provider list,
+ * derived from the server's provider catalog — arrive via `load()`.
  */
-export const EMBEDDING_PROVIDERS: ProviderId[] = ["builtin", "openai", "lmstudio", "ollama"];
-
 const DEFAULT_SETTINGS: GlobalSettings = {
   theme: "obsidian",
   defaultChatModel: { provider: "lmstudio", modelId: "local-model" },
   defaultEmbeddingModel: { provider: "lmstudio", modelId: "local-model" },
-  providers: {
-    anthropic: { baseUrl: "https://api.anthropic.com/v1", apiKeyConfigured: false },
-    openai: {
-      baseUrl: "https://api.openai.com/v1",
-      apiKeyConfigured: false,
-      authMethod: "api-key",
-    },
-    lmstudio: { baseUrl: "http://localhost:1234/v1", apiKeyConfigured: false },
-    ollama: { baseUrl: "http://localhost:11434/v1", apiKeyConfigured: false },
-    builtin: { baseUrl: "", apiKeyConfigured: false },
-  },
+  providers: {},
 };
 
 export function applyTheme(theme: ThemeId): void {

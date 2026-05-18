@@ -1,33 +1,25 @@
 import { useEffect, useState } from "react";
-import type { ProviderId } from "@otterbot/shared";
+import type { ProviderId, ProviderInfo } from "@otterbot/shared";
 import { useSetupStore } from "../../stores/setup-store";
 import { useAgentsStore } from "../../stores/agents-store";
 import { useGlobalSettingsStore } from "../../stores/global-settings-store";
+import {
+  useProvidersStore,
+  providerCredField,
+  providerDefaultCred,
+} from "../../stores/providers-store";
 import { BuiltinEmbedderControls } from "../BuiltinEmbedderControls";
 import { AvatarUpload } from "./AvatarUpload";
 
-/** Per-provider credential field metadata. */
-const CRED: Record<ProviderId, { label: string; key: string; placeholder: string; secret: boolean }> = {
-  anthropic: { label: "Anthropic API key", key: "ANTHROPIC_API_KEY", placeholder: "sk-ant-…", secret: true },
-  openai: { label: "OpenAI API key", key: "OPENAI_API_KEY", placeholder: "sk-…", secret: true },
-  lmstudio: { label: "LM Studio base URL", key: "LMSTUDIO_BASE_URL", placeholder: "http://localhost:1234/v1", secret: false },
-  ollama: { label: "Ollama base URL", key: "OLLAMA_BASE_URL", placeholder: "http://localhost:11434/v1", secret: false },
-  builtin: { label: "Built-in (CPU)", key: "", placeholder: "", secret: false },
-};
-
-/** Providers offered for the chat model and the embedding model. */
-const CHAT_PROVIDERS: ProviderId[] = ["anthropic", "openai", "lmstudio", "ollama"];
-const EMBEDDING_PROVIDERS: ProviderId[] = ["builtin", "openai", "lmstudio", "ollama"];
 /** The single model the built-in CPU embedder runs. */
 const BUILTIN_EMBED_MODEL = "all-MiniLM-L6-v2";
 
 type TestState = { status: "idle" | "testing" | "ok" | "fail"; message?: string };
 type AuthMethod = "api-key" | "oauth";
 
-/** Local providers (LM Studio, Ollama) expose a `/models` list we can fetch. */
-const isLocalProvider = (p: ProviderId) => p === "lmstudio" || p === "ollama";
-const defaultCred = (p: ProviderId) =>
-  p === "lmstudio" ? "http://localhost:1234/v1" : p === "ollama" ? "http://localhost:11434/v1" : "";
+/** Whether a provider exposes a fetchable `/models` list (local HTTP servers). */
+const isLocalProvider = (info: ProviderInfo | undefined) =>
+  !!info && !info.needsApiKey && !!info.baseUrlEnv;
 
 /** Account-wide ChatGPT-subscription OAuth, threaded into the chat picker. */
 interface OAuthBundle {
@@ -54,13 +46,23 @@ export function OnboardingWizard() {
   const reloadAgents = useAgentsStore((s) => s.load);
   const loadSettings = useGlobalSettingsStore((s) => s.load);
   const saveSettings = useGlobalSettingsStore((s) => s.save);
+  const providers = useProvidersStore((s) => s.providers);
+  const loadProviders = useProvidersStore((s) => s.load);
+  const chatProviders = providers.filter((p) => p.supportsChat);
+  const embeddingProviders = providers.filter((p) => p.supportsEmbeddings);
+  const providerInfo = (id: ProviderId) => providers.find((p) => p.id === id);
+  /** The credential field a provider needs, or null when it needs none. */
+  const credFieldFor = (id: ProviderId) => {
+    const info = providerInfo(id);
+    return info ? providerCredField(info) : null;
+  };
 
   const [step, setStep] = useState(0);
 
   // Chat model slot.
   const [chatProvider, setChatProvider] = useState<ProviderId>("lmstudio");
   const [chatModelId, setChatModelId] = useState("local-model");
-  const [chatCred, setChatCred] = useState(defaultCred("lmstudio"));
+  const [chatCred, setChatCred] = useState("http://localhost:1234/v1");
   const [chatTest, setChatTest] = useState<TestState>({ status: "idle" });
   const [chatModels, setChatModels] = useState<string[]>([]);
   const [openAiAuth, setOpenAiAuth] = useState<AuthMethod>("api-key");
@@ -96,7 +98,8 @@ export function OnboardingWizard() {
     setOpenAiAuth("api-key");
     setChatTest({ status: "idle" });
     setChatModels([]);
-    setChatCred(defaultCred(p));
+    const info = providerInfo(p);
+    setChatCred(info ? providerDefaultCred(info) : "");
     setChatModelId(p === "anthropic" ? "claude-opus-4-7" : p === "openai" ? "gpt-4o" : "local-model");
   };
 
@@ -106,7 +109,10 @@ export function OnboardingWizard() {
     setEmbTest({ status: "idle" });
     setEmbModels([]);
     // Reuse the chat credential when both slots share a (non-OAuth) provider.
-    setEmbCred(p === chatProvider && !useChatOAuth ? chatCred : defaultCred(p));
+    const info = providerInfo(p);
+    setEmbCred(
+      p === chatProvider && !useChatOAuth ? chatCred : info ? providerDefaultCred(info) : ""
+    );
     setEmbModelId(
       p === "builtin"
         ? BUILTIN_EMBED_MODEL
@@ -126,7 +132,8 @@ export function OnboardingWizard() {
   useEffect(() => {
     void refreshOAuth();
     void loadSettings();
-  }, [loadSettings]);
+    void loadProviders();
+  }, [loadSettings, loadProviders]);
 
   // Once connected, discover the Codex model catalogue for this subscription.
   useEffect(() => {
@@ -250,13 +257,15 @@ export function OnboardingWizard() {
       }
 
       // Collect credentials for both slots; a shared provider key is written
-      // once. The built-in embedder has no credential (empty CRED key).
+      // once. The built-in embedder has no credential field.
       const secrets: Record<string, string> = {};
-      if (!useChatOAuth && chatCred.trim() && CRED[chatProvider].key) {
-        secrets[CRED[chatProvider].key] = chatCred.trim();
+      const chatCredKey = credFieldFor(chatProvider)?.key;
+      const embCredKey = credFieldFor(embeddingRef.provider)?.key;
+      if (!useChatOAuth && chatCred.trim() && chatCredKey) {
+        secrets[chatCredKey] = chatCred.trim();
       }
-      if (!embSkipped && embCred.trim() && CRED[embeddingRef.provider].key) {
-        secrets[CRED[embeddingRef.provider].key] = embCred.trim();
+      if (!embSkipped && embCred.trim() && embCredKey) {
+        secrets[embCredKey] = embCred.trim();
       }
       if (Object.keys(secrets).length > 0) {
         await fetch("/api/agents/coo/credentials", {
@@ -335,7 +344,7 @@ export function OnboardingWizard() {
             <p style={p}>Pick where the COO's intelligence comes from. You can change this anytime.</p>
             <ProviderFields
               kind="chat"
-              providers={CHAT_PROVIDERS}
+              providers={chatProviders}
               provider={chatProvider}
               onProvider={pickChatProvider}
               cred={chatCred}
@@ -375,7 +384,7 @@ export function OnboardingWizard() {
             </p>
             <ProviderFields
               kind="embedding"
-              providers={EMBEDDING_PROVIDERS}
+              providers={embeddingProviders}
               provider={embProvider}
               onProvider={pickEmbProvider}
               cred={embCred}
@@ -470,7 +479,7 @@ function ProviderFields({
   oauth,
 }: {
   kind: "chat" | "embedding";
-  providers: ProviderId[];
+  providers: ProviderInfo[];
   provider: ProviderId;
   onProvider: (p: ProviderId) => void;
   cred: string;
@@ -485,8 +494,9 @@ function ProviderFields({
   modelHint?: string;
   oauth?: OAuthBundle;
 }) {
-  const credMeta = CRED[provider];
-  const isLocal = isLocalProvider(provider);
+  const info = providers.find((p) => p.id === provider);
+  const credMeta = info ? providerCredField(info) : null;
+  const isLocal = isLocalProvider(info);
   const useOAuth = !!oauth && provider === "openai" && oauth.authMethod === "oauth";
 
   /** Fetch the model list a local server is currently serving. */
@@ -498,7 +508,7 @@ function ProviderFields({
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           provider,
-          secrets: cred.trim() ? { [credMeta.key]: cred.trim() } : {},
+          secrets: cred.trim() && credMeta ? { [credMeta.key]: cred.trim() } : {},
         }),
       });
       const data = (await res.json()) as { ok: boolean; models?: string[]; error?: string };
@@ -531,7 +541,7 @@ function ProviderFields({
         body: JSON.stringify({
           provider,
           modelId: modelId.trim(),
-          secrets: cred.trim() ? { [credMeta.key]: cred.trim() } : {},
+          secrets: cred.trim() && credMeta ? { [credMeta.key]: cred.trim() } : {},
         }),
       });
       const data = (await res.json()) as { ok: boolean; error?: string };
@@ -551,15 +561,15 @@ function ProviderFields({
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
           {providers.map((pr) => (
             <button
-              key={pr}
-              onClick={() => onProvider(pr)}
+              key={pr.id}
+              onClick={() => onProvider(pr.id)}
               style={{
                 ...chip,
-                background: provider === pr ? "rgb(var(--accent))" : "transparent",
-                color: provider === pr ? "white" : "rgb(var(--fg))",
+                background: provider === pr.id ? "rgb(var(--accent))" : "transparent",
+                color: provider === pr.id ? "white" : "rgb(var(--fg))",
               }}
             >
-              {pr}
+              {pr.label}
             </button>
           ))}
         </div>
@@ -655,19 +665,21 @@ function ProviderFields({
         </div>
       ) : (
         <>
-          <Field label={credMeta.label}>
-            <input
-              type={credMeta.secret ? "password" : "text"}
-              value={cred}
-              onChange={(e) => {
-                onCred(e.target.value);
-                onTest({ status: "idle" });
-                onModels([]);
-              }}
-              placeholder={credMeta.placeholder}
-              style={input}
-            />
-          </Field>
+          {credMeta && (
+            <Field label={credMeta.label}>
+              <input
+                type={credMeta.secret ? "password" : "text"}
+                value={cred}
+                onChange={(e) => {
+                  onCred(e.target.value);
+                  onTest({ status: "idle" });
+                  onModels([]);
+                }}
+                placeholder={credMeta.placeholder}
+                style={input}
+              />
+            </Field>
+          )}
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <button
               style={ghost}

@@ -6,7 +6,7 @@ import { resolve, extname } from "node:path";
 import { existsSync, createReadStream } from "node:fs";
 import type { Config } from "./config.js";
 import type { Orchestrator, CreateAgentInput } from "./orchestrator/orchestrator.js";
-import { PROVIDERS } from "./providers/types.js";
+import { providerCatalogInfo } from "./providers/catalog.js";
 import { getSkillService } from "./skills/skill-service.js";
 import { getMemoryService } from "./memory/memory-service.js";
 import { getUserProfileService } from "./user-profile/user-profile-service.js";
@@ -44,7 +44,7 @@ export async function buildServer(orch: Orchestrator, cfg: Config): Promise<Fast
   }
 
   // --- Providers (for the model picker) ---
-  app.get("/api/providers", async () => PROVIDERS);
+  app.get("/api/providers", async () => providerCatalogInfo());
 
   app.get("/api/settings/global", async () => redactGlobalSettings(orch.getGlobalSettings()));
 
@@ -436,6 +436,19 @@ export async function buildServer(orch: Orchestrator, cfg: Config): Promise<Fast
     "/api/agents/:id/credentials",
     async (req, reply) => {
       const ok = orch.setCredentials(req.params.id, req.body ?? {});
+      if (!ok) {
+        reply.code(404);
+        return { error: "not found" };
+      }
+      return { ok: true };
+    }
+  );
+
+  // Merge specific secrets without replacing the rest (e.g. channel tokens).
+  app.patch<{ Params: { id: string }; Body: Record<string, string> }>(
+    "/api/agents/:id/credentials",
+    async (req, reply) => {
+      const ok = orch.mergeCredentials(req.params.id, req.body ?? {});
       if (!ok) {
         reply.code(404);
         return { error: "not found" };
