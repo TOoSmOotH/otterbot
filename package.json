@@ -12,6 +12,7 @@
     "dev:server": "pnpm --filter @otterbot/server dev",
     "dev:web": "pnpm --filter @otterbot/web dev",
     "dev:cli": "pnpm --filter @otterbot/cli dev",
+    "dev:daemon": "node scripts/dev-daemon.mjs",
     "cli": "pnpm --filter @otterbot/cli start",
     "test": "pnpm -r test",
     "test:e2e": "pnpm --filter @otterbot/web test:e2e"
