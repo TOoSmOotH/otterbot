@@ -57,10 +57,13 @@ export function openTerminal(
     });
     return { pty: term };
   } catch (err) {
-    return {
-      error: `failed to start the terminal: ${
-        err instanceof Error ? err.message : String(err)
-      }`,
-    };
+    const message = err instanceof Error ? err.message : String(err);
+    // "posix_spawnp failed" means node-pty's native `spawn-helper` could not be
+    // launched — almost always because node-pty was installed without running
+    // its build scripts (pnpm blocks them unless allowlisted).
+    const hint = /posix_spawn/i.test(message)
+      ? " — node-pty's native helper is missing; run `pnpm rebuild node-pty`"
+      : "";
+    return { error: `failed to start the terminal: ${message}${hint}` };
   }
 }
