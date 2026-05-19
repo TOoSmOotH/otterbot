@@ -24,9 +24,9 @@
   },
   "pnpm": {
     "onlyBuiltDependencies": [
+      "@homebridge/node-pty-prebuilt-multiarch",
       "better-sqlite3-multiple-ciphers",
-      "esbuild",
-      "node-pty"
+      "esbuild"
     ]
   },
   "packageManager": "pnpm@10.29.3",

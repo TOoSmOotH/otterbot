@@ -1,5 +1,5 @@
 import { mkdirSync } from "node:fs";
-import * as pty from "node-pty";
+import * as pty from "@homebridge/node-pty-prebuilt-multiarch";
 import { buildSandboxPlan } from "./shell.js";
 
 /**
@@ -58,11 +58,10 @@ export function openTerminal(
     return { pty: term };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    // "posix_spawnp failed" means node-pty's native `spawn-helper` could not be
-    // launched — almost always because node-pty was installed without running
-    // its build scripts (pnpm blocks them unless allowlisted).
+    // "posix_spawnp failed" means the pty library's native helper could not be
+    // launched — its native binary is missing. Reinstalling fetches a prebuilt.
     const hint = /posix_spawn/i.test(message)
-      ? " — node-pty's native helper is missing; run `pnpm rebuild node-pty`"
+      ? " — the pty native binary is missing; reinstall dependencies (`pnpm install`)"
       : "";
     return { error: `failed to start the terminal: ${message}${hint}` };
   }

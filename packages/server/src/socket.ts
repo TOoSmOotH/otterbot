@@ -1,5 +1,5 @@
 import type { Server as HttpServer } from "node:http";
-import type { IPty } from "node-pty";
+import type { IPty } from "@homebridge/node-pty-prebuilt-multiarch";
 import { Server as SocketIOServer } from "socket.io";
 import type { Orchestrator } from "./orchestrator/orchestrator.js";
 import { summarizeConversation } from "./memory/summarizer.js";
