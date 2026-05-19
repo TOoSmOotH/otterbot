@@ -95,10 +95,12 @@ function ensureAgentTables(sqlite: Database.Database) {
       capabilities TEXT NOT NULL DEFAULT '[]',
       parameters TEXT NOT NULL DEFAULT '{}',
       tags TEXT NOT NULL DEFAULT '[]',
+      mcp_servers TEXT NOT NULL DEFAULT '[]',
       body TEXT NOT NULL DEFAULT '',
       source TEXT NOT NULL DEFAULT 'authored',
       scan_status TEXT NOT NULL DEFAULT 'unscanned',
       scan_findings TEXT NOT NULL DEFAULT '[]',
+      enabled INTEGER NOT NULL DEFAULT 0,
       use_count INTEGER NOT NULL DEFAULT 0,
       file_path TEXT,
       created_at TEXT NOT NULL,
@@ -148,6 +150,19 @@ function migrateV2(sqlite: Database.Database) {
   }
   if (!colNames.has("temporal_marker")) {
     sqlite.exec(`ALTER TABLE memories ADD COLUMN temporal_marker TEXT`);
+  }
+
+  // Capabilities: skills carry an `enabled` flag and may bundle MCP servers.
+  const skillCols = new Set(
+    (sqlite.prepare(`PRAGMA table_info(skills)`).all() as Array<{ name: string }>).map(
+      (c) => c.name
+    )
+  );
+  if (!skillCols.has("enabled")) {
+    sqlite.exec(`ALTER TABLE skills ADD COLUMN enabled INTEGER NOT NULL DEFAULT 0`);
+  }
+  if (!skillCols.has("mcp_servers")) {
+    sqlite.exec(`ALTER TABLE skills ADD COLUMN mcp_servers TEXT NOT NULL DEFAULT '[]'`);
   }
 }
 

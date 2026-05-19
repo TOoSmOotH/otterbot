@@ -18,7 +18,7 @@ import { ProviderOptions } from "../ProviderOptions";
 import { AvatarUpload } from "./AvatarUpload";
 import { TerminalModal } from "./TerminalModal";
 
-const TABS = ["Identity", "Persona", "Model", "Capabilities", "Channels", "Skills", "Schedule", "Memory", "Credentials"] as const;
+const TABS = ["Identity", "Persona", "Model", "Capabilities", "Channels", "Schedule", "Memory", "Credentials"] as const;
 type StudioTab = (typeof TABS)[number];
 
 /** Full-screen agent management surface — identity, persona, model, skills,
@@ -118,7 +118,6 @@ export function AgentStudio({ agentId }: { agentId: string | null }) {
         {tab === "Model" && <ModelTab profile={profile} onSaved={onSaved} />}
         {tab === "Capabilities" && <CapabilitiesTab profile={profile} onSaved={onSaved} />}
         {tab === "Channels" && <ChannelsTab profile={profile} onSaved={onSaved} />}
-        {tab === "Skills" && <SkillsTab agentId={profile.id} />}
         {tab === "Schedule" && <ScheduleTab agentId={profile.id} />}
         {tab === "Memory" && <MemoryTab agentId={profile.id} />}
         {tab === "Credentials" && <CredentialsTab agentId={profile.id} />}
@@ -189,7 +188,18 @@ const MCP_STATE_COLOR: Record<string, string> = {
   disabled: "rgb(var(--muted))",
 };
 
-/** What an agent is allowed to do — shell, subagents, web search, MCP. */
+/** A built-in capability catalog entry — mirrors the server's `CatalogCapability`. */
+interface CatalogCapability {
+  id: string;
+  name: string;
+  description: string;
+  tools: string[];
+}
+
+/**
+ * What an agent is allowed to do — installed capabilities, the core toggles
+ * (shell / web / subagents), MCP servers, and the built-in capability catalog.
+ */
 function CapabilitiesTab({ profile, onSaved }: TabProps) {
   const update = useAgentsStore((s) => s.update);
   const [canSpawn, setCanSpawn] = useState(profile.canSpawnSubagents);
@@ -200,6 +210,81 @@ function CapabilitiesTab({ profile, onSaved }: TabProps) {
   const [mcpStatus, setMcpStatus] = useState<McpServerStatus[]>([]);
   const [saved, setSaved] = useState(false);
   const [termOpen, setTermOpen] = useState(false);
+
+  // --- Installed capabilities + catalog ---
+  const [skills, setSkills] = useState<Skill[]>([]);
+  const [catalog, setCatalog] = useState<CatalogCapability[]>([]);
+  const [addingId, setAddingId] = useState<string | null>(null);
+  const [skillError, setSkillError] = useState<string | null>(null);
+  const [raw, setRaw] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const loadSkills = () => {
+    void fetch(`/api/agents/${profile.id}/skills`)
+      .then((r) => (r.ok ? r.json() : []))
+      .then(setSkills);
+  };
+  useEffect(loadSkills, [profile.id]);
+  useEffect(() => {
+    void fetch("/api/skill-catalog")
+      .then((r) => (r.ok ? r.json() : []))
+      .then(setCatalog);
+  }, []);
+
+  const installedIds = new Set(skills.map((s) => s.id));
+
+  const installCapability = async (id: string) => {
+    setAddingId(id);
+    setSkillError(null);
+    const res = await fetch(`/api/agents/${profile.id}/skills/install`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ catalogId: id }),
+    });
+    setAddingId(null);
+    if (res.ok) loadSkills();
+    else setSkillError((await res.json())?.error ?? `Failed to install ${id}`);
+  };
+
+  const toggleSkill = async (id: string, enabled: boolean) => {
+    const res = await fetch(`/api/agents/${profile.id}/skills/${id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ enabled }),
+    });
+    if (res.ok) loadSkills();
+  };
+
+  const saveSkillBody = async (id: string, body: string) => {
+    const res = await fetch(`/api/agents/${profile.id}/skills/${id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ body }),
+    });
+    if (res.ok) loadSkills();
+  };
+
+  const addCustomCapability = async () => {
+    if (!raw.trim()) return;
+    setBusy(true);
+    const res = await fetch(`/api/agents/${profile.id}/skills`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ raw }),
+    });
+    setBusy(false);
+    if (res.ok) {
+      setRaw("");
+      loadSkills();
+    } else {
+      alert((await res.json())?.error ?? "Failed to add capability");
+    }
+  };
+
+  const delSkill = async (id: string) => {
+    await fetch(`/api/agents/${profile.id}/skills/${id}`, { method: "DELETE" });
+    loadSkills();
+  };
 
   const refreshMcp = () =>
     fetch(`/api/agents/${profile.id}/mcp`)
@@ -231,7 +316,31 @@ function CapabilitiesTab({ profile, onSaved }: TabProps) {
 
   return (
     <Form>
-      <p style={hint}>What this agent is allowed to do. Each capability is off until granted.</p>
+      <p style={hint}>
+        Capabilities bundle the tools an agent needs with a prompt that drives them. Enabled
+        capabilities are always active — their tools are granted and their prompt is injected
+        every turn.
+      </p>
+
+      {/* --- Installed capabilities --- */}
+      <strong style={{ fontSize: 13 }}>Installed capabilities ({skills.length})</strong>
+      {skills.length === 0 && <div style={hint}>No capabilities installed yet.</div>}
+      {skillError && <div style={{ ...hint, color: "#f87171" }}>{skillError}</div>}
+      {skills.map((s) => (
+        <InstalledCapability
+          key={s.id}
+          skill={s}
+          onToggle={(en) => void toggleSkill(s.id, en)}
+          onSaveBody={(body) => void saveSkillBody(s.id, body)}
+          onRemove={() => void delSkill(s.id)}
+        />
+      ))}
+
+      {/* --- Core toggles --- */}
+      <strong style={{ fontSize: 13, marginTop: 8 }}>Core tools</strong>
+      <p style={{ ...hint, marginTop: 0 }}>
+        Always-available toggles, independent of installed capabilities.
+      </p>
 
       <div style={channelCard}>
         <label style={checkboxRow}>
@@ -388,6 +497,71 @@ function CapabilitiesTab({ profile, onSaved }: TabProps) {
 
       <SaveBar onSave={save} saved={saved} onDirty={() => setSaved(false)} />
 
+      {/* --- Built-in capability catalog --- */}
+      <strong style={{ fontSize: 13, marginTop: 8 }}>
+        Capability catalog{catalog.length > 0 ? ` (${catalog.length})` : ""}
+      </strong>
+      <p style={{ ...hint, marginTop: 0 }}>
+        First-party capabilities bundled with Otterbot. Installing one copies its definition onto
+        the agent — already tool-equipped, enabled by default.
+      </p>
+      {catalog.length === 0 && <div style={hint}>Loading catalog…</div>}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+        {catalog.map((c) => {
+          const installed = installedIds.has(c.id);
+          return (
+            <div key={c.id} style={{ ...card, display: "flex", flexDirection: "column", gap: 4 }}>
+              <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+                <strong style={{ fontSize: 12 }}>{c.name}</strong>
+                {c.tools.map((t) => (
+                  <span key={t} style={badge}>
+                    {t}
+                  </span>
+                ))}
+              </div>
+              <div style={{ fontSize: 11, color: "rgb(var(--muted))", flex: 1 }}>
+                {c.description}
+              </div>
+              <button
+                onClick={() => void installCapability(c.id)}
+                disabled={installed || addingId === c.id}
+                style={{
+                  ...ghost,
+                  alignSelf: "flex-start",
+                  opacity: installed ? 0.6 : 1,
+                  cursor: installed ? "default" : "pointer",
+                }}
+              >
+                {installed ? "Installed ✓" : addingId === c.id ? "Adding…" : "Add to agent"}
+              </button>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* --- Custom capability --- */}
+      <details style={{ marginTop: 8 }}>
+        <summary style={{ cursor: "pointer", fontSize: 13, fontWeight: 600 }}>
+          Add a custom capability
+        </summary>
+        <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 8 }}>
+          <Field label="Capability markdown (YAML frontmatter + body)">
+            <textarea
+              value={raw}
+              onChange={(e) => setRaw(e.target.value)}
+              rows={8}
+              placeholder={
+                "---\nname: My capability\ndescription: ...\ntools: [shell_exec]\ntags: [custom]\n---\n\n## Setup\n...\n\n## Usage\n..."
+              }
+              style={{ ...input, resize: "vertical", fontFamily: "monospace", fontSize: 12 }}
+            />
+          </Field>
+          <button onClick={addCustomCapability} disabled={busy} style={primary}>
+            {busy ? "Adding…" : "Add capability"}
+          </button>
+        </div>
+      </details>
+
       {termOpen && (
         <TerminalModal
           agentId={profile.id}
@@ -396,6 +570,73 @@ function CapabilitiesTab({ profile, onSaved }: TabProps) {
         />
       )}
     </Form>
+  );
+}
+
+/** One installed capability: enable/disable toggle, editable body, tool + MCP badges. */
+function InstalledCapability({
+  skill,
+  onToggle,
+  onSaveBody,
+  onRemove,
+}: {
+  skill: Skill;
+  onToggle: (enabled: boolean) => void;
+  onSaveBody: (body: string) => void;
+  onRemove: () => void;
+}) {
+  const [body, setBody] = useState(skill.body);
+  const dirty = body !== skill.body;
+  return (
+    <details style={card}>
+      <summary style={{ cursor: "pointer", display: "flex", gap: 8, alignItems: "center" }}>
+        <strong style={{ fontSize: 13 }}>{skill.meta.name}</strong>
+        <span style={badge}>{skill.source}</span>
+        {skill.meta.tools.map((t) => (
+          <span key={t} style={badge}>
+            {t}
+          </span>
+        ))}
+        {(skill.meta.mcpServers ?? []).map((m) => (
+          <span key={m.name} style={badge}>
+            mcp:{m.name}
+          </span>
+        ))}
+        <span style={{ fontSize: 11, color: "rgb(var(--muted))" }}>used {skill.useCount}×</span>
+        <button
+          onClick={onRemove}
+          style={{ ...ghost, marginLeft: "auto", color: "#f87171" }}
+        >
+          Remove
+        </button>
+      </summary>
+      <label style={{ ...checkboxRow, marginTop: 8 }}>
+        <input
+          type="checkbox"
+          checked={skill.enabled}
+          onChange={(e) => onToggle(e.target.checked)}
+        />
+        Enabled {skill.enabled ? "— tools granted, prompt active" : "— inactive"}
+      </label>
+      <div style={{ fontSize: 12, color: "rgb(var(--muted))", marginTop: 6 }}>
+        {skill.meta.description}
+      </div>
+      <Field label="Customization prompt">
+        <textarea
+          value={body}
+          onChange={(e) => setBody(e.target.value)}
+          rows={8}
+          style={{ ...input, resize: "vertical", fontFamily: "monospace", fontSize: 12 }}
+        />
+      </Field>
+      <button
+        onClick={() => onSaveBody(body)}
+        disabled={!dirty}
+        style={{ ...primary, alignSelf: "flex-start", opacity: dirty ? 1 : 0.6 }}
+      >
+        Save changes
+      </button>
+    </details>
   );
 }
 
@@ -1026,228 +1267,6 @@ function OpenAiAuthPanel({
         </>
       )}
     </div>
-  );
-}
-
-// --- Skills ---------------------------------------------------------------
-
-/** A skill catalog entry — mirrors the server's `CatalogSkill`. */
-interface CatalogSkill {
-  id: string;
-  category: string;
-  description: string;
-  pack: "builtin" | "optional";
-  requires?: "macos" | "heavy";
-}
-
-const REQUIRES_LABEL: Record<NonNullable<CatalogSkill["requires"]>, string> = {
-  macos: "macOS only",
-  heavy: "Heavy deps",
-};
-
-/** Lowercase-slug a skill name so installed skills can be matched to the catalog. */
-function slugify(s: string): string {
-  return s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
-}
-
-function SkillsTab({ agentId }: { agentId: string }) {
-  const [skills, setSkills] = useState<Skill[]>([]);
-  const [catalog, setCatalog] = useState<CatalogSkill[]>([]);
-  const [query, setQuery] = useState("");
-  const [category, setCategory] = useState("all");
-  const [packFilter, setPackFilter] = useState<"all" | "builtin" | "optional">("all");
-  const [addingId, setAddingId] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [raw, setRaw] = useState("");
-  const [busy, setBusy] = useState(false);
-
-  const load = () => {
-    void fetch(`/api/agents/${agentId}/skills`)
-      .then((r) => (r.ok ? r.json() : []))
-      .then(setSkills);
-  };
-  useEffect(load, [agentId]);
-  useEffect(() => {
-    void fetch("/api/skill-catalog")
-      .then((r) => (r.ok ? r.json() : []))
-      .then(setCatalog);
-  }, []);
-
-  // Skills already on the agent, matched to catalog ids by slugified name.
-  const installedSlugs = new Set(skills.map((s) => slugify(s.meta.name)));
-
-  const install = async (id: string) => {
-    setAddingId(id);
-    setError(null);
-    const res = await fetch(`/api/agents/${agentId}/skills/install`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ catalogId: id }),
-    });
-    setAddingId(null);
-    if (res.ok) {
-      load();
-    } else {
-      setError((await res.json())?.error ?? `Failed to install ${id}`);
-    }
-  };
-
-  const addSkill = async () => {
-    if (!raw.trim()) return;
-    setBusy(true);
-    const res = await fetch(`/api/agents/${agentId}/skills`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ raw }),
-    });
-    setBusy(false);
-    if (res.ok) {
-      setRaw("");
-      load();
-    } else {
-      alert((await res.json())?.error ?? "Failed to add skill");
-    }
-  };
-
-  const del = async (id: string) => {
-    await fetch(`/api/agents/${agentId}/skills/${id}`, { method: "DELETE" });
-    load();
-  };
-
-  const categories = ["all", ...[...new Set(catalog.map((c) => c.category))].sort()];
-  const q = query.trim().toLowerCase();
-  const filtered = catalog.filter((c) => {
-    if (category !== "all" && c.category !== category) return false;
-    if (packFilter !== "all" && c.pack !== packFilter) return false;
-    if (!q) return true;
-    return c.id.includes(q) || c.description.toLowerCase().includes(q) || c.category.includes(q);
-  });
-
-  return (
-    <Form>
-      <p style={hint}>
-        Skills are reusable procedures the agent recalls on relevant tasks. Install built-in skills
-        from the Hermes catalog below, paste your own, or let the agent author its own.
-      </p>
-
-      {/* --- Installed --- */}
-      <strong style={{ fontSize: 13 }}>Installed ({skills.length})</strong>
-      {skills.length === 0 && <div style={hint}>No skills installed yet.</div>}
-      {skills.map((s) => (
-        <details key={s.id} style={card}>
-          <summary style={{ cursor: "pointer", display: "flex", gap: 8, alignItems: "center" }}>
-            <strong style={{ fontSize: 13 }}>{s.meta.name}</strong>
-            <span style={badge}>{s.source}</span>
-            <span style={{ fontSize: 11, color: "rgb(var(--muted))" }}>used {s.useCount}×</span>
-            <button onClick={() => del(s.id)} style={{ ...ghost, marginLeft: "auto", color: "#f87171" }}>
-              Remove
-            </button>
-          </summary>
-          <div style={{ fontSize: 12, color: "rgb(var(--muted))", marginTop: 6 }}>
-            {s.meta.description}
-          </div>
-          <pre style={pre}>{s.body}</pre>
-        </details>
-      ))}
-
-      {/* --- Hermes catalog --- */}
-      <strong style={{ fontSize: 13, marginTop: 8 }}>
-        Skill catalog{catalog.length > 0 ? ` (${catalog.length})` : ""}
-      </strong>
-      <p style={hint}>
-        Built-in skills from the{" "}
-        <a
-          href="https://hermes-agent.nousresearch.com/docs/skills/"
-          target="_blank"
-          rel="noreferrer"
-          style={{ color: "rgb(var(--accent))" }}
-        >
-          Hermes Agent catalog
-        </a>
-        . Each skill's definition is fetched from GitHub and security-scanned when you add it.
-        Skills tagged <em>macOS only</em> or <em>Heavy deps</em> may not run in this environment.
-      </p>
-      <Row>
-        <input
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search skills…"
-          style={input}
-        />
-        <select value={category} onChange={(e) => setCategory(e.target.value)} style={{ ...input, flex: "0 0 160px" }}>
-          {categories.map((c) => (
-            <option key={c} value={c}>
-              {c === "all" ? "All categories" : c}
-            </option>
-          ))}
-        </select>
-        <select
-          value={packFilter}
-          onChange={(e) => setPackFilter(e.target.value as typeof packFilter)}
-          style={{ ...input, flex: "0 0 120px" }}
-        >
-          <option value="all">Both packs</option>
-          <option value="builtin">Built-in</option>
-          <option value="optional">Optional</option>
-        </select>
-      </Row>
-      {error && <div style={{ ...hint, color: "#f87171" }}>{error}</div>}
-      {catalog.length === 0 && <div style={hint}>Loading catalog…</div>}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-        {filtered.map((c) => {
-          const installed = installedSlugs.has(c.id);
-          return (
-            <div key={c.id} style={{ ...card, display: "flex", flexDirection: "column", gap: 4 }}>
-              <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
-                <strong style={{ fontSize: 12 }}>{c.id}</strong>
-                <span style={badge}>{c.category}</span>
-                {c.pack === "optional" && <span style={badge}>optional</span>}
-                {c.requires && (
-                  <span style={{ ...badge, color: "#fbbf24", borderColor: "#fbbf24" }}>
-                    {REQUIRES_LABEL[c.requires]}
-                  </span>
-                )}
-              </div>
-              <div style={{ fontSize: 11, color: "rgb(var(--muted))", flex: 1 }}>{c.description}</div>
-              <button
-                onClick={() => void install(c.id)}
-                disabled={installed || addingId === c.id}
-                style={{
-                  ...ghost,
-                  alignSelf: "flex-start",
-                  opacity: installed ? 0.6 : 1,
-                  cursor: installed ? "default" : "pointer",
-                }}
-              >
-                {installed ? "Installed ✓" : addingId === c.id ? "Adding…" : "Add to agent"}
-              </button>
-            </div>
-          );
-        })}
-      </div>
-      {catalog.length > 0 && filtered.length === 0 && <div style={hint}>No skills match.</div>}
-
-      {/* --- Custom skill --- */}
-      <details style={{ marginTop: 8 }}>
-        <summary style={{ cursor: "pointer", fontSize: 13, fontWeight: 600 }}>
-          Add a custom skill
-        </summary>
-        <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 8 }}>
-          <Field label="Skill markdown (YAML frontmatter + body)">
-            <textarea
-              value={raw}
-              onChange={(e) => setRaw(e.target.value)}
-              rows={6}
-              placeholder={"---\nname: Summarize a repo\ndescription: ...\ntags: [research]\n---\n\n1. ...\n2. ..."}
-              style={{ ...input, resize: "vertical", fontFamily: "monospace", fontSize: 12 }}
-            />
-          </Field>
-          <button onClick={addSkill} disabled={busy} style={primary}>
-            {busy ? "Adding…" : "Add skill"}
-          </button>
-        </div>
-      </details>
-    </Form>
   );
 }
 

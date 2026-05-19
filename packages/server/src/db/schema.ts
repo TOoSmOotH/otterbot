@@ -5,6 +5,7 @@ import type {
   SkillScanStatus,
   ScanFinding,
   SkillSource,
+  McpServerConfig,
 } from "@otterbot/shared";
 
 export const conversations = sqliteTable("conversations", {
@@ -79,6 +80,10 @@ export const skills = sqliteTable("skills", {
     .notNull()
     .default({}),
   tags: text("tags", { mode: "json" }).$type<string[]>().notNull().default([]),
+  mcpServers: text("mcp_servers", { mode: "json" })
+    .$type<McpServerConfig[]>()
+    .notNull()
+    .default([]),
   body: text("body").notNull().default(""),
   source: text("source").$type<SkillSource>().notNull().default("authored"),
   scanStatus: text("scan_status").$type<SkillScanStatus>().notNull().default("unscanned"),
@@ -86,6 +91,7 @@ export const skills = sqliteTable("skills", {
     .$type<ScanFinding[]>()
     .notNull()
     .default([]),
+  enabled: integer("enabled", { mode: "boolean" }).notNull().default(false),
   useCount: integer("use_count").notNull().default(0),
   filePath: text("file_path"),
   createdAt: text("created_at")

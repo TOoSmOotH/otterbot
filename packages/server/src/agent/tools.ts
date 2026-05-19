@@ -22,6 +22,11 @@ export function buildAgentTools(
   const memory = ctx.memory;
   const isCoo = ctx.profile.role === "coo";
 
+  // Tools granted by enabled capabilities, on top of the profile's core
+  // toggles. A capability grants a tool by listing it in its `meta.tools`.
+  const granted = ctx.skills.effectiveTools();
+  const canUse = (name: string, profileFlag: boolean) => profileFlag || granted.has(name);
+
   const tools: Record<string, Tool> = {
     list_skills: tool({
       description: "List all skills available to the agent. Returns names, descriptions, and tags.",
@@ -141,7 +146,13 @@ export function buildAgentTools(
       },
     }),
 
-    send_email: tool({
+  };
+
+  // Integration tools — granted only by an enabled capability that declares
+  // them (e.g. the `email` / `gh-auth` capabilities). They still need the
+  // matching credentials (SMTP / GITHUB_TOKEN) configured for the agent.
+  if (granted.has("send_email")) {
+    tools.send_email = tool({
       description:
         "Send an email from this agent's own email account. Requires SMTP credentials configured for the agent.",
       parameters: z.object({
@@ -157,9 +168,11 @@ export function buildAgentTools(
           return { ok: false, error: err instanceof Error ? err.message : String(err) };
         }
       },
-    }),
+    });
+  }
 
-    github_create_issue: tool({
+  if (granted.has("github_create_issue")) {
+    tools.github_create_issue = tool({
       description:
         "Create a GitHub issue in owner/repo using this agent's GitHub token. Requires GITHUB_TOKEN configured.",
       parameters: z.object({
@@ -175,9 +188,11 @@ export function buildAgentTools(
           return { ok: false, error: err instanceof Error ? err.message : String(err) };
         }
       },
-    }),
+    });
+  }
 
-    github_list_issues: tool({
+  if (granted.has("github_list_issues")) {
+    tools.github_list_issues = tool({
       description: "List open issues in a GitHub repo (owner/repo).",
       parameters: z.object({
         repo: z.string().regex(/^[^/]+\/[^/]+$/, "must be owner/repo"),
@@ -189,12 +204,12 @@ export function buildAgentTools(
           return { ok: false, error: err instanceof Error ? err.message : String(err) };
         }
       },
-    }),
-  };
+    });
+  }
 
-  // Sandboxed shell — opt-in per agent (profile.canRunShell). Commands run on
-  // the host but are confined by an OS sandbox to the agent's workspace.
-  if (ctx.profile.canRunShell) {
+  // Sandboxed shell — granted by `profile.canRunShell` or a capability.
+  // Commands run on the host but are confined by an OS sandbox to the workspace.
+  if (canUse("shell_exec", ctx.profile.canRunShell)) {
     tools.shell_exec = tool({
       description:
         "Run a shell command in this agent's sandboxed workspace directory. The " +
@@ -221,8 +236,8 @@ export function buildAgentTools(
     });
   }
 
-  // Web search — opt-in per agent (profile.canWebSearch).
-  if (ctx.profile.canWebSearch) {
+  // Web search — granted by `profile.canWebSearch` or a capability.
+  if (canUse("web_search", ctx.profile.canWebSearch)) {
     tools.web_search = tool({
       description:
         "Search the web with DuckDuckGo. Returns a list of results, each with a " +
@@ -284,7 +299,7 @@ export function buildAgentTools(
     },
   });
 
-  if (ctx.profile.canSpawnSubagents) {
+  if (canUse("spawn_subagent", ctx.profile.canSpawnSubagents)) {
     tools.spawn_subagent = tool({
       description:
         "Spawn a temporary subagent to pursue a focused goal in parallel and report back its findings. Use for research fan-out — spawn several, each on a different source.",

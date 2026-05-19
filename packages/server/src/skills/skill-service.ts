@@ -17,7 +17,13 @@ import type {
   ScanReport,
   SkillScanStatus,
   SkillSource,
+  McpServerConfig,
 } from "@otterbot/shared";
+
+/** A skill's `enabled` default: tool-bearing capabilities are on, pure-prompt skills off. */
+function defaultEnabled(meta: SkillMeta): boolean {
+  return meta.tools.length > 0;
+}
 
 /**
  * Per-agent skill service. Skills live as markdown files in the agent's own
@@ -31,7 +37,7 @@ export class SkillService {
     private readonly memory: MemoryService
   ) {}
 
-  parseSkillFile(raw: string): { meta: SkillMeta; body: string } {
+  parseSkillFile(raw: string): { meta: SkillMeta; body: string; enabled: boolean } {
     const { data, content } = matter(raw);
     const meta: SkillMeta = {
       name: data.name ?? "Untitled Skill",
@@ -45,11 +51,16 @@ export class SkillService {
           ? (data.parameters as Record<string, SkillParameterDef>)
           : {},
       tags: Array.isArray(data.tags) ? data.tags : [],
+      mcpServers: Array.isArray(data.mcpServers)
+        ? (data.mcpServers as McpServerConfig[])
+        : undefined,
     };
-    return { meta, body: content.trim() };
+    // When frontmatter omits `enabled`, tool-bearing capabilities default on.
+    const enabled = typeof data.enabled === "boolean" ? data.enabled : defaultEnabled(meta);
+    return { meta, body: content.trim(), enabled };
   }
 
-  serializeSkillFile(meta: SkillMeta, body: string): string {
+  serializeSkillFile(meta: SkillMeta, body: string, enabled?: boolean): string {
     const frontmatter: Record<string, unknown> = {
       name: meta.name,
       description: meta.description,
@@ -58,8 +69,10 @@ export class SkillService {
     };
     if (meta.tools.length) frontmatter.tools = meta.tools;
     if (meta.capabilities.length) frontmatter.capabilities = meta.capabilities;
+    if (meta.mcpServers && meta.mcpServers.length) frontmatter.mcpServers = meta.mcpServers;
     if (Object.keys(meta.parameters).length) frontmatter.parameters = meta.parameters;
     if (meta.tags.length) frontmatter.tags = meta.tags;
+    if (typeof enabled === "boolean") frontmatter.enabled = enabled;
     return matter.stringify(body, frontmatter);
   }
 
@@ -78,7 +91,8 @@ export class SkillService {
 
   create(data: SkillCreate, opts?: { id?: string; scanReport?: ScanReport }): Skill {
     const now = new Date().toISOString();
-    const raw = this.serializeSkillFile(data.meta, data.body);
+    const enabled = data.enabled ?? defaultEnabled(data.meta);
+    const raw = this.serializeSkillFile(data.meta, data.body, enabled);
     const scanReport = opts?.scanReport ?? scanSkillContent(raw);
     const scanStatus = this.deriveScanStatus(scanReport);
 
@@ -92,12 +106,14 @@ export class SkillService {
       author: data.meta.author,
       tools: data.meta.tools,
       capabilities: data.meta.capabilities,
+      mcpServers: data.meta.mcpServers ?? [],
       parameters: data.meta.parameters as Record<string, unknown>,
       tags: data.meta.tags,
       body: data.body,
       source: (data.source ?? "authored") as SkillSource,
       scanStatus,
       scanFindings: scanReport.findings,
+      enabled,
       useCount: 0,
       filePath,
       createdAt: now,
@@ -113,13 +129,14 @@ export class SkillService {
     if (!existing) return null;
 
     const newMeta = { ...existing.meta, ...data.meta };
+    const newEnabled = data.enabled ?? existing.enabled;
     const newBody =
       data.body !== undefined
         ? data.body
         : data.appendNote
           ? `${existing.body}\n\n## Note (${new Date().toISOString().slice(0, 10)})\n${data.appendNote}`
           : existing.body;
-    const raw = this.serializeSkillFile(newMeta, newBody);
+    const raw = this.serializeSkillFile(newMeta, newBody, newEnabled);
     const scanReport = scanSkillContent(raw);
 
     const updates: Record<string, unknown> = {
@@ -129,11 +146,13 @@ export class SkillService {
       author: newMeta.author,
       tools: newMeta.tools,
       capabilities: newMeta.capabilities,
+      mcpServers: newMeta.mcpServers ?? [],
       parameters: newMeta.parameters,
       tags: newMeta.tags,
       body: newBody,
       scanStatus: this.deriveScanStatus(scanReport),
       scanFindings: scanReport.findings,
+      enabled: newEnabled,
       updatedAt: new Date().toISOString(),
     };
     if (existing.meta.name !== newMeta.name) {
@@ -186,7 +205,7 @@ export class SkillService {
       if (!name.endsWith(".md")) continue;
       const filePath = join(dir, name);
       const raw = readFileSync(filePath, "utf8");
-      const { meta, body } = this.parseSkillFile(raw);
+      const { meta, body, enabled } = this.parseSkillFile(raw);
       const id = name.replace(/\.md$/, "");
       const existing = this.db.select().from(schema.skills).where(eq(schema.skills.id, id)).get();
       const scanReport = scanSkillContent(raw);
@@ -199,12 +218,16 @@ export class SkillService {
         author: meta.author,
         tools: meta.tools,
         capabilities: meta.capabilities,
+        mcpServers: meta.mcpServers ?? [],
         parameters: meta.parameters as Record<string, unknown>,
         tags: meta.tags,
         body,
         source: "authored" as SkillSource,
         scanStatus: this.deriveScanStatus(scanReport),
         scanFindings: scanReport.findings,
+        // Markdown is the source of truth — `enabled` is persisted into the
+        // file's frontmatter on create and on every PATCH toggle.
+        enabled,
         useCount: existing?.useCount ?? 0,
         filePath,
         createdAt: existing?.createdAt ?? now,
@@ -250,6 +273,34 @@ export class SkillService {
     return "clean";
   }
 
+  /** Skills currently enabled — their tools are granted and prompt injected. */
+  listEnabled(): Skill[] {
+    return this.list().filter((s) => s.enabled);
+  }
+
+  /** Toggle a skill on or off. Persists to the DB and the markdown file. */
+  setEnabled(id: string, enabled: boolean): Skill | null {
+    return this.update(id, { enabled });
+  }
+
+  /** The union of built-in tools granted by all enabled capabilities. */
+  effectiveTools(): Set<string> {
+    const granted = new Set<string>();
+    for (const s of this.listEnabled()) {
+      for (const t of s.meta.tools) granted.add(t);
+    }
+    return granted;
+  }
+
+  /** MCP servers carried by all enabled capabilities. */
+  effectiveMcpServers(): McpServerConfig[] {
+    const servers: McpServerConfig[] = [];
+    for (const s of this.listEnabled()) {
+      if (s.meta.mcpServers) servers.push(...s.meta.mcpServers);
+    }
+    return servers;
+  }
+
   private toSkill(row: {
     id: string;
     name: string;
@@ -258,12 +309,14 @@ export class SkillService {
     author: string;
     tools: string[];
     capabilities: string[];
+    mcpServers: McpServerConfig[];
     parameters: Record<string, unknown>;
     tags: string[];
     body: string;
     source: SkillSource;
     scanStatus: SkillScanStatus;
     scanFindings: ScanReport["findings"];
+    enabled: boolean;
     useCount: number;
     createdAt: string;
     updatedAt: string;
@@ -277,6 +330,7 @@ export class SkillService {
         author: row.author,
         tools: row.tools,
         capabilities: row.capabilities,
+        mcpServers: row.mcpServers ?? [],
         parameters: row.parameters as Record<string, SkillParameterDef>,
         tags: row.tags,
       },
@@ -284,6 +338,7 @@ export class SkillService {
       source: row.source,
       scanStatus: row.scanStatus,
       scanFindings: row.scanFindings,
+      enabled: row.enabled,
       useCount: row.useCount,
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,

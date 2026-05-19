@@ -246,18 +246,25 @@ describe("HTTP API (e2e)", () => {
     expect(body.models).toContain(stack.cfg.model);
   });
 
-  it("GET /api/skill-catalog lists built-in and optional skills, omits hermes-agent", async () => {
+  it("GET /api/skill-catalog lists the first-party capabilities", async () => {
     const res = await app.inject({ method: "GET", url: "/api/skill-catalog" });
     expect(res.statusCode).toBe(200);
-    const body = res.json() as Array<{ id: string; category: string; pack: string }>;
-    expect(body.length).toBeGreaterThan(120);
-    expect(body.some((s) => s.id === "github-issues" && s.pack === "builtin")).toBe(true);
-    expect(body.some((s) => s.id === "whisper" && s.pack === "optional")).toBe(true);
-    expect(body.some((s) => s.id === "hermes-agent")).toBe(false);
-    expect(body.every((s) => typeof s.category === "string" && s.category.length > 0)).toBe(true);
+    const body = res.json() as Array<{
+      id: string;
+      name: string;
+      tools: string[];
+      markdown: string;
+    }>;
+    expect(body.length).toBeGreaterThan(0);
+    const gh = body.find((c) => c.id === "gh-auth");
+    expect(gh).toBeDefined();
+    expect(gh?.tools).toContain("shell_exec");
+    expect(gh?.markdown).toContain("## Setup");
+    expect(body.some((c) => c.id === "web-research" && c.tools.includes("web_search"))).toBe(true);
+    expect(body.some((c) => c.id === "email" && c.tools.includes("send_email"))).toBe(true);
   });
 
-  it("skill install rejects an unknown catalog id and a missing agent", async () => {
+  it("capability install rejects an unknown catalog id and a missing agent", async () => {
     const badSkill = await app.inject({
       method: "POST",
       url: "/api/agents/coo/skills/install",
@@ -268,9 +275,41 @@ describe("HTTP API (e2e)", () => {
     const badAgent = await app.inject({
       method: "POST",
       url: "/api/agents/nope/skills/install",
-      payload: { catalogId: "github-issues" },
+      payload: { catalogId: "gh-auth" },
     });
     expect(badAgent.statusCode).toBe(404);
+  });
+
+  it("installs a capability, toggles it, and grants its tool", async () => {
+    const install = await app.inject({
+      method: "POST",
+      url: "/api/agents/coo/skills/install",
+      payload: { catalogId: "gh-auth" },
+    });
+    expect(install.statusCode).toBe(200);
+    const installed = install.json() as { id: string; enabled: boolean; meta: { tools: string[] } };
+    expect(installed.id).toBe("gh-auth");
+    expect(installed.enabled).toBe(true);
+    expect(installed.meta.tools).toContain("shell_exec");
+
+    const list = await app.inject({ method: "GET", url: "/api/agents/coo/skills" });
+    expect((list.json() as Array<{ id: string }>).some((s) => s.id === "gh-auth")).toBe(true);
+
+    const off = await app.inject({
+      method: "PATCH",
+      url: "/api/agents/coo/skills/gh-auth",
+      payload: { enabled: false },
+    });
+    expect(off.statusCode).toBe(200);
+    expect((off.json() as { enabled: boolean }).enabled).toBe(false);
+
+    const edit = await app.inject({
+      method: "PATCH",
+      url: "/api/agents/coo/skills/gh-auth",
+      payload: { body: "custom body" },
+    });
+    expect(edit.statusCode).toBe(200);
+    expect((edit.json() as { body: string }).body).toBe("custom body");
   });
 
   it("reports ChatGPT OAuth status (disconnected by default)", async () => {

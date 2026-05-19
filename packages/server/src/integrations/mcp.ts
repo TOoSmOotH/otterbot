@@ -62,6 +62,11 @@ export class McpManager {
     mcpTools: Record<string, Tool>
   ): Promise<void> {
     await this.disconnect(agentId);
+    // Drop tools from a previous connect so a reconnect (e.g. after toggling a
+    // capability) does not leave stale `mcp_*` entries for removed servers.
+    for (const key of Object.keys(mcpTools)) {
+      if (key.startsWith("mcp_")) delete mcpTools[key];
+    }
     const session: Session = { clients: [], statuses: [] };
     this.sessions.set(agentId, session);
 
