@@ -1,6 +1,9 @@
 import type { ChannelBotConfig, ConnectorState } from "@otterbot/shared";
 import type { AgentRuntime } from "../runtime/agent-runtime.js";
 
+/** Placeholder text posted in-channel while the agent works on a reply. */
+export const THINKING_PLACEHOLDER = "💭 _Thinking…_";
+
 /**
  * Base class for a per-agent chat connector (Slack, Discord). It connects an
  * agent to a single chat channel so humans there can talk to it.
@@ -38,8 +41,21 @@ export abstract class ChannelConnector {
   /** Cleanly disconnect from the platform. */
   abstract stop(): Promise<void>;
 
-  /** Post a message into the agent's channel. */
-  protected abstract post(text: string): Promise<void>;
+  /**
+   * Post a message into the agent's channel. When `replace` is the handle
+   * returned by an earlier `postThinking`, the connector edits that message
+   * in place instead of posting a new one.
+   */
+  protected abstract post(text: string, replace?: unknown): Promise<void>;
+
+  /**
+   * Post a "thinking" placeholder so the channel shows the agent is working,
+   * and return an opaque handle `post` can later use to replace it. Connectors
+   * that cannot edit messages leave this as a no-op (returns null).
+   */
+  protected async postThinking(): Promise<unknown> {
+    return null;
+  }
 
   /** Update the gate (publicBot / allowedUserIds) without reconnecting. */
   updateGate(cfg: ChannelBotConfig): void {
@@ -79,6 +95,14 @@ export abstract class ChannelConnector {
     this.queue = this.queue.then(async () => {
       const runtime = this.getRuntime();
       if (!runtime) return;
+      // Post a placeholder right away so the channel shows the agent received
+      // the message and is working, rather than looking offline while it thinks.
+      let placeholder: unknown = null;
+      try {
+        placeholder = await this.postThinking();
+      } catch (err) {
+        console.warn(`[${this.platform}] thinking placeholder failed for ${this.agentId}:`, err);
+      }
       let reply: string;
       try {
         const res = await runtime.respond({
@@ -91,7 +115,7 @@ export abstract class ChannelConnector {
         reply = `Error: ${err instanceof Error ? err.message : String(err)}`;
       }
       try {
-        await this.post(reply);
+        await this.post(reply, placeholder ?? undefined);
       } catch (err) {
         console.warn(`[${this.platform}] post failed for ${this.agentId}:`, err);
       }

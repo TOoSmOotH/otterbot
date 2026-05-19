@@ -7,7 +7,7 @@ import {
 } from "discord.js";
 import type { ChannelBotConfig } from "@otterbot/shared";
 import type { AgentRuntime } from "../runtime/agent-runtime.js";
-import { ChannelConnector } from "./channel-connector.js";
+import { ChannelConnector, THINKING_PLACEHOLDER } from "./channel-connector.js";
 
 /**
  * Connects one agent to a Discord channel with its own bot client. Inbound
@@ -65,9 +65,20 @@ export class DiscordConnector extends ChannelConnector {
     this.channel = null;
   }
 
-  protected async post(text: string): Promise<void> {
+  protected async postThinking(): Promise<unknown> {
+    if (!this.channel) return null;
+    return await this.channel.send(THINKING_PLACEHOLDER);
+  }
+
+  protected async post(text: string, replace?: unknown): Promise<void> {
+    const body = text.slice(0, 2000) || "(no content)";
+    // `replace` is the placeholder Message — edit it in place.
+    if (replace) {
+      await (replace as Message).edit(body);
+      return;
+    }
     if (!this.channel) return;
-    await this.channel.send(text.slice(0, 2000) || "(no content)");
+    await this.channel.send(body);
   }
 
   private onDiscordMessage(m: Message): void {

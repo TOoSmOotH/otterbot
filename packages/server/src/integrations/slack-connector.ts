@@ -2,7 +2,7 @@ import { SocketModeClient } from "@slack/socket-mode";
 import { WebClient } from "@slack/web-api";
 import type { ChannelBotConfig } from "@otterbot/shared";
 import type { AgentRuntime } from "../runtime/agent-runtime.js";
-import { ChannelConnector } from "./channel-connector.js";
+import { ChannelConnector, THINKING_PLACEHOLDER } from "./channel-connector.js";
 
 /** The subset of a Slack message / app_mention event we use. */
 interface SlackMessageEvent {
@@ -68,7 +68,20 @@ export class SlackConnector extends ChannelConnector {
     this.socket = null;
   }
 
-  protected async post(text: string): Promise<void> {
+  protected async postThinking(): Promise<unknown> {
+    const res = await this.web.chat.postMessage({
+      channel: this.cfg.channelId,
+      text: THINKING_PLACEHOLDER,
+    });
+    return res.ts ?? null;
+  }
+
+  protected async post(text: string, replace?: unknown): Promise<void> {
+    // `replace` is the placeholder's message ts — edit it in place.
+    if (typeof replace === "string") {
+      await this.web.chat.update({ channel: this.cfg.channelId, ts: replace, text });
+      return;
+    }
     await this.web.chat.postMessage({ channel: this.cfg.channelId, text });
   }
 
