@@ -79,15 +79,28 @@ function buildEnv(home: string, secrets: Map<string, string>): Record<string, st
   return env;
 }
 
-interface SpawnPlan {
+export interface SpawnPlan {
   file: string;
   args: string[];
   env: Record<string, string> | NodeJS.ProcessEnv;
   cwd?: string;
 }
 
+export interface SandboxOpts {
+  /**
+   * Interactive PTY session. Skips bwrap's `--new-session` so the PTY the
+   * caller allocated stays the controlling terminal (Ctrl+C / job control).
+   */
+  interactive?: boolean;
+}
+
 /** bwrap: bind only the workspace writable; system dirs read-only; rest hidden. */
-function bwrapPlan(workspaceDir: string, secrets: Map<string, string>, command: string): SpawnPlan {
+function bwrapPlan(
+  workspaceDir: string,
+  secrets: Map<string, string>,
+  innerArgv: string[],
+  opts: SandboxOpts
+): SpawnPlan {
   const env = buildEnv("/workspace", secrets);
   const nodeDir = dirname(process.execPath);
   const args = [
@@ -108,11 +121,15 @@ function bwrapPlan(workspaceDir: string, secrets: Map<string, string>, command: 
     "--unshare-all",
     "--share-net",
     "--die-with-parent",
-    "--new-session",
-    "--clearenv",
   ];
+  // `--new-session` (setsid) hardens against TIOCSTI injection, but it detaches
+  // from the controlling tty — fine for a one-shot command, but it breaks Ctrl+C
+  // and job control in an interactive shell. The interactive PTY is dedicated to
+  // one session anyway, so there is no shared terminal to inject into.
+  if (!opts.interactive) args.push("--new-session");
+  args.push("--clearenv");
   for (const [key, value] of Object.entries(env)) args.push("--setenv", key, value);
-  args.push("--", "/bin/sh", "-c", command);
+  args.push("--", ...innerArgv);
   return { file: "bwrap", args, env: process.env };
 }
 
@@ -120,7 +137,7 @@ function bwrapPlan(workspaceDir: string, secrets: Map<string, string>, command: 
 function sandboxExecPlan(
   workspaceDir: string,
   secrets: Map<string, string>,
-  command: string
+  innerArgv: string[]
 ): SpawnPlan {
   const profile = [
     "(version 1)",
@@ -136,10 +153,42 @@ function sandboxExecPlan(
   ].join("\n");
   return {
     file: "/usr/bin/sandbox-exec",
-    args: ["-p", profile, "/bin/sh", "-c", command],
+    args: ["-p", profile, ...innerArgv],
     env: buildEnv(workspaceDir, secrets),
     cwd: workspaceDir,
   };
+}
+
+/** Refusal shown when no OS sandbox is available — code never runs unconfined. */
+export const NO_SANDBOX_ERROR =
+  "Shell access needs a sandbox and none is available. Install bubblewrap " +
+  "(`apt install bubblewrap`) on Linux, or run otterbot on macOS. " +
+  "Refusing to run the command unconfined.";
+
+export interface SandboxPlan {
+  plan: SpawnPlan;
+  /** The sandbox tool selected. */
+  sandbox: string;
+}
+
+/**
+ * Build the spawn plan that runs `innerArgv` confined to the agent's workspace,
+ * picking whichever OS sandbox is available. Returns `{ error }` instead when
+ * none is — callers must refuse rather than run unconfined.
+ */
+export function buildSandboxPlan(
+  workspaceDir: string,
+  secrets: Map<string, string>,
+  innerArgv: string[],
+  opts: SandboxOpts = {}
+): SandboxPlan | { error: string } {
+  if (hasBwrap()) {
+    return { plan: bwrapPlan(workspaceDir, secrets, innerArgv, opts), sandbox: "bwrap" };
+  }
+  if (hasSandboxExec()) {
+    return { plan: sandboxExecPlan(workspaceDir, secrets, innerArgv), sandbox: "sandbox-exec" };
+  }
+  return { error: NO_SANDBOX_ERROR };
 }
 
 /** Run a shell command confined to the agent's workspace directory. */
@@ -154,15 +203,8 @@ export function runAgentShell(
     /* the spawn below will surface any real problem */
   }
 
-  let plan: SpawnPlan;
-  let sandbox: string;
-  if (hasBwrap()) {
-    plan = bwrapPlan(workspaceDir, secrets, command);
-    sandbox = "bwrap";
-  } else if (hasSandboxExec()) {
-    plan = sandboxExecPlan(workspaceDir, secrets, command);
-    sandbox = "sandbox-exec";
-  } else {
+  const built = buildSandboxPlan(workspaceDir, secrets, ["/bin/sh", "-c", command]);
+  if ("error" in built) {
     return Promise.resolve({
       ok: false,
       exitCode: null,
@@ -171,12 +213,10 @@ export function runAgentShell(
       timedOut: false,
       truncated: false,
       sandbox: null,
-      error:
-        "Shell access needs a sandbox and none is available. Install bubblewrap " +
-        "(`apt install bubblewrap`) on Linux, or run otterbot on macOS. " +
-        "Refusing to run the command unconfined.",
+      error: built.error,
     });
   }
+  const { plan, sandbox } = built;
 
   return new Promise<ShellResult>((resolve) => {
     const child = spawn(plan.file, plan.args, { cwd: plan.cwd, env: plan.env });

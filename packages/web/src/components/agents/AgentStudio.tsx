@@ -16,6 +16,7 @@ import { useProvidersStore } from "../../stores/providers-store";
 import { BuiltinEmbedderControls } from "../BuiltinEmbedderControls";
 import { ProviderOptions } from "../ProviderOptions";
 import { AvatarUpload } from "./AvatarUpload";
+import { TerminalModal } from "./TerminalModal";
 
 const TABS = ["Identity", "Persona", "Model", "Capabilities", "Channels", "Skills", "Schedule", "Memory", "Credentials"] as const;
 type StudioTab = (typeof TABS)[number];
@@ -186,6 +187,7 @@ function CapabilitiesTab({ profile, onSaved }: TabProps) {
   const [mcpServers, setMcpServers] = useState<McpServerConfig[]>(profile.mcpServers);
   const [mcpStatus, setMcpStatus] = useState<McpServerStatus[]>([]);
   const [saved, setSaved] = useState(false);
+  const [termOpen, setTermOpen] = useState(false);
 
   const refreshMcp = () =>
     fetch(`/api/agents/${profile.id}/mcp`)
@@ -233,6 +235,21 @@ function CapabilitiesTab({ profile, onSaved }: TabProps) {
           confined to that directory (bubblewrap on Linux, sandbox-exec on macOS). It runs real
           commands; only enable it for agents you trust.
         </p>
+        {profile.canRunShell ? (
+          <button
+            type="button"
+            style={{ ...ghost, alignSelf: "flex-start" }}
+            onClick={() => setTermOpen(true)}
+          >
+            ⌨ Launch terminal
+          </button>
+        ) : (
+          canRunShell && (
+            <p style={{ ...hint, marginTop: 0, fontStyle: "italic" }}>
+              Save to enable the interactive terminal.
+            </p>
+          )
+        )}
       </div>
 
       <div style={channelCard}>
@@ -358,6 +375,14 @@ function CapabilitiesTab({ profile, onSaved }: TabProps) {
       </div>
 
       <SaveBar onSave={save} saved={saved} onDirty={() => setSaved(false)} />
+
+      {termOpen && (
+        <TerminalModal
+          agentId={profile.id}
+          agentName={profile.displayName}
+          onClose={() => setTermOpen(false)}
+        />
+      )}
     </Form>
   );
 }

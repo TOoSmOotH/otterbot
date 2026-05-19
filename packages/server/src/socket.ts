@@ -1,11 +1,21 @@
 import type { Server as HttpServer } from "node:http";
+import type { IPty } from "node-pty";
 import { Server as SocketIOServer } from "socket.io";
 import type { Orchestrator } from "./orchestrator/orchestrator.js";
 import { summarizeConversation } from "./memory/summarizer.js";
 import { extractFactsFromConversation } from "./memory/extractor.js";
 import { maybeAuthorSkill } from "./skills/skill-author.js";
+import { openTerminal } from "./integrations/shell-terminal.js";
 
 const IDLE_CLOSE_MS = 5 * 60 * 1000;
+/** Kill an interactive terminal after this long with no keystrokes. */
+const TERM_IDLE_MS = 15 * 60 * 1000;
+
+/** One live interactive terminal — its PTY and idle-kill timer. */
+interface TerminalSession {
+  pty: IPty;
+  idleTimer: NodeJS.Timeout | null;
+}
 
 interface JoinedConversation {
   agentId: string;
@@ -94,11 +104,98 @@ export function attachSocketServer(http: HttpServer, orch: Orchestrator): Socket
       if (joined) void closeSession(orch, agentId, joined.conversationId);
     });
 
+    // --- Interactive terminals -------------------------------------------
+    // One PTY per agent for this socket — a browser-side terminal into the
+    // agent's sandboxed workspace. The PTY is killed on close, disconnect, or
+    // after an idle period; the workspace files persist regardless.
+    const terminals = new Map<string, TerminalSession>();
+
+    const killTerminal = (agentId: string) => {
+      const term = terminals.get(agentId);
+      if (!term) return;
+      if (term.idleTimer) clearTimeout(term.idleTimer);
+      terminals.delete(agentId);
+      try {
+        term.pty.kill();
+      } catch {
+        /* already exited */
+      }
+    };
+
+    const resetTermIdle = (agentId: string) => {
+      const term = terminals.get(agentId);
+      if (!term) return;
+      if (term.idleTimer) clearTimeout(term.idleTimer);
+      term.idleTimer = setTimeout(() => killTerminal(agentId), TERM_IDLE_MS);
+    };
+
+    socket.on("term:open", (payload: { agentId?: string; cols?: number; rows?: number }) => {
+      const agentId = payload.agentId || "coo";
+      killTerminal(agentId); // replace any existing terminal for this agent
+
+      const ctx = orch.getContext(agentId);
+      if (!ctx) {
+        socket.emit("term:exit", { agentId, error: `Unknown agent: ${agentId}` });
+        return;
+      }
+      if (!ctx.profile.canRunShell) {
+        socket.emit("term:exit", {
+          agentId,
+          error: "Shell access is disabled for this agent.",
+        });
+        return;
+      }
+
+      const opened = openTerminal(ctx.workspaceDir, ctx.secrets, {
+        cols: payload.cols,
+        rows: payload.rows,
+      });
+      if ("error" in opened) {
+        socket.emit("term:exit", { agentId, error: opened.error });
+        return;
+      }
+
+      const pty = opened.pty;
+      terminals.set(agentId, { pty, idleTimer: null });
+      pty.onData((data) => socket.emit("term:output", { agentId, data }));
+      pty.onExit(({ exitCode }) => {
+        // Ignore if this PTY was already superseded or explicitly killed.
+        if (terminals.get(agentId)?.pty !== pty) return;
+        const term = terminals.get(agentId);
+        if (term?.idleTimer) clearTimeout(term.idleTimer);
+        terminals.delete(agentId);
+        socket.emit("term:exit", { agentId, exitCode });
+      });
+      resetTermIdle(agentId);
+    });
+
+    socket.on("term:input", (payload: { agentId?: string; data: string }) => {
+      const term = terminals.get(payload.agentId || "coo");
+      if (!term) return;
+      term.pty.write(payload.data);
+      resetTermIdle(payload.agentId || "coo");
+    });
+
+    socket.on("term:resize", (payload: { agentId?: string; cols: number; rows: number }) => {
+      const term = terminals.get(payload.agentId || "coo");
+      if (!term) return;
+      try {
+        term.pty.resize(payload.cols, payload.rows);
+      } catch {
+        /* resize raced with the PTY closing */
+      }
+    });
+
+    socket.on("term:close", (payload: { agentId?: string }) => {
+      killTerminal(payload.agentId || "coo");
+    });
+
     socket.on("disconnect", () => {
       for (const joined of conversations.values()) {
         if (joined.idleTimer) clearTimeout(joined.idleTimer);
         void closeSession(orch, joined.agentId, joined.conversationId);
       }
+      for (const agentId of [...terminals.keys()]) killTerminal(agentId);
     });
   });
 
