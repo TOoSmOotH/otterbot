@@ -1,10 +1,11 @@
 import { nanoid } from "nanoid";
-import { streamText, type CoreMessage, type LanguageModelV1 } from "ai";
-import { eq, asc } from "drizzle-orm";
+import { streamText, type LanguageModelV1 } from "ai";
+import { eq, sql } from "drizzle-orm";
 import * as schema from "../db/schema.js";
 import { resolveChatModel, isModelAllowed } from "../providers/registry.js";
 import { buildSystemPrompt } from "../agent/prompt.js";
 import { buildAgentTools } from "../agent/tools.js";
+import { buildContext, maybeAutoCompact } from "./context-manager.js";
 import type { AgentContext } from "./agent-context.js";
 import type { AgentServices } from "./agent-services.js";
 import type { AgentStatus, AgentMessage, StreamChunk } from "@otterbot/shared";
@@ -70,24 +71,23 @@ export class AgentRuntime {
   async respond(args: RespondArgs): Promise<RespondResult> {
     this.setStatus("thinking");
     try {
-      const db = this.ctx.db;
       this.ensureConversation(args.conversationId);
+      this.reopenConversation(args.conversationId);
       this.appendMessage(args.conversationId, "user", args.userMessage);
+      this.setTitleIfEmpty(args.conversationId, args.userMessage);
 
-      const history = db
-        .select()
-        .from(schema.messages)
-        .where(eq(schema.messages.conversationId, args.conversationId))
-        .orderBy(asc(schema.messages.createdAt))
-        .all();
+      // Bound the conversation context: compact the oldest turns if it has
+      // crossed the token budget, then send only the recap + recent window.
+      await maybeAutoCompact(this.ctx, args.conversationId);
+      const { recapText, messages: coreMessages } = buildContext(
+        this.ctx,
+        args.conversationId
+      );
 
       const { system, skillsUsed, memoriesUsed } = await buildSystemPrompt(this.ctx, {
         userMessage: args.userMessage,
+        recap: recapText,
       });
-
-      const coreMessages: CoreMessage[] = history
-        .filter((m) => m.role === "user" || m.role === "assistant")
-        .map((m) => ({ role: m.role as "user" | "assistant", content: m.content }));
 
       const tools = buildAgentTools(this.ctx, this.services);
 
@@ -202,9 +202,13 @@ export class AgentRuntime {
     content: string
   ): string {
     const id = nanoid();
-    this.ctx.db
-      .insert(schema.messages)
+    const db = this.ctx.db;
+    db.insert(schema.messages)
       .values({ id, conversationId, role, content, createdAt: new Date().toISOString() })
+      .run();
+    db.update(schema.conversations)
+      .set({ messageCount: sql`${schema.conversations.messageCount} + 1` })
+      .where(eq(schema.conversations.id, conversationId))
       .run();
     return id;
   }
@@ -214,6 +218,32 @@ export class AgentRuntime {
       .update(schema.conversations)
       .set({ updatedAt: new Date().toISOString() })
       .where(eq(schema.conversations.id, id))
+      .run();
+  }
+
+  /** Clear `closedAt` so a resumed conversation isn't flagged closed. */
+  reopenConversation(id: string): void {
+    this.ctx.db
+      .update(schema.conversations)
+      .set({ closedAt: null })
+      .where(eq(schema.conversations.id, id))
+      .run();
+  }
+
+  /** Title a conversation from its first user message — once, when still null. */
+  setTitleIfEmpty(conversationId: string, text: string): void {
+    const row = this.ctx.db
+      .select({ title: schema.conversations.title })
+      .from(schema.conversations)
+      .where(eq(schema.conversations.id, conversationId))
+      .get();
+    if (!row || row.title) return;
+    const title = text.trim().replace(/\s+/g, " ").slice(0, 60);
+    if (!title) return;
+    this.ctx.db
+      .update(schema.conversations)
+      .set({ title })
+      .where(eq(schema.conversations.id, conversationId))
       .run();
   }
 }

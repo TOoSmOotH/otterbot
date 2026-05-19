@@ -16,7 +16,17 @@ import { builtinModelStatus, downloadBuiltinModel } from "./embedders/builtin-em
 import { BUILTIN_CAPABILITIES, getCatalogCapability } from "./skills/builtin-catalog.js";
 import { generateText } from "ai";
 import { resolveChatModel, listProviderModels } from "./providers/registry.js";
-import type { AgentProfile, ProviderId, MemoryCategory, GlobalSettings } from "@otterbot/shared";
+import { eq, asc, desc, like } from "drizzle-orm";
+import * as schema from "./db/schema.js";
+import { contextStatus, compactConversation } from "./runtime/context-manager.js";
+import type {
+  AgentProfile,
+  ProviderId,
+  MemoryCategory,
+  GlobalSettings,
+  ConversationSummary,
+  ChatMessage,
+} from "@otterbot/shared";
 import { redactGlobalSettings } from "./orchestrator/orchestrator.js";
 
 /**
@@ -326,6 +336,121 @@ export async function buildServer(orch: Orchestrator, cfg: Config): Promise<Fast
       category: req.body?.category ?? "fact",
       importance: req.body?.importance ?? 7,
       source: "user",
+    });
+  });
+
+  // --- Conversations: chat history + context management --------------------
+
+  // List an agent's web conversations, most-recently-updated first. Restricted
+  // to `conv-` ids so bus/scheduled/connector conversations don't surface here.
+  app.get<{ Params: { id: string }; Querystring: { limit?: string } }>(
+    "/api/agents/:id/conversations",
+    async (req, reply) => {
+      const ctx = orch.getContext(req.params.id);
+      if (!ctx) {
+        reply.code(404);
+        return { error: "not found" };
+      }
+      const limit = Math.min(Math.max(Number(req.query.limit) || 50, 1), 200);
+      const rows = ctx.db
+        .select()
+        .from(schema.conversations)
+        .where(like(schema.conversations.id, "conv-%"))
+        .orderBy(desc(schema.conversations.updatedAt))
+        .limit(limit)
+        .all();
+      return rows.map(
+        (c): ConversationSummary => ({
+          id: c.id,
+          title: c.title,
+          createdAt: c.createdAt,
+          updatedAt: c.updatedAt,
+          closedAt: c.closedAt,
+          messageCount: c.messageCount,
+        })
+      );
+    }
+  );
+
+  // Fetch one conversation's transcript + its compacted recap, if any.
+  app.get<{ Params: { id: string; conversationId: string } }>(
+    "/api/agents/:id/conversations/:conversationId",
+    async (req, reply) => {
+      const ctx = orch.getContext(req.params.id);
+      if (!ctx) {
+        reply.code(404);
+        return { error: "not found" };
+      }
+      const conv = ctx.db
+        .select()
+        .from(schema.conversations)
+        .where(eq(schema.conversations.id, req.params.conversationId))
+        .get();
+      if (!conv) {
+        reply.code(404);
+        return { error: "not found" };
+      }
+      const messages = ctx.db
+        .select()
+        .from(schema.messages)
+        .where(eq(schema.messages.conversationId, req.params.conversationId))
+        .orderBy(asc(schema.messages.createdAt))
+        .all();
+      const recap = ctx.db
+        .select()
+        .from(schema.conversationRecaps)
+        .where(eq(schema.conversationRecaps.conversationId, req.params.conversationId))
+        .get();
+      return {
+        conversation: conv,
+        messages: messages
+          .filter((m) => m.role !== "system")
+          .map(
+            (m): ChatMessage => ({
+              id: m.id,
+              conversationId: m.conversationId,
+              role: m.role,
+              content: m.content,
+              createdAt: m.createdAt,
+            })
+          ),
+        recap: recap
+          ? {
+              recap: recap.recap,
+              keyPoints: recap.keyPoints,
+              coveredMessageCount: recap.coveredMessageCount,
+              updatedAt: recap.updatedAt,
+            }
+          : null,
+      };
+    }
+  );
+
+  // Token-budget accounting for a conversation's live context window.
+  app.get<{ Params: { id: string; conversationId: string } }>(
+    "/api/agents/:id/conversations/:conversationId/context",
+    async (req, reply) => {
+      const ctx = orch.getContext(req.params.id);
+      if (!ctx) {
+        reply.code(404);
+        return { error: "not found" };
+      }
+      return contextStatus(ctx, req.params.conversationId);
+    }
+  );
+
+  // Compact a conversation now — folds the oldest turns into the recap.
+  app.post<{
+    Params: { id: string; conversationId: string };
+    Body: { force?: boolean };
+  }>("/api/agents/:id/conversations/:conversationId/compact", async (req, reply) => {
+    const ctx = orch.getContext(req.params.id);
+    if (!ctx) {
+      reply.code(404);
+      return { error: "not found" };
+    }
+    return compactConversation(ctx, req.params.conversationId, {
+      force: req.body?.force ?? true,
     });
   });
 

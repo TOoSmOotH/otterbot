@@ -57,7 +57,11 @@ export function attachSocketServer(http: HttpServer, orch: Orchestrator): Socket
           idleTimer: null,
         };
         conversations.set(agentId, joined);
-        socket.emit("chat:joined", { agentId, conversationId: joined.conversationId });
+        socket.emit("chat:joined", {
+          agentId,
+          conversationId: joined.conversationId,
+          resumed: false,
+        });
       }
       return joined;
     };
@@ -66,7 +70,11 @@ export function attachSocketServer(http: HttpServer, orch: Orchestrator): Socket
       const agentId = payload.agentId || "coo";
       const conversationId = payload.conversationId || `conv-${agentId}-${Date.now()}`;
       conversations.set(agentId, { agentId, conversationId, idleTimer: null });
-      socket.emit("chat:joined", { agentId, conversationId });
+      socket.emit("chat:joined", {
+        agentId,
+        conversationId,
+        resumed: Boolean(payload.conversationId),
+      });
     });
 
     socket.on("chat:message", async (payload: { agentId?: string; text: string }) => {

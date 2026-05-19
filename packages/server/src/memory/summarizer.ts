@@ -5,7 +5,7 @@ import * as schema from "../db/schema.js";
 import { resolveChatModel } from "../providers/registry.js";
 import type { AgentContext } from "../runtime/agent-context.js";
 
-const SUMMARIZE_PROMPT = `You are a conversation summarizer. Given the transcript below, produce:
+export const SUMMARIZE_PROMPT = `You are a conversation summarizer. Given the transcript below, produce:
 
 1. A concise paragraph (<= 150 words) capturing what the user and assistant did.
 2. A JSON array of 0-8 short key points — specific facts, decisions, or task results worth recalling later.
@@ -17,6 +17,24 @@ SUMMARY:
 
 KEY_POINTS:
 <JSON array of strings>`;
+
+/**
+ * Run the summarizer model over an arbitrary transcript and parse its output.
+ * Throws on model failure so callers can apply their own fallback. Shared by
+ * `summarizeConversation` (end-of-session) and the context manager (compaction).
+ */
+export async function summarizeText(
+  ctx: AgentContext,
+  transcript: string
+): Promise<{ summary: string; keyPoints: string[] }> {
+  const { text } = await generateText({
+    model: resolveChatModel(ctx.profile.model.chat, ctx.secrets),
+    system: SUMMARIZE_PROMPT,
+    prompt: transcript,
+    maxTokens: 800,
+  });
+  return parseSummary(text);
+}
 
 export interface SummarizeResult {
   id: string;
@@ -62,13 +80,7 @@ export async function summarizeConversation(
     .join("\n\n");
 
   try {
-    const { text } = await generateText({
-      model: resolveChatModel(ctx.profile.model.chat, ctx.secrets),
-      system: SUMMARIZE_PROMPT,
-      prompt: transcript,
-      maxTokens: 800,
-    });
-    const { summary, keyPoints } = parseSummary(text);
+    const { summary, keyPoints } = await summarizeText(ctx, transcript);
     return persist(ctx, conversationId, summary, keyPoints);
   } catch (err) {
     console.warn("[summarize] model call failed; storing raw transcript:", err);

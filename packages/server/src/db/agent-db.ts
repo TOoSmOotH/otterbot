@@ -54,7 +54,9 @@ function ensureAgentTables(sqlite: Database.Database) {
       title TEXT,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
-      closed_at TEXT
+      closed_at TEXT,
+      message_count INTEGER NOT NULL DEFAULT 0,
+      last_compacted_at TEXT
     )`,
     `CREATE TABLE IF NOT EXISTS messages (
       id TEXT PRIMARY KEY,
@@ -65,6 +67,17 @@ function ensureAgentTables(sqlite: Database.Database) {
       created_at TEXT NOT NULL
     )`,
     `CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages(conversation_id, created_at)`,
+    `CREATE TABLE IF NOT EXISTS conversation_recaps (
+      id TEXT PRIMARY KEY,
+      conversation_id TEXT NOT NULL,
+      recap TEXT NOT NULL,
+      key_points TEXT NOT NULL DEFAULT '[]',
+      covered_through_message_id TEXT NOT NULL,
+      covered_message_count INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_recaps_conversation ON conversation_recaps(conversation_id)`,
     `CREATE TABLE IF NOT EXISTS session_summaries (
       id TEXT PRIMARY KEY,
       conversation_id TEXT NOT NULL,
@@ -138,6 +151,7 @@ function ensureAgentTables(sqlite: Database.Database) {
   ];
   for (const s of stmts) sqlite.exec(s);
   migrateV2(sqlite);
+  migrateV3(sqlite);
 }
 
 function migrateV2(sqlite: Database.Database) {
@@ -163,6 +177,24 @@ function migrateV2(sqlite: Database.Database) {
   }
   if (!skillCols.has("mcp_servers")) {
     sqlite.exec(`ALTER TABLE skills ADD COLUMN mcp_servers TEXT NOT NULL DEFAULT '[]'`);
+  }
+}
+
+/**
+ * Context management: conversations carry compaction bookkeeping columns.
+ * The `conversation_recaps` table itself is created by `ensureAgentTables`.
+ */
+function migrateV3(sqlite: Database.Database) {
+  const convCols = new Set(
+    (sqlite.prepare(`PRAGMA table_info(conversations)`).all() as Array<{ name: string }>).map(
+      (c) => c.name
+    )
+  );
+  if (!convCols.has("message_count")) {
+    sqlite.exec(`ALTER TABLE conversations ADD COLUMN message_count INTEGER NOT NULL DEFAULT 0`);
+  }
+  if (!convCols.has("last_compacted_at")) {
+    sqlite.exec(`ALTER TABLE conversations ADD COLUMN last_compacted_at TEXT`);
   }
 }
 

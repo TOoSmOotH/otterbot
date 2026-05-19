@@ -18,6 +18,33 @@ export const conversations = sqliteTable("conversations", {
     .notNull()
     .$defaultFn(() => new Date().toISOString()),
   closedAt: text("closed_at"),
+  messageCount: integer("message_count").notNull().default(0),
+  lastCompactedAt: text("last_compacted_at"),
+});
+
+/**
+ * The running compacted summary of a conversation — one row per conversation,
+ * upserted each time the oldest turns are folded into a recap to keep the live
+ * context within its token budget. Distinct from `session_summaries`, which is
+ * the end-of-session learning artifact.
+ */
+export const conversationRecaps = sqliteTable("conversation_recaps", {
+  id: text("id").primaryKey(),
+  conversationId: text("conversation_id").notNull(),
+  recap: text("recap").notNull(),
+  keyPoints: text("key_points", { mode: "json" })
+    .$type<string[]>()
+    .notNull()
+    .default([]),
+  /** Id of the last message folded into the recap — the compaction watermark. */
+  coveredThroughMessageId: text("covered_through_message_id").notNull(),
+  coveredMessageCount: integer("covered_message_count").notNull().default(0),
+  createdAt: text("created_at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+  updatedAt: text("updated_at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
 });
 
 export const messages = sqliteTable("messages", {

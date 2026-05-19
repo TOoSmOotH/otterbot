@@ -337,4 +337,73 @@ describe("HTTP API (e2e)", () => {
     const body = list.json() as Array<{ content: string; source: string }>;
     expect(body.some((m) => m.content.includes("Mike") && m.source === "user")).toBe(true);
   });
+
+  it(
+    "lists conversations, fetches a transcript, and reports context status",
+    async () => {
+      const coo = stack.orch.getRuntime("coo");
+      expect(coo).toBeDefined();
+      await coo!.respond({
+        conversationId: "conv-coo-history",
+        userMessage: "Remember the number 42 for later.",
+        onChunk: () => {},
+      });
+
+      const list = await app.inject({
+        method: "GET",
+        url: "/api/agents/coo/conversations",
+      });
+      expect(list.statusCode).toBe(200);
+      const convs = list.json() as Array<{
+        id: string;
+        title: string | null;
+        messageCount: number;
+      }>;
+      const conv = convs.find((c) => c.id === "conv-coo-history");
+      expect(conv).toBeDefined();
+      expect(conv?.title).toBeTruthy();
+      expect(conv?.messageCount ?? 0).toBeGreaterThanOrEqual(2);
+
+      const detail = await app.inject({
+        method: "GET",
+        url: "/api/agents/coo/conversations/conv-coo-history",
+      });
+      expect(detail.statusCode).toBe(200);
+      const body = detail.json() as { messages: Array<{ role: string }> };
+      expect(body.messages.length).toBeGreaterThanOrEqual(2);
+      expect(body.messages[0].role).toBe("user");
+
+      const context = await app.inject({
+        method: "GET",
+        url: "/api/agents/coo/conversations/conv-coo-history/context",
+      });
+      expect(context.statusCode).toBe(200);
+      const status = context.json() as { usedTokens: number; overBudget: boolean };
+      expect(status.usedTokens).toBeGreaterThan(0);
+      expect(status.overBudget).toBe(false);
+
+      const compact = await app.inject({
+        method: "POST",
+        url: "/api/agents/coo/conversations/conv-coo-history/compact",
+        payload: { force: true },
+      });
+      expect(compact.statusCode).toBe(200);
+      expect((compact.json() as { budgetTokens: number }).budgetTokens).toBeGreaterThan(0);
+    },
+    60_000
+  );
+
+  it("404s conversation routes for unknown agent and conversation", async () => {
+    const badAgent = await app.inject({
+      method: "GET",
+      url: "/api/agents/does-not-exist/conversations",
+    });
+    expect(badAgent.statusCode).toBe(404);
+
+    const badConv = await app.inject({
+      method: "GET",
+      url: "/api/agents/coo/conversations/no-such-conversation",
+    });
+    expect(badConv.statusCode).toBe(404);
+  });
 });

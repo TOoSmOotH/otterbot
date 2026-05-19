@@ -29,6 +29,8 @@ export interface BuildPromptArgs {
   userMessage: string;
   skillsLimit?: number;
   memoriesLimit?: number;
+  /** Compacted recap of earlier turns when the conversation was compacted. */
+  recap?: string | null;
 }
 
 export interface BuiltPrompt {
@@ -100,6 +102,10 @@ export async function buildSystemPrompt(
       parts.push(`## Relevant skills (applied)\n\n${rendered}`);
       for (const h of skillHits) skillSvc.recordUse(h.refId);
     }
+  }
+
+  if (args.recap && args.recap.trim()) {
+    parts.push(`## Earlier in this conversation\n\n${args.recap.trim()}`);
   }
 
   parts.push(`## Today\n${new Date().toISOString().slice(0, 10)}`);

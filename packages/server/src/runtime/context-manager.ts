@@ -1,0 +1,202 @@
+import { nanoid } from "nanoid";
+import { eq, asc } from "drizzle-orm";
+import type { CoreMessage } from "ai";
+import * as schema from "../db/schema.js";
+import { summarizeText } from "../memory/summarizer.js";
+import type { AgentContext } from "./agent-context.js";
+import type { ContextStatus } from "@otterbot/shared";
+
+/** Rough char-per-token ratio — good enough for budgeting without a tokenizer. */
+export const CHARS_PER_TOKEN = 4;
+/** Token budget for a conversation's live history (recap + verbatim window). */
+export const DEFAULT_BUDGET_TOKENS = 12_000;
+/** Compact once usage reaches this fraction of the budget. */
+export const COMPACT_WATERMARK = 0.8;
+/** Recent turns always kept verbatim, never folded into the recap. */
+export const KEEP_RECENT_MESSAGES = 8;
+/** Per-message framing overhead added to the char estimate. */
+const PER_MESSAGE_OVERHEAD = 4;
+
+type MessageRow = typeof schema.messages.$inferSelect;
+type RecapRow = typeof schema.conversationRecaps.$inferSelect;
+
+export function estimateTokens(text: string): number {
+  return Math.ceil(text.length / CHARS_PER_TOKEN);
+}
+
+export function estimateMessagesTokens(rows: Array<{ content: string }>): number {
+  return rows.reduce((sum, m) => sum + estimateTokens(m.content) + PER_MESSAGE_OVERHEAD, 0);
+}
+
+/** Conversation messages that go to the model — user/assistant turns, in order. */
+function loadChatMessages(ctx: AgentContext, conversationId: string): MessageRow[] {
+  return ctx.db
+    .select()
+    .from(schema.messages)
+    .where(eq(schema.messages.conversationId, conversationId))
+    .orderBy(asc(schema.messages.createdAt))
+    .all()
+    .filter((m) => m.role === "user" || m.role === "assistant");
+}
+
+function loadRecap(ctx: AgentContext, conversationId: string): RecapRow | undefined {
+  return ctx.db
+    .select()
+    .from(schema.conversationRecaps)
+    .where(eq(schema.conversationRecaps.conversationId, conversationId))
+    .get();
+}
+
+/** Messages after the compaction watermark — the turns still kept verbatim. */
+function verbatimWindow(messages: MessageRow[], recap: RecapRow | undefined): MessageRow[] {
+  if (!recap) return messages;
+  const idx = messages.findIndex((m) => m.id === recap.coveredThroughMessageId);
+  return idx >= 0 ? messages.slice(idx + 1) : messages;
+}
+
+/** Render a recap row as a single prompt block: paragraph + key-point bullets. */
+function formatRecap(recap: RecapRow): string {
+  const points = recap.keyPoints.length
+    ? "\n\n" + recap.keyPoints.map((p) => `- ${p}`).join("\n")
+    : "";
+  return recap.recap + points;
+}
+
+/** Token-budget accounting for a conversation's live context window. */
+export function contextStatus(ctx: AgentContext, conversationId: string): ContextStatus {
+  const messages = loadChatMessages(ctx, conversationId);
+  const recap = loadRecap(ctx, conversationId);
+  const verbatim = verbatimWindow(messages, recap);
+  const recapTokens = recap ? estimateTokens(formatRecap(recap)) : 0;
+  const verbatimTokens = estimateMessagesTokens(verbatim);
+  const usedTokens = recapTokens + verbatimTokens;
+  return {
+    budgetTokens: DEFAULT_BUDGET_TOKENS,
+    usedTokens,
+    recapTokens,
+    verbatimTokens,
+    messageCount: messages.length,
+    compactedMessageCount: recap?.coveredMessageCount ?? 0,
+    overBudget: usedTokens > DEFAULT_BUDGET_TOKENS,
+    lastCompactedAt: recap?.updatedAt ?? null,
+  };
+}
+
+/**
+ * Build the bounded context for one turn: the compacted recap (if any) plus
+ * only the verbatim window of recent messages. Replaces loading all history.
+ */
+export function buildContext(
+  ctx: AgentContext,
+  conversationId: string
+): { recapText: string | null; messages: CoreMessage[] } {
+  const messages = loadChatMessages(ctx, conversationId);
+  const recap = loadRecap(ctx, conversationId);
+  const verbatim = verbatimWindow(messages, recap);
+  return {
+    recapText: recap ? formatRecap(recap) : null,
+    messages: verbatim.map((m) => ({
+      role: m.role as "user" | "assistant",
+      content: m.content,
+    })),
+  };
+}
+
+/**
+ * Fold the oldest uncompacted turns into the recap, keeping the most recent
+ * `KEEP_RECENT_MESSAGES` verbatim. The prior recap is fed back in so the
+ * summary stays cumulative. No-op when under the watermark (unless `force`d) or
+ * when too few turns exist to compact. Returns the updated status.
+ */
+export async function compactConversation(
+  ctx: AgentContext,
+  conversationId: string,
+  opts: { force?: boolean } = {}
+): Promise<ContextStatus> {
+  const before = contextStatus(ctx, conversationId);
+  if (!opts.force && before.usedTokens < before.budgetTokens * COMPACT_WATERMARK) {
+    return before;
+  }
+
+  const messages = loadChatMessages(ctx, conversationId);
+  const recap = loadRecap(ctx, conversationId);
+  const verbatim = verbatimWindow(messages, recap);
+  if (verbatim.length <= KEEP_RECENT_MESSAGES) return before;
+
+  const toSummarize = verbatim.slice(0, verbatim.length - KEEP_RECENT_MESSAGES);
+
+  const parts: string[] = [];
+  if (recap) parts.push(`PREVIOUS RECAP:\n${recap.recap}`);
+  for (const m of toSummarize) parts.push(`${m.role.toUpperCase()}: ${m.content}`);
+  const transcript = parts.join("\n\n");
+
+  let summary: string;
+  let keyPoints: string[];
+  try {
+    const res = await summarizeText(ctx, transcript);
+    summary = res.summary;
+    keyPoints = res.keyPoints;
+  } catch (err) {
+    console.warn("[compact] summarize failed; storing truncated transcript:", err);
+    summary = transcript.slice(0, 1500);
+    keyPoints = recap?.keyPoints ?? [];
+  }
+
+  const now = new Date().toISOString();
+  const watermark = toSummarize[toSummarize.length - 1].id;
+  const coveredCount = (recap?.coveredMessageCount ?? 0) + toSummarize.length;
+
+  if (recap) {
+    ctx.db
+      .update(schema.conversationRecaps)
+      .set({
+        recap: summary,
+        keyPoints,
+        coveredThroughMessageId: watermark,
+        coveredMessageCount: coveredCount,
+        updatedAt: now,
+      })
+      .where(eq(schema.conversationRecaps.id, recap.id))
+      .run();
+  } else {
+    ctx.db
+      .insert(schema.conversationRecaps)
+      .values({
+        id: nanoid(),
+        conversationId,
+        recap: summary,
+        keyPoints,
+        coveredThroughMessageId: watermark,
+        coveredMessageCount: coveredCount,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .run();
+  }
+
+  ctx.db
+    .update(schema.conversations)
+    .set({ lastCompactedAt: now })
+    .where(eq(schema.conversations.id, conversationId))
+    .run();
+
+  return contextStatus(ctx, conversationId);
+}
+
+/**
+ * Compact a conversation if it has crossed the watermark. Errors are logged,
+ * never thrown — a chat turn must never fail because compaction failed.
+ */
+export async function maybeAutoCompact(
+  ctx: AgentContext,
+  conversationId: string
+): Promise<void> {
+  try {
+    const status = contextStatus(ctx, conversationId);
+    if (status.usedTokens >= status.budgetTokens * COMPACT_WATERMARK) {
+      await compactConversation(ctx, conversationId);
+    }
+  } catch (err) {
+    console.warn("[context] auto-compact failed:", err);
+  }
+}

@@ -23,6 +23,42 @@ export interface Conversation {
   createdAt: string;
   updatedAt: string;
   closedAt: string | null;
+  messageCount?: number;
+  lastCompactedAt?: string | null;
+}
+
+/** A conversation as listed in the web UI's chat-history browser. */
+export interface ConversationSummary {
+  id: string;
+  title: string | null;
+  createdAt: string;
+  updatedAt: string;
+  closedAt: string | null;
+  messageCount: number;
+}
+
+/**
+ * The running compacted summary of a conversation — the oldest turns folded
+ * into a recap so the live context stays within budget. Distinct from a
+ * `SessionSummary`, which is the end-of-session learning artifact.
+ */
+export interface ConversationRecap {
+  recap: string;
+  keyPoints: string[];
+  coveredMessageCount: number;
+  updatedAt: string;
+}
+
+/** Token-budget accounting for a conversation's live context window. */
+export interface ContextStatus {
+  budgetTokens: number;
+  usedTokens: number;
+  recapTokens: number;
+  verbatimTokens: number;
+  messageCount: number;
+  compactedMessageCount: number;
+  overBudget: boolean;
+  lastCompactedAt: string | null;
 }
 
 export type StreamChunk =
