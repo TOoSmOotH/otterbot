@@ -83,6 +83,36 @@ describe("HTTP API (e2e)", () => {
     expect((after.json() as unknown[]).length).toBe(0);
   });
 
+  it("manages credentials independently (add, list keys, delete one)", async () => {
+    await app.inject({ method: "POST", url: "/api/agents", payload: { displayName: "Cred API" } });
+
+    // Add two credentials in separate merge requests.
+    await app.inject({
+      method: "PATCH",
+      url: "/api/agents/cred-api/credentials",
+      payload: { SLACK_BOT_TOKEN: "xoxb-1" },
+    });
+    await app.inject({
+      method: "PATCH",
+      url: "/api/agents/cred-api/credentials",
+      payload: { GITHUB_TOKEN: "ghp-1" },
+    });
+
+    // GET returns key names only — never values — and adding GITHUB_TOKEN
+    // did not wipe SLACK_BOT_TOKEN.
+    const list = await app.inject({ method: "GET", url: "/api/agents/cred-api/credentials" });
+    expect((list.json() as { keys: string[] }).keys).toEqual(["GITHUB_TOKEN", "SLACK_BOT_TOKEN"]);
+
+    // Deleting one key leaves the rest intact.
+    const del = await app.inject({
+      method: "DELETE",
+      url: "/api/agents/cred-api/credentials/GITHUB_TOKEN",
+    });
+    expect((del.json() as { ok: boolean }).ok).toBe(true);
+    const after = await app.inject({ method: "GET", url: "/api/agents/cred-api/credentials" });
+    expect((after.json() as { keys: string[] }).keys).toEqual(["SLACK_BOT_TOKEN"]);
+  });
+
   it("manages scheduled tasks (add valid, reject invalid, delete)", async () => {
     await app.inject({ method: "POST", url: "/api/agents", payload: { displayName: "Sched Agent" } });
 

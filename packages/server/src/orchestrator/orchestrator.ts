@@ -31,6 +31,7 @@ import {
   type ChannelConnector,
   connectorSignature,
 } from "../integrations/channel-connector.js";
+import { WebClient } from "@slack/web-api";
 import { SlackConnector } from "../integrations/slack-connector.js";
 import { DiscordConnector } from "../integrations/discord-connector.js";
 import { McpManager } from "../integrations/mcp.js";
@@ -652,12 +653,10 @@ export class Orchestrator {
     return true;
   }
 
-  /** Replace an agent's credentials in the encrypted DB and restart it. */
-  setCredentials(id: string, secrets: Record<string, string>): boolean {
-    if (!this.contexts.has(id)) return false;
-    this.secrets.set(id, secrets);
-    this.updateAgent(id, {});
-    return true;
+  /** The names (not values) of an agent's stored credentials, sorted. */
+  listCredentialKeys(id: string): string[] | null {
+    if (!this.contexts.has(id)) return null;
+    return [...this.secrets.get(id).keys()].sort();
   }
 
   /** Merge secrets into an agent's existing credentials, then restart it. */
@@ -670,6 +669,30 @@ export class Orchestrator {
     this.secrets.set(id, merged);
     this.updateAgent(id, {});
     return true;
+  }
+
+  /** Delete a single credential by key, then restart the agent. */
+  deleteCredential(id: string, key: string): boolean {
+    if (!this.contexts.has(id)) return false;
+    this.secrets.deleteOne(id, key);
+    this.updateAgent(id, {});
+    return true;
+  }
+
+  /** Verify an agent's stored Slack bot token against Slack's `auth.test`. */
+  async testSlackToken(
+    id: string
+  ): Promise<{ ok: boolean; team?: string; user?: string; error?: string }> {
+    if (!this.contexts.has(id)) return { ok: false, error: "unknown agent" };
+    const token = this.secrets.get(id).get("SLACK_BOT_TOKEN");
+    if (!token) return { ok: false, error: "no SLACK_BOT_TOKEN set" };
+    try {
+      const res = await new WebClient(token).auth.test();
+      return { ok: true, team: res.team as string, user: res.user as string };
+    } catch (err) {
+      const e = err as { data?: { error?: string }; message?: string };
+      return { ok: false, error: e.data?.error ?? e.message ?? "unknown error" };
+    }
   }
 
   private restartAgents(): void {

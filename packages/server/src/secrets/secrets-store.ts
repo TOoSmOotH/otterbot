@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { controlSchema, type ControlDb } from "../db/control-db.js";
 
 /**
@@ -36,6 +36,19 @@ export class SecretsStore {
       }
     });
     apply();
+  }
+
+  /** Delete a single secret by key, leaving the agent's other secrets intact. */
+  deleteOne(agentId: string, key: string): void {
+    this.control.db
+      .delete(controlSchema.agentSecrets)
+      .where(
+        and(
+          eq(controlSchema.agentSecrets.agentId, agentId),
+          eq(controlSchema.agentSecrets.key, key.trim())
+        )
+      )
+      .run();
   }
 
   /** Delete every secret belonging to an agent. */

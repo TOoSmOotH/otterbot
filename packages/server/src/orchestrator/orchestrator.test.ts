@@ -113,8 +113,14 @@ describe("orchestrator (e2e)", () => {
 
   it("stores agent credentials in the encrypted secrets store", async () => {
     const agent = stack.orch.createAgent({ displayName: "Cred Agent" });
-    stack.orch.setCredentials(agent.id, { ANTHROPIC_API_KEY: "sk-test-xyz" });
+    stack.orch.mergeCredentials(agent.id, { ANTHROPIC_API_KEY: "sk-test-xyz" });
     expect(stack.orch.getSecrets().get(agent.id).get("ANTHROPIC_API_KEY")).toBe("sk-test-xyz");
+    // Merging a second credential leaves the first one intact.
+    stack.orch.mergeCredentials(agent.id, { GITHUB_TOKEN: "ghp-test" });
+    expect(stack.orch.listCredentialKeys(agent.id)).toEqual(["ANTHROPIC_API_KEY", "GITHUB_TOKEN"]);
+    // Deleting one credential leaves the rest intact.
+    stack.orch.deleteCredential(agent.id, "GITHUB_TOKEN");
+    expect(stack.orch.listCredentialKeys(agent.id)).toEqual(["ANTHROPIC_API_KEY"]);
     // Deleting the agent clears its secrets.
     await stack.orch.deleteAgent(agent.id);
     expect(stack.orch.getSecrets().hasAny(agent.id)).toBe(false);

@@ -43,6 +43,14 @@ describe("SecretsStore", () => {
     expect(got.get("NEW_KEY")).toBe("2");
   });
 
+  it("deleteOne() removes a single key, leaving the rest intact", () => {
+    store.set("a", { SLACK_BOT_TOKEN: "xoxb", GITHUB_TOKEN: "gh" });
+    store.deleteOne("a", "GITHUB_TOKEN");
+    const got = store.get("a");
+    expect(got.has("GITHUB_TOKEN")).toBe(false);
+    expect(got.get("SLACK_BOT_TOKEN")).toBe("xoxb");
+  });
+
   it("delete() removes an agent's credentials", () => {
     store.set("a", { KEY: "v" });
     expect(store.hasAny("a")).toBe(true);

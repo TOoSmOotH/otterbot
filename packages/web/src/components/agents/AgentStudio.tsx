@@ -1425,43 +1425,142 @@ function MemoryTab({ agentId }: { agentId: string }) {
 
 // --- Credentials ----------------------------------------------------------
 
-function CredentialsTab({ agentId }: { agentId: string }) {
-  const [creds, setCreds] = useState("");
-  const [status, setStatus] = useState("");
+interface SlackTestResult {
+  ok: boolean;
+  team?: string;
+  user?: string;
+  error?: string;
+}
 
-  const save = async () => {
-    const record: Record<string, string> = {};
-    for (const line of creds.split("\n")) {
-      const eq = line.indexOf("=");
-      if (eq > 0) record[line.slice(0, eq).trim()] = line.slice(eq + 1).trim();
-    }
+function CredentialsTab({ agentId }: { agentId: string }) {
+  const [keys, setKeys] = useState<string[]>([]);
+  const [newKey, setNewKey] = useState("");
+  const [newValue, setNewValue] = useState("");
+  const [status, setStatus] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [slackTest, setSlackTest] = useState<SlackTestResult | null>(null);
+
+  const load = async () => {
+    const res = await fetch(`/api/agents/${agentId}/credentials`);
+    if (res.ok) setKeys(((await res.json()).keys as string[]) ?? []);
+  };
+
+  useEffect(() => {
+    void load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [agentId]);
+
+  const add = async () => {
+    const key = newKey.trim();
+    if (!key || !newValue) return;
+    setBusy(true);
     const res = await fetch(`/api/agents/${agentId}/credentials`, {
-      method: "POST",
+      method: "PATCH",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify(record),
+      body: JSON.stringify({ [key]: newValue }),
     });
-    setStatus(res.ok ? `Saved ${Object.keys(record).length} secret(s) — agent restarted.` : "Failed.");
+    if (res.ok) {
+      setStatus(keys.includes(key) ? `Updated ${key} — agent restarted.` : `Added ${key} — agent restarted.`);
+      setNewKey("");
+      setNewValue("");
+      await load();
+    } else {
+      setStatus("Failed to save.");
+    }
+    setBusy(false);
+  };
+
+  const remove = async (key: string) => {
+    if (!confirm(`Delete credential ${key}? This only removes this one key.`)) return;
+    setBusy(true);
+    const res = await fetch(`/api/agents/${agentId}/credentials/${encodeURIComponent(key)}`, {
+      method: "DELETE",
+    });
+    if (res.ok) {
+      setStatus(`Deleted ${key} — agent restarted.`);
+      if (key === "SLACK_BOT_TOKEN") setSlackTest(null);
+      await load();
+    } else {
+      setStatus("Failed to delete.");
+    }
+    setBusy(false);
+  };
+
+  const testSlack = async () => {
+    setBusy(true);
+    setSlackTest(null);
+    const res = await fetch(`/api/agents/${agentId}/credentials/test-slack`, { method: "POST" });
+    setSlackTest((await res.json()) as SlackTestResult);
+    setBusy(false);
   };
 
   return (
     <Form>
       <p style={hint}>
         Secrets for this agent only — API keys, GitHub token, SMTP, model endpoints. Stored
-        encrypted in the database. KEY=VALUE per line; saving replaces all of this agent's secrets.
+        encrypted in the database. Each credential is independent — adding or deleting one never
+        affects the others.
       </p>
-      <textarea
-        value={creds}
-        onChange={(e) => setCreds(e.target.value)}
-        rows={8}
-        placeholder={"ANTHROPIC_API_KEY=...\nOPENAI_API_KEY=...\nGITHUB_TOKEN=...\nSMTP_HOST=...\nSMTP_USER=...\nSMTP_PASS=...\nLMSTUDIO_BASE_URL=..."}
-        style={{ ...input, resize: "vertical", fontFamily: "monospace", fontSize: 12 }}
-      />
-      <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-        <button onClick={save} style={primary}>
-          Save credentials
-        </button>
-        {status && <span style={{ fontSize: 12, color: "rgb(var(--muted))" }}>{status}</span>}
+
+      {keys.length === 0 && <div style={hint}>No credentials stored yet.</div>}
+      {keys.map((key) => (
+        <div key={key} style={{ ...card, display: "flex", flexDirection: "column", gap: 6 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <code style={{ fontSize: 12, fontWeight: 600 }}>{key}</code>
+            <span style={{ fontSize: 12, color: "rgb(var(--muted))" }}>••••••</span>
+            <div style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
+              {key === "SLACK_BOT_TOKEN" && (
+                <button onClick={testSlack} disabled={busy} style={ghost}>
+                  Test
+                </button>
+              )}
+              <button
+                onClick={() => remove(key)}
+                disabled={busy}
+                style={{ ...ghost, color: "#f87171" }}
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+          {key === "SLACK_BOT_TOKEN" && slackTest && (
+            <div
+              style={{
+                fontSize: 12,
+                color: slackTest.ok ? "#4ade80" : "#f87171",
+              }}
+            >
+              {slackTest.ok
+                ? `✓ valid — team '${slackTest.team}', bot '${slackTest.user}'`
+                : `✗ ${slackTest.error}`}
+            </div>
+          )}
+        </div>
+      ))}
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 4 }}>
+        <span style={{ fontSize: 12, color: "rgb(var(--muted))" }}>Add credential</span>
+        <div style={{ display: "flex", gap: 8 }}>
+          <input
+            value={newKey}
+            onChange={(e) => setNewKey(e.target.value)}
+            placeholder="KEY (e.g. GITHUB_TOKEN)"
+            style={{ ...input, fontFamily: "monospace", fontSize: 12 }}
+          />
+          <input
+            value={newValue}
+            onChange={(e) => setNewValue(e.target.value)}
+            placeholder="value"
+            type="password"
+            style={{ ...input, fontFamily: "monospace", fontSize: 12 }}
+          />
+          <button onClick={add} disabled={busy || !newKey.trim() || !newValue} style={primary}>
+            Add
+          </button>
+        </div>
       </div>
+
+      {status && <span style={{ fontSize: 12, color: "rgb(var(--muted))" }}>{status}</span>}
     </Form>
   );
 }

@@ -231,7 +231,7 @@ export function AgentEditor({ agentId, onClose }: { agentId: string | null; onCl
       if (eq > 0) record[line.slice(0, eq).trim()] = line.slice(eq + 1).trim();
     }
     const res = await fetch(`/api/agents/${agentId}/credentials`, {
-      method: "POST",
+      method: "PATCH",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(record),
     });
@@ -454,7 +454,7 @@ export function AgentEditor({ agentId, onClose }: { agentId: string | null; onCl
         </div>
 
         {isEdit && (
-          <Field label="Credentials (.env — KEY=VALUE per line; replaces all secrets)">
+          <Field label="Credentials (.env — KEY=VALUE per line; merges into existing secrets)">
             <textarea
               value={creds}
               onChange={(e) => setCreds(e.target.value)}

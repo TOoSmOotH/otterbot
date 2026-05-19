@@ -455,19 +455,20 @@ export async function buildServer(orch: Orchestrator, cfg: Config): Promise<Fast
     }
   );
 
-  app.post<{ Params: { id: string }; Body: Record<string, string> }>(
+  // The names of an agent's stored credentials — values are never returned.
+  app.get<{ Params: { id: string } }>(
     "/api/agents/:id/credentials",
     async (req, reply) => {
-      const ok = orch.setCredentials(req.params.id, req.body ?? {});
-      if (!ok) {
+      const keys = orch.listCredentialKeys(req.params.id);
+      if (!keys) {
         reply.code(404);
         return { error: "not found" };
       }
-      return { ok: true };
+      return { keys };
     }
   );
 
-  // Merge specific secrets without replacing the rest (e.g. channel tokens).
+  // Merge specific secrets without replacing the rest — add or update keys.
   app.patch<{ Params: { id: string }; Body: Record<string, string> }>(
     "/api/agents/:id/credentials",
     async (req, reply) => {
@@ -478,6 +479,25 @@ export async function buildServer(orch: Orchestrator, cfg: Config): Promise<Fast
       }
       return { ok: true };
     }
+  );
+
+  // Delete a single credential by key, leaving the agent's other secrets intact.
+  app.delete<{ Params: { id: string; key: string } }>(
+    "/api/agents/:id/credentials/:key",
+    async (req, reply) => {
+      const ok = orch.deleteCredential(req.params.id, req.params.key);
+      if (!ok) {
+        reply.code(404);
+        return { error: "not found" };
+      }
+      return { ok: true };
+    }
+  );
+
+  // Verify an agent's stored Slack bot token against Slack's auth.test.
+  app.post<{ Params: { id: string } }>(
+    "/api/agents/:id/credentials/test-slack",
+    async (req) => orch.testSlackToken(req.params.id)
   );
 
   // --- Agent-to-agent bus + subagent tasks ---

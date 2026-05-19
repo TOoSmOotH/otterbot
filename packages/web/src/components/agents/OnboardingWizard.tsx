@@ -252,7 +252,7 @@ export function OnboardingWizard() {
       }
       if (Object.keys(secrets).length > 0) {
         await fetch("/api/agents/coo/credentials", {
-          method: "POST",
+          method: "PATCH",
           headers: { "content-type": "application/json" },
           body: JSON.stringify(secrets),
         });
