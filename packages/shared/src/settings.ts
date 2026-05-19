@@ -11,14 +11,23 @@ export interface GlobalProviderSettings {
   authMethod?: OpenAiAuthMethod;
 }
 
+/**
+ * A chat model's context window, keyed by provider + model id. Every agent
+ * using that model inherits this window; the conversation-history budget is
+ * derived from it.
+ */
+export interface ModelContextWindow {
+  provider: ProviderId;
+  modelId: string;
+  /** Total context window in tokens. */
+  contextWindow: number;
+}
+
 export interface GlobalSettings {
   theme: ThemeId;
   defaultChatModel: ModelRef;
   defaultEmbeddingModel: ModelRef;
-  /**
-   * Default chat-model context window (tokens) for agents that don't set their
-   * own. The conversation-history budget is derived from this.
-   */
-  defaultContextWindow: number;
+  /** Per-model context windows — shared by every agent using a given model. */
+  modelContextWindows: ModelContextWindow[];
   providers: Record<ProviderId, GlobalProviderSettings>;
 }

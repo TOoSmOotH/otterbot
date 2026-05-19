@@ -12,6 +12,7 @@ import type {
   ChannelConnectorStatus,
   GlobalSettings,
   McpServerStatus,
+  ModelContextWindow,
   ProviderId,
 } from "@otterbot/shared";
 import type { Config } from "../config.js";
@@ -90,7 +91,7 @@ const DEFAULT_GLOBAL_SETTINGS: GlobalSettings = {
   theme: "obsidian",
   defaultChatModel: { provider: "lmstudio", modelId: "local-model" },
   defaultEmbeddingModel: { provider: "lmstudio", modelId: "local-model" },
-  defaultContextWindow: DEFAULT_CONTEXT_WINDOW,
+  modelContextWindows: [],
   providers: Object.fromEntries(
     PROVIDER_CATALOG.map((p) => [
       p.id,
@@ -117,14 +118,27 @@ function normalizeGlobalSettings(input?: Partial<GlobalSettings> | null): Global
       nextProviders[provider].authMethod = "api-key";
     }
   }
+  const modelContextWindows = Array.isArray(input?.modelContextWindows)
+    ? input.modelContextWindows
+        .filter(
+          (m): m is ModelContextWindow =>
+            !!m &&
+            typeof m.provider === "string" &&
+            typeof m.modelId === "string" &&
+            typeof m.contextWindow === "number" &&
+            m.contextWindow > 0
+        )
+        .map((m) => ({
+          provider: m.provider,
+          modelId: m.modelId,
+          contextWindow: Math.round(m.contextWindow),
+        }))
+    : [];
   return {
     theme: input?.theme ?? defaults.theme,
     defaultChatModel: input?.defaultChatModel ?? defaults.defaultChatModel,
     defaultEmbeddingModel: input?.defaultEmbeddingModel ?? defaults.defaultEmbeddingModel,
-    defaultContextWindow:
-      typeof input?.defaultContextWindow === "number" && input.defaultContextWindow > 0
-        ? input.defaultContextWindow
-        : defaults.defaultContextWindow,
+    modelContextWindows,
     providers: nextProviders,
   };
 }
@@ -362,10 +376,15 @@ export class Orchestrator {
   private startAgent(profile: AgentProfile): AgentContext {
     const paths = this.profiles.pathsFor(profile.id);
     const secrets = new Map([...this.getGlobalProviderSecrets(), ...this.secrets.get(profile.id)]);
+    const chat = profile.model.chat;
+    const contextWindow =
+      this.getGlobalSettings().modelContextWindows.find(
+        (m) => m.provider === chat.provider && m.modelId === chat.modelId
+      )?.contextWindow ?? DEFAULT_CONTEXT_WINDOW;
     const ctx = buildAgentContext({
       profile,
       secrets,
-      contextWindow: profile.model.contextWindow ?? this.getGlobalSettings().defaultContextWindow,
+      contextWindow,
       agentDbPath: paths.agentDb,
       skillsDir: paths.skillsDir,
       workspaceDir: paths.workspace,

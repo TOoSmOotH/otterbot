@@ -42,7 +42,7 @@ const DEFAULT_SETTINGS: GlobalSettings = {
   theme: "obsidian",
   defaultChatModel: { provider: "lmstudio", modelId: "local-model" },
   defaultEmbeddingModel: { provider: "lmstudio", modelId: "local-model" },
-  defaultContextWindow: 16_000,
+  modelContextWindows: [],
   providers: {},
 };
 

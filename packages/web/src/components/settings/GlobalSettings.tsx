@@ -113,23 +113,16 @@ export function GlobalSettings() {
             }
           />
         </div>
-        <Field label="Default context window (tokens)">
-          <input
-            type="number"
-            min={1000}
-            step={1000}
-            value={draft.defaultContextWindow}
-            onChange={(e) =>
-              patch({ defaultContextWindow: Math.max(0, Math.round(Number(e.target.value) || 0)) })
-            }
-            style={{ ...input, maxWidth: 220 }}
-          />
-        </Field>
+      </section>
+
+      <section style={section}>
+        <h2 style={h2}>Model Context Windows</h2>
         <p style={hint}>
-          The chat model's context window for agents that don't set their own. About 75% is kept
-          for conversation history; older turns compact into a recap past that. Per-agent overrides
-          live in Agent Studio → Model.
+          Each chat model's total context window, in tokens. Every agent using a model inherits its
+          window — about 75% is kept for conversation history, the rest reserved for the system
+          prompt, tools, and the reply. Unlisted models fall back to a built-in default.
         </p>
+        <ModelContextWindows draft={draft} patch={patch} />
       </section>
 
       <section style={section}>
@@ -394,6 +387,130 @@ function OpenAiOAuthControls() {
   );
 }
 
+/**
+ * Per-model context-window registry editor. Lists every chat model an agent
+ * currently uses (plus any already-configured models) and lets the user set
+ * each model's context window. Editing is keyed by provider + model id, so all
+ * agents sharing a model share its window.
+ */
+function ModelContextWindows({
+  draft,
+  patch,
+}: {
+  draft: GlobalSettingsShape;
+  patch: (p: Partial<GlobalSettingsShape>) => void;
+}) {
+  const providers = useProvidersStore((s) => s.providers);
+  const loadProviders = useProvidersStore((s) => s.load);
+  const [usedModels, setUsedModels] = useState<ModelRef[]>([]);
+  const [newProvider, setNewProvider] = useState<ProviderId>("");
+  const [newModelId, setNewModelId] = useState("");
+
+  useEffect(() => void loadProviders(), [loadProviders]);
+
+  useEffect(() => {
+    void fetch("/api/agents")
+      .then((r) => (r.ok ? (r.json() as Promise<AgentProfileSummary[]>) : []))
+      .then((list) => setUsedModels(list.map((a) => a.chatModel).filter(Boolean)))
+      .catch(() => {});
+  }, []);
+
+  const registry = draft.modelContextWindows;
+
+  // Distinct models: those in use by an agent, plus those already configured.
+  const rows = useMemo(() => {
+    const seen = new Set<string>();
+    const out: { provider: ProviderId; modelId: string }[] = [];
+    for (const m of [...usedModels, ...registry]) {
+      if (!m.modelId) continue;
+      const key = `${m.provider} ${m.modelId}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push({ provider: m.provider, modelId: m.modelId });
+    }
+    return out;
+  }, [usedModels, registry]);
+
+  const windowFor = (provider: ProviderId, modelId: string) =>
+    registry.find((m) => m.provider === provider && m.modelId === modelId)?.contextWindow;
+
+  const setWindow = (provider: ProviderId, modelId: string, value: number) => {
+    const rest = registry.filter((m) => !(m.provider === provider && m.modelId === modelId));
+    patch({
+      modelContextWindows: value > 0 ? [...rest, { provider, modelId, contextWindow: value }] : rest,
+    });
+  };
+
+  const providerLabel = (id: ProviderId) => providers.find((p) => p.id === id)?.label ?? id;
+
+  const addModel = () => {
+    const id = newModelId.trim();
+    if (!newProvider || !id) return;
+    if (!rows.some((r) => r.provider === newProvider && r.modelId === id)) {
+      setWindow(newProvider, id, 16_000);
+    }
+    setNewModelId("");
+  };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      {rows.length === 0 && <p style={hint}>No chat models in use yet.</p>}
+      {rows.map((r) => (
+        <div key={`${r.provider} ${r.modelId}`} style={modelRow}>
+          <span style={{ fontSize: 12, color: "rgb(var(--muted))", flex: "0 0 88px" }}>
+            {providerLabel(r.provider)}
+          </span>
+          <strong
+            style={{ fontSize: 13, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}
+          >
+            {r.modelId}
+          </strong>
+          <input
+            type="number"
+            min={0}
+            step={1000}
+            value={windowFor(r.provider, r.modelId) ?? ""}
+            placeholder="default"
+            onChange={(e) =>
+              setWindow(r.provider, r.modelId, Math.max(0, Math.round(Number(e.target.value) || 0)))
+            }
+            style={{ ...input, flex: "0 0 130px" }}
+          />
+        </div>
+      ))}
+      <div style={{ ...modelRow, marginTop: 2 }}>
+        <select
+          value={newProvider}
+          onChange={(e) => setNewProvider(e.target.value)}
+          style={{ ...input, flex: "0 0 130px" }}
+        >
+          <option value="">Provider…</option>
+          {providers
+            .filter((p) => p.supportsChat)
+            .map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.label}
+              </option>
+            ))}
+        </select>
+        <input
+          value={newModelId}
+          onChange={(e) => setNewModelId(e.target.value)}
+          placeholder="add another model id"
+          style={{ ...input, flex: 1 }}
+        />
+        <button
+          onClick={addModel}
+          disabled={!newProvider || !newModelId.trim()}
+          style={ghostButton}
+        >
+          Add
+        </button>
+      </div>
+    </div>
+  );
+}
+
 /** A sensible default model id when a default-model picker's provider changes. */
 function defaultModelId(p: ProviderId, kind: "chat" | "embedding"): string {
   if (kind === "embedding") {
@@ -579,6 +696,12 @@ const swatch: React.CSSProperties = {
   height: 14,
   borderRadius: 999,
   border: "1px solid rgb(var(--border))",
+};
+
+const modelRow: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: 8,
 };
 
 const badge: React.CSSProperties = {
