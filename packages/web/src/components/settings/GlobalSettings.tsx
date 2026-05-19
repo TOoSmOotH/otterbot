@@ -1,5 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import type {
+  AgentPeerAccess,
+  AgentProfile,
+  AgentProfileSummary,
+  AgentRole,
   GlobalSettings as GlobalSettingsShape,
   ProviderId,
   ProviderInfo,
@@ -8,6 +12,7 @@ import type {
 import { THEMES, useGlobalSettingsStore, applyTheme } from "../../stores/global-settings-store";
 import { useProvidersStore } from "../../stores/providers-store";
 import { BuiltinEmbedderControls } from "../BuiltinEmbedderControls";
+import { PeerAccessEditor } from "../agents/PeerAccessEditor";
 
 type OpenAiAuthStatus = { connected: boolean; accountId: string | null };
 
@@ -189,7 +194,110 @@ export function GlobalSettings() {
         </div>
       </section>
 
+      <section style={section} data-testid="agent-communication">
+        <h2 style={h2}>Agent communication</h2>
+        <p style={hint}>
+          Control which agents may message each other and read each other's memory. The COO can
+          always reach every agent.
+        </p>
+        <AgentCommunicationSection />
+      </section>
+
       {status && <div style={hint}>{status}</div>}
+    </div>
+  );
+}
+
+/** Post-creation editor for every agent's peer-access permissions. */
+function AgentCommunicationSection() {
+  const [agents, setAgents] = useState<{ id: string; displayName: string; role: AgentRole }[]>([]);
+  const [saved, setSaved] = useState<Record<string, AgentPeerAccess[]>>({});
+  const [drafts, setDrafts] = useState<Record<string, AgentPeerAccess[]>>({});
+  const [savingId, setSavingId] = useState<string | null>(null);
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const list: AgentProfileSummary[] = await fetch("/api/agents")
+        .then((r) => (r.ok ? r.json() : []))
+        .catch(() => []);
+      const profiles = await Promise.all(
+        list.map((a) =>
+          fetch(`/api/agents/${a.id}`)
+            .then((r) => (r.ok ? (r.json() as Promise<AgentProfile>) : null))
+            .catch(() => null)
+        )
+      );
+      if (cancelled) return;
+      const real = profiles.filter(
+        (p): p is AgentProfile => p !== null && p.role !== "subagent"
+      );
+      setAgents(real.map((p) => ({ id: p.id, displayName: p.displayName, role: p.role })));
+      const peers: Record<string, AgentPeerAccess[]> = {};
+      for (const p of real) peers[p.id] = p.allowedPeers ?? [];
+      setSaved(peers);
+      setDrafts(peers);
+      setLoaded(true);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const save = async (id: string) => {
+    setSavingId(id);
+    try {
+      const allowedPeers = drafts[id] ?? [];
+      const res = await fetch(`/api/agents/${id}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ allowedPeers }),
+      });
+      if (res.ok) setSaved((s) => ({ ...s, [id]: allowedPeers }));
+    } finally {
+      setSavingId(null);
+    }
+  };
+
+  if (!loaded) return <p style={hint}>Loading agents…</p>;
+  if (agents.length === 0) return <p style={hint}>No agents yet.</p>;
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      {agents.map((a) => {
+        const peerAgents = agents.filter((x) => x.id !== a.id);
+        const draft = drafts[a.id] ?? [];
+        const isCoo = a.role === "coo";
+        const dirty = JSON.stringify(draft) !== JSON.stringify(saved[a.id] ?? []);
+        return (
+          <details key={a.id} style={panel}>
+            <summary
+              style={{ cursor: "pointer", display: "flex", alignItems: "center", gap: 8 }}
+            >
+              <strong style={{ fontSize: 13 }}>{a.displayName}</strong>
+              {isCoo && <span style={badge}>COO</span>}
+            </summary>
+            <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 8 }}>
+              <PeerAccessEditor
+                peers={draft}
+                peerAgents={peerAgents}
+                isCoo={isCoo}
+                onChange={(next) => setDrafts((d) => ({ ...d, [a.id]: next }))}
+              />
+              {!isCoo && peerAgents.length > 0 && (
+                <button
+                  onClick={() => void save(a.id)}
+                  disabled={!dirty || savingId === a.id}
+                  style={{ ...primary, alignSelf: "flex-start", opacity: dirty ? 1 : 0.5 }}
+                >
+                  {savingId === a.id ? "Saving…" : "Save"}
+                </button>
+              )}
+            </div>
+          </details>
+        );
+      })}
     </div>
   );
 }

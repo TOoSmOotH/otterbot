@@ -8,6 +8,7 @@ import {
   providerDefaultCred,
 } from "../../stores/providers-store";
 import { ProviderFields, type TestState } from "./ProviderFields";
+import { PeerAccessEditor } from "./PeerAccessEditor";
 
 interface FormState {
   displayName: string;
@@ -146,24 +147,6 @@ export function AgentEditor({ agentId, onClose }: { agentId: string | null; onCl
     setEmbCred(info ? providerDefaultCred(info) : "");
     setEmbModel(defaultEmbedModel(p));
   };
-
-  const setPeerMessage = (peerId: string, on: boolean) =>
-    setForm((f) => ({
-      ...f,
-      allowedPeers: on
-        ? f.allowedPeers.some((p) => p.agentId === peerId)
-          ? f.allowedPeers
-          : [...f.allowedPeers, { agentId: peerId, shareMemory: false }]
-        : f.allowedPeers.filter((p) => p.agentId !== peerId),
-    }));
-
-  const setPeerMemory = (peerId: string, on: boolean) =>
-    setForm((f) => ({
-      ...f,
-      allowedPeers: f.allowedPeers.map((p) =>
-        p.agentId === peerId ? { ...p, shareMemory: on } : p
-      ),
-    }));
 
   const peerAgents = agents.filter((a) => a.id !== agentId);
 
@@ -410,47 +393,12 @@ export function AgentEditor({ agentId, onClose }: { agentId: string | null; onCl
           }}
         >
           <span style={{ fontSize: 12, color: "rgb(var(--muted))" }}>Peer access</span>
-          {agentId === "coo" ? (
-            <p style={hintStyle}>The COO can message and read the memory of every agent.</p>
-          ) : peerAgents.length === 0 ? (
-            <p style={hintStyle}>No other agents to grant access to yet.</p>
-          ) : (
-            <>
-              <p style={hintStyle}>
-                Choose which agents this agent may message. Reading a peer's memory
-                (read-only) requires message permission.
-              </p>
-              {peerAgents.map((a) => {
-                const peer = form.allowedPeers.find((p) => p.agentId === a.id);
-                const canMessage = peer !== undefined;
-                return (
-                  <div
-                    key={a.id}
-                    style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 13 }}
-                  >
-                    <span style={{ flex: 1 }}>{a.displayName}</span>
-                    <label style={checkboxRow}>
-                      <input
-                        type="checkbox"
-                        checked={canMessage}
-                        onChange={(e) => setPeerMessage(a.id, e.target.checked)}
-                      />
-                      Can message
-                    </label>
-                    <label style={{ ...checkboxRow, opacity: canMessage ? 1 : 0.5 }}>
-                      <input
-                        type="checkbox"
-                        checked={peer?.shareMemory ?? false}
-                        disabled={!canMessage}
-                        onChange={(e) => setPeerMemory(a.id, e.target.checked)}
-                      />
-                      Can read memory
-                    </label>
-                  </div>
-                );
-              })}
-            </>
-          )}
+          <PeerAccessEditor
+            peers={form.allowedPeers}
+            peerAgents={peerAgents}
+            isCoo={agentId === "coo"}
+            onChange={(next) => patch({ allowedPeers: next })}
+          />
         </div>
 
         {isEdit && (
