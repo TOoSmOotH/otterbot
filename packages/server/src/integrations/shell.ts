@@ -1,6 +1,7 @@
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync } from "node:fs";
-import { dirname } from "node:path";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 
 /**
  * The "local" shell backend for an agent's `shell_exec` tool.
@@ -53,6 +54,34 @@ function hasSandboxExec(): boolean {
   return process.platform === "darwin" && existsSync("/usr/bin/sandbox-exec");
 }
 
+/**
+ * Minimal passwd/group files for the sandbox, generated once per process. The
+ * host's real `/etc/passwd` is never exposed; tools still resolve the running
+ * uid via getpwuid() against this stub. Returns null if it can't be written
+ * (the passwd/group bind is then simply skipped).
+ */
+let idFiles: { passwd: string; group: string } | null | undefined;
+function sandboxIdFiles(): { passwd: string; group: string } | null {
+  if (idFiles === undefined) {
+    try {
+      const uid = process.getuid?.() ?? 1000;
+      const gid = process.getgid?.() ?? 1000;
+      const passwd = join(tmpdir(), "otterbot-sandbox-passwd");
+      const group = join(tmpdir(), "otterbot-sandbox-group");
+      writeFileSync(
+        passwd,
+        `root:x:0:0:root:/root:/bin/sh\notter:x:${uid}:${gid}:otter:/workspace:/bin/sh\n`,
+        { mode: 0o644 }
+      );
+      writeFileSync(group, `root:x:0:\notter:x:${gid}:\n`, { mode: 0o644 });
+      idFiles = { passwd, group };
+    } catch {
+      idFiles = null;
+    }
+  }
+  return idFiles;
+}
+
 /** Environment for the confined command — explicit, never the server's env. */
 function buildEnv(home: string, secrets: Map<string, string>): Record<string, string> {
   const env: Record<string, string> = {
@@ -103,6 +132,7 @@ function bwrapPlan(
 ): SpawnPlan {
   const env = buildEnv("/workspace", secrets);
   const nodeDir = dirname(process.execPath);
+  const ids = sandboxIdFiles();
   const args = [
     "--ro-bind", "/usr", "/usr",
     "--ro-bind-try", "/bin", "/bin",
@@ -110,9 +140,29 @@ function bwrapPlan(
     "--ro-bind-try", "/lib", "/lib",
     "--ro-bind-try", "/lib32", "/lib32",
     "--ro-bind-try", "/lib64", "/lib64",
-    "--ro-bind-try", "/etc", "/etc",
     "--ro-bind-try", "/opt", "/opt",
     "--ro-bind-try", nodeDir, nodeDir,
+    // Only the slices of /etc tooling needs — DNS, TLS roots, the dynamic
+    // linker cache, timezone — never the host's full config directory.
+    "--ro-bind-try", "/etc/resolv.conf", "/etc/resolv.conf",
+    "--ro-bind-try", "/etc/hosts", "/etc/hosts",
+    "--ro-bind-try", "/etc/nsswitch.conf", "/etc/nsswitch.conf",
+    "--ro-bind-try", "/etc/ssl", "/etc/ssl",
+    "--ro-bind-try", "/etc/ca-certificates", "/etc/ca-certificates",
+    "--ro-bind-try", "/etc/pki", "/etc/pki",
+    "--ro-bind-try", "/etc/ld.so.cache", "/etc/ld.so.cache",
+    "--ro-bind-try", "/etc/ld.so.conf", "/etc/ld.so.conf",
+    "--ro-bind-try", "/etc/ld.so.conf.d", "/etc/ld.so.conf.d",
+    "--ro-bind-try", "/etc/alternatives", "/etc/alternatives",
+    "--ro-bind-try", "/etc/terminfo", "/etc/terminfo",
+    "--ro-bind-try", "/etc/localtime", "/etc/localtime",
+    // Stub passwd/group so getpwuid() works without exposing host accounts.
+    ...(ids
+      ? [
+          "--ro-bind-try", ids.passwd, "/etc/passwd",
+          "--ro-bind-try", ids.group, "/etc/group",
+        ]
+      : []),
     "--proc", "/proc",
     "--dev", "/dev",
     "--tmpfs", "/tmp",
