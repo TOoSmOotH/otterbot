@@ -1,18 +1,18 @@
 import { useEffect, useState } from "react";
-import type { AgentPeerAccess, AgentProfile, AgentRole, ProviderId } from "@otterbot/shared";
+import type { AgentPeerAccess, AgentProfile, AgentRole, ModelRef, ProviderId } from "@otterbot/shared";
 import { useAgentsStore } from "../../stores/agents-store";
 import { useGlobalSettingsStore } from "../../stores/global-settings-store";
-import { useProvidersStore } from "../../stores/providers-store";
-import { ProviderOptions } from "../ProviderOptions";
+import {
+  useProvidersStore,
+  providerCredField,
+  providerDefaultCred,
+} from "../../stores/providers-store";
+import { ProviderFields, type TestState } from "./ProviderFields";
 
 interface FormState {
   displayName: string;
   role: AgentRole;
   persona: string;
-  chatProvider: ProviderId;
-  chatModel: string;
-  embeddingProvider: ProviderId;
-  embeddingModel: string;
   transport: "local" | "discord";
   email: string;
   canSpawnSubagents: boolean;
@@ -23,15 +23,21 @@ const BLANK: FormState = {
   displayName: "",
   role: "agent",
   persona: "",
-  chatProvider: "lmstudio",
-  chatModel: "local-model",
-  embeddingProvider: "lmstudio",
-  embeddingModel: "local-model",
   transport: "local",
   email: "",
   canSpawnSubagents: true,
   allowedPeers: [],
 };
+
+/** Default chat model for a freshly-picked provider. */
+const defaultChatModel = (p: ProviderId) =>
+  p === "anthropic" ? "claude-opus-4-7" : p === "openai" ? "gpt-4o" : "local-model";
+const defaultEmbedModel = (p: ProviderId) =>
+  p === "builtin"
+    ? "all-MiniLM-L6-v2"
+    : p === "openai"
+      ? "text-embedding-3-small"
+      : "local-embedding-model";
 
 /** Modal form for creating a new agent or editing an existing profile. */
 export function AgentEditor({ agentId, onClose }: { agentId: string | null; onClose: () => void }) {
@@ -45,6 +51,10 @@ export function AgentEditor({ agentId, onClose }: { agentId: string | null; onCl
   const loadProviders = useProvidersStore((s) => s.load);
   const chatProviders = providers.filter((p) => p.supportsChat);
   const embeddingProviders = providers.filter((p) => p.supportsEmbeddings);
+  const credKey = (id: ProviderId) => {
+    const info = providers.find((p) => p.id === id);
+    return info ? providerCredField(info)?.key : undefined;
+  };
 
   const [form, setForm] = useState<FormState>(BLANK);
   const [saving, setSaving] = useState(false);
@@ -52,15 +62,47 @@ export function AgentEditor({ agentId, onClose }: { agentId: string | null; onCl
   const [credsStatus, setCredsStatus] = useState("");
   const isEdit = agentId !== null;
 
+  // Chat model slot.
+  const [chatProvider, setChatProvider] = useState<ProviderId>("lmstudio");
+  const [chatModel, setChatModel] = useState("local-model");
+  const [chatCred, setChatCred] = useState("");
+  const [chatTest, setChatTest] = useState<TestState>({ status: "idle" });
+  const [chatModels, setChatModels] = useState<string[]>([]);
+
+  // Embedding model slot — new agents inherit the COO's embedding by default.
+  const [embInherit, setEmbInherit] = useState(true);
+  const [embProvider, setEmbProvider] = useState<ProviderId>("builtin");
+  const [embModel, setEmbModel] = useState("all-MiniLM-L6-v2");
+  const [embCred, setEmbCred] = useState("");
+  const [embTest, setEmbTest] = useState<TestState>({ status: "idle" });
+  const [embModels, setEmbModels] = useState<string[]>([]);
+  const [cooEmbedding, setCooEmbedding] = useState<ModelRef | null>(null);
+
+  /** A COO can't inherit from itself. */
+  const canInherit = form.role !== "coo" && agentId !== "coo";
+  const inheritEmbedding = embInherit && canInherit;
+
+  useEffect(() => void loadGlobalSettings(), [loadGlobalSettings]);
+  useEffect(() => void loadProviders(), [loadProviders]);
+
+  // The COO's embedding model — offered as an "inherit" option for new agents.
+  useEffect(() => {
+    void fetch("/api/agents/coo")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((p: AgentProfile | null) => {
+        if (p) setCooEmbedding(p.model.embedding);
+      })
+      .catch(() => {});
+  }, []);
+
   useEffect(() => {
     if (!agentId) {
-      setForm({
-        ...BLANK,
-        chatProvider: globalSettings.defaultChatModel.provider,
-        chatModel: globalSettings.defaultChatModel.modelId,
-        embeddingProvider: globalSettings.defaultEmbeddingModel.provider,
-        embeddingModel: globalSettings.defaultEmbeddingModel.modelId,
-      });
+      setForm(BLANK);
+      setChatProvider(globalSettings.defaultChatModel.provider);
+      setChatModel(globalSettings.defaultChatModel.modelId);
+      setEmbInherit(true);
+      setEmbProvider(globalSettings.defaultEmbeddingModel.provider);
+      setEmbModel(globalSettings.defaultEmbeddingModel.modelId);
       return;
     }
     void fetch(`/api/agents/${agentId}`)
@@ -71,22 +113,39 @@ export function AgentEditor({ agentId, onClose }: { agentId: string | null; onCl
           displayName: p.displayName,
           role: p.role,
           persona: p.persona,
-          chatProvider: p.model.chat.provider,
-          chatModel: p.model.chat.modelId,
-          embeddingProvider: p.model.embedding.provider,
-          embeddingModel: p.model.embedding.modelId,
           transport: p.transport,
           email: p.email ?? "",
           canSpawnSubagents: p.canSpawnSubagents,
           allowedPeers: p.allowedPeers ?? [],
         });
+        setChatProvider(p.model.chat.provider);
+        setChatModel(p.model.chat.modelId);
+        // An existing agent shows its own configured embedding model.
+        setEmbInherit(false);
+        setEmbProvider(p.model.embedding.provider);
+        setEmbModel(p.model.embedding.modelId);
       });
   }, [agentId, globalSettings]);
 
-  useEffect(() => void loadGlobalSettings(), [loadGlobalSettings]);
-  useEffect(() => void loadProviders(), [loadProviders]);
-
   const patch = (p: Partial<FormState>) => setForm((f) => ({ ...f, ...p }));
+
+  const pickChatProvider = (p: ProviderId) => {
+    setChatProvider(p);
+    setChatTest({ status: "idle" });
+    setChatModels([]);
+    const info = providers.find((x) => x.id === p);
+    setChatCred(info ? providerDefaultCred(info) : "");
+    setChatModel(defaultChatModel(p));
+  };
+
+  const pickEmbProvider = (p: ProviderId) => {
+    setEmbProvider(p);
+    setEmbTest({ status: "idle" });
+    setEmbModels([]);
+    const info = providers.find((x) => x.id === p);
+    setEmbCred(info ? providerDefaultCred(info) : "");
+    setEmbModel(defaultEmbedModel(p));
+  };
 
   const setPeerMessage = (peerId: string, on: boolean) =>
     setForm((f) => ({
@@ -111,29 +170,56 @@ export function AgentEditor({ agentId, onClose }: { agentId: string | null; onCl
   const onSave = async () => {
     if (!form.displayName.trim()) return;
     setSaving(true);
-    const payload: Partial<AgentProfile> & { displayName: string } = {
-      displayName: form.displayName.trim(),
-      role: form.role,
-      persona: form.persona,
-      model: {
-        chat: { provider: form.chatProvider, modelId: form.chatModel.trim() },
-        embedding: { provider: form.embeddingProvider, modelId: form.embeddingModel.trim() },
-      },
-      allowedModels: [
-        { provider: form.chatProvider, modelId: "*" },
-        { provider: form.embeddingProvider, modelId: "*" },
-      ],
-      transport: form.transport,
-      email: form.email.trim() || null,
-      canSpawnSubagents: form.canSpawnSubagents,
-      allowedPeers: form.allowedPeers,
-    };
-    if (isEdit && agentId) {
-      await update(agentId, payload);
-    } else {
-      await create(payload);
+    try {
+      const chatRef: ModelRef = { provider: chatProvider, modelId: chatModel.trim() };
+      const embeddingRef: ModelRef =
+        inheritEmbedding && cooEmbedding
+          ? cooEmbedding
+          : { provider: embProvider, modelId: embModel.trim() };
+      const payload: Partial<AgentProfile> & { displayName: string } = {
+        displayName: form.displayName.trim(),
+        role: form.role,
+        persona: form.persona,
+        model: { chat: chatRef, embedding: embeddingRef },
+        allowedModels: Array.from(new Set([chatRef.provider, embeddingRef.provider])).map((p) => ({
+          provider: p,
+          modelId: "*",
+        })),
+        transport: form.transport,
+        email: form.email.trim() || null,
+        canSpawnSubagents: form.canSpawnSubagents,
+        allowedPeers: form.allowedPeers,
+      };
+
+      let id = agentId;
+      if (isEdit && agentId) {
+        await update(agentId, payload);
+      } else {
+        const created = await create(payload);
+        id = created?.id ?? null;
+      }
+
+      // Provider keys typed into the model pickers are merged into the
+      // agent's credentials (without disturbing its other secrets).
+      if (id) {
+        const secrets: Record<string, string> = {};
+        const chatKey = credKey(chatProvider);
+        if (chatCred.trim() && chatKey) secrets[chatKey] = chatCred.trim();
+        if (!inheritEmbedding) {
+          const embKey = credKey(embProvider);
+          if (embCred.trim() && embKey) secrets[embKey] = embCred.trim();
+        }
+        if (Object.keys(secrets).length > 0) {
+          await fetch(`/api/agents/${id}/credentials`, {
+            method: "PATCH",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify(secrets),
+          });
+        }
+      }
+    } finally {
+      setSaving(false);
     }
-    setSaving(false);
     onClose();
   };
 
@@ -221,43 +307,63 @@ export function AgentEditor({ agentId, onClose }: { agentId: string | null; onCl
           />
         </Field>
 
-        <Row>
-          <Field label="Chat provider">
-            <select
-              value={form.chatProvider}
-              onChange={(e) => patch({ chatProvider: e.target.value })}
-              style={inputStyle}
-            >
-              <ProviderOptions list={chatProviders} current={form.chatProvider} />
-            </select>
-          </Field>
-          <Field label="Chat model">
-            <input
-              value={form.chatModel}
-              onChange={(e) => patch({ chatModel: e.target.value })}
-              style={inputStyle}
-            />
-          </Field>
-        </Row>
+        <div style={sectionBox}>
+          <strong style={{ fontSize: 12 }}>Chat model</strong>
+          <ProviderFields
+            kind="chat"
+            providers={chatProviders}
+            provider={chatProvider}
+            onProvider={pickChatProvider}
+            cred={chatCred}
+            onCred={setChatCred}
+            modelId={chatModel}
+            onModelId={setChatModel}
+            test={chatTest}
+            onTest={setChatTest}
+            models={chatModels}
+            onModels={setChatModels}
+            modelLabel="Chat model"
+          />
+        </div>
 
-        <Row>
-          <Field label="Embedding provider">
-            <select
-              value={form.embeddingProvider}
-              onChange={(e) => patch({ embeddingProvider: e.target.value })}
-              style={inputStyle}
-            >
-              <ProviderOptions list={embeddingProviders} current={form.embeddingProvider} />
-            </select>
-          </Field>
-          <Field label="Embedding model">
-            <input
-              value={form.embeddingModel}
-              onChange={(e) => patch({ embeddingModel: e.target.value })}
-              style={inputStyle}
+        <div style={sectionBox}>
+          <strong style={{ fontSize: 12 }}>Embedding model</strong>
+          {canInherit && (
+            <label style={checkboxRow}>
+              <input
+                type="checkbox"
+                checked={embInherit}
+                onChange={(e) => setEmbInherit(e.target.checked)}
+              />
+              Inherit the COO's embedding model
+            </label>
+          )}
+          {inheritEmbedding ? (
+            <p style={hintStyle}>
+              {cooEmbedding
+                ? `Uses the COO's embedding model — ${cooEmbedding.provider} / ${
+                    cooEmbedding.modelId || "(disabled)"
+                  }. Copied at creation; you can change it later in the Agent Studio.`
+                : "Uses the COO's embedding model."}
+            </p>
+          ) : (
+            <ProviderFields
+              kind="embedding"
+              providers={embeddingProviders}
+              provider={embProvider}
+              onProvider={pickEmbProvider}
+              cred={embCred}
+              onCred={setEmbCred}
+              modelId={embModel}
+              onModelId={setEmbModel}
+              test={embTest}
+              onTest={setEmbTest}
+              models={embModels}
+              onModels={setEmbModels}
+              modelLabel="Embedding model"
             />
-          </Field>
-        </Row>
+          )}
+        </div>
 
         <Field label="Agent-to-agent transport">
           <select
@@ -396,10 +502,6 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
-function Row({ children }: { children: React.ReactNode }) {
-  return <div style={{ display: "flex", gap: 10 }}>{children}</div>;
-}
-
 const checkboxRow: React.CSSProperties = {
   display: "flex",
   alignItems: "center",
@@ -411,6 +513,15 @@ const hintStyle: React.CSSProperties = {
   margin: "4px 0 0",
   fontSize: 12,
   color: "rgb(var(--muted))",
+};
+
+const sectionBox: React.CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  gap: 8,
+  border: "1px solid rgb(var(--border))",
+  borderRadius: 8,
+  padding: 10,
 };
 
 const inputStyle: React.CSSProperties = {
