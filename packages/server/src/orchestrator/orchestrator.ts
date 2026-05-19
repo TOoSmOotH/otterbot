@@ -374,14 +374,22 @@ export class Orchestrator {
     this.runtimes.set(profile.id, runtime);
     this.registerInControl(profile, paths.dir);
     this.pendingInits.push(ctx.embedding.init());
+    // Load on-disk skills first so capability-carried MCP servers are known
+    // before we connect.
+    ctx.skills.loadFromDisk();
     // Connect the agent's MCP servers in the background; their tools merge in
-    // once available. A failing server never blocks the agent.
+    // once available. A failing server never blocks the agent. The set is the
+    // union of the profile's servers and those carried by enabled capabilities.
     this.pendingInits.push(
       this.mcp
-        .connect(profile.id, profile.mcpServers, secrets, ctx.mcpTools)
+        .connect(
+          profile.id,
+          [...profile.mcpServers, ...ctx.skills.effectiveMcpServers()],
+          secrets,
+          ctx.mcpTools
+        )
         .catch((err) => console.warn(`[mcp] connect failed for ${profile.id}:`, err))
     );
-    ctx.skills.loadFromDisk();
     return ctx;
   }
 
@@ -602,6 +610,25 @@ export class Orchestrator {
   /** Live MCP server status for an agent. */
   getMcpStatus(id: string): McpServerStatus[] | null {
     return this.contexts.has(id) ? this.mcp.status(id) : null;
+  }
+
+  /**
+   * Reconnect an agent's MCP servers without the full `updateAgent()`
+   * teardown/restart. Used when a capability is toggled or (un)installed so the
+   * union of profile + capability-carried MCP servers stays current.
+   */
+  async reloadAgentMcp(id: string): Promise<void> {
+    const ctx = this.contexts.get(id);
+    if (!ctx) return;
+    const secrets = new Map([...this.getGlobalProviderSecrets(), ...this.secrets.get(id)]);
+    await this.mcp
+      .connect(
+        id,
+        [...ctx.profile.mcpServers, ...ctx.skills.effectiveMcpServers()],
+        secrets,
+        ctx.mcpTools
+      )
+      .catch((err) => console.warn(`[mcp] reload failed for ${id}:`, err));
   }
 
   /** Absolute path to an agent's stored avatar image, or null if it has none. */

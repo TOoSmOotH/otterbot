@@ -11,10 +11,9 @@ import { getSkillService } from "./skills/skill-service.js";
 import { getMemoryService } from "./memory/memory-service.js";
 import { getUserProfileService } from "./user-profile/user-profile-service.js";
 import { importSkillFromRaw, importSkillFromUrl, exportAllSkills } from "./skills/skill-hub.js";
-import { formatScanFindings, scanSkillContent, blockingFindings } from "./skills/skill-scanner.js";
 import { initOpenAiAuth, getOpenAiAuth } from "./auth/openai-auth-store.js";
 import { builtinModelStatus, downloadBuiltinModel } from "./embedders/builtin-embedder.js";
-import { SKILL_CATALOG, getCatalogSkill, catalogSkillUrl } from "./skills/builtin-catalog.js";
+import { BUILTIN_CAPABILITIES, getCatalogCapability } from "./skills/builtin-catalog.js";
 import { generateText } from "ai";
 import { resolveChatModel, listProviderModels } from "./providers/registry.js";
 import type { AgentProfile, ProviderId, MemoryCategory, GlobalSettings } from "@otterbot/shared";
@@ -382,10 +381,11 @@ export async function buildServer(orch: Orchestrator, cfg: Config): Promise<Fast
     }
   });
 
-  // The Hermes skill catalog (built-in + optional) — index only; bodies fetched on install.
-  app.get("/api/skill-catalog", async () => SKILL_CATALOG);
+  // The first-party capability catalog — fully bundled, no network fetch.
+  app.get("/api/skill-catalog", async () => BUILTIN_CAPABILITIES);
 
-  // Install a catalog skill onto an agent: fetch its SKILL.md, scan it, store it.
+  // Install a catalog capability onto an agent: copy the bundled markdown into
+  // the agent's skills/ dir + DB. The capability is already tool-equipped.
   app.post<{ Params: { id: string }; Body: { catalogId?: string } }>(
     "/api/agents/:id/skills/install",
     async (req, reply) => {
@@ -394,39 +394,19 @@ export async function buildServer(orch: Orchestrator, cfg: Config): Promise<Fast
         reply.code(404);
         return { error: "not found" };
       }
-      const entry = getCatalogSkill(req.body?.catalogId ?? "");
+      const entry = getCatalogCapability(req.body?.catalogId ?? "");
       if (!entry) {
         reply.code(400);
-        return { error: "unknown catalog skill" };
+        return { error: "unknown catalog capability" };
       }
-      try {
-        const res = await fetch(catalogSkillUrl(entry), { redirect: "follow" });
-        if (!res.ok) {
-          reply.code(502);
-          return { error: `could not fetch skill from GitHub: ${res.status} ${res.statusText}` };
-        }
-        const raw = await res.text();
-        // The catalog is a curated allowlist of official skills, so capable
-        // content (URLs, network calls, credential language) is expected and
-        // kept in the report; only tamper / injection signals block an install.
-        const scan = scanSkillContent(raw);
-        const blocking = blockingFindings(scan.findings);
-        if (blocking.length > 0) {
-          reply.code(400);
-          return {
-            error: "skill rejected by security scanner: " + formatScanFindings(blocking),
-          };
-        }
-        const { meta, body } = ctx.skills.parseSkillFile(raw);
-        if (!meta.name || !body) {
-          reply.code(400);
-          return { error: "the fetched SKILL.md is missing frontmatter `name` or a body" };
-        }
-        return ctx.skills.create({ meta, body, source: "builtin" }, { scanReport: scan });
-      } catch (err) {
-        reply.code(502);
-        return { error: err instanceof Error ? err.message : String(err) };
-      }
+      const { meta, body, enabled } = ctx.skills.parseSkillFile(entry.markdown);
+      const skill = ctx.skills.create(
+        { meta, body, enabled, source: "builtin" },
+        { id: entry.id }
+      );
+      // A newly-installed capability may carry MCP servers — reconcile now.
+      void orch.reloadAgentMcp(req.params.id);
+      return skill;
     }
   );
 
@@ -438,9 +418,35 @@ export async function buildServer(orch: Orchestrator, cfg: Config): Promise<Fast
         reply.code(404);
         return { error: "not found" };
       }
-      return { ok: ctx.skills.delete(req.params.skillId) };
+      const ok = ctx.skills.delete(req.params.skillId);
+      void orch.reloadAgentMcp(req.params.id);
+      return { ok };
     }
   );
+
+  // Toggle a capability's `enabled` flag and/or edit its customization body.
+  app.patch<{
+    Params: { id: string; skillId: string };
+    Body: { enabled?: boolean; body?: string };
+  }>("/api/agents/:id/skills/:skillId", async (req, reply) => {
+    const ctx = orch.getContext(req.params.id);
+    if (!ctx) {
+      reply.code(404);
+      return { error: "not found" };
+    }
+    const b = req.body ?? {};
+    const updated = ctx.skills.update(req.params.skillId, {
+      enabled: b.enabled,
+      body: b.body,
+    });
+    if (!updated) {
+      reply.code(404);
+      return { error: "skill not found" };
+    }
+    // An enable/disable may change the agent's MCP server set — reconcile.
+    void orch.reloadAgentMcp(req.params.id);
+    return updated;
+  });
 
   app.delete<{ Params: { id: string; memId: string } }>(
     "/api/agents/:id/memories/:memId",

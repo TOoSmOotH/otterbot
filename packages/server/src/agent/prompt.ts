@@ -55,7 +55,15 @@ export async function buildSystemPrompt(
     (args.skillsLimit ?? 3) + (args.memoriesLimit ?? 6)
   );
 
-  const skillHits = contentHits.filter((h) => h.kind === "skill").slice(0, args.skillsLimit ?? 3);
+  // Enabled capabilities are always injected; their tools are always granted.
+  const enabledSkills = skillSvc.listEnabled();
+  const enabledIds = new Set(enabledSkills.map((s) => s.id));
+
+  // Semantic-searched skill hits cover only non-enabled / pure-prompt skills —
+  // enabled capabilities are already injected, so don't double-render them.
+  const skillHits = contentHits
+    .filter((h) => h.kind === "skill" && !enabledIds.has(h.refId))
+    .slice(0, args.skillsLimit ?? 3);
   const memoryHits = contentHits.filter((h) => h.kind !== "skill").slice(0, args.memoriesLimit ?? 6);
 
   const persona = ctx.profile.persona.trim() || FALLBACK_PERSONA;
@@ -69,6 +77,14 @@ export async function buildSystemPrompt(
       .map((h) => `- [${h.kind}] ${truncate(h.body, 240)}`)
       .join("\n");
     parts.push(`## Relevant memories\n\n${rendered}`);
+  }
+
+  if (enabledSkills.length > 0) {
+    const rendered = enabledSkills
+      .map((s) => `### Capability: ${s.meta.name}\n${s.meta.description}\n\n${s.body}`)
+      .join("\n\n---\n\n");
+    parts.push(`## Active capabilities\n\n${rendered}`);
+    for (const s of enabledSkills) skillSvc.recordUse(s.id);
   }
 
   if (skillHits.length > 0) {
@@ -90,7 +106,7 @@ export async function buildSystemPrompt(
 
   return {
     system: parts.join("\n\n"),
-    skillsUsed: skillHits.map((h) => h.refId),
+    skillsUsed: [...enabledSkills.map((s) => s.id), ...skillHits.map((h) => h.refId)],
     memoriesUsed: memoryHits.map((h) => h.refId),
   };
 }
