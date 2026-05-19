@@ -10,7 +10,7 @@ import {
 } from "node:fs";
 import { join, resolve } from "node:path";
 import { parse as parseDotenv } from "dotenv";
-import type { AgentProfile, AgentRole, ModelRef } from "@otterbot/shared";
+import type { AgentProfile, AgentRole, ChannelBotConfig, ModelRef } from "@otterbot/shared";
 
 /** Resolved on-disk paths for one agent profile directory. */
 export interface ProfilePaths {
@@ -191,6 +191,19 @@ export class ProfileStore {
   }
 }
 
+/** Fill in defaults on a channel connector config (older profiles lack newer fields). */
+function normalizeChannel(c: ChannelBotConfig | null | undefined): ChannelBotConfig | null {
+  if (!c) return null;
+  return {
+    enabled: c.enabled ?? false,
+    channelId: c.channelId ?? "",
+    publicBot: c.publicBot ?? false,
+    allowedUserIds: c.allowedUserIds ?? [],
+    // Default to @mention-only so the agent isn't noisy in a shared channel.
+    mentionOnly: c.mentionOnly ?? true,
+  };
+}
+
 /** Fill in defaults for any missing fields so older/partial profiles still load. */
 export function normalizeProfile(p: Partial<AgentProfile> & { id: string }): AgentProfile {
   const role: AgentRole = p.role ?? "agent";
@@ -207,8 +220,8 @@ export function normalizeProfile(p: Partial<AgentProfile> & { id: string }): Age
       : [{ provider: chat.provider, modelId: "*" }],
     allowedChatServices: p.allowedChatServices ?? ["web"],
     transport: p.transport ?? "local",
-    slack: p.slack ?? null,
-    discord: p.discord ?? null,
+    slack: normalizeChannel(p.slack),
+    discord: normalizeChannel(p.discord),
     email: p.email ?? null,
     artwork: { avatar: p.artwork?.avatar ?? null },
     allowedPeers: p.allowedPeers ?? [],

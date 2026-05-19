@@ -58,6 +58,13 @@ export interface ChannelBotConfig {
   publicBot: boolean;
   /** Platform user IDs allowed to talk to the agent when publicBot is false. */
   allowedUserIds: string[];
+  /**
+   * When true the agent only replies when its bot is @mentioned in the
+   * channel; when false it replies to every message. Mention detection is
+   * identity-based — it triggers on the bot's own handle regardless of the
+   * agent's display name.
+   */
+  mentionOnly: boolean;
 }
 
 /** Live state of one chat-channel connector (Slack / Discord). */

@@ -72,6 +72,14 @@ export class DiscordConnector extends ChannelConnector {
 
   private onDiscordMessage(m: Message): void {
     if (m.author.bot || m.channelId !== this.cfg.channelId) return;
-    this.handleInbound(m.author.id, m.content);
+    const botUser = this.client?.user;
+    if (this.cfg.mentionOnly) {
+      // Only reply when this bot is @mentioned.
+      if (!botUser || !m.mentions.has(botUser)) return;
+    }
+    const text = botUser
+      ? m.content.replace(new RegExp(`<@!?${botUser.id}>`, "g"), "").trim()
+      : m.content;
+    this.handleInbound(m.author.id, text);
   }
 }

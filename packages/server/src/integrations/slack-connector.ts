@@ -4,7 +4,7 @@ import type { ChannelBotConfig } from "@otterbot/shared";
 import type { AgentRuntime } from "../runtime/agent-runtime.js";
 import { ChannelConnector } from "./channel-connector.js";
 
-/** The subset of a Slack message event we use. */
+/** The subset of a Slack message / app_mention event we use. */
 interface SlackMessageEvent {
   type?: string;
   subtype?: string;
@@ -12,6 +12,11 @@ interface SlackMessageEvent {
   user?: string;
   text?: string;
   bot_id?: string;
+}
+
+/** Strip a leading bot @mention (`<@U…> `) so the agent gets a clean prompt. */
+function stripLeadingMention(text: string): string {
+  return text.replace(/^\s*<@[A-Z0-9]+>\s*/i, "");
 }
 
 /**
@@ -39,13 +44,23 @@ export class SlackConnector extends ChannelConnector {
 
   async start(): Promise<void> {
     const socket = new SocketModeClient({ appToken: this.appToken });
-    socket.on("message", ({ event, ack }: { event: SlackMessageEvent; ack: () => Promise<void> }) => {
-      void ack();
-      this.onSlackMessage(event);
-    });
+    // mentionOnly → subscribe to `app_mention` (fires only when the bot is
+    // @mentioned); otherwise `message` (every message in the channel).
+    const eventType = this.cfg.mentionOnly ? "app_mention" : "message";
+    socket.on(
+      eventType,
+      ({ event, ack }: { event: SlackMessageEvent; ack: () => Promise<void> }) => {
+        void ack();
+        this.onSlackMessage(event);
+      }
+    );
     await socket.start();
     this.socket = socket;
-    console.info(`[slack] connector connected for ${this.agentId}`);
+    console.info(
+      `[slack] connector connected for ${this.agentId} (${
+        this.cfg.mentionOnly ? "@mention only" : "all messages"
+      })`
+    );
   }
 
   async stop(): Promise<void> {
@@ -62,6 +77,6 @@ export class SlackConnector extends ChannelConnector {
     if (event.subtype || event.bot_id) return;
     if (event.channel !== this.cfg.channelId) return;
     if (!event.user || !event.text) return;
-    this.handleInbound(event.user, event.text);
+    this.handleInbound(event.user, stripLeadingMention(event.text));
   }
 }

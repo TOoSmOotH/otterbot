@@ -105,5 +105,7 @@ export function connectorSignature(
   tokens: string[]
 ): string {
   if (!cfg?.enabled) return "disabled";
-  return JSON.stringify([cfg.channelId, tokens]);
+  // `mentionOnly` changes which channel events the connector subscribes to,
+  // so a change to it must force a reconnect.
+  return JSON.stringify([cfg.channelId, cfg.mentionOnly, tokens]);
 }

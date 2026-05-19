@@ -228,6 +228,7 @@ function ChannelsTab({ profile, onSaved }: TabProps) {
   const [slackChannel, setSlackChannel] = useState(profile.slack?.channelId ?? "");
   const [slackPublic, setSlackPublic] = useState(profile.slack?.publicBot ?? false);
   const [slackUsers, setSlackUsers] = useState((profile.slack?.allowedUserIds ?? []).join("\n"));
+  const [slackMentionOnly, setSlackMentionOnly] = useState(profile.slack?.mentionOnly ?? true);
   const [slackBotToken, setSlackBotToken] = useState("");
   const [slackAppToken, setSlackAppToken] = useState("");
 
@@ -236,6 +237,9 @@ function ChannelsTab({ profile, onSaved }: TabProps) {
   const [discordPublic, setDiscordPublic] = useState(profile.discord?.publicBot ?? false);
   const [discordUsers, setDiscordUsers] = useState(
     (profile.discord?.allowedUserIds ?? []).join("\n")
+  );
+  const [discordMentionOnly, setDiscordMentionOnly] = useState(
+    profile.discord?.mentionOnly ?? true
   );
   const [discordBotToken, setDiscordBotToken] = useState("");
 
@@ -252,6 +256,7 @@ function ChannelsTab({ profile, onSaved }: TabProps) {
             channelId: slackChannel.trim(),
             publicBot: slackPublic,
             allowedUserIds: parseIds(slackUsers),
+            mentionOnly: slackMentionOnly,
           }
         : null,
       discord: discordEnabled
@@ -260,6 +265,7 @@ function ChannelsTab({ profile, onSaved }: TabProps) {
             channelId: discordChannel.trim(),
             publicBot: discordPublic,
             allowedUserIds: parseIds(discordUsers),
+            mentionOnly: discordMentionOnly,
           }
         : null,
     });
@@ -344,6 +350,19 @@ function ChannelsTab({ profile, onSaved }: TabProps) {
             <label style={checkboxRow}>
               <input
                 type="checkbox"
+                checked={slackMentionOnly}
+                onChange={(e) => setSlackMentionOnly(e.target.checked)}
+              />
+              Only respond when @mentioned
+            </label>
+            <p style={{ ...hint, marginTop: 0 }}>
+              {slackMentionOnly
+                ? "The agent replies only when its Slack bot is @mentioned — triggers on the bot's handle, whatever the agent is named here."
+                : "The agent replies to every message in the channel."}
+            </p>
+            <label style={checkboxRow}>
+              <input
+                type="checkbox"
                 checked={slackPublic}
                 onChange={(e) => setSlackPublic(e.target.checked)}
               />
@@ -402,6 +421,14 @@ function ChannelsTab({ profile, onSaved }: TabProps) {
                 style={input}
               />
             </Field>
+            <label style={checkboxRow}>
+              <input
+                type="checkbox"
+                checked={discordMentionOnly}
+                onChange={(e) => setDiscordMentionOnly(e.target.checked)}
+              />
+              Only respond when @mentioned
+            </label>
             <label style={checkboxRow}>
               <input
                 type="checkbox"
