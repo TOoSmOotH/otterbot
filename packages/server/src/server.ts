@@ -11,7 +11,7 @@ import { getSkillService } from "./skills/skill-service.js";
 import { getMemoryService } from "./memory/memory-service.js";
 import { getUserProfileService } from "./user-profile/user-profile-service.js";
 import { importSkillFromRaw, importSkillFromUrl, exportAllSkills } from "./skills/skill-hub.js";
-import { formatScanFindings, scanSkillContent } from "./skills/skill-scanner.js";
+import { formatScanFindings, scanSkillContent, blockingFindings } from "./skills/skill-scanner.js";
 import { initOpenAiAuth, getOpenAiAuth } from "./auth/openai-auth-store.js";
 import { builtinModelStatus, downloadBuiltinModel } from "./embedders/builtin-embedder.js";
 import { SKILL_CATALOG, getCatalogSkill, catalogSkillUrl } from "./skills/builtin-catalog.js";
@@ -396,12 +396,15 @@ export async function buildServer(orch: Orchestrator, cfg: Config): Promise<Fast
           return { error: `could not fetch skill from GitHub: ${res.status} ${res.statusText}` };
         }
         const raw = await res.text();
+        // The catalog is a curated allowlist of official skills, so capable
+        // content (URLs, network calls, credential language) is expected and
+        // kept in the report; only tamper / injection signals block an install.
         const scan = scanSkillContent(raw);
-        if (scan.findings.some((f) => f.severity === "error")) {
+        const blocking = blockingFindings(scan.findings);
+        if (blocking.length > 0) {
           reply.code(400);
           return {
-            error: "skill rejected by security scanner: " +
-              formatScanFindings(scan.findings),
+            error: "skill rejected by security scanner: " + formatScanFindings(blocking),
           };
         }
         const { meta, body } = ctx.skills.parseSkillFile(raw);

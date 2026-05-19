@@ -22,6 +22,19 @@ export function scanSkillContent(raw: string): ScanReport {
   };
 }
 
+/**
+ * Findings that should block installing a curated catalog skill. Capable-skill
+ * signals — URLs, network calls, credential handling, shell access — are
+ * advisory: a GitHub or web skill legitimately contains them. Only tamper
+ * signals (hidden characters) and injection signals (encoded or disguised
+ * instructions) block an install.
+ */
+export function blockingFindings(findings: ScanFinding[]): ScanFinding[] {
+  return findings.filter(
+    (f) => f.category === "hidden-content" || f.category === "prompt-injection"
+  );
+}
+
 export function formatScanFindings(findings: ScanFinding[]): string {
   const seen = new Set<string>();
   const formatted: string[] = [];
