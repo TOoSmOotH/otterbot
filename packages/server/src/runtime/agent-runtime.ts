@@ -101,6 +101,7 @@ export class AgentRuntime {
 
       let finalText = "";
       let sawWork = false;
+      let streamError: string | null = null;
       for await (const part of result.fullStream) {
         switch (part.type) {
           case "text-delta":
@@ -120,6 +121,8 @@ export class AgentRuntime {
           case "error": {
             const message =
               part.error instanceof Error ? part.error.message : String(part.error);
+            streamError = message;
+            console.warn(`[agent ${this.id}] model stream error:`, message);
             args.onChunk({ kind: "error", message });
             break;
           }
@@ -128,6 +131,12 @@ export class AgentRuntime {
         }
       }
       void sawWork;
+
+      // A stream error that produced no text would otherwise surface as a
+      // useless "(no response)" — throw so callers report the real cause.
+      if (!finalText && streamError) {
+        throw new Error(streamError);
+      }
 
       const messageId = this.appendMessage(args.conversationId, "assistant", finalText);
       this.touchConversation(args.conversationId);
