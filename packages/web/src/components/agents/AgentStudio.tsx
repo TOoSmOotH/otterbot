@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import type {
   AgentProfile,
   AgentConnectorStatus,
+  AgentPeerAccess,
+  AgentProfileSummary,
   ChannelConnectorStatus,
   McpServerConfig,
   McpServerStatus,
@@ -16,9 +18,10 @@ import { useProvidersStore } from "../../stores/providers-store";
 import { BuiltinEmbedderControls } from "../BuiltinEmbedderControls";
 import { ProviderOptions } from "../ProviderOptions";
 import { AvatarUpload } from "./AvatarUpload";
+import { PeerAccessEditor } from "./PeerAccessEditor";
 import { TerminalModal } from "./TerminalModal";
 
-const TABS = ["Identity", "Persona", "Model", "Capabilities", "Channels", "Schedule", "Memory", "Credentials"] as const;
+const TABS = ["Identity", "Persona", "Model", "Capabilities", "Channels", "Peers", "Schedule", "Memory", "Credentials"] as const;
 type StudioTab = (typeof TABS)[number];
 
 /** Full-screen agent management surface — identity, persona, model, skills,
@@ -118,6 +121,7 @@ export function AgentStudio({ agentId }: { agentId: string | null }) {
         {tab === "Model" && <ModelTab profile={profile} onSaved={onSaved} />}
         {tab === "Capabilities" && <CapabilitiesTab profile={profile} onSaved={onSaved} />}
         {tab === "Channels" && <ChannelsTab profile={profile} onSaved={onSaved} />}
+        {tab === "Peers" && <PeersTab profile={profile} onSaved={onSaved} />}
         {tab === "Schedule" && <ScheduleTab agentId={profile.id} />}
         {tab === "Memory" && <MemoryTab agentId={profile.id} />}
         {tab === "Credentials" && <CredentialsTab agentId={profile.id} />}
@@ -1287,6 +1291,65 @@ function OpenAiAuthPanel({
         </>
       )}
     </div>
+  );
+}
+
+// --- Schedule -------------------------------------------------------------
+
+// --- Peers ----------------------------------------------------------------
+
+/** Which other agents this agent may message and whose memory it may read. */
+function PeersTab({ profile, onSaved }: TabProps) {
+  const [peerAgents, setPeerAgents] = useState<{ id: string; displayName: string }[]>([]);
+  const [draft, setDraft] = useState<AgentPeerAccess[]>(profile.allowedPeers ?? []);
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    void fetch("/api/agents")
+      .then((r) => (r.ok ? (r.json() as Promise<AgentProfileSummary[]>) : []))
+      .then((list) =>
+        setPeerAgents(
+          list
+            .filter((a) => a.id !== profile.id && a.role !== "subagent")
+            .map((a) => ({ id: a.id, displayName: a.displayName }))
+        )
+      )
+      .catch(() => {});
+  }, [profile.id]);
+
+  const isCoo = profile.role === "coo";
+
+  const save = async () => {
+    const res = await fetch(`/api/agents/${profile.id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ allowedPeers: draft }),
+    });
+    if (res.ok) {
+      setSaved(true);
+      onSaved();
+    }
+  };
+
+  return (
+    <Form>
+      <p style={hint}>
+        Control which agents this agent may message and whose memory it may read. The COO can
+        always reach every agent.
+      </p>
+      <PeerAccessEditor
+        peers={draft}
+        peerAgents={peerAgents}
+        isCoo={isCoo}
+        onChange={(next) => {
+          setDraft(next);
+          setSaved(false);
+        }}
+      />
+      {!isCoo && peerAgents.length > 0 && (
+        <SaveBar onSave={save} saved={saved} onDirty={() => setSaved(false)} />
+      )}
+    </Form>
   );
 }
 

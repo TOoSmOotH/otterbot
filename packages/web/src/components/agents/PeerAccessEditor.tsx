@@ -7,8 +7,8 @@ interface PeerAgent {
 
 /**
  * Editor for an agent's peer access — which other agents it may message and
- * whose memory it may read. Shared by the new-agent form and the Settings
- * "Agent communication" section.
+ * whose memory it may read. Shared by the new-agent form and the Agent Studio
+ * "Peers" tab.
  */
 export function PeerAccessEditor({
   peers,

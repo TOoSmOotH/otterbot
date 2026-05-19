@@ -1,9 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import type {
-  AgentPeerAccess,
-  AgentProfile,
   AgentProfileSummary,
-  AgentRole,
   GlobalSettings as GlobalSettingsShape,
   ModelRef,
   ProviderId,
@@ -14,11 +11,15 @@ import { THEMES, useGlobalSettingsStore, applyTheme } from "../../stores/global-
 import { useProvidersStore, globalProviderPatch } from "../../stores/providers-store";
 import { BuiltinEmbedderControls } from "../BuiltinEmbedderControls";
 import { ProviderFields, isLocalProvider, type TestState } from "../agents/ProviderFields";
-import { PeerAccessEditor } from "../agents/PeerAccessEditor";
 
 type OpenAiAuthStatus = { connected: boolean; accountId: string | null };
 
 const EMPTY_PROVIDER_CFG = { baseUrl: "", apiKeyConfigured: false };
+
+const TABS = ["Providers", "Models", "Appearance"] as const;
+type SettingsTab = (typeof TABS)[number];
+
+type PatchFn = (p: Partial<GlobalSettingsShape>) => void;
 
 export function GlobalSettings() {
   const savedSettings = useGlobalSettingsStore((s) => s.settings);
@@ -28,19 +29,19 @@ export function GlobalSettings() {
   const providers = useProvidersStore((s) => s.providers);
   const loadProviders = useProvidersStore((s) => s.load);
   const [draft, setDraft] = useState<GlobalSettingsShape>(savedSettings);
+  const [tab, setTab] = useState<SettingsTab>("Providers");
   const [status, setStatus] = useState("");
 
   useEffect(() => void load(), [load]);
   useEffect(() => void loadProviders(), [loadProviders]);
   useEffect(() => setDraft(savedSettings), [savedSettings]);
 
-  const themeOptions = useMemo(() => Object.keys(THEMES) as ThemeId[], []);
-  const chatProviders = providers.filter((p) => p.supportsChat);
-  const embeddingProviders = providers.filter((p) => p.supportsEmbeddings);
-  // Providers with something to configure (the built-in embedder has nothing).
-  const credentialProviders = providers.filter((p) => p.needsApiKey || p.baseUrlEnv);
+  const dirty = useMemo(
+    () => JSON.stringify(draft) !== JSON.stringify(savedSettings),
+    [draft, savedSettings]
+  );
 
-  const patch = (p: Partial<GlobalSettingsShape>) => {
+  const patch: PatchFn = (p) => {
     setDraft((current) => ({ ...current, ...p }));
     setStatus("");
   };
@@ -50,87 +51,83 @@ export function GlobalSettings() {
     setStatus(saved ? "Saved." : "Save failed.");
   };
 
+  // Theme applies live for preview, so discarding must revert it too.
+  const discard = () => {
+    setDraft(savedSettings);
+    applyTheme(savedSettings.theme);
+    setStatus("");
+  };
+
   return (
     <div data-testid="global-settings" style={page}>
       <header style={header}>
-        <div>
-          <h1 style={{ margin: 0, fontSize: 18 }}>Global Settings</h1>
-          <p style={hint}>Defaults used across otterbot. Per-agent credentials still override these.</p>
-        </div>
-        <button onClick={save} disabled={saving} style={primary}>
-          {saving ? "Saving..." : "Save settings"}
-        </button>
+        <h1 style={{ margin: 0, fontSize: 18 }}>Global Settings</h1>
+        <p style={hint}>Defaults used across otterbot. Per-agent credentials still override these.</p>
       </header>
 
-      <section style={section}>
-        <h2 style={h2}>Theme</h2>
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          {themeOptions.map((theme) => (
-            <button
-              key={theme}
-              data-testid={`theme-${theme}`}
-              onClick={() => {
-                patch({ theme });
-                applyTheme(theme);
-              }}
-              style={{
-                ...themeButton,
-                borderColor: draft.theme === theme ? "rgb(var(--accent))" : "rgb(var(--border))",
-              }}
-            >
-              <span style={{ ...swatch, background: `rgb(${THEMES[theme].vars["--accent"]})` }} />
-              {THEMES[theme].label}
+      <nav style={tabBar}>
+        {TABS.map((t) => (
+          <button
+            key={t}
+            data-testid={`settings-tab-${t}`}
+            onClick={() => setTab(t)}
+            style={{
+              ...tabButton,
+              background: tab === t ? "rgb(var(--accent))" : "transparent",
+              color: tab === t ? "white" : "rgb(var(--fg))",
+            }}
+          >
+            {t}
+          </button>
+        ))}
+      </nav>
+
+      <div style={tabBody}>
+        {tab === "Providers" && <ProvidersTab draft={draft} patch={patch} providers={providers} />}
+        {tab === "Models" && <ModelsTab draft={draft} patch={patch} providers={providers} />}
+        {tab === "Appearance" && <AppearanceTab draft={draft} patch={patch} />}
+      </div>
+
+      {dirty && (
+        <div style={saveBar}>
+          <span style={{ fontSize: 13, fontWeight: 600 }}>Unsaved changes</span>
+          {status && <span style={hint}>{status}</span>}
+          <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
+            <button onClick={discard} disabled={saving} style={ghostButton}>
+              Discard
             </button>
-          ))}
+            <button onClick={save} disabled={saving} style={primary}>
+              {saving ? "Saving..." : "Save settings"}
+            </button>
+          </div>
         </div>
-      </section>
+      )}
+    </div>
+  );
+}
 
-      <section style={section}>
-        <h2 style={h2}>Default Models</h2>
-        <p style={hint}>
-          The model new agents start with. Pick a provider, test the connection, and choose from
-          the models it serves. Credentials are shared with the Model Providers section below.
-        </p>
-        <div style={grid}>
-          <DefaultModelPicker
-            title="Chat"
-            kind="chat"
-            providers={chatProviders}
-            draft={draft}
-            patch={patch}
-            value={draft.defaultChatModel}
-            onChange={(provider, modelId) => patch({ defaultChatModel: { provider, modelId } })}
-          />
-          <DefaultModelPicker
-            title="Embeddings"
-            kind="embedding"
-            providers={embeddingProviders}
-            draft={draft}
-            patch={patch}
-            value={draft.defaultEmbeddingModel}
-            onChange={(provider, modelId) =>
-              patch({ defaultEmbeddingModel: { provider, modelId } })
-            }
-          />
-        </div>
-      </section>
+/** Provider credentials — the foundation everything else depends on. */
+function ProvidersTab({
+  draft,
+  patch,
+  providers,
+}: {
+  draft: GlobalSettingsShape;
+  patch: PatchFn;
+  providers: ProviderInfo[];
+}) {
+  // Providers with something to configure (the built-in embedder has nothing).
+  const credentialProviders = providers.filter((p) => p.needsApiKey || p.baseUrlEnv);
 
-      <section style={section}>
-        <h2 style={h2}>Model Context Windows</h2>
-        <p style={hint}>
-          Each chat model's total context window, in tokens. Every agent using a model inherits its
-          window — about 75% is kept for conversation history, the rest reserved for the system
-          prompt, tools, and the reply. Unlisted models fall back to a built-in default.
-        </p>
-        <ModelContextWindows draft={draft} patch={patch} />
-      </section>
-
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
       <section style={section}>
         <h2 style={h2}>Model Providers</h2>
+        <p style={hint}>
+          Credentials for each model provider — the single source of truth every agent reuses.
+        </p>
         <div style={providerGrid}>
-          {credentialProviders.length === 0 && (
-            <p style={hint}>Loading providers…</p>
-          )}
+          {credentialProviders.length === 0 && <p style={hint}>Loading providers…</p>}
           {credentialProviders.map((p) => {
             const cfg = draft.providers[p.id] ?? EMPTY_PROVIDER_CFG;
             return (
@@ -198,125 +195,107 @@ export function GlobalSettings() {
               </div>
             );
           })}
+          <div style={panel}>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+              <strong style={{ fontSize: 13 }}>Built-in Embedder</strong>
+            </div>
+            <p style={hint}>
+              A zero-setup embedding model that runs on your CPU — no API key, no server. Needed
+              only for agents whose embedding provider is "builtin". The model (~30 MB) downloads on
+              demand.
+            </p>
+            <BuiltinEmbedderControls />
+          </div>
         </div>
       </section>
-
-      <section style={section}>
-        <h2 style={h2}>Built-in Embedder</h2>
-        <p style={hint}>
-          A zero-setup embedding model that runs on your CPU — no API key, no server. Needed only
-          for agents whose embedding provider is "builtin". The model (~30 MB) downloads on demand.
-        </p>
-        <div style={panel}>
-          <BuiltinEmbedderControls />
-        </div>
-      </section>
-
-      <section style={section} data-testid="agent-communication">
-        <h2 style={h2}>Agent communication</h2>
-        <p style={hint}>
-          Control which agents may message each other and read each other's memory. The COO can
-          always reach every agent.
-        </p>
-        <AgentCommunicationSection />
-      </section>
-
-      {status && <div style={hint}>{status}</div>}
     </div>
   );
 }
 
-/** Post-creation editor for every agent's peer-access permissions. */
-function AgentCommunicationSection() {
-  const [agents, setAgents] = useState<{ id: string; displayName: string; role: AgentRole }[]>([]);
-  const [saved, setSaved] = useState<Record<string, AgentPeerAccess[]>>({});
-  const [drafts, setDrafts] = useState<Record<string, AgentPeerAccess[]>>({});
-  const [savingId, setSavingId] = useState<string | null>(null);
-  const [loaded, setLoaded] = useState(false);
-
-  useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      const list: AgentProfileSummary[] = await fetch("/api/agents")
-        .then((r) => (r.ok ? r.json() : []))
-        .catch(() => []);
-      const profiles = await Promise.all(
-        list.map((a) =>
-          fetch(`/api/agents/${a.id}`)
-            .then((r) => (r.ok ? (r.json() as Promise<AgentProfile>) : null))
-            .catch(() => null)
-        )
-      );
-      if (cancelled) return;
-      const real = profiles.filter(
-        (p): p is AgentProfile => p !== null && p.role !== "subagent"
-      );
-      setAgents(real.map((p) => ({ id: p.id, displayName: p.displayName, role: p.role })));
-      const peers: Record<string, AgentPeerAccess[]> = {};
-      for (const p of real) peers[p.id] = p.allowedPeers ?? [];
-      setSaved(peers);
-      setDrafts(peers);
-      setLoaded(true);
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  const save = async (id: string) => {
-    setSavingId(id);
-    try {
-      const allowedPeers = drafts[id] ?? [];
-      const res = await fetch(`/api/agents/${id}`, {
-        method: "PATCH",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ allowedPeers }),
-      });
-      if (res.ok) setSaved((s) => ({ ...s, [id]: allowedPeers }));
-    } finally {
-      setSavingId(null);
-    }
-  };
-
-  if (!loaded) return <p style={hint}>Loading agents…</p>;
-  if (agents.length === 0) return <p style={hint}>No agents yet.</p>;
+/** Default models for new agents, plus the per-model context-window registry. */
+function ModelsTab({
+  draft,
+  patch,
+  providers,
+}: {
+  draft: GlobalSettingsShape;
+  patch: PatchFn;
+  providers: ProviderInfo[];
+}) {
+  const chatProviders = providers.filter((p) => p.supportsChat);
+  const embeddingProviders = providers.filter((p) => p.supportsEmbeddings);
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-      {agents.map((a) => {
-        const peerAgents = agents.filter((x) => x.id !== a.id);
-        const draft = drafts[a.id] ?? [];
-        const isCoo = a.role === "coo";
-        const dirty = JSON.stringify(draft) !== JSON.stringify(saved[a.id] ?? []);
-        return (
-          <details key={a.id} style={panel}>
-            <summary
-              style={{ cursor: "pointer", display: "flex", alignItems: "center", gap: 8 }}
-            >
-              <strong style={{ fontSize: 13 }}>{a.displayName}</strong>
-              {isCoo && <span style={badge}>COO</span>}
-            </summary>
-            <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 8 }}>
-              <PeerAccessEditor
-                peers={draft}
-                peerAgents={peerAgents}
-                isCoo={isCoo}
-                onChange={(next) => setDrafts((d) => ({ ...d, [a.id]: next }))}
-              />
-              {!isCoo && peerAgents.length > 0 && (
-                <button
-                  onClick={() => void save(a.id)}
-                  disabled={!dirty || savingId === a.id}
-                  style={{ ...primary, alignSelf: "flex-start", opacity: dirty ? 1 : 0.5 }}
-                >
-                  {savingId === a.id ? "Saving…" : "Save"}
-                </button>
-              )}
-            </div>
-          </details>
-        );
-      })}
+    <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+      <section style={section}>
+        <h2 style={h2}>Default Models</h2>
+        <p style={hint}>
+          The model new agents start with. Pick a provider, test the connection, and choose from
+          the models it serves. Credentials come from the Providers tab.
+        </p>
+        <div style={grid}>
+          <DefaultModelPicker
+            title="Chat"
+            kind="chat"
+            providers={chatProviders}
+            draft={draft}
+            patch={patch}
+            value={draft.defaultChatModel}
+            onChange={(provider, modelId) => patch({ defaultChatModel: { provider, modelId } })}
+          />
+          <DefaultModelPicker
+            title="Embeddings"
+            kind="embedding"
+            providers={embeddingProviders}
+            draft={draft}
+            patch={patch}
+            value={draft.defaultEmbeddingModel}
+            onChange={(provider, modelId) =>
+              patch({ defaultEmbeddingModel: { provider, modelId } })
+            }
+          />
+        </div>
+      </section>
+
+      <details style={section}>
+        <summary style={{ ...h2, cursor: "pointer" }}>Advanced — context windows</summary>
+        <p style={hint}>
+          Each chat model's total context window, in tokens. Every agent using a model inherits its
+          window — about 75% is kept for conversation history, the rest reserved for the system
+          prompt, tools, and the reply. Unlisted models fall back to a built-in default.
+        </p>
+        <ModelContextWindows draft={draft} patch={patch} />
+      </details>
     </div>
+  );
+}
+
+/** Theme picker. */
+function AppearanceTab({ draft, patch }: { draft: GlobalSettingsShape; patch: PatchFn }) {
+  const themeOptions = useMemo(() => Object.keys(THEMES) as ThemeId[], []);
+  return (
+    <section style={section}>
+      <h2 style={h2}>Theme</h2>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        {themeOptions.map((theme) => (
+          <button
+            key={theme}
+            data-testid={`theme-${theme}`}
+            onClick={() => {
+              patch({ theme });
+              applyTheme(theme);
+            }}
+            style={{
+              ...themeButton,
+              borderColor: draft.theme === theme ? "rgb(var(--accent))" : "rgb(var(--border))",
+            }}
+          >
+            <span style={{ ...swatch, background: `rgb(${THEMES[theme].vars["--accent"]})` }} />
+            {THEMES[theme].label}
+          </button>
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -398,7 +377,7 @@ function ModelContextWindows({
   patch,
 }: {
   draft: GlobalSettingsShape;
-  patch: (p: Partial<GlobalSettingsShape>) => void;
+  patch: PatchFn;
 }) {
   const providers = useProvidersStore((s) => s.providers);
   const loadProviders = useProvidersStore((s) => s.load);
@@ -423,7 +402,7 @@ function ModelContextWindows({
     const out: { provider: ProviderId; modelId: string }[] = [];
     for (const m of [...usedModels, ...registry]) {
       if (!m.modelId) continue;
-      const key = `${m.provider} ${m.modelId}`;
+      const key = `${m.provider} ${m.modelId}`;
       if (seen.has(key)) continue;
       seen.add(key);
       out.push({ provider: m.provider, modelId: m.modelId });
@@ -456,7 +435,7 @@ function ModelContextWindows({
     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
       {rows.length === 0 && <p style={hint}>No chat models in use yet.</p>}
       {rows.map((r) => (
-        <div key={`${r.provider} ${r.modelId}`} style={modelRow}>
+        <div key={`${r.provider} ${r.modelId}`} style={modelRow}>
           <span style={{ fontSize: 12, color: "rgb(var(--muted))", flex: "0 0 88px" }}>
             {providerLabel(r.provider)}
           </span>
@@ -528,7 +507,7 @@ function defaultModelId(p: ProviderId, kind: "chat" | "embedding"): string {
  * selector (provider chips, credential entry, connection test, model list)
  * wired to write the chosen model into the global-settings draft. Any typed
  * credential is merged into that provider's draft config — the same store the
- * Model Providers section edits.
+ * Providers tab edits.
  */
 function DefaultModelPicker({
   title,
@@ -543,7 +522,7 @@ function DefaultModelPicker({
   kind: "chat" | "embedding";
   providers: ProviderInfo[];
   draft: GlobalSettingsShape;
-  patch: (p: Partial<GlobalSettingsShape>) => void;
+  patch: PatchFn;
   value: ModelRef;
   onChange: (provider: ProviderId, modelId: string) => void;
 }) {
@@ -600,7 +579,7 @@ function patchProvider(
   provider: ProviderId,
   patchValue: Partial<GlobalSettingsShape["providers"][ProviderId]>,
   draft: GlobalSettingsShape,
-  patch: (p: Partial<GlobalSettingsShape>) => void
+  patch: PatchFn
 ) {
   patch({
     providers: {
@@ -612,18 +591,45 @@ function patchProvider(
 
 const page: React.CSSProperties = {
   height: "100%",
-  overflowY: "auto",
-  padding: 18,
   display: "flex",
   flexDirection: "column",
-  gap: 18,
+  minHeight: 0,
 };
 
 const header: React.CSSProperties = {
+  padding: "14px 18px 0",
+};
+
+const tabBar: React.CSSProperties = {
+  display: "flex",
+  gap: 4,
+  padding: "10px 18px",
+  borderBottom: "1px solid rgb(var(--border))",
+  flexWrap: "wrap",
+};
+
+const tabButton: React.CSSProperties = {
+  border: "1px solid rgb(var(--border))",
+  padding: "4px 12px",
+  borderRadius: 6,
+  cursor: "pointer",
+  fontSize: 12,
+};
+
+const tabBody: React.CSSProperties = {
+  flex: 1,
+  minHeight: 0,
+  overflowY: "auto",
+  padding: 18,
+};
+
+const saveBar: React.CSSProperties = {
   display: "flex",
   alignItems: "center",
-  justifyContent: "space-between",
   gap: 12,
+  padding: "10px 18px",
+  borderTop: "1px solid rgb(var(--border))",
+  background: "rgb(var(--bg))",
 };
 
 const section: React.CSSProperties = {
