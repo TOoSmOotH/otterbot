@@ -33,6 +33,7 @@ function makeProfile(overrides: Partial<AgentProfile> = {}): AgentProfile {
     subagentLimit: 0,
     canRunShell: false,
     canWebSearch: false,
+    autoLearn: true,
     mcpServers: [],
     parentId: null,
     createdAt: new Date().toISOString(),

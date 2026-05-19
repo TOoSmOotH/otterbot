@@ -206,6 +206,7 @@ function CapabilitiesTab({ profile, onSaved }: TabProps) {
   const [limit, setLimit] = useState(profile.subagentLimit);
   const [canRunShell, setCanRunShell] = useState(profile.canRunShell);
   const [canWebSearch, setCanWebSearch] = useState(profile.canWebSearch);
+  const [autoLearn, setAutoLearn] = useState(profile.autoLearn);
   const [mcpServers, setMcpServers] = useState<McpServerConfig[]>(profile.mcpServers);
   const [mcpStatus, setMcpStatus] = useState<McpServerStatus[]>([]);
   const [saved, setSaved] = useState(false);
@@ -307,6 +308,7 @@ function CapabilitiesTab({ profile, onSaved }: TabProps) {
       subagentLimit: limit,
       canRunShell,
       canWebSearch,
+      autoLearn,
       mcpServers: mcpServers.filter((s) => s.name.trim()),
     });
     setSaved(true);
@@ -411,6 +413,24 @@ function CapabilitiesTab({ profile, onSaved }: TabProps) {
             />
           </label>
         )}
+      </div>
+
+      {/* --- Learning --- */}
+      <strong style={{ fontSize: 13, marginTop: 8 }}>Learning</strong>
+      <div style={channelCard}>
+        <label style={checkboxRow}>
+          <input
+            type="checkbox"
+            checked={autoLearn}
+            onChange={(e) => setAutoLearn(e.target.checked)}
+          />
+          Auto-learning
+        </label>
+        <p style={{ ...hint, marginTop: 0 }}>
+          When a chat session closes, the agent reflects on it — summarizing the conversation,
+          extracting facts into memory, rebuilding its user profile, and optionally authoring a
+          capability. Turn this off to keep the agent's memory and capabilities frozen.
+        </p>
       </div>
 
       <div style={channelCard}>

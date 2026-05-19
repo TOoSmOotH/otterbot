@@ -219,6 +219,9 @@ export async function closeSession(
 ): Promise<void> {
   const ctx = orch.getContext(agentId);
   if (!ctx) return;
+  // Auto-learning is opt-out per agent — when off, the session closes without
+  // touching the agent's memory, user profile or capabilities.
+  if (!ctx.profile.autoLearn) return;
   try {
     await summarizeConversation(ctx, conversationId);
   } catch (err) {

@@ -176,6 +176,11 @@ export interface AgentProfile {
   canRunShell: boolean;
   /** When true the agent gets a `web_search` tool (DuckDuckGo). */
   canWebSearch: boolean;
+  /**
+   * When true the agent runs its post-session learning loop on chat close —
+   * summarize, extract facts, rebuild its user profile, author a capability.
+   */
+  autoLearn: boolean;
   /** MCP servers this agent connects to for additional tools. */
   mcpServers: McpServerConfig[];
   /** Set for subagents; null for the COO and top-level agents. */
