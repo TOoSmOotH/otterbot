@@ -36,7 +36,13 @@ export function AgentStudio({ agentId }: { agentId: string | null }) {
       .then((p: AgentProfile | null) => setProfile(p));
   };
 
-  useEffect(loadProfile, [agentId]);
+  // Clear the stale profile on agent switch so the tabs (which seed their
+  // state from `profile` on mount) never briefly render another agent's data.
+  useEffect(() => {
+    setProfile(null);
+    loadProfile();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [agentId]);
 
   if (!agentId) {
     return <Empty>Select an agent, then open the Agent Studio.</Empty>;
@@ -100,7 +106,13 @@ export function AgentStudio({ agentId }: { agentId: string | null }) {
         ))}
       </nav>
 
-      <div style={{ flex: 1, overflowY: "auto", padding: 16 }}>
+      {/*
+       * key={profile.id} remounts the tab subtree when the selected agent
+       * changes — tab components seed local state from `profile` via useState,
+       * which only runs on mount, so without this they would keep showing the
+       * previously-viewed agent's settings.
+       */}
+      <div key={profile.id} style={{ flex: 1, overflowY: "auto", padding: 16 }}>
         {tab === "Identity" && <IdentityTab profile={profile} onSaved={onSaved} />}
         {tab === "Persona" && <PersonaTab profile={profile} onSaved={onSaved} />}
         {tab === "Model" && <ModelTab profile={profile} onSaved={onSaved} />}
