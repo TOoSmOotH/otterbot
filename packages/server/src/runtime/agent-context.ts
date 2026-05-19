@@ -17,6 +17,11 @@ export interface AgentContext {
   profile: AgentProfile;
   /** Per-agent secrets parsed from the profile's `.env` (never `process.env`). */
   secrets: Map<string, string>;
+  /**
+   * The chat model's effective context window (tokens) — the agent's own
+   * `model.contextWindow`, or the global default. Drives the history budget.
+   */
+  contextWindow: number;
   /** Sandboxed working directory for the agent's `shell_exec` tool. */
   workspaceDir: string;
   agentDb: AgentDb;
@@ -39,6 +44,8 @@ export interface AgentContext {
 export interface BuildAgentContextInput {
   profile: AgentProfile;
   secrets: Map<string, string>;
+  /** The agent's effective chat-model context window in tokens. */
+  contextWindow: number;
   /** Path to this agent's isolated `agent.db`. */
   agentDbPath: string;
   /** Path to this agent's `skills/` directory. */
@@ -63,6 +70,7 @@ export function buildAgentContext(input: BuildAgentContextInput): AgentContext {
   return {
     profile: input.profile,
     secrets: input.secrets,
+    contextWindow: input.contextWindow,
     workspaceDir: input.workspaceDir,
     agentDb,
     sqlite: agentDb.sqlite,

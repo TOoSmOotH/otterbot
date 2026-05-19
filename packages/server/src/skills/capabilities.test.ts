@@ -50,6 +50,7 @@ describe("capabilities", () => {
     ctx = buildAgentContext({
       profile: makeProfile(),
       secrets: new Map(),
+      contextWindow: 16_000,
       agentDbPath: join(dir, "agent.db"),
       skillsDir: join(dir, "skills"),
       workspaceDir: join(dir, "workspace"),

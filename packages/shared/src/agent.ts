@@ -126,6 +126,12 @@ export interface ModelRef {
 export interface AgentModelConfig {
   chat: ModelRef;
   embedding: ModelRef;
+  /**
+   * The chat model's total context window, in tokens. Used to size the
+   * conversation-history budget before compaction kicks in. Optional — when
+   * unset the global default context window applies.
+   */
+  contextWindow?: number;
 }
 
 /** An agent's visual identity in the UI. */

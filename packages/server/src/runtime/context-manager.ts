@@ -8,14 +8,28 @@ import type { ContextStatus } from "@otterbot/shared";
 
 /** Rough char-per-token ratio — good enough for budgeting without a tokenizer. */
 export const CHARS_PER_TOKEN = 4;
-/** Token budget for a conversation's live history (recap + verbatim window). */
-export const DEFAULT_BUDGET_TOKENS = 12_000;
+/** Fallback context window when neither the agent nor global settings set one. */
+export const DEFAULT_CONTEXT_WINDOW = 16_000;
+/**
+ * Fraction of the model's context window kept for live conversation history
+ * (recap + verbatim window). The remainder is reserved for the system prompt,
+ * tool definitions, and the model's reply.
+ */
+export const HISTORY_BUDGET_FRACTION = 0.75;
 /** Compact once usage reaches this fraction of the budget. */
 export const COMPACT_WATERMARK = 0.8;
 /** Recent turns always kept verbatim, never folded into the recap. */
 export const KEEP_RECENT_MESSAGES = 8;
 /** Per-message framing overhead added to the char estimate. */
 const PER_MESSAGE_OVERHEAD = 4;
+
+/**
+ * The live-history token budget for an agent, derived from its (resolved)
+ * chat-model context window.
+ */
+export function historyBudget(ctx: AgentContext): number {
+  return Math.round(ctx.contextWindow * HISTORY_BUDGET_FRACTION);
+}
 
 type MessageRow = typeof schema.messages.$inferSelect;
 type RecapRow = typeof schema.conversationRecaps.$inferSelect;
@@ -70,14 +84,15 @@ export function contextStatus(ctx: AgentContext, conversationId: string): Contex
   const recapTokens = recap ? estimateTokens(formatRecap(recap)) : 0;
   const verbatimTokens = estimateMessagesTokens(verbatim);
   const usedTokens = recapTokens + verbatimTokens;
+  const budgetTokens = historyBudget(ctx);
   return {
-    budgetTokens: DEFAULT_BUDGET_TOKENS,
+    budgetTokens,
     usedTokens,
     recapTokens,
     verbatimTokens,
     messageCount: messages.length,
     compactedMessageCount: recap?.coveredMessageCount ?? 0,
-    overBudget: usedTokens > DEFAULT_BUDGET_TOKENS,
+    overBudget: usedTokens > budgetTokens,
     lastCompactedAt: recap?.updatedAt ?? null,
   };
 }

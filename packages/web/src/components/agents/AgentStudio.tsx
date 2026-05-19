@@ -996,8 +996,21 @@ function ModelTab({ profile, onSaved }: TabProps) {
   const [cm, setCm] = useState(profile.model.chat.modelId);
   const [ep, setEp] = useState<ProviderId>(profile.model.embedding.provider);
   const [em, setEm] = useState(profile.model.embedding.modelId);
+  const [cw, setCw] = useState(
+    profile.model.contextWindow != null ? String(profile.model.contextWindow) : ""
+  );
   const [saved, setSaved] = useState(false);
   const dirty = () => setSaved(false);
+
+  /** The model config to save, with the optional context-window override. */
+  const modelConfig = (chatModelId: string) => {
+    const cwNum = Math.round(Number(cw));
+    return {
+      chat: { provider: cp, modelId: chatModelId },
+      embedding: { provider: ep, modelId: em.trim() },
+      ...(cw.trim() && Number.isFinite(cwNum) && cwNum > 0 ? { contextWindow: cwNum } : {}),
+    };
+  };
 
   return (
     <Form>
@@ -1024,10 +1037,7 @@ function ModelTab({ profile, onSaved }: TabProps) {
           onUseCodexModel={async (m) => {
             setCm(m);
             await update(profile.id, {
-              model: {
-                chat: { provider: cp, modelId: m },
-                embedding: { provider: ep, modelId: em.trim() },
-              },
+              model: modelConfig(m),
               allowedModels: [
                 { provider: cp, modelId: "*" },
                 { provider: ep, modelId: "*" },
@@ -1038,6 +1048,24 @@ function ModelTab({ profile, onSaved }: TabProps) {
           }}
         />
       )}
+      <Field label="Context window (tokens)">
+        <input
+          type="number"
+          min={1000}
+          step={1000}
+          value={cw}
+          onChange={(e) => {
+            setCw(e.target.value);
+            dirty();
+          }}
+          placeholder="Leave blank to use the global default"
+          style={input}
+        />
+      </Field>
+      <p style={hint}>
+        The model's total context window. About 75% is kept for conversation history; older turns
+        compact into a recap past that. Leave blank to inherit the global default.
+      </p>
       <Field label="Embedding model (for semantic memory)">
         <div style={{ display: "flex", gap: 8 }}>
           <select
@@ -1065,10 +1093,7 @@ function ModelTab({ profile, onSaved }: TabProps) {
       <SaveBar
         onSave={async () => {
           await update(profile.id, {
-            model: {
-              chat: { provider: cp, modelId: cm.trim() },
-              embedding: { provider: ep, modelId: em.trim() },
-            },
+            model: modelConfig(cm.trim()),
             allowedModels: [
               { provider: cp, modelId: "*" },
               { provider: ep, modelId: "*" },

@@ -239,7 +239,13 @@ export function normalizeProfile(p: Partial<AgentProfile> & { id: string }): Age
     displayName: p.displayName ?? p.id,
     role,
     persona: p.persona ?? "",
-    model: { chat, embedding },
+    model: {
+      chat,
+      embedding,
+      ...(typeof p.model?.contextWindow === "number" && p.model.contextWindow > 0
+        ? { contextWindow: p.model.contextWindow }
+        : {}),
+    },
     allowedModels: p.allowedModels?.length
       ? p.allowedModels
       : [{ provider: chat.provider, modelId: "*" }],

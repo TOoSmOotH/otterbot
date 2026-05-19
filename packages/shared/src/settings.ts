@@ -15,5 +15,10 @@ export interface GlobalSettings {
   theme: ThemeId;
   defaultChatModel: ModelRef;
   defaultEmbeddingModel: ModelRef;
+  /**
+   * Default chat-model context window (tokens) for agents that don't set their
+   * own. The conversation-history budget is derived from this.
+   */
+  defaultContextWindow: number;
   providers: Record<ProviderId, GlobalProviderSettings>;
 }

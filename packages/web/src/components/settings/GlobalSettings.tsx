@@ -113,6 +113,23 @@ export function GlobalSettings() {
             }
           />
         </div>
+        <Field label="Default context window (tokens)">
+          <input
+            type="number"
+            min={1000}
+            step={1000}
+            value={draft.defaultContextWindow}
+            onChange={(e) =>
+              patch({ defaultContextWindow: Math.max(0, Math.round(Number(e.target.value) || 0)) })
+            }
+            style={{ ...input, maxWidth: 220 }}
+          />
+        </Field>
+        <p style={hint}>
+          The chat model's context window for agents that don't set their own. About 75% is kept
+          for conversation history; older turns compact into a recap past that. Per-agent overrides
+          live in Agent Studio → Model.
+        </p>
       </section>
 
       <section style={section}>

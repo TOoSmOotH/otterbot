@@ -18,6 +18,7 @@ import type { Config } from "../config.js";
 import { ProfileStore, normalizeProfile } from "../profiles/profile-store.js";
 import { controlSchema, type ControlDb } from "../db/control-db.js";
 import { buildAgentContext, type AgentContext } from "../runtime/agent-context.js";
+import { DEFAULT_CONTEXT_WINDOW } from "../runtime/context-manager.js";
 import { AgentRuntime } from "../runtime/agent-runtime.js";
 import type { AgentServices, SpawnResult } from "../runtime/agent-services.js";
 import { resolveEmbedder } from "../providers/registry.js";
@@ -89,6 +90,7 @@ const DEFAULT_GLOBAL_SETTINGS: GlobalSettings = {
   theme: "obsidian",
   defaultChatModel: { provider: "lmstudio", modelId: "local-model" },
   defaultEmbeddingModel: { provider: "lmstudio", modelId: "local-model" },
+  defaultContextWindow: DEFAULT_CONTEXT_WINDOW,
   providers: Object.fromEntries(
     PROVIDER_CATALOG.map((p) => [
       p.id,
@@ -119,6 +121,10 @@ function normalizeGlobalSettings(input?: Partial<GlobalSettings> | null): Global
     theme: input?.theme ?? defaults.theme,
     defaultChatModel: input?.defaultChatModel ?? defaults.defaultChatModel,
     defaultEmbeddingModel: input?.defaultEmbeddingModel ?? defaults.defaultEmbeddingModel,
+    defaultContextWindow:
+      typeof input?.defaultContextWindow === "number" && input.defaultContextWindow > 0
+        ? input.defaultContextWindow
+        : defaults.defaultContextWindow,
     providers: nextProviders,
   };
 }
@@ -359,6 +365,7 @@ export class Orchestrator {
     const ctx = buildAgentContext({
       profile,
       secrets,
+      contextWindow: profile.model.contextWindow ?? this.getGlobalSettings().defaultContextWindow,
       agentDbPath: paths.agentDb,
       skillsDir: paths.skillsDir,
       workspaceDir: paths.workspace,
