@@ -5,13 +5,15 @@ import type {
   AgentProfileSummary,
   AgentRole,
   GlobalSettings as GlobalSettingsShape,
+  ModelRef,
   ProviderId,
   ProviderInfo,
   ThemeId,
 } from "@otterbot/shared";
 import { THEMES, useGlobalSettingsStore, applyTheme } from "../../stores/global-settings-store";
-import { useProvidersStore } from "../../stores/providers-store";
+import { useProvidersStore, globalProviderPatch } from "../../stores/providers-store";
 import { BuiltinEmbedderControls } from "../BuiltinEmbedderControls";
+import { ProviderFields, isLocalProvider, type TestState } from "../agents/ProviderFields";
 import { PeerAccessEditor } from "../agents/PeerAccessEditor";
 
 type OpenAiAuthStatus = { connected: boolean; accountId: string | null };
@@ -85,21 +87,27 @@ export function GlobalSettings() {
 
       <section style={section}>
         <h2 style={h2}>Default Models</h2>
+        <p style={hint}>
+          The model new agents start with. Pick a provider, test the connection, and choose from
+          the models it serves. Credentials are shared with the Model Providers section below.
+        </p>
         <div style={grid}>
-          <ModelPicker
+          <DefaultModelPicker
             title="Chat"
+            kind="chat"
             providers={chatProviders}
-            provider={draft.defaultChatModel.provider}
-            modelId={draft.defaultChatModel.modelId}
-            onChange={(provider, modelId) =>
-              patch({ defaultChatModel: { provider, modelId } })
-            }
+            draft={draft}
+            patch={patch}
+            value={draft.defaultChatModel}
+            onChange={(provider, modelId) => patch({ defaultChatModel: { provider, modelId } })}
           />
-          <ModelPicker
+          <DefaultModelPicker
             title="Embeddings"
+            kind="embedding"
             providers={embeddingProviders}
-            provider={draft.defaultEmbeddingModel.provider}
-            modelId={draft.defaultEmbeddingModel.modelId}
+            draft={draft}
+            patch={patch}
+            value={draft.defaultEmbeddingModel}
             onChange={(provider, modelId) =>
               patch({ defaultEmbeddingModel: { provider, modelId } })
             }
@@ -369,38 +377,78 @@ function OpenAiOAuthControls() {
   );
 }
 
-function ModelPicker({
+/** A sensible default model id when a default-model picker's provider changes. */
+function defaultModelId(p: ProviderId, kind: "chat" | "embedding"): string {
+  if (kind === "embedding") {
+    return p === "builtin"
+      ? "all-MiniLM-L6-v2"
+      : p === "openai"
+        ? "text-embedding-3-small"
+        : "local-embedding-model";
+  }
+  return p === "anthropic" ? "claude-opus-4-7" : p === "openai" ? "gpt-4o" : "local-model";
+}
+
+/**
+ * A default-model picker for the Settings page: the shared `ProviderFields`
+ * selector (provider chips, credential entry, connection test, model list)
+ * wired to write the chosen model into the global-settings draft. Any typed
+ * credential is merged into that provider's draft config — the same store the
+ * Model Providers section edits.
+ */
+function DefaultModelPicker({
   title,
+  kind,
   providers,
-  provider,
-  modelId,
+  draft,
+  patch,
+  value,
   onChange,
 }: {
   title: string;
+  kind: "chat" | "embedding";
   providers: ProviderInfo[];
-  provider: ProviderId;
-  modelId: string;
+  draft: GlobalSettingsShape;
+  patch: (p: Partial<GlobalSettingsShape>) => void;
+  value: ModelRef;
   onChange: (provider: ProviderId, modelId: string) => void;
 }) {
+  const [cred, setCred] = useState("");
+  const [test, setTest] = useState<TestState>({ status: "idle" });
+  const [models, setModels] = useState<string[]>([]);
+
+  const pickProvider = (p: ProviderId) => {
+    setTest({ status: "idle" });
+    setModels([]);
+    const info = providers.find((x) => x.id === p);
+    const savedBaseUrl = draft.providers[p]?.baseUrl;
+    setCred(info && isLocalProvider(info) && savedBaseUrl ? savedBaseUrl : "");
+    onChange(p, defaultModelId(p, kind));
+  };
+
   return (
     <div style={panel}>
       <strong style={{ fontSize: 13 }}>{title}</strong>
-      <div style={{ display: "grid", gridTemplateColumns: "140px 1fr", gap: 8 }}>
-        <select
-          value={provider}
-          onChange={(e) => onChange(e.target.value, modelId)}
-          style={input}
-        >
-          {/* The saved provider may not be in the list yet (still loading). */}
-          {!providers.some((p) => p.id === provider) && <option value={provider}>{provider}</option>}
-          {providers.map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.label}
-            </option>
-          ))}
-        </select>
-        <input value={modelId} onChange={(e) => onChange(provider, e.target.value)} style={input} />
-      </div>
+      <ProviderFields
+        kind={kind}
+        providers={providers}
+        provider={value.provider}
+        onProvider={pickProvider}
+        cred={cred}
+        onCred={(v) => {
+          setCred(v);
+          const info = providers.find((x) => x.id === value.provider);
+          if (info) patchProvider(value.provider, globalProviderPatch(info, v), draft, patch);
+        }}
+        modelId={value.modelId}
+        onModelId={(m) => onChange(value.provider, m)}
+        test={test}
+        onTest={setTest}
+        models={models}
+        onModels={setModels}
+        modelLabel={`${title} model`}
+        globalConfig={draft.providers[value.provider]}
+      />
     </div>
   );
 }

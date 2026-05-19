@@ -1,16 +1,17 @@
 import { useEffect, useState } from "react";
-import type { ProviderId } from "@otterbot/shared";
+import type { GlobalProviderSettings, ProviderId } from "@otterbot/shared";
 import { useSetupStore } from "../../stores/setup-store";
 import { useAgentsStore } from "../../stores/agents-store";
 import { useGlobalSettingsStore } from "../../stores/global-settings-store";
 import {
   useProvidersStore,
-  providerCredField,
   providerDefaultCred,
+  globalProviderPatch,
 } from "../../stores/providers-store";
 import {
   ProviderFields,
   Field,
+  isLocalProvider,
   type OAuthBundle,
   type TestState,
   type AuthMethod,
@@ -27,6 +28,7 @@ const BUILTIN_EMBED_MODEL = "all-MiniLM-L6-v2";
 export function OnboardingWizard() {
   const markComplete = useSetupStore((s) => s.markComplete);
   const reloadAgents = useAgentsStore((s) => s.load);
+  const settings = useGlobalSettingsStore((s) => s.settings);
   const loadSettings = useGlobalSettingsStore((s) => s.load);
   const saveSettings = useGlobalSettingsStore((s) => s.save);
   const providers = useProvidersStore((s) => s.providers);
@@ -34,10 +36,16 @@ export function OnboardingWizard() {
   const chatProviders = providers.filter((p) => p.supportsChat);
   const embeddingProviders = providers.filter((p) => p.supportsEmbeddings);
   const providerInfo = (id: ProviderId) => providers.find((p) => p.id === id);
-  /** The credential field a provider needs, or null when it needs none. */
-  const credFieldFor = (id: ProviderId) => {
+  /**
+   * The credential field's initial value for a provider: a local server's
+   * already-saved base URL when there is one, else the provider default.
+   */
+  const credSeedFor = (id: ProviderId) => {
     const info = providerInfo(id);
-    return info ? providerCredField(info) : null;
+    if (!info) return "";
+    const savedBaseUrl = settings.providers[id]?.baseUrl;
+    if (isLocalProvider(info) && savedBaseUrl) return savedBaseUrl;
+    return providerDefaultCred(info);
   };
 
   const [step, setStep] = useState(0);
@@ -81,8 +89,7 @@ export function OnboardingWizard() {
     setOpenAiAuth("api-key");
     setChatTest({ status: "idle" });
     setChatModels([]);
-    const info = providerInfo(p);
-    setChatCred(info ? providerDefaultCred(info) : "");
+    setChatCred(credSeedFor(p));
     setChatModelId(p === "anthropic" ? "claude-opus-4-7" : p === "openai" ? "gpt-4o" : "local-model");
   };
 
@@ -92,10 +99,7 @@ export function OnboardingWizard() {
     setEmbTest({ status: "idle" });
     setEmbModels([]);
     // Reuse the chat credential when both slots share a (non-OAuth) provider.
-    const info = providerInfo(p);
-    setEmbCred(
-      p === chatProvider && !useChatOAuth ? chatCred : info ? providerDefaultCred(info) : ""
-    );
+    setEmbCred(p === chatProvider && !useChatOAuth ? chatCred : credSeedFor(p));
     setEmbModelId(
       p === "builtin"
         ? BUILTIN_EMBED_MODEL
@@ -226,35 +230,35 @@ export function OnboardingWizard() {
         ? { provider: "builtin" as ProviderId, modelId: "" }
         : { provider: embProvider, modelId: embModelId.trim() };
 
+      // Provider credentials are saved to Global Settings — the single source
+      // of truth — so every agent reuses them. The built-in embedder has no
+      // credential field; OAuth tokens are stored server-side by its flow.
+      const current = useGlobalSettingsStore.getState().settings;
+      const providerPatch: Record<string, GlobalProviderSettings> = {};
+      const addCred = (p: ProviderId, value: string) => {
+        const info = providerInfo(p);
+        if (!info || p === "builtin" || !value.trim()) return;
+        providerPatch[p] = {
+          ...current.providers[p],
+          ...providerPatch[p],
+          ...globalProviderPatch(info, value.trim()),
+        };
+      };
+      if (!useChatOAuth) addCred(chatProvider, chatCred);
+      if (!embSkipped) addCred(embeddingRef.provider, embCred);
       if (useChatOAuth) {
-        // Tokens are stored server-side by the OAuth flow; flip the OpenAI
-        // provider over to OAuth account-wide so model resolution uses them.
-        const current = useGlobalSettingsStore.getState().settings;
+        // Flip OpenAI to OAuth account-wide so model resolution uses the
+        // server-side tokens. Folded into the single save below.
+        providerPatch.openai = {
+          ...current.providers.openai,
+          ...providerPatch.openai,
+          authMethod: "oauth",
+        };
+      }
+      if (Object.keys(providerPatch).length > 0) {
         await saveSettings({
           ...current,
-          providers: {
-            ...current.providers,
-            openai: { ...current.providers.openai, authMethod: "oauth" },
-          },
-        });
-      }
-
-      // Collect credentials for both slots; a shared provider key is written
-      // once. The built-in embedder has no credential field.
-      const secrets: Record<string, string> = {};
-      const chatCredKey = credFieldFor(chatProvider)?.key;
-      const embCredKey = credFieldFor(embeddingRef.provider)?.key;
-      if (!useChatOAuth && chatCred.trim() && chatCredKey) {
-        secrets[chatCredKey] = chatCred.trim();
-      }
-      if (!embSkipped && embCred.trim() && embCredKey) {
-        secrets[embCredKey] = embCred.trim();
-      }
-      if (Object.keys(secrets).length > 0) {
-        await fetch("/api/agents/coo/credentials", {
-          method: "PATCH",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify(secrets),
+          providers: { ...current.providers, ...providerPatch },
         });
       }
 
@@ -340,6 +344,7 @@ export function OnboardingWizard() {
               onModels={setChatModels}
               modelLabel="Chat model"
               oauth={oauthBundle}
+              globalConfig={settings.providers[chatProvider]}
             />
             <Buttons>
               <button style={ghost} onClick={() => setStep(0)}>
@@ -379,6 +384,7 @@ export function OnboardingWizard() {
               models={embModels}
               onModels={setEmbModels}
               modelLabel="Embedding model"
+              globalConfig={settings.providers[embProvider]}
             />
             <Buttons>
               <button style={ghost} onClick={() => setStep(1)}>

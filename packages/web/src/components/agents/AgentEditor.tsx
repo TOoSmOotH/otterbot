@@ -1,13 +1,20 @@
 import { useEffect, useState } from "react";
-import type { AgentPeerAccess, AgentProfile, AgentRole, ModelRef, ProviderId } from "@otterbot/shared";
+import type {
+  AgentPeerAccess,
+  AgentProfile,
+  AgentRole,
+  GlobalProviderSettings,
+  ModelRef,
+  ProviderId,
+} from "@otterbot/shared";
 import { useAgentsStore } from "../../stores/agents-store";
 import { useGlobalSettingsStore } from "../../stores/global-settings-store";
 import {
   useProvidersStore,
-  providerCredField,
   providerDefaultCred,
+  globalProviderPatch,
 } from "../../stores/providers-store";
-import { ProviderFields, type TestState } from "./ProviderFields";
+import { ProviderFields, isLocalProvider, type TestState } from "./ProviderFields";
 import { PeerAccessEditor } from "./PeerAccessEditor";
 
 interface FormState {
@@ -48,13 +55,21 @@ export function AgentEditor({ agentId, onClose }: { agentId: string | null; onCl
   const agents = useAgentsStore((s) => s.agents);
   const globalSettings = useGlobalSettingsStore((s) => s.settings);
   const loadGlobalSettings = useGlobalSettingsStore((s) => s.load);
+  const saveSettings = useGlobalSettingsStore((s) => s.save);
   const providers = useProvidersStore((s) => s.providers);
   const loadProviders = useProvidersStore((s) => s.load);
   const chatProviders = providers.filter((p) => p.supportsChat);
   const embeddingProviders = providers.filter((p) => p.supportsEmbeddings);
-  const credKey = (id: ProviderId) => {
+  /**
+   * The credential field's initial value for a provider: a local server's
+   * already-saved base URL when there is one, else the provider default.
+   */
+  const credSeedFor = (id: ProviderId) => {
     const info = providers.find((p) => p.id === id);
-    return info ? providerCredField(info)?.key : undefined;
+    if (!info) return "";
+    const savedBaseUrl = globalSettings.providers[id]?.baseUrl;
+    if (isLocalProvider(info) && savedBaseUrl) return savedBaseUrl;
+    return providerDefaultCred(info);
   };
 
   const [form, setForm] = useState<FormState>(BLANK);
@@ -134,8 +149,7 @@ export function AgentEditor({ agentId, onClose }: { agentId: string | null; onCl
     setChatProvider(p);
     setChatTest({ status: "idle" });
     setChatModels([]);
-    const info = providers.find((x) => x.id === p);
-    setChatCred(info ? providerDefaultCred(info) : "");
+    setChatCred(credSeedFor(p));
     setChatModel(defaultChatModel(p));
   };
 
@@ -143,8 +157,7 @@ export function AgentEditor({ agentId, onClose }: { agentId: string | null; onCl
     setEmbProvider(p);
     setEmbTest({ status: "idle" });
     setEmbModels([]);
-    const info = providers.find((x) => x.id === p);
-    setEmbCred(info ? providerDefaultCred(info) : "");
+    setEmbCred(credSeedFor(p));
     setEmbModel(defaultEmbedModel(p));
   };
 
@@ -174,31 +187,32 @@ export function AgentEditor({ agentId, onClose }: { agentId: string | null; onCl
         allowedPeers: form.allowedPeers,
       };
 
-      let id = agentId;
       if (isEdit && agentId) {
         await update(agentId, payload);
       } else {
-        const created = await create(payload);
-        id = created?.id ?? null;
+        await create(payload);
       }
 
-      // Provider keys typed into the model pickers are merged into the
-      // agent's credentials (without disturbing its other secrets).
-      if (id) {
-        const secrets: Record<string, string> = {};
-        const chatKey = credKey(chatProvider);
-        if (chatCred.trim() && chatKey) secrets[chatKey] = chatCred.trim();
-        if (!inheritEmbedding) {
-          const embKey = credKey(embProvider);
-          if (embCred.trim() && embKey) secrets[embKey] = embCred.trim();
-        }
-        if (Object.keys(secrets).length > 0) {
-          await fetch(`/api/agents/${id}/credentials`, {
-            method: "PATCH",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify(secrets),
-          });
-        }
+      // Provider credentials typed into the model pickers are saved to Global
+      // Settings — the single source of truth — so every agent reuses them.
+      const current = useGlobalSettingsStore.getState().settings;
+      const providerPatch: Record<string, GlobalProviderSettings> = {};
+      const addCred = (p: ProviderId, value: string) => {
+        const info = providers.find((x) => x.id === p);
+        if (!info || p === "builtin" || !value.trim()) return;
+        providerPatch[p] = {
+          ...current.providers[p],
+          ...providerPatch[p],
+          ...globalProviderPatch(info, value.trim()),
+        };
+      };
+      addCred(chatProvider, chatCred);
+      if (!inheritEmbedding) addCred(embProvider, embCred);
+      if (Object.keys(providerPatch).length > 0) {
+        await saveSettings({
+          ...current,
+          providers: { ...current.providers, ...providerPatch },
+        });
       }
     } finally {
       setSaving(false);
@@ -306,6 +320,7 @@ export function AgentEditor({ agentId, onClose }: { agentId: string | null; onCl
             models={chatModels}
             onModels={setChatModels}
             modelLabel="Chat model"
+            globalConfig={globalSettings.providers[chatProvider]}
           />
         </div>
 
@@ -344,6 +359,7 @@ export function AgentEditor({ agentId, onClose }: { agentId: string | null; onCl
               models={embModels}
               onModels={setEmbModels}
               modelLabel="Embedding model"
+              globalConfig={globalSettings.providers[embProvider]}
             />
           )}
         </div>

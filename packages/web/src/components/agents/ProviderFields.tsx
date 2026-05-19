@@ -1,5 +1,6 @@
-import type { ProviderId, ProviderInfo } from "@otterbot/shared";
-import { providerCredField } from "../../stores/providers-store";
+import { useEffect, useState } from "react";
+import type { GlobalProviderSettings, ProviderId, ProviderInfo } from "@otterbot/shared";
+import { providerCredField, isProviderConfiguredGlobally } from "../../stores/providers-store";
 import { BuiltinEmbedderControls } from "../BuiltinEmbedderControls";
 
 export type TestState = { status: "idle" | "testing" | "ok" | "fail"; message?: string };
@@ -47,6 +48,7 @@ export function ProviderFields({
   modelLabel,
   modelHint,
   oauth,
+  globalConfig,
 }: {
   kind: "chat" | "embedding";
   providers: ProviderInfo[];
@@ -63,11 +65,19 @@ export function ProviderFields({
   modelLabel: string;
   modelHint?: string;
   oauth?: OAuthBundle;
+  /** The provider's saved Global Settings entry, if any. */
+  globalConfig?: GlobalProviderSettings;
 }) {
   const info = providers.find((p) => p.id === provider);
   const credMeta = info ? providerCredField(info) : null;
   const isLocal = isLocalProvider(info);
   const useOAuth = !!oauth && provider === "openai" && oauth.authMethod === "oauth";
+  const configuredGlobally = !!info && isProviderConfiguredGlobally(info, globalConfig);
+
+  // When a provider is already configured globally the credential field is
+  // collapsed to a "✓ Configured" row; this reveals it for an override.
+  const [editCred, setEditCred] = useState(false);
+  useEffect(() => setEditCred(false), [provider]);
 
   /** Fetch the model list a provider currently serves. */
   const loadModels = async () => {
@@ -235,21 +245,33 @@ export function ProviderFields({
         </div>
       ) : (
         <>
-          {credMeta && (
-            <Field label={credMeta.label}>
-              <input
-                type={credMeta.secret ? "password" : "text"}
-                value={cred}
-                onChange={(e) => {
-                  onCred(e.target.value);
-                  onTest({ status: "idle" });
-                  onModels([]);
-                }}
-                placeholder={credMeta.placeholder}
-                style={input}
-              />
-            </Field>
-          )}
+          {credMeta &&
+            (configuredGlobally && !editCred ? (
+              <Field label={credMeta.label}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <span style={{ fontSize: 12, color: "#4ade80" }}>
+                    ✓ Configured in Global Settings
+                  </span>
+                  <button style={updateBtn} onClick={() => setEditCred(true)}>
+                    Update credentials
+                  </button>
+                </div>
+              </Field>
+            ) : (
+              <Field label={credMeta.label}>
+                <input
+                  type={credMeta.secret ? "password" : "text"}
+                  value={cred}
+                  onChange={(e) => {
+                    onCred(e.target.value);
+                    onTest({ status: "idle" });
+                    onModels([]);
+                  }}
+                  placeholder={credMeta.placeholder}
+                  style={input}
+                />
+              </Field>
+            ))}
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <button
               style={ghost}
@@ -369,6 +391,16 @@ const ghost: React.CSSProperties = {
   borderRadius: 7,
   cursor: "pointer",
   fontSize: 13,
+};
+
+const updateBtn: React.CSSProperties = {
+  background: "transparent",
+  color: "rgb(var(--fg))",
+  border: "1px solid rgb(var(--border))",
+  padding: "4px 10px",
+  borderRadius: 6,
+  cursor: "pointer",
+  fontSize: 12,
 };
 
 const oauthCard: React.CSSProperties = {
