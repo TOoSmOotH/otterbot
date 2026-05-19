@@ -6,6 +6,7 @@ import type { AgentServices } from "../runtime/agent-services.js";
 import { sendEmail } from "../integrations/email.js";
 import { createIssue, listIssues } from "../integrations/github.js";
 import { runAgentShell } from "../integrations/shell.js";
+import { searchWeb } from "../integrations/web-search.js";
 
 /**
  * Build the tool set for an agent, scoped to its own context. When cross-agent
@@ -219,6 +220,28 @@ export function buildAgentTools(
       },
     });
   }
+
+  // Web search — opt-in per agent (profile.canWebSearch).
+  if (ctx.profile.canWebSearch) {
+    tools.web_search = tool({
+      description:
+        "Search the web with DuckDuckGo. Returns a list of results, each with a " +
+        "title, URL and snippet. Use it to find current information.",
+      parameters: z.object({
+        query: z.string().min(1).describe("The search query."),
+      }),
+      execute: async ({ query }) => {
+        try {
+          return { ok: true, results: await searchWeb(query) };
+        } catch (err) {
+          return { ok: false, error: err instanceof Error ? err.message : String(err) };
+        }
+      },
+    });
+  }
+
+  // Tools discovered from the agent's MCP servers (populated after connect).
+  Object.assign(tools, ctx.mcpTools);
 
   if (!services) return tools;
 

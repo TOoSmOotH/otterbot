@@ -10,7 +10,13 @@ import {
 } from "node:fs";
 import { join, resolve } from "node:path";
 import { parse as parseDotenv } from "dotenv";
-import type { AgentProfile, AgentRole, ChannelBotConfig, ModelRef } from "@otterbot/shared";
+import type {
+  AgentProfile,
+  AgentRole,
+  ChannelBotConfig,
+  McpServerConfig,
+  ModelRef,
+} from "@otterbot/shared";
 
 /** Resolved on-disk paths for one agent profile directory. */
 export interface ProfilePaths {
@@ -186,6 +192,8 @@ export class ProfileStore {
       canSpawnSubagents: true,
       subagentLimit: 5,
       canRunShell: false,
+      canWebSearch: false,
+      mcpServers: [],
       parentId: null,
       createdAt: now,
     };
@@ -193,6 +201,18 @@ export class ProfileStore {
     console.info("[profiles] created default COO profile");
     return profile;
   }
+}
+
+/** Fill in defaults on an MCP server config (older/partial entries). */
+function normalizeMcpServer(s: Partial<McpServerConfig>): McpServerConfig {
+  return {
+    name: s.name ?? "",
+    transport: s.transport === "sse" ? "sse" : "stdio",
+    enabled: s.enabled ?? true,
+    command: s.command,
+    args: s.args ?? [],
+    url: s.url,
+  };
 }
 
 /** Fill in defaults on a channel connector config (older profiles lack newer fields). */
@@ -232,6 +252,8 @@ export function normalizeProfile(p: Partial<AgentProfile> & { id: string }): Age
     canSpawnSubagents: p.canSpawnSubagents ?? role !== "subagent",
     subagentLimit: p.subagentLimit ?? 5,
     canRunShell: p.canRunShell ?? false,
+    canWebSearch: p.canWebSearch ?? false,
+    mcpServers: (p.mcpServers ?? []).map(normalizeMcpServer),
     parentId: p.parentId ?? null,
     createdAt: p.createdAt ?? new Date().toISOString(),
   };

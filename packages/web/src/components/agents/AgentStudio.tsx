@@ -3,6 +3,8 @@ import type {
   AgentProfile,
   AgentConnectorStatus,
   ChannelConnectorStatus,
+  McpServerConfig,
+  McpServerStatus,
   ProviderId,
   Skill,
   ScheduledTask,
@@ -15,7 +17,7 @@ import { BuiltinEmbedderControls } from "../BuiltinEmbedderControls";
 import { ProviderOptions } from "../ProviderOptions";
 import { AvatarUpload } from "./AvatarUpload";
 
-const TABS = ["Identity", "Persona", "Model", "Channels", "Skills", "Schedule", "Memory", "Credentials"] as const;
+const TABS = ["Identity", "Persona", "Model", "Capabilities", "Channels", "Skills", "Schedule", "Memory", "Credentials"] as const;
 type StudioTab = (typeof TABS)[number];
 
 /** Full-screen agent management surface — identity, persona, model, skills,
@@ -101,6 +103,7 @@ export function AgentStudio({ agentId }: { agentId: string | null }) {
         {tab === "Identity" && <IdentityTab profile={profile} onSaved={onSaved} />}
         {tab === "Persona" && <PersonaTab profile={profile} onSaved={onSaved} />}
         {tab === "Model" && <ModelTab profile={profile} onSaved={onSaved} />}
+        {tab === "Capabilities" && <CapabilitiesTab profile={profile} onSaved={onSaved} />}
         {tab === "Channels" && <ChannelsTab profile={profile} onSaved={onSaved} />}
         {tab === "Skills" && <SkillsTab agentId={profile.id} />}
         {tab === "Schedule" && <ScheduleTab agentId={profile.id} />}
@@ -119,9 +122,6 @@ function IdentityTab({ profile, onSaved }: TabProps) {
   const [displayName, setName] = useState(profile.displayName);
   const [email, setEmail] = useState(profile.email ?? "");
   const [transport, setTransport] = useState(profile.transport);
-  const [canSpawn, setCanSpawn] = useState(profile.canSpawnSubagents);
-  const [limit, setLimit] = useState(profile.subagentLimit);
-  const [canRunShell, setCanRunShell] = useState(profile.canRunShell);
   const [saved, setSaved] = useState(false);
 
   const save = async () => {
@@ -129,9 +129,6 @@ function IdentityTab({ profile, onSaved }: TabProps) {
       displayName,
       email: email.trim() || null,
       transport,
-      canSpawnSubagents: canSpawn,
-      subagentLimit: limit,
-      canRunShell,
     });
     setSaved(true);
     onSaved();
@@ -159,34 +156,207 @@ function IdentityTab({ profile, onSaved }: TabProps) {
           <option value="discord">discord</option>
         </select>
       </Field>
-      <label style={checkboxRow}>
-        <input type="checkbox" checked={canSpawn} onChange={(e) => setCanSpawn(e.target.checked)} />
-        Can spawn subagents
-      </label>
-      <Field label="Subagent limit">
-        <input
-          type="number"
-          min={0}
-          max={20}
-          value={limit}
-          onChange={(e) => setLimit(Number(e.target.value))}
-          style={{ ...input, width: 90 }}
-        />
-      </Field>
-      <label style={checkboxRow}>
-        <input
-          type="checkbox"
-          checked={canRunShell}
-          onChange={(e) => setCanRunShell(e.target.checked)}
-        />
-        Allow shell access
-      </label>
-      <p style={hint}>
-        Gives the agent a <code>shell_exec</code> tool that runs commands in a sandboxed
-        per-agent workspace — confined to that directory (via bubblewrap on Linux,
-        sandbox-exec on macOS). It runs real commands; only enable it for agents you trust
-        with that.
-      </p>
+      <SaveBar onSave={save} saved={saved} onDirty={() => setSaved(false)} />
+    </Form>
+  );
+}
+
+// --- Capabilities ---------------------------------------------------------
+
+/** Split a command line into the executable + its arguments. */
+function parseCommand(line: string): { command: string; args: string[] } {
+  const parts = line.trim().split(/\s+/).filter(Boolean);
+  return { command: parts[0] ?? "", args: parts.slice(1) };
+}
+
+const MCP_STATE_COLOR: Record<string, string> = {
+  connected: "#4ade80",
+  connecting: "rgb(var(--muted))",
+  error: "#f87171",
+  disabled: "rgb(var(--muted))",
+};
+
+/** What an agent is allowed to do — shell, subagents, web search, MCP. */
+function CapabilitiesTab({ profile, onSaved }: TabProps) {
+  const update = useAgentsStore((s) => s.update);
+  const [canSpawn, setCanSpawn] = useState(profile.canSpawnSubagents);
+  const [limit, setLimit] = useState(profile.subagentLimit);
+  const [canRunShell, setCanRunShell] = useState(profile.canRunShell);
+  const [canWebSearch, setCanWebSearch] = useState(profile.canWebSearch);
+  const [mcpServers, setMcpServers] = useState<McpServerConfig[]>(profile.mcpServers);
+  const [mcpStatus, setMcpStatus] = useState<McpServerStatus[]>([]);
+  const [saved, setSaved] = useState(false);
+
+  const refreshMcp = () =>
+    fetch(`/api/agents/${profile.id}/mcp`)
+      .then((r) => (r.ok ? (r.json() as Promise<McpServerStatus[]>) : null))
+      .then((s) => s && setMcpStatus(s))
+      .catch(() => {});
+  useEffect(() => {
+    void refreshMcp();
+    const timer = setInterval(refreshMcp, 3000);
+    return () => clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [profile.id]);
+
+  const setServer = (i: number, patch: Partial<McpServerConfig>) =>
+    setMcpServers((list) => list.map((s, idx) => (idx === i ? { ...s, ...patch } : s)));
+
+  const save = async () => {
+    await update(profile.id, {
+      canSpawnSubagents: canSpawn,
+      subagentLimit: limit,
+      canRunShell,
+      canWebSearch,
+      mcpServers: mcpServers.filter((s) => s.name.trim()),
+    });
+    setSaved(true);
+    onSaved();
+    void refreshMcp();
+  };
+
+  return (
+    <Form>
+      <p style={hint}>What this agent is allowed to do. Each capability is off until granted.</p>
+
+      <div style={channelCard}>
+        <label style={checkboxRow}>
+          <input
+            type="checkbox"
+            checked={canRunShell}
+            onChange={(e) => setCanRunShell(e.target.checked)}
+          />
+          Shell access
+        </label>
+        <p style={{ ...hint, marginTop: 0 }}>
+          A <code>shell_exec</code> tool that runs commands in a sandboxed per-agent workspace —
+          confined to that directory (bubblewrap on Linux, sandbox-exec on macOS). It runs real
+          commands; only enable it for agents you trust.
+        </p>
+      </div>
+
+      <div style={channelCard}>
+        <label style={checkboxRow}>
+          <input
+            type="checkbox"
+            checked={canWebSearch}
+            onChange={(e) => setCanWebSearch(e.target.checked)}
+          />
+          Web search
+        </label>
+        <p style={{ ...hint, marginTop: 0 }}>
+          A <code>web_search</code> tool that queries DuckDuckGo — keyless, no setup.
+        </p>
+      </div>
+
+      <div style={channelCard}>
+        <label style={checkboxRow}>
+          <input
+            type="checkbox"
+            checked={canSpawn}
+            onChange={(e) => setCanSpawn(e.target.checked)}
+          />
+          Spawn subagents
+        </label>
+        {canSpawn && (
+          <label
+            style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "rgb(var(--muted))" }}
+          >
+            Limit
+            <input
+              type="number"
+              min={0}
+              max={20}
+              value={limit}
+              onChange={(e) => setLimit(Number(e.target.value))}
+              style={{ ...input, width: 80 }}
+            />
+          </label>
+        )}
+      </div>
+
+      <div style={channelCard}>
+        <strong style={{ fontSize: 12 }}>MCP servers</strong>
+        <p style={{ ...hint, marginTop: 0 }}>
+          Connect Model Context Protocol servers; their tools are added to this agent. stdio
+          servers run as local processes (unsandboxed) with the agent's credentials as env.
+        </p>
+        {mcpServers.map((s, i) => {
+          const st = mcpStatus.find((x) => x.name === s.name);
+          return (
+            <div key={i} style={{ ...channelCard, gap: 6 }}>
+              <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                <input
+                  value={s.name}
+                  onChange={(e) => setServer(i, { name: e.target.value })}
+                  placeholder="server name"
+                  style={{ ...input, flex: 1 }}
+                />
+                <select
+                  value={s.transport}
+                  onChange={(e) => setServer(i, { transport: e.target.value as "stdio" | "sse" })}
+                  style={{ ...input, flex: "0 0 90px" }}
+                >
+                  <option value="stdio">stdio</option>
+                  <option value="sse">sse</option>
+                </select>
+                <label style={{ ...checkboxRow, fontSize: 12 }}>
+                  <input
+                    type="checkbox"
+                    checked={s.enabled}
+                    onChange={(e) => setServer(i, { enabled: e.target.checked })}
+                  />
+                  on
+                </label>
+                <button
+                  type="button"
+                  onClick={() => setMcpServers((l) => l.filter((_, idx) => idx !== i))}
+                  style={{ ...ghost, padding: "4px 10px" }}
+                >
+                  Remove
+                </button>
+              </div>
+              {s.transport === "stdio" ? (
+                <input
+                  value={[s.command ?? "", ...(s.args ?? [])].filter(Boolean).join(" ")}
+                  onChange={(e) => setServer(i, parseCommand(e.target.value))}
+                  placeholder="npx -y @modelcontextprotocol/server-filesystem /path"
+                  style={{ ...input, fontFamily: "monospace", fontSize: 12 }}
+                />
+              ) : (
+                <input
+                  value={s.url ?? ""}
+                  onChange={(e) => setServer(i, { url: e.target.value })}
+                  placeholder="https://mcp.example.com/sse"
+                  style={{ ...input, fontFamily: "monospace", fontSize: 12 }}
+                />
+              )}
+              {st && (
+                <span style={{ fontSize: 11, color: MCP_STATE_COLOR[st.state] ?? "rgb(var(--muted))" }}>
+                  {st.state === "connected"
+                    ? `✓ connected · ${st.toolCount} tool(s)`
+                    : st.state === "error"
+                      ? `✗ ${st.error ?? "failed"}`
+                      : st.state}
+                </span>
+              )}
+            </div>
+          );
+        })}
+        <button
+          type="button"
+          onClick={() =>
+            setMcpServers((l) => [
+              ...l,
+              { name: "", transport: "stdio", enabled: true, command: "", args: [], url: "" },
+            ])
+          }
+          style={{ ...ghost, alignSelf: "flex-start" }}
+        >
+          + Add MCP server
+        </button>
+      </div>
+
       <SaveBar onSave={save} saved={saved} onDirty={() => setSaved(false)} />
     </Form>
   );

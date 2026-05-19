@@ -67,6 +67,32 @@ export interface ChannelBotConfig {
   mentionOnly: boolean;
 }
 
+/** A Model Context Protocol server an agent connects to for extra tools. */
+export interface McpServerConfig {
+  /** Label — namespaces the server's tools as `mcp_<name>_<tool>`. */
+  name: string;
+  /** `stdio` spawns a local command; `sse` connects to a remote URL. */
+  transport: "stdio" | "sse";
+  enabled: boolean;
+  /** stdio: the executable to run. */
+  command?: string;
+  /** stdio: arguments for the command. */
+  args?: string[];
+  /** sse: the server URL. */
+  url?: string;
+}
+
+/** Live state of one MCP server connection. */
+export type McpState = "connecting" | "connected" | "error" | "disabled";
+
+export interface McpServerStatus {
+  name: string;
+  state: McpState;
+  error: string | null;
+  /** Number of tools the server contributed. */
+  toolCount: number;
+}
+
 /** Live state of one chat-channel connector (Slack / Discord). */
 export type ConnectorState =
   | "off"
@@ -148,6 +174,10 @@ export interface AgentProfile {
    * sandboxed workspace directory. Off by default — it runs real commands.
    */
   canRunShell: boolean;
+  /** When true the agent gets a `web_search` tool (DuckDuckGo). */
+  canWebSearch: boolean;
+  /** MCP servers this agent connects to for additional tools. */
+  mcpServers: McpServerConfig[];
   /** Set for subagents; null for the COO and top-level agents. */
   parentId: string | null;
   createdAt: string;

@@ -1,4 +1,5 @@
 import type Database from "better-sqlite3-multiple-ciphers";
+import type { Tool } from "ai";
 import type { AgentProfile } from "@otterbot/shared";
 import { openAgentDb, type AgentDb, type AgentDrizzle } from "../db/agent-db.js";
 import { EmbeddingService, type Embedder } from "../embedding.js";
@@ -26,6 +27,11 @@ export interface AgentContext {
   memory: MemoryService;
   skills: SkillService;
   userProfile: UserProfileService;
+  /**
+   * Tools discovered from the agent's MCP servers — populated asynchronously
+   * by the MCP manager after the agent starts; merged into the agent's tools.
+   */
+  mcpTools: Record<string, Tool>;
   /** Close the agent's database handles. */
   close(): void;
 }
@@ -66,6 +72,7 @@ export function buildAgentContext(input: BuildAgentContextInput): AgentContext {
     memory,
     skills,
     userProfile,
+    mcpTools: {},
     close: () => agentDb.close(),
   };
 }

@@ -11,6 +11,7 @@ import type {
   ChannelBotConfig,
   ChannelConnectorStatus,
   GlobalSettings,
+  McpServerStatus,
   ProviderId,
 } from "@otterbot/shared";
 import type { Config } from "../config.js";
@@ -32,6 +33,7 @@ import {
 } from "../integrations/channel-connector.js";
 import { SlackConnector } from "../integrations/slack-connector.js";
 import { DiscordConnector } from "../integrations/discord-connector.js";
+import { McpManager } from "../integrations/mcp.js";
 
 /** A live per-agent chat connector plus the signature it was started with. */
 interface TrackedConnector<C extends ChannelConnector> {
@@ -160,6 +162,8 @@ export class Orchestrator {
   /** Per-agent chat connectors, keyed by agent id. */
   private readonly slackConnectors = new Map<string, TrackedConnector<SlackConnector>>();
   private readonly discordConnectors = new Map<string, TrackedConnector<DiscordConnector>>();
+  /** Per-agent MCP server connections. */
+  private readonly mcp = new McpManager();
   private subagentSeq = 0;
 
   constructor(
@@ -296,6 +300,7 @@ export class Orchestrator {
     ]);
     this.slackConnectors.clear();
     this.discordConnectors.clear();
+    await this.mcp.shutdown();
     await Promise.allSettled(this.pendingInits.splice(0));
     for (const ctx of this.contexts.values()) {
       try {
@@ -368,6 +373,13 @@ export class Orchestrator {
     this.runtimes.set(profile.id, runtime);
     this.registerInControl(profile, paths.dir);
     this.pendingInits.push(ctx.embedding.init());
+    // Connect the agent's MCP servers in the background; their tools merge in
+    // once available. A failing server never blocks the agent.
+    this.pendingInits.push(
+      this.mcp
+        .connect(profile.id, profile.mcpServers, secrets, ctx.mcpTools)
+        .catch((err) => console.warn(`[mcp] connect failed for ${profile.id}:`, err))
+    );
     ctx.skills.loadFromDisk();
     return ctx;
   }
@@ -576,6 +588,7 @@ export class Orchestrator {
     const updated = normalizeProfile({ ...ctx.profile, ...patch, id });
     this.profiles.save(updated);
 
+    void this.mcp.disconnect(id);
     ctx.close();
     this.contexts.delete(id);
     this.runtimes.delete(id);
@@ -583,6 +596,11 @@ export class Orchestrator {
     if (id === "coo") setDefaultContext(fresh);
     this.reconcileConnectors(updated);
     return updated;
+  }
+
+  /** Live MCP server status for an agent. */
+  getMcpStatus(id: string): McpServerStatus[] | null {
+    return this.contexts.has(id) ? this.mcp.status(id) : null;
   }
 
   /** Absolute path to an agent's stored avatar image, or null if it has none. */
@@ -624,6 +642,7 @@ export class Orchestrator {
     const ctx = this.contexts.get(id);
     if (!ctx) return false;
     await this.stopConnectors(id);
+    await this.mcp.disconnect(id);
     ctx.close();
     this.contexts.delete(id);
     this.runtimes.delete(id);

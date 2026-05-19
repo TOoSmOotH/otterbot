@@ -212,6 +212,16 @@ export async function buildServer(orch: Orchestrator, cfg: Config): Promise<Fast
     return status;
   });
 
+  // Live MCP server status for an agent.
+  app.get<{ Params: { id: string } }>("/api/agents/:id/mcp", async (req, reply) => {
+    const status = orch.getMcpStatus(req.params.id);
+    if (!status) {
+      reply.code(404);
+      return { error: "not found" };
+    }
+    return status;
+  });
+
   app.delete<{ Params: { id: string } }>("/api/agents/:id", async (req, reply) => {
     const ok = await orch.deleteAgent(req.params.id);
     if (!ok) {
