@@ -16,8 +16,16 @@ const DEFAULT_ROWS = 24;
  * The shell launched inside the sandbox: prefer an interactive login `bash`,
  * fall back to `sh -i` on systems without bash. `exec` keeps it as PID 1 of the
  * sandbox so `--die-with-parent` reaps it cleanly.
+ *
+ * The bash-presence check is what's redirected to /dev/null — never the shell
+ * itself: an interactive shell writes its prompt (PS1) to stderr, so silencing
+ * stderr leaves only a blinking cursor with no prompt.
  */
-const INTERACTIVE_SHELL = ["/bin/sh", "-c", "exec bash -il 2>/dev/null || exec sh -i"];
+const INTERACTIVE_SHELL = [
+  "/bin/sh",
+  "-c",
+  "command -v bash >/dev/null 2>&1 && exec bash -il; exec sh -i",
+];
 
 export interface TerminalSize {
   cols: number;
