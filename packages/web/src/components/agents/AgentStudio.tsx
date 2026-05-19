@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import type {
   AgentProfile,
+  AgentConnectorStatus,
+  ChannelConnectorStatus,
   ProviderId,
   Skill,
   ScheduledTask,
@@ -185,8 +187,42 @@ function parseIds(raw: string): string[] {
 }
 
 /** Slack / Discord chat connectors: tokens, channel id, and the access gate. */
+/** A coloured dot + label for one connector's live state. */
+function ConnectorBadge({ s }: { s: ChannelConnectorStatus | undefined }) {
+  if (!s || !s.enabled) return null;
+  const view: Record<string, { color: string; text: string }> = {
+    connected: { color: "#4ade80", text: "Connected" },
+    connecting: { color: "rgb(var(--muted))", text: "Connecting…" },
+    "missing-tokens": { color: "#fbbf24", text: s.error ?? "Tokens missing" },
+    error: { color: "#f87171", text: s.error ?? "Connection failed" },
+    off: { color: "rgb(var(--muted))", text: "" },
+  };
+  const v = view[s.state] ?? view.off;
+  if (!v.text) return null;
+  return (
+    <span style={{ fontSize: 12, color: v.color, display: "flex", alignItems: "center", gap: 5 }}>
+      <span style={{ width: 8, height: 8, borderRadius: "50%", background: v.color }} />
+      {v.text}
+    </span>
+  );
+}
+
 function ChannelsTab({ profile, onSaved }: TabProps) {
   const update = useAgentsStore((s) => s.update);
+
+  const [connStatus, setConnStatus] = useState<AgentConnectorStatus | null>(null);
+  const refreshStatus = () =>
+    fetch(`/api/agents/${profile.id}/connectors`)
+      .then((r) => (r.ok ? (r.json() as Promise<AgentConnectorStatus>) : null))
+      .then(setConnStatus)
+      .catch(() => {});
+  useEffect(() => {
+    void refreshStatus();
+    // Poll — a connector takes a moment to connect after a save / restart.
+    const timer = setInterval(refreshStatus, 3000);
+    return () => clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [profile.id]);
 
   const [slackEnabled, setSlackEnabled] = useState(profile.slack?.enabled ?? false);
   const [slackChannel, setSlackChannel] = useState(profile.slack?.channelId ?? "");
@@ -248,6 +284,7 @@ function ChannelsTab({ profile, onSaved }: TabProps) {
     setDiscordBotToken("");
     setSaved(true);
     onSaved();
+    void refreshStatus();
   };
 
   return (
@@ -258,16 +295,26 @@ function ChannelsTab({ profile, onSaved }: TabProps) {
       </p>
 
       <div style={channelCard}>
-        <label style={checkboxRow}>
-          <input
-            type="checkbox"
-            checked={slackEnabled}
-            onChange={(e) => setSlackEnabled(e.target.checked)}
-          />
-          Enable Slack
-        </label>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+          <label style={checkboxRow}>
+            <input
+              type="checkbox"
+              checked={slackEnabled}
+              onChange={(e) => setSlackEnabled(e.target.checked)}
+            />
+            Enable Slack
+          </label>
+          <ConnectorBadge s={connStatus?.slack} />
+        </div>
         {slackEnabled && (
           <>
+            {connStatus?.slack.state === "connected" && (
+              <p style={{ ...hint, marginTop: 0 }}>
+                Connected. If the agent doesn't reply: invite the bot to the channel, and make
+                sure whoever messages it is allowed — enable "Public bot" or list their Slack
+                user ID below.
+              </p>
+            )}
             <Field label="Bot OAuth token (xoxb-…)">
               <input
                 type="password"
@@ -317,16 +364,26 @@ function ChannelsTab({ profile, onSaved }: TabProps) {
       </div>
 
       <div style={channelCard}>
-        <label style={checkboxRow}>
-          <input
-            type="checkbox"
-            checked={discordEnabled}
-            onChange={(e) => setDiscordEnabled(e.target.checked)}
-          />
-          Enable Discord
-        </label>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+          <label style={checkboxRow}>
+            <input
+              type="checkbox"
+              checked={discordEnabled}
+              onChange={(e) => setDiscordEnabled(e.target.checked)}
+            />
+            Enable Discord
+          </label>
+          <ConnectorBadge s={connStatus?.discord} />
+        </div>
         {discordEnabled && (
           <>
+            {connStatus?.discord.state === "connected" && (
+              <p style={{ ...hint, marginTop: 0 }}>
+                Connected. If the agent doesn't reply: invite the bot to the channel, and make
+                sure whoever messages it is allowed — enable "Public bot" or list their user ID
+                below.
+              </p>
+            )}
             <Field label="Bot token">
               <input
                 type="password"

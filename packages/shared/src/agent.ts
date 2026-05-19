@@ -60,6 +60,28 @@ export interface ChannelBotConfig {
   allowedUserIds: string[];
 }
 
+/** Live state of one chat-channel connector (Slack / Discord). */
+export type ConnectorState =
+  | "off"
+  | "missing-tokens"
+  | "connecting"
+  | "connected"
+  | "error";
+
+/** Live connector status for one channel, surfaced in the Channels UI. */
+export interface ChannelConnectorStatus {
+  enabled: boolean;
+  state: ConnectorState;
+  error: string | null;
+  channelId: string | null;
+}
+
+/** Live Slack + Discord connector status for an agent. */
+export interface AgentConnectorStatus {
+  slack: ChannelConnectorStatus;
+  discord: ChannelConnectorStatus;
+}
+
 /** A reference to a specific model on a specific provider. */
 export interface ModelRef {
   provider: ProviderId;

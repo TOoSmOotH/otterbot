@@ -1,4 +1,4 @@
-import type { ChannelBotConfig } from "@otterbot/shared";
+import type { ChannelBotConfig, ConnectorState } from "@otterbot/shared";
 import type { AgentRuntime } from "../runtime/agent-runtime.js";
 
 /**
@@ -17,6 +17,9 @@ export abstract class ChannelConnector {
   protected cfg: ChannelBotConfig;
   /** Serial queue — process one channel message at a time. */
   private queue: Promise<unknown> = Promise.resolve();
+  /** Live connection state, surfaced to the Channels UI. */
+  private connState: ConnectorState = "connecting";
+  private connError: string | null = null;
 
   constructor(
     /** Prefix for the runtime conversation id, e.g. "slack" or "discord". */
@@ -41,6 +44,23 @@ export abstract class ChannelConnector {
   /** Update the gate (publicBot / allowedUserIds) without reconnecting. */
   updateGate(cfg: ChannelBotConfig): void {
     this.cfg = cfg;
+  }
+
+  /** Live connection status for the Channels UI. */
+  getStatus(): { state: ConnectorState; error: string | null; channelId: string } {
+    return { state: this.connState, error: this.connError, channelId: this.cfg.channelId };
+  }
+
+  /** Mark the connector as successfully connected. */
+  markConnected(): void {
+    this.connState = "connected";
+    this.connError = null;
+  }
+
+  /** Mark the connector as failed, with a human-readable reason. */
+  markError(message: string): void {
+    this.connState = "error";
+    this.connError = message;
   }
 
   /** True when `userId` is allowed to talk to the agent. */

@@ -202,6 +202,16 @@ export async function buildServer(orch: Orchestrator, cfg: Config): Promise<Fast
     }
   );
 
+  // Live Slack/Discord connector status for an agent.
+  app.get<{ Params: { id: string } }>("/api/agents/:id/connectors", async (req, reply) => {
+    const status = orch.getConnectorStatus(req.params.id);
+    if (!status) {
+      reply.code(404);
+      return { error: "not found" };
+    }
+    return status;
+  });
+
   app.delete<{ Params: { id: string } }>("/api/agents/:id", async (req, reply) => {
     const ok = await orch.deleteAgent(req.params.id);
     if (!ok) {

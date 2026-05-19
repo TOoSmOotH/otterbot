@@ -7,7 +7,9 @@ import type {
   AgentProfileSummary,
   AgentStatus,
   AgentRole,
+  AgentConnectorStatus,
   ChannelBotConfig,
+  ChannelConnectorStatus,
   GlobalSettings,
   ProviderId,
 } from "@otterbot/shared";
@@ -35,6 +37,27 @@ import { DiscordConnector } from "../integrations/discord-connector.js";
 interface TrackedConnector<C extends ChannelConnector> {
   connector: C;
   signature: string;
+}
+
+/** Derive the UI-facing status for one channel from its config + connector. */
+function channelStatus(
+  cfg: ChannelBotConfig | null,
+  tracked: TrackedConnector<ChannelConnector> | undefined
+): ChannelConnectorStatus {
+  if (!cfg?.enabled) {
+    return { enabled: false, state: "off", error: null, channelId: cfg?.channelId ?? null };
+  }
+  if (!tracked) {
+    // Enabled but no connector — reconcile skipped it for missing tokens.
+    return {
+      enabled: true,
+      state: "missing-tokens",
+      error: "Add the bot token and app/socket token, then save.",
+      channelId: cfg.channelId,
+    };
+  }
+  const s = tracked.connector.getStatus();
+  return { enabled: true, state: s.state, error: s.error, channelId: s.channelId };
 }
 
 /** Input for creating a new agent profile. */
@@ -385,6 +408,16 @@ export class Orchestrator {
    * lifecycle: a connector only reconnects when its channel/tokens actually
    * change; a gate-only change (publicBot / allowedUserIds) is applied in place.
    */
+  /** Live Slack/Discord connector status for an agent. */
+  getConnectorStatus(id: string): AgentConnectorStatus | null {
+    const ctx = this.contexts.get(id);
+    if (!ctx) return null;
+    return {
+      slack: channelStatus(ctx.profile.slack, this.slackConnectors.get(id)),
+      discord: channelStatus(ctx.profile.discord, this.discordConnectors.get(id)),
+    };
+  }
+
   private reconcileConnectors(profile: AgentProfile): void {
     const secrets = this.secrets.get(profile.id);
     this.reconcileOne(
@@ -433,7 +466,12 @@ export class Orchestrator {
     this.pendingInits.push(
       connector
         .start()
-        .catch((err) => console.warn(`[connector] start failed for ${agentId}:`, err))
+        .then(() => connector.markConnected())
+        .catch((err) => {
+          const message = err instanceof Error ? err.message : String(err);
+          connector.markError(message);
+          console.warn(`[connector] start failed for ${agentId}:`, message);
+        })
     );
   }
 
