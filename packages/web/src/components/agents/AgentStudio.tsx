@@ -121,6 +121,7 @@ function IdentityTab({ profile, onSaved }: TabProps) {
   const [transport, setTransport] = useState(profile.transport);
   const [canSpawn, setCanSpawn] = useState(profile.canSpawnSubagents);
   const [limit, setLimit] = useState(profile.subagentLimit);
+  const [canRunShell, setCanRunShell] = useState(profile.canRunShell);
   const [saved, setSaved] = useState(false);
 
   const save = async () => {
@@ -130,6 +131,7 @@ function IdentityTab({ profile, onSaved }: TabProps) {
       transport,
       canSpawnSubagents: canSpawn,
       subagentLimit: limit,
+      canRunShell,
     });
     setSaved(true);
     onSaved();
@@ -171,6 +173,20 @@ function IdentityTab({ profile, onSaved }: TabProps) {
           style={{ ...input, width: 90 }}
         />
       </Field>
+      <label style={checkboxRow}>
+        <input
+          type="checkbox"
+          checked={canRunShell}
+          onChange={(e) => setCanRunShell(e.target.checked)}
+        />
+        Allow shell access
+      </label>
+      <p style={hint}>
+        Gives the agent a <code>shell_exec</code> tool that runs commands in a sandboxed
+        per-agent workspace — confined to that directory (via bubblewrap on Linux,
+        sandbox-exec on macOS). It runs real commands; only enable it for agents you trust
+        with that.
+      </p>
       <SaveBar onSave={save} saved={saved} onDirty={() => setSaved(false)} />
     </Form>
   );

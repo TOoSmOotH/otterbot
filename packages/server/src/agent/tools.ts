@@ -5,6 +5,7 @@ import type { AgentContext } from "../runtime/agent-context.js";
 import type { AgentServices } from "../runtime/agent-services.js";
 import { sendEmail } from "../integrations/email.js";
 import { createIssue, listIssues } from "../integrations/github.js";
+import { runAgentShell } from "../integrations/shell.js";
 
 /**
  * Build the tool set for an agent, scoped to its own context. When cross-agent
@@ -189,6 +190,35 @@ export function buildAgentTools(
       },
     }),
   };
+
+  // Sandboxed shell — opt-in per agent (profile.canRunShell). Commands run on
+  // the host but are confined by an OS sandbox to the agent's workspace.
+  if (ctx.profile.canRunShell) {
+    tools.shell_exec = tool({
+      description:
+        "Run a shell command in this agent's sandboxed workspace directory. The " +
+        "workspace persists across calls and is the command's HOME, so installed " +
+        "tools, SSH keys and configs stick around. Commands are confined to the " +
+        "workspace — they cannot read or modify anything outside it. Each call is a " +
+        "fresh shell, so chain steps with '&&' or persist state to files. The " +
+        "agent's own credentials are available as environment variables.",
+      parameters: z.object({
+        command: z.string().min(1).describe("Shell command to run (bash/sh syntax)."),
+      }),
+      execute: async ({ command }) => {
+        const r = await runAgentShell(ctx.workspaceDir, ctx.secrets, command);
+        if (r.error) return { ok: false, error: r.error };
+        return {
+          ok: r.ok,
+          exitCode: r.exitCode,
+          stdout: r.stdout,
+          stderr: r.stderr,
+          ...(r.timedOut ? { timedOut: true } : {}),
+          ...(r.truncated ? { truncated: true } : {}),
+        };
+      },
+    });
+  }
 
   if (!services) return tools;
 

@@ -355,6 +355,7 @@ export class Orchestrator {
       secrets,
       agentDbPath: paths.agentDb,
       skillsDir: paths.skillsDir,
+      workspaceDir: paths.workspace,
       embedder: resolveEmbedder(profile.model.embedding, secrets),
       dbKey: this.cfg.dbKey,
     });

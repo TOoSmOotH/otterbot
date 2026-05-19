@@ -22,6 +22,8 @@ export interface ProfilePaths {
   agentDb: string;
   skillsDir: string;
   subagentsDir: string;
+  /** Sandboxed working directory for the agent's `shell_exec` tool. */
+  workspace: string;
 }
 
 export function profilePaths(root: string, id: string): ProfilePaths {
@@ -35,6 +37,7 @@ export function profilePaths(root: string, id: string): ProfilePaths {
     agentDb: join(dir, "agent.db"),
     skillsDir: join(dir, "skills"),
     subagentsDir: join(dir, "subagents"),
+    workspace: join(dir, "workspace"),
   };
 }
 
@@ -182,6 +185,7 @@ export class ProfileStore {
       allowedPeers: [],
       canSpawnSubagents: true,
       subagentLimit: 5,
+      canRunShell: false,
       parentId: null,
       createdAt: now,
     };
@@ -227,6 +231,7 @@ export function normalizeProfile(p: Partial<AgentProfile> & { id: string }): Age
     allowedPeers: p.allowedPeers ?? [],
     canSpawnSubagents: p.canSpawnSubagents ?? role !== "subagent",
     subagentLimit: p.subagentLimit ?? 5,
+    canRunShell: p.canRunShell ?? false,
     parentId: p.parentId ?? null,
     createdAt: p.createdAt ?? new Date().toISOString(),
   };

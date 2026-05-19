@@ -143,6 +143,11 @@ export interface AgentProfile {
   allowedPeers: AgentPeerAccess[];
   canSpawnSubagents: boolean;
   subagentLimit: number;
+  /**
+   * When true the agent gets a `shell_exec` tool that runs commands in its own
+   * sandboxed workspace directory. Off by default — it runs real commands.
+   */
+  canRunShell: boolean;
   /** Set for subagents; null for the COO and top-level agents. */
   parentId: string | null;
   createdAt: string;

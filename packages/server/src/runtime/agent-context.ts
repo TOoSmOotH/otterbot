@@ -16,6 +16,8 @@ export interface AgentContext {
   profile: AgentProfile;
   /** Per-agent secrets parsed from the profile's `.env` (never `process.env`). */
   secrets: Map<string, string>;
+  /** Sandboxed working directory for the agent's `shell_exec` tool. */
+  workspaceDir: string;
   agentDb: AgentDb;
   sqlite: Database.Database;
   db: AgentDrizzle;
@@ -35,6 +37,8 @@ export interface BuildAgentContextInput {
   agentDbPath: string;
   /** Path to this agent's `skills/` directory. */
   skillsDir: string;
+  /** Path to this agent's sandboxed workspace directory. */
+  workspaceDir: string;
   /** The embedder resolved from the agent's embedding model. */
   embedder: Embedder;
   /** Database encryption key, if configured. */
@@ -53,6 +57,7 @@ export function buildAgentContext(input: BuildAgentContextInput): AgentContext {
   return {
     profile: input.profile,
     secrets: input.secrets,
+    workspaceDir: input.workspaceDir,
     agentDb,
     sqlite: agentDb.sqlite,
     db: agentDb.db,
