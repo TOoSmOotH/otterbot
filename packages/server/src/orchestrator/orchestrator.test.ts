@@ -117,10 +117,15 @@ describe("orchestrator (e2e)", () => {
     expect(stack.orch.getSecrets().get(agent.id).get("ANTHROPIC_API_KEY")).toBe("sk-test-xyz");
     // Merging a second credential leaves the first one intact.
     stack.orch.mergeCredentials(agent.id, { GITHUB_TOKEN: "ghp-test" });
-    expect(stack.orch.listCredentialKeys(agent.id)).toEqual(["ANTHROPIC_API_KEY", "GITHUB_TOKEN"]);
+    expect(stack.orch.listCredentials(agent.id)?.map((c) => c.key)).toEqual([
+      "ANTHROPIC_API_KEY",
+      "GITHUB_TOKEN",
+    ]);
     // Deleting one credential leaves the rest intact.
     stack.orch.deleteCredential(agent.id, "GITHUB_TOKEN");
-    expect(stack.orch.listCredentialKeys(agent.id)).toEqual(["ANTHROPIC_API_KEY"]);
+    expect(stack.orch.listCredentials(agent.id)?.map((c) => c.key)).toEqual([
+      "ANTHROPIC_API_KEY",
+    ]);
     // Deleting the agent clears its secrets.
     await stack.orch.deleteAgent(agent.id);
     expect(stack.orch.getSecrets().hasAny(agent.id)).toBe(false);

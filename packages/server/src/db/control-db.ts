@@ -81,6 +81,7 @@ function ensureControlTables(sqlite: Database.Database) {
       agent_id TEXT NOT NULL,
       key TEXT NOT NULL,
       value TEXT NOT NULL,
+      scope TEXT NOT NULL DEFAULT 'broad',
       PRIMARY KEY (agent_id, key)
     )`,
     `CREATE TABLE IF NOT EXISTS app_settings (
@@ -89,4 +90,16 @@ function ensureControlTables(sqlite: Database.Database) {
     )`,
   ];
   for (const s of stmts) sqlite.exec(s);
+
+  // Migration: credentials grew a scope column. Default 'broad' preserves the
+  // pre-existing behaviour (every key dumped into the shell env) until the
+  // startup migration re-tags known keys.
+  const secretCols = new Set(
+    (sqlite.prepare(`PRAGMA table_info(agent_secrets)`).all() as Array<{ name: string }>).map(
+      (c) => c.name
+    )
+  );
+  if (!secretCols.has("scope")) {
+    sqlite.exec(`ALTER TABLE agent_secrets ADD COLUMN scope TEXT NOT NULL DEFAULT 'broad'`);
+  }
 }

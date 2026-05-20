@@ -52,7 +52,7 @@ describe("capabilities", () => {
     dir = mkdtempSync(join(tmpdir(), "otter-cap-"));
     ctx = buildAgentContext({
       profile: makeProfile(),
-      secrets: new Map(),
+      scopedSecrets: new Map(),
       contextWindow: 16_000,
       agentDbPath: join(dir, "agent.db"),
       skillsDir: join(dir, "skills"),

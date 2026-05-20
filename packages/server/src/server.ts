@@ -42,6 +42,14 @@ import type {
 } from "@otterbot/shared";
 import { redactGlobalSettings } from "./orchestrator/orchestrator.js";
 
+/** Validate a credential-scope string from API input — see `CredentialScope`. */
+function isValidScope(scope: string): boolean {
+  if (scope === "direct" || scope === "broad") return true;
+  if (!scope.startsWith("cap:")) return false;
+  const ids = scope.slice(4).split(",").map((s) => s.trim());
+  return ids.length > 0 && ids.every((id) => /^[a-z0-9][a-z0-9-]*$/i.test(id));
+}
+
 /** Optional knobs supplied by the boot process; tests omit these. */
 export interface BuildServerOpts {
   /**
@@ -620,11 +628,11 @@ export async function buildServer(
     }
   );
 
-  // The names of an agent's stored credentials — values are never returned.
+  // The names + scopes of an agent's stored credentials — values are never returned.
   app.get<{ Params: { id: string } }>(
     "/api/agents/:id/credentials",
     async (req, reply) => {
-      const keys = orch.listCredentialKeys(req.params.id);
+      const keys = orch.listCredentials(req.params.id);
       if (!keys) {
         reply.code(404);
         return { error: "not found" };
@@ -633,18 +641,42 @@ export async function buildServer(
     }
   );
 
-  // Merge specific secrets without replacing the rest — add or update keys.
-  app.patch<{ Params: { id: string }; Body: Record<string, string> }>(
-    "/api/agents/:id/credentials",
-    async (req, reply) => {
-      const ok = orch.mergeCredentials(req.params.id, req.body ?? {});
-      if (!ok) {
-        reply.code(404);
-        return { error: "not found" };
-      }
-      return { ok: true };
+  // Merge specific credentials without replacing the rest — add or update keys.
+  // Body is `Record<string, string | { value: string; scope?: CredentialScope }>`.
+  // Legacy plain-string values inherit the existing scope (or `broad` for new keys).
+  app.patch<{
+    Params: { id: string };
+    Body: Record<string, string | { value: string; scope?: string }>;
+  }>("/api/agents/:id/credentials", async (req, reply) => {
+    const ok = orch.mergeCredentials(req.params.id, (req.body ?? {}) as never);
+    if (!ok) {
+      reply.code(404);
+      return { error: "not found" };
     }
-  );
+    return { ok: true };
+  });
+
+  // Change a credential's scope without re-sending the value.
+  app.patch<{
+    Params: { id: string; key: string };
+    Body: { scope?: string };
+  }>("/api/agents/:id/credentials/:key/scope", async (req, reply) => {
+    const scope = (req.body?.scope ?? "").trim();
+    if (!isValidScope(scope)) {
+      reply.code(400);
+      return { error: "invalid scope" };
+    }
+    const ok = orch.setCredentialScope(
+      req.params.id,
+      decodeURIComponent(req.params.key),
+      scope as never,
+    );
+    if (!ok) {
+      reply.code(404);
+      return { error: "not found" };
+    }
+    return { ok: true };
+  });
 
   // Delete a single credential by key, leaving the agent's other secrets intact.
   app.delete<{ Params: { id: string; key: string } }>(

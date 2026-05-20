@@ -30,7 +30,9 @@ import { setDefaultContext } from "../runtime/default-agent.js";
 import { MessageBus } from "../bus/bus.js";
 import { createTransport } from "../bus/transports/factory.js";
 import { Scheduler } from "../scheduler/scheduler.js";
-import { SecretsStore } from "../secrets/secrets-store.js";
+import { SecretsStore, type ScopedSecret } from "../secrets/secrets-store.js";
+import { suggestScopeForKey } from "../secrets/shell-secrets.js";
+import type { CredentialScope } from "@otterbot/shared";
 import {
   type ChannelConnector,
   connectorSignature,
@@ -391,6 +393,62 @@ export class Orchestrator {
    * every configured provider — so an unused "work" account never leaks into
    * an agent that's using "personal".
    */
+  /**
+   * Walk every agent's stored credentials and apply `suggestScopeForKey` to any
+   * row still at the schema-default `broad`. Known keys (GITHUB_TOKEN, SMTP_*,
+   * SLACK_*, DISCORD_*) get a tightened scope; unknown keys stay broad so
+   * existing shell-dependent agents keep working. Logs a per-agent summary.
+   */
+  private tagLegacyCredentialScopes(): void {
+    let totalRetagged = 0;
+    let remainingBroad = 0;
+    for (const id of this.profiles.listIds()) {
+      const scoped = this.secrets.getScoped(id);
+      if (scoped.size === 0) continue;
+      let retaggedHere = 0;
+      let broadHere = 0;
+      for (const [key, { scope }] of scoped) {
+        if (scope !== "broad") continue;
+        const suggested = suggestScopeForKey(key);
+        if (suggested === "broad") {
+          broadHere += 1;
+          continue;
+        }
+        this.secrets.setScope(id, key, suggested);
+        retaggedHere += 1;
+      }
+      if (retaggedHere > 0 || broadHere > 0) {
+        console.info(
+          `[secrets] ${id}: re-tagged ${retaggedHere} credential(s); ${broadHere} remain broad-shell`,
+        );
+      }
+      totalRetagged += retaggedHere;
+      remainingBroad += broadHere;
+    }
+    if (totalRetagged > 0 || remainingBroad > 0) {
+      console.info(
+        `[secrets] migration summary: re-tagged ${totalRetagged}, ${remainingBroad} remain broad-shell — review in Agent Studio › Credentials`,
+      );
+    }
+  }
+
+  /**
+   * Merge an agent's per-credential bag: global provider keys get an implicit
+   * `direct` scope (they power chat/embedder calls and never need to be in
+   * the shell env), agent-owned credentials carry their stored scope. Agent
+   * credentials win when keys collide.
+   */
+  private buildScopedSecrets(profile: AgentProfile): Map<string, ScopedSecret> {
+    const out = new Map<string, ScopedSecret>();
+    for (const [k, v] of this.getProviderSecretsForProfile(profile)) {
+      out.set(k, { value: v, scope: "direct" });
+    }
+    for (const [k, entry] of this.secrets.getScoped(profile.id)) {
+      out.set(k, entry);
+    }
+    return out;
+  }
+
   getProviderSecretsForProfile(profile: AgentProfile): Map<string, string> {
     const settings = this.getGlobalSettings();
     const secrets = new Map<string, string>();
@@ -481,6 +539,11 @@ export class Orchestrator {
       }
     }
 
+    // One-time migration: tag every legacy credential with a sane default
+    // scope based on its env-var name. Re-runs are cheap and idempotent —
+    // we only touch rows still at the schema default `broad`.
+    this.tagLegacyCredentialScopes();
+
     for (const profile of this.profiles.list()) {
       this.startAgent(profile);
     }
@@ -500,10 +563,9 @@ export class Orchestrator {
   /** Build and register a runtime + context for a profile. */
   private startAgent(profile: AgentProfile): AgentContext {
     const paths = this.profiles.pathsFor(profile.id);
-    const secrets = new Map([
-      ...this.getProviderSecretsForProfile(profile),
-      ...this.secrets.get(profile.id),
-    ]);
+    const scopedSecrets = this.buildScopedSecrets(profile);
+    const secrets = new Map<string, string>();
+    for (const [k, { value }] of scopedSecrets) secrets.set(k, value);
     const chat = profile.model.chat;
     const contextWindow =
       this.getGlobalSettings().modelContextWindows.find(
@@ -511,7 +573,7 @@ export class Orchestrator {
       )?.contextWindow ?? DEFAULT_CONTEXT_WINDOW;
     const ctx = buildAgentContext({
       profile,
-      secrets,
+      scopedSecrets,
       contextWindow,
       agentDbPath: paths.agentDb,
       skillsDir: paths.skillsDir,
@@ -837,22 +899,43 @@ export class Orchestrator {
     return true;
   }
 
-  /** The names (not values) of an agent's stored credentials, sorted. */
-  listCredentialKeys(id: string): string[] | null {
+  /** Stored credentials for an agent, masked: only `key` and `scope`. */
+  listCredentials(id: string): Array<{ key: string; scope: CredentialScope }> | null {
     if (!this.contexts.has(id)) return null;
-    return [...this.secrets.get(id).keys()].sort();
+    return this.secrets
+      .listScopes(id)
+      .sort((a, b) => a.key.localeCompare(b.key));
   }
 
-  /** Merge secrets into an agent's existing credentials, then restart it. */
-  mergeCredentials(id: string, secrets: Record<string, string>): boolean {
+  /**
+   * Merge credentials into an agent's existing bag, then restart it. Each
+   * entry may be a plain string (legacy: scope defaults to existing-or-broad)
+   * or `{ value, scope }`. Empty/whitespace keys are dropped.
+   */
+  mergeCredentials(
+    id: string,
+    secrets: Record<string, string | { value: string; scope?: CredentialScope }>,
+  ): boolean {
     if (!this.contexts.has(id)) return false;
-    const merged = this.secrets.get(id);
-    for (const [key, value] of Object.entries(secrets)) {
-      if (key.trim()) merged.set(key.trim(), value);
+    for (const [rawKey, entry] of Object.entries(secrets)) {
+      const key = rawKey.trim();
+      if (!key) continue;
+      if (typeof entry === "string") {
+        this.secrets.upsert(id, key, entry);
+      } else {
+        this.secrets.upsert(id, key, entry.value, entry.scope);
+      }
     }
-    this.secrets.set(id, merged);
     this.updateAgent(id, {});
     return true;
+  }
+
+  /** Change a credential's scope without re-sending the value. */
+  setCredentialScope(id: string, key: string, scope: CredentialScope): boolean {
+    if (!this.contexts.has(id)) return false;
+    const ok = this.secrets.setScope(id, key, scope);
+    if (ok) this.updateAgent(id, {});
+    return ok;
   }
 
   /** Delete a single credential by key, then restart the agent. */

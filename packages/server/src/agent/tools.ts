@@ -222,7 +222,7 @@ export function buildAgentTools(
         command: z.string().min(1).describe("Shell command to run (bash/sh syntax)."),
       }),
       execute: async ({ command }) => {
-        const r = await runAgentShell(ctx.workspaceDir, ctx.secrets, command);
+        const r = await runAgentShell(ctx.workspaceDir, ctx.shellSecrets(), command);
         if (r.error) return { ok: false, error: r.error };
         return {
           ok: r.ok,

@@ -178,7 +178,7 @@ export function attachSocketServer(
         return;
       }
 
-      const opened = openTerminal(ctx.workspaceDir, ctx.secrets, {
+      const opened = openTerminal(ctx.workspaceDir, ctx.shellSecrets(), {
         cols: payload.cols,
         rows: payload.rows,
       });

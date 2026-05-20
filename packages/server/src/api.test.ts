@@ -98,10 +98,13 @@ describe("HTTP API (e2e)", () => {
       payload: { GITHUB_TOKEN: "ghp-1" },
     });
 
-    // GET returns key names only — never values — and adding GITHUB_TOKEN
-    // did not wipe SLACK_BOT_TOKEN.
+    // GET returns key+scope tuples (never values), and adding GITHUB_TOKEN
+    // did not wipe SLACK_BOT_TOKEN. SLACK_BOT_TOKEN gets the legacy default
+    // 'broad' scope since this endpoint is called outside of `boot()` where
+    // the auto-tagger runs.
     const list = await app.inject({ method: "GET", url: "/api/agents/cred-api/credentials" });
-    expect((list.json() as { keys: string[] }).keys).toEqual(["GITHUB_TOKEN", "SLACK_BOT_TOKEN"]);
+    const listed = (list.json() as { keys: Array<{ key: string; scope: string }> }).keys;
+    expect(listed.map((c) => c.key)).toEqual(["GITHUB_TOKEN", "SLACK_BOT_TOKEN"]);
 
     // Deleting one key leaves the rest intact.
     const del = await app.inject({
@@ -110,7 +113,45 @@ describe("HTTP API (e2e)", () => {
     });
     expect((del.json() as { ok: boolean }).ok).toBe(true);
     const after = await app.inject({ method: "GET", url: "/api/agents/cred-api/credentials" });
-    expect((after.json() as { keys: string[] }).keys).toEqual(["SLACK_BOT_TOKEN"]);
+    expect(
+      (after.json() as { keys: Array<{ key: string }> }).keys.map((c) => c.key),
+    ).toEqual(["SLACK_BOT_TOKEN"]);
+  });
+
+  it("scopes credentials by capability so the shell env can be filtered", async () => {
+    await app.inject({ method: "POST", url: "/api/agents", payload: { displayName: "Scope API" } });
+
+    // Add a credential with an explicit cap-scope.
+    await app.inject({
+      method: "PATCH",
+      url: "/api/agents/scope-api/credentials",
+      payload: { GITHUB_TOKEN: { value: "ghp-scope", scope: "cap:gh-auth" } },
+    });
+    const list = await app.inject({ method: "GET", url: "/api/agents/scope-api/credentials" });
+    const rows = (list.json() as { keys: Array<{ key: string; scope: string }> }).keys;
+    expect(rows.find((r) => r.key === "GITHUB_TOKEN")?.scope).toBe("cap:gh-auth");
+
+    // Retag via the scope-only endpoint — no need to re-send the value.
+    const retag = await app.inject({
+      method: "PATCH",
+      url: "/api/agents/scope-api/credentials/GITHUB_TOKEN/scope",
+      payload: { scope: "direct" },
+    });
+    expect((retag.json() as { ok: boolean }).ok).toBe(true);
+    const list2 = await app.inject({ method: "GET", url: "/api/agents/scope-api/credentials" });
+    expect(
+      (list2.json() as { keys: Array<{ key: string; scope: string }> }).keys.find(
+        (r) => r.key === "GITHUB_TOKEN",
+      )?.scope,
+    ).toBe("direct");
+
+    // Invalid scope strings are rejected.
+    const bad = await app.inject({
+      method: "PATCH",
+      url: "/api/agents/scope-api/credentials/GITHUB_TOKEN/scope",
+      payload: { scope: "garbage" },
+    });
+    expect(bad.statusCode).toBe(400);
   });
 
   it("manages scheduled tasks (add valid, reject invalid, delete)", async () => {

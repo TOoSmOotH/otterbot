@@ -54,6 +54,9 @@ export class SkillService {
       mcpServers: Array.isArray(data.mcpServers)
         ? (data.mcpServers as McpServerConfig[])
         : undefined,
+      credentialKeys: Array.isArray(data.credentialKeys)
+        ? (data.credentialKeys as string[])
+        : undefined,
     };
     // When frontmatter omits `enabled`, tool-bearing capabilities default on.
     const enabled = typeof data.enabled === "boolean" ? data.enabled : defaultEnabled(meta);
@@ -70,6 +73,9 @@ export class SkillService {
     if (meta.tools.length) frontmatter.tools = meta.tools;
     if (meta.capabilities.length) frontmatter.capabilities = meta.capabilities;
     if (meta.mcpServers && meta.mcpServers.length) frontmatter.mcpServers = meta.mcpServers;
+    if (meta.credentialKeys && meta.credentialKeys.length) {
+      frontmatter.credentialKeys = meta.credentialKeys;
+    }
     if (Object.keys(meta.parameters).length) frontmatter.parameters = meta.parameters;
     if (meta.tags.length) frontmatter.tags = meta.tags;
     if (typeof enabled === "boolean") frontmatter.enabled = enabled;
@@ -107,6 +113,7 @@ export class SkillService {
       tools: data.meta.tools,
       capabilities: data.meta.capabilities,
       mcpServers: data.meta.mcpServers ?? [],
+      credentialKeys: data.meta.credentialKeys ?? [],
       parameters: data.meta.parameters as Record<string, unknown>,
       tags: data.meta.tags,
       body: data.body,
@@ -147,6 +154,7 @@ export class SkillService {
       tools: newMeta.tools,
       capabilities: newMeta.capabilities,
       mcpServers: newMeta.mcpServers ?? [],
+      credentialKeys: newMeta.credentialKeys ?? [],
       parameters: newMeta.parameters,
       tags: newMeta.tags,
       body: newBody,
@@ -219,6 +227,7 @@ export class SkillService {
         tools: meta.tools,
         capabilities: meta.capabilities,
         mcpServers: meta.mcpServers ?? [],
+        credentialKeys: meta.credentialKeys ?? [],
         parameters: meta.parameters as Record<string, unknown>,
         tags: meta.tags,
         body,
@@ -310,6 +319,7 @@ export class SkillService {
     tools: string[];
     capabilities: string[];
     mcpServers: McpServerConfig[];
+    credentialKeys?: string[];
     parameters: Record<string, unknown>;
     tags: string[];
     body: string;
@@ -331,6 +341,7 @@ export class SkillService {
         tools: row.tools,
         capabilities: row.capabilities,
         mcpServers: row.mcpServers ?? [],
+        credentialKeys: row.credentialKeys ?? [],
         parameters: row.parameters as Record<string, SkillParameterDef>,
         tags: row.tags,
       },

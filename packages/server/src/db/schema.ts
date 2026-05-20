@@ -111,6 +111,10 @@ export const skills = sqliteTable("skills", {
     .$type<McpServerConfig[]>()
     .notNull()
     .default([]),
+  credentialKeys: text("credential_keys", { mode: "json" })
+    .$type<string[]>()
+    .notNull()
+    .default([]),
   body: text("body").notNull().default(""),
   source: text("source").$type<SkillSource>().notNull().default("authored"),
   scanStatus: text("scan_status").$type<SkillScanStatus>().notNull().default("unscanned"),

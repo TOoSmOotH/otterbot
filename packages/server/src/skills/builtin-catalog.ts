@@ -23,6 +23,8 @@ export interface CatalogCapability {
   description: string;
   /** Built-in tools this capability grants — see `GRANTABLE_TOOL_NAMES`. */
   tools: string[];
+  /** Env-var names this capability expects in the agent's shell or direct integrations. */
+  credentialKeys: string[];
   /** The full capability markdown (frontmatter + body) bundled in the repo. */
   markdown: string;
 }
@@ -33,21 +35,26 @@ function capability(args: {
   name: string;
   description: string;
   tools: string[];
+  credentialKeys?: string[];
   body: string;
 }): CatalogCapability {
-  const markdown = matter.stringify(args.body.trim(), {
+  const credentialKeys = args.credentialKeys ?? [];
+  const frontmatter: Record<string, unknown> = {
     name: args.name,
     description: args.description,
     version: "1.0.0",
     author: "otterbot",
     tools: args.tools,
     enabled: true,
-  });
+  };
+  if (credentialKeys.length) frontmatter.credentialKeys = credentialKeys;
+  const markdown = matter.stringify(args.body.trim(), frontmatter);
   return {
     id: args.id,
     name: args.name,
     description: args.description,
     tools: args.tools,
+    credentialKeys,
     markdown,
   };
 }
@@ -60,6 +67,7 @@ export const BUILTIN_CAPABILITIES: CatalogCapability[] = [
     description:
       "Operate GitHub from the shell with the gh CLI — issues, PRs, repos, releases.",
     tools: ["shell_exec"],
+    credentialKeys: ["GITHUB_TOKEN"],
     body: `
 Use the GitHub CLI (\`gh\`) for any GitHub task: issues, pull requests, repos,
 releases, and the GitHub API. \`gh\` reads its credentials from the
@@ -126,6 +134,7 @@ No setup needed — \`web_search\` works out of the box.
     name: "Email",
     description: "Send email from the agent's own account via the send_email tool.",
     tools: ["send_email"],
+    credentialKeys: ["SMTP_HOST", "SMTP_PORT", "SMTP_USER", "SMTP_PASS", "SMTP_FROM"],
     body: `
 You can send email with the \`send_email\` tool, from your own configured email
 account.

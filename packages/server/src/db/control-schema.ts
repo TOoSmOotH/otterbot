@@ -71,6 +71,14 @@ export const agentSecrets = sqliteTable("agent_secrets", {
   agentId: text("agent_id").notNull(),
   key: text("key").notNull(),
   value: text("value").notNull(),
+  /**
+   * Exposure rule for this credential. Parsed by `parseCredentialScope`.
+   * - "direct"             → never in shell env; direct-integration consumers only.
+   * - "broad"              → injected into every shell exec.
+   * - "cap:<id>,<id>,…"    → injected only when at least one listed capability
+   *                          is currently enabled on the agent.
+   */
+  scope: text("scope").notNull().default("broad"),
 });
 
 /** App-level key/value settings (e.g. onboarding completion). */

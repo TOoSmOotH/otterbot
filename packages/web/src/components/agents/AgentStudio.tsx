@@ -1624,37 +1624,102 @@ interface SlackTestResult {
   error?: string;
 }
 
+type ScopeKind = "direct" | "broad" | "cap";
+
+interface CredentialRow {
+  key: string;
+  scope: string;
+}
+
+interface CatalogCap {
+  id: string;
+  name: string;
+  description: string;
+  credentialKeys?: string[];
+}
+
+function parseScope(scope: string): { kind: ScopeKind; capIds: string[] } {
+  if (scope === "direct") return { kind: "direct", capIds: [] };
+  if (scope.startsWith("cap:")) {
+    return {
+      kind: "cap",
+      capIds: scope
+        .slice(4)
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean),
+    };
+  }
+  return { kind: "broad", capIds: [] };
+}
+
+function serializeScope(kind: ScopeKind, capIds: string[]): string {
+  if (kind === "direct") return "direct";
+  if (kind === "broad") return "broad";
+  const ids = capIds.map((s) => s.trim()).filter(Boolean);
+  return ids.length > 0 ? `cap:${ids.join(",")}` : "broad";
+}
+
 function CredentialsTab({ agentId }: { agentId: string }) {
-  const [keys, setKeys] = useState<string[]>([]);
+  const [rows, setRows] = useState<CredentialRow[]>([]);
+  const [catalog, setCatalog] = useState<CatalogCap[]>([]);
   const [newKey, setNewKey] = useState("");
   const [newValue, setNewValue] = useState("");
+  const [newKind, setNewKind] = useState<ScopeKind>("broad");
+  const [newCapIds, setNewCapIds] = useState<string[]>([]);
   const [status, setStatus] = useState("");
   const [busy, setBusy] = useState(false);
   const [slackTest, setSlackTest] = useState<SlackTestResult | null>(null);
+  const [editing, setEditing] = useState<string | null>(null);
 
   const load = async () => {
     const res = await apiFetch(`/api/agents/${agentId}/credentials`);
-    if (res.ok) setKeys(((await res.json()).keys as string[]) ?? []);
+    if (res.ok) setRows(((await res.json()).keys as CredentialRow[]) ?? []);
+  };
+
+  const loadCatalog = async () => {
+    const res = await apiFetch("/api/skill-catalog");
+    if (res.ok) setCatalog(((await res.json()) as CatalogCap[]) ?? []);
   };
 
   useEffect(() => {
     void load();
+    void loadCatalog();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [agentId]);
+
+  // Auto-suggest a scope when the user types a known key name.
+  useEffect(() => {
+    const key = newKey.trim().toUpperCase();
+    if (!key || catalog.length === 0) return;
+    const match = catalog.find((c) =>
+      (c.credentialKeys ?? []).some((k) => k.toUpperCase() === key),
+    );
+    if (!match) return;
+    // Don't override an explicit user choice already in progress.
+    if (newKind === "broad" && newCapIds.length === 0) {
+      setNewKind("cap");
+      setNewCapIds([match.id]);
+    }
+  }, [newKey, catalog]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const add = async () => {
     const key = newKey.trim();
     if (!key || !newValue) return;
     setBusy(true);
+    const scope = serializeScope(newKind, newCapIds);
     const res = await apiFetch(`/api/agents/${agentId}/credentials`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ [key]: newValue }),
+      body: JSON.stringify({ [key]: { value: newValue, scope } }),
     });
     if (res.ok) {
-      setStatus(keys.includes(key) ? `Updated ${key} — agent restarted.` : `Added ${key} — agent restarted.`);
+      const existed = rows.some((r) => r.key === key);
+      setStatus(`${existed ? "Updated" : "Added"} ${key} — agent restarted.`);
       setNewKey("");
       setNewValue("");
+      setNewKind("broad");
+      setNewCapIds([]);
       await load();
     } else {
       setStatus("Failed to save.");
@@ -1678,6 +1743,26 @@ function CredentialsTab({ agentId }: { agentId: string }) {
     setBusy(false);
   };
 
+  const saveScope = async (key: string, nextScope: string) => {
+    setBusy(true);
+    const res = await apiFetch(
+      `/api/agents/${agentId}/credentials/${encodeURIComponent(key)}/scope`,
+      {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ scope: nextScope }),
+      },
+    );
+    if (res.ok) {
+      setStatus(`Re-scoped ${key} → ${nextScope}.`);
+      setEditing(null);
+      await load();
+    } else {
+      setStatus("Failed to update scope.");
+    }
+    setBusy(false);
+  };
+
   const testSlack = async () => {
     setBusy(true);
     setSlackTest(null);
@@ -1690,36 +1775,57 @@ function CredentialsTab({ agentId }: { agentId: string }) {
     <Form>
       <p style={hint}>
         Secrets for this agent only — API keys, GitHub token, SMTP, model endpoints. Stored
-        encrypted in the database. Each credential is independent — adding or deleting one never
-        affects the others.
+        encrypted in the database. <strong>Scope</strong> decides where each credential is
+        exposed: <em>direct</em> (only structured integrations), <em>capability-bound</em>{" "}
+        (only in the shell when that capability is enabled), or <em>broad shell</em> (every
+        shell exec — use sparingly).
       </p>
 
-      {keys.length === 0 && <div style={hint}>No credentials stored yet.</div>}
-      {keys.map((key) => (
-        <div key={key} style={{ ...card, display: "flex", flexDirection: "column", gap: 6 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <code style={{ fontSize: 12, fontWeight: 600 }}>{key}</code>
-            <span style={{ fontSize: 12, color: "rgb(var(--muted))" }}>••••••</span>
+      {rows.length === 0 && <div style={hint}>No credentials stored yet.</div>}
+      {rows.map((row) => (
+        <div key={row.key} style={{ ...card, display: "flex", flexDirection: "column", gap: 8 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+            <code style={{ fontSize: 12, fontWeight: 600, fontFamily: "var(--font-mono)" }}>
+              {row.key}
+            </code>
+            <span style={{ fontSize: 12, color: "rgb(var(--subtle))" }}>••••••</span>
+            <ScopeChip scope={row.scope} />
             <div style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
-              {key === "SLACK_BOT_TOKEN" && (
+              <button
+                onClick={() => setEditing(editing === row.key ? null : row.key)}
+                disabled={busy}
+                style={ghost}
+              >
+                {editing === row.key ? "Cancel" : "Scope"}
+              </button>
+              {row.key === "SLACK_BOT_TOKEN" && (
                 <button onClick={testSlack} disabled={busy} style={ghost}>
                   Test
                 </button>
               )}
               <button
-                onClick={() => remove(key)}
+                onClick={() => remove(row.key)}
                 disabled={busy}
-                style={{ ...ghost, color: "#f87171" }}
+                style={{ ...ghost, color: "rgb(var(--danger))" }}
               >
                 Delete
               </button>
             </div>
           </div>
-          {key === "SLACK_BOT_TOKEN" && slackTest && (
+          {editing === row.key && (
+            <ScopeEditor
+              current={row.scope}
+              catalog={catalog}
+              onCancel={() => setEditing(null)}
+              onSave={(nextScope) => saveScope(row.key, nextScope)}
+              busy={busy}
+            />
+          )}
+          {row.key === "SLACK_BOT_TOKEN" && slackTest && (
             <div
               style={{
                 fontSize: 12,
-                color: slackTest.ok ? "#4ade80" : "#f87171",
+                color: slackTest.ok ? "rgb(var(--success))" : "rgb(var(--danger))",
               }}
             >
               {slackTest.ok
@@ -1730,23 +1836,36 @@ function CredentialsTab({ agentId }: { agentId: string }) {
         </div>
       ))}
 
-      <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 4 }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 4 }}>
         <span style={{ fontSize: 12, color: "rgb(var(--muted))" }}>Add credential</span>
         <div style={{ display: "flex", gap: 8 }}>
           <input
             value={newKey}
             onChange={(e) => setNewKey(e.target.value)}
             placeholder="KEY (e.g. GITHUB_TOKEN)"
-            style={{ ...input, fontFamily: "monospace", fontSize: 12 }}
+            style={{ ...input, fontFamily: "var(--font-mono)", fontSize: 12 }}
           />
           <input
             value={newValue}
             onChange={(e) => setNewValue(e.target.value)}
             placeholder="value"
             type="password"
-            style={{ ...input, fontFamily: "monospace", fontSize: 12 }}
+            style={{ ...input, fontFamily: "var(--font-mono)", fontSize: 12 }}
           />
-          <button onClick={add} disabled={busy || !newKey.trim() || !newValue} style={primary}>
+        </div>
+        <ScopePicker
+          kind={newKind}
+          capIds={newCapIds}
+          onKindChange={setNewKind}
+          onCapIdsChange={setNewCapIds}
+          catalog={catalog}
+        />
+        <div style={{ display: "flex", justifyContent: "flex-end" }}>
+          <button
+            onClick={add}
+            disabled={busy || !newKey.trim() || !newValue || (newKind === "cap" && newCapIds.length === 0)}
+            style={primary}
+          >
             Add
           </button>
         </div>
@@ -1756,6 +1875,206 @@ function CredentialsTab({ agentId }: { agentId: string }) {
     </Form>
   );
 }
+
+function ScopeChip({ scope }: { scope: string }) {
+  const parsed = parseScope(scope);
+  let label: string;
+  let bg: string;
+  let fg: string;
+  let border: string;
+  if (parsed.kind === "direct") {
+    label = "direct";
+    bg = "rgb(var(--neutral-bg))";
+    fg = "rgb(var(--muted))";
+    border = "rgb(var(--border))";
+  } else if (parsed.kind === "broad") {
+    label = "⚠ broad shell";
+    bg = "rgb(var(--warning-bg))";
+    fg = "rgb(var(--warning))";
+    border = "rgb(var(--warning) / 0.3)";
+  } else {
+    label = parsed.capIds.length === 1 ? `cap:${parsed.capIds[0]}` : `cap:${parsed.capIds.length}`;
+    bg = "rgb(var(--accent) / 0.15)";
+    fg = "rgb(var(--accent))";
+    border = "rgb(var(--accent) / 0.3)";
+  }
+  return (
+    <span
+      title={scope}
+      style={{
+        fontSize: 10,
+        fontWeight: 600,
+        letterSpacing: "0.04em",
+        padding: "2px 6px",
+        borderRadius: 4,
+        background: bg,
+        color: fg,
+        border: `1px solid ${border}`,
+        fontFamily: "var(--font-mono)",
+      }}
+    >
+      {label}
+    </span>
+  );
+}
+
+function ScopePicker({
+  kind,
+  capIds,
+  onKindChange,
+  onCapIdsChange,
+  catalog,
+}: {
+  kind: ScopeKind;
+  capIds: string[];
+  onKindChange: (k: ScopeKind) => void;
+  onCapIdsChange: (ids: string[]) => void;
+  catalog: CatalogCap[];
+}) {
+  const toggleCap = (id: string) => {
+    onCapIdsChange(capIds.includes(id) ? capIds.filter((x) => x !== id) : [...capIds, id]);
+  };
+  return (
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: 6,
+        padding: 10,
+        border: "1px solid rgb(var(--border))",
+        borderRadius: 7,
+        background: "rgb(var(--surface-sunken))",
+      }}
+    >
+      <span style={{ fontSize: 11, color: "rgb(var(--muted))" }}>Scope</span>
+      <label style={radioRow}>
+        <input
+          type="radio"
+          checked={kind === "direct"}
+          onChange={() => onKindChange("direct")}
+        />
+        <span>
+          <strong>Direct integrations only</strong>
+          <span style={radioHint}> — never reachable from the agent's shell.</span>
+        </span>
+      </label>
+      <label style={radioRow}>
+        <input
+          type="radio"
+          checked={kind === "cap"}
+          onChange={() => onKindChange("cap")}
+        />
+        <span>
+          <strong>Bound to capability</strong>
+          <span style={radioHint}> — exposed only when one of these capabilities is enabled.</span>
+        </span>
+      </label>
+      {kind === "cap" && (
+        <div
+          style={{
+            display: "flex",
+            flexWrap: "wrap",
+            gap: 6,
+            marginLeft: 22,
+            marginBottom: 2,
+          }}
+        >
+          {catalog.length === 0 && (
+            <span style={{ fontSize: 11, color: "rgb(var(--subtle))" }}>
+              Loading catalog…
+            </span>
+          )}
+          {catalog.map((c) => {
+            const on = capIds.includes(c.id);
+            return (
+              <button
+                type="button"
+                key={c.id}
+                onClick={() => toggleCap(c.id)}
+                title={c.description}
+                style={{
+                  fontSize: 11,
+                  fontFamily: "var(--font-mono)",
+                  padding: "3px 8px",
+                  borderRadius: 5,
+                  border: `1px solid ${on ? "rgb(var(--accent))" : "rgb(var(--border))"}`,
+                  background: on ? "rgb(var(--accent) / 0.15)" : "transparent",
+                  color: on ? "rgb(var(--accent))" : "rgb(var(--fg))",
+                  cursor: "pointer",
+                }}
+              >
+                {c.id}
+              </button>
+            );
+          })}
+        </div>
+      )}
+      <label style={radioRow}>
+        <input
+          type="radio"
+          checked={kind === "broad"}
+          onChange={() => onKindChange("broad")}
+        />
+        <span>
+          <strong style={{ color: "rgb(var(--warning))" }}>Broad shell</strong>
+          <span style={radioHint}> — available in every shell exec. Use only when necessary.</span>
+        </span>
+      </label>
+    </div>
+  );
+}
+
+function ScopeEditor({
+  current,
+  catalog,
+  onCancel,
+  onSave,
+  busy,
+}: {
+  current: string;
+  catalog: CatalogCap[];
+  onCancel: () => void;
+  onSave: (scope: string) => void;
+  busy: boolean;
+}) {
+  const initial = parseScope(current);
+  const [kind, setKind] = useState<ScopeKind>(initial.kind);
+  const [capIds, setCapIds] = useState<string[]>(initial.capIds);
+  const next = serializeScope(kind, capIds);
+  const dirty = next !== current && !(kind === "cap" && capIds.length === 0);
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      <ScopePicker
+        kind={kind}
+        capIds={capIds}
+        onKindChange={setKind}
+        onCapIdsChange={setCapIds}
+        catalog={catalog}
+      />
+      <div style={{ display: "flex", justifyContent: "flex-end", gap: 6 }}>
+        <button onClick={onCancel} disabled={busy} style={ghost}>
+          Cancel
+        </button>
+        <button onClick={() => onSave(next)} disabled={busy || !dirty} style={primary}>
+          Save scope
+        </button>
+      </div>
+    </div>
+  );
+}
+
+const radioRow: React.CSSProperties = {
+  display: "flex",
+  alignItems: "flex-start",
+  gap: 8,
+  fontSize: 12,
+  lineHeight: 1.45,
+  cursor: "pointer",
+};
+
+const radioHint: React.CSSProperties = {
+  color: "rgb(var(--muted))",
+};
 
 // --- shared bits ----------------------------------------------------------
 

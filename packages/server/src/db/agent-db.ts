@@ -109,6 +109,7 @@ function ensureAgentTables(sqlite: Database.Database) {
       parameters TEXT NOT NULL DEFAULT '{}',
       tags TEXT NOT NULL DEFAULT '[]',
       mcp_servers TEXT NOT NULL DEFAULT '[]',
+      credential_keys TEXT NOT NULL DEFAULT '[]',
       body TEXT NOT NULL DEFAULT '',
       source TEXT NOT NULL DEFAULT 'authored',
       scan_status TEXT NOT NULL DEFAULT 'unscanned',
@@ -152,6 +153,7 @@ function ensureAgentTables(sqlite: Database.Database) {
   for (const s of stmts) sqlite.exec(s);
   migrateV2(sqlite);
   migrateV3(sqlite);
+  migrateV4(sqlite);
 }
 
 function migrateV2(sqlite: Database.Database) {
@@ -195,6 +197,21 @@ function migrateV3(sqlite: Database.Database) {
   }
   if (!convCols.has("last_compacted_at")) {
     sqlite.exec(`ALTER TABLE conversations ADD COLUMN last_compacted_at TEXT`);
+  }
+}
+
+/**
+ * Capabilities declare which credential env-vars they expect; the column is
+ * a JSON-encoded array of strings, default `[]`.
+ */
+function migrateV4(sqlite: Database.Database) {
+  const skillCols = new Set(
+    (sqlite.prepare(`PRAGMA table_info(skills)`).all() as Array<{ name: string }>).map(
+      (c) => c.name
+    )
+  );
+  if (!skillCols.has("credential_keys")) {
+    sqlite.exec(`ALTER TABLE skills ADD COLUMN credential_keys TEXT NOT NULL DEFAULT '[]'`);
   }
 }
 

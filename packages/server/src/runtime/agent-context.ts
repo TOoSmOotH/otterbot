@@ -7,6 +7,8 @@ import { VecIndex } from "../vec-index.js";
 import { MemoryService } from "../memory/memory-service.js";
 import { SkillService } from "../skills/skill-service.js";
 import { UserProfileService } from "../user-profile/user-profile-service.js";
+import { buildShellSecrets } from "../secrets/shell-secrets.js";
+import type { ScopedSecret } from "../secrets/secrets-store.js";
 
 /**
  * Everything one agent needs at runtime: its profile, secrets, isolated
@@ -15,8 +17,23 @@ import { UserProfileService } from "../user-profile/user-profile-service.js";
  */
 export interface AgentContext {
   profile: AgentProfile;
-  /** Per-agent secrets parsed from the profile's `.env` (never `process.env`). */
+  /**
+   * The agent's complete credential bag, flattened to `key -> value`. Consumed
+   * by direct integrations (`github.ts`, `email.ts`, `slack-connector.ts`,
+   * model resolution, …) which trust the call site to use credentials
+   * structurally — i.e., never piped to a shell.
+   *
+   * **Do not pass this to `runAgentShell` or `buildSandboxPlan`.** Use
+   * `shellSecrets()` instead, which filters by each credential's `scope`
+   * and the agent's currently enabled capabilities.
+   */
   secrets: Map<string, string>;
+  /**
+   * The subset of credentials that may appear in the agent's shell env.
+   * A thunk (not a static map) because capability enable/disable should
+   * take effect live; recomputed per `shell_exec`.
+   */
+  shellSecrets: () => Map<string, string>;
   /**
    * The chat model's effective context window (tokens) — the agent's own
    * `model.contextWindow`, or the global default. Drives the history budget.
@@ -43,7 +60,12 @@ export interface AgentContext {
 
 export interface BuildAgentContextInput {
   profile: AgentProfile;
-  secrets: Map<string, string>;
+  /**
+   * Per-credential scope map: every entry the agent can see, tagged with
+   * its exposure rule. Provider keys are merged in upstream with implicit
+   * `direct` scope so they never enter the shell.
+   */
+  scopedSecrets: Map<string, ScopedSecret>;
   /** The agent's effective chat-model context window in tokens. */
   contextWindow: number;
   /** Path to this agent's isolated `agent.db`. */
@@ -67,9 +89,19 @@ export function buildAgentContext(input: BuildAgentContextInput): AgentContext {
   const skills = new SkillService(agentDb.db, input.skillsDir, memory);
   const userProfile = new UserProfileService(agentDb.db);
 
-  return {
+  // Flat value-only map for direct integrations (chat model resolution,
+  // github.ts, email.ts, slack-connector.ts).
+  const flatSecrets = new Map<string, string>();
+  for (const [k, { value }] of input.scopedSecrets) flatSecrets.set(k, value);
+
+  const ctx: AgentContext = {
     profile: input.profile,
-    secrets: input.secrets,
+    secrets: flatSecrets,
+    shellSecrets: () => {
+      // Recompute each call so capability toggles take effect live.
+      const enabledCapabilityIds = new Set(skills.listEnabled().map((s) => s.id));
+      return buildShellSecrets(input.scopedSecrets, enabledCapabilityIds);
+    },
     contextWindow: input.contextWindow,
     workspaceDir: input.workspaceDir,
     agentDb,
@@ -83,4 +115,5 @@ export function buildAgentContext(input: BuildAgentContextInput): AgentContext {
     mcpTools: {},
     close: () => agentDb.close(),
   };
+  return ctx;
 }

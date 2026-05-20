@@ -35,6 +35,24 @@ export interface SkillMeta {
   tags: string[];
   /** MCP servers this capability carries; connected while the skill is enabled. */
   mcpServers?: McpServerConfig[];
+  /**
+   * Env-var names this capability looks for in the agent's shell environment.
+   * Drives credential-tagging UI hints and the auto-suggest mapping when a
+   * user adds a credential. Not enforced at injection time — actual exposure
+   * is governed by each credential's `scope` field.
+   */
+  credentialKeys?: string[];
+}
+
+/** A credential's exposure rule. Strings serialised into the `scope` column. */
+export type CredentialScope =
+  | "direct"
+  | "broad"
+  | `cap:${string}`;
+
+export interface AgentCredentialEntry {
+  key: string;
+  scope: CredentialScope;
 }
 
 export type SkillSource = "builtin" | "authored" | "imported";
