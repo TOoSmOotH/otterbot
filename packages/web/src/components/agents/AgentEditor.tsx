@@ -3,8 +3,8 @@ import type {
   AgentPeerAccess,
   AgentProfile,
   AgentRole,
-  GlobalProviderSettings,
   ModelRef,
+  ProviderAccount,
   ProviderId,
 } from "@otterbot/shared";
 import { useAgentsStore } from "../../stores/agents-store";
@@ -67,10 +67,11 @@ export function AgentEditor({ agentId, onClose }: { agentId: string | null; onCl
   const credSeedFor = (id: ProviderId) => {
     const info = providers.find((p) => p.id === id);
     if (!info) return "";
-    const savedBaseUrl = globalSettings.providers[id]?.baseUrl;
-    if (isLocalProvider(info) && savedBaseUrl) return savedBaseUrl;
+    const accounts = globalSettings.providers[id] ?? [];
+    if (isLocalProvider(info) && accounts[0]?.baseUrl) return accounts[0].baseUrl;
     return providerDefaultCred(info);
   };
+  const accountsFor = (id: ProviderId) => globalSettings.providers[id] ?? [];
 
   const [form, setForm] = useState<FormState>(BLANK);
   const [saving, setSaving] = useState(false);
@@ -80,6 +81,7 @@ export function AgentEditor({ agentId, onClose }: { agentId: string | null; onCl
 
   // Chat model slot.
   const [chatProvider, setChatProvider] = useState<ProviderId>("lmstudio");
+  const [chatAccount, setChatAccount] = useState("default");
   const [chatModel, setChatModel] = useState("local-model");
   const [chatCred, setChatCred] = useState("");
   const [chatTest, setChatTest] = useState<TestState>({ status: "idle" });
@@ -88,6 +90,7 @@ export function AgentEditor({ agentId, onClose }: { agentId: string | null; onCl
   // Embedding model slot — new agents inherit the COO's embedding by default.
   const [embInherit, setEmbInherit] = useState(true);
   const [embProvider, setEmbProvider] = useState<ProviderId>("builtin");
+  const [embAccount, setEmbAccount] = useState("default");
   const [embModel, setEmbModel] = useState("all-MiniLM-L6-v2");
   const [embCred, setEmbCred] = useState("");
   const [embTest, setEmbTest] = useState<TestState>({ status: "idle" });
@@ -115,9 +118,11 @@ export function AgentEditor({ agentId, onClose }: { agentId: string | null; onCl
     if (!agentId) {
       setForm(BLANK);
       setChatProvider(globalSettings.defaultChatModel.provider);
+      setChatAccount(globalSettings.defaultChatModel.account || "default");
       setChatModel(globalSettings.defaultChatModel.modelId);
       setEmbInherit(true);
       setEmbProvider(globalSettings.defaultEmbeddingModel.provider);
+      setEmbAccount(globalSettings.defaultEmbeddingModel.account || "default");
       setEmbModel(globalSettings.defaultEmbeddingModel.modelId);
       return;
     }
@@ -135,10 +140,12 @@ export function AgentEditor({ agentId, onClose }: { agentId: string | null; onCl
           allowedPeers: p.allowedPeers ?? [],
         });
         setChatProvider(p.model.chat.provider);
+        setChatAccount(p.model.chat.account || "default");
         setChatModel(p.model.chat.modelId);
         // An existing agent shows its own configured embedding model.
         setEmbInherit(false);
         setEmbProvider(p.model.embedding.provider);
+        setEmbAccount(p.model.embedding.account || "default");
         setEmbModel(p.model.embedding.modelId);
       });
   }, [agentId, globalSettings]);
@@ -149,6 +156,7 @@ export function AgentEditor({ agentId, onClose }: { agentId: string | null; onCl
     setChatProvider(p);
     setChatTest({ status: "idle" });
     setChatModels([]);
+    setChatAccount(accountsFor(p)[0]?.account ?? "default");
     setChatCred(credSeedFor(p));
     setChatModel(defaultChatModel(p));
   };
@@ -157,6 +165,7 @@ export function AgentEditor({ agentId, onClose }: { agentId: string | null; onCl
     setEmbProvider(p);
     setEmbTest({ status: "idle" });
     setEmbModels([]);
+    setEmbAccount(accountsFor(p)[0]?.account ?? "default");
     setEmbCred(credSeedFor(p));
     setEmbModel(defaultEmbedModel(p));
   };
@@ -167,11 +176,19 @@ export function AgentEditor({ agentId, onClose }: { agentId: string | null; onCl
     if (!form.displayName.trim()) return;
     setSaving(true);
     try {
-      const chatRef: ModelRef = { provider: chatProvider, modelId: chatModel.trim() };
+      const chatRef: ModelRef = {
+        provider: chatProvider,
+        account: chatAccount || "default",
+        modelId: chatModel.trim(),
+      };
       const embeddingRef: ModelRef =
         inheritEmbedding && cooEmbedding
           ? cooEmbedding
-          : { provider: embProvider, modelId: embModel.trim() };
+          : {
+              provider: embProvider,
+              account: embAccount || "default",
+              modelId: embModel.trim(),
+            };
       const payload: Partial<AgentProfile> & { displayName: string } = {
         displayName: form.displayName.trim(),
         role: form.role,
@@ -179,6 +196,7 @@ export function AgentEditor({ agentId, onClose }: { agentId: string | null; onCl
         model: { chat: chatRef, embedding: embeddingRef },
         allowedModels: Array.from(new Set([chatRef.provider, embeddingRef.provider])).map((p) => ({
           provider: p,
+          account: "*",
           modelId: "*",
         })),
         transport: form.transport,
@@ -196,18 +214,31 @@ export function AgentEditor({ agentId, onClose }: { agentId: string | null; onCl
       // Provider credentials typed into the model pickers are saved to Global
       // Settings — the single source of truth — so every agent reuses them.
       const current = useGlobalSettingsStore.getState().settings;
-      const providerPatch: Record<string, GlobalProviderSettings> = {};
-      const addCred = (p: ProviderId, value: string) => {
+      const providerPatch: Record<string, ProviderAccount[]> = {};
+      const upsertAccount = (p: ProviderId, accountName: string, value: string) => {
         const info = providers.find((x) => x.id === p);
         if (!info || p === "builtin" || !value.trim()) return;
-        providerPatch[p] = {
-          ...current.providers[p],
-          ...providerPatch[p],
-          ...globalProviderPatch(info, value.trim()),
-        };
+        const list = providerPatch[p] ?? current.providers[p]?.map((a) => ({ ...a })) ?? [];
+        const idx = list.findIndex((a) => a.account === accountName);
+        const patch = globalProviderPatch(info, value.trim());
+        if (idx >= 0) {
+          list[idx] = {
+            ...list[idx],
+            ...patch,
+            apiKeyConfigured: list[idx].apiKeyConfigured || Boolean(patch.apiKey),
+          };
+        } else {
+          list.push({
+            account: accountName,
+            baseUrl: info.defaultBaseUrl ?? "",
+            apiKeyConfigured: Boolean(patch.apiKey),
+            ...patch,
+          } as ProviderAccount);
+        }
+        providerPatch[p] = list;
       };
-      addCred(chatProvider, chatCred);
-      if (!inheritEmbedding) addCred(embProvider, embCred);
+      upsertAccount(chatProvider, chatRef.account, chatCred);
+      if (!inheritEmbedding) upsertAccount(embProvider, embeddingRef.account, embCred);
       if (Object.keys(providerPatch).length > 0) {
         await saveSettings({
           ...current,
@@ -311,6 +342,9 @@ export function AgentEditor({ agentId, onClose }: { agentId: string | null; onCl
             providers={chatProviders}
             provider={chatProvider}
             onProvider={pickChatProvider}
+            account={chatAccount}
+            onAccount={setChatAccount}
+            accounts={accountsFor(chatProvider)}
             cred={chatCred}
             onCred={setChatCred}
             modelId={chatModel}
@@ -320,7 +354,6 @@ export function AgentEditor({ agentId, onClose }: { agentId: string | null; onCl
             models={chatModels}
             onModels={setChatModels}
             modelLabel="Chat model"
-            globalConfig={globalSettings.providers[chatProvider]}
           />
         </div>
 
@@ -350,6 +383,9 @@ export function AgentEditor({ agentId, onClose }: { agentId: string | null; onCl
               providers={embeddingProviders}
               provider={embProvider}
               onProvider={pickEmbProvider}
+              account={embAccount}
+              onAccount={setEmbAccount}
+              accounts={accountsFor(embProvider)}
               cred={embCred}
               onCred={setEmbCred}
               modelId={embModel}
@@ -359,7 +395,6 @@ export function AgentEditor({ agentId, onClose }: { agentId: string | null; onCl
               models={embModels}
               onModels={setEmbModels}
               modelLabel="Embedding model"
-              globalConfig={globalSettings.providers[embProvider]}
             />
           )}
         </div>

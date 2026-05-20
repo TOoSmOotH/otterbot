@@ -90,8 +90,10 @@ export async function buildServer(orch: Orchestrator, cfg: Config): Promise<Fast
         ...orch.getGlobalProviderSecrets(),
         ...Object.entries(secrets ?? {}),
       ]);
+      // test-model bypasses the account lookup — the caller supplies the
+      // credential directly in `secrets`, so the account label is irrelevant.
       const model = resolveChatModel(
-        { provider, modelId },
+        { provider, account: "default", modelId },
         mergedSecrets
       );
       const { text } = await generateText({

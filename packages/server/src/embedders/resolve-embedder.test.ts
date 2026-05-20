@@ -7,26 +7,35 @@ describe("resolveEmbedder", () => {
   const secrets = new Map<string, string>();
 
   it("returns a NullEmbedder when the modelId is empty (embeddings disabled)", () => {
-    expect(resolveEmbedder({ provider: "builtin", modelId: "" }, secrets)).toBeInstanceOf(
+    expect(resolveEmbedder({ provider: "builtin", account: "default", modelId: "" }, secrets)).toBeInstanceOf(
       NullEmbedder
     );
-    expect(resolveEmbedder({ provider: "lmstudio", modelId: "   " }, secrets)).toBeInstanceOf(
+    expect(resolveEmbedder({ provider: "lmstudio", account: "default", modelId: "   " }, secrets)).toBeInstanceOf(
       NullEmbedder
     );
   });
 
   it("returns a BuiltinEmbedder for the builtin provider", () => {
     expect(
-      resolveEmbedder({ provider: "builtin", modelId: "all-MiniLM-L6-v2" }, secrets)
+      resolveEmbedder(
+        { provider: "builtin", account: "default", modelId: "all-MiniLM-L6-v2" },
+        secrets
+      )
     ).toBeInstanceOf(BuiltinEmbedder);
   });
 
   it("returns an HttpEmbedder for HTTP-backed providers", () => {
     expect(
-      resolveEmbedder({ provider: "lmstudio", modelId: "nomic-embed-text" }, secrets)
+      resolveEmbedder(
+        { provider: "lmstudio", account: "default", modelId: "nomic-embed-text" },
+        secrets
+      )
     ).toBeInstanceOf(HttpEmbedder);
     expect(
-      resolveEmbedder({ provider: "openai", modelId: "text-embedding-3-small" }, secrets)
+      resolveEmbedder(
+        { provider: "openai", account: "default", modelId: "text-embedding-3-small" },
+        secrets
+      )
     ).toBeInstanceOf(HttpEmbedder);
   });
 });

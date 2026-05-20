@@ -20,7 +20,10 @@ function makeProfile(overrides: Partial<AgentProfile> = {}): AgentProfile {
     displayName: "Test",
     role: "agent",
     persona: "a tester",
-    model: { chat: { provider: "x", modelId: "m" }, embedding: { provider: "x", modelId: "e" } },
+    model: {
+      chat: { provider: "x", account: "default", modelId: "m" },
+      embedding: { provider: "x", account: "default", modelId: "e" },
+    },
     allowedModels: [],
     allowedChatServices: ["web"],
     transport: "local",

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import type { GlobalProviderSettings, ProviderId, ProviderInfo } from "@otterbot/shared";
-import { providerCredField, isProviderConfiguredGlobally } from "../../stores/providers-store";
+import type { ProviderAccount, ProviderId, ProviderInfo } from "@otterbot/shared";
+import { providerCredField, isAccountConfigured, findAccount } from "../../stores/providers-store";
 import { BuiltinEmbedderControls } from "../BuiltinEmbedderControls";
 
 export type TestState = { status: "idle" | "testing" | "ok" | "fail"; message?: string };
@@ -26,17 +26,26 @@ export interface OAuthBundle {
 export const isLocalProvider = (info: ProviderInfo | undefined) =>
   !!info && !info.needsApiKey && !!info.baseUrlEnv;
 
+const NEW_ACCOUNT = "__new__";
+
 /**
- * Provider + credential + model selection for one model slot (chat or
- * embedding). Shared by the onboarding wizard and the New-agent screen.
- * When `oauth` is supplied (chat only) an OpenAI ChatGPT-subscription option
- * is offered alongside the API key.
+ * Provider + account + credential + model selection for one model slot
+ * (chat or embedding). Shared by onboarding, the New-agent screen, and the
+ * Agent Studio model tab. When `oauth` is supplied (chat only) an OpenAI
+ * ChatGPT-subscription option is offered alongside the API key.
+ *
+ * Multi-account: a provider may have several saved credential sets (e.g.
+ * "personal" / "work"). The Account dropdown picks which one this model slot
+ * uses; "+ New account" reveals an inline label for a brand-new account.
  */
 export function ProviderFields({
   kind,
   providers,
   provider,
   onProvider,
+  account,
+  onAccount,
+  accounts,
   cred,
   onCred,
   modelId,
@@ -48,12 +57,17 @@ export function ProviderFields({
   modelLabel,
   modelHint,
   oauth,
-  globalConfig,
 }: {
   kind: "chat" | "embedding";
   providers: ProviderInfo[];
   provider: ProviderId;
   onProvider: (p: ProviderId) => void;
+  /** Name of the currently selected account (e.g. "default", "personal"). */
+  account: string;
+  /** Pick an existing account or rename the in-progress new one. */
+  onAccount: (name: string) => void;
+  /** Saved accounts for the current provider. */
+  accounts: ProviderAccount[];
   cred: string;
   onCred: (v: string) => void;
   modelId: string;
@@ -65,19 +79,21 @@ export function ProviderFields({
   modelLabel: string;
   modelHint?: string;
   oauth?: OAuthBundle;
-  /** The provider's saved Global Settings entry, if any. */
-  globalConfig?: GlobalProviderSettings;
 }) {
   const info = providers.find((p) => p.id === provider);
   const credMeta = info ? providerCredField(info) : null;
   const isLocal = isLocalProvider(info);
   const useOAuth = !!oauth && provider === "openai" && oauth.authMethod === "oauth";
-  const configuredGlobally = !!info && isProviderConfiguredGlobally(info, globalConfig);
+  // The account currently shown in the cred field — may be one of the saved
+  // accounts or a brand-new label being typed.
+  const selectedAccount = findAccount(accounts, account);
+  const isNewAccount = !accounts.some((a) => a.account === account);
+  const accountConfigured = !!info && isAccountConfigured(info, selectedAccount);
 
-  // When a provider is already configured globally the credential field is
-  // collapsed to a "✓ Configured" row; this reveals it for an override.
+  // When an account is already configured the credential field collapses to a
+  // "✓ Configured" row; this reveals it for an override.
   const [editCred, setEditCred] = useState(false);
-  useEffect(() => setEditCred(false), [provider]);
+  useEffect(() => setEditCred(false), [provider, account]);
 
   /** Fetch the model list a provider currently serves. */
   const loadModels = async () => {
@@ -95,7 +111,6 @@ export function ProviderFields({
       if (data.ok && data.models && data.models.length > 0) {
         const list = data.models;
         onModels(list);
-        // Bias the auto-pick: an embedding-looking model for the embedding slot.
         const guess =
           kind === "embedding"
             ? (list.find((m) => /embed/i.test(m)) ?? list[0])
@@ -154,6 +169,46 @@ export function ProviderFields({
           ))}
         </div>
       </Field>
+
+      {info && info.id !== "builtin" && (
+        <Field label="Account">
+          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+            <select
+              value={isNewAccount ? NEW_ACCOUNT : account}
+              onChange={(e) => {
+                onTest({ status: "idle" });
+                onModels([]);
+                if (e.target.value === NEW_ACCOUNT) {
+                  // Suggest a unique label.
+                  let label = "personal";
+                  let i = 2;
+                  while (accounts.some((a) => a.account === label)) label = `account-${i++}`;
+                  onAccount(label);
+                  onCred("");
+                } else {
+                  onAccount(e.target.value);
+                }
+              }}
+              style={{ ...input, flex: "0 0 180px" }}
+            >
+              {accounts.map((a) => (
+                <option key={a.account} value={a.account}>
+                  {a.account}
+                </option>
+              ))}
+              <option value={NEW_ACCOUNT}>+ New account…</option>
+            </select>
+            {isNewAccount && (
+              <input
+                value={account}
+                onChange={(e) => onAccount(e.target.value)}
+                placeholder="account label (e.g. work)"
+                style={input}
+              />
+            )}
+          </div>
+        </Field>
+      )}
 
       {oauth && provider === "openai" && (
         <Field label="Authentication">
@@ -246,11 +301,11 @@ export function ProviderFields({
       ) : (
         <>
           {credMeta &&
-            (configuredGlobally && !editCred ? (
+            (accountConfigured && !editCred && !isNewAccount ? (
               <Field label={credMeta.label}>
                 <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                   <span style={{ fontSize: 12, color: "#4ade80" }}>
-                    ✓ Configured in Global Settings
+                    ✓ Saved on account "{account}"
                   </span>
                   <button style={updateBtn} onClick={() => setEditCred(true)}>
                     Update credentials

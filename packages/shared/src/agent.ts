@@ -115,9 +115,17 @@ export interface AgentConnectorStatus {
   discord: ChannelConnectorStatus;
 }
 
-/** A reference to a specific model on a specific provider. */
+/** A reference to a specific model on a specific provider account. */
 export interface ModelRef {
   provider: ProviderId;
+  /**
+   * The provider account this ref uses — names a {@link ProviderAccount} in
+   * GlobalSettings.providers[provider]. Users may configure multiple accounts
+   * per provider (e.g. "personal" vs "work"); `"default"` is the auto-created
+   * first account and the value to use when nothing more specific is meant.
+   * `"*"` is a wildcard, valid only in allowedModels.
+   */
+  account: string;
   /** Provider-specific model id. "*" is a wildcard, valid only in allowedModels. */
   modelId: string;
 }

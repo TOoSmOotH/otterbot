@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { GlobalProviderSettings, ProviderId } from "@otterbot/shared";
+import type { ProviderAccount, ProviderId } from "@otterbot/shared";
 import { useSetupStore } from "../../stores/setup-store";
 import { useAgentsStore } from "../../stores/agents-store";
 import { useGlobalSettingsStore } from "../../stores/global-settings-store";
@@ -43,15 +43,19 @@ export function OnboardingWizard() {
   const credSeedFor = (id: ProviderId) => {
     const info = providerInfo(id);
     if (!info) return "";
-    const savedBaseUrl = settings.providers[id]?.baseUrl;
+    const accounts = settings.providers[id] ?? [];
+    const savedBaseUrl = accounts[0]?.baseUrl;
     if (isLocalProvider(info) && savedBaseUrl) return savedBaseUrl;
     return providerDefaultCred(info);
   };
+
+  const accountsFor = (id: ProviderId) => settings.providers[id] ?? [];
 
   const [step, setStep] = useState(0);
 
   // Chat model slot.
   const [chatProvider, setChatProvider] = useState<ProviderId>("lmstudio");
+  const [chatAccount, setChatAccount] = useState("default");
   const [chatModelId, setChatModelId] = useState("local-model");
   const [chatCred, setChatCred] = useState("http://localhost:1234/v1");
   const [chatTest, setChatTest] = useState<TestState>({ status: "idle" });
@@ -61,6 +65,7 @@ export function OnboardingWizard() {
   // Embedding model slot — may use a different provider than chat. Defaults to
   // the zero-setup built-in CPU embedder.
   const [embProvider, setEmbProvider] = useState<ProviderId>("builtin");
+  const [embAccount, setEmbAccount] = useState("default");
   const [embModelId, setEmbModelId] = useState(BUILTIN_EMBED_MODEL);
   const [embCred, setEmbCred] = useState("");
   const [embTest, setEmbTest] = useState<TestState>({ status: "idle" });
@@ -89,6 +94,7 @@ export function OnboardingWizard() {
     setOpenAiAuth("api-key");
     setChatTest({ status: "idle" });
     setChatModels([]);
+    setChatAccount(accountsFor(p)[0]?.account ?? "default");
     setChatCred(credSeedFor(p));
     setChatModelId(p === "anthropic" ? "claude-opus-4-7" : p === "openai" ? "gpt-4o" : "local-model");
   };
@@ -98,6 +104,7 @@ export function OnboardingWizard() {
     setEmbSkipped(false);
     setEmbTest({ status: "idle" });
     setEmbModels([]);
+    setEmbAccount(accountsFor(p)[0]?.account ?? "default");
     // Reuse the chat credential when both slots share a (non-OAuth) provider.
     setEmbCred(p === chatProvider && !useChatOAuth ? chatCred : credSeedFor(p));
     setEmbModelId(
@@ -223,37 +230,58 @@ export function OnboardingWizard() {
   const finish = async () => {
     setSaving(true);
     try {
-      const chatRef = { provider: chatProvider, modelId: chatModelId.trim() };
+      const chatRef = {
+        provider: chatProvider,
+        account: chatAccount || "default",
+        modelId: chatModelId.trim(),
+      };
       // Skipped embeddings → empty modelId, which the server resolves to a
       // disabled (null) embedder; memory falls back to keyword search.
       const embeddingRef = embSkipped
-        ? { provider: "builtin" as ProviderId, modelId: "" }
-        : { provider: embProvider, modelId: embModelId.trim() };
+        ? { provider: "builtin" as ProviderId, account: "default", modelId: "" }
+        : {
+            provider: embProvider,
+            account: embAccount || "default",
+            modelId: embModelId.trim(),
+          };
 
       // Provider credentials are saved to Global Settings — the single source
       // of truth — so every agent reuses them. The built-in embedder has no
       // credential field; OAuth tokens are stored server-side by its flow.
       const current = useGlobalSettingsStore.getState().settings;
-      const providerPatch: Record<string, GlobalProviderSettings> = {};
-      const addCred = (p: ProviderId, value: string) => {
+      const providerPatch: Record<string, ProviderAccount[]> = {};
+      const upsertAccount = (
+        p: ProviderId,
+        accountName: string,
+        value: string,
+        extra: Partial<ProviderAccount> = {}
+      ) => {
         const info = providerInfo(p);
-        if (!info || p === "builtin" || !value.trim()) return;
-        providerPatch[p] = {
-          ...current.providers[p],
-          ...providerPatch[p],
-          ...globalProviderPatch(info, value.trim()),
-        };
+        if (!info || p === "builtin") return;
+        const list =
+          providerPatch[p] ?? current.providers[p]?.map((a) => ({ ...a })) ?? [];
+        const idx = list.findIndex((a) => a.account === accountName);
+        const patch: Partial<ProviderAccount> = value.trim()
+          ? { ...globalProviderPatch(info, value.trim()), ...extra }
+          : { ...extra };
+        if (idx >= 0) {
+          list[idx] = { ...list[idx], ...patch, apiKeyConfigured: list[idx].apiKeyConfigured || Boolean(patch.apiKey) };
+        } else {
+          list.push({
+            account: accountName,
+            baseUrl: info.defaultBaseUrl ?? "",
+            apiKeyConfigured: Boolean(patch.apiKey),
+            ...patch,
+          } as ProviderAccount);
+        }
+        providerPatch[p] = list;
       };
-      if (!useChatOAuth) addCred(chatProvider, chatCred);
-      if (!embSkipped) addCred(embeddingRef.provider, embCred);
+      if (!useChatOAuth) upsertAccount(chatProvider, chatRef.account, chatCred);
+      if (!embSkipped) upsertAccount(embeddingRef.provider, embeddingRef.account, embCred);
       if (useChatOAuth) {
-        // Flip OpenAI to OAuth account-wide so model resolution uses the
-        // server-side tokens. Folded into the single save below.
-        providerPatch.openai = {
-          ...current.providers.openai,
-          ...providerPatch.openai,
-          authMethod: "oauth",
-        };
+        // Flip OpenAI to OAuth account-wide on the chosen account so model
+        // resolution uses the server-side tokens.
+        upsertAccount("openai", chatRef.account, "", { authMethod: "oauth" });
       }
       if (Object.keys(providerPatch).length > 0) {
         await saveSettings({
@@ -264,7 +292,7 @@ export function OnboardingWizard() {
 
       const allowedModels = Array.from(
         new Set([chatRef.provider, embeddingRef.provider])
-      ).map((p) => ({ provider: p, modelId: "*" }));
+      ).map((p) => ({ provider: p, account: "*", modelId: "*" }));
 
       await fetch("/api/agents/coo", {
         method: "PATCH",
@@ -334,6 +362,9 @@ export function OnboardingWizard() {
               providers={chatProviders}
               provider={chatProvider}
               onProvider={pickChatProvider}
+              account={chatAccount}
+              onAccount={setChatAccount}
+              accounts={accountsFor(chatProvider)}
               cred={chatCred}
               onCred={setChatCred}
               modelId={chatModelId}
@@ -344,7 +375,6 @@ export function OnboardingWizard() {
               onModels={setChatModels}
               modelLabel="Chat model"
               oauth={oauthBundle}
-              globalConfig={settings.providers[chatProvider]}
             />
             <Buttons>
               <button style={ghost} onClick={() => setStep(0)}>
@@ -375,6 +405,9 @@ export function OnboardingWizard() {
               providers={embeddingProviders}
               provider={embProvider}
               onProvider={pickEmbProvider}
+              account={embAccount}
+              onAccount={setEmbAccount}
+              accounts={accountsFor(embProvider)}
               cred={embCred}
               onCred={setEmbCred}
               modelId={embModelId}
@@ -384,7 +417,6 @@ export function OnboardingWizard() {
               models={embModels}
               onModels={setEmbModels}
               modelLabel="Embedding model"
-              globalConfig={settings.providers[embProvider]}
             />
             <Buttons>
               <button style={ghost} onClick={() => setStep(1)}>

@@ -148,41 +148,57 @@ describe("HTTP API (e2e)", () => {
       url: "/api/settings/global",
       payload: {
         theme: "forest",
-        defaultChatModel: { provider: "openai", modelId: "gpt-4o" },
-        defaultEmbeddingModel: { provider: "lmstudio", modelId: "nomic-embed-text" },
+        defaultChatModel: { provider: "openai", account: "default", modelId: "gpt-4o" },
+        defaultEmbeddingModel: {
+          provider: "lmstudio",
+          account: "default",
+          modelId: "nomic-embed-text",
+        },
         providers: {
-          anthropic: {
-            baseUrl: "https://api.anthropic.com/v1",
-            apiKeyConfigured: false,
-          },
-          openai: {
-            baseUrl: "https://api.openai.com/v1",
-            apiKeyConfigured: false,
-            authMethod: "oauth",
-            apiKey: "sk-test",
-          },
-          lmstudio: {
-            baseUrl: stack.cfg.lmstudioBaseUrl,
-            apiKeyConfigured: false,
-          },
-          ollama: {
-            baseUrl: "http://localhost:11434/v1",
-            apiKeyConfigured: false,
-          },
+          anthropic: [
+            { account: "default", baseUrl: "https://api.anthropic.com/v1", apiKeyConfigured: false },
+          ],
+          openai: [
+            {
+              account: "default",
+              baseUrl: "https://api.openai.com/v1",
+              apiKeyConfigured: false,
+              authMethod: "oauth",
+              apiKey: "sk-test",
+            },
+          ],
+          lmstudio: [
+            { account: "default", baseUrl: stack.cfg.lmstudioBaseUrl, apiKeyConfigured: false },
+          ],
+          ollama: [
+            { account: "default", baseUrl: "http://localhost:11434/v1", apiKeyConfigured: false },
+          ],
         },
       },
     });
     expect(update.statusCode).toBe(200);
     const updated = update.json() as {
       theme: string;
-      defaultChatModel: { provider: string; modelId: string };
-      providers: { openai: { apiKey?: string; apiKeyConfigured: boolean; authMethod?: string } };
+      defaultChatModel: { provider: string; account: string; modelId: string };
+      providers: {
+        openai: Array<{
+          account: string;
+          apiKey?: string;
+          apiKeyConfigured: boolean;
+          authMethod?: string;
+        }>;
+      };
     };
     expect(updated.theme).toBe("forest");
-    expect(updated.defaultChatModel).toEqual({ provider: "openai", modelId: "gpt-4o" });
-    expect(updated.providers.openai.apiKey).toBeUndefined();
-    expect(updated.providers.openai.apiKeyConfigured).toBe(true);
-    expect(updated.providers.openai.authMethod).toBe("oauth");
+    expect(updated.defaultChatModel).toEqual({
+      provider: "openai",
+      account: "default",
+      modelId: "gpt-4o",
+    });
+    const openaiDefault = updated.providers.openai[0];
+    expect(openaiDefault.apiKey).toBeUndefined();
+    expect(openaiDefault.apiKeyConfigured).toBe(true);
+    expect(openaiDefault.authMethod).toBe("oauth");
     expect(stack.orch.getGlobalProviderSecrets().get("OPENAI_API_KEY")).toBe("sk-test");
     expect(stack.orch.getGlobalProviderSecrets().get("OPENAI_AUTH_METHOD")).toBe("oauth");
   });

@@ -64,7 +64,17 @@ Principles:
 type ProfileJson = Omit<AgentProfile, "persona">;
 
 function lmstudioRef(modelId: string): ModelRef {
-  return { provider: "lmstudio", modelId };
+  return { provider: "lmstudio", account: "default", modelId };
+}
+
+/** Add `account: "default"` to refs persisted before the multi-account refactor. */
+function normalizeRef(r: Partial<ModelRef> | undefined, fallback: ModelRef): ModelRef {
+  if (!r) return fallback;
+  return {
+    provider: r.provider ?? fallback.provider,
+    account: r.account || "default",
+    modelId: r.modelId ?? fallback.modelId,
+  };
 }
 
 /**
@@ -181,7 +191,7 @@ export class ProfileStore {
         chat: lmstudioRef(opts.chatModelId),
         embedding: lmstudioRef(opts.chatModelId),
       },
-      allowedModels: [{ provider: "lmstudio", modelId: "*" }],
+      allowedModels: [{ provider: "lmstudio", account: "*", modelId: "*" }],
       allowedChatServices: ["web"],
       transport: "local",
       slack: null,
@@ -232,8 +242,8 @@ function normalizeChannel(c: ChannelBotConfig | null | undefined): ChannelBotCon
 /** Fill in defaults for any missing fields so older/partial profiles still load. */
 export function normalizeProfile(p: Partial<AgentProfile> & { id: string }): AgentProfile {
   const role: AgentRole = p.role ?? "agent";
-  const chat: ModelRef = p.model?.chat ?? lmstudioRef("local-model");
-  const embedding: ModelRef = p.model?.embedding ?? chat;
+  const chat: ModelRef = normalizeRef(p.model?.chat, lmstudioRef("local-model"));
+  const embedding: ModelRef = normalizeRef(p.model?.embedding, chat);
   return {
     id: p.id,
     displayName: p.displayName ?? p.id,
@@ -241,8 +251,8 @@ export function normalizeProfile(p: Partial<AgentProfile> & { id: string }): Age
     persona: p.persona ?? "",
     model: { chat, embedding },
     allowedModels: p.allowedModels?.length
-      ? p.allowedModels
-      : [{ provider: chat.provider, modelId: "*" }],
+      ? p.allowedModels.map((r) => normalizeRef(r, { provider: r.provider, account: "*", modelId: "*" }))
+      : [{ provider: chat.provider, account: "*", modelId: "*" }],
     allowedChatServices: p.allowedChatServices ?? ["web"],
     transport: p.transport ?? "local",
     slack: normalizeChannel(p.slack),

@@ -13,6 +13,8 @@ import type {
   GlobalSettings,
   McpServerStatus,
   ModelContextWindow,
+  ModelRef,
+  ProviderAccount,
   ProviderId,
 } from "@otterbot/shared";
 import type { Config } from "../config.js";
@@ -86,37 +88,89 @@ export interface CreateAgentInput {
 
 export const GLOBAL_SETTINGS_KEY = "global_settings";
 
+/** The auto-created first account for every provider. */
+export const DEFAULT_ACCOUNT = "default";
+
+function defaultAccountFor(p: { id: string; defaultBaseUrl: string | null }): ProviderAccount {
+  return {
+    account: DEFAULT_ACCOUNT,
+    baseUrl: p.defaultBaseUrl ?? "",
+    apiKeyConfigured: false,
+    ...(p.id === "openai" ? { authMethod: "api-key" as const } : {}),
+  };
+}
+
 /** Per-provider default settings, derived from the provider catalog. */
 const DEFAULT_GLOBAL_SETTINGS: GlobalSettings = {
   theme: "obsidian",
-  defaultChatModel: { provider: "lmstudio", modelId: "local-model" },
-  defaultEmbeddingModel: { provider: "lmstudio", modelId: "local-model" },
+  defaultChatModel: { provider: "lmstudio", account: DEFAULT_ACCOUNT, modelId: "local-model" },
+  defaultEmbeddingModel: { provider: "lmstudio", account: DEFAULT_ACCOUNT, modelId: "local-model" },
   modelContextWindows: [],
-  providers: Object.fromEntries(
-    PROVIDER_CATALOG.map((p) => [
-      p.id,
-      {
-        baseUrl: p.defaultBaseUrl ?? "",
-        apiKeyConfigured: false,
-        ...(p.id === "openai" ? { authMethod: "api-key" as const } : {}),
-      },
-    ])
-  ),
+  providers: Object.fromEntries(PROVIDER_CATALOG.map((p) => [p.id, [defaultAccountFor(p)]])),
 };
+
+function normalizeModelRef(ref: ModelRef | undefined, fallback: ModelRef): ModelRef {
+  if (!ref) return fallback;
+  return {
+    provider: ref.provider ?? fallback.provider,
+    account: ref.account || DEFAULT_ACCOUNT,
+    modelId: ref.modelId ?? fallback.modelId,
+  };
+}
+
+/**
+ * Accept both the new shape (`ProviderAccount[]`) and the pre-multi-account
+ * shape (a single `ProviderAccount`-ish object). Old single-config installs
+ * become one `"default"` account.
+ */
+function normalizeProviderAccounts(
+  raw: unknown,
+  providerId: ProviderId
+): ProviderAccount[] {
+  const list = Array.isArray(raw)
+    ? raw
+    : raw && typeof raw === "object"
+      ? [raw]
+      : [];
+  const seen = new Set<string>();
+  const out: ProviderAccount[] = [];
+  for (const item of list as Partial<ProviderAccount>[]) {
+    if (!item || typeof item !== "object") continue;
+    let label = (item.account ?? DEFAULT_ACCOUNT).trim() || DEFAULT_ACCOUNT;
+    while (seen.has(label)) label = `${label}-2`;
+    seen.add(label);
+    const apiKey = typeof item.apiKey === "string" ? item.apiKey : undefined;
+    const account: ProviderAccount = {
+      account: label,
+      baseUrl: typeof item.baseUrl === "string" ? item.baseUrl : "",
+      apiKeyConfigured: Boolean(apiKey || item.apiKeyConfigured),
+      ...(apiKey !== undefined ? { apiKey } : {}),
+      ...(providerId === "openai" && item.authMethod
+        ? { authMethod: item.authMethod }
+        : providerId === "openai"
+          ? { authMethod: "api-key" }
+          : {}),
+    };
+    out.push(account);
+  }
+  return out;
+}
 
 function normalizeGlobalSettings(input?: Partial<GlobalSettings> | null): GlobalSettings {
   const defaults = DEFAULT_GLOBAL_SETTINGS;
-  const nextProviders = { ...defaults.providers };
+  const nextProviders: Record<ProviderId, ProviderAccount[]> = {};
+  // Start from defaults so every catalog provider has at least the "default" account.
   for (const provider of Object.keys(defaults.providers) as ProviderId[]) {
-    const incoming = input?.providers?.[provider];
-    nextProviders[provider] = {
-      ...defaults.providers[provider],
-      ...incoming,
-      apiKeyConfigured: Boolean(incoming?.apiKey || incoming?.apiKeyConfigured),
-    };
-    if (provider === "openai" && nextProviders[provider].authMethod !== "oauth") {
-      nextProviders[provider].authMethod = "api-key";
-    }
+    const incoming = (input?.providers as Record<string, unknown> | undefined)?.[provider];
+    const normalized = normalizeProviderAccounts(incoming, provider);
+    nextProviders[provider] =
+      normalized.length > 0 ? normalized : [defaultAccountFor({ id: provider, defaultBaseUrl: defaults.providers[provider]?.[0]?.baseUrl ?? null })];
+  }
+  // Preserve any provider in the input that isn't in the catalog (forward-compat).
+  for (const [provider, raw] of Object.entries(input?.providers ?? {})) {
+    if (nextProviders[provider]) continue;
+    const normalized = normalizeProviderAccounts(raw, provider);
+    if (normalized.length > 0) nextProviders[provider] = normalized;
   }
   const modelContextWindows = Array.isArray(input?.modelContextWindows)
     ? input.modelContextWindows
@@ -136,21 +190,26 @@ function normalizeGlobalSettings(input?: Partial<GlobalSettings> | null): Global
     : [];
   return {
     theme: input?.theme ?? defaults.theme,
-    defaultChatModel: input?.defaultChatModel ?? defaults.defaultChatModel,
-    defaultEmbeddingModel: input?.defaultEmbeddingModel ?? defaults.defaultEmbeddingModel,
+    defaultChatModel: normalizeModelRef(input?.defaultChatModel, defaults.defaultChatModel),
+    defaultEmbeddingModel: normalizeModelRef(
+      input?.defaultEmbeddingModel,
+      defaults.defaultEmbeddingModel
+    ),
     modelContextWindows,
     providers: nextProviders,
   };
 }
 
 export function redactGlobalSettings(settings: GlobalSettings): GlobalSettings {
-  const providers = { ...settings.providers };
-  for (const provider of Object.keys(providers) as ProviderId[]) {
-    const { apiKey, ...rest } = providers[provider];
-    providers[provider] = {
-      ...rest,
-      apiKeyConfigured: Boolean(apiKey || rest.apiKeyConfigured),
-    };
+  const providers: Record<ProviderId, ProviderAccount[]> = {};
+  for (const provider of Object.keys(settings.providers) as ProviderId[]) {
+    providers[provider] = (settings.providers[provider] ?? []).map((acc) => {
+      const { apiKey, ...rest } = acc;
+      return {
+        ...rest,
+        apiKeyConfigured: Boolean(apiKey || rest.apiKeyConfigured),
+      };
+    });
   }
   return { ...settings, providers };
 }
@@ -263,9 +322,14 @@ export class Orchestrator {
     const raw = this.getSetting(GLOBAL_SETTINGS_KEY);
     if (!raw) {
       const settings = normalizeGlobalSettings();
-      settings.providers.lmstudio.baseUrl = this.cfg.lmstudioBaseUrl;
-      settings.providers.lmstudio.apiKey = this.cfg.lmstudioApiKey ?? undefined;
-      settings.providers.lmstudio.apiKeyConfigured = Boolean(this.cfg.lmstudioApiKey);
+      const lm = settings.providers.lmstudio?.[0];
+      if (lm) {
+        lm.baseUrl = this.cfg.lmstudioBaseUrl;
+        if (this.cfg.lmstudioApiKey) {
+          lm.apiKey = this.cfg.lmstudioApiKey;
+          lm.apiKeyConfigured = true;
+        }
+      }
       return settings;
     }
     try {
@@ -277,19 +341,29 @@ export class Orchestrator {
 
   setGlobalSettings(settings: GlobalSettings): GlobalSettings {
     const current = this.getGlobalSettings();
-    const mergedProviders = { ...current.providers };
+    const mergedProviders: Record<ProviderId, ProviderAccount[]> = {};
+    // Merge each incoming account against current (preserves apiKey when caller
+    // sent only a redacted view — apiKey is dropped over the wire).
     for (const provider of Object.keys(settings.providers) as ProviderId[]) {
-      const incoming = settings.providers[provider];
-      mergedProviders[provider] = {
-        ...current.providers[provider],
-        ...incoming,
-        apiKey:
+      const incomingList = settings.providers[provider] ?? [];
+      const currentByName = new Map(
+        (current.providers[provider] ?? []).map((a) => [a.account, a])
+      );
+      mergedProviders[provider] = incomingList.map((incoming) => {
+        const prev = currentByName.get(incoming.account);
+        const apiKey =
           incoming.apiKey !== undefined
-            ? incoming.apiKey
-            : current.providers[provider].apiKey,
-      };
-      if (incoming.apiKey === "") delete mergedProviders[provider].apiKey;
-      mergedProviders[provider].apiKeyConfigured = Boolean(mergedProviders[provider].apiKey);
+            ? incoming.apiKey === ""
+              ? undefined
+              : incoming.apiKey
+            : prev?.apiKey;
+        return {
+          ...(prev ?? {}),
+          ...incoming,
+          ...(apiKey !== undefined ? { apiKey } : { apiKey: undefined }),
+          apiKeyConfigured: Boolean(apiKey),
+        };
+      });
     }
     const next = normalizeGlobalSettings({ ...settings, providers: mergedProviders });
     this.setSetting(GLOBAL_SETTINGS_KEY, JSON.stringify(next));
@@ -297,15 +371,66 @@ export class Orchestrator {
     return next;
   }
 
+  /**
+   * Resolve a provider+account pair to its stored {@link ProviderAccount}.
+   * Falls back to the first configured account for the provider when the named
+   * one is missing (e.g. a profile referencing a deleted account).
+   */
+  findAccount(
+    provider: ProviderId,
+    account: string,
+    settings: GlobalSettings = this.getGlobalSettings()
+  ): ProviderAccount | undefined {
+    const list = settings.providers[provider] ?? [];
+    return list.find((a) => a.account === account) ?? list[0];
+  }
+
+  /**
+   * Build the env-var secrets map for a profile. Overlays only the credentials
+   * for the accounts the profile actually references (chat + embedding), not
+   * every configured provider — so an unused "work" account never leaks into
+   * an agent that's using "personal".
+   */
+  getProviderSecretsForProfile(profile: AgentProfile): Map<string, string> {
+    const settings = this.getGlobalSettings();
+    const secrets = new Map<string, string>();
+    for (const ref of [profile.model.chat, profile.model.embedding]) {
+      this.overlayAccountSecrets(secrets, ref, settings);
+    }
+    return secrets;
+  }
+
+  private overlayAccountSecrets(
+    into: Map<string, string>,
+    ref: ModelRef,
+    settings: GlobalSettings
+  ): void {
+    const def = findProvider(ref.provider);
+    if (!def) return;
+    const account = this.findAccount(ref.provider, ref.account, settings);
+    if (!account) return;
+    if (def.apiKeyEnv && account.apiKey) into.set(def.apiKeyEnv, account.apiKey);
+    if (def.baseUrlEnv && account.baseUrl) into.set(def.baseUrlEnv, account.baseUrl);
+    if (ref.provider === "openai" && account.authMethod) {
+      into.set("OPENAI_AUTH_METHOD", account.authMethod);
+    }
+  }
+
+  /**
+   * Default-account secrets for the test/list endpoints. The endpoints layer
+   * the caller's typed credentials on top, so this is just a fallback.
+   */
   getGlobalProviderSecrets(): Map<string, string> {
     const settings = this.getGlobalSettings();
     const secrets = new Map<string, string>();
-    for (const [provider, cfg] of Object.entries(settings.providers)) {
+    for (const [provider, accounts] of Object.entries(settings.providers)) {
+      const first = accounts[0];
+      if (!first) continue;
       const def = findProvider(provider);
-      if (def?.apiKeyEnv && cfg.apiKey) secrets.set(def.apiKeyEnv, cfg.apiKey);
-      if (def?.baseUrlEnv && cfg.baseUrl) secrets.set(def.baseUrlEnv, cfg.baseUrl);
-      if (provider === "openai" && cfg.authMethod) {
-        secrets.set("OPENAI_AUTH_METHOD", cfg.authMethod);
+      if (def?.apiKeyEnv && first.apiKey) secrets.set(def.apiKeyEnv, first.apiKey);
+      if (def?.baseUrlEnv && first.baseUrl) secrets.set(def.baseUrlEnv, first.baseUrl);
+      if (provider === "openai" && first.authMethod) {
+        secrets.set("OPENAI_AUTH_METHOD", first.authMethod);
       }
     }
     return secrets;
@@ -375,7 +500,10 @@ export class Orchestrator {
   /** Build and register a runtime + context for a profile. */
   private startAgent(profile: AgentProfile): AgentContext {
     const paths = this.profiles.pathsFor(profile.id);
-    const secrets = new Map([...this.getGlobalProviderSecrets(), ...this.secrets.get(profile.id)]);
+    const secrets = new Map([
+      ...this.getProviderSecretsForProfile(profile),
+      ...this.secrets.get(profile.id),
+    ]);
     const chat = profile.model.chat;
     const contextWindow =
       this.getGlobalSettings().modelContextWindows.find(
@@ -595,8 +723,8 @@ export class Orchestrator {
       persona: input.persona,
       model,
       allowedModels: input.allowedModels ?? [
-        { provider: model.chat.provider, modelId: "*" },
-        { provider: model.embedding.provider, modelId: "*" },
+        { provider: model.chat.provider, account: "*", modelId: "*" },
+        { provider: model.embedding.provider, account: "*", modelId: "*" },
       ],
       allowedChatServices: input.allowedChatServices,
       transport: input.transport,
@@ -646,7 +774,10 @@ export class Orchestrator {
   async reloadAgentMcp(id: string): Promise<void> {
     const ctx = this.contexts.get(id);
     if (!ctx) return;
-    const secrets = new Map([...this.getGlobalProviderSecrets(), ...this.secrets.get(id)]);
+    const secrets = new Map([
+      ...this.getProviderSecretsForProfile(ctx.profile),
+      ...this.secrets.get(id),
+    ]);
     await this.mcp
       .connect(
         id,

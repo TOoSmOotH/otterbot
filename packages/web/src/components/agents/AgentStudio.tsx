@@ -992,40 +992,77 @@ function ModelTab({ profile, onSaved }: TabProps) {
   const update = useAgentsStore((s) => s.update);
   const providers = useProvidersStore((s) => s.providers);
   const loadProviders = useProvidersStore((s) => s.load);
+  const settings = useGlobalSettingsStore((s) => s.settings);
+  const loadSettings = useGlobalSettingsStore((s) => s.load);
   useEffect(() => void loadProviders(), [loadProviders]);
+  useEffect(() => void loadSettings(), [loadSettings]);
   const chatProviders = providers.filter((p) => p.supportsChat);
   const embeddingProviders = providers.filter((p) => p.supportsEmbeddings);
 
   const [cp, setCp] = useState<ProviderId>(profile.model.chat.provider);
+  const [ca, setCa] = useState(profile.model.chat.account || "default");
   const [cm, setCm] = useState(profile.model.chat.modelId);
   const [ep, setEp] = useState<ProviderId>(profile.model.embedding.provider);
+  const [ea, setEa] = useState(profile.model.embedding.account || "default");
   const [em, setEm] = useState(profile.model.embedding.modelId);
   const [saved, setSaved] = useState(false);
   const dirty = () => setSaved(false);
 
+  const chatAccounts = settings.providers[cp] ?? [];
+  const embAccounts = settings.providers[ep] ?? [];
+
   /** The model config to save. */
   const modelConfig = (chatModelId: string) => ({
-    chat: { provider: cp, modelId: chatModelId },
-    embedding: { provider: ep, modelId: em.trim() },
+    chat: { provider: cp, account: ca || "default", modelId: chatModelId },
+    embedding: { provider: ep, account: ea || "default", modelId: em.trim() },
   });
 
   return (
     <Form>
       <p style={hint}>
-        Each agent picks its own models. Cloud providers read their API key from this agent's
-        Credentials; local providers (LM Studio / Ollama) use the endpoint configured there or the
-        global default.
+        Each agent picks its own model + provider account. Configure provider credentials in
+        Global Settings → Providers; this picker chooses which account this agent uses.
       </p>
       <Field label="Chat model">
-        <div style={{ display: "flex", gap: 8 }}>
-          <select value={cp} onChange={(e) => { setCp(e.target.value); dirty(); }} style={{ ...input, flex: "0 0 130px" }}>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <select
+            value={cp}
+            onChange={(e) => {
+              const next = e.target.value;
+              setCp(next);
+              const accounts = settings.providers[next] ?? [];
+              setCa(accounts[0]?.account ?? "default");
+              dirty();
+            }}
+            style={{ ...input, flex: "0 0 130px" }}
+          >
             <ProviderOptions list={chatProviders} current={cp} />
           </select>
-          <input value={cm} onChange={(e) => { setCm(e.target.value); dirty(); }} style={input} />
+          {cp !== "builtin" && (
+            <select
+              value={ca}
+              onChange={(e) => { setCa(e.target.value); dirty(); }}
+              style={{ ...input, flex: "0 0 130px" }}
+              title="Provider account"
+            >
+              {chatAccounts.length === 0 && <option value="default">default</option>}
+              {chatAccounts.map((a) => (
+                <option key={a.account} value={a.account}>
+                  {a.account}
+                </option>
+              ))}
+            </select>
+          )}
+          <input
+            value={cm}
+            onChange={(e) => { setCm(e.target.value); dirty(); }}
+            style={{ ...input, flex: 1, minWidth: 160 }}
+          />
         </div>
       </Field>
       {cp === "openai" && (
         <OpenAiAuthPanel
+          account={ca}
           chatModel={cm}
           onPickModel={(m) => {
             setCm(m);
@@ -1036,8 +1073,8 @@ function ModelTab({ profile, onSaved }: TabProps) {
             await update(profile.id, {
               model: modelConfig(m),
               allowedModels: [
-                { provider: cp, modelId: "*" },
-                { provider: ep, modelId: "*" },
+                { provider: cp, account: "*", modelId: "*" },
+                { provider: ep, account: "*", modelId: "*" },
               ],
             });
             setSaved(true);
@@ -1046,12 +1083,14 @@ function ModelTab({ profile, onSaved }: TabProps) {
         />
       )}
       <Field label="Embedding model (for semantic memory)">
-        <div style={{ display: "flex", gap: 8 }}>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <select
             value={ep}
             onChange={(e) => {
               const next = e.target.value;
               setEp(next);
+              const accounts = settings.providers[next] ?? [];
+              setEa(accounts[0]?.account ?? "default");
               if (next === "builtin") setEm("all-MiniLM-L6-v2");
               dirty();
             }}
@@ -1059,12 +1098,27 @@ function ModelTab({ profile, onSaved }: TabProps) {
           >
             <ProviderOptions list={embeddingProviders} current={ep} />
           </select>
+          {ep !== "builtin" && (
+            <select
+              value={ea}
+              onChange={(e) => { setEa(e.target.value); dirty(); }}
+              style={{ ...input, flex: "0 0 130px" }}
+              title="Provider account"
+            >
+              {embAccounts.length === 0 && <option value="default">default</option>}
+              {embAccounts.map((a) => (
+                <option key={a.account} value={a.account}>
+                  {a.account}
+                </option>
+              ))}
+            </select>
+          )}
           <input
             value={em}
             onChange={(e) => { setEm(e.target.value); dirty(); }}
             readOnly={ep === "builtin"}
             placeholder="leave blank to disable semantic memory"
-            style={input}
+            style={{ ...input, flex: 1, minWidth: 160 }}
           />
         </div>
       </Field>
@@ -1074,8 +1128,8 @@ function ModelTab({ profile, onSaved }: TabProps) {
           await update(profile.id, {
             model: modelConfig(cm.trim()),
             allowedModels: [
-              { provider: cp, modelId: "*" },
-              { provider: ep, modelId: "*" },
+              { provider: cp, account: "*", modelId: "*" },
+              { provider: ep, account: "*", modelId: "*" },
             ],
           });
           setSaved(true);
@@ -1090,10 +1144,13 @@ function ModelTab({ profile, onSaved }: TabProps) {
 
 /** Connect a ChatGPT subscription (OpenAI OAuth) — account-wide, not per-agent. */
 function OpenAiAuthPanel({
+  account,
   chatModel,
   onPickModel,
   onUseCodexModel,
 }: {
+  /** Which OpenAI account to flip into OAuth mode on connect. */
+  account: string;
   chatModel: string;
   onPickModel: (id: string) => void;
   onUseCodexModel: (id: string) => Promise<void>;
@@ -1107,7 +1164,10 @@ function OpenAiAuthPanel({
   const settingsLoaded = useGlobalSettingsStore((s) => s.loaded);
   const loadSettings = useGlobalSettingsStore((s) => s.load);
   const saveSettings = useGlobalSettingsStore((s) => s.save);
-  const openAiUsesOAuth = settings.providers.openai.authMethod === "oauth";
+  const openaiAccounts = settings.providers.openai ?? [];
+  const activeAccount =
+    openaiAccounts.find((a) => a.account === account) ?? openaiAccounts[0];
+  const openAiUsesOAuth = activeAccount?.authMethod === "oauth";
   const [autoSavedModel, setAutoSavedModel] = useState("");
 
   const refresh = () =>
@@ -1120,14 +1180,31 @@ function OpenAiAuthPanel({
 
   useEffect(() => {
     if (!status?.connected || !settingsLoaded || openAiUsesOAuth) return;
+    // Flip the active OpenAI account to OAuth so resolution uses ChatGPT tokens.
+    const list = openaiAccounts.length > 0 ? [...openaiAccounts] : [
+      {
+        account: account || "default",
+        baseUrl: "https://api.openai.com/v1",
+        apiKeyConfigured: false,
+        authMethod: "api-key" as const,
+      },
+    ];
+    const idx = list.findIndex((a) => a.account === account);
+    if (idx >= 0) list[idx] = { ...list[idx], authMethod: "oauth" };
+    else list.push({ ...list[0], account: account || "default", authMethod: "oauth" });
     void saveSettings({
       ...settings,
-      providers: {
-        ...settings.providers,
-        openai: { ...settings.providers.openai, authMethod: "oauth" },
-      },
+      providers: { ...settings.providers, openai: list },
     });
-  }, [openAiUsesOAuth, saveSettings, settings, settingsLoaded, status?.connected]);
+  }, [
+    account,
+    openAiUsesOAuth,
+    openaiAccounts,
+    saveSettings,
+    settings,
+    settingsLoaded,
+    status?.connected,
+  ]);
 
   // Once connected, discover the Codex model catalogue for this subscription.
   useEffect(() => {
