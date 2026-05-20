@@ -6,6 +6,7 @@ import { AgentStudio } from "./components/agents/AgentStudio";
 import { ActivityView } from "./components/agents/ActivityView";
 import { GlobalSettings } from "./components/settings/GlobalSettings";
 import { OnboardingWizard } from "./components/agents/OnboardingWizard";
+import { AuthGate } from "./components/AuthGate";
 import { useAgentsStore } from "./stores/agents-store";
 import { useChatStore } from "./stores/chat-store";
 import { useGlobalSettingsStore } from "./stores/global-settings-store";
@@ -23,6 +24,14 @@ const VIEW_LABELS: Record<MainView, string> = {
 };
 
 export default function App() {
+  return (
+    <AuthGate>
+      <AuthedApp />
+    </AuthGate>
+  );
+}
+
+function AuthedApp() {
   const loadAgents = useAgentsStore((s) => s.load);
   const bindSocket = useAgentsStore((s) => s.bindSocket);
   const setActive = useAgentsStore((s) => s.setActive);

@@ -34,7 +34,7 @@ export function AgentStudio({ agentId }: { agentId: string | null }) {
 
   const loadProfile = () => {
     if (!agentId) return;
-    void fetch(`/api/agents/${agentId}`)
+    void apiFetch(`/api/agents/${agentId}`)
       .then((r) => (r.ok ? r.json() : null))
       .then((p: AgentProfile | null) => setProfile(p));
   };
@@ -225,13 +225,13 @@ function CapabilitiesTab({ profile, onSaved }: TabProps) {
   const [busy, setBusy] = useState(false);
 
   const loadSkills = () => {
-    void fetch(`/api/agents/${profile.id}/skills`)
+    void apiFetch(`/api/agents/${profile.id}/skills`)
       .then((r) => (r.ok ? r.json() : []))
       .then(setSkills);
   };
   useEffect(loadSkills, [profile.id]);
   useEffect(() => {
-    void fetch("/api/skill-catalog")
+    void apiFetch("/api/skill-catalog")
       .then((r) => (r.ok ? r.json() : []))
       .then(setCatalog);
   }, []);
@@ -241,7 +241,7 @@ function CapabilitiesTab({ profile, onSaved }: TabProps) {
   const installCapability = async (id: string) => {
     setAddingId(id);
     setSkillError(null);
-    const res = await fetch(`/api/agents/${profile.id}/skills/install`, {
+    const res = await apiFetch(`/api/agents/${profile.id}/skills/install`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ catalogId: id }),
@@ -252,7 +252,7 @@ function CapabilitiesTab({ profile, onSaved }: TabProps) {
   };
 
   const toggleSkill = async (id: string, enabled: boolean) => {
-    const res = await fetch(`/api/agents/${profile.id}/skills/${id}`, {
+    const res = await apiFetch(`/api/agents/${profile.id}/skills/${id}`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ enabled }),
@@ -261,7 +261,7 @@ function CapabilitiesTab({ profile, onSaved }: TabProps) {
   };
 
   const saveSkillBody = async (id: string, body: string) => {
-    const res = await fetch(`/api/agents/${profile.id}/skills/${id}`, {
+    const res = await apiFetch(`/api/agents/${profile.id}/skills/${id}`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ body }),
@@ -272,7 +272,7 @@ function CapabilitiesTab({ profile, onSaved }: TabProps) {
   const addCustomCapability = async () => {
     if (!raw.trim()) return;
     setBusy(true);
-    const res = await fetch(`/api/agents/${profile.id}/skills`, {
+    const res = await apiFetch(`/api/agents/${profile.id}/skills`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ raw }),
@@ -287,12 +287,12 @@ function CapabilitiesTab({ profile, onSaved }: TabProps) {
   };
 
   const delSkill = async (id: string) => {
-    await fetch(`/api/agents/${profile.id}/skills/${id}`, { method: "DELETE" });
+    await apiFetch(`/api/agents/${profile.id}/skills/${id}`, { method: "DELETE" });
     loadSkills();
   };
 
   const refreshMcp = () =>
-    fetch(`/api/agents/${profile.id}/mcp`)
+    apiFetch(`/api/agents/${profile.id}/mcp`)
       .then((r) => (r.ok ? (r.json() as Promise<McpServerStatus[]>) : null))
       .then((s) => s && setMcpStatus(s))
       .catch(() => {});
@@ -700,7 +700,7 @@ function ChannelsTab({ profile, onSaved }: TabProps) {
 
   const [connStatus, setConnStatus] = useState<AgentConnectorStatus | null>(null);
   const refreshStatus = () =>
-    fetch(`/api/agents/${profile.id}/connectors`)
+    apiFetch(`/api/agents/${profile.id}/connectors`)
       .then((r) => (r.ok ? (r.json() as Promise<AgentConnectorStatus>) : null))
       .then(setConnStatus)
       .catch(() => {});
@@ -763,7 +763,7 @@ function ChannelsTab({ profile, onSaved }: TabProps) {
     if (slackAppToken.trim()) secrets.SLACK_APP_TOKEN = slackAppToken.trim();
     if (discordBotToken.trim()) secrets.DISCORD_BOT_TOKEN = discordBotToken.trim();
     if (Object.keys(secrets).length > 0) {
-      const res = await fetch(`/api/agents/${profile.id}/credentials`, {
+      const res = await apiFetch(`/api/agents/${profile.id}/credentials`, {
         method: "PATCH",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(secrets),
@@ -1171,7 +1171,7 @@ function OpenAiAuthPanel({
   const [autoSavedModel, setAutoSavedModel] = useState("");
 
   const refresh = () =>
-    fetch("/api/auth/openai/status")
+    apiFetch("/api/auth/openai/status")
       .then((r) => r.json())
       .then(setStatus)
       .catch(() => {});
@@ -1212,7 +1212,7 @@ function OpenAiAuthPanel({
       setModels([]);
       return;
     }
-    void fetch("/api/provider-models", {
+    void apiFetch("/api/provider-models", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ provider: "openai", secrets: { OPENAI_AUTH_METHOD: "oauth" } }),
@@ -1233,7 +1233,7 @@ function OpenAiAuthPanel({
   const signIn = async () => {
     setBusy(true);
     try {
-      const res = await fetch("/api/auth/openai/login", { method: "POST" });
+      const res = await apiFetch("/api/auth/openai/login", { method: "POST" });
       const data = (await res.json()) as { authUrl?: string; error?: string };
       if (!data.authUrl) {
         alert(data.error ?? "Could not start sign-in.");
@@ -1244,7 +1244,7 @@ function OpenAiAuthPanel({
       // Poll until the loopback callback completes (or 5 min timeout).
       const started = Date.now();
       const timer = setInterval(async () => {
-        const s = await fetch("/api/auth/openai/status")
+        const s = await apiFetch("/api/auth/openai/status")
           .then((r) => r.json())
           .catch(() => null);
         if (s?.connected || Date.now() - started > 300_000) {
@@ -1263,7 +1263,7 @@ function OpenAiAuthPanel({
   const completeManual = async () => {
     setCompleting(true);
     try {
-      const res = await fetch("/api/auth/openai/complete", {
+      const res = await apiFetch("/api/auth/openai/complete", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ url: paste.trim() }),
@@ -1287,7 +1287,7 @@ function OpenAiAuthPanel({
   };
 
   const signOut = async () => {
-    await fetch("/api/auth/openai/signout", { method: "POST" });
+    await apiFetch("/api/auth/openai/signout", { method: "POST" });
     setModels([]);
     setPaste("");
     void refresh();
@@ -1382,7 +1382,7 @@ function PeersTab({ profile, onSaved }: TabProps) {
   const [saved, setSaved] = useState(false);
 
   useEffect(() => {
-    void fetch("/api/agents")
+    void apiFetch("/api/agents")
       .then((r) => (r.ok ? (r.json() as Promise<AgentProfileSummary[]>) : []))
       .then((list) =>
         setPeerAgents(
@@ -1397,7 +1397,7 @@ function PeersTab({ profile, onSaved }: TabProps) {
   const isCoo = profile.role === "coo";
 
   const save = async () => {
-    const res = await fetch(`/api/agents/${profile.id}`, {
+    const res = await apiFetch(`/api/agents/${profile.id}`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ allowedPeers: draft }),
@@ -1438,7 +1438,7 @@ function ScheduleTab({ agentId }: { agentId: string }) {
   const [prompt, setPrompt] = useState("");
 
   const load = () => {
-    void fetch(`/api/agents/${agentId}/scheduled-tasks`)
+    void apiFetch(`/api/agents/${agentId}/scheduled-tasks`)
       .then((r) => (r.ok ? r.json() : []))
       .then(setTasks);
   };
@@ -1446,7 +1446,7 @@ function ScheduleTab({ agentId }: { agentId: string }) {
 
   const add = async () => {
     if (!prompt.trim()) return;
-    const res = await fetch(`/api/agents/${agentId}/scheduled-tasks`, {
+    const res = await apiFetch(`/api/agents/${agentId}/scheduled-tasks`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ cron, prompt }),
@@ -1460,7 +1460,7 @@ function ScheduleTab({ agentId }: { agentId: string }) {
   };
 
   const cancel = async (id: string) => {
-    await fetch(`/api/scheduled-tasks/${id}`, { method: "DELETE" });
+    await apiFetch(`/api/scheduled-tasks/${id}`, { method: "DELETE" });
     load();
   };
 
@@ -1515,21 +1515,21 @@ function MemoryTab({ agentId }: { agentId: string }) {
   const [busy, setBusy] = useState(false);
 
   const load = () => {
-    void fetch(`/api/agents/${agentId}/memories`)
+    void apiFetch(`/api/agents/${agentId}/memories`)
       .then((r) => (r.ok ? r.json() : []))
       .then(setMemories);
   };
   useEffect(load, [agentId]);
 
   const del = async (id: string) => {
-    await fetch(`/api/agents/${agentId}/memories/${id}`, { method: "DELETE" });
+    await apiFetch(`/api/agents/${agentId}/memories/${id}`, { method: "DELETE" });
     load();
   };
 
   const add = async () => {
     if (!draft.trim()) return;
     setBusy(true);
-    const res = await fetch(`/api/agents/${agentId}/memories`, {
+    const res = await apiFetch(`/api/agents/${agentId}/memories`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ content: draft.trim(), category }),
@@ -1632,7 +1632,7 @@ function CredentialsTab({ agentId }: { agentId: string }) {
   const [slackTest, setSlackTest] = useState<SlackTestResult | null>(null);
 
   const load = async () => {
-    const res = await fetch(`/api/agents/${agentId}/credentials`);
+    const res = await apiFetch(`/api/agents/${agentId}/credentials`);
     if (res.ok) setKeys(((await res.json()).keys as string[]) ?? []);
   };
 
@@ -1645,7 +1645,7 @@ function CredentialsTab({ agentId }: { agentId: string }) {
     const key = newKey.trim();
     if (!key || !newValue) return;
     setBusy(true);
-    const res = await fetch(`/api/agents/${agentId}/credentials`, {
+    const res = await apiFetch(`/api/agents/${agentId}/credentials`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ [key]: newValue }),
@@ -1664,7 +1664,7 @@ function CredentialsTab({ agentId }: { agentId: string }) {
   const remove = async (key: string) => {
     if (!confirm(`Delete credential ${key}? This only removes this one key.`)) return;
     setBusy(true);
-    const res = await fetch(`/api/agents/${agentId}/credentials/${encodeURIComponent(key)}`, {
+    const res = await apiFetch(`/api/agents/${agentId}/credentials/${encodeURIComponent(key)}`, {
       method: "DELETE",
     });
     if (res.ok) {
@@ -1680,7 +1680,7 @@ function CredentialsTab({ agentId }: { agentId: string }) {
   const testSlack = async () => {
     setBusy(true);
     setSlackTest(null);
-    const res = await fetch(`/api/agents/${agentId}/credentials/test-slack`, { method: "POST" });
+    const res = await apiFetch(`/api/agents/${agentId}/credentials/test-slack`, { method: "POST" });
     setSlackTest((await res.json()) as SlackTestResult);
     setBusy(false);
   };

@@ -1,4 +1,4 @@
-import Fastify, { type FastifyInstance } from "fastify";
+import Fastify, { type FastifyInstance, type FastifyRequest, type FastifyReply } from "fastify";
 import fastifyStatic from "@fastify/static";
 import fastifyCors from "@fastify/cors";
 import fastifyMultipart from "@fastify/multipart";
@@ -6,6 +6,19 @@ import { resolve, extname } from "node:path";
 import { existsSync, createReadStream } from "node:fs";
 import type { Config } from "./config.js";
 import type { Orchestrator, CreateAgentInput } from "./orchestrator/orchestrator.js";
+import {
+  extractToken,
+  TOKEN_COOKIE,
+  labelFromUserAgent,
+  type AuthStore,
+} from "./auth/api-token.js";
+
+declare module "fastify" {
+  interface FastifyRequest {
+    /** Set by the auth hook — the session id that authenticated this request, or "env" for env-pinned mode. */
+    sessionId?: string;
+  }
+}
 import { providerCatalogInfo } from "./providers/catalog.js";
 import { getSkillService } from "./skills/skill-service.js";
 import { getMemoryService } from "./memory/memory-service.js";
@@ -29,17 +42,36 @@ import type {
 } from "@otterbot/shared";
 import { redactGlobalSettings } from "./orchestrator/orchestrator.js";
 
+/** Optional knobs supplied by the boot process; tests omit these. */
+export interface BuildServerOpts {
+  /**
+   * Auth store consulted per request. Omit (or pass null) to disable auth
+   * entirely — tests do this so `app.inject()` calls don't need headers.
+   */
+  auth?: AuthStore | null;
+}
+
 /**
  * Build the Fastify HTTP API over a booted `Orchestrator`. Does not call
  * `listen()` — `index.ts` does that for the real process, while tests use
  * `app.inject()`.
  */
-export async function buildServer(orch: Orchestrator, cfg: Config): Promise<FastifyInstance> {
+export async function buildServer(
+  orch: Orchestrator,
+  cfg: Config,
+  opts: BuildServerOpts = {}
+): Promise<FastifyInstance> {
   const app = Fastify({ logger: { level: cfg.logLevel } });
 
-  await app.register(fastifyCors, { origin: true, credentials: true });
+  // Same-origin only. The web app is served from this server; the CLI is a
+  // non-browser client (CORS does not apply). Anything cross-origin must be
+  // an explicit choice — flip this back on with care.
+  await app.register(fastifyCors, { origin: false });
   // Avatar uploads — capped well above any reasonable image.
   await app.register(fastifyMultipart, { limits: { fileSize: 4 * 1024 * 1024, files: 1 } });
+
+  const auth = opts.auth ?? null;
+  if (auth) registerAuth(app, auth);
 
   // Instance-wide ChatGPT OAuth store, backed by control.db app_settings. The
   // real process initialises this before `orch.boot()` so agent runtimes and
@@ -725,6 +757,160 @@ export async function buildServer(orch: Orchestrator, cfg: Config): Promise<Fast
   }
 
   return app;
+}
+
+/**
+ * Gate every `/api/*` request on the API token. The web shell, SPA fallback
+ * and the bootstrap auth endpoints (status / setup / login) stay open so a
+ * fresh client can load the UI, complete first-run setup, and exchange a
+ * password for a session token. The token is accepted as
+ * `Authorization: Bearer …`, `?token=…`, or the `otterbot_token` cookie.
+ *
+ * On valid tokens the matching session id is attached to `req.sessionId`
+ * so per-session handlers (logout, session list) know which session is
+ * making the call. In env-pinned mode the id is `"env"`.
+ */
+function registerAuth(app: FastifyInstance, auth: AuthStore): void {
+  const openPaths = new Set([
+    "/api/auth/status",
+    "/api/auth/login",
+    "/api/auth/setup",
+  ]);
+
+  app.addHook("onRequest", async (req: FastifyRequest, reply: FastifyReply) => {
+    const url = (req.raw.url ?? "").split("?")[0] || "/";
+    if (!url.startsWith("/api/")) return; // static web shell + SPA fallback
+    if (openPaths.has(url)) return;
+
+    if (!auth.hasPassword()) {
+      reply.code(503);
+      return { error: "needs-setup" };
+    }
+    const token = extractToken({ headers: req.headers, query: req.query });
+    if (!token) {
+      reply.code(401);
+      return { error: "unauthorized" };
+    }
+    const result = auth.validateToken(token);
+    if (!result) {
+      reply.code(401);
+      return { error: "unauthorized" };
+    }
+    req.sessionId = result.sessionId;
+  });
+
+  app.get("/api/auth/status", async () => ({
+    authRequired: true,
+    needsSetup: !auth.hasPassword(),
+    mode: auth.mode(),
+  }));
+
+  app.post<{ Body: { password?: string; label?: string } }>(
+    "/api/auth/setup",
+    async (req, reply) => {
+      const password = req.body?.password ?? "";
+      const label = (req.body?.label ?? "").trim() ||
+        labelFromUserAgent(asHeaderString(req.headers["user-agent"]));
+      const result = auth.setupPassword(password, label);
+      if (!result.ok) {
+        reply.code(400);
+        return result;
+      }
+      reply.header("set-cookie", sessionCookie(result.token));
+      return { ok: true, token: result.token, sessionId: result.sessionId };
+    }
+  );
+
+  app.post<{ Body: { password?: string; token?: string; label?: string } }>(
+    "/api/auth/login",
+    async (req, reply) => {
+      if (!auth.hasPassword()) {
+        reply.code(503);
+        return { ok: false, error: "needs-setup" };
+      }
+      // `token` is accepted for back-compat with older clients; new clients send `password`.
+      const password = (req.body?.password ?? req.body?.token ?? "").trim();
+      const label = (req.body?.label ?? "").trim() ||
+        labelFromUserAgent(asHeaderString(req.headers["user-agent"]));
+      const result = auth.login(password, label);
+      if (!result.ok) {
+        reply.code(401);
+        return result;
+      }
+      reply.header("set-cookie", sessionCookie(result.token));
+      return { ok: true, token: result.token, sessionId: result.sessionId };
+    }
+  );
+
+  app.post("/api/auth/logout", async (req, reply) => {
+    if (req.sessionId && req.sessionId !== "env") {
+      auth.revokeSession(req.sessionId);
+    }
+    reply.header("set-cookie", `${TOKEN_COOKIE}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0`);
+    return { ok: true };
+  });
+
+  app.get("/api/auth/sessions", async (req) => ({
+    mode: auth.mode(),
+    sessions: auth.listSessions(req.sessionId ?? null),
+  }));
+
+  app.delete<{ Params: { id: string } }>(
+    "/api/auth/sessions/:id",
+    async (req, reply) => {
+      if (auth.mode() === "env") {
+        reply.code(400);
+        return { ok: false, error: "sessions are disabled in env-pinned mode" };
+      }
+      const ok = auth.revokeSession(req.params.id);
+      if (!ok) {
+        reply.code(404);
+        return { ok: false, error: "session not found" };
+      }
+      // If the caller revoked their own session, clear the cookie too.
+      if (req.sessionId === req.params.id) {
+        reply.header("set-cookie", `${TOKEN_COOKIE}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0`);
+      }
+      return { ok: true };
+    }
+  );
+
+  app.post<{ Body: { currentPassword?: string; newPassword?: string } }>(
+    "/api/auth/change-password",
+    async (req, reply) => {
+      if (auth.mode() === "env") {
+        reply.code(400);
+        return { ok: false, error: "password change not available in env-pinned mode" };
+      }
+      const current = (req.body?.currentPassword ?? "").trim();
+      const next = (req.body?.newPassword ?? "").trim();
+      const result = auth.changePassword(current, next, req.sessionId ?? null);
+      if (!result.ok) {
+        reply.code(400);
+        return result;
+      }
+      // Rotate the caller's cookie to the new session token.
+      reply.header("set-cookie", sessionCookie(result.token));
+      return { ok: true, token: result.token, sessionId: result.sessionId };
+    }
+  );
+}
+
+function asHeaderString(v: string | string[] | undefined): string | undefined {
+  if (typeof v === "string") return v;
+  if (Array.isArray(v)) return v[0];
+  return undefined;
+}
+
+/**
+ * Build the session cookie. HttpOnly so JS on the page can't read the value;
+ * SameSite=Lax keeps it off cross-site requests. Not Secure — the server
+ * runs over plain HTTP on the LAN; flipping Secure on would break LAN
+ * access entirely.
+ */
+function sessionCookie(value: string): string {
+  const oneYear = 60 * 60 * 24 * 365;
+  return `${TOKEN_COOKIE}=${encodeURIComponent(value)}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${oneYear}`;
 }
 
 function shouldServeWebApp(method: string, url: string): boolean {

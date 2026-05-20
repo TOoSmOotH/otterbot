@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { apiFetch } from "../lib/api";
 
 /** Mirrors the server's `BuiltinModelStatus`. */
 interface BuiltinModelStatus {
@@ -18,7 +19,7 @@ export function BuiltinEmbedderControls() {
   const [status, setStatus] = useState<BuiltinModelStatus | null>(null);
 
   const refresh = () =>
-    fetch("/api/embedder/builtin/status")
+    apiFetch("/api/embedder/builtin/status")
       .then((r) => r.json())
       .then(setStatus)
       .catch(() => {});
@@ -35,7 +36,7 @@ export function BuiltinEmbedderControls() {
   const download = async () => {
     setStatus((s) => (s ? { ...s, downloading: true, error: null } : s));
     try {
-      const res = await fetch("/api/embedder/builtin/download", { method: "POST" });
+      const res = await apiFetch("/api/embedder/builtin/download", { method: "POST" });
       setStatus(await res.json());
     } catch {
       void refresh();

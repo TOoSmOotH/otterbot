@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { apiFetch } from "../../lib/api";
 import type { ProviderAccount, ProviderId } from "@otterbot/shared";
 import { useSetupStore } from "../../stores/setup-store";
 import { useAgentsStore } from "../../stores/agents-store";
@@ -118,7 +119,7 @@ export function OnboardingWizard() {
 
   // --- OpenAI OAuth (ChatGPT subscription) -------------------------------
   const refreshOAuth = () =>
-    fetch("/api/auth/openai/status")
+    apiFetch("/api/auth/openai/status")
       .then((r) => r.json())
       .then(setOauthStatus)
       .catch(() => {});
@@ -135,7 +136,7 @@ export function OnboardingWizard() {
       setOauthModels([]);
       return;
     }
-    void fetch("/api/provider-models", {
+    void apiFetch("/api/provider-models", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ provider: "openai", secrets: { OPENAI_AUTH_METHOD: "oauth" } }),
@@ -152,7 +153,7 @@ export function OnboardingWizard() {
   const signInOpenAi = async () => {
     setOauthBusy(true);
     try {
-      const res = await fetch("/api/auth/openai/login", { method: "POST" });
+      const res = await apiFetch("/api/auth/openai/login", { method: "POST" });
       const data = (await res.json()) as { authUrl?: string; error?: string };
       if (!data.authUrl) {
         setChatTest({ status: "fail", message: data.error ?? "Could not start sign-in." });
@@ -163,7 +164,7 @@ export function OnboardingWizard() {
       // Poll until the loopback callback completes (or 5 min timeout).
       const started = Date.now();
       const timer = setInterval(async () => {
-        const s = await fetch("/api/auth/openai/status")
+        const s = await apiFetch("/api/auth/openai/status")
           .then((r) => r.json())
           .catch(() => null);
         if (s?.connected || Date.now() - started > 300_000) {
@@ -178,7 +179,7 @@ export function OnboardingWizard() {
   };
 
   const signOutOpenAi = async () => {
-    await fetch("/api/auth/openai/signout", { method: "POST" });
+    await apiFetch("/api/auth/openai/signout", { method: "POST" });
     setOauthModels([]);
     setOauthPaste("");
     void refreshOAuth();
@@ -189,7 +190,7 @@ export function OnboardingWizard() {
   const completeOpenAi = async () => {
     setOauthCompleting(true);
     try {
-      const res = await fetch("/api/auth/openai/complete", {
+      const res = await apiFetch("/api/auth/openai/complete", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ url: oauthPaste.trim() }),
@@ -294,7 +295,7 @@ export function OnboardingWizard() {
         new Set([chatRef.provider, embeddingRef.provider])
       ).map((p) => ({ provider: p, account: "*", modelId: "*" }));
 
-      await fetch("/api/agents/coo", {
+      await apiFetch("/api/agents/coo", {
         method: "PATCH",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({

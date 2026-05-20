@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import { apiFetch, withToken } from "../../lib/api";
 import type { AgentProfile } from "@otterbot/shared";
 import { initials } from "./agent-visual";
 
@@ -31,7 +32,7 @@ export function AvatarUpload({
     try {
       const body = new FormData();
       body.append("file", file);
-      const res = await fetch(`/api/agents/${agentId}/avatar`, { method: "POST", body });
+      const res = await apiFetch(`/api/agents/${agentId}/avatar`, { method: "POST", body });
       const data = await res.json();
       if (!res.ok) {
         setError((data as { error?: string })?.error ?? "Upload failed.");
@@ -50,7 +51,7 @@ export function AvatarUpload({
     setBusy(true);
     setError("");
     try {
-      const res = await fetch(`/api/agents/${agentId}/avatar`, { method: "DELETE" });
+      const res = await apiFetch(`/api/agents/${agentId}/avatar`, { method: "DELETE" });
       const data = await res.json();
       if (res.ok) {
         setUrl(null);
@@ -84,7 +85,7 @@ export function AvatarUpload({
         }}
       >
         {url ? (
-          <img src={url} alt="" width={size} height={size} style={{ objectFit: "cover" }} />
+          <img src={withToken(url)} alt="" width={size} height={size} style={{ objectFit: "cover" }} />
         ) : (
           initials(name)
         )}

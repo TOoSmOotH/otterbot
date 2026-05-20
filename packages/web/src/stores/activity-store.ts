@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { apiFetch } from "../lib/api";
 import { getSocket } from "../lib/socket";
 import type { AgentMessage, SubagentTask } from "@otterbot/shared";
 
@@ -19,7 +20,7 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
 
   load: async () => {
     try {
-      const res = await fetch("/api/bus/messages?limit=300");
+      const res = await apiFetch("/api/bus/messages?limit=300");
       if (res.ok) set({ messages: (await res.json()) as AgentMessage[] });
     } catch {
       // ignore
@@ -29,7 +30,7 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
 
   loadTasks: async () => {
     try {
-      const res = await fetch("/api/subagent-tasks");
+      const res = await apiFetch("/api/subagent-tasks");
       if (res.ok) set({ tasks: (await res.json()) as SubagentTask[] });
     } catch {
       // ignore

@@ -27,7 +27,11 @@
       "@homebridge/node-pty-prebuilt-multiarch",
       "better-sqlite3-multiple-ciphers",
       "esbuild"
-    ]
+    ],
+    "overrides": {
+      "socket.io-parser": ">=4.2.6",
+      "ajv": ">=8.18.0"
+    }
   },
   "packageManager": "pnpm@10.29.3",
   "engines": {

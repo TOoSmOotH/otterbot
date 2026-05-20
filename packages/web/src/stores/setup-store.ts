@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { apiFetch } from "../lib/api";
 
 interface SetupState {
   checked: boolean;
@@ -14,7 +15,7 @@ export const useSetupStore = create<SetupState>((set) => ({
 
   load: async () => {
     try {
-      const res = await fetch("/api/setup-state");
+      const res = await apiFetch("/api/setup-state");
       if (res.ok) {
         const state = (await res.json()) as { onboardingComplete?: boolean };
         set({ checked: true, onboardingComplete: Boolean(state.onboardingComplete) });
@@ -28,7 +29,7 @@ export const useSetupStore = create<SetupState>((set) => ({
 
   markComplete: async () => {
     try {
-      await fetch("/api/setup-state/complete", { method: "POST" });
+      await apiFetch("/api/setup-state/complete", { method: "POST" });
     } finally {
       set({ onboardingComplete: true });
     }

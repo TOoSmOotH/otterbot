@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { apiFetch } from "../../lib/api";
 import type { ProviderAccount, ProviderId, ProviderInfo } from "@otterbot/shared";
 import { providerCredField, isAccountConfigured, findAccount } from "../../stores/providers-store";
 import { BuiltinEmbedderControls } from "../BuiltinEmbedderControls";
@@ -99,7 +100,7 @@ export function ProviderFields({
   const loadModels = async () => {
     onTest({ status: "testing" });
     try {
-      const res = await fetch("/api/provider-models", {
+      const res = await apiFetch("/api/provider-models", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
@@ -130,7 +131,7 @@ export function ProviderFields({
   const runTest = async () => {
     onTest({ status: "testing" });
     try {
-      const res = await fetch("/api/test-model", {
+      const res = await apiFetch("/api/test-model", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({

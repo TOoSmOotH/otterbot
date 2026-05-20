@@ -1,5 +1,6 @@
 import { useAgentsStore } from "../../stores/agents-store";
 import { useChatStore } from "../../stores/chat-store";
+import { withToken } from "../../lib/api";
 import { statusColor, initials } from "./agent-visual";
 
 /** Left-rail agent roster: the COO plus every agent, with a "New agent" action. */
@@ -81,7 +82,7 @@ export function AgentRoster({ onNewAgent }: { onNewAgent: () => void }) {
                 }}
               >
                 {thumb ? (
-                  <img src={thumb} alt="" width={34} height={34} style={{ objectFit: "cover" }} />
+                  <img src={withToken(thumb)} alt="" width={34} height={34} style={{ objectFit: "cover" }} />
                 ) : (
                   initials(a.displayName)
                 )}

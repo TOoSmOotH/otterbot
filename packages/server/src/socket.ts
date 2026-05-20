@@ -6,6 +6,12 @@ import { summarizeConversation } from "./memory/summarizer.js";
 import { extractFactsFromConversation } from "./memory/extractor.js";
 import { maybeAuthorSkill } from "./skills/skill-author.js";
 import { openTerminal } from "./integrations/shell-terminal.js";
+import { extractToken, type AuthStore } from "./auth/api-token.js";
+
+export interface AttachSocketOpts {
+  /** Auth store consulted per connection; null/undefined disables auth. */
+  auth?: AuthStore | null;
+}
 
 const IDLE_CLOSE_MS = 5 * 60 * 1000;
 /** Kill an interactive terminal after this long with no keystrokes. */
@@ -28,11 +34,29 @@ interface JoinedConversation {
  * client can hold conversations with several agents at once. Agent status
  * changes are broadcast to all clients.
  */
-export function attachSocketServer(http: HttpServer, orch: Orchestrator): SocketIOServer {
+export function attachSocketServer(
+  http: HttpServer,
+  orch: Orchestrator,
+  opts: AttachSocketOpts = {}
+): SocketIOServer {
   const io = new SocketIOServer(http, {
     path: "/socket.io",
-    cors: { origin: true, credentials: true },
+    cors: { origin: false },
   });
+
+  const auth = opts.auth ?? null;
+  if (auth) {
+    io.use((socket, next) => {
+      if (!auth.hasPassword()) return next(new Error("needs-setup"));
+      const handshake = socket.handshake;
+      const supplied =
+        (typeof handshake.auth?.token === "string" ? handshake.auth.token : null) ??
+        extractToken({ headers: handshake.headers, query: handshake.query });
+      if (!supplied) return next(new Error("unauthorized"));
+      if (auth.validateToken(supplied)) return next();
+      next(new Error("unauthorized"));
+    });
+  }
 
   // Push every agent status transition to all connected clients.
   orch.onStatusChange((agentId, status) => {

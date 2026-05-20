@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { apiFetch } from "../lib/api";
 import type { GlobalSettings, ThemeId } from "@otterbot/shared";
 
 export const THEMES: Record<ThemeId, { label: string; vars: Record<string, string> }> = {
@@ -72,7 +73,7 @@ export const useGlobalSettingsStore = create<GlobalSettingsState>((set, get) => 
     if (get().loading) return;
     set({ loading: true });
     try {
-      const res = await fetch("/api/settings/global");
+      const res = await apiFetch("/api/settings/global");
       if (!res.ok) return;
       const settings = (await res.json()) as GlobalSettings;
       applyTheme(settings.theme);
@@ -85,7 +86,7 @@ export const useGlobalSettingsStore = create<GlobalSettingsState>((set, get) => 
   save: async (settings) => {
     set({ saving: true });
     try {
-      const res = await fetch("/api/settings/global", {
+      const res = await apiFetch("/api/settings/global", {
         method: "PUT",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(settings),

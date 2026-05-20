@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { apiFetch } from "../lib/api";
 import type { ProviderAccount, ProviderInfo } from "@otterbot/shared";
 
 /**
@@ -17,7 +18,7 @@ export const useProvidersStore = create<ProvidersState>((set, get) => ({
   load: async () => {
     if (get().loaded) return;
     try {
-      const res = await fetch("/api/providers");
+      const res = await apiFetch("/api/providers");
       if (res.ok) {
         set({ providers: (await res.json()) as ProviderInfo[], loaded: true });
       }

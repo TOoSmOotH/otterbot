@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { apiFetch } from "../lib/api";
 import type { Skill } from "@otterbot/shared";
 
 interface SkillsState {
@@ -13,7 +14,7 @@ export const useSkillsStore = create<SkillsState>((set) => ({
   loaded: false,
   load: async () => {
     try {
-      const res = await fetch("/api/skills");
+      const res = await apiFetch("/api/skills");
       const skills = res.ok ? ((await res.json()) as Skill[]) : [];
       set({ skills, loaded: true });
     } catch {
@@ -21,7 +22,7 @@ export const useSkillsStore = create<SkillsState>((set) => ({
     }
   },
   importFromUrl: async (url: string) => {
-    const res = await fetch("/api/skills/import", {
+    const res = await apiFetch("/api/skills/import", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ url }),

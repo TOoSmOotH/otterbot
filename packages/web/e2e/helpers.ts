@@ -1,10 +1,20 @@
 import type { Page } from "@playwright/test";
 
+const E2E_API_TOKEN = process.env.OTTERBOT_API_TOKEN ?? "e2e-test-token-otterbot";
+
 /**
  * Open the app, dismissing the first-run onboarding wizard if it appears, and
- * wait for the agent roster (COO card) to render.
+ * wait for the agent roster (COO card) to render. The shared API token is
+ * pre-seeded into localStorage so the AuthGate accepts it without prompting.
  */
 export async function gotoApp(page: Page): Promise<void> {
+  await page.addInitScript((token) => {
+    try {
+      window.localStorage.setItem("otterbot.api-token", token);
+    } catch {
+      /* ignore */
+    }
+  }, E2E_API_TOKEN);
   await page.goto("/");
   const skip = page.getByRole("button", { name: "Skip setup" });
   try {

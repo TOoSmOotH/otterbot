@@ -19,13 +19,20 @@ export interface ClientToServer {
 
 export type OtterSocket = Socket<ServerToClient, ClientToServer>;
 
-/** Create a (not-yet-connected) socket to the given server URL. */
-export function createSocket(serverUrl: string): OtterSocket {
+/**
+ * Create a (not-yet-connected) socket to the given server URL. The optional
+ * token is sent in the Socket.IO handshake; without it, a server that has
+ * auth enabled will reject the connection. Defaults to `OTTERBOT_API_TOKEN`
+ * in the environment.
+ */
+export function createSocket(serverUrl: string, apiToken?: string): OtterSocket {
+  const token = apiToken ?? process.env.OTTERBOT_API_TOKEN ?? "";
   return io(serverUrl, {
     path: "/socket.io",
     transports: ["websocket", "polling"],
     withCredentials: true,
     reconnection: true,
     autoConnect: false,
+    auth: { token },
   });
 }

@@ -1,4 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
+import {
+  apiFetch,
+  changePassword,
+  listSessions,
+  logout,
+  revokeSession,
+  type SessionInfo,
+  type SessionList,
+} from "../../lib/api";
 import type {
   AgentProfileSummary,
   GlobalSettings as GlobalSettingsShape,
@@ -18,7 +27,7 @@ import { BuiltinEmbedderControls } from "../BuiltinEmbedderControls";
 
 type OpenAiAuthStatus = { connected: boolean; accountId: string | null };
 
-const TABS = ["Providers", "Models", "Appearance"] as const;
+const TABS = ["Providers", "Models", "Appearance", "Account"] as const;
 type SettingsTab = (typeof TABS)[number];
 
 type PatchFn = (p: Partial<GlobalSettingsShape>) => void;
@@ -88,6 +97,7 @@ export function GlobalSettings() {
         {tab === "Providers" && <ProvidersTab draft={draft} patch={patch} providers={providers} />}
         {tab === "Models" && <ModelsTab draft={draft} patch={patch} providers={providers} />}
         {tab === "Appearance" && <AppearanceTab draft={draft} patch={patch} />}
+        {tab === "Account" && <AccountTab />}
       </div>
 
       {dirty && (
@@ -367,14 +377,14 @@ function ModelsTab({
   const [embeddingUsage, setEmbeddingUsage] = useState<Map<string, string[]>>(new Map());
 
   useEffect(() => {
-    void fetch("/api/agents")
+    void apiFetch("/api/agents")
       .then((r) => (r.ok ? (r.json() as Promise<AgentProfileSummary[]>) : []))
       .then((list) => {
         setAgents(list);
         // Fetch each agent's full profile so we know its embedding model too.
         void Promise.all(
           list.map((a) =>
-            fetch(`/api/agents/${a.id}`)
+            apiFetch(`/api/agents/${a.id}`)
               .then((r) =>
                 r.ok ? (r.json() as Promise<{ id: string; displayName: string; model: { embedding: ModelRef } }>) : null
               )
@@ -621,6 +631,249 @@ function ModelsTab({
   );
 }
 
+// --- Account tab ----------------------------------------------------------
+
+const MIN_PASSWORD = 8;
+
+function AccountTab() {
+  const [sessions, setSessions] = useState<SessionList | null>(null);
+  const [error, setError] = useState("");
+
+  const refresh = async () => {
+    setSessions(await listSessions());
+  };
+
+  useEffect(() => {
+    void refresh();
+  }, []);
+
+  const revoke = async (id: string) => {
+    setError("");
+    const wasCurrent = sessions?.sessions.find((s) => s.id === id)?.current;
+    const ok = await revokeSession(id);
+    if (!ok) {
+      setError("Could not revoke that session.");
+      return;
+    }
+    if (wasCurrent) {
+      // Server cleared our cookie + invalidated our token; reload so the
+      // AuthGate sends us back to the login screen.
+      window.location.reload();
+      return;
+    }
+    void refresh();
+  };
+
+  const signOut = async () => {
+    await logout();
+    window.location.reload();
+  };
+
+  if (!sessions) {
+    return (
+      <section style={section}>
+        <h2 style={h2}>Account</h2>
+        <p style={hint}>Loading…</p>
+      </section>
+    );
+  }
+
+  if (sessions.mode === "env") {
+    return (
+      <section style={section}>
+        <h2 style={h2}>Account</h2>
+        <p style={hint}>
+          API auth is pinned by the <code>OTTERBOT_API_TOKEN</code> environment variable on the
+          server. Sessions and password change are disabled in this mode — manage credentials by
+          updating the env var and restarting otterbot.
+        </p>
+      </section>
+    );
+  }
+
+  return (
+    <section style={section}>
+      <h2 style={h2}>Active sessions</h2>
+      <p style={hint}>
+        Every device that's logged in gets its own session token. Revoking a session immediately
+        signs that device out.
+      </p>
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        {sessions.sessions.length === 0 && <p style={hint}>No active sessions.</p>}
+        {sessions.sessions.map((s) => (
+          <SessionRow key={s.id} session={s} onRevoke={() => void revoke(s.id)} />
+        ))}
+      </div>
+      {error && <span style={{ fontSize: 12, color: "#f87171" }}>{error}</span>}
+
+      <div style={{ height: 12 }} />
+      <ChangePasswordCard onChanged={() => void refresh()} />
+
+      <div style={{ height: 12 }} />
+      <button onClick={() => void signOut()} style={ghostButton}>
+        Sign out this device
+      </button>
+    </section>
+  );
+}
+
+function SessionRow({
+  session,
+  onRevoke,
+}: {
+  session: SessionInfo;
+  onRevoke: () => void;
+}) {
+  return (
+    <div
+      style={{
+        border: "1px solid rgb(var(--border))",
+        borderRadius: 8,
+        padding: "10px 12px",
+        display: "flex",
+        alignItems: "center",
+        gap: 12,
+      }}
+    >
+      <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 2 }}>
+        <span style={{ fontSize: 13, fontWeight: 600 }}>
+          {session.label}
+          {session.current && (
+            <span
+              style={{
+                marginLeft: 8,
+                fontSize: 10,
+                color: "#4ade80",
+                border: "1px solid #4ade80",
+                borderRadius: 4,
+                padding: "1px 6px",
+              }}
+            >
+              this device
+            </span>
+          )}
+        </span>
+        <span style={{ ...hint, fontSize: 11 }}>
+          last used {formatRelative(session.lastUsedAt)} · created {formatRelative(session.createdAt)}
+        </span>
+      </div>
+      <button onClick={onRevoke} style={{ ...ghostButton, color: "#f87171" }}>
+        {session.current ? "Sign out" : "Revoke"}
+      </button>
+    </div>
+  );
+}
+
+function ChangePasswordCard({ onChanged }: { onChanged: () => void }) {
+  const [current, setCurrent] = useState("");
+  const [next, setNext] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [ok, setOk] = useState(false);
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError("");
+    setOk(false);
+    if (next.length < MIN_PASSWORD) {
+      setError(`New password must be at least ${MIN_PASSWORD} characters.`);
+      return;
+    }
+    if (next !== confirm) {
+      setError("New passwords don't match.");
+      return;
+    }
+    setBusy(true);
+    try {
+      const result = await changePassword(current, next);
+      if (!result.ok) {
+        setError(result.error ?? "Could not change password.");
+        return;
+      }
+      setCurrent("");
+      setNext("");
+      setConfirm("");
+      setOk(true);
+      onChanged();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <form
+      onSubmit={submit}
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: 8,
+        border: "1px solid rgb(var(--border))",
+        borderRadius: 8,
+        padding: 12,
+      }}
+    >
+      <h2 style={h2}>Change password</h2>
+      <p style={hint}>
+        Changing the password signs out every other device — only this session keeps working.
+      </p>
+      <input
+        type="password"
+        value={current}
+        onChange={(e) => setCurrent(e.target.value)}
+        placeholder="Current password"
+        style={inputStyle}
+      />
+      <input
+        type="password"
+        value={next}
+        onChange={(e) => setNext(e.target.value)}
+        placeholder={`New password (≥ ${MIN_PASSWORD} chars)`}
+        style={inputStyle}
+      />
+      <input
+        type="password"
+        value={confirm}
+        onChange={(e) => setConfirm(e.target.value)}
+        placeholder="Confirm new password"
+        style={inputStyle}
+      />
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <button
+          type="submit"
+          disabled={busy || !current || next.length < MIN_PASSWORD || !confirm}
+          style={primary}
+        >
+          {busy ? "Saving…" : "Change password"}
+        </button>
+        {ok && <span style={{ fontSize: 12, color: "#4ade80" }}>Password updated ✓</span>}
+        {error && <span style={{ fontSize: 12, color: "#f87171" }}>{error}</span>}
+      </div>
+    </form>
+  );
+}
+
+const inputStyle: React.CSSProperties = {
+  background: "rgb(var(--bg))",
+  color: "rgb(var(--fg))",
+  border: "1px solid rgb(var(--border))",
+  borderRadius: 6,
+  padding: "7px 9px",
+  fontSize: 13,
+};
+
+function formatRelative(ts: number): string {
+  const diff = Date.now() - ts;
+  if (diff < 0) return "just now";
+  const min = Math.round(diff / 60_000);
+  if (min < 1) return "just now";
+  if (min < 60) return `${min} minute${min === 1 ? "" : "s"} ago`;
+  const hr = Math.round(min / 60);
+  if (hr < 24) return `${hr} hour${hr === 1 ? "" : "s"} ago`;
+  const day = Math.round(hr / 24);
+  return `${day} day${day === 1 ? "" : "s"} ago`;
+}
+
 // --- Appearance tab -------------------------------------------------------
 
 function AppearanceTab({ draft, patch }: { draft: GlobalSettingsShape; patch: PatchFn }) {
@@ -658,7 +911,7 @@ function OpenAiOAuthControls() {
   const [busy, setBusy] = useState(false);
 
   const refresh = () =>
-    fetch("/api/auth/openai/status")
+    apiFetch("/api/auth/openai/status")
       .then((r) => r.json())
       .then(setStatus)
       .catch(() => {});
@@ -668,7 +921,7 @@ function OpenAiOAuthControls() {
   const signIn = async () => {
     setBusy(true);
     try {
-      const res = await fetch("/api/auth/openai/login", { method: "POST" });
+      const res = await apiFetch("/api/auth/openai/login", { method: "POST" });
       const data = (await res.json()) as { authUrl?: string; error?: string };
       if (!data.authUrl) {
         alert(data.error ?? "Could not start sign-in.");
@@ -678,7 +931,7 @@ function OpenAiOAuthControls() {
       window.open(data.authUrl, "_blank", "noopener");
       const started = Date.now();
       const timer = setInterval(async () => {
-        const next = await fetch("/api/auth/openai/status")
+        const next = await apiFetch("/api/auth/openai/status")
           .then((r) => r.json())
           .catch(() => null);
         if (next?.connected || Date.now() - started > 300_000) {
@@ -693,7 +946,7 @@ function OpenAiOAuthControls() {
   };
 
   const signOut = async () => {
-    await fetch("/api/auth/openai/signout", { method: "POST" });
+    await apiFetch("/api/auth/openai/signout", { method: "POST" });
     void refresh();
   };
 

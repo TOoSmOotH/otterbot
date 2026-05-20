@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { apiFetch } from "../../lib/api";
 import type {
   AgentPeerAccess,
   AgentProfile,
@@ -106,7 +107,7 @@ export function AgentEditor({ agentId, onClose }: { agentId: string | null; onCl
 
   // The COO's embedding model — offered as an "inherit" option for new agents.
   useEffect(() => {
-    void fetch("/api/agents/coo")
+    void apiFetch("/api/agents/coo")
       .then((r) => (r.ok ? r.json() : null))
       .then((p: AgentProfile | null) => {
         if (p) setCooEmbedding(p.model.embedding);
@@ -126,7 +127,7 @@ export function AgentEditor({ agentId, onClose }: { agentId: string | null; onCl
       setEmbModel(globalSettings.defaultEmbeddingModel.modelId);
       return;
     }
-    void fetch(`/api/agents/${agentId}`)
+    void apiFetch(`/api/agents/${agentId}`)
       .then((r) => (r.ok ? r.json() : null))
       .then((p: AgentProfile | null) => {
         if (!p) return;
@@ -258,7 +259,7 @@ export function AgentEditor({ agentId, onClose }: { agentId: string | null; onCl
       const eq = line.indexOf("=");
       if (eq > 0) record[line.slice(0, eq).trim()] = line.slice(eq + 1).trim();
     }
-    const res = await fetch(`/api/agents/${agentId}/credentials`, {
+    const res = await apiFetch(`/api/agents/${agentId}/credentials`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(record),

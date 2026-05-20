@@ -11,6 +11,10 @@ const FAKE_MODEL_PORT = 8745;
 const MODEL_URL = process.env.LMSTUDIO_BASE_URL ?? `http://127.0.0.1:${FAKE_MODEL_PORT}/v1`;
 const MODEL_ID = process.env.LMSTUDIO_MODEL ?? "fake-model";
 const useFakeModel = !process.env.LMSTUDIO_BASE_URL;
+// A deterministic token so the suite can pre-seed localStorage and skip the
+// AuthGate prompt. Re-used across the helper.
+const E2E_API_TOKEN = process.env.OTTERBOT_API_TOKEN ?? "e2e-test-token-otterbot";
+process.env.OTTERBOT_API_TOKEN = E2E_API_TOKEN;
 
 export default defineConfig({
   testDir: "./e2e",
@@ -60,6 +64,7 @@ export default defineConfig({
         LMSTUDIO_BASE_URL: MODEL_URL,
         LMSTUDIO_MODEL: MODEL_ID,
         DATA_DIR: process.env.E2E_DATA_DIR ?? "./packages/server/data-e2e",
+        OTTERBOT_API_TOKEN: E2E_API_TOKEN,
       },
       timeout: 40_000,
     },

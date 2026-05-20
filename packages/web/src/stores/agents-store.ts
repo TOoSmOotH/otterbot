@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { apiFetch } from "../lib/api";
 import { getSocket } from "../lib/socket";
 import type { AgentProfile, AgentProfileSummary, AgentStatus } from "@otterbot/shared";
 
@@ -30,7 +31,7 @@ export const useAgentsStore = create<AgentsState>((set, get) => ({
   load: async () => {
     set({ loading: true });
     try {
-      const res = await fetch("/api/agents");
+      const res = await apiFetch("/api/agents");
       if (!res.ok) return;
       const agents = (await res.json()) as AgentProfileSummary[];
       set((s) => ({
@@ -58,7 +59,7 @@ export const useAgentsStore = create<AgentsState>((set, get) => ({
   setActive: (id) => set({ activeAgentId: id }),
 
   create: async (input) => {
-    const res = await fetch("/api/agents", {
+    const res = await apiFetch("/api/agents", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(input),
@@ -71,7 +72,7 @@ export const useAgentsStore = create<AgentsState>((set, get) => ({
   },
 
   update: async (id, patch) => {
-    const res = await fetch(`/api/agents/${id}`, {
+    const res = await apiFetch(`/api/agents/${id}`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(patch),
@@ -80,7 +81,7 @@ export const useAgentsStore = create<AgentsState>((set, get) => ({
   },
 
   remove: async (id) => {
-    const res = await fetch(`/api/agents/${id}`, { method: "DELETE" });
+    const res = await apiFetch(`/api/agents/${id}`, { method: "DELETE" });
     if (res.ok) {
       set((s) => ({
         activeAgentId: s.activeAgentId === id ? null : s.activeAgentId,

@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { apiFetch } from "../lib/api";
 import { getSocket } from "../lib/socket";
 import type {
   StreamChunk,
@@ -152,7 +153,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   loadConversations: async (agentId) => {
     try {
-      const res = await fetch(`/api/agents/${agentId}/conversations`);
+      const res = await apiFetch(`/api/agents/${agentId}/conversations`);
       if (!res.ok) return;
       const list = (await res.json()) as ConversationSummary[];
       set((state) => ({ conversations: { ...state.conversations, [agentId]: list } }));
@@ -164,7 +165,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   openConversation: async (agentId, conversationId) => {
     set((state) => ({ historyLoading: { ...state.historyLoading, [agentId]: true } }));
     try {
-      const res = await fetch(`/api/agents/${agentId}/conversations/${conversationId}`);
+      const res = await apiFetch(`/api/agents/${agentId}/conversations/${conversationId}`);
       if (!res.ok) return;
       const data = (await res.json()) as { messages: StoredMessage[] };
       const mapped: ChatMessage[] = data.messages.map((m) => ({
@@ -201,7 +202,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const conversationId = get().currentConversation[agentId];
     if (!conversationId) return;
     try {
-      const res = await fetch(
+      const res = await apiFetch(
         `/api/agents/${agentId}/conversations/${conversationId}/context`
       );
       if (!res.ok) return;
@@ -215,7 +216,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   compact: async (agentId, force = true) => {
     const conversationId = get().currentConversation[agentId];
     if (!conversationId) return;
-    const res = await fetch(
+    const res = await apiFetch(
       `/api/agents/${agentId}/conversations/${conversationId}/compact`,
       {
         method: "POST",
