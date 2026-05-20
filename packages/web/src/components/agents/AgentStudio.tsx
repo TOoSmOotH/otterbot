@@ -12,6 +12,7 @@ import type {
   ScheduledTask,
   MemoryEntry,
 } from "@otterbot/shared";
+import { apiFetch } from "../../lib/api";
 import { useAgentsStore } from "../../stores/agents-store";
 import { useGlobalSettingsStore } from "../../stores/global-settings-store";
 import { useProvidersStore } from "../../stores/providers-store";
