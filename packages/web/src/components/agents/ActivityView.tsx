@@ -1,20 +1,50 @@
 import { useEffect, useRef } from "react";
 import type { AgentMessage, AgentMsgKind, SubagentTask } from "@otterbot/shared";
+import { ArrowRight } from "lucide-react";
 import { useActivityStore } from "../../stores/activity-store";
 import { useAgentsStore } from "../../stores/agents-store";
+import { Badge } from "../ui/Badge";
+import { Icon } from "../ui/Icon";
+import { fonts, type } from "../../lib/typography";
 
-const KIND_COLOR: Record<AgentMsgKind, string> = {
-  request: "#6b8cff",
-  response: "#4ade80",
-  broadcast: "#a78bfa",
-  spawn: "#fbbf24",
-  report: "#4ade80",
-  status: "#5a5a64",
-  tool: "#5a5a64",
-  error: "#f87171",
+type Tone = "neutral" | "accent" | "success" | "warning" | "info" | "danger";
+
+const KIND_TONE: Record<AgentMsgKind, Tone> = {
+  request: "info",
+  response: "success",
+  broadcast: "accent",
+  spawn: "warning",
+  report: "success",
+  status: "neutral",
+  tool: "neutral",
+  error: "danger",
 };
 
-/** The agent-to-agent communication view: a live message feed + the spawn tree. */
+const TASK_TONE: Record<SubagentTask["status"], Tone> = {
+  queued: "info",
+  running: "warning",
+  done: "success",
+  failed: "danger",
+  cancelled: "neutral",
+};
+
+const TONE_VAR: Record<Tone, string> = {
+  neutral: "border",
+  accent: "accent",
+  success: "success",
+  warning: "warning",
+  info: "info",
+  danger: "danger",
+};
+
+function fmtTime(iso: string): string {
+  const d = new Date(iso);
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mm = String(d.getMinutes()).padStart(2, "0");
+  const ss = String(d.getSeconds()).padStart(2, "0");
+  return `${hh}:${mm}:${ss}`;
+}
+
 export function ActivityView() {
   const messages = useActivityStore((s) => s.messages);
   const tasks = useActivityStore((s) => s.tasks);
@@ -39,13 +69,16 @@ export function ActivityView() {
   };
 
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "1fr 320px", height: "100%", minHeight: 0 }}>
-      {/* Live message feed */}
-      <div style={{ display: "flex", flexDirection: "column", minHeight: 0, borderRight: "1px solid rgb(var(--border))" }}>
-        <header style={headerStyle}>Agent communication</header>
-        <div ref={feedRef} style={{ flex: 1, overflowY: "auto", padding: 12, display: "flex", flexDirection: "column", gap: 6 }}>
+    <div className="grid h-full min-h-0" style={{ gridTemplateColumns: "1fr 340px" }}>
+      <div className="flex flex-col min-h-0 border-r border-border">
+        <SectionHeader>Agent communication</SectionHeader>
+        <div
+          ref={feedRef}
+          className="flex-1 overflow-y-auto py-2"
+          style={{ background: "rgb(var(--surface-sunken))" }}
+        >
           {messages.length === 0 && (
-            <div style={{ color: "rgb(var(--muted))", fontSize: 13 }}>
+            <div className="text-body text-muted px-4 py-3">
               No agent-to-agent messages yet. Ask the COO to delegate something.
             </div>
           )}
@@ -55,12 +88,11 @@ export function ActivityView() {
         </div>
       </div>
 
-      {/* Spawn tree */}
-      <div style={{ display: "flex", flexDirection: "column", minHeight: 0 }}>
-        <header style={headerStyle}>Subagent tasks</header>
-        <div style={{ flex: 1, overflowY: "auto", padding: 12, display: "flex", flexDirection: "column", gap: 8 }}>
+      <div className="flex flex-col min-h-0">
+        <SectionHeader>Subagent tasks</SectionHeader>
+        <div className="flex-1 overflow-y-auto p-3 flex flex-col gap-2">
           {tasks.length === 0 && (
-            <div style={{ color: "rgb(var(--muted))", fontSize: 13 }}>No subagents spawned yet.</div>
+            <div className="text-body text-muted">No subagents spawned yet.</div>
           )}
           {tasks.map((t) => (
             <TaskCard key={t.id} task={t} parentName={name(t.parentAgentId)} />
@@ -71,49 +103,69 @@ export function ActivityView() {
   );
 }
 
-function MessageRow({ msg, from, to }: { msg: AgentMessage; from: string; to: string }) {
+function SectionHeader({ children }: { children: React.ReactNode }) {
   return (
-    <div style={{ display: "flex", gap: 8, alignItems: "flex-start", fontSize: 12 }}>
-      <span
-        style={{
-          fontSize: 9,
-          fontWeight: 700,
-          textTransform: "uppercase",
-          color: "white",
-          background: KIND_COLOR[msg.kind] ?? "#5a5a64",
-          borderRadius: 4,
-          padding: "2px 5px",
-          flexShrink: 0,
-          marginTop: 1,
-        }}
-      >
-        {msg.kind}
+    <header className="px-4 py-2.5 border-b border-border text-h2 flex items-center gap-2">
+      {children}
+    </header>
+  );
+}
+
+function MessageRow({ msg, from, to }: { msg: AgentMessage; from: string; to: string }) {
+  const tone = KIND_TONE[msg.kind] ?? "neutral";
+  const body = msg.body.length > 600 ? msg.body.slice(0, 600) + "…" : msg.body;
+  return (
+    <div
+      className="grid items-start gap-x-3 px-4 py-1.5 border-l-2 hover:bg-surface/40"
+      style={{
+        gridTemplateColumns: "auto 76px 1fr",
+        borderLeftColor: `rgb(var(--${TONE_VAR[tone]}))`,
+      }}
+    >
+      <span style={{ ...type.monoSm, color: "rgb(var(--subtle))", paddingTop: 4 }}>
+        {fmtTime(msg.createdAt)}
       </span>
-      <span style={{ flex: 1, minWidth: 0 }}>
-        <span style={{ color: "rgb(var(--muted))" }}>
-          {from} → {to}
-        </span>
-        <span style={{ display: "block", color: "rgb(var(--fg))", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
-          {msg.body.length > 600 ? msg.body.slice(0, 600) + "…" : msg.body}
-        </span>
+      <span style={{ paddingTop: 2 }}>
+        <Badge tone={tone}>{msg.kind}</Badge>
       </span>
+      <div className="min-w-0">
+        <div
+          className="flex items-center gap-1.5 text-small text-subtle"
+          style={{ fontFamily: fonts.mono, marginBottom: 2 }}
+        >
+          <span className="text-fg">{from}</span>
+          <Icon icon={ArrowRight} size={14} />
+          <span className="text-fg">{to}</span>
+        </div>
+        <div
+          className="text-body text-fg whitespace-pre-wrap break-words"
+          style={{ fontFamily: fonts.mono, fontSize: 12 }}
+        >
+          {body}
+        </div>
+      </div>
     </div>
   );
 }
 
 function TaskCard({ task, parentName }: { task: SubagentTask; parentName: string }) {
-  const color =
-    task.status === "done" ? "#4ade80" : task.status === "failed" ? "#f87171" : "#fbbf24";
+  const tone = TASK_TONE[task.status] ?? "neutral";
   return (
-    <div style={{ border: "1px solid rgb(var(--border))", borderRadius: 8, padding: 8, fontSize: 12 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", gap: 6 }}>
-        <span style={{ fontWeight: 600 }}>{parentName}</span>
-        <span style={{ color, fontWeight: 600 }}>{task.status}</span>
+    <div className="rounded-md border border-border bg-surface p-3 text-body shadow-sm">
+      <div className="flex items-center justify-between gap-2">
+        <span className="font-semibold text-fg">{parentName}</span>
+        <Badge tone={tone}>{task.status}</Badge>
       </div>
-      <div style={{ color: "rgb(var(--muted))", marginTop: 2 }}>↳ {task.subagentId}</div>
-      <div style={{ marginTop: 4, color: "rgb(var(--fg))" }}>{task.goal}</div>
+      <div
+        className="mt-1 text-small text-subtle flex items-center gap-1.5"
+        style={{ fontFamily: fonts.mono }}
+      >
+        <Icon icon={ArrowRight} size={14} />
+        {task.subagentId}
+      </div>
+      <div className="mt-2 text-body text-fg">{task.goal}</div>
       {task.resultSummary && (
-        <div style={{ marginTop: 4, color: "rgb(var(--muted))", whiteSpace: "pre-wrap" }}>
+        <div className="mt-2 text-small text-muted whitespace-pre-wrap leading-relaxed">
           {task.resultSummary.length > 240
             ? task.resultSummary.slice(0, 240) + "…"
             : task.resultSummary}
@@ -122,10 +174,3 @@ function TaskCard({ task, parentName }: { task: SubagentTask; parentName: string
     </div>
   );
 }
-
-const headerStyle: React.CSSProperties = {
-  padding: "8px 12px",
-  borderBottom: "1px solid rgb(var(--border))",
-  fontSize: 13,
-  fontWeight: 600,
-};

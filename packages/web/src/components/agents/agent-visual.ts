@@ -1,20 +1,20 @@
 import type { AgentStatus } from "@otterbot/shared";
 
-/** Colour used for an agent's status dot and 3D animation cues. */
+/** Colour used for an agent's status dot and 3D animation cues. Theme-aware. */
 export function statusColor(status: AgentStatus): string {
   switch (status) {
     case "working":
-      return "#4ade80";
+      return "rgb(var(--success))";
     case "thinking":
-      return "#fbbf24";
+      return "rgb(var(--warning))";
     case "waiting":
-      return "#6b8cff";
+      return "rgb(var(--info))";
     case "error":
-      return "#f87171";
+      return "rgb(var(--danger))";
     case "stopped":
     case "idle":
     default:
-      return "#5a5a64";
+      return "rgb(var(--neutral))";
   }
 }
 

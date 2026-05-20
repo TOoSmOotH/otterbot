@@ -1,4 +1,7 @@
 import { useEffect, useState } from "react";
+import { LayoutGroup, motion } from "motion/react";
+import { Activity, MessageSquare, Settings, Sliders } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import { AgentRoster } from "./components/agents/AgentRoster";
 import { AgentChat } from "./components/chat/AgentChat";
 import { AgentEditor } from "./components/agents/AgentEditor";
@@ -7,6 +10,7 @@ import { ActivityView } from "./components/agents/ActivityView";
 import { GlobalSettings } from "./components/settings/GlobalSettings";
 import { OnboardingWizard } from "./components/agents/OnboardingWizard";
 import { AuthGate } from "./components/AuthGate";
+import { Icon } from "./components/ui/Icon";
 import { useAgentsStore } from "./stores/agents-store";
 import { useChatStore } from "./stores/chat-store";
 import { useGlobalSettingsStore } from "./stores/global-settings-store";
@@ -14,14 +18,12 @@ import { useSetupStore } from "./stores/setup-store";
 
 type MainView = "chat" | "studio" | "activity" | "settings";
 
-const VIEWS: MainView[] = ["chat", "studio", "activity", "settings"];
-
-const VIEW_LABELS: Record<MainView, string> = {
-  chat: "Chat",
-  studio: "Agent Studio",
-  activity: "Activity",
-  settings: "Settings",
-};
+const VIEWS: { id: MainView; label: string; icon: LucideIcon }[] = [
+  { id: "chat", label: "Chat", icon: MessageSquare },
+  { id: "studio", label: "Agent Studio", icon: Sliders },
+  { id: "activity", label: "Activity", icon: Activity },
+  { id: "settings", label: "Settings", icon: Settings },
+];
 
 export default function App() {
   return (
@@ -65,25 +67,59 @@ function AuthedApp() {
       <AgentRoster onNewAgent={() => setCreateOpen(true)} />
 
       <div style={{ display: "flex", flexDirection: "column", minHeight: 0 }}>
-        <nav style={{ display: "flex", gap: 4, padding: 6, borderBottom: "1px solid rgb(var(--border))" }}>
-          {VIEWS.map((v) => (
-            <button
-              key={v}
-              data-testid={`view-${v}`}
-              onClick={() => setView(v)}
-              style={{
-                background: view === v ? "rgb(var(--accent))" : "transparent",
-                color: view === v ? "white" : "rgb(var(--fg))",
-                border: "1px solid rgb(var(--border))",
-                padding: "4px 12px",
-                borderRadius: 6,
-                cursor: "pointer",
-                fontSize: 12,
-              }}
-            >
-              {VIEW_LABELS[v]}
-            </button>
-          ))}
+        <nav
+          style={{
+            display: "flex",
+            gap: 2,
+            padding: "0 12px",
+            borderBottom: "1px solid rgb(var(--border))",
+            background: "rgb(var(--bg))",
+          }}
+        >
+          <LayoutGroup id="view-tabs">
+            {VIEWS.map((v) => {
+              const active = view === v.id;
+              return (
+                <button
+                  key={v.id}
+                  data-testid={`view-${v.id}`}
+                  onClick={() => setView(v.id)}
+                  style={{
+                    position: "relative",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 6,
+                    background: "transparent",
+                    color: active ? "rgb(var(--fg))" : "rgb(var(--muted))",
+                    border: "none",
+                    padding: "10px 12px",
+                    cursor: "pointer",
+                    fontSize: 12,
+                    fontWeight: active ? 600 : 500,
+                    letterSpacing: "-0.005em",
+                  }}
+                >
+                  <Icon icon={v.icon} size={14} />
+                  {v.label}
+                  {active && (
+                    <motion.span
+                      layoutId="view-tab-indicator"
+                      transition={{ type: "spring", stiffness: 480, damping: 38 }}
+                      style={{
+                        position: "absolute",
+                        left: 8,
+                        right: 8,
+                        bottom: -1,
+                        height: 2,
+                        background: "rgb(var(--accent))",
+                        borderRadius: 2,
+                      }}
+                    />
+                  )}
+                </button>
+              );
+            })}
+          </LayoutGroup>
         </nav>
         <div style={{ flex: 1, minHeight: 0 }}>
           {view === "chat" && <AgentChat onEditAgent={openStudio} />}

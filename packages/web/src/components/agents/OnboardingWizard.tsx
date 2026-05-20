@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { motion } from "motion/react";
 import { apiFetch } from "../../lib/api";
 import type { ProviderAccount, ProviderId } from "@otterbot/shared";
 import { useSetupStore } from "../../stores/setup-store";
@@ -18,6 +19,7 @@ import {
   type AuthMethod,
 } from "./ProviderFields";
 import { AvatarUpload } from "./AvatarUpload";
+import { type } from "../../lib/typography";
 
 /** The single model the built-in CPU embedder runs. */
 const BUILTIN_EMBED_MODEL = "all-MiniLM-L6-v2";
@@ -315,23 +317,74 @@ export function OnboardingWizard() {
   const steps = ["Welcome", "Chat model", "Embedding model", "Personality"];
 
   return (
-    <div style={overlay}>
-      <div style={panel} data-testid="onboarding-wizard">
-        <div style={{ display: "flex", gap: 6, marginBottom: 4 }}>
-          {steps.map((label, i) => (
-            <span
-              key={label}
-              style={{
-                fontSize: 11,
-                fontWeight: 600,
-                color: i === step ? "rgb(var(--fg))" : "rgb(var(--muted))",
-                borderBottom: `2px solid ${i === step ? "rgb(var(--accent))" : "transparent"}`,
-                paddingBottom: 3,
-              }}
-            >
-              {i + 1}. {label}
-            </span>
-          ))}
+    <motion.div
+      style={overlay}
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={{ duration: 0.18, ease: [0.2, 0.8, 0.2, 1] }}
+    >
+      <motion.div
+        style={panel}
+        data-testid="onboarding-wizard"
+        initial={{ opacity: 0, scale: 0.98, y: 8 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+          {steps.map((label, i) => {
+            const active = i === step;
+            const done = i < step;
+            return (
+              <div
+                key={label}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 6,
+                  ...type.small,
+                  fontWeight: 600,
+                  color: active ? "rgb(var(--fg))" : "rgb(var(--subtle))",
+                }}
+              >
+                <span
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    width: 18,
+                    height: 18,
+                    borderRadius: 999,
+                    fontSize: 10,
+                    fontWeight: 700,
+                    background: active
+                      ? "rgb(var(--accent))"
+                      : done
+                        ? "rgb(var(--accent) / 0.25)"
+                        : "rgb(var(--surface-elevated))",
+                    color: active
+                      ? "rgb(var(--accent-fg))"
+                      : done
+                        ? "rgb(var(--accent))"
+                        : "rgb(var(--subtle))",
+                    border: `1px solid ${active ? "rgb(var(--accent))" : "rgb(var(--border))"}`,
+                  }}
+                >
+                  {i + 1}
+                </span>
+                {label}
+                {i < steps.length - 1 && (
+                  <span
+                    aria-hidden
+                    style={{
+                      width: 16,
+                      height: 1,
+                      background: "rgb(var(--border))",
+                    }}
+                  />
+                )}
+              </div>
+            );
+          })}
         </div>
 
         {step === 0 && (
@@ -473,8 +526,8 @@ export function OnboardingWizard() {
             </Buttons>
           </>
         )}
-      </div>
-    </div>
+      </motion.div>
+    </motion.div>
   );
 }
 
@@ -485,7 +538,9 @@ function Buttons({ children }: { children: React.ReactNode }) {
 const overlay: React.CSSProperties = {
   position: "fixed",
   inset: 0,
-  background: "rgba(0,0,0,0.6)",
+  background: "rgb(0 0 0 / 0.55)",
+  backdropFilter: "blur(6px)",
+  WebkitBackdropFilter: "blur(6px)",
   display: "flex",
   alignItems: "center",
   justifyContent: "center",
@@ -493,40 +548,54 @@ const overlay: React.CSSProperties = {
 };
 
 const panel: React.CSSProperties = {
-  width: 480,
+  width: 520,
   maxHeight: "88vh",
   overflowY: "auto",
-  background: "rgb(var(--bg))",
+  background: "rgb(var(--surface))",
   border: "1px solid rgb(var(--border))",
-  borderRadius: 12,
-  padding: 20,
+  borderRadius: 14,
+  padding: 24,
   display: "flex",
   flexDirection: "column",
-  gap: 12,
+  gap: 14,
+  boxShadow: "var(--shadow-lg)",
 };
 
-const h2: React.CSSProperties = { margin: 0, fontSize: 17 };
-const p: React.CSSProperties = { margin: 0, fontSize: 13, color: "rgb(var(--fg))", lineHeight: 1.55 };
+const h2: React.CSSProperties = {
+  margin: 0,
+  fontSize: 20,
+  fontWeight: 600,
+  letterSpacing: "-0.015em",
+  color: "rgb(var(--fg))",
+};
+const p: React.CSSProperties = {
+  margin: 0,
+  fontSize: 13,
+  color: "rgb(var(--muted))",
+  lineHeight: 1.6,
+};
 
 const input: React.CSSProperties = {
   background: "rgb(var(--bg))",
   color: "rgb(var(--fg))",
   border: "1px solid rgb(var(--border))",
-  borderRadius: 6,
-  padding: "7px 9px",
+  borderRadius: 7,
+  padding: "8px 10px",
   fontSize: 13,
   width: "100%",
 };
 
 const primary: React.CSSProperties = {
   background: "rgb(var(--accent))",
-  color: "white",
-  border: "none",
-  padding: "8px 16px",
-  borderRadius: 7,
+  color: "rgb(var(--accent-fg))",
+  border: "1px solid rgb(var(--accent))",
+  padding: "8px 18px",
+  borderRadius: 8,
   cursor: "pointer",
   fontSize: 13,
   fontWeight: 600,
+  letterSpacing: "-0.005em",
+  boxShadow: "var(--shadow-sm)",
 };
 
 const ghost: React.CSSProperties = {
@@ -534,7 +603,8 @@ const ghost: React.CSSProperties = {
   color: "rgb(var(--fg))",
   border: "1px solid rgb(var(--border))",
   padding: "8px 14px",
-  borderRadius: 7,
+  borderRadius: 8,
   cursor: "pointer",
   fontSize: 13,
+  fontWeight: 500,
 };
