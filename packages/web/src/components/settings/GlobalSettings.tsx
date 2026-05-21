@@ -442,8 +442,14 @@ function AccountCard({
           style={{ ...input, flex: 1 }}
           aria-label="account name"
         />
-        <span style={badge}>
-          {isOAuth ? "OAuth" : configured ? "Configured" : "Incomplete"}
+        <span style={badge} title={account.apiKeyHint ? "Assigned API key" : undefined}>
+          {isOAuth
+            ? "OAuth"
+            : account.apiKeyHint
+              ? account.apiKeyHint
+              : configured
+                ? "Configured"
+                : "Incomplete"}
         </span>
         {canDelete && (
           <button onClick={onDelete} style={{ ...ghostButton, color: "#f87171" }}>
@@ -639,7 +645,7 @@ function ModelsTab({
         )}
 
         {adding && (
-          <AddModelForm
+          <AddModelWizard
             accounts={accountOptions}
             existingIds={draft.models.map((m) => m.id)}
             onCancel={() => setAdding(false)}
@@ -776,7 +782,12 @@ function ModelCard({
 }
 
 /** Inline form to register a new configured model. */
-function AddModelForm({
+/**
+ * Two-step "add model" wizard: pick a provider account, fetch the models it
+ * serves, then assign one (model id + kind + name). Falls back to manual entry
+ * if the provider can't list models.
+ */
+function AddModelWizard({
   accounts,
   existingIds,
   onCancel,
@@ -787,76 +798,67 @@ function AddModelForm({
   onCancel: () => void;
   onAdd: (model: ConfiguredModel) => void;
 }) {
-  const [label, setLabel] = useState("");
-  const [kind, setKind] = useState<"chat" | "embedding">("chat");
+  const [stepName, setStepName] = useState<"provider" | "model">("provider");
   const [pair, setPair] = useState(`${accounts[0]?.provider ?? ""}|${accounts[0]?.account ?? ""}`);
-  const [modelId, setModelId] = useState("");
-  const [fetched, setFetched] = useState<string[]>([]);
+  const [provider, account] = pair.split("|");
+  const accountLabel = accounts.find((a) => a.provider === provider && a.account === account)?.label;
+
+  const [models, setModels] = useState<string[]>([]);
   const [fetching, setFetching] = useState(false);
-  const [fetchMsg, setFetchMsg] = useState("");
+  const [note, setNote] = useState("");
 
-  const [provider] = pair.split("|");
+  const [modelId, setModelId] = useState("");
+  const [kind, setKind] = useState<"chat" | "embedding">("chat");
+  const [label, setLabel] = useState("");
+  const [contextWindow, setContextWindow] = useState("");
 
-  const fetchModels = async () => {
+  const goToModelStep = async () => {
     setFetching(true);
-    setFetchMsg("");
+    setNote("");
+    setModels([]);
     try {
       const res = await apiFetch("/api/provider-models", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ provider }),
+        body: JSON.stringify({ provider, account }),
       });
       const data = (await res.json()) as { ok: boolean; models?: string[]; error?: string };
       if (data.ok && data.models?.length) {
-        setFetched(data.models);
-        if (!modelId) setModelId(data.models[0]);
-        setFetchMsg(`Found ${data.models.length} model(s).`);
+        setModels(data.models);
+        setModelId(data.models[0]);
+        setNote(`Found ${data.models.length} model(s).`);
       } else {
-        setFetchMsg(data.error ?? "No models found.");
+        setModelId("");
+        setNote(`${data.error ?? "Couldn't list models"} — enter a model id manually.`);
       }
     } catch (err) {
-      setFetchMsg(err instanceof Error ? err.message : String(err));
+      setModelId("");
+      setNote(`${err instanceof Error ? err.message : String(err)} — enter a model id manually.`);
     } finally {
       setFetching(false);
+      setStepName("model");
     }
   };
 
   const submit = () => {
-    const [p, account] = pair.split("|");
-    const id = uniqueModelId(existingIds, label || modelId);
+    const cw = Math.max(0, Math.round(Number(contextWindow) || 0));
     onAdd({
-      id,
+      id: uniqueModelId(existingIds, label || modelId),
       label: label.trim() || modelId.trim(),
-      provider: p,
+      provider,
       account,
       modelId: modelId.trim(),
       kind,
+      ...(kind === "chat" && cw > 0 ? { contextWindow: cw } : {}),
     });
   };
 
-  return (
-    <div style={panel}>
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-        <Field label="Name">
-          <input
-            value={label}
-            onChange={(e) => setLabel(e.target.value)}
-            placeholder="e.g. Claude Opus"
-            style={{ ...input, minWidth: 180 }}
-          />
-        </Field>
-        <Field label="Kind">
-          <select
-            value={kind}
-            onChange={(e) => setKind(e.target.value as "chat" | "embedding")}
-            style={{ ...input, width: 140 }}
-          >
-            <option value="chat">chat</option>
-            <option value="embedding">embedding</option>
-          </select>
-        </Field>
+  if (stepName === "provider") {
+    return (
+      <div style={panel}>
+        <strong style={{ fontSize: 13 }}>Add a model · 1. Choose a provider</strong>
         <Field label="Provider account">
-          <select value={pair} onChange={(e) => setPair(e.target.value)} style={{ ...input, minWidth: 200 }}>
+          <select value={pair} onChange={(e) => setPair(e.target.value)} style={input}>
             {accounts.map((a) => (
               <option key={`${a.provider}|${a.account}`} value={`${a.provider}|${a.account}`}>
                 {a.label}
@@ -864,12 +866,27 @@ function AddModelForm({
             ))}
           </select>
         </Field>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button onClick={() => void goToModelStep()} disabled={!provider || fetching} style={primary}>
+            {fetching ? "Fetching models…" : "Next"}
+          </button>
+          <button onClick={onCancel} style={ghostButton}>
+            Cancel
+          </button>
+        </div>
       </div>
-      <Field label="Model id">
-        {fetched.length > 0 ? (
+    );
+  }
+
+  return (
+    <div style={panel}>
+      <strong style={{ fontSize: 13 }}>Add a model · 2. Assign {accountLabel ? `(${accountLabel})` : ""}</strong>
+      {note && <span style={{ fontSize: 12, color: "rgb(var(--muted))" }}>{note}</span>}
+      <Field label="Model">
+        {models.length > 0 ? (
           <select value={modelId} onChange={(e) => setModelId(e.target.value)} style={input}>
-            {!fetched.includes(modelId) && modelId && <option value={modelId}>{modelId}</option>}
-            {fetched.map((m) => (
+            {!models.includes(modelId) && modelId && <option value={modelId}>{modelId}</option>}
+            {models.map((m) => (
               <option key={m} value={m}>
                 {m}
               </option>
@@ -884,17 +901,49 @@ function AddModelForm({
           />
         )}
       </Field>
-      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-        <button onClick={submit} disabled={!modelId.trim() || !pair} style={primary}>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <Field label="Kind">
+          <select
+            value={kind}
+            onChange={(e) => setKind(e.target.value as "chat" | "embedding")}
+            style={{ ...input, width: 140 }}
+          >
+            <option value="chat">chat</option>
+            <option value="embedding">embedding</option>
+          </select>
+        </Field>
+        <Field label="Name">
+          <input
+            value={label}
+            onChange={(e) => setLabel(e.target.value)}
+            placeholder={modelId || "display name"}
+            style={{ ...input, minWidth: 180 }}
+          />
+        </Field>
+        {kind === "chat" && (
+          <Field label="Context window">
+            <input
+              type="number"
+              min={0}
+              step={1000}
+              value={contextWindow}
+              onChange={(e) => setContextWindow(e.target.value)}
+              placeholder="default"
+              style={{ ...input, width: 130 }}
+            />
+          </Field>
+        )}
+      </div>
+      <div style={{ display: "flex", gap: 8 }}>
+        <button onClick={submit} disabled={!modelId.trim()} style={primary}>
           Add model
         </button>
-        <button onClick={() => void fetchModels()} disabled={fetching || !provider} style={ghostButton}>
-          {fetching ? "Fetching…" : "Fetch models"}
+        <button onClick={() => setStepName("provider")} style={ghostButton}>
+          Back
         </button>
         <button onClick={onCancel} style={ghostButton}>
           Cancel
         </button>
-        {fetchMsg && <span style={{ fontSize: 12, color: "rgb(var(--muted))" }}>{fetchMsg}</span>}
       </div>
     </div>
   );

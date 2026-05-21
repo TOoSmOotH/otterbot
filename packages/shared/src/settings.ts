@@ -16,6 +16,12 @@ export interface ProviderAccount {
   baseUrl: string;
   apiKeyConfigured: boolean;
   apiKey?: string;
+  /**
+   * A masked preview of the saved API key (e.g. `sk-or…a1b2`) so the user can
+   * tell which key is assigned without exposing it. Derived server-side on
+   * read; never sent up or persisted.
+   */
+  apiKeyHint?: string;
   authMethod?: OpenAiAuthMethod;
 }
 

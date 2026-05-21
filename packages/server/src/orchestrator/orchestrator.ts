@@ -321,6 +321,13 @@ function normalizeGlobalSettings(input?: Partial<GlobalSettings> | null): Global
   };
 }
 
+/** Mask an API key to a short, identifiable hint — e.g. `sk-or…a1b2`. */
+function maskApiKey(key: string): string {
+  const k = key.trim();
+  if (k.length <= 8) return `${k.slice(0, 2)}…`;
+  return `${k.slice(0, 5)}…${k.slice(-4)}`;
+}
+
 export function redactGlobalSettings(settings: GlobalSettings): GlobalSettings {
   const providers: Record<ProviderId, ProviderAccount[]> = {};
   for (const provider of Object.keys(settings.providers) as ProviderId[]) {
@@ -329,6 +336,8 @@ export function redactGlobalSettings(settings: GlobalSettings): GlobalSettings {
       return {
         ...rest,
         apiKeyConfigured: Boolean(apiKey || rest.apiKeyConfigured),
+        // A non-sensitive preview so the UI can show which key is assigned.
+        apiKeyHint: apiKey ? maskApiKey(apiKey) : undefined,
       };
     });
   }
