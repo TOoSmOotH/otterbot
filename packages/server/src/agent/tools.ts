@@ -1,4 +1,4 @@
-import { tool, type Tool } from "ai";
+import { generateText, tool, type Tool } from "ai";
 import { z } from "zod";
 import { nanoid } from "nanoid";
 import type { AgentContext } from "../runtime/agent-context.js";
@@ -7,6 +7,20 @@ import { sendEmail } from "../integrations/email.js";
 import { createIssue, listIssues } from "../integrations/github.js";
 import { runAgentShell } from "../integrations/shell.js";
 import { searchWeb } from "../integrations/web-search.js";
+import {
+  browserBack,
+  browserClick,
+  browserConsole,
+  browserEnvFor,
+  browserGetImages,
+  browserNavigate,
+  browserPress,
+  browserScreenshot,
+  browserScroll,
+  browserSnapshot,
+  browserType,
+} from "../integrations/browser.js";
+import { resolveChatModel } from "../providers/registry.js";
 
 /**
  * Build the tool set for an agent, scoped to its own context. When cross-agent
@@ -250,6 +264,125 @@ export function buildAgentTools(
           return { ok: true, results: await searchWeb(query) };
         } catch (err) {
           return { ok: false, error: err instanceof Error ? err.message : String(err) };
+        }
+      },
+    });
+  }
+
+  // Agentic browsing (agent-browser) — granted together by the
+  // `agentic-browsing` capability. Each agent drives its own persistent,
+  // headless browser; work the page via the snapshot → ref → click/type loop.
+  if (granted.has("browser_navigate")) {
+    const browser = browserEnvFor(ctx.profile.id, ctx.browserProfileDir);
+
+    tools.browser_navigate = tool({
+      description:
+        "Open a URL in your browser (launches it on first use). Call browser_snapshot " +
+        "afterwards to see the page. Your browser is persistent — logins and cookies " +
+        "carry over between tasks.",
+      parameters: z.object({ url: z.string().url().describe("The URL to navigate to.") }),
+      execute: ({ url }) => browserNavigate(browser, url),
+    });
+
+    tools.browser_snapshot = tool({
+      description:
+        "Capture the current page as an accessibility tree with @e<n> refs. This is how " +
+        "you 'see' the page — every click/type targets a ref from here. Use interactive " +
+        "to list only clickable/typable elements.",
+      parameters: z.object({
+        interactive: z
+          .boolean()
+          .default(true)
+          .describe("Only include interactive elements (links, buttons, inputs)."),
+        compact: z.boolean().default(false).describe("Drop empty structural nodes."),
+      }),
+      execute: ({ interactive, compact }) => browserSnapshot(browser, { interactive, compact }),
+    });
+
+    tools.browser_click = tool({
+      description:
+        "Click an element by its @e<n> ref (from browser_snapshot) or a CSS selector.",
+      parameters: z.object({
+        selector: z.string().min(1).describe("An @e<n> ref or a CSS selector."),
+      }),
+      execute: ({ selector }) => browserClick(browser, selector),
+    });
+
+    tools.browser_type = tool({
+      description: "Type text into an input or textarea by its @e<n> ref or CSS selector.",
+      parameters: z.object({
+        selector: z.string().min(1).describe("An @e<n> ref or a CSS selector."),
+        text: z.string().describe("The text to type."),
+      }),
+      execute: ({ selector, text }) => browserType(browser, selector, text),
+    });
+
+    tools.browser_press = tool({
+      description: "Press a key or chord on the page, e.g. 'Enter', 'Tab', or 'Control+a'.",
+      parameters: z.object({ key: z.string().min(1).describe("Key or chord to press.") }),
+      execute: ({ key }) => browserPress(browser, key),
+    });
+
+    tools.browser_scroll = tool({
+      description: "Scroll the page in a direction, optionally by a number of pixels.",
+      parameters: z.object({
+        direction: z.enum(["up", "down", "left", "right"]),
+        pixels: z.number().int().positive().optional().describe("Pixels to scroll; omit for a page step."),
+      }),
+      execute: ({ direction, pixels }) => browserScroll(browser, direction, pixels),
+    });
+
+    tools.browser_back = tool({
+      description: "Go back one entry in the browser history.",
+      parameters: z.object({}),
+      execute: () => browserBack(browser),
+    });
+
+    tools.browser_get_images = tool({
+      description: "List the images on the current page (source URL, alt text, and natural size).",
+      parameters: z.object({}),
+      execute: () => browserGetImages(browser),
+    });
+
+    tools.browser_console = tool({
+      description: "Read the browser console logs captured for the current page.",
+      parameters: z.object({}),
+      execute: () => browserConsole(browser),
+    });
+
+    tools.browser_vision = tool({
+      description:
+        "Take a screenshot of the current page and answer a question about it visually. " +
+        "Use when the accessibility snapshot is not enough (e.g. layout, images, charts). " +
+        "Requires a vision-capable model.",
+      parameters: z.object({
+        question: z.string().min(1).describe("What to look for or describe in the screenshot."),
+      }),
+      execute: async ({ question }) => {
+        const shot = await browserScreenshot(browser);
+        if (!shot.ok) return shot;
+        try {
+          const model = resolveChatModel(ctx.chatModelRef, ctx.secrets);
+          const { text } = await generateText({
+            model,
+            messages: [
+              {
+                role: "user",
+                content: [
+                  { type: "text", text: question },
+                  { type: "image", image: shot.base64 },
+                ],
+              },
+            ],
+          });
+          return { ok: true, answer: text };
+        } catch (err) {
+          return {
+            ok: false,
+            error:
+              `Vision analysis failed (the agent's model may not accept images): ` +
+              (err instanceof Error ? err.message : String(err)),
+          };
         }
       },
     });

@@ -813,6 +813,7 @@ export class Orchestrator {
       agentDbPath: paths.agentDb,
       skillsDir: paths.skillsDir,
       workspaceDir: paths.workspace,
+      browserProfileDir: paths.browser,
       embedder: resolveEmbedder(embeddingRef, secrets),
       dbKey: this.cfg.dbKey,
     });

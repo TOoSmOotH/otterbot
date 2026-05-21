@@ -57,6 +57,7 @@ describe("capabilities", () => {
       agentDbPath: join(dir, "agent.db"),
       skillsDir: join(dir, "skills"),
       workspaceDir: join(dir, "workspace"),
+      browserProfileDir: join(dir, "browser"),
       embedder: new NullEmbedder(),
       dbKey: null,
     });
@@ -172,6 +173,49 @@ describe("capabilities", () => {
       body: "x",
     });
     expect(buildAgentTools(ctx).send_email).toBeDefined();
+  });
+
+  it("the agentic-browsing capability grants the full browser_* tool family", () => {
+    expect(buildAgentTools(ctx).browser_navigate).toBeUndefined();
+    ctx.skills.create({
+      meta: {
+        name: "Agentic browsing",
+        description: "",
+        version: "1.0.0",
+        author: "t",
+        tools: [
+          "browser_navigate",
+          "browser_snapshot",
+          "browser_click",
+          "browser_type",
+          "browser_press",
+          "browser_scroll",
+          "browser_back",
+          "browser_get_images",
+          "browser_console",
+          "browser_vision",
+        ],
+        capabilities: [],
+        parameters: {},
+        tags: [],
+      },
+      body: "x",
+    });
+    const tools = buildAgentTools(ctx);
+    for (const name of [
+      "browser_navigate",
+      "browser_snapshot",
+      "browser_click",
+      "browser_type",
+      "browser_press",
+      "browser_scroll",
+      "browser_back",
+      "browser_get_images",
+      "browser_console",
+      "browser_vision",
+    ]) {
+      expect(tools[name], `${name} should be granted`).toBeDefined();
+    }
   });
 
   it("prompt injects enabled capabilities under Active capabilities", async () => {

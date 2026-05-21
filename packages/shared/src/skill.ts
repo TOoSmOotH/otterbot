@@ -19,6 +19,18 @@ export const GRANTABLE_TOOL_NAMES = [
   "github_create_issue",
   "github_list_issues",
   "spawn_subagent",
+  // Agentic browsing (agent-browser) — granted together by the
+  // `agentic-browsing` capability.
+  "browser_navigate",
+  "browser_snapshot",
+  "browser_click",
+  "browser_type",
+  "browser_press",
+  "browser_scroll",
+  "browser_back",
+  "browser_get_images",
+  "browser_console",
+  "browser_vision",
 ] as const;
 
 export type GrantableToolName = (typeof GRANTABLE_TOOL_NAMES)[number];

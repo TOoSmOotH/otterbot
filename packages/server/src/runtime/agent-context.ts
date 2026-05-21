@@ -9,6 +9,7 @@ import { SkillService } from "../skills/skill-service.js";
 import { UserProfileService } from "../user-profile/user-profile-service.js";
 import { buildShellSecrets } from "../secrets/shell-secrets.js";
 import type { ScopedSecret } from "../secrets/secrets-store.js";
+import { browserEnvFor, closeBrowserSession } from "../integrations/browser.js";
 
 /**
  * Everything one agent needs at runtime: its profile, secrets, isolated
@@ -47,6 +48,8 @@ export interface AgentContext {
   contextWindow: number;
   /** Sandboxed working directory for the agent's `shell_exec` tool. */
   workspaceDir: string;
+  /** Persistent Chrome user-data dir for the agent's browser tools. */
+  browserProfileDir: string;
   agentDb: AgentDb;
   sqlite: Database.Database;
   db: AgentDrizzle;
@@ -82,6 +85,8 @@ export interface BuildAgentContextInput {
   skillsDir: string;
   /** Path to this agent's sandboxed workspace directory. */
   workspaceDir: string;
+  /** Path to this agent's persistent browser profile directory. */
+  browserProfileDir: string;
   /** The embedder resolved from the agent's embedding model. */
   embedder: Embedder;
   /** Database encryption key, if configured. */
@@ -113,6 +118,7 @@ export function buildAgentContext(input: BuildAgentContextInput): AgentContext {
     },
     contextWindow: input.contextWindow,
     workspaceDir: input.workspaceDir,
+    browserProfileDir: input.browserProfileDir,
     agentDb,
     sqlite: agentDb.sqlite,
     db: agentDb.db,
@@ -122,7 +128,11 @@ export function buildAgentContext(input: BuildAgentContextInput): AgentContext {
     skills,
     userProfile,
     mcpTools: {},
-    close: () => agentDb.close(),
+    close: () => {
+      // Best-effort: tear down the agent's browser daemon, then close the db.
+      closeBrowserSession(browserEnvFor(input.profile.id, input.browserProfileDir));
+      agentDb.close();
+    },
   };
   return ctx;
 }

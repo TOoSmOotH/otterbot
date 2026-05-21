@@ -39,6 +39,8 @@ export interface ProfilePaths {
   subagentsDir: string;
   /** Sandboxed working directory for the agent's `shell_exec` tool. */
   workspace: string;
+  /** Persistent Chrome user-data dir for the agent's browser tools. */
+  browser: string;
 }
 
 export function profilePaths(root: string, id: string): ProfilePaths {
@@ -53,6 +55,7 @@ export function profilePaths(root: string, id: string): ProfilePaths {
     skillsDir: join(dir, "skills"),
     subagentsDir: join(dir, "subagents"),
     workspace: join(dir, "workspace"),
+    browser: join(dir, "browser"),
   };
 }
 

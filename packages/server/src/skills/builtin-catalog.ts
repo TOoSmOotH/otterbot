@@ -130,6 +130,57 @@ No setup needed — \`web_search\` works out of the box.
   }),
 
   capability({
+    id: "agentic-browsing",
+    name: "Agentic browsing",
+    description:
+      "Drive a real browser — navigate, click, type, read, and screenshot pages — via agent-browser.",
+    tools: [
+      "browser_navigate",
+      "browser_snapshot",
+      "browser_click",
+      "browser_type",
+      "browser_press",
+      "browser_scroll",
+      "browser_back",
+      "browser_get_images",
+      "browser_console",
+      "browser_vision",
+    ],
+    body: `
+You can drive a real, headless web browser. It is **persistent and private to
+you** — cookies and logins survive across tasks, so once you sign in to a site
+you stay signed in.
+
+## Setup
+
+The browser engine (\`agent-browser\`) ships with otterbot, but Chrome must be
+downloaded once on the host. If a browser tool fails saying the engine is not
+ready, ask the user to run \`agent-browser install\` on the server (or
+\`agent-browser install --with-deps\` on Linux to also install system libraries).
+You cannot do this yourself.
+
+## How to browse
+
+Work the page in a loop — never guess element ids:
+
+1. **browser_navigate** to a URL.
+2. **browser_snapshot** to see the page as an accessibility tree. Each element
+   has a ref like \`@e3\`.
+3. Act on a ref: **browser_click** \`@e3\`, **browser_type** \`@e5\` "text",
+   **browser_press** "Enter", **browser_scroll** to reveal more.
+4. **Snapshot again** after anything that changes the page — refs are only valid
+   for the snapshot they came from.
+
+## Tips
+
+- Prefer the snapshot (text) over **browser_vision** (screenshot + vision model);
+  reach for vision only for layout, images, or charts the tree can't convey.
+- \`browser_get_images\` lists images on the page; \`browser_console\` shows console logs.
+- Quote the page URL and what you saw so the user can verify.
+`,
+  }),
+
+  capability({
     id: "email",
     name: "Email",
     description: "Send email from the agent's own account via the send_email tool.",
