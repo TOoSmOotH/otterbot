@@ -266,18 +266,20 @@ function normalizeProviderAccounts(
 function normalizeGlobalSettings(input?: Partial<GlobalSettings> | null): GlobalSettings {
   const defaults = DEFAULT_GLOBAL_SETTINGS;
   const nextProviders: Record<ProviderId, ProviderAccount[]> = {};
-  // Start from defaults so every catalog provider has at least the "default" account.
-  for (const provider of Object.keys(defaults.providers) as ProviderId[]) {
-    const incoming = (input?.providers as Record<string, unknown> | undefined)?.[provider];
-    const normalized = normalizeProviderAccounts(incoming, provider);
-    nextProviders[provider] =
-      normalized.length > 0 ? normalized : [defaultAccountFor({ id: provider, defaultBaseUrl: defaults.providers[provider]?.[0]?.baseUrl ?? null })];
-  }
-  // Preserve any provider in the input that isn't in the catalog (forward-compat).
-  for (const [provider, raw] of Object.entries(input?.providers ?? {})) {
-    if (nextProviders[provider]) continue;
-    const normalized = normalizeProviderAccounts(raw, provider);
-    if (normalized.length > 0) nextProviders[provider] = normalized;
+  const inputProviders = input?.providers as Record<string, unknown> | undefined;
+  const hasProviders =
+    !!inputProviders && typeof inputProviders === "object" && Object.keys(inputProviders).length > 0;
+  if (!hasProviders) {
+    // Fresh / legacy install: seed every catalog provider with its default account.
+    for (const provider of Object.keys(defaults.providers) as ProviderId[]) {
+      nextProviders[provider] = defaults.providers[provider].map((a) => ({ ...a }));
+    }
+  } else {
+    // Respect exactly what the caller sent. An empty list means the user removed
+    // that provider, so don't resurrect a default account for it.
+    for (const [provider, raw] of Object.entries(inputProviders)) {
+      nextProviders[provider] = normalizeProviderAccounts(raw, provider);
+    }
   }
   // Resolve the model registry. Three cases:
   //  - new shape: `models` is an array (may be empty if the user cleared it).
