@@ -1,4 +1,4 @@
-import type { MemorySearchResult, ModelRef, ScheduledTask } from "@otterbot/shared";
+import type { MemorySearchResult, ScheduledTask } from "@otterbot/shared";
 import type { MessageBus } from "../bus/bus.js";
 
 export interface AgentDirectoryEntry {
@@ -28,7 +28,7 @@ export interface AgentServices {
   spawnSubagent(
     parentId: string,
     goal: string,
-    opts?: { modelRef?: ModelRef }
+    opts?: { modelId?: string }
   ): Promise<SpawnResult>;
   /** Schedule a recurring prompt (cron expression) for an agent. */
   scheduleTask(agentId: string, cron: string, prompt: string): ScheduledTask | null;

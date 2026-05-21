@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { motion } from "motion/react";
 import { apiFetch } from "../../lib/api";
-import type { ProviderAccount, ProviderId } from "@otterbot/shared";
+import type { ConfiguredModel, ProviderAccount, ProviderId } from "@otterbot/shared";
+import { uniqueModelId } from "../../lib/model-id";
 import { useSetupStore } from "../../stores/setup-store";
 import { useAgentsStore } from "../../stores/agents-store";
 import { useGlobalSettingsStore } from "../../stores/global-settings-store";
@@ -233,20 +234,8 @@ export function OnboardingWizard() {
   const finish = async () => {
     setSaving(true);
     try {
-      const chatRef = {
-        provider: chatProvider,
-        account: chatAccount || "default",
-        modelId: chatModelId.trim(),
-      };
-      // Skipped embeddings → empty modelId, which the server resolves to a
-      // disabled (null) embedder; memory falls back to keyword search.
-      const embeddingRef = embSkipped
-        ? { provider: "builtin" as ProviderId, account: "default", modelId: "" }
-        : {
-            provider: embProvider,
-            account: embAccount || "default",
-            modelId: embModelId.trim(),
-          };
+      const chatAcct = chatAccount || "default";
+      const embAcct = embAccount || "default";
 
       // Provider credentials are saved to Global Settings — the single source
       // of truth — so every agent reuses them. The built-in embedder has no
@@ -279,23 +268,47 @@ export function OnboardingWizard() {
         }
         providerPatch[p] = list;
       };
-      if (!useChatOAuth) upsertAccount(chatProvider, chatRef.account, chatCred);
-      if (!embSkipped) upsertAccount(embeddingRef.provider, embeddingRef.account, embCred);
+      if (!useChatOAuth) upsertAccount(chatProvider, chatAcct, chatCred);
+      if (!embSkipped) upsertAccount(embProvider, embAcct, embCred);
       if (useChatOAuth) {
         // Flip OpenAI to OAuth account-wide on the chosen account so model
         // resolution uses the server-side tokens.
-        upsertAccount("openai", chatRef.account, "", { authMethod: "oauth" });
-      }
-      if (Object.keys(providerPatch).length > 0) {
-        await saveSettings({
-          ...current,
-          providers: { ...current.providers, ...providerPatch },
-        });
+        upsertAccount("openai", chatAcct, "", { authMethod: "oauth" });
       }
 
-      const allowedModels = Array.from(
-        new Set([chatRef.provider, embeddingRef.provider])
-      ).map((p) => ({ provider: p, account: "*", modelId: "*" }));
+      // Register the chosen models. First-run starts with just the COO, so we
+      // seed the registry with exactly what was picked and point the defaults
+      // (and the COO) at them.
+      const chatEntry: ConfiguredModel = {
+        id: uniqueModelId([], chatModelId.trim() || chatProvider),
+        label: chatModelId.trim() || chatProvider,
+        provider: chatProvider,
+        account: chatAcct,
+        modelId: chatModelId.trim(),
+        kind: "chat",
+      };
+      const models: ConfiguredModel[] = [chatEntry];
+      let embeddingId = "";
+      if (!embSkipped) {
+        const embEntry: ConfiguredModel = {
+          id: uniqueModelId(models.map((m) => m.id), embModelId.trim() || embProvider),
+          label: embModelId.trim() || embProvider,
+          provider: embProvider,
+          account: embAcct,
+          modelId: embModelId.trim(),
+          kind: "embedding",
+        };
+        models.push(embEntry);
+        embeddingId = embEntry.id;
+      }
+
+      await saveSettings({
+        ...current,
+        providers: { ...current.providers, ...providerPatch },
+        models,
+        defaultChatModelId: chatEntry.id,
+        defaultEmbeddingModelId: embeddingId,
+      });
 
       await apiFetch("/api/agents/coo", {
         method: "PATCH",
@@ -303,8 +316,7 @@ export function OnboardingWizard() {
         body: JSON.stringify({
           displayName: cooName.trim() || "Otterbot COO",
           persona,
-          model: { chat: chatRef, embedding: embeddingRef },
-          allowedModels,
+          model: { chat: chatEntry.id, embedding: embeddingId },
         }),
       });
       await markComplete();

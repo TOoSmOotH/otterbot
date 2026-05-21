@@ -34,7 +34,7 @@ export class SlackConnector extends ChannelConnector {
   constructor(
     agentId: string,
     cfg: ChannelBotConfig,
-    private readonly botToken: string,
+    botToken: string,
     private readonly appToken: string,
     getRuntime: () => AgentRuntime | undefined
   ) {

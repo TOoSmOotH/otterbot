@@ -1,4 +1,4 @@
-import { resolve, join } from "node:path";
+import { join } from "node:path";
 import { existsSync, readdirSync, writeFileSync, rmSync } from "node:fs";
 import { eq, desc } from "drizzle-orm";
 import { nanoid } from "nanoid";
@@ -10,15 +10,20 @@ import type {
   AgentConnectorStatus,
   ChannelBotConfig,
   ChannelConnectorStatus,
+  ConfiguredModel,
   GlobalSettings,
   McpServerStatus,
-  ModelContextWindow,
   ModelRef,
   ProviderAccount,
   ProviderId,
 } from "@otterbot/shared";
 import type { Config } from "../config.js";
-import { ProfileStore, normalizeProfile } from "../profiles/profile-store.js";
+import {
+  ProfileStore,
+  normalizeProfile,
+  DEFAULT_CHAT_MODEL_ID,
+  DEFAULT_EMBEDDING_MODEL_ID,
+} from "../profiles/profile-store.js";
 import { controlSchema, type ControlDb } from "../db/control-db.js";
 import { buildAgentContext, type AgentContext } from "../runtime/agent-context.js";
 import { DEFAULT_CONTEXT_WINDOW } from "../runtime/context-manager.js";
@@ -75,7 +80,6 @@ export interface CreateAgentInput {
   role?: AgentRole;
   persona?: string;
   model?: AgentProfile["model"];
-  allowedModels?: AgentProfile["allowedModels"];
   allowedChatServices?: AgentProfile["allowedChatServices"];
   transport?: AgentProfile["transport"];
   slack?: ChannelBotConfig | null;
@@ -102,22 +106,123 @@ function defaultAccountFor(p: { id: string; defaultBaseUrl: string | null }): Pr
   };
 }
 
+/** The chat + embedding models a fresh install ships with (local LM Studio). */
+const DEFAULT_MODELS: ConfiguredModel[] = [
+  {
+    id: DEFAULT_CHAT_MODEL_ID,
+    label: "local-model",
+    provider: "lmstudio",
+    account: DEFAULT_ACCOUNT,
+    modelId: "local-model",
+    kind: "chat",
+  },
+  {
+    id: DEFAULT_EMBEDDING_MODEL_ID,
+    label: "local-model",
+    provider: "lmstudio",
+    account: DEFAULT_ACCOUNT,
+    modelId: "local-model",
+    kind: "embedding",
+  },
+];
+
 /** Per-provider default settings, derived from the provider catalog. */
 const DEFAULT_GLOBAL_SETTINGS: GlobalSettings = {
   theme: "obsidian",
-  defaultChatModel: { provider: "lmstudio", account: DEFAULT_ACCOUNT, modelId: "local-model" },
-  defaultEmbeddingModel: { provider: "lmstudio", account: DEFAULT_ACCOUNT, modelId: "local-model" },
-  modelContextWindows: [],
+  models: DEFAULT_MODELS.map((m) => ({ ...m })),
+  defaultChatModelId: DEFAULT_CHAT_MODEL_ID,
+  defaultEmbeddingModelId: DEFAULT_EMBEDDING_MODEL_ID,
   providers: Object.fromEntries(PROVIDER_CATALOG.map((p) => [p.id, [defaultAccountFor(p)]])),
 };
 
-function normalizeModelRef(ref: ModelRef | undefined, fallback: ModelRef): ModelRef {
-  if (!ref) return fallback;
-  return {
-    provider: ref.provider ?? fallback.provider,
-    account: ref.account || DEFAULT_ACCOUNT,
-    modelId: ref.modelId ?? fallback.modelId,
+/**
+ * Legacy (pre-registry) GlobalSettings shape — agents and defaults stored
+ * `ModelRef`s and a separate context-window table. Accepted by
+ * {@link normalizeGlobalSettings} so old installs migrate transparently.
+ */
+interface LegacyGlobalSettings {
+  defaultChatModel?: Partial<ModelRef>;
+  defaultEmbeddingModel?: Partial<ModelRef>;
+  modelContextWindows?: Array<{ provider?: string; modelId?: string; contextWindow?: number }>;
+}
+
+/** Normalize one configured-model entry; returns null if it can't be salvaged. */
+function normalizeConfiguredModel(raw: unknown): ConfiguredModel | null {
+  if (!raw || typeof raw !== "object") return null;
+  const m = raw as Partial<ConfiguredModel>;
+  if (typeof m.id !== "string" || !m.id.trim()) return null;
+  if (typeof m.provider !== "string" || typeof m.modelId !== "string") return null;
+  const kind = m.kind === "embedding" ? "embedding" : "chat";
+  const out: ConfiguredModel = {
+    id: m.id,
+    label: typeof m.label === "string" && m.label.trim() ? m.label : m.modelId || m.id,
+    provider: m.provider,
+    account: typeof m.account === "string" && m.account ? m.account : DEFAULT_ACCOUNT,
+    modelId: m.modelId,
+    kind,
   };
+  if (kind === "chat" && typeof m.contextWindow === "number" && m.contextWindow > 0) {
+    out.contextWindow = Math.round(m.contextWindow);
+  }
+  return out;
+}
+
+/**
+ * Synthesize a model registry from the legacy ModelRef-based settings. The old
+ * default chat/embedding refs become the two default models; any extra context
+ * windows become standalone chat entries so their tuning isn't lost.
+ */
+function migrateLegacyModels(legacy: LegacyGlobalSettings): {
+  models: ConfiguredModel[];
+  defaultChatModelId: string;
+  defaultEmbeddingModelId: string;
+} {
+  const models: ConfiguredModel[] = [];
+  const cwFor = (provider?: string, modelId?: string) =>
+    legacy.modelContextWindows?.find((m) => m.provider === provider && m.modelId === modelId)
+      ?.contextWindow;
+
+  const chat = legacy.defaultChatModel;
+  const emb = legacy.defaultEmbeddingModel;
+  let defaultChatModelId = "";
+  let defaultEmbeddingModelId = "";
+  if (chat?.provider) {
+    models.push({
+      id: DEFAULT_CHAT_MODEL_ID,
+      label: chat.modelId || "chat model",
+      provider: chat.provider,
+      account: chat.account || DEFAULT_ACCOUNT,
+      modelId: chat.modelId ?? "",
+      kind: "chat",
+      ...(cwFor(chat.provider, chat.modelId) ? { contextWindow: cwFor(chat.provider, chat.modelId) } : {}),
+    });
+    defaultChatModelId = DEFAULT_CHAT_MODEL_ID;
+  }
+  if (emb?.provider) {
+    models.push({
+      id: DEFAULT_EMBEDDING_MODEL_ID,
+      label: emb.modelId || "embedding model",
+      provider: emb.provider,
+      account: emb.account || DEFAULT_ACCOUNT,
+      modelId: emb.modelId ?? "",
+      kind: "embedding",
+    });
+    defaultEmbeddingModelId = DEFAULT_EMBEDDING_MODEL_ID;
+  }
+  for (const cw of legacy.modelContextWindows ?? []) {
+    if (!cw.provider || !cw.modelId) continue;
+    if (models.some((m) => m.provider === cw.provider && m.modelId === cw.modelId)) continue;
+    models.push({
+      id: uniqueModelId(models, cw.modelId),
+      label: cw.modelId,
+      provider: cw.provider,
+      account: DEFAULT_ACCOUNT,
+      modelId: cw.modelId,
+      kind: "chat",
+      ...(cw.contextWindow && cw.contextWindow > 0 ? { contextWindow: Math.round(cw.contextWindow) } : {}),
+    });
+  }
+  return { models, defaultChatModelId, defaultEmbeddingModelId };
 }
 
 /**
@@ -174,30 +279,42 @@ function normalizeGlobalSettings(input?: Partial<GlobalSettings> | null): Global
     const normalized = normalizeProviderAccounts(raw, provider);
     if (normalized.length > 0) nextProviders[provider] = normalized;
   }
-  const modelContextWindows = Array.isArray(input?.modelContextWindows)
-    ? input.modelContextWindows
-        .filter(
-          (m): m is ModelContextWindow =>
-            !!m &&
-            typeof m.provider === "string" &&
-            typeof m.modelId === "string" &&
-            typeof m.contextWindow === "number" &&
-            m.contextWindow > 0
-        )
-        .map((m) => ({
-          provider: m.provider,
-          modelId: m.modelId,
-          contextWindow: Math.round(m.contextWindow),
-        }))
-    : [];
+  // Resolve the model registry. Three cases:
+  //  - new shape: `models` is an array (may be empty if the user cleared it).
+  //  - legacy shape: ModelRef-based defaults / context windows → synthesize.
+  //  - nothing supplied: ship the built-in defaults.
+  const legacy = input as (Partial<GlobalSettings> & LegacyGlobalSettings) | null | undefined;
+  let models: ConfiguredModel[];
+  let defaultChatModelId: string;
+  let defaultEmbeddingModelId: string;
+  if (Array.isArray(input?.models)) {
+    const seen = new Set<string>();
+    models = [];
+    for (const raw of input.models) {
+      const m = normalizeConfiguredModel(raw);
+      if (!m || seen.has(m.id)) continue;
+      seen.add(m.id);
+      models.push(m);
+    }
+    defaultChatModelId = typeof input?.defaultChatModelId === "string" ? input.defaultChatModelId : "";
+    defaultEmbeddingModelId =
+      typeof input?.defaultEmbeddingModelId === "string" ? input.defaultEmbeddingModelId : "";
+  } else if (legacy?.defaultChatModel || legacy?.defaultEmbeddingModel || legacy?.modelContextWindows) {
+    ({ models, defaultChatModelId, defaultEmbeddingModelId } = migrateLegacyModels(legacy));
+  } else {
+    models = defaults.models.map((m) => ({ ...m }));
+    defaultChatModelId = defaults.defaultChatModelId;
+    defaultEmbeddingModelId = defaults.defaultEmbeddingModelId;
+  }
+  // A default id must point at a real entry, else clear it.
+  if (defaultChatModelId && !models.some((m) => m.id === defaultChatModelId)) defaultChatModelId = "";
+  if (defaultEmbeddingModelId && !models.some((m) => m.id === defaultEmbeddingModelId))
+    defaultEmbeddingModelId = "";
   return {
     theme: input?.theme ?? defaults.theme,
-    defaultChatModel: normalizeModelRef(input?.defaultChatModel, defaults.defaultChatModel),
-    defaultEmbeddingModel: normalizeModelRef(
-      input?.defaultEmbeddingModel,
-      defaults.defaultEmbeddingModel
-    ),
-    modelContextWindows,
+    models,
+    defaultChatModelId,
+    defaultEmbeddingModelId,
     providers: nextProviders,
   };
 }
@@ -224,6 +341,15 @@ function slugify(name: string): string {
       .replace(/^-+|-+$/g, "")
       .slice(0, 40) || "agent"
   );
+}
+
+/** A slug id for a configured model, unique within the given registry. */
+function uniqueModelId(existing: { id: string }[], base: string): string {
+  const root = slugify(base) || "model";
+  let id = root;
+  let n = 2;
+  while (existing.some((m) => m.id === id)) id = `${root}-${n++}`;
+  return id;
 }
 
 /**
@@ -330,6 +456,14 @@ export class Orchestrator {
         if (this.cfg.lmstudioApiKey) {
           lm.apiKey = this.cfg.lmstudioApiKey;
           lm.apiKeyConfigured = true;
+        }
+      }
+      // Seed the default chat model's id from the configured fallback model.
+      if (this.cfg.model) {
+        const chat = settings.models.find((m) => m.id === DEFAULT_CHAT_MODEL_ID);
+        if (chat) {
+          chat.modelId = this.cfg.model;
+          chat.label = this.cfg.model;
         }
       }
       return settings;
@@ -449,11 +583,83 @@ export class Orchestrator {
     return out;
   }
 
+  /**
+   * Resolve a configured-model id to its runtime {@link ModelRef}. An unknown
+   * id (deleted/never-set model) yields an empty ref the runtime treats as
+   * "no model configured" rather than crashing.
+   */
+  resolveModelRef(
+    modelId: string,
+    settings: GlobalSettings = this.getGlobalSettings()
+  ): ModelRef {
+    const m = settings.models.find((x) => x.id === modelId);
+    return m
+      ? { provider: m.provider, account: m.account, modelId: m.modelId }
+      : { provider: "", account: DEFAULT_ACCOUNT, modelId: "" };
+  }
+
+  /**
+   * Migrate profiles persisted with the old ModelRef-based `model` shape. Each
+   * legacy ref is matched against (or appended to) the model registry, and the
+   * profile is rewritten to reference the resulting id. The synthesized registry
+   * (legacy defaults + any new agent models) is persisted once at the end.
+   * Idempotent: profiles already storing string ids are left untouched.
+   */
+  private migrateLegacyModelRefs(): void {
+    const storedRaw = this.getSetting(GLOBAL_SETTINGS_KEY);
+    const wasLegacySettings = storedRaw ? !Array.isArray(JSON.parse(storedRaw)?.models) : false;
+    const settings = this.getGlobalSettings(); // already normalized to the new shape
+    let changed = wasLegacySettings;
+
+    const findOrCreate = (raw: unknown, kind: "chat" | "embedding"): string => {
+      if (!raw || typeof raw !== "object") {
+        return kind === "chat" ? settings.defaultChatModelId : settings.defaultEmbeddingModelId;
+      }
+      const ref = raw as Partial<ModelRef>;
+      const provider = String(ref.provider ?? "");
+      const account = ref.account || DEFAULT_ACCOUNT;
+      const modelId = String(ref.modelId ?? "");
+      const existing = settings.models.find(
+        (m) => m.kind === kind && m.provider === provider && m.account === account && m.modelId === modelId
+      );
+      if (existing) return existing.id;
+      const id = uniqueModelId(settings.models, modelId || provider || kind);
+      settings.models.push({ id, label: modelId || provider || kind, provider, account, modelId, kind });
+      changed = true;
+      return id;
+    };
+
+    for (const id of this.profiles.listIds()) {
+      const raw = this.profiles.readProfileJson(id);
+      if (!raw) continue;
+      const model = raw.model as { chat?: unknown; embedding?: unknown } | undefined;
+      const legacyChat = !!model && typeof model.chat === "object" && model.chat !== null;
+      const legacyEmb = !!model && typeof model.embedding === "object" && model.embedding !== null;
+      if (!legacyChat && !legacyEmb && !("allowedModels" in raw)) continue;
+      const chatId = legacyChat
+        ? findOrCreate(model!.chat, "chat")
+        : typeof model?.chat === "string"
+          ? model.chat
+          : settings.defaultChatModelId;
+      const embId = legacyEmb
+        ? findOrCreate(model!.embedding, "embedding")
+        : typeof model?.embedding === "string"
+          ? model.embedding
+          : settings.defaultEmbeddingModelId;
+      raw.model = { chat: chatId, embedding: embId };
+      delete raw.allowedModels;
+      this.profiles.writeProfileJson(id, raw);
+      console.info(`[profiles] migrated ${id} to configured-model ids`);
+    }
+
+    if (changed) this.setSetting(GLOBAL_SETTINGS_KEY, JSON.stringify(settings));
+  }
+
   getProviderSecretsForProfile(profile: AgentProfile): Map<string, string> {
     const settings = this.getGlobalSettings();
     const secrets = new Map<string, string>();
-    for (const ref of [profile.model.chat, profile.model.embedding]) {
-      this.overlayAccountSecrets(secrets, ref, settings);
+    for (const id of [profile.model.chat, profile.model.embedding]) {
+      this.overlayAccountSecrets(secrets, this.resolveModelRef(id, settings), settings);
     }
     return secrets;
   }
@@ -544,6 +750,11 @@ export class Orchestrator {
     // we only touch rows still at the schema default `broad`.
     this.tagLegacyCredentialScopes();
 
+    // One-time migration: rewrite any profile still storing ModelRef objects
+    // into configured-model id references, registering matching entries in the
+    // model registry. Idempotent — profiles already on ids are skipped.
+    this.migrateLegacyModelRefs();
+
     for (const profile of this.profiles.list()) {
       this.startAgent(profile);
     }
@@ -566,19 +777,21 @@ export class Orchestrator {
     const scopedSecrets = this.buildScopedSecrets(profile);
     const secrets = new Map<string, string>();
     for (const [k, { value }] of scopedSecrets) secrets.set(k, value);
-    const chat = profile.model.chat;
+    const settings = this.getGlobalSettings();
+    const chatModelRef = this.resolveModelRef(profile.model.chat, settings);
+    const embeddingRef = this.resolveModelRef(profile.model.embedding, settings);
     const contextWindow =
-      this.getGlobalSettings().modelContextWindows.find(
-        (m) => m.provider === chat.provider && m.modelId === chat.modelId
-      )?.contextWindow ?? DEFAULT_CONTEXT_WINDOW;
+      settings.models.find((m) => m.id === profile.model.chat)?.contextWindow ??
+      DEFAULT_CONTEXT_WINDOW;
     const ctx = buildAgentContext({
       profile,
+      chatModelRef,
       scopedSecrets,
       contextWindow,
       agentDbPath: paths.agentDb,
       skillsDir: paths.skillsDir,
       workspaceDir: paths.workspace,
-      embedder: resolveEmbedder(profile.model.embedding, secrets),
+      embedder: resolveEmbedder(embeddingRef, secrets),
       dbKey: this.cfg.dbKey,
     });
     const runtime = new AgentRuntime(ctx, this.services);
@@ -742,6 +955,7 @@ export class Orchestrator {
   }
 
   listSummaries(): AgentProfileSummary[] {
+    const settings = this.getGlobalSettings();
     return [...this.runtimes.values()].map((r) => {
       const p = r.ctx.profile;
       return {
@@ -749,7 +963,7 @@ export class Orchestrator {
         displayName: p.displayName,
         role: p.role,
         status: r.status,
-        chatModel: p.model.chat,
+        chatModel: this.resolveModelRef(p.model.chat, settings),
         artwork: p.artwork,
         parentId: p.parentId,
         activeSubagents: [...this.contexts.values()].filter(
@@ -775,8 +989,8 @@ export class Orchestrator {
     }
     const defaults = this.getGlobalSettings();
     const model = input.model ?? {
-      chat: defaults.defaultChatModel,
-      embedding: defaults.defaultEmbeddingModel,
+      chat: defaults.defaultChatModelId,
+      embedding: defaults.defaultEmbeddingModelId,
     };
     const profile = normalizeProfile({
       id,
@@ -784,10 +998,6 @@ export class Orchestrator {
       role: input.role ?? "agent",
       persona: input.persona,
       model,
-      allowedModels: input.allowedModels ?? [
-        { provider: model.chat.provider, account: "*", modelId: "*" },
-        { provider: model.embedding.provider, account: "*", modelId: "*" },
-      ],
       allowedChatServices: input.allowedChatServices,
       transport: input.transport,
       slack: input.slack ?? null,
@@ -985,7 +1195,7 @@ export class Orchestrator {
   async spawnSubagent(
     parentId: string,
     goal: string,
-    opts?: { modelRef?: AgentProfile["model"]["chat"] }
+    opts?: { modelId?: AgentProfile["model"]["chat"] }
   ): Promise<SpawnResult> {
     const parentCtx = this.contexts.get(parentId);
     if (!parentCtx) throw new Error(`Unknown agent: ${parentId}`);
@@ -1011,10 +1221,9 @@ export class Orchestrator {
         `Pursue exactly the goal you are given, use your tools (search_memory, save_memory), ` +
         `and finish with a concise findings summary.`,
       model: {
-        chat: opts?.modelRef ?? parentCtx.profile.model.chat,
+        chat: opts?.modelId ?? parentCtx.profile.model.chat,
         embedding: parentCtx.profile.model.embedding,
       },
-      allowedModels: parentCtx.profile.allowedModels,
       transport: parentCtx.profile.transport,
       artwork: parentCtx.profile.artwork,
       parentId,

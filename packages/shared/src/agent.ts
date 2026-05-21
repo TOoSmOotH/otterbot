@@ -115,7 +115,13 @@ export interface AgentConnectorStatus {
   discord: ChannelConnectorStatus;
 }
 
-/** A reference to a specific model on a specific provider account. */
+/**
+ * A reference to a specific model on a specific provider account. This is the
+ * *runtime* representation the provider registry resolves against — it is no
+ * longer stored on agents. Agents instead reference a {@link ConfiguredModel}
+ * by id (see {@link AgentModelConfig}); the orchestrator resolves that id to a
+ * `ModelRef` when it builds a runtime.
+ */
 export interface ModelRef {
   provider: ProviderId;
   /**
@@ -123,17 +129,22 @@ export interface ModelRef {
    * GlobalSettings.providers[provider]. Users may configure multiple accounts
    * per provider (e.g. "personal" vs "work"); `"default"` is the auto-created
    * first account and the value to use when nothing more specific is meant.
-   * `"*"` is a wildcard, valid only in allowedModels.
    */
   account: string;
-  /** Provider-specific model id. "*" is a wildcard, valid only in allowedModels. */
+  /** Provider-specific model id. */
   modelId: string;
 }
 
-/** The chat + embedding models an agent currently uses. */
+/**
+ * The chat + embedding models an agent currently uses. Each field is the `id`
+ * of a {@link ConfiguredModel} in GlobalSettings.models — agents pick a model
+ * by name and the orchestrator resolves it to a {@link ModelRef} at runtime.
+ */
 export interface AgentModelConfig {
-  chat: ModelRef;
-  embedding: ModelRef;
+  /** id of a chat-kind ConfiguredModel. */
+  chat: string;
+  /** id of an embedding-kind ConfiguredModel. */
+  embedding: string;
 }
 
 /** An agent's visual identity in the UI. */
@@ -162,8 +173,6 @@ export interface AgentProfile {
   /** Persona / system-prompt persona block — resolved from SOUL.md. */
   persona: string;
   model: AgentModelConfig;
-  /** Allowlist of models this agent may use. Supports per-provider "*" wildcard. */
-  allowedModels: ModelRef[];
   allowedChatServices: ChatService[];
   /** Transport used for this agent's outbound agent-to-agent messages. */
   transport: TransportId;

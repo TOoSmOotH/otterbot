@@ -98,9 +98,9 @@ export async function buildServer(
   app.get("/api/settings/global", async () => redactGlobalSettings(orch.getGlobalSettings()));
 
   app.put<{ Body: GlobalSettings }>("/api/settings/global", async (req, reply) => {
-    if (!req.body?.defaultChatModel || !req.body.defaultEmbeddingModel || !req.body.providers) {
+    if (!Array.isArray(req.body?.models) || !req.body?.providers) {
       reply.code(400);
-      return { error: "theme, default models, and providers are required" };
+      return { error: "models and providers are required" };
     }
     return redactGlobalSettings(orch.setGlobalSettings(req.body));
   });

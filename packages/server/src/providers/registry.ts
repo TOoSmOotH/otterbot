@@ -29,16 +29,3 @@ export function listProviderModels(
 ): Promise<string[]> {
   return getProvider(provider).listModels(secrets);
 }
-
-/**
- * Check a `ModelRef` against an allowlist. `"*"` matches any model for a
- * provider; on `account`, `"*"` (or empty) matches any account.
- */
-export function isModelAllowed(ref: ModelRef, allowed: ModelRef[]): boolean {
-  return allowed.some(
-    (a) =>
-      a.provider === ref.provider &&
-      (a.modelId === "*" || a.modelId === ref.modelId) &&
-      (!a.account || a.account === "*" || a.account === ref.account)
-  );
-}

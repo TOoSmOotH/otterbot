@@ -12,11 +12,20 @@ import { join, resolve } from "node:path";
 import { parse as parseDotenv } from "dotenv";
 import type {
   AgentProfile,
+  AgentModelConfig,
   AgentRole,
   ChannelBotConfig,
   McpServerConfig,
-  ModelRef,
 } from "@otterbot/shared";
+
+/**
+ * Stable ids of the two models a fresh install ships with. The default COO
+ * references these, and {@link normalizeGlobalSettings} seeds matching entries
+ * in GlobalSettings.models. Kept here (not in the orchestrator) so profile
+ * scaffolding doesn't import from it.
+ */
+export const DEFAULT_CHAT_MODEL_ID = "default-chat";
+export const DEFAULT_EMBEDDING_MODEL_ID = "default-embedding";
 
 /** Resolved on-disk paths for one agent profile directory. */
 export interface ProfilePaths {
@@ -63,18 +72,14 @@ Principles:
 /** On-disk shape of `profile.json` — the full profile minus the persona (SOUL.md). */
 type ProfileJson = Omit<AgentProfile, "persona">;
 
-function lmstudioRef(modelId: string): ModelRef {
-  return { provider: "lmstudio", account: "default", modelId };
-}
-
-/** Add `account: "default"` to refs persisted before the multi-account refactor. */
-function normalizeRef(r: Partial<ModelRef> | undefined, fallback: ModelRef): ModelRef {
-  if (!r) return fallback;
-  return {
-    provider: r.provider ?? fallback.provider,
-    account: r.account || "default",
-    modelId: r.modelId ?? fallback.modelId,
-  };
+/**
+ * Resolve a stored model field to a configured-model id. New profiles store a
+ * string id; legacy profiles stored a `ModelRef` object — those are migrated to
+ * ids by the orchestrator at boot, but if one slips through here we fall back to
+ * the default so the profile still loads.
+ */
+function modelIdOf(value: unknown, fallback: string): string {
+  return typeof value === "string" && value ? value : fallback;
 }
 
 /**
@@ -133,6 +138,24 @@ export class ProfileStore {
     writeFileSync(paths.soulMd, persona, "utf8");
   }
 
+  /** Raw parsed `profile.json` — no persona, no normalization. For migrations. */
+  readProfileJson(id: string): Record<string, unknown> | null {
+    const paths = profilePaths(this.root, id);
+    if (!existsSync(paths.profileJson)) return null;
+    try {
+      return JSON.parse(readFileSync(paths.profileJson, "utf8")) as Record<string, unknown>;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Overwrite `profile.json` with raw JSON (leaves SOUL.md untouched). */
+  writeProfileJson(id: string, json: Record<string, unknown>): void {
+    const paths = profilePaths(this.root, id);
+    mkdirSync(paths.dir, { recursive: true });
+    writeFileSync(paths.profileJson, JSON.stringify(json, null, 2), "utf8");
+  }
+
   /**
    * Read a legacy plaintext `.env` from a profile directory, if one exists.
    * Used once at boot to migrate old credentials into the encrypted database.
@@ -188,10 +211,9 @@ export class ProfileStore {
       role: "coo",
       persona: DEFAULT_COO_PERSONA,
       model: {
-        chat: lmstudioRef(opts.chatModelId),
-        embedding: lmstudioRef(opts.chatModelId),
+        chat: DEFAULT_CHAT_MODEL_ID,
+        embedding: DEFAULT_EMBEDDING_MODEL_ID,
       },
-      allowedModels: [{ provider: "lmstudio", account: "*", modelId: "*" }],
       allowedChatServices: ["web"],
       transport: "local",
       slack: null,
@@ -242,17 +264,15 @@ function normalizeChannel(c: ChannelBotConfig | null | undefined): ChannelBotCon
 /** Fill in defaults for any missing fields so older/partial profiles still load. */
 export function normalizeProfile(p: Partial<AgentProfile> & { id: string }): AgentProfile {
   const role: AgentRole = p.role ?? "agent";
-  const chat: ModelRef = normalizeRef(p.model?.chat, lmstudioRef("local-model"));
-  const embedding: ModelRef = normalizeRef(p.model?.embedding, chat);
+  const chat = modelIdOf(p.model?.chat, DEFAULT_CHAT_MODEL_ID);
+  const embedding = modelIdOf(p.model?.embedding, DEFAULT_EMBEDDING_MODEL_ID);
+  const model: AgentModelConfig = { chat, embedding };
   return {
     id: p.id,
     displayName: p.displayName ?? p.id,
     role,
     persona: p.persona ?? "",
-    model: { chat, embedding },
-    allowedModels: p.allowedModels?.length
-      ? p.allowedModels.map((r) => normalizeRef(r, { provider: r.provider, account: "*", modelId: "*" }))
-      : [{ provider: chat.provider, account: "*", modelId: "*" }],
+    model,
     allowedChatServices: p.allowedChatServices ?? ["web"],
     transport: p.transport ?? "local",
     slack: normalizeChannel(p.slack),

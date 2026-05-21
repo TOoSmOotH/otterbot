@@ -28,7 +28,7 @@ export async function summarizeText(
   transcript: string
 ): Promise<{ summary: string; keyPoints: string[] }> {
   const { text } = await generateText({
-    model: resolveChatModel(ctx.profile.model.chat, ctx.secrets),
+    model: resolveChatModel(ctx.chatModelRef, ctx.secrets),
     system: SUMMARIZE_PROMPT,
     prompt: transcript,
     maxTokens: 800,

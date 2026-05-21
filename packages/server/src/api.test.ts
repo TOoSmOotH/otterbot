@@ -189,12 +189,22 @@ describe("HTTP API (e2e)", () => {
       url: "/api/settings/global",
       payload: {
         theme: "forest",
-        defaultChatModel: { provider: "openai", account: "default", modelId: "gpt-4o" },
-        defaultEmbeddingModel: {
-          provider: "lmstudio",
-          account: "default",
-          modelId: "nomic-embed-text",
-        },
+        models: [
+          { id: "gpt", label: "GPT-4o", provider: "openai", account: "default", modelId: "gpt-4o", kind: "chat" },
+          {
+            id: "nomic",
+            label: "Nomic",
+            provider: "lmstudio",
+            account: "default",
+            modelId: "nomic-embed-text",
+            kind: "embedding",
+          },
+          // Preserve the COO's models so it keeps resolving after this save.
+          { id: "default-chat", label: "local", provider: "lmstudio", account: "default", modelId: stack.fake.model, kind: "chat" },
+          { id: "default-embedding", label: "local", provider: "lmstudio", account: "default", modelId: stack.fake.model, kind: "embedding" },
+        ],
+        defaultChatModelId: "gpt",
+        defaultEmbeddingModelId: "nomic",
         providers: {
           anthropic: [
             { account: "default", baseUrl: "https://api.anthropic.com/v1", apiKeyConfigured: false },
@@ -220,7 +230,8 @@ describe("HTTP API (e2e)", () => {
     expect(update.statusCode).toBe(200);
     const updated = update.json() as {
       theme: string;
-      defaultChatModel: { provider: string; account: string; modelId: string };
+      models: Array<{ id: string; provider: string; account: string; modelId: string; kind: string }>;
+      defaultChatModelId: string;
       providers: {
         openai: Array<{
           account: string;
@@ -231,10 +242,12 @@ describe("HTTP API (e2e)", () => {
       };
     };
     expect(updated.theme).toBe("forest");
-    expect(updated.defaultChatModel).toEqual({
+    expect(updated.defaultChatModelId).toBe("gpt");
+    expect(updated.models.find((m) => m.id === "gpt")).toMatchObject({
       provider: "openai",
       account: "default",
       modelId: "gpt-4o",
+      kind: "chat",
     });
     const openaiDefault = updated.providers.openai[0];
     expect(openaiDefault.apiKey).toBeUndefined();

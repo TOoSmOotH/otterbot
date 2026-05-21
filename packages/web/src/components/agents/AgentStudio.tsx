@@ -7,7 +7,6 @@ import type {
   ChannelConnectorStatus,
   McpServerConfig,
   McpServerStatus,
-  ProviderId,
   Skill,
   ScheduledTask,
   MemoryEntry,
@@ -15,9 +14,7 @@ import type {
 import { apiFetch } from "../../lib/api";
 import { useAgentsStore } from "../../stores/agents-store";
 import { useGlobalSettingsStore } from "../../stores/global-settings-store";
-import { useProvidersStore } from "../../stores/providers-store";
-import { BuiltinEmbedderControls } from "../BuiltinEmbedderControls";
-import { ProviderOptions } from "../ProviderOptions";
+import { ModelSelect } from "./ModelSelect";
 import { AvatarUpload } from "./AvatarUpload";
 import { PeerAccessEditor } from "./PeerAccessEditor";
 import { TerminalModal } from "./TerminalModal";
@@ -991,148 +988,48 @@ function PersonaTab({ profile, onSaved }: TabProps) {
 
 function ModelTab({ profile, onSaved }: TabProps) {
   const update = useAgentsStore((s) => s.update);
-  const providers = useProvidersStore((s) => s.providers);
-  const loadProviders = useProvidersStore((s) => s.load);
   const settings = useGlobalSettingsStore((s) => s.settings);
   const loadSettings = useGlobalSettingsStore((s) => s.load);
-  useEffect(() => void loadProviders(), [loadProviders]);
   useEffect(() => void loadSettings(), [loadSettings]);
-  const chatProviders = providers.filter((p) => p.supportsChat);
-  const embeddingProviders = providers.filter((p) => p.supportsEmbeddings);
+  const models = settings.models;
 
-  const [cp, setCp] = useState<ProviderId>(profile.model.chat.provider);
-  const [ca, setCa] = useState(profile.model.chat.account || "default");
-  const [cm, setCm] = useState(profile.model.chat.modelId);
-  const [ep, setEp] = useState<ProviderId>(profile.model.embedding.provider);
-  const [ea, setEa] = useState(profile.model.embedding.account || "default");
-  const [em, setEm] = useState(profile.model.embedding.modelId);
+  const [chat, setChat] = useState(profile.model.chat);
+  const [emb, setEmb] = useState(profile.model.embedding);
   const [saved, setSaved] = useState(false);
   const dirty = () => setSaved(false);
-
-  const chatAccounts = settings.providers[cp] ?? [];
-  const embAccounts = settings.providers[ep] ?? [];
-
-  /** The model config to save. */
-  const modelConfig = (chatModelId: string) => ({
-    chat: { provider: cp, account: ca || "default", modelId: chatModelId },
-    embedding: { provider: ep, account: ea || "default", modelId: em.trim() },
-  });
 
   return (
     <Form>
       <p style={hint}>
-        Each agent picks its own model + provider account. Configure provider credentials in
-        Global Settings → Providers; this picker chooses which account this agent uses.
+        Pick this agent's models by name. Models and their provider accounts are managed in Global
+        Settings → Models. Editing a model there updates every agent using it.
       </p>
       <Field label="Chat model">
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          <select
-            value={cp}
-            onChange={(e) => {
-              const next = e.target.value;
-              setCp(next);
-              const accounts = settings.providers[next] ?? [];
-              setCa(accounts[0]?.account ?? "default");
-              dirty();
-            }}
-            style={{ ...input, flex: "0 0 130px" }}
-          >
-            <ProviderOptions list={chatProviders} current={cp} />
-          </select>
-          {cp !== "builtin" && (
-            <select
-              value={ca}
-              onChange={(e) => { setCa(e.target.value); dirty(); }}
-              style={{ ...input, flex: "0 0 130px" }}
-              title="Provider account"
-            >
-              {chatAccounts.length === 0 && <option value="default">default</option>}
-              {chatAccounts.map((a) => (
-                <option key={a.account} value={a.account}>
-                  {a.account}
-                </option>
-              ))}
-            </select>
-          )}
-          <input
-            value={cm}
-            onChange={(e) => { setCm(e.target.value); dirty(); }}
-            style={{ ...input, flex: 1, minWidth: 160 }}
-          />
-        </div>
-      </Field>
-      {cp === "openai" && (
-        <OpenAiAuthPanel
-          account={ca}
-          chatModel={cm}
-          onPickModel={(m) => {
-            setCm(m);
+        <ModelSelect
+          models={models}
+          kind="chat"
+          value={chat}
+          onChange={(v) => {
+            setChat(v);
             dirty();
           }}
-          onUseCodexModel={async (m) => {
-            setCm(m);
-            await update(profile.id, {
-              model: modelConfig(m),
-              allowedModels: [
-                { provider: cp, account: "*", modelId: "*" },
-                { provider: ep, account: "*", modelId: "*" },
-              ],
-            });
-            setSaved(true);
-            onSaved();
-          }}
         />
-      )}
-      <Field label="Embedding model (for semantic memory)">
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          <select
-            value={ep}
-            onChange={(e) => {
-              const next = e.target.value;
-              setEp(next);
-              const accounts = settings.providers[next] ?? [];
-              setEa(accounts[0]?.account ?? "default");
-              if (next === "builtin") setEm("all-MiniLM-L6-v2");
-              dirty();
-            }}
-            style={{ ...input, flex: "0 0 130px" }}
-          >
-            <ProviderOptions list={embeddingProviders} current={ep} />
-          </select>
-          {ep !== "builtin" && (
-            <select
-              value={ea}
-              onChange={(e) => { setEa(e.target.value); dirty(); }}
-              style={{ ...input, flex: "0 0 130px" }}
-              title="Provider account"
-            >
-              {embAccounts.length === 0 && <option value="default">default</option>}
-              {embAccounts.map((a) => (
-                <option key={a.account} value={a.account}>
-                  {a.account}
-                </option>
-              ))}
-            </select>
-          )}
-          <input
-            value={em}
-            onChange={(e) => { setEm(e.target.value); dirty(); }}
-            readOnly={ep === "builtin"}
-            placeholder="leave blank to disable semantic memory"
-            style={{ ...input, flex: 1, minWidth: 160 }}
-          />
-        </div>
       </Field>
-      {ep === "builtin" && <BuiltinEmbedderControls />}
+      <Field label="Embedding model (for semantic memory)">
+        <ModelSelect
+          models={models}
+          kind="embedding"
+          value={emb}
+          onChange={(v) => {
+            setEmb(v);
+            dirty();
+          }}
+          allowNone
+        />
+      </Field>
       <SaveBar
         onSave={async () => {
-          await update(profile.id, {
-            model: modelConfig(cm.trim()),
-            allowedModels: [
-              { provider: cp, account: "*", modelId: "*" },
-              { provider: ep, account: "*", modelId: "*" },
-            ],
-          });
+          await update(profile.id, { model: { chat, embedding: emb } });
           setSaved(true);
           onSaved();
         }}
@@ -1142,237 +1039,6 @@ function ModelTab({ profile, onSaved }: TabProps) {
     </Form>
   );
 }
-
-/** Connect a ChatGPT subscription (OpenAI OAuth) — account-wide, not per-agent. */
-function OpenAiAuthPanel({
-  account,
-  chatModel,
-  onPickModel,
-  onUseCodexModel,
-}: {
-  /** Which OpenAI account to flip into OAuth mode on connect. */
-  account: string;
-  chatModel: string;
-  onPickModel: (id: string) => void;
-  onUseCodexModel: (id: string) => Promise<void>;
-}) {
-  const [status, setStatus] = useState<{ connected: boolean; accountId: string | null } | null>(null);
-  const [models, setModels] = useState<string[]>([]);
-  const [busy, setBusy] = useState(false);
-  const [paste, setPaste] = useState("");
-  const [completing, setCompleting] = useState(false);
-  const settings = useGlobalSettingsStore((s) => s.settings);
-  const settingsLoaded = useGlobalSettingsStore((s) => s.loaded);
-  const loadSettings = useGlobalSettingsStore((s) => s.load);
-  const saveSettings = useGlobalSettingsStore((s) => s.save);
-  const openaiAccounts = settings.providers.openai ?? [];
-  const activeAccount =
-    openaiAccounts.find((a) => a.account === account) ?? openaiAccounts[0];
-  const openAiUsesOAuth = activeAccount?.authMethod === "oauth";
-  const [autoSavedModel, setAutoSavedModel] = useState("");
-
-  const refresh = () =>
-    apiFetch("/api/auth/openai/status")
-      .then((r) => r.json())
-      .then(setStatus)
-      .catch(() => {});
-  useEffect(() => void refresh(), []);
-  useEffect(() => void loadSettings(), [loadSettings]);
-
-  useEffect(() => {
-    if (!status?.connected || !settingsLoaded || openAiUsesOAuth) return;
-    // Flip the active OpenAI account to OAuth so resolution uses ChatGPT tokens.
-    const list = openaiAccounts.length > 0 ? [...openaiAccounts] : [
-      {
-        account: account || "default",
-        baseUrl: "https://api.openai.com/v1",
-        apiKeyConfigured: false,
-        authMethod: "api-key" as const,
-      },
-    ];
-    const idx = list.findIndex((a) => a.account === account);
-    if (idx >= 0) list[idx] = { ...list[idx], authMethod: "oauth" };
-    else list.push({ ...list[0], account: account || "default", authMethod: "oauth" });
-    void saveSettings({
-      ...settings,
-      providers: { ...settings.providers, openai: list },
-    });
-  }, [
-    account,
-    openAiUsesOAuth,
-    openaiAccounts,
-    saveSettings,
-    settings,
-    settingsLoaded,
-    status?.connected,
-  ]);
-
-  // Once connected, discover the Codex model catalogue for this subscription.
-  useEffect(() => {
-    if (!status?.connected) {
-      setModels([]);
-      return;
-    }
-    void apiFetch("/api/provider-models", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ provider: "openai", secrets: { OPENAI_AUTH_METHOD: "oauth" } }),
-    })
-      .then((r) => r.json())
-      .then((d: { ok: boolean; models?: string[] }) => {
-        const list = d.ok && d.models ? d.models : [];
-        setModels(list);
-        const first = list[0];
-        if (first && !list.includes(chatModel) && autoSavedModel !== first) {
-          setAutoSavedModel(first);
-          void onUseCodexModel(first);
-        }
-      })
-      .catch(() => setModels([]));
-  }, [autoSavedModel, chatModel, onUseCodexModel, status?.connected]);
-
-  const signIn = async () => {
-    setBusy(true);
-    try {
-      const res = await apiFetch("/api/auth/openai/login", { method: "POST" });
-      const data = (await res.json()) as { authUrl?: string; error?: string };
-      if (!data.authUrl) {
-        alert(data.error ?? "Could not start sign-in.");
-        setBusy(false);
-        return;
-      }
-      window.open(data.authUrl, "_blank", "noopener");
-      // Poll until the loopback callback completes (or 5 min timeout).
-      const started = Date.now();
-      const timer = setInterval(async () => {
-        const s = await apiFetch("/api/auth/openai/status")
-          .then((r) => r.json())
-          .catch(() => null);
-        if (s?.connected || Date.now() - started > 300_000) {
-          clearInterval(timer);
-          if (s) setStatus(s);
-          setBusy(false);
-        }
-      }, 2000);
-    } catch {
-      setBusy(false);
-    }
-  };
-
-  // Manual completion: paste the redirect URL when the loopback callback
-  // can't be reached (otterbot running on a remote box).
-  const completeManual = async () => {
-    setCompleting(true);
-    try {
-      const res = await apiFetch("/api/auth/openai/complete", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ url: paste.trim() }),
-      });
-      const data = (await res.json()) as {
-        ok: boolean;
-        status?: { connected: boolean; accountId: string | null };
-        error?: string;
-      };
-      if (data.ok && data.status) {
-        setStatus(data.status);
-        setPaste("");
-      } else {
-        alert(data.error ?? "Could not complete sign-in.");
-      }
-    } catch (e) {
-      alert(e instanceof Error ? e.message : String(e));
-    } finally {
-      setCompleting(false);
-    }
-  };
-
-  const signOut = async () => {
-    await apiFetch("/api/auth/openai/signout", { method: "POST" });
-    setModels([]);
-    setPaste("");
-    void refresh();
-  };
-
-  return (
-    <div style={{ ...card, display: "flex", flexDirection: "column", gap: 6 }}>
-      <strong style={{ fontSize: 12 }}>ChatGPT subscription</strong>
-      {status?.connected ? (
-        <>
-          <div style={{ fontSize: 12, color: "#4ade80" }}>
-            ✓ Connected{status.accountId ? ` · account ${status.accountId}` : ""}
-          </div>
-          <div style={hint}>
-            {openAiUsesOAuth
-              ? "OpenAI chats are using ChatGPT OAuth."
-              : "Switching OpenAI chats to ChatGPT OAuth..."}
-          </div>
-          {models.length > 0 && (
-            <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12 }}>
-              <span style={{ color: "rgb(var(--muted))" }}>Codex model</span>
-              <select
-                value={models.includes(chatModel) ? chatModel : ""}
-                onChange={(e) => onPickModel(e.target.value)}
-                style={input}
-              >
-                {!models.includes(chatModel) && <option value="">Pick a Codex model…</option>}
-                {models.map((m) => (
-                  <option key={m} value={m}>
-                    {m}
-                  </option>
-                ))}
-              </select>
-            </label>
-          )}
-          <button onClick={signOut} style={{ ...ghost, alignSelf: "flex-start" }}>
-            Sign out
-          </button>
-        </>
-      ) : (
-        <>
-          <div style={hint}>
-            Use a ChatGPT Plus/Pro subscription instead of an API key. Sign-in is account-wide —
-            it applies to every agent whose chat provider is OpenAI. Unofficial route; it may stop
-            working if OpenAI changes it.
-          </div>
-          <button onClick={signIn} disabled={busy} style={{ ...primary, alignSelf: "flex-start" }}>
-            {busy ? "Waiting for sign-in…" : "Sign in with ChatGPT"}
-          </button>
-          <div
-            style={{
-              borderTop: "1px solid rgb(var(--border))",
-              paddingTop: 6,
-              display: "flex",
-              flexDirection: "column",
-              gap: 6,
-            }}
-          >
-            <div style={hint}>
-              Running otterbot on a remote box? Your browser can't reach <code>localhost:1455</code>
-              . After approving, copy the URL it was redirected to (the page won't load) and paste
-              it here.
-            </div>
-            <input
-              value={paste}
-              onChange={(e) => setPaste(e.target.value)}
-              placeholder="http://localhost:1455/auth/callback?code=…"
-              style={input}
-            />
-            <button
-              onClick={completeManual}
-              disabled={completing || !paste.trim()}
-              style={{ ...ghost, alignSelf: "flex-start" }}
-            >
-              {completing ? "Completing…" : "Complete sign-in"}
-            </button>
-          </div>
-        </>
-      )}
-    </div>
-  );
-}
-
-// --- Schedule -------------------------------------------------------------
 
 // --- Peers ----------------------------------------------------------------
 
@@ -2183,19 +1849,6 @@ const badge: React.CSSProperties = {
   border: "1px solid rgb(var(--border))",
   borderRadius: 4,
   padding: "1px 5px",
-};
-
-const pre: React.CSSProperties = {
-  background: "rgb(var(--bg))",
-  border: "1px solid rgb(var(--border))",
-  borderRadius: 6,
-  padding: 8,
-  fontSize: 11,
-  marginTop: 6,
-  whiteSpace: "pre-wrap",
-  wordBreak: "break-word",
-  maxHeight: 220,
-  overflowY: "auto",
 };
 
 const hint: React.CSSProperties = {

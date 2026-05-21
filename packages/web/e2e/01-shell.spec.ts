@@ -45,12 +45,13 @@ test.describe("shell", () => {
     expect(res.ok()).toBeTruthy();
     const json = (await res.json()) as {
       theme: string;
-      defaultChatModel: { provider: string };
-      providers: { openai: { apiKey?: string } };
+      models: { id: string; kind: string }[];
+      defaultChatModelId: string;
+      providers: { openai: { apiKey?: string }[] };
     };
     expect(json.theme).toBeTruthy();
-    expect(json.defaultChatModel.provider).toBeTruthy();
-    expect(json.providers.openai.apiKey).toBeUndefined();
+    expect(Array.isArray(json.models)).toBeTruthy();
+    expect(json.providers.openai[0]?.apiKey).toBeUndefined();
   });
 
   test("GET /api/bus/messages returns an array", async ({ request }) => {

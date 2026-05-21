@@ -2,7 +2,7 @@ import { nanoid } from "nanoid";
 import { streamText, type LanguageModelV1 } from "ai";
 import { eq, sql } from "drizzle-orm";
 import * as schema from "../db/schema.js";
-import { resolveChatModel, isModelAllowed } from "../providers/registry.js";
+import { resolveChatModel } from "../providers/registry.js";
 import { buildSystemPrompt } from "../agent/prompt.js";
 import { buildAgentTools } from "../agent/tools.js";
 import { buildContext, maybeAutoCompact } from "./context-manager.js";
@@ -29,7 +29,7 @@ export interface RespondResult {
  * own isolated context (memory, skills, profile).
  */
 export class AgentRuntime {
-  private chatModel: LanguageModelV1;
+  private _chatModel?: LanguageModelV1;
   private _status: AgentStatus = "idle";
   private statusListener?: (status: AgentStatus) => void;
   /** Serial work queue — one agent processes one task at a time. */
@@ -38,14 +38,24 @@ export class AgentRuntime {
   constructor(
     public readonly ctx: AgentContext,
     private readonly services?: AgentServices
-  ) {
-    const ref = ctx.profile.model.chat;
-    if (!isModelAllowed(ref, ctx.profile.allowedModels)) {
-      console.warn(
-        `[runtime] agent ${ctx.profile.id} chat model ${ref.provider}/${ref.modelId} is not in its allowedModels list`
-      );
+  ) {}
+
+  /**
+   * The agent's chat model, resolved lazily. An agent whose configured model
+   * was deleted or never set (empty provider) has no resolvable model — rather
+   * than crash at boot, we defer the error to the moment it's actually used.
+   */
+  private get chatModel(): LanguageModelV1 {
+    if (!this._chatModel) {
+      const ref = this.ctx.chatModelRef;
+      if (!ref.provider || !ref.modelId) {
+        throw new Error(
+          `Agent "${this.ctx.profile.id}" has no chat model configured. Pick one in Settings › Models.`
+        );
+      }
+      this._chatModel = resolveChatModel(ref, this.ctx.secrets);
     }
-    this.chatModel = resolveChatModel(ref, ctx.secrets);
+    return this._chatModel;
   }
 
   get id(): string {

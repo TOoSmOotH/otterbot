@@ -104,9 +104,9 @@ export const THEMES: Record<ThemeId, { label: string; vars: Record<string, strin
  */
 const DEFAULT_SETTINGS: GlobalSettings = {
   theme: "obsidian",
-  defaultChatModel: { provider: "lmstudio", account: "default", modelId: "local-model" },
-  defaultEmbeddingModel: { provider: "lmstudio", account: "default", modelId: "local-model" },
-  modelContextWindows: [],
+  models: [],
+  defaultChatModelId: "",
+  defaultEmbeddingModelId: "",
   providers: {},
 };
 

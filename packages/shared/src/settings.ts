@@ -1,4 +1,4 @@
-import type { ModelRef, ProviderId } from "./agent.js";
+import type { ProviderId } from "./agent.js";
 
 export type ThemeId = "obsidian" | "light" | "forest";
 
@@ -20,25 +20,34 @@ export interface ProviderAccount {
 }
 
 /**
- * A chat model's context window, keyed by provider + model id. Every agent
- * using that model inherits this window; the conversation-history budget is
- * derived from it. Context windows are a property of the model itself, so
- * they are NOT keyed by account — all accounts of the same provider serving
- * the same model id share one window.
+ * A model the user has configured and named — the unit agents select by id.
+ * Each one is tied to a single provider account; the orchestrator resolves it
+ * to a {@link ModelRef} when building a runtime. Editing an entry propagates to
+ * every agent referencing it (agents store only `id`).
  */
-export interface ModelContextWindow {
+export interface ConfiguredModel {
+  /** Stable slug, generated on create; referenced by AgentModelConfig. */
+  id: string;
+  /** Display name shown in every model picker. */
+  label: string;
   provider: ProviderId;
+  /** Names a {@link ProviderAccount} in providers[provider]. */
+  account: string;
+  /** Provider-specific model id. */
   modelId: string;
-  /** Total context window in tokens. */
-  contextWindow: number;
+  kind: "chat" | "embedding";
+  /** Total context window in tokens (chat only). */
+  contextWindow?: number;
 }
 
 export interface GlobalSettings {
   theme: ThemeId;
-  defaultChatModel: ModelRef;
-  defaultEmbeddingModel: ModelRef;
-  /** Per-model context windows — shared by every agent using a given model. */
-  modelContextWindows: ModelContextWindow[];
+  /** Registry of named models agents pick from. */
+  models: ConfiguredModel[];
+  /** id of the {@link ConfiguredModel} new agents use for chat ("" if none). */
+  defaultChatModelId: string;
+  /** id of the {@link ConfiguredModel} new agents use for embeddings ("" if none). */
+  defaultEmbeddingModelId: string;
   /** Per-provider list of named credential sets (accounts). */
   providers: Record<ProviderId, ProviderAccount[]>;
 }

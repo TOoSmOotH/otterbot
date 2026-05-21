@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { resolveChatModel, resolveEmbedder, isModelAllowed } from "./registry.js";
+import { resolveChatModel, resolveEmbedder } from "./registry.js";
 import { PROVIDER_CATALOG } from "./catalog.js";
 import { HttpEmbedder, NullEmbedder } from "../embedding.js";
 import { BuiltinEmbedder } from "../embedders/builtin-embedder.js";
@@ -52,34 +52,5 @@ describe("provider registry", () => {
     expect(
       resolveEmbedder({ provider: "lmstudio", account: "default", modelId: "nomic" }, new Map())
     ).toBeInstanceOf(HttpEmbedder);
-  });
-
-  it("enforces the allowedModels allowlist with wildcard support", () => {
-    const allow = [
-      { provider: "anthropic", account: "*", modelId: "*" },
-      { provider: "lmstudio", account: "*", modelId: "exact-model" },
-    ];
-    expect(
-      isModelAllowed({ provider: "anthropic", account: "default", modelId: "anything" }, allow)
-    ).toBe(true);
-    expect(
-      isModelAllowed({ provider: "lmstudio", account: "default", modelId: "exact-model" }, allow)
-    ).toBe(true);
-    expect(
-      isModelAllowed({ provider: "lmstudio", account: "default", modelId: "other" }, allow)
-    ).toBe(false);
-    expect(
-      isModelAllowed({ provider: "openai", account: "default", modelId: "gpt" }, allow)
-    ).toBe(false);
-  });
-
-  it("matches accounts strictly when the allowlist names them", () => {
-    const allow = [{ provider: "openai", account: "personal", modelId: "*" }];
-    expect(
-      isModelAllowed({ provider: "openai", account: "personal", modelId: "gpt-4o" }, allow)
-    ).toBe(true);
-    expect(
-      isModelAllowed({ provider: "openai", account: "work", modelId: "gpt-4o" }, allow)
-    ).toBe(false);
   });
 });

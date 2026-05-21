@@ -10,7 +10,7 @@ import { resolveChatModel } from "./providers/registry.js";
  */
 export function llm(): LanguageModelV1 {
   const ctx = getDefaultContext();
-  return resolveChatModel(ctx.profile.model.chat, ctx.secrets);
+  return resolveChatModel(ctx.chatModelRef, ctx.secrets);
 }
 
 /** Whether a default agent context is available to resolve a model from. */

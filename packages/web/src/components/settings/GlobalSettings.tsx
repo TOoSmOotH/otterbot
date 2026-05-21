@@ -9,9 +9,8 @@ import {
   type SessionList,
 } from "../../lib/api";
 import type {
-  AgentProfileSummary,
+  ConfiguredModel,
   GlobalSettings as GlobalSettingsShape,
-  ModelRef,
   ProviderAccount,
   ProviderId,
   ProviderInfo,
@@ -22,8 +21,10 @@ import {
   useProvidersStore,
   providerCredField,
   isAccountConfigured,
+  globalProviderPatch,
 } from "../../stores/providers-store";
 import { BuiltinEmbedderControls } from "../BuiltinEmbedderControls";
+import { uniqueModelId } from "../../lib/model-id";
 
 type OpenAiAuthStatus = { connected: boolean; accountId: string | null };
 
@@ -120,10 +121,19 @@ export function GlobalSettings() {
 
 // --- Providers tab --------------------------------------------------------
 
+/** Whether a provider account should appear in the configured-providers list. */
+function isAccountVisible(info: ProviderInfo, acc: ProviderAccount): boolean {
+  if (info.id === "openai" && acc.authMethod === "oauth") return true;
+  // A pending (typed-but-unsaved) API key counts so a freshly added account
+  // doesn't vanish before its first save round-trip.
+  if (acc.apiKey && acc.apiKey.trim()) return true;
+  return isAccountConfigured(info, acc);
+}
+
 /**
- * Provider credentials — the foundation everything else depends on. Each
- * provider type has its own panel containing one or more named "accounts"
- * (credential sets), plus "Add account" to add another.
+ * Provider credentials — the foundation everything else depends on. A single
+ * "+ Add provider" button, then one card per configured credential set (e.g.
+ * "OpenAI · work"). Models reference these accounts by name.
  */
 function ProvidersTab({
   draft,
@@ -134,111 +144,186 @@ function ProvidersTab({
   patch: PatchFn;
   providers: ProviderInfo[];
 }) {
-  // Providers with something to configure (the built-in embedder has nothing).
   const credentialProviders = providers.filter((p) => p.needsApiKey || p.baseUrlEnv);
+  const byId = useMemo(
+    () => new Map(credentialProviders.map((p) => [p.id, p])),
+    [credentialProviders]
+  );
+  const [adding, setAdding] = useState(false);
+
+  // Flatten every configured account across all providers into a single list.
+  const cards: { info: ProviderInfo; account: ProviderAccount; index: number }[] = [];
+  for (const info of credentialProviders) {
+    (draft.providers[info.id] ?? []).forEach((account, index) => {
+      if (isAccountVisible(info, account)) cards.push({ info, account, index });
+    });
+  }
+
+  const setAccounts = (providerId: ProviderId, next: ProviderAccount[]) =>
+    patch({ providers: { ...draft.providers, [providerId]: next } });
+
+  const updateAccount = (info: ProviderInfo, index: number, p: Partial<ProviderAccount>) => {
+    const accounts = draft.providers[info.id] ?? [];
+    setAccounts(info.id, accounts.map((a, i) => (i === index ? { ...a, ...p } : a)));
+  };
+
+  const renameAccount = (info: ProviderInfo, index: number, nextName: string) => {
+    const accounts = draft.providers[info.id] ?? [];
+    let unique = nextName.trim() || `account-${index + 1}`;
+    let n = 2;
+    while (accounts.some((a, i) => i !== index && a.account === unique)) unique = `${nextName.trim()}-${n++}`;
+    const oldName = accounts[index].account;
+    setAccounts(info.id, accounts.map((a, i) => (i === index ? { ...a, account: unique } : a)));
+    // Repoint any configured models that named the old account.
+    if (oldName !== unique) {
+      patch({
+        models: draft.models.map((m) =>
+          m.provider === info.id && m.account === oldName ? { ...m, account: unique } : m
+        ),
+      });
+    }
+  };
+
+  const deleteAccount = (info: ProviderInfo, index: number) => {
+    const accounts = draft.providers[info.id] ?? [];
+    setAccounts(info.id, accounts.filter((_, i) => i !== index));
+  };
+
+  const addProvider = (providerId: ProviderId, accountName: string, cred: string) => {
+    const info = byId.get(providerId);
+    if (!info) return;
+    const accounts = draft.providers[providerId] ?? [];
+    const label = accountName.trim() || "default";
+    const patchValue: Partial<ProviderAccount> = {
+      ...globalProviderPatch(info, cred.trim()),
+      ...(info.id === "openai" ? { authMethod: "api-key" as const } : {}),
+    };
+    const existing = accounts.findIndex((a) => a.account === label);
+    if (existing >= 0) {
+      setAccounts(providerId, accounts.map((a, i) => (i === existing ? { ...a, ...patchValue } : a)));
+    } else {
+      setAccounts(providerId, [
+        ...accounts,
+        { account: label, baseUrl: info.defaultBaseUrl ?? "", apiKeyConfigured: false, ...patchValue },
+      ]);
+    }
+    setAdding(false);
+  };
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
       <section style={section}>
-        <h2 style={h2}>Model Providers</h2>
-        <p style={hint}>
-          Configure one or more accounts per provider — useful when you have multiple keys for the
-          same provider (e.g. personal + work). Each agent's model picker selects which account it
-          uses.
-        </p>
-        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-          {credentialProviders.length === 0 && <p style={hint}>Loading providers…</p>}
-          {credentialProviders.map((p) => (
-            <ProviderPanel key={p.id} info={p} draft={draft} patch={patch} />
-          ))}
-          <BuiltinEmbedderPanel />
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <h2 style={h2}>Model Providers</h2>
+          <button onClick={() => setAdding(true)} style={ghostButton}>
+            + Add provider
+          </button>
         </div>
+        <p style={hint}>
+          The provider accounts you've configured. Add another to use a new provider or a second key
+          for the same one (e.g. personal + work). Models reference these by name.
+        </p>
+
+        {adding && (
+          <AddProviderForm
+            providers={credentialProviders}
+            existing={draft.providers}
+            onCancel={() => setAdding(false)}
+            onAdd={addProvider}
+          />
+        )}
+
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {cards.length === 0 && !adding && (
+            <p style={hint}>No providers configured yet — click “Add provider”.</p>
+          )}
+          {cards.map(({ info, account, index }) => (
+            <AccountCard
+              key={`${info.id}-${index}-${account.account}`}
+              info={info}
+              providerLabel={info.label}
+              account={account}
+              canDelete
+              credMeta={providerCredField(info)}
+              onRename={(name) => renameAccount(info, index, name)}
+              onPatch={(p) => updateAccount(info, index, p)}
+              onDelete={() => deleteAccount(info, index)}
+            />
+          ))}
+        </div>
+      </section>
+
+      <section style={section}>
+        <BuiltinEmbedderPanel />
       </section>
     </div>
   );
 }
 
-function ProviderPanel({
-  info,
-  draft,
-  patch,
+/** Inline form to configure a new provider account. */
+function AddProviderForm({
+  providers,
+  existing,
+  onCancel,
+  onAdd,
 }: {
-  info: ProviderInfo;
-  draft: GlobalSettingsShape;
-  patch: PatchFn;
+  providers: ProviderInfo[];
+  existing: Record<ProviderId, ProviderAccount[]>;
+  onCancel: () => void;
+  onAdd: (provider: ProviderId, account: string, cred: string) => void;
 }) {
-  const accounts = draft.providers[info.id] ?? [];
-  const credMeta = providerCredField(info);
+  const [provider, setProvider] = useState<ProviderId>(providers[0]?.id ?? "");
+  const [account, setAccount] = useState("default");
+  const [cred, setCred] = useState("");
+  const info = providers.find((p) => p.id === provider);
+  const credMeta = info ? providerCredField(info) : null;
 
-  const updateAccounts = (next: ProviderAccount[]) => {
-    patch({ providers: { ...draft.providers, [info.id]: next } });
-  };
-
-  const updateAccount = (index: number, patchValue: Partial<ProviderAccount>) => {
-    updateAccounts(accounts.map((a, i) => (i === index ? { ...a, ...patchValue } : a)));
-  };
-
-  const renameAccount = (index: number, nextName: string) => {
-    const trimmed = nextName.trim() || `account-${index + 1}`;
-    // Disallow duplicates by appending a suffix.
-    let unique = trimmed;
+  // Suggest a non-clashing account label when the provider changes.
+  useEffect(() => {
+    const taken = (existing[provider] ?? []).map((a) => a.account);
+    let label = taken.includes("default") ? "personal" : "default";
     let n = 2;
-    while (accounts.some((a, i) => i !== index && a.account === unique)) unique = `${trimmed}-${n++}`;
-    const oldName = accounts[index].account;
-    updateAccounts(accounts.map((a, i) => (i === index ? { ...a, account: unique } : a)));
-    // Rewrite ModelRefs that named the old account so they keep pointing at it.
-    if (oldName !== unique) {
-      const fixRef = (r: ModelRef): ModelRef =>
-        r.provider === info.id && r.account === oldName ? { ...r, account: unique } : r;
-      patch({
-        defaultChatModel: fixRef(draft.defaultChatModel),
-        defaultEmbeddingModel: fixRef(draft.defaultEmbeddingModel),
-      });
-    }
-  };
-
-  const addAccount = () => {
-    let label = "personal";
-    let i = 2;
-    while (accounts.some((a) => a.account === label)) label = `account-${i++}`;
-    const next: ProviderAccount = {
-      account: label,
-      baseUrl: info.defaultBaseUrl ?? "",
-      apiKeyConfigured: false,
-      ...(info.id === "openai" ? { authMethod: "api-key" as const } : {}),
-    };
-    updateAccounts([...accounts, next]);
-  };
-
-  const deleteAccount = (index: number) => {
-    if (accounts.length === 1) return; // keep at least one slot
-    updateAccounts(accounts.filter((_, i) => i !== index));
-  };
+    while (taken.includes(label)) label = `account-${n++}`;
+    setAccount(label);
+    setCred("");
+  }, [provider, existing]);
 
   return (
     <div style={panel}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <strong style={{ fontSize: 14 }}>{info.label}</strong>
-        <button onClick={addAccount} style={ghostButton}>
-          + Add account
-        </button>
-      </div>
-      {accounts.length === 0 && (
-        <p style={hint}>No accounts configured yet — add one to use this provider.</p>
-      )}
-      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-        {accounts.map((acc, i) => (
-          <AccountCard
-            key={`${i}-${acc.account}`}
-            info={info}
-            account={acc}
-            canDelete={accounts.length > 1}
-            credMeta={credMeta}
-            onRename={(name) => renameAccount(i, name)}
-            onPatch={(p) => updateAccount(i, p)}
-            onDelete={() => deleteAccount(i)}
+      <Field label="Provider">
+        <select value={provider} onChange={(e) => setProvider(e.target.value)} style={input}>
+          {providers.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.label}
+            </option>
+          ))}
+        </select>
+      </Field>
+      <Field label="Account name">
+        <input value={account} onChange={(e) => setAccount(e.target.value)} style={input} />
+      </Field>
+      {credMeta && (
+        <Field label={credMeta.label}>
+          <input
+            type={credMeta.secret ? "password" : "text"}
+            value={cred}
+            onChange={(e) => setCred(e.target.value)}
+            placeholder={credMeta.placeholder}
+            style={input}
           />
-        ))}
+        </Field>
+      )}
+      <div style={{ display: "flex", gap: 8 }}>
+        <button
+          onClick={() => onAdd(provider, account, cred)}
+          disabled={!provider || (credMeta?.secret ? !cred.trim() : false)}
+          style={primary}
+        >
+          Add provider
+        </button>
+        <button onClick={onCancel} style={ghostButton}>
+          Cancel
+        </button>
       </div>
     </div>
   );
@@ -246,6 +331,7 @@ function ProviderPanel({
 
 function AccountCard({
   info,
+  providerLabel,
   account,
   canDelete,
   credMeta,
@@ -254,6 +340,8 @@ function AccountCard({
   onDelete,
 }: {
   info: ProviderInfo;
+  /** Provider label shown as a prefix (flat list spans multiple providers). */
+  providerLabel?: string;
   account: ProviderAccount;
   canDelete: boolean;
   credMeta: ReturnType<typeof providerCredField>;
@@ -267,6 +355,11 @@ function AccountCard({
   return (
     <div style={accountCard}>
       <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+        {providerLabel && (
+          <span style={{ fontSize: 13, fontWeight: 600, whiteSpace: "nowrap" }}>
+            {providerLabel} ·
+          </span>
+        )}
         <input
           value={account.account}
           onChange={(e) => onRename(e.target.value)}
@@ -345,24 +438,17 @@ function BuiltinEmbedderPanel() {
 
 // --- Models tab -----------------------------------------------------------
 
-interface ModelRow {
+/** A (provider, account) pair the user can attach a model to. */
+interface AccountOption {
   provider: ProviderId;
   account: string;
-  modelId: string;
-  /** Agent display names using this exact (provider, account, model) triple. */
-  usedBy: string[];
-  /** Whether this row is the default chat / default embedding. */
-  isDefaultChat: boolean;
-  isDefaultEmbedding: boolean;
-  /** Context window from registry (shared by all accounts of same provider+modelId). */
-  contextWindow?: number;
+  label: string;
 }
 
 /**
- * Unified models view — every model in use across all agents, with provider,
- * account, context window, and which agents use it. Star toggles a row as the
- * default chat / embedding for new agents. Context-window edits update the
- * registry (shared across accounts that serve the same model id).
+ * The model registry — the named models agents pick from. Each is tied to one
+ * configured provider account; agents reference them by id, so editing one
+ * propagates to every agent using it. ★ marks the defaults for new agents.
  */
 function ModelsTab({
   draft,
@@ -373,260 +459,353 @@ function ModelsTab({
   patch: PatchFn;
   providers: ProviderInfo[];
 }) {
-  const [agents, setAgents] = useState<AgentProfileSummary[]>([]);
-  const [embeddingUsage, setEmbeddingUsage] = useState<Map<string, string[]>>(new Map());
-
+  // Which agents reference each model id (for "Used by" + delete warnings).
+  const [usage, setUsage] = useState<Map<string, string[]>>(new Map());
   useEffect(() => {
     void apiFetch("/api/agents")
-      .then((r) => (r.ok ? (r.json() as Promise<AgentProfileSummary[]>) : []))
-      .then((list) => {
-        setAgents(list);
-        // Fetch each agent's full profile so we know its embedding model too.
-        void Promise.all(
+      .then((r) => (r.ok ? (r.json() as Promise<{ id: string }[]>) : []))
+      .then((list) =>
+        Promise.all(
           list.map((a) =>
             apiFetch(`/api/agents/${a.id}`)
               .then((r) =>
-                r.ok ? (r.json() as Promise<{ id: string; displayName: string; model: { embedding: ModelRef } }>) : null
+                r.ok
+                  ? (r.json() as Promise<{ displayName: string; model: { chat: string; embedding: string } }>)
+                  : null
               )
               .catch(() => null)
           )
-        ).then((profiles) => {
-          const map = new Map<string, string[]>();
-          for (const p of profiles) {
-            if (!p) continue;
-            const e = p.model.embedding;
-            if (!e?.modelId) continue;
-            const key = `${e.provider}|${e.account}|${e.modelId}`;
-            const list = map.get(key) ?? [];
-            list.push(p.displayName);
-            map.set(key, list);
+        )
+      )
+      .then((profiles) => {
+        const map = new Map<string, string[]>();
+        for (const p of profiles ?? []) {
+          if (!p) continue;
+          for (const id of [p.model.chat, p.model.embedding]) {
+            if (!id) continue;
+            const list = map.get(id) ?? [];
+            if (!list.includes(p.displayName)) list.push(p.displayName);
+            map.set(id, list);
           }
-          setEmbeddingUsage(map);
-        });
+        }
+        setUsage(map);
       })
       .catch(() => {});
   }, []);
 
-  const rows = useMemo<ModelRow[]>(() => {
-    const byKey = new Map<string, ModelRow>();
-    const refDefault: ModelRef = draft.defaultChatModel;
-    const refDefaultEmb: ModelRef = draft.defaultEmbeddingModel;
-    const cwFor = (provider: ProviderId, modelId: string) =>
-      draft.modelContextWindows.find((m) => m.provider === provider && m.modelId === modelId)
-        ?.contextWindow;
-
-    const upsert = (provider: ProviderId, account: string, modelId: string, by?: string) => {
-      const key = `${provider}|${account}|${modelId}`;
-      let row = byKey.get(key);
-      if (!row) {
-        row = {
-          provider,
-          account,
-          modelId,
-          usedBy: [],
-          isDefaultChat:
-            refDefault.provider === provider &&
-            refDefault.account === account &&
-            refDefault.modelId === modelId,
-          isDefaultEmbedding:
-            refDefaultEmb.provider === provider &&
-            refDefaultEmb.account === account &&
-            refDefaultEmb.modelId === modelId,
-          contextWindow: cwFor(provider, modelId),
-        };
-        byKey.set(key, row);
-      }
-      if (by && !row.usedBy.includes(by)) row.usedBy.push(by);
-    };
-
-    for (const a of agents) {
-      const m = a.chatModel;
-      if (m?.modelId) upsert(m.provider, m.account || "default", m.modelId, a.displayName);
-    }
-    for (const [key, users] of embeddingUsage) {
-      const [provider, account, modelId] = key.split("|");
-      for (const u of users) upsert(provider, account, modelId, u);
-    }
-    if (refDefault.modelId) upsert(refDefault.provider, refDefault.account, refDefault.modelId);
-    if (refDefaultEmb.modelId)
-      upsert(refDefaultEmb.provider, refDefaultEmb.account, refDefaultEmb.modelId);
-    for (const cw of draft.modelContextWindows) {
-      upsert(cw.provider, "*", cw.modelId);
-    }
-
-    return [...byKey.values()].sort((a, b) =>
-      a.provider === b.provider ? a.modelId.localeCompare(b.modelId) : a.provider.localeCompare(b.provider)
-    );
-  }, [draft, agents, embeddingUsage]);
-
   const providerLabel = (id: ProviderId) => providers.find((p) => p.id === id)?.label ?? id;
 
-  const setContextWindow = (provider: ProviderId, modelId: string, value: number) => {
-    const rest = draft.modelContextWindows.filter(
-      (m) => !(m.provider === provider && m.modelId === modelId)
-    );
+  // Every (provider, account) pair the user has configured — the link between a
+  // model and its provider.
+  const accountOptions = useMemo<AccountOption[]>(() => {
+    const out: AccountOption[] = [];
+    for (const info of providers) {
+      for (const acc of draft.providers[info.id] ?? []) {
+        out.push({ provider: info.id, account: acc.account, label: `${info.label} · ${acc.account}` });
+      }
+    }
+    return out;
+  }, [providers, draft.providers]);
+
+  const updateModel = (id: string, p: Partial<ConfiguredModel>) =>
+    patch({ models: draft.models.map((m) => (m.id === id ? { ...m, ...p } : m)) });
+
+  const deleteModel = (m: ConfiguredModel) => {
+    const users = usage.get(m.id) ?? [];
+    const warn = users.length
+      ? `"${m.label}" is used by ${users.join(", ")}. Those agents will have no ${m.kind} model until you pick another. Delete anyway?`
+      : `Delete "${m.label}"?`;
+    if (!window.confirm(warn)) return;
     patch({
-      modelContextWindows:
-        value > 0 ? [...rest, { provider, modelId, contextWindow: value }] : rest,
+      models: draft.models.filter((x) => x.id !== m.id),
+      ...(draft.defaultChatModelId === m.id ? { defaultChatModelId: "" } : {}),
+      ...(draft.defaultEmbeddingModelId === m.id ? { defaultEmbeddingModelId: "" } : {}),
     });
   };
 
-  const setDefaultChat = (row: ModelRow) =>
-    patch({ defaultChatModel: { provider: row.provider, account: row.account, modelId: row.modelId } });
-  const setDefaultEmbedding = (row: ModelRow) =>
-    patch({
-      defaultEmbeddingModel: { provider: row.provider, account: row.account, modelId: row.modelId },
-    });
+  const addModel = (model: ConfiguredModel) => patch({ models: [...draft.models, model] });
 
   const [adding, setAdding] = useState(false);
-  const [newProvider, setNewProvider] = useState<ProviderId>("");
-  const [newAccount, setNewAccount] = useState("default");
-  const [newModelId, setNewModelId] = useState("");
-  const [newWindow, setNewWindow] = useState("");
-
-  const addModel = () => {
-    const id = newModelId.trim();
-    if (!newProvider || !id) return;
-    const window = Math.max(0, Math.round(Number(newWindow) || 0));
-    if (window > 0) setContextWindow(newProvider, id, window);
-    // Just adding to the list — the row appears next render via cwFor or future agent usage.
-    // If the user wants to actually use it, they pick it in the agent's model tab.
-    setAdding(false);
-    setNewProvider("");
-    setNewAccount("default");
-    setNewModelId("");
-    setNewWindow("");
-  };
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
       <section style={section}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <h2 style={h2}>Models</h2>
-          <button onClick={() => setAdding(true)} style={ghostButton}>
+          <button
+            onClick={() => setAdding(true)}
+            style={ghostButton}
+            disabled={accountOptions.length === 0}
+          >
             + Add model
           </button>
         </div>
         <p style={hint}>
-          Every model in use across your agents. ★ marks the defaults for new agents — click to
-          change. The context window is per-model (shared across accounts of the same provider).
+          Named models your agents pick from — each tied to a configured provider account. ★ marks
+          the defaults for new agents. Editing a model updates every agent using it.
         </p>
+        {accountOptions.length === 0 && (
+          <p style={hint}>Configure a provider first (Providers tab) before adding a model.</p>
+        )}
 
-        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-          <div style={{ ...modelRowHead }}>
-            <span style={{ flex: "0 0 110px" }}>Provider</span>
-            <span style={{ flex: "0 0 130px" }}>Account</span>
-            <span style={{ flex: 1 }}>Model id</span>
-            <span style={{ flex: "0 0 110px" }}>Context window</span>
-            <span style={{ flex: "0 0 60px" }}>Defaults</span>
-            <span style={{ flex: 2 }}>Used by</span>
-          </div>
-          {rows.length === 0 && <p style={hint}>No models in use yet.</p>}
-          {rows.map((r) => (
-            <div key={`${r.provider}|${r.account}|${r.modelId}`} style={modelRow}>
-              <span style={{ flex: "0 0 110px", fontSize: 12, color: "rgb(var(--muted))" }}>
-                {providerLabel(r.provider)}
-              </span>
-              <span style={{ flex: "0 0 130px", fontSize: 12 }}>{r.account}</span>
-              <strong
-                style={{ flex: 1, fontSize: 13, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}
-                title={r.modelId}
-              >
-                {r.modelId}
-              </strong>
-              <input
-                type="number"
-                min={0}
-                step={1000}
-                value={r.contextWindow ?? ""}
-                placeholder="default"
-                onChange={(e) =>
-                  setContextWindow(
-                    r.provider,
-                    r.modelId,
-                    Math.max(0, Math.round(Number(e.target.value) || 0))
-                  )
-                }
-                style={{ ...input, flex: "0 0 110px" }}
-              />
-              <div style={{ flex: "0 0 60px", display: "flex", gap: 4 }}>
-                <button
-                  onClick={() => setDefaultChat(r)}
-                  title="Default chat model"
-                  style={{ ...starButton, color: r.isDefaultChat ? "rgb(var(--accent))" : undefined }}
-                >
-                  ★C
-                </button>
-                <button
-                  onClick={() => setDefaultEmbedding(r)}
-                  title="Default embedding model"
-                  style={{
-                    ...starButton,
-                    color: r.isDefaultEmbedding ? "rgb(var(--accent))" : undefined,
-                  }}
-                >
-                  ★E
-                </button>
-              </div>
-              <span style={{ flex: 2, fontSize: 12, color: "rgb(var(--muted))" }}>
-                {r.usedBy.length === 0 ? "—" : r.usedBy.join(", ")}
-              </span>
-            </div>
+        {adding && (
+          <AddModelForm
+            accounts={accountOptions}
+            existingIds={draft.models.map((m) => m.id)}
+            onCancel={() => setAdding(false)}
+            onAdd={(m) => {
+              addModel(m);
+              setAdding(false);
+            }}
+          />
+        )}
+
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {draft.models.length === 0 && !adding && <p style={hint}>No models configured yet.</p>}
+          {draft.models.map((m) => (
+            <ModelCard
+              key={m.id}
+              model={m}
+              accounts={accountOptions}
+              providerLabel={providerLabel(m.provider)}
+              usedBy={usage.get(m.id) ?? []}
+              isDefaultChat={draft.defaultChatModelId === m.id}
+              isDefaultEmbedding={draft.defaultEmbeddingModelId === m.id}
+              onPatch={(p) => updateModel(m.id, p)}
+              onMakeDefault={() =>
+                patch(
+                  m.kind === "chat"
+                    ? { defaultChatModelId: m.id }
+                    : { defaultEmbeddingModelId: m.id }
+                )
+              }
+              onDelete={() => deleteModel(m)}
+            />
           ))}
-
-          {adding && (
-            <div style={{ ...modelRow, alignItems: "flex-end" }}>
-              <select
-                value={newProvider}
-                onChange={(e) => setNewProvider(e.target.value)}
-                style={{ ...input, flex: "0 0 110px" }}
-              >
-                <option value="">Provider…</option>
-                {providers.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.label}
-                  </option>
-                ))}
-              </select>
-              <select
-                value={newAccount}
-                onChange={(e) => setNewAccount(e.target.value)}
-                style={{ ...input, flex: "0 0 130px" }}
-              >
-                {(draft.providers[newProvider] ?? []).map((a) => (
-                  <option key={a.account} value={a.account}>
-                    {a.account}
-                  </option>
-                ))}
-                {(draft.providers[newProvider] ?? []).length === 0 && (
-                  <option value="default">default</option>
-                )}
-              </select>
-              <input
-                value={newModelId}
-                onChange={(e) => setNewModelId(e.target.value)}
-                placeholder="model id"
-                style={{ ...input, flex: 1 }}
-              />
-              <input
-                type="number"
-                min={0}
-                step={1000}
-                value={newWindow}
-                onChange={(e) => setNewWindow(e.target.value)}
-                placeholder="window"
-                style={{ ...input, flex: "0 0 110px" }}
-              />
-              <button onClick={addModel} disabled={!newProvider || !newModelId.trim()} style={primary}>
-                Add
-              </button>
-              <button onClick={() => setAdding(false)} style={ghostButton}>
-                Cancel
-              </button>
-            </div>
-          )}
         </div>
       </section>
+    </div>
+  );
+}
+
+function ModelCard({
+  model,
+  accounts,
+  providerLabel,
+  usedBy,
+  isDefaultChat,
+  isDefaultEmbedding,
+  onPatch,
+  onMakeDefault,
+  onDelete,
+}: {
+  model: ConfiguredModel;
+  accounts: AccountOption[];
+  providerLabel: string;
+  usedBy: string[];
+  isDefaultChat: boolean;
+  isDefaultEmbedding: boolean;
+  onPatch: (p: Partial<ConfiguredModel>) => void;
+  onMakeDefault: () => void;
+  onDelete: () => void;
+}) {
+  const isDefault = isDefaultChat || isDefaultEmbedding;
+  return (
+    <div style={accountCard}>
+      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+        <input
+          value={model.label}
+          onChange={(e) => onPatch({ label: e.target.value })}
+          style={{ ...input, flex: 1 }}
+          aria-label="model name"
+        />
+        <span style={badge}>{model.kind}</span>
+        <button
+          onClick={onMakeDefault}
+          title={`Default ${model.kind} model for new agents`}
+          style={{ ...starButton, color: isDefault ? "rgb(var(--accent))" : undefined }}
+        >
+          {isDefault ? "★ default" : "☆ default"}
+        </button>
+        <button onClick={onDelete} style={{ ...ghostButton, color: "#f87171" }}>
+          Delete
+        </button>
+      </div>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <Field label="Provider account">
+          <select
+            value={`${model.provider}|${model.account}`}
+            onChange={(e) => {
+              const [provider, account] = e.target.value.split("|");
+              onPatch({ provider, account });
+            }}
+            style={{ ...input, minWidth: 200 }}
+          >
+            {/* Keep the current pairing selectable even if its account was removed. */}
+            {!accounts.some((a) => a.provider === model.provider && a.account === model.account) && (
+              <option value={`${model.provider}|${model.account}`}>
+                {providerLabel} · {model.account}
+              </option>
+            )}
+            {accounts.map((a) => (
+              <option key={`${a.provider}|${a.account}`} value={`${a.provider}|${a.account}`}>
+                {a.label}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <Field label="Model id">
+          <input
+            value={model.modelId}
+            onChange={(e) => onPatch({ modelId: e.target.value })}
+            style={{ ...input, minWidth: 200 }}
+          />
+        </Field>
+        {model.kind === "chat" && (
+          <Field label="Context window">
+            <input
+              type="number"
+              min={0}
+              step={1000}
+              value={model.contextWindow ?? ""}
+              placeholder="default"
+              onChange={(e) => {
+                const v = Math.max(0, Math.round(Number(e.target.value) || 0));
+                onPatch({ contextWindow: v > 0 ? v : undefined });
+              }}
+              style={{ ...input, width: 130 }}
+            />
+          </Field>
+        )}
+      </div>
+      {usedBy.length > 0 && (
+        <span style={{ fontSize: 11, color: "rgb(var(--muted))" }}>Used by {usedBy.join(", ")}</span>
+      )}
+    </div>
+  );
+}
+
+/** Inline form to register a new configured model. */
+function AddModelForm({
+  accounts,
+  existingIds,
+  onCancel,
+  onAdd,
+}: {
+  accounts: AccountOption[];
+  existingIds: string[];
+  onCancel: () => void;
+  onAdd: (model: ConfiguredModel) => void;
+}) {
+  const [label, setLabel] = useState("");
+  const [kind, setKind] = useState<"chat" | "embedding">("chat");
+  const [pair, setPair] = useState(`${accounts[0]?.provider ?? ""}|${accounts[0]?.account ?? ""}`);
+  const [modelId, setModelId] = useState("");
+  const [fetched, setFetched] = useState<string[]>([]);
+  const [fetching, setFetching] = useState(false);
+  const [fetchMsg, setFetchMsg] = useState("");
+
+  const [provider] = pair.split("|");
+
+  const fetchModels = async () => {
+    setFetching(true);
+    setFetchMsg("");
+    try {
+      const res = await apiFetch("/api/provider-models", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ provider }),
+      });
+      const data = (await res.json()) as { ok: boolean; models?: string[]; error?: string };
+      if (data.ok && data.models?.length) {
+        setFetched(data.models);
+        if (!modelId) setModelId(data.models[0]);
+        setFetchMsg(`Found ${data.models.length} model(s).`);
+      } else {
+        setFetchMsg(data.error ?? "No models found.");
+      }
+    } catch (err) {
+      setFetchMsg(err instanceof Error ? err.message : String(err));
+    } finally {
+      setFetching(false);
+    }
+  };
+
+  const submit = () => {
+    const [p, account] = pair.split("|");
+    const id = uniqueModelId(existingIds, label || modelId);
+    onAdd({
+      id,
+      label: label.trim() || modelId.trim(),
+      provider: p,
+      account,
+      modelId: modelId.trim(),
+      kind,
+    });
+  };
+
+  return (
+    <div style={panel}>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <Field label="Name">
+          <input
+            value={label}
+            onChange={(e) => setLabel(e.target.value)}
+            placeholder="e.g. Claude Opus"
+            style={{ ...input, minWidth: 180 }}
+          />
+        </Field>
+        <Field label="Kind">
+          <select
+            value={kind}
+            onChange={(e) => setKind(e.target.value as "chat" | "embedding")}
+            style={{ ...input, width: 140 }}
+          >
+            <option value="chat">chat</option>
+            <option value="embedding">embedding</option>
+          </select>
+        </Field>
+        <Field label="Provider account">
+          <select value={pair} onChange={(e) => setPair(e.target.value)} style={{ ...input, minWidth: 200 }}>
+            {accounts.map((a) => (
+              <option key={`${a.provider}|${a.account}`} value={`${a.provider}|${a.account}`}>
+                {a.label}
+              </option>
+            ))}
+          </select>
+        </Field>
+      </div>
+      <Field label="Model id">
+        {fetched.length > 0 ? (
+          <select value={modelId} onChange={(e) => setModelId(e.target.value)} style={input}>
+            {!fetched.includes(modelId) && modelId && <option value={modelId}>{modelId}</option>}
+            {fetched.map((m) => (
+              <option key={m} value={m}>
+                {m}
+              </option>
+            ))}
+          </select>
+        ) : (
+          <input
+            value={modelId}
+            onChange={(e) => setModelId(e.target.value)}
+            placeholder="provider-specific model id"
+            style={input}
+          />
+        )}
+      </Field>
+      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+        <button onClick={submit} disabled={!modelId.trim() || !pair} style={primary}>
+          Add model
+        </button>
+        <button onClick={() => void fetchModels()} disabled={fetching || !provider} style={ghostButton}>
+          {fetching ? "Fetching…" : "Fetch models"}
+        </button>
+        <button onClick={onCancel} style={ghostButton}>
+          Cancel
+        </button>
+        {fetchMsg && <span style={{ fontSize: 12, color: "rgb(var(--muted))" }}>{fetchMsg}</span>}
+      </div>
     </div>
   );
 }
@@ -1106,24 +1285,6 @@ const swatch: React.CSSProperties = {
   height: 14,
   borderRadius: 999,
   border: "1px solid rgb(var(--border))",
-};
-
-const modelRow: React.CSSProperties = {
-  display: "flex",
-  alignItems: "center",
-  gap: 8,
-  padding: "4px 0",
-};
-
-const modelRowHead: React.CSSProperties = {
-  display: "flex",
-  gap: 8,
-  fontSize: 11,
-  color: "rgb(var(--muted))",
-  textTransform: "uppercase",
-  letterSpacing: 0.4,
-  borderBottom: "1px solid rgb(var(--border))",
-  paddingBottom: 4,
 };
 
 const badge: React.CSSProperties = {

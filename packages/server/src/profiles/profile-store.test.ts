@@ -66,7 +66,8 @@ describe("ProfileStore", () => {
     const p = normalizeProfile({ id: "x" });
     expect(p.role).toBe("agent");
     expect(p.transport).toBe("local");
-    expect(p.allowedModels.length).toBeGreaterThan(0);
+    expect(p.model.chat).toBe("default-chat");
+    expect(p.model.embedding).toBe("default-embedding");
     expect(p.canSpawnSubagents).toBe(true);
   });
 });

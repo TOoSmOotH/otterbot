@@ -1,6 +1,6 @@
 import type Database from "better-sqlite3-multiple-ciphers";
 import type { Tool } from "ai";
-import type { AgentProfile } from "@otterbot/shared";
+import type { AgentProfile, ModelRef } from "@otterbot/shared";
 import { openAgentDb, type AgentDb, type AgentDrizzle } from "../db/agent-db.js";
 import { EmbeddingService, type Embedder } from "../embedding.js";
 import { VecIndex } from "../vec-index.js";
@@ -17,6 +17,12 @@ import type { ScopedSecret } from "../secrets/secrets-store.js";
  */
 export interface AgentContext {
   profile: AgentProfile;
+  /**
+   * The resolved chat {@link ModelRef} the runtime runs against. The profile
+   * stores only a configured-model id; the orchestrator resolves it against
+   * GlobalSettings.models when building the context.
+   */
+  chatModelRef: ModelRef;
   /**
    * The agent's complete credential bag, flattened to `key -> value`. Consumed
    * by direct integrations (`github.ts`, `email.ts`, `slack-connector.ts`,
@@ -60,6 +66,8 @@ export interface AgentContext {
 
 export interface BuildAgentContextInput {
   profile: AgentProfile;
+  /** Chat ModelRef resolved from the profile's configured-model id. */
+  chatModelRef: ModelRef;
   /**
    * Per-credential scope map: every entry the agent can see, tagged with
    * its exposure rule. Provider keys are merged in upstream with implicit
@@ -96,6 +104,7 @@ export function buildAgentContext(input: BuildAgentContextInput): AgentContext {
 
   const ctx: AgentContext = {
     profile: input.profile,
+    chatModelRef: input.chatModelRef,
     secrets: flatSecrets,
     shellSecrets: () => {
       // Recompute each call so capability toggles take effect live.

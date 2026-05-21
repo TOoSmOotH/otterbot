@@ -21,10 +21,9 @@ function makeProfile(overrides: Partial<AgentProfile> = {}): AgentProfile {
     role: "agent",
     persona: "a tester",
     model: {
-      chat: { provider: "x", account: "default", modelId: "m" },
-      embedding: { provider: "x", account: "default", modelId: "e" },
+      chat: "test-chat",
+      embedding: "test-embedding",
     },
-    allowedModels: [],
     allowedChatServices: ["web"],
     transport: "local",
     slack: null,
@@ -52,6 +51,7 @@ describe("capabilities", () => {
     dir = mkdtempSync(join(tmpdir(), "otter-cap-"));
     ctx = buildAgentContext({
       profile: makeProfile(),
+      chatModelRef: { provider: "x", account: "default", modelId: "m" },
       scopedSecrets: new Map(),
       contextWindow: 16_000,
       agentDbPath: join(dir, "agent.db"),
