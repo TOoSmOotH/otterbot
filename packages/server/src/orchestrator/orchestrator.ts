@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import { existsSync, readdirSync, writeFileSync, rmSync } from "node:fs";
+import { existsSync, readdirSync, writeFileSync, rmSync, cpSync } from "node:fs";
 import { eq, desc } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import type {
@@ -1241,7 +1241,7 @@ export class Orchestrator {
       role: "subagent",
       persona:
         `You are a focused research subagent spawned by ${parentCtx.profile.displayName}. ` +
-        `Pursue exactly the goal you are given, use your tools (search_memory, save_memory), ` +
+        `Pursue exactly the goal you are given, use your available tools, ` +
         `and finish with a concise findings summary.`,
       model: {
         chat: opts?.modelId ?? parentCtx.profile.model.chat,
@@ -1249,13 +1249,29 @@ export class Orchestrator {
       },
       transport: parentCtx.profile.transport,
       artwork: parentCtx.profile.artwork,
+      // Inherit the parent's capability-bearing profile fields so the subagent
+      // can actually do the work it's delegated, not just touch memory.
+      canRunShell: parentCtx.profile.canRunShell,
+      canWebSearch: parentCtx.profile.canWebSearch,
+      mcpServers: parentCtx.profile.mcpServers,
+      allowedPeers: parentCtx.profile.allowedPeers,
       parentId,
+      // Subagents never spawn their own subagents — no nested recursion.
       canSpawnSubagents: false,
       createdAt: now,
     });
     this.profiles.create(subProfile);
-    // Inherit the parent's secrets so the subagent reaches the same endpoints.
-    this.secrets.set(subId, this.secrets.get(parentId));
+    // Copy the parent's skills (capabilities) so the subagent loads the same
+    // tools/MCP servers via loadFromDisk in startAgent. Each skill's enabled
+    // state is preserved in its frontmatter.
+    const parentSkills = this.profiles.pathsFor(parentId).skillsDir;
+    const subSkills = this.profiles.pathsFor(subId).skillsDir;
+    if (existsSync(parentSkills)) {
+      cpSync(parentSkills, subSkills, { recursive: true });
+    }
+    // Inherit the parent's secrets (scope preserved) so the subagent reaches the
+    // same endpoints and cap-scoped credentials stay gated from the shell.
+    this.secrets.set(subId, this.secrets.getScoped(parentId));
     this.startAgent(subProfile);
 
     this.control.db

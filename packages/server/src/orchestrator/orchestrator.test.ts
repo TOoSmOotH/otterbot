@@ -2,6 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { nanoid } from "nanoid";
 import { createTestStack, type TestStack } from "../test/harness.js";
 import { buildAgentTools } from "../agent/tools.js";
+import { getCatalogCapability } from "../skills/builtin-catalog.js";
 import type { AgentServices } from "../runtime/agent-services.js";
 
 /**
@@ -94,6 +95,32 @@ describe("orchestrator (e2e)", () => {
       const history = stack.orch.getBus().history(100);
       expect(history.some((m) => m.kind === "spawn")).toBe(true);
       expect(history.some((m) => m.kind === "report" && m.rootSpawnId === result.taskId)).toBe(true);
+    },
+    60_000
+  );
+
+  it(
+    "spawns a subagent that inherits the parent's capabilities",
+    async () => {
+      // Parent: web search on, a tool-bearing capability installed.
+      const parent = stack.orch.createAgent({
+        displayName: "Capable Parent",
+        canSpawnSubagents: true,
+      });
+      stack.orch.updateAgent(parent.id, { canWebSearch: true });
+      const parentCtx = stack.orch.getContext(parent.id)!;
+      const entry = getCatalogCapability("agentic-browsing")!;
+      const { meta, body, enabled } = parentCtx.skills.parseSkillFile(entry.markdown);
+      parentCtx.skills.create({ meta, body, enabled, source: "builtin" }, { id: entry.id });
+
+      const result = await stack.orch.spawnSubagent(parent.id, "Look something up.");
+      const subCtx = stack.orch.getContext(result.subagentId)!;
+
+      // Profile flags inherited; nested spawning stays off.
+      expect(subCtx.profile.canWebSearch).toBe(true);
+      expect(subCtx.profile.canSpawnSubagents).toBe(false);
+      // The installed capability and its granted tools come along.
+      expect(subCtx.skills.effectiveTools().has("browser_navigate")).toBe(true);
     },
     60_000
   );
