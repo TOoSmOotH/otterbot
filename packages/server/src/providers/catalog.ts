@@ -92,7 +92,27 @@ function openaiEndpoint(secrets: Secrets): ProviderEndpoint {
   };
 }
 
-/** Build a chat + embedder + model-list def for an OpenAI-compatible server. */
+function openrouterEndpoint(secrets: Secrets): ProviderEndpoint {
+  return {
+    baseUrl: secrets.get("OPENROUTER_BASE_URL") ?? "https://openrouter.ai/api/v1",
+    apiKey: secrets.get("OPENROUTER_API_KEY") ?? "",
+  };
+}
+
+function openAiCompatEndpoint(secrets: Secrets): ProviderEndpoint {
+  // No default — the user supplies the base URL per account.
+  return {
+    baseUrl: secrets.get("OPENAI_COMPAT_BASE_URL") ?? "",
+    apiKey: secrets.get("OPENAI_COMPAT_API_KEY") ?? "",
+  };
+}
+
+/**
+ * Build a chat + embedder + model-list def backed by an OpenAI-compatible
+ * endpoint. Used for LM Studio / Ollama (local, no key) and for cloud
+ * compatibles like OpenRouter (key required) and the generic "OpenAI API
+ * Compatible" provider (user-supplied base URL).
+ */
 function openAiCompatibleProvider(opts: {
   id: string;
   label: string;
@@ -100,18 +120,23 @@ function openAiCompatibleProvider(opts: {
   baseUrlEnv: string;
   defaultBaseUrl: string;
   endpoint: (secrets: Secrets) => ProviderEndpoint;
+  needsApiKey?: boolean;
+  supportsEmbeddings?: boolean;
 }): ProviderDef {
   return {
     id: opts.id,
     label: opts.label,
     supportsChat: true,
-    supportsEmbeddings: true,
-    needsApiKey: false,
+    supportsEmbeddings: opts.supportsEmbeddings ?? true,
+    needsApiKey: opts.needsApiKey ?? false,
     apiKeyEnv: opts.apiKeyEnv,
     baseUrlEnv: opts.baseUrlEnv,
     defaultBaseUrl: opts.defaultBaseUrl,
     createChatModel: (modelId, secrets) => {
       const ep = opts.endpoint(secrets);
+      if (!ep.baseUrl) {
+        return unavailableModel(modelId, `${opts.label}: no base URL configured`);
+      }
       return createOpenAICompatible({
         name: opts.id,
         baseURL: ep.baseUrl,
@@ -124,6 +149,7 @@ function openAiCompatibleProvider(opts: {
     },
     listModels: (secrets) => {
       const ep = opts.endpoint(secrets);
+      if (!ep.baseUrl) throw new Error(`${opts.label}: no base URL configured`);
       return httpListModels(ep, { authorization: `Bearer ${ep.apiKey}` });
     },
   };
@@ -203,6 +229,26 @@ const openai: ProviderDef = {
   },
 };
 
+const openrouter = openAiCompatibleProvider({
+  id: "openrouter",
+  label: "OpenRouter",
+  apiKeyEnv: "OPENROUTER_API_KEY",
+  baseUrlEnv: "OPENROUTER_BASE_URL",
+  defaultBaseUrl: "https://openrouter.ai/api/v1",
+  endpoint: openrouterEndpoint,
+  needsApiKey: true,
+  supportsEmbeddings: false, // OpenRouter is chat-completions only
+});
+
+const openaiCompatible = openAiCompatibleProvider({
+  id: "openai-compatible",
+  label: "OpenAI API Compatible",
+  apiKeyEnv: "OPENAI_COMPAT_API_KEY",
+  baseUrlEnv: "OPENAI_COMPAT_BASE_URL",
+  defaultBaseUrl: "", // user supplies the base URL per account
+  endpoint: openAiCompatEndpoint,
+});
+
 const lmstudio = openAiCompatibleProvider({
   id: "lmstudio",
   label: "LM Studio (local)",
@@ -237,7 +283,15 @@ const builtin: ProviderDef = {
 };
 
 /** Every provider otterbot knows about. Add new providers here. */
-export const PROVIDER_CATALOG: ProviderDef[] = [anthropic, openai, lmstudio, ollama, builtin];
+export const PROVIDER_CATALOG: ProviderDef[] = [
+  anthropic,
+  openai,
+  openrouter,
+  openaiCompatible,
+  lmstudio,
+  ollama,
+  builtin,
+];
 
 // --- lookups --------------------------------------------------------------
 

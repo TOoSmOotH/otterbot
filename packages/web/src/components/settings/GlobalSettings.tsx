@@ -17,12 +17,7 @@ import type {
   ThemeId,
 } from "@otterbot/shared";
 import { THEMES, useGlobalSettingsStore, applyTheme } from "../../stores/global-settings-store";
-import {
-  useProvidersStore,
-  providerCredField,
-  isAccountConfigured,
-  globalProviderPatch,
-} from "../../stores/providers-store";
+import { useProvidersStore, isAccountConfigured } from "../../stores/providers-store";
 import { BuiltinEmbedderControls } from "../BuiltinEmbedderControls";
 import { uniqueModelId } from "../../lib/model-id";
 
@@ -189,13 +184,18 @@ function ProvidersTab({
     setAccounts(info.id, accounts.filter((_, i) => i !== index));
   };
 
-  const addProvider = (providerId: ProviderId, accountName: string, cred: string) => {
+  const addProvider = (
+    providerId: ProviderId,
+    accountName: string,
+    creds: { baseUrl?: string; apiKey?: string }
+  ) => {
     const info = byId.get(providerId);
     if (!info) return;
     const accounts = draft.providers[providerId] ?? [];
     const label = accountName.trim() || "default";
     const patchValue: Partial<ProviderAccount> = {
-      ...globalProviderPatch(info, cred.trim()),
+      ...(creds.baseUrl?.trim() ? { baseUrl: creds.baseUrl.trim() } : {}),
+      ...(creds.apiKey?.trim() ? { apiKey: creds.apiKey.trim() } : {}),
       ...(info.id === "openai" ? { authMethod: "api-key" as const } : {}),
     };
     const existing = accounts.findIndex((a) => a.account === label);
@@ -244,7 +244,6 @@ function ProvidersTab({
               providerLabel={info.label}
               account={account}
               canDelete
-              credMeta={providerCredField(info)}
               onRename={(name) => renameAccount(info, index, name)}
               onPatch={(p) => updateAccount(info, index, p)}
               onDelete={() => deleteAccount(info, index)}
@@ -270,22 +269,32 @@ function AddProviderForm({
   providers: ProviderInfo[];
   existing: Record<ProviderId, ProviderAccount[]>;
   onCancel: () => void;
-  onAdd: (provider: ProviderId, account: string, cred: string) => void;
+  onAdd: (provider: ProviderId, account: string, creds: { baseUrl?: string; apiKey?: string }) => void;
 }) {
   const [provider, setProvider] = useState<ProviderId>(providers[0]?.id ?? "");
   const [account, setAccount] = useState("default");
-  const [cred, setCred] = useState("");
+  const [baseUrl, setBaseUrl] = useState("");
+  const [apiKey, setApiKey] = useState("");
   const info = providers.find((p) => p.id === provider);
-  const credMeta = info ? providerCredField(info) : null;
 
-  // Suggest a non-clashing account label when the provider changes.
+  // Base URL is user-relevant only for self-hosted/compatible providers; cloud
+  // providers (needsApiKey) have a fixed endpoint. The API key field shows
+  // whenever the provider supports one.
+  const showBaseUrl = !!info?.baseUrlEnv && !info.needsApiKey;
+  const showApiKey = !!info?.apiKeyEnv;
+  const baseUrlRequired = showBaseUrl && !info?.defaultBaseUrl; // compatible: no default
+  const apiKeyRequired = !!info?.needsApiKey;
+  const incomplete = (baseUrlRequired && !baseUrl.trim()) || (apiKeyRequired && !apiKey.trim());
+
+  // Suggest a non-clashing account label + reset creds when the provider changes.
   useEffect(() => {
     const taken = (existing[provider] ?? []).map((a) => a.account);
     let label = taken.includes("default") ? "personal" : "default";
     let n = 2;
     while (taken.includes(label)) label = `account-${n++}`;
     setAccount(label);
-    setCred("");
+    setBaseUrl("");
+    setApiKey("");
   }, [provider, existing]);
 
   return (
@@ -302,21 +311,31 @@ function AddProviderForm({
       <Field label="Account name">
         <input value={account} onChange={(e) => setAccount(e.target.value)} style={input} />
       </Field>
-      {credMeta && (
-        <Field label={credMeta.label}>
+      {showBaseUrl && (
+        <Field label="Base URL">
           <input
-            type={credMeta.secret ? "password" : "text"}
-            value={cred}
-            onChange={(e) => setCred(e.target.value)}
-            placeholder={credMeta.placeholder}
+            value={baseUrl}
+            onChange={(e) => setBaseUrl(e.target.value)}
+            placeholder={info?.defaultBaseUrl || "https://…/v1"}
+            style={input}
+          />
+        </Field>
+      )}
+      {showApiKey && (
+        <Field label={`${info?.label} API key`}>
+          <input
+            type="password"
+            value={apiKey}
+            onChange={(e) => setApiKey(e.target.value)}
+            placeholder={apiKeyRequired ? "API key" : "Optional"}
             style={input}
           />
         </Field>
       )}
       <div style={{ display: "flex", gap: 8 }}>
         <button
-          onClick={() => onAdd(provider, account, cred)}
-          disabled={!provider || (credMeta?.secret ? !cred.trim() : false)}
+          onClick={() => onAdd(provider, account, { baseUrl, apiKey })}
+          disabled={!provider || incomplete}
           style={primary}
         >
           Add provider
@@ -334,7 +353,6 @@ function AccountCard({
   providerLabel,
   account,
   canDelete,
-  credMeta,
   onRename,
   onPatch,
   onDelete,
@@ -344,7 +362,6 @@ function AccountCard({
   providerLabel?: string;
   account: ProviderAccount;
   canDelete: boolean;
-  credMeta: ReturnType<typeof providerCredField>;
   onRename: (name: string) => void;
   onPatch: (p: Partial<ProviderAccount>) => void;
   onDelete: () => void;
@@ -367,7 +384,7 @@ function AccountCard({
           aria-label="account name"
         />
         <span style={badge}>
-          {isOAuth ? "OAuth" : configured ? "Key saved" : "No key"}
+          {isOAuth ? "OAuth" : configured ? "Configured" : "Incomplete"}
         </span>
         {canDelete && (
           <button onClick={onDelete} style={{ ...ghostButton, color: "#f87171" }}>
@@ -400,17 +417,21 @@ function AccountCard({
               <input
                 value={account.baseUrl}
                 onChange={(e) => onPatch({ baseUrl: e.target.value })}
-                placeholder={info.defaultBaseUrl ?? ""}
+                placeholder={info.defaultBaseUrl || "https://…/v1"}
                 style={input}
               />
             </Field>
           )}
-          {info.apiKeyEnv && credMeta && (
-            <Field label={credMeta.label}>
+          {info.apiKeyEnv && (
+            <Field label={`${info.label} API key`}>
               <input
                 type="password"
                 placeholder={
-                  configured ? "Leave blank to keep existing key" : "Optional"
+                  account.apiKeyConfigured
+                    ? "Leave blank to keep existing key"
+                    : info.needsApiKey
+                      ? "API key"
+                      : "Optional"
                 }
                 onChange={(e) => onPatch({ apiKey: e.target.value })}
                 style={input}
