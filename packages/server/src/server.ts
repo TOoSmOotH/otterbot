@@ -223,6 +223,64 @@ export async function buildServer(
     return builtinModelStatus();
   });
 
+  // --- Code reference (instance-wide cloned repos) ---
+  app.get("/api/code-reference/status", async () => orch.getCodeReference().status());
+
+  app.get("/api/code-reference/repos", async () => orch.getCodeReference().listRepos());
+
+  app.post<{ Body: { url?: string; ref?: string } }>(
+    "/api/code-reference/repos",
+    async (req, reply) => {
+      const url = req.body?.url?.trim();
+      if (!url) {
+        reply.code(400);
+        return { error: "url is required" };
+      }
+      try {
+        // Clone + index runs in the background; the client polls /status.
+        return await orch.getCodeReference().addRepo({ url, ref: req.body?.ref });
+      } catch (err) {
+        reply.code(400);
+        return { error: err instanceof Error ? err.message : String(err) };
+      }
+    }
+  );
+
+  app.delete<{ Params: { id: string } }>(
+    "/api/code-reference/repos/:id",
+    async (req, reply) => {
+      const ok = await orch.getCodeReference().removeRepo(req.params.id);
+      if (!ok) {
+        reply.code(404);
+        return { error: "not found" };
+      }
+      return { ok };
+    }
+  );
+
+  app.post<{ Params: { id: string } }>(
+    "/api/code-reference/repos/:id/refresh",
+    async (req) => {
+      // Pull + re-index in the background; the client polls /status.
+      void orch.getCodeReference().refresh(req.params.id);
+      return { ok: true };
+    }
+  );
+
+  app.get("/api/code-reference/config", async () => ({
+    pullCron: orch.getCodeReference().status().pullCron,
+  }));
+
+  app.put<{ Body: { pullCron?: string } }>(
+    "/api/code-reference/config",
+    async (req) => {
+      if (typeof req.body?.pullCron === "string") {
+        orch.getCodeReference().setPullCron(req.body.pullCron);
+      }
+      return { pullCron: orch.getCodeReference().status().pullCron };
+    }
+  );
+
   // --- Agents ---
   app.get("/api/agents", async () => orch.listSummaries());
 

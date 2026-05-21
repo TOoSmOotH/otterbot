@@ -1,4 +1,4 @@
-import type { MemorySearchResult, ScheduledTask } from "@otterbot/shared";
+import type { CodeSearchHit, MemorySearchResult, ScheduledTask } from "@otterbot/shared";
 import type { MessageBus } from "../bus/bus.js";
 
 export interface AgentDirectoryEntry {
@@ -42,4 +42,19 @@ export interface AgentServices {
     query: string,
     limit: number
   ): Promise<MemorySearchResult[]>;
+  /** Hybrid keyword + semantic search over the instance's reference repos. */
+  searchCodeReference(query: string, opts?: { limit?: number; repo?: string }): Promise<CodeSearchHit[]>;
+  /** Exact grep over the instance's reference repos. */
+  grepCodeReference(
+    pattern: string,
+    opts?: { repo?: string; limit?: number; regex?: boolean }
+  ): Promise<CodeSearchHit[]>;
+  /** Read a file (or line range) from a reference repo clone. */
+  readCodeReference(
+    repo: string,
+    path: string,
+    range?: { start: number; end?: number }
+  ): { ok: boolean; content?: string; path?: string; truncated?: boolean; error?: string };
+  /** List the reference repos available to search. */
+  listCodeReferenceRepos(): { repo: string; path: string; state: string }[];
 }

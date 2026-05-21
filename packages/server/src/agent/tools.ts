@@ -541,5 +541,72 @@ export function buildAgentTools(
     });
   }
 
+  // Code reference (instance-wide cloned repos) — granted by the
+  // `code-reference` capability. Search the shared index, then read the file.
+  if (granted.has("list_reference_repos")) {
+    tools.list_reference_repos = tool({
+      description: "List the reference code repositories available to search.",
+      parameters: z.object({}),
+      execute: async () => ({ ok: true, repos: services.listCodeReferenceRepos() }),
+    });
+  }
+
+  if (granted.has("code_search")) {
+    tools.code_search = tool({
+      description:
+        "Exact keyword/regex grep across the configured reference repositories. " +
+        "Best for finding a literal setting name, symbol, or string. Returns file " +
+        "paths + line numbers; follow up with read_code to see surrounding context.",
+      parameters: z.object({
+        pattern: z.string().min(1).describe("Literal text (or a regex if regex=true) to find."),
+        repo: z.string().optional().describe('Limit to one repo, "owner/name".'),
+        regex: z.boolean().default(false),
+        limit: z.number().int().min(1).max(50).default(20),
+      }),
+      execute: async ({ pattern, repo, regex, limit }) => ({
+        ok: true,
+        hits: await services.grepCodeReference(pattern, { repo, regex, limit }),
+      }),
+    });
+  }
+
+  if (granted.has("search_code")) {
+    tools.search_code = tool({
+      description:
+        "Hybrid semantic + keyword search across reference repositories. Best for " +
+        "conceptual questions when you don't know the exact term. Returns snippets " +
+        "with file paths + line ranges; read_code for full context.",
+      parameters: z.object({
+        query: z.string().min(1),
+        repo: z.string().optional().describe('Limit to one repo, "owner/name".'),
+        limit: z.number().int().min(1).max(20).default(8),
+      }),
+      execute: async ({ query, repo, limit }) => ({
+        ok: true,
+        hits: await services.searchCodeReference(query, { repo, limit }),
+      }),
+    });
+  }
+
+  if (granted.has("read_code")) {
+    tools.read_code = tool({
+      description:
+        "Read a file (or a line range) from a reference repository. Use after a " +
+        "search hit to read the surrounding context — especially comments/annotations.",
+      parameters: z.object({
+        repo: z.string().describe('"owner/name"'),
+        path: z.string().describe("Repo-relative file path."),
+        startLine: z.number().int().min(1).optional(),
+        endLine: z.number().int().min(1).optional(),
+      }),
+      execute: async ({ repo, path, startLine, endLine }) =>
+        services.readCodeReference(
+          repo,
+          path,
+          startLine ? { start: startLine, end: endLine } : undefined
+        ),
+    });
+  }
+
   return tools;
 }

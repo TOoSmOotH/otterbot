@@ -35,6 +35,7 @@ import { setDefaultContext } from "../runtime/default-agent.js";
 import { MessageBus } from "../bus/bus.js";
 import { createTransport } from "../bus/transports/factory.js";
 import { Scheduler } from "../scheduler/scheduler.js";
+import { CodeReferenceService } from "../code-reference/code-reference-service.js";
 import { SecretsStore, type ScopedSecret } from "../secrets/secrets-store.js";
 import { suggestScopeForKey } from "../secrets/shell-secrets.js";
 import type { CredentialScope } from "@otterbot/shared";
@@ -376,6 +377,7 @@ export class Orchestrator {
   private readonly pendingInits: Promise<void>[] = [];
   private readonly bus: MessageBus;
   private readonly scheduler: Scheduler;
+  private readonly codeRef: CodeReferenceService;
   private readonly secrets: SecretsStore;
   private readonly services: AgentServices;
   /** Per-agent chat connectors, keyed by agent id. */
@@ -392,6 +394,19 @@ export class Orchestrator {
   ) {
     this.bus = new MessageBus(control, createTransport(cfg));
     this.scheduler = new Scheduler(control, (id) => this.runtimes.get(id));
+    this.codeRef = new CodeReferenceService({
+      dataDir: cfg.dataDir,
+      dbKey: cfg.dbKey,
+      getSetting: (k) => this.getSetting(k),
+      setSetting: (k, v) => this.setSetting(k, v),
+      resolveEmbedder: () => {
+        const settings = this.getGlobalSettings();
+        return resolveEmbedder(
+          this.resolveModelRef(settings.defaultEmbeddingModelId, settings),
+          this.getGlobalProviderSecrets()
+        );
+      },
+    });
     this.secrets = new SecretsStore(control);
     this.bus.setDeliver((agentId, msg) => {
       if (agentId === "*") {
@@ -420,7 +435,16 @@ export class Orchestrator {
         if (!targetCtx) return [];
         return targetCtx.memory.search(query, { limit });
       },
+      searchCodeReference: (query, opts) => this.codeRef.search(query, opts),
+      grepCodeReference: (pattern, opts) => this.codeRef.grep(pattern, opts),
+      readCodeReference: (repo, path, range) => this.codeRef.readFile(repo, path, range),
+      listCodeReferenceRepos: () => this.codeRef.listRepoDirectory(),
     };
+  }
+
+  /** The instance-wide code reference service (cloned repos + shared index). */
+  getCodeReference(): CodeReferenceService {
+    return this.codeRef;
   }
 
   /** The agent-to-agent message bus. */
@@ -515,6 +539,9 @@ export class Orchestrator {
     const next = normalizeGlobalSettings({ ...settings, providers: mergedProviders });
     this.setSetting(GLOBAL_SETTINGS_KEY, JSON.stringify(next));
     this.restartAgents();
+    // The shared code-reference index uses the instance default embedder; pick
+    // up a changed model (and re-index if its dimension changed).
+    void this.codeRef.reloadEmbedder();
     return next;
   }
 
@@ -725,6 +752,7 @@ export class Orchestrator {
   /** Stop the scheduler + bus and close every agent's database. */
   async shutdown(): Promise<void> {
     this.scheduler.stop();
+    await this.codeRef.stop();
     await this.bus.stop();
     await Promise.allSettled([
       ...[...this.slackConnectors.values()].map((t) => t.connector.stop()),
@@ -791,6 +819,7 @@ export class Orchestrator {
 
     await this.bus.start();
     this.scheduler.start();
+    this.codeRef.start();
   }
 
   /** Build and register a runtime + context for a profile. */
