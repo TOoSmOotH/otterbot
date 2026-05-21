@@ -125,6 +125,57 @@ function isAccountVisible(info: ProviderInfo, acc: ProviderAccount): boolean {
   return isAccountConfigured(info, acc);
 }
 
+type TestStatus = { state: "idle" | "testing" | "ok" | "fail"; message?: string };
+
+/**
+ * Verify a provider's credentials by listing its models. `account` resolves the
+ * stored credentials for that account server-side; `secrets` layers any typed
+ * (unsaved) overrides on top so a key can be tested before it's saved.
+ */
+async function testProviderConnection(
+  provider: ProviderId,
+  opts: { account?: string; secrets?: Record<string, string> }
+): Promise<TestStatus> {
+  try {
+    const res = await apiFetch("/api/provider-models", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ provider, account: opts.account, secrets: opts.secrets ?? {} }),
+    });
+    const data = (await res.json()) as { ok: boolean; models?: string[]; error?: string };
+    return data.ok
+      ? { state: "ok", message: `Connected — ${data.models?.length ?? 0} model(s)` }
+      : { state: "fail", message: data.error ?? "Connection failed" };
+  } catch (err) {
+    return { state: "fail", message: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+/** A "Test" button + inline status, shared by the account card and add form. */
+function TestConnection({ onTest }: { onTest: () => Promise<TestStatus> }) {
+  const [status, setStatus] = useState<TestStatus>({ state: "idle" });
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+      <button
+        onClick={async () => {
+          setStatus({ state: "testing" });
+          setStatus(await onTest());
+        }}
+        disabled={status.state === "testing"}
+        style={ghostButton}
+      >
+        {status.state === "testing" ? "Testing…" : "Test"}
+      </button>
+      {status.state === "ok" && (
+        <span style={{ fontSize: 12, color: "rgb(var(--success))" }}>✓ {status.message}</span>
+      )}
+      {status.state === "fail" && (
+        <span style={{ fontSize: 12, color: "rgb(var(--danger))" }}>✗ {status.message}</span>
+      )}
+    </div>
+  );
+}
+
 /**
  * Provider credentials — the foundation everything else depends on. A single
  * "+ Add provider" button, then one card per configured credential set (e.g.
@@ -332,7 +383,7 @@ function AddProviderForm({
           />
         </Field>
       )}
-      <div style={{ display: "flex", gap: 8 }}>
+      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
         <button
           onClick={() => onAdd(provider, account, { baseUrl, apiKey })}
           disabled={!provider || incomplete}
@@ -340,6 +391,14 @@ function AddProviderForm({
         >
           Add provider
         </button>
+        <TestConnection
+          onTest={() => {
+            const secrets: Record<string, string> = {};
+            if (info?.apiKeyEnv && apiKey.trim()) secrets[info.apiKeyEnv] = apiKey.trim();
+            if (info?.baseUrlEnv && baseUrl.trim()) secrets[info.baseUrlEnv] = baseUrl.trim();
+            return testProviderConnection(provider, { secrets });
+          }}
+        />
         <button onClick={onCancel} style={ghostButton}>
           Cancel
         </button>
@@ -438,6 +497,16 @@ function AccountCard({
               />
             </Field>
           )}
+          <TestConnection
+            onTest={() => {
+              // Send any typed (unsaved) creds as overrides; the server uses the
+              // account's stored credentials as the base.
+              const secrets: Record<string, string> = {};
+              if (info.apiKeyEnv && account.apiKey?.trim()) secrets[info.apiKeyEnv] = account.apiKey.trim();
+              if (info.baseUrlEnv && account.baseUrl?.trim()) secrets[info.baseUrlEnv] = account.baseUrl.trim();
+              return testProviderConnection(info.id, { account: account.account, secrets });
+            }}
+          />
         </>
       )}
     </div>

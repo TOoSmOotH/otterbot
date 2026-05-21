@@ -147,20 +147,22 @@ export async function buildServer(
     }
   });
 
-  // List the models a provider currently serves (for the model picker).
+  // List the models a provider currently serves (for the model picker and the
+  // Providers-tab "Test" button). When `account` is given, the named account's
+  // stored credentials are the base; `secrets` layers unsaved overrides on top.
   app.post<{
-    Body: { provider?: ProviderId; secrets?: Record<string, string> };
+    Body: { provider?: ProviderId; account?: string; secrets?: Record<string, string> };
   }>("/api/provider-models", async (req, reply) => {
-    const { provider, secrets } = req.body ?? {};
+    const { provider, account, secrets } = req.body ?? {};
     if (!provider) {
       reply.code(400);
       return { ok: false, error: "provider is required" };
     }
     try {
-      const mergedSecrets = new Map([
-        ...orch.getGlobalProviderSecrets(),
-        ...Object.entries(secrets ?? {}),
-      ]);
+      const base = account
+        ? orch.getAccountSecrets(provider, account)
+        : orch.getGlobalProviderSecrets();
+      const mergedSecrets = new Map([...base, ...Object.entries(secrets ?? {})]);
       const models = await listProviderModels(provider, mergedSecrets);
       return { ok: true, models };
     } catch (err) {

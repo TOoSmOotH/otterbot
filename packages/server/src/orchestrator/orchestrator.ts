@@ -683,6 +683,17 @@ export class Orchestrator {
   }
 
   /**
+   * Stored credentials for one specific provider account — for the test/list
+   * endpoints so they can verify a named account (not just the first one).
+   * Callers may layer typed/unsaved overrides on top.
+   */
+  getAccountSecrets(provider: ProviderId, account: string): Map<string, string> {
+    const secrets = new Map<string, string>();
+    this.overlayAccountSecrets(secrets, { provider, account, modelId: "" }, this.getGlobalSettings());
+    return secrets;
+  }
+
+  /**
    * Default-account secrets for the test/list endpoints. The endpoints layer
    * the caller's typed credentials on top, so this is just a fallback.
    */
