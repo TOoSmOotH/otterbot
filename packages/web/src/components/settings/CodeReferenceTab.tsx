@@ -6,7 +6,7 @@ import { BuiltinEmbedderControls } from "../BuiltinEmbedderControls";
 /**
  * Instance-wide Code Reference settings: register GitHub repos that get cloned
  * and indexed for agent search. Saves immediately (no global Save bar). The
- * per-agent ON/OFF toggle lives in Agent Studio's Capabilities tab.
+ * per-agent ON/OFF toggle lives in Agent Studio's Skills tab.
  */
 export function CodeReferenceTab() {
   const status = useCodeReferenceStore((s) => s.status);
@@ -49,9 +49,9 @@ export function CodeReferenceTab() {
         <h2 style={h2}>Reference repositories</h2>
         <p style={hint}>
           Public GitHub repos cloned once and indexed for the whole instance. Any
-          agent with the <strong>Code reference</strong> capability enabled can
+          agent with the <strong>Code reference</strong> skill enabled can
           search and read them. Configure that toggle per agent in Agent Studio →
-          Capabilities.
+          Skills.
         </p>
       </div>
 

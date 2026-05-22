@@ -20,12 +20,9 @@ test.describe("agent studio", () => {
     await page.getByTestId("studio-tab-Model").click();
     await expect(page.getByText("Chat model")).toBeVisible();
 
-    // The old "Skills" tab is merged into "Capabilities" — it must be gone.
-    await expect(page.getByTestId("studio-tab-Skills")).toHaveCount(0);
-
-    await page.getByTestId("studio-tab-Capabilities").click();
-    await expect(page.getByText(/Installed capabilities/)).toBeVisible();
-    await expect(page.getByText(/Capability catalog/)).toBeVisible();
+    await page.getByTestId("studio-tab-Skills").click();
+    await expect(page.getByText(/Installed skills/)).toBeVisible();
+    await expect(page.getByText(/Skill catalog/)).toBeVisible();
 
     await page.getByTestId("studio-tab-Schedule").click();
     await expect(page.getByText(/Scheduled prompts run automatically/)).toBeVisible();

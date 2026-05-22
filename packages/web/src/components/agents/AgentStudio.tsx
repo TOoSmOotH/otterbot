@@ -19,7 +19,7 @@ import { AvatarUpload } from "./AvatarUpload";
 import { PeerAccessEditor } from "./PeerAccessEditor";
 import { TerminalModal } from "./TerminalModal";
 
-const TABS = ["Identity", "Persona", "Model", "Capabilities", "Channels", "Peers", "Schedule", "Memory", "Credentials"] as const;
+const TABS = ["Identity", "Persona", "Model", "Skills", "Channels", "Peers", "Schedule", "Memory", "Credentials"] as const;
 type StudioTab = (typeof TABS)[number];
 
 /** Full-screen agent management surface — identity, persona, model, skills,
@@ -117,7 +117,7 @@ export function AgentStudio({ agentId }: { agentId: string | null }) {
         {tab === "Identity" && <IdentityTab profile={profile} onSaved={onSaved} />}
         {tab === "Persona" && <PersonaTab profile={profile} onSaved={onSaved} />}
         {tab === "Model" && <ModelTab profile={profile} onSaved={onSaved} />}
-        {tab === "Capabilities" && <CapabilitiesTab profile={profile} onSaved={onSaved} />}
+        {tab === "Skills" && <SkillsTab profile={profile} onSaved={onSaved} />}
         {tab === "Channels" && <ChannelsTab profile={profile} onSaved={onSaved} />}
         {tab === "Peers" && <PeersTab profile={profile} onSaved={onSaved} />}
         {tab === "Schedule" && <ScheduleTab agentId={profile.id} />}
@@ -175,7 +175,7 @@ function IdentityTab({ profile, onSaved }: TabProps) {
   );
 }
 
-// --- Capabilities ---------------------------------------------------------
+// --- Skills ---------------------------------------------------------------
 
 /** Split a command line into the executable + its arguments. */
 function parseCommand(line: string): { command: string; args: string[] } {
@@ -190,8 +190,8 @@ const MCP_STATE_COLOR: Record<string, string> = {
   disabled: "rgb(var(--muted))",
 };
 
-/** A built-in capability catalog entry — mirrors the server's `CatalogCapability`. */
-interface CatalogCapability {
+/** A built-in skill catalog entry — mirrors the server's `CatalogCapability`. */
+interface CatalogSkill {
   id: string;
   name: string;
   description: string;
@@ -199,10 +199,10 @@ interface CatalogCapability {
 }
 
 /**
- * What an agent is allowed to do — installed capabilities, the core toggles
- * (shell / web / subagents), MCP servers, and the built-in capability catalog.
+ * What an agent is allowed to do — installed skills, the core toggles
+ * (shell / web / subagents), MCP servers, and the built-in skill catalog.
  */
-function CapabilitiesTab({ profile, onSaved }: TabProps) {
+function SkillsTab({ profile, onSaved }: TabProps) {
   const update = useAgentsStore((s) => s.update);
   const [canSpawn, setCanSpawn] = useState(profile.canSpawnSubagents);
   const [limit, setLimit] = useState(profile.subagentLimit);
@@ -214,9 +214,9 @@ function CapabilitiesTab({ profile, onSaved }: TabProps) {
   const [saved, setSaved] = useState(false);
   const [termOpen, setTermOpen] = useState(false);
 
-  // --- Installed capabilities + catalog ---
+  // --- Installed skills + catalog ---
   const [skills, setSkills] = useState<Skill[]>([]);
-  const [catalog, setCatalog] = useState<CatalogCapability[]>([]);
+  const [catalog, setCatalog] = useState<CatalogSkill[]>([]);
   const [addingId, setAddingId] = useState<string | null>(null);
   const [skillError, setSkillError] = useState<string | null>(null);
   const [raw, setRaw] = useState("");
@@ -236,7 +236,7 @@ function CapabilitiesTab({ profile, onSaved }: TabProps) {
 
   const installedIds = new Set(skills.map((s) => s.id));
 
-  const installCapability = async (id: string) => {
+  const installSkill = async (id: string) => {
     setAddingId(id);
     setSkillError(null);
     const res = await apiFetch(`/api/agents/${profile.id}/skills/install`, {
@@ -267,7 +267,7 @@ function CapabilitiesTab({ profile, onSaved }: TabProps) {
     if (res.ok) loadSkills();
   };
 
-  const addCustomCapability = async () => {
+  const addCustomSkill = async () => {
     if (!raw.trim()) return;
     setBusy(true);
     const res = await apiFetch(`/api/agents/${profile.id}/skills`, {
@@ -280,7 +280,7 @@ function CapabilitiesTab({ profile, onSaved }: TabProps) {
       setRaw("");
       loadSkills();
     } else {
-      alert((await res.json())?.error ?? "Failed to add capability");
+      alert((await res.json())?.error ?? "Failed to add skill");
     }
   };
 
@@ -321,17 +321,17 @@ function CapabilitiesTab({ profile, onSaved }: TabProps) {
   return (
     <Form>
       <p style={hint}>
-        Capabilities bundle the tools an agent needs with a prompt that drives them. Enabled
-        capabilities are always active — their tools are granted and their prompt is injected
+        Skills bundle the tools an agent needs with a prompt that drives them. Enabled
+        skills are always active — their tools are granted and their prompt is injected
         every turn.
       </p>
 
-      {/* --- Installed capabilities --- */}
-      <strong style={{ fontSize: 13 }}>Installed capabilities ({skills.length})</strong>
-      {skills.length === 0 && <div style={hint}>No capabilities installed yet.</div>}
+      {/* --- Installed skills --- */}
+      <strong style={{ fontSize: 13 }}>Installed skills ({skills.length})</strong>
+      {skills.length === 0 && <div style={hint}>No skills installed yet.</div>}
       {skillError && <div style={{ ...hint, color: "#f87171" }}>{skillError}</div>}
       {skills.map((s) => (
-        <InstalledCapability
+        <InstalledSkill
           key={s.id}
           skill={s}
           onToggle={(en) => void toggleSkill(s.id, en)}
@@ -343,7 +343,7 @@ function CapabilitiesTab({ profile, onSaved }: TabProps) {
       {/* --- Core toggles --- */}
       <strong style={{ fontSize: 13, marginTop: 8 }}>Core tools</strong>
       <p style={{ ...hint, marginTop: 0 }}>
-        Always-available toggles, independent of installed capabilities.
+        Always-available toggles, independent of installed skills.
       </p>
 
       <div style={channelCard}>
@@ -431,7 +431,7 @@ function CapabilitiesTab({ profile, onSaved }: TabProps) {
         <p style={{ ...hint, marginTop: 0 }}>
           When a chat session closes, the agent reflects on it — summarizing the conversation,
           extracting facts into memory, rebuilding its user profile, and optionally authoring a
-          capability. Turn this off to keep the agent's memory and capabilities frozen.
+          skill. Turn this off to keep the agent's memory and skills frozen.
         </p>
       </div>
 
@@ -519,12 +519,12 @@ function CapabilitiesTab({ profile, onSaved }: TabProps) {
 
       <SaveBar onSave={save} saved={saved} onDirty={() => setSaved(false)} />
 
-      {/* --- Built-in capability catalog --- */}
+      {/* --- Built-in skill catalog --- */}
       <strong style={{ fontSize: 13, marginTop: 8 }}>
-        Capability catalog{catalog.length > 0 ? ` (${catalog.length})` : ""}
+        Skill catalog{catalog.length > 0 ? ` (${catalog.length})` : ""}
       </strong>
       <p style={{ ...hint, marginTop: 0 }}>
-        First-party capabilities bundled with Otterbot. Installing one copies its definition onto
+        First-party skills bundled with Otterbot. Installing one copies its definition onto
         the agent — already tool-equipped, enabled by default.
       </p>
       {catalog.length === 0 && <div style={hint}>Loading catalog…</div>}
@@ -545,7 +545,7 @@ function CapabilitiesTab({ profile, onSaved }: TabProps) {
                 {c.description}
               </div>
               <button
-                onClick={() => void installCapability(c.id)}
+                onClick={() => void installSkill(c.id)}
                 disabled={installed || addingId === c.id}
                 style={{
                   ...ghost,
@@ -561,25 +561,25 @@ function CapabilitiesTab({ profile, onSaved }: TabProps) {
         })}
       </div>
 
-      {/* --- Custom capability --- */}
+      {/* --- Custom skill --- */}
       <details style={{ marginTop: 8 }}>
         <summary style={{ cursor: "pointer", fontSize: 13, fontWeight: 600 }}>
-          Add a custom capability
+          Add a custom skill
         </summary>
         <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 8 }}>
-          <Field label="Capability markdown (YAML frontmatter + body)">
+          <Field label="Skill markdown (YAML frontmatter + body)">
             <textarea
               value={raw}
               onChange={(e) => setRaw(e.target.value)}
               rows={8}
               placeholder={
-                "---\nname: My capability\ndescription: ...\ntools: [shell_exec]\ntags: [custom]\n---\n\n## Setup\n...\n\n## Usage\n..."
+                "---\nname: My skill\ndescription: ...\ntools: [shell_exec]\ntags: [custom]\n---\n\n## Setup\n...\n\n## Usage\n..."
               }
               style={{ ...input, resize: "vertical", fontFamily: "monospace", fontSize: 12 }}
             />
           </Field>
-          <button onClick={addCustomCapability} disabled={busy} style={primary}>
-            {busy ? "Adding…" : "Add capability"}
+          <button onClick={addCustomSkill} disabled={busy} style={primary}>
+            {busy ? "Adding…" : "Add skill"}
           </button>
         </div>
       </details>
@@ -595,8 +595,8 @@ function CapabilitiesTab({ profile, onSaved }: TabProps) {
   );
 }
 
-/** One installed capability: enable/disable toggle, editable body, tool + MCP badges. */
-function InstalledCapability({
+/** One installed skill: enable/disable toggle, editable body, tool + MCP badges. */
+function InstalledSkill({
   skill,
   onToggle,
   onSaveBody,
@@ -1503,8 +1503,8 @@ function CredentialsTab({ agentId }: { agentId: string }) {
       <p style={hint}>
         Secrets for this agent only — API keys, GitHub token, SMTP, model endpoints. Stored
         encrypted in the database. <strong>Scope</strong> decides where each credential is
-        exposed: <em>direct</em> (only structured integrations), <em>capability-bound</em>{" "}
-        (only in the shell when that capability is enabled), or <em>broad shell</em> (every
+        exposed: <em>direct</em> (only structured integrations), <em>skill-bound</em>{" "}
+        (only in the shell when that skill is enabled), or <em>broad shell</em> (every
         shell exec — use sparingly).
       </p>
 
@@ -1692,8 +1692,8 @@ function ScopePicker({
           onChange={() => onKindChange("cap")}
         />
         <span>
-          <strong>Bound to capability</strong>
-          <span style={radioHint}> — exposed only when one of these capabilities is enabled.</span>
+          <strong>Bound to skill</strong>
+          <span style={radioHint}> — exposed only when one of these skills is enabled.</span>
         </span>
       </label>
       {kind === "cap" && (
