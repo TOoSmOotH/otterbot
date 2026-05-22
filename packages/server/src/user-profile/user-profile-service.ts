@@ -91,6 +91,27 @@ export class UserProfileService {
   }
 
   /**
+   * Merge an imported profile into the current one. Facts in each bucket are
+   * deduped by content (keeping the strongest confidence and most recent
+   * confirmation); the existing name and notes win, with imported notes
+   * appended. Never deletes existing knowledge.
+   */
+  merge(incoming: UserProfile): UserProfile {
+    const profile = this.get();
+    profile.name = profile.name ?? incoming.name;
+    for (const bucket of ["preferences", "goals", "facts"] as const) {
+      profile[bucket] = mergeFacts(profile[bucket], incoming[bucket]);
+    }
+    const incomingNotes = incoming.notes?.trim() ?? "";
+    if (incomingNotes && !profile.notes.includes(incomingNotes)) {
+      profile.notes = profile.notes.trim()
+        ? `${profile.notes.trim()}\n\n${incomingNotes}`
+        : incomingNotes;
+    }
+    return this.save(profile);
+  }
+
+  /**
    * Honcho-style dialectic rebuild: diff the current profile against
    * the transcript of a session, producing an evolved profile.
    */
@@ -170,6 +191,32 @@ export function parseProfileJson(text: string): UserProfile | null {
   } catch {
     return null;
   }
+}
+
+/** Union two fact lists, deduping by content and keeping the stronger signal. */
+function mergeFacts(existing: UserProfileFact[], incoming: UserProfileFact[]): UserProfileFact[] {
+  const byContent = new Map<string, UserProfileFact>();
+  for (const f of existing) byContent.set(f.content, { ...f });
+  for (const f of incoming.filter(isFact)) {
+    const prev = byContent.get(f.content);
+    if (!prev) {
+      byContent.set(f.content, { ...f });
+      continue;
+    }
+    prev.confidence = Math.max(prev.confidence, f.confidence);
+    prev.firstSeenAt = earliest(prev.firstSeenAt, f.firstSeenAt);
+    prev.lastConfirmedAt = latest(prev.lastConfirmedAt, f.lastConfirmedAt);
+    prev.contradicted = prev.contradicted && f.contradicted;
+  }
+  return [...byContent.values()];
+}
+
+function earliest(a: string, b: string): string {
+  return a <= b ? a : b;
+}
+
+function latest(a: string, b: string): string {
+  return a >= b ? a : b;
 }
 
 function isFact(v: unknown): v is UserProfileFact {

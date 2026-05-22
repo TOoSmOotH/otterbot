@@ -2,6 +2,8 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import type { FastifyInstance } from "fastify";
 import { createTestStack, type TestStack } from "./test/harness.js";
 import { buildServer } from "./server.js";
+import * as schema from "./db/schema.js";
+import type { AgentMemoryExport } from "@otterbot/shared";
 
 /** End-to-end HTTP API tests — exercises the real Fastify routes via inject(). */
 describe("HTTP API (e2e)", () => {
@@ -462,6 +464,76 @@ describe("HTTP API (e2e)", () => {
     },
     60_000
   );
+
+  it("exports an agent's memory and merge-imports it into another", async () => {
+    await app.inject({ method: "POST", url: "/api/agents", payload: { displayName: "Mem Source" } });
+    await app.inject({ method: "POST", url: "/api/agents", payload: { displayName: "Mem Dest" } });
+
+    // Seed the source: a memory, a profile fact, and a session summary.
+    await app.inject({
+      method: "POST",
+      url: "/api/agents/mem-source/memories",
+      payload: { content: "The user keeps otters.", category: "fact" },
+    });
+    const src = stack.orch.getContext("mem-source")!;
+    src.userProfile.addFact("facts", "Lives near a river");
+    src.db
+      .insert(schema.sessionSummaries)
+      .values({
+        id: "src-summary-1",
+        conversationId: "conv-source-1",
+        summary: "Discussed otter care.",
+        keyPoints: ["otters need water"],
+        createdAt: new Date().toISOString(),
+      })
+      .run();
+
+    // Export.
+    const exported = await app.inject({ method: "GET", url: "/api/agents/mem-source/memory/export" });
+    expect(exported.statusCode).toBe(200);
+    expect(exported.headers["content-disposition"]).toContain("mem-source-memory.json");
+    const payload = exported.json() as AgentMemoryExport;
+    expect(payload.otterbotMemoryExport).toBe(1);
+    expect(payload.memories.some((m) => m.content.includes("otters"))).toBe(true);
+    expect(payload.sessionSummaries).toHaveLength(1);
+    expect(payload.userProfile.facts.some((f) => f.content === "Lives near a river")).toBe(true);
+
+    // Import into the destination over a multipart upload.
+    const importInto = (body: object) => {
+      const boundary = "----otterbottest";
+      const json = JSON.stringify(body);
+      const multipart =
+        `--${boundary}\r\n` +
+        `Content-Disposition: form-data; name="file"; filename="mem.json"\r\n` +
+        `Content-Type: application/json\r\n\r\n` +
+        json +
+        `\r\n--${boundary}--\r\n`;
+      return app.inject({
+        method: "POST",
+        url: "/api/agents/mem-dest/memory/import",
+        headers: { "content-type": `multipart/form-data; boundary=${boundary}` },
+        payload: multipart,
+      });
+    };
+
+    const imported = await importInto(payload);
+    expect(imported.statusCode).toBe(200);
+    expect(imported.json()).toMatchObject({ memories: 1, summaries: 1, profileMerged: true });
+
+    const dest = stack.orch.getContext("mem-dest")!;
+    expect(dest.memory.exportAll()).toHaveLength(1);
+    expect(dest.memory.exportAll()[0].id).not.toBe(payload.memories[0].id); // fresh id
+    expect(dest.userProfile.get().facts.some((f) => f.content === "Lives near a river")).toBe(true);
+
+    // A second import merges memories (count grows) and dedupes summaries by conversation.
+    const again = await importInto(payload);
+    expect(again.json()).toMatchObject({ memories: 1, summaries: 0 });
+    expect(dest.memory.exportAll()).toHaveLength(2);
+
+    // Garbage upload is rejected.
+    const bad = await importInto({ not: "an export" });
+    expect(bad.statusCode).toBe(400);
+  });
 
   it("404s conversation routes for unknown agent and conversation", async () => {
     const badAgent = await app.inject({

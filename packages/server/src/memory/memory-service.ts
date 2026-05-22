@@ -5,7 +5,13 @@ import type { AgentDrizzle } from "../db/agent-db.js";
 import * as schema from "../db/schema.js";
 import type { VecIndex } from "../vec-index.js";
 import { getDefaultContext } from "../runtime/default-agent.js";
-import type { MemoryEntry, MemoryCategory, MemorySource, MemorySearchResult } from "@otterbot/shared";
+import type {
+  MemoryEntry,
+  MemoryCategory,
+  MemorySource,
+  MemorySearchResult,
+  ExportedMemory,
+} from "@otterbot/shared";
 
 export interface SaveMemoryInput {
   id?: string;
@@ -67,6 +73,50 @@ export class MemoryService {
     this.db.delete(schema.memories).where(eq(schema.memories.id, id)).run();
     this.removeFts("memory", id);
     this.vec.delete(id);
+  }
+
+  /** All memories as full rows, for lossless export. Unlike `list`, unlimited. */
+  exportAll(): ExportedMemory[] {
+    return this.db
+      .select()
+      .from(schema.memories)
+      .orderBy(sql`datetime(created_at) asc`)
+      .all() as ExportedMemory[];
+  }
+
+  /**
+   * Merge-import memories from an export. Each row gets a fresh id to avoid PK
+   * collisions, but its original timestamps, access stats, entity refs and
+   * temporal marker are preserved. Re-indexes FTS and re-embeds with this
+   * agent's own model (so exports are portable across embedding dimensions);
+   * awaits embedding so the import is fully durable before returning.
+   * Returns the number of memories inserted.
+   */
+  async importMany(rows: ExportedMemory[]): Promise<number> {
+    let inserted = 0;
+    for (const row of rows) {
+      const id = nanoid();
+      this.db
+        .insert(schema.memories)
+        .values({
+          id,
+          category: row.category,
+          content: row.content,
+          source: row.source,
+          importance: row.importance,
+          accessCount: row.accessCount,
+          lastAccessedAt: row.lastAccessedAt,
+          entityRefs: row.entityRefs ?? [],
+          temporalMarker: row.temporalMarker ?? null,
+          createdAt: row.createdAt,
+          updatedAt: row.updatedAt,
+        })
+        .run();
+      this.indexFts({ kind: "memory", refId: id, title: row.category, body: row.content, tags: "" });
+      await this.vec.insert(id, row.content);
+      inserted++;
+    }
+    return inserted;
   }
 
   /**

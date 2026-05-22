@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type {
   AgentProfile,
   AgentConnectorStatus,
@@ -1180,6 +1180,8 @@ function MemoryTab({ agentId }: { agentId: string }) {
   const [draft, setDraft] = useState("");
   const [category, setCategory] = useState<MemoryCategory>("fact");
   const [busy, setBusy] = useState(false);
+  const [transfer, setTransfer] = useState("");
+  const importRef = useRef<HTMLInputElement>(null);
 
   const load = () => {
     void apiFetch(`/api/agents/${agentId}/memories`)
@@ -1187,6 +1189,43 @@ function MemoryTab({ agentId }: { agentId: string }) {
       .then(setMemories);
   };
   useEffect(load, [agentId]);
+
+  const exportMemory = async () => {
+    setTransfer("");
+    const res = await apiFetch(`/api/agents/${agentId}/memory/export`);
+    if (!res.ok) {
+      setTransfer((await res.json().catch(() => ({})))?.error ?? "Export failed.");
+      return;
+    }
+    const blob = await res.blob();
+    const match = res.headers.get("content-disposition")?.match(/filename="(.+?)"/);
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = match?.[1] ?? "agent-memory.json";
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const importMemory = async (file: File) => {
+    setTransfer("");
+    setBusy(true);
+    const body = new FormData();
+    body.append("file", file);
+    const res = await apiFetch(`/api/agents/${agentId}/memory/import`, { method: "POST", body });
+    setBusy(false);
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      setTransfer(data?.error ?? "Import failed.");
+      return;
+    }
+    setTransfer(
+      `Imported ${data.memories} ${data.memories === 1 ? "memory" : "memories"}` +
+        `, ${data.summaries} ${data.summaries === 1 ? "summary" : "summaries"}` +
+        (data.profileMerged ? ", merged user profile." : ".")
+    );
+    load();
+  };
 
   const del = async (id: string) => {
     await apiFetch(`/api/agents/${agentId}/memories/${id}`, { method: "DELETE" });
@@ -1223,6 +1262,28 @@ function MemoryTab({ agentId }: { agentId: string }) {
         What this agent remembers across sessions. The agent saves memories as it works; you can
         also add, search, and remove them here.
       </p>
+
+      {/* --- Export / import --- */}
+      <Row>
+        <button onClick={exportMemory} style={ghost}>
+          Export memory
+        </button>
+        <button onClick={() => importRef.current?.click()} disabled={busy} style={ghost}>
+          {busy ? "Importing…" : "Import memory"}
+        </button>
+        <input
+          ref={importRef}
+          type="file"
+          accept="application/json"
+          style={{ display: "none" }}
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            e.target.value = "";
+            if (file) void importMemory(file);
+          }}
+        />
+      </Row>
+      {transfer && <p style={hint}>{transfer}</p>}
 
       {/* --- Add a memory --- */}
       <Field label="Add a memory">

@@ -32,6 +32,7 @@ import { resolveChatModel, listProviderModels } from "./providers/registry.js";
 import { eq, asc, desc, like } from "drizzle-orm";
 import * as schema from "./db/schema.js";
 import { contextStatus, compactConversation } from "./runtime/context-manager.js";
+import { nanoid } from "nanoid";
 import type {
   AgentProfile,
   ProviderId,
@@ -39,6 +40,7 @@ import type {
   GlobalSettings,
   ConversationSummary,
   ChatMessage,
+  AgentMemoryExport,
 } from "@otterbot/shared";
 import { redactGlobalSettings } from "./orchestrator/orchestrator.js";
 
@@ -439,6 +441,110 @@ export async function buildServer(
       importance: req.body?.importance ?? 7,
       source: "user",
     });
+  });
+
+  // Export an agent's full learned state (memories + session summaries + user
+  // profile) as a single downloadable JSON file. Embeddings are omitted — they
+  // are regenerated on import using the target agent's own model.
+  app.get<{ Params: { id: string } }>("/api/agents/:id/memory/export", async (req, reply) => {
+    const ctx = orch.getContext(req.params.id);
+    if (!ctx) {
+      reply.code(404);
+      return { error: "not found" };
+    }
+    const sessionSummaries = ctx.db
+      .select()
+      .from(schema.sessionSummaries)
+      .orderBy(asc(schema.sessionSummaries.createdAt))
+      .all();
+    const payload: AgentMemoryExport = {
+      otterbotMemoryExport: 1,
+      exportedAt: new Date().toISOString(),
+      sourceAgent: { id: ctx.profile.id, name: ctx.profile.displayName },
+      memories: ctx.memory.exportAll(),
+      sessionSummaries,
+      userProfile: ctx.userProfile.get(),
+    };
+    const slug = ctx.profile.displayName.replace(/[^a-z0-9]+/gi, "-").replace(/^-+|-+$/g, "").toLowerCase() || "agent";
+    reply.header("content-disposition", `attachment; filename="${slug}-memory.json"`);
+    return payload;
+  });
+
+  // Merge-import a memory export into an agent. Never wipes existing state;
+  // memories get fresh ids, profile facts are deduped, and summaries already
+  // present (by conversation) are skipped.
+  app.post<{ Params: { id: string } }>("/api/agents/:id/memory/import", async (req, reply) => {
+    const ctx = orch.getContext(req.params.id);
+    if (!ctx) {
+      reply.code(404);
+      return { error: "not found" };
+    }
+    let raw: string;
+    try {
+      const file = await req.file();
+      if (!file) {
+        reply.code(400);
+        return { error: "expected a JSON file upload" };
+      }
+      raw = (await file.toBuffer()).toString("utf8");
+    } catch {
+      reply.code(413);
+      return { error: "file is too large (max 4 MB)" };
+    }
+
+    let data: AgentMemoryExport;
+    try {
+      data = JSON.parse(raw);
+    } catch {
+      reply.code(400);
+      return { error: "not valid JSON" };
+    }
+    if (data?.otterbotMemoryExport !== 1 || !Array.isArray(data.memories)) {
+      reply.code(400);
+      return { error: "not a valid Otterbot memory export" };
+    }
+
+    const memories = await ctx.memory.importMany(data.memories);
+
+    let summaries = 0;
+    const existingConvos = new Set(
+      ctx.db
+        .select({ conversationId: schema.sessionSummaries.conversationId })
+        .from(schema.sessionSummaries)
+        .all()
+        .map((r) => r.conversationId)
+    );
+    for (const s of data.sessionSummaries ?? []) {
+      if (existingConvos.has(s.conversationId)) continue;
+      const sid = nanoid();
+      ctx.db
+        .insert(schema.sessionSummaries)
+        .values({
+          id: sid,
+          conversationId: s.conversationId,
+          summary: s.summary,
+          keyPoints: s.keyPoints ?? [],
+          createdAt: s.createdAt,
+        })
+        .run();
+      ctx.memory.indexFts({
+        kind: "session_summary",
+        refId: sid,
+        title: `Session ${s.conversationId.slice(0, 8)}`,
+        body: [s.summary, ...(s.keyPoints ?? [])].join("\n"),
+        tags: "",
+      });
+      existingConvos.add(s.conversationId);
+      summaries++;
+    }
+
+    let profileMerged = false;
+    if (data.userProfile) {
+      ctx.userProfile.merge(data.userProfile);
+      profileMerged = true;
+    }
+
+    return { memories, summaries, profileMerged };
   });
 
   // --- Conversations: chat history + context management --------------------
