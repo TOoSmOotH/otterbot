@@ -17,6 +17,13 @@ export interface Config {
   logLevel: "debug" | "info" | "warn" | "error";
   /** Encryption key for all SQLite databases. The only secret kept in .env. */
   dbKey: string | null;
+  /**
+   * How long an ephemeral subagent lingers after finishing its task before it is
+   * fully removed (runtime, profile dir, secrets, registry row). Its audit trail
+   * — the `subagent_tasks` row and `spawn`/`report` bus messages — is kept. `0`
+   * tears it down immediately on completion.
+   */
+  subagentGraceMs: number;
   /** Agent-to-agent transport: in-process bus, or a shared Discord channel. */
   agentTransport: "local" | "discord";
   discordBotToken: string | null;
@@ -47,6 +54,7 @@ export function loadConfig(): Config {
     enableEmbeddings: bool(process.env.ENABLE_EMBEDDINGS, false),
     logLevel: (process.env.LOG_LEVEL as Config["logLevel"]) ?? "info",
     dbKey: process.env.OTTERBOT_DB_KEY ?? null,
+    subagentGraceMs: Number(process.env.SUBAGENT_GRACE_MS ?? 300_000),
     agentTransport: process.env.AGENT_TRANSPORT === "discord" ? "discord" : "local",
     discordBotToken: process.env.DISCORD_BOT_TOKEN ?? null,
     discordChannelId: process.env.DISCORD_CHANNEL_ID ?? null,

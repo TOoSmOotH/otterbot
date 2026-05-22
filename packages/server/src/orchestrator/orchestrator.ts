@@ -386,6 +386,8 @@ export class Orchestrator {
   /** Per-agent MCP server connections. */
   private readonly mcp = new McpManager();
   private subagentSeq = 0;
+  /** subId -> pending teardown timer for an ephemeral subagent in its grace window. */
+  private readonly subagentTeardowns = new Map<string, NodeJS.Timeout>();
 
   constructor(
     private readonly profiles: ProfileStore,
@@ -752,6 +754,8 @@ export class Orchestrator {
   /** Stop the scheduler + bus and close every agent's database. */
   async shutdown(): Promise<void> {
     this.scheduler.stop();
+    for (const timer of this.subagentTeardowns.values()) clearTimeout(timer);
+    this.subagentTeardowns.clear();
     await this.codeRef.stop();
     await this.bus.stop();
     await Promise.allSettled([
@@ -1148,6 +1152,12 @@ export class Orchestrator {
   /** Delete an agent. The COO cannot be deleted. */
   async deleteAgent(id: string): Promise<boolean> {
     if (id === "coo") return false;
+    // Cancel any pending grace-window teardown so it can't fire after we delete.
+    const pending = this.subagentTeardowns.get(id);
+    if (pending) {
+      clearTimeout(pending);
+      this.subagentTeardowns.delete(id);
+    }
     const ctx = this.contexts.get(id);
     if (!ctx) return false;
     await this.stopConnectors(id);
@@ -1243,6 +1253,11 @@ export class Orchestrator {
    * completion, and return its findings. The subagent inherits the parent's
    * model + credentials, is tracked in `subagent_tasks`, and announces itself
    * (`spawn`) and its result (`report`) on the bus.
+   *
+   * The subagent is short-lived: once its task finishes it lingers for a grace
+   * window (`config.subagentGraceMs`) and is then fully removed — runtime,
+   * profile dir, secrets, and registry row. Its audit trail (the `subagent_tasks`
+   * row and `spawn`/`report` bus messages) is kept.
    */
   async spawnSubagent(
     parentId: string,
@@ -1264,29 +1279,10 @@ export class Orchestrator {
     const subId = `${parentId}__sub__${++this.subagentSeq}`;
     const taskId = nanoid();
     const now = new Date().toISOString();
-    const subProfile = normalizeProfile({
+    const subProfile = buildSubagentProfile(parentCtx.profile, {
       id: subId,
       displayName: `${parentCtx.profile.displayName} · sub ${this.subagentSeq}`,
-      role: "subagent",
-      persona:
-        `You are a focused research subagent spawned by ${parentCtx.profile.displayName}. ` +
-        `Pursue exactly the goal you are given, use your available tools, ` +
-        `and finish with a concise findings summary.`,
-      model: {
-        chat: opts?.modelId ?? parentCtx.profile.model.chat,
-        embedding: parentCtx.profile.model.embedding,
-      },
-      transport: parentCtx.profile.transport,
-      artwork: parentCtx.profile.artwork,
-      // Inherit the parent's capability-bearing profile fields so the subagent
-      // can actually do the work it's delegated, not just touch memory.
-      canRunShell: parentCtx.profile.canRunShell,
-      canWebSearch: parentCtx.profile.canWebSearch,
-      mcpServers: parentCtx.profile.mcpServers,
-      allowedPeers: parentCtx.profile.allowedPeers,
-      parentId,
-      // Subagents never spawn their own subagents — no nested recursion.
-      canSpawnSubagents: false,
+      modelId: opts?.modelId,
       createdAt: now,
     });
     this.profiles.create(subProfile);
@@ -1327,6 +1323,7 @@ export class Orchestrator {
       threadId: taskId,
       correlationId: null,
       rootSpawnId: taskId,
+      payload: { subagentId: subId },
       body: `Spawned ${subId} for: ${goal}`,
       transport: parentCtx.profile.transport,
     });
@@ -1365,7 +1362,29 @@ export class Orchestrator {
       transport: parentCtx.profile.transport,
     });
 
+    // The subagent exists only for this one task. Keep it briefly (grace
+    // window) so it stays inspectable, then remove it entirely — its audit
+    // trail (task row + bus messages) remains.
+    const grace = this.cfg.subagentGraceMs;
+    if (grace <= 0) {
+      await this.teardownSubagent(subId);
+    } else {
+      const timer = setTimeout(() => void this.teardownSubagent(subId), grace);
+      timer.unref?.(); // a pending teardown shouldn't keep the process alive
+      this.subagentTeardowns.set(subId, timer);
+    }
+
     return { subagentId: subId, taskId, summary };
+  }
+
+  /** Fully remove an ephemeral subagent. Best-effort — never surfaces to the parent. */
+  private async teardownSubagent(subId: string): Promise<void> {
+    this.subagentTeardowns.delete(subId);
+    try {
+      await this.deleteAgent(subId);
+    } catch (err) {
+      console.warn(`[subagent] teardown failed for ${subId}:`, err);
+    }
   }
 
   /** All subagent spawn tasks, newest first. */
@@ -1376,4 +1395,45 @@ export class Orchestrator {
       .orderBy(desc(controlSchema.subagentTasks.createdAt))
       .all();
   }
+}
+
+/**
+ * Build the normalized profile for an ephemeral subagent spawned under `parent`.
+ * The subagent inherits the parent's capability-bearing fields so it can do the
+ * work it's delegated, but never spawns its own subagents (no nested recursion).
+ */
+export function buildSubagentProfile(
+  parent: AgentProfile,
+  args: {
+    id: string;
+    displayName: string;
+    modelId?: AgentProfile["model"]["chat"];
+    createdAt: string;
+  }
+): AgentProfile {
+  return normalizeProfile({
+    id: args.id,
+    displayName: args.displayName,
+    role: "subagent",
+    persona:
+      `You are a focused research subagent spawned by ${parent.displayName}. ` +
+      `Pursue exactly the goal you are given, use your available tools, ` +
+      `and finish with a concise findings summary.`,
+    model: {
+      chat: args.modelId ?? parent.model.chat,
+      embedding: parent.model.embedding,
+    },
+    transport: parent.transport,
+    artwork: parent.artwork,
+    // Inherit the parent's capability-bearing profile fields so the subagent
+    // can actually do the work it's delegated, not just touch memory.
+    canRunShell: parent.canRunShell,
+    canWebSearch: parent.canWebSearch,
+    mcpServers: parent.mcpServers,
+    allowedPeers: parent.allowedPeers,
+    parentId: parent.id,
+    // Subagents never spawn their own subagents — no nested recursion.
+    canSpawnSubagents: false,
+    createdAt: args.createdAt,
+  });
 }
