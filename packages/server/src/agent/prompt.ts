@@ -23,7 +23,11 @@ Save a memory whenever the user:
 
 How to save: call \`save_memory\` in the same turn, before or alongside your reply, with \`content\` written as a clear standalone sentence. For example, if the user says "my name is Mike", call \`save_memory\` with \`content: "The user's name is Mike."\` and \`category: "fact"\`, then reply confirming you saved it. Replying "Got it" or "Noted" WITHOUT calling \`save_memory\` does not save anything — the fact is lost.
 
-Use \`search_memory\` to recall earlier facts before answering questions about the user or past sessions. When you complete a multi-step task worth reusing, call \`author_skill\`. Never save a memory the user did not actually confirm.`;
+Use \`search_memory\` to recall earlier facts before answering questions about the user or past sessions. When you complete a multi-step task worth reusing, call \`author_skill\`. Never save a memory the user did not actually confirm.
+
+## Images & files
+
+Images and files are shown to the user automatically — those you create with a tool, and those another agent hands back when you delegate to it. Do NOT paste image URLs or markdown image links (\`![alt](/api/agents/.../images/x.png)\`) into your reply; they will not render and only clutter the message. Just refer to the result in plain language ("Here's the baseball bat image."). When you relay another agent's result, summarize it in your own words — never copy image links or file URLs out of their reply.`;
 
 export interface BuildPromptArgs {
   userMessage: string;
