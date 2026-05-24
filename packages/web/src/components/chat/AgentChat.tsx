@@ -18,6 +18,7 @@ import { Icon } from "../ui/Icon";
 import { type, fonts } from "../../lib/typography";
 import { ConversationList } from "./ConversationList";
 import { ContextPanel } from "./ContextPanel";
+import { ChatImage } from "./ChatImage";
 
 const PULSING_STATUSES = new Set(["working", "thinking"]);
 
@@ -63,6 +64,13 @@ export function AgentChat({ onEditAgent }: { onEditAgent: (id: string) => void }
     if (!input.trim() || streaming || !activeAgentId) return;
     send(activeAgentId, input);
     setInput("");
+  };
+
+  // Re-prompt an existing image: send an edit instruction that references the
+  // source image so the agent can run edit_image (delegating if needed).
+  const editImage = (imageUrl: string, change: string) => {
+    if (!activeAgentId) return;
+    send(activeAgentId, `Edit this image: ${change}\n(source: ${imageUrl})`);
   };
 
   if (!agent || !activeAgentId) {
@@ -216,14 +224,10 @@ export function AgentChat({ onEditAgent }: { onEditAgent: (id: string) => void }
                   <div style={{ display: "flex", flexDirection: "column", gap: 6, minWidth: 0 }}>
                     <span>{m.content}</span>
                     {m.imageUrl && (
-                      <img
-                        src={withToken(m.imageUrl)}
+                      <ChatImage
+                        url={m.imageUrl}
                         alt={m.content}
-                        style={{
-                          maxWidth: "min(420px, 100%)",
-                          borderRadius: 6,
-                          border: "1px solid rgb(var(--border))",
-                        }}
+                        onEdit={(change) => editImage(m.imageUrl!, change)}
                       />
                     )}
                     {m.fileUrl && (
@@ -239,7 +243,7 @@ export function AgentChat({ onEditAgent }: { onEditAgent: (id: string) => void }
                           borderRadius: 6,
                           border: "1px solid rgb(var(--border))",
                           background: "rgb(var(--surface))",
-                          color: "rgb(var(--text))",
+                          color: "rgb(var(--fg))",
                           textDecoration: "none",
                           fontSize: 12,
                         }}
