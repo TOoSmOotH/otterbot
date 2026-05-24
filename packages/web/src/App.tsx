@@ -1,12 +1,13 @@
 import { useEffect, useState } from "react";
 import { LayoutGroup, motion } from "motion/react";
-import { Activity, MessageSquare, Settings, Sliders } from "lucide-react";
+import { Activity, MessageSquare, Network, Settings, Sliders } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { AgentRoster } from "./components/agents/AgentRoster";
 import { AgentChat } from "./components/chat/AgentChat";
 import { AgentEditor } from "./components/agents/AgentEditor";
 import { AgentStudio } from "./components/agents/AgentStudio";
 import { ActivityView } from "./components/agents/ActivityView";
+import { AgentNetworkGraph } from "./components/agents/AgentNetworkGraph";
 import { GlobalSettings } from "./components/settings/GlobalSettings";
 import { OnboardingWizard } from "./components/agents/OnboardingWizard";
 import { AuthGate } from "./components/AuthGate";
@@ -16,12 +17,13 @@ import { useChatStore } from "./stores/chat-store";
 import { useGlobalSettingsStore } from "./stores/global-settings-store";
 import { useSetupStore } from "./stores/setup-store";
 
-type MainView = "chat" | "studio" | "activity" | "settings";
+type MainView = "chat" | "studio" | "activity" | "network" | "settings";
 
 const VIEWS: { id: MainView; label: string; icon: LucideIcon }[] = [
   { id: "chat", label: "Chat", icon: MessageSquare },
   { id: "studio", label: "Agent Studio", icon: Sliders },
   { id: "activity", label: "Activity", icon: Activity },
+  { id: "network", label: "Network", icon: Network },
   { id: "settings", label: "Settings", icon: Settings },
 ];
 
@@ -125,6 +127,7 @@ function AuthedApp() {
           {view === "chat" && <AgentChat onEditAgent={openStudio} />}
           {view === "studio" && <AgentStudio agentId={activeAgentId} />}
           {view === "activity" && <ActivityView />}
+          {view === "network" && <AgentNetworkGraph />}
           {view === "settings" && <GlobalSettings />}
         </div>
       </div>

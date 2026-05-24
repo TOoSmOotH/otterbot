@@ -128,3 +128,35 @@
     transition-duration: 0.01ms !important;
   }
 }
+
+/* React Flow (agent network graph) — map the library's tokens to our theme. */
+.react-flow {
+  --xy-background-color: rgb(var(--surface-sunken));
+  --xy-edge-stroke: rgb(var(--border-strong));
+  --xy-edge-stroke-selected: rgb(var(--accent));
+  --xy-connectionline-stroke: rgb(var(--accent));
+  --xy-attribution-background-color: transparent;
+}
+
+.react-flow .react-flow__edge.selected .react-flow__edge-path {
+  stroke: rgb(var(--accent));
+}
+
+.react-flow .react-flow__edge-path {
+  cursor: pointer;
+}
+
+.react-flow .react-flow__controls {
+  box-shadow: var(--shadow-sm);
+}
+
+.react-flow .react-flow__controls-button {
+  background: rgb(var(--surface-elevated));
+  border-bottom: 1px solid rgb(var(--border));
+  color: rgb(var(--fg));
+  fill: rgb(var(--fg));
+}
+
+.react-flow .react-flow__controls-button:hover {
+  background: rgb(var(--surface));
+}

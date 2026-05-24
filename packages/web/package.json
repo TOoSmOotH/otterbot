@@ -15,6 +15,7 @@
     "@otterbot/shared": "workspace:*",
     "@xterm/addon-fit": "^0.10.0",
     "@xterm/xterm": "^5.5.0",
+    "@xyflow/react": "^12.10.2",
     "lucide-react": "^1.16.0",
     "motion": "^12.39.0",
     "react": "^19.0.0",
