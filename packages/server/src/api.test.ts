@@ -2,6 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import type { FastifyInstance } from "fastify";
 import { createTestStack, type TestStack } from "./test/harness.js";
 import { buildServer } from "./server.js";
+import { persistArtifact } from "./integrations/artifacts.js";
 import * as schema from "./db/schema.js";
 import type { AgentMemoryExport } from "@otterbot/shared";
 
@@ -547,5 +548,29 @@ describe("HTTP API (e2e)", () => {
       url: "/api/agents/coo/conversations/no-such-conversation",
     });
     expect(badConv.statusCode).toBe(404);
+  });
+
+  it("serves an agent's produced files and guards path traversal", async () => {
+    // Plant a file in the COO's artifacts dir, exactly as persistArtifact would.
+    const art = persistArtifact({
+      filesDir: stack.profiles.pathsFor("coo").files,
+      agentId: "coo",
+      data: Buffer.from("hello,world\n"),
+      name: "data.csv",
+    });
+
+    const ok = await app.inject({ method: "GET", url: art.url });
+    expect(ok.statusCode).toBe(200);
+    expect(ok.headers["content-type"]).toContain("text/csv");
+    // Non-image types are offered as a download.
+    expect(ok.headers["content-disposition"]).toContain("attachment");
+    expect(ok.body).toBe("hello,world\n");
+
+    // Missing file 404s; traversal and unknown agents are rejected.
+    const missing = await app.inject({ method: "GET", url: "/api/agents/coo/files/nope.csv" });
+    expect(missing.statusCode).toBe(404);
+    expect(stack.orch.agentFilePath("coo", "../../etc/passwd")).toBeNull();
+    expect(stack.orch.agentFilePath("coo", "a/b.txt")).toBeNull();
+    expect(stack.orch.agentFilePath("no-such-agent", art.id)).toBeNull();
   });
 });

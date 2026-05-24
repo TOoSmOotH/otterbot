@@ -11,9 +11,11 @@ import type { AgentServices } from "./agent-services.js";
 import type {
   AgentStatus,
   AgentMessage,
+  Artifact,
   StreamChunk,
   ToolCallRecord,
 } from "@otterbot/shared";
+import { basename } from "node:path";
 
 /** A tool result that produced an image we persist + render in the chat. */
 function isImageResult(result: unknown): result is { url: string } {
@@ -23,6 +25,69 @@ function isImageResult(result: unknown): result is { url: string } {
     (result as { kind?: unknown }).kind === "image" &&
     typeof (result as { url?: unknown }).url === "string"
   );
+}
+
+/**
+ * Normalize a tool result into an {@link Artifact} if it produced one. Handles
+ * both image tool results (`{ kind: "image", url, prompt? }`, synthesizing a
+ * name/MIME) and general file results (`{ kind: "file", url, name, mimeType }`).
+ * Returns null for any other result.
+ */
+function artifactFromResult(result: unknown): Artifact | null {
+  if (!result || typeof result !== "object") return null;
+  const r = result as {
+    kind?: unknown;
+    url?: unknown;
+    name?: unknown;
+    mimeType?: unknown;
+    prompt?: unknown;
+  };
+  if (typeof r.url !== "string") return null;
+  if (r.kind === "image") {
+    const name = typeof r.name === "string" ? r.name : basename(r.url);
+    return {
+      id: name,
+      kind: "image",
+      url: r.url,
+      name,
+      mimeType: typeof r.mimeType === "string" ? r.mimeType : "image/png",
+      prompt: typeof r.prompt === "string" ? r.prompt : undefined,
+    };
+  }
+  if (r.kind === "file" && typeof r.name === "string") {
+    return {
+      id: r.name,
+      kind: "file",
+      url: r.url,
+      name: r.name,
+      mimeType: typeof r.mimeType === "string" ? r.mimeType : "application/octet-stream",
+    };
+  }
+  return null;
+}
+
+/**
+ * If a request carried attached docs on its payload, append a reference block
+ * to the task so the receiving agent knows they exist and can open them with
+ * `read_file`. Keeps the inline body small while making the docs discoverable.
+ */
+function withAttachmentRefs(body: string, payload: unknown): string {
+  if (!payload || typeof payload !== "object") return body;
+  const list = (payload as { attachments?: unknown }).attachments;
+  if (!Array.isArray(list) || list.length === 0) return body;
+  const refs = list
+    .filter((a): a is Artifact => artifactFromResult(a) !== null)
+    .map((a) => `- ${a.name} — ${a.url}`);
+  if (!refs.length) return body;
+  return `${body}\n\n---\nAttached files (use the read_file tool to read each):\n${refs.join("\n")}`;
+}
+
+/** A tool result from `delegate` that carried artifacts back from a peer. */
+function delegateArtifacts(result: unknown): Artifact[] {
+  if (!result || typeof result !== "object") return [];
+  const r = result as { kind?: unknown; artifacts?: unknown };
+  if (r.kind !== "delegate" || !Array.isArray(r.artifacts)) return [];
+  return r.artifacts.filter((a): a is Artifact => artifactFromResult(a) !== null);
 }
 
 export interface RespondArgs {
@@ -36,6 +101,8 @@ export interface RespondResult {
   finalText: string;
   skillsUsed: string[];
   memoriesUsed: string[];
+  /** Files produced during this turn (generated locally or via delegation). */
+  artifacts: Artifact[];
 }
 
 /**
@@ -130,6 +197,11 @@ export class AgentRuntime {
       // Image-producing tool results, persisted as their own messages so they
       // survive a reload (they're excluded from the model context).
       const imageMessages: Array<{ toolCall: ToolCallRecord; prompt: string }> = [];
+      // Files received back from a delegated peer, persisted so they re-render.
+      const artifactMessages: Array<{ content: string; toolCall: ToolCallRecord }> = [];
+      // Everything this turn produced (local images + delegated files) — handed
+      // back to the bus so a delegating agent can display them.
+      const turnArtifacts: Artifact[] = [];
       for await (const part of result.fullStream) {
         switch (part.type) {
           case "text-delta":
@@ -171,14 +243,39 @@ export class AgentRuntime {
             args: unknown;
             result: unknown;
           }>) {
-            // Only image results are surfaced to the client; other tool outputs
-            // (web pages, file contents, …) stay server-side.
+            // Image results are surfaced to the client and persisted; other
+            // tool outputs (web pages, file contents, …) stay server-side.
             if (isImageResult(tr.result)) {
               args.onChunk({ kind: "tool_end", id: tr.toolCallId, result: tr.result });
               imageMessages.push({
                 toolCall: { id: tr.toolCallId, name: tr.toolName, args: tr.args, result: tr.result },
                 prompt: (tr.args as { prompt?: string })?.prompt ?? "image",
               });
+              const art = artifactFromResult(tr.result);
+              if (art) turnArtifacts.push(art);
+              continue;
+            }
+            // Files a delegated peer produced and handed back — display them in
+            // this agent's chat and persist so they survive a reload.
+            const delegated = delegateArtifacts(tr.result);
+            if (delegated.length) {
+              args.onChunk({ kind: "artifacts", artifacts: delegated });
+              delegated.forEach((a, i) => {
+                const result =
+                  a.kind === "image"
+                    ? { kind: "image", url: a.url }
+                    : { kind: "file", url: a.url, name: a.name };
+                artifactMessages.push({
+                  content: a.kind === "image" ? `Image: ${a.prompt ?? a.name}` : a.name,
+                  toolCall: {
+                    id: `${tr.toolCallId}-art-${i}`,
+                    name: tr.toolName,
+                    args: tr.args,
+                    result,
+                  },
+                });
+              });
+              turnArtifacts.push(...delegated);
             }
           }
         }
@@ -199,11 +296,15 @@ export class AgentRuntime {
           img.toolCall,
         ]);
       }
+      // Files received from delegated peers, persisted in turn order too.
+      for (const art of artifactMessages) {
+        this.appendMessage(args.conversationId, "tool", art.content, [art.toolCall]);
+      }
 
       const messageId = this.appendMessage(args.conversationId, "assistant", finalText);
       this.touchConversation(args.conversationId);
 
-      return { messageId, finalText, skillsUsed, memoriesUsed };
+      return { messageId, finalText, skillsUsed, memoriesUsed, artifacts: turnArtifacts };
     } finally {
       this.setStatus("idle");
     }
@@ -219,13 +320,15 @@ export class AgentRuntime {
     this.queue = this.queue.then(async () => {
       const bus = this.services!.bus;
       let reply = "";
+      let artifacts: Artifact[] = [];
       try {
         const res = await this.respond({
           conversationId: `bus-${msg.threadId}`,
-          userMessage: msg.body,
+          userMessage: withAttachmentRefs(msg.body, msg.payload),
           onChunk: () => {},
         });
         reply = res.finalText || "(no response)";
+        artifacts = res.artifacts;
       } catch (err) {
         reply = `Error: ${err instanceof Error ? err.message : String(err)}`;
       }
@@ -238,6 +341,7 @@ export class AgentRuntime {
         correlationId: msg.id,
         rootSpawnId: msg.rootSpawnId,
         body: reply,
+        payload: artifacts.length ? { artifacts } : undefined,
         transport: this.ctx.profile.transport,
       });
     });

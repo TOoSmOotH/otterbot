@@ -8,6 +8,8 @@ import { createIssue, listIssues } from "../integrations/github.js";
 import { runAgentShell } from "../integrations/shell.js";
 import { searchWeb } from "../integrations/web-search.js";
 import { editImage, generateImage, persistImage } from "../integrations/image-gen.js";
+import { persistArtifact } from "../integrations/artifacts.js";
+import type { Artifact } from "@otterbot/shared";
 import {
   browserBack,
   browserClick,
@@ -463,6 +465,24 @@ export function buildAgentTools(
 
   if (!services) return tools;
 
+  tools.read_file = tool({
+    description:
+      "Read the text contents of a shared file by its reference, e.g. a doc " +
+      "attached to a delegation or a file another agent produced. Pass the " +
+      "file's path/URL (like /api/agents/<id>/files/<name>). Images and other " +
+      "binary files cannot be read as text — reference those by URL instead.",
+    parameters: z.object({
+      path: z.string().min(1).describe("The file reference, e.g. /api/agents/<id>/files/<name>."),
+    }),
+    execute: async ({ path }) => {
+      const m = path.match(/\/agents\/([^/]+)\/files\/([^/?#]+)/);
+      if (!m) {
+        return { ok: false, error: "Unrecognized file reference; expected /api/agents/<id>/files/<name>." };
+      }
+      return services.readArtifact(m[1], m[2]);
+    },
+  });
+
   tools.schedule_task = tool({
     description:
       "Schedule a recurring prompt for yourself using a cron expression (e.g. '0 9 * * *' for 9am daily). The prompt runs automatically on that schedule.",
@@ -517,12 +537,21 @@ export function buildAgentTools(
   if (isCoo || ctx.profile.allowedPeers.length > 0) {
     tools.delegate = tool({
       description:
-        "Delegate a task to another agent by id and wait for its result. Use list_agents first to choose the right specialist.",
+        "Delegate a task to another agent by id and wait for its result. Use list_agents first to choose the right specialist. For large or structured context (briefs, specs, data), pass it as an `attachments` markdown doc instead of inlining it in `task` — the peer reads it with read_file. Keep `task` itself short.",
       parameters: z.object({
         agentId: z.string().min(1),
         task: z.string().min(1),
+        attachments: z
+          .array(
+            z.object({
+              name: z.string().min(1).describe("A filename, e.g. \"brief.md\"."),
+              content: z.string().min(1).describe("The document's text (markdown)."),
+            })
+          )
+          .optional()
+          .describe("Documents to attach for the peer to read with read_file."),
       }),
-      execute: async ({ agentId, task }) => {
+      execute: async ({ agentId, task, attachments }) => {
         const known = services.listAgents();
         if (!known.some((a) => a.id === agentId)) {
           return {
@@ -538,6 +567,25 @@ export function buildAgentTools(
             error: `Not permitted to message "${agentId}". Permitted peers: ${permitted}`,
           };
         }
+        // Persist any attached docs to this (sending) agent's files dir; the
+        // peer reads them on demand via read_file. Guard against oversized docs.
+        const MAX_ATTACHMENT_BYTES = 1024 * 1024;
+        const attached: Artifact[] = [];
+        for (const a of attachments ?? []) {
+          const data = Buffer.from(a.content, "utf8");
+          if (data.byteLength > MAX_ATTACHMENT_BYTES) {
+            return { ok: false, error: `Attachment "${a.name}" exceeds 1 MB; trim it or split it.` };
+          }
+          attached.push(
+            persistArtifact({
+              filesDir: ctx.filesDir,
+              agentId: ctx.profile.id,
+              data,
+              name: a.name,
+              mimeType: "text/markdown; charset=utf-8",
+            })
+          );
+        }
         try {
           const res = await services.bus.request({
             id: nanoid(),
@@ -548,9 +596,14 @@ export function buildAgentTools(
             correlationId: null,
             rootSpawnId: null,
             body: task,
+            payload: attached.length ? { attachments: attached } : undefined,
             transport: ctx.profile.transport,
           });
-          return { ok: true, from: agentId, result: res.body };
+          // Any files the peer produced ride back on the response payload; the
+          // runtime surfaces these to display in this agent's chat.
+          const payload = res.payload as { artifacts?: unknown } | undefined;
+          const artifacts = Array.isArray(payload?.artifacts) ? payload!.artifacts : [];
+          return { ok: true, kind: "delegate", from: agentId, result: res.body, artifacts };
         } catch (err) {
           return { ok: false, error: err instanceof Error ? err.message : String(err) };
         }

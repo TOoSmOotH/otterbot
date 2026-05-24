@@ -226,6 +226,28 @@ export function AgentChat({ onEditAgent }: { onEditAgent: (id: string) => void }
                         }}
                       />
                     )}
+                    {m.fileUrl && (
+                      <a
+                        href={withToken(m.fileUrl)}
+                        download={m.fileName}
+                        style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: 6,
+                          alignSelf: "flex-start",
+                          padding: "5px 9px",
+                          borderRadius: 6,
+                          border: "1px solid rgb(var(--border))",
+                          background: "rgb(var(--surface))",
+                          color: "rgb(var(--text))",
+                          textDecoration: "none",
+                          fontSize: 12,
+                        }}
+                      >
+                        <Icon icon={FileText} size={14} />
+                        {m.fileName ?? "Download file"}
+                      </a>
+                    )}
                   </div>
                 </motion.div>
               ) : (

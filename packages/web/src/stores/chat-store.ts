@@ -13,25 +13,37 @@ export interface ChatMessage {
   id: string;
   role: "user" | "assistant" | "tool";
   content: string;
-  /** A generated image to render inline (from an image tool result). */
+  /** A generated/shared image to render inline (from an image tool result). */
   imageUrl?: string;
+  /** A non-image file to offer as a download (from a file tool result). */
+  fileUrl?: string;
+  fileName?: string;
   pending?: boolean;
   error?: string;
 }
 
-/** Pull an image URL out of a tool result like `{ kind: "image", url }`. */
-function imageUrlFromResult(result: unknown): string | undefined {
-  if (result && typeof result === "object" && "url" in result) {
-    const url = (result as { url?: unknown }).url;
-    if (typeof url === "string") return url;
+/** The display fields a tool result contributes (an image or a download). */
+type ArtifactFields = Pick<ChatMessage, "imageUrl" | "fileUrl" | "fileName">;
+
+/**
+ * Pull display fields out of a tool result like `{ kind: "image", url }` or
+ * `{ kind: "file", url, name }`. Anything with a `url` but no explicit `file`
+ * kind is treated as an image (back-compat with existing image results).
+ */
+function artifactFromResult(result: unknown): ArtifactFields | undefined {
+  if (!result || typeof result !== "object" || !("url" in result)) return undefined;
+  const r = result as { kind?: unknown; url?: unknown; name?: unknown };
+  if (typeof r.url !== "string") return undefined;
+  if (r.kind === "file") {
+    return { fileUrl: r.url, fileName: typeof r.name === "string" ? r.name : "file" };
   }
-  return undefined;
+  return { imageUrl: r.url };
 }
 
-function imageUrlFromToolCalls(calls?: ToolCallRecord[]): string | undefined {
+function artifactFromToolCalls(calls?: ToolCallRecord[]): ArtifactFields | undefined {
   for (const c of calls ?? []) {
-    const url = imageUrlFromResult(c.result);
-    if (url) return url;
+    const fields = artifactFromResult(c.result);
+    if (fields) return fields;
   }
   return undefined;
 }
@@ -82,13 +94,27 @@ function appendChunk(messages: ChatMessage[], chunk: StreamChunk): ChatMessage[]
       next.push({ id: `t-${chunk.id}`, role: "tool", content: `Used ${chunk.name}` });
       return next;
     case "tool_end": {
-      const imageUrl = imageUrlFromResult(chunk.result);
-      if (!imageUrl) return next;
+      const fields = artifactFromResult(chunk.result);
+      if (!fields) return next;
       for (let i = next.length - 1; i >= 0; i--) {
         if (next[i].id === `t-${chunk.id}`) {
-          next[i] = { ...next[i], imageUrl };
+          next[i] = { ...next[i], ...fields };
           break;
         }
+      }
+      return next;
+    }
+    case "artifacts": {
+      // Files a delegated peer produced — shown as their own tool bubbles.
+      for (const a of chunk.artifacts) {
+        next.push({
+          id: `art-${a.id}-${next.length}`,
+          role: "tool",
+          content: a.kind === "image" ? a.prompt ?? a.name : a.name,
+          imageUrl: a.kind === "image" ? a.url : undefined,
+          fileUrl: a.kind === "file" ? a.url : undefined,
+          fileName: a.kind === "file" ? a.name : undefined,
+        });
       }
       return next;
     }
@@ -203,7 +229,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           id: m.id,
           role,
           content: m.content,
-          imageUrl: role === "tool" ? imageUrlFromToolCalls(m.toolCalls) : undefined,
+          ...(role === "tool" ? artifactFromToolCalls(m.toolCalls) : undefined),
         };
       });
       set((state) => ({

@@ -43,6 +43,8 @@ export interface ProfilePaths {
   browser: string;
   /** Where the agent's generated images are saved and served from. */
   images: string;
+  /** Where the agent's produced files (artifacts) are saved and served from. */
+  files: string;
 }
 
 export function profilePaths(root: string, id: string): ProfilePaths {
@@ -59,6 +61,7 @@ export function profilePaths(root: string, id: string): ProfilePaths {
     workspace: join(dir, "workspace"),
     browser: join(dir, "browser"),
     images: join(dir, "images"),
+    files: join(dir, "files"),
   };
 }
 

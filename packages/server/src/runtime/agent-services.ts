@@ -57,4 +57,13 @@ export interface AgentServices {
   ): { ok: boolean; content?: string; path?: string; truncated?: boolean; error?: string };
   /** List the reference repos available to search. */
   listCodeReferenceRepos(): { repo: string; path: string; state: string }[];
+  /**
+   * Read the text contents of an agent's produced file (artifact) by basename.
+   * Used by the `read_file` tool to pull a shared doc into a turn. Binary files
+   * (images, …) are not returned as text.
+   */
+  readArtifact(
+    agentId: string,
+    file: string
+  ): { ok: boolean; content?: string; mimeType?: string; truncated?: boolean; error?: string };
 }

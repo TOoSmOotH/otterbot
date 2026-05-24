@@ -1,8 +1,11 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { existsSync } from "node:fs";
+import { eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { createTestStack, type TestStack } from "../test/harness.js";
 import { buildAgentTools } from "../agent/tools.js";
+import { persistArtifact } from "../integrations/artifacts.js";
+import * as schema from "../db/schema.js";
 import { getCatalogCapability } from "../skills/builtin-catalog.js";
 import { buildSubagentProfile } from "./orchestrator.js";
 import { normalizeProfile } from "../profiles/profile-store.js";
@@ -173,6 +176,153 @@ describe("orchestrator (e2e)", () => {
     // Subagents never spawn their own subagents.
     expect(sub.canSpawnSubagents).toBe(false);
   });
+
+  it("delegate surfaces artifacts the peer returned on the response payload", async () => {
+    const artifact = {
+      id: "art_1.png",
+      kind: "image" as const,
+      url: "/api/agents/painter/files/art_1.png",
+      name: "art_1.png",
+      mimeType: "image/png",
+      prompt: "an otter",
+    };
+    const services = {
+      // A peer that replies with text plus a produced file on the payload.
+      bus: {
+        request: async (m: { body: string }) => ({
+          ...m,
+          kind: "response",
+          body: "done",
+          payload: { artifacts: [artifact] },
+        }),
+      },
+      listAgents: () => [{ id: "painter", displayName: "Painter", role: "agent", summary: "" }],
+    } as unknown as AgentServices;
+
+    const cooTools = buildAgentTools(stack.orch.getContext("coo")!, services);
+    const res = (await cooTools.delegate!.execute!(
+      { agentId: "painter", task: "make art" },
+      {} as never
+    )) as { ok: boolean; kind: string; artifacts: unknown[] };
+    expect(res.ok).toBe(true);
+    expect(res.kind).toBe("delegate");
+    expect(res.artifacts).toEqual([artifact]);
+  });
+
+  it("delegate attaches docs as files and carries refs on the request payload", async () => {
+    let captured: { payload?: { attachments?: Array<{ id: string; name: string; kind: string; mimeType: string }> } } | undefined;
+    const services = {
+      bus: {
+        request: async (m: typeof captured & { body: string }) => {
+          captured = m;
+          return { ...m, kind: "response", body: "ok", payload: undefined };
+        },
+      },
+      listAgents: () => [{ id: "painter", displayName: "Painter", role: "agent", summary: "" }],
+    } as unknown as AgentServices;
+
+    const cooTools = buildAgentTools(stack.orch.getContext("coo")!, services);
+    const res = (await cooTools.delegate!.execute!(
+      {
+        agentId: "painter",
+        task: "Paint per the brief.",
+        attachments: [{ name: "brief.md", content: "# Big brief\nlots of detail here" }],
+      },
+      {} as never
+    )) as { ok: boolean };
+    expect(res.ok).toBe(true);
+
+    // The request carried the attachment as a file reference on the payload …
+    const atts = captured!.payload!.attachments!;
+    expect(atts).toHaveLength(1);
+    expect(atts[0]).toMatchObject({ kind: "file", name: "brief.md" });
+    expect(atts[0].mimeType).toContain("markdown");
+    // … and the doc was written under the sending agent's files dir.
+    const planted = stack.orch.readArtifact("coo", atts[0].id);
+    expect(planted.ok).toBe(true);
+    expect(planted.content).toContain("Big brief");
+  });
+
+  it("read_file reads a shared doc by reference and refuses traversal / binary", async () => {
+    const doc = persistArtifact({
+      filesDir: stack.profiles.pathsFor("coo").files,
+      agentId: "coo",
+      data: Buffer.from("hello from the doc"),
+      name: "note.md",
+      mimeType: "text/markdown; charset=utf-8",
+    });
+    const services = {
+      readArtifact: (id: string, f: string) => stack.orch.readArtifact(id, f),
+    } as unknown as AgentServices;
+    const cooTools = buildAgentTools(stack.orch.getContext("coo")!, services);
+
+    const ok = (await cooTools.read_file!.execute!({ path: doc.url }, {} as never)) as {
+      ok: boolean;
+      content?: string;
+    };
+    expect(ok.ok).toBe(true);
+    expect(ok.content).toContain("hello from the doc");
+
+    // An unrecognized reference is rejected by the tool itself.
+    const bad = (await cooTools.read_file!.execute!({ path: "/not/a/file" }, {} as never)) as {
+      ok: boolean;
+    };
+    expect(bad.ok).toBe(false);
+
+    // The service guards traversal, missing files, and binary types.
+    expect(stack.orch.readArtifact("coo", "../secret").ok).toBe(false);
+    expect(stack.orch.readArtifact("coo", "missing.md").ok).toBe(false);
+    const img = persistArtifact({
+      filesDir: stack.profiles.pathsFor("coo").files,
+      agentId: "coo",
+      data: Buffer.from("PNGBYTES"),
+      name: "pic.png",
+    });
+    expect(stack.orch.readArtifact("coo", img.id).ok).toBe(false);
+  });
+
+  it(
+    "appends attachment references to a delegated request's user message",
+    async () => {
+      stack.orch.createAgent({ displayName: "Reader Agent", persona: "reads docs" });
+      const threadId = nanoid();
+      await stack.orch.getBus().request({
+        id: nanoid(),
+        kind: "request",
+        from: "coo",
+        to: "reader-agent",
+        threadId,
+        correlationId: null,
+        rootSpawnId: null,
+        body: "Summarize the attached brief.",
+        payload: {
+          attachments: [
+            {
+              id: "art_1.md",
+              kind: "file",
+              url: "/api/agents/coo/files/art_1.md",
+              name: "brief.md",
+              mimeType: "text/markdown",
+            },
+          ],
+        },
+        transport: "local",
+      });
+
+      // The receiver's first user message in the bus thread carries the ref block.
+      const ctx = stack.orch.getContext("reader-agent")!;
+      const userMsg = ctx.db
+        .select()
+        .from(schema.messages)
+        .where(eq(schema.messages.conversationId, `bus-${threadId}`))
+        .all()
+        .find((m) => m.role === "user");
+      expect(userMsg?.content).toContain("Summarize the attached brief.");
+      expect(userMsg?.content).toContain("read_file");
+      expect(userMsg?.content).toContain("/api/agents/coo/files/art_1.md");
+    },
+    60_000
+  );
 
   it("keeps each agent's memory in its own isolated database", async () => {
     const a = stack.orch.createAgent({ displayName: "Mem A" });

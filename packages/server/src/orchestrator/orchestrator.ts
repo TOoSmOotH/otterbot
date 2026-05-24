@@ -1,5 +1,5 @@
 import { basename, join } from "node:path";
-import { existsSync, readdirSync, writeFileSync, rmSync, cpSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, writeFileSync, rmSync, cpSync } from "node:fs";
 import { eq, desc } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import type {
@@ -47,6 +47,7 @@ import { WebClient } from "@slack/web-api";
 import { SlackConnector } from "../integrations/slack-connector.js";
 import { DiscordConnector } from "../integrations/discord-connector.js";
 import { McpManager } from "../integrations/mcp.js";
+import { mimeFromName } from "../integrations/artifacts.js";
 
 /** A live per-agent chat connector plus the signature it was started with. */
 interface TrackedConnector<C extends ChannelConnector> {
@@ -441,6 +442,39 @@ export class Orchestrator {
       grepCodeReference: (pattern, opts) => this.codeRef.grep(pattern, opts),
       readCodeReference: (repo, path, range) => this.codeRef.readFile(repo, path, range),
       listCodeReferenceRepos: () => this.codeRef.listRepoDirectory(),
+      readArtifact: (agentId, file) => this.readArtifact(agentId, file),
+    };
+  }
+
+  /**
+   * Read the text contents of an agent's produced file (artifact). Resolves and
+   * traversal-guards via {@link agentFilePath}; refuses binary types and caps
+   * the returned text. Backs the `read_file` tool.
+   */
+  readArtifact(
+    agentId: string,
+    file: string
+  ): { ok: boolean; content?: string; mimeType?: string; truncated?: boolean; error?: string } {
+    const resolved = this.agentFilePath(agentId, file);
+    if (!resolved) return { ok: false, error: "file not found" };
+    const isText =
+      resolved.mimeType.startsWith("text/") ||
+      resolved.mimeType === "application/json" ||
+      resolved.mimeType === "application/xml";
+    if (!isText) {
+      return {
+        ok: false,
+        error: `cannot read ${resolved.mimeType} as text; reference it by URL instead`,
+      };
+    }
+    const MAX_BYTES = 256 * 1024;
+    const buf = readFileSync(resolved.path);
+    const truncated = buf.byteLength > MAX_BYTES;
+    return {
+      ok: true,
+      mimeType: resolved.mimeType,
+      content: buf.subarray(0, MAX_BYTES).toString("utf8"),
+      truncated,
     };
   }
 
@@ -848,6 +882,7 @@ export class Orchestrator {
       workspaceDir: paths.workspace,
       browserProfileDir: paths.browser,
       imagesDir: paths.images,
+      filesDir: paths.files,
       embedder: resolveEmbedder(embeddingRef, secrets),
       dbKey: this.cfg.dbKey,
     });
@@ -1136,6 +1171,20 @@ export class Orchestrator {
     if (name !== file || !/^[\w.-]+\.png$/i.test(name)) return null;
     const path = join(this.profiles.pathsFor(id).images, name);
     return existsSync(path) ? path : null;
+  }
+
+  /**
+   * Absolute path + MIME for one of an agent's produced files, or null. Accepts
+   * any extension but only a bare basename within the agent's files dir — same
+   * traversal guard as {@link agentImagePath}.
+   */
+  agentFilePath(id: string, file: string): { path: string; mimeType: string } | null {
+    if (!this.contexts.has(id)) return null;
+    const name = basename(file);
+    if (name !== file || name.includes("..") || !/^[\w.-]+$/.test(name)) return null;
+    const path = join(this.profiles.pathsFor(id).files, name);
+    if (!existsSync(path)) return null;
+    return { path, mimeType: mimeFromName(name) };
   }
 
   /** Save an uploaded avatar image and point the agent's artwork at it. */

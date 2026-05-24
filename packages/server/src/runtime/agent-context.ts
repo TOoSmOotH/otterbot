@@ -52,6 +52,8 @@ export interface AgentContext {
   browserProfileDir: string;
   /** Directory where the agent's generated images are written and served from. */
   imagesDir: string;
+  /** Directory where the agent's produced files (artifacts) are written/served. */
+  filesDir: string;
   agentDb: AgentDb;
   sqlite: Database.Database;
   db: AgentDrizzle;
@@ -91,6 +93,8 @@ export interface BuildAgentContextInput {
   browserProfileDir: string;
   /** Path to this agent's generated-images directory. */
   imagesDir: string;
+  /** Path to this agent's produced-files (artifacts) directory. */
+  filesDir: string;
   /** The embedder resolved from the agent's embedding model. */
   embedder: Embedder;
   /** Database encryption key, if configured. */
@@ -124,6 +128,7 @@ export function buildAgentContext(input: BuildAgentContextInput): AgentContext {
     workspaceDir: input.workspaceDir,
     browserProfileDir: input.browserProfileDir,
     imagesDir: input.imagesDir,
+    filesDir: input.filesDir,
     agentDb,
     sqlite: agentDb.sqlite,
     db: agentDb.db,

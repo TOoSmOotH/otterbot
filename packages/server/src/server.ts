@@ -419,6 +419,26 @@ export async function buildServer(
     }
   );
 
+  // Serve an agent's produced files (artifacts of any type). Images are shown
+  // inline by the client; other types are offered as a download.
+  app.get<{ Params: { id: string; file: string } }>(
+    "/api/agents/:id/files/:file",
+    async (req, reply) => {
+      const resolved = orch.agentFilePath(req.params.id, req.params.file);
+      if (!resolved) {
+        reply.code(404);
+        return { error: "not found" };
+      }
+      reply.header("content-type", resolved.mimeType);
+      // Names are unique per file, so they can be cached aggressively.
+      reply.header("cache-control", "public, max-age=31536000, immutable");
+      if (!resolved.mimeType.startsWith("image/")) {
+        reply.header("content-disposition", `attachment; filename="${req.params.file}"`);
+      }
+      return reply.send(createReadStream(resolved.path));
+    }
+  );
+
   app.delete<{ Params: { id: string } }>("/api/agents/:id/avatar", async (req, reply) => {
     const updated = orch.clearAgentAvatar(req.params.id);
     if (!updated) {
