@@ -12,6 +12,7 @@ import {
 import type { LucideIcon } from "lucide-react";
 import { useChatStore } from "../../stores/chat-store";
 import { useAgentsStore } from "../../stores/agents-store";
+import { withToken } from "../../lib/api";
 import { statusColor } from "../agents/agent-visual";
 import { Icon } from "../ui/Icon";
 import { type, fonts } from "../../lib/typography";
@@ -212,7 +213,20 @@ export function AgentChat({ onEditAgent }: { onEditAgent: (id: string) => void }
                       marginTop: 2,
                     }}
                   />
-                  <span>{m.content}</span>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6, minWidth: 0 }}>
+                    <span>{m.content}</span>
+                    {m.imageUrl && (
+                      <img
+                        src={withToken(m.imageUrl)}
+                        alt={m.content}
+                        style={{
+                          maxWidth: "min(420px, 100%)",
+                          borderRadius: 6,
+                          border: "1px solid rgb(var(--border))",
+                        }}
+                      />
+                    )}
+                  </div>
                 </motion.div>
               ) : (
                 <motion.div

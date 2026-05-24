@@ -50,6 +50,8 @@ export interface AgentContext {
   workspaceDir: string;
   /** Persistent Chrome user-data dir for the agent's browser tools. */
   browserProfileDir: string;
+  /** Directory where the agent's generated images are written and served from. */
+  imagesDir: string;
   agentDb: AgentDb;
   sqlite: Database.Database;
   db: AgentDrizzle;
@@ -87,6 +89,8 @@ export interface BuildAgentContextInput {
   workspaceDir: string;
   /** Path to this agent's persistent browser profile directory. */
   browserProfileDir: string;
+  /** Path to this agent's generated-images directory. */
+  imagesDir: string;
   /** The embedder resolved from the agent's embedding model. */
   embedder: Embedder;
   /** Database encryption key, if configured. */
@@ -119,6 +123,7 @@ export function buildAgentContext(input: BuildAgentContextInput): AgentContext {
     contextWindow: input.contextWindow,
     workspaceDir: input.workspaceDir,
     browserProfileDir: input.browserProfileDir,
+    imagesDir: input.imagesDir,
     agentDb,
     sqlite: agentDb.sqlite,
     db: agentDb.db,

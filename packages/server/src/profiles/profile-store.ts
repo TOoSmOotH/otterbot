@@ -41,6 +41,8 @@ export interface ProfilePaths {
   workspace: string;
   /** Persistent Chrome user-data dir for the agent's browser tools. */
   browser: string;
+  /** Where the agent's generated images are saved and served from. */
+  images: string;
 }
 
 export function profilePaths(root: string, id: string): ProfilePaths {
@@ -56,6 +58,7 @@ export function profilePaths(root: string, id: string): ProfilePaths {
     subagentsDir: join(dir, "subagents"),
     workspace: join(dir, "workspace"),
     browser: join(dir, "browser"),
+    images: join(dir, "images"),
   };
 }
 

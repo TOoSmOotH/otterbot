@@ -7,6 +7,7 @@ import { sendEmail } from "../integrations/email.js";
 import { createIssue, listIssues } from "../integrations/github.js";
 import { runAgentShell } from "../integrations/shell.js";
 import { searchWeb } from "../integrations/web-search.js";
+import { editImage, generateImage, persistImage } from "../integrations/image-gen.js";
 import {
   browserBack,
   browserClick,
@@ -217,6 +218,75 @@ export function buildAgentTools(
         } catch (err) {
           return { ok: false, error: err instanceof Error ? err.message : String(err) };
         }
+      },
+    });
+  }
+
+  // Image generation via ChatGPT Codex OAuth (gpt-image-2) — granted by the
+  // `image-gen` capability. Uses the instance-wide ChatGPT connection, so no
+  // per-agent credential is needed; the result is saved and shown in the chat.
+  if (granted.has("generate_image")) {
+    tools.generate_image = tool({
+      description:
+        "Generate an image from a text prompt using ChatGPT (gpt-image-2). The " +
+        "image is saved and shown in the chat; the result includes its URL. " +
+        "Requires the user to have connected ChatGPT in Settings.",
+      parameters: z.object({
+        prompt: z.string().min(1).describe("A detailed description of the image to generate."),
+        quality: z
+          .enum(["low", "medium", "high"])
+          .default("medium")
+          .describe("Higher quality looks better but is slower."),
+        size: z
+          .string()
+          .optional()
+          .describe('Image size, e.g. "1024x1024", "1024x1536", or "1536x1024".'),
+      }),
+      execute: async ({ prompt, quality, size }) => {
+        const res = await generateImage({ prompt, quality, size });
+        if (!res.ok || !res.b64) return { ok: false, error: res.error ?? "image generation failed" };
+        const { file } = persistImage(ctx.imagesDir, res.b64);
+        return { ok: true, kind: "image", url: `/api/agents/${ctx.profile.id}/images/${file}`, prompt };
+      },
+    });
+  }
+
+  if (granted.has("edit_image")) {
+    tools.edit_image = tool({
+      description:
+        "Edit or vary an existing image with ChatGPT (gpt-image-2), guided by a " +
+        "prompt and optionally a mask. The source can be a previously generated " +
+        "image URL, a file in your workspace, or an http(s) URL. The edited image " +
+        "is saved and shown in the chat. Requires ChatGPT connected in Settings.",
+      parameters: z.object({
+        prompt: z.string().min(1).describe("How to change the image."),
+        source_image: z
+          .string()
+          .min(1)
+          .describe(
+            "The image to edit: a generated-image URL (/api/agents/.../images/x.png), a " +
+              "workspace-relative path, or an http(s) URL."
+          ),
+        mask: z
+          .string()
+          .optional()
+          .describe("Optional mask image (same reference forms) marking the area to change."),
+        quality: z.enum(["low", "medium", "high"]).default("medium"),
+        size: z.string().optional().describe('Image size, e.g. "1024x1024".'),
+      }),
+      execute: async ({ prompt, source_image, mask, quality, size }) => {
+        const res = await editImage({
+          prompt,
+          sourceImage: source_image,
+          mask,
+          quality,
+          size,
+          imagesDir: ctx.imagesDir,
+          workspaceDir: ctx.workspaceDir,
+        });
+        if (!res.ok || !res.b64) return { ok: false, error: res.error ?? "image edit failed" };
+        const { file } = persistImage(ctx.imagesDir, res.b64);
+        return { ok: true, kind: "image", url: `/api/agents/${ctx.profile.id}/images/${file}`, prompt };
       },
     });
   }

@@ -1,4 +1,4 @@
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { existsSync, readdirSync, writeFileSync, rmSync, cpSync } from "node:fs";
 import { eq, desc } from "drizzle-orm";
 import { nanoid } from "nanoid";
@@ -847,6 +847,7 @@ export class Orchestrator {
       skillsDir: paths.skillsDir,
       workspaceDir: paths.workspace,
       browserProfileDir: paths.browser,
+      imagesDir: paths.images,
       embedder: resolveEmbedder(embeddingRef, secrets),
       dbKey: this.cfg.dbKey,
     });
@@ -1123,6 +1124,18 @@ export class Orchestrator {
     if (!existsSync(dir)) return null;
     const file = readdirSync(dir).find((n) => /^avatar\.(png|jpg|jpeg|webp|gif)$/i.test(n));
     return file ? join(dir, file) : null;
+  }
+
+  /**
+   * Absolute path to one of an agent's generated images, or null. Accepts only
+   * a bare `.png` basename within the agent's images dir — guards traversal.
+   */
+  agentImagePath(id: string, file: string): string | null {
+    if (!this.contexts.has(id)) return null;
+    const name = basename(file);
+    if (name !== file || !/^[\w.-]+\.png$/i.test(name)) return null;
+    const path = join(this.profiles.pathsFor(id).images, name);
+    return existsSync(path) ? path : null;
   }
 
   /** Save an uploaded avatar image and point the agent's artwork at it. */

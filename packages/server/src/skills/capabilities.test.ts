@@ -58,6 +58,7 @@ describe("capabilities", () => {
       skillsDir: join(dir, "skills"),
       workspaceDir: join(dir, "workspace"),
       browserProfileDir: join(dir, "browser"),
+      imagesDir: join(dir, "images"),
       embedder: new NullEmbedder(),
       dbKey: null,
     });

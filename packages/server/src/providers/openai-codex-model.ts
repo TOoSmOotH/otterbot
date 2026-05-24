@@ -6,6 +6,7 @@ import type {
 } from "ai";
 import { randomUUID } from "node:crypto";
 import { CHATGPT_CODEX_BASE_URL } from "../auth/openai-oauth.js";
+import { buildCodexHeaders } from "../auth/codex-request.js";
 import type { OpenAiAuthStore } from "../auth/openai-auth-store.js";
 
 type ResponsesInputItem =
@@ -156,20 +157,8 @@ export class OpenAiCodexOAuthModel implements LanguageModelV1 {
     };
   }
 
-  private async headers(): Promise<Headers> {
-    const token = await this.auth.accessToken();
-    const headers = new Headers({
-      authorization: `Bearer ${token}`,
-      "content-type": "application/json",
-      accept: "text/event-stream",
-      "openai-beta": "responses=experimental",
-      originator: "codex_cli_rs",
-      "User-Agent": "codex_cli_rs/0.0.0 (Otterbot)",
-      session_id: randomUUID(),
-    });
-    const account = this.auth.accountId() ?? accountIdFromJwt(token);
-    if (account) headers.set("ChatGPT-Account-ID", account);
-    return headers;
+  private headers(): Promise<Headers> {
+    return buildCodexHeaders(this.auth);
   }
 }
 
@@ -404,17 +393,6 @@ function unsupported(setting: CodexCallWarning["setting"]): CodexCallWarning {
     setting,
     details: "ChatGPT Codex OAuth omits this setting to match the Hermes/Codex transport.",
   };
-}
-
-function accountIdFromJwt(token: string): string | null {
-  try {
-    const payload = JSON.parse(Buffer.from(token.split(".")[1] ?? "", "base64").toString("utf8")) as {
-      "https://api.openai.com/auth"?: { chatgpt_account_id?: string };
-    };
-    return payload["https://api.openai.com/auth"]?.chatgpt_account_id ?? null;
-  } catch {
-    return null;
-  }
 }
 
 async function safeResponseText(res: Response): Promise<string> {

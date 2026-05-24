@@ -19,6 +19,10 @@ export const GRANTABLE_TOOL_NAMES = [
   "github_create_issue",
   "github_list_issues",
   "spawn_subagent",
+  // Image generation via ChatGPT Codex OAuth (gpt-image-2) — granted together
+  // by the `image-gen` capability.
+  "generate_image",
+  "edit_image",
   // Agentic browsing (agent-browser) — granted together by the
   // `agentic-browsing` capability.
   "browser_navigate",

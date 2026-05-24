@@ -8,7 +8,22 @@ import { buildAgentTools } from "../agent/tools.js";
 import { buildContext, maybeAutoCompact } from "./context-manager.js";
 import type { AgentContext } from "./agent-context.js";
 import type { AgentServices } from "./agent-services.js";
-import type { AgentStatus, AgentMessage, StreamChunk } from "@otterbot/shared";
+import type {
+  AgentStatus,
+  AgentMessage,
+  StreamChunk,
+  ToolCallRecord,
+} from "@otterbot/shared";
+
+/** A tool result that produced an image we persist + render in the chat. */
+function isImageResult(result: unknown): result is { url: string } {
+  return (
+    !!result &&
+    typeof result === "object" &&
+    (result as { kind?: unknown }).kind === "image" &&
+    typeof (result as { url?: unknown }).url === "string"
+  );
+}
 
 export interface RespondArgs {
   conversationId: string;
@@ -112,6 +127,9 @@ export class AgentRuntime {
       let finalText = "";
       let sawWork = false;
       let streamError: string | null = null;
+      // Image-producing tool results, persisted as their own messages so they
+      // survive a reload (they're excluded from the model context).
+      const imageMessages: Array<{ toolCall: ToolCallRecord; prompt: string }> = [];
       for await (const part of result.fullStream) {
         switch (part.type) {
           case "text-delta":
@@ -142,10 +160,44 @@ export class AgentRuntime {
       }
       void sawWork;
 
+      // Tool results aren't typed into `fullStream` for an untyped tool set, so
+      // read them from the completed steps: emit tool_end for the UI, and queue
+      // any images for persistence.
+      try {
+        for (const step of await result.steps) {
+          for (const tr of step.toolResults as Array<{
+            toolCallId: string;
+            toolName: string;
+            args: unknown;
+            result: unknown;
+          }>) {
+            // Only image results are surfaced to the client; other tool outputs
+            // (web pages, file contents, …) stay server-side.
+            if (isImageResult(tr.result)) {
+              args.onChunk({ kind: "tool_end", id: tr.toolCallId, result: tr.result });
+              imageMessages.push({
+                toolCall: { id: tr.toolCallId, name: tr.toolName, args: tr.args, result: tr.result },
+                prompt: (tr.args as { prompt?: string })?.prompt ?? "image",
+              });
+            }
+          }
+        }
+      } catch {
+        /* steps unavailable — nothing to persist */
+      }
+
       // A stream error that produced no text would otherwise surface as a
       // useless "(no response)" — throw so callers report the real cause.
       if (!finalText && streamError) {
         throw new Error(streamError);
+      }
+
+      // Persist generated images as tool messages (in turn order, before the
+      // assistant's closing text) so they re-render when the chat is reopened.
+      for (const img of imageMessages) {
+        this.appendMessage(args.conversationId, "tool", `Generated image: ${img.prompt}`, [
+          img.toolCall,
+        ]);
       }
 
       const messageId = this.appendMessage(args.conversationId, "assistant", finalText);
@@ -209,12 +261,20 @@ export class AgentRuntime {
   appendMessage(
     conversationId: string,
     role: "user" | "assistant" | "tool",
-    content: string
+    content: string,
+    toolCalls?: ToolCallRecord[]
   ): string {
     const id = nanoid();
     const db = this.ctx.db;
     db.insert(schema.messages)
-      .values({ id, conversationId, role, content, createdAt: new Date().toISOString() })
+      .values({
+        id,
+        conversationId,
+        role,
+        content,
+        toolCalls: toolCalls ?? null,
+        createdAt: new Date().toISOString(),
+      })
       .run();
     db.update(schema.conversations)
       .set({ messageCount: sql`${schema.conversations.messageCount} + 1` })

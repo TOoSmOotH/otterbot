@@ -6,14 +6,34 @@ import type {
   ConversationSummary,
   ContextStatus,
   ChatMessage as StoredMessage,
+  ToolCallRecord,
 } from "@otterbot/shared";
 
 export interface ChatMessage {
   id: string;
   role: "user" | "assistant" | "tool";
   content: string;
+  /** A generated image to render inline (from an image tool result). */
+  imageUrl?: string;
   pending?: boolean;
   error?: string;
+}
+
+/** Pull an image URL out of a tool result like `{ kind: "image", url }`. */
+function imageUrlFromResult(result: unknown): string | undefined {
+  if (result && typeof result === "object" && "url" in result) {
+    const url = (result as { url?: unknown }).url;
+    if (typeof url === "string") return url;
+  }
+  return undefined;
+}
+
+function imageUrlFromToolCalls(calls?: ToolCallRecord[]): string | undefined {
+  for (const c of calls ?? []) {
+    const url = imageUrlFromResult(c.result);
+    if (url) return url;
+  }
+  return undefined;
 }
 
 interface ChatState {
@@ -61,8 +81,17 @@ function appendChunk(messages: ChatMessage[], chunk: StreamChunk): ChatMessage[]
     case "tool_start":
       next.push({ id: `t-${chunk.id}`, role: "tool", content: `Used ${chunk.name}` });
       return next;
-    case "tool_end":
+    case "tool_end": {
+      const imageUrl = imageUrlFromResult(chunk.result);
+      if (!imageUrl) return next;
+      for (let i = next.length - 1; i >= 0; i--) {
+        if (next[i].id === `t-${chunk.id}`) {
+          next[i] = { ...next[i], imageUrl };
+          break;
+        }
+      }
       return next;
+    }
     case "error":
       if (last && last.role === "assistant" && last.pending) {
         next[next.length - 1] = { ...last, error: chunk.message, pending: false };
@@ -168,11 +197,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const res = await apiFetch(`/api/agents/${agentId}/conversations/${conversationId}`);
       if (!res.ok) return;
       const data = (await res.json()) as { messages: StoredMessage[] };
-      const mapped: ChatMessage[] = data.messages.map((m) => ({
-        id: m.id,
-        role: m.role === "assistant" || m.role === "tool" ? m.role : "user",
-        content: m.content,
-      }));
+      const mapped: ChatMessage[] = data.messages.map((m) => {
+        const role = m.role === "assistant" || m.role === "tool" ? m.role : "user";
+        return {
+          id: m.id,
+          role,
+          content: m.content,
+          imageUrl: role === "tool" ? imageUrlFromToolCalls(m.toolCalls) : undefined,
+        };
+      });
       set((state) => ({
         byAgent: { ...state.byAgent, [agentId]: mapped },
         currentConversation: { ...state.currentConversation, [agentId]: conversationId },

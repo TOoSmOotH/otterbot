@@ -40,6 +40,7 @@ import type {
   GlobalSettings,
   ConversationSummary,
   ChatMessage,
+  ToolCallRecord,
   AgentMemoryExport,
 } from "@otterbot/shared";
 import { redactGlobalSettings } from "./orchestrator/orchestrator.js";
@@ -402,6 +403,22 @@ export async function buildServer(
     return reply.send(createReadStream(file));
   });
 
+  // Serve an agent's generated images (from the `generate_image` tool).
+  app.get<{ Params: { id: string; file: string } }>(
+    "/api/agents/:id/images/:file",
+    async (req, reply) => {
+      const file = orch.agentImagePath(req.params.id, req.params.file);
+      if (!file) {
+        reply.code(404);
+        return { error: "not found" };
+      }
+      reply.header("content-type", "image/png");
+      // Filenames are unique per image, so they can be cached aggressively.
+      reply.header("cache-control", "public, max-age=31536000, immutable");
+      return reply.send(createReadStream(file));
+    }
+  );
+
   app.delete<{ Params: { id: string } }>("/api/agents/:id/avatar", async (req, reply) => {
     const updated = orch.clearAgentAvatar(req.params.id);
     if (!updated) {
@@ -619,6 +636,7 @@ export async function buildServer(
               conversationId: m.conversationId,
               role: m.role,
               content: m.content,
+              toolCalls: (m.toolCalls as ToolCallRecord[] | null) ?? undefined,
               createdAt: m.createdAt,
             })
           ),

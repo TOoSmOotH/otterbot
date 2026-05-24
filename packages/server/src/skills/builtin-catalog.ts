@@ -206,6 +206,36 @@ Credentials tab — you cannot configure them yourself.
   }),
 
   capability({
+    id: "image-gen",
+    name: "Image generation",
+    description:
+      "Generate and edit images with ChatGPT (gpt-image-2), via the instance's ChatGPT connection.",
+    tools: ["generate_image", "edit_image"],
+    body: `
+You can create and edit images with the \`generate_image\` and \`edit_image\`
+tools. They use ChatGPT's image model (gpt-image-2) through the instance's
+ChatGPT subscription — no API key or per-agent credential is involved.
+
+## Setup
+
+These tools need the user's ChatGPT account connected for this otterbot instance
+(**Settings → OpenAI → Sign in with ChatGPT**). If a tool reports it is not
+connected, ask the user to connect ChatGPT there — you cannot do it yourself.
+
+## Usage
+
+- **generate_image**: pass a vivid, specific \`prompt\`. Describe subject, style,
+  composition, and mood. Pick \`quality\` (\`low\`/\`medium\`/\`high\`) for the
+  speed/detail trade-off, and \`size\` for the aspect ratio.
+- **edit_image**: pass a \`prompt\` plus a \`source_image\` — the URL of an image
+  you generated earlier, a file in your workspace, or an http(s) URL. Add a
+  \`mask\` to confine the edit to part of the image.
+- The saved image is shown in the chat automatically; you don't need to paste the
+  URL. Briefly tell the user what you made.
+`,
+  }),
+
+  capability({
     id: "code-reference",
     name: "Code reference",
     description:
