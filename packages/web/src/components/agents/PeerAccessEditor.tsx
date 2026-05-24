@@ -99,21 +99,30 @@ export function PeerAccessEditor({
 
       {incoming !== undefined && (
         <section style={{ marginTop: 16 }}>
-          <p style={sectionLabel}>Incoming — agents that can reach {name}</p>
+          <p style={sectionLabel}>Incoming — who can reach {name}</p>
           {incoming.length === 0 ? (
             <p style={hintStyle}>No agents can message {name} yet.</p>
           ) : (
             <>
-              {incoming.map((p) => (
-                <div key={p.agentId} style={rowStyle}>
-                  <span style={dirLabel}>
-                    <span>{p.displayName}</span>
-                    <Icon icon={ArrowRight} size={14} />
-                    <span style={selfName}>{name}</span>
-                  </span>
-                  <span style={levelBadge(p.level)}>{LEVEL_TEXT[p.level]}</span>
-                </div>
-              ))}
+              {incoming.map((p) => {
+                const canReadMemory = p.level === "memory" || p.level === "always";
+                return (
+                  <div key={p.agentId} style={rowStyle}>
+                    <span style={dirLabel}>
+                      <span style={selfName}>{p.displayName}</span>
+                      {p.level === "always" && <span style={alwaysTag}>always</span>}
+                    </span>
+                    <label style={checkboxRow}>
+                      <input type="checkbox" checked disabled readOnly />
+                      can message
+                    </label>
+                    <label style={{ ...checkboxRow, opacity: canReadMemory ? 1 : 0.5 }}>
+                      <input type="checkbox" checked={canReadMemory} disabled readOnly />
+                      read my memory
+                    </label>
+                  </div>
+                );
+              })}
               <p style={hintStyle}>
                 Controlled by the other agent — change these on that agent's Peers tab.
               </p>
@@ -123,31 +132,6 @@ export function PeerAccessEditor({
       )}
     </>
   );
-}
-
-const LEVEL_TEXT: Record<IncomingPeer["level"], string> = {
-  message: "message",
-  memory: "message + memory",
-  always: "always",
-};
-
-function levelBadge(level: IncomingPeer["level"]): React.CSSProperties {
-  const color =
-    level === "memory"
-      ? "var(--accent)"
-      : level === "always"
-        ? "var(--muted)"
-        : "var(--border-strong)";
-  return {
-    fontSize: 11,
-    fontWeight: 600,
-    color: `rgb(${color})`,
-    border: `1px solid rgb(${color} / 0.4)`,
-    background: `rgb(${color} / 0.12)`,
-    borderRadius: 5,
-    padding: "1px 7px",
-    whiteSpace: "nowrap",
-  };
 }
 
 const rowStyle: React.CSSProperties = {
@@ -169,6 +153,17 @@ const dirLabel: React.CSSProperties = {
 
 const selfName: React.CSSProperties = {
   fontWeight: 600,
+};
+
+const alwaysTag: React.CSSProperties = {
+  fontSize: 10,
+  fontWeight: 600,
+  letterSpacing: "0.04em",
+  textTransform: "uppercase",
+  color: "rgb(var(--muted))",
+  border: "1px solid rgb(var(--border))",
+  borderRadius: 4,
+  padding: "0 5px",
 };
 
 const checkboxRow: React.CSSProperties = {
