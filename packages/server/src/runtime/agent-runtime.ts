@@ -258,12 +258,6 @@ export class AgentRuntime {
             // Files a delegated peer produced and handed back — display them in
             // this agent's chat and persist so they survive a reload.
             const delegated = delegateArtifacts(tr.result);
-            if (tr.toolName === "delegate") {
-              console.log(
-                `[artifacts] ${this.id}: delegate result had ${delegated.length} artifact(s)`,
-                JSON.stringify((tr.result as { artifacts?: unknown })?.artifacts ?? null)
-              );
-            }
             if (delegated.length) {
               args.onChunk({ kind: "artifacts", artifacts: delegated });
               delegated.forEach((a, i) => {
@@ -285,8 +279,8 @@ export class AgentRuntime {
             }
           }
         }
-      } catch (err) {
-        console.warn(`[artifacts] ${this.id}: steps harvest failed`, err);
+      } catch {
+        /* steps unavailable — nothing to persist */
       }
 
       // A stream error that produced no text would otherwise surface as a
@@ -335,10 +329,6 @@ export class AgentRuntime {
         });
         reply = res.finalText || "(no response)";
         artifacts = res.artifacts;
-        console.log(
-          `[artifacts] ${this.id}: responding to ${msg.from} with ${artifacts.length} artifact(s)`,
-          JSON.stringify(artifacts.map((a) => ({ kind: a.kind, url: a.url })))
-        );
       } catch (err) {
         reply = `Error: ${err instanceof Error ? err.message : String(err)}`;
       }
