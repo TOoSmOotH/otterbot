@@ -1,24 +1,44 @@
 import type { AgentPeerAccess } from "@otterbot/shared";
+import { ArrowRight } from "lucide-react";
+import { Icon } from "../ui/Icon";
 
 interface PeerAgent {
   id: string;
   displayName: string;
 }
 
+/** An agent that may message the agent being edited (shown read-only). */
+export interface IncomingPeer {
+  agentId: string;
+  displayName: string;
+  /** "always" = the COO, which can reach every agent. */
+  level: "message" | "memory" | "always";
+}
+
 /**
- * Editor for an agent's peer access — which other agents it may message and
- * whose memory it may read. Shared by the new-agent form and the Agent Studio
- * "Peers" tab.
+ * Editor for an agent's peer access. The "Outgoing" section is editable — which
+ * other agents this agent may message and whose memory it may read. The optional
+ * "Incoming" section shows, read-only, which agents may message *this* agent
+ * (controlled by those agents). Every row spells out the direction with the
+ * agent's name and an arrow so "who can talk to whom" is unambiguous.
+ *
+ * Shared by the new-agent form (no incoming section) and the Agent Studio
+ * "Peers" tab (with incoming).
  */
 export function PeerAccessEditor({
+  agentName,
   peers,
   peerAgents,
   onChange,
+  incoming,
   isCoo = false,
 }: {
+  agentName: string;
   peers: AgentPeerAccess[];
   peerAgents: PeerAgent[];
   onChange: (next: AgentPeerAccess[]) => void;
+  /** When provided, renders the read-only "Incoming" section. */
+  incoming?: IncomingPeer[];
   isCoo?: boolean;
 }) {
   const setPeerMessage = (peerId: string, on: boolean) =>
@@ -33,53 +53,137 @@ export function PeerAccessEditor({
   const setPeerMemory = (peerId: string, on: boolean) =>
     onChange(peers.map((p) => (p.agentId === peerId ? { ...p, shareMemory: on } : p)));
 
-  if (isCoo) {
-    return <p style={hintStyle}>The COO can message and read the memory of every agent.</p>;
-  }
-  if (peerAgents.length === 0) {
-    return <p style={hintStyle}>No other agents to grant access to yet.</p>;
-  }
+  const name = agentName || "this agent";
+
   return (
     <>
-      <p style={hintStyle}>
-        Choose which agents this agent may message. Reading a peer's memory (read-only) requires
-        message permission.
-      </p>
-      {peerAgents.map((a) => {
-        const peer = peers.find((p) => p.agentId === a.id);
-        const canMessage = peer !== undefined;
-        return (
-          <div key={a.id} style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 13 }}>
-            <span style={{ flex: 1 }}>{a.displayName}</span>
-            <label style={checkboxRow}>
-              <input
-                type="checkbox"
-                checked={canMessage}
-                onChange={(e) => setPeerMessage(a.id, e.target.checked)}
-              />
-              Can message
-            </label>
-            <label style={{ ...checkboxRow, opacity: canMessage ? 1 : 0.5 }}>
-              <input
-                type="checkbox"
-                checked={peer?.shareMemory ?? false}
-                disabled={!canMessage}
-                onChange={(e) => setPeerMemory(a.id, e.target.checked)}
-              />
-              Can read memory
-            </label>
-          </div>
-        );
-      })}
+      <section>
+        <p style={sectionLabel}>Outgoing — agents {name} can reach</p>
+        {isCoo ? (
+          <p style={hintStyle}>The COO can message and read the memory of every agent.</p>
+        ) : peerAgents.length === 0 ? (
+          <p style={hintStyle}>No other agents to grant access to yet.</p>
+        ) : (
+          peerAgents.map((a) => {
+            const peer = peers.find((p) => p.agentId === a.id);
+            const canMessage = peer !== undefined;
+            return (
+              <div key={a.id} style={rowStyle}>
+                <span style={dirLabel}>
+                  <span style={selfName}>{name}</span>
+                  <Icon icon={ArrowRight} size={14} />
+                  <span>{a.displayName}</span>
+                </span>
+                <label style={checkboxRow}>
+                  <input
+                    type="checkbox"
+                    checked={canMessage}
+                    onChange={(e) => setPeerMessage(a.id, e.target.checked)}
+                  />
+                  message
+                </label>
+                <label style={{ ...checkboxRow, opacity: canMessage ? 1 : 0.5 }}>
+                  <input
+                    type="checkbox"
+                    checked={peer?.shareMemory ?? false}
+                    disabled={!canMessage}
+                    onChange={(e) => setPeerMemory(a.id, e.target.checked)}
+                  />
+                  read memory
+                </label>
+              </div>
+            );
+          })
+        )}
+      </section>
+
+      {incoming !== undefined && (
+        <section style={{ marginTop: 16 }}>
+          <p style={sectionLabel}>Incoming — agents that can reach {name}</p>
+          {incoming.length === 0 ? (
+            <p style={hintStyle}>No agents can message {name} yet.</p>
+          ) : (
+            <>
+              {incoming.map((p) => (
+                <div key={p.agentId} style={rowStyle}>
+                  <span style={dirLabel}>
+                    <span>{p.displayName}</span>
+                    <Icon icon={ArrowRight} size={14} />
+                    <span style={selfName}>{name}</span>
+                  </span>
+                  <span style={levelBadge(p.level)}>{LEVEL_TEXT[p.level]}</span>
+                </div>
+              ))}
+              <p style={hintStyle}>
+                Controlled by the other agent — change these on that agent's Peers tab.
+              </p>
+            </>
+          )}
+        </section>
+      )}
     </>
   );
 }
 
+const LEVEL_TEXT: Record<IncomingPeer["level"], string> = {
+  message: "message",
+  memory: "message + memory",
+  always: "always",
+};
+
+function levelBadge(level: IncomingPeer["level"]): React.CSSProperties {
+  const color =
+    level === "memory"
+      ? "var(--accent)"
+      : level === "always"
+        ? "var(--muted)"
+        : "var(--border-strong)";
+  return {
+    fontSize: 11,
+    fontWeight: 600,
+    color: `rgb(${color})`,
+    border: `1px solid rgb(${color} / 0.4)`,
+    background: `rgb(${color} / 0.12)`,
+    borderRadius: 5,
+    padding: "1px 7px",
+    whiteSpace: "nowrap",
+  };
+}
+
+const rowStyle: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: 12,
+  fontSize: 13,
+  padding: "3px 0",
+};
+
+const dirLabel: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: 6,
+  flex: 1,
+  minWidth: 0,
+  color: "rgb(var(--fg))",
+};
+
+const selfName: React.CSSProperties = {
+  fontWeight: 600,
+};
+
 const checkboxRow: React.CSSProperties = {
   display: "flex",
   alignItems: "center",
-  gap: 8,
+  gap: 6,
   fontSize: 13,
+  color: "rgb(var(--muted))",
+};
+
+const sectionLabel: React.CSSProperties = {
+  margin: "0 0 6px",
+  fontSize: 12,
+  fontWeight: 600,
+  color: "rgb(var(--fg))",
 };
 
 const hintStyle: React.CSSProperties = {

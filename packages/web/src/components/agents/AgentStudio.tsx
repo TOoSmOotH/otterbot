@@ -16,7 +16,7 @@ import { useAgentsStore } from "../../stores/agents-store";
 import { useGlobalSettingsStore } from "../../stores/global-settings-store";
 import { ModelSelect } from "./ModelSelect";
 import { AvatarUpload } from "./AvatarUpload";
-import { PeerAccessEditor } from "./PeerAccessEditor";
+import { PeerAccessEditor, type IncomingPeer } from "./PeerAccessEditor";
 import { TerminalModal } from "./TerminalModal";
 
 const TABS = ["Identity", "Persona", "Model", "Skills", "Channels", "Peers", "Schedule", "Memory", "Credentials"] as const;
@@ -1045,21 +1045,52 @@ function ModelTab({ profile, onSaved }: TabProps) {
 /** Which other agents this agent may message and whose memory it may read. */
 function PeersTab({ profile, onSaved }: TabProps) {
   const [peerAgents, setPeerAgents] = useState<{ id: string; displayName: string }[]>([]);
+  const [incoming, setIncoming] = useState<IncomingPeer[]>([]);
   const [draft, setDraft] = useState<AgentPeerAccess[]>(profile.allowedPeers ?? []);
   const [saved, setSaved] = useState(false);
 
   useEffect(() => {
+    let cancelled = false;
     void apiFetch("/api/agents")
       .then((r) => (r.ok ? (r.json() as Promise<AgentProfileSummary[]>) : []))
-      .then((list) =>
-        setPeerAgents(
-          list
-            .filter((a) => a.id !== profile.id && a.role !== "subagent")
-            .map((a) => ({ id: a.id, displayName: a.displayName }))
-        )
-      )
+      .then(async (list) => {
+        if (cancelled) return;
+        const others = list.filter((a) => a.id !== profile.id && a.role !== "subagent");
+        setPeerAgents(others.map((a) => ({ id: a.id, displayName: a.displayName })));
+
+        // Compute who can reach THIS agent. The COO always can (implicit, not in
+        // its stored allowedPeers); every other agent that lists this one does.
+        const coo = others.find((a) => a.role === "coo");
+        const fromOthers = await Promise.all(
+          others
+            .filter((a) => a.role !== "coo")
+            .map((a) =>
+              apiFetch(`/api/agents/${a.id}`)
+                .then((r) => (r.ok ? (r.json() as Promise<AgentProfile>) : null))
+                .then((p): IncomingPeer | null => {
+                  const grant = p?.allowedPeers?.find((peer) => peer.agentId === profile.id);
+                  if (!grant) return null;
+                  return {
+                    agentId: a.id,
+                    displayName: a.displayName,
+                    level: grant.shareMemory ? "memory" : "message",
+                  };
+                })
+                .catch(() => null)
+            )
+        );
+        if (cancelled) return;
+        const result = fromOthers.filter((x): x is IncomingPeer => x !== null);
+        if (coo && profile.role !== "coo") {
+          result.unshift({ agentId: coo.id, displayName: coo.displayName, level: "always" });
+        }
+        setIncoming(result);
+      })
       .catch(() => {});
-  }, [profile.id]);
+    return () => {
+      cancelled = true;
+    };
+  }, [profile.id, profile.role]);
 
   const isCoo = profile.role === "coo";
 
@@ -1078,12 +1109,13 @@ function PeersTab({ profile, onSaved }: TabProps) {
   return (
     <Form>
       <p style={hint}>
-        Control which agents this agent may message and whose memory it may read. The COO can
-        always reach every agent.
+        An arrow A → B means A may message B. The COO can always reach every agent.
       </p>
       <PeerAccessEditor
+        agentName={profile.displayName}
         peers={draft}
         peerAgents={peerAgents}
+        incoming={incoming}
         isCoo={isCoo}
         onChange={(next) => {
           setDraft(next);

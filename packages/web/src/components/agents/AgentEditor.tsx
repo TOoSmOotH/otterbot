@@ -288,6 +288,7 @@ export function AgentEditor({ agentId, onClose }: { agentId: string | null; onCl
         >
           <span style={{ fontSize: 12, color: "rgb(var(--muted))" }}>Peer access</span>
           <PeerAccessEditor
+            agentName={form.displayName}
             peers={form.allowedPeers}
             peerAgents={peerAgents}
             isCoo={agentId === "coo"}
