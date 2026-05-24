@@ -573,4 +573,37 @@ describe("HTTP API (e2e)", () => {
     expect(stack.orch.agentFilePath("coo", "a/b.txt")).toBeNull();
     expect(stack.orch.agentFilePath("no-such-agent", art.id)).toBeNull();
   });
+
+  it("accepts a chat file upload, rejects unsupported types and unknown agents", async () => {
+    const upload = (agentId: string, filename: string, contentType: string, body: string) => {
+      const boundary = "----otterbotupload";
+      const multipart =
+        `--${boundary}\r\n` +
+        `Content-Disposition: form-data; name="file"; filename="${filename}"\r\n` +
+        `Content-Type: ${contentType}\r\n\r\n` +
+        body +
+        `\r\n--${boundary}--\r\n`;
+      return app.inject({
+        method: "POST",
+        url: `/api/agents/${agentId}/files`,
+        headers: { "content-type": `multipart/form-data; boundary=${boundary}` },
+        payload: multipart,
+      });
+    };
+
+    // A supported text upload returns a fetchable Artifact reference.
+    const ok = await upload("coo", "notes.md", "text/markdown", "# hello");
+    expect(ok.statusCode).toBe(200);
+    const art = ok.json() as { url: string; kind: string; name: string };
+    expect(art.name).toBe("notes.md");
+    const fetched = await app.inject({ method: "GET", url: art.url });
+    expect(fetched.statusCode).toBe(200);
+    expect(fetched.body).toBe("# hello");
+
+    // Unsupported type → 415; unknown agent → 404.
+    const bad = await upload("coo", "x.exe", "application/x-msdownload", "MZ");
+    expect(bad.statusCode).toBe(415);
+    const noAgent = await upload("does-not-exist", "a.txt", "text/plain", "hi");
+    expect(noAgent.statusCode).toBe(404);
+  });
 });

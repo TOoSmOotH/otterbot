@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { apiFetch } from "../lib/api";
 import { getSocket } from "../lib/socket";
 import type {
+  Artifact,
   StreamChunk,
   ConversationSummary,
   ContextStatus,
@@ -18,6 +19,8 @@ export interface ChatMessage {
   /** A non-image file to offer as a download (from a file tool result). */
   fileUrl?: string;
   fileName?: string;
+  /** Files the user uploaded with this message. */
+  attachments?: Artifact[];
   pending?: boolean;
   error?: string;
 }
@@ -66,7 +69,7 @@ interface ChatState {
 
   connect: () => void;
   join: (agentId: string) => void;
-  send: (agentId: string, text: string) => void;
+  send: (agentId: string, text: string, attachments?: Artifact[]) => void;
   loadConversations: (agentId: string) => Promise<void>;
   openConversation: (agentId: string, conversationId: string) => Promise<void>;
   newConversation: (agentId: string) => void;
@@ -190,20 +193,20 @@ export const useChatStore = create<ChatState>((set, get) => ({
     getSocket().emit("chat:join", { agentId, conversationId });
   },
 
-  send: (agentId, text) => {
+  send: (agentId, text, attachments) => {
     const trimmed = text.trim();
-    if (!trimmed) return;
+    if (!trimmed && !attachments?.length) return;
     set((state) => ({
       byAgent: {
         ...state.byAgent,
         [agentId]: [
           ...(state.byAgent[agentId] ?? []),
-          { id: `u-${Date.now()}`, role: "user", content: trimmed },
+          { id: `u-${Date.now()}`, role: "user", content: trimmed, attachments },
         ],
       },
       streaming: { ...state.streaming, [agentId]: true },
     }));
-    getSocket().emit("chat:message", { agentId, text: trimmed });
+    getSocket().emit("chat:message", { agentId, text: trimmed, attachments });
   },
 
   loadConversations: async (agentId) => {
@@ -229,6 +232,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           id: m.id,
           role,
           content: m.content,
+          attachments: m.attachments,
           ...(role === "tool" ? artifactFromToolCalls(m.toolCalls) : undefined),
         };
       });

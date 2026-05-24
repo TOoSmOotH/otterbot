@@ -62,6 +62,19 @@ export interface BuildServerOpts {
   auth?: AuthStore | null;
 }
 
+/** MIME types accepted by the chat file-upload endpoint. */
+const UPLOAD_ALLOWED = new Set([
+  "image/png",
+  "image/jpeg",
+  "image/webp",
+  "image/gif",
+  "application/pdf",
+  "text/plain",
+  "text/markdown",
+  "text/csv",
+  "application/json",
+]);
+
 /**
  * Build the Fastify HTTP API over a booted `Orchestrator`. Does not call
  * `listen()` — `index.ts` does that for the real process, while tests use
@@ -78,8 +91,8 @@ export async function buildServer(
   // non-browser client (CORS does not apply). Anything cross-origin must be
   // an explicit choice — flip this back on with care.
   await app.register(fastifyCors, { origin: false });
-  // Avatar uploads — capped well above any reasonable image.
-  await app.register(fastifyMultipart, { limits: { fileSize: 4 * 1024 * 1024, files: 1 } });
+  // Avatar and chat file uploads.
+  await app.register(fastifyMultipart, { limits: { fileSize: 10 * 1024 * 1024, files: 1 } });
 
   const auth = opts.auth ?? null;
   if (auth) registerAuth(app, auth);
@@ -439,6 +452,34 @@ export async function buildServer(
     }
   );
 
+  // Accept a user file upload for an agent to process; returns its Artifact ref.
+  app.post<{ Params: { id: string } }>("/api/agents/:id/files", async (req, reply) => {
+    const file = await req.file();
+    if (!file) {
+      reply.code(400);
+      return { error: "expected a multipart file upload" };
+    }
+    const mimeType = file.mimetype || "application/octet-stream";
+    if (!UPLOAD_ALLOWED.has(mimeType)) {
+      reply.code(415);
+      return { error: `unsupported file type: ${mimeType}` };
+    }
+    let data: Buffer;
+    try {
+      data = await file.toBuffer();
+    } catch {
+      // @fastify/multipart throws when the file exceeds the configured limit.
+      reply.code(413);
+      return { error: "file too large" };
+    }
+    const art = orch.saveAgentUpload(req.params.id, data, file.filename || "upload", mimeType);
+    if (!art) {
+      reply.code(404);
+      return { error: "unknown agent" };
+    }
+    return art;
+  });
+
   app.delete<{ Params: { id: string } }>("/api/agents/:id/avatar", async (req, reply) => {
     const updated = orch.clearAgentAvatar(req.params.id);
     if (!updated) {
@@ -657,6 +698,7 @@ export async function buildServer(
               role: m.role,
               content: m.content,
               toolCalls: (m.toolCalls as ToolCallRecord[] | null) ?? undefined,
+              attachments: m.attachments ?? undefined,
               createdAt: m.createdAt,
             })
           ),

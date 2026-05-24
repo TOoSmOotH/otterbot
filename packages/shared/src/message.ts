@@ -6,6 +6,8 @@ export interface ChatMessage {
   role: MessageRole;
   content: string;
   toolCalls?: ToolCallRecord[];
+  /** Files the user attached to this message (uploads). */
+  attachments?: Artifact[];
   createdAt: string;
 }
 

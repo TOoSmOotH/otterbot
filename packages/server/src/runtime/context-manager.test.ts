@@ -1,4 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { nanoid } from "nanoid";
 import { createTestStack, type TestStack } from "../test/harness.js";
 import * as schema from "../db/schema.js";
@@ -51,6 +53,41 @@ describe("context-manager", () => {
     expect(estimateTokens("")).toBe(0);
     expect(estimateTokens("abcd")).toBe(1);
     expect(estimateTokens("a".repeat(400))).toBe(100);
+  });
+
+  it("renders a user message's image attachment as a multimodal image part", () => {
+    const conversationId = `conv-img-${nanoid(6)}`;
+    ctx.db.insert(schema.conversations).values({ id: conversationId }).run();
+    mkdirSync(ctx.filesDir, { recursive: true });
+    writeFileSync(join(ctx.filesDir, "up.png"), Buffer.from("PNGBYTES"));
+    ctx.db
+      .insert(schema.messages)
+      .values({
+        id: nanoid(),
+        conversationId,
+        role: "user",
+        content: "what is this?",
+        attachments: [
+          {
+            id: "up.png",
+            kind: "image",
+            url: "/api/agents/coo/files/up.png",
+            name: "up.png",
+            mimeType: "image/png",
+          },
+        ],
+        createdAt: new Date().toISOString(),
+      })
+      .run();
+
+    const { messages } = buildContext(ctx, conversationId);
+    const last = messages[messages.length - 1];
+    expect(Array.isArray(last.content)).toBe(true);
+    const parts = last.content as Array<{ type: string }>;
+    expect(parts.some((p) => p.type === "image")).toBe(true);
+    // The text part carries the reference block so the agent can route the file.
+    const text = parts.find((p) => p.type === "text") as { text: string } | undefined;
+    expect(text?.text).toContain("/api/agents/coo/files/up.png");
   });
 
   it("contextStatus reports usage for an uncompacted conversation", () => {

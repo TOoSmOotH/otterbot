@@ -1,10 +1,12 @@
 import { nanoid } from "nanoid";
 import { eq, asc } from "drizzle-orm";
-import type { CoreMessage } from "ai";
+import { readFileSync } from "node:fs";
+import { basename, join } from "node:path";
+import type { CoreMessage, FilePart, ImagePart, TextPart } from "ai";
 import * as schema from "../db/schema.js";
 import { summarizeText } from "../memory/summarizer.js";
 import type { AgentContext } from "./agent-context.js";
-import type { ContextStatus } from "@otterbot/shared";
+import type { Artifact, ContextStatus } from "@otterbot/shared";
 
 /** Rough char-per-token ratio — good enough for budgeting without a tokenizer. */
 export const CHARS_PER_TOKEN = 4;
@@ -110,11 +112,59 @@ export function buildContext(
   const verbatim = verbatimWindow(messages, recap);
   return {
     recapText: recap ? formatRecap(recap) : null,
-    messages: verbatim.map((m) => ({
-      role: m.role as "user" | "assistant",
-      content: m.content,
-    })),
+    messages: verbatim.map(
+      (m) =>
+        ({
+          role: m.role as "user" | "assistant",
+          content: messageContent(ctx, m),
+        }) as CoreMessage
+    ),
   };
+}
+
+/**
+ * Build a message's model content. Plain text unless the (user) message has
+ * uploaded attachments — then it becomes a multimodal part array: the text
+ * (plus a reference block so the agent can route/read files by URL), image
+ * parts for images, and file parts for PDFs. Text-like docs are left for the
+ * agent to fetch via `read_file`. Reads bytes from the agent's own files dir;
+ * anything that can't be read is skipped.
+ */
+function messageContent(
+  ctx: AgentContext,
+  m: MessageRow
+): string | Array<TextPart | ImagePart | FilePart> {
+  const attachments = (m.attachments as Artifact[] | null) ?? null;
+  if (m.role !== "user" || !attachments || attachments.length === 0) return m.content;
+
+  const refs = attachments.map((a) => `- ${a.name} — ${a.url}`).join("\n");
+  const parts: Array<TextPart | ImagePart | FilePart> = [
+    {
+      type: "text",
+      text: `${m.content}\n\n---\nAttached files (use the read_file tool to read text files):\n${refs}`,
+    },
+  ];
+  for (const a of attachments) {
+    const path = artifactLocalPath(ctx, a);
+    if (!path) continue;
+    try {
+      if (a.kind === "image" || a.mimeType.startsWith("image/")) {
+        parts.push({ type: "image", image: readFileSync(path), mimeType: a.mimeType });
+      } else if (a.mimeType === "application/pdf") {
+        parts.push({ type: "file", data: readFileSync(path), mimeType: "application/pdf" });
+      }
+    } catch {
+      /* unreadable upload — skip; the reference is still in the text */
+    }
+  }
+  return parts;
+}
+
+/** Resolve an uploaded artifact URL to a path within this agent's files dir. */
+function artifactLocalPath(ctx: AgentContext, a: Artifact): string | null {
+  const match = a.url.match(/\/files\/([^/?#]+)$/);
+  if (!match) return null;
+  return join(ctx.filesDir, basename(match[1]));
 }
 
 /**

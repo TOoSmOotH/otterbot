@@ -93,6 +93,8 @@ function delegateArtifacts(result: unknown): Artifact[] {
 export interface RespondArgs {
   conversationId: string;
   userMessage: string;
+  /** Files the user uploaded with this message, for the agent to process. */
+  attachments?: Artifact[];
   onChunk: (chunk: StreamChunk) => void;
 }
 
@@ -165,7 +167,13 @@ export class AgentRuntime {
     try {
       this.ensureConversation(args.conversationId);
       this.reopenConversation(args.conversationId);
-      this.appendMessage(args.conversationId, "user", args.userMessage);
+      this.appendMessage(
+        args.conversationId,
+        "user",
+        args.userMessage,
+        undefined,
+        args.attachments
+      );
       this.setTitleIfEmpty(args.conversationId, args.userMessage);
 
       // Bound the conversation context: compact the oldest turns if it has
@@ -366,7 +374,8 @@ export class AgentRuntime {
     conversationId: string,
     role: "user" | "assistant" | "tool",
     content: string,
-    toolCalls?: ToolCallRecord[]
+    toolCalls?: ToolCallRecord[],
+    attachments?: Artifact[]
   ): string {
     const id = nanoid();
     const db = this.ctx.db;
@@ -377,6 +386,7 @@ export class AgentRuntime {
         role,
         content,
         toolCalls: toolCalls ?? null,
+        attachments: attachments ?? null,
         createdAt: new Date().toISOString(),
       })
       .run();

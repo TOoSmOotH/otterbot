@@ -219,6 +219,8 @@ export function persistImage(imagesDir: string, b64: string): { file: string; pa
  */
 async function resolveImageDataUrl(ref: string, opts: EditImageOpts): Promise<string> {
   const trimmed = ref.trim();
+  // Already a data URL (e.g. a cross-agent artifact pre-resolved by the tool).
+  if (trimmed.startsWith("data:")) return trimmed;
   if (/^https?:\/\//i.test(trimmed)) {
     const res = await fetch(trimmed);
     if (!res.ok) throw new Error(`could not fetch source image: ${res.status}`);

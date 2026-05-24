@@ -7,6 +7,7 @@ import { extractFactsFromConversation } from "./memory/extractor.js";
 import { maybeAuthorSkill } from "./skills/skill-author.js";
 import { openTerminal } from "./integrations/shell-terminal.js";
 import { extractToken, type AuthStore } from "./auth/api-token.js";
+import type { Artifact } from "@otterbot/shared";
 
 export interface AttachSocketOpts {
   /** Auth store consulted per connection; null/undefined disables auth. */
@@ -101,7 +102,7 @@ export function attachSocketServer(
       });
     });
 
-    socket.on("chat:message", async (payload: { agentId?: string; text: string }) => {
+    socket.on("chat:message", async (payload: { agentId?: string; text: string; attachments?: Artifact[] }) => {
       const agentId = payload.agentId || "coo";
       const joined = ensureJoined(agentId);
       resetIdle(joined, () => closeSession(orch, agentId, joined.conversationId));
@@ -120,6 +121,7 @@ export function attachSocketServer(
         await runtime.respond({
           conversationId: joined.conversationId,
           userMessage: payload.text,
+          attachments: payload.attachments,
           onChunk: (chunk) => socket.emit("chat:stream", { agentId, chunk }),
         });
         socket.emit("chat:done", { agentId, conversationId: joined.conversationId });

@@ -66,4 +66,14 @@ export interface AgentServices {
     agentId: string,
     file: string
   ): { ok: boolean; content?: string; mimeType?: string; truncated?: boolean; error?: string };
+  /**
+   * Read the raw bytes of an agent's file (`files/`) or generated image
+   * (`images/`) by basename. Used to resolve cross-agent image references for
+   * editing. Returns null if the agent/file is unknown or the name is unsafe.
+   */
+  readArtifactBinary(
+    agentId: string,
+    dir: "files" | "images",
+    name: string
+  ): { data: Buffer; mimeType: string } | null;
 }

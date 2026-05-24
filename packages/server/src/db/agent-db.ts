@@ -64,6 +64,7 @@ function ensureAgentTables(sqlite: Database.Database) {
       role TEXT NOT NULL,
       content TEXT NOT NULL,
       tool_calls TEXT,
+      attachments TEXT,
       created_at TEXT NOT NULL
     )`,
     `CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages(conversation_id, created_at)`,
@@ -154,6 +155,19 @@ function ensureAgentTables(sqlite: Database.Database) {
   migrateV2(sqlite);
   migrateV3(sqlite);
   migrateV4(sqlite);
+  migrateV5(sqlite);
+}
+
+/** User uploads: messages carry an `attachments` JSON column (default null). */
+function migrateV5(sqlite: Database.Database) {
+  const cols = new Set(
+    (sqlite.prepare(`PRAGMA table_info(messages)`).all() as Array<{ name: string }>).map(
+      (c) => c.name
+    )
+  );
+  if (!cols.has("attachments")) {
+    sqlite.exec(`ALTER TABLE messages ADD COLUMN attachments TEXT`);
+  }
 }
 
 function migrateV2(sqlite: Database.Database) {

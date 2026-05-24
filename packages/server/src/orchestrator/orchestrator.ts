@@ -47,7 +47,8 @@ import { WebClient } from "@slack/web-api";
 import { SlackConnector } from "../integrations/slack-connector.js";
 import { DiscordConnector } from "../integrations/discord-connector.js";
 import { McpManager } from "../integrations/mcp.js";
-import { mimeFromName } from "../integrations/artifacts.js";
+import { mimeFromName, persistArtifact } from "../integrations/artifacts.js";
+import type { Artifact } from "@otterbot/shared";
 
 /** A live per-agent chat connector plus the signature it was started with. */
 interface TrackedConnector<C extends ChannelConnector> {
@@ -443,7 +444,23 @@ export class Orchestrator {
       readCodeReference: (repo, path, range) => this.codeRef.readFile(repo, path, range),
       listCodeReferenceRepos: () => this.codeRef.listRepoDirectory(),
       readArtifact: (agentId, file) => this.readArtifact(agentId, file),
+      readArtifactBinary: (agentId, dir, name) => this.readArtifactBinary(agentId, dir, name),
     };
+  }
+
+  /** Raw bytes of an agent's file or generated image, traversal-guarded. */
+  readArtifactBinary(
+    agentId: string,
+    dir: "files" | "images",
+    name: string
+  ): { data: Buffer; mimeType: string } | null {
+    if (!this.contexts.has(agentId)) return null;
+    const base = basename(name);
+    if (base !== name || base.includes("..") || !/^[\w.-]+$/.test(base)) return null;
+    const paths = this.profiles.pathsFor(agentId);
+    const path = join(dir === "images" ? paths.images : paths.files, base);
+    if (!existsSync(path)) return null;
+    return { data: readFileSync(path), mimeType: mimeFromName(base) };
   }
 
   /**
@@ -1185,6 +1202,21 @@ export class Orchestrator {
     const path = join(this.profiles.pathsFor(id).files, name);
     if (!existsSync(path)) return null;
     return { path, mimeType: mimeFromName(name) };
+  }
+
+  /**
+   * Store a user-uploaded file in an agent's `files/` dir and return its
+   * {@link Artifact} reference. Backs `POST /api/agents/:id/files`.
+   */
+  saveAgentUpload(id: string, data: Buffer, name: string, mimeType: string): Artifact | null {
+    if (!this.contexts.has(id)) return null;
+    return persistArtifact({
+      filesDir: this.profiles.pathsFor(id).files,
+      agentId: id,
+      data,
+      name,
+      mimeType,
+    });
   }
 
   /** Save an uploaded avatar image and point the agent's artwork at it. */

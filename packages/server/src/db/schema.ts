@@ -1,5 +1,6 @@
 import { sqliteTable, text, integer } from "drizzle-orm/sqlite-core";
 import type {
+  Artifact,
   MemoryCategory,
   MemorySource,
   SkillScanStatus,
@@ -54,6 +55,9 @@ export const messages = sqliteTable("messages", {
   content: text("content").notNull(),
   toolCalls: text("tool_calls", { mode: "json" })
     .$type<unknown[] | null>()
+    .default(null),
+  attachments: text("attachments", { mode: "json" })
+    .$type<Artifact[] | null>()
     .default(null),
   createdAt: text("created_at")
     .notNull()

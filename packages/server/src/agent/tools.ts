@@ -26,6 +26,21 @@ import {
 import { resolveChatModel } from "../providers/registry.js";
 
 /**
+ * Resolve an `/api/agents/<id>/(files|images)/<name>` reference to a data URL
+ * via the cross-agent binary read service, so `edit_image` can read another
+ * agent's uploaded or generated image (e.g. the COO's upload). Returns the ref
+ * unchanged when it isn't such a URL or no service is available.
+ */
+function resolveArtifactRef(ref: string | undefined, services?: AgentServices): string | undefined {
+  if (!ref || !services) return ref;
+  const m = ref.match(/\/agents\/([^/]+)\/(files|images)\/([^/?#]+)/);
+  if (!m) return ref;
+  const bin = services.readArtifactBinary(m[1], m[2] as "files" | "images", m[3]);
+  if (!bin) return ref;
+  return `data:${bin.mimeType};base64,${bin.data.toString("base64")}`;
+}
+
+/**
  * Build the tool set for an agent, scoped to its own context. When cross-agent
  * `services` are available, coordination tools (delegate, spawn, broadcast) are
  * added — `delegate`/`broadcast` only for the COO.
@@ -266,7 +281,8 @@ export function buildAgentTools(
           .string()
           .min(1)
           .describe(
-            "The image to edit: a generated-image URL (/api/agents/.../images/x.png), a " +
+            "The image to edit: a generated-image or uploaded-file URL " +
+              "(/api/agents/<id>/images|files/x.png, including another agent's), a " +
               "workspace-relative path, or an http(s) URL."
           ),
         mask: z
@@ -279,8 +295,8 @@ export function buildAgentTools(
       execute: async ({ prompt, source_image, mask, quality, size }) => {
         const res = await editImage({
           prompt,
-          sourceImage: source_image,
-          mask,
+          sourceImage: resolveArtifactRef(source_image, services) ?? source_image,
+          mask: resolveArtifactRef(mask, services) ?? mask,
           quality,
           size,
           imagesDir: ctx.imagesDir,

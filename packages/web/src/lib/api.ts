@@ -5,6 +5,8 @@
  * the auth gate can re-prompt.
  */
 
+import type { Artifact } from "@otterbot/shared";
+
 const TOKEN_KEY = "otterbot.api-token";
 
 const listeners = new Set<() => void>();
@@ -64,6 +66,21 @@ export async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Pr
     fireAuthInvalid();
   }
   return res;
+}
+
+/**
+ * Upload a file for an agent to process. Returns the stored {@link Artifact}
+ * (its URL, name, kind, mimeType). Throws on a non-2xx response.
+ */
+export async function uploadFile(agentId: string, file: File): Promise<Artifact> {
+  const form = new FormData();
+  form.append("file", file, file.name);
+  const res = await apiFetch(`/api/agents/${agentId}/files`, { method: "POST", body: form });
+  if (!res.ok) {
+    const body = (await res.json().catch(() => ({}))) as { error?: string };
+    throw new Error(body.error ?? `upload failed (${res.status})`);
+  }
+  return (await res.json()) as Artifact;
 }
 
 /**

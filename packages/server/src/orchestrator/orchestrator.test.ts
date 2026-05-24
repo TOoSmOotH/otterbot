@@ -324,6 +324,20 @@ describe("orchestrator (e2e)", () => {
     60_000
   );
 
+  it("readArtifactBinary reads bytes and guards traversal / unknown agents", () => {
+    const art = persistArtifact({
+      filesDir: stack.profiles.pathsFor("coo").files,
+      agentId: "coo",
+      data: Buffer.from("PNGDATA"),
+      name: "pic.png",
+    });
+    const bin = stack.orch.readArtifactBinary("coo", "files", art.id);
+    expect(bin?.data.toString()).toBe("PNGDATA");
+    expect(bin?.mimeType).toBe("image/png");
+    expect(stack.orch.readArtifactBinary("coo", "files", "../secret")).toBeNull();
+    expect(stack.orch.readArtifactBinary("no-such-agent", "files", art.id)).toBeNull();
+  });
+
   it("keeps each agent's memory in its own isolated database", async () => {
     const a = stack.orch.createAgent({ displayName: "Mem A" });
     const b = stack.orch.createAgent({ displayName: "Mem B" });
