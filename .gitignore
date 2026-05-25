@@ -57,3 +57,6 @@ data/
 # E2E test data
 data-e2e/
 packages/server/data-e2e/
+
+# Local security review report (kept out of the repo / history)
+security-review.md
