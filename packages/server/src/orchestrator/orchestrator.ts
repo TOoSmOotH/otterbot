@@ -40,13 +40,11 @@ import { SecretsStore, type ScopedSecret } from "../secrets/secrets-store.js";
 import { suggestScopeForKey } from "../secrets/shell-secrets.js";
 import type { CredentialScope } from "@otterbot/shared";
 import {
-  type ChannelConnector,
+  ChannelConnector,
   connectorSignature,
-} from "../integrations/channel-connector.js";
+} from "../integrations/chat/channel-connector.js";
 import { WebClient } from "@slack/web-api";
-import { SlackConnector } from "../integrations/slack-connector.js";
-import { DiscordConnector } from "../integrations/discord-connector.js";
-import { MatrixConnector } from "../integrations/matrix-connector.js";
+import { PROVIDERS, type ChatProviderId, type ChatProvider } from "../integrations/chat/providers.js";
 import { McpManager } from "../integrations/mcp.js";
 import { mimeFromName, persistArtifact } from "../integrations/artifacts.js";
 import type { Artifact } from "@otterbot/shared";
@@ -384,10 +382,8 @@ export class Orchestrator {
   private readonly codeRef: CodeReferenceService;
   private readonly secrets: SecretsStore;
   private readonly services: AgentServices;
-  /** Per-agent chat connectors, keyed by agent id. */
-  private readonly slackConnectors = new Map<string, TrackedConnector<SlackConnector>>();
-  private readonly discordConnectors = new Map<string, TrackedConnector<DiscordConnector>>();
-  private readonly matrixConnectors = new Map<string, TrackedConnector<MatrixConnector>>();
+  /** Per-agent chat connectors, keyed by `${agentId}:${service}`. */
+  private readonly connectors = new Map<string, TrackedConnector<ChannelConnector>>();
   /** Per-agent MCP server connections. */
   private readonly mcp = new McpManager();
   private subagentSeq = 0;
@@ -812,14 +808,8 @@ export class Orchestrator {
     this.subagentTeardowns.clear();
     await this.codeRef.stop();
     await this.bus.stop();
-    await Promise.allSettled([
-      ...[...this.slackConnectors.values()].map((t) => t.connector.stop()),
-      ...[...this.discordConnectors.values()].map((t) => t.connector.stop()),
-      ...[...this.matrixConnectors.values()].map((t) => t.connector.stop()),
-    ]);
-    this.slackConnectors.clear();
-    this.discordConnectors.clear();
-    this.matrixConnectors.clear();
+    await Promise.allSettled([...this.connectors.values()].map((t) => t.connector.stop()));
+    this.connectors.clear();
     await this.mcp.shutdown();
     await Promise.allSettled(this.pendingInits.splice(0));
     for (const ctx of this.contexts.values()) {
@@ -978,62 +968,39 @@ export class Orchestrator {
     const ctx = this.contexts.get(id);
     if (!ctx) return null;
     return {
-      slack: channelStatus(ctx.profile.slack, this.slackConnectors.get(id)),
-      discord: channelStatus(ctx.profile.discord, this.discordConnectors.get(id)),
-      matrix: channelStatus(ctx.profile.matrix, this.matrixConnectors.get(id)),
+      slack: channelStatus(ctx.profile.slack, this.connectors.get(`${id}:slack`)),
+      discord: channelStatus(ctx.profile.discord, this.connectors.get(`${id}:discord`)),
+      matrix: channelStatus(ctx.profile.matrix, this.connectors.get(`${id}:matrix`)),
     };
+  }
+
+  /** A per-service view of a profile's connector configs. */
+  private channelConfig(profile: AgentProfile): Record<ChatProviderId, ChannelBotConfig | null> {
+    return { slack: profile.slack, discord: profile.discord, matrix: profile.matrix };
   }
 
   private reconcileConnectors(profile: AgentProfile): void {
     const secrets = this.secrets.get(profile.id);
-    this.reconcileOne(
-      profile.id,
-      profile.slack,
-      [secrets.get("SLACK_BOT_TOKEN") ?? "", secrets.get("SLACK_APP_TOKEN") ?? ""],
-      this.slackConnectors,
-      (cfg, [bot, appToken]) =>
-        new SlackConnector(profile.id, cfg, bot, appToken, () =>
-          this.runtimes.get(profile.id)
-        )
-    );
-    this.reconcileOne(
-      profile.id,
-      profile.discord,
-      [secrets.get("DISCORD_BOT_TOKEN") ?? ""],
-      this.discordConnectors,
-      (cfg, [bot]) =>
-        new DiscordConnector(profile.id, cfg, bot, () => this.runtimes.get(profile.id))
-    );
-    this.reconcileOne(
-      profile.id,
-      profile.matrix,
-      [secrets.get("MATRIX_HOMESERVER_URL") ?? "", secrets.get("MATRIX_ACCESS_TOKEN") ?? ""],
-      this.matrixConnectors,
-      (cfg, [url, token]) =>
-        new MatrixConnector(
-          profile.id,
-          cfg,
-          url,
-          token,
-          join(this.cfg.dataDir, "matrix", `connector-${profile.id}.json`),
-          join(this.cfg.dataDir, "matrix", `crypto-connector-${profile.id}`),
-          () => this.runtimes.get(profile.id)
-        )
-    );
+    const cfgByService = this.channelConfig(profile);
+    for (const provider of Object.values(PROVIDERS)) {
+      const tokens = provider.connectorTokenKeys.map((k) => secrets.get(k) ?? "");
+      this.reconcileOne(provider, profile.id, cfgByService[provider.id], tokens, secrets);
+    }
   }
 
-  private reconcileOne<C extends ChannelConnector>(
+  private reconcileOne(
+    provider: ChatProvider,
     agentId: string,
     cfg: ChannelBotConfig | null,
     tokens: string[],
-    connectors: Map<string, TrackedConnector<C>>,
-    make: (cfg: ChannelBotConfig, tokens: string[]) => C
+    secrets: Map<string, string>
   ): void {
-    const existing = connectors.get(agentId);
+    const key = `${agentId}:${provider.id}`;
+    const existing = this.connectors.get(key);
     if (!cfg?.enabled || tokens.some((t) => !t)) {
       if (existing) {
         void existing.connector.stop();
-        connectors.delete(agentId);
+        this.connectors.delete(key);
       }
       return;
     }
@@ -1043,8 +1010,15 @@ export class Orchestrator {
       return;
     }
     if (existing) void existing.connector.stop();
-    const connector = make(cfg, tokens);
-    connectors.set(agentId, { connector, signature });
+    const client = provider.connectorClient(secrets, {
+      storagePath: join(this.cfg.dataDir, "matrix", `connector-${agentId}.json`),
+      cryptoStoragePath: join(this.cfg.dataDir, "matrix", `crypto-connector-${agentId}`),
+    });
+    if (!client) return;
+    const connector = new ChannelConnector(provider.id, agentId, cfg, client, () =>
+      this.runtimes.get(agentId)
+    );
+    this.connectors.set(key, { connector, signature });
     this.pendingInits.push(
       connector
         .start()
@@ -1058,17 +1032,15 @@ export class Orchestrator {
   }
 
   private async stopConnectors(agentId: string): Promise<void> {
-    const slack = this.slackConnectors.get(agentId);
-    const discord = this.discordConnectors.get(agentId);
-    const matrix = this.matrixConnectors.get(agentId);
-    this.slackConnectors.delete(agentId);
-    this.discordConnectors.delete(agentId);
-    this.matrixConnectors.delete(agentId);
-    await Promise.allSettled([
-      slack?.connector.stop(),
-      discord?.connector.stop(),
-      matrix?.connector.stop(),
-    ]);
+    const prefix = `${agentId}:`;
+    const stops: Promise<void>[] = [];
+    for (const [key, tracked] of this.connectors) {
+      if (key.startsWith(prefix)) {
+        stops.push(tracked.connector.stop());
+        this.connectors.delete(key);
+      }
+    }
+    await Promise.allSettled(stops);
   }
 
   // --- Accessors -----------------------------------------------------------
