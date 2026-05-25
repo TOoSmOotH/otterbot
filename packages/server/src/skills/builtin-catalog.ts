@@ -270,6 +270,81 @@ Prefer reading the actual file over guessing. Keep reads narrow (a line range),
 not whole large files.
 `,
   }),
+
+  capability({
+    id: "proxmox",
+    name: "Proxmox VM control",
+    description:
+      "Manage specific Proxmox VE virtual machines — start/stop, snapshot, and roll back — over the API.",
+    tools: [
+      "proxmox_list_vms",
+      "proxmox_status",
+      "proxmox_start",
+      "proxmox_stop",
+      "proxmox_list_snapshots",
+      "proxmox_rollback",
+      "proxmox_create_snapshot",
+      "proxmox_delete_snapshot",
+    ],
+    credentialKeys: [
+      "PROXMOX_HOST",
+      "PROXMOX_TOKEN_ID",
+      "PROXMOX_TOKEN_SECRET",
+      "PROXMOX_ALLOWED_VMIDS",
+      "PROXMOX_VERIFY_SSL",
+    ],
+    body: `
+You can manage virtual machines on a Proxmox VE server with the \`proxmox_*\`
+tools, authenticated by your own API token. You can only touch the VMs the user
+explicitly allowed you (the \`PROXMOX_ALLOWED_VMIDS\` allowlist) — any other vmid
+is refused.
+
+## Tools
+
+- \`proxmox_list_vms\` — the VMs you may manage (vmid, name, node, status).
+- \`proxmox_status\` — a VM's current run state.
+- \`proxmox_start\` / \`proxmox_stop\` — boot a VM, or stop it (graceful ACPI
+  shutdown by default; \`graceful: false\` for a hard stop).
+- \`proxmox_list_snapshots\` — a VM's snapshots.
+- \`proxmox_rollback\` — revert a VM to a named snapshot.
+- \`proxmox_create_snapshot\` / \`proxmox_delete_snapshot\` — take or remove a snapshot.
+
+Lifecycle and snapshot actions return a Proxmox task id (UPID); they run
+asynchronously, so poll \`proxmox_status\` or \`proxmox_list_snapshots\` to confirm
+completion before the next step.
+
+## Setup
+
+These tools need credentials configured for you in the Agent Studio Credentials
+tab — you cannot set them yourself. If a tool reports Proxmox is not configured,
+or that no VMs are allowed, ask the user to add:
+
+- \`PROXMOX_HOST\` — the Proxmox host (e.g. \`pve.lan\` or \`10.0.0.5\`); the API is
+  reached at \`https://<host>:8006\`.
+- \`PROXMOX_TOKEN_ID\` — the API token id, e.g. \`root@pam!otterbot\`.
+- \`PROXMOX_TOKEN_SECRET\` — the token's secret (UUID).
+- \`PROXMOX_ALLOWED_VMIDS\` — comma-separated vmids you may control, e.g. \`200\`.
+  **Unset means you may control nothing.**
+- \`PROXMOX_VERIFY_SSL\` — set to \`false\` for a self-signed Proxmox cert (common
+  in labs); defaults to \`true\`.
+
+## Workflow: roll back, then install and test inside a VM
+
+To install and test software against a clean VM:
+
+1. \`proxmox_rollback\` the VM to a known-good snapshot (e.g. \`clean\`).
+2. \`proxmox_start\` the VM and poll \`proxmox_status\` until it is \`running\`.
+3. SSH into the VM with the \`shell_exec\` tool to install and test — for example
+   \`ssh user@<vm-ip> 'sudo apt-get install -y <pkg> && ./run-tests.sh'\`.
+4. Optionally \`proxmox_create_snapshot\` to capture a good state, or
+   \`proxmox_stop\` when finished.
+
+Getting *into* the VM (its IP/hostname, SSH user, and key) is configured
+separately from these tools — it relies on the SSH credentials available in your
+\`shell_exec\` environment. If SSH fails, tell the user what credential or host
+detail is missing rather than guessing.
+`,
+  }),
 ];
 
 /** Look up a built-in capability by its slug. */

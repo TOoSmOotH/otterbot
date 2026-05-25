@@ -5,6 +5,16 @@ import type { AgentContext } from "../runtime/agent-context.js";
 import type { AgentServices } from "../runtime/agent-services.js";
 import { sendEmail } from "../integrations/email.js";
 import { createIssue, listIssues } from "../integrations/github.js";
+import {
+  createSnapshot,
+  deleteSnapshot,
+  listSnapshots,
+  listVms,
+  rollbackSnapshot,
+  startVm,
+  stopVm,
+  vmStatus,
+} from "../integrations/proxmox.js";
 import { runAgentShell } from "../integrations/shell.js";
 import { searchWeb } from "../integrations/web-search.js";
 import { editImage, generateImage, persistImage } from "../integrations/image-gen.js";
@@ -232,6 +242,140 @@ export function buildAgentTools(
       execute: async ({ repo }) => {
         try {
           return { ok: true, issues: await listIssues(ctx.secrets, { repo }) };
+        } catch (err) {
+          return { ok: false, error: err instanceof Error ? err.message : String(err) };
+        }
+      },
+    });
+  }
+
+  // Proxmox VE VM management — granted by the `proxmox` capability. Each tool
+  // is gated by the agent's PROXMOX_ALLOWED_VMIDS allowlist inside the
+  // integration, so it can only touch VMs the user explicitly granted.
+  if (granted.has("proxmox_list_vms")) {
+    tools.proxmox_list_vms = tool({
+      description:
+        "List the Proxmox VMs this agent is allowed to manage, with their vmid, name, node, and status.",
+      parameters: z.object({}),
+      execute: async () => {
+        try {
+          return { ok: true, vms: await listVms(ctx.secrets) };
+        } catch (err) {
+          return { ok: false, error: err instanceof Error ? err.message : String(err) };
+        }
+      },
+    });
+  }
+
+  if (granted.has("proxmox_status")) {
+    tools.proxmox_status = tool({
+      description: "Get the current status of a Proxmox VM by its vmid.",
+      parameters: z.object({ vmid: z.number().int().positive() }),
+      execute: async ({ vmid }) => {
+        try {
+          return { ok: true, ...(await vmStatus(ctx.secrets, vmid)) };
+        } catch (err) {
+          return { ok: false, error: err instanceof Error ? err.message : String(err) };
+        }
+      },
+    });
+  }
+
+  if (granted.has("proxmox_start")) {
+    tools.proxmox_start = tool({
+      description: "Start a Proxmox VM by its vmid. Returns the Proxmox task id (UPID).",
+      parameters: z.object({ vmid: z.number().int().positive() }),
+      execute: async ({ vmid }) => {
+        try {
+          return { ok: true, ...(await startVm(ctx.secrets, vmid)) };
+        } catch (err) {
+          return { ok: false, error: err instanceof Error ? err.message : String(err) };
+        }
+      },
+    });
+  }
+
+  if (granted.has("proxmox_stop")) {
+    tools.proxmox_stop = tool({
+      description:
+        "Stop a Proxmox VM. By default sends a graceful ACPI shutdown; set graceful=false " +
+        "to hard-stop (pull the power). Returns the Proxmox task id (UPID).",
+      parameters: z.object({
+        vmid: z.number().int().positive(),
+        graceful: z.boolean().default(true),
+      }),
+      execute: async ({ vmid, graceful }) => {
+        try {
+          return { ok: true, ...(await stopVm(ctx.secrets, { vmid, graceful })) };
+        } catch (err) {
+          return { ok: false, error: err instanceof Error ? err.message : String(err) };
+        }
+      },
+    });
+  }
+
+  if (granted.has("proxmox_list_snapshots")) {
+    tools.proxmox_list_snapshots = tool({
+      description: "List the snapshots of a Proxmox VM by its vmid.",
+      parameters: z.object({ vmid: z.number().int().positive() }),
+      execute: async ({ vmid }) => {
+        try {
+          return { ok: true, snapshots: await listSnapshots(ctx.secrets, vmid) };
+        } catch (err) {
+          return { ok: false, error: err instanceof Error ? err.message : String(err) };
+        }
+      },
+    });
+  }
+
+  if (granted.has("proxmox_rollback")) {
+    tools.proxmox_rollback = tool({
+      description:
+        "Roll a Proxmox VM back to a named snapshot. This reverts the VM's disk and " +
+        "(if captured) RAM to that snapshot. Returns the Proxmox task id (UPID).",
+      parameters: z.object({
+        vmid: z.number().int().positive(),
+        snapname: z.string().min(1),
+      }),
+      execute: async ({ vmid, snapname }) => {
+        try {
+          return { ok: true, ...(await rollbackSnapshot(ctx.secrets, { vmid, snapname })) };
+        } catch (err) {
+          return { ok: false, error: err instanceof Error ? err.message : String(err) };
+        }
+      },
+    });
+  }
+
+  if (granted.has("proxmox_create_snapshot")) {
+    tools.proxmox_create_snapshot = tool({
+      description:
+        "Take a new snapshot of a Proxmox VM. Returns the Proxmox task id (UPID).",
+      parameters: z.object({
+        vmid: z.number().int().positive(),
+        snapname: z.string().min(1).describe("A name for the snapshot, e.g. \"before-test\"."),
+        description: z.string().optional(),
+      }),
+      execute: async ({ vmid, snapname, description }) => {
+        try {
+          return { ok: true, ...(await createSnapshot(ctx.secrets, { vmid, snapname, description })) };
+        } catch (err) {
+          return { ok: false, error: err instanceof Error ? err.message : String(err) };
+        }
+      },
+    });
+  }
+
+  if (granted.has("proxmox_delete_snapshot")) {
+    tools.proxmox_delete_snapshot = tool({
+      description: "Delete a named snapshot of a Proxmox VM. Returns the Proxmox task id (UPID).",
+      parameters: z.object({
+        vmid: z.number().int().positive(),
+        snapname: z.string().min(1),
+      }),
+      execute: async ({ vmid, snapname }) => {
+        try {
+          return { ok: true, ...(await deleteSnapshot(ctx.secrets, { vmid, snapname })) };
         } catch (err) {
           return { ok: false, error: err instanceof Error ? err.message : String(err) };
         }

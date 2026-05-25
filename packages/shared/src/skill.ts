@@ -41,6 +41,15 @@ export const GRANTABLE_TOOL_NAMES = [
   "code_search",
   "search_code",
   "read_code",
+  // Proxmox VE VM management — granted together by the `proxmox` capability.
+  "proxmox_list_vms",
+  "proxmox_status",
+  "proxmox_start",
+  "proxmox_stop",
+  "proxmox_list_snapshots",
+  "proxmox_rollback",
+  "proxmox_create_snapshot",
+  "proxmox_delete_snapshot",
 ] as const;
 
 export type GrantableToolName = (typeof GRANTABLE_TOOL_NAMES)[number];
