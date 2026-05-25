@@ -2,6 +2,7 @@ import type {
   ChatClient,
   InboundChatMessage,
   MessageHandle,
+  OutboundFile,
   RichChatMessage,
 } from "../integrations/chat/chat-client.js";
 
@@ -13,6 +14,7 @@ export class FakeChatClient implements ChatClient {
   sent: { channelId: string; text: string }[] = [];
   edits: { handle: MessageHandle; text: string }[] = [];
   rich: { channelId: string; msg: RichChatMessage }[] = [];
+  files: { channelId: string; file: OutboundFile }[] = [];
   private handler: (m: InboundChatMessage) => void = () => {};
   private seq = 0;
 
@@ -38,6 +40,9 @@ export class FakeChatClient implements ChatClient {
   }
   async sendRich(channelId: string, msg: RichChatMessage): Promise<void> {
     this.rich.push({ channelId, msg });
+  }
+  async sendFile(channelId: string, file: OutboundFile): Promise<void> {
+    this.files.push({ channelId, file });
   }
 
   /** Test helper: simulate an inbound message (defaults are a plain user msg). */

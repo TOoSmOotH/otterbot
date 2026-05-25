@@ -4,6 +4,7 @@ import type {
   ChatClient,
   InboundChatMessage,
   MessageHandle,
+  OutboundFile,
   RichChatMessage,
 } from "./chat-client.js";
 
@@ -98,6 +99,14 @@ export class SlackChatClient implements ChatClient {
     const header = `${msg.author} · ${msg.kind} → ${msg.to}`;
     const body = msg.body || "(no content)";
     await this.web.chat.postMessage({ channel: channelId, text: `*${header}*\n${body}` });
+  }
+
+  async sendFile(channelId: string, file: OutboundFile): Promise<void> {
+    await this.web.files.uploadV2({
+      channel_id: channelId,
+      file: file.data,
+      filename: file.filename,
+    });
   }
 
   private onSlackMessage(event: SlackMessageEvent, isAppMention: boolean): void {

@@ -20,6 +20,15 @@ export interface ChatClient {
   edit(handle: MessageHandle, text: string): Promise<void>;
   /** Post a structured agent-to-agent message, rendered per provider. */
   sendRich(channelId: string, msg: RichChatMessage): Promise<void>;
+  /** Upload a file to a channel. Images render inline; other types attach. */
+  sendFile(channelId: string, file: OutboundFile): Promise<void>;
+}
+
+/** A file to upload to a channel/room (image rendered inline, others attached). */
+export interface OutboundFile {
+  data: Buffer;
+  filename: string;
+  mimeType: string;
 }
 
 /** Opaque, provider-specific handle to a posted message (for edits). */

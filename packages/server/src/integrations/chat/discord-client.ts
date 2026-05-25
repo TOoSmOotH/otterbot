@@ -3,6 +3,7 @@ import {
   Events,
   GatewayIntentBits,
   EmbedBuilder,
+  AttachmentBuilder,
   type Message,
   type SendableChannels,
 } from "discord.js";
@@ -11,6 +12,7 @@ import type {
   ChatClient,
   InboundChatMessage,
   MessageHandle,
+  OutboundFile,
   RichChatMessage,
 } from "./chat-client.js";
 
@@ -95,6 +97,12 @@ export class DiscordChatClient implements ChatClient {
       .setDescription(msg.body.slice(0, 4000) || "(no content)")
       .setFooter({ text: `${msg.kind} → ${msg.to} · ${msg.id}` });
     await ch.send({ embeds: [embed] });
+  }
+
+  async sendFile(channelId: string, file: OutboundFile): Promise<void> {
+    const ch = await this.channel(channelId);
+    if (!ch) return;
+    await ch.send({ files: [new AttachmentBuilder(file.data, { name: file.filename })] });
   }
 
   private onDiscordMessage(m: Message): void {

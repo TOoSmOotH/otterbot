@@ -10,6 +10,7 @@ import type {
   ChatClient,
   InboundChatMessage,
   MessageHandle,
+  OutboundFile,
   RichChatMessage,
 } from "./chat-client.js";
 
@@ -104,6 +105,18 @@ export class MatrixChatClient implements ChatClient {
       body: `[${header}] ${body}`,
       format: "org.matrix.custom.html",
       formatted_body: `<strong>${escapeHtml(header)}</strong><br/>${escapeHtml(body)}`,
+    });
+  }
+
+  async sendFile(channelId: string, file: OutboundFile): Promise<void> {
+    if (!this.client) return;
+    const url = await this.client.uploadContent(file.data, file.mimeType, file.filename);
+    const msgtype = file.mimeType.startsWith("image/") ? "m.image" : "m.file";
+    await this.client.sendMessage(channelId, {
+      msgtype,
+      url,
+      body: file.filename,
+      info: { mimetype: file.mimeType, size: file.data.length },
     });
   }
 
