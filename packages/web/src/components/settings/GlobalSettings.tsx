@@ -814,7 +814,8 @@ function AddModelWizard({
   const [label, setLabel] = useState("");
   const [contextWindow, setContextWindow] = useState("");
 
-  const goToModelStep = async () => {
+  /** Fetch the models this provider account serves; safe to call repeatedly. */
+  const listModels = async () => {
     setFetching(true);
     setNote("");
     setModels([]);
@@ -826,20 +827,25 @@ function AddModelWizard({
       });
       const data = (await res.json()) as { ok: boolean; models?: string[]; error?: string };
       if (data.ok && data.models?.length) {
-        setModels(data.models);
-        setModelId(data.models[0]);
-        setNote(`Found ${data.models.length} model(s).`);
+        const list = data.models;
+        setModels(list);
+        // Default to the first model only when nothing's been typed yet, so a
+        // re-fetch never clobbers a custom id the user entered.
+        setModelId((cur) => cur.trim() || list[0]);
+        setNote(`Found ${list.length} model(s).`);
       } else {
-        setModelId("");
         setNote(`${data.error ?? "Couldn't list models"} — enter a model id manually.`);
       }
     } catch (err) {
-      setModelId("");
       setNote(`${err instanceof Error ? err.message : String(err)} — enter a model id manually.`);
     } finally {
       setFetching(false);
-      setStepName("model");
     }
+  };
+
+  const goToModelStep = async () => {
+    await listModels();
+    setStepName("model");
   };
 
   const submit = () => {
@@ -885,24 +891,27 @@ function AddModelWizard({
       <strong style={{ fontSize: 13 }}>Add a model · 2. Assign {accountLabel ? `(${accountLabel})` : ""}</strong>
       {note && <span style={{ fontSize: 12, color: "rgb(var(--muted))" }}>{note}</span>}
       <Field label="Model">
-        {models.length > 0 ? (
-          <select value={modelId} onChange={(e) => setModelId(e.target.value)} style={input}>
-            {!models.includes(modelId) && modelId && <option value={modelId}>{modelId}</option>}
-            {models.map((m) => (
-              <option key={m} value={m}>
-                {m}
-              </option>
-            ))}
-          </select>
-        ) : (
-          <input
-            value={modelId}
-            onChange={(e) => setModelId(e.target.value)}
-            placeholder="provider-specific model id"
-            style={input}
-          />
-        )}
+        <input
+          list="add-model-options"
+          value={modelId}
+          onChange={(e) => setModelId(e.target.value)}
+          placeholder="provider-specific model id"
+          style={input}
+        />
+        <datalist id="add-model-options">
+          {models.map((m) => (
+            <option key={m} value={m} />
+          ))}
+        </datalist>
+        <span style={{ color: "rgb(var(--muted))", fontSize: 11 }}>
+          Type a model id, or click "List models" and pick one from the dropdown.
+        </span>
       </Field>
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <button onClick={() => void listModels()} disabled={fetching} style={ghostButton}>
+          {fetching ? "Listing…" : "List models"}
+        </button>
+      </div>
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
         <Field label="Kind">
           <select
