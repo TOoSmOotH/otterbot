@@ -28,12 +28,15 @@ export interface Config {
    * Agent-to-agent transport: in-process bus, a shared Discord channel, or a
    * shared Matrix room.
    */
-  agentTransport: "local" | "discord" | "matrix";
+  agentTransport: "local" | "discord" | "matrix" | "slack";
   discordBotToken: string | null;
   discordChannelId: string | null;
   matrixHomeserverUrl: string | null;
   matrixAccessToken: string | null;
   matrixRoomId: string | null;
+  slackBotToken: string | null;
+  slackAppToken: string | null;
+  slackChannelId: string | null;
 }
 
 function bool(v: string | undefined, fallback: boolean): boolean {
@@ -61,17 +64,18 @@ export function loadConfig(): Config {
     logLevel: (process.env.LOG_LEVEL as Config["logLevel"]) ?? "info",
     dbKey: process.env.OTTERBOT_DB_KEY ?? null,
     subagentGraceMs: Number(process.env.SUBAGENT_GRACE_MS ?? 300_000),
-    agentTransport:
-      process.env.AGENT_TRANSPORT === "discord"
-        ? "discord"
-        : process.env.AGENT_TRANSPORT === "matrix"
-          ? "matrix"
-          : "local",
+    agentTransport: ((): Config["agentTransport"] => {
+      const t = process.env.AGENT_TRANSPORT;
+      return t === "discord" || t === "matrix" || t === "slack" ? t : "local";
+    })(),
     discordBotToken: process.env.DISCORD_BOT_TOKEN ?? null,
     discordChannelId: process.env.DISCORD_CHANNEL_ID ?? null,
     matrixHomeserverUrl: process.env.MATRIX_HOMESERVER_URL ?? null,
     matrixAccessToken: process.env.MATRIX_ACCESS_TOKEN ?? null,
     matrixRoomId: process.env.MATRIX_ROOM_ID ?? null,
+    slackBotToken: process.env.SLACK_BOT_TOKEN ?? null,
+    slackAppToken: process.env.SLACK_APP_TOKEN ?? null,
+    slackChannelId: process.env.SLACK_CHANNEL_ID ?? null,
   };
 }
 

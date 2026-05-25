@@ -42,7 +42,7 @@ export type AgentStatus =
   | "stopped"
   | "error";
 
-export type TransportId = "local" | "discord" | "matrix";
+export type TransportId = "local" | "discord" | "matrix" | "slack";
 
 export type ChatService = "web" | "discord" | "slack" | "matrix";
 
