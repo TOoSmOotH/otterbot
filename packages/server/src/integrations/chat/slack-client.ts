@@ -7,13 +7,15 @@ import type {
   RichChatMessage,
 } from "./chat-client.js";
 
-/** The subset of a Slack message event we use. */
+/** The subset of a Slack message / app_mention event we use. */
 interface SlackMessageEvent {
   subtype?: string;
   channel?: string;
   user?: string;
   text?: string;
   bot_id?: string;
+  /** Message timestamp — stable id used to dedup app_mention vs message. */
+  ts?: string;
 }
 
 /** A Slack message handle is the channel + ts needed to edit it. */
@@ -29,9 +31,13 @@ function stripLeadingMention(text: string): string {
 
 /**
  * Slack client plumbing for both chat roles, over Socket Mode (events) + Web
- * API (posting). Reads a bot token (xoxb-) and app token (xapp-). Always
- * subscribes to `message`; mentionOnly is applied by the connector via the
- * computed `mentioned` flag. Edits are supported (canEdit = true).
+ * API (posting). Reads a bot token (xoxb-) and app token (xapp-).
+ *
+ * Subscribes to BOTH `app_mention` and `message`: a mention-only Slack app
+ * delivers `app_mention`, an all-messages app delivers `message`, so handling
+ * both makes the client work regardless of the app's Event Subscriptions.
+ * `mentionOnly` is applied by the connector via the computed `mentioned` flag.
+ * Edits are supported (canEdit = true).
  */
 export class SlackChatClient implements ChatClient {
   readonly canEdit = true;
@@ -39,6 +45,8 @@ export class SlackChatClient implements ChatClient {
   private readonly web: WebClient;
   private handler: (m: InboundChatMessage) => void = () => {};
   private selfUserId = "";
+  /** Recently handled message timestamps — dedup app_mention vs message. */
+  private readonly seenTs = new Set<string>();
 
   constructor(
     botToken: string,
@@ -55,15 +63,19 @@ export class SlackChatClient implements ChatClient {
     const auth = (await this.web.auth.test()) as { user_id?: string };
     this.selfUserId = auth.user_id ?? "";
     const socket = new SocketModeClient({ appToken: this.appToken });
-    socket.on(
-      "message",
+    const listener =
+      (isAppMention: boolean) =>
       ({ event, ack }: { event: SlackMessageEvent; ack: () => Promise<void> }) => {
         void ack();
-        this.onSlackMessage(event);
-      }
-    );
+        this.onSlackMessage(event, isAppMention);
+      };
+    // A mention reaches us as `app_mention` (mention-only apps) and/or `message`
+    // (all-messages apps); subscribe to both and dedup by ts.
+    socket.on("app_mention", listener(true));
+    socket.on("message", listener(false));
     await socket.start();
     this.socket = socket;
+    console.info(`[slack] client connected as ${this.selfUserId || "(unknown)"}`);
   }
 
   async stop(): Promise<void> {
@@ -88,10 +100,20 @@ export class SlackChatClient implements ChatClient {
     await this.web.chat.postMessage({ channel: channelId, text: `*${header}*\n${body}` });
   }
 
-  private onSlackMessage(event: SlackMessageEvent): void {
+  private onSlackMessage(event: SlackMessageEvent, isAppMention: boolean): void {
     if (event.subtype || event.bot_id) return;
     if (!event.channel || !event.user || !event.text) return;
-    const mentioned = this.selfUserId !== "" && event.text.includes(`<@${this.selfUserId}>`);
+    // The same mention can arrive as both an app_mention and a message event;
+    // process each underlying message only once.
+    if (event.ts) {
+      if (this.seenTs.has(event.ts)) return;
+      this.seenTs.add(event.ts);
+      if (this.seenTs.size > 500) {
+        this.seenTs.delete(this.seenTs.values().next().value as string);
+      }
+    }
+    const mentioned =
+      isAppMention || (this.selfUserId !== "" && event.text.includes(`<@${this.selfUserId}>`));
     this.handler({
       channelId: event.channel,
       senderId: event.user,
