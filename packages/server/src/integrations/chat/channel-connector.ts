@@ -1,6 +1,6 @@
-import type { ChannelBotConfig, ConnectorState } from "@otterbot/shared";
+import type { Artifact, ChannelBotConfig, ConnectorState } from "@otterbot/shared";
 import type { AgentRuntime } from "../../runtime/agent-runtime.js";
-import type { ChatClient, InboundChatMessage, MessageHandle } from "./chat-client.js";
+import type { ChatClient, InboundChatMessage, MessageHandle, OutboundFile } from "./chat-client.js";
 
 /** Placeholder posted while the agent works, when the client supports edits. */
 export const THINKING_PLACEHOLDER = "💭 _Thinking…_";
@@ -23,7 +23,8 @@ export class ChannelConnector {
     private readonly agentId: string,
     cfg: ChannelBotConfig,
     private readonly client: ChatClient,
-    private readonly getRuntime: () => AgentRuntime | undefined
+    private readonly getRuntime: () => AgentRuntime | undefined,
+    private readonly loadArtifact: (a: Artifact) => OutboundFile | null = () => null
   ) {
     this.cfg = cfg;
   }
@@ -87,6 +88,7 @@ export class ChannelConnector {
         }
       }
       let reply: string;
+      let artifacts: Artifact[] = [];
       try {
         const res = await runtime.respond({
           conversationId: `${this.platform}-${this.cfg.channelId}`,
@@ -94,6 +96,7 @@ export class ChannelConnector {
           onChunk: () => {},
         });
         reply = res.finalText || "(no response)";
+        artifacts = res.artifacts ?? [];
       } catch (err) {
         reply = `Error: ${err instanceof Error ? err.message : String(err)}`;
       }
@@ -105,6 +108,20 @@ export class ChannelConnector {
         }
       } catch (err) {
         console.warn(`[${this.platform}] post failed for ${this.agentId}:`, err);
+      }
+      for (const artifact of artifacts) {
+        let file: OutboundFile | null = null;
+        try {
+          file = this.loadArtifact(artifact);
+        } catch (err) {
+          console.warn(`[${this.platform}] artifact load failed for ${this.agentId}:`, err);
+        }
+        if (!file) continue;
+        try {
+          await this.client.sendFile(this.cfg.channelId, file);
+        } catch (err) {
+          console.warn(`[${this.platform}] file upload failed for ${this.agentId}:`, err);
+        }
       }
     });
   }
