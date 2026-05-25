@@ -110,4 +110,28 @@ describe("ChannelConnector", () => {
     await conn.whenIdle();
     expect(calls).toEqual(["one", "two"]);
   });
+
+  it("drops the message (no send, no throw) when no runtime is available", async () => {
+    const client = new FakeChatClient(false);
+    const conn = new ChannelConnector("test", "agent-1", cfg(), client, () => undefined);
+    await conn.start();
+    client.emit({ text: "hi" });
+    await conn.whenIdle();
+    expect(client.sent).toEqual([]);
+    expect(client.edits).toEqual([]);
+  });
+
+  it("surfaces a runtime error as the reply instead of throwing", async () => {
+    const client = new FakeChatClient(false);
+    const runtime = {
+      respond: async () => {
+        throw new Error("boom");
+      },
+    } as never;
+    const conn = make(client, cfg(), runtime);
+    await conn.start();
+    client.emit({ text: "hi" });
+    await conn.whenIdle();
+    expect(client.sent).toEqual([{ channelId: "C1", text: "Error: boom" }]);
+  });
 });

@@ -47,13 +47,18 @@ export class ChannelConnector {
     await this.queue;
   }
 
+  /** Live connection status for the Channels UI. */
   getStatus(): { state: ConnectorState; error: string | null; channelId: string } {
     return { state: this.connState, error: this.connError, channelId: this.cfg.channelId };
   }
+
+  /** Mark the connector as successfully connected. */
   markConnected(): void {
     this.connState = "connected";
     this.connError = null;
   }
+
+  /** Mark the connector as failed, with a human-readable reason. */
   markError(message: string): void {
     this.connState = "error";
     this.connError = message;
@@ -108,5 +113,7 @@ export class ChannelConnector {
 /** Stable signature used to decide when a connector must reconnect. */
 export function connectorSignature(cfg: ChannelBotConfig | null, tokens: string[]): string {
   if (!cfg?.enabled) return "disabled";
+  // `mentionOnly` changes which channel events the connector subscribes to,
+  // so a change to it must force a reconnect.
   return JSON.stringify([cfg.channelId, cfg.mentionOnly, tokens]);
 }
