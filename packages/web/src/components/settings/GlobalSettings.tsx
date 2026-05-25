@@ -907,20 +907,30 @@ function AddModelWizard({
       <strong style={{ fontSize: 13 }}>Add a model · 2. Assign {accountLabel ? `(${accountLabel})` : ""}</strong>
       {note && <span style={{ fontSize: 12, color: "rgb(var(--muted))" }}>{note}</span>}
       <Field label="Model">
+        {models.length > 0 && (
+          <select
+            value={models.includes(modelId) ? modelId : ""}
+            onChange={(e) => setModelId(e.target.value)}
+            style={input}
+          >
+            <option value="">— pick from {models.length} model(s) —</option>
+            {models.map((m) => (
+              <option key={m} value={m}>
+                {m}
+              </option>
+            ))}
+          </select>
+        )}
         <input
-          list="add-model-options"
           value={modelId}
           onChange={(e) => setModelId(e.target.value)}
-          placeholder="provider-specific model id"
+          placeholder={models.length > 0 ? "…or type a custom model id" : "provider-specific model id"}
           style={input}
         />
-        <datalist id="add-model-options">
-          {models.map((m) => (
-            <option key={m} value={m} />
-          ))}
-        </datalist>
         <span style={{ color: "rgb(var(--muted))", fontSize: 11 }}>
-          Type a model id, or click "List models" and pick one from the dropdown.
+          {models.length > 0
+            ? "Pick from the list above, or type a custom id."
+            : 'Type a model id, or click "List models" to choose from a dropdown.'}
         </span>
       </Field>
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
