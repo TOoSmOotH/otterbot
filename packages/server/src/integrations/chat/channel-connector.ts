@@ -70,6 +70,23 @@ export class ChannelConnector {
     return this.cfg.allowedUserIds.includes(userId);
   }
 
+  /**
+   * When an artifact can't be uploaded (missing files:write, bot not in the
+   * channel, file unresolvable), post a text note instead so the human isn't
+   * left with nothing and the cause is actionable.
+   */
+  private async postArtifactFallback(artifact: Artifact, reason: string): Promise<void> {
+    const note =
+      `⚠️ I produced "${artifact.name}" but ${reason}. ` +
+      `An admin may need to grant the bot the files:write scope and invite it to this channel. ` +
+      `Reference: ${artifact.url}`;
+    try {
+      await this.client.sendText(this.cfg.channelId, note);
+    } catch (err) {
+      console.error(`[${this.platform}] artifact fallback post failed for ${this.agentId}:`, err);
+    }
+  }
+
   private onInbound(m: InboundChatMessage): void {
     if (m.channelId !== this.cfg.channelId) return;
     if (m.fromSelf) return;
@@ -84,7 +101,10 @@ export class ChannelConnector {
         try {
           placeholder = await this.client.sendText(this.cfg.channelId, THINKING_PLACEHOLDER);
         } catch (err) {
-          console.warn(`[${this.platform}] thinking placeholder failed for ${this.agentId}:`, err);
+          console.error(
+            `[${this.platform}] thinking placeholder failed for ${this.agentId}:`,
+            err
+          );
         }
       }
       let reply: string;
@@ -106,21 +126,36 @@ export class ChannelConnector {
         } else {
           await this.client.sendText(this.cfg.channelId, reply);
         }
+        // A successful post means we can reach the channel — clear any stale
+        // error state so the Channels UI recovers after a transient failure.
+        if (this.connState === "error") this.markConnected();
       } catch (err) {
-        console.warn(`[${this.platform}] post failed for ${this.agentId}:`, err);
+        // Surface instead of swallowing: a failed post (missing chat:write, bot
+        // not in channel) is exactly what leaves the human with nothing.
+        const reason = err instanceof Error ? err.message : String(err);
+        console.error(`[${this.platform}] post failed for ${this.agentId}:`, err);
+        this.markError(`post failed: ${reason}`);
       }
       for (const artifact of artifacts) {
         let file: OutboundFile | null = null;
         try {
           file = this.loadArtifact(artifact);
         } catch (err) {
-          console.warn(`[${this.platform}] artifact load failed for ${this.agentId}:`, err);
+          console.error(`[${this.platform}] artifact load failed for ${this.agentId}:`, err);
         }
-        if (!file) continue;
+        if (!file) {
+          await this.postArtifactFallback(artifact, "it couldn't be loaded for upload");
+          continue;
+        }
         try {
           await this.client.sendFile(this.cfg.channelId, file);
         } catch (err) {
-          console.warn(`[${this.platform}] file upload failed for ${this.agentId}:`, err);
+          // Don't drop the artifact silently: tell the channel and flag the
+          // connector so a missing files:write / channel membership is visible.
+          const reason = err instanceof Error ? err.message : String(err);
+          console.error(`[${this.platform}] file upload failed for ${this.agentId}:`, err);
+          this.markError(`file upload failed: ${reason}`);
+          await this.postArtifactFallback(artifact, `upload failed (${reason})`);
         }
       }
     });

@@ -190,6 +190,14 @@ export interface AgentProfile {
   canSpawnSubagents: boolean;
   subagentLimit: number;
   /**
+   * When true, an inbound `delegate` request is handled by spawning a
+   * non-blocking subagent (inheriting this agent's skills/credentials) instead
+   * of running on this agent's serial queue. The subagent replies directly to
+   * the original requester, so one skilled agent (e.g. an image generator) can
+   * serve many requesters in parallel. Requires `canSpawnSubagents`.
+   */
+  dispatchToSubagent: boolean;
+  /**
    * When true the agent gets a `shell_exec` tool that runs commands in its own
    * sandboxed workspace directory. Off by default — it runs real commands.
    */

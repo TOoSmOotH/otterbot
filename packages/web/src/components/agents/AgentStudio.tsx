@@ -206,6 +206,7 @@ function SkillsTab({ profile, onSaved }: TabProps) {
   const update = useAgentsStore((s) => s.update);
   const [canSpawn, setCanSpawn] = useState(profile.canSpawnSubagents);
   const [limit, setLimit] = useState(profile.subagentLimit);
+  const [dispatchToSubagent, setDispatchToSubagent] = useState(profile.dispatchToSubagent);
   const [canRunShell, setCanRunShell] = useState(profile.canRunShell);
   const [canWebSearch, setCanWebSearch] = useState(profile.canWebSearch);
   const [autoLearn, setAutoLearn] = useState(profile.autoLearn);
@@ -308,6 +309,7 @@ function SkillsTab({ profile, onSaved }: TabProps) {
     await update(profile.id, {
       canSpawnSubagents: canSpawn,
       subagentLimit: limit,
+      dispatchToSubagent: canSpawn && dispatchToSubagent,
       canRunShell,
       canWebSearch,
       autoLearn,
@@ -401,19 +403,34 @@ function SkillsTab({ profile, onSaved }: TabProps) {
           Spawn subagents
         </label>
         {canSpawn && (
-          <label
-            style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "rgb(var(--muted))" }}
-          >
-            Limit
-            <input
-              type="number"
-              min={0}
-              max={20}
-              value={limit}
-              onChange={(e) => setLimit(Number(e.target.value))}
-              style={{ ...input, width: 80 }}
-            />
-          </label>
+          <>
+            <label
+              style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "rgb(var(--muted))" }}
+            >
+              Limit
+              <input
+                type="number"
+                min={0}
+                max={20}
+                value={limit}
+                onChange={(e) => setLimit(Number(e.target.value))}
+                style={{ ...input, width: 80 }}
+              />
+            </label>
+            <label style={checkboxRow}>
+              <input
+                type="checkbox"
+                checked={dispatchToSubagent}
+                onChange={(e) => setDispatchToSubagent(e.target.checked)}
+              />
+              Dispatch delegated work to a subagent
+            </label>
+            <p style={{ ...hint, marginTop: 0 }}>
+              When another agent delegates a task to this one, hand it to a fresh subagent
+              instead of running it on this agent's serial queue — so it can serve many
+              requesters in parallel (e.g. an image-generation service agent).
+            </p>
+          </>
         )}
       </div>
 

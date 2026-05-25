@@ -13,6 +13,7 @@ interface FormState {
   transport: "local" | "discord";
   email: string;
   canSpawnSubagents: boolean;
+  dispatchToSubagent: boolean;
   allowedPeers: AgentPeerAccess[];
 }
 
@@ -23,6 +24,7 @@ const BLANK: FormState = {
   transport: "local",
   email: "",
   canSpawnSubagents: true,
+  dispatchToSubagent: false,
   allowedPeers: [],
 };
 
@@ -84,6 +86,7 @@ export function AgentEditor({ agentId, onClose }: { agentId: string | null; onCl
           transport: p.transport,
           email: p.email ?? "",
           canSpawnSubagents: p.canSpawnSubagents,
+          dispatchToSubagent: p.dispatchToSubagent ?? false,
           allowedPeers: p.allowedPeers ?? [],
         });
         setChatModelId(p.model.chat);
@@ -114,6 +117,7 @@ export function AgentEditor({ agentId, onClose }: { agentId: string | null; onCl
         transport: form.transport,
         email: form.email.trim() || null,
         canSpawnSubagents: form.canSpawnSubagents,
+        dispatchToSubagent: form.canSpawnSubagents && form.dispatchToSubagent,
         allowedPeers: form.allowedPeers,
       };
 
@@ -270,6 +274,24 @@ export function AgentEditor({ agentId, onClose }: { agentId: string | null; onCl
             onChange={(e) => patch({ canSpawnSubagents: e.target.checked })}
           />
           Can spawn subagents
+        </label>
+
+        <label
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            fontSize: 13,
+            opacity: form.canSpawnSubagents ? 1 : 0.5,
+          }}
+        >
+          <input
+            type="checkbox"
+            checked={form.dispatchToSubagent}
+            disabled={!form.canSpawnSubagents}
+            onChange={(e) => patch({ dispatchToSubagent: e.target.checked })}
+          />
+          Dispatch delegated work to a subagent (serve requests in parallel)
         </label>
 
         <p style={hintStyle}>

@@ -1,4 +1,4 @@
-import type { CodeSearchHit, MemorySearchResult, ScheduledTask } from "@otterbot/shared";
+import type { AgentMessage, CodeSearchHit, MemorySearchResult, ScheduledTask } from "@otterbot/shared";
 import type { MessageBus } from "../bus/bus.js";
 
 export interface AgentDirectoryEntry {
@@ -30,6 +30,14 @@ export interface AgentServices {
     goal: string,
     opts?: { modelId?: string }
   ): Promise<SpawnResult>;
+  /**
+   * Service-agent dispatch: handle an inbound delegated `request` by spawning a
+   * non-blocking subagent (inheriting `parentId`'s skills/credentials) that
+   * replies directly to the original requester (correlationId = request.id).
+   * Returns immediately — the reply arrives later over the bus. Present only
+   * when the orchestrator wired it; runtimes guard on its existence.
+   */
+  dispatchToSubagent?(args: { parentId: string; request: AgentMessage }): void;
   /** Schedule a recurring prompt (cron expression) for an agent. */
   scheduleTask(agentId: string, cron: string, prompt: string): ScheduledTask | null;
   /** List an agent's scheduled tasks. */

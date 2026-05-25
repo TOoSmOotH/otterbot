@@ -603,18 +603,23 @@ export function buildAgentTools(
           );
         }
         try {
-          const res = await services.bus.request({
-            id: nanoid(),
-            kind: "request",
-            from: ctx.profile.id,
-            to: agentId,
-            threadId: nanoid(),
-            correlationId: null,
-            rootSpawnId: null,
-            body: task,
-            payload: attached.length ? { attachments: attached } : undefined,
-            transport: ctx.profile.transport,
-          });
+          const res = await services.bus.request(
+            {
+              id: nanoid(),
+              kind: "request",
+              from: ctx.profile.id,
+              to: agentId,
+              threadId: nanoid(),
+              correlationId: null,
+              rootSpawnId: null,
+              body: task,
+              payload: attached.length ? { attachments: attached } : undefined,
+              transport: ctx.profile.transport,
+            },
+            // A delegated task may itself spawn a subagent and run a slow tool
+            // (e.g. image generation) — allow well beyond the 120s default.
+            300_000
+          );
           // Any files the peer produced ride back on the response payload; the
           // runtime surfaces these to display in this agent's chat.
           const payload = res.payload as { artifacts?: unknown } | undefined;

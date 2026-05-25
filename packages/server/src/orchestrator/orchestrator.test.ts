@@ -177,6 +177,99 @@ describe("orchestrator (e2e)", () => {
     expect(sub.canSpawnSubagents).toBe(false);
   });
 
+  // A request addressed to a service agent, for the dispatch tests below.
+  const dispatchRequest = (to: string) => ({
+    id: nanoid(),
+    kind: "request" as const,
+    from: "coo",
+    to,
+    threadId: nanoid(),
+    correlationId: null,
+    rootSpawnId: null,
+    body: "Briefly say anything.",
+    transport: "local" as const,
+  });
+
+  it(
+    "dispatchToSubagent: a delegated request is answered by a non-blocking subagent",
+    async () => {
+      stack.cfg.subagentGraceMs = 0;
+      const svc = stack.orch.createAgent({
+        displayName: "Service Agent",
+        canSpawnSubagents: true,
+        dispatchToSubagent: true,
+      });
+      expect(stack.orch.getContext(svc.id)!.profile.dispatchToSubagent).toBe(true);
+
+      const req = dispatchRequest(svc.id);
+      const reply = await stack.orch.getBus().request(req);
+
+      // The reply resolves the original request, but comes FROM a subagent —
+      // the service agent's own serial queue is never engaged.
+      expect(reply.kind).toBe("response");
+      expect(reply.correlationId).toBe(req.id);
+      expect(reply.from).toContain(`${svc.id}__sub__`);
+      expect(reply.body.trim().length).toBeGreaterThan(0);
+
+      // A subagent task was recorded under the service agent, then the
+      // ephemeral subagent is torn down.
+      const task = stack.orch
+        .listSubagentTasks()
+        .find((t) => t.parentAgentId === svc.id && t.subagentId === reply.from);
+      expect(task?.status).toBe("done");
+      await waitFor(() => stack.orch.getContext(reply.from!) === undefined);
+    },
+    60_000
+  );
+
+  it(
+    "dispatchToSubagent: serves two concurrent requests from distinct subagents",
+    async () => {
+      stack.cfg.subagentGraceMs = 0;
+      const svc = stack.orch.createAgent({
+        displayName: "Parallel Service",
+        canSpawnSubagents: true,
+        dispatchToSubagent: true,
+      });
+      const bus = stack.orch.getBus();
+      const a = dispatchRequest(svc.id);
+      const b = dispatchRequest(svc.id);
+      const [ra, rb] = await Promise.all([bus.request(a), bus.request(b)]);
+
+      expect(ra.correlationId).toBe(a.id);
+      expect(rb.correlationId).toBe(b.id);
+      expect(ra.from).toContain(`${svc.id}__sub__`);
+      expect(rb.from).toContain(`${svc.id}__sub__`);
+      // Distinct subagents ran the two requests in parallel.
+      expect(ra.from).not.toBe(rb.from);
+    },
+    60_000
+  );
+
+  it(
+    "dispatchToSubagent: queues past subagentLimit and still answers every request",
+    async () => {
+      stack.cfg.subagentGraceMs = 0;
+      const svc = stack.orch.createAgent({
+        displayName: "Limited Service",
+        canSpawnSubagents: true,
+        dispatchToSubagent: true,
+        subagentLimit: 1,
+      });
+      const bus = stack.orch.getBus();
+      const reqs = [dispatchRequest(svc.id), dispatchRequest(svc.id), dispatchRequest(svc.id)];
+      const replies = await Promise.all(reqs.map((r) => bus.request(r)));
+
+      // Over-limit requests were queued and drained, not rejected — every one
+      // gets a correlated, non-empty answer.
+      reqs.forEach((r, i) => {
+        expect(replies[i].correlationId).toBe(r.id);
+        expect(replies[i].body.trim().length).toBeGreaterThan(0);
+      });
+    },
+    60_000
+  );
+
   it("delegate surfaces artifacts the peer returned on the response payload", async () => {
     const artifact = {
       id: "art_1.png",

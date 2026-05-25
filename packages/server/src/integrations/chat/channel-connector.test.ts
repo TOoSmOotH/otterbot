@@ -213,14 +213,43 @@ describe("ChannelConnector", () => {
     expect(client.files.map((f) => f.file.filename)).toEqual(["ok.png"]);
   });
 
-  it("swallows a failed file upload", async () => {
+  it("on a failed file upload, posts a fallback note and marks the connector errored", async () => {
     const client = new FakeChatClient(false);
     client.sendFile = async () => {
-      throw new Error("upload failed");
+      throw new Error("missing_scope");
     };
-    const conn = make(client, cfg(), runtimeWithArtifacts([artifact()]));
+    const conn = make(client, cfg(), runtimeWithArtifacts([artifact({ name: "cat.png" })]));
     await conn.start();
+    conn.markConnected();
     client.emit({ text: "go" });
     await expect(conn.whenIdle()).resolves.toBeUndefined();
+    // The reply plus a human-readable fallback naming the artifact and reason.
+    expect(client.sent.length).toBe(2);
+    const fallback = client.sent[1].text;
+    expect(fallback).toContain("cat.png");
+    expect(fallback).toContain("missing_scope");
+    expect(fallback).toContain("files:write");
+    expect(conn.getStatus().state).toBe("error");
+  });
+
+  it("posts a fallback note when an artifact cannot be loaded", async () => {
+    const client = new FakeChatClient(false);
+    const conn = make(client, cfg(), runtimeWithArtifacts([artifact({ name: "doc.pdf" })]), () => null);
+    await conn.start();
+    client.emit({ text: "go" });
+    await conn.whenIdle();
+    expect(client.files).toEqual([]);
+    expect(client.sent[1]?.text).toContain("doc.pdf");
+  });
+
+  it("clears a prior error state after a later successful post", async () => {
+    const client = new FakeChatClient(false);
+    const conn = make(client, cfg(), runtimeWithArtifacts([]));
+    await conn.start();
+    conn.markError("boom");
+    expect(conn.getStatus().state).toBe("error");
+    client.emit({ text: "hi" });
+    await conn.whenIdle();
+    expect(conn.getStatus().state).toBe("connected");
   });
 });

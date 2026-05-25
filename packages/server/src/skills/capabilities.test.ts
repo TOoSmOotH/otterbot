@@ -34,6 +34,7 @@ function makeProfile(overrides: Partial<AgentProfile> = {}): AgentProfile {
     allowedPeers: [],
     canSpawnSubagents: false,
     subagentLimit: 0,
+    dispatchToSubagent: false,
     canRunShell: false,
     canWebSearch: false,
     autoLearn: true,

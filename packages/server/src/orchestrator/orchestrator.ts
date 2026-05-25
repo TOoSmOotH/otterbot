@@ -1,5 +1,5 @@
 import { basename, join } from "node:path";
-import { existsSync, readdirSync, readFileSync, writeFileSync, rmSync, cpSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync, rmSync, cpSync } from "node:fs";
 import { eq, desc } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import type {
@@ -8,6 +8,7 @@ import type {
   AgentStatus,
   AgentRole,
   AgentConnectorStatus,
+  AgentMessage,
   ChannelBotConfig,
   ChannelConnectorStatus,
   ConfiguredModel,
@@ -27,7 +28,7 @@ import {
 import { controlSchema, type ControlDb } from "../db/control-db.js";
 import { buildAgentContext, type AgentContext } from "../runtime/agent-context.js";
 import { DEFAULT_CONTEXT_WINDOW } from "../runtime/context-manager.js";
-import { AgentRuntime } from "../runtime/agent-runtime.js";
+import { AgentRuntime, withAttachmentRefs } from "../runtime/agent-runtime.js";
 import type { AgentServices, SpawnResult } from "../runtime/agent-services.js";
 import { resolveEmbedder } from "../providers/registry.js";
 import { PROVIDER_CATALOG, findProvider } from "../providers/catalog.js";
@@ -93,6 +94,7 @@ export interface CreateAgentInput {
   artwork?: AgentProfile["artwork"];
   canSpawnSubagents?: boolean;
   subagentLimit?: number;
+  dispatchToSubagent?: boolean;
   parentId?: string | null;
 }
 
@@ -390,6 +392,12 @@ export class Orchestrator {
   private subagentSeq = 0;
   /** subId -> pending teardown timer for an ephemeral subagent in its grace window. */
   private readonly subagentTeardowns = new Map<string, NodeJS.Timeout>();
+  /**
+   * parentId -> FIFO of delegated requests waiting for a dispatch-subagent slot.
+   * A service agent (`dispatchToSubagent`) queues bursts past `subagentLimit`
+   * here instead of rejecting; entries drain as subagents tear down.
+   */
+  private readonly dispatchQueues = new Map<string, AgentMessage[]>();
 
   constructor(
     private readonly profiles: ProfileStore,
@@ -431,6 +439,8 @@ export class Orchestrator {
           summary: p.persona.split("\n").find((l) => l.trim())?.slice(0, 140) ?? "",
         })),
       spawnSubagent: (parentId, goal, opts) => this.spawnSubagent(parentId, goal, opts),
+      dispatchToSubagent: ({ parentId, request }) =>
+        this.dispatchDelegateToSubagent(parentId, request),
       scheduleTask: (agentId, cron, prompt) => this.scheduler.add(agentId, cron, prompt),
       listScheduledTasks: (agentId) => this.scheduler.list(agentId),
       cancelScheduledTask: (id) => this.scheduler.cancel(id),
@@ -1123,6 +1133,7 @@ export class Orchestrator {
       artwork: input.artwork,
       canSpawnSubagents: input.canSpawnSubagents,
       subagentLimit: input.subagentLimit,
+      dispatchToSubagent: input.dispatchToSubagent,
       parentId: input.parentId ?? null,
       createdAt: new Date().toISOString(),
     });
@@ -1503,6 +1514,198 @@ export class Orchestrator {
     }
   }
 
+  /**
+   * Service-agent dispatch (non-blocking). Handle a delegated `request` on
+   * behalf of an agent flagged `dispatchToSubagent` by spawning an ephemeral
+   * subagent that inherits the service agent's skills + credentials. The
+   * subagent's result is published as a `response` carrying the ORIGINAL
+   * request's correlationId, addressed to the original requester — so the
+   * requester's pending `bus.request` resolves with the subagent's output and
+   * artifacts, without ever touching the service agent's serial queue. Returns
+   * immediately; the reply arrives later over the bus.
+   */
+  private dispatchDelegateToSubagent(parentId: string, request: AgentMessage): void {
+    void this.runDispatchedSubagent(parentId, request).catch((err) => {
+      // An orchestrator-side fault (profile create, runtime start, limit) must
+      // still resolve the requester rather than leave it to time out.
+      this.replyToRequester(request, parentId, {
+        body: `Service agent error: ${err instanceof Error ? err.message : String(err)}`,
+        artifacts: [],
+      });
+    });
+  }
+
+  private async runDispatchedSubagent(parentId: string, request: AgentMessage): Promise<void> {
+    const parentCtx = this.contexts.get(parentId);
+    if (!parentCtx) throw new Error(`Unknown agent: ${parentId}`);
+    if (!parentCtx.profile.canSpawnSubagents) {
+      throw new Error(`agent ${parentId} is not allowed to spawn subagents`);
+    }
+    // Concurrency gate: queue bursts past the limit and drain them as slots free
+    // (a service agent should absorb load, not reject it). The requester keeps
+    // waiting on its bus.request until a slot opens or the request times out.
+    if (this.activeSubagentCount(parentId) >= parentCtx.profile.subagentLimit) {
+      const q = this.dispatchQueues.get(parentId) ?? [];
+      q.push(request);
+      this.dispatchQueues.set(parentId, q);
+      return;
+    }
+
+    const subId = `${parentId}__sub__${++this.subagentSeq}`;
+    const taskId = nanoid();
+    const now = new Date().toISOString();
+    const subProfile = buildSubagentProfile(parentCtx.profile, {
+      id: subId,
+      displayName: `${parentCtx.profile.displayName} · svc ${this.subagentSeq}`,
+      createdAt: now,
+    });
+    this.profiles.create(subProfile);
+    // Inherit the parent's skills + secrets, exactly as spawnSubagent does, so
+    // the subagent loads the same tools (e.g. image-gen) and reaches the same
+    // endpoints.
+    const parentSkills = this.profiles.pathsFor(parentId).skillsDir;
+    const subSkills = this.profiles.pathsFor(subId).skillsDir;
+    if (existsSync(parentSkills)) cpSync(parentSkills, subSkills, { recursive: true });
+    this.secrets.set(subId, this.secrets.getScoped(parentId));
+    this.startAgent(subProfile);
+
+    this.control.db
+      .insert(controlSchema.subagentTasks)
+      .values({
+        id: taskId,
+        rootId: taskId,
+        parentTaskId: null,
+        parentAgentId: parentId,
+        subagentId: subId,
+        goal: request.body,
+        status: "running",
+        resultSummary: null,
+        createdAt: now,
+        finishedAt: null,
+      })
+      .run();
+
+    this.bus.publish({
+      id: nanoid(),
+      kind: "spawn",
+      from: parentId,
+      to: null,
+      threadId: taskId,
+      correlationId: null,
+      rootSpawnId: taskId,
+      payload: { subagentId: subId },
+      body: `Dispatched ${subId} to serve a request from ${request.from}`,
+      transport: parentCtx.profile.transport,
+    });
+
+    const runtime = this.runtimes.get(subId);
+    let body = "";
+    let artifacts: Artifact[] = [];
+    let status: "done" | "failed" = "done";
+    try {
+      if (!runtime) throw new Error("subagent runtime failed to start");
+      const res = await runtime.respond({
+        conversationId: `dispatch-${taskId}`,
+        userMessage: withAttachmentRefs(request.body, request.payload),
+        onChunk: () => {},
+      });
+      body = res.finalText || "(no response)";
+      // Re-home produced files into the parent (persistent) before teardown —
+      // the subagent's directory is about to be deleted.
+      artifacts = this.rehomeArtifacts(subId, parentId, res.artifacts);
+    } catch (err) {
+      status = "failed";
+      body = `Error: ${err instanceof Error ? err.message : String(err)}`;
+    }
+
+    this.control.db
+      .update(controlSchema.subagentTasks)
+      .set({ status, resultSummary: body, finishedAt: new Date().toISOString() })
+      .where(eq(controlSchema.subagentTasks.id, taskId))
+      .run();
+
+    // Resolve the ORIGINAL requester's pending delegate, carrying any artifacts.
+    this.replyToRequester(request, subId, { body, artifacts });
+
+    // Free the slot immediately (artifacts are already re-homed), then pull the
+    // next queued request for this parent, if any.
+    await this.teardownSubagent(subId);
+    this.drainDispatchQueue(parentId);
+  }
+
+  /**
+   * Publish the correlated `response` that resolves the original requester's
+   * pending `bus.request`. The bus matches a response purely by correlationId
+   * (ignoring `from`), so the subagent can satisfy the delegate the requester
+   * addressed to the service agent.
+   */
+  private replyToRequester(
+    request: AgentMessage,
+    fromId: string,
+    out: { body: string; artifacts: Artifact[] }
+  ): void {
+    this.bus.publish({
+      id: nanoid(),
+      kind: "response",
+      from: fromId,
+      to: request.from,
+      threadId: request.threadId,
+      correlationId: request.id,
+      rootSpawnId: request.rootSpawnId,
+      body: out.body,
+      payload: out.artifacts.length ? { artifacts: out.artifacts } : undefined,
+      transport: this.contexts.get(request.from)?.profile.transport ?? "local",
+    });
+  }
+
+  /** Count an agent's live ephemeral subagents (incl. any in a grace window). */
+  private activeSubagentCount(parentId: string): number {
+    return [...this.contexts.values()].filter(
+      (c) => c.profile.parentId === parentId && c.profile.role === "subagent"
+    ).length;
+  }
+
+  /** Start the next queued dispatch for a parent if a subagent slot is free. */
+  private drainDispatchQueue(parentId: string): void {
+    const q = this.dispatchQueues.get(parentId);
+    if (!q?.length) return;
+    const parentCtx = this.contexts.get(parentId);
+    if (!parentCtx) {
+      this.dispatchQueues.delete(parentId);
+      return;
+    }
+    if (this.activeSubagentCount(parentId) >= parentCtx.profile.subagentLimit) return;
+    const next = q.shift()!;
+    if (!q.length) this.dispatchQueues.delete(parentId);
+    this.dispatchDelegateToSubagent(parentId, next);
+  }
+
+  /**
+   * Copy each artifact's bytes from `fromId`'s images/files dir into `toId`'s
+   * and rewrite its URL to point at `toId`. Used so a dispatched subagent's
+   * output survives the subagent's teardown by living in the persistent parent.
+   * Artifacts that don't resolve are passed through unchanged.
+   */
+  private rehomeArtifacts(fromId: string, toId: string, artifacts: Artifact[]): Artifact[] {
+    return artifacts.map((a) => {
+      const m = a.url.match(/\/agents\/([^/]+)\/(images|files)\/([^/?#]+)/);
+      if (!m) return a;
+      const [, , kind, file] = m;
+      const name = basename(file);
+      const srcDir = kind === "images"
+        ? this.profiles.pathsFor(fromId).images
+        : this.profiles.pathsFor(fromId).files;
+      const dstDir = kind === "images"
+        ? this.profiles.pathsFor(toId).images
+        : this.profiles.pathsFor(toId).files;
+      const src = join(srcDir, name);
+      if (!existsSync(src)) return a;
+      mkdirSync(dstDir, { recursive: true });
+      cpSync(src, join(dstDir, name));
+      return { ...a, url: `/api/agents/${toId}/${kind}/${name}` };
+    });
+  }
+
   /** All subagent spawn tasks, newest first. */
   listSubagentTasks(): Array<typeof controlSchema.subagentTasks.$inferSelect> {
     return this.control.db
@@ -1548,8 +1751,10 @@ export function buildSubagentProfile(
     mcpServers: parent.mcpServers,
     allowedPeers: parent.allowedPeers,
     parentId: parent.id,
-    // Subagents never spawn their own subagents — no nested recursion.
+    // Subagents never spawn their own subagents — no nested recursion. They
+    // also never re-dispatch: a dispatched subagent does the work itself.
     canSpawnSubagents: false,
+    dispatchToSubagent: false,
     createdAt: args.createdAt,
   });
 }

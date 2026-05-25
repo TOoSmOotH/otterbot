@@ -71,7 +71,7 @@ function artifactFromResult(result: unknown): Artifact | null {
  * to the task so the receiving agent knows they exist and can open them with
  * `read_file`. Keeps the inline body small while making the docs discoverable.
  */
-function withAttachmentRefs(body: string, payload: unknown): string {
+export function withAttachmentRefs(body: string, payload: unknown): string {
   if (!payload || typeof payload !== "object") return body;
   const list = (payload as { attachments?: unknown }).attachments;
   if (!Array.isArray(list) || list.length === 0) return body;
@@ -325,6 +325,14 @@ export class AgentRuntime {
    */
   async handleBusMessage(msg: AgentMessage): Promise<void> {
     if (msg.kind !== "request" || !this.services) return;
+    // Service-agent fast path: hand the request to a non-blocking subagent that
+    // replies directly to the original requester, leaving this agent's serial
+    // queue free to accept the next request. Lets one skilled agent (e.g. an
+    // image generator) serve many requesters in parallel.
+    if (this.ctx.profile.dispatchToSubagent && this.services.dispatchToSubagent) {
+      this.services.dispatchToSubagent({ parentId: this.id, request: msg });
+      return;
+    }
     this.queue = this.queue.then(async () => {
       const bus = this.services!.bus;
       let reply = "";
