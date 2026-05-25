@@ -958,7 +958,7 @@ export class Orchestrator {
   }
 
   /**
-   * Bring an agent's Slack + Discord chat connectors in line with its profile
+   * Bring an agent's Slack, Discord, and Matrix chat connectors in line with its profile
    * and credentials. Connectors are deliberately decoupled from agent context
    * lifecycle: a connector only reconnects when its channel/tokens actually
    * change; a gate-only change (publicBot / allowedUserIds) is applied in place.
