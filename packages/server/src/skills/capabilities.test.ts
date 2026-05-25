@@ -28,6 +28,7 @@ function makeProfile(overrides: Partial<AgentProfile> = {}): AgentProfile {
     transport: "local",
     slack: null,
     discord: null,
+    matrix: null,
     email: null,
     artwork: { avatar: null },
     allowedPeers: [],

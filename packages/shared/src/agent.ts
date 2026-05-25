@@ -42,14 +42,14 @@ export type AgentStatus =
   | "stopped"
   | "error";
 
-export type TransportId = "local" | "discord";
+export type TransportId = "local" | "discord" | "matrix";
 
-export type ChatService = "web" | "discord" | "slack";
+export type ChatService = "web" | "discord" | "slack" | "matrix";
 
 /**
- * Per-agent config for a chat channel (Slack or Discord) the agent is reachable
- * in. `publicBot` lets anyone in the channel talk to the agent; otherwise only
- * the listed platform user IDs may.
+ * Per-agent config for a chat channel (Slack, Discord, or Matrix) the agent is
+ * reachable in. `publicBot` lets anyone in the channel talk to the agent;
+ * otherwise only the listed platform user IDs may.
  */
 export interface ChannelBotConfig {
   enabled: boolean;
@@ -93,7 +93,7 @@ export interface McpServerStatus {
   toolCount: number;
 }
 
-/** Live state of one chat-channel connector (Slack / Discord). */
+/** Live state of one chat-channel connector (Slack / Discord / Matrix). */
 export type ConnectorState =
   | "off"
   | "missing-tokens"
@@ -109,10 +109,11 @@ export interface ChannelConnectorStatus {
   channelId: string | null;
 }
 
-/** Live Slack + Discord connector status for an agent. */
+/** Live Slack + Discord + Matrix connector status for an agent. */
 export interface AgentConnectorStatus {
   slack: ChannelConnectorStatus;
   discord: ChannelConnectorStatus;
+  matrix: ChannelConnectorStatus;
 }
 
 /**
@@ -180,6 +181,8 @@ export interface AgentProfile {
   slack: ChannelBotConfig | null;
   /** Per-agent Discord channel connector config; null when not configured. */
   discord: ChannelBotConfig | null;
+  /** Per-agent Matrix room connector config; null when not configured. */
+  matrix: ChannelBotConfig | null;
   email: string | null;
   artwork: AgentArtwork;
   /** Peer agents this agent is permitted to message (+ optional memory access). */

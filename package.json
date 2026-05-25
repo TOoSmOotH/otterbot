@@ -25,6 +25,7 @@
   "pnpm": {
     "onlyBuiltDependencies": [
       "@homebridge/node-pty-prebuilt-multiarch",
+      "@matrix-org/matrix-sdk-crypto-nodejs",
       "better-sqlite3-multiple-ciphers",
       "esbuild"
     ],

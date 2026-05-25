@@ -729,6 +729,16 @@ function ChannelsTab({ profile, onSaved }: TabProps) {
   );
   const [discordBotToken, setDiscordBotToken] = useState("");
 
+  const [matrixEnabled, setMatrixEnabled] = useState(profile.matrix?.enabled ?? false);
+  const [matrixRoom, setMatrixRoom] = useState(profile.matrix?.channelId ?? "");
+  const [matrixPublic, setMatrixPublic] = useState(profile.matrix?.publicBot ?? false);
+  const [matrixUsers, setMatrixUsers] = useState(
+    (profile.matrix?.allowedUserIds ?? []).join("\n")
+  );
+  const [matrixMentionOnly, setMatrixMentionOnly] = useState(profile.matrix?.mentionOnly ?? true);
+  const [matrixHomeserver, setMatrixHomeserver] = useState("");
+  const [matrixToken, setMatrixToken] = useState("");
+
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState("");
 
@@ -754,12 +764,23 @@ function ChannelsTab({ profile, onSaved }: TabProps) {
             mentionOnly: discordMentionOnly,
           }
         : null,
+      matrix: matrixEnabled
+        ? {
+            enabled: true,
+            channelId: matrixRoom.trim(),
+            publicBot: matrixPublic,
+            allowedUserIds: parseIds(matrixUsers),
+            mentionOnly: matrixMentionOnly,
+          }
+        : null,
     });
     // 2. Tokens are secrets — merge in only the ones that were entered.
     const secrets: Record<string, string> = {};
     if (slackBotToken.trim()) secrets.SLACK_BOT_TOKEN = slackBotToken.trim();
     if (slackAppToken.trim()) secrets.SLACK_APP_TOKEN = slackAppToken.trim();
     if (discordBotToken.trim()) secrets.DISCORD_BOT_TOKEN = discordBotToken.trim();
+    if (matrixHomeserver.trim()) secrets.MATRIX_HOMESERVER_URL = matrixHomeserver.trim();
+    if (matrixToken.trim()) secrets.MATRIX_ACCESS_TOKEN = matrixToken.trim();
     if (Object.keys(secrets).length > 0) {
       const res = await apiFetch(`/api/agents/${profile.id}/credentials`, {
         method: "PATCH",
@@ -774,6 +795,8 @@ function ChannelsTab({ profile, onSaved }: TabProps) {
     setSlackBotToken("");
     setSlackAppToken("");
     setDiscordBotToken("");
+    setMatrixHomeserver("");
+    setMatrixToken("");
     setSaved(true);
     onSaved();
     void refreshStatus();
@@ -782,8 +805,8 @@ function ChannelsTab({ profile, onSaved }: TabProps) {
   return (
     <Form>
       <p style={hint}>
-        Connect this agent to a Slack or Discord channel. Tokens are stored encrypted alongside the
-        agent's other credentials — leave a token blank to keep the one already saved.
+        Connect this agent to a Slack, Discord, or Matrix channel. Tokens are stored encrypted
+        alongside the agent's other credentials — leave a token blank to keep the one already saved.
       </p>
 
       <div style={channelCard}>
@@ -928,6 +951,88 @@ function ChannelsTab({ profile, onSaved }: TabProps) {
                 <textarea
                   value={discordUsers}
                   onChange={(e) => setDiscordUsers(e.target.value)}
+                  rows={3}
+                  style={{ ...input, resize: "vertical", fontFamily: "monospace", fontSize: 12 }}
+                />
+              </Field>
+            )}
+          </>
+        )}
+      </div>
+
+      <div style={channelCard}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+          <label style={checkboxRow}>
+            <input
+              type="checkbox"
+              checked={matrixEnabled}
+              onChange={(e) => setMatrixEnabled(e.target.checked)}
+            />
+            Enable Matrix
+          </label>
+          <ConnectorBadge s={connStatus?.matrix} />
+        </div>
+        {matrixEnabled && (
+          <>
+            {connStatus?.matrix.state === "connected" && (
+              <p style={{ ...hint, marginTop: 0 }}>
+                Connected. If the agent doesn't reply: invite the bot to the room, and make sure
+                whoever messages it is allowed — enable "Public bot" or list their Matrix ID below.
+              </p>
+            )}
+            <Field label="Homeserver URL">
+              <input
+                value={matrixHomeserver}
+                onChange={(e) => setMatrixHomeserver(e.target.value)}
+                placeholder={
+                  profile.matrix ? "Leave blank to keep the saved URL" : "https://matrix.org"
+                }
+                style={input}
+              />
+            </Field>
+            <Field label="Access token">
+              <input
+                type="password"
+                value={matrixToken}
+                onChange={(e) => setMatrixToken(e.target.value)}
+                placeholder={profile.matrix ? "Leave blank to keep the saved token" : "syt_…"}
+                style={input}
+              />
+            </Field>
+            <Field label="Room ID to join">
+              <input
+                value={matrixRoom}
+                onChange={(e) => setMatrixRoom(e.target.value)}
+                placeholder="!room:matrix.org"
+                style={input}
+              />
+            </Field>
+            <label style={checkboxRow}>
+              <input
+                type="checkbox"
+                checked={matrixMentionOnly}
+                onChange={(e) => setMatrixMentionOnly(e.target.checked)}
+              />
+              Only respond when mentioned
+            </label>
+            <p style={{ ...hint, marginTop: 0 }}>
+              {matrixMentionOnly
+                ? "The agent replies only when its Matrix ID or display name appears in the message."
+                : "The agent replies to every message in the room."}
+            </p>
+            <label style={checkboxRow}>
+              <input
+                type="checkbox"
+                checked={matrixPublic}
+                onChange={(e) => setMatrixPublic(e.target.checked)}
+              />
+              Public bot — anyone in the room may talk to this agent
+            </label>
+            {!matrixPublic && (
+              <Field label="Allowed Matrix IDs (one per line, @user:server)">
+                <textarea
+                  value={matrixUsers}
+                  onChange={(e) => setMatrixUsers(e.target.value)}
                   rows={3}
                   style={{ ...input, resize: "vertical", fontFamily: "monospace", fontSize: 12 }}
                 />

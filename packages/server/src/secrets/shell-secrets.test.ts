@@ -72,6 +72,8 @@ describe("suggestScopeForKey", () => {
     ["SLACK_BOT_TOKEN", "direct"],
     ["SLACK_APP_TOKEN", "direct"],
     ["DISCORD_BOT_TOKEN", "direct"],
+    ["MATRIX_ACCESS_TOKEN", "direct"],
+    ["MATRIX_HOMESERVER_URL", "direct"],
     ["MY_RANDOM_KEY", "broad"],
   ])("maps %s to %s", (key, expected) => {
     expect(suggestScopeForKey(key)).toBe(expected);

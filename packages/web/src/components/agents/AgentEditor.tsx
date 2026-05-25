@@ -273,7 +273,7 @@ export function AgentEditor({ agentId, onClose }: { agentId: string | null; onCl
         </label>
 
         <p style={hintStyle}>
-          Connect this agent to Slack or Discord in the Agent Studio → Channels tab.
+          Connect this agent to Slack, Discord, or Matrix in the Agent Studio → Channels tab.
         </p>
 
         <div

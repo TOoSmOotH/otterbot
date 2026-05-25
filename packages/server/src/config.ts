@@ -24,10 +24,16 @@ export interface Config {
    * tears it down immediately on completion.
    */
   subagentGraceMs: number;
-  /** Agent-to-agent transport: in-process bus, or a shared Discord channel. */
-  agentTransport: "local" | "discord";
+  /**
+   * Agent-to-agent transport: in-process bus, a shared Discord channel, or a
+   * shared Matrix room.
+   */
+  agentTransport: "local" | "discord" | "matrix";
   discordBotToken: string | null;
   discordChannelId: string | null;
+  matrixHomeserverUrl: string | null;
+  matrixAccessToken: string | null;
+  matrixRoomId: string | null;
 }
 
 function bool(v: string | undefined, fallback: boolean): boolean {
@@ -55,9 +61,17 @@ export function loadConfig(): Config {
     logLevel: (process.env.LOG_LEVEL as Config["logLevel"]) ?? "info",
     dbKey: process.env.OTTERBOT_DB_KEY ?? null,
     subagentGraceMs: Number(process.env.SUBAGENT_GRACE_MS ?? 300_000),
-    agentTransport: process.env.AGENT_TRANSPORT === "discord" ? "discord" : "local",
+    agentTransport:
+      process.env.AGENT_TRANSPORT === "discord"
+        ? "discord"
+        : process.env.AGENT_TRANSPORT === "matrix"
+          ? "matrix"
+          : "local",
     discordBotToken: process.env.DISCORD_BOT_TOKEN ?? null,
     discordChannelId: process.env.DISCORD_CHANNEL_ID ?? null,
+    matrixHomeserverUrl: process.env.MATRIX_HOMESERVER_URL ?? null,
+    matrixAccessToken: process.env.MATRIX_ACCESS_TOKEN ?? null,
+    matrixRoomId: process.env.MATRIX_ROOM_ID ?? null,
   };
 }
 

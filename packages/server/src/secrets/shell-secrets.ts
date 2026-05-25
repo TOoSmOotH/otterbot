@@ -51,5 +51,6 @@ export function suggestScopeForKey(key: string): CredentialScope {
   if (upper.startsWith("SMTP_")) return "direct";
   if (upper === "SLACK_BOT_TOKEN" || upper === "SLACK_APP_TOKEN") return "direct";
   if (upper === "DISCORD_BOT_TOKEN") return "direct";
+  if (upper.startsWith("MATRIX_")) return "direct";
   return "broad";
 }

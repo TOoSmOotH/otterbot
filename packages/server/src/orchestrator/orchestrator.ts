@@ -46,6 +46,7 @@ import {
 import { WebClient } from "@slack/web-api";
 import { SlackConnector } from "../integrations/slack-connector.js";
 import { DiscordConnector } from "../integrations/discord-connector.js";
+import { MatrixConnector } from "../integrations/matrix-connector.js";
 import { McpManager } from "../integrations/mcp.js";
 import { mimeFromName, persistArtifact } from "../integrations/artifacts.js";
 import type { Artifact } from "@otterbot/shared";
@@ -87,6 +88,7 @@ export interface CreateAgentInput {
   transport?: AgentProfile["transport"];
   slack?: ChannelBotConfig | null;
   discord?: ChannelBotConfig | null;
+  matrix?: ChannelBotConfig | null;
   allowedPeers?: AgentProfile["allowedPeers"];
   email?: string | null;
   artwork?: AgentProfile["artwork"];
@@ -385,6 +387,7 @@ export class Orchestrator {
   /** Per-agent chat connectors, keyed by agent id. */
   private readonly slackConnectors = new Map<string, TrackedConnector<SlackConnector>>();
   private readonly discordConnectors = new Map<string, TrackedConnector<DiscordConnector>>();
+  private readonly matrixConnectors = new Map<string, TrackedConnector<MatrixConnector>>();
   /** Per-agent MCP server connections. */
   private readonly mcp = new McpManager();
   private subagentSeq = 0;
@@ -812,9 +815,11 @@ export class Orchestrator {
     await Promise.allSettled([
       ...[...this.slackConnectors.values()].map((t) => t.connector.stop()),
       ...[...this.discordConnectors.values()].map((t) => t.connector.stop()),
+      ...[...this.matrixConnectors.values()].map((t) => t.connector.stop()),
     ]);
     this.slackConnectors.clear();
     this.discordConnectors.clear();
+    this.matrixConnectors.clear();
     await this.mcp.shutdown();
     await Promise.allSettled(this.pendingInits.splice(0));
     for (const ctx of this.contexts.values()) {
@@ -968,13 +973,14 @@ export class Orchestrator {
    * lifecycle: a connector only reconnects when its channel/tokens actually
    * change; a gate-only change (publicBot / allowedUserIds) is applied in place.
    */
-  /** Live Slack/Discord connector status for an agent. */
+  /** Live Slack/Discord/Matrix connector status for an agent. */
   getConnectorStatus(id: string): AgentConnectorStatus | null {
     const ctx = this.contexts.get(id);
     if (!ctx) return null;
     return {
       slack: channelStatus(ctx.profile.slack, this.slackConnectors.get(id)),
       discord: channelStatus(ctx.profile.discord, this.discordConnectors.get(id)),
+      matrix: channelStatus(ctx.profile.matrix, this.matrixConnectors.get(id)),
     };
   }
 
@@ -997,6 +1003,22 @@ export class Orchestrator {
       this.discordConnectors,
       (cfg, [bot]) =>
         new DiscordConnector(profile.id, cfg, bot, () => this.runtimes.get(profile.id))
+    );
+    this.reconcileOne(
+      profile.id,
+      profile.matrix,
+      [secrets.get("MATRIX_HOMESERVER_URL") ?? "", secrets.get("MATRIX_ACCESS_TOKEN") ?? ""],
+      this.matrixConnectors,
+      (cfg, [url, token]) =>
+        new MatrixConnector(
+          profile.id,
+          cfg,
+          url,
+          token,
+          join(this.cfg.dataDir, "matrix", `connector-${profile.id}.json`),
+          join(this.cfg.dataDir, "matrix", `crypto-connector-${profile.id}`),
+          () => this.runtimes.get(profile.id)
+        )
     );
   }
 
@@ -1038,9 +1060,15 @@ export class Orchestrator {
   private async stopConnectors(agentId: string): Promise<void> {
     const slack = this.slackConnectors.get(agentId);
     const discord = this.discordConnectors.get(agentId);
+    const matrix = this.matrixConnectors.get(agentId);
     this.slackConnectors.delete(agentId);
     this.discordConnectors.delete(agentId);
-    await Promise.allSettled([slack?.connector.stop(), discord?.connector.stop()]);
+    this.matrixConnectors.delete(agentId);
+    await Promise.allSettled([
+      slack?.connector.stop(),
+      discord?.connector.stop(),
+      matrix?.connector.stop(),
+    ]);
   }
 
   // --- Accessors -----------------------------------------------------------
@@ -1111,6 +1139,7 @@ export class Orchestrator {
       transport: input.transport,
       slack: input.slack ?? null,
       discord: input.discord ?? null,
+      matrix: input.matrix ?? null,
       allowedPeers: input.allowedPeers,
       email: input.email ?? null,
       artwork: input.artwork,
