@@ -1,6 +1,8 @@
-import { useState } from "react";
-import { Plus, Wifi, WifiOff } from "lucide-react";
+import { useMemo, useState } from "react";
+import { CornerDownRight, Plus, Wifi, WifiOff } from "lucide-react";
+import type { SubagentTask } from "@otterbot/shared";
 import { useAgentsStore } from "../../stores/agents-store";
+import { useActivityStore } from "../../stores/activity-store";
 import { useChatStore } from "../../stores/chat-store";
 import { withToken } from "../../lib/api";
 import { Icon } from "../ui/Icon";
@@ -8,6 +10,7 @@ import { statusColor, initials } from "./agent-visual";
 import { type } from "../../lib/typography";
 
 const PULSING_STATUSES = new Set(["working", "thinking"]);
+const ACTIVE_TASK_STATUSES = new Set<SubagentTask["status"]>(["running", "queued"]);
 
 /** Left-rail agent roster: the COO plus every agent, with a "New agent" action. */
 export function AgentRoster({ onNewAgent }: { onNewAgent: () => void }) {
@@ -15,6 +18,7 @@ export function AgentRoster({ onNewAgent }: { onNewAgent: () => void }) {
   const activeAgentId = useAgentsStore((s) => s.activeAgentId);
   const setActive = useAgentsStore((s) => s.setActive);
   const connected = useChatStore((s) => s.connected);
+  const tasks = useActivityStore((s) => s.tasks);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
 
   const ordered = [...agents].sort((a, b) => {
@@ -22,6 +26,18 @@ export function AgentRoster({ onNewAgent }: { onNewAgent: () => void }) {
     if (b.role === "coo") return 1;
     return a.displayName.localeCompare(b.displayName);
   });
+
+  // Live subagent tasks grouped under the agent that delegated them.
+  const activeTasksByAgent = useMemo(() => {
+    const map = new Map<string, SubagentTask[]>();
+    for (const t of tasks) {
+      if (!ACTIVE_TASK_STATUSES.has(t.status)) continue;
+      const list = map.get(t.parentAgentId);
+      if (list) list.push(t);
+      else map.set(t.parentAgentId, [t]);
+    }
+    return map;
+  }, [tasks]);
 
   return (
     <div
@@ -81,10 +97,11 @@ export function AgentRoster({ onNewAgent }: { onNewAgent: () => void }) {
           const active = a.id === activeAgentId;
           const hovered = hoveredId === a.id;
           const pulse = PULSING_STATUSES.has(a.status);
+          const subtasks = activeTasksByAgent.get(a.id) ?? [];
 
           return (
+            <div key={a.id} style={{ display: "flex", flexDirection: "column" }}>
             <button
-              key={a.id}
               data-testid={`agent-card-${a.id}`}
               onClick={() => setActive(a.id)}
               onMouseEnter={() => setHoveredId(a.id)}
@@ -206,6 +223,10 @@ export function AgentRoster({ onNewAgent }: { onNewAgent: () => void }) {
                 }}
               />
             </button>
+            {subtasks.map((t) => (
+              <SubtaskRow key={t.id} task={t} />
+            ))}
+            </div>
           );
         })}
         {ordered.length === 0 && (
@@ -241,6 +262,51 @@ export function AgentRoster({ onNewAgent }: { onNewAgent: () => void }) {
           New agent
         </button>
       </div>
+    </div>
+  );
+}
+
+/** A single live subagent task delegated by the agent above it. */
+function SubtaskRow({ task }: { task: SubagentTask }) {
+  const running = task.status === "running";
+  const color = running ? "rgb(var(--warning))" : "rgb(var(--info))";
+  return (
+    <div
+      data-testid={`subtask-row-${task.id}`}
+      title={`${task.status}: ${task.goal}`}
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 6,
+        padding: "2px 10px 4px 22px",
+        color: "rgb(var(--subtle))",
+      }}
+    >
+      <Icon icon={CornerDownRight} size={12} />
+      <span
+        style={{
+          ...type.monoSm,
+          flex: 1,
+          minWidth: 0,
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          whiteSpace: "nowrap",
+        }}
+      >
+        {task.goal}
+      </span>
+      <span
+        title={task.status}
+        style={{
+          width: 6,
+          height: 6,
+          borderRadius: "50%",
+          flexShrink: 0,
+          background: color,
+          animation: running ? "otter-pulse 1.5s ease-in-out infinite" : undefined,
+          boxShadow: running ? `0 0 6px ${color}` : undefined,
+        }}
+      />
     </div>
   );
 }

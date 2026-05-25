@@ -13,6 +13,7 @@ import { OnboardingWizard } from "./components/agents/OnboardingWizard";
 import { AuthGate } from "./components/AuthGate";
 import { Icon } from "./components/ui/Icon";
 import { useAgentsStore } from "./stores/agents-store";
+import { useActivityStore } from "./stores/activity-store";
 import { useChatStore } from "./stores/chat-store";
 import { useGlobalSettingsStore } from "./stores/global-settings-store";
 import { useSetupStore } from "./stores/setup-store";
@@ -41,6 +42,8 @@ function AuthedApp() {
   const setActive = useAgentsStore((s) => s.setActive);
   const activeAgentId = useAgentsStore((s) => s.activeAgentId);
   const connect = useChatStore((s) => s.connect);
+  const bindActivity = useActivityStore((s) => s.bindSocket);
+  const loadActivity = useActivityStore((s) => s.load);
   const loadSetup = useSetupStore((s) => s.load);
   const loadSettings = useGlobalSettingsStore((s) => s.load);
   const setupChecked = useSetupStore((s) => s.checked);
@@ -52,10 +55,12 @@ function AuthedApp() {
   useEffect(() => {
     connect();
     bindSocket();
+    bindActivity();
     void loadAgents();
+    void loadActivity();
     void loadSetup();
     void loadSettings();
-  }, [connect, bindSocket, loadAgents, loadSetup, loadSettings]);
+  }, [connect, bindSocket, bindActivity, loadAgents, loadActivity, loadSetup, loadSettings]);
 
   const showOnboarding = setupChecked && !onboardingComplete;
 
