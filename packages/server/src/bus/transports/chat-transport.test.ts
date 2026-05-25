@@ -61,9 +61,18 @@ describe("ChatProviderTransport", () => {
     const received: AgentMessage[] = [];
     t.onReceive((m) => received.push(m));
     await t.start();
-    client.emit({ channelId: "C1", fromSelf: true });
+    client.emit({ channelId: "C1", fromSelf: true, text: "hello" });
     client.emit({ channelId: "OTHER", text: "x" });
     client.emit({ channelId: "C1", text: "   " });
     expect(received).toEqual([]);
+  });
+
+  it("swallows a failed send instead of throwing (bus stays alive)", async () => {
+    const client = new FakeChatClient();
+    client.sendRich = async () => {
+      throw new Error("network down");
+    };
+    const t = new ChatProviderTransport("discord", client, "C1");
+    await expect(t.send(msg())).resolves.toBeUndefined();
   });
 });

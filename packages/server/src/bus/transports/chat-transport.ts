@@ -28,13 +28,19 @@ export class ChatProviderTransport implements Transport {
   }
 
   async send(msg: AgentMessage): Promise<void> {
-    await this.client.sendRich(this.roomId, {
-      author: msg.from,
-      kind: msg.kind,
-      to: msg.to ?? "all",
-      body: msg.body,
-      id: msg.id,
-    });
+    // A failed post must not break bus delivery — warn and move on, as the
+    // per-provider transports this generalises did.
+    try {
+      await this.client.sendRich(this.roomId, {
+        author: msg.from,
+        kind: msg.kind,
+        to: msg.to ?? "all",
+        body: msg.body,
+        id: msg.id,
+      });
+    } catch (err) {
+      console.warn(`[${this.id}] transport send failed:`, err);
+    }
   }
 
   onReceive(handler: (msg: AgentMessage) => void): void {
