@@ -59,6 +59,15 @@ export function GlobalSettings() {
     setStatus(saved ? "Saved." : "Save failed.");
   };
 
+  // Persist an explicit next-settings immediately, for actions that should
+  // auto-save rather than wait for the save bar (e.g. adding a provider, so its
+  // credentials reach the server before the user lists that provider's models).
+  const commit = async (next: GlobalSettingsShape) => {
+    setDraft(next);
+    const saved = await saveSettings(next);
+    setStatus(saved ? "Saved." : "Save failed.");
+  };
+
   // Theme applies live for preview, so discarding must revert it too.
   const discard = () => {
     setDraft(savedSettings);
@@ -91,7 +100,9 @@ export function GlobalSettings() {
       </nav>
 
       <div style={tabBody}>
-        {tab === "Providers" && <ProvidersTab draft={draft} patch={patch} providers={providers} />}
+        {tab === "Providers" && (
+          <ProvidersTab draft={draft} patch={patch} providers={providers} onCommit={commit} />
+        )}
         {tab === "Models" && <ModelsTab draft={draft} patch={patch} providers={providers} />}
         {tab === "Code Reference" && <CodeReferenceTab />}
         {tab === "Appearance" && <AppearanceTab draft={draft} patch={patch} />}
@@ -187,10 +198,12 @@ function ProvidersTab({
   draft,
   patch,
   providers,
+  onCommit,
 }: {
   draft: GlobalSettingsShape;
   patch: PatchFn;
   providers: ProviderInfo[];
+  onCommit: (next: GlobalSettingsShape) => Promise<void>;
 }) {
   const credentialProviders = providers.filter((p) => p.needsApiKey || p.baseUrlEnv);
   const byId = useMemo(
@@ -252,15 +265,18 @@ function ProvidersTab({
       ...(info.id === "openai" ? { authMethod: "api-key" as const } : {}),
     };
     const existing = accounts.findIndex((a) => a.account === label);
-    if (existing >= 0) {
-      setAccounts(providerId, accounts.map((a, i) => (i === existing ? { ...a, ...patchValue } : a)));
-    } else {
-      setAccounts(providerId, [
-        ...accounts,
-        { account: label, baseUrl: info.defaultBaseUrl ?? "", apiKeyConfigured: false, ...patchValue },
-      ]);
-    }
+    const nextAccounts =
+      existing >= 0
+        ? accounts.map((a, i) => (i === existing ? { ...a, ...patchValue } : a))
+        : [
+            ...accounts,
+            { account: label, baseUrl: info.defaultBaseUrl ?? "", apiKeyConfigured: false, ...patchValue },
+          ];
     setAdding(false);
+    // Auto-save so the new account's credentials are persisted server-side
+    // immediately — model listing for this provider reads saved secrets, not
+    // the unsaved draft.
+    void onCommit({ ...draft, providers: { ...draft.providers, [providerId]: nextAccounts } });
   };
 
   return (
