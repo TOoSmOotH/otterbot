@@ -43,6 +43,7 @@ import {
   ChannelConnector,
   connectorSignature,
 } from "../integrations/chat/channel-connector.js";
+import type { OutboundFile } from "../integrations/chat/chat-client.js";
 import { WebClient } from "@slack/web-api";
 import { PROVIDERS, type ChatProviderId, type ChatProvider } from "../integrations/chat/providers.js";
 import { McpManager } from "../integrations/mcp.js";
@@ -1015,8 +1016,13 @@ export class Orchestrator {
       cryptoStoragePath: join(this.cfg.dataDir, "matrix", `crypto-connector-${agentId}`),
     });
     if (!client) return;
-    const connector = new ChannelConnector(provider.id, agentId, cfg, client, () =>
-      this.runtimes.get(agentId)
+    const connector = new ChannelConnector(
+      provider.id,
+      agentId,
+      cfg,
+      client,
+      () => this.runtimes.get(agentId),
+      (artifact) => this.loadArtifactFile(artifact)
     );
     this.connectors.set(key, { connector, signature });
     this.pendingInits.push(
@@ -1189,6 +1195,21 @@ export class Orchestrator {
     if (name !== file || !/^[\w.-]+\.png$/i.test(name)) return null;
     const path = join(this.profiles.pathsFor(id).images, name);
     return existsSync(path) ? path : null;
+  }
+
+  /** Resolve a turn artifact to bytes for upload to a chat channel. */
+  private loadArtifactFile(artifact: Artifact): OutboundFile | null {
+    const m = artifact.url.match(/\/agents\/([^/]+)\/(images|files)\/([^/?#]+)/);
+    if (!m) return null;
+    const [, agentId, kind, id] = m;
+    if (kind === "images") {
+      const path = this.agentImagePath(agentId, id);
+      if (!path) return null;
+      return { data: readFileSync(path), filename: artifact.name, mimeType: artifact.mimeType };
+    }
+    const resolved = this.agentFilePath(agentId, id);
+    if (!resolved) return null;
+    return { data: readFileSync(resolved.path), filename: artifact.name, mimeType: artifact.mimeType };
   }
 
   /**
