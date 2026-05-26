@@ -88,6 +88,14 @@ export class ChannelConnector {
   }
 
   private onInbound(m: InboundChatMessage): void {
+    // DEBUG: show the inbound message and every gate decision.
+    console.log(
+      `[connector-debug] ${this.platform}/${this.agentId} channel=${m.channelId} ` +
+        `cfgChannel=${this.cfg.channelId} channelMatch=${m.channelId === this.cfg.channelId} ` +
+        `fromSelf=${m.fromSelf} mentionOnly=${this.cfg.mentionOnly} mentioned=${m.mentioned} ` +
+        `sender=${m.senderId} publicBot=${this.cfg.publicBot} ` +
+        `allowed=${JSON.stringify(this.cfg.allowedUserIds)} gate=${this.passesGate(m.senderId)}`
+    );
     if (m.channelId !== this.cfg.channelId) return;
     if (m.fromSelf) return;
     if (this.cfg.mentionOnly && !m.mentioned) return;
