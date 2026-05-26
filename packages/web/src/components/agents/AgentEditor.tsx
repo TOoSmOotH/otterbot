@@ -14,6 +14,8 @@ interface FormState {
   email: string;
   canSpawnSubagents: boolean;
   dispatchToSubagent: boolean;
+  browseTimeoutMs: string;
+  maxSteps: string;
   allowedPeers: AgentPeerAccess[];
 }
 
@@ -25,6 +27,8 @@ const BLANK: FormState = {
   email: "",
   canSpawnSubagents: true,
   dispatchToSubagent: false,
+  browseTimeoutMs: "",
+  maxSteps: "",
   allowedPeers: [],
 };
 
@@ -87,6 +91,8 @@ export function AgentEditor({ agentId, onClose }: { agentId: string | null; onCl
           email: p.email ?? "",
           canSpawnSubagents: p.canSpawnSubagents,
           dispatchToSubagent: p.dispatchToSubagent ?? false,
+          browseTimeoutMs: p.browseTimeoutMs != null ? String(p.browseTimeoutMs) : "",
+          maxSteps: p.maxSteps != null ? String(p.maxSteps) : "",
           allowedPeers: p.allowedPeers ?? [],
         });
         setChatModelId(p.model.chat);
@@ -118,6 +124,8 @@ export function AgentEditor({ agentId, onClose }: { agentId: string | null; onCl
         email: form.email.trim() || null,
         canSpawnSubagents: form.canSpawnSubagents,
         dispatchToSubagent: form.canSpawnSubagents && form.dispatchToSubagent,
+        browseTimeoutMs: form.browseTimeoutMs.trim() === "" ? null : Number(form.browseTimeoutMs),
+        maxSteps: form.maxSteps.trim() === "" ? null : Number(form.maxSteps),
         allowedPeers: form.allowedPeers,
       };
 
@@ -293,6 +301,28 @@ export function AgentEditor({ agentId, onClose }: { agentId: string | null; onCl
           />
           Dispatch delegated work to a subagent (serve requests in parallel)
         </label>
+
+        <Field label="Browser command timeout (ms) — blank inherits the global default (60000)">
+          <input
+            type="number"
+            min={0}
+            value={form.browseTimeoutMs}
+            onChange={(e) => patch({ browseTimeoutMs: e.target.value })}
+            placeholder="inherit (60000)"
+            style={inputStyle}
+          />
+        </Field>
+
+        <Field label="Max steps per turn — blank inherits the global default (8)">
+          <input
+            type="number"
+            min={1}
+            value={form.maxSteps}
+            onChange={(e) => patch({ maxSteps: e.target.value })}
+            placeholder="inherit (8)"
+            style={inputStyle}
+          />
+        </Field>
 
         <p style={hintStyle}>
           Connect this agent to Slack, Discord, or Matrix in the Agent Studio → Channels tab.
