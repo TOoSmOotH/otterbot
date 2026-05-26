@@ -20,14 +20,20 @@ export interface ChatClient {
    * configured id is used as-is. Called once after start().
    */
   resolveChannelId?(configured: string): Promise<string>;
-  /** Post plain text to a channel; returns an opaque handle for a later edit. */
-  sendText(channelId: string, text: string): Promise<MessageHandle>;
+  /**
+   * Post plain text to a channel; returns an opaque handle for a later edit.
+   * When `threadId` is set, post into that native thread (starting it if needed).
+   */
+  sendText(channelId: string, text: string, threadId?: string): Promise<MessageHandle>;
   /** Edit a previously sent message in place. Only valid when canEdit. */
   edit(handle: MessageHandle, text: string): Promise<void>;
   /** Post a structured agent-to-agent message, rendered per provider. */
   sendRich(channelId: string, msg: RichChatMessage): Promise<void>;
-  /** Upload a file to a channel. Images render inline; other types attach. */
-  sendFile(channelId: string, file: OutboundFile): Promise<void>;
+  /**
+   * Upload a file to a channel. Images render inline; other types attach.
+   * When `threadId` is set, upload into that native thread.
+   */
+  sendFile(channelId: string, file: OutboundFile, threadId?: string): Promise<void>;
 }
 
 /** A file to upload to a channel/room (image rendered inline, others attached). */
@@ -50,6 +56,17 @@ export interface InboundChatMessage {
   fromSelf: boolean;
   /** This bot was @mentioned — drives the connector's mentionOnly gate. */
   mentioned: boolean;
+  /**
+   * Provider id of this message (Slack `ts`, Discord message id, Matrix
+   * `event_id`). Used as the thread-root key when this is a top-level message.
+   */
+  messageId: string;
+  /**
+   * Thread-root id when this message already belongs to a native thread
+   * (Slack `thread_ts`, Discord thread channel id, Matrix `m.thread` root).
+   * Undefined for a top-level message.
+   */
+  threadId?: string;
 }
 
 /** A structured agent-to-agent message for the transport role. */

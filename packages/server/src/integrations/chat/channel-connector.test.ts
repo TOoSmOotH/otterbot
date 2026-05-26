@@ -59,7 +59,7 @@ describe("ChannelConnector", () => {
     await conn.start();
     client.emit({ text: "hi there" });
     await conn.whenIdle();
-    expect(client.sent).toEqual([{ channelId: "C1", text: "echo:hi there" }]);
+    expect(client.sent).toEqual([{ channelId: "C1", text: "echo:hi there", threadId: "M1" }]);
     expect(client.edits).toEqual([]);
   });
 
@@ -152,7 +152,7 @@ describe("ChannelConnector", () => {
     await conn.start();
     client.emit({ text: "hi" });
     await conn.whenIdle();
-    expect(client.sent).toEqual([{ channelId: "C1", text: "Error: boom" }]);
+    expect(client.sent).toEqual([{ channelId: "C1", text: "Error: boom", threadId: "M1" }]);
   });
 
   function artifact(over: Partial<Artifact> = {}): Artifact {
@@ -184,9 +184,10 @@ describe("ChannelConnector", () => {
     await conn.start();
     client.emit({ text: "make stuff" });
     await conn.whenIdle();
-    expect(client.sent).toEqual([{ channelId: "C1", text: "here" }]);
+    expect(client.sent).toEqual([{ channelId: "C1", text: "here", threadId: "M1" }]);
     expect(client.files.map((f) => f.file.filename)).toEqual(["cat.png", "report.pdf"]);
     expect(client.files[0].channelId).toBe("C1");
+    expect(client.files[0].threadId).toBe("M1");
   });
 
   it("posts no files when the turn has no artifacts", async () => {
@@ -257,7 +258,7 @@ describe("ChannelConnector", () => {
     await conn.start();
     client.emit({ text: "!clear" });
     await conn.whenIdle();
-    expect(resets).toEqual(["test-C1"]);
+    expect(resets).toEqual(["test-C1-M1"]);
     expect(calls).toEqual([]); // no agent turn for a command
     expect(client.sent.length).toBe(1);
     expect(client.sent[0].text).toContain("cleared");
@@ -275,7 +276,7 @@ describe("ChannelConnector", () => {
     await conn.start();
     client.emit({ text: "Otter Bot: !clear", mentioned: true });
     await conn.whenIdle();
-    expect(resets).toEqual(["test-C1"]);
+    expect(resets).toEqual(["test-C1-M1"]);
   });
 
   it("does NOT wipe on a chat !reset — replies that full reset is web-only", async () => {
@@ -327,5 +328,77 @@ describe("ChannelConnector", () => {
     client.emit({ text: "hi" });
     await conn.whenIdle();
     expect(conn.getStatus().state).toBe("connected");
+  });
+
+  // --- Threading ---------------------------------------------------------
+  /** Records the conversationId of each turn. */
+  function convRuntime(convs: string[] = []) {
+    return {
+      convs,
+      runtime: {
+        respond: async ({ conversationId }: { conversationId: string }) => {
+          convs.push(conversationId);
+          return { finalText: "ok" };
+        },
+      } as never,
+    };
+  }
+
+  it("a top-level message replies in a new thread rooted at the message", async () => {
+    const client = new FakeChatClient(false);
+    const { runtime, convs } = convRuntime();
+    const conn = make(client, cfg(), runtime);
+    await conn.start();
+    client.emit({ text: "hi", messageId: "T1" });
+    await conn.whenIdle();
+    // The reply is posted into the thread keyed by the message's own id.
+    expect(client.sent).toEqual([{ channelId: "C1", text: "ok", threadId: "T1" }]);
+    expect(convs).toEqual(["test-C1-T1"]);
+  });
+
+  it("an in-thread message continues that thread's conversation", async () => {
+    const client = new FakeChatClient(false);
+    const { runtime, convs } = convRuntime();
+    const conn = make(client, cfg(), runtime);
+    await conn.start();
+    // A reply inside an existing thread carries the thread root as threadId.
+    client.emit({ text: "more", messageId: "T2", threadId: "T1" });
+    await conn.whenIdle();
+    expect(client.sent).toEqual([{ channelId: "C1", text: "ok", threadId: "T1" }]);
+    expect(convs).toEqual(["test-C1-T1"]);
+  });
+
+  it("two top-level messages get independent conversations", async () => {
+    const client = new FakeChatClient(false);
+    const { runtime, convs } = convRuntime();
+    const conn = make(client, cfg(), runtime);
+    await conn.start();
+    client.emit({ text: "one", messageId: "A" });
+    client.emit({ text: "two", messageId: "B" });
+    await conn.whenIdle();
+    expect(convs).toEqual(["test-C1-A", "test-C1-B"]);
+  });
+
+  it("with mentionOnly, answers in-thread follow-ups without a re-mention", async () => {
+    const client = new FakeChatClient(false);
+    const { runtime, convs } = convRuntime();
+    const conn = make(client, cfg({ mentionOnly: true }), runtime);
+    await conn.start();
+    // A top-level message without a mention is ignored.
+    client.emit({ text: "ignored", messageId: "T1", mentioned: false });
+    await conn.whenIdle();
+    expect(convs).toEqual([]);
+    // Mentioning the bot starts a thread the bot is now active in.
+    client.emit({ text: "hello", messageId: "T2", mentioned: true });
+    await conn.whenIdle();
+    expect(convs).toEqual(["test-C1-T2"]);
+    // A follow-up in that thread is answered though it isn't a mention.
+    client.emit({ text: "follow up", messageId: "T3", threadId: "T2", mentioned: false });
+    await conn.whenIdle();
+    expect(convs).toEqual(["test-C1-T2", "test-C1-T2"]);
+    // But an unrelated thread the bot never joined stays ignored.
+    client.emit({ text: "other", messageId: "T4", threadId: "X9", mentioned: false });
+    await conn.whenIdle();
+    expect(convs).toEqual(["test-C1-T2", "test-C1-T2"]);
   });
 });

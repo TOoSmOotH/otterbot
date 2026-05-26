@@ -11,10 +11,10 @@ export class FakeChatClient implements ChatClient {
   readonly canEdit: boolean;
   started = false;
   stopped = false;
-  sent: { channelId: string; text: string }[] = [];
+  sent: { channelId: string; text: string; threadId?: string }[] = [];
   edits: { handle: MessageHandle; text: string }[] = [];
   rich: { channelId: string; msg: RichChatMessage }[] = [];
-  files: { channelId: string; file: OutboundFile }[] = [];
+  files: { channelId: string; file: OutboundFile; threadId?: string }[] = [];
   private handler: (m: InboundChatMessage) => void = () => {};
   private seq = 0;
 
@@ -31,8 +31,8 @@ export class FakeChatClient implements ChatClient {
   async stop(): Promise<void> {
     this.stopped = true;
   }
-  async sendText(channelId: string, text: string): Promise<MessageHandle> {
-    this.sent.push({ channelId, text });
+  async sendText(channelId: string, text: string, threadId?: string): Promise<MessageHandle> {
+    this.sent.push({ channelId, text, threadId });
     return `handle-${this.seq++}`;
   }
   async edit(handle: MessageHandle, text: string): Promise<void> {
@@ -41,11 +41,11 @@ export class FakeChatClient implements ChatClient {
   async sendRich(channelId: string, msg: RichChatMessage): Promise<void> {
     this.rich.push({ channelId, msg });
   }
-  async sendFile(channelId: string, file: OutboundFile): Promise<void> {
-    this.files.push({ channelId, file });
+  async sendFile(channelId: string, file: OutboundFile, threadId?: string): Promise<void> {
+    this.files.push({ channelId, file, threadId });
   }
 
-  /** Test helper: simulate an inbound message (defaults are a plain user msg). */
+  /** Test helper: simulate an inbound message (defaults are a plain top-level msg). */
   emit(m: Partial<InboundChatMessage> = {}): void {
     this.handler({
       channelId: "C1",
@@ -53,6 +53,7 @@ export class FakeChatClient implements ChatClient {
       text: "hello",
       fromSelf: false,
       mentioned: false,
+      messageId: "M1",
       ...m,
     });
   }

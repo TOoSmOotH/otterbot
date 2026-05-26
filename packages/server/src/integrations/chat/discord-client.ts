@@ -36,6 +36,13 @@ export class DiscordChatClient implements ChatClient {
   private client: Client | null = null;
   private handler: (m: InboundChatMessage) => void = () => {};
   private readonly channels = new Map<string, SendableChannels>();
+  /**
+   * Recently seen inbound messages, keyed by id. A top-level message's id is
+   * also its future thread id (Discord gives a message-rooted thread the same
+   * snowflake), so we keep the Message around to start that thread on the first
+   * reply. Bounded to avoid unbounded growth.
+   */
+  private readonly messages = new Map<string, Message>();
 
   constructor(private readonly botToken: string) {}
 
@@ -64,6 +71,7 @@ export class DiscordChatClient implements ChatClient {
     await this.client?.destroy();
     this.client = null;
     this.channels.clear();
+    this.messages.clear();
   }
 
   private async channel(id: string): Promise<SendableChannels | null> {
@@ -78,8 +86,38 @@ export class DiscordChatClient implements ChatClient {
     return null;
   }
 
-  async sendText(channelId: string, text: string): Promise<MessageHandle> {
-    const ch = await this.channel(channelId);
+  /**
+   * Resolve where to post. With no `threadId`, the channel itself. Otherwise the
+   * thread `threadId` names: a known thread channel (an in-thread reply), or —
+   * when `threadId` is a top-level message id with no thread yet — a thread
+   * started off that message (its id then equals the message id). Falls back to
+   * the parent channel so the human still gets a reply.
+   */
+  private async target(channelId: string, threadId?: string): Promise<SendableChannels | null> {
+    if (!threadId) return this.channel(channelId);
+    const known = this.channels.get(threadId);
+    if (known) return known;
+    const msg = this.messages.get(threadId);
+    if (msg) {
+      try {
+        const name = msg.content.slice(0, 80).trim() || "Otterbot thread";
+        const thread = await msg.startThread({ name });
+        if (thread.isSendable()) {
+          this.channels.set(thread.id, thread);
+          return thread;
+        }
+      } catch (err) {
+        console.warn(
+          `[discord] could not start a thread for ${threadId}:`,
+          err instanceof Error ? err.message : err
+        );
+      }
+    }
+    return this.channel(channelId);
+  }
+
+  async sendText(channelId: string, text: string, threadId?: string): Promise<MessageHandle> {
+    const ch = await this.target(channelId, threadId);
     if (!ch) return null;
     return await ch.send(text.slice(0, 2000) || "(no content)");
   }
@@ -99,8 +137,8 @@ export class DiscordChatClient implements ChatClient {
     await ch.send({ embeds: [embed] });
   }
 
-  async sendFile(channelId: string, file: OutboundFile): Promise<void> {
-    const ch = await this.channel(channelId);
+  async sendFile(channelId: string, file: OutboundFile, threadId?: string): Promise<void> {
+    const ch = await this.target(channelId, threadId);
     if (!ch) return;
     await ch.send({ files: [new AttachmentBuilder(file.data, { name: file.filename })] });
   }
@@ -110,12 +148,32 @@ export class DiscordChatClient implements ChatClient {
     if (!self) return;
     const mentioned = m.mentions.has(self);
     const text = m.content.replace(new RegExp(`<@!?${self.id}>`, "g"), "").trim();
+    // Remember the message so a top-level one can root a thread on the first
+    // reply; keep the map bounded.
+    this.messages.set(m.id, m);
+    if (this.messages.size > 500) {
+      this.messages.delete(this.messages.keys().next().value as string);
+    }
+    // A message inside a thread reports the thread's own id as channelId; the
+    // connector matches on the configured (parent) channel, so normalize to the
+    // parent and carry the thread id separately. The thread is sendable, so
+    // cache it for replies without an extra fetch.
+    const ch = m.channel;
+    let channelId = m.channelId;
+    let threadId: string | undefined;
+    if (ch.isThread()) {
+      channelId = ch.parentId ?? m.channelId;
+      threadId = ch.id;
+      if (ch.isSendable()) this.channels.set(ch.id, ch);
+    }
     this.handler({
-      channelId: m.channelId,
+      channelId,
       senderId: m.author.id,
       text,
       fromSelf: m.author.bot,
       mentioned,
+      messageId: m.id,
+      threadId,
     });
   }
 }

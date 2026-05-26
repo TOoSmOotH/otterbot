@@ -11,6 +11,10 @@ export const THINKING_PLACEHOLDER = "💭 _Thinking…_";
  * can talk to it. The `publicBot` gate decides who may talk to the agent; the
  * gate is evaluated per message and can be updated in place without
  * reconnecting. Messages run one agent turn at a time (serial queue).
+ *
+ * Each native thread is its own conversation (`${platform}-${channelId}-${threadKey}`):
+ * a top-level message starts a new thread the bot replies in, and replies inside
+ * a thread continue that thread's isolated context.
  */
 export class ChannelConnector {
   private cfg: ChannelBotConfig;
@@ -24,6 +28,13 @@ export class ChannelConnector {
   private queue: Promise<unknown> = Promise.resolve();
   private connState: ConnectorState = "connecting";
   private connError: string | null = null;
+  /**
+   * Thread keys the bot has already responded in. Lets a mentionOnly channel
+   * answer in-thread follow-ups without a fresh @mention, while threads the bot
+   * never joined stay ignored. In-memory: a restart needs one re-mention to
+   * re-activate a thread.
+   */
+  private readonly activeThreads = new Set<string>();
 
   constructor(
     /** Prefix for the runtime conversation id, e.g. "slack". */
@@ -96,37 +107,51 @@ export class ChannelConnector {
    * channel, file unresolvable), post a text note instead so the human isn't
    * left with nothing and the cause is actionable.
    */
-  private async postArtifactFallback(artifact: Artifact, reason: string): Promise<void> {
+  private async postArtifactFallback(
+    artifact: Artifact,
+    reason: string,
+    threadId: string
+  ): Promise<void> {
     const note =
       `⚠️ I produced "${artifact.name}" but ${reason}. ` +
       `An admin may need to grant the bot the files:write scope and invite it to this channel. ` +
       `Reference: ${artifact.url}`;
     try {
-      await this.client.sendText(this.channelId, note);
+      await this.client.sendText(this.channelId, note, threadId);
     } catch (err) {
       console.error(`[${this.platform}] artifact fallback post failed for ${this.agentId}:`, err);
     }
   }
 
-  /** The conversation id this channel maps to. */
-  private conversationId(): string {
-    return `${this.platform}-${this.channelId}`;
+  /**
+   * The conversation id a given thread maps to. Each native thread is its own
+   * conversation; a top-level message's own id roots a new thread.
+   */
+  private conversationId(threadKey: string): string {
+    return `${this.platform}-${this.channelId}-${threadKey}`;
   }
 
   private onInbound(m: InboundChatMessage): void {
     if (m.channelId !== this.channelId) return;
     if (m.fromSelf) return;
-    if (this.cfg.mentionOnly && !m.mentioned) return;
+    // Each native thread is its own conversation; a top-level message's own id
+    // roots the thread the bot will reply in.
+    const threadKey = m.threadId ?? m.messageId;
+    // In a thread the bot already joined, follow-ups don't need a re-mention.
+    const addressed = m.mentioned || (m.threadId != null && this.activeThreads.has(threadKey));
+    if (this.cfg.mentionOnly && !addressed) return;
     const body = m.text.trim();
     if (!body || !this.passesGate(m.senderId)) return;
+    const conversationId = this.conversationId(threadKey);
     const command = parseChatCommand(body);
     if (command) {
       this.queue = this.queue.then(async () => {
         const runtime = this.getRuntime();
         if (!runtime) return;
-        const reply = handleChatCommand(runtime, this.conversationId(), command);
+        this.activeThreads.add(threadKey);
+        const reply = handleChatCommand(runtime, conversationId, command);
         try {
-          await this.client.sendText(this.channelId, reply);
+          await this.client.sendText(this.channelId, reply, threadKey);
         } catch (err) {
           console.error(`[${this.platform}] command reply failed for ${this.agentId}:`, err);
         }
@@ -136,10 +161,15 @@ export class ChannelConnector {
     this.queue = this.queue.then(async () => {
       const runtime = this.getRuntime();
       if (!runtime) return;
+      this.activeThreads.add(threadKey);
       let placeholder: MessageHandle | null = null;
       if (this.client.canEdit) {
         try {
-          placeholder = await this.client.sendText(this.channelId, THINKING_PLACEHOLDER);
+          placeholder = await this.client.sendText(
+            this.channelId,
+            THINKING_PLACEHOLDER,
+            threadKey
+          );
         } catch (err) {
           console.error(
             `[${this.platform}] thinking placeholder failed for ${this.agentId}:`,
@@ -151,7 +181,7 @@ export class ChannelConnector {
       let artifacts: Artifact[] = [];
       try {
         const res = await runtime.respond({
-          conversationId: this.conversationId(),
+          conversationId,
           userMessage: body,
           onChunk: () => {},
         });
@@ -164,7 +194,7 @@ export class ChannelConnector {
         if (placeholder != null) {
           await this.client.edit(placeholder, reply);
         } else {
-          await this.client.sendText(this.channelId, reply);
+          await this.client.sendText(this.channelId, reply, threadKey);
         }
         // A successful post means we can reach the channel — clear any stale
         // error state so the Channels UI recovers after a transient failure.
@@ -184,18 +214,18 @@ export class ChannelConnector {
           console.error(`[${this.platform}] artifact load failed for ${this.agentId}:`, err);
         }
         if (!file) {
-          await this.postArtifactFallback(artifact, "it couldn't be loaded for upload");
+          await this.postArtifactFallback(artifact, "it couldn't be loaded for upload", threadKey);
           continue;
         }
         try {
-          await this.client.sendFile(this.channelId, file);
+          await this.client.sendFile(this.channelId, file, threadKey);
         } catch (err) {
           // Don't drop the artifact silently: tell the channel and flag the
           // connector so a missing files:write / channel membership is visible.
           const reason = err instanceof Error ? err.message : String(err);
           console.error(`[${this.platform}] file upload failed for ${this.agentId}:`, err);
           this.markError(`file upload failed: ${reason}`);
-          await this.postArtifactFallback(artifact, `upload failed (${reason})`);
+          await this.postArtifactFallback(artifact, `upload failed (${reason})`, threadKey);
         }
       }
     });

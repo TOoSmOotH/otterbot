@@ -17,6 +17,8 @@ interface SlackMessageEvent {
   bot_id?: string;
   /** Message timestamp — stable id used to dedup app_mention vs message. */
   ts?: string;
+  /** Set when the message is a reply inside a thread; the thread's root ts. */
+  thread_ts?: string;
 }
 
 /** A Slack message handle is the channel + ts needed to edit it. */
@@ -84,8 +86,8 @@ export class SlackChatClient implements ChatClient {
     this.socket = null;
   }
 
-  async sendText(channelId: string, text: string): Promise<MessageHandle> {
-    const res = await this.web.chat.postMessage({ channel: channelId, text });
+  async sendText(channelId: string, text: string, threadId?: string): Promise<MessageHandle> {
+    const res = await this.web.chat.postMessage({ channel: channelId, text, thread_ts: threadId });
     return res.ts ? ({ channel: channelId, ts: res.ts } satisfies SlackHandle) : null;
   }
 
@@ -101,12 +103,16 @@ export class SlackChatClient implements ChatClient {
     await this.web.chat.postMessage({ channel: channelId, text: `*${header}*\n${body}` });
   }
 
-  async sendFile(channelId: string, file: OutboundFile): Promise<void> {
-    await this.web.files.uploadV2({
+  async sendFile(channelId: string, file: OutboundFile, threadId?: string): Promise<void> {
+    // Slack types the upload args as a strict union of destinations, which
+    // over-constrains an optional thread_ts; build the object and cast.
+    const args = {
       channel_id: channelId,
       file: file.data,
       filename: file.filename,
-    });
+      ...(threadId ? { thread_ts: threadId } : {}),
+    } as Parameters<WebClient["files"]["uploadV2"]>[0];
+    await this.web.files.uploadV2(args);
   }
 
   private onSlackMessage(event: SlackMessageEvent, isAppMention: boolean): void {
@@ -129,6 +135,8 @@ export class SlackChatClient implements ChatClient {
       text: stripLeadingMention(event.text),
       fromSelf: event.user === this.selfUserId,
       mentioned,
+      messageId: event.ts ?? "",
+      threadId: event.thread_ts,
     });
   }
 }

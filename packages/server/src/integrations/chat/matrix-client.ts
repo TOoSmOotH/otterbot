@@ -17,6 +17,8 @@ import type {
 /** The subset of a Matrix `m.room.message` timeline event we use. */
 interface MatrixMessageEvent {
   sender?: string;
+  /** This event's id — roots a new thread when the message is top-level. */
+  event_id?: string;
   content?: MatrixMessageContent;
 }
 
@@ -27,6 +29,8 @@ interface MatrixMessageContent {
   formatted_body?: string;
   /** Structured mentions (MSC3952 / current spec) — the reliable signal. */
   "m.mentions"?: { user_ids?: string[] };
+  /** Relations; an `m.thread` rel_type carries the thread root event id. */
+  "m.relates_to"?: { rel_type?: string; event_id?: string };
 }
 
 /**
@@ -298,9 +302,16 @@ export class MatrixChatClient implements ChatClient {
     return this.client.resolveRoom(configured);
   }
 
-  async sendText(channelId: string, text: string): Promise<MessageHandle> {
+  async sendText(channelId: string, text: string, threadId?: string): Promise<MessageHandle> {
     if (!this.client) return null;
-    const eventId = await this.client.sendText(channelId, text.slice(0, 16000) || "(no content)");
+    const body = text.slice(0, 16000) || "(no content)";
+    const eventId = threadId
+      ? await this.client.sendMessage(channelId, {
+          msgtype: "m.text",
+          body,
+          "m.relates_to": { rel_type: "m.thread", event_id: threadId },
+        })
+      : await this.client.sendText(channelId, body);
     return { roomId: channelId, eventId } satisfies MatrixMessageRef;
   }
 
@@ -329,7 +340,7 @@ export class MatrixChatClient implements ChatClient {
     });
   }
 
-  async sendFile(channelId: string, file: OutboundFile): Promise<void> {
+  async sendFile(channelId: string, file: OutboundFile, threadId?: string): Promise<void> {
     if (!this.client) return;
     const url = await this.client.uploadContent(file.data, file.mimeType, file.filename);
     const msgtype = file.mimeType.startsWith("image/") ? "m.image" : "m.file";
@@ -338,6 +349,7 @@ export class MatrixChatClient implements ChatClient {
       url,
       body: file.filename,
       info: { mimetype: file.mimeType, size: file.data.length },
+      ...(threadId && { "m.relates_to": { rel_type: "m.thread", event_id: threadId } }),
     });
   }
 
@@ -345,12 +357,16 @@ export class MatrixChatClient implements ChatClient {
     const content = event.content;
     if (content?.msgtype !== "m.text") return;
     const text = (content.body ?? "").trim();
+    const rel = content["m.relates_to"];
+    const threadId = rel?.rel_type === "m.thread" ? rel.event_id : undefined;
     this.handler({
       channelId: roomId,
       senderId: event.sender ?? "",
       text,
       fromSelf: !event.sender || event.sender === this.selfUserId,
       mentioned: detectMention(this.selfUserId, this.mentionTokens, content),
+      messageId: event.event_id ?? "",
+      threadId,
     });
   }
 }
