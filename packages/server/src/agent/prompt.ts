@@ -1,4 +1,5 @@
 import type { AgentContext } from "../runtime/agent-context.js";
+import type { AgentDirectoryEntry } from "../runtime/agent-services.js";
 
 const FALLBACK_PERSONA = `You are an Otterbot agent. You remember things across sessions,
 author reusable skills when you learn something worth keeping, and build a model
@@ -35,6 +36,8 @@ export interface BuildPromptArgs {
   memoriesLimit?: number;
   /** Compacted recap of earlier turns when the conversation was compacted. */
   recap?: string | null;
+  /** Agents this one may delegate to, so it knows who to hand work it can't do. */
+  peers?: AgentDirectoryEntry[];
 }
 
 export interface BuiltPrompt {
@@ -74,6 +77,19 @@ export async function buildSystemPrompt(
 
   const persona = ctx.profile.persona.trim() || FALLBACK_PERSONA;
   const parts: string[] = [persona, OPERATING_GUIDE];
+
+  if (args.peers && args.peers.length > 0) {
+    const rendered = args.peers
+      .map((p) => `- \`${p.id}\` — ${p.displayName}: ${p.summary}`)
+      .join("\n");
+    parts.push(
+      `## Agents you can delegate to\n\n` +
+        `You can hand work to these agents with the \`delegate\` tool (call \`list_agents\` for the live roster). ` +
+        `When a request needs something you can't do yourself — generate an image, run code, send email, and so on — and one of them handles it, delegate the task and relay their result. ` +
+        `Never say you did something (produced an image, sent a message) that you did not actually do with a tool; if you can't do it and no peer can, say so.\n\n` +
+        rendered
+    );
+  }
 
   const profileBlock = profile.renderForPrompt();
   if (profileBlock) parts.push(profileBlock);

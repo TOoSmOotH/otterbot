@@ -7,7 +7,7 @@ import { buildSystemPrompt } from "../agent/prompt.js";
 import { buildAgentTools } from "../agent/tools.js";
 import { buildContext, maybeAutoCompact } from "./context-manager.js";
 import type { AgentContext } from "./agent-context.js";
-import type { AgentServices } from "./agent-services.js";
+import type { AgentServices, AgentDirectoryEntry } from "./agent-services.js";
 import type {
   AgentStatus,
   AgentMessage,
@@ -162,6 +162,19 @@ export class AgentRuntime {
   }
 
   /** Run one conversational turn for this agent. */
+  /**
+   * Agents this one may delegate to — the COO sees everyone, others see only
+   * their permitted peers. Mirrors the gating of the `list_agents` tool so the
+   * prompt's peer list matches what `delegate` will actually allow.
+   */
+  private reachablePeers(): AgentDirectoryEntry[] {
+    if (!this.services) return [];
+    const others = this.services.listAgents().filter((a) => a.id !== this.ctx.profile.id);
+    if (this.ctx.profile.role === "coo") return others;
+    const peerIds = new Set(this.ctx.profile.allowedPeers.map((p) => p.agentId));
+    return others.filter((a) => peerIds.has(a.id));
+  }
+
   async respond(args: RespondArgs): Promise<RespondResult> {
     this.setStatus("thinking");
     try {
@@ -187,6 +200,7 @@ export class AgentRuntime {
       const { system, skillsUsed, memoriesUsed } = await buildSystemPrompt(this.ctx, {
         userMessage: args.userMessage,
         recap: recapText,
+        peers: this.reachablePeers(),
       });
 
       const tools = buildAgentTools(this.ctx, this.services);
