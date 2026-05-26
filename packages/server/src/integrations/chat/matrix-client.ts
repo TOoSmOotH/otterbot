@@ -168,14 +168,25 @@ function escapeHtml(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
+/** Opaque handle for a sent Matrix message, used to edit it in place. */
+interface MatrixMessageRef {
+  roomId: string;
+  eventId: string;
+}
+
+function isMatrixMessageRef(h: MessageHandle): h is MatrixMessageRef {
+  return typeof h === "object" && h !== null && "roomId" in h && "eventId" in h;
+}
+
 /**
  * Matrix client plumbing for both chat roles. End-to-end encryption is always
  * enabled via a persistent rust-sdk crypto store, so messages in encrypted
- * rooms are transparently decrypted/encrypted. Matrix does not implement
- * in-place edits here, so canEdit = false (no thinking placeholder).
+ * rooms are transparently decrypted/encrypted. In-place edits (m.replace) are
+ * supported so the connector can post a "thinking" placeholder and replace it
+ * with the reply, matching Slack.
  */
 export class MatrixChatClient implements ChatClient {
-  readonly canEdit = false;
+  readonly canEdit = true;
   private client: MatrixClient | null = null;
   private handler: (m: InboundChatMessage) => void = () => {};
   private selfUserId = "";
@@ -289,12 +300,22 @@ export class MatrixChatClient implements ChatClient {
 
   async sendText(channelId: string, text: string): Promise<MessageHandle> {
     if (!this.client) return null;
-    await this.client.sendText(channelId, text.slice(0, 16000) || "(no content)");
-    return null;
+    const eventId = await this.client.sendText(channelId, text.slice(0, 16000) || "(no content)");
+    return { roomId: channelId, eventId } satisfies MatrixMessageRef;
   }
 
-  // Matrix has no in-place edit here; canEdit is false so this is never called.
-  async edit(_handle: MessageHandle, _text: string): Promise<void> {}
+  /** Replace a previously sent message with `text` via an m.replace edit. */
+  async edit(handle: MessageHandle, text: string): Promise<void> {
+    if (!this.client || !isMatrixMessageRef(handle)) return;
+    const body = text.slice(0, 16000) || "(no content)";
+    await this.client.sendMessage(handle.roomId, {
+      // Fallback shown by clients that don't render edits (convention: "* …").
+      msgtype: "m.text",
+      body: `* ${body}`,
+      "m.new_content": { msgtype: "m.text", body },
+      "m.relates_to": { rel_type: "m.replace", event_id: handle.eventId },
+    });
+  }
 
   async sendRich(channelId: string, msg: RichChatMessage): Promise<void> {
     if (!this.client) return;
