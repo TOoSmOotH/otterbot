@@ -206,6 +206,17 @@ export interface AgentProfile {
    */
   dispatchToSubagent: boolean;
   /**
+   * Per-call browser-command timeout in ms. `null` inherits the global default
+   * (`OTTERBOT_BROWSE_TIMEOUT_MS`). Raise it for agents that browse slow pages.
+   */
+  browseTimeoutMs: number | null;
+  /**
+   * Max model steps (tool-call rounds) per turn. `null` inherits the global
+   * default (`OTTERBOT_AGENT_MAX_STEPS`). Raise it for agents whose web tasks
+   * need many snapshot/click rounds before answering.
+   */
+  maxSteps: number | null;
+  /**
    * When true the agent gets a `shell_exec` tool that runs commands in its own
    * sandboxed workspace directory. Off by default — it runs real commands.
    */

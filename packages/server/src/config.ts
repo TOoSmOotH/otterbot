@@ -24,6 +24,10 @@ export interface Config {
    * tears it down immediately on completion.
    */
   subagentGraceMs: number;
+  /** Default per-call browser-command timeout (ms). Per-agent profiles override. */
+  browseTimeoutMs: number;
+  /** Default max model steps (tool-call rounds) per turn. Per-agent profiles override. */
+  agentMaxSteps: number;
   /**
    * Agent-to-agent transport: in-process bus, a shared Discord channel, or a
    * shared Matrix room.
@@ -64,6 +68,8 @@ export function loadConfig(): Config {
     logLevel: (process.env.LOG_LEVEL as Config["logLevel"]) ?? "info",
     dbKey: process.env.OTTERBOT_DB_KEY ?? null,
     subagentGraceMs: Number(process.env.SUBAGENT_GRACE_MS ?? 300_000),
+    browseTimeoutMs: Number(process.env.OTTERBOT_BROWSE_TIMEOUT_MS ?? 60_000),
+    agentMaxSteps: Number(process.env.OTTERBOT_AGENT_MAX_STEPS ?? 8),
     agentTransport: ((): Config["agentTransport"] => {
       const t = process.env.AGENT_TRANSPORT;
       return t === "discord" || t === "matrix" || t === "slack" ? t : "local";
