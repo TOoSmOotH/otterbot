@@ -90,6 +90,24 @@ function delegateArtifacts(result: unknown): Artifact[] {
   return r.artifacts.filter((a): a is Artifact => artifactFromResult(a) !== null);
 }
 
+/**
+ * When a turn ends with no text purely because it exhausted its step budget
+ * (the last step still wanted to call tools), return a message that explains
+ * that instead of the silent "(no response)". Returns null otherwise.
+ */
+export function stepBudgetMessage(
+  finalText: string,
+  lastFinishReason: string | undefined,
+  maxSteps: number
+): string | null {
+  if (finalText.trim()) return null;
+  if (lastFinishReason !== "tool-calls") return null;
+  return (
+    `I reached my step budget (${maxSteps} steps) before finishing this task. ` +
+    `Try narrowing the request, or raise this agent's max steps.`
+  );
+}
+
 export interface RespondArgs {
   conversationId: string;
   userMessage: string;
@@ -211,12 +229,13 @@ export class AgentRuntime {
         system,
         messages: coreMessages,
         tools,
-        maxSteps: 8,
+        maxSteps: this.ctx.maxSteps,
       });
 
       let finalText = "";
       let sawWork = false;
       let streamError: string | null = null;
+      let lastFinishReason: string | undefined;
       // Image-producing tool results, persisted as their own messages so they
       // survive a reload (they're excluded from the model context).
       const imageMessages: Array<{ toolCall: ToolCallRecord; prompt: string }> = [];
@@ -259,7 +278,9 @@ export class AgentRuntime {
       // read them from the completed steps: emit tool_end for the UI, and queue
       // any images for persistence.
       try {
-        for (const step of await result.steps) {
+        const completedSteps = await result.steps;
+        lastFinishReason = completedSteps.at(-1)?.finishReason;
+        for (const step of completedSteps) {
           for (const tr of step.toolResults as Array<{
             toolCallId: string;
             toolName: string;
@@ -311,6 +332,11 @@ export class AgentRuntime {
       if (!finalText && streamError) {
         throw new Error(streamError);
       }
+
+      // A turn that hit its step cap with no closing text would otherwise post a
+      // silent "(no response)" — name the limit instead so it's actionable.
+      const budgetMsg = stepBudgetMessage(finalText, lastFinishReason, this.ctx.maxSteps);
+      if (budgetMsg) finalText = budgetMsg;
 
       // Persist generated images as tool messages (in turn order, before the
       // assistant's closing text) so they re-render when the chat is reopened.
