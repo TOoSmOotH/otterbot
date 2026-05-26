@@ -234,6 +234,8 @@ export class ProfileStore {
       canSpawnSubagents: true,
       subagentLimit: 5,
       dispatchToSubagent: false,
+      browseTimeoutMs: null,
+      maxSteps: null,
       canRunShell: false,
       canWebSearch: false,
       autoLearn: true,
@@ -298,6 +300,8 @@ export function normalizeProfile(p: Partial<AgentProfile> & { id: string }): Age
     // flag can't enable dispatch on an agent that can't actually spawn.
     dispatchToSubagent:
       (p.dispatchToSubagent ?? false) && (p.canSpawnSubagents ?? role !== "subagent"),
+    browseTimeoutMs: p.browseTimeoutMs ?? null,
+    maxSteps: p.maxSteps ?? null,
     canRunShell: p.canRunShell ?? false,
     canWebSearch: p.canWebSearch ?? false,
     autoLearn: p.autoLearn ?? true,

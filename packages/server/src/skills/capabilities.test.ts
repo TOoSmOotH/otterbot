@@ -35,6 +35,8 @@ function makeProfile(overrides: Partial<AgentProfile> = {}): AgentProfile {
     canSpawnSubagents: false,
     subagentLimit: 0,
     dispatchToSubagent: false,
+    browseTimeoutMs: null,
+    maxSteps: null,
     canRunShell: false,
     canWebSearch: false,
     autoLearn: true,
