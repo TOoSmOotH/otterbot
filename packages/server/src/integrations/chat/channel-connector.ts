@@ -143,6 +143,13 @@ export class ChannelConnector {
     const body = m.text.trim();
     if (!body || !this.passesGate(m.senderId)) return;
     const conversationId = this.conversationId(threadKey);
+    if (process.env.OTTER_DEBUG_THREADS) {
+      console.info(
+        `[${this.platform}][threads] messageId=${JSON.stringify(m.messageId)} ` +
+          `threadId=${JSON.stringify(m.threadId)} threadKey=${JSON.stringify(threadKey)} ` +
+          `conversationId=${JSON.stringify(conversationId)}`
+      );
+    }
     const command = parseChatCommand(body);
     if (command) {
       this.queue = this.queue.then(async () => {

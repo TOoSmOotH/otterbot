@@ -359,6 +359,13 @@ export class MatrixChatClient implements ChatClient {
     const text = (content.body ?? "").trim();
     const rel = content["m.relates_to"];
     const threadId = rel?.rel_type === "m.thread" ? rel.event_id : undefined;
+    if (process.env.OTTER_DEBUG_THREADS) {
+      console.info(
+        `[matrix][threads] event_id=${JSON.stringify(event.event_id)} ` +
+          `relates_to=${JSON.stringify(content["m.relates_to"])} ` +
+          `messageId=${JSON.stringify(event.event_id ?? "")} threadId=${JSON.stringify(threadId)}`
+      );
+    }
     this.handler({
       channelId: roomId,
       senderId: event.sender ?? "",
