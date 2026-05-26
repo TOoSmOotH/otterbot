@@ -282,7 +282,7 @@ function SubtaskRow({ task }: { task: SubagentTask }) {
         color: "rgb(var(--subtle))",
       }}
     >
-      <Icon icon={CornerDownRight} size={12} />
+      <Icon icon={CornerDownRight} size={14} />
       <span
         style={{
           ...type.monoSm,

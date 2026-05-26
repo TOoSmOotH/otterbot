@@ -815,7 +815,8 @@ function ChannelsTab({ profile, onSaved }: TabProps) {
     setSlackAppToken("");
     setDiscordBotToken("");
     setMatrixHomeserver("");
-    setMatrixToken("");
+    setMatrixUser("");
+    setMatrixPassword("");
     setSaved(true);
     onSaved();
     void refreshStatus();
