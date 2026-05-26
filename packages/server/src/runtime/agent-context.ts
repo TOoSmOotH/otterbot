@@ -50,6 +50,10 @@ export interface AgentContext {
   workspaceDir: string;
   /** Persistent Chrome user-data dir for the agent's browser tools. */
   browserProfileDir: string;
+  /** Effective per-call browser-command timeout (ms): profile override or global default. */
+  browseTimeoutMs: number;
+  /** Effective max model steps per turn: profile override or global default. */
+  maxSteps: number;
   /** Directory where the agent's generated images are written and served from. */
   imagesDir: string;
   /** Directory where the agent's produced files (artifacts) are written/served. */
@@ -99,6 +103,27 @@ export interface BuildAgentContextInput {
   embedder: Embedder;
   /** Database encryption key, if configured. */
   dbKey?: string | null;
+  /** Global default per-call browser timeout (ms); profile may override. */
+  defaultBrowseTimeoutMs: number;
+  /** Global default max steps per turn; profile may override. */
+  defaultMaxSteps: number;
+}
+
+/**
+ * Effective per-turn limits. A finite, positive profile override wins; anything
+ * else (null, 0, negative, NaN, Infinity) falls back to the global default —
+ * so a stray value can never disable browsing or pin the step budget to 0.
+ */
+export function resolveTurnLimits(
+  override: { browseTimeoutMs: number | null; maxSteps: number | null },
+  defaults: { browseTimeoutMs: number; maxSteps: number }
+): { browseTimeoutMs: number; maxSteps: number } {
+  const pos = (v: number | null, fallback: number) =>
+    typeof v === "number" && Number.isFinite(v) && v > 0 ? v : fallback;
+  return {
+    browseTimeoutMs: pos(override.browseTimeoutMs, defaults.browseTimeoutMs),
+    maxSteps: pos(override.maxSteps, defaults.maxSteps),
+  };
 }
 
 /** Construct an agent's runtime context, opening its isolated database. */
@@ -115,6 +140,11 @@ export function buildAgentContext(input: BuildAgentContextInput): AgentContext {
   const flatSecrets = new Map<string, string>();
   for (const [k, { value }] of input.scopedSecrets) flatSecrets.set(k, value);
 
+  const limits = resolveTurnLimits(
+    { browseTimeoutMs: input.profile.browseTimeoutMs, maxSteps: input.profile.maxSteps },
+    { browseTimeoutMs: input.defaultBrowseTimeoutMs, maxSteps: input.defaultMaxSteps }
+  );
+
   const ctx: AgentContext = {
     profile: input.profile,
     chatModelRef: input.chatModelRef,
@@ -127,6 +157,8 @@ export function buildAgentContext(input: BuildAgentContextInput): AgentContext {
     contextWindow: input.contextWindow,
     workspaceDir: input.workspaceDir,
     browserProfileDir: input.browserProfileDir,
+    browseTimeoutMs: limits.browseTimeoutMs,
+    maxSteps: limits.maxSteps,
     imagesDir: input.imagesDir,
     filesDir: input.filesDir,
     agentDb,

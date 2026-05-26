@@ -66,6 +66,8 @@ describe("capabilities", () => {
       filesDir: join(dir, "files"),
       embedder: new NullEmbedder(),
       dbKey: null,
+      defaultBrowseTimeoutMs: 60_000,
+      defaultMaxSteps: 8,
     });
   });
 

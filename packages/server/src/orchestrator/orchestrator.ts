@@ -908,6 +908,8 @@ export class Orchestrator {
       filesDir: paths.files,
       embedder: resolveEmbedder(embeddingRef, secrets),
       dbKey: this.cfg.dbKey,
+      defaultBrowseTimeoutMs: this.cfg.browseTimeoutMs,
+      defaultMaxSteps: this.cfg.agentMaxSteps,
     });
     const runtime = new AgentRuntime(ctx, this.services);
     runtime.onStatus((status) => {
