@@ -505,7 +505,7 @@ export function buildAgentTools(
   // `agentic-browsing` capability. Each agent drives its own persistent,
   // headless browser; work the page via the snapshot → ref → click/type loop.
   if (granted.has("browser_navigate")) {
-    const browser = browserEnvFor(ctx.profile.id, ctx.browserProfileDir);
+    const browser = browserEnvFor(ctx.profile.id, ctx.browserProfileDir, ctx.browseTimeoutMs);
 
     tools.browser_navigate = tool({
       description:

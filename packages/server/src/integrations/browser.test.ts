@@ -105,3 +105,14 @@ describe.skipIf(!ready)("agent-browser integration", () => {
     expect(clicked.ok).toBe(true);
   });
 });
+
+describe("browserEnvFor", () => {
+  it("carries an explicit per-call timeout", () => {
+    const env = browserEnvFor("agent-x", "/tmp/profile", 180_000);
+    expect(env.timeoutMs).toBe(180_000);
+  });
+  it("leaves timeout unset when none is given", () => {
+    const env = browserEnvFor("agent-x", "/tmp/profile");
+    expect(env.timeoutMs).toBeUndefined();
+  });
+});

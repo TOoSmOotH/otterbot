@@ -29,11 +29,13 @@ export interface BrowserEnv {
   session: string;
   /** Persistent Chrome user-data dir (cookies/logins survive here). */
   profileDir: string;
+  /** Optional per-agent timeout override for browser commands (ms). */
+  timeoutMs?: number;
 }
 
 /** Build the per-agent browser identity from an agent id and its profile dir. */
-export function browserEnvFor(agentId: string, profileDir: string): BrowserEnv {
-  return { session: `otter_${agentId}`, profileDir };
+export function browserEnvFor(agentId: string, profileDir: string, timeoutMs?: number): BrowserEnv {
+  return { session: `otter_${agentId}`, profileDir, timeoutMs };
 }
 
 /** Result handed back to the tool layer; mirrors the other integrations. */
@@ -84,7 +86,7 @@ interface RawRun {
 async function runAgentBrowser(
   env: BrowserEnv,
   args: string[],
-  timeoutMs = DEFAULT_TIMEOUT_MS
+  timeoutMs = env.timeoutMs ?? DEFAULT_TIMEOUT_MS
 ): Promise<RawRun> {
   mkdirSync(env.profileDir, { recursive: true });
   const outPath = join(tmpdir(), `otter-ab-${randomUUID()}.out`);
