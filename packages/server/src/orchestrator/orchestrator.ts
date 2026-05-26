@@ -1786,6 +1786,8 @@ export function buildSubagentProfile(
     // can actually do the work it's delegated, not just touch memory.
     canRunShell: parent.canRunShell,
     canWebSearch: parent.canWebSearch,
+    browseTimeoutMs: parent.browseTimeoutMs,
+    maxSteps: parent.maxSteps,
     mcpServers: parent.mcpServers,
     allowedPeers: parent.allowedPeers,
     parentId: parent.id,

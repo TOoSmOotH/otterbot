@@ -161,6 +161,8 @@ describe("orchestrator (e2e)", () => {
       canWebSearch: true,
       canRunShell: true,
       allowedPeers: [{ agentId: "coo", shareMemory: false }],
+      browseTimeoutMs: 120_000,
+      maxSteps: 16,
     });
     const sub = buildSubagentProfile(parent, {
       id: "cap-parent__sub__1",
@@ -175,6 +177,8 @@ describe("orchestrator (e2e)", () => {
     expect(sub.model.chat).toEqual(parent.model.chat);
     // Subagents never spawn their own subagents.
     expect(sub.canSpawnSubagents).toBe(false);
+    expect(sub.browseTimeoutMs).toBe(120_000);
+    expect(sub.maxSteps).toBe(16);
   });
 
   // A request addressed to a service agent, for the dispatch tests below.
