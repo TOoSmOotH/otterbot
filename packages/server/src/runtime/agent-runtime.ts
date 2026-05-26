@@ -198,11 +198,6 @@ export class AgentRuntime {
       );
 
       const peers = this.reachablePeers();
-      // DEBUG: which conversation, how much history, and who this agent can reach.
-      console.log(
-        `[respond-debug] agent=${this.id} conv=${args.conversationId} ` +
-          `historyMsgs=${coreMessages.length} peers=${JSON.stringify(peers.map((p) => p.id))}`
-      );
       const { system, skillsUsed, memoriesUsed } = await buildSystemPrompt(this.ctx, {
         userMessage: args.userMessage,
         recap: recapText,
@@ -237,8 +232,6 @@ export class AgentRuntime {
             args.onChunk({ kind: "token", text: part.textDelta });
             break;
           case "tool-call":
-            // DEBUG: confirm whether the model actually invokes tools (delegate).
-            console.log(`[respond-debug] agent=${this.id} tool-call=${part.toolName}`);
             sawWork = true;
             this.setStatus("working");
             args.onChunk({
