@@ -193,6 +193,17 @@ export class MatrixChatClient implements ChatClient {
   readonly canEdit = true;
   private client: MatrixClient | null = null;
   private handler: (m: InboundChatMessage) => void = () => {};
+  /**
+   * Thread relations recovered from the cleartext of `m.room.encrypted` events,
+   * keyed by event id. In encrypted rooms `m.relates_to` lives on the outer
+   * (unencrypted) event and is dropped when the SDK replaces the content with
+   * the decrypted payload, so we stash it here before decryption and read it
+   * back in `onMatrixMessage`. Bounded to avoid unbounded growth.
+   */
+  private readonly pendingRelations = new Map<
+    string,
+    { rel_type?: string; event_id?: string } | undefined
+  >();
   private selfUserId = "";
   private mentionTokens: string[] = [];
 
@@ -284,6 +295,19 @@ export class MatrixChatClient implements ChatClient {
       // No display name is fine — structured mentions / pill links still match.
     }
 
+    // The thread relation rides on the outer encrypted event's cleartext and is
+    // lost on decrypt; capture it here (fires before room.message for the same
+    // event) so onMatrixMessage can recover it.
+    client.on(
+      "room.encrypted_event",
+      (_roomId: string, event: { event_id?: string; content?: MatrixMessageContent }) => {
+        if (!event.event_id) return;
+        this.pendingRelations.set(event.event_id, event.content?.["m.relates_to"]);
+        if (this.pendingRelations.size > 500) {
+          this.pendingRelations.delete(this.pendingRelations.keys().next().value as string);
+        }
+      }
+    );
     client.on("room.message", (roomId: string, event: MatrixMessageEvent) =>
       this.onMatrixMessage(roomId, event)
     );
@@ -357,15 +381,12 @@ export class MatrixChatClient implements ChatClient {
     const content = event.content;
     if (content?.msgtype !== "m.text") return;
     const text = (content.body ?? "").trim();
-    const rel = content["m.relates_to"];
+    // In encrypted rooms the relation is stripped from `content` on decrypt;
+    // fall back to the relation we stashed from the outer encrypted event.
+    const stashed = event.event_id ? this.pendingRelations.get(event.event_id) : undefined;
+    if (event.event_id) this.pendingRelations.delete(event.event_id);
+    const rel = content["m.relates_to"] ?? stashed;
     const threadId = rel?.rel_type === "m.thread" ? rel.event_id : undefined;
-    if (process.env.OTTER_DEBUG_THREADS) {
-      console.info(
-        `[matrix][threads] event_id=${JSON.stringify(event.event_id)} ` +
-          `relates_to=${JSON.stringify(content["m.relates_to"])} ` +
-          `messageId=${JSON.stringify(event.event_id ?? "")} threadId=${JSON.stringify(threadId)}`
-      );
-    }
     this.handler({
       channelId: roomId,
       senderId: event.sender ?? "",
