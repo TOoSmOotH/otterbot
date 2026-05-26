@@ -754,7 +754,8 @@ function ChannelsTab({ profile, onSaved }: TabProps) {
   );
   const [matrixMentionOnly, setMatrixMentionOnly] = useState(profile.matrix?.mentionOnly ?? true);
   const [matrixHomeserver, setMatrixHomeserver] = useState("");
-  const [matrixToken, setMatrixToken] = useState("");
+  const [matrixUser, setMatrixUser] = useState("");
+  const [matrixPassword, setMatrixPassword] = useState("");
 
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState("");
@@ -797,7 +798,8 @@ function ChannelsTab({ profile, onSaved }: TabProps) {
     if (slackAppToken.trim()) secrets.SLACK_APP_TOKEN = slackAppToken.trim();
     if (discordBotToken.trim()) secrets.DISCORD_BOT_TOKEN = discordBotToken.trim();
     if (matrixHomeserver.trim()) secrets.MATRIX_HOMESERVER_URL = matrixHomeserver.trim();
-    if (matrixToken.trim()) secrets.MATRIX_ACCESS_TOKEN = matrixToken.trim();
+    if (matrixUser.trim()) secrets.MATRIX_USER = matrixUser.trim();
+    if (matrixPassword) secrets.MATRIX_PASSWORD = matrixPassword;
     if (Object.keys(secrets).length > 0) {
       const res = await apiFetch(`/api/agents/${profile.id}/credentials`, {
         method: "PATCH",
@@ -1007,15 +1009,27 @@ function ChannelsTab({ profile, onSaved }: TabProps) {
                 style={input}
               />
             </Field>
-            <Field label="Access token">
+            <Field label="Username">
               <input
-                type="password"
-                value={matrixToken}
-                onChange={(e) => setMatrixToken(e.target.value)}
-                placeholder={profile.matrix ? "Leave blank to keep the saved token" : "syt_…"}
+                value={matrixUser}
+                onChange={(e) => setMatrixUser(e.target.value)}
+                placeholder={profile.matrix ? "Leave blank to keep the saved username" : "botuser"}
                 style={input}
               />
             </Field>
+            <Field label="Password">
+              <input
+                type="password"
+                value={matrixPassword}
+                onChange={(e) => setMatrixPassword(e.target.value)}
+                placeholder={profile.matrix ? "Leave blank to keep the saved password" : "••••••••"}
+                style={input}
+              />
+            </Field>
+            <p style={{ ...hint, marginTop: 0 }}>
+              otterbot logs in and provisions its own Matrix device. Don't paste an
+              access token from Element — a shared device's encryption keys collide.
+            </p>
             <Field label="Room ID to join">
               <input
                 value={matrixRoom}

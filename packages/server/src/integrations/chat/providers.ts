@@ -14,12 +14,22 @@ export interface ProviderPaths {
   cryptoStoragePath: string;
 }
 
+/** Hooks a connector client may use to persist credentials it derives at runtime. */
+export interface ConnectorContext {
+  /** Persist a secret back to the agent's store (e.g. a minted Matrix token). */
+  persistSecret: (key: string, value: string) => void;
+}
+
 export interface ChatProvider {
   id: ChatProviderId;
   /** Credential keys the connector role needs (drives the reconcile signature). */
   connectorTokenKeys: string[];
   /** Build a connector client from per-agent secrets; null if creds missing. */
-  connectorClient(secrets: Map<string, string>, paths: ProviderPaths): ChatClient | null;
+  connectorClient(
+    secrets: Map<string, string>,
+    paths: ProviderPaths,
+    ctx: ConnectorContext
+  ): ChatClient | null;
   /** Build a transport client from instance config; null if creds missing. */
   transportClient(cfg: Config): ChatClient | null;
   /** The room/channel id the transport posts to; null if not configured. */
@@ -56,19 +66,40 @@ export const PROVIDERS: Record<ChatProviderId, ChatProvider> = {
   },
   matrix: {
     id: "matrix",
-    connectorTokenKeys: ["MATRIX_HOMESERVER_URL", "MATRIX_ACCESS_TOKEN"],
-    connectorClient(secrets, paths) {
+    // Login credentials, not a pasted token: otterbot mints its own device so the
+    // crypto store is owned exclusively (see MatrixAuth in matrix-client.ts).
+    connectorTokenKeys: ["MATRIX_HOMESERVER_URL", "MATRIX_USER", "MATRIX_PASSWORD"],
+    connectorClient(secrets, paths, ctx) {
       const url = secrets.get("MATRIX_HOMESERVER_URL");
-      const token = secrets.get("MATRIX_ACCESS_TOKEN");
-      return url && token
-        ? new MatrixChatClient(url, token, paths.storagePath, paths.cryptoStoragePath)
-        : null;
+      const user = secrets.get("MATRIX_USER");
+      const password = secrets.get("MATRIX_PASSWORD");
+      if (!url || !user || !password) return null;
+      return new MatrixChatClient(
+        url,
+        {
+          token: secrets.get("MATRIX_ACCESS_TOKEN") ?? null,
+          deviceId: secrets.get("MATRIX_DEVICE_ID") ?? null,
+          login: { user, password },
+          persist: (token, deviceId) => {
+            ctx.persistSecret("MATRIX_ACCESS_TOKEN", token);
+            ctx.persistSecret("MATRIX_DEVICE_ID", deviceId);
+          },
+        },
+        paths.storagePath,
+        paths.cryptoStoragePath
+      );
     },
     transportClient(cfg) {
       return cfg.matrixHomeserverUrl && cfg.matrixAccessToken
         ? new MatrixChatClient(
             cfg.matrixHomeserverUrl,
-            cfg.matrixAccessToken,
+            {
+              token: cfg.matrixAccessToken,
+              deviceId: null,
+              // The bus transport is instance-wide token config; no login/persist.
+              login: null,
+              persist: () => {},
+            },
             join(cfg.dataDir, "matrix", "bus.json"),
             join(cfg.dataDir, "matrix", "crypto-bus")
           )

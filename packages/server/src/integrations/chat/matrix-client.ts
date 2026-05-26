@@ -1,4 +1,4 @@
-import { mkdirSync } from "node:fs";
+import { mkdirSync, rmSync } from "node:fs";
 import { dirname } from "node:path";
 import {
   MatrixClient,
@@ -18,6 +18,72 @@ import type {
 interface MatrixMessageEvent {
   sender?: string;
   content?: { msgtype?: string; body?: string };
+}
+
+/**
+ * How the Matrix client obtains its access token. The persistent rust-sdk crypto
+ * store is bound to a single device, so the bot must own that device exclusively:
+ * we log in with the account password to mint a dedicated device (never reuse a
+ * token copied from another client like Element — that device's one-time keys are
+ * owned by another crypto store and uploads collide with `M_UNKNOWN: One time key
+ * … already exists`). The minted token + device id are persisted so restarts reuse
+ * the same device, and a refreshed login reuses the device id to keep the crypto
+ * store valid.
+ */
+export interface MatrixAuth {
+  /** Existing/minted access token, if any. */
+  token: string | null;
+  /** Previously minted device id, if any. Reused on re-login to keep crypto state. */
+  deviceId: string | null;
+  /**
+   * Account login used to mint/refresh a dedicated device. Required for the
+   * per-agent connector; the instance bus transport runs token-only (login null).
+   */
+  login: { user: string; password: string } | null;
+  /** Persist a freshly minted token + device id back to the agent's secrets. */
+  persist: (token: string, deviceId: string) => void;
+}
+
+interface LoginResult {
+  accessToken: string;
+  deviceId: string;
+}
+
+/** True for errors that mean the stored access token is no longer valid. */
+function isInvalidTokenError(err: unknown): boolean {
+  const e = err as { statusCode?: number; body?: { errcode?: string } } | undefined;
+  return e?.statusCode === 401 || e?.body?.errcode === "M_UNKNOWN_TOKEN";
+}
+
+/**
+ * Password-login against the homeserver. Passing `deviceId` reuses that device
+ * (issuing a fresh token for it); omitting it makes the server mint a new device.
+ * Returns the access token and the device id the server assigned.
+ */
+async function matrixLogin(
+  homeserverUrl: string,
+  user: string,
+  password: string,
+  deviceId: string | null
+): Promise<LoginResult> {
+  const body: Record<string, unknown> = {
+    type: "m.login.password",
+    identifier: { type: "m.id.user", user },
+    password,
+    initial_device_display_name: "otterbot",
+  };
+  if (deviceId) body.device_id = deviceId;
+  // A token-less client just to reuse the SDK's request plumbing for /login.
+  const res = (await new MatrixClient(homeserverUrl, "").doRequest(
+    "POST",
+    "/_matrix/client/v3/login",
+    null,
+    body
+  )) as { access_token?: string; device_id?: string };
+  if (!res.access_token || !res.device_id) {
+    throw new Error("Matrix login: response missing access_token or device_id");
+  }
+  return { accessToken: res.access_token, deviceId: res.device_id };
 }
 
 /** Escape text for an `org.matrix.custom.html` formatted body. */
@@ -40,7 +106,7 @@ export class MatrixChatClient implements ChatClient {
 
   constructor(
     private readonly homeserverUrl: string,
-    private readonly accessToken: string,
+    private readonly auth: MatrixAuth,
     private readonly storagePath: string,
     private readonly cryptoStoragePath: string
   ) {}
@@ -51,10 +117,58 @@ export class MatrixChatClient implements ChatClient {
 
   async start(): Promise<void> {
     mkdirSync(dirname(this.storagePath), { recursive: true });
+
+    let token = this.auth.token;
+    let deviceId = this.auth.deviceId;
+    // Only trust a token we minted ourselves — one always paired with a device id.
+    // A token without a device id was pasted from elsewhere (e.g. Element) and its
+    // device's crypto state is owned by another store; using it collides on
+    // one-time-key upload. In that case (or with no token) log in to mint our own
+    // dedicated device. Minting a new device (no prior device id) means any crypto
+    // store left from a previous device must be discarded first.
+    if (this.auth.login && (!token || !deviceId)) {
+      const mintedNewDevice = !deviceId;
+      const minted = await matrixLogin(
+        this.homeserverUrl,
+        this.auth.login.user,
+        this.auth.login.password,
+        deviceId
+      );
+      token = minted.accessToken;
+      deviceId = minted.deviceId;
+      this.auth.persist(token, deviceId);
+      if (mintedNewDevice) this.resetCryptoStore();
+    }
+    if (!token) throw new Error("Matrix: no access token and no login credentials provided");
     mkdirSync(this.cryptoStoragePath, { recursive: true });
+
+    try {
+      this.client = await this.buildClient(token);
+    } catch (err) {
+      if (!isInvalidTokenError(err) || !this.auth.login) throw err;
+      // The stored token expired/was revoked. Re-login reusing the same device
+      // id so the crypto store stays valid, then retry with the fresh token.
+      const refreshed = await matrixLogin(
+        this.homeserverUrl,
+        this.auth.login.user,
+        this.auth.login.password,
+        deviceId
+      );
+      this.auth.persist(refreshed.accessToken, refreshed.deviceId);
+      this.client = await this.buildClient(refreshed.accessToken);
+    }
+  }
+
+  /** Discard the on-disk crypto store so a freshly minted device starts clean. */
+  private resetCryptoStore(): void {
+    rmSync(this.cryptoStoragePath, { recursive: true, force: true });
+  }
+
+  /** Build, wire, and start a MatrixClient for the given access token. */
+  private async buildClient(token: string): Promise<MatrixClient> {
     const client = new MatrixClient(
       this.homeserverUrl,
-      this.accessToken,
+      token,
       new SimpleFsStorageProvider(this.storagePath),
       new RustSdkCryptoStorageProvider(this.cryptoStoragePath)
     );
@@ -79,7 +193,7 @@ export class MatrixChatClient implements ChatClient {
       this.onMatrixMessage(roomId, event)
     );
     await client.start();
-    this.client = client;
+    return client;
   }
 
   async stop(): Promise<void> {

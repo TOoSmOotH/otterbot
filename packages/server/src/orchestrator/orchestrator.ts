@@ -1021,10 +1021,19 @@ export class Orchestrator {
       return;
     }
     if (existing) void existing.connector.stop();
-    const client = provider.connectorClient(secrets, {
-      storagePath: join(this.cfg.dataDir, "matrix", `connector-${agentId}.json`),
-      cryptoStoragePath: join(this.cfg.dataDir, "matrix", `crypto-connector-${agentId}`),
-    });
+    const client = provider.connectorClient(
+      secrets,
+      {
+        storagePath: join(this.cfg.dataDir, "matrix", `connector-${agentId}.json`),
+        cryptoStoragePath: join(this.cfg.dataDir, "matrix", `crypto-connector-${agentId}`),
+      },
+      {
+        // Persist credentials the client mints at runtime (e.g. the Matrix device
+        // token). upsert writes straight to the store and does not re-reconcile,
+        // so this cannot loop. "direct" keeps it out of the shell env.
+        persistSecret: (key, value) => this.secrets.upsert(agentId, key, value, "direct"),
+      }
+    );
     if (!client) return;
     const connector = new ChannelConnector(
       provider.id,
@@ -1316,11 +1325,16 @@ export class Orchestrator {
     secrets: Record<string, string | { value: string; scope?: CredentialScope }>,
   ): boolean {
     if (!this.contexts.has(id)) return false;
+    const existingKeys = new Set(this.secrets.listScopes(id).map((s) => s.key));
     for (const [rawKey, entry] of Object.entries(secrets)) {
       const key = rawKey.trim();
       if (!key) continue;
       if (typeof entry === "string") {
-        this.secrets.upsert(id, key, entry);
+        // New keys get their suggested scope (so connector secrets like
+        // MATRIX_PASSWORD are "direct", not injected into the shell env);
+        // existing keys keep whatever scope they already have.
+        if (existingKeys.has(key)) this.secrets.upsert(id, key, entry);
+        else this.secrets.upsert(id, key, entry, suggestScopeForKey(key));
       } else {
         this.secrets.upsert(id, key, entry.value, entry.scope);
       }
