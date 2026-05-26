@@ -13,6 +13,7 @@ import type {
 } from "@otterbot/shared";
 import { apiFetch } from "../../lib/api";
 import { useAgentsStore } from "../../stores/agents-store";
+import { useChatStore } from "../../stores/chat-store";
 import { useGlobalSettingsStore } from "../../stores/global-settings-store";
 import { ModelSelect } from "./ModelSelect";
 import { AvatarUpload } from "./AvatarUpload";
@@ -27,8 +28,13 @@ type StudioTab = (typeof TABS)[number];
 export function AgentStudio({ agentId }: { agentId: string | null }) {
   const [profile, setProfile] = useState<AgentProfile | null>(null);
   const [tab, setTab] = useState<StudioTab>("Identity");
+  // Bumped after a full reset to remount the tab subtree, so the Memory tab
+  // (which loads its list on mount) reflects the now-empty memory.
+  const [resetNonce, setResetNonce] = useState(0);
   const reloadRoster = useAgentsStore((s) => s.load);
   const removeAgent = useAgentsStore((s) => s.remove);
+  const currentConversation = useChatStore((s) => s.currentConversation);
+  const newConversation = useChatStore((s) => s.newConversation);
 
   const loadProfile = () => {
     if (!agentId) return;
@@ -57,6 +63,32 @@ export function AgentStudio({ agentId }: { agentId: string | null }) {
     void reloadRoster();
   };
 
+  const resetAgent = async () => {
+    if (
+      !confirm(
+        `Reset "${profile.displayName}"? This clears the current conversation and ` +
+          `erases ALL of this agent's long-term memory. Skills and credentials are kept. ` +
+          `This cannot be undone.`
+      )
+    ) {
+      return;
+    }
+    const conversationId = currentConversation[profile.id] ?? undefined;
+    const res = await apiFetch(`/api/agents/${profile.id}/reset`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ conversationId }),
+    });
+    if (!res.ok) {
+      alert("Reset failed.");
+      return;
+    }
+    // Drop the now-cleared conversation locally and remount the tabs so the
+    // Memory tab reloads its (empty) list.
+    newConversation(profile.id);
+    setResetNonce((n) => n + 1);
+  };
+
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
       <header
@@ -70,7 +102,10 @@ export function AgentStudio({ agentId }: { agentId: string | null }) {
       >
         <strong style={{ fontSize: 14 }}>{profile.displayName}</strong>
         <span style={{ fontSize: 11, color: "rgb(var(--muted))" }}>Agent Studio</span>
-        <div style={{ marginLeft: "auto" }}>
+        <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
+          <button onClick={resetAgent} style={{ ...ghost, color: "#f87171" }}>
+            Reset agent
+          </button>
           {profile.role !== "coo" && (
             <button
               onClick={async () => {
@@ -108,12 +143,13 @@ export function AgentStudio({ agentId }: { agentId: string | null }) {
       </nav>
 
       {/*
-       * key={profile.id} remounts the tab subtree when the selected agent
-       * changes — tab components seed local state from `profile` via useState,
-       * which only runs on mount, so without this they would keep showing the
-       * previously-viewed agent's settings.
+       * The key remounts the tab subtree when the selected agent changes — tab
+       * components seed local state from `profile` via useState, which only runs
+       * on mount, so without this they would keep showing the previously-viewed
+       * agent's settings. `resetNonce` also forces a remount after a full reset
+       * so the Memory tab reloads its (now-empty) list.
        */}
-      <div key={profile.id} style={{ flex: 1, overflowY: "auto", padding: 16 }}>
+      <div key={`${profile.id}-${resetNonce}`} style={{ flex: 1, overflowY: "auto", padding: 16 }}>
         {tab === "Identity" && <IdentityTab profile={profile} onSaved={onSaved} />}
         {tab === "Persona" && <PersonaTab profile={profile} onSaved={onSaved} />}
         {tab === "Model" && <ModelTab profile={profile} onSaved={onSaved} />}

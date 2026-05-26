@@ -6,6 +6,7 @@ import { summarizeConversation } from "./memory/summarizer.js";
 import { extractFactsFromConversation } from "./memory/extractor.js";
 import { maybeAuthorSkill } from "./skills/skill-author.js";
 import { openTerminal } from "./integrations/shell-terminal.js";
+import { handleChatCommand, parseChatCommand } from "./runtime/chat-commands.js";
 import { extractToken, type AuthStore } from "./auth/api-token.js";
 import type { Artifact } from "@otterbot/shared";
 
@@ -113,6 +114,16 @@ export function attachSocketServer(
           agentId,
           chunk: { kind: "error", message: `Unknown agent: ${agentId}` },
         });
+        socket.emit("chat:done", { agentId, conversationId: joined.conversationId });
+        return;
+      }
+
+      // Bang-commands (!context, !clear, !reset) are handled inline without a
+      // model turn: emit the reply as an ephemeral assistant message.
+      const command = parseChatCommand(payload.text);
+      if (command) {
+        const reply = handleChatCommand(runtime, joined.conversationId, command);
+        socket.emit("chat:stream", { agentId, chunk: { kind: "token", text: reply } });
         socket.emit("chat:done", { agentId, conversationId: joined.conversationId });
         return;
       }

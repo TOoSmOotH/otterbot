@@ -5,7 +5,7 @@ import * as schema from "../db/schema.js";
 import { resolveChatModel } from "../providers/registry.js";
 import { buildSystemPrompt } from "../agent/prompt.js";
 import { buildAgentTools } from "../agent/tools.js";
-import { buildContext, maybeAutoCompact } from "./context-manager.js";
+import { buildContext, contextStatus, maybeAutoCompact } from "./context-manager.js";
 import type { AgentContext } from "./agent-context.js";
 import type { AgentServices, AgentDirectoryEntry } from "./agent-services.js";
 import type {
@@ -423,6 +423,22 @@ export class AgentRuntime {
       .set({ messageCount: 0, updatedAt: new Date().toISOString() })
       .where(eq(schema.conversations.id, conversationId))
       .run();
+  }
+
+  /** Token-budget accounting for a conversation's live context window. */
+  contextStatus(conversationId: string) {
+    return contextStatus(this.ctx, conversationId);
+  }
+
+  /**
+   * Full reset: erase the agent's entire long-term memory, then clear the given
+   * conversation's history. Skills, credentials, and other conversations are
+   * left untouched. This is the destructive "danger zone" action exposed only
+   * in the web app.
+   */
+  fullReset(conversationId: string): void {
+    this.ctx.memory.clear();
+    this.resetConversation(conversationId);
   }
 
   ensureConversation(id: string, title: string | null = null): void {

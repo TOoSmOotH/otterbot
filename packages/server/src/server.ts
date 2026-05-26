@@ -742,6 +742,28 @@ export async function buildServer(
     });
   });
 
+  // Full reset (danger zone): wipe the agent's long-term memory and clear the
+  // given conversation's history. Skills/credentials are untouched. Exposed only
+  // here (web app) — the chat `!reset` command is informational, never destructive.
+  app.post<{
+    Params: { id: string };
+    Body: { conversationId?: string };
+  }>("/api/agents/:id/reset", async (req, reply) => {
+    const runtime = orch.getRuntime(req.params.id);
+    if (!runtime) {
+      reply.code(404);
+      return { error: "not found" };
+    }
+    const conversationId = req.body?.conversationId;
+    if (conversationId) {
+      runtime.fullReset(conversationId);
+    } else {
+      const ctx = orch.getContext(req.params.id);
+      ctx?.memory.clear();
+    }
+    return { ok: true };
+  });
+
   app.get<{ Params: { id: string } }>("/api/agents/:id/skills", async (req, reply) => {
     const ctx = orch.getContext(req.params.id);
     if (!ctx) {

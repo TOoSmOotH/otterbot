@@ -1,5 +1,6 @@
 import type { Artifact, ChannelBotConfig, ConnectorState } from "@otterbot/shared";
 import type { AgentRuntime } from "../../runtime/agent-runtime.js";
+import { handleChatCommand, parseChatCommand } from "../../runtime/chat-commands.js";
 import type { ChatClient, InboundChatMessage, MessageHandle, OutboundFile } from "./chat-client.js";
 
 /** Placeholder posted while the agent works, when the client supports edits. */
@@ -112,24 +113,22 @@ export class ChannelConnector {
     return `${this.platform}-${this.channelId}`;
   }
 
-  /** `!reset` (optionally after a mention) clears this channel's history. */
-  private isResetCommand(text: string): boolean {
-    return text.trim().toLowerCase().endsWith("!reset");
-  }
-
   private onInbound(m: InboundChatMessage): void {
     if (m.channelId !== this.channelId) return;
     if (m.fromSelf) return;
     if (this.cfg.mentionOnly && !m.mentioned) return;
     const body = m.text.trim();
     if (!body || !this.passesGate(m.senderId)) return;
-    if (this.isResetCommand(body)) {
+    const command = parseChatCommand(body);
+    if (command) {
       this.queue = this.queue.then(async () => {
-        this.getRuntime()?.resetConversation(this.conversationId());
+        const runtime = this.getRuntime();
+        if (!runtime) return;
+        const reply = handleChatCommand(runtime, this.conversationId(), command);
         try {
-          await this.client.sendText(this.channelId, "🧹 Conversation history cleared — starting fresh.");
+          await this.client.sendText(this.channelId, reply);
         } catch (err) {
-          console.error(`[${this.platform}] reset reply failed for ${this.agentId}:`, err);
+          console.error(`[${this.platform}] command reply failed for ${this.agentId}:`, err);
         }
       });
       return;

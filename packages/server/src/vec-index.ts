@@ -32,6 +32,12 @@ export class VecIndex {
     this.sqlite.prepare("DELETE FROM vec_memories WHERE memory_id = ?").run(memoryId);
   }
 
+  /** Delete every stored embedding. Used by a full agent reset. */
+  clear(): void {
+    if (!this.embedding.isAvailable()) return;
+    this.sqlite.prepare("DELETE FROM vec_memories").run();
+  }
+
   /** KNN search via vec0. Returns top-N closest memories by cosine distance. */
   async search(query: string, limit = 6): Promise<VecSearchHit[]> {
     if (!this.embedding.isAvailable()) return [];

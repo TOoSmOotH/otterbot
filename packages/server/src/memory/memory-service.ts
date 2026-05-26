@@ -75,6 +75,16 @@ export class MemoryService {
     this.vec.delete(id);
   }
 
+  /**
+   * Erase every memory: the rows, their FTS index entries, and their vectors.
+   * Used by a full agent reset; skills and other content are left untouched.
+   */
+  clear(): void {
+    this.db.delete(schema.memories).run();
+    this.sqlite.prepare(`DELETE FROM content_fts WHERE kind = 'memory'`).run();
+    this.vec.clear();
+  }
+
   /** All memories as full rows, for lossless export. Unlike `list`, unlimited. */
   exportAll(): ExportedMemory[] {
     return this.db

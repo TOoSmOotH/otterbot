@@ -242,7 +242,7 @@ describe("ChannelConnector", () => {
     expect(client.sent[1]?.text).toContain("doc.pdf");
   });
 
-  it("clears history on a !reset command instead of running an agent turn", async () => {
+  it("clears context on a !clear command instead of running an agent turn", async () => {
     const client = new FakeChatClient(false);
     const resets: string[] = [];
     const calls: string[] = [];
@@ -255,15 +255,16 @@ describe("ChannelConnector", () => {
     } as never;
     const conn = make(client, cfg(), runtime);
     await conn.start();
-    client.emit({ text: "!reset" });
+    client.emit({ text: "!clear" });
     await conn.whenIdle();
     expect(resets).toEqual(["test-C1"]);
-    expect(calls).toEqual([]); // no agent turn for a reset command
+    expect(calls).toEqual([]); // no agent turn for a command
     expect(client.sent.length).toBe(1);
     expect(client.sent[0].text).toContain("cleared");
+    expect(client.sent[0].text).toContain("memory kept");
   });
 
-  it("treats a mention-prefixed '!reset' as the reset command", async () => {
+  it("treats a mention-prefixed '!clear' as the clear command", async () => {
     const client = new FakeChatClient(false);
     const resets: string[] = [];
     const runtime = {
@@ -272,9 +273,49 @@ describe("ChannelConnector", () => {
     } as never;
     const conn = make(client, cfg({ mentionOnly: true }), runtime);
     await conn.start();
-    client.emit({ text: "Otter Bot: !reset", mentioned: true });
+    client.emit({ text: "Otter Bot: !clear", mentioned: true });
     await conn.whenIdle();
     expect(resets).toEqual(["test-C1"]);
+  });
+
+  it("does NOT wipe on a chat !reset — replies that full reset is web-only", async () => {
+    const client = new FakeChatClient(false);
+    const resets: string[] = [];
+    const runtime = {
+      respond: async () => ({ finalText: "x" }),
+      resetConversation: (id: string) => resets.push(id),
+    } as never;
+    const conn = make(client, cfg(), runtime);
+    await conn.start();
+    client.emit({ text: "!reset" });
+    await conn.whenIdle();
+    expect(resets).toEqual([]); // chat !reset never clears anything
+    expect(client.sent.length).toBe(1);
+    expect(client.sent[0].text).toContain("web app");
+  });
+
+  it("reports context usage on a !context command", async () => {
+    const client = new FakeChatClient(false);
+    const runtime = {
+      respond: async () => ({ finalText: "x" }),
+      contextStatus: () => ({
+        budgetTokens: 1000,
+        usedTokens: 250,
+        recapTokens: 0,
+        verbatimTokens: 250,
+        messageCount: 4,
+        compactedMessageCount: 0,
+        overBudget: false,
+        lastCompactedAt: null,
+      }),
+    } as never;
+    const conn = make(client, cfg(), runtime);
+    await conn.start();
+    client.emit({ text: "!context" });
+    await conn.whenIdle();
+    expect(client.sent.length).toBe(1);
+    expect(client.sent[0].text).toContain("250 / 1,000 tokens (25%)");
+    expect(client.sent[0].text).toContain("4 messages");
   });
 
   it("clears a prior error state after a later successful post", async () => {
