@@ -1,6 +1,5 @@
-import { mkdirSync } from "node:fs";
 import * as pty from "@homebridge/node-pty-prebuilt-multiarch";
-import { buildSandboxPlan } from "./shell.js";
+import { buildSandboxPlan, ensureWorkspace } from "./shell.js";
 
 /**
  * Interactive pseudo-terminals into an agent's workspace — the human-facing
@@ -43,11 +42,7 @@ export function openTerminal(
   secrets: Map<string, string>,
   size: Partial<TerminalSize> = {}
 ): OpenTerminalResult {
-  try {
-    mkdirSync(workspaceDir, { recursive: true });
-  } catch {
-    /* the spawn below will surface any real problem */
-  }
+  ensureWorkspace(workspaceDir);
 
   const built = buildSandboxPlan(workspaceDir, secrets, INTERACTIVE_SHELL, {
     interactive: true,

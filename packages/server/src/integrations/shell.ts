@@ -87,6 +87,8 @@ function buildEnv(home: string, secrets: Map<string, string>): Record<string, st
   const env: Record<string, string> = {
     HOME: home,
     PATH: [
+      `${home}/bin`,
+      `${home}/.local/bin`,
       `${home}/.npm-global/bin`,
       "/usr/local/sbin",
       "/usr/local/bin",
@@ -241,17 +243,64 @@ export function buildSandboxPlan(
   return { error: NO_SANDBOX_ERROR };
 }
 
+/**
+ * Default `.bashrc` seeded into a fresh workspace. The workspace is the shell's
+ * HOME, so this is what the interactive terminal reads. `shell_exec` runs a
+ * non-interactive `sh -c` and never sources it — its PATH comes from buildEnv.
+ * PATH is re-exported defensively; the prompt and aliases are guarded to the
+ * interactive case so sourcing this elsewhere is harmless.
+ */
+const DEFAULT_BASHRC = `# Seeded by otterbot — edit freely, it won't be overwritten.
+export PATH="$HOME/bin:$HOME/.local/bin:$HOME/.npm-global/bin:$PATH"
+
+case $- in
+  *i*)
+    PS1='\\[\\e[36m\\]\\w\\[\\e[0m\\] $ '
+    alias ll='ls -alF'
+    alias la='ls -A'
+    alias ..='cd ..'
+    alias grep='grep --color=auto'
+    ;;
+esac
+`;
+
+/** Login-shell entry points; both just source `.bashrc`. */
+const DEFAULT_PROFILE = `# Seeded by otterbot — edit freely, it won't be overwritten.
+[ -f "$HOME/.bashrc" ] && . "$HOME/.bashrc"
+`;
+
+/**
+ * Create the workspace directory (and `~/bin`) and seed shell dotfiles on first
+ * use. Seeding is best-effort and never clobbers existing files, so the user's
+ * own edits in this persistent workspace survive. Both `shell_exec` and the
+ * interactive terminal call this before spawning.
+ */
+export function ensureWorkspace(workspaceDir: string): void {
+  try {
+    mkdirSync(join(workspaceDir, "bin"), { recursive: true });
+  } catch {
+    /* the spawn below will surface any real problem */
+  }
+  const seed = (name: string, contents: string) => {
+    const path = join(workspaceDir, name);
+    try {
+      if (!existsSync(path)) writeFileSync(path, contents, { mode: 0o644 });
+    } catch {
+      /* best-effort; a missing dotfile is not fatal */
+    }
+  };
+  seed(".bashrc", DEFAULT_BASHRC);
+  seed(".bash_profile", DEFAULT_PROFILE);
+  seed(".profile", DEFAULT_PROFILE);
+}
+
 /** Run a shell command confined to the agent's workspace directory. */
 export function runAgentShell(
   workspaceDir: string,
   secrets: Map<string, string>,
   command: string
 ): Promise<ShellResult> {
-  try {
-    mkdirSync(workspaceDir, { recursive: true });
-  } catch {
-    /* the spawn below will surface any real problem */
-  }
+  ensureWorkspace(workspaceDir);
 
   const built = buildSandboxPlan(workspaceDir, secrets, ["/bin/sh", "-c", command]);
   if ("error" in built) {
