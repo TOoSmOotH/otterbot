@@ -49,6 +49,53 @@ interface LoginResult {
   deviceId: string;
 }
 
+/**
+ * The rust crypto engine sends `device_keys: null` on one-time-key top-ups, but
+ * the Matrix spec marks `device_keys` optional and expects it omitted when
+ * absent. Strict homeservers reject the explicit null with
+ * `M_INVALID_PARAM: device_keys must not be null`. Drop the null before sending
+ * so `/keys/upload` stays spec-compliant. Returns the (possibly cloned) body to
+ * send; non-upload requests and real device_keys pass through untouched.
+ */
+export function sanitizeMatrixRequestBody(endpoint: string, body: unknown): unknown {
+  if (
+    endpoint.endsWith("/keys/upload") &&
+    typeof body === "object" &&
+    body !== null &&
+    "device_keys" in body &&
+    (body as { device_keys?: unknown }).device_keys == null
+  ) {
+    const sanitized: Record<string, unknown> = { ...(body as Record<string, unknown>) };
+    delete sanitized.device_keys;
+    return sanitized;
+  }
+  return body;
+}
+
+class SpecCompliantMatrixClient extends MatrixClient {
+  override doRequest(
+    method: string,
+    endpoint: string,
+    qs?: unknown,
+    body?: unknown,
+    timeout?: number,
+    raw?: boolean,
+    contentType?: string,
+    noEncoding?: boolean
+  ): Promise<unknown> {
+    return super.doRequest(
+      method,
+      endpoint,
+      qs,
+      sanitizeMatrixRequestBody(endpoint, body),
+      timeout,
+      raw,
+      contentType,
+      noEncoding
+    );
+  }
+}
+
 /** True for errors that mean the stored access token is no longer valid. */
 function isInvalidTokenError(err: unknown): boolean {
   const e = err as { statusCode?: number; body?: { errcode?: string } } | undefined;
@@ -166,7 +213,7 @@ export class MatrixChatClient implements ChatClient {
 
   /** Build, wire, and start a MatrixClient for the given access token. */
   private async buildClient(token: string): Promise<MatrixClient> {
-    const client = new MatrixClient(
+    const client = new SpecCompliantMatrixClient(
       this.homeserverUrl,
       token,
       new SimpleFsStorageProvider(this.storagePath),
