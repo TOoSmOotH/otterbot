@@ -13,6 +13,13 @@ export const THINKING_PLACEHOLDER = "💭 _Thinking…_";
  */
 export class ChannelConnector {
   private cfg: ChannelBotConfig;
+  /**
+   * Canonical channel id used for matching inbound messages and sending. Starts
+   * as the configured id and is replaced with the client-resolved id after
+   * start() (Matrix: a room alias resolves to its internal `!id:hs`). A channel
+   * change forces a reconnect, so this is only refreshed on (re)start.
+   */
+  private channelId: string;
   private queue: Promise<unknown> = Promise.resolve();
   private connState: ConnectorState = "connecting";
   private connError: string | null = null;
@@ -27,11 +34,24 @@ export class ChannelConnector {
     private readonly loadArtifact: (a: Artifact) => OutboundFile | null = () => null
   ) {
     this.cfg = cfg;
+    this.channelId = cfg.channelId;
   }
 
   async start(): Promise<void> {
     this.client.onMessage((m) => this.onInbound(m));
     await this.client.start();
+    // Resolve the configured channel to its canonical id (e.g. a Matrix room
+    // alias → internal id) so inbound matching and sending agree.
+    if (this.client.resolveChannelId) {
+      try {
+        this.channelId = await this.client.resolveChannelId(this.cfg.channelId);
+      } catch (err) {
+        console.warn(
+          `[${this.platform}] could not resolve channel "${this.cfg.channelId}" for ${this.agentId}:`,
+          err instanceof Error ? err.message : err
+        );
+      }
+    }
   }
 
   async stop(): Promise<void> {
@@ -50,7 +70,7 @@ export class ChannelConnector {
 
   /** Live connection status for the Channels UI. */
   getStatus(): { state: ConnectorState; error: string | null; channelId: string } {
-    return { state: this.connState, error: this.connError, channelId: this.cfg.channelId };
+    return { state: this.connState, error: this.connError, channelId: this.channelId };
   }
 
   /** Mark the connector as successfully connected. */
@@ -81,22 +101,14 @@ export class ChannelConnector {
       `An admin may need to grant the bot the files:write scope and invite it to this channel. ` +
       `Reference: ${artifact.url}`;
     try {
-      await this.client.sendText(this.cfg.channelId, note);
+      await this.client.sendText(this.channelId, note);
     } catch (err) {
       console.error(`[${this.platform}] artifact fallback post failed for ${this.agentId}:`, err);
     }
   }
 
   private onInbound(m: InboundChatMessage): void {
-    // DEBUG: show the inbound message and every gate decision.
-    console.log(
-      `[connector-debug] ${this.platform}/${this.agentId} channel=${m.channelId} ` +
-        `cfgChannel=${this.cfg.channelId} channelMatch=${m.channelId === this.cfg.channelId} ` +
-        `fromSelf=${m.fromSelf} mentionOnly=${this.cfg.mentionOnly} mentioned=${m.mentioned} ` +
-        `sender=${m.senderId} publicBot=${this.cfg.publicBot} ` +
-        `allowed=${JSON.stringify(this.cfg.allowedUserIds)} gate=${this.passesGate(m.senderId)}`
-    );
-    if (m.channelId !== this.cfg.channelId) return;
+    if (m.channelId !== this.channelId) return;
     if (m.fromSelf) return;
     if (this.cfg.mentionOnly && !m.mentioned) return;
     const body = m.text.trim();
@@ -107,7 +119,7 @@ export class ChannelConnector {
       let placeholder: MessageHandle | null = null;
       if (this.client.canEdit) {
         try {
-          placeholder = await this.client.sendText(this.cfg.channelId, THINKING_PLACEHOLDER);
+          placeholder = await this.client.sendText(this.channelId, THINKING_PLACEHOLDER);
         } catch (err) {
           console.error(
             `[${this.platform}] thinking placeholder failed for ${this.agentId}:`,
@@ -119,7 +131,7 @@ export class ChannelConnector {
       let artifacts: Artifact[] = [];
       try {
         const res = await runtime.respond({
-          conversationId: `${this.platform}-${this.cfg.channelId}`,
+          conversationId: `${this.platform}-${this.channelId}`,
           userMessage: body,
           onChunk: () => {},
         });
@@ -132,7 +144,7 @@ export class ChannelConnector {
         if (placeholder != null) {
           await this.client.edit(placeholder, reply);
         } else {
-          await this.client.sendText(this.cfg.channelId, reply);
+          await this.client.sendText(this.channelId, reply);
         }
         // A successful post means we can reach the channel — clear any stale
         // error state so the Channels UI recovers after a transient failure.
@@ -156,7 +168,7 @@ export class ChannelConnector {
           continue;
         }
         try {
-          await this.client.sendFile(this.cfg.channelId, file);
+          await this.client.sendFile(this.channelId, file);
         } catch (err) {
           // Don't drop the artifact silently: tell the channel and flag the
           // connector so a missing files:write / channel membership is visible.

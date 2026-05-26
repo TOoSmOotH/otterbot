@@ -14,6 +14,12 @@ export interface ChatClient {
   start(): Promise<void>;
   /** Cleanly disconnect. */
   stop(): Promise<void>;
+  /**
+   * Resolve a configured channel id to its canonical form (Matrix: a room alias
+   * like `#room:hs` → its internal `!id:hs`). Optional — when absent the
+   * configured id is used as-is. Called once after start().
+   */
+  resolveChannelId?(configured: string): Promise<string>;
   /** Post plain text to a channel; returns an opaque handle for a later edit. */
   sendText(channelId: string, text: string): Promise<MessageHandle>;
   /** Edit a previously sent message in place. Only valid when canEdit. */

@@ -281,6 +281,12 @@ export class MatrixChatClient implements ChatClient {
     this.client = null;
   }
 
+  /** Resolve a room alias (`#room:hs`) to its internal id (`!id:hs`); ids pass through. */
+  async resolveChannelId(configured: string): Promise<string> {
+    if (!this.client) return configured;
+    return this.client.resolveRoom(configured);
+  }
+
   async sendText(channelId: string, text: string): Promise<MessageHandle> {
     if (!this.client) return null;
     await this.client.sendText(channelId, text.slice(0, 16000) || "(no content)");
@@ -316,26 +322,14 @@ export class MatrixChatClient implements ChatClient {
 
   private onMatrixMessage(roomId: string, event: MatrixMessageEvent): void {
     const content = event.content;
-    // DEBUG: trace every room.message the SDK delivers (incl. non-text).
-    console.log(
-      `[matrix-debug] room.message room=${roomId} sender=${event.sender} ` +
-        `msgtype=${content?.msgtype} body=${JSON.stringify(content?.body)} ` +
-        `hasFormatted=${Boolean(content?.formatted_body)} ` +
-        `mMentions=${JSON.stringify(content?.["m.mentions"]?.user_ids)} ` +
-        `self=${this.selfUserId} tokens=${JSON.stringify(this.mentionTokens)}`
-    );
     if (content?.msgtype !== "m.text") return;
     const text = (content.body ?? "").trim();
-    const fromSelf = !event.sender || event.sender === this.selfUserId;
-    const mentioned = detectMention(this.selfUserId, this.mentionTokens, content);
-    // DEBUG: computed gating flags.
-    console.log(`[matrix-debug] -> fromSelf=${fromSelf} mentioned=${mentioned}`);
     this.handler({
       channelId: roomId,
       senderId: event.sender ?? "",
       text,
-      fromSelf,
-      mentioned,
+      fromSelf: !event.sender || event.sender === this.selfUserId,
+      mentioned: detectMention(this.selfUserId, this.mentionTokens, content),
     });
   }
 }
