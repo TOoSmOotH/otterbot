@@ -107,12 +107,33 @@ export class ChannelConnector {
     }
   }
 
+  /** The conversation id this channel maps to. */
+  private conversationId(): string {
+    return `${this.platform}-${this.channelId}`;
+  }
+
+  /** `!reset` (optionally after a mention) clears this channel's history. */
+  private isResetCommand(text: string): boolean {
+    return text.trim().toLowerCase().endsWith("!reset");
+  }
+
   private onInbound(m: InboundChatMessage): void {
     if (m.channelId !== this.channelId) return;
     if (m.fromSelf) return;
     if (this.cfg.mentionOnly && !m.mentioned) return;
     const body = m.text.trim();
     if (!body || !this.passesGate(m.senderId)) return;
+    if (this.isResetCommand(body)) {
+      this.queue = this.queue.then(async () => {
+        this.getRuntime()?.resetConversation(this.conversationId());
+        try {
+          await this.client.sendText(this.channelId, "🧹 Conversation history cleared — starting fresh.");
+        } catch (err) {
+          console.error(`[${this.platform}] reset reply failed for ${this.agentId}:`, err);
+        }
+      });
+      return;
+    }
     this.queue = this.queue.then(async () => {
       const runtime = this.getRuntime();
       if (!runtime) return;
@@ -131,7 +152,7 @@ export class ChannelConnector {
       let artifacts: Artifact[] = [];
       try {
         const res = await runtime.respond({
-          conversationId: `${this.platform}-${this.channelId}`,
+          conversationId: this.conversationId(),
           userMessage: body,
           onChunk: () => {},
         });

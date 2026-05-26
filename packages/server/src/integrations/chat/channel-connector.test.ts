@@ -242,6 +242,41 @@ describe("ChannelConnector", () => {
     expect(client.sent[1]?.text).toContain("doc.pdf");
   });
 
+  it("clears history on a !reset command instead of running an agent turn", async () => {
+    const client = new FakeChatClient(false);
+    const resets: string[] = [];
+    const calls: string[] = [];
+    const runtime = {
+      respond: async ({ userMessage }: { userMessage: string }) => {
+        calls.push(userMessage);
+        return { finalText: `echo:${userMessage}` };
+      },
+      resetConversation: (id: string) => resets.push(id),
+    } as never;
+    const conn = make(client, cfg(), runtime);
+    await conn.start();
+    client.emit({ text: "!reset" });
+    await conn.whenIdle();
+    expect(resets).toEqual(["test-C1"]);
+    expect(calls).toEqual([]); // no agent turn for a reset command
+    expect(client.sent.length).toBe(1);
+    expect(client.sent[0].text).toContain("cleared");
+  });
+
+  it("treats a mention-prefixed '!reset' as the reset command", async () => {
+    const client = new FakeChatClient(false);
+    const resets: string[] = [];
+    const runtime = {
+      respond: async () => ({ finalText: "x" }),
+      resetConversation: (id: string) => resets.push(id),
+    } as never;
+    const conn = make(client, cfg({ mentionOnly: true }), runtime);
+    await conn.start();
+    client.emit({ text: "Otter Bot: !reset", mentioned: true });
+    await conn.whenIdle();
+    expect(resets).toEqual(["test-C1"]);
+  });
+
   it("clears a prior error state after a later successful post", async () => {
     const client = new FakeChatClient(false);
     const conn = make(client, cfg(), runtimeWithArtifacts([]));

@@ -386,6 +386,26 @@ export class AgentRuntime {
     await this.queue;
   }
 
+  /**
+   * Clear a conversation's history — messages, compaction recaps, and session
+   * summaries — so the next turn starts fresh. Long-term memory and skills are
+   * left untouched; this only resets the chat thread.
+   */
+  resetConversation(conversationId: string): void {
+    const db = this.ctx.db;
+    db.delete(schema.messages).where(eq(schema.messages.conversationId, conversationId)).run();
+    db.delete(schema.conversationRecaps)
+      .where(eq(schema.conversationRecaps.conversationId, conversationId))
+      .run();
+    db.delete(schema.sessionSummaries)
+      .where(eq(schema.sessionSummaries.conversationId, conversationId))
+      .run();
+    db.update(schema.conversations)
+      .set({ messageCount: 0, updatedAt: new Date().toISOString() })
+      .where(eq(schema.conversations.id, conversationId))
+      .run();
+  }
+
   ensureConversation(id: string, title: string | null = null): void {
     const db = this.ctx.db;
     const existing = db
