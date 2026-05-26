@@ -107,6 +107,14 @@ export interface ChannelConnectorStatus {
   state: ConnectorState;
   error: string | null;
   channelId: string | null;
+  /**
+   * Non-secret saved connection values, for pre-filling the form so the user
+   * can see and edit what's stored. Matrix only: homeserver URL + username.
+   * Secrets (the password) are never returned — only `hasPassword` says one is set.
+   */
+  homeserverUrl?: string | null;
+  username?: string | null;
+  hasPassword?: boolean;
 }
 
 /** Live Slack + Discord + Matrix connector status for an agent. */

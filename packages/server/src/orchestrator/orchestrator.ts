@@ -978,10 +978,17 @@ export class Orchestrator {
   getConnectorStatus(id: string): AgentConnectorStatus | null {
     const ctx = this.contexts.get(id);
     if (!ctx) return null;
+    const secrets = this.secrets.get(id);
+    const matrix = channelStatus(ctx.profile.matrix, this.connectors.get(`${id}:matrix`));
+    // Surface the non-secret Matrix connection values so the form can pre-fill
+    // them; never expose the password (only whether one is stored).
+    matrix.homeserverUrl = secrets.get("MATRIX_HOMESERVER_URL") ?? null;
+    matrix.username = secrets.get("MATRIX_USER") ?? null;
+    matrix.hasPassword = Boolean(secrets.get("MATRIX_PASSWORD"));
     return {
       slack: channelStatus(ctx.profile.slack, this.connectors.get(`${id}:slack`)),
       discord: channelStatus(ctx.profile.discord, this.connectors.get(`${id}:discord`)),
-      matrix: channelStatus(ctx.profile.matrix, this.connectors.get(`${id}:matrix`)),
+      matrix,
     };
   }
 

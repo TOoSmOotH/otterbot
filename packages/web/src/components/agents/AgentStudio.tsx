@@ -757,6 +757,18 @@ function ChannelsTab({ profile, onSaved }: TabProps) {
   const [matrixUser, setMatrixUser] = useState("");
   const [matrixPassword, setMatrixPassword] = useState("");
 
+  // Pre-fill the saved non-secret Matrix values once the status arrives, so the
+  // fields show what's stored (the password stays masked — only hasPassword is
+  // known). Guarded so the 3s status poll never clobbers the user's edits.
+  const matrixPrefilled = useRef(false);
+  const matrixHasPassword = connStatus?.matrix.hasPassword ?? false;
+  useEffect(() => {
+    if (matrixPrefilled.current || !connStatus) return;
+    matrixPrefilled.current = true;
+    if (connStatus.matrix.homeserverUrl) setMatrixHomeserver(connStatus.matrix.homeserverUrl);
+    if (connStatus.matrix.username) setMatrixUser(connStatus.matrix.username);
+  }, [connStatus]);
+
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState("");
 
@@ -1004,9 +1016,7 @@ function ChannelsTab({ profile, onSaved }: TabProps) {
               <input
                 value={matrixHomeserver}
                 onChange={(e) => setMatrixHomeserver(e.target.value)}
-                placeholder={
-                  profile.matrix ? "Leave blank to keep the saved URL" : "https://matrix.org"
-                }
+                placeholder="https://matrix.org"
                 style={input}
               />
             </Field>
@@ -1014,7 +1024,7 @@ function ChannelsTab({ profile, onSaved }: TabProps) {
               <input
                 value={matrixUser}
                 onChange={(e) => setMatrixUser(e.target.value)}
-                placeholder={profile.matrix ? "Leave blank to keep the saved username" : "botuser"}
+                placeholder="botuser"
                 style={input}
               />
             </Field>
@@ -1023,7 +1033,7 @@ function ChannelsTab({ profile, onSaved }: TabProps) {
                 type="password"
                 value={matrixPassword}
                 onChange={(e) => setMatrixPassword(e.target.value)}
-                placeholder={profile.matrix ? "Leave blank to keep the saved password" : "••••••••"}
+                placeholder={matrixHasPassword ? "•••••••• saved — leave blank to keep" : "password"}
                 style={input}
               />
             </Field>
