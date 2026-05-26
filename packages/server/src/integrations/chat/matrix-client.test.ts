@@ -1,7 +1,40 @@
 import { describe, it, expect } from "vitest";
-import { sanitizeMatrixRequestBody } from "./matrix-client.js";
+import { sanitizeMatrixRequestBody, detectMention } from "./matrix-client.js";
 
 const UPLOAD = "/_matrix/client/v3/keys/upload";
+
+const SELF = "@otterthebot:derpzilla.net";
+// As built in buildClient: [mxid, localpart, displayName].
+const TOKENS = [SELF.toLowerCase(), "otterthebot", "otter bot"];
+
+describe("detectMention", () => {
+  it("matches structured m.mentions regardless of display name", () => {
+    expect(
+      detectMention(SELF, TOKENS, { body: "hey there", "m.mentions": { user_ids: [SELF] } })
+    ).toBe(true);
+  });
+
+  it("matches the MXID in an HTML pill even when the body shows the display name", () => {
+    expect(
+      detectMention(SELF, TOKENS, {
+        body: "Otter Bot: ping",
+        formatted_body: `<a href="https://matrix.to/#/${SELF}">Otter Bot</a>: ping`,
+      })
+    ).toBe(true);
+  });
+
+  it("matches the display name in the plain body (no pill, no m.mentions)", () => {
+    expect(detectMention(SELF, TOKENS, { body: "Otter Bot can you help" })).toBe(true);
+  });
+
+  it("matches the localpart", () => {
+    expect(detectMention(SELF, TOKENS, { body: "otterthebot hello" })).toBe(true);
+  });
+
+  it("does not match an unrelated message", () => {
+    expect(detectMention(SELF, TOKENS, { body: "good morning everyone" })).toBe(false);
+  });
+});
 
 describe("sanitizeMatrixRequestBody", () => {
   it("drops an explicit null device_keys from keys/upload", () => {

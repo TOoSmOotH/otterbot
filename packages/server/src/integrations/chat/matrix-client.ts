@@ -17,7 +17,37 @@ import type {
 /** The subset of a Matrix `m.room.message` timeline event we use. */
 interface MatrixMessageEvent {
   sender?: string;
-  content?: { msgtype?: string; body?: string };
+  content?: MatrixMessageContent;
+}
+
+interface MatrixMessageContent {
+  msgtype?: string;
+  body?: string;
+  /** HTML body; mention pills appear here as matrix.to links carrying the MXID. */
+  formatted_body?: string;
+  /** Structured mentions (MSC3952 / current spec) — the reliable signal. */
+  "m.mentions"?: { user_ids?: string[] };
+}
+
+/**
+ * Whether a message mentions this bot. Prefers display-name-independent signals:
+ * the structured `m.mentions.user_ids`, then the bot's MXID in the HTML pill
+ * (`formatted_body`). Falls back to substring-matching the body/HTML against
+ * `mentionTokens` (mxid, localpart, display name) for clients that don't send
+ * either. This matters because Element renders mentions as the display name, not
+ * the username, so matching the MXID against the plain body alone never fires.
+ */
+export function detectMention(
+  selfUserId: string,
+  mentionTokens: string[],
+  content: MatrixMessageContent
+): boolean {
+  const ids = content["m.mentions"]?.user_ids;
+  if (Array.isArray(ids) && ids.includes(selfUserId)) return true;
+  const formatted = (content.formatted_body ?? "").toLowerCase();
+  if (formatted.includes(selfUserId.toLowerCase())) return true;
+  const body = (content.body ?? "").toLowerCase();
+  return mentionTokens.some((t) => t.length > 0 && (body.includes(t) || formatted.includes(t)));
 }
 
 /**
@@ -228,12 +258,15 @@ export class MatrixChatClient implements ChatClient {
     });
 
     this.selfUserId = await client.getUserId();
-    this.mentionTokens = [this.selfUserId.toLowerCase()];
+    // Tokens for the substring fallback: full MXID and the localpart
+    // (`@otterthebot:hs` → `otterthebot`), plus the display name if one is set.
+    const localpart = this.selfUserId.replace(/^@/, "").split(":")[0];
+    this.mentionTokens = [this.selfUserId.toLowerCase(), localpart.toLowerCase()];
     try {
       const profile = (await client.getUserProfile(this.selfUserId)) as { displayname?: string };
       if (profile?.displayname) this.mentionTokens.push(profile.displayname.toLowerCase());
     } catch {
-      // No display name is fine — fall back to mxid matching only.
+      // No display name is fine — structured mentions / pill links still match.
     }
 
     client.on("room.message", (roomId: string, event: MatrixMessageEvent) =>
@@ -284,13 +317,12 @@ export class MatrixChatClient implements ChatClient {
   private onMatrixMessage(roomId: string, event: MatrixMessageEvent): void {
     if (event.content?.msgtype !== "m.text") return;
     const text = (event.content.body ?? "").trim();
-    const lower = text.toLowerCase();
     this.handler({
       channelId: roomId,
       senderId: event.sender ?? "",
       text,
       fromSelf: !event.sender || event.sender === this.selfUserId,
-      mentioned: this.mentionTokens.some((t) => lower.includes(t)),
+      mentioned: detectMention(this.selfUserId, this.mentionTokens, event.content),
     });
   }
 }
