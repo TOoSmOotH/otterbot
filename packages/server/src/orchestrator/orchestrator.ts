@@ -1645,6 +1645,23 @@ export class Orchestrator {
       .where(eq(controlSchema.subagentTasks.id, taskId))
       .run();
 
+    // Announce completion with a `report` (mirrors spawnSubagent). The correlated
+    // `response` below resolves the requester, but the UI only refreshes its task
+    // list on spawn/report — without this the active-subagent indicator lingers
+    // until a manual page refresh. Runtimes ignore non-`request` messages, so this
+    // is purely a UI/audit signal.
+    this.bus.publish({
+      id: nanoid(),
+      kind: "report",
+      from: subId,
+      to: parentId,
+      threadId: taskId,
+      correlationId: null,
+      rootSpawnId: taskId,
+      body,
+      transport: parentCtx.profile.transport,
+    });
+
     // Resolve the ORIGINAL requester's pending delegate, carrying any artifacts.
     this.replyToRequester(request, subId, { body, artifacts });
 

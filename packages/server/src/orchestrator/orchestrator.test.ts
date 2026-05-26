@@ -217,6 +217,15 @@ describe("orchestrator (e2e)", () => {
         .listSubagentTasks()
         .find((t) => t.parentAgentId === svc.id && t.subagentId === reply.from);
       expect(task?.status).toBe("done");
+
+      // Completion is announced with a `report` (not just the correlated
+      // `response`) so the UI's task list refreshes and the active-subagent
+      // indicator clears without a manual page refresh.
+      const history = stack.orch.getBus().history(100);
+      expect(
+        history.some((m) => m.kind === "report" && m.rootSpawnId === task!.rootId)
+      ).toBe(true);
+
       await waitFor(() => stack.orch.getContext(reply.from!) === undefined);
     },
     60_000
