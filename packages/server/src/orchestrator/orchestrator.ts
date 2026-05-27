@@ -893,6 +893,13 @@ export class Orchestrator {
   /** Build and register a runtime + context for a profile. */
   private startAgent(profile: AgentProfile): AgentContext {
     const paths = this.profiles.pathsFor(profile.id);
+    // A subagent shares its parent's SSH key: the user installs one public key
+    // per agent, and the parent's dir is persistent (the subagent's own profile
+    // dir is removed on teardown). Subagents never nest, so the parent is always
+    // a top-level agent.
+    const sshDir = profile.parentId
+      ? this.profiles.pathsFor(profile.parentId).ssh
+      : paths.ssh;
     const scopedSecrets = this.buildScopedSecrets(profile);
     const secrets = new Map<string, string>();
     for (const [k, { value }] of scopedSecrets) secrets.set(k, value);
@@ -913,7 +920,7 @@ export class Orchestrator {
       browserProfileDir: paths.browser,
       imagesDir: paths.images,
       filesDir: paths.files,
-      sshDir: paths.ssh,
+      sshDir,
       embedder: resolveEmbedder(embeddingRef, secrets),
       dbKey: this.cfg.dbKey,
       defaultBrowseTimeoutMs: this.cfg.browseTimeoutMs,

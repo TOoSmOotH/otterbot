@@ -145,6 +145,8 @@ describe("orchestrator (e2e)", () => {
       expect(subCtx.profile.canSpawnSubagents).toBe(false);
       // The installed capability and its granted tools came along (skills copied + loaded).
       expect(subCtx.skills.effectiveTools().has("browser_navigate")).toBe(true);
+      // It shares the parent's SSH key dir rather than getting a throwaway key.
+      expect(subCtx.sshDir).toBe(stack.profiles.pathsFor(parent.id).ssh);
 
       // Once the grace timer fires it is fully removed.
       await waitFor(() => stack.orch.getContext(result.subagentId) === undefined);
