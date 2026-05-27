@@ -38,6 +38,12 @@ import { createTransport } from "../bus/transports/factory.js";
 import { Scheduler } from "../scheduler/scheduler.js";
 import { CodeReferenceService } from "../code-reference/code-reference-service.js";
 import { SecretsStore, type ScopedSecret } from "../secrets/secrets-store.js";
+import {
+  readSkillConfig,
+  buildSkillConfigPayload,
+  deriveSkillCredentials,
+  type SkillConfigView,
+} from "../skills/skill-config.js";
 import { suggestScopeForKey } from "../secrets/shell-secrets.js";
 import type { CredentialScope } from "@otterbot/shared";
 import {
@@ -1350,6 +1356,43 @@ export class Orchestrator {
     }
     this.updateAgent(id, {});
     return true;
+  }
+
+  /**
+   * Read a skill's config form values for an agent. Non-secret fields return
+   * their parsed value; secret fields return only a "present" flag, never the
+   * value. Returns null if the agent or skill is unknown, or the skill has no
+   * config schema.
+   */
+  getSkillConfig(id: string, skillId: string): SkillConfigView | null {
+    const ctx = this.getContext(id);
+    const skill = ctx?.skills.get(skillId);
+    const schema = skill?.meta.configSchema;
+    if (!schema) return null;
+    const { values, secretsPresent } = readSkillConfig(schema, this.secrets.get(id));
+    return { schema, values, secretsPresent };
+  }
+
+  /**
+   * Persist a submitted skill config form. Maps schema fields onto credential
+   * keys (lists are JSON-encoded), adds any skill-derived keys (e.g. proxmox's
+   * derived vmid allowlist), then merges + restarts the agent. Secret fields
+   * left blank are preserved. Returns false if the agent/skill is unknown.
+   */
+  applySkillConfig(
+    id: string,
+    skillId: string,
+    formValues: Record<string, unknown>,
+  ): boolean {
+    const ctx = this.getContext(id);
+    const skill = ctx?.skills.get(skillId);
+    const schema = skill?.meta.configSchema;
+    if (!schema) return false;
+    const payload = {
+      ...buildSkillConfigPayload(schema, formValues),
+      ...deriveSkillCredentials(skillId, formValues),
+    };
+    return this.mergeCredentials(id, payload);
   }
 
   /** Change a credential's scope without re-sending the value. */

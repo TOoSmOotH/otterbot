@@ -1,5 +1,6 @@
 import type { AgentContext } from "../runtime/agent-context.js";
 import type { AgentDirectoryEntry } from "../runtime/agent-services.js";
+import { renderSkillConfigContext } from "../skills/skill-config.js";
 
 const FALLBACK_PERSONA = `You are an Otterbot agent. You remember things across sessions,
 author reusable skills when you learn something worth keeping, and build a model
@@ -103,7 +104,13 @@ export async function buildSystemPrompt(
 
   if (enabledSkills.length > 0) {
     const rendered = enabledSkills
-      .map((s) => `### Capability: ${s.meta.name}\n${s.meta.description}\n\n${s.body}`)
+      .map((s) => {
+        const config = s.meta.configSchema
+          ? renderSkillConfigContext(s.meta.configSchema, ctx.secrets)
+          : null;
+        const configBlock = config ? `\n\n${config}` : "";
+        return `### Capability: ${s.meta.name}\n${s.meta.description}\n\n${s.body}${configBlock}`;
+      })
       .join("\n\n---\n\n");
     parts.push(`## Active capabilities\n\n${rendered}`);
     for (const s of enabledSkills) skillSvc.recordUse(s.id);

@@ -111,6 +111,7 @@ function ensureAgentTables(sqlite: Database.Database) {
       tags TEXT NOT NULL DEFAULT '[]',
       mcp_servers TEXT NOT NULL DEFAULT '[]',
       credential_keys TEXT NOT NULL DEFAULT '[]',
+      config_schema TEXT,
       body TEXT NOT NULL DEFAULT '',
       source TEXT NOT NULL DEFAULT 'authored',
       scan_status TEXT NOT NULL DEFAULT 'unscanned',
@@ -156,6 +157,22 @@ function ensureAgentTables(sqlite: Database.Database) {
   migrateV3(sqlite);
   migrateV4(sqlite);
   migrateV5(sqlite);
+  migrateV6(sqlite);
+}
+
+/**
+ * Per-skill config: skills may declare a typed config schema (rendered as a
+ * form in Agent Studio). Nullable JSON column, default NULL.
+ */
+function migrateV6(sqlite: Database.Database) {
+  const skillCols = new Set(
+    (sqlite.prepare(`PRAGMA table_info(skills)`).all() as Array<{ name: string }>).map(
+      (c) => c.name
+    )
+  );
+  if (!skillCols.has("config_schema")) {
+    sqlite.exec(`ALTER TABLE skills ADD COLUMN config_schema TEXT`);
+  }
 }
 
 /** User uploads: messages carry an `attachments` JSON column (default null). */

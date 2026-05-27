@@ -7,6 +7,7 @@ import type {
   ScanFinding,
   SkillSource,
   McpServerConfig,
+  SkillConfigSchema,
 } from "@otterbot/shared";
 
 export const conversations = sqliteTable("conversations", {
@@ -119,6 +120,9 @@ export const skills = sqliteTable("skills", {
     .$type<string[]>()
     .notNull()
     .default([]),
+  configSchema: text("config_schema", { mode: "json" })
+    .$type<SkillConfigSchema | null>()
+    .default(null),
   body: text("body").notNull().default(""),
   source: text("source").$type<SkillSource>().notNull().default("authored"),
   scanStatus: text("scan_status").$type<SkillScanStatus>().notNull().default("unscanned"),

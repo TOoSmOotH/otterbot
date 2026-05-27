@@ -34,6 +34,43 @@ function cfg(secrets: Map<string, string>): ProxmoxConfig {
   return { host, tokenId, tokenSecret, verifySsl };
 }
 
+/** A VM as recorded in the agent's `PROXMOX_VMS` config list (reference only). */
+export interface ConfiguredVm {
+  vmid: number;
+  name: string;
+  snapshots: string[];
+}
+
+/**
+ * The agent's configured VM list (`PROXMOX_VMS`, JSON) — a convenience
+ * reference surfaced to the agent, not an authoritative source. Tolerates an
+ * absent or malformed value by returning an empty list rather than throwing.
+ */
+export function parseConfiguredVms(secrets: Map<string, string>): ConfiguredVm[] {
+  const raw = secrets.get("PROXMOX_VMS");
+  if (!raw) return [];
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return [];
+  }
+  if (!Array.isArray(parsed)) return [];
+  return parsed
+    .map((v) => {
+      const o = (v ?? {}) as { vmid?: unknown; name?: unknown; snapshots?: unknown };
+      const vmid = Number(o.vmid);
+      if (!Number.isInteger(vmid) || vmid <= 0) return null;
+      const snapshots = Array.isArray(o.snapshots)
+        ? o.snapshots
+            .map((s) => (s as { name?: unknown })?.name)
+            .filter((n): n is string => typeof n === "string" && n.length > 0)
+        : [];
+      return { vmid, name: typeof o.name === "string" ? o.name : "", snapshots };
+    })
+    .filter((v): v is ConfiguredVm => v !== null);
+}
+
 /** The set of vmids this agent may control, parsed from `PROXMOX_ALLOWED_VMIDS`. */
 function allowedVmids(secrets: Map<string, string>): Set<number> {
   const raw = secrets.get("PROXMOX_ALLOWED_VMIDS") ?? "";

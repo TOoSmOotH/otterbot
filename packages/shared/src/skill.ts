@@ -6,6 +6,51 @@ export interface SkillParameterDef {
   description?: string;
 }
 
+/** Field kinds a skill's generated config form can render. */
+export type SkillConfigFieldType =
+  | "string"
+  | "secret"
+  | "boolean"
+  | "number"
+  /** A repeatable array of sub-objects shaped by `itemFields` (e.g. VMs → snapshots). */
+  | "list";
+
+/**
+ * A single field in a skill's config form. Scalar fields map to one credential
+ * key; a `list` field JSON-encodes its whole array into one credential value.
+ * See {@link SkillConfigSchema}.
+ */
+export interface SkillConfigField {
+  /** Stable field key — identifies the value in the config form payload. */
+  key: string;
+  label: string;
+  type: SkillConfigFieldType;
+  required?: boolean;
+  default?: string | number | boolean;
+  description?: string;
+  placeholder?: string;
+  /**
+   * The `agent_secrets` credential key this field's value is written to. For a
+   * scalar field this is an env-var name (e.g. `PROXMOX_HOST`); for a `list`
+   * field the JSON-encoded array is stored under this single key. Omit for
+   * nested item fields (their values live inside the parent list's JSON).
+   */
+  credentialKey?: string;
+  /** True secret — value is write-only: never returned by the config read API. */
+  secret?: boolean;
+  /** Scope assigned when this field's credential key is first written. */
+  scope?: CredentialScope;
+  /** For `type: "list"` — the shape of each item (item fields may nest one list). */
+  itemFields?: SkillConfigField[];
+}
+
+/** A skill's typed config schema; Agent Studio renders a form from it. */
+export interface SkillConfigSchema {
+  /** Optional intro shown above the generated form. */
+  description?: string;
+  fields: SkillConfigField[];
+}
+
 /**
  * Built-in tools a capability may grant on top of an agent's always-available
  * core tool set. A capability's `meta.tools` is validated against this list and
@@ -73,6 +118,12 @@ export interface SkillMeta {
    * is governed by each credential's `scope` field.
    */
   credentialKeys?: string[];
+  /**
+   * Optional typed config schema. When present, Agent Studio renders a
+   * generated config form for the skill instead of relying on raw credential
+   * entry. Field values are persisted into the agent's credentials store.
+   */
+  configSchema?: SkillConfigSchema;
 }
 
 /** A credential's exposure rule. Strings serialised into the `scope` column. */

@@ -883,6 +883,32 @@ export async function buildServer(
     return updated;
   });
 
+  // A skill's config form: its schema + current values (secrets masked).
+  app.get<{ Params: { id: string; skillId: string } }>(
+    "/api/agents/:id/skills/:skillId/config",
+    async (req, reply) => {
+      const config = orch.getSkillConfig(req.params.id, req.params.skillId);
+      if (!config) {
+        reply.code(404);
+        return { error: "no config for this skill" };
+      }
+      return config;
+    }
+  );
+
+  // Save a skill's config form — maps fields onto the agent's credentials.
+  app.post<{
+    Params: { id: string; skillId: string };
+    Body: Record<string, unknown>;
+  }>("/api/agents/:id/skills/:skillId/config", async (req, reply) => {
+    const ok = orch.applySkillConfig(req.params.id, req.params.skillId, req.body ?? {});
+    if (!ok) {
+      reply.code(404);
+      return { error: "no config for this skill" };
+    }
+    return { ok: true };
+  });
+
   app.delete<{ Params: { id: string; memId: string } }>(
     "/api/agents/:id/memories/:memId",
     async (req, reply) => {

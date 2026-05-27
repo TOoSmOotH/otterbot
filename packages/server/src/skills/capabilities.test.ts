@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { AgentProfile } from "@otterbot/shared";
+import type { AgentProfile, SkillConfigSchema } from "@otterbot/shared";
 import { buildAgentContext, type AgentContext } from "../runtime/agent-context.js";
 import { NullEmbedder } from "../embedding.js";
 import { buildAgentTools } from "../agent/tools.js";
@@ -224,6 +224,85 @@ describe("capabilities", () => {
     ]) {
       expect(tools[name], `${name} should be granted`).toBeDefined();
     }
+  });
+
+  it("round-trips a configSchema through the DB and the markdown frontmatter", () => {
+    const configSchema: SkillConfigSchema = {
+      description: "test config",
+      fields: [
+        { key: "host", label: "Host", type: "string", credentialKey: "PROXMOX_HOST" },
+        {
+          key: "vms",
+          label: "VMs",
+          type: "list",
+          credentialKey: "PROXMOX_VMS",
+          itemFields: [
+            { key: "vmid", label: "VMID", type: "number" },
+            {
+              key: "snapshots",
+              label: "Snapshots",
+              type: "list",
+              itemFields: [{ key: "name", label: "Snapshot", type: "string" }],
+            },
+          ],
+        },
+      ],
+    };
+    const created = ctx.skills.create({
+      meta: {
+        name: "Configurable",
+        description: "",
+        version: "1.0.0",
+        author: "t",
+        tools: ["shell_exec"],
+        capabilities: [],
+        parameters: {},
+        tags: [],
+        configSchema,
+      },
+      body: "x",
+    });
+    expect(created.meta.configSchema).toEqual(configSchema);
+
+    // Re-read from disk (the markdown file) — proves the YAML frontmatter
+    // round-trips the nested itemFields, not just the DB column.
+    ctx.skills.loadFromDisk();
+    expect(ctx.skills.get(created.id)?.meta.configSchema).toEqual(configSchema);
+  });
+
+  it("injects a skill's configured (non-secret) settings into its prompt block", async () => {
+    const cap = ctx.skills.create({
+      meta: {
+        name: "Proxmox VM control",
+        description: "manage vms",
+        version: "1.0.0",
+        author: "t",
+        tools: ["shell_exec"],
+        capabilities: [],
+        parameters: {},
+        tags: [],
+        configSchema: {
+          fields: [
+            { key: "host", label: "Host", type: "string", credentialKey: "PROXMOX_HOST" },
+            {
+              key: "secret",
+              label: "Secret",
+              type: "secret",
+              secret: true,
+              credentialKey: "PROXMOX_TOKEN_SECRET",
+            },
+          ],
+        },
+      },
+      body: "## Setup",
+    });
+    void cap;
+    // ctx.secrets is the flat map the prompt reads; seed it directly.
+    ctx.secrets.set("PROXMOX_HOST", "pve.lan");
+    ctx.secrets.set("PROXMOX_TOKEN_SECRET", "super-secret");
+    const built = await buildSystemPrompt(ctx, { userMessage: "hi there" });
+    expect(built.system).toContain("Host: pve.lan");
+    expect(built.system).not.toContain("super-secret");
   });
 
   it("prompt injects enabled capabilities under Active capabilities", async () => {

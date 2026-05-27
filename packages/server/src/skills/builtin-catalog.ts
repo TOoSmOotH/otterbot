@@ -14,6 +14,7 @@
  */
 
 import matter from "gray-matter";
+import type { SkillConfigSchema } from "@otterbot/shared";
 
 /** A built-in capability the user can install onto an agent. */
 export interface CatalogCapability {
@@ -25,6 +26,8 @@ export interface CatalogCapability {
   tools: string[];
   /** Env-var names this capability expects in the agent's shell or direct integrations. */
   credentialKeys: string[];
+  /** Optional typed config schema; Agent Studio renders a form from it. */
+  configSchema?: SkillConfigSchema;
   /** The full capability markdown (frontmatter + body) bundled in the repo. */
   markdown: string;
 }
@@ -36,6 +39,7 @@ function capability(args: {
   description: string;
   tools: string[];
   credentialKeys?: string[];
+  configSchema?: SkillConfigSchema;
   body: string;
 }): CatalogCapability {
   const credentialKeys = args.credentialKeys ?? [];
@@ -48,6 +52,7 @@ function capability(args: {
     enabled: true,
   };
   if (credentialKeys.length) frontmatter.credentialKeys = credentialKeys;
+  if (args.configSchema) frontmatter.configSchema = args.configSchema;
   const markdown = matter.stringify(args.body.trim(), frontmatter);
   return {
     id: args.id,
@@ -55,6 +60,7 @@ function capability(args: {
     description: args.description,
     tools: args.tools,
     credentialKeys,
+    configSchema: args.configSchema,
     markdown,
   };
 }
@@ -288,11 +294,90 @@ not whole large files.
     ],
     credentialKeys: [
       "PROXMOX_HOST",
+      "PROXMOX_HOST_IP",
       "PROXMOX_TOKEN_ID",
       "PROXMOX_TOKEN_SECRET",
       "PROXMOX_ALLOWED_VMIDS",
+      "PROXMOX_VMS",
       "PROXMOX_VERIFY_SSL",
     ],
+    configSchema: {
+      description:
+        "Connect this agent to your Proxmox VE host. The VM list is a convenience " +
+        "reference surfaced to the agent — it still discovers VMs and snapshots live " +
+        "via the API and is not limited to this list. The allowlist of VMs the agent " +
+        "may control is derived from the VMIDs you list here.",
+      fields: [
+        {
+          key: "host",
+          label: "Proxmox host",
+          type: "string",
+          required: true,
+          credentialKey: "PROXMOX_HOST",
+          scope: "cap:proxmox",
+          placeholder: "pve.lan or 10.0.0.5",
+          description: "The API is reached at https://<host>:8006.",
+        },
+        {
+          key: "ip",
+          label: "Host IP (reference)",
+          type: "string",
+          credentialKey: "PROXMOX_HOST_IP",
+          scope: "cap:proxmox",
+          description: "Informational; surfaced to the agent for SSH/context.",
+        },
+        {
+          key: "tokenId",
+          label: "API token id",
+          type: "string",
+          required: true,
+          credentialKey: "PROXMOX_TOKEN_ID",
+          scope: "cap:proxmox",
+          placeholder: "root@pam!otterbot",
+        },
+        {
+          key: "tokenSecret",
+          label: "API token secret",
+          type: "secret",
+          required: true,
+          secret: true,
+          credentialKey: "PROXMOX_TOKEN_SECRET",
+          scope: "direct",
+          description: "The token's secret (UUID).",
+        },
+        {
+          key: "verifySsl",
+          label: "Verify TLS certificate",
+          type: "boolean",
+          default: true,
+          credentialKey: "PROXMOX_VERIFY_SSL",
+          scope: "cap:proxmox",
+          description: "Turn off for the self-signed certs common in labs.",
+        },
+        {
+          key: "vms",
+          label: "VMs",
+          type: "list",
+          credentialKey: "PROXMOX_VMS",
+          scope: "cap:proxmox",
+          description:
+            "Reference list of VMs (and their snapshots) the agent may control. " +
+            "The vmid allowlist is derived from these entries.",
+          itemFields: [
+            { key: "vmid", label: "VMID", type: "number", required: true },
+            { key: "name", label: "Name", type: "string" },
+            {
+              key: "snapshots",
+              label: "Snapshots",
+              type: "list",
+              itemFields: [
+                { key: "name", label: "Snapshot name", type: "string", required: true },
+              ],
+            },
+          ],
+        },
+      ],
+    },
     body: `
 You can manage virtual machines on a Proxmox VE server with the \`proxmox_*\`
 tools, authenticated by your own API token. You can only touch the VMs the user
@@ -315,18 +400,21 @@ completion before the next step.
 
 ## Setup
 
-These tools need credentials configured for you in the Agent Studio Credentials
-tab — you cannot set them yourself. If a tool reports Proxmox is not configured,
-or that no VMs are allowed, ask the user to add:
+These tools are configured for you in this skill's **Configure** panel in Agent
+Studio — you cannot set them yourself. If a tool reports Proxmox is not
+configured, or that no VMs are allowed, ask the user to open the panel and fill
+in:
 
-- \`PROXMOX_HOST\` — the Proxmox host (e.g. \`pve.lan\` or \`10.0.0.5\`); the API is
-  reached at \`https://<host>:8006\`.
-- \`PROXMOX_TOKEN_ID\` — the API token id, e.g. \`root@pam!otterbot\`.
-- \`PROXMOX_TOKEN_SECRET\` — the token's secret (UUID).
-- \`PROXMOX_ALLOWED_VMIDS\` — comma-separated vmids you may control, e.g. \`200\`.
-  **Unset means you may control nothing.**
-- \`PROXMOX_VERIFY_SSL\` — set to \`false\` for a self-signed Proxmox cert (common
-  in labs); defaults to \`true\`.
+- **Proxmox host** (e.g. \`pve.lan\` or \`10.0.0.5\`); the API is reached at
+  \`https://<host>:8006\`.
+- **API token id**, e.g. \`root@pam!otterbot\`, and the **token secret** (UUID).
+- The **VMs** list — the VMs (and their snapshots) you may control. The vmid
+  allowlist is derived from this list; **an empty list means you may control
+  nothing.** This list is a *reference* — always confirm the live set with
+  \`proxmox_list_vms\` and snapshots with \`proxmox_list_snapshots\` rather than
+  trusting it blindly.
+- **Verify TLS certificate** — turn off for a self-signed Proxmox cert (common
+  in labs); on by default.
 
 ## Workflow: roll back, then install and test inside a VM
 

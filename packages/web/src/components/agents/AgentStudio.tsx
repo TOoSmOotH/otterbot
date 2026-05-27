@@ -19,6 +19,7 @@ import { ModelSelect } from "./ModelSelect";
 import { AvatarUpload } from "./AvatarUpload";
 import { PeerAccessEditor, type IncomingPeer } from "./PeerAccessEditor";
 import { TerminalModal } from "./TerminalModal";
+import { SkillConfigForm } from "./SkillConfigForm";
 
 const TABS = ["Identity", "Persona", "Model", "Skills", "Channels", "Peers", "Schedule", "Memory", "Credentials"] as const;
 type StudioTab = (typeof TABS)[number];
@@ -255,6 +256,8 @@ function SkillsTab({ profile, onSaved }: TabProps) {
   const [skills, setSkills] = useState<Skill[]>([]);
   const [catalog, setCatalog] = useState<CatalogSkill[]>([]);
   const [addingId, setAddingId] = useState<string | null>(null);
+  // Skill whose Configure panel should auto-open (set right after install).
+  const [configuredId, setConfiguredId] = useState<string | null>(null);
   const [skillError, setSkillError] = useState<string | null>(null);
   const [raw, setRaw] = useState("");
   const [busy, setBusy] = useState(false);
@@ -282,8 +285,14 @@ function SkillsTab({ profile, onSaved }: TabProps) {
       body: JSON.stringify({ catalogId: id }),
     });
     setAddingId(null);
-    if (res.ok) loadSkills();
-    else setSkillError((await res.json())?.error ?? `Failed to install ${id}`);
+    if (res.ok) {
+      // Prompt for configuration right away if the skill declares a schema.
+      const skill = (await res.json()) as Skill;
+      if (skill?.meta?.configSchema) setConfiguredId(id);
+      loadSkills();
+    } else {
+      setSkillError((await res.json())?.error ?? `Failed to install ${id}`);
+    }
   };
 
   const toggleSkill = async (id: string, enabled: boolean) => {
@@ -372,6 +381,8 @@ function SkillsTab({ profile, onSaved }: TabProps) {
         <InstalledSkill
           key={s.id}
           skill={s}
+          agentId={profile.id}
+          autoOpenConfig={s.id === configuredId}
           onToggle={(en) => void toggleSkill(s.id, en)}
           onSaveBody={(body) => void saveSkillBody(s.id, body)}
           onRemove={() => void delSkill(s.id)}
@@ -648,22 +659,29 @@ function SkillsTab({ profile, onSaved }: TabProps) {
   );
 }
 
-/** One installed skill: enable/disable toggle, editable body, tool + MCP badges. */
+/** One installed skill: enable/disable toggle, config form, editable body, badges. */
 function InstalledSkill({
   skill,
+  agentId,
+  autoOpenConfig,
   onToggle,
   onSaveBody,
   onRemove,
 }: {
   skill: Skill;
+  agentId: string;
+  autoOpenConfig?: boolean;
   onToggle: (enabled: boolean) => void;
   onSaveBody: (body: string) => void;
   onRemove: () => void;
 }) {
   const [body, setBody] = useState(skill.body);
+  const [open, setOpen] = useState(!!autoOpenConfig);
+  const [showConfig, setShowConfig] = useState(!!autoOpenConfig);
   const dirty = body !== skill.body;
+  const hasConfig = !!skill.meta.configSchema;
   return (
-    <details style={card}>
+    <details style={card} open={open} onToggle={(e) => setOpen(e.currentTarget.open)}>
       <summary style={{ cursor: "pointer", display: "flex", gap: 8, alignItems: "center" }}>
         <strong style={{ fontSize: 13 }}>{skill.meta.name}</strong>
         <span style={badge}>{skill.source}</span>
@@ -696,6 +714,24 @@ function InstalledSkill({
       <div style={{ fontSize: 12, color: "rgb(var(--muted))", marginTop: 6 }}>
         {skill.meta.description}
       </div>
+      {hasConfig && (
+        <div style={{ marginTop: 8 }}>
+          <button
+            type="button"
+            onClick={() => setShowConfig((v) => !v)}
+            style={{ ...ghost, alignSelf: "flex-start" }}
+          >
+            {showConfig ? "Hide configuration" : "⚙ Configure"}
+          </button>
+          {showConfig && (
+            <SkillConfigForm
+              agentId={agentId}
+              skillId={skill.id}
+              schema={skill.meta.configSchema!}
+            />
+          )}
+        </div>
+      )}
       <Field label="Customization prompt">
         <textarea
           value={body}

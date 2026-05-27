@@ -18,6 +18,7 @@ import type {
   SkillScanStatus,
   SkillSource,
   McpServerConfig,
+  SkillConfigSchema,
 } from "@otterbot/shared";
 
 /** A skill's `enabled` default: tool-bearing capabilities are on, pure-prompt skills off. */
@@ -57,6 +58,12 @@ export class SkillService {
       credentialKeys: Array.isArray(data.credentialKeys)
         ? (data.credentialKeys as string[])
         : undefined,
+      configSchema:
+        data.configSchema &&
+        typeof data.configSchema === "object" &&
+        Array.isArray((data.configSchema as SkillConfigSchema).fields)
+          ? (data.configSchema as SkillConfigSchema)
+          : undefined,
     };
     // When frontmatter omits `enabled`, tool-bearing capabilities default on.
     const enabled = typeof data.enabled === "boolean" ? data.enabled : defaultEnabled(meta);
@@ -75,6 +82,9 @@ export class SkillService {
     if (meta.mcpServers && meta.mcpServers.length) frontmatter.mcpServers = meta.mcpServers;
     if (meta.credentialKeys && meta.credentialKeys.length) {
       frontmatter.credentialKeys = meta.credentialKeys;
+    }
+    if (meta.configSchema && meta.configSchema.fields.length) {
+      frontmatter.configSchema = meta.configSchema;
     }
     if (Object.keys(meta.parameters).length) frontmatter.parameters = meta.parameters;
     if (meta.tags.length) frontmatter.tags = meta.tags;
@@ -114,6 +124,7 @@ export class SkillService {
       capabilities: data.meta.capabilities,
       mcpServers: data.meta.mcpServers ?? [],
       credentialKeys: data.meta.credentialKeys ?? [],
+      configSchema: data.meta.configSchema ?? null,
       parameters: data.meta.parameters as Record<string, unknown>,
       tags: data.meta.tags,
       body: data.body,
@@ -155,6 +166,7 @@ export class SkillService {
       capabilities: newMeta.capabilities,
       mcpServers: newMeta.mcpServers ?? [],
       credentialKeys: newMeta.credentialKeys ?? [],
+      configSchema: newMeta.configSchema ?? null,
       parameters: newMeta.parameters,
       tags: newMeta.tags,
       body: newBody,
@@ -228,6 +240,7 @@ export class SkillService {
         capabilities: meta.capabilities,
         mcpServers: meta.mcpServers ?? [],
         credentialKeys: meta.credentialKeys ?? [],
+        configSchema: meta.configSchema ?? null,
         parameters: meta.parameters as Record<string, unknown>,
         tags: meta.tags,
         body,
@@ -320,6 +333,7 @@ export class SkillService {
     capabilities: string[];
     mcpServers: McpServerConfig[];
     credentialKeys?: string[];
+    configSchema?: SkillConfigSchema | null;
     parameters: Record<string, unknown>;
     tags: string[];
     body: string;
@@ -342,6 +356,7 @@ export class SkillService {
         capabilities: row.capabilities,
         mcpServers: row.mcpServers ?? [],
         credentialKeys: row.credentialKeys ?? [],
+        configSchema: row.configSchema ?? undefined,
         parameters: row.parameters as Record<string, SkillParameterDef>,
         tags: row.tags,
       },
