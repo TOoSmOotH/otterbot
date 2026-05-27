@@ -44,6 +44,7 @@ import {
   deriveSkillCredentials,
   type SkillConfigView,
 } from "../skills/skill-config.js";
+import { BUILTIN_CAPABILITIES } from "../skills/builtin-catalog.js";
 import { suggestScopeForKey } from "../secrets/shell-secrets.js";
 import type { CredentialScope } from "@otterbot/shared";
 import {
@@ -929,6 +930,9 @@ export class Orchestrator {
     // Load on-disk skills first so capability-carried MCP servers are known
     // before we connect.
     ctx.skills.loadFromDisk();
+    // Backfill config schemas onto capabilities installed before the schema
+    // existed, so older installs gain their Configure panel.
+    ctx.skills.reconcileBuiltinConfig(BUILTIN_CAPABILITIES);
     // Connect the agent's MCP servers in the background; their tools merge in
     // once available. A failing server never blocks the agent. The set is the
     // union of the profile's servers and those carried by enabled capabilities.

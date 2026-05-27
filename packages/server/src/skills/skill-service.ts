@@ -266,6 +266,28 @@ export class SkillService {
     return count;
   }
 
+  /**
+   * Backfill `configSchema` (and credential keys) from the catalog onto
+   * already-installed capabilities that predate them — matched by id. Only
+   * fills a missing schema; never touches the user's customization body or an
+   * existing schema. Lets older installs gain a Configure panel on restart.
+   */
+  reconcileBuiltinConfig(
+    catalog: Array<{ id: string; configSchema?: SkillConfigSchema; credentialKeys?: string[] }>,
+  ): void {
+    for (const entry of catalog) {
+      if (!entry.configSchema) continue;
+      const existing = this.get(entry.id);
+      if (!existing || existing.meta.configSchema) continue;
+      this.update(entry.id, {
+        meta: {
+          configSchema: entry.configSchema,
+          credentialKeys: entry.credentialKeys ?? existing.meta.credentialKeys,
+        },
+      });
+    }
+  }
+
   private writeToDisk(id: string, raw: string): string {
     mkdirSync(this.skillsDir, { recursive: true });
     const filePath = resolve(this.skillsDir, `${id}.md`);

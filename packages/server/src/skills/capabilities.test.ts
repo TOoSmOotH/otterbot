@@ -270,6 +270,41 @@ describe("capabilities", () => {
     expect(ctx.skills.get(created.id)?.meta.configSchema).toEqual(configSchema);
   });
 
+  it("reconcileBuiltinConfig backfills a missing configSchema by id, leaving others alone", () => {
+    const schema: SkillConfigSchema = {
+      fields: [{ key: "host", label: "Host", type: "string", credentialKey: "PROXMOX_HOST" }],
+    };
+    // An older install (id matches the catalog) with no configSchema.
+    const old = ctx.skills.create({
+      meta: {
+        name: "Proxmox VM control",
+        description: "",
+        version: "1.0.0",
+        author: "t",
+        tools: ["shell_exec"],
+        capabilities: [],
+        parameters: {},
+        tags: [],
+      },
+      body: "keep my edits",
+      source: "builtin",
+    }, { id: "proxmox" });
+    expect(old.meta.configSchema).toBeUndefined();
+
+    ctx.skills.reconcileBuiltinConfig([{ id: "proxmox", configSchema: schema }]);
+
+    const reconciled = ctx.skills.get("proxmox");
+    expect(reconciled?.meta.configSchema).toEqual(schema);
+    // The user's body is preserved.
+    expect(reconciled?.body).toBe("keep my edits");
+
+    // A second pass must not clobber the (now-present) schema with a stale one.
+    ctx.skills.reconcileBuiltinConfig([
+      { id: "proxmox", configSchema: { fields: [] } },
+    ]);
+    expect(ctx.skills.get("proxmox")?.meta.configSchema).toEqual(schema);
+  });
+
   it("injects a skill's configured (non-secret) settings into its prompt block", async () => {
     const cap = ctx.skills.create({
       meta: {

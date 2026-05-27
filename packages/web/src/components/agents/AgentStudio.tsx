@@ -682,9 +682,18 @@ function InstalledSkill({
   const hasConfig = !!skill.meta.configSchema;
   return (
     <details style={card} open={open} onToggle={(e) => setOpen(e.currentTarget.open)}>
-      <summary style={{ cursor: "pointer", display: "flex", gap: 8, alignItems: "center" }}>
-        <strong style={{ fontSize: 13 }}>{skill.meta.name}</strong>
+      <summary
+        style={{
+          cursor: "pointer",
+          display: "flex",
+          gap: 8,
+          alignItems: "center",
+          flexWrap: "wrap",
+        }}
+      >
+        <strong style={{ fontSize: 13, whiteSpace: "nowrap" }}>{skill.meta.name}</strong>
         <span style={badge}>{skill.source}</span>
+        {hasConfig && <span style={{ ...badge, color: "rgb(var(--accent))" }}>⚙ configurable</span>}
         {skill.meta.tools.map((t) => (
           <span key={t} style={badge}>
             {t}
@@ -695,7 +704,9 @@ function InstalledSkill({
             mcp:{m.name}
           </span>
         ))}
-        <span style={{ fontSize: 11, color: "rgb(var(--muted))" }}>used {skill.useCount}×</span>
+        <span style={{ fontSize: 11, color: "rgb(var(--muted))", whiteSpace: "nowrap" }}>
+          used {skill.useCount}×
+        </span>
         <button
           onClick={onRemove}
           style={{ ...ghost, marginLeft: "auto", color: "#f87171" }}
