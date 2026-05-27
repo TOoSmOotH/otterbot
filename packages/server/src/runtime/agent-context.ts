@@ -58,6 +58,8 @@ export interface AgentContext {
   imagesDir: string;
   /** Directory where the agent's produced files (artifacts) are written/served. */
   filesDir: string;
+  /** Directory holding the agent's managed SSH keypair and known_hosts (not in the sandbox). */
+  sshDir: string;
   agentDb: AgentDb;
   sqlite: Database.Database;
   db: AgentDrizzle;
@@ -99,6 +101,8 @@ export interface BuildAgentContextInput {
   imagesDir: string;
   /** Path to this agent's produced-files (artifacts) directory. */
   filesDir: string;
+  /** Path to this agent's SSH key directory (keypair + known_hosts). */
+  sshDir: string;
   /** The embedder resolved from the agent's embedding model. */
   embedder: Embedder;
   /** Database encryption key, if configured. */
@@ -161,6 +165,7 @@ export function buildAgentContext(input: BuildAgentContextInput): AgentContext {
     maxSteps: limits.maxSteps,
     imagesDir: input.imagesDir,
     filesDir: input.filesDir,
+    sshDir: input.sshDir,
     agentDb,
     sqlite: agentDb.sqlite,
     db: agentDb.db,

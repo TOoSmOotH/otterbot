@@ -64,6 +64,7 @@ describe("capabilities", () => {
       browserProfileDir: join(dir, "browser"),
       imagesDir: join(dir, "images"),
       filesDir: join(dir, "files"),
+      sshDir: join(dir, "ssh"),
       embedder: new NullEmbedder(),
       dbKey: null,
       defaultBrowseTimeoutMs: 60_000,

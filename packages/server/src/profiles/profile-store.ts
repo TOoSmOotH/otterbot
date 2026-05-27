@@ -45,6 +45,8 @@ export interface ProfilePaths {
   images: string;
   /** Where the agent's produced files (artifacts) are saved and served from. */
   files: string;
+  /** Where the agent's managed SSH keypair and known_hosts live (out of the sandbox). */
+  ssh: string;
 }
 
 export function profilePaths(root: string, id: string): ProfilePaths {
@@ -62,6 +64,7 @@ export function profilePaths(root: string, id: string): ProfilePaths {
     browser: join(dir, "browser"),
     images: join(dir, "images"),
     files: join(dir, "files"),
+    ssh: join(dir, "ssh"),
   };
 }
 

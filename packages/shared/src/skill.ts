@@ -95,6 +95,11 @@ export const GRANTABLE_TOOL_NAMES = [
   "proxmox_rollback",
   "proxmox_create_snapshot",
   "proxmox_delete_snapshot",
+  // SSH remote access — granted together by the `ssh` capability.
+  "ssh_generate_key",
+  "ssh_get_public_key",
+  "ssh_list_hosts",
+  "ssh_exec",
 ] as const;
 
 export type GrantableToolName = (typeof GRANTABLE_TOOL_NAMES)[number];

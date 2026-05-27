@@ -913,6 +913,7 @@ export class Orchestrator {
       browserProfileDir: paths.browser,
       imagesDir: paths.images,
       filesDir: paths.files,
+      sshDir: paths.ssh,
       embedder: resolveEmbedder(embeddingRef, secrets),
       dbKey: this.cfg.dbKey,
       defaultBrowseTimeoutMs: this.cfg.browseTimeoutMs,

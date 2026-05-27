@@ -433,6 +433,115 @@ separately from these tools — it relies on the SSH credentials available in yo
 detail is missing rather than guessing.
 `,
   }),
+  capability({
+    id: "ssh",
+    name: "SSH remote access",
+    description:
+      "Connect to allowlisted remote hosts over SSH and run commands (optionally with sudo), using a managed key the user installs for passwordless login.",
+    tools: ["ssh_generate_key", "ssh_get_public_key", "ssh_list_hosts", "ssh_exec"],
+    credentialKeys: ["SSH_HOSTS", "SSH_SUDO_PASSWORD"],
+    configSchema: {
+      description:
+        "List the hosts this agent may reach over SSH. The agent can only connect " +
+        "to hosts you add here — an empty list means it can connect to nothing. " +
+        "Authentication uses the agent's own managed key: have it run " +
+        "ssh_generate_key, then add the shown public key to each host's " +
+        "~/.ssh/authorized_keys.",
+      fields: [
+        {
+          key: "hosts",
+          label: "Hosts",
+          type: "list",
+          credentialKey: "SSH_HOSTS",
+          scope: "cap:ssh",
+          description: "The hosts the agent may SSH to (its allowlist).",
+          itemFields: [
+            {
+              key: "name",
+              label: "Name",
+              type: "string",
+              description: "Friendly label the agent uses to address the host (defaults to the host).",
+            },
+            {
+              key: "host",
+              label: "Host",
+              type: "string",
+              required: true,
+              placeholder: "server.lan or 10.0.0.7",
+            },
+            { key: "port", label: "Port", type: "number", default: 22 },
+            {
+              key: "user",
+              label: "User",
+              type: "string",
+              required: true,
+              placeholder: "ubuntu",
+            },
+          ],
+        },
+        {
+          key: "sudoPassword",
+          label: "Sudo password",
+          type: "secret",
+          secret: true,
+          credentialKey: "SSH_SUDO_PASSWORD",
+          scope: "direct",
+          description:
+            "Optional. Used only when a command is run with sudo, fed to `sudo -S`. " +
+            "Leave blank if the remote user has passwordless (NOPASSWD) sudo.",
+        },
+      ],
+    },
+    body: `
+You can log into remote hosts over SSH and run commands with the \`ssh_*\` tools,
+using a keypair this agent manages. You can only reach the hosts the user added
+to your allowlist — any other host is refused.
+
+## First-time setup: install your key
+
+Passwordless login uses your own SSH key, which the user must install on each
+host once:
+
+1. Run \`ssh_generate_key\` — it creates your \`ed25519\` keypair (if needed) and
+   returns your **public key**.
+2. Show that public key to the user and ask them to append it to the target
+   host's \`~/.ssh/authorized_keys\` (for the login user configured for that host).
+3. Once installed, \`ssh_exec\` can log in without a password.
+
+Use \`ssh_get_public_key\` any time to show the key again.
+
+## Tools
+
+- \`ssh_generate_key\` — create (or return the existing) keypair and show the
+  public key to copy onto remote hosts.
+- \`ssh_get_public_key\` — re-display your public key.
+- \`ssh_list_hosts\` — the hosts you are allowed to reach (name, host, port, user).
+- \`ssh_exec\` — run a command on an allowlisted host. Address the host by its
+  configured \`name\` or \`host\`. Set \`sudo: true\` to run the command as root.
+
+## Running commands
+
+\`ssh_exec\` returns \`exitCode\`, \`stdout\`, and \`stderr\`. A non-zero exit code is a
+failure — read \`stderr\` and report it rather than assuming success. Chain steps
+in one command with \`&&\` when they must all run.
+
+For privileged work, pass \`sudo: true\`. If the user configured a sudo password
+it is supplied automatically (\`sudo -S\`); otherwise the host must allow
+passwordless sudo for that user, or the command fails with a sudo prompt error.
+
+You can relay results to the user, or to another agent that delegated the work —
+the structured output from \`ssh_exec\` is what you pass back.
+
+## Setup
+
+Hosts and the optional sudo password are configured for you in this skill's
+**Configure** panel in Agent Studio — you cannot set them yourself. If a tool
+reports no hosts are configured, or a host is not in your allowlist, ask the user
+to open the panel and add it. If a connection fails with an authentication error,
+the public key probably isn't installed on that host yet — run
+\`ssh_get_public_key\` and ask the user to add it.
+`,
+  }),
 ];
 
 /** Look up a built-in capability by its slug. */

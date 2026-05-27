@@ -16,6 +16,7 @@ import {
   vmStatus,
 } from "../integrations/proxmox.js";
 import { runAgentShell } from "../integrations/shell.js";
+import { ensureKey, parseHosts, publicKey, sshExec } from "../integrations/ssh.js";
 import { searchWeb } from "../integrations/web-search.js";
 import { editImage, generateImage, persistImage } from "../integrations/image-gen.js";
 import { persistArtifact } from "../integrations/artifacts.js";
@@ -376,6 +377,83 @@ export function buildAgentTools(
       execute: async ({ vmid, snapname }) => {
         try {
           return { ok: true, ...(await deleteSnapshot(ctx.secrets, { vmid, snapname })) };
+        } catch (err) {
+          return { ok: false, error: err instanceof Error ? err.message : String(err) };
+        }
+      },
+    });
+  }
+
+  // SSH remote access — granted by the `ssh` capability. The agent's managed
+  // key lives in `ctx.sshDir` (out of the shell sandbox); connections are gated
+  // by the user-configured host allowlist.
+  if (granted.has("ssh_generate_key")) {
+    tools.ssh_generate_key = tool({
+      description:
+        "Create this agent's SSH keypair (if it doesn't have one yet) and return its " +
+        "public key. Show the public key to the user and ask them to add it to the " +
+        "target host's ~/.ssh/authorized_keys so you can log in without a password.",
+      parameters: z.object({}),
+      execute: async () => {
+        try {
+          const { publicKey: pub, generated } = ensureKey(ctx.sshDir);
+          return {
+            ok: true,
+            publicKey: pub,
+            generated,
+            note:
+              "Add this public key to the remote host's ~/.ssh/authorized_keys " +
+              "(for the configured login user) to enable passwordless login.",
+          };
+        } catch (err) {
+          return { ok: false, error: err instanceof Error ? err.message : String(err) };
+        }
+      },
+    });
+  }
+
+  if (granted.has("ssh_get_public_key")) {
+    tools.ssh_get_public_key = tool({
+      description: "Return this agent's SSH public key (to copy onto a remote host).",
+      parameters: z.object({}),
+      execute: async () => {
+        try {
+          return { ok: true, publicKey: publicKey(ctx.sshDir) };
+        } catch (err) {
+          return { ok: false, error: err instanceof Error ? err.message : String(err) };
+        }
+      },
+    });
+  }
+
+  if (granted.has("ssh_list_hosts")) {
+    tools.ssh_list_hosts = tool({
+      description: "List the hosts this agent is allowed to SSH to (name, host, port, user).",
+      parameters: z.object({}),
+      execute: async () => {
+        try {
+          return { ok: true, hosts: parseHosts(ctx.secrets) };
+        } catch (err) {
+          return { ok: false, error: err instanceof Error ? err.message : String(err) };
+        }
+      },
+    });
+  }
+
+  if (granted.has("ssh_exec")) {
+    tools.ssh_exec = tool({
+      description:
+        "Run a command on a remote host over SSH and return its exit code, stdout, and " +
+        "stderr. You can only reach hosts in your configured allowlist; address one by " +
+        "its configured name or host. Set sudo=true to run the command as root.",
+      parameters: z.object({
+        host: z.string().min(1).describe("The configured host name or address to connect to."),
+        command: z.string().min(1).describe("The command to run (bash syntax)."),
+        sudo: z.boolean().default(false).describe("Run the command as root via sudo."),
+      }),
+      execute: async ({ host, command, sudo }) => {
+        try {
+          return await sshExec(ctx.sshDir, ctx.secrets, { host, command, sudo });
         } catch (err) {
           return { ok: false, error: err instanceof Error ? err.message : String(err) };
         }
