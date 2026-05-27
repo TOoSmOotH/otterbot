@@ -17,7 +17,10 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
-import { Client, utils } from "ssh2";
+// ssh2 is CommonJS; Node's ESM loader can't extract named exports from it, so
+// import the default and destructure.
+import ssh2 from "ssh2";
+const { Client, utils } = ssh2;
 
 /** Long enough for installs and test runs, matching the shell tool's budget. */
 const TIMEOUT_MS = 300_000;

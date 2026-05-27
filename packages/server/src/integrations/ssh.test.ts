@@ -51,10 +51,12 @@ class FakeClient extends EventEmitter {
 
 vi.mock("ssh2", async (importOriginal) => {
   const mod = await importOriginal<Record<string, unknown>>();
-  // ssh2 is CommonJS; its named exports may live on `default`. Keep the real
-  // `utils` (used for key generation) and swap only the `Client`.
+  // ssh2 is CommonJS; its real exports live on `default`. Keep the real `utils`
+  // (used for key generation) and swap only the `Client`. Expose the result on
+  // both `default` and named exports so either import style resolves the fake.
   const real = (mod.default ?? mod) as Record<string, unknown>;
-  return { ...real, ...mod, Client: FakeClient };
+  const mocked = { ...real, Client: FakeClient };
+  return { ...mocked, default: mocked };
 });
 
 // Imported after the mock is registered.
