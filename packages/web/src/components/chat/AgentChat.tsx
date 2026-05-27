@@ -22,6 +22,7 @@ import { type, fonts } from "../../lib/typography";
 import { ConversationList } from "./ConversationList";
 import { ContextPanel } from "./ContextPanel";
 import { ChatImage } from "./ChatImage";
+import { Markdown } from "./Markdown";
 
 const PULSING_STATUSES = new Set(["working", "thinking"]);
 
@@ -306,7 +307,7 @@ export function AgentChat({ onEditAgent }: { onEditAgent: (id: string) => void }
                       m.role === "user"
                         ? "1px solid rgb(var(--accent))"
                         : "1px solid rgb(var(--border))",
-                    whiteSpace: "pre-wrap",
+                    whiteSpace: m.role === "assistant" ? "normal" : "pre-wrap",
                     wordBreak: "break-word",
                     fontSize: 13,
                     lineHeight: 1.55,
@@ -356,7 +357,7 @@ export function AgentChat({ onEditAgent }: { onEditAgent: (id: string) => void }
                       )}
                     </div>
                   )}
-                  {m.content}
+                  {m.role === "assistant" ? <Markdown content={m.content} /> : m.content}
                   {m.error && (
                     <div
                       style={{

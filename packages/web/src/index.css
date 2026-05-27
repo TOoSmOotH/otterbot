@@ -160,3 +160,9 @@
 .react-flow .react-flow__controls-button:hover {
   background: rgb(var(--surface));
 }
+
+/* Markdown-rendered chat messages: drop the trailing block margin so the
+   message bubble closes flush against its padding. */
+.md > :last-child {
+  margin-bottom: 0;
+}
