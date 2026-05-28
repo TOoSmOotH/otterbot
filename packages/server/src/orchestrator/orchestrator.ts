@@ -43,7 +43,8 @@ import {
   type PipelineRunView,
 } from "../pipeline/pipeline-manager.js";
 import { ForgeService } from "../forge/forge-service.js";
-import type { ForgeProvider } from "../forge/forge.js";
+import type { ForgeProvider, ForgeIssue } from "../forge/forge.js";
+import { ForgeMonitor } from "../forge/forge-monitor.js";
 import { SecretsStore, type ScopedSecret } from "../secrets/secrets-store.js";
 import {
   readSkillConfig,
@@ -436,6 +437,7 @@ export class Orchestrator {
   private readonly codeRef: CodeReferenceService;
   private readonly projects: ProjectStore;
   private readonly forge: ForgeService;
+  private readonly forgeMonitor: ForgeMonitor;
   private readonly pipeline: PipelineManager;
   private readonly pipelineListeners = new Set<(run: PipelineRunView) => void>();
   /** Run ids already published (PR opened) — guards the publish-on-done hook. */
@@ -511,6 +513,32 @@ export class Orchestrator {
           );
         }
         for (const listener of this.pipelineListeners) listener(run);
+      },
+    });
+    this.forgeMonitor = new ForgeMonitor({
+      listMonitoredProjects: () =>
+        this.projects.listMonitored().map((p) => ({ id: p.id, forgeRepo: p.forgeRepo! })),
+      forgeForProject: (projectId) => {
+        const p = this.projects.get(projectId);
+        return p ? this.forge.forgeForAccount(p.forgeAccountId) : null;
+      },
+      hasRunForIssue: (projectId, issueNumber) =>
+        this.pipeline.findRunByIssue(projectId, issueNumber) !== null,
+      startRunFromIssue: (projectId, issue) =>
+        this.pipeline.startRun(
+          projectId,
+          `Resolve issue #${issue.number}: ${issue.title}\n\n${issue.body}`,
+          { issueNumber: issue.number }
+        ),
+      watchableRuns: (projectId) =>
+        this.pipeline
+          .listForProject(projectId)
+          .filter((r) => r.status === "done" && r.prNumber != null)
+          .map((r) => ({ id: r.id, prNumber: r.prNumber, status: r.status })),
+      resumeRun: (runId, feedback) => {
+        // Allow the run to re-publish (push the updated branch) after rework.
+        this.publishedRuns.delete(runId);
+        return this.pipeline.resume(runId, feedback);
       },
     });
     this.secrets = new SecretsStore(control);
@@ -933,6 +961,7 @@ export class Orchestrator {
   /** Stop the scheduler + bus and close every agent's database. */
   async shutdown(): Promise<void> {
     this.scheduler.stop();
+    this.forgeMonitor.stop();
     for (const timer of this.subagentTeardowns.values()) clearTimeout(timer);
     this.subagentTeardowns.clear();
     await this.codeRef.stop();
@@ -1001,6 +1030,8 @@ export class Orchestrator {
     this.codeRef.start();
     // Ensure the shared infra service agents (proxmox, ssh) exist.
     this.ensureServiceAgents();
+    // Poll forges for assigned issues + PR/CI signals every 5 minutes.
+    this.forgeMonitor.start(5 * 60_000);
   }
 
   /** Build and register a runtime + context for a profile. */

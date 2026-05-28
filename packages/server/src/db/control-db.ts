@@ -129,6 +129,7 @@ function ensureControlTables(sqlite: Database.Database) {
       status TEXT NOT NULL DEFAULT 'running',
       current_stage TEXT,
       attempt INTEGER NOT NULL DEFAULT 0,
+      issue_number INTEGER,
       pr_branch TEXT,
       pr_number INTEGER,
       pr_url TEXT,

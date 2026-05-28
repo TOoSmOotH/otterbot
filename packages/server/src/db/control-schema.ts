@@ -173,6 +173,8 @@ export const pipelineRuns = sqliteTable("pipeline_runs", {
   currentStage: text("current_stage"),
   /** How many times the run has been kicked back to the coder. */
   attempt: integer("attempt").notNull().default(0),
+  /** The forge issue this run was started from, if any (for monitoring dedupe). */
+  issueNumber: integer("issue_number"),
   /** The feature branch the run pushed (forge-backed projects). */
   prBranch: text("pr_branch"),
   /** The opened PR/MR number + URL, once published. */

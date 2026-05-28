@@ -37,6 +37,7 @@ export interface PipelineRun {
   status: "running" | "done" | "failed" | "cancelled";
   currentStage: string | null;
   attempt: number;
+  issueNumber: number | null;
   prBranch: string | null;
   prNumber: number | null;
   prUrl: string | null;
@@ -87,7 +88,7 @@ export class PipelineManager {
   }
 
   /** Start a run and drive it in the background; returns the new run id. */
-  startRun(projectId: string, goal: string): string {
+  startRun(projectId: string, goal: string, opts: { issueNumber?: number } = {}): string {
     const id = nanoid();
     const now = new Date().toISOString();
     this.deps.control.db
@@ -99,6 +100,7 @@ export class PipelineManager {
         status: "running",
         currentStage: this.stages[0] ?? null,
         attempt: 0,
+        issueNumber: opts.issueNumber ?? null,
         createdAt: now,
         updatedAt: now,
       })
@@ -108,6 +110,46 @@ export class PipelineManager {
       this.finish(id, "failed");
     });
     return id;
+  }
+
+  /**
+   * Re-open a finished run and re-drive it from the coder, carrying review/CI
+   * feedback so the coder addresses it. Used by the PR monitor on
+   * changes-requested or CI failure. Bounded by MAX_ATTEMPTS; returns false if
+   * the run is unknown, still running, or out of attempts.
+   */
+  resume(runId: string, feedback: string): boolean {
+    const run = this.get(runId);
+    if (!run || run.status === "running") return false;
+    const nextAttempt = run.attempt + 1;
+    if (nextAttempt > MAX_ATTEMPTS) return false;
+    // Record the feedback so it appears in the coder's prior reports.
+    this.recordStage(runId, "review-feedback", "(forge)", "fail", feedback, nextAttempt);
+    this.deps.control.db
+      .update(controlSchema.pipelineRuns)
+      .set({
+        status: "running",
+        currentStage: "coder",
+        attempt: nextAttempt,
+        updatedAt: new Date().toISOString(),
+      })
+      .where(eq(controlSchema.pipelineRuns.id, runId))
+      .run();
+    void this.drive(runId).catch((err) => {
+      console.error(`[pipeline] resumed run ${runId} crashed:`, err);
+      this.finish(runId, "failed");
+    });
+    return true;
+  }
+
+  /** The most recent run started from a given forge issue, if any. */
+  findRunByIssue(projectId: string, issueNumber: number): PipelineRun | null {
+    const rows = this.deps.control.db
+      .select()
+      .from(controlSchema.pipelineRuns)
+      .where(eq(controlSchema.pipelineRuns.projectId, projectId))
+      .all() as PipelineRun[];
+    return rows.filter((r) => r.issueNumber === issueNumber).sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0] ?? null;
   }
 
   /** Walk the stages from the current one, handling kickback on failure. */
