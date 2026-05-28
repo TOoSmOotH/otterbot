@@ -331,6 +331,37 @@ export async function buildServer(
     }
   });
 
+  // Launch / inspect a project's build pipeline.
+  app.post<{ Params: { id: string }; Body: { goal?: string } }>(
+    "/api/projects/:id/pipeline",
+    async (req, reply) => {
+      const goal = req.body?.goal?.trim();
+      if (!goal) {
+        reply.code(400);
+        return { error: "goal is required" };
+      }
+      try {
+        return { ok: true, runId: orch.startPipeline(req.params.id, goal) };
+      } catch (err) {
+        reply.code(400);
+        return { error: err instanceof Error ? err.message : String(err) };
+      }
+    }
+  );
+
+  app.get<{ Params: { id: string } }>("/api/projects/:id/pipeline-runs", async (req) =>
+    orch.listPipelineRuns(req.params.id)
+  );
+
+  app.get<{ Params: { runId: string } }>("/api/pipeline-runs/:runId", async (req, reply) => {
+    const run = orch.getPipelineRun(req.params.runId);
+    if (!run) {
+      reply.code(404);
+      return { error: "not found" };
+    }
+    return run;
+  });
+
   app.post<{ Params: { id: string }; Body: { agentId?: string } }>(
     "/api/projects/:id/members",
     async (req, reply) => {

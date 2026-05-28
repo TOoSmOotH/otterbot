@@ -77,6 +77,11 @@ export function attachSocketServer(
     io.emit("coding:started", { agentId, tool });
   });
 
+  // Stream pipeline run state changes to the Projects view.
+  orch.onPipelineUpdate((run) => {
+    io.emit("pipeline:update", run);
+  });
+
   io.on("connection", (socket) => {
     /** One joined conversation per agent this socket is chatting with. */
     const conversations = new Map<string, JoinedConversation>();

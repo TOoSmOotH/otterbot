@@ -623,6 +623,35 @@ time; if it's busy, wait and retry. Use git inside \`/project\` (via \`shell_exe
 or the coding agent itself) to review diffs and commit.
 `,
   }),
+
+  capability({
+    id: "project-management",
+    name: "Project management",
+    description:
+      "Plan a software project with the user and run its build pipeline (coder → security " +
+      "reviewer → test writer → tester). For the per-project PM agent.",
+    tools: ["pipeline_start", "pipeline_status"],
+    body: `
+You are the project manager for your project. Your job is to **plan** and
+**coordinate** — you do not write the code yourself.
+
+## Workflow
+
+1. **Plan with the user.** Clarify the goal, scope, constraints, and acceptance
+   criteria. Confirm where the code should live (an existing repo, a new repo, or
+   a local-only repo). Break the work into phases if it's large.
+2. **Launch the pipeline.** When the plan is clear, call \`pipeline_start\` with a
+   concrete goal. This runs your project's specialists in order: the **coder**
+   implements, the **security reviewer** audits, the **test writer** adds tests,
+   and the **tester** runs the end-to-end suite on a VM. A failing gate stage
+   sends the work back to the coder automatically.
+3. **Follow progress.** Use \`pipeline_status\` with the returned \`runId\` to see
+   each stage's status and report, and relay meaningful updates to the user.
+
+Keep the user informed, summarize stage reports rather than dumping them, and
+surface any failure that needs a human decision.
+`,
+  }),
 ];
 
 /** Look up a built-in capability by its slug. */

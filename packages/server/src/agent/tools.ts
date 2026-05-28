@@ -674,6 +674,47 @@ export function buildAgentTools(
     });
   }
 
+  // Build-pipeline control — granted by the `project-management` capability
+  // (the PM agent). Launches and inspects a project's staged pipeline run.
+  if (granted.has("pipeline_start") && services?.startPipeline) {
+    tools.pipeline_start = tool({
+      description:
+        "Launch this project's build pipeline (coder → security reviewer → test writer " +
+        "→ tester) to pursue a goal. Returns a runId immediately; the stages run in the " +
+        "background. Use pipeline_status to follow progress. Plan with the user first; " +
+        "this kicks off real work.",
+      parameters: z.object({
+        goal: z.string().min(1).describe("What the pipeline should build/achieve."),
+        projectId: z
+          .string()
+          .optional()
+          .describe("Project to run on. Defaults to the project you belong to."),
+      }),
+      execute: async ({ goal, projectId }) => {
+        const pid = projectId ?? services.projectIdForAgent?.(ctx.profile.id) ?? null;
+        if (!pid) return { ok: false, error: "No project found for this agent; pass projectId." };
+        try {
+          const runId = services.startPipeline!(pid, goal);
+          return { ok: true, runId, projectId: pid };
+        } catch (err) {
+          return { ok: false, error: err instanceof Error ? err.message : String(err) };
+        }
+      },
+    });
+  }
+
+  if (granted.has("pipeline_status") && services?.getPipelineRun) {
+    tools.pipeline_status = tool({
+      description: "Get the current state of a pipeline run: each stage's status and report.",
+      parameters: z.object({ runId: z.string().min(1) }),
+      execute: async ({ runId }) => {
+        const run = services.getPipelineRun!(runId);
+        if (!run) return { ok: false, error: "Unknown run." };
+        return { ok: true, run };
+      },
+    });
+  }
+
   // Web search — granted by `profile.canWebSearch` or a capability.
   if (canUse("web_search", ctx.profile.canWebSearch)) {
     tools.web_search = tool({

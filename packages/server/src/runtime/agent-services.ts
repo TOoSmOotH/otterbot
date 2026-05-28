@@ -91,4 +91,21 @@ export interface AgentServices {
    * when the orchestrator wired it.
    */
   notifyCodingSession?(agentId: string, tool: string): void;
+  /** The project an agent belongs to (most-recent), or null. For the PM. */
+  projectIdForAgent?(agentId: string): string | null;
+  /** Start a build-pipeline run for a project; returns the run id. */
+  startPipeline?(projectId: string, goal: string): string;
+  /** A pipeline run's current state (stages, statuses, reports). */
+  getPipelineRun?(runId: string): PipelineRunStatus | null;
+}
+
+/** A pipeline run's state, surfaced to the PM via `pipeline_status`. */
+export interface PipelineRunStatus {
+  id: string;
+  projectId: string;
+  goal: string;
+  status: string;
+  currentStage: string | null;
+  attempt: number;
+  stages: Array<{ stage: string; agentId: string; status: string; report: string; attempt: number }>;
 }

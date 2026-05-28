@@ -38,6 +38,10 @@ import { createTransport } from "../bus/transports/factory.js";
 import { Scheduler } from "../scheduler/scheduler.js";
 import { CodeReferenceService } from "../code-reference/code-reference-service.js";
 import { ProjectStore } from "../projects/project-store.js";
+import {
+  PipelineManager,
+  type PipelineRunView,
+} from "../pipeline/pipeline-manager.js";
 import { SecretsStore, type ScopedSecret } from "../secrets/secrets-store.js";
 import {
   readSkillConfig,
@@ -386,6 +390,32 @@ function uniqueModelId(existing: { id: string }[], base: string): string {
   return id;
 }
 
+/** Coding stages can run a CLI for a long time; give a stage a generous budget. */
+const STAGE_TIMEOUT_MS = 45 * 60_000;
+
+/** Build the prompt handed to a pipeline stage's agent. */
+function buildStagePrompt(
+  stage: string,
+  goal: string,
+  priorReports: Array<{ stage: string; report: string }>
+): string {
+  const gate = stage === "security-reviewer" || stage === "tester";
+  const prior = priorReports.length
+    ? `\n\nReports from earlier stages:\n${priorReports
+        .map((r) => `### ${r.stage}\n${r.report}`)
+        .join("\n\n")}`
+    : "";
+  const verdict = gate
+    ? `\n\nThis is a gate stage. End your reply with a line "VERDICT: PASS" or ` +
+      `"VERDICT: FAIL" so the pipeline knows whether to proceed or send the work ` +
+      `back to the coder.`
+    : "";
+  return (
+    `You are the **${stage}** stage of the build pipeline for this project. Work in ` +
+    `the shared /project tree. Project goal:\n\n${goal}${prior}${verdict}`
+  );
+}
+
 /**
  * Owns the lifecycle of every agent: builds one isolated `AgentContext` and
  * `AgentRuntime` per profile, keeps the control DB registry in sync, and
@@ -403,6 +433,8 @@ export class Orchestrator {
   private readonly scheduler: Scheduler;
   private readonly codeRef: CodeReferenceService;
   private readonly projects: ProjectStore;
+  private readonly pipeline: PipelineManager;
+  private readonly pipelineListeners = new Set<(run: PipelineRunView) => void>();
   private readonly secrets: SecretsStore;
   private readonly services: AgentServices;
   /** Per-agent chat connectors, keyed by `${agentId}:${service}`. */
@@ -440,6 +472,31 @@ export class Orchestrator {
       },
     });
     this.projects = new ProjectStore(control, resolve(cfg.dataDir, "projects"));
+    this.pipeline = new PipelineManager({
+      control,
+      resolveAgent: (projectId, role) => this.projects.agentForRole(projectId, role),
+      runStage: async ({ projectId, stage, agentId, goal, priorReports }) => {
+        const fromId = this.projects.agentForRole(projectId, "pm") ?? "coo";
+        const res = await this.bus.request(
+          {
+            id: nanoid(),
+            kind: "request",
+            from: fromId,
+            to: agentId,
+            threadId: nanoid(),
+            correlationId: null,
+            rootSpawnId: null,
+            body: buildStagePrompt(stage, goal, priorReports),
+            transport: "local",
+          },
+          STAGE_TIMEOUT_MS
+        );
+        return { report: res.body };
+      },
+      onUpdate: (run) => {
+        for (const listener of this.pipelineListeners) listener(run);
+      },
+    });
     this.secrets = new SecretsStore(control);
     this.bus.setDeliver((agentId, msg) => {
       if (agentId === "*") {
@@ -478,6 +535,27 @@ export class Orchestrator {
       readArtifactBinary: (agentId, dir, name) => this.readArtifactBinary(agentId, dir, name),
       notifyCodingSession: (agentId, tool) => {
         for (const listener of this.codingListeners) listener(agentId, tool);
+      },
+      projectIdForAgent: (agentId) => this.projects.projectsForAgent(agentId)[0]?.id ?? null,
+      startPipeline: (projectId, goal) => this.startPipeline(projectId, goal),
+      getPipelineRun: (runId) => {
+        const v = this.pipeline.view(runId);
+        if (!v) return null;
+        return {
+          id: v.id,
+          projectId: v.projectId,
+          goal: v.goal,
+          status: v.status,
+          currentStage: v.currentStage,
+          attempt: v.attempt,
+          stages: v.stages.map((s) => ({
+            stage: s.stage,
+            agentId: s.agentId,
+            status: s.status,
+            report: s.report,
+            attempt: s.attempt,
+          })),
+        };
       },
     };
   }
@@ -1206,6 +1284,32 @@ export class Orchestrator {
   /** The agent that fills a pipeline role for a project, or null. */
   agentForRole(projectId: string, role: string): string | null {
     return this.projects.agentForRole(projectId, role);
+  }
+
+  // --- Pipeline ------------------------------------------------------------
+
+  /** Start a build-pipeline run for a project; returns the run id immediately. */
+  startPipeline(projectId: string, goal: string): string {
+    if (!this.projects.get(projectId)) throw new Error(`Unknown project: ${projectId}`);
+    return this.pipeline.startRun(projectId, goal);
+  }
+
+  getPipelineRun(runId: string): PipelineRunView | null {
+    return this.pipeline.view(runId);
+  }
+
+  listPipelineRuns(projectId: string) {
+    return this.pipeline.listForProject(projectId);
+  }
+
+  cancelPipeline(runId: string): void {
+    this.pipeline.cancel(runId);
+  }
+
+  /** Subscribe to pipeline run state changes (for sockets/UI). */
+  onPipelineUpdate(listener: (run: PipelineRunView) => void): () => void {
+    this.pipelineListeners.add(listener);
+    return () => this.pipelineListeners.delete(listener);
   }
 
   // --- Team provisioning ---------------------------------------------------

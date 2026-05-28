@@ -104,6 +104,9 @@ export const GRANTABLE_TOOL_NAMES = [
   // granted together by the `coding-cli` capability.
   "coding_cli_run",
   "coding_cli_status",
+  // Build-pipeline control — granted by the `project-management` capability.
+  "pipeline_start",
+  "pipeline_status",
 ] as const;
 
 export type GrantableToolName = (typeof GRANTABLE_TOOL_NAMES)[number];

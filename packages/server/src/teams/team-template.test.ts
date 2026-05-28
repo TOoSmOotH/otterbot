@@ -54,6 +54,10 @@ describe("coding team provisioning", () => {
     const testerCtx = stack.orch.getContext(stack.orch.agentForRole(project.id, "tester")!)!;
     const peerIds = testerCtx.profile.allowedPeers.map((p) => p.agentId).sort();
     expect(peerIds).toEqual(["svc-proxmox", "svc-ssh"]);
+
+    // The PM can drive the pipeline.
+    const pmCtx = stack.orch.getContext(stack.orch.agentForRole(project.id, "pm")!)!;
+    expect(pmCtx.skills.effectiveTools().has("pipeline_start")).toBe(true);
   });
 
   it("tears down the team when the project is deleted", async () => {

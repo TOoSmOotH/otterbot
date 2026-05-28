@@ -108,6 +108,28 @@ function ensureControlTables(sqlite: Database.Database) {
       created_at TEXT NOT NULL,
       PRIMARY KEY (project_id, role)
     )`,
+    `CREATE TABLE IF NOT EXISTS pipeline_runs (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      goal TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'running',
+      current_stage TEXT,
+      attempt INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_pipeline_runs_project ON pipeline_runs(project_id)`,
+    `CREATE TABLE IF NOT EXISTS pipeline_stage_results (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      run_id TEXT NOT NULL,
+      stage TEXT NOT NULL,
+      agent_id TEXT NOT NULL,
+      status TEXT NOT NULL,
+      report TEXT NOT NULL DEFAULT '',
+      attempt INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_pipeline_stage_run ON pipeline_stage_results(run_id, id)`,
   ];
   for (const s of stmts) sqlite.exec(s);
 

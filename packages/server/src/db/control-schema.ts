@@ -128,6 +128,46 @@ export const projectTeam = sqliteTable("project_team", {
     .$defaultFn(() => new Date().toISOString()),
 });
 
+/**
+ * One run of a project's build pipeline. The PM starts a run with a goal; the
+ * `PipelineManager` walks the stages (coder → security → test-writer → tester),
+ * handing each to that project's specialist and recording the outcome.
+ */
+export const pipelineRuns = sqliteTable("pipeline_runs", {
+  id: text("id").primaryKey(),
+  projectId: text("project_id").notNull(),
+  goal: text("goal").notNull(),
+  status: text("status", {
+    enum: ["running", "done", "failed", "cancelled"],
+  })
+    .notNull()
+    .default("running"),
+  /** The stage currently executing (or the last one, when finished). */
+  currentStage: text("current_stage"),
+  /** How many times the run has been kicked back to the coder. */
+  attempt: integer("attempt").notNull().default(0),
+  createdAt: text("created_at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+  updatedAt: text("updated_at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+});
+
+/** One stage execution within a pipeline run (history; multiple per stage on retry). */
+export const pipelineStageResults = sqliteTable("pipeline_stage_results", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  runId: text("run_id").notNull(),
+  stage: text("stage").notNull(),
+  agentId: text("agent_id").notNull(),
+  status: text("status", { enum: ["pass", "fail", "error"] }).notNull(),
+  report: text("report").notNull().default(""),
+  attempt: integer("attempt").notNull().default(0),
+  createdAt: text("created_at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+});
+
 /** Cron-scheduled prompts fired against an agent. */
 export const scheduledTasks = sqliteTable("scheduled_tasks", {
   id: text("id").primaryKey(),
