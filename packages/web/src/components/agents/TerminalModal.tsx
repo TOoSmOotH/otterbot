@@ -5,11 +5,40 @@ import "@xterm/xterm/css/xterm.css";
 import { getSocket } from "../../lib/socket";
 
 /**
- * A live interactive shell into one agent's sandboxed workspace, rendered with
- * xterm.js over the shared socket. The PTY itself lives on the server (see the
- * `term:*` handlers in socket.ts) and is confined to the same sandbox as the
- * agent's `shell_exec` tool.
+ * A live terminal into one agent, rendered with xterm.js over the shared
+ * socket. Two kinds:
+ *  - "shell"  → an interactive shell in the agent's sandboxed workspace
+ *               (`term:*` handlers).
+ *  - "coding" → attaches to the agent's running coding-CLI session (`coding:*`
+ *               handlers); the PTY is started by the `coding_cli_run` tool.
+ * Both PTYs live on the server, confined to the same sandbox as `shell_exec`.
  */
+
+export type TerminalKind = "shell" | "coding";
+
+/** Socket event names per kind. */
+const EVENTS: Record<
+  TerminalKind,
+  { open: string; input: string; resize: string; close: string; output: string; exit: string }
+> = {
+  shell: {
+    open: "term:open",
+    input: "term:input",
+    resize: "term:resize",
+    close: "term:close",
+    output: "term:output",
+    exit: "term:exit",
+  },
+  coding: {
+    // The session is started server-side by the tool; we attach to it.
+    open: "coding:attach",
+    input: "coding:input",
+    resize: "coding:resize",
+    close: "coding:detach",
+    output: "coding:output",
+    exit: "coding:exit",
+  },
+};
 
 interface TermOutput {
   agentId: string;
@@ -32,10 +61,15 @@ export function TerminalModal({
   agentId,
   agentName,
   onClose,
+  kind = "shell",
+  toolLabel,
 }: {
   agentId: string;
   agentName: string;
   onClose: () => void;
+  kind?: TerminalKind;
+  /** For coding sessions, the tool name shown in the header (e.g. "claude"). */
+  toolLabel?: string;
 }) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const [exited, setExited] = useState<string | null>(null);
@@ -44,6 +78,7 @@ export function TerminalModal({
     const host = hostRef.current;
     if (!host) return;
     const socket = getSocket();
+    const ev = EVENTS[kind];
 
     const term = new Terminal({
       cursorBlink: true,
@@ -57,9 +92,9 @@ export function TerminalModal({
     fit.fit();
     term.focus();
 
-    socket.emit("term:open", { agentId, cols: term.cols, rows: term.rows });
+    socket.emit(ev.open, { agentId, cols: term.cols, rows: term.rows });
 
-    const typed = term.onData((data) => socket.emit("term:input", { agentId, data }));
+    const typed = term.onData((data) => socket.emit(ev.input, { agentId, data }));
 
     const onOutput = (p: TermOutput) => {
       if (p.agentId === agentId) term.write(p.data);
@@ -72,13 +107,13 @@ export function TerminalModal({
       term.write(`\r\n\x1b[90m— ${reason} —\x1b[0m\r\n`);
       setExited(reason);
     };
-    socket.on("term:output", onOutput);
-    socket.on("term:exit", onExit);
+    socket.on(ev.output, onOutput);
+    socket.on(ev.exit, onExit);
 
     const ro = new ResizeObserver(() => {
       try {
         fit.fit();
-        socket.emit("term:resize", { agentId, cols: term.cols, rows: term.rows });
+        socket.emit(ev.resize, { agentId, cols: term.cols, rows: term.rows });
       } catch {
         /* host detached mid-resize */
       }
@@ -86,21 +121,23 @@ export function TerminalModal({
     ro.observe(host);
 
     return () => {
-      socket.emit("term:close", { agentId });
-      socket.off("term:output", onOutput);
-      socket.off("term:exit", onExit);
+      socket.emit(ev.close, { agentId });
+      socket.off(ev.output, onOutput);
+      socket.off(ev.exit, onExit);
       typed.dispose();
       ro.disconnect();
       term.dispose();
     };
-  }, [agentId]);
+  }, [agentId, kind]);
 
   return (
     <div style={overlay} onClick={onClose}>
       <div style={modal} onClick={(e) => e.stopPropagation()}>
         <div style={header}>
           <span style={{ fontWeight: 600, fontSize: 13 }}>
-            {agentName} · workspace terminal
+            {kind === "coding"
+              ? `${agentName} · ${toolLabel ?? "coding"} session`
+              : `${agentName} · workspace terminal`}
           </span>
           <span style={{ flex: 1 }} />
           {exited && <span style={exitBadge}>{exited}</span>}

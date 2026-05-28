@@ -542,6 +542,89 @@ the public key probably isn't installed on that host yet — run
 \`ssh_get_public_key\` and ask the user to add it.
 `,
   }),
+
+  capability({
+    id: "coding-cli",
+    name: "Coding CLI agents",
+    description:
+      "Run command-line coding agents — Claude Code, Codex, Gemini CLI, OpenCode — on a " +
+      "task, using your own subscription. Works on your project's shared code tree when " +
+      "you belong to one. Supports a headless run that returns a summary, or a live " +
+      "terminal UI streamed to the user.",
+    tools: ["coding_cli_run", "coding_cli_status"],
+    configSchema: {
+      description:
+        "Choose which coding CLIs this agent may run and (optionally) a default model " +
+        "for each. Each tool authenticates from this agent's own workspace — log it in " +
+        "from the agent's terminal once (see the skill instructions); the credentials " +
+        "persist there and stay private to this agent.",
+      fields: [
+        {
+          key: "tools",
+          label: "Enabled tools",
+          type: "list",
+          credentialKey: "CODING_CLI_TOOLS",
+          scope: "cap:coding-cli",
+          description: "The coding CLIs this agent is allowed to run.",
+          itemFields: [
+            {
+              key: "name",
+              label: "Tool",
+              type: "string",
+              required: true,
+              placeholder: "claude | codex | gemini | opencode",
+            },
+            {
+              key: "model",
+              label: "Default model",
+              type: "string",
+              placeholder: "(optional) tool-specific model id",
+            },
+          ],
+        },
+      ],
+    },
+    body: `
+You can run command-line coding agents — **Claude Code** (\`claude\`), **Codex**
+(\`codex\`), **Gemini CLI** (\`gemini\`), and **OpenCode** (\`opencode\`) — to write and
+edit code. Each runs inside your sandbox, authenticated by **your own
+subscription**, and (if you belong to a project) on that project's shared code
+tree at \`/project\`, which you share live with the other agents on the project.
+
+## First-time setup: log in once
+
+Each tool stores its login under your workspace HOME, so it must be logged in
+from **your terminal** before you can run it. The user does this once per tool:
+
+1. Open this agent's terminal (the Terminal button in Agent Studio, or SSH to
+   the host and \`cd\` into this agent's \`workspace\`).
+2. Run the tool's login flow and complete it in the browser/device prompt:
+   - Claude Code: run \`claude\` and follow the login prompt.
+   - Codex: run \`codex login\`.
+   - Gemini CLI: run \`gemini\` and choose Google login.
+   - OpenCode: run \`opencode auth login\`.
+3. The credentials persist in this agent's workspace and stay private to it.
+
+If a run fails with an authentication error, the tool isn't logged in yet — ask
+the user to complete the step above.
+
+## Tools
+
+- \`coding_cli_run\` — run a coding agent on a task. \`interactive: false\` (default)
+  runs it to completion and returns a summary; \`interactive: true\` launches its
+  live terminal UI, streamed to the user, and returns a summary when it exits.
+- \`coding_cli_status\` — report whether you're on a project and whether a live
+  session is running.
+
+## Working on a project
+
+If you belong to a project, coding runs happen in the shared \`/project\` tree, so
+another agent (e.g. one writing tests) sees your changes immediately. Runs are
+**serialized per project** — only one coding agent edits the shared code at a
+time; if it's busy, wait and retry. Use git inside \`/project\` (via \`shell_exec\`
+or the coding agent itself) to review diffs and commit.
+`,
+  }),
 ];
 
 /** Look up a built-in capability by its slug. */

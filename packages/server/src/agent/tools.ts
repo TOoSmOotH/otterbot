@@ -16,6 +16,16 @@ import {
   vmStatus,
 } from "../integrations/proxmox.js";
 import { runAgentShell } from "../integrations/shell.js";
+import {
+  CODING_TOOLS,
+  type CodingTool,
+  codingLockKey,
+  getCodingSession,
+  isCodingLockBusy,
+  runCodingCliHeadless,
+  startCodingSession,
+  withCodingLock,
+} from "../integrations/coding-cli.js";
 import { ensureKey, parseHosts, publicKey, sshExec } from "../integrations/ssh.js";
 import { searchWeb } from "../integrations/web-search.js";
 import { editImage, generateImage, persistImage } from "../integrations/image-gen.js";
@@ -539,14 +549,17 @@ export function buildAgentTools(
         "Run a shell command in this agent's sandboxed workspace directory. The " +
         "workspace persists across calls and is the command's HOME, so installed " +
         "tools, SSH keys and configs stick around. Commands are confined to the " +
-        "workspace — they cannot read or modify anything outside it. Each call is a " +
-        "fresh shell, so chain steps with '&&' or persist state to files. The " +
-        "agent's own credentials are available as environment variables.",
+        "workspace — they cannot read or modify anything outside it. If you belong " +
+        "to a project, its shared working tree is also available at /project. Each " +
+        "call is a fresh shell, so chain steps with '&&' or persist state to files. " +
+        "The agent's own credentials are available as environment variables.",
       parameters: z.object({
         command: z.string().min(1).describe("Shell command to run (bash/sh syntax)."),
       }),
       execute: async ({ command }) => {
-        const r = await runAgentShell(ctx.workspaceDir, ctx.shellSecrets(), command);
+        const r = await runAgentShell(ctx.workspaceDir, ctx.shellSecrets(), command, {
+          projectRepoPath: ctx.projectRepoPath() ?? undefined,
+        });
         if (r.error) return { ok: false, error: r.error };
         return {
           ok: r.ok,
@@ -555,6 +568,89 @@ export function buildAgentTools(
           stderr: r.stderr,
           ...(r.timedOut ? { timedOut: true } : {}),
           ...(r.truncated ? { truncated: true } : {}),
+        };
+      },
+    });
+  }
+
+  // Command-line coding agents (Claude Code, Codex, Gemini CLI, OpenCode) —
+  // granted by the `coding-cli` capability. Each runs inside the same sandbox
+  // as shell_exec, authenticated from the agent's own workspace login, and
+  // operates on the shared /project tree when the agent belongs to a project.
+  if (granted.has("coding_cli_run")) {
+    tools.coding_cli_run = tool({
+      description:
+        "Run a command-line coding agent (claude, codex, gemini, or opencode) on a " +
+        "task. It works in your project's shared tree if you belong to one, otherwise " +
+        "in your workspace. By default it runs to completion and returns a summary of " +
+        "what it did. Set interactive=true to launch its live terminal UI (streamed to " +
+        "the user) instead. The tool must already be logged in — see the capability's " +
+        "setup notes. Runs are serialized per project, so only one coding agent edits " +
+        "the shared code at a time.",
+      parameters: z.object({
+        tool: z.enum(CODING_TOOLS as [CodingTool, ...CodingTool[]]).describe("Which CLI to run."),
+        task: z.string().min(1).describe("The task / prompt to hand the coding agent."),
+        interactive: z
+          .boolean()
+          .default(false)
+          .describe("Launch the live terminal UI instead of running headless."),
+        model: z.string().optional().describe("Optional model override for the tool."),
+      }),
+      execute: async ({ tool: cliTool, task, interactive, model }) => {
+        const projectRepoPath = ctx.projectRepoPath();
+        const lockKey = codingLockKey(ctx.profile.id, projectRepoPath);
+        if (isCodingLockBusy(lockKey)) {
+          return {
+            ok: false,
+            busy: true,
+            error:
+              "Another coding agent is already working on this project. Wait for it to " +
+              "finish, then try again.",
+          };
+        }
+        return withCodingLock(lockKey, async () => {
+          const common = {
+            tool: cliTool,
+            task,
+            model,
+            workspaceDir: ctx.workspaceDir,
+            secrets: ctx.shellSecrets(),
+            projectRepoPath,
+          };
+          if (interactive) {
+            const started = startCodingSession({ ...common, agentId: ctx.profile.id });
+            if ("error" in started) return { ok: false, error: started.error };
+            services?.notifyCodingSession?.(ctx.profile.id, cliTool);
+            const { exitCode, summary } = await started.session.exited;
+            return { ok: exitCode === 0, interactive: true, exitCode, summary };
+          }
+          const r = await runCodingCliHeadless(common);
+          if (r.error) return { ok: false, error: r.error };
+          return {
+            ok: r.ok,
+            exitCode: r.exitCode,
+            summary: r.summary,
+            ...(r.timedOut ? { timedOut: true } : {}),
+            ...(r.truncated ? { truncated: true } : {}),
+          };
+        });
+      },
+    });
+  }
+
+  if (granted.has("coding_cli_status")) {
+    tools.coding_cli_status = tool({
+      description:
+        "Report your coding setup: whether you belong to a project (shared code tree), " +
+        "and whether a live coding session is currently running.",
+      parameters: z.object({}),
+      execute: async () => {
+        const session = getCodingSession(ctx.profile.id);
+        return {
+          ok: true,
+          inProject: ctx.projectRepoPath() !== null,
+          activeSession: session ? { tool: session.tool } : null,
+          tools: CODING_TOOLS,
         };
       },
     });

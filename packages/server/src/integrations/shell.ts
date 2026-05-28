@@ -123,6 +123,36 @@ export interface SandboxOpts {
    * caller allocated stays the controlling terminal (Ctrl+C / job control).
    */
   interactive?: boolean;
+  /**
+   * A shared project working tree to expose, writable, alongside the agent's
+   * own workspace. Several agents that belong to the same project bind the same
+   * directory here, so they collaborate on one codebase while `HOME`
+   * (`/workspace`) — and thus each agent's per-tool CLI credentials — stays
+   * private. On bwrap it is bound at `/project`; on macOS sandbox-exec there is
+   * no remapping, so the real path is simply made writable.
+   */
+  projectRepoPath?: string;
+  /**
+   * Where the command starts. `"project"` requires `projectRepoPath` and starts
+   * the command inside the shared tree; anything else starts in `/workspace`.
+   */
+  startIn?: "workspace" | "project";
+}
+
+/** Mount point of the shared project tree inside the bwrap sandbox. */
+export const PROJECT_MOUNT = "/project";
+
+/**
+ * The project working tree as the confined command sees it: the fixed
+ * `/project` mount under bwrap, or the real host path under sandbox-exec (which
+ * does not remap paths). Returns null when the agent has no project.
+ */
+export function sandboxProjectDir(
+  sandbox: string,
+  projectRepoPath: string | undefined
+): string | null {
+  if (!projectRepoPath) return null;
+  return sandbox === "bwrap" ? PROJECT_MOUNT : projectRepoPath;
 }
 
 /** bwrap: bind only the workspace writable; system dirs read-only; rest hidden. */
@@ -169,11 +199,19 @@ function bwrapPlan(
     "--dev", "/dev",
     "--tmpfs", "/tmp",
     "--bind", workspaceDir, "/workspace",
-    "--chdir", "/workspace",
+  ];
+  // The shared project tree, when the agent belongs to a project. Bound
+  // writable so collaborating agents edit one codebase; HOME stays /workspace.
+  if (opts.projectRepoPath) {
+    args.push("--bind", opts.projectRepoPath, PROJECT_MOUNT);
+  }
+  const startDir = opts.startIn === "project" && opts.projectRepoPath ? PROJECT_MOUNT : "/workspace";
+  args.push(
+    "--chdir", startDir,
     "--unshare-all",
     "--share-net",
-    "--die-with-parent",
-  ];
+    "--die-with-parent"
+  );
   // `--new-session` (setsid) hardens against TIOCSTI injection, but it detaches
   // from the controlling tty — fine for a one-shot command, but it breaks Ctrl+C
   // and job control in an interactive shell. The interactive PTY is dedicated to
@@ -189,7 +227,8 @@ function bwrapPlan(
 function sandboxExecPlan(
   workspaceDir: string,
   secrets: Map<string, string>,
-  innerArgv: string[]
+  innerArgv: string[],
+  opts: SandboxOpts
 ): SpawnPlan {
   const profile = [
     "(version 1)",
@@ -197,6 +236,8 @@ function sandboxExecPlan(
     "(deny file-write*)",
     "(allow file-write*",
     `  (subpath ${JSON.stringify(workspaceDir)})`,
+    // The shared project tree, when the agent belongs to a project.
+    ...(opts.projectRepoPath ? [`  (subpath ${JSON.stringify(opts.projectRepoPath)})`] : []),
     '  (subpath "/private/tmp")',
     '  (subpath "/private/var/tmp")',
     '  (subpath "/private/var/folders")',
@@ -207,7 +248,9 @@ function sandboxExecPlan(
     file: "/usr/bin/sandbox-exec",
     args: ["-p", profile, ...innerArgv],
     env: buildEnv(workspaceDir, secrets),
-    cwd: workspaceDir,
+    // sandbox-exec does not remap paths, so the project's real host path is the
+    // working directory when starting in the shared tree.
+    cwd: opts.startIn === "project" && opts.projectRepoPath ? opts.projectRepoPath : workspaceDir,
   };
 }
 
@@ -238,7 +281,7 @@ export function buildSandboxPlan(
     return { plan: bwrapPlan(workspaceDir, secrets, innerArgv, opts), sandbox: "bwrap" };
   }
   if (hasSandboxExec()) {
-    return { plan: sandboxExecPlan(workspaceDir, secrets, innerArgv), sandbox: "sandbox-exec" };
+    return { plan: sandboxExecPlan(workspaceDir, secrets, innerArgv, opts), sandbox: "sandbox-exec" };
   }
   return { error: NO_SANDBOX_ERROR };
 }
@@ -298,11 +341,14 @@ export function ensureWorkspace(workspaceDir: string): void {
 export function runAgentShell(
   workspaceDir: string,
   secrets: Map<string, string>,
-  command: string
+  command: string,
+  opts: { projectRepoPath?: string } = {}
 ): Promise<ShellResult> {
   ensureWorkspace(workspaceDir);
 
-  const built = buildSandboxPlan(workspaceDir, secrets, ["/bin/sh", "-c", command]);
+  const built = buildSandboxPlan(workspaceDir, secrets, ["/bin/sh", "-c", command], {
+    projectRepoPath: opts.projectRepoPath,
+  });
   if ("error" in built) {
     return Promise.resolve({
       ok: false,

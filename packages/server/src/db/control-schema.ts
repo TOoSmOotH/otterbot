@@ -87,6 +87,32 @@ export const appSettings = sqliteTable("app_settings", {
   value: text("value").notNull(),
 });
 
+/**
+ * A collaborative project: a single git working tree that several agents share.
+ * The tree lives at `repoPath` (under `data/projects/<id>/repo`) and is bound,
+ * writable, into each member agent's sandbox at `/project`, so the members edit
+ * one codebase while their own `/workspace` (and per-tool CLI credentials) stays
+ * private. Phase 1 is local-only; remote/GitHub fields arrive in a later phase.
+ */
+export const projects = sqliteTable("projects", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  /** Absolute path to the project's git working tree on the host. */
+  repoPath: text("repo_path").notNull(),
+  createdAt: text("created_at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+});
+
+/** Which agents belong to which project. One row per (project, agent). */
+export const projectMembers = sqliteTable("project_members", {
+  projectId: text("project_id").notNull(),
+  agentId: text("agent_id").notNull(),
+  createdAt: text("created_at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+});
+
 /** Cron-scheduled prompts fired against an agent. */
 export const scheduledTasks = sqliteTable("scheduled_tasks", {
   id: text("id").primaryKey(),

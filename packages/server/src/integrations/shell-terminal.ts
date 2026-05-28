@@ -40,12 +40,16 @@ export type OpenTerminalResult = { pty: pty.IPty } | { error: string };
 export function openTerminal(
   workspaceDir: string,
   secrets: Map<string, string>,
-  size: Partial<TerminalSize> = {}
+  size: Partial<TerminalSize> = {},
+  opts: { projectRepoPath?: string | null } = {}
 ): OpenTerminalResult {
   ensureWorkspace(workspaceDir);
 
+  // The shell starts in HOME (/workspace) so per-tool CLI logins land there;
+  // a project member can `cd /project` to reach the shared tree.
   const built = buildSandboxPlan(workspaceDir, secrets, INTERACTIVE_SHELL, {
     interactive: true,
+    projectRepoPath: opts.projectRepoPath ?? undefined,
   });
   if ("error" in built) return { error: built.error };
 

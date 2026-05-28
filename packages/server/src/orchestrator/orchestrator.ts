@@ -1,4 +1,4 @@
-import { basename, join } from "node:path";
+import { basename, join, resolve } from "node:path";
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync, rmSync, cpSync } from "node:fs";
 import { eq, desc } from "drizzle-orm";
 import { nanoid } from "nanoid";
@@ -37,6 +37,7 @@ import { MessageBus } from "../bus/bus.js";
 import { createTransport } from "../bus/transports/factory.js";
 import { Scheduler } from "../scheduler/scheduler.js";
 import { CodeReferenceService } from "../code-reference/code-reference-service.js";
+import { ProjectStore } from "../projects/project-store.js";
 import { SecretsStore, type ScopedSecret } from "../secrets/secrets-store.js";
 import {
   readSkillConfig,
@@ -385,11 +386,14 @@ export class Orchestrator {
   private readonly contexts = new Map<string, AgentContext>();
   private readonly runtimes = new Map<string, AgentRuntime>();
   private readonly statusListeners = new Set<(id: string, status: AgentStatus) => void>();
+  /** Listeners notified when an agent starts a live coding-CLI session. */
+  private readonly codingListeners = new Set<(agentId: string, tool: string) => void>();
   /** Background embedding-init promises, awaited on shutdown. */
   private readonly pendingInits: Promise<void>[] = [];
   private readonly bus: MessageBus;
   private readonly scheduler: Scheduler;
   private readonly codeRef: CodeReferenceService;
+  private readonly projects: ProjectStore;
   private readonly secrets: SecretsStore;
   private readonly services: AgentServices;
   /** Per-agent chat connectors, keyed by `${agentId}:${service}`. */
@@ -426,6 +430,7 @@ export class Orchestrator {
         );
       },
     });
+    this.projects = new ProjectStore(control, resolve(cfg.dataDir, "projects"));
     this.secrets = new SecretsStore(control);
     this.bus.setDeliver((agentId, msg) => {
       if (agentId === "*") {
@@ -462,6 +467,9 @@ export class Orchestrator {
       listCodeReferenceRepos: () => this.codeRef.listRepoDirectory(),
       readArtifact: (agentId, file) => this.readArtifact(agentId, file),
       readArtifactBinary: (agentId, dir, name) => this.readArtifactBinary(agentId, dir, name),
+      notifyCodingSession: (agentId, tool) => {
+        for (const listener of this.codingListeners) listener(agentId, tool);
+      },
     };
   }
 
@@ -917,6 +925,7 @@ export class Orchestrator {
       agentDbPath: paths.agentDb,
       skillsDir: paths.skillsDir,
       workspaceDir: paths.workspace,
+      resolveProjectRepoPath: () => this.projects.repoPathForAgent(profile.id),
       browserProfileDir: paths.browser,
       imagesDir: paths.images,
       filesDir: paths.files,
@@ -1139,6 +1148,37 @@ export class Orchestrator {
     return () => this.statusListeners.delete(listener);
   }
 
+  /** Subscribe to "an agent started a live coding session" events. */
+  onCodingSession(listener: (agentId: string, tool: string) => void): () => void {
+    this.codingListeners.add(listener);
+    return () => this.codingListeners.delete(listener);
+  }
+
+  // --- Projects ------------------------------------------------------------
+
+  /** A project plus its current member agent ids. */
+  listProjects(): Array<{ id: string; name: string; repoPath: string; createdAt: string; members: string[] }> {
+    return this.projects.list().map((p) => ({ ...p, members: this.projects.listMembers(p.id) }));
+  }
+
+  createProject(name: string): { id: string; name: string; repoPath: string; createdAt: string } {
+    return this.projects.create(name);
+  }
+
+  deleteProject(id: string): void {
+    this.projects.delete(id);
+  }
+
+  /** Add an agent to a project. Throws if the project or agent is unknown. */
+  addProjectMember(projectId: string, agentId: string): void {
+    if (!this.contexts.has(agentId)) throw new Error(`Unknown agent: ${agentId}`);
+    this.projects.addMember(projectId, agentId);
+  }
+
+  removeProjectMember(projectId: string, agentId: string): void {
+    this.projects.removeMember(projectId, agentId);
+  }
+
   // --- Mutations -----------------------------------------------------------
 
   /** Create a new agent profile, scaffold its directory, and start it. */
@@ -1330,6 +1370,8 @@ export class Orchestrator {
     this.runtimes.delete(id);
     this.control.db.delete(controlSchema.agents).where(eq(controlSchema.agents.id, id)).run();
     this.secrets.delete(id);
+    // Drop the agent from any project it belonged to.
+    for (const p of this.projects.projectsForAgent(id)) this.projects.removeMember(p.id, id);
     this.profiles.delete(id);
     return true;
   }

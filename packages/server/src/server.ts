@@ -297,6 +297,54 @@ export async function buildServer(
     }
   );
 
+  // --- Projects (shared coding working trees) ---
+  app.get("/api/projects", async () => orch.listProjects());
+
+  app.post<{ Body: { name?: string } }>("/api/projects", async (req, reply) => {
+    const name = req.body?.name?.trim();
+    if (!name) {
+      reply.code(400);
+      return { error: "name is required" };
+    }
+    try {
+      return orch.createProject(name);
+    } catch (err) {
+      reply.code(400);
+      return { error: err instanceof Error ? err.message : String(err) };
+    }
+  });
+
+  app.delete<{ Params: { id: string } }>("/api/projects/:id", async (req) => {
+    orch.deleteProject(req.params.id);
+    return { ok: true };
+  });
+
+  app.post<{ Params: { id: string }; Body: { agentId?: string } }>(
+    "/api/projects/:id/members",
+    async (req, reply) => {
+      const agentId = req.body?.agentId;
+      if (!agentId) {
+        reply.code(400);
+        return { error: "agentId is required" };
+      }
+      try {
+        orch.addProjectMember(req.params.id, agentId);
+        return { ok: true, members: orch.listProjects().find((p) => p.id === req.params.id)?.members ?? [] };
+      } catch (err) {
+        reply.code(400);
+        return { error: err instanceof Error ? err.message : String(err) };
+      }
+    }
+  );
+
+  app.delete<{ Params: { id: string; agentId: string } }>(
+    "/api/projects/:id/members/:agentId",
+    async (req) => {
+      orch.removeProjectMember(req.params.id, req.params.agentId);
+      return { ok: true };
+    }
+  );
+
   // --- Agents ---
   app.get("/api/agents", async () => orch.listSummaries());
 

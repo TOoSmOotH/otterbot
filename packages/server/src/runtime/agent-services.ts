@@ -84,4 +84,11 @@ export interface AgentServices {
     dir: "files" | "images",
     name: string
   ): { data: Buffer; mimeType: string } | null;
+  /**
+   * Announce that an agent started a live (PTY) coding-CLI session, so the UI
+   * can attach a terminal view. The session itself is tracked in
+   * `integrations/coding-cli.ts`; this is just the notification. Present only
+   * when the orchestrator wired it.
+   */
+  notifyCodingSession?(agentId: string, tool: string): void;
 }

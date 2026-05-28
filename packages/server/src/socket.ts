@@ -6,6 +6,7 @@ import { summarizeConversation } from "./memory/summarizer.js";
 import { extractFactsFromConversation } from "./memory/extractor.js";
 import { maybeAuthorSkill } from "./skills/skill-author.js";
 import { openTerminal } from "./integrations/shell-terminal.js";
+import { getCodingSession } from "./integrations/coding-cli.js";
 import { handleChatCommand, parseChatCommand } from "./runtime/chat-commands.js";
 import { extractToken, type AuthStore } from "./auth/api-token.js";
 import type { Artifact } from "@otterbot/shared";
@@ -68,6 +69,12 @@ export function attachSocketServer(
   // Surface every agent-to-agent bus message to the Activity View.
   orch.getBus().setEmit((msg) => {
     io.emit("bus:message", msg);
+  });
+
+  // Tell every client when an agent starts a live coding session, so the UI can
+  // offer to attach a terminal view.
+  orch.onCodingSession((agentId, tool) => {
+    io.emit("coding:started", { agentId, tool });
   });
 
   io.on("connection", (socket) => {
@@ -191,10 +198,12 @@ export function attachSocketServer(
         return;
       }
 
-      const opened = openTerminal(ctx.workspaceDir, ctx.shellSecrets(), {
-        cols: payload.cols,
-        rows: payload.rows,
-      });
+      const opened = openTerminal(
+        ctx.workspaceDir,
+        ctx.shellSecrets(),
+        { cols: payload.cols, rows: payload.rows },
+        { projectRepoPath: ctx.projectRepoPath() }
+      );
       if ("error" in opened) {
         socket.emit("term:exit", { agentId, error: opened.error });
         return;
@@ -235,12 +244,52 @@ export function attachSocketServer(
       killTerminal(payload.agentId || "coo");
     });
 
+    // --- Live coding sessions --------------------------------------------
+    // Read-only-ish attach to an agent's active coding-CLI PTY (owned by
+    // integrations/coding-cli.ts). Multiple sockets can watch the same session;
+    // each gets the replay buffer then a live stream, and may relay keystrokes.
+    const codingUnsubs = new Map<string, () => void>();
+
+    socket.on("coding:attach", (payload: { agentId?: string }) => {
+      const agentId = payload.agentId || "coo";
+      const session = getCodingSession(agentId);
+      if (!session) {
+        socket.emit("coding:exit", { agentId });
+        return;
+      }
+      codingUnsubs.get(agentId)?.();
+      socket.emit("coding:output", { agentId, data: session.getReplayBuffer() });
+      const unsub = session.onData((data) => socket.emit("coding:output", { agentId, data }));
+      codingUnsubs.set(agentId, unsub);
+      void session.exited.then(() => {
+        socket.emit("coding:exit", { agentId });
+        codingUnsubs.get(agentId)?.();
+        codingUnsubs.delete(agentId);
+      });
+    });
+
+    socket.on("coding:input", (payload: { agentId?: string; data: string }) => {
+      getCodingSession(payload.agentId || "coo")?.write(payload.data);
+    });
+
+    socket.on("coding:resize", (payload: { agentId?: string; cols: number; rows: number }) => {
+      getCodingSession(payload.agentId || "coo")?.resize(payload.cols, payload.rows);
+    });
+
+    socket.on("coding:detach", (payload: { agentId?: string }) => {
+      const agentId = payload.agentId || "coo";
+      codingUnsubs.get(agentId)?.();
+      codingUnsubs.delete(agentId);
+    });
+
     socket.on("disconnect", () => {
       for (const joined of conversations.values()) {
         if (joined.idleTimer) clearTimeout(joined.idleTimer);
         void closeSession(orch, joined.agentId, joined.conversationId);
       }
       for (const agentId of [...terminals.keys()]) killTerminal(agentId);
+      for (const unsub of codingUnsubs.values()) unsub();
+      codingUnsubs.clear();
     });
   });
 

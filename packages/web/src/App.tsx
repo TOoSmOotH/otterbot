@@ -1,12 +1,15 @@
 import { useEffect, useState } from "react";
 import { LayoutGroup, motion } from "motion/react";
-import { Activity, MessageSquare, Network, Settings, Sliders } from "lucide-react";
+import { Activity, FolderGit2, MessageSquare, Network, Settings, Sliders } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { AgentRoster } from "./components/agents/AgentRoster";
 import { AgentChat } from "./components/chat/AgentChat";
 import { AgentEditor } from "./components/agents/AgentEditor";
 import { AgentStudio } from "./components/agents/AgentStudio";
 import { ActivityView } from "./components/agents/ActivityView";
+import { ProjectsView } from "./components/agents/ProjectsView";
+import { TerminalModal } from "./components/agents/TerminalModal";
+import { getSocket } from "./lib/socket";
 import { AgentNetworkGraph } from "./components/agents/AgentNetworkGraph";
 import { GlobalSettings } from "./components/settings/GlobalSettings";
 import { OnboardingWizard } from "./components/agents/OnboardingWizard";
@@ -18,11 +21,12 @@ import { useChatStore } from "./stores/chat-store";
 import { useGlobalSettingsStore } from "./stores/global-settings-store";
 import { useSetupStore } from "./stores/setup-store";
 
-type MainView = "chat" | "studio" | "activity" | "network" | "settings";
+type MainView = "chat" | "studio" | "projects" | "activity" | "network" | "settings";
 
 const VIEWS: { id: MainView; label: string; icon: LucideIcon }[] = [
   { id: "chat", label: "Chat", icon: MessageSquare },
   { id: "studio", label: "Agent Studio", icon: Sliders },
+  { id: "projects", label: "Projects", icon: FolderGit2 },
   { id: "activity", label: "Activity", icon: Activity },
   { id: "network", label: "Network", icon: Network },
   { id: "settings", label: "Settings", icon: Settings },
@@ -51,6 +55,8 @@ function AuthedApp() {
 
   const [createOpen, setCreateOpen] = useState(false);
   const [view, setView] = useState<MainView>("chat");
+  const agents = useAgentsStore((s) => s.agents);
+  const [codingView, setCodingView] = useState<{ agentId: string; tool: string } | null>(null);
 
   useEffect(() => {
     connect();
@@ -61,6 +67,16 @@ function AuthedApp() {
     void loadSetup();
     void loadSettings();
   }, [connect, bindSocket, bindActivity, loadAgents, loadActivity, loadSetup, loadSettings]);
+
+  // Offer a live view whenever an agent launches an interactive coding session.
+  useEffect(() => {
+    const socket = getSocket();
+    const onStarted = (p: { agentId: string; tool: string }) => setCodingView(p);
+    socket.on("coding:started", onStarted);
+    return () => {
+      socket.off("coding:started", onStarted);
+    };
+  }, []);
 
   const showOnboarding = setupChecked && !onboardingComplete;
 
@@ -131,6 +147,7 @@ function AuthedApp() {
         <div style={{ flex: 1, minHeight: 0 }}>
           {view === "chat" && <AgentChat onEditAgent={openStudio} />}
           {view === "studio" && <AgentStudio agentId={activeAgentId} />}
+          {view === "projects" && <ProjectsView />}
           {view === "activity" && <ActivityView />}
           {view === "network" && <AgentNetworkGraph />}
           {view === "settings" && <GlobalSettings />}
@@ -138,6 +155,15 @@ function AuthedApp() {
       </div>
 
       {createOpen && <AgentEditor agentId={null} onClose={() => setCreateOpen(false)} />}
+      {codingView && (
+        <TerminalModal
+          kind="coding"
+          agentId={codingView.agentId}
+          agentName={agents.find((a) => a.id === codingView.agentId)?.displayName ?? codingView.agentId}
+          toolLabel={codingView.tool}
+          onClose={() => setCodingView(null)}
+        />
+      )}
       {showOnboarding && <OnboardingWizard />}
     </div>
   );

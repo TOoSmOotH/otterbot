@@ -56,3 +56,49 @@ describe("buildSandboxPlan PATH", () => {
     }
   });
 });
+
+describe("buildSandboxPlan project binding", () => {
+  it("binds the project tree and starts there when requested", () => {
+    const dir = mkdtempSync(join(tmpdir(), "otter-ws-"));
+    const repo = mkdtempSync(join(tmpdir(), "otter-repo-"));
+    try {
+      const built = buildSandboxPlan(dir, new Map(), ["/bin/sh", "-c", "true"], {
+        projectRepoPath: repo,
+        startIn: "project",
+      });
+      if ("error" in built) return; // no OS sandbox here
+      const { plan, sandbox } = built;
+      if (sandbox === "bwrap") {
+        // The project is bound at /project and the command chdirs there.
+        const bindIdx = plan.args.indexOf(repo);
+        expect(bindIdx).toBeGreaterThan(-1);
+        expect(plan.args[bindIdx - 1]).toBe("--bind");
+        expect(plan.args[bindIdx + 1]).toBe("/project");
+        const chdirIdx = plan.args.indexOf("--chdir");
+        expect(plan.args[chdirIdx + 1]).toBe("/project");
+      } else {
+        // sandbox-exec: no remap; the real repo path is the cwd.
+        expect(plan.cwd).toBe(repo);
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+      rmSync(repo, { recursive: true, force: true });
+    }
+  });
+
+  it("leaves the start dir at /workspace when no project is bound", () => {
+    const dir = mkdtempSync(join(tmpdir(), "otter-ws-"));
+    try {
+      const built = buildSandboxPlan(dir, new Map(), ["/bin/sh", "-c", "true"]);
+      if ("error" in built) return;
+      const { plan, sandbox } = built;
+      if (sandbox === "bwrap") {
+        const chdirIdx = plan.args.indexOf("--chdir");
+        expect(plan.args[chdirIdx + 1]).toBe("/workspace");
+        expect(plan.args).not.toContain("/project");
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});

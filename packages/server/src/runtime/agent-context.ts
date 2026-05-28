@@ -48,6 +48,12 @@ export interface AgentContext {
   contextWindow: number;
   /** Sandboxed working directory for the agent's `shell_exec` tool. */
   workspaceDir: string;
+  /**
+   * The shared project working tree bound into this agent's sandbox at
+   * `/project`, or null when the agent belongs to no project. A thunk so
+   * membership changes take effect without rebuilding the context.
+   */
+  projectRepoPath: () => string | null;
   /** Persistent Chrome user-data dir for the agent's browser tools. */
   browserProfileDir: string;
   /** Effective per-call browser-command timeout (ms): profile override or global default. */
@@ -95,6 +101,11 @@ export interface BuildAgentContextInput {
   skillsDir: string;
   /** Path to this agent's sandboxed workspace directory. */
   workspaceDir: string;
+  /**
+   * Resolve the shared project tree bound into this agent's sandbox, or null
+   * when it belongs to no project. Called live (membership can change).
+   */
+  resolveProjectRepoPath?: () => string | null;
   /** Path to this agent's persistent browser profile directory. */
   browserProfileDir: string;
   /** Path to this agent's generated-images directory. */
@@ -160,6 +171,7 @@ export function buildAgentContext(input: BuildAgentContextInput): AgentContext {
     },
     contextWindow: input.contextWindow,
     workspaceDir: input.workspaceDir,
+    projectRepoPath: input.resolveProjectRepoPath ?? (() => null),
     browserProfileDir: input.browserProfileDir,
     browseTimeoutMs: limits.browseTimeoutMs,
     maxSteps: limits.maxSteps,
