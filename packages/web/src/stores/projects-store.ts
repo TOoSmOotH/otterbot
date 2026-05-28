@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { apiFetch } from "../lib/api";
+import { getSocket } from "../lib/socket";
 
 export interface Project {
   id: string;
@@ -7,18 +8,83 @@ export interface Project {
   repoPath: string;
   createdAt: string;
   members: string[];
+  team: Array<{ role: string; agentId: string }>;
+  mode: "local" | "existing" | "new";
+  forgeAccountId: string | null;
+  forgeRepo: string | null;
+  baseBranch: string | null;
+  monitorIssues: boolean;
+}
+
+export interface ForgeAccount {
+  id: string;
+  provider: "github" | "gitea";
+  label: string;
+  baseUrl: string;
+  username: string;
+  hasToken: boolean;
+}
+
+export interface PipelineStage {
+  stage: string;
+  agentId: string;
+  status: "pass" | "fail" | "error";
+  report: string;
+  attempt: number;
+}
+
+export interface PipelineRun {
+  id: string;
+  projectId: string;
+  goal: string;
+  status: "running" | "done" | "failed" | "cancelled";
+  currentStage: string | null;
+  attempt: number;
+  issueNumber: number | null;
+  prBranch: string | null;
+  prNumber: number | null;
+  prUrl: string | null;
+  stages: PipelineStage[];
 }
 
 interface ProjectsState {
   projects: Project[];
-  loading: boolean;
+  forgeAccounts: ForgeAccount[];
+  /** runs keyed by project id */
+  runs: Record<string, PipelineRun[]>;
   error: string | null;
+  socketBound: boolean;
 
   load: () => Promise<void>;
+  loadForgeAccounts: () => Promise<void>;
+  loadRuns: (projectId: string) => Promise<void>;
+  bindSocket: () => void;
+
   create: (name: string) => Promise<void>;
   remove: (id: string) => Promise<void>;
   addMember: (projectId: string, agentId: string) => Promise<void>;
   removeMember: (projectId: string, agentId: string) => Promise<void>;
+
+  addForgeAccount: (input: {
+    provider: "github" | "gitea";
+    label: string;
+    baseUrl?: string;
+    token: string;
+    username?: string;
+  }) => Promise<void>;
+  deleteForgeAccount: (id: string) => Promise<void>;
+  setForge: (
+    projectId: string,
+    input: {
+      mode: "local" | "existing" | "new";
+      accountId?: string | null;
+      repo?: string | null;
+      baseBranch?: string | null;
+      monitorIssues?: boolean;
+    }
+  ) => Promise<string | null>;
+
+  startPipeline: (projectId: string, goal: string) => Promise<void>;
 }
 
 async function readError(res: Response): Promise<string> {
@@ -28,18 +94,40 @@ async function readError(res: Response): Promise<string> {
 
 export const useProjectsStore = create<ProjectsState>((set, get) => ({
   projects: [],
-  loading: false,
+  forgeAccounts: [],
+  runs: {},
   error: null,
+  socketBound: false,
 
   load: async () => {
-    set({ loading: true });
-    try {
-      const res = await apiFetch("/api/projects");
-      if (!res.ok) return;
-      set({ projects: (await res.json()) as Project[], error: null });
-    } finally {
-      set({ loading: false });
-    }
+    const res = await apiFetch("/api/projects");
+    if (res.ok) set({ projects: (await res.json()) as Project[], error: null });
+  },
+
+  loadForgeAccounts: async () => {
+    const res = await apiFetch("/api/forge-accounts");
+    if (res.ok) set({ forgeAccounts: (await res.json()) as ForgeAccount[] });
+  },
+
+  loadRuns: async (projectId) => {
+    const res = await apiFetch(`/api/projects/${projectId}/pipeline-runs`);
+    if (!res.ok) return;
+    const runs = (await res.json()) as PipelineRun[];
+    set((s) => ({ runs: { ...s.runs, [projectId]: runs } }));
+  },
+
+  bindSocket: () => {
+    if (get().socketBound) return;
+    set({ socketBound: true });
+    getSocket().on("pipeline:update", (run: PipelineRun) => {
+      set((s) => {
+        const list = s.runs[run.projectId] ?? [];
+        const next = list.some((r) => r.id === run.id)
+          ? list.map((r) => (r.id === run.id ? run : r))
+          : [run, ...list];
+        return { runs: { ...s.runs, [run.projectId]: next } };
+      });
+    });
   },
 
   create: async (name) => {
@@ -48,10 +136,7 @@ export const useProjectsStore = create<ProjectsState>((set, get) => ({
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ name }),
     });
-    if (!res.ok) {
-      set({ error: await readError(res) });
-      return;
-    }
+    if (!res.ok) return set({ error: await readError(res) });
     set({ error: null });
     await get().load();
   },
@@ -67,19 +152,57 @@ export const useProjectsStore = create<ProjectsState>((set, get) => ({
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ agentId }),
     });
-    if (!res.ok) {
-      set({ error: await readError(res) });
-      return;
-    }
-    set({ error: null });
+    if (!res.ok) return set({ error: await readError(res) });
     await get().load();
   },
 
   removeMember: async (projectId, agentId) => {
-    const res = await apiFetch(
-      `/api/projects/${projectId}/members/${encodeURIComponent(agentId)}`,
-      { method: "DELETE" }
-    );
+    const res = await apiFetch(`/api/projects/${projectId}/members/${encodeURIComponent(agentId)}`, {
+      method: "DELETE",
+    });
     if (res.ok) await get().load();
+  },
+
+  addForgeAccount: async (input) => {
+    const res = await apiFetch("/api/forge-accounts", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(input),
+    });
+    if (!res.ok) return set({ error: await readError(res) });
+    set({ error: null });
+    await get().loadForgeAccounts();
+  },
+
+  deleteForgeAccount: async (id) => {
+    const res = await apiFetch(`/api/forge-accounts/${id}`, { method: "DELETE" });
+    if (res.ok) await get().loadForgeAccounts();
+  },
+
+  setForge: async (projectId, input) => {
+    const res = await apiFetch(`/api/projects/${projectId}/forge`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(input),
+    });
+    if (!res.ok) {
+      const err = await readError(res);
+      set({ error: err });
+      return err;
+    }
+    set({ error: null });
+    await get().load();
+    return null;
+  },
+
+  startPipeline: async (projectId, goal) => {
+    const res = await apiFetch(`/api/projects/${projectId}/pipeline`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ goal }),
+    });
+    if (!res.ok) return set({ error: await readError(res) });
+    set({ error: null });
+    await get().loadRuns(projectId);
   },
 }));
