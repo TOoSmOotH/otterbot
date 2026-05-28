@@ -92,6 +92,20 @@ function ensureControlTables(sqlite: Database.Database) {
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
       repo_path TEXT NOT NULL,
+      mode TEXT NOT NULL DEFAULT 'local',
+      forge_account_id TEXT,
+      forge_repo TEXT,
+      base_branch TEXT,
+      monitor_issues INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL
+    )`,
+    `CREATE TABLE IF NOT EXISTS forge_accounts (
+      id TEXT PRIMARY KEY,
+      provider TEXT NOT NULL,
+      label TEXT NOT NULL,
+      base_url TEXT NOT NULL,
+      token TEXT NOT NULL,
+      username TEXT NOT NULL DEFAULT '',
       created_at TEXT NOT NULL
     )`,
     `CREATE TABLE IF NOT EXISTS project_members (
@@ -115,6 +129,9 @@ function ensureControlTables(sqlite: Database.Database) {
       status TEXT NOT NULL DEFAULT 'running',
       current_stage TEXT,
       attempt INTEGER NOT NULL DEFAULT 0,
+      pr_branch TEXT,
+      pr_number INTEGER,
+      pr_url TEXT,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     )`,
@@ -144,4 +161,18 @@ function ensureControlTables(sqlite: Database.Database) {
   if (!secretCols.has("scope")) {
     sqlite.exec(`ALTER TABLE agent_secrets ADD COLUMN scope TEXT NOT NULL DEFAULT 'broad'`);
   }
+
+  // Migration: projects grew forge fields (M3). Add any missing columns so
+  // projects created before this still load.
+  const projectCols = new Set(
+    (sqlite.prepare(`PRAGMA table_info(projects)`).all() as Array<{ name: string }>).map((c) => c.name)
+  );
+  const addProjectCol = (name: string, ddl: string) => {
+    if (!projectCols.has(name)) sqlite.exec(`ALTER TABLE projects ADD COLUMN ${ddl}`);
+  };
+  addProjectCol("mode", "mode TEXT NOT NULL DEFAULT 'local'");
+  addProjectCol("forge_account_id", "forge_account_id TEXT");
+  addProjectCol("forge_repo", "forge_repo TEXT");
+  addProjectCol("base_branch", "base_branch TEXT");
+  addProjectCol("monitor_issues", "monitor_issues INTEGER NOT NULL DEFAULT 0");
 }

@@ -22,7 +22,23 @@ export interface Project {
   name: string;
   /** Absolute path to the project's git working tree on the host. */
   repoPath: string;
+  /** Where the code lives. */
+  mode: "local" | "existing" | "new";
+  /** Forge account id (forge_accounts.id) when mode != local. */
+  forgeAccountId: string | null;
+  /** owner/name on the forge when mode != local. */
+  forgeRepo: string | null;
+  /** Base/integration branch PRs target. */
+  baseBranch: string | null;
+  /** Poll the forge for assigned issues to feed the pipeline. */
+  monitorIssues: boolean;
   createdAt: string;
+}
+
+/** Result of a host-side git operation. */
+export interface GitOpResult {
+  ok: boolean;
+  output: string;
 }
 
 /** Git identity stamped into a fresh repo so in-sandbox commits succeed. */
@@ -56,7 +72,26 @@ export class ProjectStore {
       .insert(controlSchema.projects)
       .values({ id, name: trimmed, repoPath, createdAt })
       .run();
-    return { id, name: trimmed, repoPath, createdAt };
+    return this.get(id)!;
+  }
+
+  /** Update a project's forge configuration. */
+  setForge(
+    projectId: string,
+    patch: Partial<
+      Pick<Project, "mode" | "forgeAccountId" | "forgeRepo" | "baseBranch" | "monitorIssues">
+    >
+  ): void {
+    this.control.db
+      .update(controlSchema.projects)
+      .set(patch)
+      .where(eq(controlSchema.projects.id, projectId))
+      .run();
+  }
+
+  /** Projects with issue-monitoring enabled (for the poller). */
+  listMonitored(): Project[] {
+    return this.list().filter((p) => p.monitorIssues && p.forgeAccountId && p.forgeRepo);
   }
 
   list(): Project[] {
@@ -186,6 +221,57 @@ export class ProjectStore {
       .delete(controlSchema.projectTeam)
       .where(eq(controlSchema.projectTeam.projectId, projectId))
       .run();
+  }
+
+  // --- Host-side git operations (credentials never enter the sandbox) -------
+
+  /**
+   * Replace the project's working tree with a fresh clone of `authedUrl` (an
+   * https URL with an embedded token). Used when a project is backed by an
+   * existing forge repo. The tokened remote is rewritten to the plain URL after
+   * cloning so it isn't persisted in `.git/config`.
+   */
+  cloneInto(repoPath: string, authedUrl: string, plainUrl: string): GitOpResult {
+    if (existsSync(repoPath)) rmSync(repoPath, { recursive: true, force: true });
+    mkdirSync(repoPath, { recursive: true });
+    const clone = this.git(repoPath, ["clone", authedUrl, "."]);
+    if (!clone.ok) return clone;
+    this.git(repoPath, ["remote", "set-url", "origin", plainUrl]);
+    this.git(repoPath, ["config", "user.name", GIT_USER_NAME]);
+    this.git(repoPath, ["config", "user.email", GIT_USER_EMAIL]);
+    return clone;
+  }
+
+  /** Create (or switch to) a branch. */
+  ensureBranch(repoPath: string, branch: string): GitOpResult {
+    const exists = this.git(repoPath, ["rev-parse", "--verify", branch]).ok;
+    return this.git(repoPath, exists ? ["checkout", branch] : ["checkout", "-b", branch]);
+  }
+
+  /** Stage everything and commit; ok:false output "nothing to commit" when clean. */
+  commitAll(repoPath: string, message: string): GitOpResult {
+    this.git(repoPath, ["add", "-A"]);
+    const status = this.git(repoPath, ["status", "--porcelain"]);
+    if (status.ok && status.output.trim() === "") {
+      return { ok: false, output: "nothing to commit" };
+    }
+    return this.git(repoPath, ["commit", "-m", message]);
+  }
+
+  /** Push a branch to `authedUrl` (tokened https), without persisting the token. */
+  push(repoPath: string, authedUrl: string, branch: string): GitOpResult {
+    return this.git(repoPath, ["push", authedUrl, `HEAD:refs/heads/${branch}`]);
+  }
+
+  /** Run a git command in a repo, capturing combined output. */
+  private git(repoPath: string, args: string[]): GitOpResult {
+    const r = spawnSync("git", ["-C", repoPath, ...args], {
+      timeout: 120_000,
+      encoding: "utf8",
+    });
+    const output = `${r.stdout ?? ""}${r.stderr ?? ""}`.trim();
+    if (r.error) return { ok: false, output: r.error.message };
+    return { ok: r.status === 0, output };
   }
 
   /** `git init` a fresh repo and stamp a default identity for in-sandbox commits. */

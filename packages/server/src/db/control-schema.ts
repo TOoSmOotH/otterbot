@@ -88,6 +88,23 @@ export const appSettings = sqliteTable("app_settings", {
 });
 
 /**
+ * A forge account (GitHub or Gitea) the instance can act as. Instance-wide,
+ * not per-agent — projects reference one by id for clone/push/PR + monitoring.
+ * The token is stored in the (optionally encrypted) control database.
+ */
+export const forgeAccounts = sqliteTable("forge_accounts", {
+  id: text("id").primaryKey(),
+  provider: text("provider", { enum: ["github", "gitea"] }).notNull(),
+  label: text("label").notNull(),
+  baseUrl: text("base_url").notNull(),
+  token: text("token").notNull(),
+  username: text("username").notNull().default(""),
+  createdAt: text("created_at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+});
+
+/**
  * A collaborative project: a single git working tree that several agents share.
  * The tree lives at `repoPath` (under `data/projects/<id>/repo`) and is bound,
  * writable, into each member agent's sandbox at `/project`, so the members edit
@@ -99,6 +116,16 @@ export const projects = sqliteTable("projects", {
   name: text("name").notNull(),
   /** Absolute path to the project's git working tree on the host. */
   repoPath: text("repo_path").notNull(),
+  /** Where the code lives: local-only, or a repo on a forge. */
+  mode: text("mode", { enum: ["local", "existing", "new"] }).notNull().default("local"),
+  /** Forge account id (forge_accounts.id) when mode != local. */
+  forgeAccountId: text("forge_account_id"),
+  /** owner/name on the forge when mode != local. */
+  forgeRepo: text("forge_repo"),
+  /** Base/integration branch PRs target (default branch when blank). */
+  baseBranch: text("base_branch"),
+  /** Poll the forge for assigned issues to feed the pipeline. */
+  monitorIssues: integer("monitor_issues", { mode: "boolean" }).notNull().default(false),
   createdAt: text("created_at")
     .notNull()
     .$defaultFn(() => new Date().toISOString()),
@@ -146,6 +173,11 @@ export const pipelineRuns = sqliteTable("pipeline_runs", {
   currentStage: text("current_stage"),
   /** How many times the run has been kicked back to the coder. */
   attempt: integer("attempt").notNull().default(0),
+  /** The feature branch the run pushed (forge-backed projects). */
+  prBranch: text("pr_branch"),
+  /** The opened PR/MR number + URL, once published. */
+  prNumber: integer("pr_number"),
+  prUrl: text("pr_url"),
   createdAt: text("created_at")
     .notNull()
     .$defaultFn(() => new Date().toISOString()),

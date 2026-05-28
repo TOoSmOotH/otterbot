@@ -37,6 +37,9 @@ export interface PipelineRun {
   status: "running" | "done" | "failed" | "cancelled";
   currentStage: string | null;
   attempt: number;
+  prBranch: string | null;
+  prNumber: number | null;
+  prUrl: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -199,6 +202,21 @@ export class PipelineManager {
 
   cancel(runId: string): void {
     this.finish(runId, "cancelled");
+  }
+
+  /** Record the branch/PR a run published (set by the orchestrator's publish step). */
+  setPrInfo(runId: string, info: { branch?: string; number?: number; url?: string }): void {
+    this.deps.control.db
+      .update(controlSchema.pipelineRuns)
+      .set({
+        ...(info.branch !== undefined ? { prBranch: info.branch } : {}),
+        ...(info.number !== undefined ? { prNumber: info.number } : {}),
+        ...(info.url !== undefined ? { prUrl: info.url } : {}),
+        updatedAt: new Date().toISOString(),
+      })
+      .where(eq(controlSchema.pipelineRuns.id, runId))
+      .run();
+    this.emit(runId);
   }
 
   private setCurrentStage(runId: string, stage: string): void {

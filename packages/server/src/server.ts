@@ -362,6 +362,66 @@ export async function buildServer(
     return run;
   });
 
+  // --- Forge accounts (GitHub / Gitea) ---
+  app.get("/api/forge-accounts", async () => orch.listForgeAccounts());
+
+  app.post<{
+    Body: { provider?: "github" | "gitea"; label?: string; baseUrl?: string; token?: string; username?: string };
+  }>("/api/forge-accounts", async (req, reply) => {
+    const b = req.body ?? {};
+    if ((b.provider !== "github" && b.provider !== "gitea") || !b.token) {
+      reply.code(400);
+      return { error: "provider (github|gitea) and token are required" };
+    }
+    try {
+      return orch.addForgeAccount({
+        provider: b.provider,
+        label: b.label ?? b.provider,
+        baseUrl: b.baseUrl,
+        token: b.token,
+        username: b.username,
+      });
+    } catch (err) {
+      reply.code(400);
+      return { error: err instanceof Error ? err.message : String(err) };
+    }
+  });
+
+  app.delete<{ Params: { id: string } }>("/api/forge-accounts/:id", async (req) => {
+    orch.deleteForgeAccount(req.params.id);
+    return { ok: true };
+  });
+
+  // Configure a project's forge backing (clones/creates the repo as needed).
+  app.put<{
+    Params: { id: string };
+    Body: {
+      mode?: "local" | "existing" | "new";
+      accountId?: string | null;
+      repo?: string | null;
+      baseBranch?: string | null;
+      monitorIssues?: boolean;
+    };
+  }>("/api/projects/:id/forge", async (req, reply) => {
+    const mode = req.body?.mode ?? "local";
+    const result = await orch.setProjectForge(req.params.id, { ...req.body, mode });
+    if (!result.ok) {
+      reply.code(400);
+      return { error: result.error };
+    }
+    return result;
+  });
+
+  // Manually publish a run (push branch + open PR/MR).
+  app.post<{ Params: { runId: string } }>("/api/pipeline-runs/:runId/publish", async (req, reply) => {
+    const result = await orch.publishRun(req.params.runId);
+    if (!result.ok) {
+      reply.code(400);
+      return { error: result.error };
+    }
+    return result;
+  });
+
   app.post<{ Params: { id: string }; Body: { agentId?: string } }>(
     "/api/projects/:id/members",
     async (req, reply) => {

@@ -42,6 +42,8 @@ import {
   PipelineManager,
   type PipelineRunView,
 } from "../pipeline/pipeline-manager.js";
+import { ForgeService } from "../forge/forge-service.js";
+import type { ForgeProvider } from "../forge/forge.js";
 import { SecretsStore, type ScopedSecret } from "../secrets/secrets-store.js";
 import {
   readSkillConfig,
@@ -433,8 +435,11 @@ export class Orchestrator {
   private readonly scheduler: Scheduler;
   private readonly codeRef: CodeReferenceService;
   private readonly projects: ProjectStore;
+  private readonly forge: ForgeService;
   private readonly pipeline: PipelineManager;
   private readonly pipelineListeners = new Set<(run: PipelineRunView) => void>();
+  /** Run ids already published (PR opened) — guards the publish-on-done hook. */
+  private readonly publishedRuns = new Set<string>();
   private readonly secrets: SecretsStore;
   private readonly services: AgentServices;
   /** Per-agent chat connectors, keyed by `${agentId}:${service}`. */
@@ -472,6 +477,7 @@ export class Orchestrator {
       },
     });
     this.projects = new ProjectStore(control, resolve(cfg.dataDir, "projects"));
+    this.forge = new ForgeService(control);
     this.pipeline = new PipelineManager({
       control,
       resolveAgent: (projectId, role) => this.projects.agentForRole(projectId, role),
@@ -494,6 +500,13 @@ export class Orchestrator {
         return { report: res.body };
       },
       onUpdate: (run) => {
+        // Publish (push branch + open PR) once, when a forge-backed run finishes.
+        if (run.status === "done" && !this.publishedRuns.has(run.id)) {
+          this.publishedRuns.add(run.id);
+          void this.publishRun(run.id).catch((err) =>
+            console.error(`[pipeline] publish failed for run ${run.id}:`, err)
+          );
+        }
         for (const listener of this.pipelineListeners) listener(run);
       },
     });
@@ -1310,6 +1323,124 @@ export class Orchestrator {
   onPipelineUpdate(listener: (run: PipelineRunView) => void): () => void {
     this.pipelineListeners.add(listener);
     return () => this.pipelineListeners.delete(listener);
+  }
+
+  // --- Forge (GitHub / Gitea) ---------------------------------------------
+
+  listForgeAccounts() {
+    return this.forge.listAccountsMasked();
+  }
+
+  addForgeAccount(input: {
+    provider: ForgeProvider;
+    label: string;
+    baseUrl?: string;
+    token: string;
+    username?: string;
+  }) {
+    const account = this.forge.addAccount(input);
+    const { token: _t, ...masked } = account;
+    return masked;
+  }
+
+  deleteForgeAccount(id: string): void {
+    this.forge.deleteAccount(id);
+  }
+
+  /**
+   * Configure a project's forge backing. For "existing", clones the repo into
+   * the project's tree now; for "new", creates the repo on the forge then
+   * clones it. "local" clears forge config and keeps the local git tree.
+   */
+  async setProjectForge(
+    projectId: string,
+    input: {
+      mode: "local" | "existing" | "new";
+      accountId?: string | null;
+      repo?: string | null;
+      baseBranch?: string | null;
+      monitorIssues?: boolean;
+    }
+  ): Promise<{ ok: boolean; error?: string; repo?: string; defaultBranch?: string }> {
+    const project = this.projects.get(projectId);
+    if (!project) return { ok: false, error: "Unknown project" };
+
+    if (input.mode === "local") {
+      this.projects.setForge(projectId, {
+        mode: "local",
+        forgeAccountId: null,
+        forgeRepo: null,
+        monitorIssues: false,
+      });
+      return { ok: true };
+    }
+
+    const forge = this.forge.forgeForAccount(input.accountId);
+    if (!forge) return { ok: false, error: "Unknown or missing forge account" };
+    if (!input.repo) return { ok: false, error: "A repo (owner/name) is required" };
+
+    try {
+      const repoInfo =
+        input.mode === "new"
+          ? await forge.createRepo(input.repo)
+          : await forge.getRepo(input.repo);
+      const fullRepo = `${repoInfo.owner}/${repoInfo.name}`;
+      const clone = this.projects.cloneInto(
+        project.repoPath,
+        forge.authedCloneUrl(fullRepo),
+        repoInfo.cloneUrl
+      );
+      if (!clone.ok) return { ok: false, error: `clone failed: ${clone.output}` };
+      this.projects.setForge(projectId, {
+        mode: input.mode,
+        forgeAccountId: input.accountId ?? null,
+        forgeRepo: fullRepo,
+        baseBranch: input.baseBranch ?? repoInfo.defaultBranch,
+        monitorIssues: input.monitorIssues ?? false,
+      });
+      return { ok: true, repo: fullRepo, defaultBranch: repoInfo.defaultBranch };
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  }
+
+  /**
+   * Commit the project tree, push a run branch, and open a PR/MR. Called when a
+   * forge-backed pipeline run completes; safe to call manually too.
+   */
+  async publishRun(runId: string): Promise<{ ok: boolean; error?: string; prUrl?: string }> {
+    const run = this.pipeline.get(runId);
+    if (!run) return { ok: false, error: "Unknown run" };
+    const project = this.projects.get(run.projectId);
+    if (!project || project.mode === "local" || !project.forgeRepo) {
+      return { ok: false, error: "Project is not forge-backed" };
+    }
+    const forge = this.forge.forgeForAccount(project.forgeAccountId);
+    if (!forge) return { ok: false, error: "Forge account missing" };
+
+    const branch = run.prBranch ?? `otterbot/run-${runId.slice(0, 8)}`;
+    const ensure = this.projects.ensureBranch(project.repoPath, branch);
+    if (!ensure.ok) return { ok: false, error: `branch failed: ${ensure.output}` };
+    this.projects.commitAll(project.repoPath, `otterbot: ${run.goal}`.slice(0, 72));
+    const push = this.projects.push(project.repoPath, forge.authedCloneUrl(project.forgeRepo), branch);
+    if (!push.ok) return { ok: false, error: `push failed: ${push.output}` };
+
+    this.pipeline.setPrInfo(runId, { branch });
+    try {
+      const base = project.baseBranch || (await forge.getRepo(project.forgeRepo)).defaultBranch;
+      const pr = await forge.openPullRequest({
+        repo: project.forgeRepo,
+        title: `otterbot: ${run.goal}`.slice(0, 120),
+        body: `Automated by the otterbot pipeline (run ${runId}).\n\nGoal:\n${run.goal}`,
+        head: branch,
+        base,
+      });
+      this.pipeline.setPrInfo(runId, { number: pr.number, url: pr.htmlUrl });
+      return { ok: true, prUrl: pr.htmlUrl };
+    } catch (err) {
+      // The branch is pushed even if PR creation fails (e.g. one already open).
+      return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    }
   }
 
   // --- Team provisioning ---------------------------------------------------
