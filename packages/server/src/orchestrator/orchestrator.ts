@@ -481,8 +481,11 @@ export class Orchestrator {
     this.pipeline = new PipelineManager({
       control,
       resolveAgent: (projectId, role) => this.projects.agentForRole(projectId, role),
-      runStage: async ({ projectId, stage, agentId, goal, priorReports }) => {
+      runStage: async ({ projectId, runId, stage, agentId, goal, priorReports }) => {
         const fromId = this.projects.agentForRole(projectId, "pm") ?? "coo";
+        // The tester needs the code reachable on a VM: for a forge-backed
+        // project, push the run branch first and tell it how to fetch the code.
+        const testerContext = stage === "tester" ? this.prepareTesterContext(projectId, runId) : "";
         const res = await this.bus.request(
           {
             id: nanoid(),
@@ -492,7 +495,7 @@ export class Orchestrator {
             threadId: nanoid(),
             correlationId: null,
             rootSpawnId: null,
-            body: buildStagePrompt(stage, goal, priorReports),
+            body: buildStagePrompt(stage, goal, priorReports) + testerContext,
             transport: "local",
           },
           STAGE_TIMEOUT_MS
@@ -1402,6 +1405,56 @@ export class Orchestrator {
     } catch (err) {
       return { ok: false, error: err instanceof Error ? err.message : String(err) };
     }
+  }
+
+  /**
+   * Before the tester stage runs, make the project code reachable for an
+   * end-to-end run on a VM. For a forge-backed project, commit + push the run
+   * branch and return guidance (repo, branch, clone URL) for the tester to hand
+   * to the SSH agent. For a local project, return a note that the tree is only
+   * at /project. Best-effort: failures are reported in the returned text, not
+   * thrown, so the stage can still proceed/report.
+   */
+  private prepareTesterContext(projectId: string, runId: string): string {
+    const project = this.projects.get(projectId);
+    if (!project) return "";
+    if (project.mode === "local" || !project.forgeRepo) {
+      return (
+        `\n\n## End-to-end testing\nThis is a local-only project; the code lives at ` +
+        `/project. Delegate to the Proxmox Service agent to prepare a clean VM and to ` +
+        `the SSH Service agent to run the test suite against a checkout of /project ` +
+        `(the code is not on a remote, so the VM must reach it by a means your SSH host ` +
+        `is configured for). End with VERDICT: PASS or VERDICT: FAIL.`
+      );
+    }
+    const forge = this.forge.forgeForAccount(project.forgeAccountId);
+    if (!forge) return "";
+    const branch = `otterbot/run-${runId.slice(0, 8)}`;
+    let pushNote = "";
+    const ensure = this.projects.ensureBranch(project.repoPath, branch);
+    if (ensure.ok) {
+      this.projects.commitAll(project.repoPath, `otterbot: pipeline run ${runId.slice(0, 8)}`);
+      const push = this.projects.push(project.repoPath, forge.authedCloneUrl(project.forgeRepo), branch);
+      pushNote = push.ok ? "pushed" : `push failed (${push.output})`;
+      if (push.ok) this.pipeline.setPrInfo(runId, { branch });
+    } else {
+      pushNote = `branch failed (${ensure.output})`;
+    }
+    let cloneUrl = "";
+    try {
+      cloneUrl = forge.authedCloneUrl(project.forgeRepo);
+    } catch {
+      /* ignore */
+    }
+    return (
+      `\n\n## End-to-end testing\nThe project code is on ${project.forgeRepo} ` +
+      `(${project.mode === "new" ? "new repo" : "existing repo"}), branch \`${branch}\` ` +
+      `(${pushNote}). Delegate to the Proxmox Service agent to roll back to a clean ` +
+      `snapshot and start the test VM, then to the SSH Service agent to clone branch ` +
+      `\`${branch}\`, install, and run the test suite, and report results. (Clone URL ` +
+      `with credentials: ${cloneUrl || "n/a"} — pass it to the SSH agent if the VM needs ` +
+      `auth.) End with VERDICT: PASS or VERDICT: FAIL.`
+    );
   }
 
   /**
