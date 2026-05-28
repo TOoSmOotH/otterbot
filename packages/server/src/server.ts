@@ -300,19 +300,45 @@ export async function buildServer(
   // --- Projects (shared coding working trees) ---
   app.get("/api/projects", async () => orch.listProjects());
 
-  app.post<{ Body: { name?: string } }>("/api/projects", async (req, reply) => {
+  app.post<{
+    Body: { name?: string; team?: Record<string, { modelId?: string; tool?: string }> };
+  }>("/api/projects", async (req, reply) => {
     const name = req.body?.name?.trim();
     if (!name) {
       reply.code(400);
       return { error: "name is required" };
     }
     try {
-      return orch.createProject(name);
+      const project = orch.createProject(name);
+      // The wizard may provision a customized team in the same call.
+      if (req.body?.team) orch.provisionProjectTeam(project.id, req.body.team);
+      return { ...project, team: orch.getProjectTeam(project.id) };
     } catch (err) {
       reply.code(400);
       return { error: err instanceof Error ? err.message : String(err) };
     }
   });
+
+  // --- Shared service agents (Proxmox / SSH) ---
+  app.get("/api/service-agents", async () => orch.listServiceAgents());
+
+  app.post<{ Body: { kind?: "proxmox" | "ssh"; modelId?: string } }>(
+    "/api/service-agents",
+    async (req, reply) => {
+      const kind = req.body?.kind;
+      if (kind !== "proxmox" && kind !== "ssh") {
+        reply.code(400);
+        return { error: "kind must be 'proxmox' or 'ssh'" };
+      }
+      try {
+        const profile = orch.createServiceAgent(kind, { modelId: req.body?.modelId });
+        return { id: profile.id, displayName: profile.displayName };
+      } catch (err) {
+        reply.code(400);
+        return { error: err instanceof Error ? err.message : String(err) };
+      }
+    }
+  );
 
   app.delete<{ Params: { id: string } }>("/api/projects/:id", async (req) => {
     await orch.deleteProject(req.params.id);
@@ -321,9 +347,12 @@ export async function buildServer(
 
   // (Re)provision a project's specialist team. Creating a project does this
   // automatically; this is for re-running it after a change.
-  app.post<{ Params: { id: string } }>("/api/projects/:id/team", async (req, reply) => {
+  app.post<{
+    Params: { id: string };
+    Body: { team?: Record<string, { modelId?: string; tool?: string }> };
+  }>("/api/projects/:id/team", async (req, reply) => {
     try {
-      orch.provisionProjectTeam(req.params.id);
+      orch.provisionProjectTeam(req.params.id, req.body?.team ?? {});
       return { ok: true, team: orch.getProjectTeam(req.params.id) };
     } catch (err) {
       reply.code(400);

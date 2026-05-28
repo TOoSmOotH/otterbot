@@ -128,3 +128,19 @@ to reach the two service agents by id.`,
 export function teamAgentId(projectId: string, role: string): string {
   return `proj-${projectId}-${role}`;
 }
+
+/** Per-role overrides supplied by the create-team wizard. */
+export interface TeamRoleConfig {
+  /** Chat model id for this role (defaults to the global default). */
+  modelId?: string;
+  /** Pinned coding CLI for a coding role (claude | codex | gemini | opencode). */
+  tool?: string;
+}
+
+/** Wizard team config, keyed by role name. */
+export type TeamConfig = Record<string, TeamRoleConfig>;
+
+/** Map a service kind to its agent spec. */
+export function serviceSpecForKind(kind: string): ServiceAgentSpec | undefined {
+  return SERVICE_AGENTS.find((s) => s.capabilities.some((c) => c.catalogId === kind));
+}

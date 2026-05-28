@@ -57,6 +57,8 @@ import {
   SERVICE_AGENTS,
   TEAM_ROLES,
   teamAgentId,
+  serviceSpecForKind,
+  type TeamConfig,
 } from "../teams/team-template.js";
 import { suggestScopeForKey } from "../secrets/shell-secrets.js";
 import type { CredentialScope } from "@otterbot/shared";
@@ -1029,7 +1031,6 @@ export class Orchestrator {
     this.scheduler.start();
     this.codeRef.start();
     // Ensure the shared infra service agents (proxmox, ssh) exist.
-    this.ensureServiceAgents();
     // Poll forges for assigned issues + PR/CI signals every 5 minutes.
     this.forgeMonitor.start(5 * 60_000);
   }
@@ -1308,10 +1309,13 @@ export class Orchestrator {
     }));
   }
 
-  createProject(name: string): { id: string; name: string; repoPath: string; createdAt: string } {
-    const project = this.projects.create(name);
-    this.provisionProjectTeam(project.id);
-    return project;
+  /**
+   * Create a project (an empty shared git tree). The specialist team is NOT
+   * auto-provisioned — the create-team wizard calls `provisionProjectTeam` with
+   * the user's chosen per-role models/tools.
+   */
+  createProject(name: string) {
+    return this.projects.create(name);
   }
 
   async deleteProject(id: string): Promise<void> {
@@ -1542,54 +1546,86 @@ export class Orchestrator {
     return true;
   }
 
-  /** Create the shared, instance-wide service agents (proxmox, ssh) if absent. */
-  ensureServiceAgents(): void {
-    for (const spec of SERVICE_AGENTS) {
-      if (this.profiles.exists(spec.id) || this.contexts.has(spec.id)) continue;
-      this.createAgent({
-        id: spec.id,
-        displayName: spec.displayName,
-        persona: spec.persona,
-        canRunShell: spec.canRunShell,
-      });
-      for (const cap of spec.capabilities) {
-        if (this.installCapability(spec.id, cap.catalogId) && cap.config) {
-          this.applySkillConfig(spec.id, cap.catalogId, cap.config);
-        }
-      }
-    }
+  /** The shared service agents (proxmox/ssh) that currently exist. */
+  listServiceAgents(): Array<{ id: string; kind: string; displayName: string }> {
+    return SERVICE_AGENTS.filter((s) => this.contexts.has(s.id)).map((s) => ({
+      id: s.id,
+      kind: s.capabilities[0]?.catalogId ?? "",
+      displayName: s.displayName,
+    }));
   }
 
-  /** Provision a project's dedicated specialist team (idempotent per role). */
-  provisionProjectTeam(projectId: string): void {
+  /**
+   * Create a shared, instance-wide service agent on demand (from the wizard).
+   * Idempotent: returns the existing agent if already present.
+   */
+  createServiceAgent(kind: "proxmox" | "ssh", opts: { modelId?: string } = {}): AgentProfile {
+    const spec = serviceSpecForKind(kind);
+    if (!spec) throw new Error(`Unknown service kind: ${kind}`);
+    const existing = this.contexts.get(spec.id);
+    if (existing) return existing.profile;
+    const model = this.modelConfigFor(opts.modelId);
+    const profile = this.createAgent({
+      id: spec.id,
+      displayName: spec.displayName,
+      persona: spec.persona,
+      canRunShell: spec.canRunShell,
+      model,
+    });
+    for (const cap of spec.capabilities) {
+      if (this.installCapability(spec.id, cap.catalogId) && cap.config) {
+        this.applySkillConfig(spec.id, cap.catalogId, cap.config);
+      }
+    }
+    return profile;
+  }
+
+  /**
+   * Provision a project's dedicated specialist team (idempotent per role). The
+   * optional `config` lets the wizard set each role's chat model and pinned
+   * coding CLI. The tester is wired to whichever shared service agents already
+   * exist (create them via the wizard first to enable e2e).
+   */
+  provisionProjectTeam(projectId: string, config: TeamConfig = {}): void {
     const project = this.projects.get(projectId);
     if (!project) throw new Error(`Unknown project: ${projectId}`);
-    this.ensureServiceAgents();
     for (const spec of TEAM_ROLES) {
       const id = teamAgentId(projectId, spec.role);
       if (this.profiles.exists(id) || this.contexts.has(id)) {
         this.projects.setTeamRole(projectId, spec.role, id);
         continue;
       }
-      const allowedPeers = (spec.peerServices ?? []).map((agentId) => ({
-        agentId,
-        shareMemory: false,
-      }));
+      const rc = config[spec.role] ?? {};
+      // Only wire peers to service agents that actually exist right now.
+      const allowedPeers = (spec.peerServices ?? [])
+        .filter((agentId) => this.contexts.has(agentId))
+        .map((agentId) => ({ agentId, shareMemory: false }));
       this.createAgent({
         id,
         displayName: `${project.name} · ${spec.displayNameSuffix}`,
         persona: spec.persona,
         canRunShell: spec.canRunShell,
         allowedPeers,
+        model: this.modelConfigFor(rc.modelId),
       });
       for (const cap of spec.capabilities) {
-        if (this.installCapability(id, cap.catalogId) && cap.config) {
-          this.applySkillConfig(id, cap.catalogId, cap.config);
-        }
+        if (!this.installCapability(id, cap.catalogId)) continue;
+        // Coding roles: merge the wizard's pinned tool over the spec default.
+        const capConfig =
+          cap.catalogId === "coding-cli"
+            ? { ...(cap.config ?? {}), ...(rc.tool ? { pinnedTool: rc.tool } : {}) }
+            : cap.config;
+        if (capConfig) this.applySkillConfig(id, cap.catalogId, capConfig);
       }
       this.projects.addMember(projectId, id);
       this.projects.setTeamRole(projectId, spec.role, id);
     }
+  }
+
+  /** Build a model config from a chat model id, inheriting the default embedding. */
+  private modelConfigFor(chatModelId?: string): AgentProfile["model"] | undefined {
+    if (!chatModelId) return undefined;
+    return { chat: chatModelId, embedding: this.getGlobalSettings().defaultEmbeddingModelId };
   }
 
   /** Add an agent to a project. Throws if the project or agent is unknown. */

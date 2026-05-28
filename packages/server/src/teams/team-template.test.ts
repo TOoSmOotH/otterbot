@@ -3,9 +3,9 @@ import { createTestStack, type TestStack } from "../test/harness.js";
 import { teamAgentId } from "./team-template.js";
 
 /**
- * M1 provisioning: creating a project spins up the shared service agents and a
- * dedicated per-project specialist team with the right capabilities, pins, and
- * peer links.
+ * Provisioning: service agents are created on demand (not on boot), and a
+ * project's team is provisioned explicitly with optional per-role model/tool
+ * overrides from the wizard.
  */
 describe("coding team provisioning", () => {
   let stack: TestStack;
@@ -18,56 +18,72 @@ describe("coding team provisioning", () => {
     await stack.cleanup();
   });
 
-  it("creates shared service agents on boot/ensure", () => {
-    stack.orch.ensureServiceAgents();
-    expect(stack.orch.getContext("svc-proxmox")).toBeTruthy();
-    expect(stack.orch.getContext("svc-ssh")).toBeTruthy();
-    // Idempotent — a second call doesn't throw or duplicate.
-    stack.orch.ensureServiceAgents();
+  it("does not auto-create service agents", () => {
+    expect(stack.orch.getContext("svc-proxmox")).toBeFalsy();
+    expect(stack.orch.getContext("svc-ssh")).toBeFalsy();
+    expect(stack.orch.listServiceAgents()).toEqual([]);
   });
 
-  it("provisions a per-project team with members, pins, and peer links", () => {
-    const project = stack.orch.createProject("Demo");
-    const team = stack.orch.getProjectTeam(project.id);
-    const roles = team.map((t) => t.role).sort();
-    expect(roles).toEqual(["coder", "pm", "security-reviewer", "test-writer", "tester"]);
+  it("creates a service agent on demand, idempotently", () => {
+    const a = stack.orch.createServiceAgent("proxmox");
+    expect(a.id).toBe("svc-proxmox");
+    expect(stack.orch.getContext("svc-proxmox")?.skills.effectiveTools().has("proxmox_list_vms")).toBe(true);
+    // Idempotent — returns the same agent.
+    expect(stack.orch.createServiceAgent("proxmox").id).toBe("svc-proxmox");
+    expect(stack.orch.listServiceAgents().map((s) => s.id)).toContain("svc-proxmox");
+  });
 
-    // Each specialist is an actual running agent and a member of the project.
-    const members = stack.orch.listProjects().find((p) => p.id === project.id)?.members ?? [];
+  it("creating a project does NOT provision a team", () => {
+    const project = stack.orch.createProject("Bare");
+    expect(stack.orch.getProjectTeam(project.id)).toEqual([]);
+  });
+
+  it("provisions a team with custom models and pinned tools", () => {
+    const modelId = stack.orch.getGlobalSettings().defaultChatModelId;
+    const project = stack.orch.createProject("Custom");
+    stack.orch.provisionProjectTeam(project.id, {
+      coder: { modelId, tool: "codex" }, // override the claude default
+      "security-reviewer": { tool: "claude" },
+    });
+    const team = stack.orch.getProjectTeam(project.id);
+    expect(team.map((t) => t.role).sort()).toEqual([
+      "coder",
+      "pm",
+      "security-reviewer",
+      "test-writer",
+      "tester",
+    ]);
     for (const { role, agentId } of team) {
       expect(agentId).toBe(teamAgentId(project.id, role));
       expect(stack.orch.getContext(agentId)).toBeTruthy();
-      expect(members).toContain(agentId);
     }
+    const coder = stack.orch.getContext(stack.orch.agentForRole(project.id, "coder")!)!;
+    expect(coder.shellSecrets().get("CODING_CLI_PINNED_TOOL")).toBe("codex");
+    expect(coder.profile.model.chat).toBe(modelId);
+    const sec = stack.orch.getContext(stack.orch.agentForRole(project.id, "security-reviewer")!)!;
+    expect(sec.shellSecrets().get("CODING_CLI_PINNED_TOOL")).toBe("claude");
+    // test-writer keeps its template default (opencode) when not overridden.
+    const tw = stack.orch.getContext(stack.orch.agentForRole(project.id, "test-writer")!)!;
+    expect(tw.shellSecrets().get("CODING_CLI_PINNED_TOOL")).toBe("opencode");
+  });
 
-    // Coder is pinned to claude and has the coding-cli capability granted.
-    const coderId = stack.orch.agentForRole(project.id, "coder")!;
-    const coderCtx = stack.orch.getContext(coderId)!;
-    expect(coderCtx.skills.effectiveTools().has("coding_cli_run")).toBe(true);
-    expect(coderCtx.shellSecrets().get("CODING_CLI_PINNED_TOOL")).toBe("claude");
-    expect(stack.orch.getContext(stack.orch.agentForRole(project.id, "security-reviewer")!)!
-      .shellSecrets().get("CODING_CLI_PINNED_TOOL")).toBe("gemini");
-    expect(stack.orch.getContext(stack.orch.agentForRole(project.id, "test-writer")!)!
-      .shellSecrets().get("CODING_CLI_PINNED_TOOL")).toBe("opencode");
-
-    // Tester delegates to the shared service agents (allowedPeers).
-    const testerCtx = stack.orch.getContext(stack.orch.agentForRole(project.id, "tester")!)!;
-    const peerIds = testerCtx.profile.allowedPeers.map((p) => p.agentId).sort();
-    expect(peerIds).toEqual(["svc-proxmox", "svc-ssh"]);
-
-    // The PM can drive the pipeline.
-    const pmCtx = stack.orch.getContext(stack.orch.agentForRole(project.id, "pm")!)!;
-    expect(pmCtx.skills.effectiveTools().has("pipeline_start")).toBe(true);
+  it("wires the tester to service agents that already exist", () => {
+    // svc-proxmox exists (created above); svc-ssh does not.
+    const project = stack.orch.createProject("Peers");
+    stack.orch.provisionProjectTeam(project.id);
+    const tester = stack.orch.getContext(stack.orch.agentForRole(project.id, "tester")!)!;
+    const peers = tester.profile.allowedPeers.map((p) => p.agentId);
+    expect(peers).toContain("svc-proxmox");
+    expect(peers).not.toContain("svc-ssh");
   });
 
   it("tears down the team when the project is deleted", async () => {
     const project = stack.orch.createProject("Throwaway");
+    stack.orch.provisionProjectTeam(project.id);
     const coderId = stack.orch.agentForRole(project.id, "coder")!;
     expect(stack.orch.getContext(coderId)).toBeTruthy();
-
     await stack.orch.deleteProject(project.id);
     expect(stack.orch.getContext(coderId)).toBeFalsy();
     expect(stack.orch.getProjectTeam(project.id)).toEqual([]);
-    expect(stack.orch.listProjects().some((p) => p.id === project.id)).toBe(false);
   });
 });

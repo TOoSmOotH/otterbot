@@ -4,7 +4,7 @@ import { Activity, FolderGit2, MessageSquare, Network, Settings, Sliders } from 
 import type { LucideIcon } from "lucide-react";
 import { AgentRoster } from "./components/agents/AgentRoster";
 import { AgentChat } from "./components/chat/AgentChat";
-import { AgentEditor } from "./components/agents/AgentEditor";
+import { AgentWizard } from "./components/agents/AgentWizard";
 import { AgentStudio } from "./components/agents/AgentStudio";
 import { ActivityView } from "./components/agents/ActivityView";
 import { ProjectsView } from "./components/agents/ProjectsView";
@@ -154,7 +154,7 @@ function AuthedApp() {
         </div>
       </div>
 
-      {createOpen && <AgentEditor agentId={null} onClose={() => setCreateOpen(false)} />}
+      {createOpen && <AgentWizard onClose={() => setCreateOpen(false)} />}
       {codingView && (
         <TerminalModal
           kind="coding"
