@@ -45,7 +45,12 @@ import {
   deriveSkillCredentials,
   type SkillConfigView,
 } from "../skills/skill-config.js";
-import { BUILTIN_CAPABILITIES } from "../skills/builtin-catalog.js";
+import { BUILTIN_CAPABILITIES, getCatalogCapability } from "../skills/builtin-catalog.js";
+import {
+  SERVICE_AGENTS,
+  TEAM_ROLES,
+  teamAgentId,
+} from "../teams/team-template.js";
 import { suggestScopeForKey } from "../secrets/shell-secrets.js";
 import type { CredentialScope } from "@otterbot/shared";
 import {
@@ -89,8 +94,12 @@ function channelStatus(
 /** Input for creating a new agent profile. */
 export interface CreateAgentInput {
   displayName: string;
+  /** Explicit id (e.g. for provisioned singletons/teams). Slugged from name if omitted. */
+  id?: string;
   role?: AgentRole;
   persona?: string;
+  canRunShell?: boolean;
+  canWebSearch?: boolean;
   model?: AgentProfile["model"];
   allowedChatServices?: AgentProfile["allowedChatServices"];
   transport?: AgentProfile["transport"];
@@ -896,6 +905,8 @@ export class Orchestrator {
     await this.bus.start();
     this.scheduler.start();
     this.codeRef.start();
+    // Ensure the shared infra service agents (proxmox, ssh) exist.
+    this.ensureServiceAgents();
   }
 
   /** Build and register a runtime + context for a profile. */
@@ -1156,17 +1167,110 @@ export class Orchestrator {
 
   // --- Projects ------------------------------------------------------------
 
-  /** A project plus its current member agent ids. */
-  listProjects(): Array<{ id: string; name: string; repoPath: string; createdAt: string; members: string[] }> {
-    return this.projects.list().map((p) => ({ ...p, members: this.projects.listMembers(p.id) }));
+  /** A project plus its current member agent ids and role→agent team map. */
+  listProjects(): Array<{
+    id: string;
+    name: string;
+    repoPath: string;
+    createdAt: string;
+    members: string[];
+    team: Array<{ role: string; agentId: string }>;
+  }> {
+    return this.projects.list().map((p) => ({
+      ...p,
+      members: this.projects.listMembers(p.id),
+      team: this.projects.getTeam(p.id),
+    }));
   }
 
   createProject(name: string): { id: string; name: string; repoPath: string; createdAt: string } {
-    return this.projects.create(name);
+    const project = this.projects.create(name);
+    this.provisionProjectTeam(project.id);
+    return project;
   }
 
-  deleteProject(id: string): void {
+  async deleteProject(id: string): Promise<void> {
+    // Tear down the project's dedicated specialists first.
+    for (const { agentId } of this.projects.getTeam(id)) {
+      await this.deleteAgent(agentId);
+    }
+    this.projects.clearTeam(id);
     this.projects.delete(id);
+  }
+
+  /** The project's role → agent mapping (pipeline stage executors). */
+  getProjectTeam(projectId: string): Array<{ role: string; agentId: string }> {
+    return this.projects.getTeam(projectId);
+  }
+
+  /** The agent that fills a pipeline role for a project, or null. */
+  agentForRole(projectId: string, role: string): string | null {
+    return this.projects.agentForRole(projectId, role);
+  }
+
+  // --- Team provisioning ---------------------------------------------------
+
+  /** Install a built-in catalog capability onto an agent. Idempotent-ish. */
+  installCapability(agentId: string, catalogId: string): boolean {
+    const ctx = this.getContext(agentId);
+    if (!ctx) return false;
+    const entry = getCatalogCapability(catalogId);
+    if (!entry) return false; // e.g. a capability that doesn't exist yet
+    if (ctx.skills.get(entry.id)) return true; // already installed
+    const { meta, body, enabled } = ctx.skills.parseSkillFile(entry.markdown);
+    ctx.skills.create({ meta, body, enabled, source: "builtin" }, { id: entry.id });
+    void this.reloadAgentMcp(agentId);
+    return true;
+  }
+
+  /** Create the shared, instance-wide service agents (proxmox, ssh) if absent. */
+  ensureServiceAgents(): void {
+    for (const spec of SERVICE_AGENTS) {
+      if (this.profiles.exists(spec.id) || this.contexts.has(spec.id)) continue;
+      this.createAgent({
+        id: spec.id,
+        displayName: spec.displayName,
+        persona: spec.persona,
+        canRunShell: spec.canRunShell,
+      });
+      for (const cap of spec.capabilities) {
+        if (this.installCapability(spec.id, cap.catalogId) && cap.config) {
+          this.applySkillConfig(spec.id, cap.catalogId, cap.config);
+        }
+      }
+    }
+  }
+
+  /** Provision a project's dedicated specialist team (idempotent per role). */
+  provisionProjectTeam(projectId: string): void {
+    const project = this.projects.get(projectId);
+    if (!project) throw new Error(`Unknown project: ${projectId}`);
+    this.ensureServiceAgents();
+    for (const spec of TEAM_ROLES) {
+      const id = teamAgentId(projectId, spec.role);
+      if (this.profiles.exists(id) || this.contexts.has(id)) {
+        this.projects.setTeamRole(projectId, spec.role, id);
+        continue;
+      }
+      const allowedPeers = (spec.peerServices ?? []).map((agentId) => ({
+        agentId,
+        shareMemory: false,
+      }));
+      this.createAgent({
+        id,
+        displayName: `${project.name} · ${spec.displayNameSuffix}`,
+        persona: spec.persona,
+        canRunShell: spec.canRunShell,
+        allowedPeers,
+      });
+      for (const cap of spec.capabilities) {
+        if (this.installCapability(id, cap.catalogId) && cap.config) {
+          this.applySkillConfig(id, cap.catalogId, cap.config);
+        }
+      }
+      this.projects.addMember(projectId, id);
+      this.projects.setTeamRole(projectId, spec.role, id);
+    }
   }
 
   /** Add an agent to a project. Throws if the project or agent is unknown. */
@@ -1183,7 +1287,10 @@ export class Orchestrator {
 
   /** Create a new agent profile, scaffold its directory, and start it. */
   createAgent(input: CreateAgentInput): AgentProfile {
-    let id = slugify(input.displayName);
+    let id = input.id ?? slugify(input.displayName);
+    if (input.id && (this.profiles.exists(id) || this.contexts.has(id))) {
+      throw new Error(`Agent id already exists: ${id}`);
+    }
     let n = 2;
     while (this.profiles.exists(id) || this.contexts.has(id)) {
       id = `${slugify(input.displayName)}-${n++}`;
@@ -1207,6 +1314,8 @@ export class Orchestrator {
       allowedPeers: input.allowedPeers,
       email: input.email ?? null,
       artwork: input.artwork,
+      canRunShell: input.canRunShell,
+      canWebSearch: input.canWebSearch,
       canSpawnSubagents: input.canSpawnSubagents,
       subagentLimit: input.subagentLimit,
       dispatchToSubagent: input.dispatchToSubagent,

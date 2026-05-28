@@ -113,6 +113,21 @@ export const projectMembers = sqliteTable("project_members", {
     .$defaultFn(() => new Date().toISOString()),
 });
 
+/**
+ * The per-project coding team: maps a pipeline role (pm, coder, security,
+ * test-writer, tester) to the agent that fills it for a given project. Doubles
+ * as the pipeline's stage→agent lookup and the teardown list when a project is
+ * deleted. One row per (project, role).
+ */
+export const projectTeam = sqliteTable("project_team", {
+  projectId: text("project_id").notNull(),
+  role: text("role").notNull(),
+  agentId: text("agent_id").notNull(),
+  createdAt: text("created_at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+});
+
 /** Cron-scheduled prompts fired against an agent. */
 export const scheduledTasks = sqliteTable("scheduled_tasks", {
   id: text("id").primaryKey(),

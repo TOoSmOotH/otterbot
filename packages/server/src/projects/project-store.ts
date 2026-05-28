@@ -142,6 +142,52 @@ export class ProjectStore {
     return this.projectsForAgent(agentId)[0]?.repoPath ?? null;
   }
 
+  // --- Per-project team (role → agent) ------------------------------------
+
+  /** Record (or update) the agent that fills a pipeline role for a project. */
+  setTeamRole(projectId: string, role: string, agentId: string): void {
+    this.control.db
+      .insert(controlSchema.projectTeam)
+      .values({ projectId, role, agentId, createdAt: new Date().toISOString() })
+      .onConflictDoUpdate({
+        target: [controlSchema.projectTeam.projectId, controlSchema.projectTeam.role],
+        set: { agentId },
+      })
+      .run();
+  }
+
+  /** The project's role → agentId map. */
+  getTeam(projectId: string): Array<{ role: string; agentId: string }> {
+    return this.control.db
+      .select({ role: controlSchema.projectTeam.role, agentId: controlSchema.projectTeam.agentId })
+      .from(controlSchema.projectTeam)
+      .where(eq(controlSchema.projectTeam.projectId, projectId))
+      .all();
+  }
+
+  /** The agent filling a given role for a project, or null. */
+  agentForRole(projectId: string, role: string): string | null {
+    return (
+      this.control.db
+        .select({ agentId: controlSchema.projectTeam.agentId })
+        .from(controlSchema.projectTeam)
+        .where(
+          and(
+            eq(controlSchema.projectTeam.projectId, projectId),
+            eq(controlSchema.projectTeam.role, role)
+          )
+        )
+        .get()?.agentId ?? null
+    );
+  }
+
+  clearTeam(projectId: string): void {
+    this.control.db
+      .delete(controlSchema.projectTeam)
+      .where(eq(controlSchema.projectTeam.projectId, projectId))
+      .run();
+  }
+
   /** `git init` a fresh repo and stamp a default identity for in-sandbox commits. */
   private gitInit(repoPath: string): void {
     if (existsSync(join(repoPath, ".git"))) return;

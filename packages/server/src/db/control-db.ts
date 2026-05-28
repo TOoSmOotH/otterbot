@@ -101,6 +101,13 @@ function ensureControlTables(sqlite: Database.Database) {
       PRIMARY KEY (project_id, agent_id)
     )`,
     `CREATE INDEX IF NOT EXISTS idx_project_members_agent ON project_members(agent_id)`,
+    `CREATE TABLE IF NOT EXISTS project_team (
+      project_id TEXT NOT NULL,
+      role TEXT NOT NULL,
+      agent_id TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      PRIMARY KEY (project_id, role)
+    )`,
   ];
   for (const s of stmts) sqlite.exec(s);
 

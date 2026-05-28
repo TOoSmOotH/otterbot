@@ -554,33 +554,31 @@ the public key probably isn't installed on that host yet — run
     tools: ["coding_cli_run", "coding_cli_status"],
     configSchema: {
       description:
-        "Choose which coding CLIs this agent may run and (optionally) a default model " +
-        "for each. Each tool authenticates from this agent's own workspace — log it in " +
-        "from the agent's terminal once (see the skill instructions); the credentials " +
-        "persist there and stay private to this agent.",
+        "Optionally pin a default coding CLI for this agent so it doesn't have to be told " +
+        "which tool to use (e.g. a 'coder' agent always uses Claude Code). Each tool " +
+        "authenticates from this agent's own workspace — log it in from the agent's " +
+        "terminal once (see the skill instructions); the credentials persist there and " +
+        "stay private to this agent.",
       fields: [
         {
-          key: "tools",
-          label: "Enabled tools",
-          type: "list",
-          credentialKey: "CODING_CLI_TOOLS",
+          key: "pinnedTool",
+          label: "Default tool",
+          type: "string",
+          credentialKey: "CODING_CLI_PINNED_TOOL",
           scope: "cap:coding-cli",
-          description: "The coding CLIs this agent is allowed to run.",
-          itemFields: [
-            {
-              key: "name",
-              label: "Tool",
-              type: "string",
-              required: true,
-              placeholder: "claude | codex | gemini | opencode",
-            },
-            {
-              key: "model",
-              label: "Default model",
-              type: "string",
-              placeholder: "(optional) tool-specific model id",
-            },
-          ],
+          placeholder: "claude | codex | gemini | opencode",
+          description:
+            "If set, coding_cli_run uses this tool when none is given. Leave blank to " +
+            "choose per call.",
+        },
+        {
+          key: "pinnedModel",
+          label: "Default model",
+          type: "string",
+          credentialKey: "CODING_CLI_PINNED_MODEL",
+          scope: "cap:coding-cli",
+          placeholder: "(optional) tool-specific model id",
+          description: "Default model passed to the pinned tool when none is given.",
         },
       ],
     },

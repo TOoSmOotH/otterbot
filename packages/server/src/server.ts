@@ -315,8 +315,20 @@ export async function buildServer(
   });
 
   app.delete<{ Params: { id: string } }>("/api/projects/:id", async (req) => {
-    orch.deleteProject(req.params.id);
+    await orch.deleteProject(req.params.id);
     return { ok: true };
+  });
+
+  // (Re)provision a project's specialist team. Creating a project does this
+  // automatically; this is for re-running it after a change.
+  app.post<{ Params: { id: string } }>("/api/projects/:id/team", async (req, reply) => {
+    try {
+      orch.provisionProjectTeam(req.params.id);
+      return { ok: true, team: orch.getProjectTeam(req.params.id) };
+    } catch (err) {
+      reply.code(400);
+      return { error: err instanceof Error ? err.message : String(err) };
+    }
   });
 
   app.post<{ Params: { id: string }; Body: { agentId?: string } }>(

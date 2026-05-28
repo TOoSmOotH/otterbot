@@ -22,6 +22,7 @@ import {
   codingLockKey,
   getCodingSession,
   isCodingLockBusy,
+  isCodingTool,
   runCodingCliHeadless,
   startCodingSession,
   withCodingLock,
@@ -588,7 +589,10 @@ export function buildAgentTools(
         "setup notes. Runs are serialized per project, so only one coding agent edits " +
         "the shared code at a time.",
       parameters: z.object({
-        tool: z.enum(CODING_TOOLS as [CodingTool, ...CodingTool[]]).describe("Which CLI to run."),
+        tool: z
+          .enum(CODING_TOOLS as [CodingTool, ...CodingTool[]])
+          .optional()
+          .describe("Which CLI to run. Omit to use this agent's pinned default tool."),
         task: z.string().min(1).describe("The task / prompt to hand the coding agent."),
         interactive: z
           .boolean()
@@ -596,7 +600,21 @@ export function buildAgentTools(
           .describe("Launch the live terminal UI instead of running headless."),
         model: z.string().optional().describe("Optional model override for the tool."),
       }),
-      execute: async ({ tool: cliTool, task, interactive, model }) => {
+      execute: async ({ tool: requestedTool, task, interactive, model }) => {
+        // Fall back to the agent's pinned default tool/model (capability config).
+        const shellSecrets = ctx.shellSecrets();
+        const pinnedTool = shellSecrets.get("CODING_CLI_PINNED_TOOL")?.trim();
+        const pinnedModel = shellSecrets.get("CODING_CLI_PINNED_MODEL")?.trim() || undefined;
+        const cliTool = requestedTool ?? (pinnedTool && isCodingTool(pinnedTool) ? pinnedTool : undefined);
+        if (!cliTool) {
+          return {
+            ok: false,
+            error:
+              "No coding tool specified and this agent has no pinned default. Pass `tool` " +
+              "(claude | codex | gemini | opencode) or set a default in the capability config.",
+          };
+        }
+        const effectiveModel = model ?? pinnedModel;
         const projectRepoPath = ctx.projectRepoPath();
         const lockKey = codingLockKey(ctx.profile.id, projectRepoPath);
         if (isCodingLockBusy(lockKey)) {
@@ -612,9 +630,9 @@ export function buildAgentTools(
           const common = {
             tool: cliTool,
             task,
-            model,
+            model: effectiveModel,
             workspaceDir: ctx.workspaceDir,
-            secrets: ctx.shellSecrets(),
+            secrets: shellSecrets,
             projectRepoPath,
           };
           if (interactive) {
