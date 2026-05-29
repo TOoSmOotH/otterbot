@@ -20,21 +20,36 @@ const C = {
   printer: 0xb9bec8,
 };
 
-const ATLAS_IMAGE = "/office/otter-office-v3.png";
-const ATLAS_XML = "/office/otter-office-v3.xml";
+const ATLAS_IMAGE = "/office/otter-office-mock.png";
+const ATLAS_XML = "/office/otter-office-mock.xml";
 
 // First-party Otterbot office sprites. Leave a key unset to keep the Graphics
 // fallback for that item.
 const ART: Partial<
-  Record<"floor" | "floorAlt" | "wall" | "door" | "desk" | "plant" | "printer", string>
+  Record<
+    | "door"
+    | "plant"
+    | "printer"
+    | "deskPod"
+    | "shelf"
+    | "framedArt"
+    | "largePlant"
+    | "wallLamp"
+    | "cabinet"
+    | "coffeeStation",
+    string
+  >
 > = {
-  floor: "floor.png",
-  floorAlt: "floor_alt.png",
-  wall: "wall.png",
   door: "door.png",
-  desk: "desk.png",
   plant: "plant.png",
   printer: "printer.png",
+  deskPod: "desk_pod.png",
+  shelf: "shelf.png",
+  framedArt: "framed_art.png",
+  largePlant: "large_plant.png",
+  wallLamp: "wall_lamp.png",
+  cabinet: "cabinet.png",
+  coffeeStation: "coffee_station.png",
 };
 
 let sheet: Texture | null = null;
@@ -70,9 +85,16 @@ export function artSprite(key: keyof typeof ART): Sprite | null {
   if (!name || !sheet || !frames || !frames[name]) return null;
   const tex = new Texture({ source: sheet.source, frame: frames[name] });
   const s = new Sprite(tex);
-  s.width = TILE;
-  s.height = TILE;
   return s;
+}
+
+function placeSprite(root: Container, key: keyof typeof ART, x: number, y: number): boolean {
+  const sprite = artSprite(key);
+  if (!sprite) return false;
+  sprite.x = Math.round(x);
+  sprite.y = Math.round(y);
+  root.addChild(sprite);
+  return true;
 }
 
 /** Draw the floor + walls + doors + desks for a world into a fresh Container. */
@@ -111,12 +133,12 @@ export function drawEnvironment(world: World): Container {
     }
   }
 
-  drawRoomDecor(g, world);
+  drawRoomDecor(root, g, world);
 
   for (let ty = 0; ty < world.rows; ty++) {
     for (let tx = 0; tx < world.cols; tx++) {
       const cell = world.grid[ty * world.cols + tx] as Cell;
-      if (cell === Cell.DESK) drawDeskPod(g, tx, ty);
+      if (cell === Cell.DESK) drawDeskPod(root, g, tx, ty);
     }
   }
   return root;
@@ -182,11 +204,13 @@ function drawWall(g: Graphics, tx: number, ty: number, world: World): void {
   }
 }
 
-function drawDeskPod(g: Graphics, tx: number, ty: number): void {
+function drawDeskPod(root: Container, g: Graphics, tx: number, ty: number): void {
   const x = tx * TILE - 24;
   const y = ty * TILE - 2;
   const w = 72;
   const h = 45;
+
+  if (placeSprite(root, "deskPod", x - 4, y - 4)) return;
 
   g.roundRect(x + 4, y + 7, w, h, 5).fill(0x17120f);
   g.roundRect(x, y, w, h - 6, 5).fill(C.deskTop).stroke({ width: 2, color: 0xb37a45 });
@@ -211,31 +235,32 @@ function drawDeskPod(g: Graphics, tx: number, ty: number): void {
   g.circle(x + 58, y + 25, 6).fill(0xffd98a);
 }
 
-function drawRoomDecor(g: Graphics, world: World): void {
+function drawRoomDecor(root: Container, g: Graphics, world: World): void {
   for (const room of world.rooms) {
     const x = room.x * TILE;
     const y = room.y * TILE;
     const w = room.w * TILE;
     const h = room.h * TILE;
     if (room.kind !== "unassigned") {
-      drawShelf(g, x + w - 70, y + 30);
-      drawWallLamp(g, x + 18, y + 42);
+      drawShelf(root, g, x + w - 70, y + 30);
+      drawWallLamp(root, g, x + 18, y + 42);
     }
     if (room.kind === "coo") {
-      drawFramedArt(g, x + 34, y + 52);
-      drawLargePlant(g, x + 18, y + h - 58);
+      drawFramedArt(root, g, x + 34, y + 52);
+      drawLargePlant(root, g, x + 18, y + h - 58);
     } else if (room.kind === "project") {
-      drawLargePlant(g, x + w - 48, y + 28);
-      drawCabinet(g, x + w - 48, y + h - 64);
+      drawLargePlant(root, g, x + w - 48, y + 28);
+      drawCabinet(root, g, x + w - 48, y + h - 64);
     } else {
-      drawShelf(g, x + w - 76, y + 18);
-      drawWallLamp(g, x + w - 36, y + 42);
-      drawLargePlant(g, x + w - 58, y + h - 64);
+      drawShelf(root, g, x + w - 76, y + 18);
+      drawWallLamp(root, g, x + w - 36, y + 42);
+      drawLargePlant(root, g, x + w - 58, y + h - 64);
     }
   }
 }
 
-function drawShelf(g: Graphics, x: number, y: number): void {
+function drawShelf(root: Container, g: Graphics, x: number, y: number): void {
+  if (placeSprite(root, "shelf", x, y - 20)) return;
   g.rect(x, y, 54, 6).fill(0x201713).stroke({ width: 1, color: 0xb37a45 });
   g.rect(x + 6, y - 14, 8, 14).fill(0x4ba464);
   g.rect(x + 17, y - 18, 6, 18).fill(0xd7a447);
@@ -243,14 +268,16 @@ function drawShelf(g: Graphics, x: number, y: number): void {
   g.rect(x + 39, y - 20, 9, 20).fill(0x7a4f32);
 }
 
-function drawFramedArt(g: Graphics, x: number, y: number): void {
+function drawFramedArt(root: Container, g: Graphics, x: number, y: number): void {
+  if (placeSprite(root, "framedArt", x, y)) return;
   g.rect(x, y, 66, 36).fill(0x201713).stroke({ width: 2, color: 0xb37a45 });
   g.rect(x + 5, y + 5, 56, 26).fill(0x7fb0d6);
   g.rect(x + 5, y + 20, 56, 11).fill(0x456f48);
   g.rect(x + 12, y + 16, 18, 6).fill(0xd2a94d);
 }
 
-function drawLargePlant(g: Graphics, x: number, y: number): void {
+function drawLargePlant(root: Container, g: Graphics, x: number, y: number): void {
+  if (placeSprite(root, "largePlant", x, y)) return;
   g.rect(x + 12, y + 34, 18, 15).fill(0x8a5638).stroke({ width: 1, color: 0x3b271b });
   g.circle(x + 8, y + 22, 9).fill(0x3f8f5a);
   g.circle(x + 22, y + 12, 12).fill(0x4ba464);
@@ -258,13 +285,15 @@ function drawLargePlant(g: Graphics, x: number, y: number): void {
   g.circle(x + 20, y + 29, 10).fill(0x34784a);
 }
 
-function drawWallLamp(g: Graphics, x: number, y: number): void {
+function drawWallLamp(root: Container, g: Graphics, x: number, y: number): void {
+  if (placeSprite(root, "wallLamp", x, y)) return;
   g.rect(x + 5, y, 6, 12).fill(0x5b3824);
   g.circle(x + 8, y + 15, 9).fill(0xffd98a);
   g.circle(x + 8, y + 15, 5).fill(0xe2b13c);
 }
 
-function drawCabinet(g: Graphics, x: number, y: number): void {
+function drawCabinet(root: Container, g: Graphics, x: number, y: number): void {
+  if (placeSprite(root, "cabinet", x, y)) return;
   g.rect(x, y, 34, 45).fill(0x5b3824).stroke({ width: 1, color: 0x2b1b13 });
   g.rect(x + 5, y + 8, 24, 10).fill(0x714b31);
   g.rect(x + 5, y + 25, 24, 10).fill(0x714b31);
