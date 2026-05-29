@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Building2, Network } from "lucide-react";
 import { Tabs, type TabSpec } from "../ui/Tabs";
 import { AgentNetworkGraph } from "./AgentNetworkGraph";
-import { AgentOffice } from "./AgentOffice";
+import { PixiOffice } from "./office/PixiOffice";
 
 /**
  * The Network view hosts two sub-tabs: "Permissions" (the editable agent-to-agent
@@ -24,7 +24,7 @@ export function NetworkView() {
       <Tabs tabs={TABS} value={tab} onChange={setTab} layoutId="network-subtabs" />
       <div style={{ flex: 1, minHeight: 0 }}>
         {tab === "permissions" && <AgentNetworkGraph />}
-        {tab === "office" && <AgentOffice />}
+        {tab === "office" && <PixiOffice />}
       </div>
     </div>
   );
