@@ -5,6 +5,9 @@ import { useProjectsStore, type Project, type PipelineRun } from "../../stores/p
 import { useAgentsStore } from "../../stores/agents-store";
 import { AgentWizard } from "./AgentWizard";
 
+/** Stable empty array so the runs selector never returns a fresh reference. */
+const EMPTY_RUNS: PipelineRun[] = [];
+
 /**
  * Manage collaborative projects: a shared git working tree with a dedicated
  * specialist team. Configure where the code lives (local / GitHub / Gitea) and
@@ -115,7 +118,9 @@ function ForgeAccountsSection() {
 function ProjectCard({ project, onDelete }: { project: Project; onDelete: () => void }) {
   const agents = useAgentsStore((s) => s.agents);
   const accounts = useProjectsStore((s) => s.forgeAccounts);
-  const runs = useProjectsStore((s) => s.runs[project.id] ?? []);
+  // Select the stored array (stable ref); default outside the selector so we
+  // don't return a fresh [] every render (which crashes useSyncExternalStore).
+  const runs = useProjectsStore((s) => s.runs[project.id]) ?? EMPTY_RUNS;
   const loadRuns = useProjectsStore((s) => s.loadRuns);
   const setForge = useProjectsStore((s) => s.setForge);
   const startPipeline = useProjectsStore((s) => s.startPipeline);
