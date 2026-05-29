@@ -1064,6 +1064,7 @@ export class Orchestrator {
       workspaceDir: paths.workspace,
       resolveProjectRepoPath: () => this.projects.repoPathForAgent(profile.id),
       resolveProjectRules: () => this.projects.rulesForAgent(profile.id),
+      resolveProjectAccess: () => this.projects.accessForAgent(profile.id),
       browserProfileDir: paths.browser,
       imagesDir: paths.images,
       filesDir: paths.files,

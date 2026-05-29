@@ -560,6 +560,7 @@ export function buildAgentTools(
       execute: async ({ command }) => {
         const r = await runAgentShell(ctx.workspaceDir, ctx.shellSecrets(), command, {
           projectRepoPath: ctx.projectRepoPath() ?? undefined,
+          projectReadOnly: ctx.projectAccess() === "read",
         });
         if (r.error) return { ok: false, error: r.error };
         return {
@@ -616,6 +617,14 @@ export function buildAgentTools(
         }
         const effectiveModel = model ?? pinnedModel;
         const projectRepoPath = ctx.projectRepoPath();
+        if (projectRepoPath && ctx.projectAccess() === "read") {
+          return {
+            ok: false,
+            error:
+              "You have read-only access to this project, so you can't run coding tools that " +
+              "modify its source. Ask the project owner for read-write access.",
+          };
+        }
         const lockKey = codingLockKey(ctx.profile.id, projectRepoPath);
         if (isCodingLockBusy(lockKey)) {
           return {

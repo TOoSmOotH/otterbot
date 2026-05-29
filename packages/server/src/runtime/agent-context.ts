@@ -60,6 +60,12 @@ export interface AgentContext {
    * next turn without rebuilding the context.
    */
   projectRules: () => string | null;
+  /**
+   * The access level for this agent's project (`'read'` | `'write'`), or null
+   * when it belongs to no project. A thunk so access changes take effect on the
+   * next turn without rebuilding the context.
+   */
+  projectAccess: () => "read" | "write" | null;
   /** Persistent Chrome user-data dir for the agent's browser tools. */
   browserProfileDir: string;
   /** Effective per-call browser-command timeout (ms): profile override or global default. */
@@ -117,6 +123,8 @@ export interface BuildAgentContextInput {
    * (rules can change between turns).
    */
   resolveProjectRules?: () => string | null;
+  /** Resolve the agent's project access level, or null. Called live. */
+  resolveProjectAccess?: () => "read" | "write" | null;
   /** Path to this agent's persistent browser profile directory. */
   browserProfileDir: string;
   /** Path to this agent's generated-images directory. */
@@ -184,6 +192,7 @@ export function buildAgentContext(input: BuildAgentContextInput): AgentContext {
     workspaceDir: input.workspaceDir,
     projectRepoPath: input.resolveProjectRepoPath ?? (() => null),
     projectRules: input.resolveProjectRules ?? (() => null),
+    projectAccess: input.resolveProjectAccess ?? (() => null),
     browserProfileDir: input.browserProfileDir,
     browseTimeoutMs: limits.browseTimeoutMs,
     maxSteps: limits.maxSteps,
