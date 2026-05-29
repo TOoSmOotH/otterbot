@@ -81,7 +81,7 @@ interface ProjectsState {
     committerName?: string;
     committerEmail?: string;
     signCommits?: boolean;
-  }) => Promise<void>;
+  }) => Promise<{ id: string; publicKey: string | null } | null>;
   deleteForgeAccount: (id: string) => Promise<void>;
   setForge: (
     projectId: string,
@@ -179,9 +179,14 @@ export const useProjectsStore = create<ProjectsState>((set, get) => ({
       headers: { "content-type": "application/json" },
       body: JSON.stringify(input),
     });
-    if (!res.ok) return set({ error: await readError(res) });
+    if (!res.ok) {
+      set({ error: await readError(res) });
+      return null;
+    }
     set({ error: null });
+    const created = (await res.json().catch(() => null)) as { id: string; publicKey: string | null } | null;
     await get().loadForgeAccounts();
+    return created;
   },
 
   deleteForgeAccount: async (id) => {

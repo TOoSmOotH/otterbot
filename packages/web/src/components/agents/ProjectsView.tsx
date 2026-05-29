@@ -37,7 +37,7 @@ export function ProjectsView() {
       </div>
       <p style={{ color: "rgb(var(--muted))", fontSize: 12, maxWidth: 680, marginTop: 0 }}>
         Each project gets a dedicated team (PM, coder, security reviewer, test writer, tester) that
-        shares one code tree. Add a git host in Settings → Git Hosting, then point a project at a
+        shares one code tree. Add a git host in Settings → Git Creds, then point a project at a
         repo and launch the build pipeline.
       </p>
 
@@ -123,7 +123,7 @@ function ProjectCard({ project, onDelete }: { project: Project; onDelete: () => 
             </select>
             {accounts.length === 0 && (
               <span style={{ fontSize: 11, color: "rgb(var(--muted))", gridColumn: "1 / -1" }}>
-                No git hosting accounts yet — add one in Settings → Git Hosting.
+                No git hosting accounts yet — add one in Settings → Git Creds.
               </span>
             )}
             <input placeholder="owner/name" value={forge.repo} onChange={(e) => setForgeForm({ ...forge, repo: e.target.value })} style={input} />
