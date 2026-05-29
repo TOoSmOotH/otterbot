@@ -42,7 +42,7 @@ printer) give it life.
 |---|---|
 | Renderer / integration | **Imperative PixiJS v8 `Application` + Zustand store bridge** (subscribe outside React render). |
 | Characters | **Existing agent avatars** as token faces (initials fallback). |
-| Environment furniture | **CC0 pack** (pinned below) with **programmatic Pixi `Graphics`** fallback; abstracted behind `tiles.ts`. |
+| Environment furniture | **CC0 pack (Kenney) wired in v1** + **programmatic Pixi `Graphics`** fallback for missing pieces; both behind `tiles.ts`. |
 | Floor arrangement | **Walled rooms** per project + COO office + open "Unassigned" area, linked by a corridor. |
 | v1 behaviors | Walking movement, speech/thought bubbles, per-room whiteboard, ambient props. |
 | DOM office | **Removed** and replaced by the Pixi office. |
@@ -142,11 +142,13 @@ used). Status, messages, and pipeline updates are applied incrementally without 
 
 - **Characters:** existing avatars — `Assets.load(withToken(avatarUrl))`; initials `Text`
   on a colored chip when an agent has no avatar (same fallback rule as today).
-- **Environment:** target a **CC0 furniture pack** — candidate **Kenney** (e.g. a
-  top-down furniture / roguelike set), pinned and confirmed during the implementation
-  plan. **Programmatic `Graphics`** tiles are the guaranteed fallback for any missing
-  piece, so the feature is never blocked on asset availability and isn't locked to a pack.
-  `tiles.ts` is the only module that knows which backend is in use.
+- **Environment:** v1 **wires a CC0 furniture pack — Kenney** (a top-down furniture /
+  roguelike set) — as the primary furniture art, **and** keeps **programmatic `Graphics`**
+  tiles as the fallback for any piece the pack lacks (so the scene is always complete and
+  never blocked on asset availability). Both rendering paths ship in v1; `tiles.ts` is the
+  only module that knows which backend supplies a given tile and picks the pack texture
+  when present, else draws the `Graphics` primitive. The specific Kenney set/atlas is
+  pinned in the implementation plan.
 
 ## Non-functional
 
@@ -185,6 +187,5 @@ used). Status, messages, and pipeline updates are applied incrementally without 
 
 ## Open items (to settle in the plan)
 
-- Pin the exact CC0 furniture pack (or commit to programmatic-only for v1) and confirm
-  with the user.
+- Pin the specific Kenney CC0 set/atlas to use for furniture (Graphics covers any gaps).
 - Final tile size / camera-fit and minimum room sizing for tiny teams.
