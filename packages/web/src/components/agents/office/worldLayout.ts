@@ -51,9 +51,8 @@ interface Cluster {
 function clusterDims(n: number, kind: Room["kind"]) {
   const deskCols = Math.min(Math.max(1, Math.ceil(Math.sqrt(n))), MAX_DESK_COLS);
   const deskRows = Math.ceil(n / deskCols);
-  const wallless = kind === "unassigned";
   const titleRows = kind === "project" ? 1 : 0;
-  const border = wallless ? 0 : 1;
+  const border = 1;
   const interiorW = deskCols * CELL_W;
   const interiorH = deskRows * CELL_H;
   return {
@@ -161,21 +160,19 @@ export function buildWorld(agents: AgentProfileSummary[], projects: Project[]): 
       desks: [],
     };
 
-    if (p.kind !== "unassigned") {
-      for (let tx = x; tx < x + dims.w; tx++) {
-        set(tx, y, Cell.WALL);
-        set(tx, y + dims.h - 1, Cell.WALL);
-      }
-      for (let ty = y; ty < y + dims.h; ty++) {
-        set(x, ty, Cell.WALL);
-        set(x + dims.w - 1, ty, Cell.WALL);
-      }
-      room.doorTx = x + Math.floor(dims.w / 2);
-      room.doorTy = y + dims.h - 1;
-      set(room.doorTx, room.doorTy, Cell.DOOR);
-      if (p.kind === "project") {
-        room.whiteboard = { tx: x + 1, ty: y + 1, wTiles: Math.max(2, dims.w - 2) };
-      }
+    for (let tx = x; tx < x + dims.w; tx++) {
+      set(tx, y, Cell.WALL);
+      set(tx, y + dims.h - 1, Cell.WALL);
+    }
+    for (let ty = y; ty < y + dims.h; ty++) {
+      set(x, ty, Cell.WALL);
+      set(x + dims.w - 1, ty, Cell.WALL);
+    }
+    room.doorTx = x + Math.floor(dims.w / 2);
+    room.doorTy = y + dims.h - 1;
+    set(room.doorTx, room.doorTy, Cell.DOOR);
+    if (p.kind === "project") {
+      room.whiteboard = { tx: x + 1, ty: y + 1, wTiles: Math.max(2, dims.w - 2) };
     }
 
     const innerX = x + dims.border;

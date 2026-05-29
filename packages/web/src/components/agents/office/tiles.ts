@@ -37,6 +37,7 @@ const ART: Partial<
     | "largePlant"
     | "wallLamp"
     | "cabinet"
+    | "whiteboard"
     | "floorTile"
     | "wallTile"
     | "glassWall"
@@ -55,6 +56,7 @@ const ART: Partial<
   largePlant: "large_plant",
   wallLamp: "wall_lamp",
   cabinet: "cabinet",
+  whiteboard: "whiteboard",
   floorTile: "wood_floor_tile",
   wallTile: "navy_wall_tile",
   glassWall: "glass_wall",
@@ -147,6 +149,7 @@ export function drawEnvironment(world: World): Container {
 
   drawStudioFloor(floorLayer, g, world);
   drawRoomRugs(root, g, world);
+  drawRoomShells(g, world);
 
   for (let ty = 0; ty < world.rows; ty++) {
     for (let tx = 0; tx < world.cols; tx++) {
@@ -171,6 +174,7 @@ export function drawEnvironment(world: World): Container {
   }
 
   drawRoomDecor(root, g, world);
+  drawHallDecor(root, g, world);
 
   for (let ty = 0; ty < world.rows; ty++) {
     for (let tx = 0; tx < world.cols; tx++) {
@@ -213,6 +217,26 @@ function drawRoomRugs(root: Container, g: Graphics, world: World): void {
     g.roundRect(x + 4, y + 4, w - 8, h - 8, 5).fill(color).stroke({ width: 2, color: C.rugEdge });
     for (let rx = x + 16; rx < x + w - 8; rx += 28) g.rect(rx, y + 8, 1, h - 16).fill(C.rugLine);
     for (let ry = y + 20; ry < y + h - 8; ry += 28) g.rect(x + 8, ry, w - 16, 1).fill(0x303d49);
+  }
+}
+
+function drawRoomShells(g: Graphics, world: World): void {
+  for (const room of world.rooms) {
+    const x = room.x * TILE;
+    const y = room.y * TILE;
+    const w = room.w * TILE;
+    const h = room.h * TILE;
+
+    g.rect(x - 2, y - 5, w + 4, 6).fill(0x9a6a43);
+    g.rect(x - 2, y - 1, w + 4, 2).fill(0x241714);
+    g.rect(x - 4, y - 5, 5, h + 10).fill(0x1b1514);
+    g.rect(x + w - 1, y - 5, 5, h + 10).fill(0x1b1514);
+    g.rect(x - 2, y + h - 1, w + 4, 4).fill(0x1b1514);
+
+    for (let px = x; px <= x + w; px += TILE * 4) {
+      g.rect(px - 1, y - 8, 3, h + 14).fill(0xb48355);
+      g.rect(px, y - 8, 1, h + 14).fill(0xe1b079);
+    }
   }
 }
 
@@ -301,6 +325,18 @@ function drawRoomDecor(root: Container, g: Graphics, world: World): void {
       drawWallLamp(root, g, x + w - 36, y + 42);
       drawLargePlant(root, g, x + w - 58, y + h - 64);
     }
+  }
+}
+
+function drawHallDecor(root: Container, g: Graphics, world: World): void {
+  const hallY = Math.max(2, world.rows - 5) * TILE;
+  drawLargePlant(root, g, TILE * 2, hallY + 20);
+  drawCabinet(root, g, Math.round(world.pxWidth * 0.55), hallY + 34);
+  drawWallLamp(root, g, Math.round(world.pxWidth * 0.52), hallY + 30);
+  drawFramedArt(root, g, Math.round(world.pxWidth * 0.3), hallY + 28);
+  if (world.pxWidth > 900) {
+    drawLargePlant(root, g, world.pxWidth - TILE * 5, hallY + 12);
+    drawCabinet(root, g, world.pxWidth - TILE * 12, hallY + 42);
   }
 }
 
