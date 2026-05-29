@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { GitHubForge } from "./github.js";
 import { GiteaForge } from "./gitea.js";
-import { tokenizeUrl, splitRepo, type ForgeAccount } from "./forge.js";
+import { tokenizeUrl, splitRepo, parseRepoInput, type ForgeAccount } from "./forge.js";
 
 /** A fake fetch that records calls and returns canned JSON per URL substring. */
 function fakeFetch(routes: Array<{ match: string; status?: number; body: unknown; capture?: (init?: RequestInit) => void }>) {
@@ -50,6 +50,18 @@ describe("helpers", () => {
     expect(tokenizeUrl("https://github.com/o/n.git", "x-access-token", "T")).toBe(
       "https://x-access-token:T@github.com/o/n.git"
     );
+  });
+
+  it("parseRepoInput accepts owner/name and full URLs from any host", () => {
+    expect(parseRepoInput("org/repo")).toBe("org/repo");
+    expect(parseRepoInput("  org/repo.git ")).toBe("org/repo");
+    expect(parseRepoInput("https://gitea.somehost.com/org/repo")).toBe("org/repo");
+    expect(parseRepoInput("https://gitea.somehost.com/org/repo.git")).toBe("org/repo");
+    // Gitea served under a subpath — take the last two segments.
+    expect(parseRepoInput("https://somehost.com/git/org/repo")).toBe("org/repo");
+    expect(parseRepoInput("git@gitea.somehost.com:org/repo.git")).toBe("org/repo");
+    expect(parseRepoInput("ssh://git@somehost.com:222/org/repo.git")).toBe("org/repo");
+    expect(() => parseRepoInput("not-a-repo")).toThrow();
   });
 });
 

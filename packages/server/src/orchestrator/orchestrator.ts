@@ -43,7 +43,7 @@ import {
   type PipelineRunView,
 } from "../pipeline/pipeline-manager.js";
 import { ForgeService } from "../forge/forge-service.js";
-import type { ForgeProvider, ForgeIssue } from "../forge/forge.js";
+import { parseRepoInput, type ForgeProvider, type ForgeIssue } from "../forge/forge.js";
 import { ForgeMonitor } from "../forge/forge-monitor.js";
 import { SecretsStore, type ScopedSecret } from "../secrets/secrets-store.js";
 import {
@@ -1429,10 +1429,12 @@ export class Orchestrator {
     const forge = this.forge.forgeFor(account);
 
     try {
+      // Accept "owner/name" or a full repo URL (e.g. https://gitea.somehost.com/org/repo).
+      const repoRef = parseRepoInput(input.repo);
       const repoInfo =
         input.mode === "new"
-          ? await forge.createRepo(input.repo)
-          : await forge.getRepo(input.repo);
+          ? await forge.createRepo(repoRef)
+          : await forge.getRepo(repoRef);
       const fullRepo = `${repoInfo.owner}/${repoInfo.name}`;
       const useSsh = account.gitTransport === "ssh";
       if (useSsh && !repoInfo.sshUrl) {

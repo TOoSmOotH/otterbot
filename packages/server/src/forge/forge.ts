@@ -102,6 +102,37 @@ export function splitRepo(repo: string): { owner: string; name: string } {
   return { owner: parts[0], name: parts[parts.length - 1].replace(/\.git$/, "") };
 }
 
+/**
+ * Normalize a user-entered repo to "owner/name". Accepts a bare "owner/name",
+ * a full HTTPS URL (e.g. https://gitea.somehost.com/org/repo[.git], including
+ * a subpath) or an SSH URL (git@host:org/repo.git, ssh://git@host:222/org/repo).
+ * The host is ignored here — it comes from the account — so a repo on any
+ * self-hosted forge can be pasted as its browser URL.
+ */
+export function parseRepoInput(input: string): string {
+  const raw = input.trim();
+  if (!raw) throw new Error("A repo is required.");
+
+  // scp-style SSH: git@host:owner/repo(.git)
+  const scp = /^[^@]+@[^:]+:(.+)$/.exec(raw);
+  let path = raw;
+  if (scp) {
+    path = scp[1];
+  } else if (/^(https?|ssh):\/\//i.test(raw)) {
+    try {
+      path = new URL(raw).pathname;
+    } catch {
+      /* fall through to plain handling */
+    }
+  }
+  const parts = path.replace(/\.git$/, "").split("/").filter(Boolean);
+  if (parts.length < 2) throw new Error(`Could not read "owner/name" from "${input}".`);
+  // Take the last two path segments (handles Gitea subpath installs).
+  const name = parts[parts.length - 1];
+  const owner = parts[parts.length - 2];
+  return `${owner}/${name}`;
+}
+
 /** Embed a token into an https URL for host-side git clone/push. */
 export function tokenizeUrl(httpsUrl: string, username: string, token: string): string {
   try {

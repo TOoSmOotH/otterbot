@@ -126,7 +126,7 @@ function ProjectCard({ project, onDelete }: { project: Project; onDelete: () => 
                 No git hosting accounts yet — add one in Settings → Git Creds.
               </span>
             )}
-            <input placeholder="owner/name" value={forge.repo} onChange={(e) => setForgeForm({ ...forge, repo: e.target.value })} style={input} />
+            <input placeholder="owner/name or repo URL" value={forge.repo} onChange={(e) => setForgeForm({ ...forge, repo: e.target.value })} style={input} />
             <input placeholder="base branch (optional)" value={forge.baseBranch} onChange={(e) => setForgeForm({ ...forge, baseBranch: e.target.value })} style={input} />
             <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "rgb(var(--muted))" }}>
               <input type="checkbox" checked={forge.monitorIssues} onChange={(e) => setForgeForm({ ...forge, monitorIssues: e.target.checked })} />
