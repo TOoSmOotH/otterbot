@@ -7,7 +7,7 @@ export interface Project {
   name: string;
   repoPath: string;
   createdAt: string;
-  members: string[];
+  members: Array<{ agentId: string; access: "read" | "write" }>;
   team: Array<{ role: string; agentId: string }>;
   mode: "local" | "existing" | "new";
   forgeAccountId: string | null;
@@ -69,7 +69,8 @@ interface ProjectsState {
 
   create: (name: string) => Promise<void>;
   remove: (id: string) => Promise<void>;
-  addMember: (projectId: string, agentId: string) => Promise<void>;
+  addMember: (projectId: string, agentId: string, access?: "read" | "write") => Promise<void>;
+  setMemberAccess: (projectId: string, agentId: string, access: "read" | "write") => Promise<void>;
   removeMember: (projectId: string, agentId: string) => Promise<void>;
 
   addForgeAccount: (input: {
@@ -158,11 +159,21 @@ export const useProjectsStore = create<ProjectsState>((set, get) => ({
     if (res.ok) await get().load();
   },
 
-  addMember: async (projectId, agentId) => {
+  addMember: async (projectId, agentId, access = "read") => {
     const res = await apiFetch(`/api/projects/${projectId}/members`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ agentId }),
+      body: JSON.stringify({ agentId, access }),
+    });
+    if (!res.ok) return set({ error: await readError(res) });
+    await get().load();
+  },
+
+  setMemberAccess: async (projectId, agentId, access) => {
+    const res = await apiFetch(`/api/projects/${projectId}/members/${encodeURIComponent(agentId)}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ access }),
     });
     if (!res.ok) return set({ error: await readError(res) });
     await get().load();

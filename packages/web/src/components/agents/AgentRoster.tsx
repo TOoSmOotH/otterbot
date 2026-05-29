@@ -80,7 +80,7 @@ export function AgentRoster({ onNewAgent }: { onNewAgent: () => void }) {
     // agentId -> the first project that claims it as a member.
     const projectOf = new Map<string, Project>();
     for (const p of projects) {
-      for (const memberId of p.members) {
+      for (const { agentId: memberId } of p.members) {
         if (!projectOf.has(memberId)) projectOf.set(memberId, p);
       }
     }
