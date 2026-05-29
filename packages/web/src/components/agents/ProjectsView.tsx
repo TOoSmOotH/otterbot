@@ -68,6 +68,9 @@ function ProjectCard({ project, onDelete }: { project: Project; onDelete: () => 
   const loadRuns = useProjectsStore((s) => s.loadRuns);
   const setForge = useProjectsStore((s) => s.setForge);
   const setRules = useProjectsStore((s) => s.setRules);
+  const addMember = useProjectsStore((s) => s.addMember);
+  const removeMember = useProjectsStore((s) => s.removeMember);
+  const setMemberAccess = useProjectsStore((s) => s.setMemberAccess);
   const startPipeline = useProjectsStore((s) => s.startPipeline);
 
   const [forge, setForgeForm] = useState({
@@ -77,6 +80,7 @@ function ProjectCard({ project, onDelete }: { project: Project; onDelete: () => 
     baseBranch: project.baseBranch ?? "",
     monitorIssues: project.monitorIssues,
   });
+  const [pickAgent, setPickAgent] = useState("");
   const [goal, setGoal] = useState("");
   const [busy, setBusy] = useState(false);
   const [rulesText, setRulesText] = useState(project.rules ?? "");
@@ -87,6 +91,12 @@ function ProjectCard({ project, onDelete }: { project: Project; onDelete: () => 
   }, [project.id, loadRuns]);
 
   const nameFor = (id: string) => agents.find((a) => a.id === id)?.displayName ?? id;
+
+  const teamIds = new Set(project.team.map((t) => t.agentId));
+  const extraMembers = project.members.filter((m) => !teamIds.has(m.agentId));
+  const candidateAgents = agents.filter(
+    (a) => a.role !== "subagent" && !project.members.some((m) => m.agentId === a.id)
+  );
 
   return (
     <div style={{ ...card, maxWidth: 680 }}>
@@ -106,6 +116,55 @@ function ProjectCard({ project, onDelete }: { project: Project; onDelete: () => 
             {t.role}: {nameFor(t.agentId)}
           </span>
         ))}
+      </div>
+
+      {/* Additional agents */}
+      <div style={{ marginTop: 12, fontSize: 12, fontWeight: 600 }}>Additional agents</div>
+      <p style={{ fontSize: 11, color: "rgb(var(--muted))", margin: "2px 0 6px" }}>
+        Give another agent access to this project's source (e.g. a Discord support bot). Read-only by
+        default; the agent still needs shell or code-search tools to use it.
+      </p>
+      <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+        {extraMembers.length === 0 && (
+          <span style={{ fontSize: 11, color: "rgb(var(--muted))" }}>None yet.</span>
+        )}
+        {extraMembers.map((m) => (
+          <div key={m.agentId} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <span style={{ flex: 1, fontSize: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {nameFor(m.agentId)}
+            </span>
+            <select
+              data-testid={`member-access-${m.agentId}`}
+              value={m.access}
+              onChange={(e) => void setMemberAccess(project.id, m.agentId, e.target.value as "read" | "write")}
+              style={{ ...input, flex: "none", width: 130 }}
+            >
+              <option value="read">read-only</option>
+              <option value="write">read-write</option>
+            </select>
+            <button style={iconBtn} title="Remove from project" onClick={() => void removeMember(project.id, m.agentId)}>
+              <Icon icon={Trash2} size={14} />
+            </button>
+          </div>
+        ))}
+      </div>
+      <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
+        <select value={pickAgent} onChange={(e) => setPickAgent(e.target.value)} style={input}>
+          <option value="">Add an agent…</option>
+          {candidateAgents.map((a) => (
+            <option key={a.id} value={a.id}>{a.displayName}</option>
+          ))}
+        </select>
+        <button
+          style={primaryBtn}
+          disabled={!pickAgent}
+          onClick={async () => {
+            await addMember(project.id, pickAgent);
+            setPickAgent("");
+          }}
+        >
+          <Icon icon={Plus} size={14} /> Add
+        </button>
       </div>
 
       {/* Forge config */}
