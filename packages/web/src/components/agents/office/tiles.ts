@@ -14,9 +14,15 @@ const C = {
   printer: 0xb9bec8,
 };
 
-// Sprite names from public/office/roguelike.xml. Leave a key unset to keep the
-// Graphics drawing for that item. Populated only when verified against the pack.
-const ART: Partial<Record<"floor" | "wall" | "door" | "desk" | "plant" | "printer", string>> = {};
+// Sprite names from public/office/roguelike.xml (Kenney "Roguelike Modern City",
+// CC0). Indices verified against the tilemap. Leave a key unset to keep the
+// Graphics drawing for that item.
+const ART: Partial<Record<"floor" | "wall" | "door" | "desk" | "plant" | "printer", string>> = {
+  floor: "tile_0741.png", // gray tile floor
+  wall: "tile_0039.png", // brick wall
+  door: "tile_0617.png", // wooden paneled door
+  desk: "tile_0572.png", // wooden desk
+};
 
 let sheet: Texture | null = null;
 let frames: Record<string, Rectangle> | null = null;
