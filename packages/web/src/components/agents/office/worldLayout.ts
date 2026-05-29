@@ -35,8 +35,8 @@ export interface World {
 }
 
 const CELL_W = 4;
-const CELL_H = 3;
-const MAX_DESK_COLS = 4;
+const CELL_H = 4;
+const MAX_DESK_COLS = 3;
 const ROOM_GAP = 2;
 const ROW_GAP = 3;
 const TARGET_COLS = 64;

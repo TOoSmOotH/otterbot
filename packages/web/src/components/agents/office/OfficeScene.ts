@@ -82,12 +82,12 @@ export class OfficeScene {
     const pad = 12;
     const widthScale = (this.containerW - pad * 2) / this.world.pxWidth;
     const heightScale = (this.containerH - pad * 2) / this.world.pxHeight;
-    const scale = Math.max(widthScale, Math.min(heightScale, 2.6));
-    const s = Math.max(0.2, Math.min(scale, 3));
+    const scale = Math.max(widthScale, heightScale);
+    const s = Math.max(0.2, Math.min(scale, 2.2));
     this.root.scale.set(s);
     const scaledW = this.world.pxWidth * s;
     this.root.x = scaledW <= this.containerW - pad * 2 ? (this.containerW - scaledW) / 2 : pad;
-    this.root.y = pad;
+    this.root.y = scaledW <= this.containerW - pad * 2 ? pad : 8;
   }
 
   async setWorld(agents: AgentProfileSummary[], projects: Project[]): Promise<void> {
@@ -273,20 +273,20 @@ export class OfficeScene {
     const root = new Container();
     root.x = tx * TILE + 3;
     root.y = ty * TILE + 3;
-    const maxChars = Math.max(4, Math.floor((wTiles * TILE - 12) / 5));
+    const maxChars = Math.max(4, Math.floor((wTiles * TILE - 18) / 7));
     const text = label.length > maxChars ? label.slice(0, Math.max(1, maxChars - 1)) + "…" : label;
     const t = new Text({
       text,
-      style: { fontSize: 8, fill: 0xf3e7cf, fontWeight: "700" },
+      style: { fontSize: 11, fill: 0xf3e7cf, fontWeight: "700" },
     });
-    t.x = 5;
-    t.y = 1;
-    const w = Math.min(wTiles * TILE - 6, Math.max(24, t.width + 10));
+    t.x = 8;
+    t.y = 3;
+    const w = Math.min(wTiles * TILE - 8, Math.max(42, t.width + 16));
     const bg = new Graphics()
-      .roundRect(0, 0, w, 11, 2)
+      .roundRect(0, 0, w, 18, 2)
       .fill(0x2a2220)
-      .stroke({ width: 1, color: 0xb37a45 });
-    const pin = new Graphics().rect(2, 4, 2, 2).fill(0xe2b13c);
+      .stroke({ width: 2, color: 0xb37a45 });
+    const pin = new Graphics().rect(4, 7, 3, 3).fill(0xe2b13c);
     root.addChild(bg, pin, t);
     return root;
   }
@@ -296,11 +296,14 @@ export class OfficeScene {
     container.x = tx * TILE;
     container.y = ty * TILE;
     const chair = new Graphics()
-      .roundRect(1, 18, 14, 9, 2)
-      .fill(0x293848)
+      .roundRect(-9, 34, 34, 22, 4)
+      .fill(0x0e141b)
+      .stroke({ width: 2, color: 0x2b3642 })
+      .roundRect(-5, 24, 26, 15, 4)
+      .fill(0x1b2530)
       .stroke({ width: 1, color: 0xb37a45 })
-      .rect(4, 15, 8, 4)
-      .fill(0x34485c);
+      .rect(2, 55, 10, 8)
+      .fill(0x0b1016);
     const screen = new Graphics();
     const keys = new Graphics();
     container.addChild(chair, screen, keys);
@@ -339,33 +342,33 @@ export class OfficeScene {
 
     fx.screen
       .clear()
-      .roundRect(-2, -5, 20, 12, 2)
+      .roundRect(-12, -14, 42, 27, 3)
       .fill(0x111820)
-      .rect(0, -3, 16, 8)
+      .rect(-8, -10, 34, 19)
       .fill(color)
-      .rect(6, 6, 4, 2)
+      .rect(3, 11, 8, 4)
       .fill(0x1a2028)
-      .rect(3, 8, 10, 1)
+      .rect(-2, 15, 18, 2)
       .fill(0x1a2028);
 
     if (active || fx.status === "error") {
       const glow = pulse > 0.5 ? 0xb6fff2 : color;
-      fx.screen.rect(2, -1, 12, 2).fill(glow);
+      fx.screen.rect(-3, -4, 20, 3).fill(glow);
     }
 
-    fx.keys.clear().rect(0, 12, 16, 2).fill(0xd7dbe4);
+    fx.keys.clear().rect(-8, 25, 34, 4).fill(0xd7dbe4);
     if (!active || this.reduced) {
-      fx.keys.rect(3, 15, 10, 1).fill(0x8b93a3);
+      fx.keys.rect(-2, 32, 22, 2).fill(0x8b93a3);
       return;
     }
 
     const tick = pulse > 0.5 ? 1 : 0;
     fx.keys
-      .rect(2 + tick, 15, 2, 1)
+      .rect(-4 + tick, 32, 4, 2)
       .fill(0xf1f3f7)
-      .rect(7 - tick, 15, 2, 1)
+      .rect(7 - tick, 32, 4, 2)
       .fill(0xf1f3f7)
-      .rect(12, 15, 2, 1)
+      .rect(18, 32, 4, 2)
       .fill(pulse > 0.75 ? 0xf1f3f7 : 0x8b93a3);
   }
 

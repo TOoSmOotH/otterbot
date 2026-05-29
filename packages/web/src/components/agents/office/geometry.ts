@@ -1,5 +1,5 @@
 /** Logical pixels per tile in world space (before camera scaling). */
-export const TILE = 16;
+export const TILE = 24;
 
 /** Grid cell kinds. Walkable = FLOOR or DOOR. */
 export enum Cell {

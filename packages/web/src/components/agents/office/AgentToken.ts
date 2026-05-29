@@ -34,7 +34,7 @@ export class AgentToken {
     this.homeChair = chair;
     this.container.addChild(this.ring);
 
-    const size = TILE + 2;
+    const size = TILE + 4;
     if (texture) {
       const s = new Sprite(texture);
       s.width = size;
@@ -44,7 +44,7 @@ export class AgentToken {
     } else {
       const chip = new Graphics().roundRect(-size / 2, -size / 2, size, size, 4).fill(0xc8cdd8);
       const initials = displayName.trim().slice(0, 2).toUpperCase() || "??";
-      const t = new Text({ text: initials, style: { fontSize: 10, fill: 0x222222, fontWeight: "700" } });
+    const t = new Text({ text: initials, style: { fontSize: 12, fill: 0x222222, fontWeight: "700" } });
       t.anchor.set(0.5);
       this.container.addChild(chip, t);
     }
@@ -57,17 +57,17 @@ export class AgentToken {
     const labelText = roleName.length > 12 ? roleName.slice(0, 12) + "…" : roleName;
     const label = new Text({
       text: labelText,
-      style: { fontSize: 8, fill: 0xf1f3f7, align: "center", fontWeight: "600" },
+      style: { fontSize: 10, fill: 0xf1f3f7, align: "center", fontWeight: "600" },
     });
     label.anchor.set(0.5);
-    const tagW = Math.max(22, Math.min(54, label.width + 8));
+    const tagW = Math.max(34, Math.min(78, label.width + 12));
     const tag = new Container();
     const tagBg = new Graphics()
-      .roundRect(-tagW / 2, -6, tagW, 12, 3)
+      .roundRect(-tagW / 2, -8, tagW, 16, 4)
       .fill(0x20242c)
       .stroke({ width: 1, color: 0x5f6978 });
     tag.addChild(tagBg, label);
-    tag.y = size / 2 + 7;
+    tag.y = size / 2 + 11;
     this.container.addChild(tag);
 
     this.container.x = tilePx(chair.tx);

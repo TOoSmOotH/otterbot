@@ -125,14 +125,14 @@ export function drawEnvironment(world: World): Container {
 function drawStudioFloor(g: Graphics, world: World): void {
   g.rect(0, 0, world.pxWidth, world.pxHeight).fill(C.floor);
 
-  for (let y = 0; y < world.pxHeight; y += 8) {
+  for (let y = 0; y < world.pxHeight; y += 12) {
     g.rect(0, y, world.pxWidth, 1).fill(C.floorLine);
   }
-  for (let row = 0; row < Math.ceil(world.pxHeight / 8); row++) {
-    const y0 = row * 8;
-    const offset = row % 2 ? 28 : 0;
-    for (let x = offset; x < world.pxWidth; x += 56) {
-      g.rect(x, y0 + 2, 18, 1).fill(C.floorGrain);
+  for (let row = 0; row < Math.ceil(world.pxHeight / 12); row++) {
+    const y0 = row * 12;
+    const offset = row % 2 ? 42 : 0;
+    for (let x = offset; x < world.pxWidth; x += 84) {
+      g.rect(x, y0 + 3, 27, 1).fill(C.floorGrain);
     }
   }
 }
@@ -147,9 +147,9 @@ function drawRoomRugs(g: Graphics, world: World): void {
     if (w <= 0 || h <= 0) continue;
 
     const color = room.kind === "coo" ? 0x332b2a : C.rug;
-    g.roundRect(x + 2, y + 2, w - 4, h - 4, 3).fill(color).stroke({ width: 1, color: C.rugEdge });
-    for (let rx = x + 10; rx < x + w - 4; rx += 18) g.rect(rx, y + 4, 1, h - 8).fill(C.rugLine);
-    for (let ry = y + 12; ry < y + h - 4; ry += 18) g.rect(x + 4, ry, w - 8, 1).fill(0x303d49);
+    g.roundRect(x + 4, y + 4, w - 8, h - 8, 5).fill(color).stroke({ width: 2, color: C.rugEdge });
+    for (let rx = x + 16; rx < x + w - 8; rx += 28) g.rect(rx, y + 8, 1, h - 16).fill(C.rugLine);
+    for (let ry = y + 20; ry < y + h - 8; ry += 28) g.rect(x + 8, ry, w - 16, 1).fill(0x303d49);
   }
 }
 
@@ -161,47 +161,54 @@ function drawWall(g: Graphics, tx: number, ty: number, world: World): void {
       ? (world.grid[ny * world.cols + nx] as Cell)
       : Cell.WALL;
   const horiz = at(tx - 1, ty) === Cell.WALL || at(tx + 1, ty) === Cell.WALL;
+  const frontGlass = horiz && at(tx, ty - 1) !== Cell.WALL && at(tx, ty + 1) !== Cell.WALL;
 
   g.rect(x, y, TILE, TILE).fill(C.wallDark);
-  g.rect(x + 1, y + 1, TILE - 2, TILE - 2).fill(C.wall);
-  if (horiz) {
-    g.rect(x + 1, y + 2, TILE - 2, 4).fill(C.wallPanel);
-    g.rect(x + 1, y + 6, TILE - 2, 1).fill(C.trim);
-    g.rect(x + 3, y + 9, TILE - 6, 3).fill(0x1d2833);
+  if (frontGlass) {
+    g.rect(x + 1, y + 2, TILE - 2, 3).fill(C.trim);
+    g.rect(x + 2, y + 5, TILE - 4, TILE - 9).fill(0x5f7886);
+    g.rect(x + 4, y + 7, TILE - 8, TILE - 13).fill(0x26333d);
+    g.rect(x + 1, y + TILE - 4, TILE - 2, 3).fill(0x1b2027);
+  } else if (horiz) {
+    g.rect(x + 1, y + 1, TILE - 2, TILE - 2).fill(C.wall);
+    g.rect(x + 2, y + 3, TILE - 4, 6).fill(C.wallPanel);
+    g.rect(x + 2, y + 9, TILE - 4, 2).fill(C.trim);
+    g.rect(x + 5, y + 15, TILE - 10, 4).fill(0x1d2833);
   } else {
-    g.rect(x + 2, y + 1, 4, TILE - 2).fill(C.wallPanel);
-    g.rect(x + 6, y + 1, 1, TILE - 2).fill(C.trim);
-    g.rect(x + 9, y + 3, 3, TILE - 6).fill(0x1d2833);
+    g.rect(x + 1, y + 1, TILE - 2, TILE - 2).fill(C.wall);
+    g.rect(x + 3, y + 2, 6, TILE - 4).fill(C.wallPanel);
+    g.rect(x + 9, y + 2, 2, TILE - 4).fill(C.trim);
+    g.rect(x + 15, y + 5, 4, TILE - 10).fill(0x1d2833);
   }
 }
 
 function drawDeskPod(g: Graphics, tx: number, ty: number): void {
-  const x = tx * TILE - 16;
-  const y = ty * TILE - 1;
-  const w = 48;
-  const h = 30;
+  const x = tx * TILE - 24;
+  const y = ty * TILE - 2;
+  const w = 72;
+  const h = 45;
 
-  g.roundRect(x + 3, y + 5, w, h, 3).fill(0x17120f);
-  g.roundRect(x, y, w, h - 4, 3).fill(C.deskTop).stroke({ width: 1, color: 0xb37a45 });
-  g.rect(x, y, w, 4).fill(0x9b6b43);
-  g.rect(x, y + h - 7, w, 4).fill(C.deskEdge);
-  g.rect(x + 3, y + h - 3, 7, 5).fill(0x211713);
-  g.rect(x + w - 10, y + h - 3, 7, 5).fill(0x211713);
+  g.roundRect(x + 4, y + 7, w, h, 5).fill(0x17120f);
+  g.roundRect(x, y, w, h - 6, 5).fill(C.deskTop).stroke({ width: 2, color: 0xb37a45 });
+  g.rect(x, y, w, 6).fill(0x9b6b43);
+  g.rect(x, y + h - 10, w, 6).fill(C.deskEdge);
+  g.rect(x + 4, y + h - 4, 10, 7).fill(0x211713);
+  g.rect(x + w - 14, y + h - 4, 10, 7).fill(0x211713);
 
-  g.rect(x + 4, y + 8, 10, 10).fill(0x5b3824).stroke({ width: 1, color: 0x2b1b13 });
-  g.rect(x + 6, y + 11, 6, 1).fill(0xb37a45);
-  g.rect(x + 6, y + 15, 6, 1).fill(0xb37a45);
+  g.rect(x + 6, y + 12, 15, 15).fill(0x5b3824).stroke({ width: 1, color: 0x2b1b13 });
+  g.rect(x + 9, y + 16, 9, 1).fill(0xb37a45);
+  g.rect(x + 9, y + 22, 9, 1).fill(0xb37a45);
 
-  g.rect(x + 32, y + 7, 3, 7).fill(0x67412a);
-  g.circle(x + 33, y + 6, 3).fill(0x4ba464);
-  g.circle(x + 36, y + 8, 3).fill(0x78c981);
-  g.circle(x + 30, y + 10, 3).fill(0x34784a);
+  g.rect(x + 50, y + 10, 5, 10).fill(0x67412a);
+  g.circle(x + 51, y + 8, 5).fill(0x4ba464);
+  g.circle(x + 56, y + 11, 5).fill(0x78c981);
+  g.circle(x + 47, y + 14, 5).fill(0x34784a);
 
-  g.circle(x + 41, y + 9, 3).fill(0xe9ead2).stroke({ width: 1, color: 0x7a4f32 });
-  g.rect(x + 43, y + 9, 2, 1).fill(0xe9ead2);
-  g.rect(x + 15, y + 18, 18, 2).fill(0xd7dbe4);
-  g.rect(x + 37, y + 17, 4, 5).fill(0xe2b13c);
-  g.circle(x + 39, y + 16, 4).fill(0xffd98a);
+  g.circle(x + 62, y + 14, 5).fill(0xe9ead2).stroke({ width: 1, color: 0x7a4f32 });
+  g.rect(x + 65, y + 14, 3, 2).fill(0xe9ead2);
+  g.rect(x + 23, y + 28, 27, 3).fill(0xd7dbe4);
+  g.rect(x + 55, y + 27, 6, 8).fill(0xe2b13c);
+  g.circle(x + 58, y + 25, 6).fill(0xffd98a);
 }
 
 function drawRoomDecor(g: Graphics, world: World): void {
@@ -211,58 +218,58 @@ function drawRoomDecor(g: Graphics, world: World): void {
     const w = room.w * TILE;
     const h = room.h * TILE;
     if (room.kind !== "unassigned") {
-      drawShelf(g, x + w - 46, y + 18);
-      drawWallLamp(g, x + 10, y + 26);
+      drawShelf(g, x + w - 70, y + 30);
+      drawWallLamp(g, x + 18, y + 42);
     }
     if (room.kind === "coo") {
-      drawFramedArt(g, x + 20, y + 32);
-      drawLargePlant(g, x + 12, y + h - 36);
+      drawFramedArt(g, x + 34, y + 52);
+      drawLargePlant(g, x + 18, y + h - 58);
     } else if (room.kind === "project") {
-      drawLargePlant(g, x + w - 28, y + 18);
-      drawCabinet(g, x + w - 30, y + h - 40);
+      drawLargePlant(g, x + w - 48, y + 28);
+      drawCabinet(g, x + w - 48, y + h - 64);
     } else {
-      drawShelf(g, x + w - 52, y + 8);
-      drawWallLamp(g, x + w - 22, y + 28);
-      drawLargePlant(g, x + w - 34, y + h - 42);
+      drawShelf(g, x + w - 76, y + 18);
+      drawWallLamp(g, x + w - 36, y + 42);
+      drawLargePlant(g, x + w - 58, y + h - 64);
     }
   }
 }
 
 function drawShelf(g: Graphics, x: number, y: number): void {
-  g.rect(x, y, 36, 4).fill(0x201713).stroke({ width: 1, color: 0xb37a45 });
-  g.rect(x + 4, y - 9, 5, 9).fill(0x4ba464);
-  g.rect(x + 11, y - 12, 4, 12).fill(0xd7a447);
-  g.rect(x + 17, y - 10, 4, 10).fill(0xd9e2e4);
-  g.rect(x + 25, y - 13, 6, 13).fill(0x7a4f32);
+  g.rect(x, y, 54, 6).fill(0x201713).stroke({ width: 1, color: 0xb37a45 });
+  g.rect(x + 6, y - 14, 8, 14).fill(0x4ba464);
+  g.rect(x + 17, y - 18, 6, 18).fill(0xd7a447);
+  g.rect(x + 26, y - 15, 6, 15).fill(0xd9e2e4);
+  g.rect(x + 39, y - 20, 9, 20).fill(0x7a4f32);
 }
 
 function drawFramedArt(g: Graphics, x: number, y: number): void {
-  g.rect(x, y, 44, 24).fill(0x201713).stroke({ width: 1, color: 0xb37a45 });
-  g.rect(x + 3, y + 3, 38, 18).fill(0x7fb0d6);
-  g.rect(x + 3, y + 14, 38, 7).fill(0x456f48);
-  g.rect(x + 8, y + 11, 12, 4).fill(0xd2a94d);
+  g.rect(x, y, 66, 36).fill(0x201713).stroke({ width: 2, color: 0xb37a45 });
+  g.rect(x + 5, y + 5, 56, 26).fill(0x7fb0d6);
+  g.rect(x + 5, y + 20, 56, 11).fill(0x456f48);
+  g.rect(x + 12, y + 16, 18, 6).fill(0xd2a94d);
 }
 
 function drawLargePlant(g: Graphics, x: number, y: number): void {
-  g.rect(x + 8, y + 22, 12, 10).fill(0x8a5638).stroke({ width: 1, color: 0x3b271b });
-  g.circle(x + 5, y + 15, 6).fill(0x3f8f5a);
-  g.circle(x + 15, y + 8, 8).fill(0x4ba464);
-  g.circle(x + 23, y + 16, 7).fill(0x78c981);
-  g.circle(x + 13, y + 19, 7).fill(0x34784a);
+  g.rect(x + 12, y + 34, 18, 15).fill(0x8a5638).stroke({ width: 1, color: 0x3b271b });
+  g.circle(x + 8, y + 22, 9).fill(0x3f8f5a);
+  g.circle(x + 22, y + 12, 12).fill(0x4ba464);
+  g.circle(x + 34, y + 24, 11).fill(0x78c981);
+  g.circle(x + 20, y + 29, 10).fill(0x34784a);
 }
 
 function drawWallLamp(g: Graphics, x: number, y: number): void {
-  g.rect(x + 3, y, 4, 8).fill(0x5b3824);
-  g.circle(x + 5, y + 10, 6).fill(0xffd98a);
-  g.circle(x + 5, y + 10, 3).fill(0xe2b13c);
+  g.rect(x + 5, y, 6, 12).fill(0x5b3824);
+  g.circle(x + 8, y + 15, 9).fill(0xffd98a);
+  g.circle(x + 8, y + 15, 5).fill(0xe2b13c);
 }
 
 function drawCabinet(g: Graphics, x: number, y: number): void {
-  g.rect(x, y, 22, 30).fill(0x5b3824).stroke({ width: 1, color: 0x2b1b13 });
-  g.rect(x + 3, y + 5, 16, 7).fill(0x714b31);
-  g.rect(x + 3, y + 16, 16, 7).fill(0x714b31);
-  g.rect(x + 10, y + 8, 2, 1).fill(0xb37a45);
-  g.rect(x + 10, y + 19, 2, 1).fill(0xb37a45);
+  g.rect(x, y, 34, 45).fill(0x5b3824).stroke({ width: 1, color: 0x2b1b13 });
+  g.rect(x + 5, y + 8, 24, 10).fill(0x714b31);
+  g.rect(x + 5, y + 25, 24, 10).fill(0x714b31);
+  g.rect(x + 16, y + 12, 3, 2).fill(0xb37a45);
+  g.rect(x + 16, y + 29, 3, 2).fill(0xb37a45);
 }
 
 /** A simple potted-plant prop at a tile. */
