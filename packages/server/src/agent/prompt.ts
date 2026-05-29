@@ -79,6 +79,13 @@ export async function buildSystemPrompt(
   const persona = ctx.profile.persona.trim() || FALLBACK_PERSONA;
   const parts: string[] = [persona, OPERATING_GUIDE];
 
+  const projectRules = ctx.projectRules()?.trim();
+  if (projectRules) {
+    parts.push(
+      `## Project rules\n\nStanding rules for this project — follow them in everything you do here:\n\n${projectRules}`
+    );
+  }
+
   if (args.peers && args.peers.length > 0) {
     const rendered = args.peers
       .map((p) => `- \`${p.id}\` — ${p.displayName}: ${p.summary}`)
