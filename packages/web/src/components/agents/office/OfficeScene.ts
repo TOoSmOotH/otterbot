@@ -5,7 +5,7 @@ import { withToken } from "../../../lib/api";
 import { Cell, TILE, tilePx, type Pt } from "./geometry";
 import { buildWorld, type World } from "./worldLayout";
 import { findPath } from "./pathfind";
-import { drawEnvironment, drawPlant, drawPrinter } from "./tiles";
+import { drawEnvironment, drawPlant, drawPrinter, loadOfficeAtlas } from "./tiles";
 import { AgentToken } from "./AgentToken";
 import { drawWhiteboard } from "./whiteboard";
 
@@ -82,6 +82,7 @@ export class OfficeScene {
     const world = buildWorld(agents, projects);
     this.world = world;
 
+    await loadOfficeAtlas();
     this.envLayer.removeChildren().forEach((c) => c.destroy());
     this.envLayer.addChild(drawEnvironment(world));
     this.envLayer.addChild(drawPlant(1, world.rows - 2), drawPrinter(world.cols - 3, world.rows - 2));

@@ -1,4 +1,4 @@
-import { Container, Graphics } from "pixi.js";
+import { Assets, Container, Graphics, Rectangle, Sprite, Texture } from "pixi.js";
 import { Cell, TILE } from "./geometry";
 import type { World } from "./worldLayout";
 
@@ -14,6 +14,47 @@ const C = {
   printer: 0xb9bec8,
 };
 
+// Sprite names from public/office/roguelike.xml. Leave a key unset to keep the
+// Graphics drawing for that item. Populated only when verified against the pack.
+const ART: Partial<Record<"floor" | "wall" | "door" | "desk" | "plant" | "printer", string>> = {};
+
+let sheet: Texture | null = null;
+let frames: Record<string, Rectangle> | null = null;
+
+/** Load the Kenney sheet + parse its XML atlas. Safe to call repeatedly; no-throw. */
+export async function loadOfficeAtlas(): Promise<void> {
+  if (frames) return;
+  try {
+    sheet = (await Assets.load("/office/roguelike.png")) as Texture;
+    const xml = await (await fetch("/office/roguelike.xml")).text();
+    const doc = new DOMParser().parseFromString(xml, "text/xml");
+    const out: Record<string, Rectangle> = {};
+    doc.querySelectorAll("SubTexture").forEach((el) => {
+      const name = el.getAttribute("name")!;
+      out[name] = new Rectangle(
+        +el.getAttribute("x")!,
+        +el.getAttribute("y")!,
+        +el.getAttribute("width")!,
+        +el.getAttribute("height")!
+      );
+    });
+    frames = out;
+  } catch {
+    frames = {}; // atlas unavailable -> Graphics fallback everywhere
+  }
+}
+
+/** A Sprite for an art key if mapped and loaded; else null (use Graphics). */
+export function artSprite(key: keyof typeof ART): Sprite | null {
+  const name = ART[key];
+  if (!name || !sheet || !frames || !frames[name]) return null;
+  const tex = new Texture({ source: sheet.source, frame: frames[name] });
+  const s = new Sprite(tex);
+  s.width = TILE;
+  s.height = TILE;
+  return s;
+}
+
 /** Draw the floor + walls + doors + desks for a world into a fresh Container. */
 export function drawEnvironment(world: World): Container {
   const root = new Container();
@@ -26,21 +67,67 @@ export function drawEnvironment(world: World): Container {
       const x = tx * TILE;
       const y = ty * TILE;
       switch (cell) {
-        case Cell.WALL:
-          g.rect(x, y, TILE, TILE).fill(C.wall);
-          g.rect(x, y, TILE, 4).fill(C.wallTop);
+        case Cell.WALL: {
+          const wallSprite = artSprite("wall");
+          if (wallSprite) {
+            wallSprite.x = x;
+            wallSprite.y = y;
+            root.addChild(wallSprite);
+          } else {
+            g.rect(x, y, TILE, TILE).fill(C.wall);
+            g.rect(x, y, TILE, 4).fill(C.wallTop);
+          }
           break;
-        case Cell.DOOR:
-          g.rect(x, y, TILE, TILE).fill(C.floor);
-          g.rect(x + 3, y, TILE - 6, TILE).fill(C.door);
+        }
+        case Cell.DOOR: {
+          const doorFloor = artSprite("floor");
+          if (doorFloor) {
+            doorFloor.x = x;
+            doorFloor.y = y;
+            root.addChild(doorFloor);
+          } else {
+            g.rect(x, y, TILE, TILE).fill(C.floor);
+          }
+          const doorSprite = artSprite("door");
+          if (doorSprite) {
+            doorSprite.x = x;
+            doorSprite.y = y;
+            root.addChild(doorSprite);
+          } else {
+            g.rect(x + 3, y, TILE - 6, TILE).fill(C.door);
+          }
           break;
-        case Cell.DESK:
-          g.rect(x, y, TILE, TILE).fill((tx + ty) % 2 ? C.floor : C.floorAlt);
-          g.rect(x + 1, y + 3, TILE - 2, TILE - 5).fill(C.deskTop);
-          g.rect(x + 1, y + TILE - 4, TILE - 2, 3).fill(C.deskEdge);
+        }
+        case Cell.DESK: {
+          const base = artSprite("floor");
+          if (base) {
+            base.x = x;
+            base.y = y;
+            root.addChild(base);
+          } else {
+            g.rect(x, y, TILE, TILE).fill((tx + ty) % 2 ? C.floor : C.floorAlt);
+          }
+          const deskSprite = artSprite("desk");
+          if (deskSprite) {
+            deskSprite.x = x;
+            deskSprite.y = y;
+            root.addChild(deskSprite);
+          } else {
+            g.rect(x + 1, y + 3, TILE - 2, TILE - 5).fill(C.deskTop);
+            g.rect(x + 1, y + TILE - 4, TILE - 2, 3).fill(C.deskEdge);
+          }
           break;
-        default:
-          g.rect(x, y, TILE, TILE).fill((tx + ty) % 2 ? C.floor : C.floorAlt);
+        }
+        default: {
+          const floorSprite = artSprite("floor");
+          if (floorSprite) {
+            floorSprite.x = x;
+            floorSprite.y = y;
+            root.addChild(floorSprite);
+          } else {
+            g.rect(x, y, TILE, TILE).fill((tx + ty) % 2 ? C.floor : C.floorAlt);
+          }
+        }
       }
     }
   }
