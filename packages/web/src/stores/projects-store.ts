@@ -14,6 +14,7 @@ export interface Project {
   forgeRepo: string | null;
   baseBranch: string | null;
   monitorIssues: boolean;
+  rules: string | null;
 }
 
 export interface ForgeAccount {
@@ -93,6 +94,7 @@ interface ProjectsState {
       monitorIssues?: boolean;
     }
   ) => Promise<string | null>;
+  setRules: (projectId: string, rules: string) => Promise<string | null>;
 
   startPipeline: (projectId: string, goal: string) => Promise<void>;
 }
@@ -199,6 +201,22 @@ export const useProjectsStore = create<ProjectsState>((set, get) => ({
       method: "PUT",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(input),
+    });
+    if (!res.ok) {
+      const err = await readError(res);
+      set({ error: err });
+      return err;
+    }
+    set({ error: null });
+    await get().load();
+    return null;
+  },
+
+  setRules: async (projectId, rules) => {
+    const res = await apiFetch(`/api/projects/${projectId}/rules`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ rules }),
     });
     if (!res.ok) {
       const err = await readError(res);
