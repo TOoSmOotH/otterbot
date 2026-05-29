@@ -19,7 +19,7 @@ const C = {
 // Graphics drawing for that item.
 const ART: Partial<Record<"floor" | "wall" | "door" | "desk" | "plant" | "printer", string>> = {
   floor: "tile_0741.png", // gray tile floor
-  wall: "tile_0039.png", // brick wall
+  wall: "tile_0009.png", // neutral gray stone wall
   door: "tile_0617.png", // wooden paneled door
   desk: "tile_0572.png", // wooden desk
 };
