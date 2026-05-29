@@ -3,6 +3,7 @@ import { FolderGit2, Plus, Trash2, X, Play, GitPullRequest } from "lucide-react"
 import { Icon } from "../ui/Icon";
 import { useProjectsStore, type Project, type PipelineRun } from "../../stores/projects-store";
 import { useAgentsStore } from "../../stores/agents-store";
+import { AgentWizard } from "./AgentWizard";
 
 /**
  * Manage collaborative projects: a shared git working tree with a dedicated
@@ -15,10 +16,9 @@ export function ProjectsView() {
   const load = useProjectsStore((s) => s.load);
   const loadForgeAccounts = useProjectsStore((s) => s.loadForgeAccounts);
   const bindSocket = useProjectsStore((s) => s.bindSocket);
-  const create = useProjectsStore((s) => s.create);
   const remove = useProjectsStore((s) => s.remove);
 
-  const [name, setName] = useState("");
+  const [wizardOpen, setWizardOpen] = useState(false);
 
   useEffect(() => {
     void load();
@@ -39,21 +39,13 @@ export function ProjectsView() {
 
       <ForgeAccountsSection />
 
-      <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          if (!name.trim()) return;
-          void create(name.trim());
-          setName("");
-        }}
-        style={{ display: "flex", gap: 8, margin: "16px 0", maxWidth: 480 }}
-      >
-        <input value={name} onChange={(e) => setName(e.target.value)} placeholder="New project name" style={input} />
-        <button type="submit" style={primaryBtn}>
-          <Icon icon={Plus} size={14} /> Create + provision team
+      <div style={{ margin: "16px 0" }}>
+        <button style={primaryBtn} onClick={() => setWizardOpen(true)}>
+          <Icon icon={Plus} size={14} /> New coding team
         </button>
-      </form>
+      </div>
       {error && <div style={{ color: "rgb(220 90 90)", fontSize: 12, marginBottom: 8 }}>{error}</div>}
+      {wizardOpen && <AgentWizard initialChoice="team" onClose={() => setWizardOpen(false)} />}
 
       <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
         {projects.length === 0 && <div style={{ color: "rgb(var(--muted))", fontSize: 13 }}>No projects yet.</div>}

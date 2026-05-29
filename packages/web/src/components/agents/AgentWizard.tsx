@@ -37,8 +37,15 @@ const ROLES: RoleSpec[] = [
   { role: "tester", label: "Tester", blurb: "Runs e2e via the Proxmox + SSH agents." },
 ];
 
-export function AgentWizard({ onClose }: { onClose: () => void }) {
-  const [choice, setChoice] = useState<Choice>("menu");
+export function AgentWizard({
+  onClose,
+  initialChoice = "menu",
+}: {
+  onClose: () => void;
+  /** Open straight to a step (e.g. "team" from the Projects tab). */
+  initialChoice?: Choice;
+}) {
+  const [choice, setChoice] = useState<Choice>(initialChoice);
 
   if (choice === "single") return <AgentEditor agentId={null} onClose={onClose} />;
 
