@@ -15,7 +15,10 @@ const WALK_SPEED = 60 / 1000; // px per ms
 
 export class AgentToken {
   readonly container = new Container();
+  private avatar = new Container();
   private ring = new Graphics();
+  private tagBg: Graphics | null = null;
+  private tagW = 34;
   private bubble: Container | null = null;
   private bubbleTtl = 0;
   private path: Pt[] = [];
@@ -23,6 +26,7 @@ export class AgentToken {
   private resolveWalk: (() => void) | null = null;
   private homeChair: Pt;
   private bobPhase = 0;
+  private seated = true;
   reduced = false;
 
   constructor(
@@ -32,7 +36,8 @@ export class AgentToken {
     chair: Pt
   ) {
     this.homeChair = chair;
-    this.container.addChild(this.ring);
+    this.avatar.addChild(this.ring);
+    this.container.addChild(this.avatar);
 
     const size = TILE + 4;
     if (texture) {
@@ -40,13 +45,13 @@ export class AgentToken {
       s.width = size;
       s.height = size;
       s.anchor.set(0.5);
-      this.container.addChild(s);
+      this.avatar.addChild(s);
     } else {
       const chip = new Graphics().roundRect(-size / 2, -size / 2, size, size, 4).fill(0xc8cdd8);
       const initials = displayName.trim().slice(0, 2).toUpperCase() || "??";
-    const t = new Text({ text: initials, style: { fontSize: 12, fill: 0x222222, fontWeight: "700" } });
+      const t = new Text({ text: initials, style: { fontSize: 12, fill: 0x222222, fontWeight: "700" } });
       t.anchor.set(0.5);
-      this.container.addChild(chip, t);
+      this.avatar.addChild(chip, t);
     }
 
     // Show just the role (the project name is the room grouping) and keep it
@@ -61,17 +66,19 @@ export class AgentToken {
     });
     label.anchor.set(0.5);
     const tagW = Math.max(34, Math.min(78, label.width + 12));
+    this.tagW = tagW;
     const tag = new Container();
-    const tagBg = new Graphics()
+    this.tagBg = new Graphics()
       .roundRect(-tagW / 2, -8, tagW, 16, 4)
       .fill(0x20242c)
       .stroke({ width: 1, color: 0x5f6978 });
-    tag.addChild(tagBg, label);
-    tag.y = size / 2 + 11;
+    tag.addChild(this.tagBg, label);
+    tag.y = 30;
     this.container.addChild(tag);
 
     this.container.x = tilePx(chair.tx);
     this.container.y = tilePx(chair.ty);
+    this.setSeated(true);
     this.setStatus("idle");
   }
 
@@ -79,6 +86,11 @@ export class AgentToken {
     const color = STATUS_HEX[status];
     const size = TILE + 6;
     this.ring.clear().roundRect(-size / 2 - 2, -size / 2 - 2, size + 4, size + 4, 6).stroke({ width: 2, color });
+    this.tagBg
+      ?.clear()
+      .roundRect(-this.tagW / 2, -8, this.tagW, 16, 4)
+      .fill(0x20242c)
+      .stroke({ width: 1, color });
   }
 
   showBubble(text: string, accent: number): void {
@@ -109,8 +121,10 @@ export class AgentToken {
       const end = path[path.length - 1] ?? this.homeChair;
       this.container.x = tilePx(end.tx);
       this.container.y = tilePx(end.ty);
+      this.setSeated(true);
       return Promise.resolve();
     }
+    this.setSeated(false);
     this.path = path;
     this.pathI = 1;
     return new Promise((res) => (this.resolveWalk = res));
@@ -152,6 +166,7 @@ export class AgentToken {
           this.pathI = 0;
           const r = this.resolveWalk;
           this.resolveWalk = null;
+          this.setSeated(true);
           r?.();
         }
       } else {
@@ -161,14 +176,22 @@ export class AgentToken {
       return;
     }
 
-    if (!this.reduced) {
+    if (!this.seated && !this.reduced) {
       this.bobPhase = (this.bobPhase + dtMs / 600) % (Math.PI * 2);
       this.container.y = tilePx(this.homeChair.ty) + Math.sin(this.bobPhase) * 1.2;
+    } else {
+      this.container.y = tilePx(this.homeChair.ty);
     }
   }
 
   setHome(chair: Pt): void {
     this.homeChair = chair;
+  }
+
+  setSeated(seated: boolean): void {
+    this.seated = seated;
+    this.avatar.visible = !seated;
+    this.ring.visible = !seated;
   }
 
   destroy(): void {

@@ -21,7 +21,6 @@ const MAX_WALKERS = 6;
 
 interface DeskFx {
   container: Container;
-  chair: Graphics;
   screen: Graphics;
   keys: Graphics;
   phase: number;
@@ -295,19 +294,10 @@ export class OfficeScene {
     const container = new Container();
     container.x = tx * TILE;
     container.y = ty * TILE;
-    const chair = new Graphics()
-      .roundRect(-9, 34, 34, 22, 4)
-      .fill(0x0e141b)
-      .stroke({ width: 2, color: 0x2b3642 })
-      .roundRect(-5, 24, 26, 15, 4)
-      .fill(0x1b2530)
-      .stroke({ width: 1, color: 0xb37a45 })
-      .rect(2, 55, 10, 8)
-      .fill(0x0b1016);
     const screen = new Graphics();
     const keys = new Graphics();
-    container.addChild(chair, screen, keys);
-    const fx = { container, chair, screen, keys, phase: Math.random() * Math.PI * 2, status };
+    container.addChild(screen, keys);
+    const fx = { container, screen, keys, phase: Math.random() * Math.PI * 2, status };
     this.drawDeskFx(fx, 0);
     return fx;
   }
@@ -342,34 +332,30 @@ export class OfficeScene {
 
     fx.screen
       .clear()
-      .roundRect(-12, -14, 42, 27, 3)
-      .fill(0x111820)
-      .rect(-8, -10, 34, 19)
-      .fill(color)
-      .rect(3, 11, 8, 4)
-      .fill(0x1a2028)
-      .rect(-2, 15, 18, 2)
-      .fill(0x1a2028);
+      .roundRect(-11, -13, 36, 22, 2)
+      .fill(0x0b1218, 0.38)
+      .rect(-8, -10, 30, 16)
+      .fill(color, 0.72);
 
     if (active || fx.status === "error") {
       const glow = pulse > 0.5 ? 0xb6fff2 : color;
-      fx.screen.rect(-3, -4, 20, 3).fill(glow);
+      fx.screen.rect(-4, -4, 18, 2).fill(glow, 0.95);
     }
 
-    fx.keys.clear().rect(-8, 25, 34, 4).fill(0xd7dbe4);
+    fx.keys.clear().rect(-10, 22, 30, 3).fill(0xd7dbe4, 0.7);
     if (!active || this.reduced) {
-      fx.keys.rect(-2, 32, 22, 2).fill(0x8b93a3);
+      fx.keys.rect(-3, 28, 18, 2).fill(0x8b93a3, 0.7);
       return;
     }
 
     const tick = pulse > 0.5 ? 1 : 0;
     fx.keys
-      .rect(-4 + tick, 32, 4, 2)
-      .fill(0xf1f3f7)
-      .rect(7 - tick, 32, 4, 2)
-      .fill(0xf1f3f7)
-      .rect(18, 32, 4, 2)
-      .fill(pulse > 0.75 ? 0xf1f3f7 : 0x8b93a3);
+      .rect(-5 + tick, 28, 3, 2)
+      .fill(0xf1f3f7, 0.85)
+      .rect(5 - tick, 28, 3, 2)
+      .fill(0xf1f3f7, 0.85)
+      .rect(15, 28, 3, 2)
+      .fill(pulse > 0.75 ? 0xf1f3f7 : 0x8b93a3, 0.85);
   }
 
   destroy(): void {

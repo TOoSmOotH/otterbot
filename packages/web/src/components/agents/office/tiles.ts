@@ -31,6 +31,7 @@ const ART: Partial<
     | "plant"
     | "printer"
     | "deskPod"
+    | "occupiedDeskPod"
     | "shelf"
     | "framedArt"
     | "largePlant"
@@ -48,6 +49,7 @@ const ART: Partial<
   plant: "small_plant",
   printer: "printer",
   deskPod: "desk_empty",
+  occupiedDeskPod: "workstation_occupied",
   shelf: "wall_shelf",
   framedArt: "framed_landscape",
   largePlant: "large_plant",
@@ -173,7 +175,7 @@ export function drawEnvironment(world: World): Container {
   for (let ty = 0; ty < world.rows; ty++) {
     for (let tx = 0; tx < world.cols; tx++) {
       const cell = world.grid[ty * world.cols + tx] as Cell;
-      if (cell === Cell.DESK) drawDeskPod(root, g, tx, ty);
+      if (cell === Cell.DESK) drawDeskPod(root, g, tx, ty, true);
     }
   }
   return root;
@@ -246,13 +248,14 @@ function drawWall(root: Container, g: Graphics, tx: number, ty: number, world: W
   }
 }
 
-function drawDeskPod(root: Container, g: Graphics, tx: number, ty: number): void {
-  const x = tx * TILE - 36;
-  const y = ty * TILE - 12;
-  const w = 96;
-  const h = 72;
+function drawDeskPod(root: Container, g: Graphics, tx: number, ty: number, occupied: boolean): void {
+  const x = tx * TILE - 40;
+  const y = ty * TILE - 18;
+  const w = 104;
+  const h = 88;
 
-  if (placeSprite(root, "deskPod", x, y, w, h)) return;
+  if (occupied && placeSprite(root, "occupiedDeskPod", x, y, w, h)) return;
+  if (placeSprite(root, "deskPod", x, y + 8, w, h - 16)) return;
 
   g.roundRect(x + 4, y + 7, w, h, 5).fill(0x17120f);
   g.roundRect(x, y, w, h - 6, 5).fill(C.deskTop).stroke({ width: 2, color: 0xb37a45 });
