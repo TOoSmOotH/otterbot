@@ -99,6 +99,13 @@ export const forgeAccounts = sqliteTable("forge_accounts", {
   baseUrl: text("base_url").notNull(),
   token: text("token").notNull(),
   username: text("username").notNull().default(""),
+  /** How git transport authenticates: tokenized HTTPS or a managed SSH key. */
+  gitTransport: text("git_transport", { enum: ["https", "ssh"] }).notNull().default("https"),
+  /** Commit author identity (for the Verified badge, email must match the account). */
+  committerName: text("committer_name").notNull().default(""),
+  committerEmail: text("committer_email").notNull().default(""),
+  /** SSH-sign commits with the managed key (gitTransport must be ssh). */
+  signCommits: integer("sign_commits", { mode: "boolean" }).notNull().default(false),
   createdAt: text("created_at")
     .notNull()
     .$defaultFn(() => new Date().toISOString()),
@@ -122,6 +129,8 @@ export const projects = sqliteTable("projects", {
   forgeAccountId: text("forge_account_id"),
   /** owner/name on the forge when mode != local. */
   forgeRepo: text("forge_repo"),
+  /** SSH clone/push URL captured from the forge (handles custom Gitea ports). */
+  forgeSshUrl: text("forge_ssh_url"),
   /** Base/integration branch PRs target (default branch when blank). */
   baseBranch: text("base_branch"),
   /** Poll the forge for assigned issues to feed the pipeline. */

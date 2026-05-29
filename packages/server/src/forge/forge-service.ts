@@ -1,3 +1,6 @@
+import { spawnSync } from "node:child_process";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { controlSchema, type ControlDb } from "../db/control-db.js";
@@ -8,10 +11,24 @@ import { GiteaForge } from "./gitea.js";
 /** Default API base for GitHub when an account doesn't override it. */
 const GITHUB_DEFAULT_BASE = "https://api.github.com";
 
-/** Manages forge accounts and builds a {@link Forge} client for one. */
+/** Transport + signing context for a forge account's git operations. */
+export interface ForgeGitContext {
+  sshKeyPath?: string;
+  knownHostsPath?: string;
+  committer?: { name: string; email: string };
+  /** Public-key path used for SSH commit signing, when enabled. */
+  signingKeyPath?: string;
+}
+
+/**
+ * Manages forge accounts, builds a {@link Forge} client, and owns each account's
+ * managed SSH keypair (for SSH transport + commit signing). Keys live on disk
+ * under `<keysDir>/<accountId>/` so git can reference them with `-i`.
+ */
 export class ForgeService {
   constructor(
     private readonly control: ControlDb,
+    private readonly keysDir: string,
     private readonly fetchFn: FetchFn = fetch
   ) {}
 
@@ -19,9 +36,13 @@ export class ForgeService {
     return this.control.db.select().from(controlSchema.forgeAccounts).all() as ForgeAccount[];
   }
 
-  /** Accounts with the token redacted — for the API/UI. */
-  listAccountsMasked(): Array<Omit<ForgeAccount, "token"> & { hasToken: boolean }> {
-    return this.listAccounts().map(({ token, ...rest }) => ({ ...rest, hasToken: Boolean(token) }));
+  /** Accounts with the token redacted + key presence — for the API/UI. */
+  listAccountsMasked() {
+    return this.listAccounts().map(({ token, ...rest }) => ({
+      ...rest,
+      hasToken: Boolean(token),
+      publicKey: rest.gitTransport === "ssh" ? this.publicKey(rest.id) : null,
+    }));
   }
 
   getAccount(id: string): ForgeAccount | null {
@@ -40,11 +61,16 @@ export class ForgeService {
     baseUrl?: string;
     token: string;
     username?: string;
+    gitTransport?: "https" | "ssh";
+    committerName?: string;
+    committerEmail?: string;
+    signCommits?: boolean;
   }): ForgeAccount {
-    if (!input.token) throw new Error("A token is required.");
+    if (!input.token) throw new Error("A token is required (used for the forge API).");
     if (input.provider === "gitea" && !input.baseUrl) {
       throw new Error("Gitea accounts need a baseUrl (instance URL).");
     }
+    const gitTransport = input.gitTransport ?? "https";
     const account: ForgeAccount = {
       id: nanoid(),
       provider: input.provider,
@@ -52,11 +78,17 @@ export class ForgeService {
       baseUrl: input.baseUrl || (input.provider === "github" ? GITHUB_DEFAULT_BASE : ""),
       token: input.token,
       username: input.username ?? "",
+      gitTransport,
+      committerName: input.committerName ?? "",
+      committerEmail: input.committerEmail ?? "",
+      // Signing requires the managed SSH key, so only with ssh transport.
+      signCommits: gitTransport === "ssh" ? Boolean(input.signCommits) : false,
     };
     this.control.db
       .insert(controlSchema.forgeAccounts)
       .values({ ...account, createdAt: new Date().toISOString() })
       .run();
+    if (gitTransport === "ssh") this.ensureKey(account.id);
     return account;
   }
 
@@ -67,17 +99,72 @@ export class ForgeService {
       .run();
   }
 
-  /** Build a Forge client for an account. */
   forgeFor(account: ForgeAccount): Forge {
     return account.provider === "gitea"
       ? new GiteaForge(account, this.fetchFn)
       : new GitHubForge(account, this.fetchFn);
   }
 
-  /** Build a Forge client for an account id, or null if unknown. */
   forgeForAccount(id: string | null | undefined): Forge | null {
     if (!id) return null;
     const account = this.getAccount(id);
     return account ? this.forgeFor(account) : null;
+  }
+
+  // --- managed SSH key ------------------------------------------------------
+
+  private keyPath(accountId: string): string {
+    return join(this.keysDir, accountId, "id_ed25519");
+  }
+
+  knownHostsPath(): string {
+    mkdirSync(this.keysDir, { recursive: true });
+    return join(this.keysDir, "known_hosts");
+  }
+
+  /** Generate the account's ed25519 keypair if absent; returns the public key. */
+  ensureKey(accountId: string): string | null {
+    const priv = this.keyPath(accountId);
+    if (!existsSync(priv)) {
+      mkdirSync(join(this.keysDir, accountId), { recursive: true });
+      const r = spawnSync(
+        "ssh-keygen",
+        ["-t", "ed25519", "-f", priv, "-N", "", "-C", `otterbot-forge-${accountId}`],
+        { timeout: 20_000 }
+      );
+      if (r.error || r.status !== 0) {
+        console.warn(`[forge] ssh-keygen failed for ${accountId}: ${r.error?.message ?? r.status}`);
+        return null;
+      }
+    }
+    return this.publicKey(accountId);
+  }
+
+  publicKey(accountId: string): string | null {
+    const pub = `${this.keyPath(accountId)}.pub`;
+    try {
+      return existsSync(pub) ? readFileSync(pub, "utf8").trim() : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Git transport + signing context for an account (ensures the key for ssh). */
+  gitContextFor(account: ForgeAccount): ForgeGitContext {
+    const committer =
+      account.committerName || account.committerEmail
+        ? {
+            name: account.committerName || "otterbot",
+            email: account.committerEmail || "otterbot@localhost",
+          }
+        : undefined;
+    if (account.gitTransport !== "ssh") return { committer };
+    this.ensureKey(account.id);
+    return {
+      sshKeyPath: this.keyPath(account.id),
+      knownHostsPath: this.knownHostsPath(),
+      committer,
+      signingKeyPath: account.signCommits ? `${this.keyPath(account.id)}.pub` : undefined,
+    };
   }
 }

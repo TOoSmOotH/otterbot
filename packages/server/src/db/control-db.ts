@@ -106,6 +106,10 @@ function ensureControlTables(sqlite: Database.Database) {
       base_url TEXT NOT NULL,
       token TEXT NOT NULL,
       username TEXT NOT NULL DEFAULT '',
+      git_transport TEXT NOT NULL DEFAULT 'https',
+      committer_name TEXT NOT NULL DEFAULT '',
+      committer_email TEXT NOT NULL DEFAULT '',
+      sign_commits INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL
     )`,
     `CREATE TABLE IF NOT EXISTS project_members (
@@ -174,6 +178,19 @@ function ensureControlTables(sqlite: Database.Database) {
   addProjectCol("mode", "mode TEXT NOT NULL DEFAULT 'local'");
   addProjectCol("forge_account_id", "forge_account_id TEXT");
   addProjectCol("forge_repo", "forge_repo TEXT");
+  addProjectCol("forge_ssh_url", "forge_ssh_url TEXT");
   addProjectCol("base_branch", "base_branch TEXT");
   addProjectCol("monitor_issues", "monitor_issues INTEGER NOT NULL DEFAULT 0");
+
+  // Migration: forge_accounts grew SSH-transport + signing fields.
+  const forgeCols = new Set(
+    (sqlite.prepare(`PRAGMA table_info(forge_accounts)`).all() as Array<{ name: string }>).map((c) => c.name)
+  );
+  const addForgeCol = (name: string, ddl: string) => {
+    if (forgeCols.has("id") && !forgeCols.has(name)) sqlite.exec(`ALTER TABLE forge_accounts ADD COLUMN ${ddl}`);
+  };
+  addForgeCol("git_transport", "git_transport TEXT NOT NULL DEFAULT 'https'");
+  addForgeCol("committer_name", "committer_name TEXT NOT NULL DEFAULT ''");
+  addForgeCol("committer_email", "committer_email TEXT NOT NULL DEFAULT ''");
+  addForgeCol("sign_commits", "sign_commits INTEGER NOT NULL DEFAULT 0");
 }

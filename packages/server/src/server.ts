@@ -395,7 +395,17 @@ export async function buildServer(
   app.get("/api/forge-accounts", async () => orch.listForgeAccounts());
 
   app.post<{
-    Body: { provider?: "github" | "gitea"; label?: string; baseUrl?: string; token?: string; username?: string };
+    Body: {
+      provider?: "github" | "gitea";
+      label?: string;
+      baseUrl?: string;
+      token?: string;
+      username?: string;
+      gitTransport?: "https" | "ssh";
+      committerName?: string;
+      committerEmail?: string;
+      signCommits?: boolean;
+    };
   }>("/api/forge-accounts", async (req, reply) => {
     const b = req.body ?? {};
     if ((b.provider !== "github" && b.provider !== "gitea") || !b.token) {
@@ -409,11 +419,25 @@ export async function buildServer(
         baseUrl: b.baseUrl,
         token: b.token,
         username: b.username,
+        gitTransport: b.gitTransport,
+        committerName: b.committerName,
+        committerEmail: b.committerEmail,
+        signCommits: b.signCommits,
       });
     } catch (err) {
       reply.code(400);
       return { error: err instanceof Error ? err.message : String(err) };
     }
+  });
+
+  // The managed SSH public key to add on the forge (auth + signing key).
+  app.get<{ Params: { id: string } }>("/api/forge-accounts/:id/public-key", async (req, reply) => {
+    const publicKey = orch.forgeAccountPublicKey(req.params.id);
+    if (!publicKey) {
+      reply.code(404);
+      return { error: "no managed key for this account (HTTPS transport?)" };
+    }
+    return { publicKey };
   });
 
   app.delete<{ Params: { id: string } }>("/api/forge-accounts/:id", async (req) => {

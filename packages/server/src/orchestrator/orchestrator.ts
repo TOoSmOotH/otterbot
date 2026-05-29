@@ -37,7 +37,7 @@ import { MessageBus } from "../bus/bus.js";
 import { createTransport } from "../bus/transports/factory.js";
 import { Scheduler } from "../scheduler/scheduler.js";
 import { CodeReferenceService } from "../code-reference/code-reference-service.js";
-import { ProjectStore } from "../projects/project-store.js";
+import { ProjectStore, type GitContext } from "../projects/project-store.js";
 import {
   PipelineManager,
   type PipelineRunView,
@@ -481,7 +481,7 @@ export class Orchestrator {
       },
     });
     this.projects = new ProjectStore(control, resolve(cfg.dataDir, "projects"));
-    this.forge = new ForgeService(control);
+    this.forge = new ForgeService(control, resolve(cfg.dataDir, "forge-keys"));
     this.pipeline = new PipelineManager({
       control,
       resolveAgent: (projectId, role) => this.projects.agentForRole(projectId, role),
@@ -1375,14 +1375,24 @@ export class Orchestrator {
     baseUrl?: string;
     token: string;
     username?: string;
+    gitTransport?: "https" | "ssh";
+    committerName?: string;
+    committerEmail?: string;
+    signCommits?: boolean;
   }) {
     const account = this.forge.addAccount(input);
     const { token: _t, ...masked } = account;
-    return masked;
+    // Surface the managed public key so the user can add it to the forge.
+    return { ...masked, publicKey: this.forge.publicKey(account.id) };
   }
 
   deleteForgeAccount(id: string): void {
     this.forge.deleteAccount(id);
+  }
+
+  /** The managed SSH public key for an account (to add on the forge), or null. */
+  forgeAccountPublicKey(id: string): string | null {
+    return this.forge.publicKey(id);
   }
 
   /**
@@ -1413,9 +1423,10 @@ export class Orchestrator {
       return { ok: true };
     }
 
-    const forge = this.forge.forgeForAccount(input.accountId);
-    if (!forge) return { ok: false, error: "Unknown or missing forge account" };
+    const account = input.accountId ? this.forge.getAccount(input.accountId) : null;
+    if (!account) return { ok: false, error: "Unknown or missing forge account" };
     if (!input.repo) return { ok: false, error: "A repo (owner/name) is required" };
+    const forge = this.forge.forgeFor(account);
 
     try {
       const repoInfo =
@@ -1423,16 +1434,27 @@ export class Orchestrator {
           ? await forge.createRepo(input.repo)
           : await forge.getRepo(input.repo);
       const fullRepo = `${repoInfo.owner}/${repoInfo.name}`;
-      const clone = this.projects.cloneInto(
-        project.repoPath,
-        forge.authedCloneUrl(fullRepo),
-        repoInfo.cloneUrl
-      );
-      if (!clone.ok) return { ok: false, error: `clone failed: ${clone.output}` };
+      const useSsh = account.gitTransport === "ssh";
+      if (useSsh && !repoInfo.sshUrl) {
+        return { ok: false, error: "The forge did not provide an SSH URL for this repo." };
+      }
+      const ctx = this.forge.gitContextFor(account);
+      const cloneUrl = useSsh ? repoInfo.sshUrl! : forge.authedCloneUrl(fullRepo);
+      const plainUrl = useSsh ? repoInfo.sshUrl! : repoInfo.cloneUrl;
+      const clone = this.projects.cloneInto(project.repoPath, cloneUrl, plainUrl, ctx);
+      if (!clone.ok) {
+        return {
+          ok: false,
+          error:
+            `clone failed: ${clone.output}` +
+            (useSsh ? " (is the managed SSH key added to the forge as a deploy/auth key?)" : ""),
+        };
+      }
       this.projects.setForge(projectId, {
         mode: input.mode,
         forgeAccountId: input.accountId ?? null,
         forgeRepo: fullRepo,
+        forgeSshUrl: repoInfo.sshUrl ?? null,
         baseBranch: input.baseBranch ?? repoInfo.defaultBranch,
         monitorIssues: input.monitorIssues ?? false,
       });
@@ -1440,6 +1462,25 @@ export class Orchestrator {
     } catch (err) {
       return { ok: false, error: err instanceof Error ? err.message : String(err) };
     }
+  }
+
+  /**
+   * The push/clone URL + transport context for a forge-backed project: the
+   * SSH URL + managed key when the account uses SSH, else a tokenized HTTPS URL.
+   * Returns null when the project isn't forge-backed or config is missing.
+   */
+  private gitTargetFor(
+    project: { forgeAccountId: string | null; forgeRepo: string | null; forgeSshUrl: string | null }
+  ): { url: string; ctx: GitContext } | null {
+    if (!project.forgeRepo || !project.forgeAccountId) return null;
+    const account = this.forge.getAccount(project.forgeAccountId);
+    if (!account) return null;
+    const ctx = this.forge.gitContextFor(account);
+    if (account.gitTransport === "ssh") {
+      if (!project.forgeSshUrl) return null;
+      return { url: project.forgeSshUrl, ctx };
+    }
+    return { url: this.forge.forgeFor(account).authedCloneUrl(project.forgeRepo), ctx };
   }
 
   /**
@@ -1462,33 +1503,27 @@ export class Orchestrator {
         `is configured for). End with VERDICT: PASS or VERDICT: FAIL.`
       );
     }
-    const forge = this.forge.forgeForAccount(project.forgeAccountId);
-    if (!forge) return "";
+    const target = this.gitTargetFor(project);
+    if (!target) return "";
     const branch = `otterbot/run-${runId.slice(0, 8)}`;
     let pushNote = "";
     const ensure = this.projects.ensureBranch(project.repoPath, branch);
     if (ensure.ok) {
-      this.projects.commitAll(project.repoPath, `otterbot: pipeline run ${runId.slice(0, 8)}`);
-      const push = this.projects.push(project.repoPath, forge.authedCloneUrl(project.forgeRepo), branch);
+      this.projects.commitAll(project.repoPath, `otterbot: pipeline run ${runId.slice(0, 8)}`, target.ctx);
+      const push = this.projects.push(project.repoPath, target.url, branch, target.ctx);
       pushNote = push.ok ? "pushed" : `push failed (${push.output})`;
       if (push.ok) this.pipeline.setPrInfo(runId, { branch });
     } else {
       pushNote = `branch failed (${ensure.output})`;
     }
-    let cloneUrl = "";
-    try {
-      cloneUrl = forge.authedCloneUrl(project.forgeRepo);
-    } catch {
-      /* ignore */
-    }
     return (
       `\n\n## End-to-end testing\nThe project code is on ${project.forgeRepo} ` +
       `(${project.mode === "new" ? "new repo" : "existing repo"}), branch \`${branch}\` ` +
       `(${pushNote}). Delegate to the Proxmox Service agent to roll back to a clean ` +
-      `snapshot and start the test VM, then to the SSH Service agent to clone branch ` +
-      `\`${branch}\`, install, and run the test suite, and report results. (Clone URL ` +
-      `with credentials: ${cloneUrl || "n/a"} — pass it to the SSH agent if the VM needs ` +
-      `auth.) End with VERDICT: PASS or VERDICT: FAIL.`
+      `snapshot and start the test VM, then to the SSH Service agent to fetch branch ` +
+      `\`${branch}\` of ${project.forgeRepo}, install, and run the test suite, and report ` +
+      `results. (The VM needs its own access to clone the repo.) End with VERDICT: PASS ` +
+      `or VERDICT: FAIL.`
     );
   }
 
@@ -1505,12 +1540,14 @@ export class Orchestrator {
     }
     const forge = this.forge.forgeForAccount(project.forgeAccountId);
     if (!forge) return { ok: false, error: "Forge account missing" };
+    const target = this.gitTargetFor(project);
+    if (!target) return { ok: false, error: "Could not resolve a git push target" };
 
     const branch = run.prBranch ?? `otterbot/run-${runId.slice(0, 8)}`;
     const ensure = this.projects.ensureBranch(project.repoPath, branch);
     if (!ensure.ok) return { ok: false, error: `branch failed: ${ensure.output}` };
-    this.projects.commitAll(project.repoPath, `otterbot: ${run.goal}`.slice(0, 72));
-    const push = this.projects.push(project.repoPath, forge.authedCloneUrl(project.forgeRepo), branch);
+    this.projects.commitAll(project.repoPath, `otterbot: ${run.goal}`.slice(0, 72), target.ctx);
+    const push = this.projects.push(project.repoPath, target.url, branch, target.ctx);
     if (!push.ok) return { ok: false, error: `push failed: ${push.output}` };
 
     this.pipeline.setPrInfo(runId, { branch });

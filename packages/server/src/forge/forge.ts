@@ -18,6 +18,13 @@ export interface ForgeAccount {
   token: string;
   /** The bot's username on the forge (for assignment detection + clone URLs). */
   username: string;
+  /** How git transport authenticates: tokenized HTTPS or a managed SSH key. */
+  gitTransport: "https" | "ssh";
+  /** Commit author identity (email should match the account for "Verified"). */
+  committerName: string;
+  committerEmail: string;
+  /** SSH-sign commits with the managed key (requires gitTransport "ssh"). */
+  signCommits: boolean;
 }
 
 export interface ForgeRepo {
@@ -26,6 +33,8 @@ export interface ForgeRepo {
   defaultBranch: string;
   /** HTTPS clone URL (no credentials). */
   cloneUrl: string;
+  /** SSH clone/push URL (e.g. git@host:owner/name.git), or null if unknown. */
+  sshUrl: string | null;
   htmlUrl: string;
 }
 

@@ -24,6 +24,10 @@ const ghAccount: ForgeAccount = {
   baseUrl: "https://api.github.com",
   token: "ghtok",
   username: "bot",
+  gitTransport: "https",
+  committerName: "",
+  committerEmail: "",
+  signCommits: false,
 };
 
 const giteaAccount: ForgeAccount = {
@@ -33,6 +37,10 @@ const giteaAccount: ForgeAccount = {
   baseUrl: "https://gitea.lan",
   token: "gttok",
   username: "bot",
+  gitTransport: "https",
+  committerName: "",
+  committerEmail: "",
+  signCommits: false,
 };
 
 describe("helpers", () => {

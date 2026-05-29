@@ -28,6 +28,8 @@ export interface Project {
   forgeAccountId: string | null;
   /** owner/name on the forge when mode != local. */
   forgeRepo: string | null;
+  /** SSH clone/push URL captured from the forge. */
+  forgeSshUrl: string | null;
   /** Base/integration branch PRs target. */
   baseBranch: string | null;
   /** Poll the forge for assigned issues to feed the pipeline. */
@@ -39,6 +41,16 @@ export interface Project {
 export interface GitOpResult {
   ok: boolean;
   output: string;
+}
+
+/** Transport + identity/signing context for host-side git operations. */
+export interface GitContext {
+  /** Private key for SSH transport; when set, git uses SSH instead of HTTPS. */
+  sshKeyPath?: string;
+  knownHostsPath?: string;
+  committer?: { name: string; email: string };
+  /** SSH public-key path used for commit signing, when enabled. */
+  signingKeyPath?: string;
 }
 
 /** Git identity stamped into a fresh repo so in-sandbox commits succeed. */
@@ -79,7 +91,7 @@ export class ProjectStore {
   setForge(
     projectId: string,
     patch: Partial<
-      Pick<Project, "mode" | "forgeAccountId" | "forgeRepo" | "baseBranch" | "monitorIssues">
+      Pick<Project, "mode" | "forgeAccountId" | "forgeRepo" | "forgeSshUrl" | "baseBranch" | "monitorIssues">
     >
   ): void {
     this.control.db
@@ -226,19 +238,18 @@ export class ProjectStore {
   // --- Host-side git operations (credentials never enter the sandbox) -------
 
   /**
-   * Replace the project's working tree with a fresh clone of `authedUrl` (an
-   * https URL with an embedded token). Used when a project is backed by an
-   * existing forge repo. The tokened remote is rewritten to the plain URL after
-   * cloning so it isn't persisted in `.git/config`.
+   * Replace the project's working tree with a fresh clone of `authedUrl`. For
+   * HTTPS this carries an embedded token (rewritten to `plainUrl` afterward so
+   * it isn't persisted); for SSH it's the ssh_url and `ctx.sshKeyPath` provides
+   * auth. The committer + commit-signing config is applied after cloning.
    */
-  cloneInto(repoPath: string, authedUrl: string, plainUrl: string): GitOpResult {
+  cloneInto(repoPath: string, authedUrl: string, plainUrl: string, ctx: GitContext = {}): GitOpResult {
     if (existsSync(repoPath)) rmSync(repoPath, { recursive: true, force: true });
     mkdirSync(repoPath, { recursive: true });
-    const clone = this.git(repoPath, ["clone", authedUrl, "."]);
+    const clone = this.git(repoPath, ["clone", authedUrl, "."], ctx);
     if (!clone.ok) return clone;
     this.git(repoPath, ["remote", "set-url", "origin", plainUrl]);
-    this.git(repoPath, ["config", "user.name", GIT_USER_NAME]);
-    this.git(repoPath, ["config", "user.email", GIT_USER_EMAIL]);
+    this.configureRepo(repoPath, ctx);
     return clone;
   }
 
@@ -249,25 +260,53 @@ export class ProjectStore {
   }
 
   /** Stage everything and commit; ok:false output "nothing to commit" when clean. */
-  commitAll(repoPath: string, message: string): GitOpResult {
+  commitAll(repoPath: string, message: string, ctx: GitContext = {}): GitOpResult {
+    this.configureRepo(repoPath, ctx);
     this.git(repoPath, ["add", "-A"]);
     const status = this.git(repoPath, ["status", "--porcelain"]);
     if (status.ok && status.output.trim() === "") {
       return { ok: false, output: "nothing to commit" };
     }
-    return this.git(repoPath, ["commit", "-m", message]);
+    // commit.gpgsign (set by configureRepo when signing) makes this sign.
+    return this.git(repoPath, ["commit", "-m", message], ctx);
   }
 
-  /** Push a branch to `authedUrl` (tokened https), without persisting the token. */
-  push(repoPath: string, authedUrl: string, branch: string): GitOpResult {
-    return this.git(repoPath, ["push", authedUrl, `HEAD:refs/heads/${branch}`]);
+  /** Push a branch to `authedUrl`, using `ctx` transport (token or SSH key). */
+  push(repoPath: string, authedUrl: string, branch: string, ctx: GitContext = {}): GitOpResult {
+    return this.git(repoPath, ["push", authedUrl, `HEAD:refs/heads/${branch}`], ctx);
+  }
+
+  /** Apply committer identity and (optionally) SSH commit signing to a repo. */
+  private configureRepo(repoPath: string, ctx: GitContext): void {
+    const name = ctx.committer?.name ?? GIT_USER_NAME;
+    const email = ctx.committer?.email ?? GIT_USER_EMAIL;
+    this.git(repoPath, ["config", "user.name", name]);
+    this.git(repoPath, ["config", "user.email", email]);
+    if (ctx.signingKeyPath) {
+      this.git(repoPath, ["config", "gpg.format", "ssh"]);
+      this.git(repoPath, ["config", "user.signingkey", ctx.signingKeyPath]);
+      this.git(repoPath, ["config", "commit.gpgsign", "true"]);
+    } else {
+      this.git(repoPath, ["config", "commit.gpgsign", "false"]);
+    }
+  }
+
+  /** Build the env for a git command, wiring SSH key/known-hosts when present. */
+  private gitEnv(ctx: GitContext): NodeJS.ProcessEnv {
+    if (!ctx.sshKeyPath) return process.env;
+    const known = ctx.knownHostsPath
+      ? `-o UserKnownHostsFile=${ctx.knownHostsPath}`
+      : "";
+    const sshCommand = `ssh -i ${ctx.sshKeyPath} -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new ${known}`.trim();
+    return { ...process.env, GIT_SSH_COMMAND: sshCommand };
   }
 
   /** Run a git command in a repo, capturing combined output. */
-  private git(repoPath: string, args: string[]): GitOpResult {
+  private git(repoPath: string, args: string[], ctx: GitContext = {}): GitOpResult {
     const r = spawnSync("git", ["-C", repoPath, ...args], {
       timeout: 120_000,
       encoding: "utf8",
+      env: this.gitEnv(ctx),
     });
     const output = `${r.stdout ?? ""}${r.stderr ?? ""}`.trim();
     if (r.error) return { ok: false, output: r.error.message };

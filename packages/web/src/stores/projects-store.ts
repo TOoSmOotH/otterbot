@@ -23,6 +23,12 @@ export interface ForgeAccount {
   baseUrl: string;
   username: string;
   hasToken: boolean;
+  gitTransport: "https" | "ssh";
+  committerName: string;
+  committerEmail: string;
+  signCommits: boolean;
+  /** Managed SSH public key to add on the forge (ssh accounts only). */
+  publicKey: string | null;
 }
 
 export interface PipelineStage {
@@ -71,6 +77,10 @@ interface ProjectsState {
     baseUrl?: string;
     token: string;
     username?: string;
+    gitTransport?: "https" | "ssh";
+    committerName?: string;
+    committerEmail?: string;
+    signCommits?: boolean;
   }) => Promise<void>;
   deleteForgeAccount: (id: string) => Promise<void>;
   setForge: (

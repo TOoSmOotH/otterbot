@@ -47,9 +47,17 @@ export class GiteaForge implements Forge {
     const d = (await this.api(`/repos/${owner}/${name}`)) as {
       default_branch: string;
       clone_url: string;
+      ssh_url: string;
       html_url: string;
     };
-    return { owner, name, defaultBranch: d.default_branch, cloneUrl: d.clone_url, htmlUrl: d.html_url };
+    return {
+      owner,
+      name,
+      defaultBranch: d.default_branch,
+      cloneUrl: d.clone_url,
+      sshUrl: d.ssh_url ?? null,
+      htmlUrl: d.html_url,
+    };
   }
 
   async createRepo(repo: string, opts: { private?: boolean; description?: string } = {}): Promise<ForgeRepo> {
@@ -57,12 +65,20 @@ export class GiteaForge implements Forge {
     const d = (await this.api(`/user/repos`, {
       method: "POST",
       body: JSON.stringify({ name, private: opts.private ?? true, description: opts.description ?? "", auto_init: true }),
-    })) as { owner: { login: string }; name: string; default_branch: string; clone_url: string; html_url: string };
+    })) as {
+      owner: { login: string };
+      name: string;
+      default_branch: string;
+      clone_url: string;
+      ssh_url: string;
+      html_url: string;
+    };
     return {
       owner: d.owner.login,
       name: d.name,
       defaultBranch: d.default_branch || "main",
       cloneUrl: d.clone_url,
+      sshUrl: d.ssh_url ?? null,
       htmlUrl: d.html_url,
     };
   }

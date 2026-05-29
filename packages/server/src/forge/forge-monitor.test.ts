@@ -6,9 +6,20 @@ import type { Forge, ForgeIssue, ForgePullRequest, ForgeReview, CheckState } fro
 function fakeForge(over: Partial<Forge>): Forge {
   return {
     provider: "github",
-    account: { id: "a", provider: "github", label: "x", baseUrl: "", token: "t", username: "bot" },
-    getRepo: async () => ({ owner: "o", name: "n", defaultBranch: "main", cloneUrl: "", htmlUrl: "" }),
-    createRepo: async () => ({ owner: "o", name: "n", defaultBranch: "main", cloneUrl: "", htmlUrl: "" }),
+    account: {
+      id: "a",
+      provider: "github",
+      label: "x",
+      baseUrl: "",
+      token: "t",
+      username: "bot",
+      gitTransport: "https",
+      committerName: "",
+      committerEmail: "",
+      signCommits: false,
+    },
+    getRepo: async () => ({ owner: "o", name: "n", defaultBranch: "main", cloneUrl: "", sshUrl: null, htmlUrl: "" }),
+    createRepo: async () => ({ owner: "o", name: "n", defaultBranch: "main", cloneUrl: "", sshUrl: null, htmlUrl: "" }),
     authedCloneUrl: () => "",
     openPullRequest: async () => ({ number: 1, htmlUrl: "", state: "open", merged: false, headBranch: "b", headSha: "s" }),
     getPullRequest: async () => ({ number: 1, htmlUrl: "", state: "open", merged: false, headBranch: "b", headSha: "s" }),

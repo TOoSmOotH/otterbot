@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, rmSync, existsSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { spawnSync } from "node:child_process";
 import { openControlDb, type ControlDb } from "../db/control-db.js";
 import { ProjectStore } from "./project-store.js";
 
@@ -91,5 +92,26 @@ describe("ProjectStore", () => {
     const noop = store.commitAll(p.repoPath, "again");
     expect(noop.ok).toBe(false);
     expect(noop.output).toMatch(/nothing to commit/);
+  });
+
+  it("SSH-signs commits when a signing key is given in the git context", () => {
+    const p = store.create("Signed");
+    // Generate a throwaway ssh key to sign with.
+    const keyDir = mkdtempSync(join(tmpdir(), "otter-signkey-"));
+    const keyPath = join(keyDir, "id_ed25519");
+    spawnSync("ssh-keygen", ["-t", "ed25519", "-f", keyPath, "-N", "", "-C", "test"]);
+    const ctx = {
+      committer: { name: "Otter", email: "otter@example.com" },
+      signingKeyPath: `${keyPath}.pub`,
+    };
+    writeFileSync(join(p.repoPath, "f.txt"), "x");
+    const commit = store.commitAll(p.repoPath, "signed commit", ctx);
+    expect(commit.ok).toBe(true);
+    // The commit object carries a gpgsig header (SSH signature).
+    const show = spawnSync("git", ["-C", p.repoPath, "cat-file", "-p", "HEAD"], { encoding: "utf8" });
+    expect(show.stdout).toContain("gpgsig");
+    const author = spawnSync("git", ["-C", p.repoPath, "log", "-1", "--format=%an <%ae>"], { encoding: "utf8" });
+    expect(author.stdout.trim()).toBe("Otter <otter@example.com>");
+    rmSync(keyDir, { recursive: true, force: true });
   });
 });
