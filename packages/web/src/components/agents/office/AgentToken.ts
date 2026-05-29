@@ -49,8 +49,14 @@ export class AgentToken {
       this.container.addChild(chip, t);
     }
 
+    // Show just the role (the project name is the room grouping) and keep it
+    // short so adjacent desks' labels don't collide.
+    const roleName = displayName.includes(" · ")
+      ? displayName.slice(displayName.indexOf(" · ") + 3)
+      : displayName;
+    const labelText = roleName.length > 12 ? roleName.slice(0, 12) + "…" : roleName;
     const label = new Text({
-      text: displayName,
+      text: labelText,
       style: { fontSize: 8, fill: 0xd7dbe4, align: "center" },
     });
     label.anchor.set(0.5, 0);

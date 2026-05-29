@@ -102,6 +102,18 @@ export class OfficeScene {
       this.boards.set(room.id, { container: wb, ...room.whiteboard });
     }
 
+    // Room name headers, so each project room is identifiable.
+    for (const room of world.rooms) {
+      if (!room.label) continue;
+      const header = new Text({
+        text: room.label,
+        style: { fontSize: 8, fill: 0xb6acff, fontWeight: "700" },
+      });
+      header.x = room.x * TILE + 4;
+      header.y = room.y * TILE + 4;
+      this.envLayer.addChild(header);
+    }
+
     const byId = new Map(agents.map((a) => [a.id, a]));
     const wantIds = new Set(Object.keys(world.deskOf));
 

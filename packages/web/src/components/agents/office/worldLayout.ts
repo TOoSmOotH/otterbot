@@ -34,7 +34,7 @@ export interface World {
   pxHeight: number;
 }
 
-const CELL_W = 2;
+const CELL_W = 4;
 const CELL_H = 3;
 const MAX_DESK_COLS = 4;
 const ROOM_GAP = 2;
