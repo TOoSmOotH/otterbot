@@ -21,6 +21,7 @@ const MAX_WALKERS = 6;
 
 interface DeskFx {
   container: Container;
+  chair: Graphics;
   screen: Graphics;
   keys: Graphics;
   phase: number;
@@ -293,10 +294,16 @@ export class OfficeScene {
     const container = new Container();
     container.x = tx * TILE;
     container.y = ty * TILE;
+    const chair = new Graphics()
+      .roundRect(3, 17, 10, 8, 2)
+      .fill(0x293848)
+      .stroke({ width: 1, color: 0xb37a45 })
+      .rect(5, 15, 6, 3)
+      .fill(0x34485c);
     const screen = new Graphics();
     const keys = new Graphics();
-    container.addChild(screen, keys);
-    const fx = { container, screen, keys, phase: Math.random() * Math.PI * 2, status };
+    container.addChild(chair, screen, keys);
+    const fx = { container, chair, screen, keys, phase: Math.random() * Math.PI * 2, status };
     this.drawDeskFx(fx, 0);
     return fx;
   }

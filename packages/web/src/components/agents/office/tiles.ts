@@ -3,19 +3,25 @@ import { Cell, TILE } from "./geometry";
 import type { World } from "./worldLayout";
 
 const C = {
-  floor: 0x2b2f3a,
-  floorAlt: 0x30343f,
-  wall: 0x171a21,
-  wallTop: 0x3a4254,
-  door: 0x5a4636,
-  deskTop: 0x6a513c,
-  deskEdge: 0x3c2f24,
+  floor: 0x3b2c25,
+  floorLine: 0x251d19,
+  floorGrain: 0x5b4437,
+  rug: 0x26323d,
+  rugLine: 0x1f2933,
+  rugEdge: 0xb37a45,
+  wall: 0x293848,
+  wallDark: 0x10151b,
+  wallPanel: 0x34485c,
+  trim: 0xb37a45,
+  door: 0x815334,
+  deskTop: 0x714b31,
+  deskEdge: 0x3b271b,
   plant: 0x3f8f5a,
   printer: 0xb9bec8,
 };
 
-const ATLAS_IMAGE = "/office/otter-office-v2.png";
-const ATLAS_XML = "/office/otter-office-v2.xml";
+const ATLAS_IMAGE = "/office/otter-office-v3.png";
+const ATLAS_XML = "/office/otter-office-v3.xml";
 
 // First-party Otterbot office sprites. Leave a key unset to keep the Graphics
 // fallback for that item.
@@ -75,6 +81,9 @@ export function drawEnvironment(world: World): Container {
   const g = new Graphics();
   root.addChild(g);
 
+  drawStudioFloor(g, world);
+  drawRoomRugs(g, world);
+
   for (let ty = 0; ty < world.rows; ty++) {
     for (let tx = 0; tx < world.cols; tx++) {
       const cell = world.grid[ty * world.cols + tx] as Cell;
@@ -82,26 +91,10 @@ export function drawEnvironment(world: World): Container {
       const y = ty * TILE;
       switch (cell) {
         case Cell.WALL: {
-          const wallSprite = artSprite("wall");
-          if (wallSprite) {
-            wallSprite.x = x;
-            wallSprite.y = y;
-            root.addChild(wallSprite);
-          } else {
-            g.rect(x, y, TILE, TILE).fill(C.wall);
-            g.rect(x, y, TILE, 4).fill(C.wallTop);
-          }
+          drawWall(g, tx, ty, world);
           break;
         }
         case Cell.DOOR: {
-          const doorFloor = artSprite((tx + ty) % 2 ? "floorAlt" : "floor");
-          if (doorFloor) {
-            doorFloor.x = x;
-            doorFloor.y = y;
-            root.addChild(doorFloor);
-          } else {
-            g.rect(x, y, TILE, TILE).fill(C.floor);
-          }
           const doorSprite = artSprite("door");
           if (doorSprite) {
             doorSprite.x = x;
@@ -113,14 +106,6 @@ export function drawEnvironment(world: World): Container {
           break;
         }
         case Cell.DESK: {
-          const base = artSprite((tx + ty) % 2 ? "floorAlt" : "floor");
-          if (base) {
-            base.x = x;
-            base.y = y;
-            root.addChild(base);
-          } else {
-            g.rect(x, y, TILE, TILE).fill((tx + ty) % 2 ? C.floor : C.floorAlt);
-          }
           const deskSprite = artSprite("desk");
           if (deskSprite) {
             deskSprite.x = x;
@@ -132,20 +117,65 @@ export function drawEnvironment(world: World): Container {
           }
           break;
         }
-        default: {
-          const floorSprite = artSprite((tx + ty) % 2 ? "floorAlt" : "floor");
-          if (floorSprite) {
-            floorSprite.x = x;
-            floorSprite.y = y;
-            root.addChild(floorSprite);
-          } else {
-            g.rect(x, y, TILE, TILE).fill((tx + ty) % 2 ? C.floor : C.floorAlt);
-          }
-        }
+        default:
+          break;
       }
     }
   }
   return root;
+}
+
+function drawStudioFloor(g: Graphics, world: World): void {
+  g.rect(0, 0, world.pxWidth, world.pxHeight).fill(C.floor);
+
+  for (let y = 0; y < world.pxHeight; y += 8) {
+    g.rect(0, y, world.pxWidth, 1).fill(C.floorLine);
+  }
+  for (let row = 0; row < Math.ceil(world.pxHeight / 8); row++) {
+    const y0 = row * 8;
+    const offset = row % 2 ? 28 : 0;
+    for (let x = offset; x < world.pxWidth; x += 56) {
+      g.rect(x, y0 + 2, 18, 1).fill(C.floorGrain);
+    }
+  }
+}
+
+function drawRoomRugs(g: Graphics, world: World): void {
+  for (const room of world.rooms) {
+    const pad = room.kind === "unassigned" ? 1 : 2;
+    const x = room.x * TILE + pad * TILE;
+    const y = room.y * TILE + pad * TILE;
+    const w = Math.max(TILE, (room.w - pad * 2) * TILE);
+    const h = Math.max(TILE, (room.h - pad * 2) * TILE);
+    if (w <= 0 || h <= 0) continue;
+
+    const color = room.kind === "coo" ? 0x332b2a : C.rug;
+    g.roundRect(x + 2, y + 2, w - 4, h - 4, 3).fill(color).stroke({ width: 1, color: C.rugEdge });
+    for (let rx = x + 10; rx < x + w - 4; rx += 18) g.rect(rx, y + 4, 1, h - 8).fill(C.rugLine);
+    for (let ry = y + 12; ry < y + h - 4; ry += 18) g.rect(x + 4, ry, w - 8, 1).fill(0x303d49);
+  }
+}
+
+function drawWall(g: Graphics, tx: number, ty: number, world: World): void {
+  const x = tx * TILE;
+  const y = ty * TILE;
+  const at = (nx: number, ny: number) =>
+    nx >= 0 && ny >= 0 && nx < world.cols && ny < world.rows
+      ? (world.grid[ny * world.cols + nx] as Cell)
+      : Cell.WALL;
+  const horiz = at(tx - 1, ty) === Cell.WALL || at(tx + 1, ty) === Cell.WALL;
+
+  g.rect(x, y, TILE, TILE).fill(C.wallDark);
+  g.rect(x + 1, y + 1, TILE - 2, TILE - 2).fill(C.wall);
+  if (horiz) {
+    g.rect(x + 1, y + 2, TILE - 2, 4).fill(C.wallPanel);
+    g.rect(x + 1, y + 6, TILE - 2, 1).fill(C.trim);
+    g.rect(x + 3, y + 9, TILE - 6, 3).fill(0x1d2833);
+  } else {
+    g.rect(x + 2, y + 1, 4, TILE - 2).fill(C.wallPanel);
+    g.rect(x + 6, y + 1, 1, TILE - 2).fill(C.trim);
+    g.rect(x + 9, y + 3, 3, TILE - 6).fill(0x1d2833);
+  }
 }
 
 /** A simple potted-plant prop at a tile. */

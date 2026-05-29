@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TextureAtlas imagePath="otter-office-v3.png">
+  <SubTexture name="floor.png" x="0" y="0" width="16" height="16"/>
+  <SubTexture name="floor_alt.png" x="16" y="0" width="16" height="16"/>
+  <SubTexture name="wall.png" x="32" y="0" width="16" height="16"/>
+  <SubTexture name="door.png" x="48" y="0" width="16" height="16"/>
+  <SubTexture name="desk.png" x="64" y="0" width="16" height="16"/>
+  <SubTexture name="plant.png" x="80" y="0" width="16" height="16"/>
+  <SubTexture name="printer.png" x="96" y="0" width="16" height="16"/>
+  <SubTexture name="window.png" x="112" y="0" width="16" height="16"/>
+</TextureAtlas>
