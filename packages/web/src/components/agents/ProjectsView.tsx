@@ -177,6 +177,11 @@ function ProjectCard({ project, onDelete }: { project: Project; onDelete: () => 
                 <option key={a.id} value={a.id}>{a.label} ({a.provider})</option>
               ))}
             </select>
+            {accounts.length === 0 && (
+              <span style={{ fontSize: 11, color: "rgb(var(--muted))", gridColumn: "1 / -1" }}>
+                No forge accounts yet — add one in the “Forge accounts” panel at the top of this tab.
+              </span>
+            )}
             <input placeholder="owner/name" value={forge.repo} onChange={(e) => setForgeForm({ ...forge, repo: e.target.value })} style={input} />
             <input placeholder="base branch (optional)" value={forge.baseBranch} onChange={(e) => setForgeForm({ ...forge, baseBranch: e.target.value })} style={input} />
             <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "rgb(var(--muted))" }}>
