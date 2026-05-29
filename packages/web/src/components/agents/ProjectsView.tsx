@@ -1,12 +1,7 @@
 import { useEffect, useState } from "react";
-import { FolderGit2, Plus, Trash2, X, Play, GitPullRequest } from "lucide-react";
+import { FolderGit2, Plus, Trash2, Play, GitPullRequest } from "lucide-react";
 import { Icon } from "../ui/Icon";
-import {
-  useProjectsStore,
-  type Project,
-  type PipelineRun,
-  type ForgeAccount as ForgeAccountT,
-} from "../../stores/projects-store";
+import { useProjectsStore, type Project, type PipelineRun } from "../../stores/projects-store";
 import { useAgentsStore } from "../../stores/agents-store";
 import { AgentWizard } from "./AgentWizard";
 
@@ -42,10 +37,9 @@ export function ProjectsView() {
       </div>
       <p style={{ color: "rgb(var(--muted))", fontSize: 12, maxWidth: 680, marginTop: 0 }}>
         Each project gets a dedicated team (PM, coder, security reviewer, test writer, tester) that
-        shares one code tree. Configure a forge to clone/PR, then launch the build pipeline.
+        shares one code tree. Add a git host in Settings → Git Hosting, then point a project at a
+        repo and launch the build pipeline.
       </p>
-
-      <ForgeAccountsSection />
 
       <div style={{ margin: "16px 0" }}>
         <button style={primaryBtn} onClick={() => setWizardOpen(true)}>
@@ -61,116 +55,6 @@ export function ProjectsView() {
           <ProjectCard key={p.id} project={p} onDelete={() => remove(p.id)} />
         ))}
       </div>
-    </div>
-  );
-}
-
-function ForgeAccountsSection() {
-  const accounts = useProjectsStore((s) => s.forgeAccounts);
-  const add = useProjectsStore((s) => s.addForgeAccount);
-  const del = useProjectsStore((s) => s.deleteForgeAccount);
-  const [open, setOpen] = useState(false);
-  const [form, setForm] = useState({
-    provider: "github" as "github" | "gitea",
-    label: "",
-    baseUrl: "",
-    token: "",
-    username: "",
-    gitTransport: "https" as "https" | "ssh",
-    committerName: "",
-    committerEmail: "",
-    signCommits: false,
-  });
-
-  return (
-    <div style={{ ...card, maxWidth: 680, marginTop: 8 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        <span style={{ fontWeight: 600, fontSize: 13 }}>Forge accounts</span>
-        <span style={{ flex: 1 }} />
-        <button style={ghostBtn} onClick={() => setOpen((v) => !v)}>
-          <Icon icon={Plus} size={14} /> Add
-        </button>
-      </div>
-      <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 8 }}>
-        {accounts.length === 0 && <span style={{ color: "rgb(var(--muted))", fontSize: 12 }}>None configured.</span>}
-        {accounts.map((a) => (
-          <ForgeAccountRow key={a.id} account={a} onDelete={() => void del(a.id)} />
-        ))}
-      </div>
-      {open && (
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (!form.token) return;
-            void add(form);
-            setForm({ provider: "github", label: "", baseUrl: "", token: "", username: "", gitTransport: "https", committerName: "", committerEmail: "", signCommits: false });
-            setOpen(false);
-          }}
-          style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, marginTop: 10 }}
-        >
-          <select value={form.provider} onChange={(e) => setForm({ ...form, provider: e.target.value as "github" | "gitea" })} style={input}>
-            <option value="github">GitHub</option>
-            <option value="gitea">Gitea</option>
-          </select>
-          <input placeholder="Label" value={form.label} onChange={(e) => setForm({ ...form, label: e.target.value })} style={input} />
-          {form.provider === "gitea" && (
-            <input placeholder="Instance URL (https://gitea.lan)" value={form.baseUrl} onChange={(e) => setForm({ ...form, baseUrl: e.target.value })} style={input} />
-          )}
-          <input placeholder="Bot username" value={form.username} onChange={(e) => setForm({ ...form, username: e.target.value })} style={input} />
-          <input placeholder="API token" type="password" value={form.token} onChange={(e) => setForm({ ...form, token: e.target.value })} style={input} />
-          <select value={form.gitTransport} onChange={(e) => setForm({ ...form, gitTransport: e.target.value as "https" | "ssh", signCommits: e.target.value === "ssh" ? form.signCommits : false })} style={input}>
-            <option value="https">git over HTTPS (token)</option>
-            <option value="ssh">git over SSH (managed key)</option>
-          </select>
-          <input placeholder="Committer name" value={form.committerName} onChange={(e) => setForm({ ...form, committerName: e.target.value })} style={input} />
-          <input placeholder="Committer email" value={form.committerEmail} onChange={(e) => setForm({ ...form, committerEmail: e.target.value })} style={input} />
-          {form.gitTransport === "ssh" && (
-            <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "rgb(var(--muted))" }}>
-              <input type="checkbox" checked={form.signCommits} onChange={(e) => setForm({ ...form, signCommits: e.target.checked })} />
-              SSH-sign commits with the managed key
-            </label>
-          )}
-          <button type="submit" style={{ ...primaryBtn, gridColumn: "1 / -1" }}>Save account</button>
-          {form.gitTransport === "ssh" && (
-            <span style={{ fontSize: 11, color: "rgb(var(--muted))", gridColumn: "1 / -1" }}>
-              On save, otterbot generates an SSH key and shows the public key below — add it to the
-              forge as an authentication key (and a signing key, for Verified commits).
-            </span>
-          )}
-        </form>
-      )}
-    </div>
-  );
-}
-
-function ForgeAccountRow({ account, onDelete }: { account: ForgeAccountT; onDelete: () => void }) {
-  const [showKey, setShowKey] = useState(false);
-  return (
-    <div style={{ border: "1px solid rgb(var(--border))", borderRadius: 6, padding: "6px 8px" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        <span style={{ fontSize: 12, fontWeight: 600 }}>{account.label}</span>
-        <span style={badge}>{account.provider}</span>
-        <span style={badge}>{account.gitTransport === "ssh" ? "ssh" : "https"}</span>
-        {account.signCommits && <span style={badge}>signed</span>}
-        {account.username && <span style={{ fontSize: 11, color: "rgb(var(--muted))" }}>· {account.username}</span>}
-        <span style={{ flex: 1 }} />
-        {account.publicKey && (
-          <button style={chipX} title="Show public key" onClick={() => setShowKey((v) => !v)}>
-            🔑
-          </button>
-        )}
-        <button style={chipX} onClick={onDelete} title="Delete account">
-          <Icon icon={X} size={14} />
-        </button>
-      </div>
-      {showKey && account.publicKey && (
-        <textarea
-          readOnly
-          value={account.publicKey}
-          onFocus={(e) => e.currentTarget.select()}
-          style={{ ...input, width: "100%", marginTop: 6, fontFamily: "monospace", fontSize: 11, height: 48 }}
-        />
-      )}
     </div>
   );
 }
@@ -239,7 +123,7 @@ function ProjectCard({ project, onDelete }: { project: Project; onDelete: () => 
             </select>
             {accounts.length === 0 && (
               <span style={{ fontSize: 11, color: "rgb(var(--muted))", gridColumn: "1 / -1" }}>
-                No forge accounts yet — add one in the “Forge accounts” panel at the top of this tab.
+                No git hosting accounts yet — add one in Settings → Git Hosting.
               </span>
             )}
             <input placeholder="owner/name" value={forge.repo} onChange={(e) => setForgeForm({ ...forge, repo: e.target.value })} style={input} />
@@ -386,14 +270,6 @@ const chip: React.CSSProperties = {
   borderRadius: 12,
   padding: "2px 8px",
   fontSize: 11,
-};
-const chipX: React.CSSProperties = {
-  display: "inline-flex",
-  background: "transparent",
-  border: "none",
-  color: "rgb(var(--muted))",
-  cursor: "pointer",
-  padding: 0,
 };
 const badge: React.CSSProperties = {
   fontSize: 10,
