@@ -301,7 +301,11 @@ export async function buildServer(
   app.get("/api/projects", async () => orch.listProjects());
 
   app.post<{
-    Body: { name?: string; team?: Record<string, { modelId?: string; tool?: string }> };
+    Body: {
+      name?: string;
+      team?: Record<string, { modelId?: string; tool?: string }>;
+      rules?: string;
+    };
   }>("/api/projects", async (req, reply) => {
     const name = req.body?.name?.trim();
     if (!name) {
@@ -310,9 +314,11 @@ export async function buildServer(
     }
     try {
       const project = orch.createProject(name);
+      const rules = req.body?.rules?.trim() || null;
+      if (rules) orch.setProjectRules(project.id, rules);
       // The wizard may provision a customized team in the same call.
       if (req.body?.team) orch.provisionProjectTeam(project.id, req.body.team);
-      return { ...project, team: orch.getProjectTeam(project.id) };
+      return { ...project, rules, team: orch.getProjectTeam(project.id) };
     } catch (err) {
       reply.code(400);
       return { error: err instanceof Error ? err.message : String(err) };
@@ -463,6 +469,16 @@ export async function buildServer(
       return { error: result.error };
     }
     return result;
+  });
+
+  // Set (or clear) a project's standing rules, injected into members' prompts.
+  app.put<{
+    Params: { id: string };
+    Body: { rules?: string | null };
+  }>("/api/projects/:id/rules", async (req) => {
+    const rules = (req.body?.rules ?? "").trim() || null;
+    orch.setProjectRules(req.params.id, rules);
+    return { ok: true, rules };
   });
 
   // Manually publish a run (push branch + open PR/MR).

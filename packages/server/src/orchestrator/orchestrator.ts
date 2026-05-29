@@ -1319,6 +1319,11 @@ export class Orchestrator {
     return this.projects.create(name);
   }
 
+  /** Set (or clear, with null) a project's standing rules. */
+  setProjectRules(projectId: string, rules: string | null): void {
+    this.projects.setRules(projectId, rules);
+  }
+
   async deleteProject(id: string): Promise<void> {
     // Tear down the project's dedicated specialists first.
     for (const { agentId } of this.projects.getTeam(id)) {
