@@ -23,6 +23,7 @@ let frames: Record<string, Rectangle> | null = null;
 
 /** Load the Kenney sheet + parse its XML atlas. Safe to call repeatedly; no-throw. */
 export async function loadOfficeAtlas(): Promise<void> {
+  if (Object.keys(ART).length === 0) { frames = frames ?? {}; return; }
   if (frames) return;
   try {
     sheet = (await Assets.load("/office/roguelike.png")) as Texture;

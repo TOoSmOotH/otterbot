@@ -30,6 +30,8 @@ export class OfficeScene {
   private textures = new Map<string, Texture | null>();
   private world: World | null = null;
   private structureKey = "";
+  private gen = 0;
+  private loadedUrls = new Set<string>();
   private reduced = false;
   private clock: Text | null = null;
   private containerW = 800;
@@ -78,11 +80,15 @@ export class OfficeScene {
       for (const a of agents) this.tokens.get(a.id)?.setStatus(a.status);
       return;
     }
-    this.structureKey = key;
+    const myGen = ++this.gen;
     const world = buildWorld(agents, projects);
-    this.world = world;
 
     await loadOfficeAtlas();
+    if (myGen !== this.gen) return;
+
+    this.structureKey = key;
+    this.world = world;
+
     this.envLayer.removeChildren().forEach((c) => c.destroy());
     this.envLayer.addChild(drawEnvironment(world));
     this.envLayer.addChild(drawPlant(1, world.rows - 2), drawPrinter(world.cols - 3, world.rows - 2));
@@ -107,12 +113,14 @@ export class OfficeScene {
     }
 
     for (const id of wantIds) {
+      if (myGen !== this.gen) return;
       const a = byId.get(id)!;
       const slot = world.deskOf[id];
       const chair: Pt = { tx: slot.chairTx, ty: slot.chairTy };
       let tok = this.tokens.get(id);
       if (!tok) {
         const tex = await this.textureFor(a);
+        if (myGen !== this.gen) return;
         tok = new AgentToken(id, a.displayName, tex, chair);
         tok.reduced = this.reduced;
         this.tokens.set(id, tok);
@@ -134,7 +142,9 @@ export class OfficeScene {
     if (!url) return null;
     if (this.textures.has(url)) return this.textures.get(url)!;
     try {
-      const tex = (await Assets.load(withToken(url))) as Texture;
+      const loadUrl = withToken(url);
+      const tex = (await Assets.load(loadUrl)) as Texture;
+      this.loadedUrls.add(loadUrl);
       this.textures.set(url, tex);
       return tex;
     } catch {
@@ -221,5 +231,7 @@ export class OfficeScene {
     for (const tok of this.tokens.values()) tok.destroy();
     this.tokens.clear();
     this.root.destroy({ children: true });
+    for (const u of this.loadedUrls) void Assets.unload(u).catch(() => {});
+    this.loadedUrls.clear();
   }
 }

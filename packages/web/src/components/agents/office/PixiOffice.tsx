@@ -80,13 +80,12 @@ export function PixiOffice() {
       unsubs.push(
         useAgentsStore.subscribe((s) => {
           if (s.agents === lastAgents) return;
-          const prev = new Map(lastAgents.map((a) => [a.id, a.status]));
           lastAgents = s.agents;
           void scene?.setWorld(s.agents, useProjectsStore.getState().projects);
-          for (const a of s.agents) if (prev.get(a.id) !== a.status) scene?.setStatus(a.id, a.status);
         })
       );
 
+      const lastRunId = new Map<string, string | null>();
       let lastProjects = p0;
       unsubs.push(
         useProjectsStore.subscribe((s) => {
@@ -95,7 +94,11 @@ export function PixiOffice() {
             void scene?.setWorld(useAgentsStore.getState().agents, s.projects);
           }
           for (const [pid, runs] of Object.entries(s.runs)) {
-            scene?.setPipeline(pid, runs[0] ?? null);
+            const top = runs[0] ?? null;
+            const id = top ? top.id : null;
+            if (lastRunId.get(pid) === id) continue;
+            lastRunId.set(pid, id);
+            scene?.setPipeline(pid, top);
           }
         })
       );

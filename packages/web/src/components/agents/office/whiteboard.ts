@@ -42,6 +42,7 @@ export function drawWhiteboard(
 
   let cx = 4;
   for (const st of run.stages) {
+    if (cx + 6 > w) break;
     const color = STAGE_HEX[st.status] ?? STAGE_HEX.pending;
     const dot = new Graphics().circle(cx + 3, h - 5, 3).fill(color);
     root.addChild(dot);

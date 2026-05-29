@@ -149,7 +149,7 @@ export class AgentToken {
     }
 
     if (!this.reduced) {
-      this.bobPhase += dtMs / 600;
+      this.bobPhase = (this.bobPhase + dtMs / 600) % (Math.PI * 2);
       this.container.y = tilePx(this.homeChair.ty) + Math.sin(this.bobPhase) * 1.2;
     }
   }
