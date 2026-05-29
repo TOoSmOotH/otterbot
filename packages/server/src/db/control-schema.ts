@@ -135,6 +135,8 @@ export const projects = sqliteTable("projects", {
   baseBranch: text("base_branch"),
   /** Poll the forge for assigned issues to feed the pipeline. */
   monitorIssues: integer("monitor_issues", { mode: "boolean" }).notNull().default(false),
+  /** Standing rules injected into every project member's system prompt. */
+  rules: text("rules"),
   createdAt: text("created_at")
     .notNull()
     .$defaultFn(() => new Date().toISOString()),

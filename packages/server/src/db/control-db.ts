@@ -97,6 +97,7 @@ function ensureControlTables(sqlite: Database.Database) {
       forge_repo TEXT,
       base_branch TEXT,
       monitor_issues INTEGER NOT NULL DEFAULT 0,
+      rules TEXT,
       created_at TEXT NOT NULL
     )`,
     `CREATE TABLE IF NOT EXISTS forge_accounts (
@@ -181,6 +182,7 @@ function ensureControlTables(sqlite: Database.Database) {
   addProjectCol("forge_ssh_url", "forge_ssh_url TEXT");
   addProjectCol("base_branch", "base_branch TEXT");
   addProjectCol("monitor_issues", "monitor_issues INTEGER NOT NULL DEFAULT 0");
+  addProjectCol("rules", "rules TEXT");
 
   // Migration: forge_accounts grew SSH-transport + signing fields.
   const forgeCols = new Set(

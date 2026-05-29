@@ -34,6 +34,8 @@ export interface Project {
   baseBranch: string | null;
   /** Poll the forge for assigned issues to feed the pipeline. */
   monitorIssues: boolean;
+  /** Standing rules injected into every project member's system prompt. */
+  rules: string | null;
   createdAt: string;
 }
 
@@ -99,6 +101,24 @@ export class ProjectStore {
       .set(patch)
       .where(eq(controlSchema.projects.id, projectId))
       .run();
+  }
+
+  /** Set (or clear, with null) the project's standing rules. */
+  setRules(projectId: string, rules: string | null): void {
+    this.control.db
+      .update(controlSchema.projects)
+      .set({ rules })
+      .where(eq(controlSchema.projects.id, projectId))
+      .run();
+  }
+
+  /**
+   * The standing rules for the agent's project, or null. Like
+   * {@link repoPathForAgent}, the most recently created project wins when the
+   * agent is in several.
+   */
+  rulesForAgent(agentId: string): string | null {
+    return this.projectsForAgent(agentId)[0]?.rules ?? null;
   }
 
   /** Projects with issue-monitoring enabled (for the poller). */

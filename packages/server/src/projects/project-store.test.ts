@@ -71,6 +71,23 @@ describe("ProjectStore", () => {
     expect(store.repoPathForAgent("claude")).toBe(b.repoPath);
   });
 
+  it("stores and clears project rules", () => {
+    const p = store.create("Ruled");
+    expect(p.rules).toBeNull();
+    store.setRules(p.id, "Always commit to dev.\nWrite tests first.");
+    expect(store.get(p.id)!.rules).toBe("Always commit to dev.\nWrite tests first.");
+    store.setRules(p.id, null);
+    expect(store.get(p.id)!.rules).toBeNull();
+  });
+
+  it("resolves rules for an agent via project membership (most recent wins)", () => {
+    const p = store.create("Ruled");
+    store.setRules(p.id, "House style applies.");
+    store.addMember(p.id, "coder");
+    expect(store.rulesForAgent("coder")).toBe("House style applies.");
+    expect(store.rulesForAgent("stranger")).toBeNull();
+  });
+
   it("defaults to local mode and updates forge config", () => {
     const p = store.create("Forge Me");
     expect(p.mode).toBe("local");
