@@ -133,6 +133,12 @@ export interface SandboxOpts {
    */
   projectRepoPath?: string;
   /**
+   * Bind the project tree read-only (`--ro-bind`) instead of writable. Used for
+   * project members granted read-only access — they can read/grep the source
+   * but cannot modify it. bwrap only; sandbox-exec does not enforce this.
+   */
+  projectReadOnly?: boolean;
+  /**
    * Where the command starts. `"project"` requires `projectRepoPath` and starts
    * the command inside the shared tree; anything else starts in `/workspace`.
    */
@@ -203,7 +209,7 @@ function bwrapPlan(
   // The shared project tree, when the agent belongs to a project. Bound
   // writable so collaborating agents edit one codebase; HOME stays /workspace.
   if (opts.projectRepoPath) {
-    args.push("--bind", opts.projectRepoPath, PROJECT_MOUNT);
+    args.push(opts.projectReadOnly ? "--ro-bind" : "--bind", opts.projectRepoPath, PROJECT_MOUNT);
   }
   const startDir = opts.startIn === "project" && opts.projectRepoPath ? PROJECT_MOUNT : "/workspace";
   args.push(
@@ -342,12 +348,13 @@ export function runAgentShell(
   workspaceDir: string,
   secrets: Map<string, string>,
   command: string,
-  opts: { projectRepoPath?: string } = {}
+  opts: { projectRepoPath?: string; projectReadOnly?: boolean } = {}
 ): Promise<ShellResult> {
   ensureWorkspace(workspaceDir);
 
   const built = buildSandboxPlan(workspaceDir, secrets, ["/bin/sh", "-c", command], {
     projectRepoPath: opts.projectRepoPath,
+    projectReadOnly: opts.projectReadOnly,
   });
   if ("error" in built) {
     return Promise.resolve({

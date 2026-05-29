@@ -101,4 +101,26 @@ describe("buildSandboxPlan project binding", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  it("binds the project read-only when projectReadOnly is set", () => {
+    const dir = mkdtempSync(join(tmpdir(), "otter-ws-"));
+    const repo = mkdtempSync(join(tmpdir(), "otter-repo-"));
+    try {
+      const built = buildSandboxPlan(dir, new Map(), ["/bin/sh", "-c", "true"], {
+        projectRepoPath: repo,
+        projectReadOnly: true,
+      });
+      if ("error" in built) return; // no OS sandbox here
+      const { plan, sandbox } = built;
+      if (sandbox === "bwrap") {
+        const bindIdx = plan.args.indexOf(repo);
+        expect(bindIdx).toBeGreaterThan(-1);
+        expect(plan.args[bindIdx - 1]).toBe("--ro-bind");
+        expect(plan.args[bindIdx + 1]).toBe("/project");
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+      rmSync(repo, { recursive: true, force: true });
+    }
+  });
 });
