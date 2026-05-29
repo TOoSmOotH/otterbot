@@ -1,0 +1,33 @@
+{
+  "image": "office-assets-transparent.png",
+  "source": "office-assets-source.png",
+  "generatedAt": "2026-05-29",
+  "style": "original top-down cozy pixel-art office assets with transparent background",
+  "tileReference": {
+    "floorTile": 32,
+    "intendedScale": "Use nearest-neighbor rendering; crop frames from this atlas and scale only by integer or fixed scene zoom factors."
+  },
+  "frames": {
+    "workstation_occupied": { "x": 37, "y": 40, "w": 261, "h": 267 },
+    "desk_empty": { "x": 358, "y": 60, "w": 287, "h": 211 },
+    "office_chair": { "x": 701, "y": 69, "w": 118, "h": 188 },
+    "monitor": { "x": 886, "y": 102, "w": 145, "h": 135 },
+    "small_plant": { "x": 1462, "y": 130, "w": 57, "h": 94 },
+    "mug": { "x": 1322, "y": 143, "w": 79, "h": 81 },
+    "keyboard": { "x": 1091, "y": 151, "w": 157, "h": 67 },
+    "wooden_door": { "x": 1378, "y": 318, "w": 136, "h": 205 },
+    "glass_wall": { "x": 784, "y": 325, "w": 246, "h": 189 },
+    "large_plant": { "x": 41, "y": 333, "w": 152, "h": 190 },
+    "glass_corner": { "x": 1091, "y": 338, "w": 217, "h": 201 },
+    "framed_landscape": { "x": 535, "y": 360, "w": 181, "h": 134 },
+    "wall_shelf": { "x": 265, "y": 372, "w": 200, "h": 126 },
+    "water_cooler": { "x": 211, "y": 556, "w": 78, "h": 171 },
+    "printer": { "x": 357, "y": 566, "w": 146, "h": 148 },
+    "whiteboard": { "x": 564, "y": 571, "w": 337, "h": 166 },
+    "wall_lamp": { "x": 58, "y": 579, "w": 69, "h": 138 },
+    "cabinet": { "x": 970, "y": 591, "w": 200, "h": 146 },
+    "rug": { "x": 1241, "y": 596, "w": 281, "h": 143 },
+    "wood_floor_tile": { "x": 60, "y": 773, "w": 224, "h": 164 },
+    "navy_wall_tile": { "x": 354, "y": 774, "w": 217, "h": 163 }
+  }
+}
