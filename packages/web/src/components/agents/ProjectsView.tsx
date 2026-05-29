@@ -67,6 +67,7 @@ function ProjectCard({ project, onDelete }: { project: Project; onDelete: () => 
   const runs = useProjectsStore((s) => s.runs[project.id]) ?? EMPTY_RUNS;
   const loadRuns = useProjectsStore((s) => s.loadRuns);
   const setForge = useProjectsStore((s) => s.setForge);
+  const setRules = useProjectsStore((s) => s.setRules);
   const startPipeline = useProjectsStore((s) => s.startPipeline);
 
   const [forge, setForgeForm] = useState({
@@ -78,6 +79,8 @@ function ProjectCard({ project, onDelete }: { project: Project; onDelete: () => 
   });
   const [goal, setGoal] = useState("");
   const [busy, setBusy] = useState(false);
+  const [rulesText, setRulesText] = useState(project.rules ?? "");
+  const [rulesBusy, setRulesBusy] = useState(false);
 
   useEffect(() => {
     void loadRuns(project.id);
@@ -151,6 +154,31 @@ function ProjectCard({ project, onDelete }: { project: Project; onDelete: () => 
         }}
       >
         {busy ? "Saving…" : "Save code location"}
+      </button>
+
+      {/* Project rules */}
+      <div style={{ marginTop: 12, fontSize: 12, fontWeight: 600 }}>Project rules</div>
+      <p style={{ fontSize: 11, color: "rgb(var(--muted))", margin: "2px 0 6px" }}>
+        Standing instructions for every team member — e.g. "always commit to dev", coding standards.
+      </p>
+      <textarea
+        data-testid={`project-rules-${project.id}`}
+        value={rulesText}
+        onChange={(e) => setRulesText(e.target.value)}
+        placeholder="One rule per line…"
+        rows={5}
+        style={{ ...input, width: "100%", resize: "vertical", fontFamily: "inherit" }}
+      />
+      <button
+        style={{ ...ghostBtn, marginTop: 6 }}
+        disabled={rulesBusy}
+        onClick={async () => {
+          setRulesBusy(true);
+          await setRules(project.id, rulesText);
+          setRulesBusy(false);
+        }}
+      >
+        {rulesBusy ? "Saving…" : "Save rules"}
       </button>
 
       {/* Pipeline */}
