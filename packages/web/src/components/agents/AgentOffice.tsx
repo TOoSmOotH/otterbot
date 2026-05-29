@@ -9,10 +9,11 @@ import type {
 } from "@otterbot/shared";
 import { useAgentsStore } from "../../stores/agents-store";
 import { useActivityStore } from "../../stores/activity-store";
+import { useProjectsStore } from "../../stores/projects-store";
 import { statusColor, initials } from "./agent-visual";
 import { withToken } from "../../lib/api";
 import { type } from "../../lib/typography";
-import { deskLayout, DESK_W, DESK_H, GAP_X, type DeskPlacement } from "./office-layout";
+import { deskLayout, type DeskPlacement } from "./office-layout";
 
 /**
  * A 2D "office" view of the roster: each top-level agent sits at a desk, its
@@ -111,12 +112,15 @@ export function AgentOffice() {
   const messages = useActivityStore((s) => s.messages);
   const bindActivity = useActivityStore((s) => s.bindSocket);
   const loadActivity = useActivityStore((s) => s.load);
+  const projects = useProjectsStore((s) => s.projects);
+  const loadProjects = useProjectsStore((s) => s.load);
   const reduced = useReducedMotion() ?? false;
 
   useEffect(() => {
     bindActivity();
     void loadActivity();
-  }, [bindActivity, loadActivity]);
+    void loadProjects();
+  }, [bindActivity, loadActivity, loadProjects]);
 
   // Top-level agents get desks; subagents are drawn as clusters at their parent.
   const deskAgents = useMemo(
@@ -135,22 +139,19 @@ export function AgentOffice() {
     return m;
   }, [agents]);
 
-  // Responsive column count driven by the floor container width.
+  // Available floor width drives how project rooms wrap.
   const scrollRef = useRef<HTMLDivElement>(null);
-  const [cols, setCols] = useState(3);
+  const [containerW, setContainerW] = useState(900);
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
-    const ro = new ResizeObserver(([entry]) => {
-      const w = entry.contentRect.width;
-      setCols(Math.max(1, Math.floor((w - GAP_X) / (DESK_W + GAP_X))));
-    });
+    const ro = new ResizeObserver(([entry]) => setContainerW(entry.contentRect.width));
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
 
-  // Layout recomputes only when the agent set or column count actually changes,
-  // never on a status tick (ordering is keyed by immutable id).
+  // Layout recomputes only when the agent set, project membership, or width
+  // actually changes — never on a status tick (ordering is keyed by immutable id).
   const orderedKey = useMemo(
     () =>
       deskAgents
@@ -159,10 +160,17 @@ export function AgentOffice() {
         .join(","),
     [deskAgents]
   );
+  const projectsKey = useMemo(
+    () =>
+      projects
+        .map((p) => `${p.id}:${p.members.map((m) => m.agentId).sort().join(",")}`)
+        .join(";"),
+    [projects]
+  );
   const floor = useMemo(
-    () => deskLayout(deskAgents, cols),
+    () => deskLayout(deskAgents, projects, containerW),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [orderedKey, cols]
+    [orderedKey, projectsKey, containerW]
   );
   const byId = useMemo(() => {
     const m = new Map<string, AgentProfileSummary>();
@@ -257,6 +265,36 @@ export function AgentOffice() {
               margin: "24px auto",
             }}
           >
+            {floor.groups.map((g) => (
+              <div
+                key={g.id}
+                style={{
+                  position: "absolute",
+                  left: g.x,
+                  top: g.y,
+                  width: g.w,
+                  height: g.h,
+                  borderRadius: 16,
+                  border: "1px dashed rgb(var(--border-strong))",
+                  background: "rgb(var(--accent) / 0.04)",
+                  pointerEvents: "none",
+                }}
+              >
+                <span
+                  style={{
+                    ...type.micro,
+                    position: "absolute",
+                    top: 8,
+                    left: 14,
+                    color: "rgb(var(--muted))",
+                    textTransform: "uppercase",
+                  }}
+                >
+                  {g.label}
+                </span>
+              </div>
+            ))}
+
             {floor.desks.map((d) => {
               const agent = byId.get(d.id);
               if (!agent) return null;
