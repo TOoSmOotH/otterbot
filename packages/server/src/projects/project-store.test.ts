@@ -49,6 +49,24 @@ describe("ProjectStore", () => {
     expect(store.repoPathForAgent("claude")).toBeNull();
   });
 
+  it("adds members read-only by default and resolves access", () => {
+    const p = store.create("Acc");
+    store.addMember(p.id, "bot");
+    expect(store.listMembersDetailed(p.id)).toEqual([{ agentId: "bot", access: "read" }]);
+    expect(store.accessForAgent("bot")).toBe("read");
+    expect(store.accessForAgent("nobody")).toBeNull();
+  });
+
+  it("supports write members, updates access, and re-add overwrites access", () => {
+    const p = store.create("Acc");
+    store.addMember(p.id, "coder", "write");
+    expect(store.accessForAgent("coder")).toBe("write");
+    store.setMemberAccess(p.id, "coder", "read");
+    expect(store.accessForAgent("coder")).toBe("read");
+    store.addMember(p.id, "coder", "write"); // re-add is deterministic
+    expect(store.accessForAgent("coder")).toBe("write");
+  });
+
   it("refuses to add a member to an unknown project", () => {
     expect(() => store.addMember("does-not-exist", "claude")).toThrow(/unknown project/i);
   });

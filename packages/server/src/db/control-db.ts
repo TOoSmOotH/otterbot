@@ -117,6 +117,7 @@ function ensureControlTables(sqlite: Database.Database) {
       project_id TEXT NOT NULL,
       agent_id TEXT NOT NULL,
       created_at TEXT NOT NULL,
+      access TEXT NOT NULL DEFAULT 'read',
       PRIMARY KEY (project_id, agent_id)
     )`,
     `CREATE INDEX IF NOT EXISTS idx_project_members_agent ON project_members(agent_id)`,
@@ -183,6 +184,16 @@ function ensureControlTables(sqlite: Database.Database) {
   addProjectCol("base_branch", "base_branch TEXT");
   addProjectCol("monitor_issues", "monitor_issues INTEGER NOT NULL DEFAULT 0");
   addProjectCol("rules", "rules TEXT");
+
+  // Migration: project_members grew a per-member access level ('read'|'write').
+  const memberCols = new Set(
+    (sqlite.prepare(`PRAGMA table_info(project_members)`).all() as Array<{ name: string }>).map(
+      (c) => c.name
+    )
+  );
+  if (!memberCols.has("access")) {
+    sqlite.exec(`ALTER TABLE project_members ADD COLUMN access TEXT NOT NULL DEFAULT 'read'`);
+  }
 
   // Migration: forge_accounts grew SSH-transport + signing fields.
   const forgeCols = new Set(

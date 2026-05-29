@@ -155,13 +155,33 @@ export class ProjectStore {
     }
   }
 
-  /** Add an agent to a project (idempotent). */
-  addMember(projectId: string, agentId: string): void {
+  /**
+   * Add an agent to a project with the given access (default read-only). Re-adding
+   * an existing member updates its access deterministically.
+   */
+  addMember(projectId: string, agentId: string, access: "read" | "write" = "read"): void {
     if (!this.get(projectId)) throw new Error(`Unknown project: ${projectId}`);
     this.control.db
       .insert(controlSchema.projectMembers)
-      .values({ projectId, agentId, createdAt: new Date().toISOString() })
-      .onConflictDoNothing()
+      .values({ projectId, agentId, access, createdAt: new Date().toISOString() })
+      .onConflictDoUpdate({
+        target: [controlSchema.projectMembers.projectId, controlSchema.projectMembers.agentId],
+        set: { access },
+      })
+      .run();
+  }
+
+  /** Change an existing member's access level. */
+  setMemberAccess(projectId: string, agentId: string, access: "read" | "write"): void {
+    this.control.db
+      .update(controlSchema.projectMembers)
+      .set({ access })
+      .where(
+        and(
+          eq(controlSchema.projectMembers.projectId, projectId),
+          eq(controlSchema.projectMembers.agentId, agentId)
+        )
+      )
       .run();
   }
 
@@ -185,6 +205,40 @@ export class ProjectStore {
       .where(eq(controlSchema.projectMembers.projectId, projectId))
       .all()
       .map((r) => r.agentId);
+  }
+
+  /** Project members with their per-member access level. */
+  listMembersDetailed(projectId: string): Array<{ agentId: string; access: "read" | "write" }> {
+    return this.control.db
+      .select({
+        agentId: controlSchema.projectMembers.agentId,
+        access: controlSchema.projectMembers.access,
+      })
+      .from(controlSchema.projectMembers)
+      .where(eq(controlSchema.projectMembers.projectId, projectId))
+      .all();
+  }
+
+  /**
+   * The access level for the agent's project — the membership row of the same
+   * project repoPathForAgent resolves (most recently created wins), or null when
+   * the agent belongs to no project.
+   */
+  accessForAgent(agentId: string): "read" | "write" | null {
+    const project = this.projectsForAgent(agentId)[0];
+    if (!project) return null;
+    return (
+      this.control.db
+        .select({ access: controlSchema.projectMembers.access })
+        .from(controlSchema.projectMembers)
+        .where(
+          and(
+            eq(controlSchema.projectMembers.projectId, project.id),
+            eq(controlSchema.projectMembers.agentId, agentId)
+          )
+        )
+        .get()?.access ?? null
+    );
   }
 
   /** The projects an agent belongs to, most-recently-joined first. */

@@ -146,6 +146,9 @@ export const projects = sqliteTable("projects", {
 export const projectMembers = sqliteTable("project_members", {
   projectId: text("project_id").notNull(),
   agentId: text("agent_id").notNull(),
+  access: text("access", { enum: ["read", "write"] })
+    .notNull()
+    .default("read"),
   createdAt: text("created_at")
     .notNull()
     .$defaultFn(() => new Date().toISOString()),
