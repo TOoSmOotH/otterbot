@@ -37,6 +37,12 @@ export interface TeamRoleSpec {
   canRunShell?: boolean;
   /** Shared service agents this role may delegate to (added as allowedPeers). */
   peerServices?: string[];
+  /**
+   * When true, this role is wired to message every other agent in its project
+   * team (added as allowedPeers at provisioning time). The PM uses this so it can
+   * delegate to and coordinate the whole team.
+   */
+  peerAllTeam?: boolean;
 }
 
 export const SVC_PROXMOX_ID = "svc-proxmox";
@@ -77,6 +83,7 @@ decide where the code lives (an existing repo, a new repo, or a local-only repo)
 You break the work into phases and launch the build pipeline, then relay progress
 and results. You coordinate; you do not write the code yourself.`,
     capabilities: [{ catalogId: "project-management" }],
+    peerAllTeam: true,
   },
   {
     role: "coder",

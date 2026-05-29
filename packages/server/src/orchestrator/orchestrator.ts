@@ -1642,10 +1642,21 @@ export class Orchestrator {
         continue;
       }
       const rc = config[spec.role] ?? {};
+      const peerIds = new Set<string>();
       // Only wire peers to service agents that actually exist right now.
-      const allowedPeers = (spec.peerServices ?? [])
-        .filter((agentId) => this.contexts.has(agentId))
-        .map((agentId) => ({ agentId, shareMemory: false }));
+      for (const svc of spec.peerServices ?? []) {
+        if (this.contexts.has(svc)) peerIds.add(svc);
+      }
+      // PM-style roles reach every other agent in the project. Their ids are
+      // deterministic, so it's fine to reference teammates not yet created in
+      // this loop — the runtime resolves peers against the live directory.
+      if (spec.peerAllTeam) {
+        for (const other of TEAM_ROLES) {
+          if (other.role === spec.role) continue;
+          peerIds.add(teamAgentId(projectId, other.role));
+        }
+      }
+      const allowedPeers = [...peerIds].map((agentId) => ({ agentId, shareMemory: false }));
       this.createAgent({
         id,
         displayName: `${project.name} · ${spec.displayNameSuffix}`,

@@ -77,6 +77,20 @@ describe("coding team provisioning", () => {
     expect(peers).not.toContain("svc-ssh");
   });
 
+  it("wires the PM to every other agent in its team", () => {
+    const project = stack.orch.createProject("PMReach");
+    stack.orch.provisionProjectTeam(project.id);
+    const pm = stack.orch.getContext(stack.orch.agentForRole(project.id, "pm")!)!;
+    const peers = pm.profile.allowedPeers.map((p) => p.agentId).sort();
+    expect(peers).toEqual(
+      ["coder", "security-reviewer", "test-writer", "tester"]
+        .map((role) => teamAgentId(project.id, role))
+        .sort()
+    );
+    // The PM does not list itself as a peer.
+    expect(peers).not.toContain(teamAgentId(project.id, "pm"));
+  });
+
   it("tears down the team when the project is deleted", async () => {
     const project = stack.orch.createProject("Throwaway");
     stack.orch.provisionProjectTeam(project.id);

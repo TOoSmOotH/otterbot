@@ -10,7 +10,7 @@ import { ActivityView } from "./components/agents/ActivityView";
 import { ProjectsView } from "./components/agents/ProjectsView";
 import { TerminalModal } from "./components/agents/TerminalModal";
 import { getSocket } from "./lib/socket";
-import { AgentNetworkGraph } from "./components/agents/AgentNetworkGraph";
+import { NetworkView } from "./components/agents/NetworkView";
 import { GlobalSettings } from "./components/settings/GlobalSettings";
 import { OnboardingWizard } from "./components/agents/OnboardingWizard";
 import { AuthGate } from "./components/AuthGate";
@@ -149,7 +149,7 @@ function AuthedApp() {
           {view === "studio" && <AgentStudio agentId={activeAgentId} />}
           {view === "projects" && <ProjectsView />}
           {view === "activity" && <ActivityView />}
-          {view === "network" && <AgentNetworkGraph />}
+          {view === "network" && <NetworkView />}
           {view === "settings" && <GlobalSettings />}
         </div>
       </div>
