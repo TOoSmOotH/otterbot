@@ -54,6 +54,12 @@ export interface AgentContext {
    * membership changes take effect without rebuilding the context.
    */
   projectRepoPath: () => string | null;
+  /**
+   * The standing rules for this agent's project, or null when it belongs to no
+   * project (or the project has none). A thunk so rule edits take effect on the
+   * next turn without rebuilding the context.
+   */
+  projectRules: () => string | null;
   /** Persistent Chrome user-data dir for the agent's browser tools. */
   browserProfileDir: string;
   /** Effective per-call browser-command timeout (ms): profile override or global default. */
@@ -106,6 +112,11 @@ export interface BuildAgentContextInput {
    * when it belongs to no project. Called live (membership can change).
    */
   resolveProjectRepoPath?: () => string | null;
+  /**
+   * Resolve the standing rules for this agent's project, or null. Called live
+   * (rules can change between turns).
+   */
+  resolveProjectRules?: () => string | null;
   /** Path to this agent's persistent browser profile directory. */
   browserProfileDir: string;
   /** Path to this agent's generated-images directory. */
@@ -172,6 +183,7 @@ export function buildAgentContext(input: BuildAgentContextInput): AgentContext {
     contextWindow: input.contextWindow,
     workspaceDir: input.workspaceDir,
     projectRepoPath: input.resolveProjectRepoPath ?? (() => null),
+    projectRules: input.resolveProjectRules ?? (() => null),
     browserProfileDir: input.browserProfileDir,
     browseTimeoutMs: limits.browseTimeoutMs,
     maxSteps: limits.maxSteps,
