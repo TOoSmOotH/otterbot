@@ -19,6 +19,7 @@ export function PixiOffice() {
   useEffect(() => {
     let scene: OfficeScene | null = null;
     let app: Application | null = null;
+    let appReady = false;
     let ro: ResizeObserver | null = null;
     const unsubs: Array<() => void> = [];
     let cancelled = false;
@@ -44,11 +45,15 @@ export function PixiOffice() {
           backgroundColor: 0x1a1c22,
           resolution: Math.min(window.devicePixelRatio || 1, 2),
           autoDensity: true,
+          // Fall back to the 2D-canvas renderer when WebGL is unavailable
+          // (e.g. headless CI). WebGL is still preferred in normal browsers.
+          preference: ["webgl", "canvas"],
         });
       } catch {
         if (errorRef.current) errorRef.current.style.display = "flex";
         return;
       }
+      appReady = true;
       if (cancelled) {
         app.destroy(true);
         return;
@@ -117,7 +122,10 @@ export function PixiOffice() {
       ro?.disconnect();
       for (const u of unsubs) u();
       scene?.destroy();
-      app?.destroy(true);
+      // Only destroy the Pixi Application if init() completed — calling destroy()
+      // on a partially-initialised app throws because internal teardown hooks
+      // (e.g. _cancelResize) haven't been wired up yet.
+      if (appReady) app?.destroy(true);
     };
   }, []);
 
