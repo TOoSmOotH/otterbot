@@ -79,14 +79,15 @@ export class OfficeScene {
 
   private fit(): void {
     if (!this.world) return;
-    const scale = Math.min(
-      this.containerW / this.world.pxWidth,
-      this.containerH / this.world.pxHeight
-    );
+    const pad = 12;
+    const widthScale = (this.containerW - pad * 2) / this.world.pxWidth;
+    const heightScale = (this.containerH - pad * 2) / this.world.pxHeight;
+    const scale = Math.max(widthScale, Math.min(heightScale, 2.6));
     const s = Math.max(0.2, Math.min(scale, 3));
     this.root.scale.set(s);
-    this.root.x = (this.containerW - this.world.pxWidth * s) / 2;
-    this.root.y = (this.containerH - this.world.pxHeight * s) / 2;
+    const scaledW = this.world.pxWidth * s;
+    this.root.x = scaledW <= this.containerW - pad * 2 ? (this.containerW - scaledW) / 2 : pad;
+    this.root.y = pad;
   }
 
   async setWorld(agents: AgentProfileSummary[], projects: Project[]): Promise<void> {
@@ -295,10 +296,10 @@ export class OfficeScene {
     container.x = tx * TILE;
     container.y = ty * TILE;
     const chair = new Graphics()
-      .roundRect(3, 17, 10, 8, 2)
+      .roundRect(1, 18, 14, 9, 2)
       .fill(0x293848)
       .stroke({ width: 1, color: 0xb37a45 })
-      .rect(5, 15, 6, 3)
+      .rect(4, 15, 8, 4)
       .fill(0x34485c);
     const screen = new Graphics();
     const keys = new Graphics();
@@ -338,29 +339,33 @@ export class OfficeScene {
 
     fx.screen
       .clear()
-      .rect(6, 2, 4, 3)
+      .roundRect(-2, -5, 20, 12, 2)
+      .fill(0x111820)
+      .rect(0, -3, 16, 8)
       .fill(color)
-      .rect(5, 1, 6, 1)
+      .rect(6, 6, 4, 2)
+      .fill(0x1a2028)
+      .rect(3, 8, 10, 1)
       .fill(0x1a2028);
 
     if (active || fx.status === "error") {
       const glow = pulse > 0.5 ? 0xb6fff2 : color;
-      fx.screen.rect(7, 3, 2, 1).fill(glow);
+      fx.screen.rect(2, -1, 12, 2).fill(glow);
     }
 
-    fx.keys.clear().rect(5, 8, 6, 1).fill(0xd7dbe4);
+    fx.keys.clear().rect(0, 12, 16, 2).fill(0xd7dbe4);
     if (!active || this.reduced) {
-      fx.keys.rect(6, 9, 4, 1).fill(0x8b93a3);
+      fx.keys.rect(3, 15, 10, 1).fill(0x8b93a3);
       return;
     }
 
     const tick = pulse > 0.5 ? 1 : 0;
     fx.keys
-      .rect(5 + tick, 9, 1, 1)
+      .rect(2 + tick, 15, 2, 1)
       .fill(0xf1f3f7)
-      .rect(8 - tick, 9, 1, 1)
+      .rect(7 - tick, 15, 2, 1)
       .fill(0xf1f3f7)
-      .rect(10, 9, 1, 1)
+      .rect(12, 15, 2, 1)
       .fill(pulse > 0.75 ? 0xf1f3f7 : 0x8b93a3);
   }
 

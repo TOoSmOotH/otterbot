@@ -126,8 +126,9 @@ export function buildWorld(agents: AgentProfileSummary[], projects: Project[]): 
   const contentRight = placed.reduce((m, p) => Math.max(m, p.x + p.dims.w), 1);
   const contentBottom = placed.reduce((m, p) => Math.max(m, p.y + p.dims.h), 1);
   const cols = contentRight + 1;
-  // +2: one tile of corridor below rooms, then the outer wall
-  const rows = contentBottom + 2;
+  // Extra lower corridor/lounge space keeps the office from reading like a
+  // skinny strip when the view is scaled to a wide dashboard panel.
+  const rows = contentBottom + 6;
   const grid = new Uint8Array(cols * rows).fill(Cell.FLOOR);
   const set = (tx: number, ty: number, v: Cell) => {
     if (tx >= 0 && ty >= 0 && tx < cols && ty < rows) grid[ty * cols + tx] = v;

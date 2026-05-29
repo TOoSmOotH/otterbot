@@ -34,7 +34,7 @@ export class AgentToken {
     this.homeChair = chair;
     this.container.addChild(this.ring);
 
-    const size = TILE + 6;
+    const size = TILE + 2;
     if (texture) {
       const s = new Sprite(texture);
       s.width = size;
