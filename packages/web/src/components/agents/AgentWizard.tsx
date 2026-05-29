@@ -104,6 +104,7 @@ function TeamForm({ onClose }: { onClose: () => void }) {
   const reloadProjects = useProjectsStore((s) => s.load);
 
   const [name, setName] = useState("");
+  const [rules, setRules] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [roles, setRoles] = useState<Record<string, { modelId: string; tool?: Tool }>>(() =>
@@ -129,7 +130,11 @@ function TeamForm({ onClose }: { onClose: () => void }) {
     const res = await apiFetch("/api/projects", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ name: name.trim(), team }),
+      body: JSON.stringify({
+        name: name.trim(),
+        team,
+        ...(rules.trim() ? { rules: rules.trim() } : {}),
+      }),
     });
     setBusy(false);
     if (!res.ok) {
@@ -173,6 +178,17 @@ function TeamForm({ onClose }: { onClose: () => void }) {
             )}
           </div>
         ))}
+      </div>
+      <div style={{ marginTop: 12 }}>
+        <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 4 }}>Project rules (optional)</div>
+        <textarea
+          data-testid="team-rules"
+          value={rules}
+          onChange={(e) => setRules(e.target.value)}
+          placeholder={`Standing rules for the team — e.g.\nAlways commit to dev.\nFollow the existing code style.`}
+          rows={4}
+          style={{ ...input, width: "100%", resize: "vertical", fontFamily: "inherit" }}
+        />
       </div>
       <p style={{ fontSize: 11, color: "rgb(var(--muted))", marginTop: 10 }}>
         Each coding role uses its own subscription — you'll log its CLI in from the agent's terminal
