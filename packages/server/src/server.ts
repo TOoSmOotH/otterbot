@@ -499,8 +499,13 @@ export async function buildServer(
         reply.code(400);
         return { error: "agentId is required" };
       }
+      const access = req.body?.access ?? "read";
+      if (access !== "read" && access !== "write") {
+        reply.code(400);
+        return { error: "access must be 'read' or 'write'" };
+      }
       try {
-        orch.addProjectMember(req.params.id, agentId, req.body?.access ?? "read");
+        orch.addProjectMember(req.params.id, agentId, access);
         return { ok: true, members: orch.listProjects().find((p) => p.id === req.params.id)?.members ?? [] };
       } catch (err) {
         reply.code(400);
