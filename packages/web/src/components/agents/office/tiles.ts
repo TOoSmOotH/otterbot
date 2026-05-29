@@ -14,14 +14,21 @@ const C = {
   printer: 0xb9bec8,
 };
 
-// Sprite names from public/office/roguelike.xml (Kenney "Roguelike Modern City",
-// CC0). Indices verified against the tilemap. Leave a key unset to keep the
-// Graphics drawing for that item.
-const ART: Partial<Record<"floor" | "wall" | "door" | "desk" | "plant" | "printer", string>> = {
-  floor: "tile_0741.png", // gray tile floor
-  wall: "tile_0009.png", // neutral gray stone wall
-  door: "tile_0617.png", // wooden paneled door
-  desk: "tile_0572.png", // wooden desk
+const ATLAS_IMAGE = "/office/otter-office.png";
+const ATLAS_XML = "/office/otter-office.xml";
+
+// First-party Otterbot office sprites. Leave a key unset to keep the Graphics
+// fallback for that item.
+const ART: Partial<
+  Record<"floor" | "floorAlt" | "wall" | "door" | "desk" | "plant" | "printer", string>
+> = {
+  floor: "floor.png",
+  floorAlt: "floor_alt.png",
+  wall: "wall.png",
+  door: "door.png",
+  desk: "desk.png",
+  plant: "plant.png",
+  printer: "printer.png",
 };
 
 let sheet: Texture | null = null;
@@ -32,8 +39,8 @@ export async function loadOfficeAtlas(): Promise<void> {
   if (Object.keys(ART).length === 0) { frames = frames ?? {}; return; }
   if (frames) return;
   try {
-    sheet = (await Assets.load("/office/roguelike.png")) as Texture;
-    const xml = await (await fetch("/office/roguelike.xml")).text();
+    sheet = (await Assets.load(ATLAS_IMAGE)) as Texture;
+    const xml = await (await fetch(ATLAS_XML)).text();
     const doc = new DOMParser().parseFromString(xml, "text/xml");
     const out: Record<string, Rectangle> = {};
     doc.querySelectorAll("SubTexture").forEach((el) => {
@@ -126,7 +133,7 @@ export function drawEnvironment(world: World): Container {
           break;
         }
         default: {
-          const floorSprite = artSprite("floor");
+          const floorSprite = artSprite((tx + ty) % 2 ? "floorAlt" : "floor");
           if (floorSprite) {
             floorSprite.x = x;
             floorSprite.y = y;
@@ -142,7 +149,13 @@ export function drawEnvironment(world: World): Container {
 }
 
 /** A simple potted-plant prop at a tile. */
-export function drawPlant(tx: number, ty: number): Graphics {
+export function drawPlant(tx: number, ty: number): Container {
+  const sprite = artSprite("plant");
+  if (sprite) {
+    sprite.x = tx * TILE;
+    sprite.y = ty * TILE;
+    return sprite;
+  }
   const g = new Graphics();
   g.rect(tx * TILE + 5, ty * TILE + 9, 6, 5).fill(0x8a5a3c);
   g.circle(tx * TILE + 8, ty * TILE + 6, 5).fill(C.plant);
@@ -150,7 +163,13 @@ export function drawPlant(tx: number, ty: number): Graphics {
 }
 
 /** A simple printer prop at a tile. */
-export function drawPrinter(tx: number, ty: number): Graphics {
+export function drawPrinter(tx: number, ty: number): Container {
+  const sprite = artSprite("printer");
+  if (sprite) {
+    sprite.x = tx * TILE;
+    sprite.y = ty * TILE;
+    return sprite;
+  }
   const g = new Graphics();
   g.rect(tx * TILE + 3, ty * TILE + 5, 10, 8).fill(C.printer);
   g.rect(tx * TILE + 5, ty * TILE + 3, 6, 3).fill(0x8b93a3);
