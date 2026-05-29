@@ -491,7 +491,7 @@ export async function buildServer(
     return result;
   });
 
-  app.post<{ Params: { id: string }; Body: { agentId?: string } }>(
+  app.post<{ Params: { id: string }; Body: { agentId?: string; access?: "read" | "write" } }>(
     "/api/projects/:id/members",
     async (req, reply) => {
       const agentId = req.body?.agentId;
@@ -500,7 +500,7 @@ export async function buildServer(
         return { error: "agentId is required" };
       }
       try {
-        orch.addProjectMember(req.params.id, agentId);
+        orch.addProjectMember(req.params.id, agentId, req.body?.access ?? "read");
         return { ok: true, members: orch.listProjects().find((p) => p.id === req.params.id)?.members ?? [] };
       } catch (err) {
         reply.code(400);
@@ -513,6 +513,19 @@ export async function buildServer(
     "/api/projects/:id/members/:agentId",
     async (req) => {
       orch.removeProjectMember(req.params.id, req.params.agentId);
+      return { ok: true };
+    }
+  );
+
+  app.patch<{ Params: { id: string; agentId: string }; Body: { access?: "read" | "write" } }>(
+    "/api/projects/:id/members/:agentId",
+    async (req, reply) => {
+      const access = req.body?.access;
+      if (access !== "read" && access !== "write") {
+        reply.code(400);
+        return { error: "access must be 'read' or 'write'" };
+      }
+      orch.setProjectMemberAccess(req.params.id, req.params.agentId, access);
       return { ok: true };
     }
   );

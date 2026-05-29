@@ -1295,18 +1295,18 @@ export class Orchestrator {
 
   // --- Projects ------------------------------------------------------------
 
-  /** A project plus its current member agent ids and role→agent team map. */
+  /** A project plus its current member agents (with access) and role→agent team map. */
   listProjects(): Array<{
     id: string;
     name: string;
     repoPath: string;
     createdAt: string;
-    members: string[];
+    members: Array<{ agentId: string; access: "read" | "write" }>;
     team: Array<{ role: string; agentId: string }>;
   }> {
     return this.projects.list().map((p) => ({
       ...p,
-      members: this.projects.listMembers(p.id),
+      members: this.projects.listMembersDetailed(p.id),
       team: this.projects.getTeam(p.id),
     }));
   }
@@ -1663,7 +1663,7 @@ export class Orchestrator {
             : cap.config;
         if (capConfig) this.applySkillConfig(id, cap.catalogId, capConfig);
       }
-      this.projects.addMember(projectId, id);
+      this.projects.addMember(projectId, id, "write");
       this.projects.setTeamRole(projectId, spec.role, id);
     }
   }
@@ -1674,10 +1674,15 @@ export class Orchestrator {
     return { chat: chatModelId, embedding: this.getGlobalSettings().defaultEmbeddingModelId };
   }
 
-  /** Add an agent to a project. Throws if the project or agent is unknown. */
-  addProjectMember(projectId: string, agentId: string): void {
+  /** Add an agent to a project with optional access (default read-only). Throws if the project or agent is unknown. */
+  addProjectMember(projectId: string, agentId: string, access: "read" | "write" = "read"): void {
     if (!this.contexts.has(agentId)) throw new Error(`Unknown agent: ${agentId}`);
-    this.projects.addMember(projectId, agentId);
+    this.projects.addMember(projectId, agentId, access);
+  }
+
+  /** Change a project member's access level. */
+  setProjectMemberAccess(projectId: string, agentId: string, access: "read" | "write"): void {
+    this.projects.setMemberAccess(projectId, agentId, access);
   }
 
   removeProjectMember(projectId: string, agentId: string): void {
