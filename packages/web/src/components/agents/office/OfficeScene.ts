@@ -19,13 +19,23 @@ const KIND_ACCENT: Partial<Record<AgentMsgKind, number>> = {
 const WALK_KINDS: Set<AgentMsgKind> = new Set(["request", "response", "spawn", "report"]);
 const MAX_WALKERS = 6;
 
+interface DeskFx {
+  container: Container;
+  screen: Graphics;
+  keys: Graphics;
+  phase: number;
+  status: AgentStatus;
+}
+
 export class OfficeScene {
   private root = new Container();
   private envLayer = new Container();
+  private workstationLayer = new Container();
   private boardLayer = new Container();
   private tokenLayer = new Container();
   private ambianceLayer = new Container();
   private tokens = new Map<string, AgentToken>();
+  private deskFx = new Map<string, DeskFx>();
   private boards = new Map<string, { container: Container; tx: number; ty: number; wTiles: number }>();
   private textures = new Map<string, Texture | null>();
   private world: World | null = null;
@@ -38,13 +48,20 @@ export class OfficeScene {
   private containerH = 600;
 
   constructor(private app: Application) {
-    this.root.addChild(this.envLayer, this.boardLayer, this.tokenLayer, this.ambianceLayer);
+    this.root.addChild(
+      this.envLayer,
+      this.workstationLayer,
+      this.boardLayer,
+      this.tokenLayer,
+      this.ambianceLayer
+    );
     this.app.stage.addChild(this.root);
     this.app.ticker.add(this.onTick);
   }
 
   private onTick = () => {
     const dt = this.app.ticker.deltaMS;
+    this.updateDeskFx(dt);
     for (const tok of this.tokens.values()) tok.update(dt);
   };
 
@@ -77,7 +94,10 @@ export class OfficeScene {
       "|" +
       projects.map((p) => `${p.id}:${p.members.map((m) => m.agentId).sort().join(",")}`).join(";");
     if (key === this.structureKey && this.world) {
-      for (const a of agents) this.tokens.get(a.id)?.setStatus(a.status);
+      for (const a of agents) {
+        this.tokens.get(a.id)?.setStatus(a.status);
+        this.setDeskFxStatus(a.id, a.status);
+      }
       return;
     }
     const myGen = ++this.gen;
@@ -92,6 +112,9 @@ export class OfficeScene {
     this.envLayer.removeChildren().forEach((c) => c.destroy());
     this.envLayer.addChild(drawEnvironment(world));
     this.envLayer.addChild(drawPlant(1, world.rows - 2), drawPrinter(world.cols - 3, world.rows - 2));
+
+    this.workstationLayer.removeChildren().forEach((c) => c.destroy());
+    this.deskFx.clear();
 
     this.boardLayer.removeChildren().forEach((c) => c.destroy());
     this.boards.clear();
@@ -116,6 +139,15 @@ export class OfficeScene {
 
     const byId = new Map(agents.map((a) => [a.id, a]));
     const wantIds = new Set(Object.keys(world.deskOf));
+
+    for (const id of wantIds) {
+      const a = byId.get(id);
+      if (!a) continue;
+      const slot = world.deskOf[id];
+      const fx = this.createDeskFx(slot.deskTx, slot.deskTy, a.status);
+      this.deskFx.set(id, fx);
+      this.workstationLayer.addChild(fx.container);
+    }
 
     for (const [id, tok] of this.tokens) {
       if (!wantIds.has(id)) {
@@ -143,6 +175,7 @@ export class OfficeScene {
         tok.container.y = tilePx(chair.ty);
       }
       tok.setStatus(a.status);
+      this.setDeskFxStatus(id, a.status);
     }
 
     this.ensureAmbiance();
@@ -167,6 +200,7 @@ export class OfficeScene {
 
   setStatus(agentId: string, status: AgentStatus): void {
     this.tokens.get(agentId)?.setStatus(status);
+    this.setDeskFxStatus(agentId, status);
   }
 
   setPipeline(projectId: string, run: PipelineRun | null): void {
@@ -236,6 +270,74 @@ export class OfficeScene {
     this.clock.x = this.world.pxWidth - 34;
     this.clock.y = 9;
     this.ambianceLayer.addChild(this.clock);
+  }
+
+  private createDeskFx(tx: number, ty: number, status: AgentStatus): DeskFx {
+    const container = new Container();
+    container.x = tx * TILE;
+    container.y = ty * TILE;
+    const screen = new Graphics();
+    const keys = new Graphics();
+    container.addChild(screen, keys);
+    const fx = { container, screen, keys, phase: Math.random() * Math.PI * 2, status };
+    this.drawDeskFx(fx, 0);
+    return fx;
+  }
+
+  private setDeskFxStatus(agentId: string, status: AgentStatus): void {
+    const fx = this.deskFx.get(agentId);
+    if (!fx) return;
+    fx.status = status;
+    this.drawDeskFx(fx, 0);
+  }
+
+  private updateDeskFx(dtMs: number): void {
+    for (const fx of this.deskFx.values()) {
+      fx.phase = (fx.phase + dtMs / 450) % (Math.PI * 2);
+      const pulse = this.reduced ? 0.45 : (Math.sin(fx.phase) + 1) / 2;
+      this.drawDeskFx(fx, pulse);
+    }
+  }
+
+  private drawDeskFx(fx: DeskFx, pulse: number): void {
+    const active = fx.status === "working" || fx.status === "thinking" || fx.status === "waiting";
+    const color =
+      fx.status === "error"
+        ? 0xe0584a
+        : fx.status === "thinking"
+          ? 0xe2b13c
+          : fx.status === "waiting"
+            ? 0x4aa3e0
+            : active
+              ? 0x42c7c7
+              : 0x347c86;
+
+    fx.screen
+      .clear()
+      .rect(6, 2, 4, 3)
+      .fill(color)
+      .rect(5, 1, 6, 1)
+      .fill(0x1a2028);
+
+    if (active || fx.status === "error") {
+      const glow = pulse > 0.5 ? 0xb6fff2 : color;
+      fx.screen.rect(7, 3, 2, 1).fill(glow);
+    }
+
+    fx.keys.clear().rect(5, 8, 6, 1).fill(0xd7dbe4);
+    if (!active || this.reduced) {
+      fx.keys.rect(6, 9, 4, 1).fill(0x8b93a3);
+      return;
+    }
+
+    const tick = pulse > 0.5 ? 1 : 0;
+    fx.keys
+      .rect(5 + tick, 9, 1, 1)
+      .fill(0xf1f3f7)
+      .rect(8 - tick, 9, 1, 1)
+      .fill(0xf1f3f7)
+      .rect(10, 9, 1, 1)
+      .fill(pulse > 0.75 ? 0xf1f3f7 : 0x8b93a3);
   }
 
   destroy(): void {

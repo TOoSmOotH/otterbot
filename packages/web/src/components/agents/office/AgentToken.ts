@@ -57,11 +57,18 @@ export class AgentToken {
     const labelText = roleName.length > 12 ? roleName.slice(0, 12) + "…" : roleName;
     const label = new Text({
       text: labelText,
-      style: { fontSize: 8, fill: 0xd7dbe4, align: "center" },
+      style: { fontSize: 8, fill: 0xf1f3f7, align: "center", fontWeight: "600" },
     });
-    label.anchor.set(0.5, 0);
-    label.y = size / 2 + 1;
-    this.container.addChild(label);
+    label.anchor.set(0.5);
+    const tagW = Math.max(22, Math.min(54, label.width + 8));
+    const tag = new Container();
+    const tagBg = new Graphics()
+      .roundRect(-tagW / 2, -6, tagW, 12, 3)
+      .fill(0x20242c)
+      .stroke({ width: 1, color: 0x5f6978 });
+    tag.addChild(tagBg, label);
+    tag.y = size / 2 + 7;
+    this.container.addChild(tag);
 
     this.container.x = tilePx(chair.tx);
     this.container.y = tilePx(chair.ty);

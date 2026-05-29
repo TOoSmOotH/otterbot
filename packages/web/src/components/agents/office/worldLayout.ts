@@ -103,7 +103,7 @@ export function buildWorld(agents: AgentProfileSummary[], projects: Project[]): 
   }
   if (standalone.length) {
     standalone.sort((a, b) => a.displayName.localeCompare(b.displayName));
-    clusters.push({ id: "unassigned", label: "Unassigned", kind: "unassigned", members: standalone });
+    clusters.push({ id: "unassigned", label: "Agents", kind: "unassigned", members: standalone });
   }
 
   type Placed = Cluster & { dims: ReturnType<typeof clusterDims>; x: number; y: number };
