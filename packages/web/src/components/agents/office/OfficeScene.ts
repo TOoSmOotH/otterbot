@@ -125,16 +125,11 @@ export class OfficeScene {
       this.boards.set(room.id, { container: wb, ...room.whiteboard });
     }
 
-    // Room name headers, so each project room is identifiable.
+    // Room nameplates, so each project room is identifiable without looking
+    // like loose debug text over the pixel-art environment.
     for (const room of world.rooms) {
       if (!room.label) continue;
-      const header = new Text({
-        text: room.label,
-        style: { fontSize: 8, fill: 0xb6acff, fontWeight: "700" },
-      });
-      header.x = room.x * TILE + 4;
-      header.y = room.y * TILE + 4;
-      this.envLayer.addChild(header);
+      this.envLayer.addChild(this.drawRoomNameplate(room.x, room.y, room.w, room.label));
     }
 
     const byId = new Map(agents.map((a) => [a.id, a]));
@@ -270,6 +265,28 @@ export class OfficeScene {
     this.clock.x = this.world.pxWidth - 34;
     this.clock.y = 9;
     this.ambianceLayer.addChild(this.clock);
+  }
+
+  private drawRoomNameplate(tx: number, ty: number, wTiles: number, label: string): Container {
+    const root = new Container();
+    root.x = tx * TILE + 3;
+    root.y = ty * TILE + 3;
+    const maxChars = Math.max(4, Math.floor((wTiles * TILE - 12) / 5));
+    const text = label.length > maxChars ? label.slice(0, Math.max(1, maxChars - 1)) + "…" : label;
+    const t = new Text({
+      text,
+      style: { fontSize: 8, fill: 0xf3e7cf, fontWeight: "700" },
+    });
+    t.x = 5;
+    t.y = 1;
+    const w = Math.min(wTiles * TILE - 6, Math.max(24, t.width + 10));
+    const bg = new Graphics()
+      .roundRect(0, 0, w, 11, 2)
+      .fill(0x2a2220)
+      .stroke({ width: 1, color: 0xb37a45 });
+    const pin = new Graphics().rect(2, 4, 2, 2).fill(0xe2b13c);
+    root.addChild(bg, pin, t);
+    return root;
   }
 
   private createDeskFx(tx: number, ty: number, status: AgentStatus): DeskFx {

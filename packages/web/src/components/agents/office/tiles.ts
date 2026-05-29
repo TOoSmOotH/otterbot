@@ -14,8 +14,8 @@ const C = {
   printer: 0xb9bec8,
 };
 
-const ATLAS_IMAGE = "/office/otter-office.png";
-const ATLAS_XML = "/office/otter-office.xml";
+const ATLAS_IMAGE = "/office/otter-office-v2.png";
+const ATLAS_XML = "/office/otter-office-v2.xml";
 
 // First-party Otterbot office sprites. Leave a key unset to keep the Graphics
 // fallback for that item.
@@ -34,7 +34,7 @@ const ART: Partial<
 let sheet: Texture | null = null;
 let frames: Record<string, Rectangle> | null = null;
 
-/** Load the Kenney sheet + parse its XML atlas. Safe to call repeatedly; no-throw. */
+/** Load the first-party office sheet + parse its XML atlas. Safe to call repeatedly; no-throw. */
 export async function loadOfficeAtlas(): Promise<void> {
   if (Object.keys(ART).length === 0) { frames = frames ?? {}; return; }
   if (frames) return;
@@ -94,7 +94,7 @@ export function drawEnvironment(world: World): Container {
           break;
         }
         case Cell.DOOR: {
-          const doorFloor = artSprite("floor");
+          const doorFloor = artSprite((tx + ty) % 2 ? "floorAlt" : "floor");
           if (doorFloor) {
             doorFloor.x = x;
             doorFloor.y = y;
@@ -113,7 +113,7 @@ export function drawEnvironment(world: World): Container {
           break;
         }
         case Cell.DESK: {
-          const base = artSprite("floor");
+          const base = artSprite((tx + ty) % 2 ? "floorAlt" : "floor");
           if (base) {
             base.x = x;
             base.y = y;
