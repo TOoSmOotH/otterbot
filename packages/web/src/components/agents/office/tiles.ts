@@ -22,6 +22,24 @@ const C = {
 
 const ATLAS_IMAGE = "/office/generated/office-assets-transparent.png";
 const ATLAS_JSON = "/office/generated/office-assets.json";
+const CHARACTER_ATLAS_IMAGE = "/office/generated/office-characters-transparent.png";
+const CHARACTER_ATLAS_JSON = "/office/generated/office-characters.json";
+const PROP_ATLAS_IMAGE = "/office/generated/office-props-transparent.png";
+const PROP_ATLAS_JSON = "/office/generated/office-props.json";
+const CHARACTER_FRAME_NAMES = [
+  "worker_01_black_hair_blue",
+  "worker_02_brown_hair_green",
+  "worker_03_blond_white",
+  "worker_04_blue_hair_purple",
+  "worker_05_bun_teal",
+  "worker_06_red_hair_rust",
+  "worker_07_black_hair_gray",
+  "worker_08_orange_hair_blue",
+  "worker_09_white_hair_gold",
+  "worker_10_purple_hair_gold",
+  "worker_11_long_brown_hair_pink",
+  "worker_12_blond_ponytail_cyan",
+];
 
 // First-party Otterbot office sprites. Leave a key unset to keep the Graphics
 // fallback for that item.
@@ -66,23 +84,34 @@ const ART: Partial<
 
 let sheet: Texture | null = null;
 let frames: Record<string, Rectangle> | null = null;
+let characterSheet: Texture | null = null;
+let characterFrames: Record<string, Rectangle> | null = null;
+let propSheet: Texture | null = null;
+let propFrames: Record<string, Rectangle> | null = null;
 
 /** Load the first-party office sheet + parse its generated JSON atlas. Safe to call repeatedly; no-throw. */
 export async function loadOfficeAtlas(): Promise<void> {
-  if (Object.keys(ART).length === 0) { frames = frames ?? {}; return; }
-  if (frames) return;
+  if (frames && characterFrames && propFrames) return;
   try {
-    sheet = (await Assets.load(ATLAS_IMAGE)) as Texture;
-    const atlas = (await (await fetch(ATLAS_JSON)).json()) as {
-      frames?: Record<string, { x: number; y: number; w: number; h: number }>;
-    };
-    const out: Record<string, Rectangle> = {};
-    for (const [name, frame] of Object.entries(atlas.frames ?? {})) {
-      out[name] = new Rectangle(frame.x, frame.y, frame.w, frame.h);
-    }
-    frames = out;
+    const office = await loadGeneratedAtlas(ATLAS_IMAGE, ATLAS_JSON);
+    sheet = office.sheet;
+    frames = office.frames;
   } catch {
     frames = {}; // atlas unavailable -> Graphics fallback everywhere
+  }
+  try {
+    const characters = await loadGeneratedAtlas(CHARACTER_ATLAS_IMAGE, CHARACTER_ATLAS_JSON);
+    characterSheet = characters.sheet;
+    characterFrames = characters.frames;
+  } catch {
+    characterFrames = {};
+  }
+  try {
+    const props = await loadGeneratedAtlas(PROP_ATLAS_IMAGE, PROP_ATLAS_JSON);
+    propSheet = props.sheet;
+    propFrames = props.frames;
+  } catch {
+    propFrames = {};
   }
 }
 
@@ -93,6 +122,18 @@ export function artSprite(key: keyof typeof ART): Sprite | null {
   const tex = new Texture({ source: sheet.source, frame: frames[name] });
   const s = new Sprite(tex);
   return s;
+}
+
+async function loadGeneratedAtlas(imageUrl: string, jsonUrl: string): Promise<{ sheet: Texture; frames: Record<string, Rectangle> }> {
+  const loadedSheet = (await Assets.load(imageUrl)) as Texture;
+  const atlas = (await (await fetch(jsonUrl)).json()) as {
+    frames?: Record<string, { x: number; y: number; w: number; h: number }>;
+  };
+  const loadedFrames: Record<string, Rectangle> = {};
+  for (const [name, frame] of Object.entries(atlas.frames ?? {})) {
+    loadedFrames[name] = new Rectangle(frame.x, frame.y, frame.w, frame.h);
+  }
+  return { sheet: loadedSheet, frames: loadedFrames };
 }
 
 function placeSprite(
@@ -124,6 +165,35 @@ function placeSprite(
   }
   sprite.x = Math.round(x);
   sprite.y = Math.round(y);
+  root.addChild(sprite);
+  return true;
+}
+
+function placeGeneratedSprite(
+  root: Container,
+  sourceSheet: Texture | null,
+  sourceFrames: Record<string, Rectangle> | null,
+  name: string,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  fit: "contain" | "stretch" = "contain"
+): boolean {
+  const frame = sourceFrames?.[name];
+  if (!sourceSheet || !frame) return false;
+  const sprite = new Sprite(new Texture({ source: sourceSheet.source, frame }));
+  if (fit === "stretch") {
+    sprite.x = Math.round(x);
+    sprite.y = Math.round(y);
+    sprite.width = Math.round(w);
+    sprite.height = Math.round(h);
+  } else {
+    const scale = Math.min(w / sprite.texture.width, h / sprite.texture.height);
+    sprite.scale.set(scale);
+    sprite.x = Math.round(x + (w - sprite.texture.width * scale) / 2);
+    sprite.y = Math.round(y + (h - sprite.texture.height * scale) / 2);
+  }
   root.addChild(sprite);
   return true;
 }
@@ -181,6 +251,9 @@ export function drawEnvironment(world: World): Container {
       const cell = world.grid[ty * world.cols + tx] as Cell;
       if (cell === Cell.DESK) drawDeskPod(root, g, tx, ty, true);
     }
+  }
+  for (const room of world.rooms) {
+    for (const slot of room.desks) drawSeatedWorker(root, g, slot.agentId, slot.deskTx, slot.deskTy);
   }
   return root;
 }
@@ -304,6 +377,18 @@ function drawDeskPod(root: Container, g: Graphics, tx: number, ty: number, occup
   g.circle(x + 58, y + 25, 6).fill(0xffd98a);
 }
 
+function drawSeatedWorker(root: Container, g: Graphics, agentId: string, tx: number, ty: number): void {
+  const deskX = tx * TILE - 40;
+  const deskY = ty * TILE - 18;
+  const frame = CHARACTER_FRAME_NAMES[Math.abs(hashString(agentId)) % CHARACTER_FRAME_NAMES.length];
+  if (placeGeneratedSprite(root, characterSheet, characterFrames, frame, deskX + 30, deskY + 6, 44, 72)) return;
+
+  g.roundRect(deskX + 34, deskY + 32, 34, 36, 5).fill(0x151b24);
+  g.circle(deskX + 51, deskY + 25, 12).fill(0xc9895d);
+  g.rect(deskX + 39, deskY + 16, 24, 10).fill(0x1d1716);
+  g.rect(deskX + 36, deskY + 38, 30, 18).fill(0x263241);
+}
+
 function drawRoomDecor(root: Container, g: Graphics, world: World): void {
   for (const room of world.rooms) {
     const x = room.x * TILE;
@@ -317,19 +402,27 @@ function drawRoomDecor(root: Container, g: Graphics, world: World): void {
     if (room.kind === "coo") {
       drawFramedArt(root, g, x + 34, y + 52);
       drawLargePlant(root, g, x + 18, y + h - 58);
+      placeProp(root, "side_table_lamp", x + w - 44, y + h - 92, 28, 56);
     } else if (room.kind === "project") {
       drawLargePlant(root, g, x + w - 48, y + 28);
       drawCabinet(root, g, x + w - 48, y + h - 64);
+      placeProp(root, "console_table_lamp_photo", x + w - 128, y + h - 74, 86, 52);
     } else {
       drawShelf(root, g, x + w - 76, y + 18);
       drawWallLamp(root, g, x + w - 36, y + 42);
       drawLargePlant(root, g, x + w - 58, y + h - 64);
+      placeProp(root, "printer_station", x + w - 72, y + h - 84, 54, 64);
     }
   }
 }
 
 function drawHallDecor(root: Container, g: Graphics, world: World): void {
   const hallY = Math.max(2, world.rows - 5) * TILE;
+  placeProp(root, "exit_double_door", TILE * 2, hallY + 4, 92, 104);
+  placeProp(root, "planter_box", TILE * 7, hallY + 30, 150, 58);
+  placeProp(root, "console_table_lamp_photo", Math.round(world.pxWidth * 0.5), hallY + 22, 132, 66);
+  placeProp(root, "green_runner_rug", Math.round(world.pxWidth * 0.68), hallY + 44, 160, 50, "stretch");
+  placeProp(root, "printer_station", world.pxWidth - TILE * 7, hallY + 14, 66, 74);
   drawLargePlant(root, g, TILE * 2, hallY + 20);
   drawCabinet(root, g, Math.round(world.pxWidth * 0.55), hallY + 34);
   drawWallLamp(root, g, Math.round(world.pxWidth * 0.52), hallY + 30);
@@ -338,6 +431,27 @@ function drawHallDecor(root: Container, g: Graphics, world: World): void {
     drawLargePlant(root, g, world.pxWidth - TILE * 5, hallY + 12);
     drawCabinet(root, g, world.pxWidth - TILE * 12, hallY + 42);
   }
+}
+
+function placeProp(
+  root: Container,
+  name: string,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  fit: "contain" | "stretch" = "contain"
+): boolean {
+  return placeGeneratedSprite(root, propSheet, propFrames, name, x, y, w, h, fit);
+}
+
+function hashString(value: string): number {
+  let hash = 0;
+  for (let i = 0; i < value.length; i++) {
+    hash = (hash << 5) - hash + value.charCodeAt(i);
+    hash |= 0;
+  }
+  return hash;
 }
 
 function drawShelf(root: Container, g: Graphics, x: number, y: number): void {

@@ -39,6 +39,11 @@ const CELL_H = 4;
 const MAX_DESK_COLS = 3;
 const ROOM_GAP = 2;
 const ROW_GAP = 3;
+const ROOM_MIN: Record<Room["kind"], { w: number; h: number; topRows: number }> = {
+  coo: { w: 14, h: 17, topRows: 6 },
+  project: { w: 25, h: 17, topRows: 5 },
+  unassigned: { w: 22, h: 17, topRows: 3 },
+};
 
 interface Cluster {
   id: string;
@@ -50,17 +55,17 @@ interface Cluster {
 function clusterDims(n: number, kind: Room["kind"]) {
   const deskCols = Math.min(Math.max(1, Math.ceil(Math.sqrt(n))), MAX_DESK_COLS);
   const deskRows = Math.ceil(n / deskCols);
-  const titleRows = kind === "project" ? 1 : 0;
+  const topRows = ROOM_MIN[kind].topRows;
   const border = 1;
   const interiorW = deskCols * CELL_W;
-  const interiorH = deskRows * CELL_H;
+  const interiorH = topRows + deskRows * CELL_H;
   return {
     deskCols,
     deskRows,
     border,
-    titleRows,
-    w: interiorW + border * 2,
-    h: interiorH + titleRows + border * 2,
+    topRows,
+    w: Math.max(ROOM_MIN[kind].w, interiorW + border * 2),
+    h: Math.max(ROOM_MIN[kind].h, interiorH + border * 2),
   };
 }
 
@@ -188,7 +193,7 @@ export function buildWorld(agents: AgentProfileSummary[], projects: Project[]): 
     const deskAreaW = dims.deskCols * CELL_W;
     const innerW = dims.w - dims.border * 2;
     const innerX = x + dims.border + Math.floor(Math.max(0, innerW - deskAreaW) / 2);
-    const innerY = y + dims.border + dims.titleRows;
+    const innerY = y + dims.border + dims.topRows;
     p.members.forEach((m, i) => {
       const dc = i % dims.deskCols;
       const dr = Math.floor(i / dims.deskCols);
