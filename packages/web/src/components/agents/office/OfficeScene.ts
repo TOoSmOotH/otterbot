@@ -47,6 +47,8 @@ export class OfficeScene {
   private containerW = 800;
   private containerH = 600;
   private zoom = 1;
+  private panX = 0;
+  private panY = 0;
 
   constructor(private app: Application) {
     this.root.addChild(
@@ -82,6 +84,18 @@ export class OfficeScene {
     this.fit();
   }
 
+  panBy(dx: number, dy: number): void {
+    this.panX += dx;
+    this.panY += dy;
+    this.fit();
+  }
+
+  resetPan(): void {
+    this.panX = 0;
+    this.panY = 0;
+    this.fit();
+  }
+
   private fit(): void {
     if (!this.world) return;
     const pad = 12;
@@ -90,8 +104,21 @@ export class OfficeScene {
     const s = Math.max(0.2, Math.min(scale, 2.2));
     this.root.scale.set(s);
     const scaledW = this.world.pxWidth * s;
-    this.root.x = scaledW <= this.containerW - pad * 2 ? (this.containerW - scaledW) / 2 : pad;
-    this.root.y = pad;
+    const scaledH = this.world.pxHeight * s;
+    const baseX = scaledW <= this.containerW - pad * 2 ? (this.containerW - scaledW) / 2 : pad;
+    const baseY = scaledH <= this.containerH - pad * 2 ? (this.containerH - scaledH) / 2 : pad;
+    this.clampPan(baseX, baseY, scaledW, scaledH, pad);
+    this.root.x = baseX + this.panX;
+    this.root.y = baseY + this.panY;
+  }
+
+  private clampPan(baseX: number, baseY: number, scaledW: number, scaledH: number, pad: number): void {
+    const maxX = Math.max(0, pad - baseX);
+    const minX = Math.min(0, this.containerW - pad - scaledW - baseX);
+    const maxY = Math.max(0, pad - baseY);
+    const minY = Math.min(0, this.containerH - pad - scaledH - baseY);
+    this.panX = Math.min(maxX, Math.max(minX, this.panX));
+    this.panY = Math.min(maxY, Math.max(minY, this.panY));
   }
 
   async setWorld(agents: AgentProfileSummary[], projects: Project[]): Promise<void> {

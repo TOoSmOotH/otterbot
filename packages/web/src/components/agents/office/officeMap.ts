@@ -117,10 +117,10 @@ function deskObject(slot: DeskSlot): OfficeObject {
 function workerObject(slot: DeskSlot): OfficeObject {
   return {
     kind: "worker",
-    x: slot.deskTx * TILE - 10,
-    y: slot.deskTy * TILE - 12,
-    w: 44,
-    h: 72,
+    x: slot.deskTx * TILE - 8,
+    y: slot.deskTy * TILE + 4,
+    w: 40,
+    h: 66,
     agentId: slot.agentId,
   };
 }

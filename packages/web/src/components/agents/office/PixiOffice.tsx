@@ -18,6 +18,7 @@ export function PixiOffice() {
   const hostRef = useRef<HTMLDivElement>(null);
   const errorRef = useRef<HTMLDivElement>(null);
   const sceneRef = useRef<OfficeScene | null>(null);
+  const dragRef = useRef<{ id: number; x: number; y: number } | null>(null);
   const [zoom, setZoom] = useState(1);
 
   useEffect(() => {
@@ -39,6 +40,36 @@ export function PixiOffice() {
     void activityStore.load();
     projectsStore.bindSocket();
     void projectsStore.load();
+
+    const onPointerDown = (event: PointerEvent) => {
+      if (event.button !== 0) return;
+      dragRef.current = { id: event.pointerId, x: event.clientX, y: event.clientY };
+      host.setPointerCapture(event.pointerId);
+      host.style.cursor = "grabbing";
+    };
+
+    const onPointerMove = (event: PointerEvent) => {
+      const drag = dragRef.current;
+      if (!drag || drag.id !== event.pointerId) return;
+      const dx = event.clientX - drag.x;
+      const dy = event.clientY - drag.y;
+      dragRef.current = { id: drag.id, x: event.clientX, y: event.clientY };
+      sceneRef.current?.panBy(dx, dy);
+    };
+
+    const finishPointer = (event: PointerEvent) => {
+      const drag = dragRef.current;
+      if (!drag || drag.id !== event.pointerId) return;
+      dragRef.current = null;
+      if (host.hasPointerCapture(event.pointerId)) host.releasePointerCapture(event.pointerId);
+      host.style.cursor = "grab";
+    };
+
+    host.style.cursor = "grab";
+    host.addEventListener("pointerdown", onPointerDown);
+    host.addEventListener("pointermove", onPointerMove);
+    host.addEventListener("pointerup", finishPointer);
+    host.addEventListener("pointercancel", finishPointer);
 
     (async () => {
       app = new Application();
@@ -128,6 +159,12 @@ export function PixiOffice() {
 
     return () => {
       cancelled = true;
+      dragRef.current = null;
+      host.removeEventListener("pointerdown", onPointerDown);
+      host.removeEventListener("pointermove", onPointerMove);
+      host.removeEventListener("pointerup", finishPointer);
+      host.removeEventListener("pointercancel", finishPointer);
+      host.style.cursor = "";
       ro?.disconnect();
       for (const u of unsubs) u();
       scene?.destroy();
@@ -149,7 +186,7 @@ export function PixiOffice() {
 
   return (
     <div style={{ position: "relative", width: "100%", height: "100%", minHeight: 0 }}>
-      <div ref={hostRef} style={{ position: "absolute", inset: 0 }} />
+      <div ref={hostRef} style={{ position: "absolute", inset: 0, touchAction: "none" }} />
       <div style={zoomControlsStyle} aria-label="Office zoom controls">
         <button
           type="button"
@@ -184,7 +221,10 @@ export function PixiOffice() {
           aria-label="Reset zoom"
           title="Reset zoom"
           style={zoomButtonStyle}
-          onClick={() => setClampedZoom(1)}
+          onClick={() => {
+            sceneRef.current?.resetPan();
+            setClampedZoom(1);
+          }}
         >
           <Icon icon={Maximize2} size={14} />
         </button>
