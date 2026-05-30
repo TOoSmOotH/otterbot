@@ -489,8 +489,9 @@ export class Orchestrator {
       resolveAgent: (projectId, role) => this.projects.agentForRole(projectId, role),
       runStage: async ({ projectId, runId, stage, agentId, goal, priorReports }) => {
         const fromId = this.projects.agentForRole(projectId, "pm") ?? "coo";
-        // The tester needs the code reachable on a VM: for a forge-backed
-        // project, push the run branch first and tell it how to fetch the code.
+        // The tester always gets local unit/integration test instructions; when
+        // the project enables remote e2e and the service agents exist, it also
+        // pushes the run branch and gets VM/SSH delegation guidance.
         const testerContext = stage === "tester" ? this.prepareTesterContext(projectId, runId) : "";
         const res = await this.bus.request(
           {

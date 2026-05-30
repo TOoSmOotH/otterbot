@@ -564,4 +564,29 @@ describe("orchestrator (e2e)", () => {
     expect(cooHits.ok).toBe(true);
     expect(cooHits.hits.length).toBeGreaterThan(0);
   });
+
+  it("tester context runs local tests always and only delegates remote e2e when enabled + infra present", async () => {
+    const project = stack.orch.createProject("Tester Context");
+
+    // remoteE2e defaults off: local-only instructions, no remote delegation, no e2e section.
+    const off = (stack.orch as unknown as { prepareTesterContext(p: string, r: string): string }).prepareTesterContext(
+      project.id,
+      "run-abcdef12"
+    );
+    expect(off).toContain("Unit & integration tests");
+    expect(off).toContain("VERDICT: PASS or VERDICT: FAIL");
+    expect(off).not.toMatch(/End-to-end tests/);
+    expect(off).not.toMatch(/Proxmox|SSH Service/);
+
+    // remoteE2e on, but the test stack has no Proxmox/SSH service agents: e2e is
+    // noted as skipped, still no VM delegation flow (and no git push happens).
+    await stack.orch.setProjectForge(project.id, { mode: "local", remoteE2e: true });
+    const on = (stack.orch as unknown as { prepareTesterContext(p: string, r: string): string }).prepareTesterContext(
+      project.id,
+      "run-abcdef12"
+    );
+    expect(on).toContain("Unit & integration tests");
+    expect(on).toMatch(/End-to-end tests \(skipped\)/);
+    expect(on).not.toMatch(/roll back to a clean snapshot|start the test VM/);
+  });
 });
