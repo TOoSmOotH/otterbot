@@ -86,14 +86,12 @@ export class OfficeScene {
     if (!this.world) return;
     const pad = 12;
     const widthScale = (this.containerW - pad * 2) / this.world.pxWidth;
-    const heightScale = (this.containerH - pad * 2) / this.world.pxHeight;
-    const scale = Math.min(widthScale, heightScale) * this.zoom;
+    const scale = widthScale * this.zoom;
     const s = Math.max(0.2, Math.min(scale, 2.2));
     this.root.scale.set(s);
     const scaledW = this.world.pxWidth * s;
-    const scaledH = this.world.pxHeight * s;
     this.root.x = scaledW <= this.containerW - pad * 2 ? (this.containerW - scaledW) / 2 : pad;
-    this.root.y = scaledH <= this.containerH - pad * 2 ? (this.containerH - scaledH) / 2 : pad;
+    this.root.y = pad;
   }
 
   async setWorld(agents: AgentProfileSummary[], projects: Project[]): Promise<void> {
