@@ -95,6 +95,7 @@ function ensureControlTables(sqlite: Database.Database) {
       mode TEXT NOT NULL DEFAULT 'local',
       forge_account_id TEXT,
       forge_repo TEXT,
+      fork_repo TEXT,
       base_branch TEXT,
       monitor_issues INTEGER NOT NULL DEFAULT 0,
       rules TEXT,
@@ -180,6 +181,7 @@ function ensureControlTables(sqlite: Database.Database) {
   addProjectCol("mode", "mode TEXT NOT NULL DEFAULT 'local'");
   addProjectCol("forge_account_id", "forge_account_id TEXT");
   addProjectCol("forge_repo", "forge_repo TEXT");
+  addProjectCol("fork_repo", "fork_repo TEXT");
   addProjectCol("forge_ssh_url", "forge_ssh_url TEXT");
   addProjectCol("base_branch", "base_branch TEXT");
   addProjectCol("monitor_issues", "monitor_issues INTEGER NOT NULL DEFAULT 0");

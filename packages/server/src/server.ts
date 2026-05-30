@@ -455,7 +455,7 @@ export async function buildServer(
   app.put<{
     Params: { id: string };
     Body: {
-      mode?: "local" | "existing" | "new";
+      mode?: "local" | "existing" | "new" | "fork";
       accountId?: string | null;
       repo?: string | null;
       baseBranch?: string | null;

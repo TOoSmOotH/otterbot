@@ -20,6 +20,7 @@ function fakeForge(over: Partial<Forge>): Forge {
     },
     getRepo: async () => ({ owner: "o", name: "n", defaultBranch: "main", cloneUrl: "", sshUrl: null, htmlUrl: "" }),
     createRepo: async () => ({ owner: "o", name: "n", defaultBranch: "main", cloneUrl: "", sshUrl: null, htmlUrl: "" }),
+    forkRepo: async () => ({ owner: "bot", name: "n", defaultBranch: "main", cloneUrl: "", sshUrl: null, htmlUrl: "" }),
     authedCloneUrl: () => "",
     openPullRequest: async () => ({ number: 1, htmlUrl: "", state: "open", merged: false, headBranch: "b", headSha: "s" }),
     getPullRequest: async () => ({ number: 1, htmlUrl: "", state: "open", merged: false, headBranch: "b", headSha: "s" }),

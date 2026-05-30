@@ -23,12 +23,14 @@ export interface Project {
   /** Absolute path to the project's git working tree on the host. */
   repoPath: string;
   /** Where the code lives. */
-  mode: "local" | "existing" | "new";
+  mode: "local" | "existing" | "new" | "fork";
   /** Forge account id (forge_accounts.id) when mode != local. */
   forgeAccountId: string | null;
-  /** owner/name on the forge when mode != local. */
+  /** owner/name of the upstream repo on the forge when mode != local. */
   forgeRepo: string | null;
-  /** SSH clone/push URL captured from the forge. */
+  /** owner/name of the bot's fork (clone/push target) when mode == fork. */
+  forkRepo: string | null;
+  /** SSH clone/push URL captured from the forge (the fork's URL when mode == fork). */
   forgeSshUrl: string | null;
   /** Base/integration branch PRs target. */
   baseBranch: string | null;
@@ -93,7 +95,7 @@ export class ProjectStore {
   setForge(
     projectId: string,
     patch: Partial<
-      Pick<Project, "mode" | "forgeAccountId" | "forgeRepo" | "forgeSshUrl" | "baseBranch" | "monitorIssues">
+      Pick<Project, "mode" | "forgeAccountId" | "forgeRepo" | "forkRepo" | "forgeSshUrl" | "baseBranch" | "monitorIssues">
     >
   ): void {
     this.control.db

@@ -9,9 +9,10 @@ export interface Project {
   createdAt: string;
   members: Array<{ agentId: string; access: "read" | "write" }>;
   team: Array<{ role: string; agentId: string }>;
-  mode: "local" | "existing" | "new";
+  mode: "local" | "existing" | "new" | "fork";
   forgeAccountId: string | null;
   forgeRepo: string | null;
+  forkRepo: string | null;
   baseBranch: string | null;
   monitorIssues: boolean;
   rules: string | null;
@@ -88,7 +89,7 @@ interface ProjectsState {
   setForge: (
     projectId: string,
     input: {
-      mode: "local" | "existing" | "new";
+      mode: "local" | "existing" | "new" | "fork";
       accountId?: string | null;
       repo?: string | null;
       baseBranch?: string | null;

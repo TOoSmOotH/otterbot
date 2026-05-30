@@ -83,6 +83,38 @@ export class GiteaForge implements Forge {
     };
   }
 
+  async forkRepo(repo: string): Promise<ForgeRepo> {
+    const { name } = splitRepo(repo);
+    try {
+      const d = (await this.api(`/repos/${splitRepo(repo).owner}/${name}/forks`, {
+        method: "POST",
+        body: JSON.stringify({}),
+      })) as {
+        owner: { login: string };
+        name: string;
+        default_branch: string;
+        clone_url: string;
+        ssh_url: string;
+        html_url: string;
+      };
+      return {
+        owner: d.owner.login,
+        name: d.name,
+        defaultBranch: d.default_branch || "main",
+        cloneUrl: d.clone_url,
+        sshUrl: d.ssh_url ?? null,
+        htmlUrl: d.html_url,
+      };
+    } catch (err) {
+      // Gitea returns 409 when the fork already exists; fall back to the
+      // existing fork under the account's user.
+      if (err instanceof Error && /Gitea 409/.test(err.message)) {
+        return this.getRepo(`${this.account.username}/${name}`);
+      }
+      throw err;
+    }
+  }
+
   authedCloneUrl(repo: string): string {
     const { owner, name } = splitRepo(repo);
     const host = new URL(this.root).host;

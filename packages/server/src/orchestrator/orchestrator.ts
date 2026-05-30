@@ -43,7 +43,7 @@ import {
   type PipelineRunView,
 } from "../pipeline/pipeline-manager.js";
 import { ForgeService } from "../forge/forge-service.js";
-import { parseRepoInput, type ForgeProvider, type ForgeIssue } from "../forge/forge.js";
+import { parseRepoInput, splitRepo, type ForgeProvider, type ForgeIssue } from "../forge/forge.js";
 import { ForgeMonitor } from "../forge/forge-monitor.js";
 import { SecretsStore, type ScopedSecret } from "../secrets/secrets-store.js";
 import {
@@ -1410,7 +1410,7 @@ export class Orchestrator {
   async setProjectForge(
     projectId: string,
     input: {
-      mode: "local" | "existing" | "new";
+      mode: "local" | "existing" | "new" | "fork";
       accountId?: string | null;
       repo?: string | null;
       baseBranch?: string | null;
@@ -1425,6 +1425,7 @@ export class Orchestrator {
         mode: "local",
         forgeAccountId: null,
         forgeRepo: null,
+        forkRepo: null,
         monitorIssues: false,
       });
       return { ok: true };
@@ -1438,18 +1439,21 @@ export class Orchestrator {
     try {
       // Accept "owner/name" or a full repo URL (e.g. https://gitea.somehost.com/org/repo).
       const repoRef = parseRepoInput(input.repo);
-      const repoInfo =
-        input.mode === "new"
-          ? await forge.createRepo(repoRef)
-          : await forge.getRepo(repoRef);
-      const fullRepo = `${repoInfo.owner}/${repoInfo.name}`;
+      // `upstream` backs the PR base + issue monitoring; `cloneRepo` is what we
+      // actually clone/push. For "fork" they differ (clone the bot's fork,
+      // contribute back to the upstream); otherwise they're the same repo.
+      const upstream =
+        input.mode === "new" ? await forge.createRepo(repoRef) : await forge.getRepo(repoRef);
+      const cloneRepo = input.mode === "fork" ? await forge.forkRepo(repoRef) : upstream;
+      const fullRepo = `${upstream.owner}/${upstream.name}`;
+      const cloneFullRepo = `${cloneRepo.owner}/${cloneRepo.name}`;
       const useSsh = account.gitTransport === "ssh";
-      if (useSsh && !repoInfo.sshUrl) {
+      if (useSsh && !cloneRepo.sshUrl) {
         return { ok: false, error: "The forge did not provide an SSH URL for this repo." };
       }
       const ctx = this.forge.gitContextFor(account);
-      const cloneUrl = useSsh ? repoInfo.sshUrl! : forge.authedCloneUrl(fullRepo);
-      const plainUrl = useSsh ? repoInfo.sshUrl! : repoInfo.cloneUrl;
+      const cloneUrl = useSsh ? cloneRepo.sshUrl! : forge.authedCloneUrl(cloneFullRepo);
+      const plainUrl = useSsh ? cloneRepo.sshUrl! : cloneRepo.cloneUrl;
       const clone = this.projects.cloneInto(project.repoPath, cloneUrl, plainUrl, ctx);
       if (!clone.ok) {
         return {
@@ -1463,11 +1467,12 @@ export class Orchestrator {
         mode: input.mode,
         forgeAccountId: input.accountId ?? null,
         forgeRepo: fullRepo,
-        forgeSshUrl: repoInfo.sshUrl ?? null,
-        baseBranch: input.baseBranch ?? repoInfo.defaultBranch,
+        forkRepo: input.mode === "fork" ? cloneFullRepo : null,
+        forgeSshUrl: cloneRepo.sshUrl ?? null,
+        baseBranch: input.baseBranch ?? upstream.defaultBranch,
         monitorIssues: input.monitorIssues ?? false,
       });
-      return { ok: true, repo: fullRepo, defaultBranch: repoInfo.defaultBranch };
+      return { ok: true, repo: fullRepo, defaultBranch: upstream.defaultBranch };
     } catch (err) {
       return { ok: false, error: err instanceof Error ? err.message : String(err) };
     }
@@ -1479,17 +1484,24 @@ export class Orchestrator {
    * Returns null when the project isn't forge-backed or config is missing.
    */
   private gitTargetFor(
-    project: { forgeAccountId: string | null; forgeRepo: string | null; forgeSshUrl: string | null }
+    project: {
+      forgeAccountId: string | null;
+      forgeRepo: string | null;
+      forkRepo: string | null;
+      forgeSshUrl: string | null;
+    }
   ): { url: string; ctx: GitContext } | null {
     if (!project.forgeRepo || !project.forgeAccountId) return null;
     const account = this.forge.getAccount(project.forgeAccountId);
     if (!account) return null;
     const ctx = this.forge.gitContextFor(account);
+    // Push to the fork when forked; forgeSshUrl already holds the fork's URL.
+    const pushRepo = project.forkRepo ?? project.forgeRepo;
     if (account.gitTransport === "ssh") {
       if (!project.forgeSshUrl) return null;
       return { url: project.forgeSshUrl, ctx };
     }
-    return { url: this.forge.forgeFor(account).authedCloneUrl(project.forgeRepo), ctx };
+    return { url: this.forge.forgeFor(account).authedCloneUrl(pushRepo), ctx };
   }
 
   /**
@@ -1525,12 +1537,16 @@ export class Orchestrator {
     } else {
       pushNote = `branch failed (${ensure.output})`;
     }
+    // The run branch is pushed to the fork when forked, else to the repo itself.
+    const codeRepo = project.forkRepo ?? project.forgeRepo;
+    const repoKind =
+      project.mode === "new" ? "new repo" : project.mode === "fork" ? "fork of " + project.forgeRepo : "existing repo";
     return (
-      `\n\n## End-to-end testing\nThe project code is on ${project.forgeRepo} ` +
-      `(${project.mode === "new" ? "new repo" : "existing repo"}), branch \`${branch}\` ` +
+      `\n\n## End-to-end testing\nThe project code is on ${codeRepo} ` +
+      `(${repoKind}), branch \`${branch}\` ` +
       `(${pushNote}). Delegate to the Proxmox Service agent to roll back to a clean ` +
       `snapshot and start the test VM, then to the SSH Service agent to fetch branch ` +
-      `\`${branch}\` of ${project.forgeRepo}, install, and run the test suite, and report ` +
+      `\`${branch}\` of ${codeRepo}, install, and run the test suite, and report ` +
       `results. (The VM needs its own access to clone the repo.) End with VERDICT: PASS ` +
       `or VERDICT: FAIL.`
     );
@@ -1562,11 +1578,14 @@ export class Orchestrator {
     this.pipeline.setPrInfo(runId, { branch });
     try {
       const base = project.baseBranch || (await forge.getRepo(project.forgeRepo)).defaultBranch;
+      // For a fork, the branch lives on the fork: open a cross-fork PR into the
+      // upstream with a "forkOwner:branch" head.
+      const head = project.forkRepo ? `${splitRepo(project.forkRepo).owner}:${branch}` : branch;
       const pr = await forge.openPullRequest({
         repo: project.forgeRepo,
         title: `otterbot: ${run.goal}`.slice(0, 120),
         body: `Automated by the otterbot pipeline (run ${runId}).\n\nGoal:\n${run.goal}`,
-        head: branch,
+        head,
         base,
       });
       this.pipeline.setPrInfo(runId, { number: pr.number, url: pr.htmlUrl });

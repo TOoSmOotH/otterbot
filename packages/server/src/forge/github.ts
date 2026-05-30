@@ -80,6 +80,28 @@ export class GitHubForge implements Forge {
     };
   }
 
+  async forkRepo(repo: string): Promise<ForgeRepo> {
+    const { owner, name } = splitRepo(repo);
+    // POST /forks is idempotent: GitHub returns the existing fork (under the
+    // authenticated user) if one is already present, else creates it (202).
+    const d = (await this.api(`/repos/${owner}/${name}/forks`, { method: "POST" })) as {
+      owner: { login: string };
+      name: string;
+      default_branch: string;
+      clone_url: string;
+      ssh_url: string;
+      html_url: string;
+    };
+    return {
+      owner: d.owner.login,
+      name: d.name,
+      defaultBranch: d.default_branch || "main",
+      cloneUrl: d.clone_url,
+      sshUrl: d.ssh_url ?? null,
+      htmlUrl: d.html_url,
+    };
+  }
+
   authedCloneUrl(repo: string): string {
     const { owner, name } = splitRepo(repo);
     // Derive the git host from the API base: api.github.com → github.com;

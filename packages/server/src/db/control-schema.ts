@@ -124,11 +124,13 @@ export const projects = sqliteTable("projects", {
   /** Absolute path to the project's git working tree on the host. */
   repoPath: text("repo_path").notNull(),
   /** Where the code lives: local-only, or a repo on a forge. */
-  mode: text("mode", { enum: ["local", "existing", "new"] }).notNull().default("local"),
+  mode: text("mode", { enum: ["local", "existing", "new", "fork"] }).notNull().default("local"),
   /** Forge account id (forge_accounts.id) when mode != local. */
   forgeAccountId: text("forge_account_id"),
-  /** owner/name on the forge when mode != local. */
+  /** owner/name of the upstream repo on the forge when mode != local. */
   forgeRepo: text("forge_repo"),
+  /** owner/name of the bot's fork (clone/push target) when mode == fork. */
+  forkRepo: text("fork_repo"),
   /** SSH clone/push URL captured from the forge (handles custom Gitea ports). */
   forgeSshUrl: text("forge_ssh_url"),
   /** Base/integration branch PRs target (default branch when blank). */

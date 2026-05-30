@@ -117,6 +117,26 @@ describe("ProjectStore", () => {
     expect(store.listMonitored().some((x) => x.id === p.id)).toBe(true);
   });
 
+  it("round-trips fork mode: upstream in forgeRepo, the fork in forkRepo", () => {
+    const p = store.create("Forked");
+    expect(p.forkRepo).toBeNull();
+    store.setForge(p.id, {
+      mode: "fork",
+      forgeAccountId: "acc1",
+      forgeRepo: "upstream/app", // PR base + issue monitoring
+      forkRepo: "bot/app", // clone/push target
+      forgeSshUrl: "git@github.com:bot/app.git",
+      monitorIssues: true,
+    });
+    const updated = store.get(p.id)!;
+    expect(updated.mode).toBe("fork");
+    expect(updated.forgeRepo).toBe("upstream/app");
+    expect(updated.forkRepo).toBe("bot/app");
+    expect(updated.forgeSshUrl).toBe("git@github.com:bot/app.git");
+    // Monitoring still keys off the upstream repo.
+    expect(store.listMonitored().find((x) => x.id === p.id)?.forgeRepo).toBe("upstream/app");
+  });
+
   it("creates branches and commits changes in the working tree", () => {
     const p = store.create("Git Ops");
     expect(store.ensureBranch(p.repoPath, "feature/x").ok).toBe(true);

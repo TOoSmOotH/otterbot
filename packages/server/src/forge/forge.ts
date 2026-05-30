@@ -81,6 +81,8 @@ export interface Forge {
   getRepo(repo: string): Promise<ForgeRepo>;
   /** Create a repo under the account's user. `repo` may be "owner/name" or "name". */
   createRepo(repo: string, opts?: { private?: boolean; description?: string }): Promise<ForgeRepo>;
+  /** Fork `repo` ("owner/name") under the account's user; returns the fork. Idempotent. */
+  forkRepo(repo: string): Promise<ForgeRepo>;
   /** HTTPS clone/push URL with credentials embedded (used host-side only). */
   authedCloneUrl(repo: string): string;
 

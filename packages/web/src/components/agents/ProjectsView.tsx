@@ -174,6 +174,7 @@ function ProjectCard({ project, onDelete }: { project: Project; onDelete: () => 
           <option value="local">Local repo</option>
           <option value="existing">Existing forge repo</option>
           <option value="new">New forge repo</option>
+          <option value="fork">Fork existing repo</option>
         </select>
         {forge.mode !== "local" && (
           <>
@@ -188,12 +189,19 @@ function ProjectCard({ project, onDelete }: { project: Project; onDelete: () => 
                 No git hosting accounts yet — add one in Settings → Git Creds.
               </span>
             )}
-            <input placeholder="owner/name or repo URL" value={forge.repo} onChange={(e) => setForgeForm({ ...forge, repo: e.target.value })} style={input} />
+            <input placeholder={forge.mode === "fork" ? "upstream owner/name or repo URL" : "owner/name or repo URL"} value={forge.repo} onChange={(e) => setForgeForm({ ...forge, repo: e.target.value })} style={input} />
             <input placeholder="base branch (optional)" value={forge.baseBranch} onChange={(e) => setForgeForm({ ...forge, baseBranch: e.target.value })} style={input} />
             <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "rgb(var(--muted))" }}>
               <input type="checkbox" checked={forge.monitorIssues} onChange={(e) => setForgeForm({ ...forge, monitorIssues: e.target.checked })} />
               Monitor issues → pipeline
             </label>
+            {forge.mode === "fork" && (
+              <span style={{ fontSize: 11, color: "rgb(var(--muted))", gridColumn: "1 / -1" }}>
+                {project.forkRepo
+                  ? `Forked to ${project.forkRepo} — branches push there; PRs open against ${project.forgeRepo}.`
+                  : "Forks the upstream under the selected account, then contributes back via PRs."}
+              </span>
+            )}
           </>
         )}
       </div>

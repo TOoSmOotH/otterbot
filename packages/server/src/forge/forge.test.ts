@@ -135,6 +135,33 @@ describe("GitHubForge", () => {
       "https://x-access-token:ghtok@github.com/o/n.git"
     );
   });
+
+  it("forks a repo under the account and maps the result", async () => {
+    let method = "";
+    const { fn } = fakeFetch([
+      {
+        match: "/repos/o/n/forks",
+        status: 202,
+        body: {
+          owner: { login: "bot" },
+          name: "n",
+          default_branch: "main",
+          clone_url: "https://github.com/bot/n.git",
+          ssh_url: "git@github.com:bot/n.git",
+          html_url: "https://github.com/bot/n",
+        },
+        capture: (init) => {
+          method = String(init?.method);
+        },
+      },
+    ]);
+    const fork = await new GitHubForge(ghAccount, fn).forkRepo("o/n");
+    expect(method).toBe("POST");
+    expect(fork.owner).toBe("bot");
+    expect(fork.name).toBe("n");
+    expect(fork.cloneUrl).toBe("https://github.com/bot/n.git");
+    expect(fork.sshUrl).toBe("git@github.com:bot/n.git");
+  });
 });
 
 describe("GiteaForge", () => {
@@ -173,5 +200,44 @@ describe("GiteaForge", () => {
     expect(new GiteaForge(giteaAccount, fetch).authedCloneUrl("o/n")).toBe(
       "https://bot:gttok@gitea.lan/o/n.git"
     );
+  });
+
+  it("forks a repo under the account", async () => {
+    const { fn } = fakeFetch([
+      {
+        match: "/forks",
+        body: {
+          owner: { login: "bot" },
+          name: "n",
+          default_branch: "main",
+          clone_url: "https://gitea.lan/bot/n.git",
+          ssh_url: "git@gitea.lan:bot/n.git",
+          html_url: "https://gitea.lan/bot/n",
+        },
+      },
+    ]);
+    const fork = await new GiteaForge(giteaAccount, fn).forkRepo("o/n");
+    expect(fork.owner).toBe("bot");
+    expect(fork.cloneUrl).toBe("https://gitea.lan/bot/n.git");
+  });
+
+  it("falls back to the existing fork when the forge returns 409", async () => {
+    const { fn, calls } = fakeFetch([
+      { match: "/forks", status: 409, body: { message: "repository already exists" } },
+      {
+        match: "/repos/bot/n",
+        body: {
+          default_branch: "main",
+          clone_url: "https://gitea.lan/bot/n.git",
+          ssh_url: "git@gitea.lan:bot/n.git",
+          html_url: "https://gitea.lan/bot/n",
+        },
+      },
+    ]);
+    const fork = await new GiteaForge(giteaAccount, fn).forkRepo("o/n");
+    expect(fork.owner).toBe("bot");
+    expect(fork.name).toBe("n");
+    expect(calls.some((c) => c.url.includes("/forks"))).toBe(true);
+    expect(calls.some((c) => c.url.includes("/repos/bot/n") && !c.url.includes("/forks"))).toBe(true);
   });
 });
