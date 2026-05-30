@@ -67,6 +67,26 @@ describe("coding team provisioning", () => {
     expect(tw.shellSecrets().get("CODING_CLI_PINNED_TOOL")).toBe("opencode");
   });
 
+  it("provisions a 'model only' coding role without the coding CLI", () => {
+    const project = stack.orch.createProject("ModelOnly");
+    stack.orch.provisionProjectTeam(project.id, {
+      coder: { tool: "none" }, // model only — no coding CLI
+      "security-reviewer": { tool: "claude" }, // CLI path still works alongside
+    });
+    // The model-only coder has no coding-cli skill, no pinned-tool secret, but
+    // keeps shell access and write access to /project so it can edit directly.
+    const coder = stack.orch.getContext(stack.orch.agentForRole(project.id, "coder")!)!;
+    expect(coder.skills.get("coding-cli")).toBeFalsy();
+    expect(coder.skills.effectiveTools().has("coding_cli_run")).toBe(false);
+    expect(coder.profile.canRunShell).toBe(true);
+    expect(coder.shellSecrets().get("CODING_CLI_PINNED_TOOL")).toBeFalsy();
+    expect(coder.projectAccess()).toBe("write");
+    // The CLI-backed role in the same team is unaffected.
+    const sec = stack.orch.getContext(stack.orch.agentForRole(project.id, "security-reviewer")!)!;
+    expect(sec.skills.get("coding-cli")).toBeTruthy();
+    expect(sec.shellSecrets().get("CODING_CLI_PINNED_TOOL")).toBe("claude");
+  });
+
   it("wires the tester to service agents that already exist", () => {
     // svc-proxmox exists (created above); svc-ssh does not.
     const project = stack.orch.createProject("Peers");

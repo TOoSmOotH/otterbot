@@ -33,6 +33,12 @@ export interface TeamRoleSpec {
   /** Appended to the project name for the display name, e.g. "Acme · Coder". */
   displayNameSuffix: string;
   persona: string;
+  /**
+   * Persona used when this coding role runs "model only" (the wizard picks no
+   * coding CLI): the agent edits `/project` directly via `shell_exec` instead of
+   * delegating to a CLI. Falls back to `persona` when unset.
+   */
+  personaModelOnly?: string;
   capabilities: CapabilitySpec[];
   canRunShell?: boolean;
   /** Shared service agents this role may delegate to (added as allowedPeers). */
@@ -92,6 +98,11 @@ and results. You coordinate; you do not write the code yourself.`,
 edit the code in the shared /project tree using your coding CLI (Claude Code). Make
 focused, working changes that satisfy the task you are given, then summarize what
 you changed. Use coding_cli_run for the actual implementation.`,
+    personaModelOnly: `You are the implementation engineer for this project. You
+write and edit the code in the shared /project tree directly with your shell
+(shell_exec): read the relevant files, make focused, working changes that satisfy
+the task you are given, run the build/tests to check them, then summarize what you
+changed.`,
     capabilities: [{ catalogId: "coding-cli", config: { pinnedTool: "claude" } }],
     canRunShell: true,
   },
@@ -103,6 +114,11 @@ the shared /project tree for vulnerabilities, unsafe patterns, secret leakage, a
 risky dependencies, using your coding CLI (Gemini). Report concrete findings with
 file/line references and a clear pass/fail verdict; if you fail the review, say
 exactly what must change.`,
+    personaModelOnly: `You are the security reviewer for this project. You audit
+the code in the shared /project tree for vulnerabilities, unsafe patterns, secret
+leakage, and risky dependencies, reading the files directly with your shell
+(shell_exec). Report concrete findings with file/line references and a clear
+pass/fail verdict; if you fail the review, say exactly what must change.`,
     capabilities: [{ catalogId: "coding-cli", config: { pinnedTool: "gemini" } }],
     canRunShell: true,
   },
@@ -113,6 +129,10 @@ exactly what must change.`,
 /project tree with your coding CLI (OpenCode), add unit/integration tests that
 cover the new behavior, make them runnable, and summarize what you added and how to
 run them.`,
+    personaModelOnly: `You write the automated tests for this project. Working in
+the shared /project tree directly with your shell (shell_exec), add
+unit/integration tests that cover the new behavior, make them runnable, and
+summarize what you added and how to run them.`,
     capabilities: [{ catalogId: "coding-cli", config: { pinnedTool: "opencode" } }],
     canRunShell: true,
   },
@@ -140,7 +160,11 @@ export function teamAgentId(projectId: string, role: string): string {
 export interface TeamRoleConfig {
   /** Chat model id for this role (defaults to the global default). */
   modelId?: string;
-  /** Pinned coding CLI for a coding role (claude | codex | gemini | opencode). */
+  /**
+   * Pinned coding CLI for a coding role (claude | codex | gemini | opencode), or
+   * "none" for "model only" — the role skips the coding-cli capability and edits
+   * /project directly via shell_exec using just its model.
+   */
   tool?: string;
 }
 

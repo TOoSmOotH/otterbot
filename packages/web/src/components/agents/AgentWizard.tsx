@@ -20,6 +20,8 @@ type Choice = "menu" | "single" | "team" | "service";
 
 const CODING_TOOLS = ["claude", "codex", "gemini", "opencode"] as const;
 type Tool = (typeof CODING_TOOLS)[number];
+/** A coding role's tool: a CLI, or "model" for "model only" (no coding CLI). */
+type ToolChoice = Tool | "model";
 
 interface RoleSpec {
   role: string;
@@ -107,7 +109,7 @@ function TeamForm({ onClose }: { onClose: () => void }) {
   const [rules, setRules] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [roles, setRoles] = useState<Record<string, { modelId: string; tool?: Tool }>>(() =>
+  const [roles, setRoles] = useState<Record<string, { modelId: string; tool?: ToolChoice }>>(() =>
     Object.fromEntries(ROLES.map((r) => [r.role, { modelId: "", tool: r.defaultTool }]))
   );
 
@@ -124,7 +126,8 @@ function TeamForm({ onClose }: { onClose: () => void }) {
       const cfg = roles[r.role];
       team[r.role] = {
         ...(cfg.modelId ? { modelId: cfg.modelId } : {}),
-        ...(cfg.tool ? { tool: cfg.tool } : {}),
+        // "model" → "none" tells the server to skip the coding CLI for this role.
+        ...(cfg.tool ? { tool: cfg.tool === "model" ? "none" : cfg.tool } : {}),
       };
     }
     const res = await apiFetch("/api/projects", {
@@ -168,9 +171,10 @@ function TeamForm({ onClose }: { onClose: () => void }) {
             {r.defaultTool && (
               <select
                 value={roles[r.role].tool}
-                onChange={(e) => setRoles((s) => ({ ...s, [r.role]: { ...s[r.role], tool: e.target.value as Tool } }))}
+                onChange={(e) => setRoles((s) => ({ ...s, [r.role]: { ...s[r.role], tool: e.target.value as ToolChoice } }))}
                 style={{ ...input, width: 120 }}
               >
+                <option value="model">model only</option>
                 {CODING_TOOLS.map((t) => (
                   <option key={t} value={t}>{t}</option>
                 ))}
@@ -191,9 +195,11 @@ function TeamForm({ onClose }: { onClose: () => void }) {
         />
       </div>
       <p style={{ fontSize: 11, color: "rgb(var(--muted))", marginTop: 10 }}>
-        Each coding role uses its own subscription — you'll log its CLI in from the agent's terminal
-        once. Leave a model blank to inherit the default. Add Proxmox/SSH infrastructure agents
-        separately to enable the tester's end-to-end runs.
+        Pick <strong>model only</strong> to have a coding role work directly with just its model —
+        no CLI to install. Pick a CLI (claude/codex/gemini/opencode) to use that subscription
+        instead; you'll log it in from the agent's terminal once. Leave a model blank to inherit the
+        default. Add Proxmox/SSH infrastructure agents separately to enable the tester's end-to-end
+        runs.
       </p>
       {error && <div style={{ color: "rgb(220 90 90)", fontSize: 12 }}>{error}</div>}
       <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 12 }}>

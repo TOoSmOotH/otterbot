@@ -1642,6 +1642,9 @@ export class Orchestrator {
         continue;
       }
       const rc = config[spec.role] ?? {};
+      // "model only": the role skips its coding CLI and edits /project directly
+      // via shell_exec, driven by just its chat model.
+      const modelOnly = rc.tool === "none";
       const peerIds = new Set<string>();
       // Only wire peers to service agents that actually exist right now.
       for (const svc of spec.peerServices ?? []) {
@@ -1660,12 +1663,14 @@ export class Orchestrator {
       this.createAgent({
         id,
         displayName: `${project.name} · ${spec.displayNameSuffix}`,
-        persona: spec.persona,
+        persona: modelOnly && spec.personaModelOnly ? spec.personaModelOnly : spec.persona,
         canRunShell: spec.canRunShell,
         allowedPeers,
         model: this.modelConfigFor(rc.modelId),
       });
       for (const cap of spec.capabilities) {
+        // Model-only roles drop the coding CLI but keep shell + /project access.
+        if (modelOnly && cap.catalogId === "coding-cli") continue;
         if (!this.installCapability(id, cap.catalogId)) continue;
         // Coding roles: merge the wizard's pinned tool over the spec default.
         const capConfig =
