@@ -275,10 +275,8 @@ function drawRoomShells(g: Graphics, world: World): void {
     g.rect(x + w - 1, y - 5, 5, h + 10).fill(0x1b1514);
     g.rect(x - 2, y + h - 1, w + 4, 4).fill(0x1b1514);
 
-    for (let px = x; px <= x + w; px += TILE * 4) {
-      g.rect(px - 1, y - 8, 3, h + 14).fill(0xb48355);
-      g.rect(px, y - 8, 1, h + 14).fill(0xe1b079);
-    }
+    g.rect(x - 2, y - 8, 3, h + 14).fill(0xb48355);
+    g.rect(x + w - 1, y - 8, 3, h + 14).fill(0xb48355);
   }
 }
 

@@ -61,12 +61,10 @@ export const ROOM_PREFABS: Record<RoomKind, RoomPrefab> = {
     topRows: 5,
     floor: "rug",
     objects: (room, tile) => {
-      const { x, y, w, h } = roomBounds(room, tile);
+      const { x, y, w } = roomBounds(room, tile);
       return [
-        officeObject("large_plant", x + w - 48, y + 28, 52, 62),
-        officeObject("wall_lamp", x + 18, y + 42, 24, 48),
-        officeObject("cabinet", x + w - 48, y + h - 64, 52, 44),
-        propObject("console_table_lamp_photo", x + w - 128, y + h - 74, 86, 52),
+        officeObject("large_plant", x + w - 66, y + 34, 52, 62),
+        officeObject("wall_lamp", x + 10, y + 42, 24, 48),
       ];
     },
   },

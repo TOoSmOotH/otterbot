@@ -118,9 +118,9 @@ function workerObject(slot: DeskSlot): OfficeObject {
   return {
     kind: "worker",
     x: slot.deskTx * TILE - 8,
-    y: slot.deskTy * TILE + 4,
+    y: slot.deskTy * TILE + 10,
     w: 40,
-    h: 66,
+    h: 62,
     agentId: slot.agentId,
   };
 }

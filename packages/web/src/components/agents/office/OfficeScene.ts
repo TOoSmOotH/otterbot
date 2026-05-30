@@ -301,7 +301,6 @@ export class OfficeScene {
 
   private drawRoomNameplate(tx: number, ty: number, wTiles: number, label: string): Container {
     const root = new Container();
-    root.x = tx * TILE + 3;
     root.y = ty * TILE + 3;
     const maxChars = Math.max(4, Math.floor((wTiles * TILE - 18) / 7));
     const text = label.length > maxChars ? label.slice(0, Math.max(1, maxChars - 1)) + "…" : label;
@@ -317,6 +316,7 @@ export class OfficeScene {
       .fill(0x2a2220)
       .stroke({ width: 2, color: 0xb37a45 });
     const pin = new Graphics().rect(4, 7, 3, 3).fill(0xe2b13c);
+    root.x = tx * TILE + Math.max(3, Math.round((wTiles * TILE - w) / 2));
     root.addChild(bg, pin, t);
     return root;
   }
@@ -373,19 +373,19 @@ export class OfficeScene {
       fx.screen.rect(-4, -4, 18, 2).fill(glow, 0.95);
     }
 
-    fx.keys.clear().rect(-10, 22, 30, 3).fill(0xd7dbe4, 0.7);
+    fx.keys.clear().rect(-10, 10, 30, 3).fill(0xd7dbe4, 0.7);
     if (!active || this.reduced) {
-      fx.keys.rect(-3, 28, 18, 2).fill(0x8b93a3, 0.7);
+      fx.keys.rect(-3, 16, 18, 2).fill(0x8b93a3, 0.7);
       return;
     }
 
     const tick = pulse > 0.5 ? 1 : 0;
     fx.keys
-      .rect(-5 + tick, 28, 3, 2)
+      .rect(-5 + tick, 16, 3, 2)
       .fill(0xf1f3f7, 0.85)
-      .rect(5 - tick, 28, 3, 2)
+      .rect(5 - tick, 16, 3, 2)
       .fill(0xf1f3f7, 0.85)
-      .rect(15, 28, 3, 2)
+      .rect(15, 16, 3, 2)
       .fill(pulse > 0.75 ? 0xf1f3f7 : 0x8b93a3, 0.85);
   }
 
