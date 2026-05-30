@@ -98,6 +98,7 @@ function ensureControlTables(sqlite: Database.Database) {
       fork_repo TEXT,
       base_branch TEXT,
       monitor_issues INTEGER NOT NULL DEFAULT 0,
+      remote_e2e INTEGER NOT NULL DEFAULT 0,
       rules TEXT,
       created_at TEXT NOT NULL
     )`,
@@ -185,6 +186,7 @@ function ensureControlTables(sqlite: Database.Database) {
   addProjectCol("forge_ssh_url", "forge_ssh_url TEXT");
   addProjectCol("base_branch", "base_branch TEXT");
   addProjectCol("monitor_issues", "monitor_issues INTEGER NOT NULL DEFAULT 0");
+  addProjectCol("remote_e2e", "remote_e2e INTEGER NOT NULL DEFAULT 0");
   addProjectCol("rules", "rules TEXT");
 
   // Migration: project_members grew a per-member access level ('read'|'write').

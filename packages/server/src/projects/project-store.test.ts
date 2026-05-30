@@ -137,6 +137,22 @@ describe("ProjectStore", () => {
     expect(store.listMonitored().find((x) => x.id === p.id)?.forgeRepo).toBe("upstream/app");
   });
 
+  it("defaults remoteE2e off and round-trips the flag via setForge", () => {
+    const p = store.create("E2E Toggle");
+    expect(p.remoteE2e).toBe(false);
+    // Turn it on alongside an existing-repo config.
+    store.setForge(p.id, {
+      mode: "existing",
+      forgeAccountId: "acc1",
+      forgeRepo: "o/n",
+      remoteE2e: true,
+    });
+    expect(store.get(p.id)!.remoteE2e).toBe(true);
+    // And a local-mode save can turn it back off.
+    store.setForge(p.id, { mode: "local", remoteE2e: false });
+    expect(store.get(p.id)!.remoteE2e).toBe(false);
+  });
+
   it("creates branches and commits changes in the working tree", () => {
     const p = store.create("Git Ops");
     expect(store.ensureBranch(p.repoPath, "feature/x").ok).toBe(true);

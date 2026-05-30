@@ -137,6 +137,8 @@ export const projects = sqliteTable("projects", {
   baseBranch: text("base_branch"),
   /** Poll the forge for assigned issues to feed the pipeline. */
   monitorIssues: integer("monitor_issues", { mode: "boolean" }).notNull().default(false),
+  /** Run remote-host (Proxmox/SSH VM) end-to-end tests in the tester stage. */
+  remoteE2e: integer("remote_e2e", { mode: "boolean" }).notNull().default(false),
   /** Standing rules injected into every project member's system prompt. */
   rules: text("rules"),
   createdAt: text("created_at")

@@ -36,6 +36,8 @@ export interface Project {
   baseBranch: string | null;
   /** Poll the forge for assigned issues to feed the pipeline. */
   monitorIssues: boolean;
+  /** Run remote-host (Proxmox/SSH VM) end-to-end tests in the tester stage. */
+  remoteE2e: boolean;
   /** Standing rules injected into every project member's system prompt. */
   rules: string | null;
   createdAt: string;
@@ -95,7 +97,7 @@ export class ProjectStore {
   setForge(
     projectId: string,
     patch: Partial<
-      Pick<Project, "mode" | "forgeAccountId" | "forgeRepo" | "forkRepo" | "forgeSshUrl" | "baseBranch" | "monitorIssues">
+      Pick<Project, "mode" | "forgeAccountId" | "forgeRepo" | "forkRepo" | "forgeSshUrl" | "baseBranch" | "monitorIssues" | "remoteE2e">
     >
   ): void {
     this.control.db
