@@ -36,7 +36,7 @@ const ROLES: RoleSpec[] = [
   { role: "coder", label: "Coder", defaultTool: "claude", blurb: "Implements the feature." },
   { role: "security-reviewer", label: "Security Reviewer", defaultTool: "gemini", blurb: "Audits the code." },
   { role: "test-writer", label: "Test Writer", defaultTool: "opencode", blurb: "Writes the tests." },
-  { role: "tester", label: "Tester", blurb: "Runs e2e via the Proxmox + SSH agents." },
+  { role: "tester", label: "Tester", blurb: "Runs local tests; remote e2e is optional." },
 ];
 
 export function AgentWizard({
@@ -107,6 +107,7 @@ function TeamForm({ onClose }: { onClose: () => void }) {
 
   const [name, setName] = useState("");
   const [rules, setRules] = useState("");
+  const [remoteE2e, setRemoteE2e] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [roles, setRoles] = useState<Record<string, { modelId: string; tool?: ToolChoice }>>(() =>
@@ -136,6 +137,7 @@ function TeamForm({ onClose }: { onClose: () => void }) {
       body: JSON.stringify({
         name: name.trim(),
         team,
+        remoteE2e,
         ...(rules.trim() ? { rules: rules.trim() } : {}),
       }),
     });
@@ -194,12 +196,17 @@ function TeamForm({ onClose }: { onClose: () => void }) {
           style={{ ...input, width: "100%", resize: "vertical", fontFamily: "inherit" }}
         />
       </div>
+      <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, marginTop: 12 }}>
+        <input type="checkbox" checked={remoteE2e} onChange={(e) => setRemoteE2e(e.target.checked)} />
+        Remote end-to-end testing (needs the Proxmox + SSH service agents)
+      </label>
       <p style={{ fontSize: 11, color: "rgb(var(--muted))", marginTop: 10 }}>
         Pick <strong>model only</strong> to have a coding role work directly with just its model —
         no CLI to install. Pick a CLI (claude/codex/gemini/opencode) to use that subscription
         instead; you'll log it in from the agent's terminal once. Leave a model blank to inherit the
-        default. Add Proxmox/SSH infrastructure agents separately to enable the tester's end-to-end
-        runs.
+        default. The tester always runs the suite locally in <code>/project</code>; leave{" "}
+        <strong>Remote end-to-end testing</strong> off to skip the VM/SSH run, or turn it on (and add
+        the Proxmox/SSH infrastructure agents) to also test on a clean VM.
       </p>
       {error && <div style={{ color: "rgb(220 90 90)", fontSize: 12 }}>{error}</div>}
       <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 12 }}>

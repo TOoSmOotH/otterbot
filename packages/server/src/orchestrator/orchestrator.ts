@@ -1328,6 +1328,11 @@ export class Orchestrator {
     this.projects.setRules(projectId, rules);
   }
 
+  /** Enable/disable the tester's remote-host (Proxmox/SSH VM) e2e phase. */
+  setProjectRemoteE2e(projectId: string, on: boolean): void {
+    this.projects.setForge(projectId, { remoteE2e: on });
+  }
+
   async deleteProject(id: string): Promise<void> {
     // Tear down the project's dedicated specialists first.
     for (const { agentId } of this.projects.getTeam(id)) {

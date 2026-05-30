@@ -305,6 +305,7 @@ export async function buildServer(
       name?: string;
       team?: Record<string, { modelId?: string; tool?: string }>;
       rules?: string;
+      remoteE2e?: boolean;
     };
   }>("/api/projects", async (req, reply) => {
     const name = req.body?.name?.trim();
@@ -316,9 +317,11 @@ export async function buildServer(
       const project = orch.createProject(name);
       const rules = req.body?.rules?.trim() || null;
       if (rules) orch.setProjectRules(project.id, rules);
+      const remoteE2e = Boolean(req.body?.remoteE2e);
+      if (remoteE2e) orch.setProjectRemoteE2e(project.id, true);
       // The wizard may provision a customized team in the same call.
       if (req.body?.team) orch.provisionProjectTeam(project.id, req.body.team);
-      return { ...project, rules, team: orch.getProjectTeam(project.id) };
+      return { ...project, rules, remoteE2e, team: orch.getProjectTeam(project.id) };
     } catch (err) {
       reply.code(400);
       return { error: err instanceof Error ? err.message : String(err) };

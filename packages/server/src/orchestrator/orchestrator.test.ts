@@ -589,4 +589,16 @@ describe("orchestrator (e2e)", () => {
     expect(on).toMatch(/End-to-end tests \(skipped\)/);
     expect(on).not.toMatch(/roll back to a clean snapshot|start the test VM/);
   });
+
+  it("setProjectRemoteE2e toggles a project's remote e2e flag", () => {
+    const project = stack.orch.createProject("Remote E2E Flag");
+    const read = () =>
+      (stack.orch.listProjects().find((p) => p.id === project.id) as { remoteE2e?: boolean } | undefined)
+        ?.remoteE2e;
+    expect(read()).toBe(false); // default off
+    stack.orch.setProjectRemoteE2e(project.id, true);
+    expect(read()).toBe(true);
+    stack.orch.setProjectRemoteE2e(project.id, false);
+    expect(read()).toBe(false);
+  });
 });
