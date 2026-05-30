@@ -460,6 +460,7 @@ export async function buildServer(
       repo?: string | null;
       baseBranch?: string | null;
       monitorIssues?: boolean;
+      remoteE2e?: boolean;
     };
   }>("/api/projects/:id/forge", async (req, reply) => {
     const mode = req.body?.mode ?? "local";

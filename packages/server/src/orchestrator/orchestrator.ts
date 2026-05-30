@@ -1415,6 +1415,7 @@ export class Orchestrator {
       repo?: string | null;
       baseBranch?: string | null;
       monitorIssues?: boolean;
+      remoteE2e?: boolean;
     }
   ): Promise<{ ok: boolean; error?: string; repo?: string; defaultBranch?: string }> {
     const project = this.projects.get(projectId);
@@ -1427,6 +1428,7 @@ export class Orchestrator {
         forgeRepo: null,
         forkRepo: null,
         monitorIssues: false,
+        remoteE2e: input.remoteE2e ?? false,
       });
       return { ok: true };
     }
@@ -1471,6 +1473,7 @@ export class Orchestrator {
         forgeSshUrl: cloneRepo.sshUrl ?? null,
         baseBranch: input.baseBranch ?? upstream.defaultBranch,
         monitorIssues: input.monitorIssues ?? false,
+        remoteE2e: input.remoteE2e ?? false,
       });
       return { ok: true, repo: fullRepo, defaultBranch: upstream.defaultBranch };
     } catch (err) {
