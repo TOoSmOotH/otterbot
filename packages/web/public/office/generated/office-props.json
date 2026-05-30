@@ -1,0 +1,16 @@
+{
+  "image": "office-props-transparent.png",
+  "source": "office-props-source.png",
+  "generatedAt": "2026-05-29",
+  "style": "original top-down pixel-art office corridor and lobby props with transparent background",
+  "frames": {
+    "exit_double_door": { "x": 106, "y": 93, "w": 301, "h": 294 },
+    "console_table_lamp_photo": { "x": 1082, "y": 132, "w": 335, "h": 234 },
+    "planter_box": { "x": 526, "y": 154, "w": 431, "h": 234 },
+    "side_table_lamp": { "x": 748, "y": 446, "w": 143, "h": 238 },
+    "printer_station": { "x": 1159, "y": 446, "w": 182, "h": 238 },
+    "green_runner_rug": { "x": 109, "y": 483, "w": 456, "h": 197 },
+    "access_panel": { "x": 330, "y": 755, "w": 89, "h": 148 },
+    "low_bench": { "x": 665, "y": 766, "w": 486, "h": 152 }
+  }
+}

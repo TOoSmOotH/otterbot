@@ -39,7 +39,6 @@ const CELL_H = 4;
 const MAX_DESK_COLS = 3;
 const ROOM_GAP = 2;
 const ROW_GAP = 3;
-const TARGET_COLS = 64;
 
 interface Cluster {
   id: string;
@@ -107,20 +106,31 @@ export function buildWorld(agents: AgentProfileSummary[], projects: Project[]): 
 
   type Placed = Cluster & { dims: ReturnType<typeof clusterDims>; x: number; y: number };
   const placed: Placed[] = [];
-  let curX = 1;
-  let rowY = 1;
-  let rowMaxH = 0;
-  for (const c of clusters) {
-    const dims = clusterDims(c.members.length, c.kind);
-    if (curX > 1 && curX + dims.w > TARGET_COLS) {
-      curX = 1;
-      rowY += rowMaxH + ROW_GAP;
-      rowMaxH = 0;
-    }
-    placed.push({ ...c, dims, x: curX, y: rowY });
-    curX += dims.w + ROOM_GAP;
-    rowMaxH = Math.max(rowMaxH, dims.h);
+  const cooCluster = clusters.find((c) => c.kind === "coo");
+  const projectClusters = clusters.filter((c) => c.kind === "project");
+  const agentCluster = clusters.find((c) => c.kind === "unassigned");
+  const cooDims = cooCluster ? clusterDims(cooCluster.members.length, cooCluster.kind) : null;
+  const agentDims = agentCluster ? clusterDims(agentCluster.members.length, agentCluster.kind) : null;
+  const projectDims = projectClusters.map((c) => clusterDims(c.members.length, c.kind));
+  const maxProjectW = projectDims.reduce((max, dims) => Math.max(max, dims.w), 0);
+  const place = (c: Cluster, dims: ReturnType<typeof clusterDims>, x: number, y: number) => {
+    placed.push({ ...c, dims, x, y });
+  };
+
+  const leftColumnW = Math.max(cooDims?.w ?? 0, agentDims?.w ?? 0);
+  if (cooCluster && cooDims) place(cooCluster, cooDims, 1, 1);
+  if (agentCluster && agentDims) {
+    const agentY = cooDims ? 1 + cooDims.h + ROW_GAP : 1;
+    place(agentCluster, agentDims, 1, agentY);
   }
+
+  const projectX = leftColumnW > 0 ? 1 + leftColumnW + ROOM_GAP : 1;
+  let projectY = 1;
+  projectClusters.forEach((c, i) => {
+    const dims = { ...projectDims[i], w: Math.max(projectDims[i].w, maxProjectW) };
+    place(c, dims, projectX, projectY);
+    projectY += dims.h + ROW_GAP;
+  });
 
   const contentRight = placed.reduce((m, p) => Math.max(m, p.x + p.dims.w), 1);
   const contentBottom = placed.reduce((m, p) => Math.max(m, p.y + p.dims.h), 1);
@@ -175,7 +185,9 @@ export function buildWorld(agents: AgentProfileSummary[], projects: Project[]): 
       room.whiteboard = { tx: x + 1, ty: y + 1, wTiles: Math.max(2, dims.w - 2) };
     }
 
-    const innerX = x + dims.border;
+    const deskAreaW = dims.deskCols * CELL_W;
+    const innerW = dims.w - dims.border * 2;
+    const innerX = x + dims.border + Math.floor(Math.max(0, innerW - deskAreaW) / 2);
     const innerY = y + dims.border + dims.titleRows;
     p.members.forEach((m, i) => {
       const dc = i % dims.deskCols;

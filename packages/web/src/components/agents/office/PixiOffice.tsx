@@ -1,9 +1,11 @@
-import { useEffect, useRef } from "react";
+import { type CSSProperties, useEffect, useRef, useState } from "react";
 import { Application } from "pixi.js";
+import { Maximize2, Minus, Plus } from "lucide-react";
 import { useAgentsStore } from "../../../stores/agents-store";
 import { useActivityStore } from "../../../stores/activity-store";
 import { useProjectsStore } from "../../../stores/projects-store";
 import { type } from "../../../lib/typography";
+import { Icon } from "../../ui/Icon";
 import { OfficeScene } from "./OfficeScene";
 
 /**
@@ -15,6 +17,8 @@ import { OfficeScene } from "./OfficeScene";
 export function PixiOffice() {
   const hostRef = useRef<HTMLDivElement>(null);
   const errorRef = useRef<HTMLDivElement>(null);
+  const sceneRef = useRef<OfficeScene | null>(null);
+  const [zoom, setZoom] = useState(1);
 
   useEffect(() => {
     let scene: OfficeScene | null = null;
@@ -60,6 +64,8 @@ export function PixiOffice() {
       }
       host.appendChild(app.canvas);
       scene = new OfficeScene(app);
+      scene.setZoom(zoom);
+      sceneRef.current = scene;
 
       const mql = window.matchMedia("(prefers-reduced-motion: reduce)");
       scene.setReducedMotion(mql.matches);
@@ -125,6 +131,7 @@ export function PixiOffice() {
       ro?.disconnect();
       for (const u of unsubs) u();
       scene?.destroy();
+      sceneRef.current = null;
       // Only destroy the Pixi Application if init() completed — calling destroy()
       // on a partially-initialised app throws because internal teardown hooks
       // (e.g. _cancelResize) haven't been wired up yet.
@@ -132,9 +139,57 @@ export function PixiOffice() {
     };
   }, []);
 
+  useEffect(() => {
+    sceneRef.current?.setZoom(zoom);
+  }, [zoom]);
+
+  const setClampedZoom = (next: number) => {
+    setZoom(Math.max(0.5, Math.min(1.8, Number(next.toFixed(2)))));
+  };
+
   return (
     <div style={{ position: "relative", width: "100%", height: "100%", minHeight: 0 }}>
       <div ref={hostRef} style={{ position: "absolute", inset: 0 }} />
+      <div style={zoomControlsStyle} aria-label="Office zoom controls">
+        <button
+          type="button"
+          aria-label="Zoom out"
+          title="Zoom out"
+          style={zoomButtonStyle}
+          onClick={() => setClampedZoom(zoom - 0.1)}
+        >
+          <Icon icon={Minus} size={14} />
+        </button>
+        <input
+          aria-label="Office zoom"
+          type="range"
+          min="0.5"
+          max="1.8"
+          step="0.05"
+          value={zoom}
+          onChange={(event) => setClampedZoom(Number(event.currentTarget.value))}
+          style={zoomSliderStyle}
+        />
+        <button
+          type="button"
+          aria-label="Zoom in"
+          title="Zoom in"
+          style={zoomButtonStyle}
+          onClick={() => setClampedZoom(zoom + 0.1)}
+        >
+          <Icon icon={Plus} size={14} />
+        </button>
+        <button
+          type="button"
+          aria-label="Reset zoom"
+          title="Reset zoom"
+          style={zoomButtonStyle}
+          onClick={() => setClampedZoom(1)}
+        >
+          <Icon icon={Maximize2} size={14} />
+        </button>
+        <span style={zoomValueStyle}>{Math.round(zoom * 100)}%</span>
+      </div>
       <div
         ref={errorRef}
         style={{
@@ -152,3 +207,44 @@ export function PixiOffice() {
     </div>
   );
 }
+
+const zoomControlsStyle: CSSProperties = {
+  position: "absolute",
+  top: 10,
+  right: 10,
+  display: "flex",
+  alignItems: "center",
+  gap: 6,
+  padding: "6px 8px",
+  background: "rgb(var(--surface) / 0.9)",
+  border: "1px solid rgb(var(--border))",
+  borderRadius: 8,
+  boxShadow: "0 10px 24px rgba(0, 0, 0, 0.22)",
+  backdropFilter: "blur(10px)",
+};
+
+const zoomButtonStyle: CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  width: 28,
+  height: 28,
+  color: "rgb(var(--fg))",
+  background: "rgb(var(--surface-elevated))",
+  border: "1px solid rgb(var(--border))",
+  borderRadius: 7,
+  cursor: "pointer",
+};
+
+const zoomSliderStyle: CSSProperties = {
+  width: 96,
+  accentColor: "rgb(var(--accent))",
+};
+
+const zoomValueStyle: CSSProperties = {
+  minWidth: 38,
+  color: "rgb(var(--muted))",
+  textAlign: "right",
+  ...type.mono,
+  fontSize: 12,
+};

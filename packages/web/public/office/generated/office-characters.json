@@ -1,0 +1,20 @@
+{
+  "image": "office-characters-transparent.png",
+  "source": "office-characters-source.png",
+  "generatedAt": "2026-05-29",
+  "style": "original rear-facing seated pixel-art office worker sprites with transparent background",
+  "frames": {
+    "worker_01_black_hair_blue": { "x": 169, "y": 44, "w": 180, "h": 290 },
+    "worker_02_brown_hair_green": { "x": 509, "y": 41, "w": 180, "h": 293 },
+    "worker_03_blond_white": { "x": 847, "y": 48, "w": 180, "h": 286 },
+    "worker_04_blue_hair_purple": { "x": 1187, "y": 44, "w": 178, "h": 290 },
+    "worker_05_bun_teal": { "x": 169, "y": 360, "w": 180, "h": 292 },
+    "worker_06_red_hair_rust": { "x": 509, "y": 361, "w": 180, "h": 291 },
+    "worker_07_black_hair_gray": { "x": 847, "y": 361, "w": 180, "h": 291 },
+    "worker_08_orange_hair_blue": { "x": 1187, "y": 360, "w": 178, "h": 292 },
+    "worker_09_white_hair_gold": { "x": 169, "y": 678, "w": 180, "h": 293 },
+    "worker_10_purple_hair_gold": { "x": 509, "y": 678, "w": 180, "h": 293 },
+    "worker_11_long_brown_hair_pink": { "x": 847, "y": 679, "w": 180, "h": 292 },
+    "worker_12_blond_ponytail_cyan": { "x": 1187, "y": 681, "w": 178, "h": 290 }
+  }
+}

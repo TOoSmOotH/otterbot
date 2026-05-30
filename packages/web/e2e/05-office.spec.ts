@@ -11,5 +11,8 @@ test("office sub-tab mounts a pixi canvas with no console errors", async ({ page
   await page.getByRole("button", { name: "Office" }).click();
 
   await expect(page.locator("canvas").first()).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByRole("slider", { name: "Office zoom" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Zoom in" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Zoom out" })).toBeVisible();
   expect(errors, errors.join("\n")).toHaveLength(0);
 });

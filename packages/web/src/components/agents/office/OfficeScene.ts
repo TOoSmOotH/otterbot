@@ -46,6 +46,7 @@ export class OfficeScene {
   private clock: Text | null = null;
   private containerW = 800;
   private containerH = 600;
+  private zoom = 1;
 
   constructor(private app: Application) {
     this.root.addChild(
@@ -76,17 +77,23 @@ export class OfficeScene {
     this.fit();
   }
 
+  setZoom(zoom: number): void {
+    this.zoom = Math.max(0.35, Math.min(zoom, 2.5));
+    this.fit();
+  }
+
   private fit(): void {
     if (!this.world) return;
     const pad = 12;
     const widthScale = (this.containerW - pad * 2) / this.world.pxWidth;
     const heightScale = (this.containerH - pad * 2) / this.world.pxHeight;
-    const scale = Math.max(widthScale, heightScale);
+    const scale = Math.min(widthScale, heightScale) * this.zoom;
     const s = Math.max(0.2, Math.min(scale, 2.2));
     this.root.scale.set(s);
     const scaledW = this.world.pxWidth * s;
+    const scaledH = this.world.pxHeight * s;
     this.root.x = scaledW <= this.containerW - pad * 2 ? (this.containerW - scaledW) / 2 : pad;
-    this.root.y = scaledW <= this.containerW - pad * 2 ? pad : 8;
+    this.root.y = scaledH <= this.containerH - pad * 2 ? (this.containerH - scaledH) / 2 : pad;
   }
 
   async setWorld(agents: AgentProfileSummary[], projects: Project[]): Promise<void> {

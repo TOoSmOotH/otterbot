@@ -70,6 +70,33 @@ describe("buildWorld", () => {
     expect(w.grid[below]).toBe(Cell.FLOOR);
   });
 
+  it("keeps COO and agent pool in the left column with projects stacked on the right", () => {
+    const manyAgents = [
+      agent("coo", "coo"),
+      agent("p1-a", "agent"),
+      agent("p2-a", "agent"),
+      agent("p3-a", "agent"),
+      agent("solo", "agent"),
+    ];
+    const w = buildWorld(manyAgents, [
+      project("p1", ["p1-a"]),
+      project("p2", ["p2-a"]),
+      project("p3", ["p3-a"]),
+    ]);
+
+    const projectRooms = w.rooms.filter((r) => r.kind === "project");
+    const cooRoom = w.rooms.find((r) => r.kind === "coo")!;
+    const agentRoom = w.rooms.find((r) => r.kind === "unassigned")!;
+
+    expect(projectRooms).toHaveLength(3);
+    expect(new Set(projectRooms.map((r) => r.x)).size).toBe(1);
+    expect(projectRooms.map((r) => r.y)).toEqual([...projectRooms.map((r) => r.y)].sort((a, b) => a - b));
+    expect(projectRooms[1].y).toBeGreaterThan(projectRooms[0].y);
+    expect(agentRoom.x).toBe(cooRoom.x);
+    expect(agentRoom.y).toBeGreaterThan(cooRoom.y);
+    expect(projectRooms[0].x).toBeGreaterThan(Math.max(cooRoom.x + cooRoom.w, agentRoom.x + agentRoom.w));
+  });
+
   it("marks desk tiles as DESK and keeps the chair tile walkable", () => {
     const w = buildWorld(agents, projects);
     const slot = w.deskOf["p1-a"];
