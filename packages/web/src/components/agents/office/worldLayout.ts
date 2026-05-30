@@ -1,6 +1,7 @@
 import type { AgentProfileSummary } from "@otterbot/shared";
 import type { Project } from "../../../stores/projects-store";
 import { Cell, TILE } from "./geometry";
+import { DESK_CELL_H, DESK_CELL_W, ROW_GAP, ROOM_GAP, measureRoom } from "./roomPrefabs";
 
 export interface DeskSlot {
   agentId: string;
@@ -34,39 +35,11 @@ export interface World {
   pxHeight: number;
 }
 
-const CELL_W = 4;
-const CELL_H = 4;
-const MAX_DESK_COLS = 3;
-const ROOM_GAP = 2;
-const ROW_GAP = 3;
-const ROOM_MIN: Record<Room["kind"], { w: number; h: number; topRows: number }> = {
-  coo: { w: 14, h: 17, topRows: 6 },
-  project: { w: 25, h: 17, topRows: 5 },
-  unassigned: { w: 22, h: 17, topRows: 3 },
-};
-
 interface Cluster {
   id: string;
   label: string | null;
   kind: Room["kind"];
   members: AgentProfileSummary[];
-}
-
-function clusterDims(n: number, kind: Room["kind"]) {
-  const deskCols = Math.min(Math.max(1, Math.ceil(Math.sqrt(n))), MAX_DESK_COLS);
-  const deskRows = Math.ceil(n / deskCols);
-  const topRows = ROOM_MIN[kind].topRows;
-  const border = 1;
-  const interiorW = deskCols * CELL_W;
-  const interiorH = topRows + deskRows * CELL_H;
-  return {
-    deskCols,
-    deskRows,
-    border,
-    topRows,
-    w: Math.max(ROOM_MIN[kind].w, interiorW + border * 2),
-    h: Math.max(ROOM_MIN[kind].h, interiorH + border * 2),
-  };
 }
 
 export function buildWorld(agents: AgentProfileSummary[], projects: Project[]): World {
@@ -109,16 +82,16 @@ export function buildWorld(agents: AgentProfileSummary[], projects: Project[]): 
     clusters.push({ id: "unassigned", label: "Agents", kind: "unassigned", members: standalone });
   }
 
-  type Placed = Cluster & { dims: ReturnType<typeof clusterDims>; x: number; y: number };
+  type Placed = Cluster & { dims: ReturnType<typeof measureRoom>; x: number; y: number };
   const placed: Placed[] = [];
   const cooCluster = clusters.find((c) => c.kind === "coo");
   const projectClusters = clusters.filter((c) => c.kind === "project");
   const agentCluster = clusters.find((c) => c.kind === "unassigned");
-  const cooDims = cooCluster ? clusterDims(cooCluster.members.length, cooCluster.kind) : null;
-  const agentDims = agentCluster ? clusterDims(agentCluster.members.length, agentCluster.kind) : null;
-  const projectDims = projectClusters.map((c) => clusterDims(c.members.length, c.kind));
+  const cooDims = cooCluster ? measureRoom(cooCluster.members.length, cooCluster.kind) : null;
+  const agentDims = agentCluster ? measureRoom(agentCluster.members.length, agentCluster.kind) : null;
+  const projectDims = projectClusters.map((c) => measureRoom(c.members.length, c.kind));
   const maxProjectW = projectDims.reduce((max, dims) => Math.max(max, dims.w), 0);
-  const place = (c: Cluster, dims: ReturnType<typeof clusterDims>, x: number, y: number) => {
+  const place = (c: Cluster, dims: ReturnType<typeof measureRoom>, x: number, y: number) => {
     placed.push({ ...c, dims, x, y });
   };
 
@@ -190,15 +163,15 @@ export function buildWorld(agents: AgentProfileSummary[], projects: Project[]): 
       room.whiteboard = { tx: x + 1, ty: y + 1, wTiles: Math.max(2, dims.w - 2) };
     }
 
-    const deskAreaW = dims.deskCols * CELL_W;
+    const deskAreaW = dims.deskCols * DESK_CELL_W;
     const innerW = dims.w - dims.border * 2;
     const innerX = x + dims.border + Math.floor(Math.max(0, innerW - deskAreaW) / 2);
     const innerY = y + dims.border + dims.topRows;
     p.members.forEach((m, i) => {
       const dc = i % dims.deskCols;
       const dr = Math.floor(i / dims.deskCols);
-      const deskTx = innerX + dc * CELL_W;
-      const deskTy = innerY + dr * CELL_H;
+      const deskTx = innerX + dc * DESK_CELL_W;
+      const deskTy = innerY + dr * DESK_CELL_H;
       const slot: DeskSlot = {
         agentId: m.id,
         deskTx,
