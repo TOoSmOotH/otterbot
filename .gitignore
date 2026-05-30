@@ -63,3 +63,6 @@ security-review.md
 
 # Superpowers brainstorm artifacts
 .superpowers/
+
+# Local tooling (not part of the app)
+tools/
