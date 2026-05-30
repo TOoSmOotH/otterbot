@@ -55,6 +55,8 @@ import {
 import { BUILTIN_CAPABILITIES, getCatalogCapability } from "../skills/builtin-catalog.js";
 import {
   SERVICE_AGENTS,
+  SVC_PROXMOX_ID,
+  SVC_SSH_ID,
   TEAM_ROLES,
   teamAgentId,
   serviceSpecForKind,
@@ -1508,51 +1510,88 @@ export class Orchestrator {
   }
 
   /**
-   * Before the tester stage runs, make the project code reachable for an
-   * end-to-end run on a VM. For a forge-backed project, commit + push the run
-   * branch and return guidance (repo, branch, clone URL) for the tester to hand
-   * to the SSH agent. For a local project, return a note that the tree is only
-   * at /project. Best-effort: failures are reported in the returned text, not
-   * thrown, so the stage can still proceed/report.
+   * Build the tester stage's appended context. The tester always runs the
+   * project's unit/integration suite locally in /project; when the project's
+   * `remoteE2e` flag is on AND both the Proxmox and SSH service agents exist, it
+   * additionally pushes the run branch and delegates a remote-VM end-to-end run.
+   * When the flag is on but the service agents are missing, e2e is noted as
+   * skipped. Best-effort: git failures are reported in the returned text, not
+   * thrown, so the stage can still proceed.
    */
   private prepareTesterContext(projectId: string, runId: string): string {
     const project = this.projects.get(projectId);
     if (!project) return "";
-    if (project.mode === "local" || !project.forgeRepo) {
+
+    // The local phase always runs: build/install and run the project's unit and
+    // integration suite in the shared /project tree.
+    const local =
+      `\n\n## Testing\n### Unit & integration tests (always)\nRun the project's ` +
+      `unit/integration suite locally in /project with your shell (shell_exec): ` +
+      `detect and run the build/install and test commands, then report results. ` +
+      `Your VERDICT must be based at minimum on this local run.`;
+
+    // The remote e2e phase is opt-in (per-project toggle) and needs both shared
+    // service agents present to delegate to.
+    const haveInfra = this.contexts.has(SVC_PROXMOX_ID) && this.contexts.has(SVC_SSH_ID);
+    if (!project.remoteE2e) {
+      return local + `\n\nEnd with VERDICT: PASS or VERDICT: FAIL.`;
+    }
+    if (!haveInfra) {
       return (
-        `\n\n## End-to-end testing\nThis is a local-only project; the code lives at ` +
-        `/project. Delegate to the Proxmox Service agent to prepare a clean VM and to ` +
-        `the SSH Service agent to run the test suite against a checkout of /project ` +
-        `(the code is not on a remote, so the VM must reach it by a means your SSH host ` +
-        `is configured for). End with VERDICT: PASS or VERDICT: FAIL.`
+        local +
+        `\n\n### End-to-end tests (skipped)\nRemote end-to-end testing is enabled ` +
+        `for this project, but the Proxmox/SSH service agents are not set up, so ` +
+        `e2e was skipped. Note this in your report and base the verdict on the ` +
+        `local run. End with VERDICT: PASS or VERDICT: FAIL.`
       );
     }
-    const target = this.gitTargetFor(project);
-    if (!target) return "";
-    const branch = `otterbot/run-${runId.slice(0, 8)}`;
-    let pushNote = "";
-    const ensure = this.projects.ensureBranch(project.repoPath, branch);
-    if (ensure.ok) {
-      this.projects.commitAll(project.repoPath, `otterbot: pipeline run ${runId.slice(0, 8)}`, target.ctx);
-      const push = this.projects.push(project.repoPath, target.url, branch, target.ctx);
-      pushNote = push.ok ? "pushed" : `push failed (${push.output})`;
-      if (push.ok) this.pipeline.setPrInfo(runId, { branch });
+
+    // Infra present: delegate a remote-VM run. For a forge-backed project, push
+    // the run branch first so the VM can fetch it.
+    let e2e: string;
+    if (project.mode === "local" || !project.forgeRepo) {
+      e2e =
+        `\n\n### End-to-end tests (remote)\nThis is a local-only project; the code ` +
+        `lives at /project. Delegate to the Proxmox Service agent to prepare a clean ` +
+        `VM and to the SSH Service agent to run the test suite against a checkout of ` +
+        `/project (the code is not on a remote, so the VM must reach it by a means ` +
+        `your SSH host is configured for). Fold the e2e result into your verdict.`;
     } else {
-      pushNote = `branch failed (${ensure.output})`;
+      const branch = `otterbot/run-${runId.slice(0, 8)}`;
+      const target = this.gitTargetFor(project);
+      let pushNote = "not pushed";
+      if (target) {
+        const ensure = this.projects.ensureBranch(project.repoPath, branch);
+        if (ensure.ok) {
+          this.projects.commitAll(
+            project.repoPath,
+            `otterbot: pipeline run ${runId.slice(0, 8)}`,
+            target.ctx
+          );
+          const push = this.projects.push(project.repoPath, target.url, branch, target.ctx);
+          pushNote = push.ok ? "pushed" : `push failed (${push.output})`;
+          if (push.ok) this.pipeline.setPrInfo(runId, { branch });
+        } else {
+          pushNote = `branch failed (${ensure.output})`;
+        }
+      }
+      const codeRepo = project.forkRepo ?? project.forgeRepo;
+      const repoKind =
+        project.mode === "new"
+          ? "new repo"
+          : project.mode === "fork"
+            ? "fork of " + project.forgeRepo
+            : "existing repo";
+      e2e =
+        `\n\n### End-to-end tests (remote)\nThe project code is on ${codeRepo} ` +
+        `(${repoKind}), branch \`${branch}\` (${pushNote}). Delegate to the Proxmox ` +
+        `Service agent to roll back to a clean snapshot and start the test VM, then ` +
+        `to the SSH Service agent to fetch branch \`${branch}\` of ${codeRepo}, ` +
+        `install, and run the test suite, and report results. (The VM needs its own ` +
+        `access to clone the repo.) Fold the e2e result into your verdict.`;
     }
-    // The run branch is pushed to the fork when forked, else to the repo itself.
-    const codeRepo = project.forkRepo ?? project.forgeRepo;
-    const repoKind =
-      project.mode === "new" ? "new repo" : project.mode === "fork" ? "fork of " + project.forgeRepo : "existing repo";
-    return (
-      `\n\n## End-to-end testing\nThe project code is on ${codeRepo} ` +
-      `(${repoKind}), branch \`${branch}\` ` +
-      `(${pushNote}). Delegate to the Proxmox Service agent to roll back to a clean ` +
-      `snapshot and start the test VM, then to the SSH Service agent to fetch branch ` +
-      `\`${branch}\` of ${codeRepo}, install, and run the test suite, and report ` +
-      `results. (The VM needs its own access to clone the repo.) End with VERDICT: PASS ` +
-      `or VERDICT: FAIL.`
-    );
+
+    return local + e2e + `\n\nEnd with VERDICT: PASS or VERDICT: FAIL.`;
   }
 
   /**
