@@ -15,6 +15,7 @@ export interface Project {
   forkRepo: string | null;
   baseBranch: string | null;
   monitorIssues: boolean;
+  remoteE2e: boolean;
   rules: string | null;
 }
 
@@ -94,6 +95,7 @@ interface ProjectsState {
       repo?: string | null;
       baseBranch?: string | null;
       monitorIssues?: boolean;
+      remoteE2e?: boolean;
     }
   ) => Promise<string | null>;
   setRules: (projectId: string, rules: string) => Promise<string | null>;

@@ -79,6 +79,7 @@ function ProjectCard({ project, onDelete }: { project: Project; onDelete: () => 
     repo: project.forgeRepo ?? "",
     baseBranch: project.baseBranch ?? "",
     monitorIssues: project.monitorIssues,
+    remoteE2e: project.remoteE2e,
   });
   const [pickAgent, setPickAgent] = useState("");
   const [goal, setGoal] = useState("");
@@ -205,6 +206,14 @@ function ProjectCard({ project, onDelete }: { project: Project; onDelete: () => 
           </>
         )}
       </div>
+      <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "rgb(var(--muted))", marginTop: 6 }}>
+        <input
+          type="checkbox"
+          checked={forge.remoteE2e}
+          onChange={(e) => setForgeForm({ ...forge, remoteE2e: e.target.checked })}
+        />
+        Remote end-to-end testing (needs the Proxmox + SSH service agents)
+      </label>
       <button
         style={{ ...ghostBtn, marginTop: 6 }}
         disabled={busy}
@@ -216,6 +225,7 @@ function ProjectCard({ project, onDelete }: { project: Project; onDelete: () => 
             repo: forge.repo || null,
             baseBranch: forge.baseBranch || null,
             monitorIssues: forge.monitorIssues,
+            remoteE2e: forge.remoteE2e,
           });
           setBusy(false);
         }}
