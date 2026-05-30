@@ -15,6 +15,7 @@ export interface OfficeObject {
   kind: ObjectKind;
   atlas?: OfficeAtlas;
   name?: string;
+  layer?: RoomObject["layer"];
   x: number;
   y: number;
   w: number;
@@ -95,6 +96,7 @@ function mapRoomObject(object: RoomObject): OfficeObject {
     kind: "sprite",
     atlas: object.atlas,
     name: object.name,
+    layer: object.layer,
     x: object.x,
     y: object.y,
     w: object.w,

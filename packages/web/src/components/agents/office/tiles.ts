@@ -223,7 +223,14 @@ export function drawEnvironment(world: World): Container {
   drawRoomRugs(root, g, world);
   drawRoomShells(g, world);
   drawTileLayer(root, g, officeMap.tileLayer);
-  drawObjects(root, g, officeMap.objects);
+  drawObjects(root, g, officeMap.objects.filter((object) => object.layer === "wall"));
+  drawObjects(
+    root,
+    g,
+    officeMap.objects
+      .filter((object) => object.layer !== "wall")
+      .sort((a, b) => objectDepth(a) - objectDepth(b))
+  );
   return root;
 }
 
@@ -306,6 +313,12 @@ function drawObjects(root: Container, g: Graphics, objects: OfficeObject[]): voi
         break;
     }
   }
+}
+
+function objectDepth(object: OfficeObject): number {
+  if (object.kind === "nameplate" || object.kind === "whiteboard") return -1;
+  if (object.kind === "desk") return object.y + object.h - 18;
+  return object.y + object.h;
 }
 
 function drawObjectSprite(root: Container, object: OfficeObject): void {

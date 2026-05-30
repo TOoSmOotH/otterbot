@@ -21,6 +21,7 @@ export interface RoomObject {
   w: number;
   h: number;
   fit?: ObjectFit;
+  layer?: "wall" | "floor";
 }
 
 interface RoomPrefab {
@@ -47,11 +48,11 @@ export const ROOM_PREFABS: Record<RoomKind, RoomPrefab> = {
     objects: (room, tile) => {
       const { x, y, w, h } = roomBounds(room, tile);
       return [
-        officeObject("framed_landscape", x + 34, y + 52, 70, 44),
-        officeObject("large_plant", x + 18, y + h - 58, 52, 62),
-        officeObject("wall_shelf", x + w - 70, y + 2, 58, 36),
-        officeObject("wall_lamp", x + 18, y + 42, 24, 48),
-        propObject("side_table_lamp", x + w - 44, y + h - 92, 28, 56),
+        officeObject("framed_landscape", x + 42, y + 36, 70, 44, undefined, "wall"),
+        officeObject("wall_shelf", x + w - 86, y + 24, 58, 36, undefined, "wall"),
+        officeObject("wall_lamp", x + 18, y + 70, 24, 48, undefined, "wall"),
+        officeObject("large_plant", x + 22, y + h - 62, 52, 62, undefined, "floor"),
+        propObject("side_table_lamp", x + w - 52, y + h - 88, 28, 56, undefined, "floor"),
       ];
     },
   },
@@ -63,8 +64,8 @@ export const ROOM_PREFABS: Record<RoomKind, RoomPrefab> = {
     objects: (room, tile) => {
       const { x, y, w } = roomBounds(room, tile);
       return [
-        officeObject("large_plant", x + w - 66, y + 34, 52, 62),
-        officeObject("wall_lamp", x + 10, y + 42, 24, 48),
+        officeObject("wall_lamp", x + 12, y + 70, 24, 48, undefined, "wall"),
+        officeObject("large_plant", x + w - 70, y + 38, 52, 62, undefined, "floor"),
       ];
     },
   },
@@ -76,10 +77,10 @@ export const ROOM_PREFABS: Record<RoomKind, RoomPrefab> = {
     objects: (room, tile) => {
       const { x, y, w, h } = roomBounds(room, tile);
       return [
-        officeObject("wall_shelf", x + w - 76, y - 10, 58, 36),
-        officeObject("wall_lamp", x + w - 36, y + 42, 24, 48),
-        officeObject("large_plant", x + w - 58, y + h - 64, 52, 62),
-        propObject("printer_station", x + w - 72, y + h - 84, 54, 64),
+        officeObject("wall_shelf", x + w - 88, y + 24, 58, 36, undefined, "wall"),
+        officeObject("wall_lamp", x + w - 42, y + 70, 24, 48, undefined, "wall"),
+        officeObject("large_plant", x + w - 64, y + h - 68, 52, 62, undefined, "floor"),
+        propObject("printer_station", x + w - 78, y + h - 88, 54, 64, undefined, "floor"),
       ];
     },
   },
@@ -115,10 +116,26 @@ function roomBounds(room: Room, tile: number) {
   };
 }
 
-function officeObject(name: string, x: number, y: number, w: number, h: number, fit?: ObjectFit): RoomObject {
-  return { atlas: "office", name, x, y, w, h, fit };
+function officeObject(
+  name: string,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  fit?: ObjectFit,
+  layer?: RoomObject["layer"]
+): RoomObject {
+  return { atlas: "office", name, x, y, w, h, fit, layer };
 }
 
-function propObject(name: string, x: number, y: number, w: number, h: number, fit?: ObjectFit): RoomObject {
-  return { atlas: "props", name, x, y, w, h, fit };
+function propObject(
+  name: string,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  fit?: ObjectFit,
+  layer?: RoomObject["layer"]
+): RoomObject {
+  return { atlas: "props", name, x, y, w, h, fit, layer };
 }
