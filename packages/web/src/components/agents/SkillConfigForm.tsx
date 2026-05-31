@@ -10,7 +10,7 @@ import { apiFetch } from "../../lib/api";
  *
  * By default it talks to the per-agent endpoint derived from `agentId`/`skillId`.
  * Pass `loadPath`/`savePath`/`saveMethod` to point it at another endpoint (e.g.
- * the global `/api/secrets/proxmox`).
+ * the global `/api/secrets/capability/:capId`).
  */
 export function SkillConfigForm({
   agentId,
@@ -20,6 +20,7 @@ export function SkillConfigForm({
   savePath,
   saveMethod = "POST",
   savedMessage = "Saved — agent restarted.",
+  onSaved,
 }: {
   agentId?: string;
   skillId?: string;
@@ -28,6 +29,7 @@ export function SkillConfigForm({
   savePath?: string;
   saveMethod?: "POST" | "PUT";
   savedMessage?: string;
+  onSaved?: () => void;
 }) {
   const getPath = loadPath ?? `/api/agents/${agentId}/skills/${skillId}/config`;
   const putPath = savePath ?? `/api/agents/${agentId}/skills/${skillId}/config`;
@@ -84,6 +86,7 @@ export function SkillConfigForm({
         for (const f of schema.fields) if (f.secret) next[f.key] = "";
         return next;
       });
+      onSaved?.();
     }
   };
 

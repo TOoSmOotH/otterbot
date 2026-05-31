@@ -1280,9 +1280,10 @@ export async function buildServer(
     return { ok: true };
   });
 
-  // Structured global Proxmox config form (schema + non-secret values + flags).
-  app.get("/api/secrets/proxmox", async (_req, reply) => {
-    const view = orch.getGlobalProxmoxConfig();
+  // Structured global config form for a builtin capability (schema + non-secret
+  // values + secret-present flags) — e.g. proxmox, ssh.
+  app.get<{ Params: { capId: string } }>("/api/secrets/capability/:capId", async (req, reply) => {
+    const view = orch.getGlobalCapabilityConfig(req.params.capId);
     if (!view) {
       reply.code(404);
       return { error: "not found" };
@@ -1290,15 +1291,18 @@ export async function buildServer(
     return view;
   });
 
-  // Apply a submitted global Proxmox config form.
-  app.put<{ Body: Record<string, unknown> }>("/api/secrets/proxmox", async (req, reply) => {
-    const ok = orch.setGlobalProxmoxConfig((req.body ?? {}) as Record<string, unknown>);
-    if (!ok) {
-      reply.code(404);
-      return { error: "not found" };
+  // Apply a submitted global capability config form.
+  app.put<{ Params: { capId: string }; Body: Record<string, unknown> }>(
+    "/api/secrets/capability/:capId",
+    async (req, reply) => {
+      const ok = orch.setGlobalCapabilityConfig(req.params.capId, (req.body ?? {}) as Record<string, unknown>);
+      if (!ok) {
+        reply.code(404);
+        return { error: "not found" };
+      }
+      return { ok: true };
     }
-    return { ok: true };
-  });
+  );
 
   // Verify an agent's stored Slack bot token against Slack's auth.test.
   app.post<{ Params: { id: string } }>(

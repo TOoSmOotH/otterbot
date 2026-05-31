@@ -2137,28 +2137,30 @@ export class Orchestrator {
   }
 
   /**
-   * Read the global Proxmox config form (non-secret values + secret-present
-   * flags), driven by the proxmox capability's config schema. Null if the
-   * capability has no schema (shouldn't happen for a builtin).
+   * Read a builtin capability's global config form (non-secret values +
+   * secret-present flags), driven by that capability's config schema. Used by
+   * the structured Settings → Credentials forms (e.g. Proxmox, SSH). Null if the
+   * capability is unknown or has no config schema.
    */
-  getGlobalProxmoxConfig(): SkillConfigView | null {
-    const schema = getCatalogCapability("proxmox")?.configSchema;
+  getGlobalCapabilityConfig(capId: string): SkillConfigView | null {
+    const schema = getCatalogCapability(capId)?.configSchema;
     if (!schema) return null;
     const { values, secretsPresent } = readSkillConfig(schema, this.globalSecrets.get());
     return { schema, values, secretsPresent };
   }
 
   /**
-   * Persist a submitted global Proxmox config form: maps schema fields onto
-   * credential keys, derives `PROXMOX_ALLOWED_VMIDS` from the VM list, then
-   * merges + restarts all agents. Blank secret fields are preserved.
+   * Persist a submitted global capability config form: maps schema fields onto
+   * credential keys, adds any skill-derived keys (e.g. proxmox's
+   * `PROXMOX_ALLOWED_VMIDS`), then merges + restarts all agents. Blank secret
+   * fields are preserved. Returns false if the capability has no schema.
    */
-  setGlobalProxmoxConfig(formValues: Record<string, unknown>): boolean {
-    const schema = getCatalogCapability("proxmox")?.configSchema;
+  setGlobalCapabilityConfig(capId: string, formValues: Record<string, unknown>): boolean {
+    const schema = getCatalogCapability(capId)?.configSchema;
     if (!schema) return false;
     const payload = {
       ...buildSkillConfigPayload(schema, formValues),
-      ...deriveSkillCredentials("proxmox", formValues),
+      ...deriveSkillCredentials(capId, formValues),
     };
     return this.mergeGlobalCredentials(payload);
   }

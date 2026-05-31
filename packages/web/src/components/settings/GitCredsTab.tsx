@@ -1,52 +1,22 @@
-import { useEffect, useState } from "react";
-import { Plus, X, ArrowLeft } from "lucide-react";
+import { useState } from "react";
+import { X, ArrowLeft } from "lucide-react";
 import { Icon } from "../ui/Icon";
 import { useProjectsStore, type ForgeAccount } from "../../stores/projects-store";
 
 /**
- * Instance-wide git credentials (GitHub / Gitea) used by project pipelines to
- * clone, push, open PRs/MRs, and monitor issues. Adding one runs a short wizard;
- * per-project repo selection lives on each project in the Projects tab.
+ * Reusable git-credential (GitHub / Gitea forge account) pieces — the add
+ * wizard and the configured-account row. These are surfaced through the unified
+ * Settings → Credentials tab; this module no longer renders a tab of its own.
  */
-export function GitCredsTab() {
-  const accounts = useProjectsStore((s) => s.forgeAccounts);
-  const load = useProjectsStore((s) => s.loadForgeAccounts);
-  const del = useProjectsStore((s) => s.deleteForgeAccount);
-  const [wizardOpen, setWizardOpen] = useState(false);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
-
-  return (
-    <div style={{ maxWidth: 680 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        <h3 style={{ margin: 0, fontSize: 14, fontWeight: 600 }}>Git credentials</h3>
-        <span style={{ flex: 1 }} />
-        <button style={ghostBtn} onClick={() => setWizardOpen(true)}>
-          <Icon icon={Plus} size={14} /> Add
-        </button>
-      </div>
-      <p style={{ color: "rgb(var(--muted))", fontSize: 12, marginTop: 4 }}>
-        GitHub / Gitea credentials your project pipelines use to clone, push, open PRs/MRs, and
-        monitor issues. Pick which repo a project uses on the project itself (Projects tab).
-      </p>
-
-      <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 8 }}>
-        {accounts.length === 0 && <span style={{ color: "rgb(var(--muted))", fontSize: 12 }}>None configured.</span>}
-        {accounts.map((a) => (
-          <ForgeAccountRow key={a.id} account={a} onDelete={() => void del(a.id)} />
-        ))}
-      </div>
-
-      {wizardOpen && <GitCredWizard onClose={() => setWizardOpen(false)} />}
-    </div>
-  );
-}
 
 type Step = "provider" | "auth" | "key";
 
-function GitCredWizard({ onClose }: { onClose: () => void }) {
+/**
+ * Multi-step wizard to add an instance-wide forge account (provider → auth →
+ * SSH key). Self-contained modal: renders its own overlay. `onClose` fires on
+ * cancel or completion.
+ */
+export function GitCredWizard({ onClose }: { onClose: () => void }) {
   const add = useProjectsStore((s) => s.addForgeAccount);
   const [step, setStep] = useState<Step>("provider");
   const [busy, setBusy] = useState(false);
@@ -190,7 +160,7 @@ function GitCredWizard({ onClose }: { onClose: () => void }) {
   );
 }
 
-function ForgeAccountRow({ account, onDelete }: { account: ForgeAccount; onDelete: () => void }) {
+export function ForgeAccountRow({ account, onDelete }: { account: ForgeAccount; onDelete: () => void }) {
   const [showKey, setShowKey] = useState(false);
   return (
     <div style={{ border: "1px solid rgb(var(--border))", borderRadius: 6, padding: "6px 8px" }}>
