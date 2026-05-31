@@ -123,6 +123,23 @@ describe("PipelineManager", () => {
     expect(pm.get(runId)?.status).toBe("done");
   });
 
+  it("fails (not done) when the effective stage list is empty", async () => {
+    const calls: string[] = [];
+    const pm = new PipelineManager({
+      control,
+      resolveAgent,
+      resolveStages: () => [],
+      runStage: async ({ stage }) => {
+        calls.push(stage);
+        return { report: `did ${stage}` };
+      },
+    });
+    const runId = pm.startRun("proj1", "go");
+    await waitFor(() => pm.get(runId)?.status !== "running");
+    expect(pm.get(runId)?.status).toBe("failed");
+    expect(calls).toEqual([]);
+  });
+
   it("starts at the effective first stage even when it isn't the default first", async () => {
     const calls: string[] = [];
     const pm = new PipelineManager({

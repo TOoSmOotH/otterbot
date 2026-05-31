@@ -166,6 +166,12 @@ export class PipelineManager {
     // skips optional roles — a stage whose role has no agent is left out here
     // rather than failing the run mid-flight.
     const stages = this.deps.resolveStages?.(run.projectId) ?? this.stages;
+    if (stages.length === 0) {
+      // No provisioned roles to run — fail loudly rather than report a no-op "done".
+      this.recordStage(runId, "(none)", "(none)", "error", "No pipeline stages for this project.", run.attempt);
+      this.finish(runId, "failed");
+      return;
+    }
     let i = Math.max(0, stages.indexOf(run.currentStage ?? stages[0]));
 
     while (i < stages.length) {

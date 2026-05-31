@@ -364,7 +364,15 @@ export async function buildServer(
   // automatically; this is for re-running it after a change.
   app.post<{
     Params: { id: string };
-    Body: { team?: Record<string, { modelId?: string; tool?: string }> };
+    Body: {
+      team?: Record<string, {
+        enabled?: boolean;
+        modelId?: string;
+        tool?: string;
+        displayName?: string;
+        persona?: string;
+      }>;
+    };
   }>("/api/projects/:id/team", async (req, reply) => {
     try {
       orch.provisionProjectTeam(req.params.id, req.body?.team ?? {});
