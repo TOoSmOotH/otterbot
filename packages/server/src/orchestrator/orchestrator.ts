@@ -40,6 +40,7 @@ import { CodeReferenceService } from "../code-reference/code-reference-service.j
 import { ProjectStore, type GitContext } from "../projects/project-store.js";
 import {
   PipelineManager,
+  DEFAULT_STAGES,
   type PipelineRunView,
 } from "../pipeline/pipeline-manager.js";
 import { ForgeService } from "../forge/forge-service.js";
@@ -487,6 +488,8 @@ export class Orchestrator {
     this.pipeline = new PipelineManager({
       control,
       resolveAgent: (projectId, role) => this.projects.agentForRole(projectId, role),
+      resolveStages: (projectId) =>
+        DEFAULT_STAGES.filter((s) => this.projects.agentForRole(projectId, s) != null),
       runStage: async ({ projectId, runId, stage, agentId, goal, priorReports }) => {
         const fromId = this.projects.agentForRole(projectId, "pm") ?? "coo";
         // The tester always gets local unit/integration test instructions; when
