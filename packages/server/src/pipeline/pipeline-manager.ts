@@ -73,6 +73,11 @@ export interface PipelineDeps {
   onUpdate?: (run: PipelineRunView) => void;
   /** Stage order; defaults to DEFAULT_STAGES. */
   stages?: Stage[];
+  /**
+   * Per-project effective stage list (e.g. drop stages whose role was skipped).
+   * Falls back to `stages`/DEFAULT_STAGES when omitted.
+   */
+  resolveStages?: (projectId: string) => Stage[];
 }
 
 /** Parse a `VERDICT: PASS|FAIL` line; default to pass when none is present. */
@@ -98,7 +103,9 @@ export class PipelineManager {
         projectId,
         goal,
         status: "running",
-        currentStage: this.stages[0] ?? null,
+        // Seed from this project's effective first stage so the run starts at a
+        // stage it will actually execute (not a default that may be skipped).
+        currentStage: (this.deps.resolveStages?.(projectId) ?? this.stages)[0] ?? null,
         attempt: 0,
         issueNumber: opts.issueNumber ?? null,
         createdAt: now,
@@ -152,16 +159,19 @@ export class PipelineManager {
     return rows.filter((r) => r.issueNumber === issueNumber).sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0] ?? null;
   }
 
-  /** Walk the stages from the current one, handling kickback on failure. */
   private async drive(runId: string): Promise<void> {
     let run = this.get(runId);
     if (!run) return;
-    let i = Math.max(0, this.stages.indexOf(run.currentStage ?? this.stages[0]));
+    // The effective stage list can be narrower than the default when a project
+    // skips optional roles — a stage whose role has no agent is left out here
+    // rather than failing the run mid-flight.
+    const stages = this.deps.resolveStages?.(run.projectId) ?? this.stages;
+    let i = Math.max(0, stages.indexOf(run.currentStage ?? stages[0]));
 
-    while (i < this.stages.length) {
+    while (i < stages.length) {
       run = this.get(runId);
       if (!run || run.status !== "running") return; // cancelled / gone
-      const stage = this.stages[i];
+      const stage = stages[i];
       this.setCurrentStage(runId, stage);
 
       const agentId = this.deps.resolveAgent(run.projectId, stage);
@@ -199,7 +209,7 @@ export class PipelineManager {
           return;
         }
         this.bumpAttempt(runId, nextAttempt);
-        i = Math.max(0, this.stages.indexOf("coder"));
+        i = Math.max(0, stages.indexOf("coder"));
         continue;
       }
 

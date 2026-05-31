@@ -105,4 +105,55 @@ describe("PipelineManager", () => {
     await waitFor(() => pm.get(runId)?.status === "failed");
     expect(pm.view(runId)!.stages[0].status).toBe("error");
   });
+
+  it("runs only the stages whose roles resolve (resolveStages subset)", async () => {
+    const calls: string[] = [];
+    const pm = new PipelineManager({
+      control,
+      resolveAgent,
+      resolveStages: () => ["coder", "tester"],
+      runStage: async ({ stage }) => {
+        calls.push(stage);
+        return { report: `did ${stage}` };
+      },
+    });
+    const runId = pm.startRun("proj1", "build it");
+    await waitFor(() => pm.get(runId)?.status === "done");
+    expect(calls).toEqual(["coder", "tester"]);
+    expect(pm.get(runId)?.status).toBe("done");
+  });
+
+  it("starts at the effective first stage even when it isn't the default first", async () => {
+    const calls: string[] = [];
+    const pm = new PipelineManager({
+      control,
+      resolveAgent,
+      resolveStages: () => ["security-reviewer", "tester"],
+      runStage: async ({ stage }) => {
+        calls.push(stage);
+        return { report: `did ${stage}` };
+      },
+    });
+    const runId = pm.startRun("proj1", "go");
+    await waitFor(() => pm.get(runId)?.status === "done");
+    expect(calls).toEqual(["security-reviewer", "tester"]);
+    expect(pm.get(runId)?.currentStage).toBe("tester");
+  });
+
+  it("finishes done when only the coder stage resolves (no missing-agent error)", async () => {
+    const calls: string[] = [];
+    const pm = new PipelineManager({
+      control,
+      resolveAgent,
+      resolveStages: () => ["coder"],
+      runStage: async ({ stage }) => {
+        calls.push(stage);
+        return { report: `did ${stage}` };
+      },
+    });
+    const runId = pm.startRun("proj1", "go");
+    await waitFor(() => pm.get(runId)?.status === "done");
+    expect(calls).toEqual(["coder"]);
+    expect(pm.view(runId)!.stages.every((s) => s.status !== "error")).toBe(true);
+  });
 });
