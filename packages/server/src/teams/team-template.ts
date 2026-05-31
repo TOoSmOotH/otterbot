@@ -161,14 +161,23 @@ export function teamAgentId(projectId: string, role: string): string {
 
 /** Per-role overrides supplied by the create-team wizard. */
 export interface TeamRoleConfig {
+  /**
+   * false → don't provision this role. Ignored for the mandatory pm/coder roles.
+   * Omitted/undefined means provision it (back-compat for partial configs).
+   */
+  enabled?: boolean;
   /** Chat model id for this role (defaults to the global default). */
   modelId?: string;
   /**
    * Pinned coding CLI for a coding role (claude | codex | gemini | opencode), or
-   * "none" for "model only" — the role skips the coding-cli capability and edits
-   * /project directly via shell_exec using just its model.
+   * "none" for "normal agent (no CLI)" — the role skips the coding-cli capability
+   * and edits /project directly via shell_exec using just its model.
    */
   tool?: string;
+  /** Custom display name; defaults to "<project> · <RoleSuffix>". */
+  displayName?: string;
+  /** Custom persona; defaults to the role's built-in persona. */
+  persona?: string;
 }
 
 /** Wizard team config, keyed by role name. */

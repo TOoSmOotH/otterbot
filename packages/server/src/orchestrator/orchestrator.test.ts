@@ -601,4 +601,19 @@ describe("orchestrator (e2e)", () => {
     stack.orch.setProjectRemoteE2e(project.id, false);
     expect(read()).toBe(false);
   });
+
+  it("provisionProjectTeam skips disabled roles and applies a custom name", () => {
+    const project = stack.orch.createProject("Lean Team");
+    stack.orch.provisionProjectTeam(project.id, {
+      coder: { displayName: "Ace Coder" },
+      "test-writer": { enabled: false },
+      tester: { enabled: false },
+    });
+    const team = stack.orch.getProjectTeam(project.id);
+    // pm + coder are mandatory; security-reviewer defaults on; the two disabled
+    // roles are not provisioned.
+    expect(team.map((t) => t.role).sort()).toEqual(["coder", "pm", "security-reviewer"]);
+    const coderId = team.find((t) => t.role === "coder")!.agentId;
+    expect(stack.orch.getContext(coderId)!.profile.displayName).toBe("Ace Coder");
+  });
 });

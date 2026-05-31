@@ -1698,22 +1698,33 @@ export class Orchestrator {
 
   /**
    * Provision a project's dedicated specialist team (idempotent per role). The
-   * optional `config` lets the wizard set each role's chat model and pinned
-   * coding CLI. The tester is wired to whichever shared service agents already
-   * exist (create them via the wizard first to enable e2e).
+   * optional `config` lets the wizard set each role's chat model, pinned coding
+   * CLI, custom display name/persona, and whether the role is created at all
+   * (pm + coder are always created; other roles can be disabled). The tester is
+   * wired to whichever shared service agents already exist (create them via the
+   * wizard first to enable e2e).
    */
   provisionProjectTeam(projectId: string, config: TeamConfig = {}): void {
     const project = this.projects.get(projectId);
     if (!project) throw new Error(`Unknown project: ${projectId}`);
+    // pm + coder are mandatory; any other role is provisioned unless the config
+    // explicitly disables it.
+    const included = new Set(
+      TEAM_ROLES.filter(
+        (spec) =>
+          spec.role === "pm" || spec.role === "coder" || config[spec.role]?.enabled !== false
+      ).map((spec) => spec.role)
+    );
     for (const spec of TEAM_ROLES) {
+      if (!included.has(spec.role)) continue;
       const id = teamAgentId(projectId, spec.role);
       if (this.profiles.exists(id) || this.contexts.has(id)) {
         this.projects.setTeamRole(projectId, spec.role, id);
         continue;
       }
       const rc = config[spec.role] ?? {};
-      // "model only": the role skips its coding CLI and edits /project directly
-      // via shell_exec, driven by just its chat model.
+      // "normal agent (no CLI)": the role skips its coding CLI and edits /project
+      // directly via shell_exec, driven by just its chat model.
       const modelOnly = rc.tool === "none";
       const peerIds = new Set<string>();
       // Only wire peers to service agents that actually exist right now.
@@ -1726,14 +1737,16 @@ export class Orchestrator {
       if (spec.peerAllTeam) {
         for (const other of TEAM_ROLES) {
           if (other.role === spec.role) continue;
+          if (!included.has(other.role)) continue;
           peerIds.add(teamAgentId(projectId, other.role));
         }
       }
       const allowedPeers = [...peerIds].map((agentId) => ({ agentId, shareMemory: false }));
+      const basePersona = modelOnly && spec.personaModelOnly ? spec.personaModelOnly : spec.persona;
       this.createAgent({
         id,
-        displayName: `${project.name} · ${spec.displayNameSuffix}`,
-        persona: modelOnly && spec.personaModelOnly ? spec.personaModelOnly : spec.persona,
+        displayName: rc.displayName?.trim() || `${project.name} · ${spec.displayNameSuffix}`,
+        persona: rc.persona?.trim() || basePersona,
         canRunShell: spec.canRunShell,
         allowedPeers,
         model: this.modelConfigFor(rc.modelId),
