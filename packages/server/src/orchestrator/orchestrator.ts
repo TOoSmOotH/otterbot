@@ -47,6 +47,8 @@ import { ForgeService } from "../forge/forge-service.js";
 import { parseRepoInput, splitRepo, type ForgeProvider, type ForgeIssue } from "../forge/forge.js";
 import { ForgeMonitor } from "../forge/forge-monitor.js";
 import { SecretsStore, type ScopedSecret } from "../secrets/secrets-store.js";
+import { GlobalSecretsStore } from "../secrets/global-secrets-store.js";
+import { layerScopedSecrets } from "../secrets/layer-secrets.js";
 import {
   readSkillConfig,
   buildSkillConfigPayload,
@@ -448,6 +450,8 @@ export class Orchestrator {
   /** Run ids already published (PR opened) — guards the publish-on-done hook. */
   private readonly publishedRuns = new Set<string>();
   private readonly secrets: SecretsStore;
+  /** Instance-wide credentials shared by every agent (Settings → Secrets). */
+  private readonly globalSecrets: GlobalSecretsStore;
   private readonly services: AgentServices;
   /** Per-agent chat connectors, keyed by `${agentId}:${service}`. */
   private readonly connectors = new Map<string, TrackedConnector<ChannelConnector>>();
@@ -550,6 +554,7 @@ export class Orchestrator {
       },
     });
     this.secrets = new SecretsStore(control);
+    this.globalSecrets = new GlobalSecretsStore(control);
     this.bus.setDeliver((agentId, msg) => {
       if (agentId === "*") {
         for (const rt of this.runtimes.values()) {
@@ -822,20 +827,24 @@ export class Orchestrator {
   }
 
   /**
-   * Merge an agent's per-credential bag: global provider keys get an implicit
-   * `direct` scope (they power chat/embedder calls and never need to be in
-   * the shell env), agent-owned credentials carry their stored scope. Agent
-   * credentials win when keys collide.
+   * Merge an agent's effective credential bag, low→high precedence:
+   *   1. global provider keys — implicit `direct` scope (they power
+   *      chat/embedder calls and never need to be in the shell env);
+   *   2. instance-wide global secrets (Settings → Secrets) — their stored scope;
+   *   3. the agent's own credentials — their stored scope.
+   * Later layers win on key collision, so a per-agent secret overrides a global
+   * one of the same name, which overrides a provider key.
    */
   private buildScopedSecrets(profile: AgentProfile): Map<string, ScopedSecret> {
-    const out = new Map<string, ScopedSecret>();
+    const providerScoped = new Map<string, ScopedSecret>();
     for (const [k, v] of this.getProviderSecretsForProfile(profile)) {
-      out.set(k, { value: v, scope: "direct" });
+      providerScoped.set(k, { value: v, scope: "direct" });
     }
-    for (const [k, entry] of this.secrets.getScoped(profile.id)) {
-      out.set(k, entry);
-    }
-    return out;
+    return layerScopedSecrets([
+      providerScoped,
+      this.globalSecrets.getScoped(),
+      this.secrets.getScoped(profile.id),
+    ]);
   }
 
   /**
@@ -2077,6 +2086,81 @@ export class Orchestrator {
     this.secrets.deleteOne(id, key);
     this.updateAgent(id, {});
     return true;
+  }
+
+  // --- Instance-wide (global) credentials --------------------------------
+  //
+  // The global counterpart of the per-agent credential methods above. Each
+  // write touches credentials every agent shares, so they all restart via
+  // `restartAgents()` (not the single-agent `updateAgent`).
+
+  /** Stored global credentials, masked: only `key` and `scope`. */
+  listGlobalCredentials(): Array<{ key: string; scope: CredentialScope }> {
+    return this.globalSecrets.listScopes().sort((a, b) => a.key.localeCompare(b.key));
+  }
+
+  /**
+   * Merge credentials into the global bag, then restart all agents. Each entry
+   * may be a plain string (new keys get their suggested scope; existing keys
+   * keep theirs) or `{ value, scope }`. Empty/whitespace keys are dropped.
+   */
+  mergeGlobalCredentials(
+    secrets: Record<string, string | { value: string; scope?: CredentialScope }>,
+  ): boolean {
+    const existingKeys = new Set(this.globalSecrets.listScopes().map((s) => s.key));
+    for (const [rawKey, entry] of Object.entries(secrets)) {
+      const key = rawKey.trim();
+      if (!key) continue;
+      if (typeof entry === "string") {
+        if (existingKeys.has(key)) this.globalSecrets.upsert(key, entry);
+        else this.globalSecrets.upsert(key, entry, suggestScopeForKey(key));
+      } else {
+        this.globalSecrets.upsert(key, entry.value, entry.scope);
+      }
+    }
+    this.restartAgents();
+    return true;
+  }
+
+  /** Change a global credential's scope without re-sending the value. */
+  setGlobalCredentialScope(key: string, scope: CredentialScope): boolean {
+    const ok = this.globalSecrets.setScope(key, scope);
+    if (ok) this.restartAgents();
+    return ok;
+  }
+
+  /** Delete a single global credential by key, then restart all agents. */
+  deleteGlobalCredential(key: string): boolean {
+    this.globalSecrets.deleteOne(key);
+    this.restartAgents();
+    return true;
+  }
+
+  /**
+   * Read the global Proxmox config form (non-secret values + secret-present
+   * flags), driven by the proxmox capability's config schema. Null if the
+   * capability has no schema (shouldn't happen for a builtin).
+   */
+  getGlobalProxmoxConfig(): SkillConfigView | null {
+    const schema = getCatalogCapability("proxmox")?.configSchema;
+    if (!schema) return null;
+    const { values, secretsPresent } = readSkillConfig(schema, this.globalSecrets.get());
+    return { schema, values, secretsPresent };
+  }
+
+  /**
+   * Persist a submitted global Proxmox config form: maps schema fields onto
+   * credential keys, derives `PROXMOX_ALLOWED_VMIDS` from the VM list, then
+   * merges + restarts all agents. Blank secret fields are preserved.
+   */
+  setGlobalProxmoxConfig(formValues: Record<string, unknown>): boolean {
+    const schema = getCatalogCapability("proxmox")?.configSchema;
+    if (!schema) return false;
+    const payload = {
+      ...buildSkillConfigPayload(schema, formValues),
+      ...deriveSkillCredentials("proxmox", formValues),
+    };
+    return this.mergeGlobalCredentials(payload);
   }
 
   /** Verify an agent's stored Slack bot token against Slack's `auth.test`. */

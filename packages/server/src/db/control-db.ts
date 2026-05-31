@@ -88,6 +88,11 @@ function ensureControlTables(sqlite: Database.Database) {
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL
     )`,
+    `CREATE TABLE IF NOT EXISTS global_secrets (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL,
+      scope TEXT NOT NULL DEFAULT 'broad'
+    )`,
     `CREATE TABLE IF NOT EXISTS projects (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,

@@ -1241,6 +1241,65 @@ export async function buildServer(
     }
   );
 
+  // --- Instance-wide (global) credentials, shared by every agent ----------
+  // Mirror the per-agent credential routes above, minus the `:id`. Values are
+  // never returned; every write restarts all agents.
+
+  // The names + scopes of the global credentials — values are never returned.
+  app.get("/api/secrets", async () => ({ keys: orch.listGlobalCredentials() }));
+
+  // Merge global credentials without replacing the rest — add or update keys.
+  app.patch<{
+    Body: Record<string, string | { value: string; scope?: string }>;
+  }>("/api/secrets", async (req) => {
+    orch.mergeGlobalCredentials((req.body ?? {}) as never);
+    return { ok: true };
+  });
+
+  // Change a global credential's scope without re-sending the value.
+  app.patch<{ Params: { key: string }; Body: { scope?: string } }>(
+    "/api/secrets/:key/scope",
+    async (req, reply) => {
+      const scope = (req.body?.scope ?? "").trim();
+      if (!isValidScope(scope)) {
+        reply.code(400);
+        return { error: "invalid scope" };
+      }
+      const ok = orch.setGlobalCredentialScope(decodeURIComponent(req.params.key), scope as never);
+      if (!ok) {
+        reply.code(404);
+        return { error: "not found" };
+      }
+      return { ok: true };
+    }
+  );
+
+  // Delete a single global credential by key.
+  app.delete<{ Params: { key: string } }>("/api/secrets/:key", async (req) => {
+    orch.deleteGlobalCredential(decodeURIComponent(req.params.key));
+    return { ok: true };
+  });
+
+  // Structured global Proxmox config form (schema + non-secret values + flags).
+  app.get("/api/secrets/proxmox", async (_req, reply) => {
+    const view = orch.getGlobalProxmoxConfig();
+    if (!view) {
+      reply.code(404);
+      return { error: "not found" };
+    }
+    return view;
+  });
+
+  // Apply a submitted global Proxmox config form.
+  app.put<{ Body: Record<string, unknown> }>("/api/secrets/proxmox", async (req, reply) => {
+    const ok = orch.setGlobalProxmoxConfig((req.body ?? {}) as Record<string, unknown>);
+    if (!ok) {
+      reply.code(404);
+      return { error: "not found" };
+    }
+    return { ok: true };
+  });
+
   // Verify an agent's stored Slack bot token against Slack's auth.test.
   app.post<{ Params: { id: string } }>(
     "/api/agents/:id/credentials/test-slack",

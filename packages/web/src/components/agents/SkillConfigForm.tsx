@@ -4,19 +4,33 @@ import { apiFetch } from "../../lib/api";
 
 /**
  * Schema-driven config form for a skill. Renders one input per field declared
- * in the skill's `configSchema`, pre-fills from the agent's stored config
- * (secrets masked), and POSTs the values back. Reused for both the install-time
- * prompt and the always-available "Configure" panel.
+ * in the `configSchema`, pre-fills from stored config (secrets masked), and
+ * writes the values back. Reused for the per-agent skill config (install-time
+ * prompt + "Configure" panel) and the global Settings → Secrets forms.
+ *
+ * By default it talks to the per-agent endpoint derived from `agentId`/`skillId`.
+ * Pass `loadPath`/`savePath`/`saveMethod` to point it at another endpoint (e.g.
+ * the global `/api/secrets/proxmox`).
  */
 export function SkillConfigForm({
   agentId,
   skillId,
   schema,
+  loadPath,
+  savePath,
+  saveMethod = "POST",
+  savedMessage = "Saved — agent restarted.",
 }: {
-  agentId: string;
-  skillId: string;
+  agentId?: string;
+  skillId?: string;
   schema: SkillConfigSchema;
+  loadPath?: string;
+  savePath?: string;
+  saveMethod?: "POST" | "PUT";
+  savedMessage?: string;
 }) {
+  const getPath = loadPath ?? `/api/agents/${agentId}/skills/${skillId}/config`;
+  const putPath = savePath ?? `/api/agents/${agentId}/skills/${skillId}/config`;
   const [values, setValues] = useState<Record<string, unknown>>(() => defaults(schema));
   const [secretsPresent, setSecretsPresent] = useState<Record<string, boolean>>({});
   const [status, setStatus] = useState("");
@@ -25,7 +39,7 @@ export function SkillConfigForm({
 
   useEffect(() => {
     let cancelled = false;
-    void apiFetch(`/api/agents/${agentId}/skills/${skillId}/config`)
+    void apiFetch(getPath)
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
         if (cancelled || !data) {
@@ -40,7 +54,7 @@ export function SkillConfigForm({
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [agentId, skillId]);
+  }, [getPath]);
 
   const setField = (key: string, value: unknown) => {
     setValues((v) => ({ ...v, [key]: value }));
@@ -49,13 +63,13 @@ export function SkillConfigForm({
 
   const save = async () => {
     setBusy(true);
-    const res = await apiFetch(`/api/agents/${agentId}/skills/${skillId}/config`, {
-      method: "POST",
+    const res = await apiFetch(putPath, {
+      method: saveMethod,
       headers: { "content-type": "application/json" },
       body: JSON.stringify(values),
     });
     setBusy(false);
-    setStatus(res.ok ? "Saved — agent restarted." : "Failed to save.");
+    setStatus(res.ok ? savedMessage : "Failed to save.");
     if (res.ok) {
       // A saved secret is now present; clear the field so it shows the masked state.
       setSecretsPresent((p) => {

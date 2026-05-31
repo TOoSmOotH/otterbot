@@ -21,11 +21,12 @@ import { useProvidersStore, isAccountConfigured } from "../../stores/providers-s
 import { BuiltinEmbedderControls } from "../BuiltinEmbedderControls";
 import { CodeReferenceTab } from "./CodeReferenceTab";
 import { GitCredsTab } from "./GitCredsTab";
+import { SecretsTab } from "./SecretsTab";
 import { uniqueModelId } from "../../lib/model-id";
 
 type OpenAiAuthStatus = { connected: boolean; accountId: string | null };
 
-const TABS = ["Providers", "Models", "Code Reference", "Git Creds", "Appearance", "Account"] as const;
+const TABS = ["Providers", "Models", "Code Reference", "Git Creds", "Secrets", "Appearance", "Account"] as const;
 type SettingsTab = (typeof TABS)[number];
 
 type PatchFn = (p: Partial<GlobalSettingsShape>) => void;
@@ -107,6 +108,7 @@ export function GlobalSettings() {
         {tab === "Models" && <ModelsTab draft={draft} patch={patch} providers={providers} />}
         {tab === "Code Reference" && <CodeReferenceTab />}
         {tab === "Git Creds" && <GitCredsTab />}
+        {tab === "Secrets" && <SecretsTab />}
         {tab === "Appearance" && <AppearanceTab draft={draft} patch={patch} />}
         {tab === "Account" && <AccountTab />}
       </div>

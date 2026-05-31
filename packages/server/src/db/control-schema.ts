@@ -88,6 +88,19 @@ export const appSettings = sqliteTable("app_settings", {
 });
 
 /**
+ * Instance-wide credentials shared by every agent — the global counterpart of
+ * `agentSecrets` (no `agentId` dimension). Layered beneath per-agent secrets at
+ * context-build time, so a per-agent key of the same name still wins. The same
+ * `scope` exposure rules apply (see `agentSecrets.scope`). One row per key.
+ */
+export const globalSecrets = sqliteTable("global_secrets", {
+  key: text("key").primaryKey(),
+  value: text("value").notNull(),
+  /** Exposure rule — identical semantics to `agentSecrets.scope`. */
+  scope: text("scope").notNull().default("broad"),
+});
+
+/**
  * A forge account (GitHub or Gitea) the instance can act as. Instance-wide,
  * not per-agent — projects reference one by id for clone/push/PR + monitoring.
  * The token is stored in the (optionally encrypted) control database.
