@@ -303,7 +303,13 @@ export async function buildServer(
   app.post<{
     Body: {
       name?: string;
-      team?: Record<string, { modelId?: string; tool?: string }>;
+      team?: Record<string, {
+        enabled?: boolean;
+        modelId?: string;
+        tool?: string;
+        displayName?: string;
+        persona?: string;
+      }>;
       rules?: string;
       remoteE2e?: boolean;
     };
