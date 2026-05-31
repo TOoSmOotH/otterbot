@@ -29,14 +29,16 @@ interface RoleSpec {
   /** Default coding CLI; undefined for non-coding roles (pm, tester). */
   defaultTool?: Tool;
   blurb: string;
+  /** Skippable in the wizard (pm + coder are mandatory). */
+  optional?: boolean;
 }
 
 const ROLES: RoleSpec[] = [
   { role: "pm", label: "Project Manager", blurb: "Plans with you and runs the pipeline." },
   { role: "coder", label: "Coder", defaultTool: "claude", blurb: "Implements the feature." },
-  { role: "security-reviewer", label: "Security Reviewer", defaultTool: "gemini", blurb: "Audits the code." },
-  { role: "test-writer", label: "Test Writer", defaultTool: "opencode", blurb: "Writes the tests." },
-  { role: "tester", label: "Tester", blurb: "Runs local tests; remote e2e is optional." },
+  { role: "security-reviewer", label: "Security Reviewer", defaultTool: "gemini", blurb: "Audits the code.", optional: true },
+  { role: "test-writer", label: "Test Writer", defaultTool: "opencode", blurb: "Writes the tests.", optional: true },
+  { role: "tester", label: "Tester", blurb: "Runs local tests; remote e2e is optional.", optional: true },
 ];
 
 export function AgentWizard({
@@ -110,9 +112,14 @@ function TeamForm({ onClose }: { onClose: () => void }) {
   const [remoteE2e, setRemoteE2e] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [roles, setRoles] = useState<Record<string, { modelId: string; tool?: ToolChoice }>>(() =>
-    Object.fromEntries(ROLES.map((r) => [r.role, { modelId: "", tool: r.defaultTool }]))
+  const [roles, setRoles] = useState<
+    Record<string, { enabled: boolean; modelId: string; tool?: ToolChoice; displayName: string; persona: string }>
+  >(() =>
+    Object.fromEntries(
+      ROLES.map((r) => [r.role, { enabled: true, modelId: "", tool: r.defaultTool, displayName: "", persona: "" }])
+    )
   );
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     void loadSettings();
@@ -122,13 +129,20 @@ function TeamForm({ onClose }: { onClose: () => void }) {
     if (!name.trim()) return;
     setBusy(true);
     setError(null);
-    const team: Record<string, { modelId?: string; tool?: string }> = {};
+    const team: Record<
+      string,
+      { enabled: boolean; modelId?: string; tool?: string; displayName?: string; persona?: string }
+    > = {};
     for (const r of ROLES) {
       const cfg = roles[r.role];
       team[r.role] = {
+        // pm + coder are always enabled; optional roles follow their checkbox.
+        enabled: r.optional ? cfg.enabled : true,
         ...(cfg.modelId ? { modelId: cfg.modelId } : {}),
         // "model" → "none" tells the server to skip the coding CLI for this role.
         ...(cfg.tool ? { tool: cfg.tool === "model" ? "none" : cfg.tool } : {}),
+        ...(cfg.displayName.trim() ? { displayName: cfg.displayName.trim() } : {}),
+        ...(cfg.persona.trim() ? { persona: cfg.persona.trim() } : {}),
       };
     }
     const res = await apiFetch("/api/projects", {
@@ -156,34 +170,81 @@ function TeamForm({ onClose }: { onClose: () => void }) {
       <h2 style={{ margin: "0 0 8px", fontSize: 16, fontWeight: 600 }}>New coding team</h2>
       <input placeholder="Project name" value={name} onChange={(e) => setName(e.target.value)} style={{ ...input, width: "100%", marginBottom: 12 }} />
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-        {ROLES.map((r) => (
-          <div key={r.role} style={roleRow}>
-            <div style={{ width: 130 }}>
-              <div style={{ fontSize: 12, fontWeight: 600 }}>{r.label}</div>
-              <div style={{ fontSize: 10, color: "rgb(var(--muted))" }}>{r.blurb}</div>
+        {ROLES.map((r) => {
+          const rc = roles[r.role];
+          const on = r.optional ? rc.enabled : true;
+          return (
+            <div key={r.role} style={{ display: "flex", flexDirection: "column", gap: 6, opacity: on ? 1 : 0.55 }}>
+              <div style={roleRow}>
+                <div style={{ width: 150, display: "flex", alignItems: "center", gap: 6 }}>
+                  {r.optional && (
+                    <input
+                      type="checkbox"
+                      checked={rc.enabled}
+                      title={`Include ${r.label}`}
+                      onChange={(e) => {
+                        const checked = e.target.checked;
+                        setRoles((s) => ({ ...s, [r.role]: { ...s[r.role], enabled: checked } }));
+                        if (!checked) setExpanded((s) => ({ ...s, [r.role]: false }));
+                      }}
+                    />
+                  )}
+                  <div>
+                    <div style={{ fontSize: 12, fontWeight: 600 }}>{r.label}</div>
+                    <div style={{ fontSize: 10, color: "rgb(var(--muted))" }}>{r.blurb}</div>
+                  </div>
+                </div>
+                <div style={{ flex: 1 }}>
+                  <ModelSelect
+                    models={settings.models}
+                    kind="chat"
+                    value={rc.modelId}
+                    disabled={!on}
+                    onChange={(v) => setRoles((s) => ({ ...s, [r.role]: { ...s[r.role], modelId: v } }))}
+                  />
+                </div>
+                {r.defaultTool && (
+                  <select
+                    value={rc.tool}
+                    disabled={!on}
+                    onChange={(e) => setRoles((s) => ({ ...s, [r.role]: { ...s[r.role], tool: e.target.value as ToolChoice } }))}
+                    style={{ ...input, width: 150 }}
+                  >
+                    <option value="model">normal agent (no CLI)</option>
+                    {CODING_TOOLS.map((t) => (
+                      <option key={t} value={t}>{t}</option>
+                    ))}
+                  </select>
+                )}
+                <button
+                  type="button"
+                  style={{ ...ghostBtn, padding: "4px 8px" }}
+                  disabled={!on}
+                  onClick={() => setExpanded((s) => ({ ...s, [r.role]: !s[r.role] }))}
+                >
+                  {expanded[r.role] ? "Hide" : "Customize"}
+                </button>
+              </div>
+              {on && expanded[r.role] && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 4, paddingLeft: 24 }}>
+                  <input
+                    placeholder={`Display name (default: ${r.label})`}
+                    value={rc.displayName}
+                    onChange={(e) => setRoles((s) => ({ ...s, [r.role]: { ...s[r.role], displayName: e.target.value } }))}
+                    style={{ ...input, width: "100%" }}
+                  />
+                  <textarea
+                    placeholder="Custom persona (blank = use this role's default)"
+                    value={rc.persona}
+                    onChange={(e) => setRoles((s) => ({ ...s, [r.role]: { ...s[r.role], persona: e.target.value } }))}
+                    rows={3}
+                    style={{ ...input, width: "100%", resize: "vertical", fontFamily: "inherit" }}
+                  />
+                </div>
+              )}
             </div>
-            <div style={{ flex: 1 }}>
-              <ModelSelect
-                models={settings.models}
-                kind="chat"
-                value={roles[r.role].modelId}
-                onChange={(v) => setRoles((s) => ({ ...s, [r.role]: { ...s[r.role], modelId: v } }))}
-              />
-            </div>
-            {r.defaultTool && (
-              <select
-                value={roles[r.role].tool}
-                onChange={(e) => setRoles((s) => ({ ...s, [r.role]: { ...s[r.role], tool: e.target.value as ToolChoice } }))}
-                style={{ ...input, width: 120 }}
-              >
-                <option value="model">model only</option>
-                {CODING_TOOLS.map((t) => (
-                  <option key={t} value={t}>{t}</option>
-                ))}
-              </select>
-            )}
-          </div>
-        ))}
+          );
+        })}
       </div>
       <div style={{ marginTop: 12 }}>
         <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 4 }}>Project rules (optional)</div>
@@ -201,7 +262,7 @@ function TeamForm({ onClose }: { onClose: () => void }) {
         Remote end-to-end testing (needs the Proxmox + SSH service agents)
       </label>
       <p style={{ fontSize: 11, color: "rgb(var(--muted))", marginTop: 10 }}>
-        Pick <strong>model only</strong> to have a coding role work directly with just its model —
+        Pick <strong>normal agent (no CLI)</strong> to have a coding role work directly with just its model —
         no CLI to install. Pick a CLI (claude/codex/gemini/opencode) to use that subscription
         instead; you'll log it in from the agent's terminal once. Leave a model blank to inherit the
         default. The tester always runs the suite locally in <code>/project</code>; leave{" "}

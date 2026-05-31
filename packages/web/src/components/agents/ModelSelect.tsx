@@ -11,6 +11,7 @@ export function ModelSelect({
   value,
   onChange,
   allowNone,
+  disabled,
 }: {
   models: ConfiguredModel[];
   kind: "chat" | "embedding";
@@ -18,6 +19,8 @@ export function ModelSelect({
   onChange: (id: string) => void;
   /** Offer a "none" option (e.g. embeddings disabled). */
   allowNone?: boolean;
+  /** Render the select as disabled (non-interactive). */
+  disabled?: boolean;
 }) {
   const options = models.filter((m) => m.kind === kind);
   if (options.length === 0) {
@@ -28,7 +31,7 @@ export function ModelSelect({
     );
   }
   return (
-    <select value={value} onChange={(e) => onChange(e.target.value)} style={select}>
+    <select value={value} disabled={disabled} onChange={(e) => onChange(e.target.value)} style={select}>
       {/* Keep the current value selectable even if it's been removed. */}
       {value && !options.some((m) => m.id === value) && (
         <option value={value}>{value} (unconfigured)</option>
