@@ -1,6 +1,31 @@
 import { useEffect, useState } from "react";
-import type { SkillConfigSchema, SkillConfigField } from "@otterbot/shared";
+import type { SkillConfigSchema, SkillConfigField, SkillConfigOption } from "@otterbot/shared";
 import { apiFetch } from "../../lib/api";
+import { useGlobalSettingsStore } from "../../stores/global-settings-store";
+
+const CODING_TOOL_IDS = ["claude", "codex", "gemini", "opencode"];
+
+/**
+ * Resolve a `select` field's choices. Static `options` win; otherwise a
+ * dynamic `optionsSource` is resolved against live state. The only source today
+ * is `"codingModelPresets"`, filtered to the agent's chosen tool when set.
+ */
+function useSelectOptions(
+  field: SkillConfigField,
+  siblingValues: Record<string, unknown>
+): SkillConfigOption[] {
+  const presets = useGlobalSettingsStore((s) => s.settings.codingModelPresets);
+  if (field.options) return field.options;
+  if (field.optionsSource === "codingModelPresets") {
+    const tool = String(siblingValues.pinnedTool ?? "").trim();
+    const filtered =
+      tool && CODING_TOOL_IDS.includes(tool)
+        ? presets.filter((p) => p.tool === tool)
+        : presets;
+    return filtered.map((p) => ({ value: p.id, label: `${p.label} (${p.tool})` }));
+  }
+  return [];
+}
 
 /**
  * Schema-driven config form for a skill. Renders one input per field declared
@@ -38,6 +63,13 @@ export function SkillConfigForm({
   const [status, setStatus] = useState("");
   const [busy, setBusy] = useState(false);
   const [loaded, setLoaded] = useState(false);
+  // Ensure global settings (coding-model presets) are available for `select`
+  // fields sourced from `codingModelPresets`.
+  const settingsLoaded = useGlobalSettingsStore((s) => s.loaded);
+  const loadGlobalSettings = useGlobalSettingsStore((s) => s.load);
+  useEffect(() => {
+    if (!settingsLoaded) void loadGlobalSettings();
+  }, [settingsLoaded, loadGlobalSettings]);
 
   useEffect(() => {
     let cancelled = false;
@@ -101,6 +133,7 @@ export function SkillConfigForm({
           field={field}
           value={values[field.key]}
           secretPresent={secretsPresent[field.key]}
+          allValues={values}
           onChange={(v) => setField(field.key, v)}
         />
       ))}
@@ -114,20 +147,46 @@ export function SkillConfigForm({
   );
 }
 
-/** One field — a scalar input, a checkbox, or a repeatable list editor. */
+/** One field — a scalar input, a checkbox, a dropdown, or a repeatable list. */
 function FieldInput({
   field,
   value,
   secretPresent,
+  allValues,
   onChange,
 }: {
   field: SkillConfigField;
   value: unknown;
   secretPresent?: boolean;
+  allValues?: Record<string, unknown>;
   onChange: (v: unknown) => void;
 }) {
+  const selectOptions = useSelectOptions(field, allValues ?? {});
   if (field.type === "list") {
     return <ListEditor field={field} value={Array.isArray(value) ? value : []} onChange={onChange} />;
+  }
+  if (field.type === "select") {
+    return (
+      <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12 }}>
+        <span style={{ color: "rgb(var(--muted))" }}>
+          {field.label}
+          {field.required ? " *" : ""}
+        </span>
+        <select
+          value={value === undefined || value === null ? "" : String(value)}
+          onChange={(e) => onChange(e.target.value)}
+          style={input}
+        >
+          <option value="">{field.placeholder ?? "— none —"}</option>
+          {selectOptions.map((opt) => (
+            <option key={opt.value} value={opt.value}>
+              {opt.label}
+            </option>
+          ))}
+        </select>
+        {field.description && <span style={hint}>{field.description}</span>}
+      </label>
+    );
   }
   if (field.type === "boolean") {
     return (

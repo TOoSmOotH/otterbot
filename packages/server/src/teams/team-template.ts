@@ -188,6 +188,12 @@ interface TeamRoleConfig {
    * and edits /project directly via shell_exec using just its model.
    */
   tool?: string;
+  /**
+   * Coding-model preset id (from Settings → Coding Models) for a coding role —
+   * carries the model + reasoning effort, so different roles on the same tool can
+   * use different models. Applied as the role's `pinnedPreset`.
+   */
+  preset?: string;
   /** Custom display name; defaults to "<project> · <RoleSuffix>". */
   displayName?: string;
   /** Custom persona; defaults to the role's built-in persona. */

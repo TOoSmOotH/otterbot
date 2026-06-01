@@ -12,8 +12,16 @@ export type SkillConfigFieldType =
   | "secret"
   | "boolean"
   | "number"
+  /** A single-choice dropdown; options are static (`options`) or dynamic (`optionsSource`). */
+  | "select"
   /** A repeatable array of sub-objects shaped by `itemFields` (e.g. VMs → snapshots). */
   | "list";
+
+/** One choice in a `select` field. */
+export interface SkillConfigOption {
+  value: string;
+  label: string;
+}
 
 /**
  * A single field in a skill's config form. Scalar fields map to one credential
@@ -42,6 +50,15 @@ export interface SkillConfigField {
   scope?: CredentialScope;
   /** For `type: "list"` — the shape of each item (item fields may nest one list). */
   itemFields?: SkillConfigField[];
+  /** For `type: "select"` — a static list of choices. */
+  options?: SkillConfigOption[];
+  /**
+   * For `type: "select"` — the name of a dynamic option source the UI resolves
+   * at render time instead of using a static `options` list. Currently
+   * `"codingModelPresets"` (the configured coding-CLI presets, filtered by the
+   * agent's chosen tool).
+   */
+  optionsSource?: string;
 }
 
 /** A skill's typed config schema; Agent Studio renders a form from it. */

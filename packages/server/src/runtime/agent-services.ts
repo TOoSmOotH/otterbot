@@ -1,4 +1,10 @@
-import type { AgentMessage, CodeSearchHit, MemorySearchResult, ScheduledTask } from "@otterbot/shared";
+import type {
+  AgentMessage,
+  CodeSearchHit,
+  CodingModelPreset,
+  MemorySearchResult,
+  ScheduledTask,
+} from "@otterbot/shared";
 import type { MessageBus } from "../bus/bus.js";
 
 export interface AgentDirectoryEntry {
@@ -91,6 +97,12 @@ export interface AgentServices {
    * when the orchestrator wired it.
    */
   notifyCodingSession?(agentId: string, tool: string): void;
+  /**
+   * The configured coding-CLI model presets (Settings → Coding Models), so
+   * `coding_cli_run` can resolve a pinned/per-call preset id into the tool's
+   * model + reasoning flags. Present only when the orchestrator wired it.
+   */
+  codingModelPresets?(): CodingModelPreset[];
   /** The project an agent belongs to (most-recent), or null. For the PM. */
   projectIdForAgent?(agentId: string): string | null;
   /** Start a build-pipeline run for a project; returns the run id. */

@@ -108,6 +108,7 @@ const DEFAULT_SETTINGS: GlobalSettings = {
   defaultChatModelId: "",
   defaultEmbeddingModelId: "",
   providers: {},
+  codingModelPresets: [],
 };
 
 export function applyTheme(theme: ThemeId): void {

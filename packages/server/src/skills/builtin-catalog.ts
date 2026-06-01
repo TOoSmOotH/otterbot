@@ -572,13 +572,16 @@ the public key probably isn't installed on that host yet — run
             "choose per call.",
         },
         {
-          key: "pinnedModel",
-          label: "Default model",
-          type: "string",
-          credentialKey: "CODING_CLI_PINNED_MODEL",
+          key: "pinnedPreset",
+          label: "Default model preset",
+          type: "select",
+          credentialKey: "CODING_CLI_PINNED_PRESET",
           scope: "cap:coding-cli",
-          placeholder: "(optional) tool-specific model id",
-          description: "Default model passed to the pinned tool when none is given.",
+          optionsSource: "codingModelPresets",
+          description:
+            "Model preset (from Settings → Coding Models) this agent uses by default — it " +
+            "carries the tool, model, and reasoning effort. Choosing a preset also sets the " +
+            "tool. Leave blank to use the tool's own default model.",
         },
       ],
     },

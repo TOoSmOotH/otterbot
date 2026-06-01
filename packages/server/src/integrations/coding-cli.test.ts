@@ -1,12 +1,49 @@
 import { describe, it, expect } from "vitest";
 import {
   buildCodingArgv,
+  presetToArgs,
   stripAnsi,
   summarizeOutput,
   isCodingTool,
   codingLockKey,
   withCodingLock,
 } from "./coding-cli.js";
+
+describe("presetToArgs", () => {
+  it("maps each tool's model + reasoning knobs to its flags", () => {
+    // claude: model alias + reasoning effort
+    expect(presetToArgs("claude", { model: "opus", effort: "high" })).toEqual([
+      "--model",
+      "opus",
+      "--effort",
+      "high",
+    ]);
+    expect(presetToArgs("claude", { model: "sonnet" })).toEqual(["--model", "sonnet"]);
+    // codex: model + reasoning effort via -c TOML override
+    expect(presetToArgs("codex", { model: "gpt-5", effort: "high" })).toEqual([
+      "-m",
+      "gpt-5",
+      "-c",
+      'model_reasoning_effort="high"',
+    ]);
+    expect(presetToArgs("codex", { effort: "medium" })).toEqual([
+      "-c",
+      'model_reasoning_effort="medium"',
+    ]);
+    // gemini: model only
+    expect(presetToArgs("gemini", { model: "gemini-3-pro" })).toEqual(["-m", "gemini-3-pro"]);
+    // opencode: provider/model string
+    expect(presetToArgs("opencode", { providerModel: "ollama/llama3" })).toEqual([
+      "-m",
+      "ollama/llama3",
+    ]);
+  });
+
+  it("emits no flags for an empty config", () => {
+    expect(presetToArgs("claude", {})).toEqual([]);
+    expect(presetToArgs("opencode", {})).toEqual([]);
+  });
+});
 
 describe("buildCodingArgv", () => {
   it("builds headless argv per tool", () => {
@@ -26,14 +63,23 @@ describe("buildCodingArgv", () => {
     expect(buildCodingArgv("opencode", "do it")).toEqual(["opencode", "run", "do it"]);
   });
 
-  it("uses interactive argv and threads the model flag", () => {
-    expect(buildCodingArgv("claude", "task", { interactive: true, model: "opus" })).toEqual([
-      "claude",
-      "--model",
-      "opus",
-      "task",
-      "--dangerously-skip-permissions",
+  it("threads a structured model config into the argv", () => {
+    expect(
+      buildCodingArgv("claude", "task", { interactive: true, model: { model: "opus", effort: "high" } })
+    ).toEqual(["claude", "--model", "opus", "--effort", "high", "task", "--dangerously-skip-permissions"]);
+    expect(buildCodingArgv("codex", "do it", { model: { model: "gpt-5", effort: "high" } })).toEqual([
+      "codex",
+      "exec",
+      "--dangerously-bypass-approvals-and-sandbox",
+      "-m",
+      "gpt-5",
+      "-c",
+      'model_reasoning_effort="high"',
+      "do it",
     ]);
+    expect(
+      buildCodingArgv("opencode", "do it", { model: { providerModel: "anthropic/claude-sonnet-4-6" } })
+    ).toEqual(["opencode", "run", "-m", "anthropic/claude-sonnet-4-6", "do it"]);
     expect(buildCodingArgv("gemini", "task", { interactive: true })).toEqual([
       "gemini",
       "-i",

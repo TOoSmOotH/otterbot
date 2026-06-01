@@ -13,6 +13,7 @@ import type {
   ChannelConnectorStatus,
   Connection,
   ConfiguredModel,
+  CodingModelPreset,
   GlobalSettings,
   McpServerConfig,
   McpServerStatus,
@@ -194,6 +195,17 @@ const DEFAULT_MODELS: ConfiguredModel[] = [
   },
 ];
 
+/**
+ * Seed coding-CLI model presets. Cover the common claude/codex reasoning knobs
+ * out of the box; opencode presets are user-created (their provider/model is
+ * sourced from the configured registry, which is install-specific).
+ */
+const DEFAULT_CODING_PRESETS: CodingModelPreset[] = [
+  { id: "claude-opus-high", label: "Claude Opus · High", tool: "claude", model: "opus", effort: "high" },
+  { id: "claude-sonnet", label: "Claude Sonnet", tool: "claude", model: "sonnet" },
+  { id: "codex-high", label: "Codex · High effort", tool: "codex", effort: "high" },
+];
+
 /** Per-provider default settings, derived from the provider catalog. */
 const DEFAULT_GLOBAL_SETTINGS: GlobalSettings = {
   theme: "obsidian",
@@ -201,6 +213,7 @@ const DEFAULT_GLOBAL_SETTINGS: GlobalSettings = {
   defaultChatModelId: DEFAULT_CHAT_MODEL_ID,
   defaultEmbeddingModelId: DEFAULT_EMBEDDING_MODEL_ID,
   providers: Object.fromEntries(PROVIDER_CATALOG.map((p) => [p.id, [defaultAccountFor(p)]])),
+  codingModelPresets: DEFAULT_CODING_PRESETS.map((p) => ({ ...p })),
 };
 
 /** Normalize one configured-model entry; returns null if it can't be salvaged. */
@@ -262,6 +275,27 @@ function normalizeProviderAccounts(
   return out;
 }
 
+const CODING_TOOL_IDS = ["claude", "codex", "gemini", "opencode"] as const;
+
+/** Normalize one coding-model preset; returns null if it can't be salvaged. */
+function normalizeCodingModelPreset(raw: unknown): CodingModelPreset | null {
+  if (!raw || typeof raw !== "object") return null;
+  const p = raw as Partial<CodingModelPreset>;
+  if (typeof p.id !== "string" || !p.id.trim()) return null;
+  if (!CODING_TOOL_IDS.includes(p.tool as (typeof CODING_TOOL_IDS)[number])) return null;
+  const out: CodingModelPreset = {
+    id: p.id,
+    label: typeof p.label === "string" && p.label.trim() ? p.label : p.id,
+    tool: p.tool as CodingModelPreset["tool"],
+  };
+  const str = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : undefined);
+  if (str(p.model)) out.model = str(p.model);
+  if (str(p.effort)) out.effort = str(p.effort);
+  if (str(p.providerModel)) out.providerModel = str(p.providerModel);
+  if (str(p.registryModelId)) out.registryModelId = str(p.registryModelId);
+  return out;
+}
+
 function normalizeGlobalSettings(input?: Partial<GlobalSettings> | null): GlobalSettings {
   const defaults = DEFAULT_GLOBAL_SETTINGS;
   const nextProviders: Record<ProviderId, ProviderAccount[]> = {};
@@ -307,12 +341,28 @@ function normalizeGlobalSettings(input?: Partial<GlobalSettings> | null): Global
   if (defaultChatModelId && !models.some((m) => m.id === defaultChatModelId)) defaultChatModelId = "";
   if (defaultEmbeddingModelId && !models.some((m) => m.id === defaultEmbeddingModelId))
     defaultEmbeddingModelId = "";
+  // Coding-model presets: new shape is an array (may be empty if cleared);
+  // nothing supplied ships the built-in defaults. Dedupe by id.
+  let codingModelPresets: CodingModelPreset[];
+  if (Array.isArray(input?.codingModelPresets)) {
+    const seen = new Set<string>();
+    codingModelPresets = [];
+    for (const raw of input.codingModelPresets) {
+      const p = normalizeCodingModelPreset(raw);
+      if (!p || seen.has(p.id)) continue;
+      seen.add(p.id);
+      codingModelPresets.push(p);
+    }
+  } else {
+    codingModelPresets = defaults.codingModelPresets.map((p) => ({ ...p }));
+  }
   return {
     theme: input?.theme ?? defaults.theme,
     models,
     defaultChatModelId,
     defaultEmbeddingModelId,
     providers: nextProviders,
+    codingModelPresets,
   };
 }
 
@@ -581,6 +631,7 @@ export class Orchestrator {
       notifyCodingSession: (agentId, tool) => {
         for (const listener of this.codingListeners) listener(agentId, tool);
       },
+      codingModelPresets: () => this.getGlobalSettings().codingModelPresets,
       projectIdForAgent: (agentId) => this.projects.projectsForAgent(agentId)[0]?.id ?? null,
       startPipeline: (projectId, goal) => this.startPipeline(projectId, goal),
       getPipelineRun: (runId) => {
@@ -1778,10 +1829,16 @@ export class Orchestrator {
         // Model-only roles drop the coding CLI but keep shell + /project access.
         if (modelOnly && cap.catalogId === "coding-cli") continue;
         if (!this.installCapability(id, cap.catalogId)) continue;
-        // Coding roles: merge the wizard's pinned tool over the spec default.
+        // Coding roles: merge the wizard's pinned tool + model preset over the
+        // spec default, so a whole team can be stamped with per-role models
+        // (e.g. coder→Kimi, security-reviewer→Qwen) in one provisioning call.
         const capConfig =
           cap.catalogId === "coding-cli"
-            ? { ...(cap.config ?? {}), ...(rc.tool ? { pinnedTool: rc.tool } : {}) }
+            ? {
+                ...(cap.config ?? {}),
+                ...(rc.tool ? { pinnedTool: rc.tool } : {}),
+                ...(rc.preset ? { pinnedPreset: rc.preset } : {}),
+              }
             : cap.config;
         if (capConfig) this.applySkillConfig(id, cap.catalogId, capConfig);
       }

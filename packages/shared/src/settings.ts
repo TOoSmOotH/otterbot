@@ -46,6 +46,38 @@ export interface ConfiguredModel {
   contextWindow?: number;
 }
 
+/**
+ * A coding-CLI tool id. Mirrors the server's `CodingTool` union (kept here so
+ * shared types can reference it without depending on the server package).
+ */
+export type CodingToolId = "claude" | "codex" | "gemini" | "opencode";
+
+/**
+ * A named, reusable model configuration for one coding CLI tool. Defined once in
+ * Settings → Coding Models and assigned to agents (or project roles); resolved
+ * into that tool's model-selection flags at spawn time. Each tool exposes
+ * different knobs, so fields are optional and tool-specific:
+ *  - claude / codex — `model` + `effort` (reasoning effort)
+ *  - gemini — `model`
+ *  - opencode — `providerModel` (a "provider/model" string)
+ */
+export interface CodingModelPreset {
+  /** Stable slug, generated on create. */
+  id: string;
+  /** Display name shown in every preset picker, e.g. "Claude Opus · High". */
+  label: string;
+  /** Which CLI this preset targets; implies the tool to run. */
+  tool: CodingToolId;
+  /** Model alias/id — claude (`opus`/`sonnet`/…), codex, gemini. */
+  model?: string;
+  /** Reasoning effort — claude (`--effort`) and codex (`model_reasoning_effort`) only. */
+  effort?: string;
+  /** opencode only: the resolved `provider/model` string passed to `-m`. */
+  providerModel?: string;
+  /** opencode only: id of the {@link ConfiguredModel} it was derived from (reference). */
+  registryModelId?: string;
+}
+
 export interface GlobalSettings {
   theme: ThemeId;
   /** Registry of named models agents pick from. */
@@ -56,4 +88,6 @@ export interface GlobalSettings {
   defaultEmbeddingModelId: string;
   /** Per-provider list of named credential sets (accounts). */
   providers: Record<ProviderId, ProviderAccount[]>;
+  /** Named, reusable per-tool model presets for the coding CLIs. */
+  codingModelPresets: CodingModelPreset[];
 }

@@ -28,11 +28,49 @@ export function isCodingTool(v: string): v is CodingTool {
   return (CODING_TOOLS as string[]).includes(v);
 }
 
+/**
+ * A resolved per-tool model configuration — the subset of a
+ * {@link import("@otterbot/shared").CodingModelPreset} that drives flag
+ * selection. Each tool reads the fields that apply to it (see {@link presetToArgs}).
+ */
+export interface ResolvedCodingModel {
+  /** Model alias/id — claude (`opus`/`sonnet`/…), codex, gemini. */
+  model?: string;
+  /** Reasoning effort — claude (`--effort`) and codex (`model_reasoning_effort`). */
+  effort?: string;
+  /** opencode: the `provider/model` string passed to `-m`. */
+  providerModel?: string;
+}
+
+/**
+ * Translate a resolved model config into a tool's model-selection flags. Pure;
+ * the single point that knows each CLI's knob syntax (so it is unit-tested).
+ */
+export function presetToArgs(tool: CodingTool, m: ResolvedCodingModel): string[] {
+  switch (tool) {
+    case "claude":
+      return [
+        ...(m.model ? ["--model", m.model] : []),
+        ...(m.effort ? ["--effort", m.effort] : []),
+      ];
+    case "codex":
+      return [
+        ...(m.model ? ["-m", m.model] : []),
+        // `-c key=value` overrides config.toml; the value is parsed as TOML.
+        ...(m.effort ? ["-c", `model_reasoning_effort="${m.effort}"`] : []),
+      ];
+    case "gemini":
+      return m.model ? ["-m", m.model] : [];
+    case "opencode":
+      return m.providerModel ? ["-m", m.providerModel] : [];
+  }
+}
+
 /** How to invoke each tool non-interactively and as a live TUI. */
 interface ToolSpec {
   bin: string;
-  headless: (task: string, model?: string) => string[];
-  interactive: (task: string, model?: string) => string[];
+  headless: (task: string, m: ResolvedCodingModel) => string[];
+  interactive: (task: string, m: ResolvedCodingModel) => string[];
 }
 
 const TOOLS: Record<CodingTool, ToolSpec> = {
@@ -40,14 +78,14 @@ const TOOLS: Record<CodingTool, ToolSpec> = {
   // completes unattended (it is already confined by otterbot's own sandbox).
   claude: {
     bin: "claude",
-    headless: (task, model) => [
-      ...(model ? ["--model", model] : []),
+    headless: (task, m) => [
+      ...presetToArgs("claude", m),
       "-p",
       task,
       "--dangerously-skip-permissions",
     ],
-    interactive: (task, model) => [
-      ...(model ? ["--model", model] : []),
+    interactive: (task, m) => [
+      ...presetToArgs("claude", m),
       task,
       "--dangerously-skip-permissions",
     ],
@@ -55,24 +93,24 @@ const TOOLS: Record<CodingTool, ToolSpec> = {
   // `codex exec` runs headless and exits; the bare TUI is seeded with the task.
   codex: {
     bin: "codex",
-    headless: (task, model) => [
+    headless: (task, m) => [
       "exec",
       "--dangerously-bypass-approvals-and-sandbox",
-      ...(model ? ["-m", model] : []),
+      ...presetToArgs("codex", m),
       task,
     ],
-    interactive: (task, model) => [...(model ? ["-m", model] : []), task],
+    interactive: (task, m) => [...presetToArgs("codex", m), task],
   },
   gemini: {
     bin: "gemini",
-    headless: (task, model) => [...(model ? ["-m", model] : []), "-p", task, "--yolo"],
-    interactive: (task, model) => [...(model ? ["-m", model] : []), "-i", task, "--yolo"],
+    headless: (task, m) => [...presetToArgs("gemini", m), "-p", task, "--yolo"],
+    interactive: (task, m) => [...presetToArgs("gemini", m), "-i", task, "--yolo"],
   },
   // OpenCode renders a TUI for `run` regardless, so both modes use it.
   opencode: {
     bin: "opencode",
-    headless: (task, model) => ["run", ...(model ? ["-m", model] : []), task],
-    interactive: (task, model) => ["run", ...(model ? ["-m", model] : []), task],
+    headless: (task, m) => ["run", ...presetToArgs("opencode", m), task],
+    interactive: (task, m) => ["run", ...presetToArgs("opencode", m), task],
   },
 };
 
@@ -80,10 +118,11 @@ const TOOLS: Record<CodingTool, ToolSpec> = {
 export function buildCodingArgv(
   tool: CodingTool,
   task: string,
-  opts: { interactive?: boolean; model?: string } = {}
+  opts: { interactive?: boolean; model?: ResolvedCodingModel } = {}
 ): string[] {
   const spec = TOOLS[tool];
-  const args = opts.interactive ? spec.interactive(task, opts.model) : spec.headless(task, opts.model);
+  const m = opts.model ?? {};
+  const args = opts.interactive ? spec.interactive(task, m) : spec.headless(task, m);
   return [spec.bin, ...args];
 }
 
@@ -118,7 +157,7 @@ const RING_BUFFER_SIZE = 100 * 1024;
 export interface CodingRunOptions {
   tool: CodingTool;
   task: string;
-  model?: string;
+  model?: ResolvedCodingModel;
   workspaceDir: string;
   secrets: Map<string, string>;
   /** Shared project tree to bind + run inside, when the agent has a project. */

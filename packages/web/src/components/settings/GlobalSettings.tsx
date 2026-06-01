@@ -20,6 +20,7 @@ import { THEMES, useGlobalSettingsStore, applyTheme } from "../../stores/global-
 import { useProvidersStore, isAccountConfigured } from "../../stores/providers-store";
 import { BuiltinEmbedderControls } from "../BuiltinEmbedderControls";
 import { CodeReferenceTab } from "./CodeReferenceTab";
+import { CodingModelsTab } from "./CodingModelsTab";
 import { CredentialsTab } from "./CredentialsTab";
 import { ConnectionsTab } from "./ConnectionsTab";
 import { CodingCliSetup } from "../agents/CodingCliSetup";
@@ -28,7 +29,7 @@ import { uniqueModelId } from "../../lib/model-id";
 
 type OpenAiAuthStatus = { connected: boolean; accountId: string | null };
 
-const TABS = ["Providers", "Models", "Code Reference", "Coding CLIs", "Credentials", "Connections", "Appearance", "Account"] as const;
+const TABS = ["Providers", "Models", "Code Reference", "Coding CLIs", "Coding Models", "Credentials", "Connections", "Appearance", "Account"] as const;
 type SettingsTab = (typeof TABS)[number];
 
 type PatchFn = (p: Partial<GlobalSettingsShape>) => void;
@@ -149,6 +150,9 @@ export function GlobalSettings({
             </p>
             <CodingCliSetup onOpenLoginTerminal={onOpenLoginTerminal} />
           </section>
+        )}
+        {tab === "Coding Models" && (
+          <CodingModelsTab draft={draft} patch={patch} providers={providers} />
         )}
         {tab === "Credentials" && <CredentialsTab />}
         {tab === "Connections" && <ConnectionsTab />}

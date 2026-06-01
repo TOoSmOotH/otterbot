@@ -208,6 +208,9 @@ describe("HTTP API (e2e)", () => {
         ],
         defaultChatModelId: "gpt",
         defaultEmbeddingModelId: "nomic",
+        codingModelPresets: [
+          { id: "opencode-kimi", label: "OpenCode · Kimi", tool: "opencode", providerModel: "moonshot/kimi-k2" },
+        ],
         providers: {
           anthropic: [
             { account: "default", baseUrl: "https://api.anthropic.com/v1", apiKeyConfigured: false },
@@ -235,6 +238,7 @@ describe("HTTP API (e2e)", () => {
       theme: string;
       models: Array<{ id: string; provider: string; account: string; modelId: string; kind: string }>;
       defaultChatModelId: string;
+      codingModelPresets: Array<{ id: string; tool: string; providerModel?: string }>;
       providers: {
         openai: Array<{
           account: string;
@@ -246,6 +250,9 @@ describe("HTTP API (e2e)", () => {
     };
     expect(updated.theme).toBe("forest");
     expect(updated.defaultChatModelId).toBe("gpt");
+    expect(updated.codingModelPresets).toContainEqual(
+      expect.objectContaining({ id: "opencode-kimi", tool: "opencode", providerModel: "moonshot/kimi-k2" })
+    );
     expect(updated.models.find((m) => m.id === "gpt")).toMatchObject({
       provider: "openai",
       account: "default",

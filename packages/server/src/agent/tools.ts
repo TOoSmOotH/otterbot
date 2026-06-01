@@ -23,6 +23,7 @@ import {
   getCodingSession,
   isCodingLockBusy,
   isCodingTool,
+  type ResolvedCodingModel,
   runCodingCliHeadless,
   startCodingSession,
   withCodingLock,
@@ -36,7 +37,7 @@ import { ensureKey, parseHosts, publicKey, sshExec } from "../integrations/ssh.j
 import { searchWeb } from "../integrations/web-search.js";
 import { editImage, generateImage, persistImage } from "../integrations/image-gen.js";
 import { persistArtifact } from "../integrations/artifacts.js";
-import type { Artifact } from "@otterbot/shared";
+import type { Artifact, CodingModelPreset } from "@otterbot/shared";
 import {
   browserBack,
   browserClick,
@@ -65,6 +66,21 @@ function resolveArtifactRef(ref: string | undefined, services?: AgentServices): 
   const bin = services.readArtifactBinary(m[1], m[2] as "files" | "images", m[3]);
   if (!bin) return ref;
   return `data:${bin.mimeType};base64,${bin.data.toString("base64")}`;
+}
+
+/** Find a coding-model preset by id (preferred) or, failing that, label. */
+function findCodingPreset(
+  presets: CodingModelPreset[],
+  ref: string | undefined
+): CodingModelPreset | undefined {
+  const r = ref?.trim();
+  if (!r) return undefined;
+  return presets.find((p) => p.id === r) ?? presets.find((p) => p.label === r);
+}
+
+/** A raw model string as a per-tool {@link ResolvedCodingModel}-shaped object. */
+function rawModelFor(tool: CodingTool, model: string): { model?: string; providerModel?: string } {
+  return tool === "opencode" ? { providerModel: model } : { model };
 }
 
 /**
@@ -604,14 +620,33 @@ export function buildAgentTools(
           .boolean()
           .default(false)
           .describe("Launch the live terminal UI instead of running headless."),
-        model: z.string().optional().describe("Optional model override for the tool."),
+        preset: z
+          .string()
+          .optional()
+          .describe(
+            "Optional model preset (id or name, from Settings → Coding Models) overriding " +
+              "this agent's assigned preset. A preset carries the tool + model + reasoning effort."
+          ),
+        model: z
+          .string()
+          .optional()
+          .describe("Raw model-id override for the tool (escape hatch; overrides any preset's model)."),
       }),
-      execute: async ({ tool: requestedTool, task, interactive, model }) => {
-        // Fall back to the agent's pinned default tool/model (capability config).
+      execute: async ({ tool: requestedTool, task, interactive, preset: requestedPreset, model }) => {
+        // Fall back to the agent's pinned default tool/preset (capability config).
         const shellSecrets = ctx.shellSecrets();
+        const presets = services?.codingModelPresets?.() ?? [];
         const pinnedTool = shellSecrets.get("CODING_CLI_PINNED_TOOL")?.trim();
+        const pinnedPresetId = shellSecrets.get("CODING_CLI_PINNED_PRESET")?.trim();
+        // Legacy free-text default model — honoured for back-compat when no preset applies.
         const pinnedModel = shellSecrets.get("CODING_CLI_PINNED_MODEL")?.trim() || undefined;
-        const cliTool = requestedTool ?? (pinnedTool && isCodingTool(pinnedTool) ? pinnedTool : undefined);
+        const perCallPreset = findCodingPreset(presets, requestedPreset);
+        const pinnedPreset = findCodingPreset(presets, pinnedPresetId);
+        // Tool: explicit param → chosen preset's tool → pinned tool.
+        const cliTool =
+          requestedTool ??
+          (perCallPreset ?? pinnedPreset)?.tool ??
+          (pinnedTool && isCodingTool(pinnedTool) ? pinnedTool : undefined);
         if (!cliTool) {
           return {
             ok: false,
@@ -620,7 +655,35 @@ export function buildAgentTools(
               "(claude | codex | gemini | opencode) or set a default in the capability config.",
           };
         }
-        const effectiveModel = model ?? pinnedModel;
+        // Resolve the model config (highest precedence first):
+        //   per-call preset → pinned preset → legacy pinned model → global default preset.
+        // A raw `model` string then overrides just the model field. Presets only
+        // apply when they target the effective tool.
+        const chosenPreset =
+          perCallPreset?.tool === cliTool
+            ? perCallPreset
+            : pinnedPreset?.tool === cliTool
+              ? pinnedPreset
+              : undefined;
+        let effectiveModel: ResolvedCodingModel | undefined;
+        if (chosenPreset) {
+          effectiveModel = {
+            model: chosenPreset.model,
+            effort: chosenPreset.effort,
+            providerModel: chosenPreset.providerModel,
+          };
+        } else if (pinnedModel) {
+          effectiveModel = rawModelFor(cliTool, pinnedModel);
+        } else {
+          // Global default = the first configured preset for this tool, if any.
+          const def = presets.find((p) => p.tool === cliTool);
+          effectiveModel = def
+            ? { model: def.model, effort: def.effort, providerModel: def.providerModel }
+            : undefined;
+        }
+        if (model) {
+          effectiveModel = { ...(effectiveModel ?? {}), ...rawModelFor(cliTool, model) };
+        }
         const projectRepoPath = ctx.projectRepoPath();
         if (projectRepoPath && ctx.projectAccess() === "read") {
           return {
