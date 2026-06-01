@@ -9,6 +9,12 @@ import {
   type OAuthTokens,
   type Pkce,
 } from "./openai-oauth.js";
+import {
+  clearCodexAuth,
+  codexAuthMtimeMs,
+  readCodexAuth,
+  writeCodexAuth,
+} from "./codex-auth-file.js";
 
 /** Minimal settings backend — satisfied by the orchestrator's app_settings. */
 export interface SettingsStore {
@@ -40,6 +46,8 @@ export class OpenAiAuthStore {
   private pending: { pkce: Pkce; state: string } | null = null;
   private server: Server | null = null;
   private refreshing: Promise<string> | null = null;
+  /** mtime of the shared Codex auth file last adopted, for change detection. */
+  private fileMtimeMs = 0;
 
   constructor(private readonly settings: SettingsStore) {
     const raw = settings.getSetting(SETTINGS_KEY);
@@ -50,17 +58,39 @@ export class OpenAiAuthStore {
         this.tokens = null;
       }
     }
+    this.syncFromFile();
+  }
+
+  /**
+   * Adopt the shared Codex auth file when it has changed — Codex (or another
+   * login) may have rotated the token out from under our cached copy. This is
+   * what lets the app and the Codex CLI share one ChatGPT login without
+   * invalidating each other.
+   */
+  private syncFromFile(): void {
+    const mtime = codexAuthMtimeMs();
+    if (mtime === this.fileMtimeMs) return;
+    this.fileMtimeMs = mtime;
+    if (mtime === 0) return; // file absent — keep our existing token
+    const fromFile = readCodexAuth();
+    if (fromFile) {
+      this.tokens = fromFile;
+      this.settings.setSetting(SETTINGS_KEY, JSON.stringify(fromFile));
+    }
   }
 
   isConnected(): boolean {
+    this.syncFromFile();
     return this.tokens !== null;
   }
 
   accountId(): string | null {
+    this.syncFromFile();
     return this.tokens?.accountId ?? null;
   }
 
   status(): AuthStatus {
+    this.syncFromFile();
     return {
       connected: this.tokens !== null,
       accountId: this.tokens?.accountId ?? null,
@@ -70,6 +100,7 @@ export class OpenAiAuthStore {
 
   /** A valid access token, refreshed if it is expired or about to expire. */
   async accessToken(): Promise<string> {
+    this.syncFromFile();
     if (!this.tokens) throw new Error("not signed in to ChatGPT");
     if (Date.now() < this.tokens.expiresAt - REFRESH_SKEW_MS) {
       return this.tokens.accessToken;
@@ -95,13 +126,19 @@ export class OpenAiAuthStore {
   private persist(tokens: OAuthTokens): void {
     this.tokens = tokens;
     this.settings.setSetting(SETTINGS_KEY, JSON.stringify(tokens));
+    // Mirror into the shared Codex auth file so the CLI uses the same login,
+    // and track its mtime so syncFromFile() doesn't re-adopt our own write.
+    writeCodexAuth(tokens);
+    this.fileMtimeMs = codexAuthMtimeMs();
   }
 
-  /** Forget the connection and stop any in-progress login. */
+  /** Forget the connection and stop any in-progress login. Signs out everywhere. */
   signOut(): void {
     this.tokens = null;
     this.pending = null;
     this.settings.setSetting(SETTINGS_KEY, "");
+    clearCodexAuth();
+    this.fileMtimeMs = 0;
     this.closeServer();
   }
 

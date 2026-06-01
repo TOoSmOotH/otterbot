@@ -1356,7 +1356,8 @@ function OpenAiOAuthControls() {
     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
       <div style={hint}>
         Uses the same ChatGPT subscription OAuth route as Hermes/Codex — account-wide, not per
-        agent or per provider account.
+        agent or per provider account. This login is shared with the Codex CLI (same OpenAI
+        account), so you sign in once for both — no separate <code>codex login</code> needed.
       </div>
       {status?.connected ? (
         <>
