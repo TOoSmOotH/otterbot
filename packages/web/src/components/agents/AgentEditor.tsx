@@ -48,6 +48,16 @@ export function AgentEditor({ agentId, onClose }: { agentId: string | null; onCl
   const [credsStatus, setCredsStatus] = useState("");
   const isEdit = agentId !== null;
 
+  // Built-in skill catalog — offered as install-on-create checkboxes for new agents.
+  const [catalog, setCatalog] = useState<CatalogSkill[]>([]);
+  const [selectedSkills, setSelectedSkills] = useState<Set<string>>(new Set());
+  const toggleSkill = (id: string) =>
+    setSelectedSkills((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+
   // Model slots — each is the id of a ConfiguredModel.
   const [chatModelId, setChatModelId] = useState("");
   const [embInherit, setEmbInherit] = useState(true);
@@ -60,6 +70,15 @@ export function AgentEditor({ agentId, onClose }: { agentId: string | null; onCl
   const inheritEmbedding = embInherit && canInherit;
 
   useEffect(() => void loadGlobalSettings(), [loadGlobalSettings]);
+
+  // Load the skill catalog once (only needed for the new-agent picker).
+  useEffect(() => {
+    if (isEdit) return;
+    void apiFetch("/api/skill-catalog")
+      .then((r) => (r.ok ? (r.json() as Promise<CatalogSkill[]>) : []))
+      .then(setCatalog)
+      .catch(() => {});
+  }, [isEdit]);
 
   // The COO's embedding model — offered as an "inherit" option for new agents.
   useEffect(() => {
@@ -132,7 +151,17 @@ export function AgentEditor({ agentId, onClose }: { agentId: string | null; onCl
       if (isEdit && agentId) {
         await update(agentId, payload);
       } else {
-        await create(payload);
+        const created = await create(payload);
+        // Install any catalog skills the user picked, onto the fresh agent.
+        if (created && selectedSkills.size > 0) {
+          for (const catalogId of selectedSkills) {
+            await apiFetch(`/api/agents/${created.id}/skills/install`, {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({ catalogId }),
+            }).catch(() => {});
+          }
+        }
       }
     } finally {
       setSaving(false);
@@ -253,6 +282,45 @@ export function AgentEditor({ agentId, onClose }: { agentId: string | null; onCl
             />
           )}
         </div>
+
+        {!isEdit && (
+          <div style={sectionBox}>
+            <strong style={{ fontSize: 12 }}>Skills</strong>
+            <p style={{ ...hintStyle, marginTop: 0 }}>
+              First-party skills to install on this agent. You can add or remove more later in the
+              Agent Studio → Skills tab.
+            </p>
+            {catalog.length === 0 ? (
+              <p style={hintStyle}>Loading catalog…</p>
+            ) : (
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+                {catalog.map((c) => (
+                  <label
+                    key={c.id}
+                    title={c.description}
+                    style={{
+                      display: "flex",
+                      alignItems: "flex-start",
+                      gap: 6,
+                      fontSize: 12,
+                      border: "1px solid rgb(var(--border))",
+                      borderRadius: 6,
+                      padding: "6px 8px",
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={selectedSkills.has(c.id)}
+                      onChange={() => toggleSkill(c.id)}
+                      style={{ marginTop: 2 }}
+                    />
+                    <span>{c.name}</span>
+                  </label>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
         <Field label="Agent-to-agent transport">
           <select
@@ -386,6 +454,14 @@ export function AgentEditor({ agentId, onClose }: { agentId: string | null; onCl
       </div>
     </div>
   );
+}
+
+/** A built-in skill catalog entry — mirrors the server's `CatalogCapability`. */
+interface CatalogSkill {
+  id: string;
+  name: string;
+  description: string;
+  tools: string[];
 }
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
