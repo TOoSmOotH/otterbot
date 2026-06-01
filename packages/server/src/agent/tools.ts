@@ -27,6 +27,11 @@ import {
   startCodingSession,
   withCodingLock,
 } from "../integrations/coding-cli.js";
+import {
+  CODING_CLI_SPECS,
+  checkCodingClis,
+  installCodingCli,
+} from "../integrations/coding-cli-install.js";
 import { ensureKey, parseHosts, publicKey, sshExec } from "../integrations/ssh.js";
 import { searchWeb } from "../integrations/web-search.js";
 import { editImage, generateImage, persistImage } from "../integrations/image-gen.js";
@@ -668,16 +673,50 @@ export function buildAgentTools(
   if (granted.has("coding_cli_status")) {
     tools.coding_cli_status = tool({
       description:
-        "Report your coding setup: whether you belong to a project (shared code tree), " +
+        "Report your coding setup: which coding CLIs are installed and (best-effort) " +
+        "logged in in your workspace, whether you belong to a project (shared code tree), " +
         "and whether a live coding session is currently running.",
       parameters: z.object({}),
       execute: async () => {
         const session = getCodingSession(ctx.profile.id);
+        const cliStatus = await checkCodingClis(ctx.workspaceDir, ctx.shellSecrets());
         return {
           ok: true,
           inProject: ctx.projectRepoPath() !== null,
           activeSession: session ? { tool: session.tool } : null,
-          tools: CODING_TOOLS,
+          tools: cliStatus,
+        };
+      },
+    });
+  }
+
+  if (granted.has("coding_cli_install")) {
+    tools.coding_cli_install = tool({
+      description:
+        "Install a coding CLI (claude, codex, gemini, or opencode) into your workspace so " +
+        "you can run it. Installing only puts the binary on your PATH — you still log in " +
+        "once interactively (run the returned `loginCmd` from your terminal). Returns the " +
+        "refreshed install/login status for all tools.",
+      parameters: z.object({
+        tool: z
+          .enum(CODING_TOOLS as [CodingTool, ...CodingTool[]])
+          .describe("Which CLI to install."),
+      }),
+      execute: async ({ tool: requestedTool }) => {
+        const secrets = ctx.shellSecrets();
+        const result = await installCodingCli(
+          ctx.profile.id,
+          ctx.workspaceDir,
+          secrets,
+          requestedTool
+        );
+        const status = await checkCodingClis(ctx.workspaceDir, secrets);
+        return {
+          ok: result.ok,
+          ...(result.error ? { error: result.error } : {}),
+          output: result.output,
+          loginCmd: CODING_CLI_SPECS[requestedTool].loginCmd,
+          status,
         };
       },
     });

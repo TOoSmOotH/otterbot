@@ -21,6 +21,7 @@ import { AvatarUpload } from "./AvatarUpload";
 import { PeerAccessEditor, type IncomingPeer } from "./PeerAccessEditor";
 import { TerminalModal } from "./TerminalModal";
 import { SkillConfigForm } from "./SkillConfigForm";
+import { CodingCliSetup } from "./CodingCliSetup";
 import {
   useConnectionsStore,
   assignConnection,
@@ -732,6 +733,7 @@ function InstalledSkill({
       <div style={{ fontSize: 12, color: "rgb(var(--muted))", marginTop: 6 }}>
         {skill.meta.description}
       </div>
+      {skill.id === "coding-cli" && open && <CodingCliSetup agentId={agentId} />}
       {hasConfig && (
         <div style={{ marginTop: 8 }}>
           <button

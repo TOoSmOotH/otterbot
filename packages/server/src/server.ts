@@ -27,6 +27,8 @@ import { importSkillFromRaw, importSkillFromUrl, exportAllSkills } from "./skill
 import { initOpenAiAuth, getOpenAiAuth } from "./auth/openai-auth-store.js";
 import { builtinModelStatus, downloadBuiltinModel } from "./embedders/builtin-embedder.js";
 import { BUILTIN_CAPABILITIES, getCatalogCapability } from "./skills/builtin-catalog.js";
+import { isCodingTool } from "./integrations/coding-cli.js";
+import { checkCodingClis, installCodingCli } from "./integrations/coding-cli-install.js";
 import { generateText } from "ai";
 import { resolveChatModel, listProviderModels } from "./providers/registry.js";
 import { eq, asc, desc, like } from "drizzle-orm";
@@ -1281,6 +1283,42 @@ export async function buildServer(
     void orch.reloadAgentMcp(req.params.id);
     return updated;
   });
+
+  // Which coding CLIs (claude/codex/gemini/opencode) are installed + (best-
+  // effort) logged in in this agent's workspace.
+  app.get<{ Params: { id: string } }>(
+    "/api/agents/:id/coding-cli/status",
+    async (req, reply) => {
+      const ctx = orch.getContext(req.params.id);
+      if (!ctx) {
+        reply.code(404);
+        return { error: "not found" };
+      }
+      return checkCodingClis(ctx.workspaceDir, ctx.shellSecrets());
+    }
+  );
+
+  // Install one coding CLI into the agent's workspace, then return refreshed
+  // status. Login stays a manual, interactive step (see the capability docs).
+  app.post<{ Params: { id: string }; Body: { tool?: string } }>(
+    "/api/agents/:id/coding-cli/install",
+    async (req, reply) => {
+      const ctx = orch.getContext(req.params.id);
+      if (!ctx) {
+        reply.code(404);
+        return { error: "not found" };
+      }
+      const tool = req.body?.tool ?? "";
+      if (!isCodingTool(tool)) {
+        reply.code(400);
+        return { error: "tool must be one of claude, codex, gemini, opencode" };
+      }
+      const secrets = ctx.shellSecrets();
+      const result = await installCodingCli(req.params.id, ctx.workspaceDir, secrets, tool);
+      const status = await checkCodingClis(ctx.workspaceDir, secrets);
+      return { ...result, status };
+    }
+  );
 
   // A skill's config form: its schema + current values (secrets masked).
   app.get<{ Params: { id: string; skillId: string } }>(

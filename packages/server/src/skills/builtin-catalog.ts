@@ -551,7 +551,7 @@ the public key probably isn't installed on that host yet — run
       "task, using your own subscription. Works on your project's shared code tree when " +
       "you belong to one. Supports a headless run that returns a summary, or a live " +
       "terminal UI streamed to the user.",
-    tools: ["coding_cli_run", "coding_cli_status"],
+    tools: ["coding_cli_run", "coding_cli_status", "coding_cli_install"],
     configSchema: {
       description:
         "Optionally pin a default coding CLI for this agent so it doesn't have to be told " +
@@ -589,10 +589,17 @@ edit code. Each runs inside your sandbox, authenticated by **your own
 subscription**, and (if you belong to a project) on that project's shared code
 tree at \`/project\`, which you share live with the other agents on the project.
 
-## First-time setup: log in once
+## First-time setup: install, then log in once
 
-Each tool stores its login under your workspace HOME, so it must be logged in
-from **your terminal** before you can run it. The user does this once per tool:
+Each tool must be **installed** into your workspace and **logged in** before you
+can run it. Both are one-time, per-agent steps.
+
+**Install** — either use the Coding CLIs panel in Agent Studio (Install button
+per tool) or run \`coding_cli_install\` yourself. Installing only puts the binary
+on your PATH; it does not log you in.
+
+**Log in** — each tool stores its login under your workspace HOME, so it must be
+logged in from **your terminal** (the login flows are interactive):
 
 1. Open this agent's terminal (the Terminal button in Agent Studio, or SSH to
    the host and \`cd\` into this agent's \`workspace\`).
@@ -603,16 +610,19 @@ from **your terminal** before you can run it. The user does this once per tool:
    - OpenCode: run \`opencode auth login\`.
 3. The credentials persist in this agent's workspace and stay private to it.
 
-If a run fails with an authentication error, the tool isn't logged in yet — ask
-the user to complete the step above.
+If a run fails with "command not found", install the tool first. If it fails with
+an authentication error, it isn't logged in yet — complete the step above. Use
+\`coding_cli_status\` to see what's installed and logged in.
 
 ## Tools
 
 - \`coding_cli_run\` — run a coding agent on a task. \`interactive: false\` (default)
   runs it to completion and returns a summary; \`interactive: true\` launches its
   live terminal UI, streamed to the user, and returns a summary when it exits.
-- \`coding_cli_status\` — report whether you're on a project and whether a live
-  session is running.
+- \`coding_cli_install\` — install a tool (claude | codex | gemini | opencode) into
+  your workspace. Login still happens once, interactively (see above).
+- \`coding_cli_status\` — report which tools are installed and logged in, whether
+  you're on a project, and whether a live session is running.
 
 ## Working on a project
 
