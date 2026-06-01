@@ -62,6 +62,8 @@ export function OnboardingWizard() {
   const [chatAccount, setChatAccount] = useState("default");
   const [chatModelId, setChatModelId] = useState("local-model");
   const [chatCred, setChatCred] = useState("http://localhost:1234/v1");
+  /** Optional API key for base-URL providers (OpenAI-compatible / secured local). */
+  const [chatApiKey, setChatApiKey] = useState("");
   const [chatTest, setChatTest] = useState<TestState>({ status: "idle" });
   const [chatModels, setChatModels] = useState<string[]>([]);
   const [openAiAuth, setOpenAiAuth] = useState<AuthMethod>("api-key");
@@ -72,6 +74,7 @@ export function OnboardingWizard() {
   const [embAccount, setEmbAccount] = useState("default");
   const [embModelId, setEmbModelId] = useState(BUILTIN_EMBED_MODEL);
   const [embCred, setEmbCred] = useState("");
+  const [embApiKey, setEmbApiKey] = useState("");
   const [embTest, setEmbTest] = useState<TestState>({ status: "idle" });
   const [embModels, setEmbModels] = useState<string[]>([]);
   /** When true the user chose to skip embeddings (keyword-only memory). */
@@ -100,6 +103,7 @@ export function OnboardingWizard() {
     setChatModels([]);
     setChatAccount(accountsFor(p)[0]?.account ?? "default");
     setChatCred(credSeedFor(p));
+    setChatApiKey("");
     setChatModelId(p === "anthropic" ? "claude-opus-4-7" : p === "openai" ? "gpt-4o" : "local-model");
   };
 
@@ -111,6 +115,7 @@ export function OnboardingWizard() {
     setEmbAccount(accountsFor(p)[0]?.account ?? "default");
     // Reuse the chat credential when both slots share a (non-OAuth) provider.
     setEmbCred(p === chatProvider && !useChatOAuth ? chatCred : credSeedFor(p));
+    setEmbApiKey(p === chatProvider && !useChatOAuth ? chatApiKey : "");
     setEmbModelId(
       p === "builtin"
         ? BUILTIN_EMBED_MODEL
@@ -268,8 +273,18 @@ export function OnboardingWizard() {
         }
         providerPatch[p] = list;
       };
-      if (!useChatOAuth) upsertAccount(chatProvider, chatAcct, chatCred);
-      if (!embSkipped) upsertAccount(embProvider, embAcct, embCred);
+      // For base-URL providers that also took an optional API key, persist the
+      // key alongside the base URL on the account.
+      const optionalKeyExtra = (p: ProviderId, key: string): Partial<ProviderAccount> => {
+        const info = providerInfo(p);
+        return info && !info.needsApiKey && info.apiKeyEnv && key.trim()
+          ? { apiKey: key.trim() }
+          : {};
+      };
+      if (!useChatOAuth)
+        upsertAccount(chatProvider, chatAcct, chatCred, optionalKeyExtra(chatProvider, chatApiKey));
+      if (!embSkipped)
+        upsertAccount(embProvider, embAcct, embCred, optionalKeyExtra(embProvider, embApiKey));
       if (useChatOAuth) {
         // Flip OpenAI to OAuth account-wide on the chosen account so model
         // resolution uses the server-side tokens.
@@ -433,6 +448,8 @@ export function OnboardingWizard() {
               accounts={accountsFor(chatProvider)}
               cred={chatCred}
               onCred={setChatCred}
+              apiKey={chatApiKey}
+              onApiKey={setChatApiKey}
               modelId={chatModelId}
               onModelId={setChatModelId}
               test={chatTest}
@@ -476,6 +493,8 @@ export function OnboardingWizard() {
               accounts={accountsFor(embProvider)}
               cred={embCred}
               onCred={setEmbCred}
+              apiKey={embApiKey}
+              onApiKey={setEmbApiKey}
               modelId={embModelId}
               onModelId={setEmbModelId}
               test={embTest}

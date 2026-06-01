@@ -58,6 +58,8 @@ export function ProviderFields({
   modelLabel,
   modelHint,
   oauth,
+  apiKey,
+  onApiKey,
 }: {
   kind: "chat" | "embedding";
   providers: ProviderInfo[];
@@ -80,10 +82,30 @@ export function ProviderFields({
   modelLabel: string;
   modelHint?: string;
   oauth?: OAuthBundle;
+  /**
+   * Optional API key for providers whose primary credential field is a base
+   * URL but which can also take a key (OpenAI-compatible / local servers behind
+   * auth). When `onApiKey` is supplied, an extra optional key input is shown.
+   */
+  apiKey?: string;
+  onApiKey?: (v: string) => void;
 }) {
   const info = providers.find((p) => p.id === provider);
   const credMeta = info ? providerCredField(info) : null;
   const isLocal = isLocalProvider(info);
+  // Providers whose main cred field is the base URL but that still accept a key.
+  const optionalKeyEnv =
+    info && !info.needsApiKey && info.apiKeyEnv && info.baseUrlEnv && info.id !== "builtin"
+      ? info.apiKeyEnv
+      : null;
+  const showOptionalKey = Boolean(optionalKeyEnv && onApiKey);
+  /** Build the secrets payload for test / model-list calls (cred + optional key). */
+  const credSecrets = (): Record<string, string> => {
+    const s: Record<string, string> = {};
+    if (cred.trim() && credMeta) s[credMeta.key] = cred.trim();
+    if (optionalKeyEnv && apiKey?.trim()) s[optionalKeyEnv] = apiKey.trim();
+    return s;
+  };
   const useOAuth = !!oauth && provider === "openai" && oauth.authMethod === "oauth";
   // The account currently shown in the cred field — may be one of the saved
   // accounts or a brand-new label being typed.
@@ -103,10 +125,7 @@ export function ProviderFields({
       const res = await apiFetch("/api/provider-models", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          provider,
-          secrets: cred.trim() && credMeta ? { [credMeta.key]: cred.trim() } : {},
-        }),
+        body: JSON.stringify({ provider, secrets: credSecrets() }),
       });
       const data = (await res.json()) as { ok: boolean; models?: string[]; error?: string };
       if (data.ok && data.models && data.models.length > 0) {
@@ -134,11 +153,7 @@ export function ProviderFields({
       const res = await apiFetch("/api/test-model", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          provider,
-          modelId: modelId.trim(),
-          secrets: cred.trim() && credMeta ? { [credMeta.key]: cred.trim() } : {},
-        }),
+        body: JSON.stringify({ provider, modelId: modelId.trim(), secrets: credSecrets() }),
       });
       const data = (await res.json()) as { ok: boolean; error?: string };
       onTest(
@@ -328,6 +343,21 @@ export function ProviderFields({
                 />
               </Field>
             ))}
+          {showOptionalKey && (
+            <Field label={`${info?.label ?? "Provider"} API key (optional)`}>
+              <input
+                type="password"
+                value={apiKey ?? ""}
+                onChange={(e) => {
+                  onApiKey?.(e.target.value);
+                  onTest({ status: "idle" });
+                  onModels([]);
+                }}
+                placeholder="API key — leave blank if the endpoint needs none"
+                style={input}
+              />
+            </Field>
+          )}
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <button
               style={ghost}
