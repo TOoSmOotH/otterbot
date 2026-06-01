@@ -2,11 +2,12 @@ import { useEffect, useState } from "react";
 import { apiFetch } from "../../lib/api";
 
 /**
- * Install + status panel for the coding CLIs, shown inside the `coding-cli`
- * capability. Lists each tool with install / login badges, installs missing
- * ones into the agent's workspace (one at a time), and surfaces the interactive
- * login command for tools that aren't logged in yet. Login itself stays manual
- * — run the shown command from the agent's terminal.
+ * Install + status panel for the coding CLIs. Installs and logins are SHARED
+ * across all agents, so this lives in global Settings and operates on the shared
+ * store: install (or update) each tool once, log in once. Lists each tool with
+ * install / login badges, installs missing ones (one at a time), and surfaces
+ * the interactive login command. Login itself stays manual — run the shown
+ * command from any agent's terminal; it logs in every agent.
  */
 
 type CodingTool = "claude" | "codex" | "gemini" | "opencode";
@@ -26,27 +27,26 @@ const TOOLS: { tool: CodingTool; label: string; loginCmd: string }[] = [
   { tool: "opencode", label: "OpenCode", loginCmd: "opencode auth login" },
 ];
 
-export function CodingCliSetup({ agentId }: { agentId: string }) {
+export function CodingCliSetup() {
   const [status, setStatus] = useState<StatusMap | null>(null);
   const [loading, setLoading] = useState(true);
   const [installing, setInstalling] = useState<CodingTool | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const loadStatus = async () => {
-    const res = await apiFetch(`/api/agents/${agentId}/coding-cli/status`);
+    const res = await apiFetch(`/api/coding-cli/status`);
     if (res.ok) setStatus((await res.json()) as StatusMap);
     setLoading(false);
   };
 
   useEffect(() => {
     void loadStatus();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [agentId]);
+  }, []);
 
   const install = async (tool: CodingTool) => {
     setInstalling(tool);
     setError(null);
-    const res = await apiFetch(`/api/agents/${agentId}/coding-cli/install`, {
+    const res = await apiFetch(`/api/coding-cli/install`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ tool }),
@@ -66,9 +66,9 @@ export function CodingCliSetup({ agentId }: { agentId: string }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 8 }}>
       <p style={hint}>
-        Install a tool to put its binary on this agent's PATH, then log it in once from
-        the agent's <strong>Terminal</strong> (the login flows are interactive). Both
-        steps are per-agent and persist in this agent's workspace.
+        Install a tool once to put its binary on PATH for <strong>all</strong> agents, then log
+        it in once from any agent's <strong>Terminal</strong> (the login flows are interactive) —
+        that login is shared by every agent too. Re-installing updates the tool to the latest.
       </p>
       {TOOLS.map(({ tool, label, loginCmd }) => {
         const s = status?.[tool] ?? { installed: false, loggedIn: false };
@@ -89,20 +89,28 @@ export function CodingCliSetup({ agentId }: { agentId: string }) {
               </div>
               {s.installed && !s.loggedIn && (
                 <span style={hint}>
-                  Log in from the Terminal: <code style={code}>{loginCmd}</code>
+                  Log in from any Terminal: <code style={code}>{loginCmd}</code>
                 </span>
               )}
             </div>
-            {!s.installed && (
-              <button
-                type="button"
-                onClick={() => void install(tool)}
-                disabled={installing !== null}
-                style={{ ...primary, opacity: installing !== null ? 0.6 : 1 }}
-              >
-                {installing === tool ? "Installing…" : "Install"}
-              </button>
-            )}
+            <button
+              type="button"
+              onClick={() => void install(tool)}
+              disabled={installing !== null}
+              style={
+                s.installed
+                  ? { ...ghost, opacity: installing !== null ? 0.6 : 1 }
+                  : { ...primary, opacity: installing !== null ? 0.6 : 1 }
+              }
+            >
+              {installing === tool
+                ? s.installed
+                  ? "Updating…"
+                  : "Installing…"
+                : s.installed
+                  ? "Update"
+                  : "Install"}
+            </button>
           </div>
         );
       })}
@@ -150,6 +158,17 @@ const primary: React.CSSProperties = {
   cursor: "pointer",
   fontSize: 13,
   fontWeight: 600,
+  whiteSpace: "nowrap",
+};
+
+const ghost: React.CSSProperties = {
+  background: "transparent",
+  color: "rgb(var(--fg))",
+  border: "1px solid rgb(var(--border))",
+  padding: "6px 14px",
+  borderRadius: 7,
+  cursor: "pointer",
+  fontSize: 13,
   whiteSpace: "nowrap",
 };
 

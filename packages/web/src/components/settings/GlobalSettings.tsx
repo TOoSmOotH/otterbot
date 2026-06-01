@@ -22,11 +22,12 @@ import { BuiltinEmbedderControls } from "../BuiltinEmbedderControls";
 import { CodeReferenceTab } from "./CodeReferenceTab";
 import { CredentialsTab } from "./CredentialsTab";
 import { ConnectionsTab } from "./ConnectionsTab";
+import { CodingCliSetup } from "../agents/CodingCliSetup";
 import { uniqueModelId } from "../../lib/model-id";
 
 type OpenAiAuthStatus = { connected: boolean; accountId: string | null };
 
-const TABS = ["Providers", "Models", "Code Reference", "Credentials", "Connections", "Appearance", "Account"] as const;
+const TABS = ["Providers", "Models", "Code Reference", "Coding CLIs", "Credentials", "Connections", "Appearance", "Account"] as const;
 type SettingsTab = (typeof TABS)[number];
 
 type PatchFn = (p: Partial<GlobalSettingsShape>) => void;
@@ -107,6 +108,16 @@ export function GlobalSettings() {
         )}
         {tab === "Models" && <ModelsTab draft={draft} patch={patch} providers={providers} />}
         {tab === "Code Reference" && <CodeReferenceTab />}
+        {tab === "Coding CLIs" && (
+          <section style={section}>
+            <h2 style={h2}>Coding CLIs</h2>
+            <p style={hint}>
+              Install and log in to the command-line coding agents (Claude Code, Codex, Gemini
+              CLI, OpenCode) once — every agent shares the same install and login.
+            </p>
+            <CodingCliSetup />
+          </section>
+        )}
         {tab === "Credentials" && <CredentialsTab />}
         {tab === "Connections" && <ConnectionsTab />}
         {tab === "Appearance" && <AppearanceTab draft={draft} patch={patch} />}

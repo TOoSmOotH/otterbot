@@ -2,6 +2,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { getConfig } from "../config.js";
 
 /**
  * The "local" shell backend for an agent's `shell_exec` tool.
@@ -82,14 +83,24 @@ function sandboxIdFiles(): { passwd: string; group: string } | null {
   return idFiles;
 }
 
-/** Environment for the confined command — explicit, never the server's env. */
-function buildEnv(home: string, secrets: Map<string, string>): Record<string, string> {
+/**
+ * Environment for the confined command — explicit, never the server's env.
+ * `toolsBin`, when set, is the shared coding-CLI bin dir (the tmp-overlay mount);
+ * it sits after the per-agent workspace bins so a workspace-local install still
+ * takes precedence over the shared one.
+ */
+function buildEnv(
+  home: string,
+  secrets: Map<string, string>,
+  toolsBin?: string
+): Record<string, string> {
   const env: Record<string, string> = {
     HOME: home,
     PATH: [
       `${home}/bin`,
       `${home}/.local/bin`,
       `${home}/.npm-global/bin`,
+      ...(toolsBin ? [toolsBin] : []),
       "/usr/local/sbin",
       "/usr/local/bin",
       "/usr/sbin",
@@ -108,6 +119,74 @@ function buildEnv(home: string, secrets: Map<string, string>): Record<string, st
     if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) env[key] = value;
   }
   return env;
+}
+
+// --- Shared coding-CLI tools + credentials ---------------------------------
+//
+// The coding CLIs (claude/codex/gemini/opencode) are installed ONCE into a
+// shared host dir and their logins live in ONE shared store, so the user
+// installs and logs in a single time for all agents — not per agent. Each
+// sandbox gets:
+//   - the shared tools dir mounted at `/opt/otter-tools` via a `--tmp-overlay`,
+//     so binaries are read from the shared base while any writes (e.g. an
+//     in-session self-update) go to a throwaway per-mount tmpfs — no agent can
+//     poison the shared binaries or another agent's copy.
+//   - each tool's credential dir bind-mounted (writable) from the shared store
+//     into the sandbox HOME, so a single login authenticates every agent and
+//     OAuth token refresh writes back to the shared store.
+
+/** Mount point of the shared coding-CLI tools inside the sandbox. A top-level
+ *  path (not under the `--ro-bind`-mounted `/opt`) so bwrap can create it. */
+export const CODING_TOOLS_MOUNT = "/otter-tools";
+
+/** Per-tool credential dirs, shared across agents. `home` is relative to HOME. */
+const SHARED_AUTH_DIRS: { sub: string; home: string }[] = [
+  { sub: "claude", home: ".claude" },
+  { sub: "codex", home: ".codex" },
+  { sub: "gemini", home: ".gemini" },
+  { sub: "opencode", home: ".local/share/opencode" },
+];
+
+/** Host dir holding the one shared install of the coding CLIs. */
+export function sharedCodingToolsDir(): string {
+  return join(getConfig().dataDir, "coding-tools");
+}
+
+/** Host dir holding the one shared set of coding-CLI logins. */
+export function sharedCodingAuthDir(): string {
+  return join(getConfig().dataDir, "coding-cli-auth");
+}
+
+interface CodingShare {
+  toolsSrc: string;
+  toolsBin: string;
+  authBinds: { src: string; dest: string }[];
+}
+
+/**
+ * Shared tools + credential mounts for an agent's sandbox, or null when no
+ * shared install exists yet (so ordinary sandboxes are unchanged until the user
+ * installs the coding CLIs). Best-effort ensures the host dirs + workspace
+ * mountpoints exist so the binds succeed.
+ */
+function codingShareFor(workspaceDir: string): CodingShare | null {
+  const toolsSrc = sharedCodingToolsDir();
+  if (!existsSync(toolsSrc)) return null;
+  const authRoot = sharedCodingAuthDir();
+  const authBinds = SHARED_AUTH_DIRS.map(({ sub, home }) => ({
+    src: join(authRoot, sub),
+    dest: `/workspace/${home}`,
+  }));
+  try {
+    for (const { sub, home } of SHARED_AUTH_DIRS) {
+      mkdirSync(join(authRoot, sub), { recursive: true });
+      // Pre-create the workspace mountpoint so bwrap can bind the store over it.
+      mkdirSync(join(workspaceDir, home), { recursive: true });
+    }
+  } catch {
+    /* best-effort; a failed bind below will surface any real problem */
+  }
+  return { toolsSrc, toolsBin: `${CODING_TOOLS_MOUNT}/bin`, authBinds };
 }
 
 export interface SpawnPlan {
@@ -168,7 +247,8 @@ function bwrapPlan(
   innerArgv: string[],
   opts: SandboxOpts
 ): SpawnPlan {
-  const env = buildEnv("/workspace", secrets);
+  const share = codingShareFor(workspaceDir);
+  const env = buildEnv("/workspace", secrets, share?.toolsBin);
   const nodeDir = dirname(process.execPath);
   const ids = sandboxIdFiles();
   const args = [
@@ -206,6 +286,13 @@ function bwrapPlan(
     "--tmpfs", "/tmp",
     "--bind", workspaceDir, "/workspace",
   ];
+  // Shared coding CLIs: tools via a tmp-overlay (read shared base, writes land
+  // in a throwaway tmpfs) + each tool's shared login bound writable into HOME.
+  // Must come after the /workspace bind since the auth binds nest under it.
+  if (share) {
+    args.push("--overlay-src", share.toolsSrc, "--tmp-overlay", CODING_TOOLS_MOUNT);
+    for (const b of share.authBinds) args.push("--bind", b.src, b.dest);
+  }
   // The shared project tree, when the agent belongs to a project. Bound
   // writable so collaborating agents edit one codebase; HOME stays /workspace.
   if (opts.projectRepoPath) {
@@ -250,10 +337,15 @@ function sandboxExecPlan(
     '  (literal "/dev/null")',
     '  (regex #"^/dev/tty"))',
   ].join("\n");
+  // macOS has no overlay/bind remapping: surface the shared tools on PATH by
+  // their real host path (reads are allowed by default). Shared-login binds are
+  // bwrap-only, so on macOS each agent still logs in under its own workspace.
+  const toolsSrc = sharedCodingToolsDir();
+  const toolsBin = existsSync(toolsSrc) ? join(toolsSrc, "bin") : undefined;
   return {
     file: "/usr/bin/sandbox-exec",
     args: ["-p", profile, ...innerArgv],
-    env: buildEnv(workspaceDir, secrets),
+    env: buildEnv(workspaceDir, secrets, toolsBin),
     // sandbox-exec does not remap paths, so the project's real host path is the
     // working directory when starting in the shared tree.
     cwd: opts.startIn === "project" && opts.projectRepoPath ? opts.projectRepoPath : workspaceDir,

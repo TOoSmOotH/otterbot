@@ -589,30 +589,29 @@ edit code. Each runs inside your sandbox, authenticated by **your own
 subscription**, and (if you belong to a project) on that project's shared code
 tree at \`/project\`, which you share live with the other agents on the project.
 
-## First-time setup: install, then log in once
+## First-time setup: install + log in ONCE, for all agents
 
-Each tool must be **installed** into your workspace and **logged in** before you
-can run it. Both are one-time, per-agent steps.
+Installs and logins are **shared across every agent** — you set each tool up a
+single time, not per agent.
 
-**Install** — either use the Coding CLIs panel in Agent Studio (Install button
-per tool) or run \`coding_cli_install\` yourself. Installing only puts the binary
-on your PATH; it does not log you in.
+**Install** — once per tool, ever. Use the Coding CLIs panel in Settings
+(Install button) or run \`coding_cli_install\`. Installing only puts the binary on
+PATH; it does not log you in. Re-running it updates the tool to the latest.
 
-**Log in** — each tool stores its login under your workspace HOME, so it must be
-logged in from **your terminal** (the login flows are interactive):
+**Log in** — once per tool, ever. The login flows are interactive, so run them
+from a terminal:
 
-1. Open this agent's terminal (the Terminal button in Agent Studio, or SSH to
-   the host and \`cd\` into this agent's \`workspace\`).
+1. Open any agent's terminal (the Terminal button in Agent Studio).
 2. Run the tool's login flow and complete it in the browser/device prompt:
    - Claude Code: run \`claude\` and follow the login prompt.
    - Codex: run \`codex login\`.
    - Gemini CLI: run \`gemini\` and choose Google login.
    - OpenCode: run \`opencode auth login\`.
-3. The credentials persist in this agent's workspace and stay private to it.
+3. The login is saved to the shared store, so **every agent is now logged in**.
 
 If a run fails with "command not found", install the tool first. If it fails with
-an authentication error, it isn't logged in yet — complete the step above. Use
-\`coding_cli_status\` to see what's installed and logged in.
+an authentication error, log in once as above. Use \`coding_cli_status\` to see
+what's installed and logged in.
 
 ## Tools
 

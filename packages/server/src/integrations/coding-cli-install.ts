@@ -1,68 +1,60 @@
-import { runAgentShell } from "./shell.js";
+import { spawn, spawnSync } from "node:child_process";
+import { existsSync, mkdirSync } from "node:fs";
+import { join } from "node:path";
+import { sharedCodingAuthDir, sharedCodingToolsDir } from "./shell.js";
 import { CODING_TOOLS, withCodingLock, type CodingTool } from "./coding-cli.js";
 
 /**
  * Install + detect the coding CLIs (Claude Code, Codex, Gemini CLI, OpenCode)
- * inside an agent's own sandbox. Everything runs through `runAgentShell`, the
- * same confined shell `shell_exec` uses, so installs land in the agent's
- * workspace npm prefix (`$HOME/.npm-global`, already first on PATH — see
- * `shell.ts`) and persist per agent alongside that tool's per-agent login.
- *
- * We deliberately install per-agent rather than host-global: the sandbox makes
- * `npm i -g` land in the workspace with zero extra plumbing, and each tool's
- * credentials already live under the agent's `/workspace` HOME, so the binary
- * and its login stay co-located and isolated.
+ * ONCE for all agents. Binaries install into a single shared host dir
+ * (`<data>/coding-tools`, an npm prefix) that every sandbox mounts read-only via
+ * a tmp-overlay; logins live in a single shared store (`<data>/coding-cli-auth`)
+ * bound into every sandbox HOME. So the user installs and logs in a single time,
+ * not per agent. Install + detection run host-side (these are shared infra ops,
+ * not per-agent sandboxed work); see `shell.ts` for how the mounts are wired.
  */
 
 export interface CodingCliSpec {
   /** Human-readable name for the UI. */
   label: string;
-  /** Binary name resolved on PATH inside the sandbox. */
+  /** Binary name (under the shared tools `bin/`). */
   bin: string;
-  /**
-   * Command that installs the tool into the workspace npm prefix. Pinned to
-   * `@latest` so a (re)install always pulls the newest release — the tools
-   * auto-update themselves thereafter.
-   */
-  installCmd: string;
-  /** The (interactive) login the user runs once from the agent's terminal. */
+  /** npm package; installed as `<pkg>@latest` so installs pull the newest. */
+  pkg: string;
+  /** The (interactive) login the user runs once from an agent's terminal. */
   loginCmd: string;
-  /**
-   * `sh` test that is true when this tool has a logged-in credential under the
-   * agent's HOME. Best-effort: presence of the credential file, not a live
-   * auth check. Paths are the defaults used by each tool's current release.
-   */
-  authProbe: string;
+  /** Login credential file, relative to the shared auth store (best-effort). */
+  authFile: string;
 }
 
 export const CODING_CLI_SPECS: Record<CodingTool, CodingCliSpec> = {
   claude: {
     label: "Claude Code",
     bin: "claude",
-    installCmd: "npm i -g @anthropic-ai/claude-code@latest",
+    pkg: "@anthropic-ai/claude-code",
     loginCmd: "claude",
-    authProbe: '[ -f "$HOME/.claude/.credentials.json" ] || [ -f "$HOME/.claude.json" ]',
+    authFile: "claude/.credentials.json",
   },
   codex: {
     label: "Codex",
     bin: "codex",
-    installCmd: "npm i -g @openai/codex@latest",
+    pkg: "@openai/codex",
     loginCmd: "codex login",
-    authProbe: '[ -f "$HOME/.codex/auth.json" ]',
+    authFile: "codex/auth.json",
   },
   gemini: {
     label: "Gemini CLI",
     bin: "gemini",
-    installCmd: "npm i -g @google/gemini-cli@latest",
+    pkg: "@google/gemini-cli",
     loginCmd: "gemini",
-    authProbe: '[ -f "$HOME/.gemini/oauth_creds.json" ]',
+    authFile: "gemini/oauth_creds.json",
   },
   opencode: {
     label: "OpenCode",
     bin: "opencode",
-    installCmd: "npm i -g opencode-ai@latest",
+    pkg: "opencode-ai",
     loginCmd: "opencode auth login",
-    authProbe: '[ -f "$HOME/.local/share/opencode/auth.json" ]',
+    authFile: "opencode/auth.json",
   },
 };
 
@@ -70,93 +62,78 @@ export interface CodingCliStatus {
   installed: boolean;
   /** First line of `<bin> --version`, when installed. */
   version?: string;
-  /** Whether a logged-in credential file was found (best-effort). */
+  /** Whether a logged-in credential file was found in the shared store. */
   loggedIn: boolean;
 }
 
-/** Build the single shell script that probes all four tools at once. */
-export function buildProbeScript(): string {
-  const blocks = CODING_TOOLS.map((tool) => {
-    const spec = CODING_CLI_SPECS[tool];
-    // Tab-delimited line per tool: name, installed(0|1), version, loggedIn(0|1).
-    return [
-      `if command -v ${spec.bin} >/dev/null 2>&1; then`,
-      `  inst=1; ver=$(${spec.bin} --version 2>/dev/null | head -n1 | tr -d '\\t')`,
-      `else inst=0; ver=""; fi`,
-      `if ${spec.authProbe}; then li=1; else li=0; fi`,
-      `printf '%s\\t%s\\t%s\\t%s\\n' '${tool}' "$inst" "$ver" "$li"`,
-    ].join("\n");
-  });
-  return blocks.join("\n");
-}
-
-/** Parse the probe script's tab-delimited output into a per-tool status map. */
-export function parseProbeOutput(stdout: string): Record<CodingTool, CodingCliStatus> {
+/** Probe the shared install + shared login store for every tool. Host-side. */
+export function checkSharedCodingClis(): Record<CodingTool, CodingCliStatus> {
+  const toolsBin = join(sharedCodingToolsDir(), "bin");
+  const authRoot = sharedCodingAuthDir();
   const status = {} as Record<CodingTool, CodingCliStatus>;
   for (const tool of CODING_TOOLS) {
-    status[tool] = { installed: false, loggedIn: false };
-  }
-  for (const line of stdout.split("\n")) {
-    const parts = line.split("\t");
-    if (parts.length < 4) continue;
-    const [tool, inst, ver, li] = parts;
-    if (!(CODING_TOOLS as string[]).includes(tool)) continue;
-    const t = tool as CodingTool;
-    const installed = inst === "1";
-    status[t] = {
+    const spec = CODING_CLI_SPECS[tool];
+    const binPath = join(toolsBin, spec.bin);
+    const installed = existsSync(binPath);
+    let version: string | undefined;
+    if (installed) {
+      try {
+        const r = spawnSync(binPath, ["--version"], { timeout: 10_000, encoding: "utf8" });
+        version = (r.stdout || "").split("\n")[0]?.trim() || undefined;
+      } catch {
+        /* version is best-effort */
+      }
+    }
+    status[tool] = {
       installed,
-      ...(installed && ver.trim() ? { version: ver.trim() } : {}),
-      loggedIn: li === "1",
+      ...(version ? { version } : {}),
+      loggedIn: existsSync(join(authRoot, spec.authFile)),
     };
   }
   return status;
 }
 
-/** Probe which coding CLIs are installed + logged in for this agent. */
-export async function checkCodingClis(
-  workspaceDir: string,
-  secrets: Map<string, string>
-): Promise<Record<CodingTool, CodingCliStatus>> {
-  const r = await runAgentShell(workspaceDir, secrets, buildProbeScript());
-  if (r.error || !r.ok) {
-    // No sandbox / probe failed — report everything as not-installed rather
-    // than throwing, so the UI and tool degrade gracefully.
-    const empty = {} as Record<CodingTool, CodingCliStatus>;
-    for (const tool of CODING_TOOLS) empty[tool] = { installed: false, loggedIn: false };
-    return empty;
-  }
-  return parseProbeOutput(r.stdout);
-}
-
 export interface CodingCliInstallResult {
   ok: boolean;
-  /** Trimmed install output (stdout+stderr tail), for display. */
+  /** Trimmed install output, for display. */
   output: string;
   error?: string;
 }
 
 /**
- * Install one coding CLI into the agent's workspace. Serialized per agent so two
- * concurrent `npm i -g` runs can't corrupt the shared workspace npm prefix.
+ * Install (or update to latest) one coding CLI into the shared tools dir, for
+ * every agent at once. Serialized so two `npm i -g` runs can't corrupt the
+ * shared prefix.
  */
-export async function installCodingCli(
-  agentId: string,
-  workspaceDir: string,
-  secrets: Map<string, string>,
-  tool: CodingTool
-): Promise<CodingCliInstallResult> {
+export function installSharedCodingCli(tool: CodingTool): Promise<CodingCliInstallResult> {
   const spec = CODING_CLI_SPECS[tool];
-  return withCodingLock(`install:${agentId}`, async () => {
-    const r = await runAgentShell(workspaceDir, secrets, spec.installCmd);
-    const output = [r.stdout, r.stderr].filter(Boolean).join("\n").trim();
-    if (r.error) return { ok: false, output, error: r.error };
-    if (!r.ok) {
-      return {
-        ok: false,
-        output,
-        error: `\`${spec.installCmd}\` exited with code ${r.exitCode ?? "?"}`,
-      };
+  const prefix = sharedCodingToolsDir();
+  return withCodingLock("shared-coding-install", async () => {
+    try {
+      mkdirSync(prefix, { recursive: true });
+    } catch {
+      /* the install below will surface a real problem */
     }
-    return { ok: true, output };
+    return new Promise<CodingCliInstallResult>((resolve) => {
+      const child = spawn("npm", ["install", "-g", `${spec.pkg}@latest`], {
+        env: { ...process.env, npm_config_prefix: prefix },
+      });
+      let out = "";
+      const cap = (c: Buffer) => {
+        if (out.length < 1_000_000) out += c.toString("utf8");
+      };
+      child.stdout?.on("data", cap);
+      child.stderr?.on("data", cap);
+      child.on("error", (err) =>
+        resolve({ ok: false, output: out.trim(), error: `failed to run npm: ${err.message}` })
+      );
+      child.on("close", (code) =>
+        resolve(
+          code === 0
+            ? { ok: true, output: out.trim() }
+            : { ok: false, output: out.trim(), error: `npm install exited with code ${code ?? "?"}` }
+        )
+      );
+    });
   });
 }
