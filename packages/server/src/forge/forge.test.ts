@@ -164,6 +164,37 @@ describe("GitHubForge", () => {
   });
 });
 
+describe("GitHubForge triage methods", () => {
+  it("listOpenIssues drops PRs and maps assignees", async () => {
+    const fetchFn = (async () =>
+      new Response(
+        JSON.stringify([
+          { number: 1, title: "bug", body: "b", user: { login: "alice" }, html_url: "h", assignees: [] },
+          { number: 2, title: "pr", body: "", user: { login: "bob" }, html_url: "h", pull_request: {}, assignees: [] },
+          { number: 3, title: "feat", body: "", user: { login: "carol" }, html_url: "h", assignees: [{ login: "bot" }] },
+        ]),
+        { status: 200 }
+      )) as unknown as typeof fetch;
+    const forge = new GitHubForge(ghAccount, fetchFn);
+    const issues = await forge.listOpenIssues("o/n");
+    expect(issues.map((i) => i.number)).toEqual([1, 3]);
+    expect(issues[1].assignees).toEqual(["bot"]);
+  });
+
+  it("getUserPermission normalizes and returns none on error", async () => {
+    let call = 0;
+    const fetchFn = (async () => {
+      call += 1;
+      return call === 1
+        ? new Response(JSON.stringify({ permission: "write" }), { status: 200 })
+        : new Response("nope", { status: 404 });
+    }) as unknown as typeof fetch;
+    const forge = new GitHubForge(ghAccount, fetchFn);
+    expect(await forge.getUserPermission("o/n", "alice")).toBe("write");
+    expect(await forge.getUserPermission("o/n", "ghost")).toBe("none");
+  });
+});
+
 describe("GiteaForge", () => {
   it("uses /api/v1 + token auth and parses the commit status", async () => {
     let seenAuth = "";

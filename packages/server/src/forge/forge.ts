@@ -43,7 +43,16 @@ export interface ForgeIssue {
   title: string;
   body: string;
   author: string;
+  /** Logins of users the issue is assigned to (empty = unassigned). */
+  assignees: string[];
   htmlUrl: string;
+}
+
+export interface ForgeComment {
+  id: number;
+  author: string;
+  body: string;
+  createdAt: string;
 }
 
 export interface ForgePullRequest {
@@ -94,7 +103,14 @@ export interface Forge {
 
   /** Open issues assigned to the account's bot user. */
   listAssignedIssues(repo: string): Promise<ForgeIssue[]>;
-  commentIssue(repo: string, number: number, body: string): Promise<void>;
+  /** All open issues (not PRs), with assignees, for triage. */
+  listOpenIssues(repo: string): Promise<ForgeIssue[]>;
+  /** Comments on an issue, oldest first. */
+  listIssueComments(repo: string, number: number): Promise<ForgeComment[]>;
+  /** A user's permission on the repo, normalized. "none" if not a collaborator. */
+  getUserPermission(repo: string, username: string): Promise<"admin" | "write" | "read" | "none">;
+  /** Post a comment; resolves to the new comment's id. */
+  commentIssue(repo: string, number: number, body: string): Promise<number>;
 }
 
 /** Split "owner/name" into parts; throws if malformed. */

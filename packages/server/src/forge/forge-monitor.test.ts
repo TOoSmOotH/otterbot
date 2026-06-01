@@ -27,7 +27,10 @@ function fakeForge(over: Partial<Forge>): Forge {
     listReviews: async () => [],
     checkState: async () => "none" as CheckState,
     listAssignedIssues: async () => [],
-    commentIssue: async () => {},
+    listOpenIssues: async () => [],
+    listIssueComments: async () => [],
+    getUserPermission: async () => "none",
+    commentIssue: async () => 0,
     ...over,
   };
 }
@@ -37,6 +40,7 @@ const issue = (number: number): ForgeIssue => ({
   title: `issue ${number}`,
   body: "body",
   author: "u",
+  assignees: [],
   htmlUrl: "h",
 });
 
@@ -60,6 +64,7 @@ describe("ForgeMonitor.pollIssues", () => {
       listAssignedIssues: async () => [issue(5)],
       commentIssue: async () => {
         commented += 1;
+        return 0;
       },
     });
     const handled = new Set<number>();

@@ -3,6 +3,7 @@ import {
   type FetchFn,
   type Forge,
   type ForgeAccount,
+  type ForgeComment,
   type ForgeIssue,
   type ForgePullRequest,
   type ForgeRepo,
@@ -172,18 +173,51 @@ export class GitHubForge implements Forge {
     const { owner, name } = splitRepo(repo);
     const d = (await this.api(
       `/repos/${owner}/${name}/issues?state=open&assignee=${encodeURIComponent(this.account.username)}&per_page=30`
-    )) as Array<{ number: number; title: string; body: string | null; user: { login: string }; html_url: string; pull_request?: unknown }>;
-    // The issues endpoint also returns PRs; drop those.
+    )) as Array<{ number: number; title: string; body: string | null; user: { login: string }; html_url: string; pull_request?: unknown; assignees?: Array<{ login: string }> | null }>;
     return d
       .filter((i) => !i.pull_request)
-      .map((i) => ({ number: i.number, title: i.title, body: i.body ?? "", author: i.user?.login ?? "", htmlUrl: i.html_url }));
+      .map((i) => ({ number: i.number, title: i.title, body: i.body ?? "", author: i.user?.login ?? "", assignees: (i.assignees ?? []).map((a) => a.login), htmlUrl: i.html_url }));
   }
 
-  async commentIssue(repo: string, number: number, body: string): Promise<void> {
+  async listOpenIssues(repo: string): Promise<ForgeIssue[]> {
     const { owner, name } = splitRepo(repo);
-    await this.api(`/repos/${owner}/${name}/issues/${number}/comments`, {
+    const d = (await this.api(
+      `/repos/${owner}/${name}/issues?state=open&per_page=30`
+    )) as Array<{ number: number; title: string; body: string | null; user: { login: string }; html_url: string; pull_request?: unknown; assignees?: Array<{ login: string }> | null }>;
+    return d
+      .filter((i) => !i.pull_request)
+      .map((i) => ({ number: i.number, title: i.title, body: i.body ?? "", author: i.user?.login ?? "", assignees: (i.assignees ?? []).map((a) => a.login), htmlUrl: i.html_url }));
+  }
+
+  async listIssueComments(repo: string, number: number): Promise<ForgeComment[]> {
+    const { owner, name } = splitRepo(repo);
+    const d = (await this.api(
+      `/repos/${owner}/${name}/issues/${number}/comments?per_page=100`
+    )) as Array<{ id: number; user: { login: string }; body: string | null; created_at: string }>;
+    return d.map((c) => ({ id: c.id, author: c.user?.login ?? "", body: c.body ?? "", createdAt: c.created_at }));
+  }
+
+  async getUserPermission(repo: string, username: string): Promise<"admin" | "write" | "read" | "none"> {
+    const { owner, name } = splitRepo(repo);
+    try {
+      const d = (await this.api(
+        `/repos/${owner}/${name}/collaborators/${encodeURIComponent(username)}/permission`
+      )) as { permission?: string };
+      const p = d.permission ?? "none";
+      // GitHub's `permission` field already collapses maintain→write, triage→read.
+      if (p === "admin" || p === "write" || p === "read") return p;
+      return "none";
+    } catch {
+      return "none"; // 403/404 → not a collaborator
+    }
+  }
+
+  async commentIssue(repo: string, number: number, body: string): Promise<number> {
+    const { owner, name } = splitRepo(repo);
+    const d = (await this.api(`/repos/${owner}/${name}/issues/${number}/comments`, {
       method: "POST",
       body: JSON.stringify({ body }),
-    });
+    })) as { id: number };
+    return d?.id ?? 0;
   }
 }
