@@ -60,6 +60,7 @@ export function ProviderFields({
   oauth,
   apiKey,
   onApiKey,
+  nameAccount,
 }: {
   kind: "chat" | "embedding";
   providers: ProviderInfo[];
@@ -89,6 +90,12 @@ export function ProviderFields({
    */
   apiKey?: string;
   onApiKey?: (v: string) => void;
+  /**
+   * First-run/setup mode: render an editable account-name input (seeded with a
+   * provider-specific name) instead of the saved-accounts dropdown, so the user
+   * names this provider's credential set rather than inheriting "default".
+   */
+  nameAccount?: boolean;
 }) {
   const info = providers.find((p) => p.id === provider);
   const credMeta = info ? providerCredField(info) : null;
@@ -186,7 +193,21 @@ export function ProviderFields({
         </div>
       </Field>
 
-      {info && info.id !== "builtin" && (
+      {info && info.id !== "builtin" && nameAccount && (
+        <Field label="Account name">
+          <input
+            value={account}
+            onChange={(e) => onAccount(e.target.value)}
+            placeholder={`e.g. ${info.id}`}
+            style={input}
+          />
+          <span style={{ color: "rgb(var(--muted))", fontSize: 11 }}>
+            A label for this provider's credentials — you can add more accounts later.
+          </span>
+        </Field>
+      )}
+
+      {info && info.id !== "builtin" && !nameAccount && (
         <Field label="Account">
           <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
             <select

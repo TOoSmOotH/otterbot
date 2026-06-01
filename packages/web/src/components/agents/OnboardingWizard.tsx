@@ -59,7 +59,7 @@ export function OnboardingWizard() {
 
   // Chat model slot.
   const [chatProvider, setChatProvider] = useState<ProviderId>("lmstudio");
-  const [chatAccount, setChatAccount] = useState("default");
+  const [chatAccount, setChatAccount] = useState("lmstudio");
   const [chatModelId, setChatModelId] = useState("local-model");
   const [chatCred, setChatCred] = useState("http://localhost:1234/v1");
   /** Optional API key for base-URL providers (OpenAI-compatible / secured local). */
@@ -71,7 +71,7 @@ export function OnboardingWizard() {
   // Embedding model slot — may use a different provider than chat. Defaults to
   // the zero-setup built-in CPU embedder.
   const [embProvider, setEmbProvider] = useState<ProviderId>("builtin");
-  const [embAccount, setEmbAccount] = useState("default");
+  const [embAccount, setEmbAccount] = useState("builtin");
   const [embModelId, setEmbModelId] = useState(BUILTIN_EMBED_MODEL);
   const [embCred, setEmbCred] = useState("");
   const [embApiKey, setEmbApiKey] = useState("");
@@ -101,7 +101,9 @@ export function OnboardingWizard() {
     setOpenAiAuth("api-key");
     setChatTest({ status: "idle" });
     setChatModels([]);
-    setChatAccount(accountsFor(p)[0]?.account ?? "default");
+    // Seed a provider-specific account name the user can rename, instead of the
+    // generic synthesized "default".
+    setChatAccount(p);
     setChatCred(credSeedFor(p));
     setChatApiKey("");
     setChatModelId(p === "anthropic" ? "claude-opus-4-7" : p === "openai" ? "gpt-4o" : "local-model");
@@ -112,7 +114,7 @@ export function OnboardingWizard() {
     setEmbSkipped(false);
     setEmbTest({ status: "idle" });
     setEmbModels([]);
-    setEmbAccount(accountsFor(p)[0]?.account ?? "default");
+    setEmbAccount(p);
     // Reuse the chat credential when both slots share a (non-OAuth) provider.
     setEmbCred(p === chatProvider && !useChatOAuth ? chatCred : credSeedFor(p));
     setEmbApiKey(p === chatProvider && !useChatOAuth ? chatApiKey : "");
@@ -239,8 +241,10 @@ export function OnboardingWizard() {
   const finish = async () => {
     setSaving(true);
     try {
-      const chatAcct = chatAccount || "default";
-      const embAcct = embAccount || "default";
+      // Account names are user-set and provider-specific; fall back to the
+      // provider id rather than the generic "default".
+      const chatAcct = chatAccount.trim() || chatProvider;
+      const embAcct = embAccount.trim() || embProvider;
 
       // Provider credentials are saved to Global Settings — the single source
       // of truth — so every agent reuses them. The built-in embedder has no
@@ -281,6 +285,15 @@ export function OnboardingWizard() {
           ? { apiKey: key.trim() }
           : {};
       };
+      // Start the chosen providers' account lists fresh so the synthesized
+      // "default" account isn't persisted alongside the user-named one.
+      for (const p of new Set<ProviderId>([
+        chatProvider,
+        ...(useChatOAuth ? (["openai"] as ProviderId[]) : []),
+        ...(embSkipped ? [] : [embProvider]),
+      ])) {
+        if (p !== "builtin") providerPatch[p] = [];
+      }
       if (!useChatOAuth)
         upsertAccount(chatProvider, chatAcct, chatCred, optionalKeyExtra(chatProvider, chatApiKey));
       if (!embSkipped)
@@ -458,6 +471,7 @@ export function OnboardingWizard() {
               onModels={setChatModels}
               modelLabel="Chat model"
               oauth={oauthBundle}
+              nameAccount
             />
             <Buttons>
               <button style={ghost} onClick={() => setStep(0)}>
@@ -502,6 +516,7 @@ export function OnboardingWizard() {
               models={embModels}
               onModels={setEmbModels}
               modelLabel="Embedding model"
+              nameAccount
             />
             <Buttons>
               <button style={ghost} onClick={() => setStep(1)}>
