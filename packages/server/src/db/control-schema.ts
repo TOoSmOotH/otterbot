@@ -204,6 +204,8 @@ export const projects = sqliteTable("projects", {
   baseBranch: text("base_branch"),
   /** Poll the forge for assigned issues to feed the pipeline. */
   monitorIssues: integer("monitor_issues", { mode: "boolean" }).notNull().default(false),
+  /** Poll the forge for new unassigned issues and have the PM post/refine a plan. */
+  triageIssues: integer("triage_issues", { mode: "boolean" }).notNull().default(false),
   /** Run remote-host (Proxmox/SSH VM) end-to-end tests in the tester stage. */
   remoteE2e: integer("remote_e2e", { mode: "boolean" }).notNull().default(false),
   /** Standing rules injected into every project member's system prompt. */
@@ -283,6 +285,25 @@ export const pipelineStageResults = sqliteTable("pipeline_stage_results", {
   report: text("report").notNull().default(""),
   attempt: integer("attempt").notNull().default(0),
   createdAt: text("created_at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+});
+
+/**
+ * Per-issue triage state for a forge-backed project. One row per (project, issue):
+ * the current candidate `plan` the PM posted, and `lastCommentId` — the highest
+ * forge comment id already processed, so the poller only reacts to newer comments.
+ */
+export const issueTriage = sqliteTable("issue_triage", {
+  id: text("id").primaryKey(),
+  projectId: text("project_id").notNull(),
+  issueNumber: integer("issue_number").notNull(),
+  plan: text("plan").notNull().default(""),
+  lastCommentId: integer("last_comment_id").notNull().default(0),
+  createdAt: text("created_at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+  updatedAt: text("updated_at")
     .notNull()
     .$defaultFn(() => new Date().toISOString()),
 });

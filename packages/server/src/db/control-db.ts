@@ -184,6 +184,16 @@ function ensureControlTables(sqlite: Database.Database) {
       created_at TEXT NOT NULL
     )`,
     `CREATE INDEX IF NOT EXISTS idx_pipeline_stage_run ON pipeline_stage_results(run_id, id)`,
+    `CREATE TABLE IF NOT EXISTS issue_triage (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      issue_number INTEGER NOT NULL,
+      plan TEXT NOT NULL DEFAULT '',
+      last_comment_id INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    )`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS idx_issue_triage_issue ON issue_triage(project_id, issue_number)`,
   ];
   for (const s of stmts) sqlite.exec(s);
 
@@ -214,6 +224,7 @@ function ensureControlTables(sqlite: Database.Database) {
   addProjectCol("forge_ssh_url", "forge_ssh_url TEXT");
   addProjectCol("base_branch", "base_branch TEXT");
   addProjectCol("monitor_issues", "monitor_issues INTEGER NOT NULL DEFAULT 0");
+  addProjectCol("triage_issues", "triage_issues INTEGER NOT NULL DEFAULT 0");
   addProjectCol("remote_e2e", "remote_e2e INTEGER NOT NULL DEFAULT 0");
   addProjectCol("rules", "rules TEXT");
 
