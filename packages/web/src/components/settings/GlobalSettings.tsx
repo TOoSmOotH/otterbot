@@ -32,7 +32,7 @@ type SettingsTab = (typeof TABS)[number];
 
 type PatchFn = (p: Partial<GlobalSettingsShape>) => void;
 
-export function GlobalSettings() {
+export function GlobalSettings({ initialTab }: { initialTab?: string } = {}) {
   const savedSettings = useGlobalSettingsStore((s) => s.settings);
   const load = useGlobalSettingsStore((s) => s.load);
   const saveSettings = useGlobalSettingsStore((s) => s.save);
@@ -40,7 +40,9 @@ export function GlobalSettings() {
   const providers = useProvidersStore((s) => s.providers);
   const loadProviders = useProvidersStore((s) => s.load);
   const [draft, setDraft] = useState<GlobalSettingsShape>(savedSettings);
-  const [tab, setTab] = useState<SettingsTab>("Providers");
+  const [tab, setTab] = useState<SettingsTab>(
+    TABS.includes(initialTab as SettingsTab) ? (initialTab as SettingsTab) : "Providers"
+  );
   const [status, setStatus] = useState("");
   // Passive "a coding CLI has an update" indicator (powered by the daily check).
   const [codingUpdate, setCodingUpdate] = useState(false);

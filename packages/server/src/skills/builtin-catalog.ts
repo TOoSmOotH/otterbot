@@ -594,9 +594,9 @@ tree at \`/project\`, which you share live with the other agents on the project.
 Installs and logins are **shared across every agent** — you set each tool up a
 single time, not per agent.
 
-**Install** — once per tool, ever. Use the Coding CLIs panel in Settings
-(Install button) or run \`coding_cli_install\`. Installing only puts the binary on
-PATH; it does not log you in. Re-running it updates the tool to the latest.
+**Install** — once per tool, ever. Use **Settings → Coding CLIs** (Install
+button) or run \`coding_cli_install\`. Installing only puts the binary on PATH; it
+does not log you in. Re-running it updates the tool to the latest.
 
 **Log in** — once per tool, ever. The login flows are interactive, so run them
 from a terminal:

@@ -55,6 +55,7 @@ function AuthedApp() {
 
   const [createOpen, setCreateOpen] = useState(false);
   const [view, setView] = useState<MainView>("chat");
+  const [settingsTab, setSettingsTab] = useState<string | undefined>(undefined);
   const agents = useAgentsStore((s) => s.agents);
   const [codingView, setCodingView] = useState<{ agentId: string; tool: string } | null>(null);
 
@@ -83,6 +84,11 @@ function AuthedApp() {
   const openStudio = (id: string) => {
     setActive(id);
     setView("studio");
+  };
+
+  const openSettings = (tab?: string) => {
+    setSettingsTab(tab);
+    setView("settings");
   };
 
   return (
@@ -146,11 +152,11 @@ function AuthedApp() {
         </nav>
         <div style={{ flex: 1, minHeight: 0 }}>
           {view === "chat" && <AgentChat onEditAgent={openStudio} />}
-          {view === "studio" && <AgentStudio agentId={activeAgentId} />}
+          {view === "studio" && <AgentStudio agentId={activeAgentId} onOpenSettings={openSettings} />}
           {view === "projects" && <ProjectsView />}
           {view === "activity" && <ActivityView />}
           {view === "network" && <NetworkView />}
-          {view === "settings" && <GlobalSettings />}
+          {view === "settings" && <GlobalSettings initialTab={settingsTab} />}
         </div>
       </div>
 

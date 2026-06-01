@@ -33,7 +33,13 @@ type StudioTab = (typeof TABS)[number];
 
 /** Full-screen agent management surface — identity, persona, model, skills,
  *  cron schedule, memory, and credentials for one agent. */
-export function AgentStudio({ agentId }: { agentId: string | null }) {
+export function AgentStudio({
+  agentId,
+  onOpenSettings,
+}: {
+  agentId: string | null;
+  onOpenSettings?: (tab?: string) => void;
+}) {
   const [profile, setProfile] = useState<AgentProfile | null>(null);
   const [tab, setTab] = useState<StudioTab>("Identity");
   // Bumped after a full reset to remount the tab subtree, so the Memory tab
@@ -161,7 +167,9 @@ export function AgentStudio({ agentId }: { agentId: string | null }) {
         {tab === "Identity" && <IdentityTab profile={profile} onSaved={onSaved} />}
         {tab === "Persona" && <PersonaTab profile={profile} onSaved={onSaved} />}
         {tab === "Model" && <ModelTab profile={profile} onSaved={onSaved} />}
-        {tab === "Skills" && <SkillsTab profile={profile} onSaved={onSaved} />}
+        {tab === "Skills" && (
+          <SkillsTab profile={profile} onSaved={onSaved} onOpenSettings={onOpenSettings} />
+        )}
         {tab === "Connections" && <ChannelsTab profile={profile} onSaved={onSaved} />}
         {tab === "Peers" && <PeersTab profile={profile} onSaved={onSaved} />}
         {tab === "Schedule" && <ScheduleTab agentId={profile.id} />}
@@ -246,7 +254,11 @@ interface CatalogSkill {
  * What an agent is allowed to do — installed skills, the core toggles
  * (shell / web / subagents), MCP servers, and the built-in skill catalog.
  */
-function SkillsTab({ profile, onSaved }: TabProps) {
+function SkillsTab({
+  profile,
+  onSaved,
+  onOpenSettings,
+}: TabProps & { onOpenSettings?: (tab?: string) => void }) {
   const update = useAgentsStore((s) => s.update);
   const [canSpawn, setCanSpawn] = useState(profile.canSpawnSubagents);
   const [limit, setLimit] = useState(profile.subagentLimit);
@@ -393,6 +405,7 @@ function SkillsTab({ profile, onSaved }: TabProps) {
           onToggle={(en) => void toggleSkill(s.id, en)}
           onSaveBody={(body) => void saveSkillBody(s.id, body)}
           onRemove={() => void delSkill(s.id)}
+          onOpenSettings={onOpenSettings}
         />
       ))}
 
@@ -674,6 +687,7 @@ function InstalledSkill({
   onToggle,
   onSaveBody,
   onRemove,
+  onOpenSettings,
 }: {
   skill: Skill;
   agentId: string;
@@ -681,6 +695,7 @@ function InstalledSkill({
   onToggle: (enabled: boolean) => void;
   onSaveBody: (body: string) => void;
   onRemove: () => void;
+  onOpenSettings?: (tab?: string) => void;
 }) {
   const [body, setBody] = useState(skill.body);
   const [open, setOpen] = useState(!!autoOpenConfig);
@@ -732,6 +747,27 @@ function InstalledSkill({
       <div style={{ fontSize: 12, color: "rgb(var(--muted))", marginTop: 6 }}>
         {skill.meta.description}
       </div>
+      {skill.id === "coding-cli" && (
+        <div style={{ ...hint, marginTop: 8 }}>
+          Installing and logging in are shared by all agents — set them up once in{" "}
+          <button
+            type="button"
+            onClick={() => onOpenSettings?.("Coding CLIs")}
+            style={{
+              background: "none",
+              border: "none",
+              padding: 0,
+              color: "rgb(var(--accent))",
+              cursor: "pointer",
+              font: "inherit",
+              textDecoration: "underline",
+            }}
+          >
+            Settings → Coding CLIs
+          </button>
+          . The options below just pin a default tool/model for this agent.
+        </div>
+      )}
       {hasConfig && (
         <div style={{ marginTop: 8 }}>
           <button
