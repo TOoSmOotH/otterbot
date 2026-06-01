@@ -29,7 +29,7 @@ function markerPath(): string {
 }
 
 /** Whether the built-in model has been downloaded and is ready to use. */
-export function isBuiltinModelReady(): boolean {
+function isBuiltinModelReady(): boolean {
   return existsSync(markerPath());
 }
 

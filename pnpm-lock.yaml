@@ -142,9 +142,6 @@ importers:
       undici:
         specifier: ^6.21.0
         version: 6.24.1
-      ws:
-        specifier: ^8.18.0
-        version: 8.18.3
       zod:
         specifier: ^3.24.1
         version: 3.25.76
@@ -161,9 +158,6 @@ importers:
       '@types/ssh2':
         specifier: ^1.15.5
         version: 1.15.5
-      '@types/ws':
-        specifier: ^8.5.13
-        version: 8.18.1
       tsx:
         specifier: ^4.19.2
         version: 4.21.0

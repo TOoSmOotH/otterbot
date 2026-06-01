@@ -29,8 +29,11 @@ function project(id: string, memberIds: string[]): Project {
     mode: "local",
     forgeAccountId: null,
     forgeRepo: null,
+    forkRepo: null,
     baseBranch: null,
     monitorIssues: false,
+    triageIssues: false,
+    remoteE2e: false,
     rules: null,
   };
 }

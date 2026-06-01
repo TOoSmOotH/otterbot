@@ -100,7 +100,7 @@ export interface AgentServices {
 }
 
 /** A pipeline run's state, surfaced to the PM via `pipeline_status`. */
-export interface PipelineRunStatus {
+interface PipelineRunStatus {
   id: string;
   projectId: string;
   goal: string;

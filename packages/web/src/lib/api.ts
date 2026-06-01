@@ -19,7 +19,7 @@ export function getToken(): string | null {
   }
 }
 
-export function setToken(token: string): void {
+function setToken(token: string): void {
   try {
     window.localStorage.setItem(TOKEN_KEY, token);
   } catch {
@@ -156,7 +156,11 @@ async function authPost(
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body),
   });
-  const data = (await res.json().catch(() => ({}))) as Partial<AuthSuccess & AuthFailure>;
+  const data = (await res.json().catch(() => ({}))) as {
+    token?: string;
+    sessionId?: string;
+    error?: string;
+  };
   if (!res.ok || !data.token || !data.sessionId) {
     return { ok: false, error: data.error };
   }
@@ -198,7 +202,7 @@ export interface SessionInfo {
   current: boolean;
 }
 
-export type AuthBackendMode = "setup" | "password" | "env";
+type AuthBackendMode = "setup" | "password" | "env";
 
 export interface SessionList {
   mode: AuthBackendMode;
@@ -227,7 +231,11 @@ export async function changePassword(
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ currentPassword, newPassword }),
   });
-  const data = (await res.json().catch(() => ({}))) as Partial<AuthSuccess & AuthFailure>;
+  const data = (await res.json().catch(() => ({}))) as {
+    token?: string;
+    sessionId?: string;
+    error?: string;
+  };
   if (!res.ok || !data.token || !data.sessionId) {
     return { ok: false, error: data.error };
   }

@@ -124,8 +124,10 @@ function ensureControlTables(sqlite: Database.Database) {
       forge_account_id TEXT,
       forge_repo TEXT,
       fork_repo TEXT,
+      forge_ssh_url TEXT,
       base_branch TEXT,
       monitor_issues INTEGER NOT NULL DEFAULT 0,
+      triage_issues INTEGER NOT NULL DEFAULT 0,
       remote_e2e INTEGER NOT NULL DEFAULT 0,
       rules TEXT,
       created_at TEXT NOT NULL
@@ -196,57 +198,4 @@ function ensureControlTables(sqlite: Database.Database) {
     `CREATE UNIQUE INDEX IF NOT EXISTS idx_issue_triage_issue ON issue_triage(project_id, issue_number)`,
   ];
   for (const s of stmts) sqlite.exec(s);
-
-  // Migration: credentials grew a scope column. Default 'broad' preserves the
-  // pre-existing behaviour (every key dumped into the shell env) until the
-  // startup migration re-tags known keys.
-  const secretCols = new Set(
-    (sqlite.prepare(`PRAGMA table_info(agent_secrets)`).all() as Array<{ name: string }>).map(
-      (c) => c.name
-    )
-  );
-  if (!secretCols.has("scope")) {
-    sqlite.exec(`ALTER TABLE agent_secrets ADD COLUMN scope TEXT NOT NULL DEFAULT 'broad'`);
-  }
-
-  // Migration: projects grew forge fields (M3). Add any missing columns so
-  // projects created before this still load.
-  const projectCols = new Set(
-    (sqlite.prepare(`PRAGMA table_info(projects)`).all() as Array<{ name: string }>).map((c) => c.name)
-  );
-  const addProjectCol = (name: string, ddl: string) => {
-    if (!projectCols.has(name)) sqlite.exec(`ALTER TABLE projects ADD COLUMN ${ddl}`);
-  };
-  addProjectCol("mode", "mode TEXT NOT NULL DEFAULT 'local'");
-  addProjectCol("forge_account_id", "forge_account_id TEXT");
-  addProjectCol("forge_repo", "forge_repo TEXT");
-  addProjectCol("fork_repo", "fork_repo TEXT");
-  addProjectCol("forge_ssh_url", "forge_ssh_url TEXT");
-  addProjectCol("base_branch", "base_branch TEXT");
-  addProjectCol("monitor_issues", "monitor_issues INTEGER NOT NULL DEFAULT 0");
-  addProjectCol("triage_issues", "triage_issues INTEGER NOT NULL DEFAULT 0");
-  addProjectCol("remote_e2e", "remote_e2e INTEGER NOT NULL DEFAULT 0");
-  addProjectCol("rules", "rules TEXT");
-
-  // Migration: project_members grew a per-member access level ('read'|'write').
-  const memberCols = new Set(
-    (sqlite.prepare(`PRAGMA table_info(project_members)`).all() as Array<{ name: string }>).map(
-      (c) => c.name
-    )
-  );
-  if (!memberCols.has("access")) {
-    sqlite.exec(`ALTER TABLE project_members ADD COLUMN access TEXT NOT NULL DEFAULT 'read'`);
-  }
-
-  // Migration: forge_accounts grew SSH-transport + signing fields.
-  const forgeCols = new Set(
-    (sqlite.prepare(`PRAGMA table_info(forge_accounts)`).all() as Array<{ name: string }>).map((c) => c.name)
-  );
-  const addForgeCol = (name: string, ddl: string) => {
-    if (forgeCols.has("id") && !forgeCols.has(name)) sqlite.exec(`ALTER TABLE forge_accounts ADD COLUMN ${ddl}`);
-  };
-  addForgeCol("git_transport", "git_transport TEXT NOT NULL DEFAULT 'https'");
-  addForgeCol("committer_name", "committer_name TEXT NOT NULL DEFAULT ''");
-  addForgeCol("committer_email", "committer_email TEXT NOT NULL DEFAULT ''");
-  addForgeCol("sign_commits", "sign_commits INTEGER NOT NULL DEFAULT 0");
 }

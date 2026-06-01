@@ -29,7 +29,7 @@ interface CodexAuthJson {
 }
 
 /** Path of the shared Codex auth file (bound into sandboxes at ~/.codex/auth.json). */
-export function codexAuthPath(): string {
+function codexAuthPath(): string {
   return join(sharedCodingAuthDir(), "codex", "auth.json");
 }
 

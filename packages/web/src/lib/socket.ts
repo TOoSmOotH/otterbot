@@ -13,10 +13,3 @@ export function getSocket(): Socket {
   }
   return socket;
 }
-
-export function disconnectSocket() {
-  if (socket) {
-    socket.disconnect();
-    socket = null;
-  }
-}

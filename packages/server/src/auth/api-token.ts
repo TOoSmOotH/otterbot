@@ -4,7 +4,6 @@ import {
   mkdirSync,
   readFileSync,
   renameSync,
-  unlinkSync,
   writeFileSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
@@ -24,7 +23,7 @@ import { dirname, join } from "node:path";
  * headless deployments: no `.auth.json` is read or written, no sessions are
  * created, and the setup endpoint refuses.
  */
-export type AuthMode = "setup" | "password" | "env";
+type AuthMode = "setup" | "password" | "env";
 
 export interface SessionInfo {
   id: string;
@@ -34,19 +33,19 @@ export interface SessionInfo {
   current: boolean;
 }
 
-export interface SessionCreated {
+interface SessionCreated {
   ok: true;
   /** Random session token; only returned at creation. */
   token: string;
   sessionId: string;
 }
 
-export interface AuthError {
+interface AuthError {
   ok: false;
   error: string;
 }
 
-export type AuthResult = SessionCreated | AuthError;
+type AuthResult = SessionCreated | AuthError;
 
 export interface AuthStore {
   mode(): AuthMode;
@@ -85,7 +84,6 @@ export interface AuthStore {
 }
 
 const AUTH_FILE = ".auth.json";
-const LEGACY_TOKEN_FILE = ".api-token";
 const FILE_VERSION = 1;
 const MIN_PASSWORD_LENGTH = 8;
 const SCRYPT_PARAMS = { N: 16384, r: 8, p: 1, keylen: 64 } as const;
@@ -256,27 +254,6 @@ export function createAuthStore(dataDir: string): AuthStore {
   };
 }
 
-/** Migrate a legacy `.api-token` file (raw password) into the new auth file. */
-export function migrateLegacyToken(dataDir: string, store: AuthStore): void {
-  if (store.mode() !== "setup") return;
-  const legacy = join(dataDir, LEGACY_TOKEN_FILE);
-  if (!existsSync(legacy)) return;
-  let raw = "";
-  try {
-    raw = readFileSync(legacy, "utf8").trim();
-  } catch {
-    return;
-  }
-  if (!raw) {
-    try { unlinkSync(legacy); } catch { /* best effort */ }
-    return;
-  }
-  const result = store.setupPassword(raw, "Migrated from legacy .api-token");
-  if (result.ok) {
-    try { unlinkSync(legacy); } catch { /* best effort */ }
-  }
-}
-
 // ---- Internal helpers -----------------------------------------------------
 
 function mintSession(file: AuthFile, label: string): SessionCreated {
@@ -357,7 +334,7 @@ function writeAuthFile(path: string, file: AuthFile): void {
 const COOKIE_NAME = "otterbot_token";
 
 /** Constant-time equality so we don't leak length / prefix via timing. */
-export function tokenEquals(provided: string, expected: string): boolean {
+function tokenEquals(provided: string, expected: string): boolean {
   const a = Buffer.from(provided);
   const b = Buffer.from(expected);
   if (a.length !== b.length) return false;

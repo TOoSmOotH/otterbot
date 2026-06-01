@@ -26,7 +26,7 @@ export async function buildCodexHeaders(auth: OpenAiAuthStore): Promise<Headers>
 }
 
 /** Pull the ChatGPT account id from an access-token JWT (no signature check). */
-export function accountIdFromJwt(token: string): string | null {
+function accountIdFromJwt(token: string): string | null {
   try {
     const payload = JSON.parse(
       Buffer.from(token.split(".")[1] ?? "", "base64").toString("utf8")

@@ -35,7 +35,7 @@ export interface ForgeAccount {
   publicKey: string | null;
 }
 
-export interface PipelineStage {
+interface PipelineStage {
   stage: string;
   agentId: string;
   status: "pass" | "fail" | "error";

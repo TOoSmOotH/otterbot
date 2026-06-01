@@ -311,7 +311,7 @@ function resetIdle(joined: JoinedConversation, onIdle: () => void) {
  * summarize → extract facts → rebuild user profile → optionally author a skill.
  * Failures are logged, never thrown.
  */
-export async function closeSession(
+async function closeSession(
   orch: Orchestrator,
   agentId: string,
   conversationId: string

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { apiFetch } from "../../lib/api";
-import type { AgentPeerAccess, AgentProfile, AgentRole } from "@otterbot/shared";
+import type { AgentPeerAccess, AgentProfile, AgentRole, TransportId } from "@otterbot/shared";
 import { useAgentsStore } from "../../stores/agents-store";
 import { useGlobalSettingsStore } from "../../stores/global-settings-store";
 import { ModelSelect } from "./ModelSelect";
@@ -10,7 +10,7 @@ interface FormState {
   displayName: string;
   role: AgentRole;
   persona: string;
-  transport: "local" | "discord";
+  transport: TransportId;
   email: string;
   canSpawnSubagents: boolean;
   dispatchToSubagent: boolean;
@@ -325,7 +325,7 @@ export function AgentEditor({ agentId, onClose }: { agentId: string | null; onCl
         <Field label="Agent-to-agent transport">
           <select
             value={form.transport}
-            onChange={(e) => patch({ transport: e.target.value as "local" | "discord" })}
+            onChange={(e) => patch({ transport: e.target.value as TransportId })}
             style={inputStyle}
           >
             <option value="local">local</option>

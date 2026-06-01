@@ -1,10 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   createAuthStore,
-  migrateLegacyToken,
   extractToken,
   labelFromUserAgent,
 } from "./api-token.js";
@@ -174,33 +173,6 @@ describe("AuthStore — env-pinned mode", () => {
     expect(store.setupPassword("password123", "X").ok).toBe(false);
     expect(store.login("password123", "X").ok).toBe(false);
     expect(existsSync(join(dataDir, ".auth.json"))).toBe(false);
-  });
-});
-
-describe("migrateLegacyToken", () => {
-  it("imports the old .api-token contents as the password and deletes the file", () => {
-    const legacyPath = join(dataDir, ".api-token");
-    writeFileSync(legacyPath, "my-old-password-from-v1\n");
-    const store = createAuthStore(dataDir);
-    expect(store.mode()).toBe("setup");
-    migrateLegacyToken(dataDir, store);
-    expect(store.mode()).toBe("password");
-    // The legacy file is removed.
-    expect(existsSync(legacyPath)).toBe(false);
-    // The migrated password works for login.
-    const login = store.login("my-old-password-from-v1", "after-migrate");
-    expect(login.ok).toBe(true);
-  });
-
-  it("does nothing when env is pinned", () => {
-    process.env.OTTERBOT_API_TOKEN = "env-pinned-secret";
-    const legacyPath = join(dataDir, ".api-token");
-    writeFileSync(legacyPath, "ignored-old-password");
-    const store = createAuthStore(dataDir);
-    migrateLegacyToken(dataDir, store);
-    // Legacy file is left alone in env mode.
-    expect(existsSync(legacyPath)).toBe(true);
-    expect(readFileSync(legacyPath, "utf8")).toBe("ignored-old-password");
   });
 });
 

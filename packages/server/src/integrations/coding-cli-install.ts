@@ -188,7 +188,7 @@ export function isNewerVersion(latest: string | undefined, installed: string | u
 }
 
 /** Fetch the registry `latest` version for every tool (null on any failure). */
-export async function fetchLatestVersions(): Promise<LatestVersions> {
+async function fetchLatestVersions(): Promise<LatestVersions> {
   const out = emptyLatest();
   await Promise.all(
     CODING_TOOLS.map(async (tool) => {
@@ -209,7 +209,7 @@ export async function fetchLatestVersions(): Promise<LatestVersions> {
 }
 
 /** Read the cached latest versions (from the daily check), empty if none. */
-export function cachedLatestVersions(store: CodingCliSettingsStore): LatestVersions {
+function cachedLatestVersions(store: CodingCliSettingsStore): LatestVersions {
   try {
     const raw = store.getSetting(LATEST_CACHE_KEY);
     if (raw) return { ...emptyLatest(), ...(JSON.parse(raw).latest ?? {}) };

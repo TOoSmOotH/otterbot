@@ -137,7 +137,7 @@ function buildEnv(
 
 /** Mount point of the shared coding-CLI tools inside the sandbox. A top-level
  *  path (not under the `--ro-bind`-mounted `/opt`) so bwrap can create it. */
-export const CODING_TOOLS_MOUNT = "/otter-tools";
+const CODING_TOOLS_MOUNT = "/otter-tools";
 
 /** Per-tool credential dirs, shared across agents. `home` is relative to HOME. */
 const SHARED_AUTH_DIRS: { sub: string; home: string }[] = [
@@ -189,7 +189,7 @@ function codingShareFor(workspaceDir: string): CodingShare | null {
   return { toolsSrc, toolsBin: `${CODING_TOOLS_MOUNT}/bin`, authBinds };
 }
 
-export interface SpawnPlan {
+interface SpawnPlan {
   file: string;
   args: string[];
   env: Record<string, string> | NodeJS.ProcessEnv;
@@ -225,20 +225,7 @@ export interface SandboxOpts {
 }
 
 /** Mount point of the shared project tree inside the bwrap sandbox. */
-export const PROJECT_MOUNT = "/project";
-
-/**
- * The project working tree as the confined command sees it: the fixed
- * `/project` mount under bwrap, or the real host path under sandbox-exec (which
- * does not remap paths). Returns null when the agent has no project.
- */
-export function sandboxProjectDir(
-  sandbox: string,
-  projectRepoPath: string | undefined
-): string | null {
-  if (!projectRepoPath) return null;
-  return sandbox === "bwrap" ? PROJECT_MOUNT : projectRepoPath;
-}
+const PROJECT_MOUNT = "/project";
 
 /** bwrap: bind only the workspace writable; system dirs read-only; rest hidden. */
 function bwrapPlan(
@@ -353,7 +340,7 @@ function sandboxExecPlan(
 }
 
 /** Refusal shown when no OS sandbox is available — code never runs unconfined. */
-export const NO_SANDBOX_ERROR =
+const NO_SANDBOX_ERROR =
   "Shell access needs a sandbox and none is available. Install bubblewrap " +
   "(`apt install bubblewrap`) on Linux, or run otterbot on macOS. " +
   "Refusing to run the command unconfined.";

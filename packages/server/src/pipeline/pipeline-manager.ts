@@ -24,7 +24,7 @@ const GATE_STAGES = new Set(["security-reviewer", "tester"]);
 /** Max times a run is kicked back to the coder before it's marked failed. */
 const MAX_ATTEMPTS = 2;
 
-export interface StageOutcome {
+interface StageOutcome {
   report: string;
   /** Explicit verdict; if omitted it's parsed from the report's VERDICT line. */
   pass?: boolean;

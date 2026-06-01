@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import type { Artifact } from "@otterbot/shared";
 
 /** Common extension → MIME map for serving and persisting agent artifacts. */
-export const ARTIFACT_MIME: Record<string, string> = {
+const ARTIFACT_MIME: Record<string, string> = {
   ".png": "image/png",
   ".jpg": "image/jpeg",
   ".jpeg": "image/jpeg",

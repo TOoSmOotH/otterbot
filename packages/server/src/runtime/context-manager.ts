@@ -9,7 +9,7 @@ import type { AgentContext } from "./agent-context.js";
 import type { Artifact, ContextStatus } from "@otterbot/shared";
 
 /** Rough char-per-token ratio — good enough for budgeting without a tokenizer. */
-export const CHARS_PER_TOKEN = 4;
+const CHARS_PER_TOKEN = 4;
 /** Fallback context window when neither the agent nor global settings set one. */
 export const DEFAULT_CONTEXT_WINDOW = 16_000;
 /**
@@ -17,9 +17,9 @@ export const DEFAULT_CONTEXT_WINDOW = 16_000;
  * (recap + verbatim window). The remainder is reserved for the system prompt,
  * tool definitions, and the model's reply.
  */
-export const HISTORY_BUDGET_FRACTION = 0.75;
+const HISTORY_BUDGET_FRACTION = 0.75;
 /** Compact once usage reaches this fraction of the budget. */
-export const COMPACT_WATERMARK = 0.8;
+const COMPACT_WATERMARK = 0.8;
 /** Recent turns always kept verbatim, never folded into the recap. */
 export const KEEP_RECENT_MESSAGES = 8;
 /** Per-message framing overhead added to the char estimate. */
@@ -29,7 +29,7 @@ const PER_MESSAGE_OVERHEAD = 4;
  * The live-history token budget for an agent, derived from its (resolved)
  * chat-model context window.
  */
-export function historyBudget(ctx: AgentContext): number {
+function historyBudget(ctx: AgentContext): number {
   return Math.round(ctx.contextWindow * HISTORY_BUDGET_FRACTION);
 }
 
@@ -40,7 +40,7 @@ export function estimateTokens(text: string): number {
   return Math.ceil(text.length / CHARS_PER_TOKEN);
 }
 
-export function estimateMessagesTokens(rows: Array<{ content: string }>): number {
+function estimateMessagesTokens(rows: Array<{ content: string }>): number {
   return rows.reduce((sum, m) => sum + estimateTokens(m.content) + PER_MESSAGE_OVERHEAD, 0);
 }
 

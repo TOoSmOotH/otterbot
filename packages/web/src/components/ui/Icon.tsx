@@ -1,6 +1,6 @@
 import type { LucideIcon, LucideProps } from "lucide-react";
 
-type IconSize = 14 | 16 | 18;
+type IconSize = 13 | 14 | 15 | 16 | 18;
 
 interface IconProps extends Omit<LucideProps, "size"> {
   icon: LucideIcon;

@@ -238,10 +238,6 @@ export function getCodingSession(agentId: string): CodingSession | undefined {
   return activeCodingSessions.get(agentId);
 }
 
-export function listCodingSessions(): Array<{ agentId: string; tool: CodingTool }> {
-  return [...activeCodingSessions.values()].map((s) => ({ agentId: s.agentId, tool: s.tool }));
-}
-
 export interface StartCodingSessionOptions extends CodingRunOptions {
   agentId: string;
   cols?: number;

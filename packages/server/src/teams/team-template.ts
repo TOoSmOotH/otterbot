@@ -12,7 +12,7 @@
  */
 
 /** A capability to install on an agent, with optional config form values. */
-export interface CapabilitySpec {
+interface CapabilitySpec {
   catalogId: string;
   /** Form values for the capability's configSchema (e.g. { pinnedTool: "claude" }). */
   config?: Record<string, unknown>;
@@ -174,7 +174,7 @@ export function teamAgentId(projectId: string, role: string): string {
 }
 
 /** Per-role overrides supplied by the create-team wizard. */
-export interface TeamRoleConfig {
+interface TeamRoleConfig {
   /**
    * false → don't provision this role. Ignored for the mandatory pm/coder roles.
    * Omitted/undefined means provision it (back-compat for partial configs).

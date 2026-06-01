@@ -4,12 +4,10 @@ import {
   readFileSync,
   writeFileSync,
   readdirSync,
-  copyFileSync,
   rmSync,
   statSync,
 } from "node:fs";
 import { join, resolve } from "node:path";
-import { parse as parseDotenv } from "dotenv";
 import type {
   AgentProfile,
   AgentModelConfig,
@@ -33,7 +31,6 @@ export interface ProfilePaths {
   dir: string;
   profileJson: string;
   soulMd: string;
-  envFile: string;
   agentDb: string;
   skillsDir: string;
   subagentsDir: string;
@@ -49,14 +46,13 @@ export interface ProfilePaths {
   ssh: string;
 }
 
-export function profilePaths(root: string, id: string): ProfilePaths {
+function profilePaths(root: string, id: string): ProfilePaths {
   const dir = resolve(root, id);
   return {
     id,
     dir,
     profileJson: join(dir, "profile.json"),
     soulMd: join(dir, "SOUL.md"),
-    envFile: join(dir, ".env"),
     agentDb: join(dir, "agent.db"),
     skillsDir: join(dir, "skills"),
     subagentsDir: join(dir, "subagents"),
@@ -168,23 +164,6 @@ export class ProfileStore {
     writeFileSync(paths.profileJson, JSON.stringify(json, null, 2), "utf8");
   }
 
-  /**
-   * Read a legacy plaintext `.env` from a profile directory, if one exists.
-   * Used once at boot to migrate old credentials into the encrypted database.
-   */
-  readLegacyEnv(id: string): Map<string, string> | null {
-    const paths = profilePaths(this.root, id);
-    if (!existsSync(paths.envFile)) return null;
-    const parsed = parseDotenv(readFileSync(paths.envFile, "utf8"));
-    return new Map(Object.entries(parsed));
-  }
-
-  /** Delete a profile's legacy `.env` after its secrets have been migrated. */
-  removeLegacyEnv(id: string): void {
-    const paths = profilePaths(this.root, id);
-    if (existsSync(paths.envFile)) rmSync(paths.envFile, { force: true });
-  }
-
   /** Scaffold a new profile directory and persist it. */
   create(profile: AgentProfile): AgentProfile {
     const normalized = normalizeProfile(profile);
@@ -197,24 +176,13 @@ export class ProfileStore {
     if (existsSync(paths.dir)) rmSync(paths.dir, { recursive: true, force: true });
   }
 
-  /**
-   * Ensure a default COO profile exists. Optionally seeds it with legacy
-   * skill markdown files from a previous install.
-   */
-  ensureCooProfile(opts: { chatModelId: string; legacySkillsDir?: string }): AgentProfile {
+  /** Ensure a default COO profile exists. */
+  ensureCooProfile(): AgentProfile {
     if (this.exists("coo")) return this.load("coo");
 
     const paths = profilePaths(this.root, "coo");
     mkdirSync(paths.dir, { recursive: true });
     mkdirSync(paths.skillsDir, { recursive: true });
-
-    // Migrate legacy skill files, if present.
-    if (opts.legacySkillsDir && existsSync(opts.legacySkillsDir)) {
-      for (const name of readdirSync(opts.legacySkillsDir)) {
-        if (!name.endsWith(".md")) continue;
-        copyFileSync(join(opts.legacySkillsDir, name), join(paths.skillsDir, name));
-      }
-    }
 
     const now = new Date().toISOString();
     const profile: AgentProfile = {

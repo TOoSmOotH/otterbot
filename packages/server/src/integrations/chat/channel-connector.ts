@@ -4,7 +4,7 @@ import { handleChatCommand, parseChatCommand } from "../../runtime/chat-commands
 import type { ChatClient, InboundChatMessage, MessageHandle, OutboundFile } from "./chat-client.js";
 
 /** Placeholder posted while the agent works, when the client supports edits. */
-export const THINKING_PLACEHOLDER = "💭 _Thinking…_";
+const THINKING_PLACEHOLDER = "💭 _Thinking…_";
 
 /**
  * Connects one agent to a single chat channel via a ChatClient so humans there

@@ -9,26 +9,14 @@ import type { Skill, SkillMeta } from "@otterbot/shared";
  * `dependencies` list that we translate onto our `capabilities` field.
  */
 
-export interface AgentSkillsIoFrontmatter {
-  name?: string;
-  description?: string;
-  version?: string;
-  author?: string;
-  license?: string;
-  tags?: string[];
-  dependencies?: string[];
-  tools?: string[];
-  parameters?: Record<string, { type: string; description?: string; default?: unknown }>;
-}
-
-export function fromAgentSkillsIo(raw: string): { meta: SkillMeta; body: string } {
+function fromAgentSkillsIo(raw: string): { meta: SkillMeta; body: string } {
   const parsed = getSkillService().parseSkillFile(raw);
   // agentskills.io `dependencies` maps onto our `capabilities`; the
   // parseSkillFile method already picks up standard fields.
   return parsed;
 }
 
-export function toAgentSkillsIo(skill: Skill): string {
+function toAgentSkillsIo(skill: Skill): string {
   return getSkillService().serializeSkillFile(skill.meta, skill.body);
 }
 

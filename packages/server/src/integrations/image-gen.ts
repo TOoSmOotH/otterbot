@@ -18,7 +18,7 @@ const IMAGE_HOST_MODEL = "gpt-5.4";
 /** The image model the `image_generation` tool runs (Hermes' gpt-image-2 tiers). */
 const IMAGE_MODEL = "gpt-image-2";
 
-export type ImageQuality = "low" | "medium" | "high";
+type ImageQuality = "low" | "medium" | "high";
 const DEFAULT_QUALITY: ImageQuality = "medium";
 const DEFAULT_SIZE = "1024x1024";
 

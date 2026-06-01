@@ -3,7 +3,7 @@ import { io, type Socket } from "socket.io-client";
 import type { StreamChunk, AgentStatus } from "@otterbot/shared";
 
 /** Events the server emits to us. */
-export interface ServerToClient {
+interface ServerToClient {
   "chat:joined": (p: { agentId: string; conversationId: string }) => void;
   "chat:stream": (p: { agentId: string; chunk: StreamChunk }) => void;
   "chat:done": (p: { agentId: string; conversationId: string }) => void;
@@ -11,7 +11,7 @@ export interface ServerToClient {
 }
 
 /** Events we emit to the server. */
-export interface ClientToServer {
+interface ClientToServer {
   "chat:join": (p: { agentId?: string; conversationId?: string }) => void;
   "chat:message": (p: { agentId?: string; text: string }) => void;
   "chat:close": (p: { agentId?: string }) => void;

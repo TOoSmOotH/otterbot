@@ -27,7 +27,7 @@ export const OPENAI_OAUTH = {
 export const CHATGPT_CODEX_BASE_URL = "https://chatgpt.com/backend-api/codex";
 
 /** Codex model slugs — used as a fallback when live discovery is unavailable. */
-export const CODEX_MODELS = [
+const CODEX_MODELS = [
   "gpt-5.4-codex",
   "gpt-5.4",
   "gpt-5.4-mini",
@@ -62,7 +62,7 @@ export async function listCodexModels(accessToken: string): Promise<string[]> {
   }
 }
 
-export function redirectUri(): string {
+function redirectUri(): string {
   return `http://localhost:${OPENAI_OAUTH.redirectPort}${OPENAI_OAUTH.redirectPath}`;
 }
 

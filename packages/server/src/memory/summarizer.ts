@@ -5,7 +5,7 @@ import * as schema from "../db/schema.js";
 import { resolveChatModel } from "../providers/registry.js";
 import type { AgentContext } from "../runtime/agent-context.js";
 
-export const SUMMARIZE_PROMPT = `You are a conversation summarizer. Given the transcript below, produce:
+const SUMMARIZE_PROMPT = `You are a conversation summarizer. Given the transcript below, produce:
 
 1. A concise paragraph (<= 150 words) capturing what the user and assistant did.
 2. A JSON array of 0-8 short key points — specific facts, decisions, or task results worth recalling later.
@@ -109,7 +109,7 @@ function persist(
   return { id, conversationId, summary, keyPoints };
 }
 
-export function parseSummary(text: string): { summary: string; keyPoints: string[] } {
+function parseSummary(text: string): { summary: string; keyPoints: string[] } {
   const summaryMatch = text.match(/SUMMARY:\s*([\s\S]*?)(?:\n\s*KEY_POINTS:|$)/i);
   const pointsMatch = text.match(/KEY_POINTS:\s*([\s\S]*)/i);
   const summary = summaryMatch ? summaryMatch[1].trim() : text.trim();

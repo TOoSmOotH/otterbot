@@ -63,7 +63,6 @@ import {
   listCredentialTypes,
   getConnectionTypeDef,
   isChatConnectionType,
-  credentialKeysFor,
 } from "../integrations/connection-registry.js";
 import { layerScopedSecrets } from "../secrets/layer-secrets.js";
 import {
@@ -161,10 +160,10 @@ export interface CreateAgentInput {
   parentId?: string | null;
 }
 
-export const GLOBAL_SETTINGS_KEY = "global_settings";
+const GLOBAL_SETTINGS_KEY = "global_settings";
 
 /** The auto-created first account for every provider. */
-export const DEFAULT_ACCOUNT = "default";
+const DEFAULT_ACCOUNT = "default";
 
 function defaultAccountFor(p: { id: string; defaultBaseUrl: string | null }): ProviderAccount {
   return {
@@ -204,17 +203,6 @@ const DEFAULT_GLOBAL_SETTINGS: GlobalSettings = {
   providers: Object.fromEntries(PROVIDER_CATALOG.map((p) => [p.id, [defaultAccountFor(p)]])),
 };
 
-/**
- * Legacy (pre-registry) GlobalSettings shape — agents and defaults stored
- * `ModelRef`s and a separate context-window table. Accepted by
- * {@link normalizeGlobalSettings} so old installs migrate transparently.
- */
-interface LegacyGlobalSettings {
-  defaultChatModel?: Partial<ModelRef>;
-  defaultEmbeddingModel?: Partial<ModelRef>;
-  modelContextWindows?: Array<{ provider?: string; modelId?: string; contextWindow?: number }>;
-}
-
 /** Normalize one configured-model entry; returns null if it can't be salvaged. */
 function normalizeConfiguredModel(raw: unknown): ConfiguredModel | null {
   if (!raw || typeof raw !== "object") return null;
@@ -234,64 +222,6 @@ function normalizeConfiguredModel(raw: unknown): ConfiguredModel | null {
     out.contextWindow = Math.round(m.contextWindow);
   }
   return out;
-}
-
-/**
- * Synthesize a model registry from the legacy ModelRef-based settings. The old
- * default chat/embedding refs become the two default models; any extra context
- * windows become standalone chat entries so their tuning isn't lost.
- */
-function migrateLegacyModels(legacy: LegacyGlobalSettings): {
-  models: ConfiguredModel[];
-  defaultChatModelId: string;
-  defaultEmbeddingModelId: string;
-} {
-  const models: ConfiguredModel[] = [];
-  const cwFor = (provider?: string, modelId?: string) =>
-    legacy.modelContextWindows?.find((m) => m.provider === provider && m.modelId === modelId)
-      ?.contextWindow;
-
-  const chat = legacy.defaultChatModel;
-  const emb = legacy.defaultEmbeddingModel;
-  let defaultChatModelId = "";
-  let defaultEmbeddingModelId = "";
-  if (chat?.provider) {
-    models.push({
-      id: DEFAULT_CHAT_MODEL_ID,
-      label: chat.modelId || "chat model",
-      provider: chat.provider,
-      account: chat.account || DEFAULT_ACCOUNT,
-      modelId: chat.modelId ?? "",
-      kind: "chat",
-      ...(cwFor(chat.provider, chat.modelId) ? { contextWindow: cwFor(chat.provider, chat.modelId) } : {}),
-    });
-    defaultChatModelId = DEFAULT_CHAT_MODEL_ID;
-  }
-  if (emb?.provider) {
-    models.push({
-      id: DEFAULT_EMBEDDING_MODEL_ID,
-      label: emb.modelId || "embedding model",
-      provider: emb.provider,
-      account: emb.account || DEFAULT_ACCOUNT,
-      modelId: emb.modelId ?? "",
-      kind: "embedding",
-    });
-    defaultEmbeddingModelId = DEFAULT_EMBEDDING_MODEL_ID;
-  }
-  for (const cw of legacy.modelContextWindows ?? []) {
-    if (!cw.provider || !cw.modelId) continue;
-    if (models.some((m) => m.provider === cw.provider && m.modelId === cw.modelId)) continue;
-    models.push({
-      id: uniqueModelId(models, cw.modelId),
-      label: cw.modelId,
-      provider: cw.provider,
-      account: DEFAULT_ACCOUNT,
-      modelId: cw.modelId,
-      kind: "chat",
-      ...(cw.contextWindow && cw.contextWindow > 0 ? { contextWindow: Math.round(cw.contextWindow) } : {}),
-    });
-  }
-  return { models, defaultChatModelId, defaultEmbeddingModelId };
 }
 
 /**
@@ -350,11 +280,9 @@ function normalizeGlobalSettings(input?: Partial<GlobalSettings> | null): Global
       nextProviders[provider] = normalizeProviderAccounts(raw, provider);
     }
   }
-  // Resolve the model registry. Three cases:
+  // Resolve the model registry. Two cases:
   //  - new shape: `models` is an array (may be empty if the user cleared it).
-  //  - legacy shape: ModelRef-based defaults / context windows → synthesize.
   //  - nothing supplied: ship the built-in defaults.
-  const legacy = input as (Partial<GlobalSettings> & LegacyGlobalSettings) | null | undefined;
   let models: ConfiguredModel[];
   let defaultChatModelId: string;
   let defaultEmbeddingModelId: string;
@@ -370,8 +298,6 @@ function normalizeGlobalSettings(input?: Partial<GlobalSettings> | null): Global
     defaultChatModelId = typeof input?.defaultChatModelId === "string" ? input.defaultChatModelId : "";
     defaultEmbeddingModelId =
       typeof input?.defaultEmbeddingModelId === "string" ? input.defaultEmbeddingModelId : "";
-  } else if (legacy?.defaultChatModel || legacy?.defaultEmbeddingModel || legacy?.modelContextWindows) {
-    ({ models, defaultChatModelId, defaultEmbeddingModelId } = migrateLegacyModels(legacy));
   } else {
     models = defaults.models.map((m) => ({ ...m }));
     defaultChatModelId = defaults.defaultChatModelId;
@@ -421,15 +347,6 @@ function slugify(name: string): string {
       .replace(/^-+|-+$/g, "")
       .slice(0, 40) || "agent"
   );
-}
-
-/** A slug id for a configured model, unique within the given registry. */
-function uniqueModelId(existing: { id: string }[], base: string): string {
-  const root = slugify(base) || "model";
-  let id = root;
-  let n = 2;
-  while (existing.some((m) => m.id === id)) id = `${root}-${n++}`;
-  return id;
 }
 
 /** Coding stages can run a CLI for a long time; give a stage a generous budget. */
@@ -864,51 +781,6 @@ export class Orchestrator {
   }
 
   /**
-   * Build the env-var secrets map for a profile. Overlays only the credentials
-   * for the accounts the profile actually references (chat + embedding), not
-   * every configured provider — so an unused "work" account never leaks into
-   * an agent that's using "personal".
-   */
-  /**
-   * Walk every agent's stored credentials and apply `suggestScopeForKey` to any
-   * row still at the schema-default `broad`. Known keys (GITHUB_TOKEN, SMTP_*,
-   * SLACK_*, DISCORD_*) get a tightened scope; unknown keys stay broad so
-   * existing shell-dependent agents keep working. Logs a per-agent summary.
-   */
-  private tagLegacyCredentialScopes(): void {
-    let totalRetagged = 0;
-    let remainingBroad = 0;
-    for (const id of this.profiles.listIds()) {
-      const scoped = this.secrets.getScoped(id);
-      if (scoped.size === 0) continue;
-      let retaggedHere = 0;
-      let broadHere = 0;
-      for (const [key, { scope }] of scoped) {
-        if (scope !== "broad") continue;
-        const suggested = suggestScopeForKey(key);
-        if (suggested === "broad") {
-          broadHere += 1;
-          continue;
-        }
-        this.secrets.setScope(id, key, suggested);
-        retaggedHere += 1;
-      }
-      if (retaggedHere > 0 || broadHere > 0) {
-        console.info(
-          `[secrets] ${id}: re-tagged ${retaggedHere} credential(s); ${broadHere} remain broad-shell`,
-        );
-      }
-      totalRetagged += retaggedHere;
-      remainingBroad += broadHere;
-    }
-    if (totalRetagged > 0 || remainingBroad > 0) {
-      console.info(
-        `[secrets] migration summary: re-tagged ${totalRetagged}, ${remainingBroad} remain broad-shell — review in Agent Studio › Credentials`,
-      );
-    }
-  }
-
-  /**
    * Merge an agent's effective credential bag, low→high precedence:
    *   1. global provider keys — implicit `direct` scope (they power
    *      chat/embedder calls and never need to be in the shell env);
@@ -977,177 +849,6 @@ export class Orchestrator {
     return m
       ? { provider: m.provider, account: m.account, modelId: m.modelId }
       : { provider: "", account: DEFAULT_ACCOUNT, modelId: "" };
-  }
-
-  /**
-   * Migrate profiles persisted with the old ModelRef-based `model` shape. Each
-   * legacy ref is matched against (or appended to) the model registry, and the
-   * profile is rewritten to reference the resulting id. The synthesized registry
-   * (legacy defaults + any new agent models) is persisted once at the end.
-   * Idempotent: profiles already storing string ids are left untouched.
-   */
-  private migrateLegacyModelRefs(): void {
-    const storedRaw = this.getSetting(GLOBAL_SETTINGS_KEY);
-    const wasLegacySettings = storedRaw ? !Array.isArray(JSON.parse(storedRaw)?.models) : false;
-    const settings = this.getGlobalSettings(); // already normalized to the new shape
-    let changed = wasLegacySettings;
-
-    const findOrCreate = (raw: unknown, kind: "chat" | "embedding"): string => {
-      if (!raw || typeof raw !== "object") {
-        return kind === "chat" ? settings.defaultChatModelId : settings.defaultEmbeddingModelId;
-      }
-      const ref = raw as Partial<ModelRef>;
-      const provider = String(ref.provider ?? "");
-      const account = ref.account || DEFAULT_ACCOUNT;
-      const modelId = String(ref.modelId ?? "");
-      const existing = settings.models.find(
-        (m) => m.kind === kind && m.provider === provider && m.account === account && m.modelId === modelId
-      );
-      if (existing) return existing.id;
-      const id = uniqueModelId(settings.models, modelId || provider || kind);
-      settings.models.push({ id, label: modelId || provider || kind, provider, account, modelId, kind });
-      changed = true;
-      return id;
-    };
-
-    for (const id of this.profiles.listIds()) {
-      const raw = this.profiles.readProfileJson(id);
-      if (!raw) continue;
-      const model = raw.model as { chat?: unknown; embedding?: unknown } | undefined;
-      const legacyChat = !!model && typeof model.chat === "object" && model.chat !== null;
-      const legacyEmb = !!model && typeof model.embedding === "object" && model.embedding !== null;
-      if (!legacyChat && !legacyEmb && !("allowedModels" in raw)) continue;
-      const chatId = legacyChat
-        ? findOrCreate(model!.chat, "chat")
-        : typeof model?.chat === "string"
-          ? model.chat
-          : settings.defaultChatModelId;
-      const embId = legacyEmb
-        ? findOrCreate(model!.embedding, "embedding")
-        : typeof model?.embedding === "string"
-          ? model.embedding
-          : settings.defaultEmbeddingModelId;
-      raw.model = { chat: chatId, embedding: embId };
-      delete raw.allowedModels;
-      this.profiles.writeProfileJson(id, raw);
-      console.info(`[profiles] migrated ${id} to configured-model ids`);
-    }
-
-    if (changed) this.setSetting(GLOBAL_SETTINGS_KEY, JSON.stringify(settings));
-  }
-
-  /**
-   * One-time migration to the named Connections model. Converts each agent's
-   * inline Slack/Discord/Matrix config and MCP servers into Credentials +
-   * Connections + assignments (moving chat tokens out of `agent_secrets`), and
-   * surfaces existing global capability credentials as shared Connections.
-   * Guarded by the `connections_migrated` app-setting; per-record creation means
-   * a half-finished run resumes safely.
-   */
-  private migrateInlineToConnections(): void {
-    if (this.getSetting("connections_migrated") === "true") return;
-    let chat = 0;
-    let mcp = 0;
-    const services: ChatProviderId[] = ["slack", "discord", "matrix"];
-    for (const profile of this.profiles.list()) {
-      const raw = this.profiles.readProfileJson(profile.id);
-      if (!raw) continue;
-      let changed = false;
-
-      for (const service of services) {
-        const cfg = profile[service];
-        if (!cfg) continue;
-        const provider = PROVIDERS[service];
-        const stored = this.secrets.get(profile.id);
-        const keys = [...provider.connectorTokenKeys];
-        if (service === "matrix") keys.push("MATRIX_ACCESS_TOKEN", "MATRIX_DEVICE_ID");
-        const secrets: Record<string, string> = {};
-        for (const k of keys) {
-          const v = stored.get(k);
-          if (v) secrets[k] = v;
-        }
-        const label = `${profile.displayName} ${service}`;
-        const cred = this.credentials.create({ type: service, label, secrets });
-        const conn = this.connectionStore.create({
-          type: service,
-          label,
-          config: {
-            channelId: cfg.channelId,
-            publicBot: cfg.publicBot,
-            allowedUserIds: cfg.allowedUserIds,
-            mentionOnly: cfg.mentionOnly,
-          },
-          credentialId: cred.id,
-        });
-        this.connectionStore.assign(conn.id, profile.id);
-        for (const k of keys) this.secrets.deleteOne(profile.id, k);
-        raw[service] = null;
-        changed = true;
-        chat++;
-      }
-
-      const servers = Array.isArray(raw.mcpServers) ? (raw.mcpServers as McpServerConfig[]) : [];
-      for (const s of servers) {
-        const conn = this.connectionStore.create({
-          type: "mcp",
-          label: s.name || "mcp",
-          config: {
-            name: s.name,
-            transport: s.transport,
-            command: s.command,
-            args: s.args,
-            url: s.url,
-            enabled: s.enabled,
-          },
-          credentialId: null,
-        });
-        this.connectionStore.assign(conn.id, profile.id);
-        mcp++;
-      }
-      if (servers.length) {
-        raw.mcpServers = [];
-        changed = true;
-      }
-
-      if (changed) this.profiles.writeProfileJson(profile.id, raw);
-    }
-
-    const cap = this.migrateGlobalCapabilityConnections();
-    this.setSetting("connections_migrated", "true");
-    if (chat || mcp || cap) {
-      console.info(
-        `[connections] migrated ${chat} chat, ${mcp} mcp, ${cap} capability config(s) into named connections`
-      );
-    }
-  }
-
-  /**
-   * Surface existing instance-wide capability credentials (GitHub, SMTP,
-   * Proxmox, SSH in `global_secrets`) as shared, named Connections for the
-   * unified UI. The global secrets are left in place — they still inject into
-   * agents via the global-secrets layer — so this is purely additive.
-   */
-  private migrateGlobalCapabilityConnections(): number {
-    const global = this.globalSecrets.get();
-    const specs: Array<{ type: string; label: string; need: string }> = [
-      { type: "github", label: "GitHub", need: "GITHUB_TOKEN" },
-      { type: "smtp", label: "Email (SMTP)", need: "SMTP_HOST" },
-      { type: "proxmox", label: "Proxmox", need: "PROXMOX_HOST" },
-      { type: "ssh", label: "SSH", need: "SSH_HOSTS" },
-    ];
-    let n = 0;
-    for (const spec of specs) {
-      if (!global.get(spec.need)) continue;
-      const secrets: Record<string, string> = {};
-      for (const k of credentialKeysFor(spec.type)) {
-        const v = global.get(k);
-        if (v) secrets[k] = v;
-      }
-      const cred = this.credentials.create({ type: spec.type, label: spec.label, secrets });
-      this.connectionStore.create({ type: spec.type, label: spec.label, credentialId: cred.id });
-      n++;
-    }
-    return n;
   }
 
   getProviderSecretsForProfile(profile: AgentProfile): Map<string, string> {
@@ -1230,41 +931,9 @@ export class Orchestrator {
     this.runtimes.clear();
   }
 
-  /** Load (or first-run migrate) every profile and start its runtime. */
+  /** Load (scaffolding the COO on first run) every profile and start its runtime. */
   async boot(): Promise<void> {
-    this.profiles.ensureCooProfile({
-      chatModelId: this.cfg.model,
-      legacySkillsDir: this.cfg.skillsDir,
-    });
-
-    // One-time migration: fold any legacy plaintext `.env` credential files
-    // into the encrypted secrets store, then delete them.
-    for (const id of this.profiles.listIds()) {
-      const legacy = this.profiles.readLegacyEnv(id);
-      if (legacy) {
-        if (legacy.size > 0) {
-          const merged = this.secrets.get(id);
-          for (const [k, v] of legacy) if (!merged.has(k)) merged.set(k, v);
-          this.secrets.set(id, merged);
-        }
-        this.profiles.removeLegacyEnv(id);
-        console.info(`[profiles] migrated legacy .env for ${id} into the secrets store`);
-      }
-    }
-
-    // One-time migration: tag every legacy credential with a sane default
-    // scope based on its env-var name. Re-runs are cheap and idempotent —
-    // we only touch rows still at the schema default `broad`.
-    this.tagLegacyCredentialScopes();
-
-    // One-time migration: rewrite any profile still storing ModelRef objects
-    // into configured-model id references, registering matching entries in the
-    // model registry. Idempotent — profiles already on ids are skipped.
-    this.migrateLegacyModelRefs();
-
-    // One-time migration: fold inline chat configs, MCP servers, and global
-    // capability credentials into named Connections + Credentials. Idempotent.
-    this.migrateInlineToConnections();
+    this.profiles.ensureCooProfile();
 
     for (const profile of this.profiles.list()) {
       this.startAgent(profile);

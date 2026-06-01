@@ -7,7 +7,7 @@ import { Orchestrator } from "./orchestrator/orchestrator.js";
 import { buildServer } from "./server.js";
 import { attachSocketServer } from "./socket.js";
 import { initOpenAiAuth } from "./auth/openai-auth-store.js";
-import { createAuthStore, migrateLegacyToken } from "./auth/api-token.js";
+import { createAuthStore } from "./auth/api-token.js";
 
 async function main() {
   const cfg = getConfig();
@@ -22,9 +22,6 @@ async function main() {
   // Make sure dataDir exists before we read/write the auth file in it.
   mkdirSync(cfg.dataDir, { recursive: true });
   const auth = createAuthStore(cfg.dataDir);
-  // Pull an existing data/.api-token (the previous single-password file)
-  // into the new sessions-aware auth file, if applicable.
-  migrateLegacyToken(cfg.dataDir, auth);
 
   const mode = auth.mode();
   if (mode === "setup") {

@@ -2,8 +2,8 @@ import { Cell, TILE } from "./geometry";
 import { roomObjects, type ObjectFit, type OfficeAtlas, type RoomObject } from "./roomPrefabs";
 import type { DeskSlot, World } from "./worldLayout";
 
-export type TileKey = "floor" | "wall" | "door" | "desk";
-export type ObjectKind = "sprite" | "desk" | "worker" | "nameplate" | "whiteboard";
+type TileKey = "floor" | "wall" | "door" | "desk";
+type ObjectKind = "sprite" | "desk" | "worker" | "nameplate" | "whiteboard";
 
 export interface TileLayer {
   cols: number;

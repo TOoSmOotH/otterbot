@@ -440,23 +440,3 @@ function placeSpriteByName(
   root.addChild(sprite);
   return true;
 }
-
-/** A simple potted-plant prop at a tile. */
-export function drawPlant(tx: number, ty: number): Container {
-  const root = new Container();
-  if (placeSprite(root, "plant", tx * TILE - 4, ty * TILE - 18, 28, 40)) return root;
-  const g = new Graphics();
-  g.rect(tx * TILE + 5, ty * TILE + 9, 6, 5).fill(0x8a5a3c);
-  g.circle(tx * TILE + 8, ty * TILE + 6, 5).fill(C.plant);
-  return g;
-}
-
-/** A simple printer prop at a tile. */
-export function drawPrinter(tx: number, ty: number): Container {
-  const root = new Container();
-  if (placeSprite(root, "printer", tx * TILE - 14, ty * TILE - 18, 52, 52)) return root;
-  const g = new Graphics();
-  g.rect(tx * TILE + 3, ty * TILE + 5, 10, 8).fill(C.printer);
-  g.rect(tx * TILE + 5, ty * TILE + 3, 6, 3).fill(0x8b93a3);
-  return g;
-}

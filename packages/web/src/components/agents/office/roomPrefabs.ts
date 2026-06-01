@@ -39,7 +39,7 @@ const MAX_DESK_COLS = 3;
 export const ROOM_GAP = 2;
 export const ROW_GAP = 3;
 
-export const ROOM_PREFABS: Record<RoomKind, RoomPrefab> = {
+const ROOM_PREFABS: Record<RoomKind, RoomPrefab> = {
   coo: {
     minW: 14,
     minH: 17,

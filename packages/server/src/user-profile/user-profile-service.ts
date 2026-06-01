@@ -173,7 +173,7 @@ export class UserProfileService {
   }
 }
 
-export function parseProfileJson(text: string): UserProfile | null {
+function parseProfileJson(text: string): UserProfile | null {
   const match = text.match(/\{[\s\S]*\}/);
   if (!match) return null;
   try {

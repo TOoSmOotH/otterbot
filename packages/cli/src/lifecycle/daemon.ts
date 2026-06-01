@@ -40,7 +40,7 @@ const MAX_LOG_BYTES = 5 * 1024 * 1024;
 const delay = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
 /** A connectable URL for a server bound to `host`:`port`. */
-export function healthUrl(host: string, port: number): string {
+function healthUrl(host: string, port: number): string {
   const h = !host || host === "0.0.0.0" || host === "::" ? "localhost" : host;
   return `http://${h}:${port}`;
 }
@@ -97,7 +97,7 @@ function rotateLog(): void {
 }
 
 /** Last `lines` lines of the daemon log. */
-export function tailLog(lines: number): string {
+function tailLog(lines: number): string {
   try {
     return readFileSync(logFilePath(), "utf8").split(/\r?\n/).slice(-lines).join("\n");
   } catch {

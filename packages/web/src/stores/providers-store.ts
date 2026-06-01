@@ -72,20 +72,6 @@ export function isAccountConfigured(p: ProviderInfo, account?: ProviderAccount):
   return true;
 }
 
-/**
- * Whether any account for a provider is configured. Used by pickers to show
- * the "Configured" badge without caring which specific account is set up.
- */
-export function isProviderConfiguredGlobally(
-  p: ProviderInfo,
-  accounts?: ProviderAccount[]
-): boolean {
-  if (!accounts || accounts.length === 0) {
-    if (p.needsApiKey || p.baseUrlEnv) return false;
-    return true;
-  }
-  return accounts.some((acc) => isAccountConfigured(p, acc));
-}
 
 /**
  * Maps a provider's single credential value onto the right `ProviderAccount`
