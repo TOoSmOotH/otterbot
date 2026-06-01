@@ -20,13 +20,20 @@ import { statusColor } from "../agents/agent-visual";
 import { Icon } from "../ui/Icon";
 import { type, fonts } from "../../lib/typography";
 import { ConversationList } from "./ConversationList";
+import { CodingCliIndicator } from "./CodingCliIndicator";
 import { ContextPanel } from "./ContextPanel";
 import { ChatImage } from "./ChatImage";
 import { Markdown } from "./Markdown";
 
 const PULSING_STATUSES = new Set(["working", "thinking"]);
 
-export function AgentChat({ onEditAgent }: { onEditAgent: (id: string) => void }) {
+export function AgentChat({
+  onEditAgent,
+  onOpenSettings,
+}: {
+  onEditAgent: (id: string) => void;
+  onOpenSettings?: (tab?: string) => void;
+}) {
   const connect = useChatStore((s) => s.connect);
   const join = useChatStore((s) => s.join);
   const send = useChatStore((s) => s.send);
@@ -173,7 +180,8 @@ export function AgentChat({ onEditAgent }: { onEditAgent: (id: string) => void }
             />
             {streaming && <StreamingDots />}
           </h2>
-          <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <CodingCliIndicator onOpenSettings={onOpenSettings} />
             <IconButton
               icon={Clock}
               label="History"

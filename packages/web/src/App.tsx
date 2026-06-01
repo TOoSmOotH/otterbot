@@ -151,7 +151,7 @@ function AuthedApp() {
           </LayoutGroup>
         </nav>
         <div style={{ flex: 1, minHeight: 0 }}>
-          {view === "chat" && <AgentChat onEditAgent={openStudio} />}
+          {view === "chat" && <AgentChat onEditAgent={openStudio} onOpenSettings={openSettings} />}
           {view === "studio" && <AgentStudio agentId={activeAgentId} onOpenSettings={openSettings} />}
           {view === "projects" && <ProjectsView />}
           {view === "activity" && <ActivityView />}
