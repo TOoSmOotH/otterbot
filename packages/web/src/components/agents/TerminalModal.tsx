@@ -63,6 +63,7 @@ export function TerminalModal({
   onClose,
   kind = "shell",
   toolLabel,
+  initialCommand,
 }: {
   agentId: string;
   agentName: string;
@@ -70,6 +71,8 @@ export function TerminalModal({
   kind?: TerminalKind;
   /** For coding sessions, the tool name shown in the header (e.g. "claude"). */
   toolLabel?: string;
+  /** A command auto-run once the shell is ready (e.g. a login command). */
+  initialCommand?: string;
 }) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const [exited, setExited] = useState<string | null>(null);
@@ -96,8 +99,19 @@ export function TerminalModal({
 
     const typed = term.onData((data) => socket.emit(ev.input, { agentId, data }));
 
+    // Auto-run an initial command (e.g. a login) once the shell is ready —
+    // gated on the first output so it lands after the prompt is up, sent once.
+    let sentInit = false;
+    const maybeSendInit = () => {
+      if (sentInit || !initialCommand) return;
+      sentInit = true;
+      setTimeout(() => socket.emit(ev.input, { agentId, data: `${initialCommand}\r` }), 300);
+    };
+
     const onOutput = (p: TermOutput) => {
-      if (p.agentId === agentId) term.write(p.data);
+      if (p.agentId !== agentId) return;
+      term.write(p.data);
+      maybeSendInit();
     };
     const onExit = (p: TermExit) => {
       if (p.agentId !== agentId) return;

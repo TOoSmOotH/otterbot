@@ -14,6 +14,7 @@ function agent(id: string, role: AgentProfileSummary["role"]): AgentProfileSumma
     artwork: { avatar: null },
     parentId: null,
     activeSubagents: 0,
+    canRunShell: false,
   };
 }
 

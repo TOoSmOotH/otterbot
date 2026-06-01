@@ -1575,6 +1575,7 @@ export class Orchestrator {
         activeSubagents: [...this.contexts.values()].filter(
           (c) => c.profile.parentId === p.id
         ).length,
+        canRunShell: p.canRunShell,
       };
     });
   }

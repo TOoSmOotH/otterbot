@@ -245,4 +245,6 @@ export interface AgentProfileSummary {
   artwork: AgentArtwork;
   parentId: string | null;
   activeSubagents: number;
+  /** Whether this agent can host an interactive shell (e.g. a login terminal). */
+  canRunShell: boolean;
 }

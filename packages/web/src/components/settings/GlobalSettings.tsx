@@ -23,6 +23,7 @@ import { CodeReferenceTab } from "./CodeReferenceTab";
 import { CredentialsTab } from "./CredentialsTab";
 import { ConnectionsTab } from "./ConnectionsTab";
 import { CodingCliSetup } from "../agents/CodingCliSetup";
+import type { CodingTool } from "../../lib/coding-cli";
 import { uniqueModelId } from "../../lib/model-id";
 
 type OpenAiAuthStatus = { connected: boolean; accountId: string | null };
@@ -32,7 +33,13 @@ type SettingsTab = (typeof TABS)[number];
 
 type PatchFn = (p: Partial<GlobalSettingsShape>) => void;
 
-export function GlobalSettings({ initialTab }: { initialTab?: string } = {}) {
+export function GlobalSettings({
+  initialTab,
+  onOpenLoginTerminal,
+}: {
+  initialTab?: string;
+  onOpenLoginTerminal?: (tool: CodingTool) => void;
+} = {}) {
   const savedSettings = useGlobalSettingsStore((s) => s.settings);
   const load = useGlobalSettingsStore((s) => s.load);
   const saveSettings = useGlobalSettingsStore((s) => s.save);
@@ -140,7 +147,7 @@ export function GlobalSettings({ initialTab }: { initialTab?: string } = {}) {
               Install and log in to the command-line coding agents (Claude Code, Codex, Gemini
               CLI, OpenCode) once — every agent shares the same install and login.
             </p>
-            <CodingCliSetup />
+            <CodingCliSetup onOpenLoginTerminal={onOpenLoginTerminal} />
           </section>
         )}
         {tab === "Credentials" && <CredentialsTab />}

@@ -4,6 +4,7 @@ import { Activity, FolderGit2, MessageSquare, Network, Settings, Sliders } from 
 import type { LucideIcon } from "lucide-react";
 import { AgentRoster } from "./components/agents/AgentRoster";
 import { AgentChat } from "./components/chat/AgentChat";
+import { CODING_LOGIN_CMDS, CODING_TOOL_LABELS, type CodingTool } from "./lib/coding-cli";
 import { AgentWizard } from "./components/agents/AgentWizard";
 import { AgentStudio } from "./components/agents/AgentStudio";
 import { ActivityView } from "./components/agents/ActivityView";
@@ -58,6 +59,9 @@ function AuthedApp() {
   const [settingsTab, setSettingsTab] = useState<string | undefined>(undefined);
   const agents = useAgentsStore((s) => s.agents);
   const [codingView, setCodingView] = useState<{ agentId: string; tool: string } | null>(null);
+  const [loginTerminal, setLoginTerminal] = useState<{ agentId: string; tool: CodingTool } | null>(
+    null
+  );
 
   useEffect(() => {
     connect();
@@ -89,6 +93,23 @@ function AuthedApp() {
   const openSettings = (tab?: string) => {
     setSettingsTab(tab);
     setView("settings");
+  };
+
+  // Open a shell to log a coding CLI in. Logins are shared across agents, so any
+  // shell-capable agent works; prefer the active one, else the COO, else any.
+  const openLoginTerminal = (tool: CodingTool) => {
+    const active = agents.find((a) => a.id === activeAgentId);
+    const host =
+      (active?.canRunShell ? active : undefined) ??
+      agents.find((a) => a.role === "coo" && a.canRunShell) ??
+      agents.find((a) => a.canRunShell);
+    if (!host) {
+      alert(
+        "No shell-capable agent is available. Enable shell access on an agent (Agent Studio → Skills) to log in to the coding CLIs."
+      );
+      return;
+    }
+    setLoginTerminal({ agentId: host.id, tool });
   };
 
   return (
@@ -151,12 +172,20 @@ function AuthedApp() {
           </LayoutGroup>
         </nav>
         <div style={{ flex: 1, minHeight: 0 }}>
-          {view === "chat" && <AgentChat onEditAgent={openStudio} onOpenSettings={openSettings} />}
+          {view === "chat" && (
+            <AgentChat
+              onEditAgent={openStudio}
+              onOpenSettings={openSettings}
+              onOpenLoginTerminal={openLoginTerminal}
+            />
+          )}
           {view === "studio" && <AgentStudio agentId={activeAgentId} onOpenSettings={openSettings} />}
           {view === "projects" && <ProjectsView />}
           {view === "activity" && <ActivityView />}
           {view === "network" && <NetworkView />}
-          {view === "settings" && <GlobalSettings initialTab={settingsTab} />}
+          {view === "settings" && (
+            <GlobalSettings initialTab={settingsTab} onOpenLoginTerminal={openLoginTerminal} />
+          )}
         </div>
       </div>
 
@@ -168,6 +197,15 @@ function AuthedApp() {
           agentName={agents.find((a) => a.id === codingView.agentId)?.displayName ?? codingView.agentId}
           toolLabel={codingView.tool}
           onClose={() => setCodingView(null)}
+        />
+      )}
+      {loginTerminal && (
+        <TerminalModal
+          kind="shell"
+          agentId={loginTerminal.agentId}
+          agentName={`Log in to ${CODING_TOOL_LABELS[loginTerminal.tool]}`}
+          initialCommand={CODING_LOGIN_CMDS[loginTerminal.tool]}
+          onClose={() => setLoginTerminal(null)}
         />
       )}
       {showOnboarding && <OnboardingWizard />}

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { apiFetch } from "../../lib/api";
+import { CODING_TOOLS, CODING_TOOL_LABELS, CODING_LOGIN_CMDS, type CodingTool } from "../../lib/coding-cli";
 
 /**
  * Install + status panel for the coding CLIs. Installs and logins are SHARED
@@ -9,8 +10,6 @@ import { apiFetch } from "../../lib/api";
  * the interactive login command. Login itself stays manual — run the shown
  * command from any agent's terminal; it logs in every agent.
  */
-
-type CodingTool = "claude" | "codex" | "gemini" | "opencode";
 
 interface ToolStatus {
   installed: boolean;
@@ -22,14 +21,11 @@ interface ToolStatus {
 
 type StatusMap = Record<CodingTool, ToolStatus>;
 
-const TOOLS: { tool: CodingTool; label: string; loginCmd: string }[] = [
-  { tool: "claude", label: "Claude Code", loginCmd: "claude" },
-  { tool: "codex", label: "Codex", loginCmd: "codex login" },
-  { tool: "gemini", label: "Gemini CLI", loginCmd: "gemini" },
-  { tool: "opencode", label: "OpenCode", loginCmd: "opencode auth login" },
-];
-
-export function CodingCliSetup() {
+export function CodingCliSetup({
+  onOpenLoginTerminal,
+}: {
+  onOpenLoginTerminal?: (tool: CodingTool) => void;
+} = {}) {
   const [status, setStatus] = useState<StatusMap | null>(null);
   const [loading, setLoading] = useState(true);
   const [installing, setInstalling] = useState<CodingTool | null>(null);
@@ -83,7 +79,8 @@ export function CodingCliSetup() {
         it in once from any agent's <strong>Terminal</strong> (the login flows are interactive) —
         that login is shared by every agent too. Re-installing updates the tool to the latest.
       </p>
-      {TOOLS.map(({ tool, label, loginCmd }) => {
+      {CODING_TOOLS.map((tool) => {
+        const label = CODING_TOOL_LABELS[tool];
         const s = status?.[tool] ?? { installed: false, loggedIn: false };
         const canUpdate = !!s.updateAvailable;
         return (
@@ -106,7 +103,15 @@ export function CodingCliSetup() {
               </div>
               {s.installed && !s.loggedIn && (
                 <span style={hint}>
-                  Log in from any Terminal: <code style={code}>{loginCmd}</code>
+                  {onOpenLoginTerminal ? (
+                    <button type="button" onClick={() => onOpenLoginTerminal(tool)} style={linkBtn}>
+                      Open a shell &amp; log in
+                    </button>
+                  ) : (
+                    <>
+                      Log in from any Terminal: <code style={code}>{CODING_LOGIN_CMDS[tool]}</code>
+                    </>
+                  )}
                 </span>
               )}
             </div>
@@ -166,6 +171,16 @@ const updateBadge: React.CSSProperties = {
   ...badge,
   color: "rgb(var(--accent))",
   borderColor: "rgb(var(--accent))",
+};
+
+const linkBtn: React.CSSProperties = {
+  background: "none",
+  border: "none",
+  padding: 0,
+  font: "inherit",
+  color: "rgb(var(--accent))",
+  cursor: "pointer",
+  textDecoration: "underline",
 };
 
 const code: React.CSSProperties = {
