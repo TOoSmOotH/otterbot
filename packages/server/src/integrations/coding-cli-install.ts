@@ -64,6 +64,10 @@ export interface CodingCliStatus {
   version?: string;
   /** Whether a logged-in credential file was found in the shared store. */
   loggedIn: boolean;
+  /** Latest version on the npm registry, when known (from the cached check). */
+  latest?: string;
+  /** True when installed and a newer version is published. */
+  updateAvailable?: boolean;
 }
 
 /** Probe the shared install + shared login store for every tool. Host-side. */
@@ -136,4 +140,124 @@ export function installSharedCodingCli(tool: CodingTool): Promise<CodingCliInsta
       );
     });
   });
+}
+
+// --- Update checking -------------------------------------------------------
+//
+// The shared base is pinned `@latest` at install time but doesn't move on its
+// own, so it can fall behind the registry. We compare the installed version
+// against the npm registry's latest and surface "update available" in the UI.
+// A daily background check (CodingCliUpdateChecker) caches the latest versions
+// so the check is cheap on read and can light a passive indicator.
+
+export type LatestVersions = Record<CodingTool, string | null>;
+
+/** Minimal settings backend (the orchestrator's app_settings) for the cache. */
+export interface CodingCliSettingsStore {
+  getSetting(key: string): string | null;
+  setSetting(key: string, value: string): void;
+}
+
+const LATEST_CACHE_KEY = "coding_cli_latest";
+
+function emptyLatest(): LatestVersions {
+  const m = {} as LatestVersions;
+  for (const tool of CODING_TOOLS) m[tool] = null;
+  return m;
+}
+
+/** Pull the first `x.y.z` out of a version string (installed `--version` output
+ *  often has extra words, e.g. "codex-cli 0.135.0"). */
+function semver(v: string | undefined): [number, number, number] | null {
+  const m = (v ?? "").match(/(\d+)\.(\d+)\.(\d+)/);
+  return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : null;
+}
+
+/** True when `latest` is strictly newer than `installed`. Conservative: returns
+ *  false if either version can't be parsed (never nag on uncertainty). */
+export function isNewerVersion(latest: string | undefined, installed: string | undefined): boolean {
+  const a = semver(latest);
+  const b = semver(installed);
+  if (!a || !b) return false;
+  for (let i = 0; i < 3; i++) {
+    if (a[i] !== b[i]) return a[i] > b[i];
+  }
+  return false;
+}
+
+/** Fetch the registry `latest` version for every tool (null on any failure). */
+export async function fetchLatestVersions(): Promise<LatestVersions> {
+  const out = emptyLatest();
+  await Promise.all(
+    CODING_TOOLS.map(async (tool) => {
+      try {
+        const res = await fetch(`https://registry.npmjs.org/${CODING_CLI_SPECS[tool].pkg}/latest`, {
+          signal: AbortSignal.timeout(8000),
+          headers: { accept: "application/json" },
+        });
+        if (!res.ok) return;
+        const body = (await res.json()) as { version?: string };
+        if (body.version) out[tool] = body.version;
+      } catch {
+        /* leave null — best-effort */
+      }
+    })
+  );
+  return out;
+}
+
+/** Read the cached latest versions (from the daily check), empty if none. */
+export function cachedLatestVersions(store: CodingCliSettingsStore): LatestVersions {
+  try {
+    const raw = store.getSetting(LATEST_CACHE_KEY);
+    if (raw) return { ...emptyLatest(), ...(JSON.parse(raw).latest ?? {}) };
+  } catch {
+    /* fall through to empty */
+  }
+  return emptyLatest();
+}
+
+/** Fetch fresh latest versions and cache them. Returns the fetched map. */
+export async function refreshLatestVersions(store: CodingCliSettingsStore): Promise<LatestVersions> {
+  const latest = await fetchLatestVersions();
+  store.setSetting(LATEST_CACHE_KEY, JSON.stringify({ checkedAt: Date.now(), latest }));
+  return latest;
+}
+
+/**
+ * Shared install/login status for every tool, enriched with the cached latest
+ * version + an `updateAvailable` flag. Local + cache only (no network).
+ */
+export function sharedCodingStatus(store: CodingCliSettingsStore): Record<CodingTool, CodingCliStatus> {
+  const status = checkSharedCodingClis();
+  const latest = cachedLatestVersions(store);
+  for (const tool of CODING_TOOLS) {
+    const lv = latest[tool];
+    if (lv) {
+      status[tool].latest = lv;
+      status[tool].updateAvailable = status[tool].installed && isNewerVersion(lv, status[tool].version);
+    }
+  }
+  return status;
+}
+
+/**
+ * Periodically refreshes the cached latest versions so the UI can flag updates
+ * without a network call on every read. Mirrors ForgeMonitor's timer pattern.
+ */
+export class CodingCliUpdateChecker {
+  private timer: ReturnType<typeof setInterval> | null = null;
+  constructor(private readonly store: CodingCliSettingsStore) {}
+
+  start(intervalMs: number): void {
+    if (this.timer) return;
+    void refreshLatestVersions(this.store).catch(() => {});
+    this.timer = setInterval(() => void refreshLatestVersions(this.store).catch(() => {}), intervalMs);
+    if (typeof this.timer.unref === "function") this.timer.unref();
+  }
+
+  stop(): void {
+    if (this.timer) clearInterval(this.timer);
+    this.timer = null;
+  }
 }

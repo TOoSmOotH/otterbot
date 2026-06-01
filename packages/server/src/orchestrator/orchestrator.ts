@@ -48,6 +48,11 @@ import {
 import { ForgeService } from "../forge/forge-service.js";
 import { parseRepoInput, splitRepo, type ForgeProvider, type ForgeIssue, type ForgeComment } from "../forge/forge.js";
 import { ForgeMonitor } from "../forge/forge-monitor.js";
+import {
+  CodingCliUpdateChecker,
+  refreshLatestVersions,
+  sharedCodingStatus,
+} from "../integrations/coding-cli-install.js";
 import { IssueTriageStore } from "../projects/issue-triage-store.js";
 import { SecretsStore, type ScopedSecret } from "../secrets/secrets-store.js";
 import { GlobalSecretsStore } from "../secrets/global-secrets-store.js";
@@ -495,6 +500,7 @@ export class Orchestrator {
   private readonly forge: ForgeService;
   private readonly issueTriage: IssueTriageStore;
   private readonly forgeMonitor: ForgeMonitor;
+  private readonly codingCliUpdates: CodingCliUpdateChecker;
   private readonly pipeline: PipelineManager;
   private readonly pipelineListeners = new Set<(run: PipelineRunView) => void>();
   /** Run ids already published (PR opened) — guards the publish-on-done hook. */
@@ -615,6 +621,7 @@ export class Orchestrator {
       advanceWatermark: (projectId, issueNumber, lastCommentId) =>
         this.issueTriage.advanceWatermark(projectId, issueNumber, lastCommentId),
     });
+    this.codingCliUpdates = new CodingCliUpdateChecker(this);
     this.secrets = new SecretsStore(control);
     this.globalSecrets = new GlobalSecretsStore(control);
     this.credentials = new CredentialStore(control, this.globalSecrets);
@@ -765,6 +772,17 @@ export class Orchestrator {
       .values({ key, value })
       .onConflictDoUpdate({ target: controlSchema.appSettings.key, set: { value } })
       .run();
+  }
+
+  /** Shared coding-CLI install/login status + cached update-available info. */
+  codingCliStatus() {
+    return sharedCodingStatus(this);
+  }
+
+  /** Force a fresh registry check of the coding CLIs; returns refreshed status. */
+  async refreshCodingCliUpdates() {
+    await refreshLatestVersions(this);
+    return this.codingCliStatus();
   }
 
   getGlobalSettings(): GlobalSettings {
@@ -1192,6 +1210,7 @@ export class Orchestrator {
   async shutdown(): Promise<void> {
     this.scheduler.stop();
     this.forgeMonitor.stop();
+    this.codingCliUpdates.stop();
     for (const timer of this.subagentTeardowns.values()) clearTimeout(timer);
     this.subagentTeardowns.clear();
     await this.codeRef.stop();
@@ -1265,6 +1284,8 @@ export class Orchestrator {
     // Ensure the shared infra service agents (proxmox, ssh) exist.
     // Poll forges for assigned issues + PR/CI signals every 5 minutes.
     this.forgeMonitor.start(5 * 60_000);
+    // Refresh coding-CLI latest versions on startup, then daily.
+    this.codingCliUpdates.start(24 * 60 * 60_000);
   }
 
   /** Build and register a runtime + context for a profile. */

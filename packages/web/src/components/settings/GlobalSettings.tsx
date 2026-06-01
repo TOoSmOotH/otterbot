@@ -42,10 +42,20 @@ export function GlobalSettings() {
   const [draft, setDraft] = useState<GlobalSettingsShape>(savedSettings);
   const [tab, setTab] = useState<SettingsTab>("Providers");
   const [status, setStatus] = useState("");
+  // Passive "a coding CLI has an update" indicator (powered by the daily check).
+  const [codingUpdate, setCodingUpdate] = useState(false);
 
   useEffect(() => void load(), [load]);
   useEffect(() => void loadProviders(), [loadProviders]);
   useEffect(() => setDraft(savedSettings), [savedSettings]);
+  useEffect(() => {
+    void apiFetch("/api/coding-cli/status")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((s) => {
+        if (s) setCodingUpdate(Object.values(s).some((t) => (t as { updateAvailable?: boolean }).updateAvailable));
+      })
+      .catch(() => {});
+  }, []);
 
   const dirty = useMemo(
     () => JSON.stringify(draft) !== JSON.stringify(savedSettings),
@@ -98,6 +108,19 @@ export function GlobalSettings() {
             }}
           >
             {t}
+            {t === "Coding CLIs" && codingUpdate && (
+              <span
+                title="A coding CLI has an update available"
+                style={{
+                  marginLeft: 6,
+                  width: 7,
+                  height: 7,
+                  borderRadius: 999,
+                  background: tab === t ? "white" : "rgb(var(--accent))",
+                  display: "inline-block",
+                }}
+              />
+            )}
           </button>
         ))}
       </nav>

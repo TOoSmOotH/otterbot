@@ -28,10 +28,7 @@ import { initOpenAiAuth, getOpenAiAuth } from "./auth/openai-auth-store.js";
 import { builtinModelStatus, downloadBuiltinModel } from "./embedders/builtin-embedder.js";
 import { BUILTIN_CAPABILITIES, getCatalogCapability } from "./skills/builtin-catalog.js";
 import { isCodingTool } from "./integrations/coding-cli.js";
-import {
-  checkSharedCodingClis,
-  installSharedCodingCli,
-} from "./integrations/coding-cli-install.js";
+import { installSharedCodingCli } from "./integrations/coding-cli-install.js";
 import { generateText } from "ai";
 import { resolveChatModel, listProviderModels } from "./providers/registry.js";
 import { eq, asc, desc, like } from "drizzle-orm";
@@ -1288,9 +1285,13 @@ export async function buildServer(
   });
 
   // Which coding CLIs (claude/codex/gemini/opencode) are installed + (best-
-  // effort) logged in. Both install and login are SHARED across all agents, so
-  // this is instance-wide, not per agent.
-  app.get("/api/coding-cli/status", async () => checkSharedCodingClis());
+  // effort) logged in, plus cached "update available" info. Both install and
+  // login are SHARED across all agents, so this is instance-wide, not per agent.
+  app.get("/api/coding-cli/status", async () => orch.codingCliStatus());
+
+  // Force a fresh npm-registry check (the daily check runs in the background);
+  // returns refreshed status with latest versions + update-available flags.
+  app.post("/api/coding-cli/check-updates", async () => orch.refreshCodingCliUpdates());
 
   // Install (or update to latest) one coding CLI into the shared store for all
   // agents, then return refreshed status. Login stays a manual interactive step
@@ -1302,7 +1303,7 @@ export async function buildServer(
       return { error: "tool must be one of claude, codex, gemini, opencode" };
     }
     const result = await installSharedCodingCli(tool);
-    return { ...result, status: checkSharedCodingClis() };
+    return { ...result, status: orch.codingCliStatus() };
   });
 
   // A skill's config form: its schema + current values (secrets masked).

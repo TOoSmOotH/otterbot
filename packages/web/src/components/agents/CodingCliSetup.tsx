@@ -16,6 +16,8 @@ interface ToolStatus {
   installed: boolean;
   version?: string;
   loggedIn: boolean;
+  latest?: string;
+  updateAvailable?: boolean;
 }
 
 type StatusMap = Record<CodingTool, ToolStatus>;
@@ -31,6 +33,7 @@ export function CodingCliSetup() {
   const [status, setStatus] = useState<StatusMap | null>(null);
   const [loading, setLoading] = useState(true);
   const [installing, setInstalling] = useState<CodingTool | null>(null);
+  const [checking, setChecking] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const loadStatus = async () => {
@@ -39,8 +42,18 @@ export function CodingCliSetup() {
     setLoading(false);
   };
 
+  // Live registry check; the background daily check keeps the cache warm too.
+  const checkUpdates = async () => {
+    setChecking(true);
+    const res = await apiFetch(`/api/coding-cli/check-updates`, { method: "POST" });
+    if (res.ok) setStatus((await res.json()) as StatusMap);
+    setChecking(false);
+  };
+
   useEffect(() => {
-    void loadStatus();
+    // Show cached status immediately, then refresh against the registry.
+    void loadStatus().then(() => checkUpdates());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const install = async (tool: CodingTool) => {
@@ -72,6 +85,7 @@ export function CodingCliSetup() {
       </p>
       {TOOLS.map(({ tool, label, loginCmd }) => {
         const s = status?.[tool] ?? { installed: false, loggedIn: false };
+        const canUpdate = !!s.updateAvailable;
         return (
           <div key={tool} style={row}>
             <div style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
@@ -86,6 +100,9 @@ export function CodingCliSetup() {
                   </span>
                 )}
                 {s.version && <span style={hint}>{s.version}</span>}
+                {canUpdate && (
+                  <span style={updateBadge}>Update available → {s.latest}</span>
+                )}
               </div>
               {s.installed && !s.loggedIn && (
                 <span style={hint}>
@@ -98,7 +115,7 @@ export function CodingCliSetup() {
               onClick={() => void install(tool)}
               disabled={installing !== null}
               style={
-                s.installed
+                s.installed && !canUpdate
                   ? { ...ghost, opacity: installing !== null ? 0.6 : 1 }
                   : { ...primary, opacity: installing !== null ? 0.6 : 1 }
               }
@@ -114,7 +131,12 @@ export function CodingCliSetup() {
           </div>
         );
       })}
-      {error && <span style={{ fontSize: 12, color: "#f87171" }}>{error}</span>}
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <button type="button" onClick={() => void checkUpdates()} disabled={checking} style={ghost}>
+          {checking ? "Checking…" : "Check for updates"}
+        </button>
+        {error && <span style={{ fontSize: 12, color: "#f87171" }}>{error}</span>}
+      </div>
     </div>
   );
 }
@@ -140,6 +162,11 @@ const badge: React.CSSProperties = {
 const okBadge: React.CSSProperties = { ...badge, color: "#4ade80", borderColor: "#4ade80" };
 const warnBadge: React.CSSProperties = { ...badge, color: "#fbbf24", borderColor: "#fbbf24" };
 const offBadge: React.CSSProperties = { ...badge, color: "rgb(var(--muted))" };
+const updateBadge: React.CSSProperties = {
+  ...badge,
+  color: "rgb(var(--accent))",
+  borderColor: "rgb(var(--accent))",
+};
 
 const code: React.CSSProperties = {
   fontFamily: "monospace",
