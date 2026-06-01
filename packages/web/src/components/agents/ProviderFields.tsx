@@ -317,7 +317,11 @@ export function ProviderFields({
       ) : (
         <>
           {credMeta &&
-            (accountConfigured && !editCred && !isNewAccount ? (
+            // Collapse to a "✓ Saved" row only for SECRET fields (API keys we
+            // shouldn't redisplay). A non-secret base URL — often just the
+            // provider's seeded default — is always shown as an editable input,
+            // so it never looks like credentials the user didn't set.
+            (credMeta.secret && accountConfigured && !editCred && !isNewAccount ? (
               <Field label={credMeta.label}>
                 <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                   <span style={{ fontSize: 12, color: "#4ade80" }}>
