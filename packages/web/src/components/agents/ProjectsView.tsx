@@ -79,6 +79,7 @@ function ProjectCard({ project, onDelete }: { project: Project; onDelete: () => 
     repo: project.forgeRepo ?? "",
     baseBranch: project.baseBranch ?? "",
     monitorIssues: project.monitorIssues,
+    triageIssues: project.triageIssues,
     remoteE2e: project.remoteE2e,
   });
   const [pickAgent, setPickAgent] = useState("");
@@ -196,6 +197,10 @@ function ProjectCard({ project, onDelete }: { project: Project; onDelete: () => 
               <input type="checkbox" checked={forge.monitorIssues} onChange={(e) => setForgeForm({ ...forge, monitorIssues: e.target.checked })} />
               Monitor issues → pipeline
             </label>
+            <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "rgb(var(--muted))" }}>
+              <input type="checkbox" checked={forge.triageIssues} onChange={(e) => setForgeForm({ ...forge, triageIssues: e.target.checked })} />
+              Triage issues → PM posts/refines a plan
+            </label>
             {forge.mode === "fork" && (
               <span style={{ fontSize: 11, color: "rgb(var(--muted))", gridColumn: "1 / -1" }}>
                 {project.forkRepo
@@ -225,6 +230,7 @@ function ProjectCard({ project, onDelete }: { project: Project; onDelete: () => 
             repo: forge.repo || null,
             baseBranch: forge.baseBranch || null,
             monitorIssues: forge.monitorIssues,
+            triageIssues: forge.triageIssues,
             remoteE2e: forge.remoteE2e,
           });
           setBusy(false);

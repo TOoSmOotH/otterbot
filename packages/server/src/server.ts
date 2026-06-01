@@ -617,6 +617,7 @@ export async function buildServer(
       repo?: string | null;
       baseBranch?: string | null;
       monitorIssues?: boolean;
+      triageIssues?: boolean;
       remoteE2e?: boolean;
     };
   }>("/api/projects/:id/forge", async (req, reply) => {
