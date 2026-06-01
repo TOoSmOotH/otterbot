@@ -209,8 +209,10 @@ export function AgentRoster({ onNewAgent }: { onNewAgent: () => void }) {
           <AgentCard key={a.id} agent={a} {...cardProps} />
         ))}
         {groups.map(({ project, members }) => {
-          // Always keep the group holding the active agent open.
-          const hasActive = members.some((m) => m.id === activeAgentId);
+          // The header itself represents the PM, so selecting the PM should not
+          // force the team open — only a non-PM active member does.
+          const pmId = project.team.find((t) => t.role === "pm")?.agentId ?? null;
+          const hasActive = members.some((m) => m.id === activeAgentId && m.id !== pmId);
           const expanded = !collapsed.has(project.id) || hasActive;
           return (
             <div key={project.id} style={{ display: "flex", flexDirection: "column" }}>
@@ -219,6 +221,8 @@ export function AgentRoster({ onNewAgent }: { onNewAgent: () => void }) {
                 members={members}
                 expanded={expanded}
                 onToggle={() => toggle(project.id)}
+                setActive={setActive}
+                activeAgentId={activeAgentId}
               />
               {expanded &&
                 members.map((a) => <AgentCard key={a.id} agent={a} indented {...cardProps} />)}
@@ -425,74 +429,132 @@ interface ProjectGroupHeaderProps {
   members: AgentProfileSummary[];
   expanded: boolean;
   onToggle: () => void;
+  setActive: (id: string) => void;
+  activeAgentId: string | null;
 }
 
 /** Collapsible header for a project's team; shows a rollup status dot + count. */
-function ProjectGroupHeader({ project, members, expanded, onToggle }: ProjectGroupHeaderProps) {
+function ProjectGroupHeader({
+  project,
+  members,
+  expanded,
+  onToggle,
+  setActive,
+  activeAgentId,
+}: ProjectGroupHeaderProps) {
   const [hovered, setHovered] = useState(false);
   const status = rollupStatus(members);
   const pulse = PULSING_STATUSES.has(status);
+  // Clicking the row opens a chat with the project's PM. Legacy projects without a
+  // PM fall back to toggling, so the row is never a dead click.
+  const pmAgentId = project.team.find((t) => t.role === "pm")?.agentId ?? null;
+  const pmActive = pmAgentId != null && pmAgentId === activeAgentId;
 
   return (
-    <button
-      data-testid={`project-group-${project.id}`}
-      onClick={onToggle}
+    <div
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       style={{
+        position: "relative",
         display: "flex",
         alignItems: "center",
-        gap: 8,
-        textAlign: "left",
-        padding: "7px 10px",
         borderRadius: 8,
-        cursor: "pointer",
-        background: hovered ? "rgb(var(--surface))" : "transparent",
-        color: "rgb(var(--fg))",
+        background: pmActive
+          ? "rgb(var(--surface-elevated))"
+          : hovered
+            ? "rgb(var(--surface))"
+            : "transparent",
         border: "1px solid transparent",
       }}
     >
-      <Icon icon={expanded ? ChevronDown : ChevronRight} size={14} />
-      <Icon icon={FolderGit2} size={15} />
-      <span
+      {pmActive && (
+        <span
+          aria-hidden
+          style={{
+            position: "absolute",
+            left: 2,
+            top: 8,
+            bottom: 8,
+            width: 2,
+            background: "rgb(var(--accent))",
+            borderRadius: 2,
+          }}
+        />
+      )}
+      <button
+        data-testid={`project-group-toggle-${project.id}`}
+        aria-label={expanded ? "Collapse" : "Expand"}
+        onClick={onToggle}
+        style={{
+          display: "inline-flex",
+          alignItems: "center",
+          padding: "7px 4px 7px 10px",
+          background: "transparent",
+          border: "none",
+          color: "rgb(var(--fg))",
+          cursor: "pointer",
+        }}
+      >
+        <Icon icon={expanded ? ChevronDown : ChevronRight} size={14} />
+      </button>
+      <button
+        data-testid={`project-group-${project.id}`}
+        onClick={() => (pmAgentId ? setActive(pmAgentId) : onToggle())}
         style={{
           flex: 1,
           minWidth: 0,
-          fontSize: 13,
-          fontWeight: 600,
-          letterSpacing: "-0.005em",
-          overflow: "hidden",
-          textOverflow: "ellipsis",
-          whiteSpace: "nowrap",
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          textAlign: "left",
+          padding: "7px 10px 7px 4px",
+          background: "transparent",
+          border: "none",
+          color: "rgb(var(--fg))",
+          cursor: "pointer",
         }}
       >
-        {project.name}
-      </span>
-      <span
-        style={{
-          ...type.micro,
-          padding: "1px 6px",
-          borderRadius: 999,
-          background: "rgb(var(--surface-elevated))",
-          color: "rgb(var(--subtle))",
-          border: "1px solid rgb(var(--border))",
-        }}
-      >
-        {members.length}
-      </span>
-      <span
-        title={status}
-        style={{
-          width: 8,
-          height: 8,
-          borderRadius: "50%",
-          flexShrink: 0,
-          background: statusColor(status),
-          animation: pulse ? "otter-pulse 1.5s ease-in-out infinite" : undefined,
-          boxShadow: pulse ? `0 0 6px ${statusColor(status)}` : undefined,
-        }}
-      />
-    </button>
+        <Icon icon={FolderGit2} size={15} />
+        <span
+          style={{
+            flex: 1,
+            minWidth: 0,
+            fontSize: 13,
+            fontWeight: 600,
+            letterSpacing: "-0.005em",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+          }}
+        >
+          {project.name}
+        </span>
+        <span
+          style={{
+            ...type.micro,
+            padding: "1px 6px",
+            borderRadius: 999,
+            background: "rgb(var(--surface-elevated))",
+            color: "rgb(var(--subtle))",
+            border: "1px solid rgb(var(--border))",
+          }}
+        >
+          {members.length}
+        </span>
+        <span
+          title={status}
+          style={{
+            width: 8,
+            height: 8,
+            borderRadius: "50%",
+            flexShrink: 0,
+            background: statusColor(status),
+            animation: pulse ? "otter-pulse 1.5s ease-in-out infinite" : undefined,
+            boxShadow: pulse ? `0 0 6px ${statusColor(status)}` : undefined,
+          }}
+        />
+      </button>
+    </div>
   );
 }
 
