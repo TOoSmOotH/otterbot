@@ -97,12 +97,21 @@ A new `pollTriage(project, forge)` step in the existing `pollOnce()` cycle, run 
 projects whose `triageIssues` is on (add `listTriageProjects()` to the monitor deps,
 parallel to `listMonitoredProjects()`).
 
-For each **open, unassigned** issue (`assignees.length === 0`):
+Only **open, unassigned** issues are considered (`assignees.length === 0`). Issues
+assigned to the bot are the existing implement path; issues assigned to **anyone
+else** are skipped entirely (no triage, no build). PRs are skipped.
+
+For each open, unassigned issue:
 
 - **No `issue_triage` row →** initial triage:
-  - `triageIssue(projectId, issue)` (orchestrator dep) → PM+coder draft a plan →
-    `commentIssue(...)` with an otter marker → insert row with `plan` and
-    `lastCommentId` = the posted comment's id.
+  - First read existing comments (`listIssueComments`) and select the **instruction**
+    comments (issue author, or `getUserPermission ≥ write`), so a clarification posted
+    in the window before triage ran is folded into the very first plan.
+  - `triageIssue(projectId, issue, existingInstructionComments)` (orchestrator dep) →
+    PM+coder draft a plan that accounts for those comments → `commentIssue(...)` with
+    an otter marker → insert row with `plan` and `lastCommentId` = max comment id on
+    the issue (i.e. the posted plan comment, which is newest). The folded comments are
+    therefore below the watermark and won't re-trigger a revision.
 - **Row exists →** refinement:
   - `listIssueComments(repo, number)`; take comments with `id > lastCommentId`,
     excluding the bot's own (`author !== account.username`).
@@ -170,6 +179,9 @@ payload and add it to the web `Project` type. No collaborator UI (permission-bas
 
 - **`forge-monitor` unit tests** (injected deps, the file is built for this):
   - initial triage fires for a new open unassigned issue;
+  - initial triage folds pre-existing author/maintainer comments into the first plan
+    and sets the watermark past them (no immediate re-revision);
+  - issues assigned to a non-bot user are skipped entirely;
   - revision fires only for comments from the issue author or a write/maintain user;
   - non-allowed commenters do not trigger a revision but advance the high-water mark;
   - already-triaged issues are not re-triaged;
@@ -184,11 +196,13 @@ payload and add it to the web `Project` type. No collaborator UI (permission-bas
 ```
 poll (5 min)
   └─ triageIssues on?
-       ├─ open + unassigned + no row   → PM+coder draft plan → comment → store
+       ├─ open + unassigned + no row   → fold existing author/maintainer comments
+       │                                 → PM+coder draft plan → comment → store
        ├─ open + unassigned + has row  → new author/maintainer comments?
        │                                   yes → PM+coder revise → comment → update
        │                                   no  → advance high-water mark
-       └─ assigned (monitorIssues on)  → startRunFromIssue (goal += stored plan) → PR
+       ├─ assigned to bot (monitorIssues on) → startRunFromIssue (goal += plan) → PR
+       └─ assigned to someone else / PR → skipped
 ```
 
 ## Risks / considerations
