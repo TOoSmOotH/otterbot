@@ -46,8 +46,9 @@ import {
   type PipelineRunView,
 } from "../pipeline/pipeline-manager.js";
 import { ForgeService } from "../forge/forge-service.js";
-import { parseRepoInput, splitRepo, type ForgeProvider, type ForgeIssue } from "../forge/forge.js";
+import { parseRepoInput, splitRepo, type ForgeProvider, type ForgeIssue, type ForgeComment } from "../forge/forge.js";
 import { ForgeMonitor } from "../forge/forge-monitor.js";
+import { IssueTriageStore } from "../projects/issue-triage-store.js";
 import { SecretsStore, type ScopedSecret } from "../secrets/secrets-store.js";
 import { GlobalSecretsStore } from "../secrets/global-secrets-store.js";
 import { CredentialStore } from "../connections/credential-store.js";
@@ -452,6 +453,28 @@ function buildStagePrompt(
   );
 }
 
+/** Prefix on PM-authored issue comments so they're recognizable in the thread. */
+const TRIAGE_MARKER = "🦦 **otterbot plan**";
+
+/** Prompt for the PM to draft or revise a candidate plan for a forge issue. */
+function buildTriagePrompt(
+  issue: ForgeIssue,
+  instructionComments: ForgeComment[],
+  currentPlan: string | null
+): string {
+  const comments = instructionComments.length
+    ? `\n\nClarifying comments to address:\n${instructionComments.map((c) => `- @${c.author}: ${c.body}`).join("\n")}`
+    : "";
+  const prior = currentPlan ? `\n\nYour current plan (revise it):\n${currentPlan}` : "";
+  return (
+    `Triage GitHub/Gitea issue #${issue.number}: "${issue.title}"\n\n${issue.body}${comments}${prior}\n\n` +
+    `Produce a concise candidate implementation plan: which files/areas change, the ` +
+    `phases, and the approach. Consult the Coder for grounding, but plan ONLY — do not ` +
+    `edit code and do not launch the build pipeline. Reply with just the plan text; it ` +
+    `will be posted as a comment on the issue.`
+  );
+}
+
 /**
  * Owns the lifecycle of every agent: builds one isolated `AgentContext` and
  * `AgentRuntime` per profile, keeps the control DB registry in sync, and
@@ -470,6 +493,7 @@ export class Orchestrator {
   private readonly codeRef: CodeReferenceService;
   private readonly projects: ProjectStore;
   private readonly forge: ForgeService;
+  private readonly issueTriage: IssueTriageStore;
   private readonly forgeMonitor: ForgeMonitor;
   private readonly pipeline: PipelineManager;
   private readonly pipelineListeners = new Set<(run: PipelineRunView) => void>();
@@ -519,6 +543,7 @@ export class Orchestrator {
     });
     this.projects = new ProjectStore(control, resolve(cfg.dataDir, "projects"));
     this.forge = new ForgeService(control, resolve(cfg.dataDir, "forge-keys"));
+    this.issueTriage = new IssueTriageStore(control);
     this.pipeline = new PipelineManager({
       control,
       resolveAgent: (projectId, role) => this.projects.agentForRole(projectId, role),
@@ -566,12 +591,12 @@ export class Orchestrator {
       },
       hasRunForIssue: (projectId, issueNumber) =>
         this.pipeline.findRunByIssue(projectId, issueNumber) !== null,
-      startRunFromIssue: (projectId, issue) =>
-        this.pipeline.startRun(
-          projectId,
-          `Resolve issue #${issue.number}: ${issue.title}\n\n${issue.body}`,
-          { issueNumber: issue.number }
-        ),
+      startRunFromIssue: (projectId, issue) => {
+        const triage = this.issueTriage.get(projectId, issue.number);
+        const base = `Resolve issue #${issue.number}: ${issue.title}\n\n${issue.body}`;
+        const goal = triage?.plan ? `${base}\n\nAgreed plan:\n${triage.plan}` : base;
+        return this.pipeline.startRun(projectId, goal, { issueNumber: issue.number });
+      },
       watchableRuns: (projectId) =>
         this.pipeline
           .listForProject(projectId)
@@ -582,12 +607,13 @@ export class Orchestrator {
         this.publishedRuns.delete(runId);
         return this.pipeline.resume(runId, feedback);
       },
-      // Issue triage is wired up in a later task; disabled for now.
-      listTriageProjects: () => [],
-      getTriage: () => null,
-      triageInitial: async () => {},
-      refinePlan: async () => {},
-      advanceWatermark: () => {},
+      listTriageProjects: () =>
+        this.projects.listTriageEnabled().map((p) => ({ id: p.id, forgeRepo: p.forgeRepo! })),
+      getTriage: (projectId, issueNumber) => this.issueTriage.get(projectId, issueNumber),
+      triageInitial: (projectId, issue, instr) => this.triageInitialPlan(projectId, issue, instr),
+      refinePlan: (projectId, issue, plan, instr) => this.refineIssuePlan(projectId, issue, plan, instr),
+      advanceWatermark: (projectId, issueNumber, lastCommentId) =>
+        this.issueTriage.advanceWatermark(projectId, issueNumber, lastCommentId),
     });
     this.secrets = new SecretsStore(control);
     this.globalSecrets = new GlobalSecretsStore(control);
@@ -1607,6 +1633,56 @@ export class Orchestrator {
     return this.pipeline.startRun(projectId, goal);
   }
 
+  /** One-shot PM response over the bus (the PM consults the coder per its persona). */
+  private async askPm(pmAgentId: string, prompt: string): Promise<string> {
+    const res = await this.bus.request(
+      {
+        id: nanoid(),
+        kind: "request",
+        from: "coo",
+        to: pmAgentId,
+        threadId: nanoid(),
+        correlationId: null,
+        rootSpawnId: null,
+        body: prompt,
+        transport: "local",
+      },
+      STAGE_TIMEOUT_MS
+    );
+    return res.body;
+  }
+
+  /** PM (with coder) drafts the first plan for an issue and posts it as a comment. */
+  private async triageInitialPlan(
+    projectId: string,
+    issue: ForgeIssue,
+    instructionComments: ForgeComment[]
+  ): Promise<void> {
+    const pmId = this.projects.agentForRole(projectId, "pm");
+    const project = this.projects.get(projectId);
+    const forge = project ? this.forge.forgeForAccount(project.forgeAccountId) : null;
+    if (!pmId || !project?.forgeRepo || !forge) return;
+    const plan = await this.askPm(pmId, buildTriagePrompt(issue, instructionComments, null));
+    const commentId = await forge.commentIssue(project.forgeRepo, issue.number, `${TRIAGE_MARKER}\n\n${plan}`);
+    this.issueTriage.upsert(projectId, issue.number, plan, commentId);
+  }
+
+  /** PM (with coder) revises an issue's plan from new instruction comments. */
+  private async refineIssuePlan(
+    projectId: string,
+    issue: ForgeIssue,
+    currentPlan: string,
+    instructionComments: ForgeComment[]
+  ): Promise<void> {
+    const pmId = this.projects.agentForRole(projectId, "pm");
+    const project = this.projects.get(projectId);
+    const forge = project ? this.forge.forgeForAccount(project.forgeAccountId) : null;
+    if (!pmId || !project?.forgeRepo || !forge) return;
+    const plan = await this.askPm(pmId, buildTriagePrompt(issue, instructionComments, currentPlan));
+    const commentId = await forge.commentIssue(project.forgeRepo, issue.number, `${TRIAGE_MARKER}\n\n${plan}`);
+    this.issueTriage.upsert(projectId, issue.number, plan, commentId);
+  }
+
   getPipelineRun(runId: string): PipelineRunView | null {
     return this.pipeline.view(runId);
   }
@@ -1670,6 +1746,7 @@ export class Orchestrator {
       repo?: string | null;
       baseBranch?: string | null;
       monitorIssues?: boolean;
+      triageIssues?: boolean;
       remoteE2e?: boolean;
     }
   ): Promise<{ ok: boolean; error?: string; repo?: string; defaultBranch?: string }> {
@@ -1683,6 +1760,7 @@ export class Orchestrator {
         forgeRepo: null,
         forkRepo: null,
         monitorIssues: false,
+        triageIssues: false,
         remoteE2e: input.remoteE2e ?? false,
       });
       return { ok: true };
@@ -1728,6 +1806,7 @@ export class Orchestrator {
         forgeSshUrl: cloneRepo.sshUrl ?? null,
         baseBranch: input.baseBranch ?? upstream.defaultBranch,
         monitorIssues: input.monitorIssues ?? false,
+        triageIssues: input.triageIssues ?? false,
         remoteE2e: input.remoteE2e ?? false,
       });
       return { ok: true, repo: fullRepo, defaultBranch: upstream.defaultBranch };
