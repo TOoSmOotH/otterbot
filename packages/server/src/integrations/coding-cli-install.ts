@@ -39,7 +39,9 @@ export const CODING_CLI_SPECS: Record<CodingTool, CodingCliSpec> = {
     label: "Codex",
     bin: "codex",
     pkg: "@openai/codex",
-    loginCmd: "codex login",
+    // Device-auth flow (code + URL): the browser/loopback OAuth can't complete
+    // in the sandboxed terminal.
+    loginCmd: "codex login --device-auth",
     authFile: "codex/auth.json",
   },
   gemini: {

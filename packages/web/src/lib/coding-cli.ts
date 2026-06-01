@@ -14,7 +14,9 @@ export const CODING_TOOL_LABELS: Record<CodingTool, string> = {
 /** The interactive login command run in a terminal — logs in every agent. */
 export const CODING_LOGIN_CMDS: Record<CodingTool, string> = {
   claude: "claude",
-  codex: "codex login",
+  // Device-auth flow (code + URL): the browser/loopback OAuth can't complete in
+  // the sandboxed terminal.
+  codex: "codex login --device-auth",
   gemini: "gemini",
   opencode: "opencode auth login",
 };

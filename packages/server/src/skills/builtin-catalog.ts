@@ -604,7 +604,7 @@ from a terminal:
 1. Open any agent's terminal (the Terminal button in Agent Studio).
 2. Run the tool's login flow and complete it in the browser/device prompt:
    - Claude Code: run \`claude\` and follow the login prompt.
-   - Codex: run \`codex login\`.
+   - Codex: run \`codex login --device-auth\` (enter the code at the shown URL).
    - Gemini CLI: run \`gemini\` and choose Google login.
    - OpenCode: run \`opencode auth login\`.
 3. The login is saved to the shared store, so **every agent is now logged in**.
