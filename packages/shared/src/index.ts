@@ -3,6 +3,7 @@ export * from "./skill.js";
 export * from "./memory.js";
 export * from "./user-profile.js";
 export * from "./agent.js";
+export * from "./connection.js";
 export * from "./agent-message.js";
 export * from "./spawn.js";
 export * from "./settings.js";

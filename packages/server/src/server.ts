@@ -468,6 +468,146 @@ export async function buildServer(
     return { ok: true };
   });
 
+  // --- Named credentials + Connections (Settings → Connections) -------------
+
+  app.get("/api/connection-types", async () => orch.listConnectionTypes());
+  app.get("/api/credential-types", async () => orch.listCredentialTypes());
+
+  app.get("/api/credentials", async () => orch.listNamedCredentials());
+
+  app.get<{ Params: { id: string } }>("/api/credentials/:id", async (req, reply) => {
+    const cred = orch.getNamedCredential(req.params.id);
+    if (!cred) {
+      reply.code(404);
+      return { error: "unknown credential" };
+    }
+    return cred;
+  });
+
+  app.post<{ Body: { type?: string; label?: string; secrets?: Record<string, string> } }>(
+    "/api/credentials",
+    async (req, reply) => {
+      const b = req.body ?? {};
+      if (!b.type || !b.label) {
+        reply.code(400);
+        return { error: "type and label are required" };
+      }
+      try {
+        return orch.createNamedCredential({ type: b.type, label: b.label, secrets: b.secrets ?? {} });
+      } catch (err) {
+        reply.code(400);
+        return { error: err instanceof Error ? err.message : String(err) };
+      }
+    }
+  );
+
+  app.put<{ Params: { id: string }; Body: { label?: string; secrets?: Record<string, string> } }>(
+    "/api/credentials/:id",
+    async (req, reply) => {
+      const updated = orch.updateNamedCredential(req.params.id, req.body ?? {});
+      if (!updated) {
+        reply.code(404);
+        return { error: "unknown credential" };
+      }
+      return updated;
+    }
+  );
+
+  app.delete<{ Params: { id: string }; Querystring: { force?: string } }>(
+    "/api/credentials/:id",
+    async (req, reply) => {
+      const res = orch.deleteNamedCredential(req.params.id, req.query?.force === "true");
+      if (!res.ok) {
+        reply.code(409);
+        return { error: res.error ?? "could not delete" };
+      }
+      return { ok: true };
+    }
+  );
+
+  app.get("/api/connections", async () => orch.listConnections());
+
+  app.get<{ Params: { id: string } }>("/api/connections/:id", async (req, reply) => {
+    const conn = orch.getConnection(req.params.id);
+    if (!conn) {
+      reply.code(404);
+      return { error: "unknown connection" };
+    }
+    return conn;
+  });
+
+  app.post<{
+    Body: { type?: string; label?: string; config?: Record<string, unknown>; credentialId?: string | null };
+  }>("/api/connections", async (req, reply) => {
+    const b = req.body ?? {};
+    if (!b.type || !b.label) {
+      reply.code(400);
+      return { error: "type and label are required" };
+    }
+    try {
+      return orch.createConnection({
+        type: b.type,
+        label: b.label,
+        config: b.config,
+        credentialId: b.credentialId ?? null,
+      });
+    } catch (err) {
+      reply.code(400);
+      return { error: err instanceof Error ? err.message : String(err) };
+    }
+  });
+
+  app.put<{
+    Params: { id: string };
+    Body: { label?: string; config?: Record<string, unknown>; credentialId?: string | null };
+  }>("/api/connections/:id", async (req, reply) => {
+    const updated = orch.updateConnection(req.params.id, req.body ?? {});
+    if (!updated) {
+      reply.code(404);
+      return { error: "unknown connection" };
+    }
+    return updated;
+  });
+
+  app.delete<{ Params: { id: string }; Querystring: { force?: string } }>(
+    "/api/connections/:id",
+    async (req, reply) => {
+      const res = orch.deleteConnection(req.params.id, req.query?.force === "true");
+      if (!res.ok) {
+        reply.code(409);
+        return { error: res.error ?? "could not delete" };
+      }
+      return { ok: true };
+    }
+  );
+
+  // Per-agent assignment.
+  app.get<{ Params: { id: string } }>("/api/agents/:id/connections", async (req) =>
+    orch.connectionsForAgent(req.params.id)
+  );
+
+  app.post<{ Params: { id: string }; Body: { connectionId?: string } }>(
+    "/api/agents/:id/connections",
+    async (req, reply) => {
+      const connectionId = req.body?.connectionId;
+      if (!connectionId) {
+        reply.code(400);
+        return { error: "connectionId is required" };
+      }
+      const res = orch.assignConnection(connectionId, req.params.id);
+      if (!res.ok) {
+        reply.code(409);
+        return { error: res.error ?? "could not assign" };
+      }
+      return { ok: true };
+    }
+  );
+
+  app.delete<{ Params: { id: string; connectionId: string } }>(
+    "/api/agents/:id/connections/:connectionId",
+    async (req) => orch.unassignConnection(req.params.connectionId, req.params.id)
+  );
+
   // Configure a project's forge backing (clones/creates the repo as needed).
   app.put<{
     Params: { id: string };

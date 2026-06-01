@@ -125,6 +125,60 @@ export const forgeAccounts = sqliteTable("forge_accounts", {
 });
 
 /**
+ * A named, typed secret bundle (Slack tokens, a Matrix login, a GitHub token,
+ * SMTP creds…). The secret *values* are not stored here — they live in
+ * `global_secrets` under `cred:<id>:<KEY>`, encrypted at rest like every other
+ * secret. A {@link connections} row references one of these by id.
+ */
+export const credentials = sqliteTable("credentials", {
+  id: text("id").primaryKey(),
+  label: text("label").notNull(),
+  /** Credential kind — see the server connection registry (slack/matrix/github/…). */
+  type: text("type").notNull(),
+  createdAt: text("created_at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+  updatedAt: text("updated_at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+});
+
+/**
+ * A named connector: a type + non-secret config that references a
+ * {@link credentials} row. Assigned to agents via {@link connectionAssignments}.
+ * `config` holds the per-type non-secret fields (a `ChannelBotConfig` for chat,
+ * an `McpServerConfig` for mcp, host/allowlist fields for others).
+ */
+export const connections = sqliteTable("connections", {
+  id: text("id").primaryKey(),
+  label: text("label").notNull(),
+  type: text("type").notNull(),
+  config: text("config", { mode: "json" }).$type<Record<string, unknown>>().notNull().default({}),
+  /** References `credentials.id`; null when the connector needs no credential. */
+  credentialId: text("credential_id"),
+  createdAt: text("created_at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+  updatedAt: text("updated_at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+});
+
+/**
+ * Which agents a connection is assigned to. Many-to-many by design; the v1
+ * "one chat connection per agent / per connection" rule is enforced in the
+ * service layer (ConnectionStore), not by a DB constraint, so multi-agent chat
+ * sharing later needs no schema change. One row per (connection, agent).
+ */
+export const connectionAssignments = sqliteTable("connection_assignments", {
+  connectionId: text("connection_id").notNull(),
+  agentId: text("agent_id").notNull(),
+  createdAt: text("created_at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+});
+
+/**
  * A collaborative project: a single git working tree that several agents share.
  * The tree lives at `repoPath` (under `data/projects/<id>/repo`) and is bound,
  * writable, into each member agent's sandbox at `/project`, so the members edit

@@ -11,8 +11,10 @@ import type {
   AgentMessage,
   ChannelBotConfig,
   ChannelConnectorStatus,
+  Connection,
   ConfiguredModel,
   GlobalSettings,
+  McpServerConfig,
   McpServerStatus,
   ModelRef,
   ProviderAccount,
@@ -48,6 +50,15 @@ import { parseRepoInput, splitRepo, type ForgeProvider, type ForgeIssue } from "
 import { ForgeMonitor } from "../forge/forge-monitor.js";
 import { SecretsStore, type ScopedSecret } from "../secrets/secrets-store.js";
 import { GlobalSecretsStore } from "../secrets/global-secrets-store.js";
+import { CredentialStore } from "../connections/credential-store.js";
+import { ConnectionStore } from "../connections/connection-store.js";
+import {
+  listConnectionTypes,
+  listCredentialTypes,
+  getConnectionTypeDef,
+  isChatConnectionType,
+  credentialKeysFor,
+} from "../integrations/connection-registry.js";
 import { layerScopedSecrets } from "../secrets/layer-secrets.js";
 import {
   readSkillConfig,
@@ -103,6 +114,21 @@ function channelStatus(
   }
   const s = tracked.connector.getStatus();
   return { enabled: true, state: s.state, error: s.error, channelId: s.channelId };
+}
+
+/** Coerce a chat connection's stored config JSON into a {@link ChannelBotConfig}. */
+function toChannelConfig(config: Record<string, unknown>): ChannelBotConfig {
+  const allowed = config.allowedUserIds;
+  return {
+    // An assigned chat connection is implicitly enabled.
+    enabled: true,
+    channelId: typeof config.channelId === "string" ? config.channelId : "",
+    publicBot: config.publicBot === true,
+    allowedUserIds: Array.isArray(allowed)
+      ? allowed.map((u) => (typeof u === "string" ? u : String((u as { id?: string })?.id ?? ""))).filter(Boolean)
+      : [],
+    mentionOnly: config.mentionOnly === true,
+  };
 }
 
 /** Input for creating a new agent profile. */
@@ -452,6 +478,10 @@ export class Orchestrator {
   private readonly secrets: SecretsStore;
   /** Instance-wide credentials shared by every agent (Settings → Secrets). */
   private readonly globalSecrets: GlobalSecretsStore;
+  /** Named, reusable credential bundles (Settings → Credentials). */
+  private readonly credentials: CredentialStore;
+  /** Named connectors that reference a credential (Settings → Connections). */
+  private readonly connectionStore: ConnectionStore;
   private readonly services: AgentServices;
   /** Per-agent chat connectors, keyed by `${agentId}:${service}`. */
   private readonly connectors = new Map<string, TrackedConnector<ChannelConnector>>();
@@ -555,6 +585,8 @@ export class Orchestrator {
     });
     this.secrets = new SecretsStore(control);
     this.globalSecrets = new GlobalSecretsStore(control);
+    this.credentials = new CredentialStore(control, this.globalSecrets);
+    this.connectionStore = new ConnectionStore(control);
     this.bus.setDeliver((agentId, msg) => {
       if (agentId === "*") {
         for (const rt of this.runtimes.values()) {
@@ -843,8 +875,43 @@ export class Orchestrator {
     return layerScopedSecrets([
       providerScoped,
       this.globalSecrets.getScoped(),
+      // Secrets from this agent's assigned non-chat connections (GitHub, SMTP,
+      // SSH, Proxmox…), at each credential's stored scope. Chat connection
+      // secrets are deliberately excluded — they're consumed only by
+      // reconcileConnectors and stay out of the shell/LLM env.
+      this.connectionSecretsForAgent(profile.id),
       this.secrets.getScoped(profile.id),
     ]);
+  }
+
+  /** Scoped secrets contributed by an agent's assigned non-chat connections. */
+  private connectionSecretsForAgent(agentId: string): Map<string, ScopedSecret> {
+    const out = new Map<string, ScopedSecret>();
+    for (const conn of this.connectionStore.connectionsForAgent(agentId)) {
+      if (isChatConnectionType(conn.type) || !conn.credentialId) continue;
+      for (const [key, entry] of this.credentials.scopedSecretsFor(conn.credentialId)) {
+        out.set(key, entry);
+      }
+    }
+    return out;
+  }
+
+  /** MCP server configs from an agent's assigned `mcp` connections. */
+  private mcpConnectionsForAgent(agentId: string): McpServerConfig[] {
+    const servers: McpServerConfig[] = [];
+    for (const conn of this.connectionStore.connectionsForAgent(agentId)) {
+      if (conn.type !== "mcp") continue;
+      const c = conn.config;
+      servers.push({
+        name: typeof c.name === "string" && c.name ? c.name : conn.label,
+        transport: c.transport === "sse" ? "sse" : "stdio",
+        enabled: c.enabled !== false,
+        command: typeof c.command === "string" ? c.command : undefined,
+        args: Array.isArray(c.args) ? (c.args as string[]) : undefined,
+        url: typeof c.url === "string" ? c.url : undefined,
+      });
+    }
+    return servers;
   }
 
   /**
@@ -917,6 +984,120 @@ export class Orchestrator {
     }
 
     if (changed) this.setSetting(GLOBAL_SETTINGS_KEY, JSON.stringify(settings));
+  }
+
+  /**
+   * One-time migration to the named Connections model. Converts each agent's
+   * inline Slack/Discord/Matrix config and MCP servers into Credentials +
+   * Connections + assignments (moving chat tokens out of `agent_secrets`), and
+   * surfaces existing global capability credentials as shared Connections.
+   * Guarded by the `connections_migrated` app-setting; per-record creation means
+   * a half-finished run resumes safely.
+   */
+  private migrateInlineToConnections(): void {
+    if (this.getSetting("connections_migrated") === "true") return;
+    let chat = 0;
+    let mcp = 0;
+    const services: ChatProviderId[] = ["slack", "discord", "matrix"];
+    for (const profile of this.profiles.list()) {
+      const raw = this.profiles.readProfileJson(profile.id);
+      if (!raw) continue;
+      let changed = false;
+
+      for (const service of services) {
+        const cfg = profile[service];
+        if (!cfg) continue;
+        const provider = PROVIDERS[service];
+        const stored = this.secrets.get(profile.id);
+        const keys = [...provider.connectorTokenKeys];
+        if (service === "matrix") keys.push("MATRIX_ACCESS_TOKEN", "MATRIX_DEVICE_ID");
+        const secrets: Record<string, string> = {};
+        for (const k of keys) {
+          const v = stored.get(k);
+          if (v) secrets[k] = v;
+        }
+        const label = `${profile.displayName} ${service}`;
+        const cred = this.credentials.create({ type: service, label, secrets });
+        const conn = this.connectionStore.create({
+          type: service,
+          label,
+          config: {
+            channelId: cfg.channelId,
+            publicBot: cfg.publicBot,
+            allowedUserIds: cfg.allowedUserIds,
+            mentionOnly: cfg.mentionOnly,
+          },
+          credentialId: cred.id,
+        });
+        this.connectionStore.assign(conn.id, profile.id);
+        for (const k of keys) this.secrets.deleteOne(profile.id, k);
+        raw[service] = null;
+        changed = true;
+        chat++;
+      }
+
+      const servers = Array.isArray(raw.mcpServers) ? (raw.mcpServers as McpServerConfig[]) : [];
+      for (const s of servers) {
+        const conn = this.connectionStore.create({
+          type: "mcp",
+          label: s.name || "mcp",
+          config: {
+            name: s.name,
+            transport: s.transport,
+            command: s.command,
+            args: s.args,
+            url: s.url,
+            enabled: s.enabled,
+          },
+          credentialId: null,
+        });
+        this.connectionStore.assign(conn.id, profile.id);
+        mcp++;
+      }
+      if (servers.length) {
+        raw.mcpServers = [];
+        changed = true;
+      }
+
+      if (changed) this.profiles.writeProfileJson(profile.id, raw);
+    }
+
+    const cap = this.migrateGlobalCapabilityConnections();
+    this.setSetting("connections_migrated", "true");
+    if (chat || mcp || cap) {
+      console.info(
+        `[connections] migrated ${chat} chat, ${mcp} mcp, ${cap} capability config(s) into named connections`
+      );
+    }
+  }
+
+  /**
+   * Surface existing instance-wide capability credentials (GitHub, SMTP,
+   * Proxmox, SSH in `global_secrets`) as shared, named Connections for the
+   * unified UI. The global secrets are left in place — they still inject into
+   * agents via the global-secrets layer — so this is purely additive.
+   */
+  private migrateGlobalCapabilityConnections(): number {
+    const global = this.globalSecrets.get();
+    const specs: Array<{ type: string; label: string; need: string }> = [
+      { type: "github", label: "GitHub", need: "GITHUB_TOKEN" },
+      { type: "smtp", label: "Email (SMTP)", need: "SMTP_HOST" },
+      { type: "proxmox", label: "Proxmox", need: "PROXMOX_HOST" },
+      { type: "ssh", label: "SSH", need: "SSH_HOSTS" },
+    ];
+    let n = 0;
+    for (const spec of specs) {
+      if (!global.get(spec.need)) continue;
+      const secrets: Record<string, string> = {};
+      for (const k of credentialKeysFor(spec.type)) {
+        const v = global.get(k);
+        if (v) secrets[k] = v;
+      }
+      const cred = this.credentials.create({ type: spec.type, label: spec.label, secrets });
+      this.connectionStore.create({ type: spec.type, label: spec.label, credentialId: cred.id });
+      n++;
+    }
+    return n;
   }
 
   getProviderSecretsForProfile(profile: AgentProfile): Map<string, string> {
@@ -1030,6 +1211,10 @@ export class Orchestrator {
     // model registry. Idempotent — profiles already on ids are skipped.
     this.migrateLegacyModelRefs();
 
+    // One-time migration: fold inline chat configs, MCP servers, and global
+    // capability credentials into named Connections + Credentials. Idempotent.
+    this.migrateInlineToConnections();
+
     for (const profile of this.profiles.list()) {
       this.startAgent(profile);
     }
@@ -1111,7 +1296,11 @@ export class Orchestrator {
       this.mcp
         .connect(
           profile.id,
-          [...profile.mcpServers, ...ctx.skills.effectiveMcpServers()],
+          [
+            ...profile.mcpServers,
+            ...this.mcpConnectionsForAgent(profile.id),
+            ...ctx.skills.effectiveMcpServers(),
+          ],
           secrets,
           ctx.mcpTools
         )
@@ -1161,31 +1350,63 @@ export class Orchestrator {
   getConnectorStatus(id: string): AgentConnectorStatus | null {
     const ctx = this.contexts.get(id);
     if (!ctx) return null;
-    const secrets = this.secrets.get(id);
-    const matrix = channelStatus(ctx.profile.matrix, this.connectors.get(`${id}:matrix`));
-    // Surface the non-secret Matrix connection values so the form can pre-fill
-    // them; never expose the password (only whether one is stored).
-    matrix.homeserverUrl = secrets.get("MATRIX_HOMESERVER_URL") ?? null;
-    matrix.username = secrets.get("MATRIX_USER") ?? null;
-    matrix.hasPassword = Boolean(secrets.get("MATRIX_PASSWORD"));
+    const resolved = this.resolveChatConnections(id);
+    const matrixEntry = resolved.get("matrix");
+    const matrix = channelStatus(matrixEntry?.cfg ?? null, this.connectors.get(`${id}:matrix`));
+    // Surface the non-secret Matrix connection values so the UI can show what's
+    // configured; never expose the password (only whether one is stored).
+    if (matrixEntry) {
+      matrix.homeserverUrl = matrixEntry.secrets.get("MATRIX_HOMESERVER_URL") ?? null;
+      matrix.username = matrixEntry.secrets.get("MATRIX_USER") ?? null;
+      matrix.hasPassword = Boolean(matrixEntry.secrets.get("MATRIX_PASSWORD"));
+    }
     return {
-      slack: channelStatus(ctx.profile.slack, this.connectors.get(`${id}:slack`)),
-      discord: channelStatus(ctx.profile.discord, this.connectors.get(`${id}:discord`)),
+      slack: channelStatus(resolved.get("slack")?.cfg ?? null, this.connectors.get(`${id}:slack`)),
+      discord: channelStatus(resolved.get("discord")?.cfg ?? null, this.connectors.get(`${id}:discord`)),
       matrix,
     };
   }
 
-  /** A per-service view of a profile's connector configs. */
-  private channelConfig(profile: AgentProfile): Record<ChatProviderId, ChannelBotConfig | null> {
-    return { slack: profile.slack, discord: profile.discord, matrix: profile.matrix };
+  /**
+   * Resolve an agent's assigned chat connections into a per-service view: the
+   * connection, its config coerced to a {@link ChannelBotConfig}, the
+   * referenced credential id, and that credential's secrets. v1 allows at most
+   * one chat connection per service per agent.
+   */
+  private resolveChatConnections(
+    agentId: string
+  ): Map<ChatProviderId, { connection: Connection; cfg: ChannelBotConfig; credentialId: string | null; secrets: Map<string, string> }> {
+    const out = new Map<
+      ChatProviderId,
+      { connection: Connection; cfg: ChannelBotConfig; credentialId: string | null; secrets: Map<string, string> }
+    >();
+    for (const conn of this.connectionStore.chatConnectionsForAgent(agentId)) {
+      const service = conn.type as ChatProviderId;
+      if (out.has(service)) continue; // v1: first one wins
+      out.set(service, {
+        connection: conn,
+        cfg: toChannelConfig(conn.config),
+        credentialId: conn.credentialId,
+        secrets: conn.credentialId ? this.credentials.secretsFor(conn.credentialId) : new Map(),
+      });
+    }
+    return out;
   }
 
   private reconcileConnectors(profile: AgentProfile): void {
-    const secrets = this.secrets.get(profile.id);
-    const cfgByService = this.channelConfig(profile);
+    const resolved = this.resolveChatConnections(profile.id);
     for (const provider of Object.values(PROVIDERS)) {
-      const tokens = provider.connectorTokenKeys.map((k) => secrets.get(k) ?? "");
-      this.reconcileOne(provider, profile.id, cfgByService[provider.id], tokens, secrets);
+      const entry = resolved.get(provider.id);
+      const tokens = provider.connectorTokenKeys.map((k) => entry?.secrets.get(k) ?? "");
+      this.reconcileOne(
+        provider,
+        profile.id,
+        entry?.cfg ?? null,
+        tokens,
+        entry?.secrets ?? new Map(),
+        entry?.connection.id ?? null,
+        entry?.credentialId ?? null
+      );
     }
   }
 
@@ -1194,7 +1415,9 @@ export class Orchestrator {
     agentId: string,
     cfg: ChannelBotConfig | null,
     tokens: string[],
-    secrets: Map<string, string>
+    secrets: Map<string, string>,
+    connId: string | null,
+    credentialId: string | null
   ): void {
     const key = `${agentId}:${provider.id}`;
     const existing = this.connectors.get(key);
@@ -1211,17 +1434,23 @@ export class Orchestrator {
       return;
     }
     if (existing) void existing.connector.stop();
+    // Key the Matrix crypto store on the connection id so it survives the
+    // connection being reassigned between agents.
+    const storeKey = connId ?? agentId;
     const client = provider.connectorClient(
       secrets,
       {
-        storagePath: join(this.cfg.dataDir, "matrix", `connector-${agentId}.json`),
-        cryptoStoragePath: join(this.cfg.dataDir, "matrix", `crypto-connector-${agentId}`),
+        storagePath: join(this.cfg.dataDir, "matrix", `connector-${storeKey}.json`),
+        cryptoStoragePath: join(this.cfg.dataDir, "matrix", `crypto-connector-${storeKey}`),
       },
       {
         // Persist credentials the client mints at runtime (e.g. the Matrix device
-        // token). upsert writes straight to the store and does not re-reconcile,
-        // so this cannot loop. "direct" keeps it out of the shell env.
-        persistSecret: (key, value) => this.secrets.upsert(agentId, key, value, "direct"),
+        // token) back onto the referenced credential, so a connection moved
+        // between agents keeps its session. "direct" keeps it out of the shell env.
+        persistSecret: (k, value) => {
+          if (credentialId) this.credentials.upsertSecret(credentialId, k, value, "direct");
+          else this.secrets.upsert(agentId, k, value, "direct");
+        },
       }
     );
     if (!client) return;
@@ -1879,7 +2108,11 @@ export class Orchestrator {
     await this.mcp
       .connect(
         id,
-        [...ctx.profile.mcpServers, ...ctx.skills.effectiveMcpServers()],
+        [
+          ...ctx.profile.mcpServers,
+          ...this.mcpConnectionsForAgent(id),
+          ...ctx.skills.effectiveMcpServers(),
+        ],
         secrets,
         ctx.mcpTools
       )
@@ -1987,6 +2220,7 @@ export class Orchestrator {
     const ctx = this.contexts.get(id);
     if (!ctx) return false;
     await this.stopConnectors(id);
+    this.connectionStore.clearAgent(id);
     await this.mcp.disconnect(id);
     ctx.close();
     this.contexts.delete(id);
@@ -2163,6 +2397,131 @@ export class Orchestrator {
       ...deriveSkillCredentials(capId, formValues),
     };
     return this.mergeGlobalCredentials(payload);
+  }
+
+  // --- named credentials + connections (Settings → Connections) -------------
+
+  /** Registry descriptors for the connection/credential type pickers. */
+  listConnectionTypes() {
+    return listConnectionTypes();
+  }
+  listCredentialTypes() {
+    return listCredentialTypes();
+  }
+
+  listNamedCredentials() {
+    return this.credentials.list();
+  }
+  getNamedCredential(id: string) {
+    return this.credentials.get(id);
+  }
+  createNamedCredential(input: { type: string; label: string; secrets: Record<string, string> }) {
+    return this.credentials.create(input);
+  }
+  updateNamedCredential(id: string, patch: { label?: string; secrets?: Record<string, string> }) {
+    return this.credentials.update(id, patch);
+  }
+  /** Delete a credential; refuses (returns false) while a connection references it unless forced. */
+  deleteNamedCredential(id: string, force = false): { ok: boolean; error?: string } {
+    const referencing = this.connectionStore.list().filter((c) => c.credentialId === id);
+    if (referencing.length > 0 && !force) {
+      return { ok: false, error: `In use by ${referencing.length} connection(s).` };
+    }
+    for (const conn of referencing) this.connectionStore.update(conn.id, { credentialId: null });
+    return { ok: this.credentials.delete(id) };
+  }
+
+  listConnections() {
+    return this.connectionStore.list();
+  }
+  getConnection(id: string) {
+    return this.connectionStore.get(id);
+  }
+  createConnection(input: {
+    type: string;
+    label: string;
+    config?: Record<string, unknown>;
+    credentialId?: string | null;
+  }) {
+    return this.connectionStore.create(input);
+  }
+  updateConnection(
+    id: string,
+    patch: { label?: string; config?: Record<string, unknown>; credentialId?: string | null }
+  ) {
+    const updated = this.connectionStore.update(id, patch);
+    if (updated) this.reconcileAssignees(id);
+    return updated;
+  }
+  /** Delete a connection; refuses while assigned unless forced (then reconciles those agents). */
+  deleteConnection(id: string, force = false): { ok: boolean; error?: string } {
+    const assignees = this.connectionStore.assigneesOf(id);
+    if (assignees.length > 0 && !force) {
+      return { ok: false, error: `Assigned to ${assignees.length} agent(s).` };
+    }
+    const ok = this.connectionStore.delete(id);
+    for (const agentId of assignees) this.reconcileAgentConnections(agentId);
+    return { ok };
+  }
+
+  /** Connections currently assigned to an agent (for the Agent Studio picker). */
+  connectionsForAgent(agentId: string) {
+    return this.connectionStore.connectionsForAgent(agentId);
+  }
+
+  /**
+   * Assign a connection to an agent. v1 rule: a chat connection may belong to
+   * exactly one agent, and an agent may hold at most one chat connection per
+   * service. Non-chat connections can be shared freely.
+   */
+  assignConnection(connectionId: string, agentId: string): { ok: boolean; error?: string } {
+    const conn = this.connectionStore.get(connectionId);
+    if (!conn) return { ok: false, error: "unknown connection" };
+    if (isChatConnectionType(conn.type)) {
+      const others = this.connectionStore.assigneesOf(connectionId).filter((a) => a !== agentId);
+      if (others.length > 0) {
+        return { ok: false, error: "This chat connection is already assigned to another agent." };
+      }
+      const sameService = this.connectionStore
+        .chatConnectionsForAgent(agentId)
+        .find((c) => c.type === conn.type && c.id !== connectionId);
+      if (sameService) {
+        return { ok: false, error: `This agent already has a ${conn.type} connection.` };
+      }
+    }
+    this.connectionStore.assign(connectionId, agentId);
+    this.reconcileAgentConnections(agentId);
+    return { ok: true };
+  }
+
+  unassignConnection(connectionId: string, agentId: string): { ok: boolean } {
+    const ok = this.connectionStore.unassign(connectionId, agentId);
+    if (ok) this.reconcileAgentConnections(agentId);
+    return { ok };
+  }
+
+  /** Reconcile every agent a connection is assigned to (after an edit). */
+  private reconcileAssignees(connectionId: string): void {
+    for (const agentId of this.connectionStore.assigneesOf(connectionId)) {
+      this.reconcileAgentConnections(agentId);
+    }
+  }
+
+  /**
+   * Re-apply an agent's connections. Non-chat connection secrets and MCP servers
+   * are baked into the agent context at startAgent, so rebuild the context; chat
+   * connectors are then reconciled against the fresh context.
+   */
+  private reconcileAgentConnections(agentId: string): void {
+    const existing = this.contexts.get(agentId);
+    if (!existing) return;
+    const profile = existing.profile;
+    existing.close();
+    this.contexts.delete(agentId);
+    this.runtimes.delete(agentId);
+    const fresh = this.startAgent(profile);
+    if (agentId === "coo") setDefaultContext(fresh);
+    this.reconcileConnectors(profile);
   }
 
   /** Verify an agent's stored Slack bot token against Slack's `auth.test`. */

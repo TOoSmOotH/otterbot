@@ -93,6 +93,29 @@ function ensureControlTables(sqlite: Database.Database) {
       value TEXT NOT NULL,
       scope TEXT NOT NULL DEFAULT 'broad'
     )`,
+    `CREATE TABLE IF NOT EXISTS credentials (
+      id TEXT PRIMARY KEY,
+      label TEXT NOT NULL,
+      type TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    )`,
+    `CREATE TABLE IF NOT EXISTS connections (
+      id TEXT PRIMARY KEY,
+      label TEXT NOT NULL,
+      type TEXT NOT NULL,
+      config TEXT NOT NULL DEFAULT '{}',
+      credential_id TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    )`,
+    `CREATE TABLE IF NOT EXISTS connection_assignments (
+      connection_id TEXT NOT NULL,
+      agent_id TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      PRIMARY KEY (connection_id, agent_id)
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_conn_assign_agent ON connection_assignments(agent_id)`,
     `CREATE TABLE IF NOT EXISTS projects (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,

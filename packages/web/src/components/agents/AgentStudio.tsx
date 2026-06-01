@@ -5,6 +5,7 @@ import type {
   AgentPeerAccess,
   AgentProfileSummary,
   ChannelConnectorStatus,
+  Connection,
   McpServerConfig,
   McpServerStatus,
   Skill,
@@ -20,8 +21,14 @@ import { AvatarUpload } from "./AvatarUpload";
 import { PeerAccessEditor, type IncomingPeer } from "./PeerAccessEditor";
 import { TerminalModal } from "./TerminalModal";
 import { SkillConfigForm } from "./SkillConfigForm";
+import {
+  useConnectionsStore,
+  assignConnection,
+  unassignConnection,
+  fetchAgentConnections,
+} from "../../stores/connections-store";
 
-const TABS = ["Identity", "Persona", "Model", "Skills", "Channels", "Peers", "Schedule", "Memory", "Credentials"] as const;
+const TABS = ["Identity", "Persona", "Model", "Skills", "Connections", "Peers", "Schedule", "Memory", "Credentials"] as const;
 type StudioTab = (typeof TABS)[number];
 
 /** Full-screen agent management surface — identity, persona, model, skills,
@@ -155,7 +162,7 @@ export function AgentStudio({ agentId }: { agentId: string | null }) {
         {tab === "Persona" && <PersonaTab profile={profile} onSaved={onSaved} />}
         {tab === "Model" && <ModelTab profile={profile} onSaved={onSaved} />}
         {tab === "Skills" && <SkillsTab profile={profile} onSaved={onSaved} />}
-        {tab === "Channels" && <ChannelsTab profile={profile} onSaved={onSaved} />}
+        {tab === "Connections" && <ChannelsTab profile={profile} />}
         {tab === "Peers" && <PeersTab profile={profile} onSaved={onSaved} />}
         {tab === "Schedule" && <ScheduleTab agentId={profile.id} />}
         {tab === "Memory" && <MemoryTab agentId={profile.id} />}
@@ -793,394 +800,148 @@ function ConnectorBadge({ s }: { s: ChannelConnectorStatus | undefined }) {
   );
 }
 
-function ChannelsTab({ profile, onSaved }: TabProps) {
-  const update = useAgentsStore((s) => s.update);
-
+function ChannelsTab({ profile }: TabProps) {
+  const connections = useConnectionsStore((s) => s.connections);
+  const connectionTypes = useConnectionsStore((s) => s.connectionTypes);
+  const loadConnections = useConnectionsStore((s) => s.load);
+  const [assigned, setAssigned] = useState<Connection[]>([]);
   const [connStatus, setConnStatus] = useState<AgentConnectorStatus | null>(null);
+  const [error, setError] = useState("");
+
+  const refresh = () => fetchAgentConnections(profile.id).then(setAssigned).catch(() => {});
   const refreshStatus = () =>
     apiFetch(`/api/agents/${profile.id}/connectors`)
       .then((r) => (r.ok ? (r.json() as Promise<AgentConnectorStatus>) : null))
       .then(setConnStatus)
       .catch(() => {});
+
   useEffect(() => {
+    void loadConnections();
+    void refresh();
     void refreshStatus();
-    // Poll — a connector takes a moment to connect after a save / restart.
     const timer = setInterval(refreshStatus, 3000);
     return () => clearInterval(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profile.id]);
 
-  const [slackEnabled, setSlackEnabled] = useState(profile.slack?.enabled ?? false);
-  const [slackChannel, setSlackChannel] = useState(profile.slack?.channelId ?? "");
-  const [slackPublic, setSlackPublic] = useState(profile.slack?.publicBot ?? false);
-  const [slackUsers, setSlackUsers] = useState((profile.slack?.allowedUserIds ?? []).join("\n"));
-  const [slackMentionOnly, setSlackMentionOnly] = useState(profile.slack?.mentionOnly ?? true);
-  const [slackBotToken, setSlackBotToken] = useState("");
-  const [slackAppToken, setSlackAppToken] = useState("");
+  const typeOf = (type: string) => connectionTypes.find((t) => t.type === type);
+  const isChat = (type: string) => typeOf(type)?.isChat ?? false;
+  const assignedIds = new Set(assigned.map((c) => c.id));
+  const assignedChatTypes = new Set(assigned.filter((c) => isChat(c.type)).map((c) => c.type));
 
-  const [discordEnabled, setDiscordEnabled] = useState(profile.discord?.enabled ?? false);
-  const [discordChannel, setDiscordChannel] = useState(profile.discord?.channelId ?? "");
-  const [discordPublic, setDiscordPublic] = useState(profile.discord?.publicBot ?? false);
-  const [discordUsers, setDiscordUsers] = useState(
-    (profile.discord?.allowedUserIds ?? []).join("\n")
-  );
-  const [discordMentionOnly, setDiscordMentionOnly] = useState(
-    profile.discord?.mentionOnly ?? true
-  );
-  const [discordBotToken, setDiscordBotToken] = useState("");
+  const chatBadge = (type: string) => {
+    if (!connStatus) return undefined;
+    if (type === "slack") return connStatus.slack;
+    if (type === "discord") return connStatus.discord;
+    if (type === "matrix") return connStatus.matrix;
+    return undefined;
+  };
 
-  const [matrixEnabled, setMatrixEnabled] = useState(profile.matrix?.enabled ?? false);
-  const [matrixRoom, setMatrixRoom] = useState(profile.matrix?.channelId ?? "");
-  const [matrixPublic, setMatrixPublic] = useState(profile.matrix?.publicBot ?? false);
-  const [matrixUsers, setMatrixUsers] = useState(
-    (profile.matrix?.allowedUserIds ?? []).join("\n")
-  );
-  const [matrixMentionOnly, setMatrixMentionOnly] = useState(profile.matrix?.mentionOnly ?? true);
-  const [matrixHomeserver, setMatrixHomeserver] = useState("");
-  const [matrixUser, setMatrixUser] = useState("");
-  const [matrixPassword, setMatrixPassword] = useState("");
-
-  // Pre-fill the saved non-secret Matrix values once the status arrives, so the
-  // fields show what's stored (the password stays masked — only hasPassword is
-  // known). Guarded so the 3s status poll never clobbers the user's edits.
-  const matrixPrefilled = useRef(false);
-  const matrixHasPassword = connStatus?.matrix.hasPassword ?? false;
-  useEffect(() => {
-    if (matrixPrefilled.current || !connStatus) return;
-    matrixPrefilled.current = true;
-    if (connStatus.matrix.homeserverUrl) setMatrixHomeserver(connStatus.matrix.homeserverUrl);
-    if (connStatus.matrix.username) setMatrixUser(connStatus.matrix.username);
-  }, [connStatus]);
-
-  const [saved, setSaved] = useState(false);
-  const [error, setError] = useState("");
-
-  const save = async () => {
-    setError("");
-    // 1. Channel config (channel id + access gate) lives on the profile.
-    await update(profile.id, {
-      slack: slackEnabled
-        ? {
-            enabled: true,
-            channelId: slackChannel.trim(),
-            publicBot: slackPublic,
-            allowedUserIds: parseIds(slackUsers),
-            mentionOnly: slackMentionOnly,
-          }
-        : null,
-      discord: discordEnabled
-        ? {
-            enabled: true,
-            channelId: discordChannel.trim(),
-            publicBot: discordPublic,
-            allowedUserIds: parseIds(discordUsers),
-            mentionOnly: discordMentionOnly,
-          }
-        : null,
-      matrix: matrixEnabled
-        ? {
-            enabled: true,
-            channelId: matrixRoom.trim(),
-            publicBot: matrixPublic,
-            allowedUserIds: parseIds(matrixUsers),
-            mentionOnly: matrixMentionOnly,
-          }
-        : null,
-    });
-    // 2. Tokens are secrets — merge in only the ones that were entered.
-    const secrets: Record<string, string> = {};
-    if (slackBotToken.trim()) secrets.SLACK_BOT_TOKEN = slackBotToken.trim();
-    if (slackAppToken.trim()) secrets.SLACK_APP_TOKEN = slackAppToken.trim();
-    if (discordBotToken.trim()) secrets.DISCORD_BOT_TOKEN = discordBotToken.trim();
-    if (matrixHomeserver.trim()) secrets.MATRIX_HOMESERVER_URL = matrixHomeserver.trim();
-    if (matrixUser.trim()) secrets.MATRIX_USER = matrixUser.trim();
-    if (matrixPassword) secrets.MATRIX_PASSWORD = matrixPassword;
-    if (Object.keys(secrets).length > 0) {
-      const res = await apiFetch(`/api/agents/${profile.id}/credentials`, {
-        method: "PATCH",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(secrets),
-      });
-      if (!res.ok) {
-        setError("Channel settings saved, but storing the tokens failed.");
-        return;
-      }
+  const doAssign = async (id: string) => {
+    const res = await assignConnection(profile.id, id);
+    if (!res.ok) {
+      setError(res.error ?? "Could not assign.");
+    } else {
+      setError("");
+      await refresh();
+      void refreshStatus();
     }
-    setSlackBotToken("");
-    setSlackAppToken("");
-    setDiscordBotToken("");
-    setMatrixHomeserver("");
-    setMatrixUser("");
-    setMatrixPassword("");
-    setSaved(true);
-    onSaved();
+  };
+  const doUnassign = async (id: string) => {
+    await unassignConnection(profile.id, id);
+    await refresh();
     void refreshStatus();
   };
 
+  // Available = not already assigned here. Chat connections taken by another
+  // agent, or a second chat connection of a service this agent already has,
+  // are shown disabled (v1: one chat connection per agent per service).
+  const available = connections.filter((c) => !assignedIds.has(c.id));
+
   return (
-    <Form>
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       <p style={hint}>
-        Connect this agent to a Slack, Discord, or Matrix channel. Tokens are stored encrypted
-        alongside the agent's other credentials — leave a token blank to keep the one already saved.
+        Assign reusable connections to this agent. Create and edit them in{" "}
+        <strong>Settings → Connections</strong>.
       </p>
 
-      <div style={channelCard}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
-          <label style={checkboxRow}>
-            <input
-              type="checkbox"
-              checked={slackEnabled}
-              onChange={(e) => setSlackEnabled(e.target.checked)}
-            />
-            Enable Slack
-          </label>
-          <ConnectorBadge s={connStatus?.slack} />
-        </div>
-        {slackEnabled && (
-          <>
-            {connStatus?.slack.state === "connected" && (
-              <p style={{ ...hint, marginTop: 0 }}>
-                Connected. If the agent doesn't reply: invite the bot to the channel, and make
-                sure whoever messages it is allowed — enable "Public bot" or list their Slack
-                user ID below.
-              </p>
-            )}
-            <Field label="Bot OAuth token (xoxb-…)">
-              <input
-                type="password"
-                value={slackBotToken}
-                onChange={(e) => setSlackBotToken(e.target.value)}
-                placeholder={profile.slack ? "Leave blank to keep the saved token" : "xoxb-…"}
-                style={input}
-              />
-            </Field>
-            <Field label="App-level / Socket Mode token (xapp-…)">
-              <input
-                type="password"
-                value={slackAppToken}
-                onChange={(e) => setSlackAppToken(e.target.value)}
-                placeholder={profile.slack ? "Leave blank to keep the saved token" : "xapp-…"}
-                style={input}
-              />
-            </Field>
-            <Field label="Channel ID to join">
-              <input
-                value={slackChannel}
-                onChange={(e) => setSlackChannel(e.target.value)}
-                placeholder="C0123456789"
-                style={input}
-              />
-            </Field>
-            <label style={checkboxRow}>
-              <input
-                type="checkbox"
-                checked={slackMentionOnly}
-                onChange={(e) => setSlackMentionOnly(e.target.checked)}
-              />
-              Only respond when @mentioned
-            </label>
-            <p style={{ ...hint, marginTop: 0 }}>
-              {slackMentionOnly
-                ? "The agent replies only when its Slack bot is @mentioned — triggers on the bot's handle, whatever the agent is named here."
-                : "The agent replies to every message in the channel."}
-            </p>
-            <label style={checkboxRow}>
-              <input
-                type="checkbox"
-                checked={slackPublic}
-                onChange={(e) => setSlackPublic(e.target.checked)}
-              />
-              Public bot — anyone in the channel may talk to this agent
-            </label>
-            {!slackPublic && (
-              <Field label="Allowed Slack user IDs (one per line)">
-                <textarea
-                  value={slackUsers}
-                  onChange={(e) => setSlackUsers(e.target.value)}
-                  rows={3}
-                  style={{ ...input, resize: "vertical", fontFamily: "monospace", fontSize: 12 }}
-                />
-              </Field>
-            )}
-          </>
-        )}
-      </div>
+      <section>
+        <h4 style={{ margin: "0 0 8px", fontSize: 13, opacity: 0.8 }}>Assigned</h4>
+        {assigned.length === 0 && <p style={hint}>No connections assigned.</p>}
+        {assigned.map((c) => (
+          <div key={c.id} style={connRow}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+              <span style={{ fontWeight: 600 }}>
+                {c.label} <span style={connBadge}>{typeOf(c.type)?.label ?? c.type}</span>
+              </span>
+              {isChat(c.type) && <ConnectorBadge s={chatBadge(c.type)} />}
+            </div>
+            <button style={connGhostDanger} onClick={() => void doUnassign(c.id)}>
+              Unassign
+            </button>
+          </div>
+        ))}
+      </section>
 
-      <div style={channelCard}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
-          <label style={checkboxRow}>
-            <input
-              type="checkbox"
-              checked={discordEnabled}
-              onChange={(e) => setDiscordEnabled(e.target.checked)}
-            />
-            Enable Discord
-          </label>
-          <ConnectorBadge s={connStatus?.discord} />
-        </div>
-        {discordEnabled && (
-          <>
-            {connStatus?.discord.state === "connected" && (
-              <p style={{ ...hint, marginTop: 0 }}>
-                Connected. If the agent doesn't reply: invite the bot to the channel, and make
-                sure whoever messages it is allowed — enable "Public bot" or list their user ID
-                below.
-              </p>
-            )}
-            <Field label="Bot token">
-              <input
-                type="password"
-                value={discordBotToken}
-                onChange={(e) => setDiscordBotToken(e.target.value)}
-                placeholder={
-                  profile.discord ? "Leave blank to keep the saved token" : "Discord bot token"
-                }
-                style={input}
-              />
-            </Field>
-            <Field label="Channel ID to join">
-              <input
-                value={discordChannel}
-                onChange={(e) => setDiscordChannel(e.target.value)}
-                style={input}
-              />
-            </Field>
-            <label style={checkboxRow}>
-              <input
-                type="checkbox"
-                checked={discordMentionOnly}
-                onChange={(e) => setDiscordMentionOnly(e.target.checked)}
-              />
-              Only respond when @mentioned
-            </label>
-            <label style={checkboxRow}>
-              <input
-                type="checkbox"
-                checked={discordPublic}
-                onChange={(e) => setDiscordPublic(e.target.checked)}
-              />
-              Public bot — anyone in the channel may talk to this agent
-            </label>
-            {!discordPublic && (
-              <Field label="Allowed Discord user IDs (one per line)">
-                <textarea
-                  value={discordUsers}
-                  onChange={(e) => setDiscordUsers(e.target.value)}
-                  rows={3}
-                  style={{ ...input, resize: "vertical", fontFamily: "monospace", fontSize: 12 }}
-                />
-              </Field>
-            )}
-          </>
-        )}
-      </div>
-
-      <div style={channelCard}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
-          <label style={checkboxRow}>
-            <input
-              type="checkbox"
-              checked={matrixEnabled}
-              onChange={(e) => setMatrixEnabled(e.target.checked)}
-            />
-            Enable Matrix
-          </label>
-          <ConnectorBadge s={connStatus?.matrix} />
-        </div>
-        {matrixEnabled && (
-          <>
-            {connStatus?.matrix.state === "connected" && (
-              <p style={{ ...hint, marginTop: 0 }}>
-                Connected. If the agent doesn't reply: invite the bot to the room, and make sure
-                whoever messages it is allowed — enable "Public bot" or list their Matrix ID below.
-              </p>
-            )}
-            <Field label="Homeserver URL">
-              <input
-                value={matrixHomeserver}
-                onChange={(e) => setMatrixHomeserver(e.target.value)}
-                placeholder="https://matrix.org"
-                style={input}
-              />
-            </Field>
-            <Field label="Username">
-              <input
-                value={matrixUser}
-                onChange={(e) => setMatrixUser(e.target.value)}
-                placeholder="botuser"
-                style={input}
-              />
-            </Field>
-            <Field label="Password">
-              <input
-                type="password"
-                value={matrixPassword}
-                onChange={(e) => setMatrixPassword(e.target.value)}
-                placeholder={matrixHasPassword ? "•••••••• saved — leave blank to keep" : "password"}
-                style={input}
-              />
-            </Field>
-            <p style={{ ...hint, marginTop: 0 }}>
-              otterbot logs in and provisions its own Matrix device. Don't paste an
-              access token from Element — a shared device's encryption keys collide.
-            </p>
-            <Field label="Room ID to join">
-              <input
-                value={matrixRoom}
-                onChange={(e) => setMatrixRoom(e.target.value)}
-                placeholder="!room:matrix.org"
-                style={input}
-              />
-            </Field>
-            <label style={checkboxRow}>
-              <input
-                type="checkbox"
-                checked={matrixMentionOnly}
-                onChange={(e) => setMatrixMentionOnly(e.target.checked)}
-              />
-              Only respond when mentioned
-            </label>
-            <p style={{ ...hint, marginTop: 0 }}>
-              {matrixMentionOnly
-                ? "The agent replies only when its Matrix ID or display name appears in the message."
-                : "The agent replies to every message in the room."}
-            </p>
-            <label style={checkboxRow}>
-              <input
-                type="checkbox"
-                checked={matrixPublic}
-                onChange={(e) => setMatrixPublic(e.target.checked)}
-              />
-              Public bot — anyone in the room may talk to this agent
-            </label>
-            {!matrixPublic && (
-              <Field label="Allowed Matrix IDs (one per line, @user:server)">
-                <textarea
-                  value={matrixUsers}
-                  onChange={(e) => setMatrixUsers(e.target.value)}
-                  rows={3}
-                  style={{ ...input, resize: "vertical", fontFamily: "monospace", fontSize: 12 }}
-                />
-              </Field>
-            )}
-          </>
-        )}
-      </div>
+      <section>
+        <h4 style={{ margin: "0 0 8px", fontSize: 13, opacity: 0.8 }}>Available</h4>
+        {available.length === 0 && <p style={hint}>No other connections defined.</p>}
+        {available.map((c) => {
+          const takenElsewhere = isChat(c.type) && c.assignedAgentIds.length > 0;
+          const dupService = isChat(c.type) && assignedChatTypes.has(c.type);
+          const disabled = takenElsewhere || dupService;
+          const note = takenElsewhere
+            ? "in use by another agent"
+            : dupService
+              ? `already have a ${c.type} connection`
+              : "";
+          return (
+            <div key={c.id} style={connRow}>
+              <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                <span style={{ fontWeight: 600, opacity: disabled ? 0.5 : 1 }}>
+                  {c.label} <span style={connBadge}>{typeOf(c.type)?.label ?? c.type}</span>
+                </span>
+                {note && <span style={hint}>{note}</span>}
+              </div>
+              <button style={connGhost} disabled={disabled} onClick={() => void doAssign(c.id)}>
+                Assign
+              </button>
+            </div>
+          );
+        })}
+      </section>
 
       {error && <span style={{ fontSize: 12, color: "#f87171" }}>{error}</span>}
-      <SaveBar onSave={save} saved={saved} onDirty={() => setSaved(false)} />
-    </Form>
+    </div>
   );
 }
 
-const channelCard: React.CSSProperties = {
+const connRow: React.CSSProperties = {
   display: "flex",
-  flexDirection: "column",
-  gap: 8,
+  justifyContent: "space-between",
+  alignItems: "center",
+  padding: "8px 10px",
   border: "1px solid rgb(var(--border))",
   borderRadius: 8,
-  padding: 12,
+  marginBottom: 6,
 };
+const connBadge: React.CSSProperties = {
+  fontSize: 11,
+  padding: "1px 6px",
+  borderRadius: 6,
+  background: "rgb(var(--bg))",
+  border: "1px solid rgb(var(--border))",
+  color: "rgb(var(--muted))",
+};
+const connGhost: React.CSSProperties = {
+  padding: "5px 10px",
+  borderRadius: 6,
+  border: "1px solid rgb(var(--border))",
+  background: "transparent",
+  color: "rgb(var(--fg))",
+  cursor: "pointer",
+};
+const connGhostDanger: React.CSSProperties = { ...connGhost, color: "tomato" };
 
 // --- Persona --------------------------------------------------------------
 
