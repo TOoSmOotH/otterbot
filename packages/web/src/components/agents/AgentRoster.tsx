@@ -225,7 +225,9 @@ export function AgentRoster({ onNewAgent }: { onNewAgent: () => void }) {
                 activeAgentId={activeAgentId}
               />
               {expanded &&
-                members.map((a) => <AgentCard key={a.id} agent={a} indented {...cardProps} />)}
+                members.map((a) => (
+                  <AgentCard key={a.id} agent={a} indented isPm={a.id === pmId} {...cardProps} />
+                ))}
             </div>
           );
         })}
@@ -275,6 +277,8 @@ interface AgentCardProps {
   activeTasksByAgent: Map<string, SubagentTask[]>;
   /** Nest the card one level under a project group header. */
   indented?: boolean;
+  /** Mark this card as the project's PM with a badge. */
+  isPm?: boolean;
 }
 
 /** A single roster row: avatar, name, model, status dot, and live subtasks. */
@@ -286,6 +290,7 @@ function AgentCard({
   setHoveredId,
   activeTasksByAgent,
   indented,
+  isPm,
 }: AgentCardProps) {
   const thumb = a.artwork.avatar;
   const active = a.id === activeAgentId;
@@ -387,6 +392,20 @@ function AgentCard({
                 }}
               >
                 COO
+              </span>
+            )}
+            {isPm && (
+              <span
+                style={{
+                  ...type.micro,
+                  padding: "1px 5px",
+                  borderRadius: 4,
+                  background: "rgb(var(--accent) / 0.18)",
+                  color: "rgb(var(--accent))",
+                  border: "1px solid rgb(var(--accent) / 0.3)",
+                }}
+              >
+                PM
               </span>
             )}
           </span>
