@@ -192,6 +192,12 @@ export interface TeamRoleConfig {
   displayName?: string;
   /** Custom persona; defaults to the role's built-in persona. */
   persona?: string;
+  /**
+   * When a custom `persona` is set, whether to append it to the role's built-in
+   * persona (true) or replace it entirely (false). Undefined defaults to append
+   * — replacing drops the role's built-in instructions and may break behavior.
+   */
+  appendPersona?: boolean;
 }
 
 /** Wizard team config, keyed by role name. */

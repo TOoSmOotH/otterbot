@@ -309,6 +309,7 @@ export async function buildServer(
         tool?: string;
         displayName?: string;
         persona?: string;
+        appendPersona?: boolean;
       }>;
       rules?: string;
       remoteE2e?: boolean;
@@ -371,6 +372,7 @@ export async function buildServer(
         tool?: string;
         displayName?: string;
         persona?: string;
+        appendPersona?: boolean;
       }>;
     };
   }>("/api/projects/:id/team", async (req, reply) => {

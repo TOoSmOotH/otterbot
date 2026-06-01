@@ -2066,10 +2066,19 @@ export class Orchestrator {
       }
       const allowedPeers = [...peerIds].map((agentId) => ({ agentId, shareMemory: false }));
       const basePersona = modelOnly && spec.personaModelOnly ? spec.personaModelOnly : spec.persona;
+      // A custom persona either appends to the role's default (the wizard default,
+      // and the undefined back-compat case) or fully replaces it when appendPersona
+      // is explicitly false. Blank custom persona always falls back to the default.
+      const customPersona = rc.persona?.trim();
+      const persona = customPersona
+        ? rc.appendPersona === false
+          ? customPersona
+          : `${basePersona}\n\n${customPersona}`
+        : basePersona;
       this.createAgent({
         id,
         displayName: rc.displayName?.trim() || `${project.name} · ${spec.displayNameSuffix}`,
-        persona: rc.persona?.trim() || basePersona,
+        persona,
         canRunShell: spec.canRunShell,
         allowedPeers,
         model: this.modelConfigFor(rc.modelId),

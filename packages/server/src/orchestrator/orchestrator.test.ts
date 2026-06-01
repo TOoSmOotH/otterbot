@@ -8,6 +8,7 @@ import { persistArtifact } from "../integrations/artifacts.js";
 import * as schema from "../db/schema.js";
 import { getCatalogCapability } from "../skills/builtin-catalog.js";
 import { buildSubagentProfile } from "./orchestrator.js";
+import { TEAM_ROLES } from "../teams/team-template.js";
 import { normalizeProfile } from "../profiles/profile-store.js";
 import type { AgentServices } from "../runtime/agent-services.js";
 
@@ -615,5 +616,28 @@ describe("orchestrator (e2e)", () => {
     expect(team.map((t) => t.role).sort()).toEqual(["coder", "pm", "security-reviewer"]);
     const coderId = team.find((t) => t.role === "coder")!.agentId;
     expect(stack.orch.getContext(coderId)!.profile.displayName).toBe("Ace Coder");
+  });
+
+  it("appends a custom persona to the role default, or replaces it when appendPersona is false", () => {
+    const coderDefault = TEAM_ROLES.find((r) => r.role === "coder")!.persona;
+    const project = stack.orch.createProject("Persona Modes");
+    stack.orch.provisionProjectTeam(project.id, {
+      // default (undefined appendPersona) → append
+      pm: { persona: "Plan conservatively." },
+      // explicit replace
+      coder: { persona: "Only write Rust.", appendPersona: false },
+      "security-reviewer": { enabled: false },
+      "test-writer": { enabled: false },
+      tester: { enabled: false },
+    });
+    const team = stack.orch.getProjectTeam(project.id);
+    const pmPersona = stack.orch.getContext(team.find((t) => t.role === "pm")!.agentId)!.profile.persona;
+    const coderPersona = stack.orch.getContext(team.find((t) => t.role === "coder")!.agentId)!.profile.persona;
+    // pm: default appended after the role's built-in persona.
+    expect(pmPersona).toContain("Plan conservatively.");
+    expect(pmPersona.length).toBeGreaterThan("Plan conservatively.".length);
+    // coder: built-in persona fully replaced.
+    expect(coderPersona).toBe("Only write Rust.");
+    expect(coderPersona).not.toContain(coderDefault.slice(0, 30));
   });
 });

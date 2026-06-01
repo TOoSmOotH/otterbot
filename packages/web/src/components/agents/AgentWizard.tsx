@@ -113,10 +113,16 @@ function TeamForm({ onClose }: { onClose: () => void }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [roles, setRoles] = useState<
-    Record<string, { enabled: boolean; modelId: string; tool?: ToolChoice; displayName: string; persona: string }>
+    Record<
+      string,
+      { enabled: boolean; modelId: string; tool?: ToolChoice; displayName: string; persona: string; appendPersona: boolean }
+    >
   >(() =>
     Object.fromEntries(
-      ROLES.map((r) => [r.role, { enabled: true, modelId: "", tool: r.defaultTool, displayName: "", persona: "" }])
+      ROLES.map((r) => [
+        r.role,
+        { enabled: true, modelId: "", tool: r.defaultTool, displayName: "", persona: "", appendPersona: true },
+      ])
     )
   );
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
@@ -131,7 +137,7 @@ function TeamForm({ onClose }: { onClose: () => void }) {
     setError(null);
     const team: Record<
       string,
-      { enabled: boolean; modelId?: string; tool?: string; displayName?: string; persona?: string }
+      { enabled: boolean; modelId?: string; tool?: string; displayName?: string; persona?: string; appendPersona?: boolean }
     > = {};
     for (const r of ROLES) {
       const cfg = roles[r.role];
@@ -142,7 +148,8 @@ function TeamForm({ onClose }: { onClose: () => void }) {
         // "model" → "none" tells the server to skip the coding CLI for this role.
         ...(cfg.tool ? { tool: cfg.tool === "model" ? "none" : cfg.tool } : {}),
         ...(cfg.displayName.trim() ? { displayName: cfg.displayName.trim() } : {}),
-        ...(cfg.persona.trim() ? { persona: cfg.persona.trim() } : {}),
+        // appendPersona only matters when a custom persona is present, so only send it then.
+        ...(cfg.persona.trim() ? { persona: cfg.persona.trim(), appendPersona: cfg.appendPersona } : {}),
       };
     }
     const res = await apiFetch("/api/projects", {
@@ -240,6 +247,20 @@ function TeamForm({ onClose }: { onClose: () => void }) {
                     rows={3}
                     style={{ ...input, width: "100%", resize: "vertical", fontFamily: "inherit" }}
                   />
+                  <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: "rgb(var(--muted))" }}>
+                    <input
+                      type="checkbox"
+                      checked={rc.appendPersona}
+                      onChange={(e) => setRoles((s) => ({ ...s, [r.role]: { ...s[r.role], appendPersona: e.target.checked } }))}
+                    />
+                    Append to this role's default persona
+                  </label>
+                  {!rc.appendPersona && rc.persona.trim() && (
+                    <div style={warnText}>
+                      ⚠️ Replacing the default persona removes the role's built-in instructions (how it plans, uses its
+                      CLI, and coordinates with teammates). The role may not behave correctly — appending is recommended.
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -390,6 +411,15 @@ const input: React.CSSProperties = {
   borderRadius: 6,
   padding: "6px 10px",
   fontSize: 13,
+};
+const warnText: React.CSSProperties = {
+  fontSize: 11,
+  lineHeight: 1.4,
+  color: "rgb(var(--warning))",
+  background: "rgb(var(--warning-bg))",
+  border: "1px solid rgb(var(--warning) / 0.3)",
+  borderRadius: 6,
+  padding: "6px 8px",
 };
 const roleRow: React.CSSProperties = {
   display: "flex",
