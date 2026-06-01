@@ -162,7 +162,7 @@ export function AgentStudio({ agentId }: { agentId: string | null }) {
         {tab === "Persona" && <PersonaTab profile={profile} onSaved={onSaved} />}
         {tab === "Model" && <ModelTab profile={profile} onSaved={onSaved} />}
         {tab === "Skills" && <SkillsTab profile={profile} onSaved={onSaved} />}
-        {tab === "Connections" && <ChannelsTab profile={profile} />}
+        {tab === "Connections" && <ChannelsTab profile={profile} onSaved={onSaved} />}
         {tab === "Peers" && <PeersTab profile={profile} onSaved={onSaved} />}
         {tab === "Schedule" && <ScheduleTab agentId={profile.id} />}
         {tab === "Memory" && <MemoryTab agentId={profile.id} />}
@@ -942,6 +942,16 @@ const connGhost: React.CSSProperties = {
   cursor: "pointer",
 };
 const connGhostDanger: React.CSSProperties = { ...connGhost, color: "tomato" };
+
+/** Card wrapper shared by the Skills tab's tool/MCP sections. */
+const channelCard: React.CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  gap: 8,
+  border: "1px solid rgb(var(--border))",
+  borderRadius: 8,
+  padding: 12,
+};
 
 // --- Persona --------------------------------------------------------------
 
