@@ -582,6 +582,12 @@ export class Orchestrator {
         this.publishedRuns.delete(runId);
         return this.pipeline.resume(runId, feedback);
       },
+      // Issue triage is wired up in a later task; disabled for now.
+      listTriageProjects: () => [],
+      getTriage: () => null,
+      triageInitial: async () => {},
+      refinePlan: async () => {},
+      advanceWatermark: () => {},
     });
     this.secrets = new SecretsStore(control);
     this.globalSecrets = new GlobalSecretsStore(control);

@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { ForgeMonitor, type ForgeMonitorDeps, type WatchableRun } from "./forge-monitor.js";
-import type { Forge, ForgeIssue, ForgePullRequest, ForgeReview, CheckState } from "./forge.js";
+import type { Forge, ForgeIssue, ForgeComment, ForgePullRequest, ForgeReview, CheckState } from "./forge.js";
 
 /** A minimal fake Forge whose responses are scripted per test. */
 function fakeForge(over: Partial<Forge>): Forge {
@@ -35,13 +35,14 @@ function fakeForge(over: Partial<Forge>): Forge {
   };
 }
 
-const issue = (number: number): ForgeIssue => ({
+const issue = (number: number, over: Partial<ForgeIssue> = {}): ForgeIssue => ({
   number,
   title: `issue ${number}`,
   body: "body",
-  author: "u",
+  author: "alice",
   assignees: [],
   htmlUrl: "h",
+  ...over,
 });
 
 function baseDeps(over: Partial<ForgeMonitorDeps>, forge: Forge): ForgeMonitorDeps {
@@ -52,6 +53,11 @@ function baseDeps(over: Partial<ForgeMonitorDeps>, forge: Forge): ForgeMonitorDe
     startRunFromIssue: () => "run1",
     watchableRuns: () => [],
     resumeRun: () => true,
+    listTriageProjects: () => [],
+    getTriage: () => null,
+    triageInitial: async () => {},
+    refinePlan: async () => {},
+    advanceWatermark: () => {},
     ...over,
   };
 }
@@ -129,5 +135,107 @@ describe("ForgeMonitor.pollPullRequests", () => {
     await mon.pollOnce(); // merged set → skips the PR entirely
     expect(resumed).toEqual([]);
     expect(prCalls).toBe(1);
+  });
+});
+
+describe("ForgeMonitor.pollTriage", () => {
+  const comment = (id: number, author: string, body = "c"): ForgeComment => ({
+    id,
+    author,
+    body,
+    createdAt: "t",
+  });
+
+  it("initial-triages a new open unassigned issue, folding existing maintainer comments", async () => {
+    const calls: Array<{ n: number; instr: number[] }> = [];
+    const forge = fakeForge({
+      listOpenIssues: async () => [issue(5)],
+      listIssueComments: async () => [comment(10, "alice"), comment(11, "stranger")],
+      getUserPermission: async (_r, u) => (u === "stranger" ? "none" : "write"),
+    });
+    const deps = baseDeps(
+      {
+        listTriageProjects: () => [{ id: "p1", forgeRepo: "o/n" }],
+        getTriage: () => null,
+        triageInitial: async (_p, i, instr) => {
+          calls.push({ n: i.number, instr: instr.map((c) => c.id) });
+        },
+      },
+      forge
+    );
+    await new ForgeMonitor(deps).pollOnce();
+    expect(calls).toEqual([{ n: 5, instr: [10] }]);
+  });
+
+  it("skips assigned issues", async () => {
+    let triaged = 0;
+    const forge = fakeForge({ listOpenIssues: async () => [issue(6, { assignees: ["bot"] })] });
+    const deps = baseDeps(
+      { listTriageProjects: () => [{ id: "p1", forgeRepo: "o/n" }], triageInitial: async () => { triaged += 1; } },
+      forge
+    );
+    await new ForgeMonitor(deps).pollOnce();
+    expect(triaged).toBe(0);
+  });
+
+  it("refines only on new author/maintainer comments above the watermark", async () => {
+    const refined: number[] = [];
+    const forge = fakeForge({
+      listOpenIssues: async () => [issue(7)],
+      listIssueComments: async () => [comment(20, "alice", "old"), comment(30, "carol", "please add tests")],
+      getUserPermission: async (_r, u) => (u === "carol" ? "write" : "none"),
+    });
+    const deps = baseDeps(
+      {
+        listTriageProjects: () => [{ id: "p1", forgeRepo: "o/n" }],
+        getTriage: () => ({ plan: "p", lastCommentId: 25 }),
+        refinePlan: async (_p, i, _plan, instr) => {
+          refined.push(...instr.map((c) => c.id));
+        },
+      },
+      forge
+    );
+    await new ForgeMonitor(deps).pollOnce();
+    expect(refined).toEqual([30]);
+  });
+
+  it("advances the watermark (no refine) when new comments are not instructions", async () => {
+    let refined = 0;
+    let advancedTo = 0;
+    const forge = fakeForge({
+      listOpenIssues: async () => [issue(8)],
+      listIssueComments: async () => [comment(40, "stranger", "noise")],
+      getUserPermission: async () => "none",
+    });
+    const deps = baseDeps(
+      {
+        listTriageProjects: () => [{ id: "p1", forgeRepo: "o/n" }],
+        getTriage: () => ({ plan: "p", lastCommentId: 30 }),
+        refinePlan: async () => { refined += 1; },
+        advanceWatermark: (_p, _n, id) => { advancedTo = id; },
+      },
+      forge
+    );
+    await new ForgeMonitor(deps).pollOnce();
+    expect(refined).toBe(0);
+    expect(advancedTo).toBe(40);
+  });
+
+  it("ignores the bot's own comments", async () => {
+    let refined = 0;
+    const forge = fakeForge({
+      listOpenIssues: async () => [issue(9)],
+      listIssueComments: async () => [comment(50, "bot", "the plan")],
+    });
+    const deps = baseDeps(
+      {
+        listTriageProjects: () => [{ id: "p1", forgeRepo: "o/n" }],
+        getTriage: () => ({ plan: "p", lastCommentId: 40 }),
+        refinePlan: async () => { refined += 1; },
+      },
+      forge
+    );
+    await new ForgeMonitor(deps).pollOnce();
+    expect(refined).toBe(0);
   });
 });
