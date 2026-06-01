@@ -221,6 +221,42 @@ describe("ForgeMonitor.pollTriage", () => {
     expect(advancedTo).toBe(40);
   });
 
+  it("does not double-triage an issue while a prior round is still in flight", async () => {
+    let calls = 0;
+    let release!: () => void;
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    let entered!: () => void;
+    const inFlight = new Promise<void>((r) => {
+      entered = r;
+    });
+    const forge = fakeForge({
+      listOpenIssues: async () => [issue(12)],
+      listIssueComments: async () => [],
+    });
+    const deps = baseDeps(
+      {
+        listTriageProjects: () => [{ id: "p1", forgeRepo: "o/n" }],
+        getTriage: () => null,
+        triageInitial: async () => {
+          calls += 1;
+          entered(); // the in-flight key is now registered
+          await gate; // stay in flight until released
+        },
+      },
+      forge
+    );
+    const mon = new ForgeMonitor(deps);
+    const first = mon.pollOnce(); // enters triageInitial, holds the in-flight key
+    await inFlight; // ensure the first cycle reached inFlight.add(key)
+    await mon.pollOnce(); // overlapping cycle: must skip the in-flight issue
+    expect(calls).toBe(1);
+    release();
+    await first;
+    expect(calls).toBe(1);
+  });
+
   it("ignores the bot's own comments", async () => {
     let refined = 0;
     const forge = fakeForge({
