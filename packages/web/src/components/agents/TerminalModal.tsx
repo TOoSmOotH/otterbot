@@ -145,8 +145,11 @@ export function TerminalModal({
   }, [agentId, kind]);
 
   return (
-    <div style={overlay} onClick={onClose}>
-      <div style={modal} onClick={(e) => e.stopPropagation()}>
+    // Intentionally NOT dismissible by clicking the backdrop: a stray click
+    // (e.g. while selecting/copying a login URL) would otherwise tear down the
+    // PTY and kill an in-progress login. Closing is explicit via the ✕ button.
+    <div style={overlay}>
+      <div style={modal}>
         <div style={header}>
           <span style={{ fontWeight: 600, fontSize: 13 }}>
             {kind === "coding"
@@ -156,7 +159,7 @@ export function TerminalModal({
           <span style={{ flex: 1 }} />
           {exited && <span style={exitBadge}>{exited}</span>}
           <button style={closeBtn} onClick={onClose} aria-label="Close terminal">
-            ✕
+            ✕ Close
           </button>
         </div>
         <div ref={hostRef} style={termHost} />
