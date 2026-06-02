@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   apiFetch,
   changePassword,
@@ -48,20 +48,42 @@ export function GlobalSettings({
   onOpenLoginTerminal?: (tool: CodingTool) => void;
 } = {}) {
   const savedSettings = useGlobalSettingsStore((s) => s.settings);
+  const loaded = useGlobalSettingsStore((s) => s.loaded);
   const load = useGlobalSettingsStore((s) => s.load);
   const saveSettings = useGlobalSettingsStore((s) => s.save);
-  const saving = useGlobalSettingsStore((s) => s.saving);
   const providers = useProvidersStore((s) => s.providers);
   const loadProviders = useProvidersStore((s) => s.load);
   const [draft, setDraft] = useState<GlobalSettingsShape>(savedSettings);
   const [tab, setTab] = useState<SettingsTab>(resolveInitialTab(initialTab));
-  const [status, setStatus] = useState("");
+  // Autosave status shown in the footer; "" until the first save fires.
+  const [saveState, setSaveState] = useState<"" | "saving" | "saved" | "error">("");
   // Passive "a coding CLI has an update" indicator (powered by the daily check).
   const [codingUpdate, setCodingUpdate] = useState(false);
 
+  // Refs backing the debounced autosave so handlers/effects see live values.
+  const draftRef = useRef(draft);
+  draftRef.current = draft;
+  // JSON of the last settings we successfully sent — autosave compares against
+  // this (not the store) so a normalized server echo can't trigger a save loop.
+  const savedSnapshotRef = useRef(JSON.stringify(savedSettings));
+  const hydratedRef = useRef(false);
+  const savingRef = useRef(false);
+  const pendingRef = useRef(false);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+
   useEffect(() => void load(), [load]);
   useEffect(() => void loadProviders(), [loadProviders]);
-  useEffect(() => setDraft(savedSettings), [savedSettings]);
+
+  // Hydrate the draft from the store once settings have loaded. After that the
+  // draft is authoritative and autosave keeps the server in sync — re-copying
+  // on every store change would clobber edits made while a save is in flight.
+  useEffect(() => {
+    if (hydratedRef.current || !loaded) return;
+    setDraft(savedSettings);
+    savedSnapshotRef.current = JSON.stringify(savedSettings);
+    hydratedRef.current = true;
+  }, [loaded, savedSettings]);
+
   useEffect(() => {
     void apiFetch("/api/coding-cli/status")
       .then((r) => (r.ok ? r.json() : null))
@@ -71,35 +93,63 @@ export function GlobalSettings({
       .catch(() => {});
   }, []);
 
-  const dirty = useMemo(
-    () => JSON.stringify(draft) !== JSON.stringify(savedSettings),
-    [draft, savedSettings]
+  // Persist a settings payload, coalescing overlapping saves: if one is already
+  // in flight, queue a re-save (with the latest draft) for when it finishes.
+  const persist = useCallback(
+    async (payload: GlobalSettingsShape) => {
+      if (savingRef.current) {
+        pendingRef.current = true;
+        return;
+      }
+      savingRef.current = true;
+      setSaveState("saving");
+      const saved = await saveSettings(payload);
+      savingRef.current = false;
+      if (saved) {
+        savedSnapshotRef.current = JSON.stringify(payload);
+        setSaveState("saved");
+      } else {
+        setSaveState("error");
+      }
+      if (pendingRef.current) {
+        pendingRef.current = false;
+        void persist(draftRef.current);
+      }
+    },
+    [saveSettings]
   );
 
-  const patch: PatchFn = (p) => {
-    setDraft((current) => ({ ...current, ...p }));
-    setStatus("");
-  };
+  const patch: PatchFn = (p) => setDraft((current) => ({ ...current, ...p }));
 
-  const save = async () => {
-    const saved = await saveSettings(draft);
-    setStatus(saved ? "Saved." : "Save failed.");
-  };
+  // Debounced autosave: whenever the draft diverges from what we last saved,
+  // push it after a short idle so rapid typing coalesces into a single PUT.
+  useEffect(() => {
+    if (!hydratedRef.current) return;
+    if (JSON.stringify(draft) === savedSnapshotRef.current) return;
+    if (timerRef.current) clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(() => void persist(draftRef.current), 600);
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+    };
+  }, [draft, persist]);
 
-  // Persist an explicit next-settings immediately, for actions that should
-  // auto-save rather than wait for the save bar (e.g. adding a provider, so its
-  // credentials reach the server before the user lists that provider's models).
+  // Flush any pending change immediately when leaving the settings page, so a
+  // tweak made within the debounce window isn't lost on navigate-away.
+  useEffect(() => {
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+      if (JSON.stringify(draftRef.current) !== savedSnapshotRef.current) {
+        void saveSettings(draftRef.current);
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Some actions (e.g. adding a provider account) must reach the server before
+  // the next step — persist the explicit next-settings immediately.
   const commit = async (next: GlobalSettingsShape) => {
     setDraft(next);
-    const saved = await saveSettings(next);
-    setStatus(saved ? "Saved." : "Save failed.");
-  };
-
-  // Theme applies live for preview, so discarding must revert it too.
-  const discard = () => {
-    setDraft(savedSettings);
-    applyTheme(savedSettings.theme);
-    setStatus("");
+    await persist(next);
   };
 
   return (
@@ -163,18 +213,21 @@ export function GlobalSettings({
         {tab === "Account" && <AccountTab />}
       </div>
 
-      {dirty && (
+      {saveState && (
         <div style={saveBar}>
-          <span style={{ fontSize: 13, fontWeight: 600 }}>Unsaved changes</span>
-          {status && <span style={hint}>{status}</span>}
-          <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
-            <button onClick={discard} disabled={saving} style={ghostButton}>
-              Discard
-            </button>
-            <button onClick={save} disabled={saving} style={primary}>
-              {saving ? "Saving..." : "Save settings"}
-            </button>
-          </div>
+          {saveState === "saving" && <span style={hint}>Saving…</span>}
+          {saveState === "saved" && <span style={hint}>All changes saved</span>}
+          {saveState === "error" && (
+            <>
+              <span style={{ fontSize: 13, color: "#f87171" }}>Save failed</span>
+              <button
+                onClick={() => void persist(draftRef.current)}
+                style={{ ...ghostButton, marginLeft: "auto" }}
+              >
+                Retry
+              </button>
+            </>
+          )}
         </div>
       )}
     </div>
