@@ -97,12 +97,6 @@ export const GRANTABLE_TOOL_NAMES = [
   "browser_get_images",
   "browser_console",
   "browser_vision",
-  // Code reference (instance-wide cloned repos) — granted together by the
-  // `code-reference` capability.
-  "list_reference_repos",
-  "code_search",
-  "search_code",
-  "read_code",
   // Proxmox VE VM management — granted together by the `proxmox` capability.
   "proxmox_list_vms",
   "proxmox_status",

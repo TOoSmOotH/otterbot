@@ -242,42 +242,6 @@ connected, ask the user to connect ChatGPT there — you cannot do it yourself.
   }),
 
   capability({
-    id: "code-reference",
-    name: "Code reference",
-    description:
-      "Search and read the instance's configured reference repositories (hybrid keyword + semantic).",
-    tools: ["list_reference_repos", "code_search", "search_code", "read_code"],
-    body: `
-You can search and read a shared set of reference code repositories that an
-admin configured for this instance (for example, a product's source tree).
-Use them to answer grounded questions about that code — e.g. "what does this
-setting do?" — instead of guessing.
-
-## Setup
-
-No per-agent setup. Repositories are configured instance-wide in
-**Global Settings → Code Reference**. If \`list_reference_repos\` returns an empty
-list, tell the user to add a repository there — you cannot add one yourself.
-
-## How to answer code questions
-
-1. \`list_reference_repos\` — see which repos are available (and which are still
-   indexing).
-2. Pick the search that fits:
-   - **\`code_search\`** (exact grep) for a specific setting name, symbol, flag,
-     or string. This is usually the right first step for "what does X do?".
-   - **\`search_code\`** (semantic) for conceptual questions when you don't know
-     the exact term.
-3. \`read_code\` the most relevant hit using its path and line range, to read the
-   surrounding context — especially the comments/annotations near a setting.
-4. Cite the repo, file path, and line range in your answer.
-
-Prefer reading the actual file over guessing. Keep reads narrow (a line range),
-not whole large files.
-`,
-  }),
-
-  capability({
     id: "proxmox",
     name: "Proxmox VM control",
     description:

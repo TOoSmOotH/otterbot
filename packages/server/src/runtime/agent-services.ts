@@ -1,6 +1,5 @@
 import type {
   AgentMessage,
-  CodeSearchHit,
   CodingModelPreset,
   MemorySearchResult,
   ScheduledTask,
@@ -56,21 +55,6 @@ export interface AgentServices {
     query: string,
     limit: number
   ): Promise<MemorySearchResult[]>;
-  /** Hybrid keyword + semantic search over the instance's reference repos. */
-  searchCodeReference(query: string, opts?: { limit?: number; repo?: string }): Promise<CodeSearchHit[]>;
-  /** Exact grep over the instance's reference repos. */
-  grepCodeReference(
-    pattern: string,
-    opts?: { repo?: string; limit?: number; regex?: boolean }
-  ): Promise<CodeSearchHit[]>;
-  /** Read a file (or line range) from a reference repo clone. */
-  readCodeReference(
-    repo: string,
-    path: string,
-    range?: { start: number; end?: number }
-  ): { ok: boolean; content?: string; path?: string; truncated?: boolean; error?: string };
-  /** List the reference repos available to search. */
-  listCodeReferenceRepos(): { repo: string; path: string; state: string }[];
   /**
    * Read the text contents of an agent's produced file (artifact) by basename.
    * Used by the `read_file` tool to pull a shared doc into a turn. Binary files

@@ -11,7 +11,6 @@ import {
 import type { GlobalSettings as GlobalSettingsShape, ThemeId } from "@otterbot/shared";
 import { THEMES, useGlobalSettingsStore, applyTheme } from "../../stores/global-settings-store";
 import { useProvidersStore } from "../../stores/providers-store";
-import { CodeReferenceTab } from "./CodeReferenceTab";
 import { CodingModelsTab } from "./CodingModelsTab";
 import { CredentialsTab } from "./CredentialsTab";
 import { ConnectionsTab } from "./ConnectionsTab";
@@ -22,7 +21,6 @@ import { ghostButton, h2, hint, primary, section } from "./settings-styles";
 
 const TABS = [
   "Models & Providers",
-  "Code Reference",
   "Coding CLIs",
   "Coding Models",
   "Credentials",
@@ -193,7 +191,6 @@ export function GlobalSettings({
         {tab === "Models & Providers" && (
           <ModelsProvidersTab draft={draft} patch={patch} providers={providers} onCommit={commit} />
         )}
-        {tab === "Code Reference" && <CodeReferenceTab />}
         {tab === "Coding CLIs" && (
           <section style={section}>
             <h2 style={h2}>Coding CLIs</h2>

@@ -44,7 +44,6 @@ import { setDefaultContext } from "../runtime/default-agent.js";
 import { MessageBus } from "../bus/bus.js";
 import { createTransport } from "../bus/transports/factory.js";
 import { Scheduler } from "../scheduler/scheduler.js";
-import { CodeReferenceService } from "../code-reference/code-reference-service.js";
 import { ProjectStore, type GitContext } from "../projects/project-store.js";
 import {
   PipelineManager,
@@ -467,7 +466,6 @@ export class Orchestrator {
   private readonly pendingInits: Promise<void>[] = [];
   private readonly bus: MessageBus;
   private readonly scheduler: Scheduler;
-  private readonly codeRef: CodeReferenceService;
   private readonly projects: ProjectStore;
   private readonly forge: ForgeService;
   private readonly issueTriage: IssueTriageStore;
@@ -506,19 +504,6 @@ export class Orchestrator {
   ) {
     this.bus = new MessageBus(control, createTransport(cfg));
     this.scheduler = new Scheduler(control, (id) => this.runtimes.get(id));
-    this.codeRef = new CodeReferenceService({
-      dataDir: cfg.dataDir,
-      dbKey: cfg.dbKey,
-      getSetting: (k) => this.getSetting(k),
-      setSetting: (k, v) => this.setSetting(k, v),
-      resolveEmbedder: () => {
-        const settings = this.getGlobalSettings();
-        return resolveEmbedder(
-          this.resolveModelRef(settings.defaultEmbeddingModelId, settings),
-          this.getGlobalProviderSecrets()
-        );
-      },
-    });
     this.projects = new ProjectStore(control, resolve(cfg.dataDir, "projects"));
     this.forge = new ForgeService(control, resolve(cfg.dataDir, "forge-keys"));
     this.issueTriage = new IssueTriageStore(control);
@@ -627,10 +612,6 @@ export class Orchestrator {
         if (!targetCtx) return [];
         return targetCtx.memory.search(query, { limit });
       },
-      searchCodeReference: (query, opts) => this.codeRef.search(query, opts),
-      grepCodeReference: (pattern, opts) => this.codeRef.grep(pattern, opts),
-      readCodeReference: (repo, path, range) => this.codeRef.readFile(repo, path, range),
-      listCodeReferenceRepos: () => this.codeRef.listRepoDirectory(),
       readArtifact: (agentId, file) => this.readArtifact(agentId, file),
       readArtifactBinary: (agentId, dir, name) => this.readArtifactBinary(agentId, dir, name),
       notifyCodingSession: (agentId, tool) => {
@@ -706,11 +687,6 @@ export class Orchestrator {
       content: buf.subarray(0, MAX_BYTES).toString("utf8"),
       truncated,
     };
-  }
-
-  /** The instance-wide code reference service (cloned repos + shared index). */
-  getCodeReference(): CodeReferenceService {
-    return this.codeRef;
   }
 
   /** The agent-to-agent message bus. */
@@ -818,9 +794,6 @@ export class Orchestrator {
     // Provider endpoints/keys may have changed — refresh opencode's config.
     this.regenerateOpencodeConfig();
     this.restartAgents();
-    // The shared code-reference index uses the instance default embedder; pick
-    // up a changed model (and re-index if its dimension changed).
-    void this.codeRef.reloadEmbedder();
     return next;
   }
 
@@ -1044,7 +1017,6 @@ export class Orchestrator {
     this.codingCliUpdates.stop();
     for (const timer of this.subagentTeardowns.values()) clearTimeout(timer);
     this.subagentTeardowns.clear();
-    await this.codeRef.stop();
     await this.bus.stop();
     await Promise.allSettled([...this.connectors.values()].map((t) => t.connector.stop()));
     this.connectors.clear();
@@ -1073,6 +1045,17 @@ export class Orchestrator {
       this.startAgent(profile);
     }
 
+    // One-time cleanup: the removed `code-reference` capability left orphaned
+    // skill rows on agents that had it installed, and a stale `code_reference`
+    // app-setting. Drop them so nothing dangles.
+    for (const ctx of this.contexts.values()) {
+      if (ctx.skills.get("code-reference")) ctx.skills.delete("code-reference");
+    }
+    this.control.db
+      .delete(controlSchema.appSettings)
+      .where(eq(controlSchema.appSettings.key, "code_reference"))
+      .run();
+
     const coo = this.contexts.get("coo");
     if (!coo) throw new Error("COO profile failed to load");
     setDefaultContext(coo);
@@ -1086,7 +1069,6 @@ export class Orchestrator {
 
     await this.bus.start();
     this.scheduler.start();
-    this.codeRef.start();
     // Ensure the shared infra service agents (proxmox, ssh) exist.
     // Poll forges for assigned issues + PR/CI signals every 5 minutes.
     this.forgeMonitor.start(5 * 60_000);
