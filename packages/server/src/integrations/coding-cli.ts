@@ -215,7 +215,14 @@ export function runCodingCliHeadless(opts: CodingRunOptions): Promise<CodingRunR
   const { plan, sandbox } = built;
 
   return new Promise<CodingRunResult>((resolve) => {
-    const child = spawn(plan.file, plan.args, { cwd: plan.cwd, env: plan.env });
+    // The task is passed via argv, so the CLI needs no stdin. Redirect it from
+    // /dev/null ("ignore") — otherwise the tool waits 3s for piped input and
+    // prints a "no stdin data received" warning into the transcript.
+    const child = spawn(plan.file, plan.args, {
+      cwd: plan.cwd,
+      env: plan.env,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
     let buffer = "";
     let dropped = false;
     let timedOut = false;
