@@ -53,14 +53,27 @@ export function ProjectsView({ onOpenSettings }: { onOpenSettings?: (tab?: strin
       <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
         {projects.length === 0 && <div style={{ color: "rgb(var(--muted))", fontSize: 13 }}>No projects yet.</div>}
         {projects.map((p) => (
-          <ProjectCard key={p.id} project={p} onDelete={() => remove(p.id)} />
+          <ProjectCard
+            key={p.id}
+            project={p}
+            onDelete={() => remove(p.id)}
+            onOpenSettings={onOpenSettings}
+          />
         ))}
       </div>
     </div>
   );
 }
 
-function ProjectCard({ project, onDelete }: { project: Project; onDelete: () => void }) {
+function ProjectCard({
+  project,
+  onDelete,
+  onOpenSettings,
+}: {
+  project: Project;
+  onDelete: () => void;
+  onOpenSettings?: (tab?: string) => void;
+}) {
   const agents = useAgentsStore((s) => s.agents);
   const accounts = useProjectsStore((s) => s.forgeAccounts);
   // Select the stored array (stable ref); default outside the selector so we
