@@ -196,13 +196,25 @@ export async function buildServer(
     const jobs: Promise<{ provider: string; label: string; id: string }[]>[] = [];
     for (const [provider, accounts] of Object.entries(settings.providers)) {
       const def = findProvider(provider);
-      if (!def?.supportsChat) continue;
-      const account = accounts?.[0];
+      if (!def?.supportsChat || !def.endpoint) continue;
+      // The same account the opencode bridge uses: the first with a usable endpoint.
+      const account = (accounts ?? []).find(
+        (a) => def.endpoint!(orch.getAccountSecrets(provider, a.account)).baseUrl
+      );
       if (!account) continue;
+      // listModels can throw synchronously (e.g. no base URL) — guard both paths.
       jobs.push(
-        listProviderModels(provider, orch.getAccountSecrets(provider, account.account))
-          .then((models) => models.map((m) => ({ provider, label: def.label, id: `${provider}/${m}` })))
-          .catch(() => [])
+        (async () => {
+          try {
+            const models = await listProviderModels(
+              provider,
+              orch.getAccountSecrets(provider, account.account)
+            );
+            return models.map((m) => ({ provider, label: def.label, id: `${provider}/${m}` }));
+          } catch {
+            return [];
+          }
+        })()
       );
     }
     const groups = await Promise.all(jobs);
