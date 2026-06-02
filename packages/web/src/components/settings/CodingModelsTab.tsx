@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type {
   CodingModelPreset,
   CodingToolId,
@@ -284,93 +284,95 @@ function ToolFields({
   );
 }
 
+interface OpencodeModel {
+  provider: string;
+  label: string;
+  id: string;
+}
+
 /**
- * OpenCode preset fields: pick a provider/account from the registry, list its
- * models, and store the resolved `provider/model` string. The user may also type
- * the `provider/model` string directly (e.g. for an opencode-native provider).
+ * OpenCode preset fields: one dropdown listing `provider/model` across every
+ * configured provider (opencode-go, local LM Studio / Ollama, …), grouped by
+ * provider. The user may also type a `provider/model` string directly.
  */
 function OpencodeFields({
   value,
-  accounts,
   onChange,
 }: {
   value: Partial<CodingModelPreset>;
   accounts: AccountOption[];
   onChange: (p: Partial<CodingModelPreset>) => void;
 }) {
-  const [pair, setPair] = useState(`${accounts[0]?.provider ?? ""}|${accounts[0]?.account ?? ""}`);
-  const [provider, account] = pair.split("|");
-  const [models, setModels] = useState<string[]>([]);
-  const [fetching, setFetching] = useState(false);
+  const [models, setModels] = useState<OpencodeModel[]>([]);
+  const [loading, setLoading] = useState(false);
   const [note, setNote] = useState("");
 
-  const listModels = async () => {
-    setFetching(true);
+  const load = async () => {
+    setLoading(true);
     setNote("");
-    setModels([]);
     try {
-      const res = await apiFetch("/api/provider-models", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ provider, account }),
-      });
-      const data = (await res.json()) as { ok: boolean; models?: string[]; error?: string };
+      const res = await apiFetch("/api/coding/opencode-models");
+      const data = (await res.json()) as { ok: boolean; models?: OpencodeModel[] };
       if (data.ok && data.models?.length) {
         setModels(data.models);
-        setNote(`Found ${data.models.length} model(s).`);
+        setNote(`${data.models.length} models across your configured providers.`);
       } else {
-        setNote(`${data.error ?? "Couldn't list models"} — type the model id below.`);
+        setNote("No models found — check your providers, or type a provider/model below.");
       }
     } catch (err) {
-      setNote(`${err instanceof Error ? err.message : String(err)} — type the model id below.`);
+      setNote(`${err instanceof Error ? err.message : String(err)} — type a provider/model below.`);
     } finally {
-      setFetching(false);
+      setLoading(false);
     }
   };
 
-  // Map an Otterbot provider + model id to the opencode "provider/model" string.
-  const setFromModel = (modelId: string) => {
-    onChange({ providerModel: modelId ? `${provider}/${modelId}` : "", registryModelId: undefined });
-  };
+  useEffect(() => {
+    void load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Group models under their provider label for the dropdown optgroups.
+  const groups = useMemo(() => {
+    const byLabel = new Map<string, OpencodeModel[]>();
+    for (const m of models) {
+      const list = byLabel.get(m.label) ?? [];
+      list.push(m);
+      byLabel.set(m.label, list);
+    }
+    return [...byLabel.entries()];
+  }, [models]);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-      {accounts.length > 0 ? (
-        <div style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
-          <Field label="Provider account">
-            <select value={pair} onChange={(e) => setPair(e.target.value)} style={{ ...input, minWidth: 200 }}>
-              {accounts.map((a) => (
-                <option key={`${a.provider}|${a.account}`} value={`${a.provider}|${a.account}`}>
-                  {a.label}
+      <Field label="Model">
+        <select
+          value={value.providerModel ?? ""}
+          onChange={(e) => onChange({ providerModel: e.target.value, registryModelId: undefined })}
+          style={input}
+        >
+          <option value="">{loading ? "Loading models…" : "— pick a model —"}</option>
+          {groups.map(([label, items]) => (
+            <optgroup key={label} label={label}>
+              {items.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.id}
                 </option>
               ))}
-            </select>
-          </Field>
-          <button onClick={() => void listModels()} disabled={fetching || !provider} style={ghostButton}>
-            {fetching ? "Listing…" : "List models"}
-          </button>
-        </div>
-      ) : (
-        <p style={hint}>No chat providers configured — add one in the Providers tab, or type a provider/model string below.</p>
-      )}
-      {note && <span style={{ fontSize: 12, color: "rgb(var(--muted))" }}>{note}</span>}
-      {models.length > 0 && (
-        <Field label="Model">
-          <select value="" onChange={(e) => setFromModel(e.target.value)} style={input}>
-            <option value="">— pick from {models.length} model(s) —</option>
-            {models.map((m) => (
-              <option key={m} value={m}>
-                {m}
-              </option>
-            ))}
-          </select>
-        </Field>
-      )}
-      <Field label="provider/model">
+            </optgroup>
+          ))}
+        </select>
+      </Field>
+      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+        <button onClick={() => void load()} disabled={loading} style={ghostButton}>
+          {loading ? "Loading…" : "Reload models"}
+        </button>
+        {note && <span style={{ fontSize: 12, color: "rgb(var(--muted))" }}>{note}</span>}
+      </div>
+      <Field label="provider/model (or type directly)">
         <input
           value={value.providerModel ?? ""}
           onChange={(e) => onChange({ providerModel: e.target.value })}
-          placeholder="e.g. anthropic/claude-sonnet-4-6 or ollama/llama3"
+          placeholder="e.g. opencode-go/glm-5.1 or lmstudio/qwen3-coder-30b"
           style={input}
         />
       </Field>

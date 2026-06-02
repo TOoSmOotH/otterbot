@@ -157,6 +157,14 @@ export function sharedCodingAuthDir(): string {
   return join(getConfig().dataDir, "coding-cli-auth");
 }
 
+/** Host path of the generated opencode provider config (bound into the sandbox). */
+export function opencodeConfigHostPath(): string {
+  return join(sharedCodingAuthDir(), "opencode", "otter.json");
+}
+
+/** Where the generated opencode config appears inside the sandbox (HOME=/workspace). */
+export const OPENCODE_CONFIG_SANDBOX_PATH = "/workspace/.local/share/opencode/otter.json";
+
 interface CodingShare {
   toolsSrc: string;
   toolsBin: string;

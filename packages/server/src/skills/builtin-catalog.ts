@@ -609,7 +609,9 @@ from a terminal:
    - Claude Code: run \`claude\` and follow the login prompt.
    - Codex: run \`codex login --device-auth\` (enter the code at the shown URL).
    - Gemini CLI: run \`gemini\` and choose Google login.
-   - OpenCode: run \`opencode auth login\`.
+   - OpenCode: no login here — set the OpenCode Zen provider's key in
+     Settings → Providers (its models, and any configured provider's, are
+     bridged into opencode automatically).
 3. The login is saved to the shared store, so **every agent is now logged in**.
 
 If a run fails with "command not found", install the tool first. If it fails with

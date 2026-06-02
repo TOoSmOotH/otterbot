@@ -19,7 +19,7 @@ declare module "fastify" {
     sessionId?: string;
   }
 }
-import { providerCatalogInfo } from "./providers/catalog.js";
+import { providerCatalogInfo, findProvider } from "./providers/catalog.js";
 import { getSkillService } from "./skills/skill-service.js";
 import { getMemoryService } from "./memory/memory-service.js";
 import { getUserProfileService } from "./user-profile/user-profile-service.js";
@@ -186,6 +186,35 @@ export async function buildServer(
     } catch (err) {
       return { ok: false, error: err instanceof Error ? err.message : String(err) };
     }
+  });
+
+  // Every model across all configured chat providers, as opencode `provider/model`
+  // ids — for the coding-model preset picker. Best-effort: unreachable providers
+  // are skipped. opencode-go and local providers appear like any other.
+  app.get("/api/coding/opencode-models", async () => {
+    const settings = orch.getGlobalSettings();
+    const jobs: Promise<{ provider: string; label: string; id: string }[]>[] = [];
+    for (const [provider, accounts] of Object.entries(settings.providers)) {
+      const def = findProvider(provider);
+      if (!def?.supportsChat) continue;
+      const account = accounts?.[0];
+      if (!account) continue;
+      jobs.push(
+        listProviderModels(provider, orch.getAccountSecrets(provider, account.account))
+          .then((models) => models.map((m) => ({ provider, label: def.label, id: `${provider}/${m}` })))
+          .catch(() => [])
+      );
+    }
+    const groups = await Promise.all(jobs);
+    const seen = new Set<string>();
+    const models: { provider: string; label: string; id: string }[] = [];
+    for (const g of groups)
+      for (const m of g)
+        if (!seen.has(m.id)) {
+          seen.add(m.id);
+          models.push(m);
+        }
+    return { ok: true, models };
   });
 
   // --- ChatGPT subscription (OpenAI OAuth) ---

@@ -34,6 +34,7 @@ import {
   installSharedCodingCli,
 } from "../integrations/coding-cli-install.js";
 import { recordToolDisplay } from "./tool-display.js";
+import { OPENCODE_CONFIG_SANDBOX_PATH } from "../integrations/shell.js";
 import { ensureKey, parseHosts, publicKey, sshExec } from "../integrations/ssh.js";
 import { searchWeb } from "../integrations/web-search.js";
 import { editImage, generateImage, persistImage } from "../integrations/image-gen.js";
@@ -708,12 +709,18 @@ export function buildAgentTools(
           };
         }
         return withCodingLock(lockKey, async () => {
+          // opencode authenticates from Otterbot's generated provider config —
+          // point it there (a sandbox path) instead of its own login.
+          const runSecrets =
+            cliTool === "opencode"
+              ? new Map(shellSecrets).set("OPENCODE_CONFIG", OPENCODE_CONFIG_SANDBOX_PATH)
+              : shellSecrets;
           const common = {
             tool: cliTool,
             task,
             model: effectiveModel,
             workspaceDir: ctx.workspaceDir,
-            secrets: shellSecrets,
+            secrets: runSecrets,
             projectRepoPath,
           };
           if (interactive) {

@@ -91,7 +91,7 @@ export function CodingCliSetup({
                 <span style={s.installed ? okBadge : offBadge}>
                   {s.installed ? "Installed" : "Not installed"}
                 </span>
-                {s.installed && (
+                {s.installed && tool !== "opencode" && (
                   <span style={s.loggedIn ? okBadge : warnBadge}>
                     {s.loggedIn ? "Logged in" : "Not logged in"}
                   </span>
@@ -101,7 +101,13 @@ export function CodingCliSetup({
                   <span style={updateBadge}>Update available → {s.latest}</span>
                 )}
               </div>
-              {s.installed && !s.loggedIn && (
+              {s.installed && tool === "opencode" && (
+                <span style={hint}>
+                  Authenticated via the <strong>OpenCode Zen</strong> provider — set its key in{" "}
+                  <strong>Settings → Providers</strong>. No separate login needed.
+                </span>
+              )}
+              {s.installed && !s.loggedIn && tool !== "opencode" && (
                 <span style={hint}>
                   {onOpenLoginTerminal ? (
                     <button type="button" onClick={() => onOpenLoginTerminal(tool)} style={linkBtn}>

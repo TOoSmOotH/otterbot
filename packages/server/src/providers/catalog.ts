@@ -29,6 +29,13 @@ export interface ProviderDef extends ProviderInfo {
   createEmbedder(modelId: string, secrets: Secrets): Embedder;
   /** List the model ids the provider currently serves (for the model picker). */
   listModels(secrets: Secrets): Promise<string[]>;
+  /**
+   * Resolve this provider's OpenAI-compatible endpoint (base URL + key) from
+   * secrets. Present only for providers that expose a plain HTTP endpoint — used
+   * to bridge configured providers into opencode's config. Absent for providers
+   * with no such endpoint (e.g. anthropic, the embedding-only builtin).
+   */
+  endpoint?(secrets: Secrets): ProviderEndpoint;
 }
 
 // --- shared helpers -------------------------------------------------------
@@ -107,6 +114,21 @@ function openAiCompatEndpoint(secrets: Secrets): ProviderEndpoint {
   };
 }
 
+/** The OpenCode Zen gateway (the "Go" tier) — a plain OpenAI-compatible API. */
+function opencodeGoEndpoint(secrets: Secrets): ProviderEndpoint {
+  return {
+    baseUrl: secrets.get("OPENCODE_GO_BASE_URL") ?? "https://opencode.ai/zen/go/v1",
+    apiKey: secrets.get("OPENCODE_GO_API_KEY") ?? "",
+  };
+}
+
+function opencodeZenEndpoint(secrets: Secrets): ProviderEndpoint {
+  return {
+    baseUrl: secrets.get("OPENCODE_ZEN_BASE_URL") ?? "https://opencode.ai/zen/v1",
+    apiKey: secrets.get("OPENCODE_ZEN_API_KEY") ?? "",
+  };
+}
+
 /**
  * Build a chat + embedder + model-list def backed by an OpenAI-compatible
  * endpoint. Used for LM Studio / Ollama (local, no key) and for cloud
@@ -152,6 +174,7 @@ function openAiCompatibleProvider(opts: {
       if (!ep.baseUrl) throw new Error(`${opts.label}: no base URL configured`);
       return httpListModels(ep, { authorization: `Bearer ${ep.apiKey}` });
     },
+    endpoint: opts.endpoint,
   };
 }
 
@@ -227,6 +250,7 @@ const openai: ProviderDef = {
     const ep = openaiEndpoint(secrets);
     return httpListModels(ep, { authorization: `Bearer ${ep.apiKey}` });
   },
+  endpoint: openaiEndpoint,
 };
 
 const openrouter = openAiCompatibleProvider({
@@ -267,6 +291,31 @@ const ollama = openAiCompatibleProvider({
   endpoint: ollamaEndpoint,
 });
 
+// The OpenCode Zen gateway, used by the OpenCode CLI but exposed here as an
+// ordinary provider so its models are pickable and bridged into opencode's
+// config — no separate `opencode auth login` needed.
+const opencodeGo = openAiCompatibleProvider({
+  id: "opencode-go",
+  label: "OpenCode Zen (Go)",
+  apiKeyEnv: "OPENCODE_GO_API_KEY",
+  baseUrlEnv: "OPENCODE_GO_BASE_URL",
+  defaultBaseUrl: "https://opencode.ai/zen/go/v1",
+  endpoint: opencodeGoEndpoint,
+  needsApiKey: true,
+  supportsEmbeddings: false,
+});
+
+const opencodeZen = openAiCompatibleProvider({
+  id: "opencode-zen",
+  label: "OpenCode Zen",
+  apiKeyEnv: "OPENCODE_ZEN_API_KEY",
+  baseUrlEnv: "OPENCODE_ZEN_BASE_URL",
+  defaultBaseUrl: "https://opencode.ai/zen/v1",
+  endpoint: opencodeZenEndpoint,
+  needsApiKey: true,
+  supportsEmbeddings: false,
+});
+
 const builtin: ProviderDef = {
   id: "builtin",
   label: "Built-in (CPU)",
@@ -290,6 +339,8 @@ export const PROVIDER_CATALOG: ProviderDef[] = [
   openaiCompatible,
   lmstudio,
   ollama,
+  opencodeGo,
+  opencodeZen,
   builtin,
 ];
 

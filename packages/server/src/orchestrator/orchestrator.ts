@@ -35,6 +35,11 @@ import { AgentRuntime, withAttachmentRefs } from "../runtime/agent-runtime.js";
 import type { AgentServices, SpawnResult } from "../runtime/agent-services.js";
 import { resolveEmbedder } from "../providers/registry.js";
 import { PROVIDER_CATALOG, findProvider } from "../providers/catalog.js";
+import {
+  writeOpencodeConfig,
+  type OpencodeProviderEntry,
+} from "../integrations/opencode-config.js";
+import { sharedCodingAuthDir } from "../integrations/shell.js";
 import { setDefaultContext } from "../runtime/default-agent.js";
 import { MessageBus } from "../bus/bus.js";
 import { createTransport } from "../bus/transports/factory.js";
@@ -810,6 +815,8 @@ export class Orchestrator {
     }
     const next = normalizeGlobalSettings({ ...settings, providers: mergedProviders });
     this.setSetting(GLOBAL_SETTINGS_KEY, JSON.stringify(next));
+    // Provider endpoints/keys may have changed — refresh opencode's config.
+    this.regenerateOpencodeConfig();
     this.restartAgents();
     // The shared code-reference index uses the instance default embedder; pick
     // up a changed model (and re-index if its dimension changed).
@@ -939,6 +946,78 @@ export class Orchestrator {
   }
 
   /**
+   * Every configured provider resolved to an OpenAI-compatible endpoint, for
+   * bridging into opencode. One entry per provider id (first account with a
+   * usable base URL); skips providers with no HTTP endpoint (anthropic) and
+   * key-requiring providers whose key isn't set.
+   */
+  private collectOpencodeProviders(): OpencodeProviderEntry[] {
+    const settings = this.getGlobalSettings();
+    const entries: OpencodeProviderEntry[] = [];
+    const seen = new Set<string>();
+    for (const [providerId, accounts] of Object.entries(settings.providers)) {
+      const def = findProvider(providerId);
+      if (!def?.supportsChat || !def.endpoint || seen.has(providerId)) continue;
+      for (const acc of accounts ?? []) {
+        const ep = def.endpoint(this.getAccountSecrets(providerId, acc.account));
+        if (!ep.baseUrl || (def.needsApiKey && !ep.apiKey)) continue;
+        entries.push({ id: providerId, label: def.label, baseUrl: ep.baseUrl, apiKey: ep.apiKey });
+        seen.add(providerId);
+        break;
+      }
+    }
+    return entries;
+  }
+
+  /** (Re)write opencode's provider config from the configured providers. */
+  private regenerateOpencodeConfig(): void {
+    try {
+      writeOpencodeConfig(this.collectOpencodeProviders());
+    } catch (err) {
+      console.warn("[opencode] failed to write provider config:", err);
+    }
+  }
+
+  /**
+   * One-time migration: if opencode was logged into the Zen gateway via
+   * `opencode auth login`, lift that key into the `opencode-go` provider so it's
+   * managed like every other provider (and no native login is needed). No-op
+   * once the provider has a key.
+   */
+  private migrateOpencodeGoKey(): void {
+    const authPath = join(sharedCodingAuthDir(), "opencode", "auth.json");
+    if (!existsSync(authPath)) return;
+    let key: string | undefined;
+    try {
+      const auth = JSON.parse(readFileSync(authPath, "utf8")) as Record<string, { key?: string }>;
+      key = auth["opencode-go"]?.key;
+    } catch {
+      return;
+    }
+    if (!key) return;
+    const settings = this.getGlobalSettings();
+    const existing = settings.providers["opencode-go"] ?? [];
+    if (existing.some((a) => a.apiKeyConfigured)) return;
+    // Persist directly (no agent restart) — runs before agents boot.
+    const next = normalizeGlobalSettings({
+      ...settings,
+      providers: {
+        ...settings.providers,
+        "opencode-go": [
+          {
+            account: DEFAULT_ACCOUNT,
+            baseUrl: "https://opencode.ai/zen/go/v1",
+            apiKey: key,
+            apiKeyConfigured: true,
+          },
+        ],
+      },
+    });
+    this.setSetting(GLOBAL_SETTINGS_KEY, JSON.stringify(next));
+    console.log("[opencode] migrated gateway key into the opencode-go provider");
+  }
+
+  /**
    * Default-account secrets for the test/list endpoints. The endpoints layer
    * the caller's typed credentials on top, so this is just a fallback.
    */
@@ -986,6 +1065,10 @@ export class Orchestrator {
   async boot(): Promise<void> {
     this.profiles.ensureCooProfile();
 
+    // Lift any opencode gateway login into a provider before agents start, so
+    // they boot with it configured.
+    this.migrateOpencodeGoKey();
+
     for (const profile of this.profiles.list()) {
       this.startAgent(profile);
     }
@@ -997,6 +1080,9 @@ export class Orchestrator {
     for (const profile of this.listProfiles()) {
       this.reconcileConnectors(profile);
     }
+
+    // Generate opencode's provider config from the configured providers.
+    this.regenerateOpencodeConfig();
 
     await this.bus.start();
     this.scheduler.start();
