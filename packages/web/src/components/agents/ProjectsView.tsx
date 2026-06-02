@@ -14,7 +14,7 @@ const EMPTY_RUNS: PipelineRun[] = [];
  * specialist team. Configure where the code lives (local / GitHub / Gitea) and
  * launch the build pipeline (coder → security → test-writer → tester).
  */
-export function ProjectsView() {
+export function ProjectsView({ onOpenSettings }: { onOpenSettings?: (tab?: string) => void }) {
   const projects = useProjectsStore((s) => s.projects);
   const error = useProjectsStore((s) => s.error);
   const load = useProjectsStore((s) => s.load);
@@ -127,7 +127,7 @@ function ProjectCard({ project, onDelete }: { project: Project; onDelete: () => 
         Set the chat model each role runs, plus the coding CLI tool + model preset for the coding
         roles. Manage presets in Settings → Coding Models. Changes save immediately.
       </p>
-      <ProjectTeamModels project={project} />
+      <ProjectTeamModels project={project} onOpenSettings={onOpenSettings} />
 
       {/* Additional agents */}
       <div style={{ marginTop: 12, fontSize: 12, fontWeight: 600 }}>Additional agents</div>

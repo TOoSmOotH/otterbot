@@ -46,6 +46,7 @@ export function SkillConfigForm({
   saveMethod = "POST",
   savedMessage = "Saved — agent restarted.",
   onSaved,
+  onOpenSettings,
 }: {
   agentId?: string;
   skillId?: string;
@@ -55,6 +56,7 @@ export function SkillConfigForm({
   saveMethod?: "POST" | "PUT";
   savedMessage?: string;
   onSaved?: () => void;
+  onOpenSettings?: (tab?: string) => void;
 }) {
   const getPath = loadPath ?? `/api/agents/${agentId}/skills/${skillId}/config`;
   const putPath = savePath ?? `/api/agents/${agentId}/skills/${skillId}/config`;
@@ -135,6 +137,7 @@ export function SkillConfigForm({
           secretPresent={secretsPresent[field.key]}
           allValues={values}
           onChange={(v) => setField(field.key, v)}
+          onOpenSettings={onOpenSettings}
         />
       ))}
       <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
@@ -154,12 +157,14 @@ function FieldInput({
   secretPresent,
   allValues,
   onChange,
+  onOpenSettings,
 }: {
   field: SkillConfigField;
   value: unknown;
   secretPresent?: boolean;
   allValues?: Record<string, unknown>;
   onChange: (v: unknown) => void;
+  onOpenSettings?: (tab?: string) => void;
 }) {
   const selectOptions = useSelectOptions(field, allValues ?? {});
   if (field.type === "list") {
@@ -184,6 +189,23 @@ function FieldInput({
             </option>
           ))}
         </select>
+        {field.optionsSource === "codingModelPresets" && selectOptions.length === 0 && (
+          <span style={hint}>
+            No presets for {String(allValues?.pinnedTool ?? "").trim() || "this tool"} — it uses the
+            tool&apos;s default model.{" "}
+            {onOpenSettings ? (
+              <button
+                type="button"
+                onClick={() => onOpenSettings("Coding Models")}
+                style={linkBtn}
+              >
+                Add a preset in Settings → Coding Models
+              </button>
+            ) : (
+              "Add a preset in Settings → Coding Models to pin one."
+            )}
+          </span>
+        )}
         {field.description && <span style={hint}>{field.description}</span>}
       </label>
     );
@@ -347,6 +369,16 @@ const hint: React.CSSProperties = {
   color: "rgb(var(--muted))",
   margin: 0,
   lineHeight: 1.5,
+};
+
+const linkBtn: React.CSSProperties = {
+  background: "none",
+  border: "none",
+  padding: 0,
+  font: "inherit",
+  color: "rgb(var(--accent))",
+  textDecoration: "underline",
+  cursor: "pointer",
 };
 
 const checkboxRow: React.CSSProperties = {

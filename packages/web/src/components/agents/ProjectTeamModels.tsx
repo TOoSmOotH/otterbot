@@ -29,7 +29,13 @@ interface RoleState {
  * capability config. The team agents already exist (deterministic ids in
  * `project.team`), so we edit them directly rather than re-provisioning.
  */
-export function ProjectTeamModels({ project }: { project: Project }) {
+export function ProjectTeamModels({
+  project,
+  onOpenSettings,
+}: {
+  project: Project;
+  onOpenSettings?: (tab?: string) => void;
+}) {
   const agents = useAgentsStore((s) => s.agents);
   const updateAgent = useAgentsStore((s) => s.update);
   const settings = useGlobalSettingsStore((s) => s.settings);
@@ -183,12 +189,39 @@ export function ProjectTeamModels({ project }: { project: Project }) {
                 )}
               </div>
             )}
+            {row && !row.loading && coding && presetsForTool.length === 0 && (
+              <span style={{ fontSize: 11, color: "rgb(var(--muted))" }}>
+                No presets for {coding.pinnedTool || "this tool"} — it uses the tool's default
+                model.{" "}
+                {onOpenSettings ? (
+                  <button
+                    type="button"
+                    onClick={() => onOpenSettings("Coding Models")}
+                    style={linkBtn}
+                  >
+                    Add a preset in Settings → Coding Models
+                  </button>
+                ) : (
+                  "Add a preset in Settings → Coding Models to pin one."
+                )}
+              </span>
+            )}
           </div>
         );
       })}
     </div>
   );
 }
+
+const linkBtn: React.CSSProperties = {
+  background: "none",
+  border: "none",
+  padding: 0,
+  font: "inherit",
+  color: "rgb(var(--accent))",
+  textDecoration: "underline",
+  cursor: "pointer",
+};
 
 const select: React.CSSProperties = {
   background: "rgb(var(--bg))",

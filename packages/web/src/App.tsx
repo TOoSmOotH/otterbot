@@ -180,7 +180,7 @@ function AuthedApp() {
             />
           )}
           {view === "studio" && <AgentStudio agentId={activeAgentId} onOpenSettings={openSettings} />}
-          {view === "projects" && <ProjectsView />}
+          {view === "projects" && <ProjectsView onOpenSettings={openSettings} />}
           {view === "activity" && <ActivityView />}
           {view === "network" && <NetworkView />}
           {view === "settings" && (

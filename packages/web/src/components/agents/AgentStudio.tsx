@@ -782,6 +782,7 @@ function InstalledSkill({
               agentId={agentId}
               skillId={skill.id}
               schema={skill.meta.configSchema!}
+              onOpenSettings={onOpenSettings}
             />
           )}
         </div>
