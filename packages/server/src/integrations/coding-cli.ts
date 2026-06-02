@@ -101,10 +101,12 @@ const TOOLS: Record<CodingTool, ToolSpec> = {
     ],
     interactive: (task, m) => [...presetToArgs("codex", m), task],
   },
+  // `--skip-trust` is required: the sandboxed /project tree is not a gemini
+  // "trusted folder", so without it gemini refuses to run headless (exit 55).
   gemini: {
     bin: "gemini",
-    headless: (task, m) => [...presetToArgs("gemini", m), "-p", task, "--yolo"],
-    interactive: (task, m) => [...presetToArgs("gemini", m), "-i", task, "--yolo"],
+    headless: (task, m) => [...presetToArgs("gemini", m), "--skip-trust", "-p", task, "--yolo"],
+    interactive: (task, m) => [...presetToArgs("gemini", m), "--skip-trust", "-i", task, "--yolo"],
   },
   // OpenCode renders a TUI for `run` regardless, so both modes use it.
   opencode: {

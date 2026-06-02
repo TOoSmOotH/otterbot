@@ -59,7 +59,13 @@ describe("buildCodingArgv", () => {
       "--dangerously-bypass-approvals-and-sandbox",
       "do it",
     ]);
-    expect(buildCodingArgv("gemini", "do it")).toEqual(["gemini", "-p", "do it", "--yolo"]);
+    expect(buildCodingArgv("gemini", "do it")).toEqual([
+      "gemini",
+      "--skip-trust",
+      "-p",
+      "do it",
+      "--yolo",
+    ]);
     expect(buildCodingArgv("opencode", "do it")).toEqual(["opencode", "run", "do it"]);
   });
 
@@ -82,6 +88,7 @@ describe("buildCodingArgv", () => {
     ).toEqual(["opencode", "run", "-m", "anthropic/claude-sonnet-4-6", "do it"]);
     expect(buildCodingArgv("gemini", "task", { interactive: true })).toEqual([
       "gemini",
+      "--skip-trust",
       "-i",
       "task",
       "--yolo",
