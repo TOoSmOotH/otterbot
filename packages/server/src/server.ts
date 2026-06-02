@@ -197,10 +197,13 @@ export async function buildServer(
     for (const [provider, accounts] of Object.entries(settings.providers)) {
       const def = findProvider(provider);
       if (!def?.supportsChat || !def.endpoint) continue;
-      // The same account the opencode bridge uses: the first with a usable endpoint.
-      const account = (accounts ?? []).find(
-        (a) => def.endpoint!(orch.getAccountSecrets(provider, a.account)).baseUrl
-      );
+      // Only providers actually bridged into opencode (same rule as the config
+      // generator): a usable base URL, plus a key if the provider needs one.
+      // Otherwise we'd offer models that can't run.
+      const account = (accounts ?? []).find((a) => {
+        const ep = def.endpoint!(orch.getAccountSecrets(provider, a.account));
+        return ep.baseUrl && (!def.needsApiKey || ep.apiKey);
+      });
       if (!account) continue;
       // listModels can throw synchronously (e.g. no base URL) — guard both paths.
       jobs.push(
