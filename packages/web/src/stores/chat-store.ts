@@ -21,6 +21,11 @@ export interface ChatMessage {
   fileName?: string;
   /** Files the user uploaded with this message. */
   attachments?: Artifact[];
+  /** Tool-call detail (role === "tool"): the tool name + its input/output,
+   *  shown when the tool row is expanded. */
+  toolName?: string;
+  toolArgs?: unknown;
+  toolResult?: unknown;
   pending?: boolean;
   error?: string;
 }
@@ -49,6 +54,15 @@ function artifactFromToolCalls(calls?: ToolCallRecord[]): ArtifactFields | undef
     if (fields) return fields;
   }
   return undefined;
+}
+
+/** The expandable input/output detail off a persisted tool message's first call. */
+function toolDetailFromCalls(
+  calls?: ToolCallRecord[]
+): Pick<ChatMessage, "toolName" | "toolArgs" | "toolResult"> | undefined {
+  const c = calls?.[0];
+  if (!c) return undefined;
+  return { toolName: c.name, toolArgs: c.args, toolResult: c.result };
 }
 
 interface ChatState {
@@ -94,14 +108,19 @@ function appendChunk(messages: ChatMessage[], chunk: StreamChunk): ChatMessage[]
       }
       return next;
     case "tool_start":
-      next.push({ id: `t-${chunk.id}`, role: "tool", content: `Used ${chunk.name}` });
+      next.push({
+        id: `t-${chunk.id}`,
+        role: "tool",
+        content: `Used ${chunk.name}`,
+        toolName: chunk.name,
+        toolArgs: chunk.args,
+      });
       return next;
     case "tool_end": {
       const fields = artifactFromResult(chunk.result);
-      if (!fields) return next;
       for (let i = next.length - 1; i >= 0; i--) {
         if (next[i].id === `t-${chunk.id}`) {
-          next[i] = { ...next[i], ...fields };
+          next[i] = { ...next[i], toolResult: chunk.result, ...fields };
           break;
         }
       }
@@ -233,7 +252,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
           role,
           content: m.content,
           attachments: m.attachments,
-          ...(role === "tool" ? artifactFromToolCalls(m.toolCalls) : undefined),
+          ...(role === "tool"
+            ? { ...artifactFromToolCalls(m.toolCalls), ...toolDetailFromCalls(m.toolCalls) }
+            : undefined),
         };
       });
       set((state) => ({

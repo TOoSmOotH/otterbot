@@ -82,6 +82,32 @@ export function withAttachmentRefs(body: string, payload: unknown): string {
   return `${body}\n\n---\nAttached files (use the read_file tool to read each):\n${refs.join("\n")}`;
 }
 
+/** Cap on a single string field inside a persisted/streamed tool payload. */
+const TOOL_PAYLOAD_FIELD_MAX = 16_000;
+
+function clampToolString(s: string, max: number): string {
+  if (s.length <= max) return s;
+  return s.slice(0, max) + `\n…[truncated ${s.length - max} chars]`;
+}
+
+/**
+ * Clamp long string fields inside a tool's args/result so a large coding-CLI
+ * summary or command output doesn't bloat the agent db or the socket. Structure
+ * is preserved; only oversized strings are truncated (with a marker).
+ */
+export function clampToolPayload(value: unknown, max = TOOL_PAYLOAD_FIELD_MAX): unknown {
+  if (typeof value === "string") return clampToolString(value, max);
+  if (Array.isArray(value)) return value.map((v) => clampToolPayload(v, max));
+  if (value && typeof value === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      out[k] = clampToolPayload(v, max);
+    }
+    return out;
+  }
+  return value;
+}
+
 /** A tool result from `delegate` that carried artifacts back from a peer. */
 function delegateArtifacts(result: unknown): Artifact[] {
   if (!result || typeof result !== "object") return [];
@@ -241,6 +267,9 @@ export class AgentRuntime {
       const imageMessages: Array<{ toolCall: ToolCallRecord; prompt: string }> = [];
       // Files received back from a delegated peer, persisted so they re-render.
       const artifactMessages: Array<{ content: string; toolCall: ToolCallRecord }> = [];
+      // Every other tool call (coding CLI, ssh, web, …) — persisted with its
+      // input + output so the user can expand the tool row in the chat.
+      const toolMessages: Array<{ toolCall: ToolCallRecord }> = [];
       // Everything this turn produced (local images + delegated files) — handed
       // back to the bus so a delegating agent can display them.
       const turnArtifacts: Artifact[] = [];
@@ -287,8 +316,8 @@ export class AgentRuntime {
             args: unknown;
             result: unknown;
           }>) {
-            // Image results are surfaced to the client and persisted; other
-            // tool outputs (web pages, file contents, …) stay server-side.
+            // Image results render inline; delegated files render as artifacts;
+            // every other tool call is persisted as an expandable tool row.
             if (isImageResult(tr.result)) {
               args.onChunk({ kind: "tool_end", id: tr.toolCallId, result: tr.result });
               imageMessages.push({
@@ -320,7 +349,21 @@ export class AgentRuntime {
                 });
               });
               turnArtifacts.push(...delegated);
+              continue;
             }
+            // Generic tool call — stream its output to the UI and record the
+            // input + output (clamped) so the tool row expands, live and on reload.
+            const safeArgs = clampToolPayload(tr.args);
+            const safeResult = clampToolPayload(tr.result);
+            args.onChunk({ kind: "tool_end", id: tr.toolCallId, result: safeResult });
+            toolMessages.push({
+              toolCall: {
+                id: tr.toolCallId,
+                name: tr.toolName,
+                args: safeArgs,
+                result: safeResult,
+              },
+            });
           }
         }
       } catch {
@@ -348,6 +391,11 @@ export class AgentRuntime {
       // Files received from delegated peers, persisted in turn order too.
       for (const art of artifactMessages) {
         this.appendMessage(args.conversationId, "tool", art.content, [art.toolCall]);
+      }
+      // Every other tool call — persisted with its input/output so the row
+      // expands on reload. Excluded from the model context (see context-manager).
+      for (const t of toolMessages) {
+        this.appendMessage(args.conversationId, "tool", `Used ${t.toolCall.name}`, [t.toolCall]);
       }
 
       const messageId = this.appendMessage(args.conversationId, "assistant", finalText);

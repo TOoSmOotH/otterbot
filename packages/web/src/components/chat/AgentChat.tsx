@@ -8,7 +8,6 @@ import {
   MessageSquarePlus,
   Paperclip,
   Pencil,
-  Wrench,
   X,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
@@ -24,6 +23,7 @@ import { CodingCliIndicator } from "./CodingCliIndicator";
 import type { CodingTool } from "../../lib/coding-cli";
 import { ContextPanel } from "./ContextPanel";
 import { ChatImage } from "./ChatImage";
+import { ToolMessage } from "./ToolMessage";
 import { Markdown } from "./Markdown";
 
 const PULSING_STATUSES = new Set(["working", "thinking"]);
@@ -241,65 +241,9 @@ export function AgentChat({
                   initial={{ opacity: 0, y: 4 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ duration: 0.18, ease: [0.2, 0.8, 0.2, 1] }}
-                  style={{
-                    alignSelf: "stretch",
-                    maxWidth: "75ch",
-                    display: "flex",
-                    alignItems: "flex-start",
-                    gap: 8,
-                    padding: "6px 10px",
-                    border: "1px solid rgb(var(--border))",
-                    background: "rgb(var(--surface-sunken))",
-                    borderRadius: 6,
-                    color: "rgb(var(--muted))",
-                    fontFamily: fonts.mono,
-                    fontSize: 11,
-                    lineHeight: 1.5,
-                    whiteSpace: "pre-wrap",
-                    wordBreak: "break-word",
-                  }}
+                  style={{ alignSelf: "stretch", maxWidth: "75ch" }}
                 >
-                  <Icon
-                    icon={Wrench}
-                    size={14}
-                    style={{
-                      color: "rgb(var(--subtle))",
-                      flexShrink: 0,
-                      marginTop: 2,
-                    }}
-                  />
-                  <div style={{ display: "flex", flexDirection: "column", gap: 6, minWidth: 0 }}>
-                    <span>{m.content}</span>
-                    {m.imageUrl && (
-                      <ChatImage
-                        url={m.imageUrl}
-                        alt={m.content}
-                        onEdit={(change) => editImage(m.imageUrl!, change)}
-                      />
-                    )}
-                    {m.fileUrl && (
-                      <a
-                        href={withToken(m.fileUrl)}
-                        download={m.fileName}
-                        style={{
-                          display: "inline-flex",
-                          alignItems: "center",
-                          gap: 6,
-                          alignSelf: "flex-start",
-                          padding: "5px 9px",
-                          borderRadius: 6,
-                          border: "1px solid rgb(var(--border))",
-                          background: "rgb(var(--surface))",
-                          color: "rgb(var(--fg))",
-                          textDecoration: "none",
-                          fontSize: 12,
-                        }}
-                      >
-                        <Icon icon={FileText} size={14} />
-                        {m.fileName ?? "Download file"}
-                      </a>
-                    )}
-                  </div>
+                  <ToolMessage message={m} onEditImage={editImage} />
                 </motion.div>
               ) : (
                 <motion.div
