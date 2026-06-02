@@ -4,6 +4,7 @@ import { Icon } from "../ui/Icon";
 import { useProjectsStore, type Project, type PipelineRun } from "../../stores/projects-store";
 import { useAgentsStore } from "../../stores/agents-store";
 import { AgentWizard } from "./AgentWizard";
+import { ProjectTeamModels } from "./ProjectTeamModels";
 
 /** Stable empty array so the runs selector never returns a fresh reference. */
 const EMPTY_RUNS: PipelineRun[] = [];
@@ -119,6 +120,14 @@ function ProjectCard({ project, onDelete }: { project: Project; onDelete: () => 
           </span>
         ))}
       </div>
+
+      {/* Team models */}
+      <div style={{ marginTop: 12, fontSize: 12, fontWeight: 600 }}>Team models</div>
+      <p style={{ fontSize: 11, color: "rgb(var(--muted))", margin: "2px 0 6px" }}>
+        Set the chat model each role runs, plus the coding CLI tool + model preset for the coding
+        roles. Manage presets in Settings → Coding Models. Changes save immediately.
+      </p>
+      <ProjectTeamModels project={project} />
 
       {/* Additional agents */}
       <div style={{ marginTop: 12, fontSize: 12, fontWeight: 600 }}>Additional agents</div>
