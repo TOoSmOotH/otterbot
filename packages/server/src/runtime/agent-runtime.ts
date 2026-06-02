@@ -5,6 +5,7 @@ import * as schema from "../db/schema.js";
 import { resolveChatModel } from "../providers/registry.js";
 import { buildSystemPrompt } from "../agent/prompt.js";
 import { buildAgentTools } from "../agent/tools.js";
+import { takeToolDisplay } from "../agent/tool-display.js";
 import { buildContext, contextStatus, maybeAutoCompact } from "./context-manager.js";
 import type { AgentContext } from "./agent-context.js";
 import type { AgentServices, AgentDirectoryEntry } from "./agent-services.js";
@@ -84,6 +85,8 @@ export function withAttachmentRefs(body: string, payload: unknown): string {
 
 /** Cap on a single string field inside a persisted/streamed tool payload. */
 const TOOL_PAYLOAD_FIELD_MAX = 16_000;
+/** A captured terminal transcript gets a larger cap — it's the point of the row. */
+const TOOL_TRANSCRIPT_MAX = 60_000;
 
 function clampToolString(s: string, max: number): string {
   if (s.length <= max) return s;
@@ -354,7 +357,16 @@ export class AgentRuntime {
             // Generic tool call — stream its output to the UI and record the
             // input + output (clamped) so the tool row expands, live and on reload.
             const safeArgs = clampToolPayload(tr.args);
-            const safeResult = clampToolPayload(tr.result);
+            let safeResult = clampToolPayload(tr.result);
+            // Merge any display-only detail (e.g. a CLI run's full terminal
+            // transcript) the tool stashed — the model never saw this.
+            const display = takeToolDisplay(tr.toolCallId);
+            if (display?.transcript && safeResult && typeof safeResult === "object") {
+              safeResult = {
+                ...(safeResult as Record<string, unknown>),
+                transcript: clampToolString(display.transcript, TOOL_TRANSCRIPT_MAX),
+              };
+            }
             args.onChunk({ kind: "tool_end", id: tr.toolCallId, result: safeResult });
             toolMessages.push({
               toolCall: {

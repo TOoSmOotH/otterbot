@@ -139,14 +139,19 @@ export function stripAnsi(input: string): string {
   );
 }
 
-/** Collapse a raw terminal buffer to a readable tail for the model. */
-export function summarizeOutput(buffer: string, maxChars = 6000): string {
-  const cleaned = stripAnsi(buffer)
+/** Strip ANSI and normalize whitespace into a readable plain-text transcript. */
+export function cleanOutput(buffer: string): string {
+  return stripAnsi(buffer)
     .replace(/\r\n/g, "\n")
     .replace(/\r/g, "\n")
     .replace(/[ \t]+\n/g, "\n")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
+}
+
+/** Collapse a raw terminal buffer to a readable tail for the model. */
+export function summarizeOutput(buffer: string, maxChars = 6000): string {
+  const cleaned = cleanOutput(buffer);
   if (cleaned.length <= maxChars) return cleaned;
   return "…[earlier output truncated]\n" + cleaned.slice(-maxChars);
 }
@@ -167,7 +172,10 @@ export interface CodingRunOptions {
 export interface CodingRunResult {
   ok: boolean;
   exitCode: number | null;
+  /** Readable tail of the run, sized for the model's context. */
   summary: string;
+  /** Full cleaned terminal output (the captured tty), for display only. */
+  transcript: string;
   truncated: boolean;
   timedOut: boolean;
   sandbox: string | null;
@@ -197,6 +205,7 @@ export function runCodingCliHeadless(opts: CodingRunOptions): Promise<CodingRunR
       ok: false,
       exitCode: null,
       summary: "",
+      transcript: "",
       truncated: false,
       timedOut: false,
       sandbox: null,
@@ -236,6 +245,7 @@ export function runCodingCliHeadless(opts: CodingRunOptions): Promise<CodingRunR
         ok: false,
         exitCode: null,
         summary: "",
+        transcript: "",
         truncated: false,
         timedOut: false,
         sandbox,
@@ -248,6 +258,7 @@ export function runCodingCliHeadless(opts: CodingRunOptions): Promise<CodingRunR
         ok: code === 0 && !timedOut,
         exitCode: code,
         summary: summarizeOutput(buffer),
+        transcript: cleanOutput(buffer),
         truncated: dropped,
         timedOut,
         sandbox,

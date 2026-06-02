@@ -29,6 +29,18 @@ function firstLine(s: string): string {
   return line.length > 80 ? line.slice(0, 80) + "…" : line;
 }
 
+/** Lift a captured terminal transcript out of a tool result so it can render as
+ *  raw text; the remaining fields stay as the JSON "Output". */
+function splitTranscript(result: unknown): { transcript: string | null; rest: unknown } {
+  if (!result || typeof result !== "object" || Array.isArray(result)) {
+    return { transcript: null, rest: result };
+  }
+  const r = result as Record<string, unknown>;
+  if (typeof r.transcript !== "string") return { transcript: null, rest: result };
+  const { transcript, ...rest } = r;
+  return { transcript, rest };
+}
+
 /** A one-line preview of the most useful arg (command/prompt/task), shown dimmed
  *  on the collapsed row so you can scan without expanding. */
 function argPreview(args: unknown): string | null {
@@ -56,11 +68,16 @@ export function ToolMessage({
 }) {
   const [open, setOpen] = useState(false);
 
+  // Pull a captured terminal transcript out of the result so it renders as its
+  // own monospace block (real newlines) instead of an escaped JSON string.
+  const { transcript, rest } = splitTranscript(message.toolResult);
+
   const inputText = formatPayload(message.toolArgs);
-  const outputText = formatPayload(message.toolResult);
+  const outputText = formatPayload(rest);
   const hasInput = isMeaningful(inputText);
   const hasOutput = isMeaningful(outputText);
-  const expandable = hasInput || hasOutput;
+  const hasTranscript = !!transcript && transcript.trim().length > 0;
+  const expandable = hasInput || hasOutput || hasTranscript;
 
   // Don't echo a preview line for rows that already show their content (images,
   // files) — it would just duplicate the prompt/name above the artifact.
@@ -138,6 +155,7 @@ export function ToolMessage({
             <div style={{ display: "flex", flexDirection: "column", gap: 8, paddingTop: 8 }}>
               {hasInput && <Section title="Input" body={inputText} />}
               {hasOutput && <Section title="Output" body={outputText} />}
+              {hasTranscript && <Section title="Terminal" body={transcript!} tall />}
             </div>
           </motion.div>
         )}
@@ -146,11 +164,11 @@ export function ToolMessage({
   );
 }
 
-function Section({ title, body }: { title: string; body: string }) {
+function Section({ title, body, tall }: { title: string; body: string; tall?: boolean }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 0 }}>
       <span style={sectionLabel}>{title}</span>
-      <pre style={sectionBody}>{body}</pre>
+      <pre style={tall ? { ...sectionBody, maxHeight: 460 } : sectionBody}>{body}</pre>
     </div>
   );
 }

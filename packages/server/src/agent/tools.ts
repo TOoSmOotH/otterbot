@@ -33,6 +33,7 @@ import {
   checkSharedCodingClis,
   installSharedCodingCli,
 } from "../integrations/coding-cli-install.js";
+import { recordToolDisplay } from "./tool-display.js";
 import { ensureKey, parseHosts, publicKey, sshExec } from "../integrations/ssh.js";
 import { searchWeb } from "../integrations/web-search.js";
 import { editImage, generateImage, persistImage } from "../integrations/image-gen.js";
@@ -632,7 +633,10 @@ export function buildAgentTools(
           .optional()
           .describe("Raw model-id override for the tool (escape hatch; overrides any preset's model)."),
       }),
-      execute: async ({ tool: requestedTool, task, interactive, preset: requestedPreset, model }) => {
+      execute: async (
+        { tool: requestedTool, task, interactive, preset: requestedPreset, model },
+        { toolCallId }
+      ) => {
         // Fall back to the agent's pinned default tool/preset (capability config).
         const shellSecrets = ctx.shellSecrets();
         const presets = services?.codingModelPresets?.() ?? [];
@@ -721,6 +725,9 @@ export function buildAgentTools(
           }
           const r = await runCodingCliHeadless(common);
           if (r.error) return { ok: false, error: r.error };
+          // Stash the full terminal output for display only — the model sees
+          // just the summary so its context stays small.
+          if (r.transcript) recordToolDisplay(toolCallId, { transcript: r.transcript });
           return {
             ok: r.ok,
             exitCode: r.exitCode,
