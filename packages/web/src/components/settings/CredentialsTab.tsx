@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
-import { Plus, X } from "lucide-react";
+import { Plus, X, KeyRound } from "lucide-react";
 import { Icon } from "../ui/Icon";
 import type { CredentialScope, SkillConfigSchema } from "@otterbot/shared";
 import { apiFetch } from "../../lib/api";
 import { useProjectsStore } from "../../stores/projects-store";
 import { useSecretsStore } from "../../stores/secrets-store";
+import { useSshKeysStore } from "../../stores/ssh-keys-store";
 import { GitCredWizard, ForgeAccountRow } from "./GitCredsTab";
 import { SkillConfigForm } from "../agents/SkillConfigForm";
 
@@ -33,17 +34,23 @@ export function CredentialsTab() {
   const removeSecret = useSecretsStore((s) => s.remove);
   const busy = useSecretsStore((s) => s.busy);
 
+  const sshKeys = useSshKeysStore((s) => s.keys);
+  const loadSshKeys = useSshKeysStore((s) => s.load);
+  const removeSshKey = useSshKeysStore((s) => s.remove);
+
   const [adding, setAdding] = useState(false);
   const [editCap, setEditCap] = useState<CapId | null>(null);
 
   useEffect(() => {
     void loadForge();
     void loadSecrets();
-  }, [loadForge, loadSecrets]);
+    void loadSshKeys();
+  }, [loadForge, loadSecrets, loadSshKeys]);
 
   const reload = () => {
     void loadForge();
     void loadSecrets();
+    void loadSshKeys();
   };
 
   const proxmoxConfigured = keys.some((k) => k.key === "PROXMOX_HOST");
@@ -55,7 +62,11 @@ export function CredentialsTab() {
   );
 
   const isEmpty =
-    accounts.length === 0 && !proxmoxConfigured && !sshConfigured && genericRows.length === 0;
+    accounts.length === 0 &&
+    !proxmoxConfigured &&
+    !sshConfigured &&
+    sshKeys.length === 0 &&
+    genericRows.length === 0;
 
   const removeCapKeys = async (capId: CapId) => {
     const prefix = capId === "proxmox" ? "PROXMOX_" : "SSH_";
@@ -86,6 +97,15 @@ export function CredentialsTab() {
             <TypeBadge>Git</TypeBadge>
             <div style={{ flex: 1, minWidth: 0 }}>
               <ForgeAccountRow account={a} onDelete={() => void delForge(a.id)} />
+            </div>
+          </div>
+        ))}
+
+        {sshKeys.map((k) => (
+          <div key={k.id} style={listItem}>
+            <TypeBadge>SSH key</TypeBadge>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <SshKeyRow sshKey={k} onDelete={(force) => void removeSshKey(k.id, force)} />
             </div>
           </div>
         ))}
@@ -184,9 +204,10 @@ function CapRow({
 
 /** Add wizard: step 1 picks the credential type, then routes to its form. */
 function AddCredentialWizard({ onClose }: { onClose: () => void }) {
-  const [type, setType] = useState<"git" | CapId | "generic" | null>(null);
+  const [type, setType] = useState<"git" | "sshkey" | CapId | "generic" | null>(null);
 
   if (type === "git") return <GitCredWizard onClose={onClose} />;
+  if (type === "sshkey") return <SshKeyModal onClose={onClose} />;
   if (type === "proxmox" || type === "ssh")
     return <CapabilityModal capId={type} onClose={onClose} onSaved={() => {}} />;
   if (type === "generic") return <GenericSecretModal onClose={onClose} />;
@@ -198,6 +219,7 @@ function AddCredentialWizard({ onClose }: { onClose: () => void }) {
         <p style={hint}>What kind of credential do you want to add?</p>
         <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 12 }}>
           <ChoiceBtn label="Git account" blurb="GitHub / Gitea — token, transport, commit signing." onClick={() => setType("git")} />
+          <ChoiceBtn label="SSH key" blurb="Generate or import a reusable key, then link it to a git account." onClick={() => setType("sshkey")} />
           <ChoiceBtn label="Proxmox" blurb={CAPS.proxmox.blurb} onClick={() => setType("proxmox")} />
           <ChoiceBtn label="SSH host" blurb={CAPS.ssh.blurb} onClick={() => setType("ssh")} />
           <ChoiceBtn label="Generic secret" blurb="Any KEY=value with a scope." onClick={() => setType("generic")} />
@@ -208,6 +230,142 @@ function AddCredentialWizard({ onClose }: { onClose: () => void }) {
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+/**
+ * Generate a new ed25519 key or import an existing private key. On generate, the
+ * public key is shown for the user to copy onto the forge. The private key never
+ * leaves the server.
+ */
+function SshKeyModal({ onClose }: { onClose: () => void }) {
+  const generate = useSshKeysStore((s) => s.generate);
+  const importKey = useSshKeysStore((s) => s.import);
+  const busy = useSshKeysStore((s) => s.busy);
+  const error = useSshKeysStore((s) => s.error);
+
+  const [mode, setMode] = useState<"generate" | "import">("generate");
+  const [label, setLabel] = useState("");
+  const [privateKey, setPrivateKey] = useState("");
+  const [created, setCreated] = useState<{ publicKey: string; fingerprint: string } | null>(null);
+
+  const save = async () => {
+    const key =
+      mode === "generate" ? await generate(label) : await importKey(label, privateKey);
+    if (key) setCreated({ publicKey: key.publicKey, fingerprint: key.fingerprint });
+  };
+
+  return (
+    <div style={overlay} onClick={onClose}>
+      <div style={modal} onClick={(e) => e.stopPropagation()}>
+        {created ? (
+          <>
+            <h2 style={h2}>Key created</h2>
+            <p style={hint}>
+              Add this public key to GitHub/Gitea as an <strong>SSH key</strong>, then link it to a
+              git account (Add → Git account → transport SSH).
+            </p>
+            <textarea
+              readOnly
+              value={created.publicKey}
+              onFocus={(e) => e.currentTarget.select()}
+              style={{ ...input, width: "100%", fontFamily: "monospace", fontSize: 11, height: 70 }}
+            />
+            <p style={{ ...hint, fontFamily: "monospace" }}>{created.fingerprint}</p>
+            <div style={actions}>
+              <button style={primaryBtn} onClick={onClose}>
+                Done
+              </button>
+            </div>
+          </>
+        ) : (
+          <>
+            <h2 style={h2}>Add an SSH key</h2>
+            <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+              <button
+                style={mode === "generate" ? tabActive : tabBtn}
+                onClick={() => setMode("generate")}
+              >
+                Generate
+              </button>
+              <button style={mode === "import" ? tabActive : tabBtn} onClick={() => setMode("import")}>
+                Import
+              </button>
+            </div>
+            <label style={lbl}>Label</label>
+            <input
+              style={input}
+              placeholder="e.g. github-deploy"
+              value={label}
+              onChange={(e) => setLabel(e.target.value)}
+            />
+            {mode === "generate" ? (
+              <p style={hint}>Generates a new ed25519 keypair. You&apos;ll get the public key to copy.</p>
+            ) : (
+              <>
+                <label style={lbl}>Private key</label>
+                <textarea
+                  style={{ ...input, width: "100%", fontFamily: "monospace", fontSize: 11, height: 120 }}
+                  placeholder="-----BEGIN OPENSSH PRIVATE KEY-----"
+                  value={privateKey}
+                  onChange={(e) => setPrivateKey(e.target.value)}
+                />
+                <p style={hint}>The private key is stored encrypted and never shown back.</p>
+              </>
+            )}
+            {error && <div style={{ color: "#f87171", fontSize: 12, marginTop: 8 }}>{error}</div>}
+            <div style={actions}>
+              <button style={ghostBtn} onClick={onClose}>
+                Cancel
+              </button>
+              <button
+                style={primaryBtn}
+                disabled={busy || !label.trim() || (mode === "import" && !privateKey.trim())}
+                onClick={() => void save()}
+              >
+                {busy ? "Saving…" : mode === "generate" ? "Generate" : "Import"}
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** A configured SSH-key row with a show-public-key toggle and delete. */
+function SshKeyRow({
+  sshKey,
+  onDelete,
+}: {
+  sshKey: { id: string; label: string; publicKey: string; fingerprint: string };
+  onDelete: (force: boolean) => void;
+}) {
+  const [showKey, setShowKey] = useState(false);
+  return (
+    <div style={{ border: "1px solid rgb(var(--border))", borderRadius: 6, padding: "6px 8px" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <span style={{ fontSize: 12, fontWeight: 600 }}>{sshKey.label}</span>
+        <span style={{ fontSize: 11, color: "rgb(var(--muted))", fontFamily: "monospace" }}>
+          {sshKey.fingerprint}
+        </span>
+        <span style={{ flex: 1 }} />
+        <button style={chipX} title="Show public key" onClick={() => setShowKey((v) => !v)}>
+          <Icon icon={KeyRound} size={14} />
+        </button>
+        <button style={chipX} title="Delete" onClick={() => onDelete(false)}>
+          <Icon icon={X} size={14} />
+        </button>
+      </div>
+      {showKey && (
+        <textarea
+          readOnly
+          value={sshKey.publicKey}
+          onFocus={(e) => e.currentTarget.select()}
+          style={{ ...input, width: "100%", marginTop: 6, fontFamily: "monospace", fontSize: 11, height: 48 }}
+        />
+      )}
     </div>
   );
 }
@@ -467,6 +625,23 @@ const ghostBtn: React.CSSProperties = {
   fontSize: 12,
 };
 const ghostSm: React.CSSProperties = { ...ghostBtn, padding: "4px 10px" };
+const tabBtn: React.CSSProperties = {
+  flex: 1,
+  background: "transparent",
+  color: "rgb(var(--muted))",
+  border: "1px solid rgb(var(--border))",
+  borderRadius: 6,
+  padding: "6px 12px",
+  cursor: "pointer",
+  fontSize: 12,
+};
+const tabActive: React.CSSProperties = {
+  ...tabBtn,
+  color: "#fff",
+  background: "rgb(var(--accent))",
+  borderColor: "rgb(var(--accent))",
+  fontWeight: 600,
+};
 const chipX: React.CSSProperties = {
   display: "inline-flex",
   background: "transparent",

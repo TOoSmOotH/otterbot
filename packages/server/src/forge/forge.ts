@@ -25,6 +25,11 @@ export interface ForgeAccount {
   committerEmail: string;
   /** SSH-sign commits with the managed key (requires gitTransport "ssh"). */
   signCommits: boolean;
+  /**
+   * A reusable {@link import("../db/control-schema.js").sshKeys} key id used for
+   * git-over-SSH. Null/absent falls back to the legacy per-account managed key.
+   */
+  sshKeyId?: string | null;
 }
 
 export interface ForgeRepo {

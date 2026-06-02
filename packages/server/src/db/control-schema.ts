@@ -119,6 +119,31 @@ export const forgeAccounts = sqliteTable("forge_accounts", {
   committerEmail: text("committer_email").notNull().default(""),
   /** SSH-sign commits with the managed key (gitTransport must be ssh). */
   signCommits: integer("sign_commits", { mode: "boolean" }).notNull().default(false),
+  /**
+   * A reusable {@link sshKeys} key used for git-over-SSH (clone/push + signing),
+   * chosen by the user. Null falls back to the legacy per-account managed key.
+   */
+  sshKeyId: text("ssh_key_id"),
+  createdAt: text("created_at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+});
+
+/**
+ * A named, reusable SSH key the user generated or imported. Standalone (not tied
+ * to one forge account) so it can be associated with a git account by id. The
+ * `privateKey` lives encrypted at rest in this control database and is never
+ * returned by the API; it is materialized to a 0600 file only at git time.
+ */
+export const sshKeys = sqliteTable("ssh_keys", {
+  id: text("id").primaryKey(),
+  label: text("label").notNull(),
+  /** OpenSSH public-key line (safe to display — for copying to the forge). */
+  publicKey: text("public_key").notNull(),
+  /** SHA256:… fingerprint, matching what GitHub displays. */
+  fingerprint: text("fingerprint").notNull().default(""),
+  /** PEM private key — encrypted at rest with the DB key; never sent to the API. */
+  privateKey: text("private_key").notNull(),
   createdAt: text("created_at")
     .notNull()
     .$defaultFn(() => new Date().toISOString()),

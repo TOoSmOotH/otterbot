@@ -51,6 +51,7 @@ import {
   type PipelineRunView,
 } from "../pipeline/pipeline-manager.js";
 import { ForgeService } from "../forge/forge-service.js";
+import { SshKeyStore } from "../ssh-keys/ssh-key-store.js";
 import { parseRepoInput, splitRepo, type ForgeProvider, type ForgeIssue, type ForgeComment } from "../forge/forge.js";
 import { ForgeMonitor } from "../forge/forge-monitor.js";
 import {
@@ -468,6 +469,7 @@ export class Orchestrator {
   private readonly scheduler: Scheduler;
   private readonly projects: ProjectStore;
   private readonly forge: ForgeService;
+  private readonly sshKeys: SshKeyStore;
   private readonly issueTriage: IssueTriageStore;
   private readonly forgeMonitor: ForgeMonitor;
   private readonly codingCliUpdates: CodingCliUpdateChecker;
@@ -505,7 +507,8 @@ export class Orchestrator {
     this.bus = new MessageBus(control, createTransport(cfg));
     this.scheduler = new Scheduler(control, (id) => this.runtimes.get(id));
     this.projects = new ProjectStore(control, resolve(cfg.dataDir, "projects"));
-    this.forge = new ForgeService(control, resolve(cfg.dataDir, "forge-keys"));
+    this.sshKeys = new SshKeyStore(control, resolve(cfg.dataDir, "ssh-keys"));
+    this.forge = new ForgeService(control, resolve(cfg.dataDir, "forge-keys"), fetch, this.sshKeys);
     this.issueTriage = new IssueTriageStore(control);
     this.pipeline = new PipelineManager({
       control,
@@ -1527,20 +1530,41 @@ export class Orchestrator {
     committerName?: string;
     committerEmail?: string;
     signCommits?: boolean;
+    sshKeyId?: string | null;
   }) {
     const account = this.forge.addAccount(input);
     const { token: _t, ...masked } = account;
-    // Surface the managed public key so the user can add it to the forge.
-    return { ...masked, publicKey: this.forge.publicKey(account.id) };
+    // Surface the public key (linked reusable key or legacy managed key) so the
+    // user can add it to the forge.
+    return { ...masked, publicKey: this.forge.publicKeyForId(account.id) };
   }
 
   deleteForgeAccount(id: string): void {
     this.forge.deleteAccount(id);
   }
 
-  /** The managed SSH public key for an account (to add on the forge), or null. */
+  /** The SSH public key for an account (to add on the forge), or null. */
   forgeAccountPublicKey(id: string): string | null {
-    return this.forge.publicKey(id);
+    return this.forge.publicKeyForId(id);
+  }
+
+  // --- SSH keys (standalone, reusable) ------------------------------------
+
+  listSshKeys() {
+    return this.sshKeys.list();
+  }
+
+  /** Generate or import a reusable SSH key; returns the masked record. */
+  addSshKey(input: { label: string; mode: "generate" | "import"; privateKey?: string }) {
+    if (input.mode === "import") {
+      if (!input.privateKey?.trim()) throw new Error("A private key is required to import.");
+      return this.sshKeys.import(input.label, input.privateKey);
+    }
+    return this.sshKeys.generate(input.label);
+  }
+
+  deleteSshKey(id: string, force = false) {
+    return this.sshKeys.delete(id, force);
   }
 
   /**

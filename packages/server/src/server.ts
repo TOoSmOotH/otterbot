@@ -418,6 +418,7 @@ export async function buildServer(
       committerName?: string;
       committerEmail?: string;
       signCommits?: boolean;
+      sshKeyId?: string | null;
     };
   }>("/api/forge-accounts", async (req, reply) => {
     const b = req.body ?? {};
@@ -436,6 +437,7 @@ export async function buildServer(
         committerName: b.committerName,
         committerEmail: b.committerEmail,
         signCommits: b.signCommits,
+        sshKeyId: b.sshKeyId,
       });
     } catch (err) {
       reply.code(400);
@@ -457,6 +459,37 @@ export async function buildServer(
     orch.deleteForgeAccount(req.params.id);
     return { ok: true };
   });
+
+  // --- SSH keys (standalone, reusable; linkable to a forge account) ---
+  app.get("/api/ssh-keys", async () => orch.listSshKeys());
+
+  app.post<{
+    Body: { label?: string; mode?: "generate" | "import"; privateKey?: string };
+  }>("/api/ssh-keys", async (req, reply) => {
+    const b = req.body ?? {};
+    const mode = b.mode === "import" ? "import" : "generate";
+    try {
+      return orch.addSshKey({ label: b.label ?? "ssh-key", mode, privateKey: b.privateKey });
+    } catch (err) {
+      reply.code(400);
+      return { error: err instanceof Error ? err.message : String(err) };
+    }
+  });
+
+  app.delete<{ Params: { id: string }; Querystring: { force?: string } }>(
+    "/api/ssh-keys/:id",
+    async (req, reply) => {
+      const force = req.query.force === "true";
+      const res = orch.deleteSshKey(req.params.id, force);
+      if (!res.deleted && res.referencedBy) {
+        reply.code(409);
+        return {
+          error: `In use by ${res.referencedBy} git account(s). Pass ?force=true to delete anyway.`,
+        };
+      }
+      return { ok: res.deleted };
+    }
+  );
 
   // --- Named credentials + Connections (Settings → Connections) -------------
 

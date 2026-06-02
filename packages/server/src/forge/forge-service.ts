@@ -7,6 +7,7 @@ import { controlSchema, type ControlDb } from "../db/control-db.js";
 import { type FetchFn, type Forge, type ForgeAccount, type ForgeProvider } from "./forge.js";
 import { GitHubForge } from "./github.js";
 import { GiteaForge } from "./gitea.js";
+import type { SshKeyStore } from "../ssh-keys/ssh-key-store.js";
 
 /** Default API base for GitHub when an account doesn't override it. */
 const GITHUB_DEFAULT_BASE = "https://api.github.com";
@@ -29,7 +30,9 @@ export class ForgeService {
   constructor(
     private readonly control: ControlDb,
     private readonly keysDir: string,
-    private readonly fetchFn: FetchFn = fetch
+    private readonly fetchFn: FetchFn = fetch,
+    /** Standalone reusable SSH keys an account may reference for git transport. */
+    private readonly sshKeys?: SshKeyStore
   ) {}
 
   listAccounts(): ForgeAccount[] {
@@ -41,7 +44,7 @@ export class ForgeService {
     return this.listAccounts().map(({ token, ...rest }) => ({
       ...rest,
       hasToken: Boolean(token),
-      publicKey: rest.gitTransport === "ssh" ? this.publicKey(rest.id) : null,
+      publicKey: rest.gitTransport === "ssh" ? this.publicKeyFor(rest) : null,
     }));
   }
 
@@ -65,12 +68,16 @@ export class ForgeService {
     committerName?: string;
     committerEmail?: string;
     signCommits?: boolean;
+    /** A reusable {@link SshKeyStore} key id to use for git-over-SSH. */
+    sshKeyId?: string | null;
   }): ForgeAccount {
     if (!input.token) throw new Error("A token is required (used for the forge API).");
     if (input.provider === "gitea" && !input.baseUrl) {
       throw new Error("Gitea accounts need a baseUrl (instance URL).");
     }
     const gitTransport = input.gitTransport ?? "https";
+    // A linked SSH key only applies to ssh transport.
+    const sshKeyId = gitTransport === "ssh" ? input.sshKeyId ?? null : null;
     const account: ForgeAccount = {
       id: nanoid(),
       provider: input.provider,
@@ -81,14 +88,16 @@ export class ForgeService {
       gitTransport,
       committerName: input.committerName ?? "",
       committerEmail: input.committerEmail ?? "",
-      // Signing requires the managed SSH key, so only with ssh transport.
+      // Signing requires an SSH key, so only with ssh transport.
       signCommits: gitTransport === "ssh" ? Boolean(input.signCommits) : false,
+      sshKeyId,
     };
     this.control.db
       .insert(controlSchema.forgeAccounts)
       .values({ ...account, createdAt: new Date().toISOString() })
       .run();
-    if (gitTransport === "ssh") this.ensureKey(account.id);
+    // Generate the legacy per-account key only when no reusable key is linked.
+    if (gitTransport === "ssh" && !sshKeyId) this.ensureKey(account.id);
     return account;
   }
 
@@ -140,6 +149,7 @@ export class ForgeService {
     return this.publicKey(accountId);
   }
 
+  /** The legacy per-account public key from disk, or null. */
   publicKey(accountId: string): string | null {
     const pub = `${this.keyPath(accountId)}.pub`;
     try {
@@ -147,6 +157,24 @@ export class ForgeService {
     } catch {
       return null;
     }
+  }
+
+  /**
+   * The public key to show the user for an account: the linked reusable key's
+   * line when one is set, else the legacy per-account managed key. Looked up by
+   * id when given just an id (the API/orchestrator path).
+   */
+  publicKeyForId(accountId: string): string | null {
+    const account = this.getAccount(accountId);
+    return account ? this.publicKeyFor(account) : null;
+  }
+
+  private publicKeyFor(account: Pick<ForgeAccount, "id" | "sshKeyId">): string | null {
+    if (account.sshKeyId && this.sshKeys) {
+      const linked = this.sshKeys.publicKey(account.sshKeyId);
+      if (linked) return linked;
+    }
+    return this.publicKey(account.id);
   }
 
   /** Git transport + signing context for an account (ensures the key for ssh). */
@@ -159,6 +187,21 @@ export class ForgeService {
           }
         : undefined;
     if (account.gitTransport !== "ssh") return { committer };
+
+    // Prefer a linked reusable key, materialized to disk for `git -i`. If the
+    // key was force-deleted out from under the account, fall back to the legacy
+    // managed key rather than feeding git a missing path.
+    if (account.sshKeyId && this.sshKeys?.get(account.sshKeyId)) {
+      const mat = this.sshKeys.materialize(account.sshKeyId);
+      return {
+        sshKeyPath: mat.privateKeyPath,
+        knownHostsPath: this.knownHostsPath(),
+        committer,
+        signingKeyPath: account.signCommits ? mat.publicKeyPath : undefined,
+      };
+    }
+
+    // Legacy per-account managed key.
     this.ensureKey(account.id);
     return {
       sshKeyPath: this.keyPath(account.id),

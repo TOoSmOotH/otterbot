@@ -31,7 +31,9 @@ export interface ForgeAccount {
   committerName: string;
   committerEmail: string;
   signCommits: boolean;
-  /** Managed SSH public key to add on the forge (ssh accounts only). */
+  /** Linked reusable SSH key id used for git-over-SSH (ssh accounts), or null. */
+  sshKeyId?: string | null;
+  /** SSH public key to add on the forge (ssh accounts only). */
   publicKey: string | null;
 }
 
@@ -86,6 +88,7 @@ interface ProjectsState {
     committerName?: string;
     committerEmail?: string;
     signCommits?: boolean;
+    sshKeyId?: string | null;
   }) => Promise<{ id: string; publicKey: string | null } | null>;
   deleteForgeAccount: (id: string) => Promise<void>;
   setForge: (

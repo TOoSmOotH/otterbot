@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { X, ArrowLeft } from "lucide-react";
 import { Icon } from "../ui/Icon";
 import { useProjectsStore, type ForgeAccount } from "../../stores/projects-store";
+import { useSshKeysStore } from "../../stores/ssh-keys-store";
 
 /**
  * Reusable git-credential (GitHub / Gitea forge account) pieces — the add
@@ -18,6 +19,8 @@ type Step = "provider" | "auth" | "key";
  */
 export function GitCredWizard({ onClose }: { onClose: () => void }) {
   const add = useProjectsStore((s) => s.addForgeAccount);
+  const sshKeys = useSshKeysStore((s) => s.keys);
+  const loadSshKeys = useSshKeysStore((s) => s.load);
   const [step, setStep] = useState<Step>("provider");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -32,19 +35,27 @@ export function GitCredWizard({ onClose }: { onClose: () => void }) {
     committerName: "",
     committerEmail: "",
     signCommits: false,
+    /** Empty = generate a fresh per-account key (legacy); else a reusable key id. */
+    sshKeyId: "",
   });
   const set = (patch: Partial<typeof form>) => setForm((f) => ({ ...f, ...patch }));
+
+  useEffect(() => {
+    void loadSshKeys();
+  }, [loadSshKeys]);
 
   const create = async () => {
     setBusy(true);
     setError(null);
-    const created = await add(form);
+    const created = await add({ ...form, sshKeyId: form.sshKeyId || null });
     setBusy(false);
     if (!created) {
       setError(useProjectsStore.getState().error ?? "failed to add credentials");
       return;
     }
-    if (form.gitTransport === "ssh" && created.publicKey) {
+    // Show the public key to install only when we generated a fresh one. When a
+    // reusable key was linked, it's already in the SSH-keys list.
+    if (form.gitTransport === "ssh" && !form.sshKeyId && created.publicKey) {
       setPublicKey(created.publicKey);
       setStep("key");
     } else {
@@ -115,14 +126,31 @@ export function GitCredWizard({ onClose }: { onClose: () => void }) {
               </div>
             </div>
             {form.gitTransport === "ssh" && (
-              <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "rgb(var(--muted))", marginTop: 10 }}>
-                <input type="checkbox" checked={form.signCommits} onChange={(e) => set({ signCommits: e.target.checked })} />
-                SSH-sign commits with the managed key (for the Verified badge)
-              </label>
+              <>
+                <label style={lbl}>SSH key</label>
+                <select
+                  value={form.sshKeyId}
+                  onChange={(e) => set({ sshKeyId: e.target.value })}
+                  style={input}
+                >
+                  <option value="">Generate a new key for this account</option>
+                  {sshKeys.map((k) => (
+                    <option key={k.id} value={k.id}>
+                      {k.label} · {k.fingerprint}
+                    </option>
+                  ))}
+                </select>
+                <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "rgb(var(--muted))", marginTop: 10 }}>
+                  <input type="checkbox" checked={form.signCommits} onChange={(e) => set({ signCommits: e.target.checked })} />
+                  SSH-sign commits with this key (for the Verified badge)
+                </label>
+              </>
             )}
             <p style={hint}>
               {form.gitTransport === "ssh"
-                ? "Otterbot generates a key on save and shows the public key to add on the forge (auth key, plus a signing key if signing is on)."
+                ? form.sshKeyId
+                  ? "Uses the SSH key you selected. Make sure its public key is added on the forge."
+                  : "Generates a key on save and shows the public key to add on the forge. Or add a reusable SSH key first (Credentials → Add → SSH key) and pick it here."
                 : "Use the email registered on the account so commits show as Verified."}
             </p>
             {error && <div style={errStyle}>{error}</div>}

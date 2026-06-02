@@ -143,6 +143,15 @@ function ensureControlTables(sqlite: Database.Database) {
       committer_name TEXT NOT NULL DEFAULT '',
       committer_email TEXT NOT NULL DEFAULT '',
       sign_commits INTEGER NOT NULL DEFAULT 0,
+      ssh_key_id TEXT,
+      created_at TEXT NOT NULL
+    )`,
+    `CREATE TABLE IF NOT EXISTS ssh_keys (
+      id TEXT PRIMARY KEY,
+      label TEXT NOT NULL,
+      public_key TEXT NOT NULL,
+      fingerprint TEXT NOT NULL DEFAULT '',
+      private_key TEXT NOT NULL,
       created_at TEXT NOT NULL
     )`,
     `CREATE TABLE IF NOT EXISTS project_members (
@@ -198,4 +207,21 @@ function ensureControlTables(sqlite: Database.Database) {
     `CREATE UNIQUE INDEX IF NOT EXISTS idx_issue_triage_issue ON issue_triage(project_id, issue_number)`,
   ];
   for (const s of stmts) sqlite.exec(s);
+
+  // Additive column migrations for tables that predate the column. CREATE TABLE
+  // IF NOT EXISTS never alters an existing table, so add new columns explicitly;
+  // swallow the "duplicate column name" error when the column is already there.
+  addColumnIfMissing(sqlite, "forge_accounts", "ssh_key_id", "TEXT");
+}
+
+/** Add a column to an existing table, ignoring the error if it already exists. */
+function addColumnIfMissing(
+  sqlite: Database.Database,
+  table: string,
+  column: string,
+  type: string
+) {
+  const cols = sqlite.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
+  if (cols.some((c) => c.name === column)) return;
+  sqlite.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
 }
