@@ -891,8 +891,9 @@ function AddIntegration({
       {stepKey === "account" && def?.type === "github" && (
         <div style={{ ...card, background: "rgb(var(--bg))", gap: 8 }}>
           <p style={hint}>
-            A Git account bundles the API token, transport, and (for SSH) a key. GitHub uses a Git
-            account — SSH keys attach to one here, not to the integration directly.
+            A Git account bundles the provider (GitHub or Gitea), API token, transport, and (for
+            SSH) a key. Pick the provider when you create the account below — SSH keys attach to a
+            Git account here, not to the integration directly.
           </p>
           <div style={{ display: "flex", gap: 12 }}>
             <label style={radio}>

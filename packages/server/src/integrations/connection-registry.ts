@@ -189,7 +189,7 @@ const CONNECTION_TYPES: ConnectionTypeDef[] = [
   { type: "discord", label: "Discord channel", isChat: true, credentialType: "discord", configSchema: chatConfigSchema("Channel ID", "123456789012345678") },
   { type: "matrix", label: "Matrix room", isChat: true, credentialType: "matrix", configSchema: chatConfigSchema("Room ID", "!room:server") },
   { type: "smtp", label: "Email (SMTP)", isChat: false, credentialType: "smtp", configSchema: { fields: [] } },
-  { type: "github", label: "GitHub", isChat: false, credentialType: "github", configSchema: { fields: [] } },
+  { type: "github", label: "Git (GitHub / Gitea)", isChat: false, credentialType: "github", configSchema: { fields: [] } },
   { type: "proxmox", label: "Proxmox VM control", isChat: false, credentialType: "proxmox", configSchema: { fields: [] } },
   { type: "ssh", label: "SSH remote access", isChat: false, credentialType: "ssh", configSchema: { fields: [] } },
   { type: "mcp", label: "MCP server", isChat: false, credentialType: null, configSchema: MCP_CONFIG_SCHEMA },
