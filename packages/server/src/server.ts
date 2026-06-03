@@ -653,6 +653,86 @@ export async function buildServer(
     return result;
   });
 
+  // Add a repo to a project. Optionally configure its forge backing in the same
+  // call (clones it); otherwise it's a local git tree until /forge is called.
+  app.post<{
+    Params: { id: string };
+    Body: {
+      name?: string;
+      mode?: "local" | "existing" | "new" | "fork";
+      accountId?: string | null;
+      repo?: string | null;
+      baseBranch?: string | null;
+      monitorIssues?: boolean;
+      triageIssues?: boolean;
+    };
+  }>("/api/projects/:id/repos", async (req, reply) => {
+    try {
+      // Default the subdir name to the repo's name part when adding a forge repo.
+      const name =
+        req.body?.name?.trim() ||
+        (req.body?.repo ? req.body.repo.replace(/\.git$/, "").split("/").pop() : undefined);
+      const created = orch.addProjectRepo(req.params.id, name);
+      if (req.body?.mode && req.body.mode !== "local") {
+        const result = await orch.setProjectRepoForge(created.id, { ...req.body, mode: req.body.mode });
+        if (!result.ok) {
+          // Roll back the empty repo we just added so a failed clone leaves nothing.
+          orch.removeProjectRepo(created.id);
+          reply.code(400);
+          return { error: result.error };
+        }
+      }
+      return { ok: true, repo: orch.listProjectRepos(req.params.id).find((r) => r.id === created.id) };
+    } catch (err) {
+      reply.code(400);
+      return { error: err instanceof Error ? err.message : String(err) };
+    }
+  });
+
+  // Configure (or reconfigure) one repo's forge backing.
+  app.put<{
+    Params: { id: string; repoId: string };
+    Body: {
+      mode?: "local" | "existing" | "new" | "fork";
+      accountId?: string | null;
+      repo?: string | null;
+      baseBranch?: string | null;
+      monitorIssues?: boolean;
+      triageIssues?: boolean;
+    };
+  }>("/api/projects/:id/repos/:repoId/forge", async (req, reply) => {
+    const mode = req.body?.mode ?? "local";
+    const result = await orch.setProjectRepoForge(req.params.repoId, { ...req.body, mode });
+    if (!result.ok) {
+      reply.code(400);
+      return { error: result.error };
+    }
+    return result;
+  });
+
+  // Make a repo its project's primary (backs issue monitoring/triage + the
+  // legacy project-level forge route).
+  app.put<{ Params: { id: string; repoId: string } }>(
+    "/api/projects/:id/repos/:repoId/primary",
+    async (req) => {
+      orch.setPrimaryProjectRepo(req.params.repoId);
+      return { ok: true };
+    }
+  );
+
+  app.delete<{ Params: { id: string; repoId: string } }>(
+    "/api/projects/:id/repos/:repoId",
+    async (req, reply) => {
+      try {
+        orch.removeProjectRepo(req.params.repoId);
+        return { ok: true };
+      } catch (err) {
+        reply.code(400);
+        return { error: err instanceof Error ? err.message : String(err) };
+      }
+    }
+  );
+
   // Set (or clear) a project's standing rules, injected into members' prompts.
   app.put<{
     Params: { id: string };

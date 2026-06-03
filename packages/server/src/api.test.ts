@@ -613,4 +613,55 @@ describe("HTTP API (e2e)", () => {
     const noAgent = await upload("does-not-exist", "a.txt", "text/plain", "hi");
     expect(noAgent.statusCode).toBe(404);
   });
+
+  it("manages multiple repos within a project", async () => {
+    const created = await app.inject({
+      method: "POST",
+      url: "/api/projects",
+      payload: { name: "Multi Repo" },
+    });
+    expect(created.statusCode).toBe(200);
+    const projectId = (created.json() as { id: string }).id;
+
+    // A fresh project starts with one primary repo.
+    const listed = () =>
+      (app.inject({ method: "GET", url: "/api/projects" }) as Promise<{ json(): unknown }>).then(
+        (r) => (r.json() as Array<{ id: string; repos: Array<{ name: string; isPrimary: boolean; id: string }> }>).find((p) => p.id === projectId)!
+      );
+    expect((await listed()).repos).toHaveLength(1);
+    expect((await listed()).repos[0].isPrimary).toBe(true);
+
+    // Add a second (local) repo.
+    const add = await app.inject({
+      method: "POST",
+      url: `/api/projects/${projectId}/repos`,
+      payload: { name: "docs" },
+    });
+    expect(add.statusCode).toBe(200);
+    let repos = (await listed()).repos;
+    expect(repos.map((r) => r.name).sort()).toEqual(["docs", "repo"]);
+    const docs = repos.find((r) => r.name === "docs")!;
+
+    // Promote it to primary.
+    const promote = await app.inject({
+      method: "PUT",
+      url: `/api/projects/${projectId}/repos/${docs.id}/primary`,
+    });
+    expect(promote.statusCode).toBe(200);
+    expect((await listed()).repos.find((r) => r.isPrimary)!.name).toBe("docs");
+
+    // Remove the non-primary; can't remove the last remaining repo.
+    const repoOriginal = (await listed()).repos.find((r) => r.name === "repo")!;
+    const del = await app.inject({
+      method: "DELETE",
+      url: `/api/projects/${projectId}/repos/${repoOriginal.id}`,
+    });
+    expect(del.statusCode).toBe(200);
+    expect((await listed()).repos.map((r) => r.name)).toEqual(["docs"]);
+    const delLast = await app.inject({
+      method: "DELETE",
+      url: `/api/projects/${projectId}/repos/${docs.id}`,
+    });
+    expect(delLast.statusCode).toBe(400);
+  });
 });

@@ -2,11 +2,41 @@ import { create } from "zustand";
 import { apiFetch } from "../lib/api";
 import { getSocket } from "../lib/socket";
 
+/** Forge config for a single repo, as sent to /repos and /repos/:id/forge. */
+export interface RepoForgeInput {
+  mode: "local" | "existing" | "new" | "fork";
+  accountId?: string | null;
+  repo?: string | null;
+  baseBranch?: string | null;
+  monitorIssues?: boolean;
+  triageIssues?: boolean;
+}
+
+/** One repo within a project: its subdir + its own git/forge backing. */
+export interface ProjectRepo {
+  id: string;
+  projectId: string;
+  name: string;
+  repoPath: string;
+  mode: "local" | "existing" | "new" | "fork";
+  forgeAccountId: string | null;
+  forgeRepo: string | null;
+  forkRepo: string | null;
+  forgeSshUrl: string | null;
+  baseBranch: string | null;
+  monitorIssues: boolean;
+  triageIssues: boolean;
+  isPrimary: boolean;
+  createdAt: string;
+}
+
 export interface Project {
   id: string;
   name: string;
   repoPath: string;
   createdAt: string;
+  /** Every repo in the project (primary first). The first is the primary. */
+  repos: ProjectRepo[];
   members: Array<{ agentId: string; access: "read" | "write" }>;
   team: Array<{ role: string; agentId: string }>;
   mode: "local" | "existing" | "new" | "fork";
@@ -104,6 +134,18 @@ interface ProjectsState {
     }
   ) => Promise<string | null>;
   setRules: (projectId: string, rules: string) => Promise<string | null>;
+
+  /** Add a repo to a project (optionally configuring its forge in one call). */
+  addRepo: (
+    projectId: string,
+    input: { name?: string } & Partial<RepoForgeInput>
+  ) => Promise<string | null>;
+  /** Configure (or reconfigure) one repo's forge backing. */
+  setRepoForge: (projectId: string, repoId: string, input: RepoForgeInput) => Promise<string | null>;
+  /** Make a repo its project's primary. */
+  setPrimaryRepo: (projectId: string, repoId: string) => Promise<void>;
+  /** Remove a repo from a project. */
+  removeRepo: (projectId: string, repoId: string) => Promise<string | null>;
 
   startPipeline: (projectId: string, goal: string) => Promise<void>;
 }
@@ -237,6 +279,57 @@ export const useProjectsStore = create<ProjectsState>((set, get) => ({
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ rules }),
     });
+    if (!res.ok) {
+      const err = await readError(res);
+      set({ error: err });
+      return err;
+    }
+    set({ error: null });
+    await get().load();
+    return null;
+  },
+
+  addRepo: async (projectId, input) => {
+    const res = await apiFetch(`/api/projects/${projectId}/repos`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(input),
+    });
+    if (!res.ok) {
+      const err = await readError(res);
+      set({ error: err });
+      return err;
+    }
+    set({ error: null });
+    await get().load();
+    return null;
+  },
+
+  setRepoForge: async (projectId, repoId, input) => {
+    const res = await apiFetch(`/api/projects/${projectId}/repos/${repoId}/forge`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(input),
+    });
+    if (!res.ok) {
+      const err = await readError(res);
+      set({ error: err });
+      return err;
+    }
+    set({ error: null });
+    await get().load();
+    return null;
+  },
+
+  setPrimaryRepo: async (projectId, repoId) => {
+    const res = await apiFetch(`/api/projects/${projectId}/repos/${repoId}/primary`, {
+      method: "PUT",
+    });
+    if (res.ok) await get().load();
+  },
+
+  removeRepo: async (projectId, repoId) => {
+    const res = await apiFetch(`/api/projects/${projectId}/repos/${repoId}`, { method: "DELETE" });
     if (!res.ok) {
       const err = await readError(res);
       set({ error: err });

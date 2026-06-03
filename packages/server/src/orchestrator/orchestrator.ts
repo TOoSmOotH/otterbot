@@ -1395,11 +1395,13 @@ export class Orchestrator {
     name: string;
     repoPath: string;
     createdAt: string;
+    repos: ReturnType<ProjectStore["listRepos"]>;
     members: Array<{ agentId: string; access: "read" | "write" }>;
     team: Array<{ role: string; agentId: string }>;
   }> {
     return this.projects.list().map((p) => ({
       ...p,
+      repos: this.projects.listRepos(p.id),
       members: this.projects.listMembersDetailed(p.id),
       team: this.projects.getTeam(p.id),
     }));
@@ -1591,16 +1593,42 @@ export class Orchestrator {
   ): Promise<{ ok: boolean; error?: string; repo?: string; defaultBranch?: string }> {
     const project = this.projects.get(projectId);
     if (!project) return { ok: false, error: "Unknown project" };
+    // remoteE2e is project-wide; the forge config targets the primary repo.
+    if (input.remoteE2e !== undefined) this.projects.setForge(projectId, { remoteE2e: input.remoteE2e });
+    const primary = this.projects.primaryRepo(projectId);
+    if (!primary) return { ok: false, error: "Project has no repo" };
+    return this.setProjectRepoForge(primary.id, input);
+  }
+
+  /**
+   * Configure one repo's forge backing. For "existing"/"fork" clones the repo
+   * into that repo's subdir now; for "new" creates it on the forge then clones;
+   * "local" clears the forge config and keeps the local git tree. Each repo in a
+   * project is configured independently.
+   */
+  async setProjectRepoForge(
+    repoId: string,
+    input: {
+      mode: "local" | "existing" | "new" | "fork";
+      accountId?: string | null;
+      repo?: string | null;
+      baseBranch?: string | null;
+      monitorIssues?: boolean;
+      triageIssues?: boolean;
+    }
+  ): Promise<{ ok: boolean; error?: string; repo?: string; defaultBranch?: string }> {
+    const repo = this.projects.getRepo(repoId);
+    if (!repo) return { ok: false, error: "Unknown repo" };
 
     if (input.mode === "local") {
-      this.projects.setForge(projectId, {
+      this.projects.setRepoForge(repoId, {
         mode: "local",
         forgeAccountId: null,
         forgeRepo: null,
         forkRepo: null,
+        forgeSshUrl: null,
         monitorIssues: false,
         triageIssues: false,
-        remoteE2e: input.remoteE2e ?? false,
       });
       return { ok: true };
     }
@@ -1628,7 +1656,7 @@ export class Orchestrator {
       const ctx = this.forge.gitContextFor(account);
       const cloneUrl = useSsh ? cloneRepo.sshUrl! : forge.authedCloneUrl(cloneFullRepo);
       const plainUrl = useSsh ? cloneRepo.sshUrl! : cloneRepo.cloneUrl;
-      const clone = this.projects.cloneInto(project.repoPath, cloneUrl, plainUrl, ctx);
+      const clone = this.projects.cloneInto(repo.repoPath, cloneUrl, plainUrl, ctx);
       if (!clone.ok) {
         return {
           ok: false,
@@ -1637,7 +1665,7 @@ export class Orchestrator {
             (useSsh ? " (is the managed SSH key added to the forge as a deploy/auth key?)" : ""),
         };
       }
-      this.projects.setForge(projectId, {
+      this.projects.setRepoForge(repoId, {
         mode: input.mode,
         forgeAccountId: input.accountId ?? null,
         forgeRepo: fullRepo,
@@ -1646,12 +1674,31 @@ export class Orchestrator {
         baseBranch: input.baseBranch ?? upstream.defaultBranch,
         monitorIssues: input.monitorIssues ?? false,
         triageIssues: input.triageIssues ?? false,
-        remoteE2e: input.remoteE2e ?? false,
       });
       return { ok: true, repo: fullRepo, defaultBranch: upstream.defaultBranch };
     } catch (err) {
       return { ok: false, error: err instanceof Error ? err.message : String(err) };
     }
+  }
+
+  /** Add a repo (local) to a project. Configure its forge with {@link setProjectRepoForge}. */
+  addProjectRepo(projectId: string, name?: string) {
+    return this.projects.addRepo(projectId, { name });
+  }
+
+  /** Remove a repo from a project (and its on-disk subdir). */
+  removeProjectRepo(repoId: string): void {
+    this.projects.removeRepo(repoId);
+  }
+
+  /** Make a repo its project's primary (backs the legacy single-repo surfaces). */
+  setPrimaryProjectRepo(repoId: string): void {
+    this.projects.setPrimaryRepo(repoId);
+  }
+
+  /** A project's repos (primary first). */
+  listProjectRepos(projectId: string) {
+    return this.projects.listRepos(projectId);
   }
 
   /**
