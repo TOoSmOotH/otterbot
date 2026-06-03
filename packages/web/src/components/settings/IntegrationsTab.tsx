@@ -444,6 +444,8 @@ function AddIntegration({
   const { credentials, createCredential, createConnection, busy, error } = useConnectionsStore();
   const forgeAccounts = useProjectsStore((s) => s.forgeAccounts);
   const loadForgeAccounts = useProjectsStore((s) => s.loadForgeAccounts);
+  const addForgeAccount = useProjectsStore((s) => s.addForgeAccount);
+  const generateKey = useSshKeysStore((s) => s.generate);
   useEffect(() => void loadForgeAccounts(), [loadForgeAccounts]);
 
   const [typeKey, setTypeKey] = useState(connectionTypes[0]?.type ?? "");
@@ -462,6 +464,10 @@ function AddIntegration({
   const [allAgents, setAllAgents] = useState(false);
   const [assignTo, setAssignTo] = useState<Set<string>>(new Set());
   const [step, setStep] = useState(0);
+  // GitHub Git-account sub-state (the account step for github).
+  const [gitMode, setGitMode] = useState<"existing" | "new">(forgeAccounts.length ? "existing" : "new");
+  const [gitDraft, setGitDraft] = useState<GitDraft>(emptyGitDraft());
+  const [gitPubKey, setGitPubKey] = useState<string | null>(null);
 
   const compatibleCreds = credentials.filter((c) => c.type === def?.credentialType);
 
@@ -486,7 +492,26 @@ function AddIntegration({
     setCredId("");
     setCredLabel("");
     setCredValues({});
+    setGitMode(forgeAccounts.length ? "existing" : "new");
+    setGitDraft(emptyGitDraft());
+    setGitPubKey(null);
   };
+
+  // Next on the GitHub "new account" sub-step creates the Git account (and shows
+  // its public key) instead of advancing; otherwise Next just advances.
+  const gitAccountId = (config.gitAccountId as string | undefined) ?? undefined;
+  const needsGitCreate = stepKey === "account" && def?.type === "github" && gitMode === "new" && !gitAccountId;
+  const createGit = async () => {
+    const res = await createGitAccount(gitDraft, addForgeAccount, generateKey);
+    if (res) {
+      await loadForgeAccounts();
+      setConfig({ ...config, gitAccountId: res.id });
+      setGitMode("existing");
+      setGitPubKey(res.publicKey);
+    }
+  };
+  // Can't leave the GitHub account step until a Git account is chosen/created.
+  const blockedOnGit = stepKey === "account" && def?.type === "github" && !gitAccountId && !needsGitCreate;
 
   const submit = async () => {
     if (!def) return;
@@ -573,14 +598,63 @@ function AddIntegration({
         </>
       )}
 
-      {/* --- Step: Account --- */}
+      {/* --- Step: Account (GitHub → a Git account) --- */}
       {stepKey === "account" && def?.type === "github" && (
-        <GitAccountChooser
-          value={config.gitAccountId as string | undefined}
-          onChange={(id) => setConfig({ ...config, gitAccountId: id })}
-          forgeAccounts={forgeAccounts}
-          reloadForge={loadForgeAccounts}
-        />
+        <div style={{ ...card, background: "rgb(var(--bg))", gap: 8 }}>
+          <p style={hint}>
+            A Git account bundles the API token, transport, and (for SSH) a key. GitHub uses a Git
+            account — SSH keys attach to one here, not to the integration directly.
+          </p>
+          <div style={{ display: "flex", gap: 12 }}>
+            <label style={radio}>
+              <input
+                type="radio"
+                checked={gitMode === "existing"}
+                onChange={() => setGitMode("existing")}
+                disabled={forgeAccounts.length === 0}
+              />
+              Reuse existing
+            </label>
+            <label style={radio}>
+              <input
+                type="radio"
+                checked={gitMode === "new"}
+                onChange={() => {
+                  setGitMode("new");
+                  setConfig({ ...config, gitAccountId: undefined });
+                  setGitPubKey(null);
+                }}
+              />
+              New Git account
+            </label>
+          </div>
+
+          {gitMode === "existing" ? (
+            <select
+              value={gitAccountId ?? ""}
+              onChange={(e) => setConfig({ ...config, gitAccountId: e.target.value || undefined })}
+              style={input}
+            >
+              <option value="">Select a Git account…</option>
+              {forgeAccounts.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.label} · {a.gitTransport === "ssh" ? "SSH" : "HTTPS"}
+                </option>
+              ))}
+            </select>
+          ) : gitAccountId ? (
+            <span style={{ fontSize: 13 }}>✓ Git account created — press Next to continue.</span>
+          ) : (
+            <GitAccountFields value={gitDraft} onChange={setGitDraft} />
+          )}
+
+          {gitPubKey && (
+            <div style={{ ...card, gap: 6 }}>
+              <span style={{ fontSize: 12, fontWeight: 600 }}>Public key — add it to the forge:</span>
+              <textarea readOnly style={{ ...input, minHeight: 60, fontFamily: "monospace" }} value={gitPubKey} />
+            </div>
+          )}
+        </div>
       )}
       {stepKey === "account" && def?.type !== "github" && def?.credentialType && (
         <div style={{ ...card, background: "rgb(var(--bg))" }}>
@@ -682,8 +756,12 @@ function AddIntegration({
             <button style={primary} disabled={busy} onClick={() => void submit()}>
               {busy ? "Saving…" : "Create integration"}
             </button>
+          ) : needsGitCreate ? (
+            <button style={primary} disabled={busy || !gitDraft.token} onClick={() => void createGit()}>
+              {busy ? "Creating…" : "Create Git account"}
+            </button>
           ) : (
-            <button style={primary} disabled={!typeKey} onClick={() => setStep(clamped + 1)}>
+            <button style={primary} disabled={!typeKey || blockedOnGit} onClick={() => setStep(clamped + 1)}>
               Next
             </button>
           )}
@@ -874,91 +952,6 @@ function GitAccountFields({ value, onChange }: { value: GitDraft; onChange: (d: 
         </div>
       )}
     </>
-  );
-}
-
-/**
- * Picks the Git account a GitHub integration uses — reuse an existing one or
- * create a new one inline. A Git account bundles the token + transport + SSH
- * key, so it (not a standalone SSH key) is what GitHub points at.
- */
-function GitAccountChooser({
-  value,
-  onChange,
-  forgeAccounts,
-  reloadForge,
-}: {
-  value: string | undefined;
-  onChange: (id: string | undefined) => void;
-  forgeAccounts: Array<{ id: string; label: string; gitTransport: "https" | "ssh" }>;
-  reloadForge: () => Promise<void>;
-}) {
-  const addForgeAccount = useProjectsStore((s) => s.addForgeAccount);
-  const generateKey = useSshKeysStore((s) => s.generate);
-  const [mode, setMode] = useState<"existing" | "new">(forgeAccounts.length ? "existing" : "new");
-  const [draft, setDraft] = useState<GitDraft>(emptyGitDraft());
-  const [busy, setBusy] = useState(false);
-  const [pubKey, setPubKey] = useState<string | null>(null);
-
-  const create = async () => {
-    setBusy(true);
-    try {
-      const res = await createGitAccount(draft, addForgeAccount, generateKey);
-      if (res) {
-        await reloadForge();
-        onChange(res.id);
-        setMode("existing");
-        if (res.publicKey) setPubKey(res.publicKey);
-        setDraft(emptyGitDraft());
-      }
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <div style={{ ...card, background: "rgb(var(--bg))", gap: 8 }}>
-      <span style={{ fontSize: 12, opacity: 0.8 }}>Git account</span>
-      <p style={hint}>
-        A Git account bundles the API token, transport, and (for SSH) a key. GitHub uses a Git
-        account — SSH keys attach to one here, not to the integration directly.
-      </p>
-      <div style={{ display: "flex", gap: 12 }}>
-        <label style={radio}>
-          <input type="radio" checked={mode === "existing"} onChange={() => setMode("existing")} disabled={forgeAccounts.length === 0} />
-          Reuse existing
-        </label>
-        <label style={radio}>
-          <input type="radio" checked={mode === "new"} onChange={() => setMode("new")} />
-          New Git account
-        </label>
-      </div>
-
-      {mode === "existing" ? (
-        <select value={value ?? ""} onChange={(e) => onChange(e.target.value || undefined)} style={input}>
-          <option value="">None (token-only — pick or create a Git account for git push/PR)</option>
-          {forgeAccounts.map((a) => (
-            <option key={a.id} value={a.id}>
-              {a.label} · {a.gitTransport === "ssh" ? "SSH" : "HTTPS"}
-            </option>
-          ))}
-        </select>
-      ) : (
-        <>
-          <GitAccountFields value={draft} onChange={setDraft} />
-          <button style={ghost} disabled={busy || !draft.token} onClick={() => void create()}>
-            {busy ? "Creating…" : "Create Git account"}
-          </button>
-        </>
-      )}
-
-      {pubKey && (
-        <div style={{ ...card, gap: 6 }}>
-          <span style={{ fontSize: 12, fontWeight: 600 }}>Public key — add it to the forge:</span>
-          <textarea readOnly style={{ ...input, minHeight: 60, fontFamily: "monospace" }} value={pubKey} />
-        </div>
-      )}
-    </div>
   );
 }
 
