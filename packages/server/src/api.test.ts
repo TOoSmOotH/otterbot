@@ -664,4 +664,59 @@ describe("HTTP API (e2e)", () => {
     });
     expect(delLast.statusCode).toBe(400);
   });
+
+  it("a Git-account-backed github connection gives an agent a token + gitSsh", async () => {
+    // 1. A reusable SSH key.
+    const key = await app.inject({
+      method: "POST",
+      url: "/api/ssh-keys",
+      payload: { label: "gh-key", mode: "generate" },
+    });
+    const keyId = (key.json() as { id: string }).id;
+
+    // 2. A GitHub Git account using SSH transport + that key.
+    const acct = await app.inject({
+      method: "POST",
+      url: "/api/forge-accounts",
+      payload: {
+        provider: "github",
+        label: "gh-acct",
+        baseUrl: "https://github.com",
+        token: "ghp_test_token",
+        username: "bot",
+        gitTransport: "ssh",
+        sshKeyId: keyId,
+      },
+    });
+    const accountId = (acct.json() as { id: string }).id;
+
+    // 3. A github connection that references the Git account.
+    const conn = await app.inject({
+      method: "POST",
+      url: "/api/connections",
+      payload: { type: "github", label: "gh", config: { gitAccountId: accountId } },
+    });
+    const connId = (conn.json() as { id: string }).id;
+
+    // 4. An agent with the gh-auth capability, assigned the connection.
+    await app.inject({ method: "POST", url: "/api/agents", payload: { displayName: "GH Agent" } });
+    await app.inject({
+      method: "POST",
+      url: "/api/agents/gh-agent/skills/install",
+      payload: { catalogId: "gh-auth" },
+    });
+    await app.inject({
+      method: "POST",
+      url: "/api/agents/gh-agent/connections",
+      payload: { connectionId: connId },
+    });
+
+    // 5. The orchestrator resolves the identity for the agent.
+    const got = stack.orch.gitSshForAgentTest("gh-agent");
+    expect(got).not.toBeNull();
+    expect(got!.keyPath).toMatch(/\/id$/);
+    const secrets = stack.orch.scopedSecretsForAgentTest("gh-agent");
+    expect(secrets.get("GITHUB_TOKEN")?.value).toBe("ghp_test_token");
+    expect(secrets.get("GITHUB_TOKEN")?.scope).toBe("cap:gh-auth");
+  });
 });

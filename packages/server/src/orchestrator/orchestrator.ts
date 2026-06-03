@@ -39,7 +39,7 @@ import {
   writeOpencodeConfig,
   type OpencodeProviderEntry,
 } from "../integrations/opencode-config.js";
-import { sharedCodingAuthDir } from "../integrations/shell.js";
+import { sharedCodingAuthDir, type GitSshSetup } from "../integrations/shell.js";
 import { setDefaultContext } from "../runtime/default-agent.js";
 import { MessageBus } from "../bus/bus.js";
 import { createTransport } from "../bus/transports/factory.js";
@@ -845,12 +845,60 @@ export class Orchestrator {
   private connectionSecretsForAgent(agentId: string): Map<string, ScopedSecret> {
     const out = new Map<string, ScopedSecret>();
     for (const conn of this.connectionStore.connectionsForAgent(agentId)) {
-      if (isChatConnectionType(conn.type) || !conn.credentialId) continue;
+      if (isChatConnectionType(conn.type)) continue;
+      // GitHub connection backed by a Git account → inject the account's API
+      // token as GITHUB_TOKEN (gh-auth scoped), alongside the SSH key handled by
+      // gitSshForAgent. Token-only github connections still use credentialId.
+      if (conn.type === "github" && typeof conn.config.gitAccountId === "string") {
+        const account = this.forge.getAccount(conn.config.gitAccountId);
+        if (account?.token) out.set("GITHUB_TOKEN", { value: account.token, scope: "cap:gh-auth" });
+        continue;
+      }
+      if (!conn.credentialId) continue;
       for (const [key, entry] of this.credentials.scopedSecretsFor(conn.credentialId)) {
         out.set(key, entry);
       }
     }
     return out;
+  }
+
+  /**
+   * The SSH identity for an agent's first Git-account-backed github connection,
+   * materialized for in-sandbox git-over-SSH, or null. Only ssh-transport
+   * accounts with a usable key qualify; token-only connections return null.
+   */
+  private gitSshForAgent(agentId: string): GitSshSetup | null {
+    let chosen: GitSshSetup | null = null;
+    let seen = 0;
+    for (const conn of this.connectionStore.connectionsForAgent(agentId)) {
+      if (conn.type !== "github" || typeof conn.config.gitAccountId !== "string") continue;
+      const account = this.forge.getAccount(conn.config.gitAccountId);
+      if (!account || account.gitTransport !== "ssh") continue;
+      const gc = this.forge.gitContextFor(account);
+      if (!gc.sshKeyPath) continue;
+      seen++;
+      if (!chosen) {
+        chosen = {
+          keyPath: gc.sshKeyPath,
+          knownHostsPath: gc.knownHostsPath,
+          committer: gc.committer,
+          signingKeyPath: gc.signingKeyPath,
+        };
+      }
+    }
+    if (seen > 1)
+      console.warn(
+        `[connections] agent ${agentId} has ${seen} git-account github connections; using the first.`
+      );
+    return chosen;
+  }
+
+  /** Test-only accessors for the connection→identity resolution. */
+  gitSshForAgentTest(agentId: string): GitSshSetup | null {
+    return this.gitSshForAgent(agentId);
+  }
+  scopedSecretsForAgentTest(agentId: string): Map<string, ScopedSecret> {
+    return this.connectionSecretsForAgent(agentId);
   }
 
   /** MCP server configs from an agent's assigned `mcp` connections. */
