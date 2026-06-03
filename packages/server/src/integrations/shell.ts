@@ -121,6 +121,35 @@ function buildEnv(
   return env;
 }
 
+/**
+ * Env that points git at a bound SSH key for transport + (optional) signing.
+ * `keyDir` is the in-sandbox HOME `.ssh` dir (`/workspace/.ssh` on bwrap, the
+ * real workspace `.ssh` on macOS where paths aren't remapped).
+ */
+function gitSshEnv(gitSsh: GitSshSetup, keyDir: string): Record<string, string> {
+  const keyPath = `${keyDir}/id_ed25519`;
+  const known = gitSsh.knownHostsPath ? ` -o UserKnownHostsFile=${keyDir}/known_hosts` : "";
+  const env: Record<string, string> = {
+    GIT_SSH_COMMAND: `ssh -i ${keyPath} -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new${known}`,
+  };
+  if (gitSsh.committer) {
+    env.GIT_AUTHOR_NAME = gitSsh.committer.name;
+    env.GIT_AUTHOR_EMAIL = gitSsh.committer.email;
+    env.GIT_COMMITTER_NAME = gitSsh.committer.name;
+    env.GIT_COMMITTER_EMAIL = gitSsh.committer.email;
+  }
+  if (gitSsh.signingKeyPath) {
+    env.GIT_CONFIG_COUNT = "3";
+    env.GIT_CONFIG_KEY_0 = "gpg.format";
+    env.GIT_CONFIG_VALUE_0 = "ssh";
+    env.GIT_CONFIG_KEY_1 = "user.signingkey";
+    env.GIT_CONFIG_VALUE_1 = `${keyDir}/id_ed25519.pub`;
+    env.GIT_CONFIG_KEY_2 = "commit.gpgsign";
+    env.GIT_CONFIG_VALUE_2 = "true";
+  }
+  return env;
+}
+
 // --- Shared coding-CLI tools + credentials ---------------------------------
 //
 // The coding CLIs (claude/codex/gemini/opencode) are installed ONCE into a
@@ -204,6 +233,22 @@ interface SpawnPlan {
   cwd?: string;
 }
 
+/**
+ * A Git account's SSH identity to expose for git-over-SSH inside the sandbox.
+ * The private key is bound **read-only** (never copied into the workspace) and
+ * only when an agent is explicitly assigned a Git-account-backed connection.
+ */
+export interface GitSshSetup {
+  /** Host path to the materialized private key (0600). */
+  keyPath: string;
+  /** Host path to a known_hosts file, if any. */
+  knownHostsPath?: string;
+  /** Commit author/committer identity. */
+  committer?: { name: string; email: string };
+  /** Host path to the public key used for SSH commit signing, when enabled. */
+  signingKeyPath?: string;
+}
+
 export interface SandboxOpts {
   /**
    * Interactive PTY session. Skips bwrap's `--new-session` so the PTY the
@@ -226,6 +271,12 @@ export interface SandboxOpts {
    * but cannot modify it. bwrap only; sandbox-exec does not enforce this.
    */
   projectReadOnly?: boolean;
+  /**
+   * Expose a Git account's SSH key for git-over-SSH inside the sandbox. Binds
+   * the key read-only at `~/.ssh/id_ed25519` and sets `GIT_SSH_COMMAND` (+ commit
+   * signing). Opt-in per connection assignment; capability-gated upstream.
+   */
+  gitSsh?: GitSshSetup;
   /**
    * Where the command starts. `"project"` requires `projectWorkspacePath` and starts
    * the command inside the shared tree; anything else starts in `/workspace`.
@@ -294,6 +345,18 @@ function bwrapPlan(
   if (opts.projectWorkspacePath) {
     args.push(opts.projectReadOnly ? "--ro-bind" : "--bind", opts.projectWorkspacePath, PROJECT_MOUNT);
   }
+  // A Git account's SSH key, when the agent has a git-account-backed connection.
+  // Bound read-only under HOME/.ssh; the key is never written into the workspace.
+  if (opts.gitSsh) {
+    args.push("--ro-bind", opts.gitSsh.keyPath, "/workspace/.ssh/id_ed25519");
+    if (opts.gitSsh.knownHostsPath) {
+      args.push("--ro-bind-try", opts.gitSsh.knownHostsPath, "/workspace/.ssh/known_hosts");
+    }
+    if (opts.gitSsh.signingKeyPath) {
+      args.push("--ro-bind-try", opts.gitSsh.signingKeyPath, "/workspace/.ssh/id_ed25519.pub");
+    }
+    Object.assign(env, gitSshEnv(opts.gitSsh, "/workspace/.ssh"));
+  }
   const startDir = opts.startIn === "project" && opts.projectWorkspacePath ? PROJECT_MOUNT : "/workspace";
   args.push(
     "--chdir", startDir,
@@ -341,7 +404,10 @@ function sandboxExecPlan(
   return {
     file: "/usr/bin/sandbox-exec",
     args: ["-p", profile, ...innerArgv],
-    env: buildEnv(workspaceDir, secrets, toolsBin),
+    env: {
+      ...buildEnv(workspaceDir, secrets, toolsBin),
+      ...(opts.gitSsh ? gitSshEnv(opts.gitSsh, dirname(opts.gitSsh.keyPath)) : {}),
+    },
     // sandbox-exec does not remap paths, so the project's real host path is the
     // working directory when starting in the shared tree.
     cwd: opts.startIn === "project" && opts.projectWorkspacePath ? opts.projectWorkspacePath : workspaceDir,

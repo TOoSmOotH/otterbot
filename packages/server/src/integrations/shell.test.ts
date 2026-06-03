@@ -123,4 +123,52 @@ describe("buildSandboxPlan project binding", () => {
       rmSync(repo, { recursive: true, force: true });
     }
   });
+
+  it("binds the git SSH key read-only and sets GIT_SSH_COMMAND when gitSsh is set", () => {
+    const dir = mkdtempSync(join(tmpdir(), "otter-ws-"));
+    const key = join(mkdtempSync(join(tmpdir(), "otter-key-")), "id_ed25519");
+    writeFileSync(key, "PRIVATE", { mode: 0o600 });
+    try {
+      const built = buildSandboxPlan(dir, new Map(), ["/bin/sh", "-c", "true"], {
+        gitSsh: { keyPath: key },
+      });
+      if ("error" in built) return; // no OS sandbox here
+      const { plan, sandbox } = built;
+      if (sandbox === "bwrap") {
+        const i = plan.args.indexOf(key);
+        expect(i).toBeGreaterThan(-1);
+        expect(plan.args[i - 1]).toBe("--ro-bind");
+        expect(plan.args[i + 1]).toBe("/workspace/.ssh/id_ed25519");
+        const envIdx = plan.args.indexOf("GIT_SSH_COMMAND");
+        expect(envIdx).toBeGreaterThan(-1);
+        expect(plan.args[envIdx + 1]).toContain("/workspace/.ssh/id_ed25519");
+      } else {
+        expect(plan.env.GIT_SSH_COMMAND).toContain(key);
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+      rmSync(key, { force: true });
+    }
+  });
+
+  it("adds SSH commit-signing git config only when a signing key is given", () => {
+    const dir = mkdtempSync(join(tmpdir(), "otter-ws-"));
+    const key = join(mkdtempSync(join(tmpdir(), "otter-key-")), "id_ed25519");
+    writeFileSync(key, "PRIVATE", { mode: 0o600 });
+    try {
+      const withSign = buildSandboxPlan(dir, new Map(), ["/bin/sh", "-c", "true"], {
+        gitSsh: { keyPath: key, signingKeyPath: `${key}.pub` },
+      });
+      const without = buildSandboxPlan(dir, new Map(), ["/bin/sh", "-c", "true"], {
+        gitSsh: { keyPath: key },
+      });
+      if ("error" in withSign || "error" in without) return;
+      const flat = (p: typeof withSign) => ("plan" in p ? p.plan.args.join(" ") + JSON.stringify(p.plan.env) : "");
+      expect(flat(withSign)).toContain("commit.gpgsign");
+      expect(flat(without)).not.toContain("commit.gpgsign");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+      rmSync(key, { force: true });
+    }
+  });
 });
