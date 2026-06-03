@@ -160,6 +160,13 @@ export const credentials = sqliteTable("credentials", {
   label: text("label").notNull(),
   /** Credential kind — see the server connection registry (slack/matrix/github/…). */
   type: text("type").notNull(),
+  /**
+   * Non-secret account fields (the secret half lives in `global_secrets` under
+   * `cred:<id>:<KEY>`). Empty for simple secret bundles; holds account metadata
+   * for absorbed types — a git account's provider/baseUrl/transport/committer,
+   * an `ssh-key`'s public key + fingerprint, etc.
+   */
+  config: text("config", { mode: "json" }).$type<Record<string, unknown>>().notNull().default({}),
   createdAt: text("created_at")
     .notNull()
     .$defaultFn(() => new Date().toISOString()),
@@ -181,6 +188,8 @@ export const connections = sqliteTable("connections", {
   config: text("config", { mode: "json" }).$type<Record<string, unknown>>().notNull().default({}),
   /** References `credentials.id`; null when the connector needs no credential. */
   credentialId: text("credential_id"),
+  /** When true, the binding applies to every agent (instance-wide), not just `connectionAssignments`. */
+  allAgents: integer("all_agents", { mode: "boolean" }).notNull().default(false),
   createdAt: text("created_at")
     .notNull()
     .$defaultFn(() => new Date().toISOString()),

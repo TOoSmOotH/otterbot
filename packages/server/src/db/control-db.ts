@@ -98,6 +98,7 @@ function ensureControlTables(sqlite: Database.Database) {
       id TEXT PRIMARY KEY,
       label TEXT NOT NULL,
       type TEXT NOT NULL,
+      config TEXT NOT NULL DEFAULT '{}',
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     )`,
@@ -107,6 +108,7 @@ function ensureControlTables(sqlite: Database.Database) {
       type TEXT NOT NULL,
       config TEXT NOT NULL DEFAULT '{}',
       credential_id TEXT,
+      all_agents INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     )`,
@@ -233,6 +235,9 @@ function ensureControlTables(sqlite: Database.Database) {
   // swallow the "duplicate column name" error when the column is already there.
   addColumnIfMissing(sqlite, "forge_accounts", "ssh_key_id", "TEXT");
   addColumnIfMissing(sqlite, "projects", "workspace_path", "TEXT");
+  // Unified Integrations model: non-secret account config + instance-wide bindings.
+  addColumnIfMissing(sqlite, "credentials", "config", "TEXT NOT NULL DEFAULT '{}'");
+  addColumnIfMissing(sqlite, "connections", "all_agents", "INTEGER NOT NULL DEFAULT 0");
 
   backfillProjectRepos(sqlite);
 }

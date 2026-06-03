@@ -43,6 +43,7 @@ export class ConnectionStore {
     label: string;
     config?: Record<string, unknown>;
     credentialId?: string | null;
+    allAgents?: boolean;
     id?: string;
   }): Connection {
     if (!getConnectionTypeDef(input.type)) throw new Error(`unknown connection type: ${input.type}`);
@@ -56,6 +57,7 @@ export class ConnectionStore {
         type: input.type,
         config: input.config ?? {},
         credentialId: input.credentialId ?? null,
+        allAgents: input.allAgents ?? false,
         createdAt: now,
         updatedAt: now,
       })
@@ -65,7 +67,12 @@ export class ConnectionStore {
 
   update(
     id: string,
-    patch: { label?: string; config?: Record<string, unknown>; credentialId?: string | null }
+    patch: {
+      label?: string;
+      config?: Record<string, unknown>;
+      credentialId?: string | null;
+      allAgents?: boolean;
+    }
   ): Connection | null {
     const existing = this.get(id);
     if (!existing) return null;
@@ -73,6 +80,7 @@ export class ConnectionStore {
     if (patch.label !== undefined) sets.label = patch.label;
     if (patch.config !== undefined) sets.config = patch.config;
     if (patch.credentialId !== undefined) sets.credentialId = patch.credentialId;
+    if (patch.allAgents !== undefined) sets.allAgents = patch.allAgents;
     this.control.db.update(controlSchema.connections).set(sets).where(eq(controlSchema.connections.id, id)).run();
     return this.get(id);
   }
@@ -165,6 +173,7 @@ export class ConnectionStore {
     type: string;
     config: Record<string, unknown>;
     credentialId: string | null;
+    allAgents: boolean;
     createdAt: string;
     updatedAt: string;
   }): Connection {
@@ -175,6 +184,7 @@ export class ConnectionStore {
       config: r.config ?? {},
       credentialId: r.credentialId ?? null,
       assignedAgentIds: this.assigneesOf(r.id),
+      allAgents: r.allAgents ?? false,
       createdAt: r.createdAt,
       updatedAt: r.updatedAt,
     };

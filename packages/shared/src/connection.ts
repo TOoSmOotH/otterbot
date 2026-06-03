@@ -51,6 +51,13 @@ export interface Credential {
   fieldsPresent: Record<string, boolean>;
   /** Masked previews per field (e.g. `xoxb…a1b2`), like {@link ProviderAccount.apiKeyHint}. */
   hints?: Record<string, string>;
+  /**
+   * Non-secret account metadata (the secret half lives in `global_secrets`).
+   * Empty `{}` for plain secret bundles; for absorbed account types it holds the
+   * account fields (a git account's provider/transport/committer, an `ssh-key`'s
+   * public key + fingerprint…).
+   */
+  config: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
 }
@@ -73,8 +80,14 @@ export interface Connection {
   config: Record<string, unknown>;
   /** The {@link Credential} this connection authenticates with; null when none is needed. */
   credentialId: string | null;
-  /** Agent ids this connection is assigned to (resolved from the link table). */
+  /** Agent ids this connection is explicitly assigned to (resolved from the link table). */
   assignedAgentIds: string[];
+  /**
+   * When true the binding applies to every agent (instance-wide), independent of
+   * `assignedAgentIds` — the model for absorbed generic secrets and the legacy
+   * all-agents Proxmox/SSH config. Defaults to false.
+   */
+  allAgents: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -82,3 +95,21 @@ export interface Connection {
 /** Re-export the config shapes a connection's `config` may take, for convenience. */
 export type ChatConnectionConfig = ChannelBotConfig;
 export type McpConnectionConfig = McpServerConfig;
+
+/**
+ * Unified "Integrations" vocabulary (the user-facing model that replaces the
+ * Credentials + Connections tabs). The two-tier shape is unchanged underneath:
+ *
+ * - An {@link Account} is the reusable identity + secret (was a {@link Credential}).
+ *   Beyond chat/smtp tokens it now absorbs git/forge accounts, reusable SSH keys,
+ *   and generic instance-wide secrets.
+ * - A {@link Binding} is one use of an account + who it's for (was a
+ *   {@link Connection}). It targets specific agents (via `assignedAgentIds`) or
+ *   every agent (via {@link Binding.allAgents}, for instance-wide secrets).
+ *
+ * The names are aliases during the transition so existing call sites keep working.
+ */
+export type Account = Credential;
+export type Binding = Connection;
+/** A service kind in the unified registry (account or binding type). */
+export type IntegrationType = string;

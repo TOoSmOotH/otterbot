@@ -43,7 +43,7 @@ export class CredentialStore {
   /** All credentials, masked (no secret values). */
   list(): Credential[] {
     const rows = this.control.db.select().from(controlSchema.credentials).all();
-    return rows.map((r) => this.toMasked(r.id, r.type, r.label, r.createdAt, r.updatedAt));
+    return rows.map((r) => this.toMasked(r.id, r.type, r.label, r.config, r.createdAt, r.updatedAt));
   }
 
   /** One credential, masked. */
@@ -53,7 +53,7 @@ export class CredentialStore {
       .from(controlSchema.credentials)
       .where(eq(controlSchema.credentials.id, id))
       .get();
-    return r ? this.toMasked(r.id, r.type, r.label, r.createdAt, r.updatedAt) : null;
+    return r ? this.toMasked(r.id, r.type, r.label, r.config, r.createdAt, r.updatedAt) : null;
   }
 
   rawType(id: string): CredentialType | null {
@@ -85,29 +85,46 @@ export class CredentialStore {
     return out;
   }
 
-  create(input: { type: CredentialType; label: string; secrets: Record<string, string>; id?: string }): Credential {
+  create(input: {
+    type: CredentialType;
+    label: string;
+    secrets: Record<string, string>;
+    config?: Record<string, unknown>;
+    id?: string;
+  }): Credential {
     const def = getCredentialTypeDef(input.type);
     if (!def) throw new Error(`unknown credential type: ${input.type}`);
     const id = this.uniqueId(input.id ?? input.label ?? input.type);
     const now = new Date().toISOString();
     this.control.db
       .insert(controlSchema.credentials)
-      .values({ id, label: input.label || input.type, type: input.type, createdAt: now, updatedAt: now })
+      .values({
+        id,
+        label: input.label || input.type,
+        type: input.type,
+        config: input.config ?? {},
+        createdAt: now,
+        updatedAt: now,
+      })
       .run();
     this.writeSecrets(id, input.type, input.secrets);
     return this.get(id)!;
   }
 
-  /** Update label and/or secrets. Blank/omitted secret values keep the stored one. */
-  update(id: string, patch: { label?: string; secrets?: Record<string, string> }): Credential | null {
+  /** Update label, non-secret config, and/or secrets. Blank/omitted secret values keep the stored one. */
+  update(
+    id: string,
+    patch: { label?: string; config?: Record<string, unknown>; secrets?: Record<string, string> }
+  ): Credential | null {
     const r = this.control.db
       .select()
       .from(controlSchema.credentials)
       .where(eq(controlSchema.credentials.id, id))
       .get();
     if (!r) return null;
-    const sets: Record<string, string> = { updatedAt: new Date().toISOString() };
+    const sets: Record<string, unknown> = { updatedAt: new Date().toISOString() };
     if (patch.label !== undefined) sets.label = patch.label;
+    if (patch.config !== undefined) sets.config = patch.config;
     this.control.db.update(controlSchema.credentials).set(sets).where(eq(controlSchema.credentials.id, id)).run();
     if (patch.secrets) this.writeSecrets(id, r.type, patch.secrets);
     return this.get(id);
@@ -149,6 +166,7 @@ export class CredentialStore {
     id: string,
     type: CredentialType,
     label: string,
+    config: Record<string, unknown> | null,
     createdAt: string,
     updatedAt: string
   ): Credential {
@@ -160,7 +178,7 @@ export class CredentialStore {
       fieldsPresent[key] = present;
       if (present) hints[key] = mask(stored.get(key)!);
     }
-    return { id, label, type, fieldsPresent, hints, createdAt, updatedAt };
+    return { id, label, type, fieldsPresent, hints, config: config ?? {}, createdAt, updatedAt };
   }
 
   private uniqueId(base: string): string {

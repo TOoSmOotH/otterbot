@@ -64,6 +64,7 @@ import { SecretsStore, type ScopedSecret } from "../secrets/secrets-store.js";
 import { GlobalSecretsStore } from "../secrets/global-secrets-store.js";
 import { CredentialStore } from "../connections/credential-store.js";
 import { ConnectionStore } from "../connections/connection-store.js";
+import { IntegrationStore } from "../connections/integration-store.js";
 import {
   listConnectionTypes,
   listCredentialTypes,
@@ -485,6 +486,8 @@ export class Orchestrator {
   private readonly credentials: CredentialStore;
   /** Named connectors that reference a credential (Settings → Connections). */
   private readonly connectionStore: ConnectionStore;
+  /** Unified facade over accounts + bindings (Settings → Integrations). */
+  private readonly integrations: IntegrationStore;
   private readonly services: AgentServices;
   /** Per-agent chat connectors, keyed by `${agentId}:${service}`. */
   private readonly connectors = new Map<string, TrackedConnector<ChannelConnector>>();
@@ -587,6 +590,7 @@ export class Orchestrator {
     this.globalSecrets = new GlobalSecretsStore(control);
     this.credentials = new CredentialStore(control, this.globalSecrets);
     this.connectionStore = new ConnectionStore(control);
+    this.integrations = new IntegrationStore(this.credentials, this.connectionStore);
     this.bus.setDeliver((agentId, msg) => {
       if (agentId === "*") {
         for (const rt of this.runtimes.values()) {
@@ -2500,12 +2504,7 @@ export class Orchestrator {
   }
   /** Delete a credential; refuses (returns false) while a connection references it unless forced. */
   deleteNamedCredential(id: string, force = false): { ok: boolean; error?: string } {
-    const referencing = this.connectionStore.list().filter((c) => c.credentialId === id);
-    if (referencing.length > 0 && !force) {
-      return { ok: false, error: `In use by ${referencing.length} connection(s).` };
-    }
-    for (const conn of referencing) this.connectionStore.update(conn.id, { credentialId: null });
-    return { ok: this.credentials.delete(id) };
+    return this.integrations.deleteAccount(id, { force });
   }
 
   listConnections() {
