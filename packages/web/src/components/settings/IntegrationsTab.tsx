@@ -170,17 +170,7 @@ function AddAccount({ onDone }: { onDone: () => void }) {
   const [pubKey, setPubKey] = useState<string | null>(null);
 
   // Git account fields
-  const [git, setGit] = useState({
-    provider: "github" as "github" | "gitea",
-    label: "",
-    baseUrl: "",
-    token: "",
-    username: "",
-    gitTransport: "https" as "https" | "ssh",
-    committerName: "",
-    committerEmail: "",
-    signCommits: false,
-  });
+  const [gitDraft, setGitDraft] = useState<GitDraft>(emptyGitDraft());
   // SSH key fields
   const [keyMode, setKeyMode] = useState<"generate" | "import">("generate");
   const [keyLabel, setKeyLabel] = useState("");
@@ -190,17 +180,7 @@ function AddAccount({ onDone }: { onDone: () => void }) {
     setBusy(true);
     try {
       if (kind === "git") {
-        const res = await addForgeAccount({
-          provider: git.provider,
-          label: git.label || git.provider,
-          baseUrl: git.baseUrl || undefined,
-          token: git.token,
-          username: git.username || undefined,
-          gitTransport: git.gitTransport,
-          committerName: git.committerName || undefined,
-          committerEmail: git.committerEmail || undefined,
-          signCommits: git.signCommits,
-        });
+        const res = await createGitAccount(gitDraft, addForgeAccount);
         if (res?.publicKey) {
           setPubKey(res.publicKey);
         } else {
@@ -241,62 +221,7 @@ function AddAccount({ onDone }: { onDone: () => void }) {
       </label>
 
       {kind === "git" ? (
-        <>
-          <label style={fieldLabel}>
-            Provider
-            <select
-              style={input}
-              value={git.provider}
-              onChange={(e) => setGit({ ...git, provider: e.target.value as "github" | "gitea" })}
-            >
-              <option value="github">GitHub</option>
-              <option value="gitea">Gitea</option>
-            </select>
-          </label>
-          <label style={fieldLabel}>
-            Label
-            <input style={input} value={git.label} onChange={(e) => setGit({ ...git, label: e.target.value })} />
-          </label>
-          {git.provider === "gitea" && (
-            <label style={fieldLabel}>
-              Base URL
-              <input style={input} value={git.baseUrl} placeholder="https://gitea.example.com" onChange={(e) => setGit({ ...git, baseUrl: e.target.value })} />
-            </label>
-          )}
-          <label style={fieldLabel}>
-            API token
-            <input style={input} type="password" value={git.token} onChange={(e) => setGit({ ...git, token: e.target.value })} />
-          </label>
-          <label style={fieldLabel}>
-            Bot username
-            <input style={input} value={git.username} onChange={(e) => setGit({ ...git, username: e.target.value })} />
-          </label>
-          <label style={fieldLabel}>
-            Git transport
-            <select
-              style={input}
-              value={git.gitTransport}
-              onChange={(e) => setGit({ ...git, gitTransport: e.target.value as "https" | "ssh" })}
-            >
-              <option value="https">HTTPS (token)</option>
-              <option value="ssh">SSH (managed key)</option>
-            </select>
-          </label>
-          <label style={fieldLabel}>
-            Committer name
-            <input style={input} value={git.committerName} onChange={(e) => setGit({ ...git, committerName: e.target.value })} />
-          </label>
-          <label style={fieldLabel}>
-            Committer email
-            <input style={input} value={git.committerEmail} onChange={(e) => setGit({ ...git, committerEmail: e.target.value })} />
-          </label>
-          {git.gitTransport === "ssh" && (
-            <label style={radio}>
-              <input type="checkbox" checked={git.signCommits} onChange={(e) => setGit({ ...git, signCommits: e.target.checked })} />
-              SSH-sign commits
-            </label>
-          )}
-        </>
+        <GitAccountFields value={gitDraft} onChange={setGitDraft} />
       ) : (
         <>
           <div style={{ display: "flex", gap: 12 }}>
@@ -542,7 +467,9 @@ function AddIntegration({
   const submit = async () => {
     if (!def) return;
     let credentialId: string | null = null;
-    if (def.credentialType) {
+    // GitHub authenticates through a Git account (config.gitAccountId), not a
+    // standalone token credential — so skip the generic credential step for it.
+    if (def.credentialType && def.type !== "github") {
       if (credMode === "existing") {
         credentialId = credId || compatibleCreds[0]?.id || null;
       } else if (credDef) {
@@ -588,7 +515,7 @@ function AddIntegration({
         <input style={input} value={label} placeholder={def?.label} onChange={(e) => setLabel(e.target.value)} />
       </label>
 
-      {def?.credentialType && (
+      {def?.credentialType && def.type !== "github" && (
         <div style={{ ...card, background: "rgb(var(--bg))" }}>
           <div style={{ display: "flex", gap: 12, marginBottom: 6 }}>
             <label style={radio}>
@@ -635,28 +562,12 @@ function AddIntegration({
       )}
 
       {def?.type === "github" && (
-        <>
-          <label style={fieldLabel}>
-            Git account (token + SSH key)
-            <select
-              value={(config.gitAccountId as string) ?? ""}
-              onChange={(e) => setConfig({ ...config, gitAccountId: e.target.value || undefined })}
-              style={input}
-            >
-              <option value="">Token account only (no git-over-SSH)</option>
-              {forgeAccounts.map((a) => (
-                <option key={a.id} value={a.id}>
-                  {a.label} · {a.gitTransport === "ssh" ? "SSH" : "HTTPS — no SSH key"}
-                </option>
-              ))}
-            </select>
-          </label>
-          {forgeAccounts.length === 0 && (
-            <span style={{ fontSize: 11, color: "rgb(var(--muted))" }}>
-              No Git accounts yet — add one under Accounts below (Transport: SSH for git-over-SSH).
-            </span>
-          )}
-        </>
+        <GitAccountChooser
+          value={config.gitAccountId as string | undefined}
+          onChange={(id) => setConfig({ ...config, gitAccountId: id })}
+          forgeAccounts={forgeAccounts}
+          reloadForge={loadForgeAccounts}
+        />
       )}
 
       {def &&
@@ -708,6 +619,240 @@ function AddIntegration({
 
 function chatChannelLabel(type: string): string {
   return type === "matrix" ? "Room ID" : "Channel ID";
+}
+
+/** Editable draft for a Git (forge) account, incl. how its SSH key is provided. */
+export type GitDraft = {
+  provider: "github" | "gitea";
+  label: string;
+  baseUrl: string;
+  token: string;
+  username: string;
+  gitTransport: "https" | "ssh";
+  committerName: string;
+  committerEmail: string;
+  signCommits: boolean;
+  /** For ssh transport: generate a managed key, or link a reusable SSH-key account. */
+  sshKeyMode: "generate" | "link";
+  sshKeyId: string;
+};
+
+export const emptyGitDraft = (): GitDraft => ({
+  provider: "github",
+  label: "",
+  baseUrl: "",
+  token: "",
+  username: "",
+  gitTransport: "https",
+  committerName: "",
+  committerEmail: "",
+  signCommits: false,
+  sshKeyMode: "generate",
+  sshKeyId: "",
+});
+
+/** Persist a {@link GitDraft} via the forge endpoint; returns id + public key. */
+async function createGitAccount(
+  d: GitDraft,
+  addForgeAccount: (input: {
+    provider: "github" | "gitea";
+    label: string;
+    baseUrl?: string;
+    token: string;
+    username?: string;
+    gitTransport?: "https" | "ssh";
+    committerName?: string;
+    committerEmail?: string;
+    signCommits?: boolean;
+    sshKeyId?: string | null;
+  }) => Promise<{ id: string; publicKey: string | null } | null>
+): Promise<{ id: string; publicKey: string | null } | null> {
+  return addForgeAccount({
+    provider: d.provider,
+    label: d.label || d.provider,
+    baseUrl: d.baseUrl || undefined,
+    token: d.token,
+    username: d.username || undefined,
+    gitTransport: d.gitTransport,
+    committerName: d.committerName || undefined,
+    committerEmail: d.committerEmail || undefined,
+    signCommits: d.signCommits,
+    sshKeyId: d.gitTransport === "ssh" && d.sshKeyMode === "link" ? d.sshKeyId || null : null,
+  });
+}
+
+/** Controlled fields for a Git account, including SSH-key choice on ssh transport. */
+function GitAccountFields({ value, onChange }: { value: GitDraft; onChange: (d: GitDraft) => void }) {
+  const keys = useSshKeysStore((s) => s.keys);
+  const loadKeys = useSshKeysStore((s) => s.load);
+  useEffect(() => void loadKeys(), [loadKeys]);
+  const set = (patch: Partial<GitDraft>) => onChange({ ...value, ...patch });
+  return (
+    <>
+      <label style={fieldLabel}>
+        Provider
+        <select style={input} value={value.provider} onChange={(e) => set({ provider: e.target.value as "github" | "gitea" })}>
+          <option value="github">GitHub</option>
+          <option value="gitea">Gitea</option>
+        </select>
+      </label>
+      <label style={fieldLabel}>
+        Label
+        <input style={input} value={value.label} onChange={(e) => set({ label: e.target.value })} />
+      </label>
+      {value.provider === "gitea" && (
+        <label style={fieldLabel}>
+          Base URL
+          <input style={input} value={value.baseUrl} placeholder="https://gitea.example.com" onChange={(e) => set({ baseUrl: e.target.value })} />
+        </label>
+      )}
+      <label style={fieldLabel}>
+        API token
+        <input style={input} type="password" value={value.token} onChange={(e) => set({ token: e.target.value })} />
+      </label>
+      <label style={fieldLabel}>
+        Bot username
+        <input style={input} value={value.username} onChange={(e) => set({ username: e.target.value })} />
+      </label>
+      <label style={fieldLabel}>
+        Git transport
+        <select style={input} value={value.gitTransport} onChange={(e) => set({ gitTransport: e.target.value as "https" | "ssh" })}>
+          <option value="https">HTTPS (token)</option>
+          <option value="ssh">SSH (key)</option>
+        </select>
+      </label>
+      <label style={fieldLabel}>
+        Committer name
+        <input style={input} value={value.committerName} onChange={(e) => set({ committerName: e.target.value })} />
+      </label>
+      <label style={fieldLabel}>
+        Committer email
+        <input style={input} value={value.committerEmail} onChange={(e) => set({ committerEmail: e.target.value })} />
+      </label>
+      {value.gitTransport === "ssh" && (
+        <div style={{ ...card, background: "rgb(var(--bg))", gap: 6 }}>
+          <span style={{ fontSize: 12, opacity: 0.8 }}>SSH key (for git-over-SSH)</span>
+          <div style={{ display: "flex", gap: 12 }}>
+            <label style={radio}>
+              <input type="radio" checked={value.sshKeyMode === "generate"} onChange={() => set({ sshKeyMode: "generate" })} />
+              Generate a managed key
+            </label>
+            <label style={radio}>
+              <input
+                type="radio"
+                checked={value.sshKeyMode === "link"}
+                onChange={() => set({ sshKeyMode: "link" })}
+                disabled={keys.length === 0}
+              />
+              Link an existing SSH key
+            </label>
+          </div>
+          {value.sshKeyMode === "link" ? (
+            <select style={input} value={value.sshKeyId} onChange={(e) => set({ sshKeyId: e.target.value })}>
+              <option value="">Select an SSH key…</option>
+              {keys.map((k) => (
+                <option key={k.id} value={k.id}>
+                  {k.label} · {k.fingerprint}
+                </option>
+              ))}
+            </select>
+          ) : (
+            keys.length === 0 && (
+              <span style={hint}>A new key is generated on save; you’ll get its public key to add to the forge.</span>
+            )
+          )}
+          <label style={radio}>
+            <input type="checkbox" checked={value.signCommits} onChange={(e) => set({ signCommits: e.target.checked })} />
+            SSH-sign commits
+          </label>
+        </div>
+      )}
+    </>
+  );
+}
+
+/**
+ * Picks the Git account a GitHub integration uses — reuse an existing one or
+ * create a new one inline. A Git account bundles the token + transport + SSH
+ * key, so it (not a standalone SSH key) is what GitHub points at.
+ */
+function GitAccountChooser({
+  value,
+  onChange,
+  forgeAccounts,
+  reloadForge,
+}: {
+  value: string | undefined;
+  onChange: (id: string | undefined) => void;
+  forgeAccounts: Array<{ id: string; label: string; gitTransport: "https" | "ssh" }>;
+  reloadForge: () => Promise<void>;
+}) {
+  const addForgeAccount = useProjectsStore((s) => s.addForgeAccount);
+  const [mode, setMode] = useState<"existing" | "new">(forgeAccounts.length ? "existing" : "new");
+  const [draft, setDraft] = useState<GitDraft>(emptyGitDraft());
+  const [busy, setBusy] = useState(false);
+  const [pubKey, setPubKey] = useState<string | null>(null);
+
+  const create = async () => {
+    setBusy(true);
+    try {
+      const res = await createGitAccount(draft, addForgeAccount);
+      if (res) {
+        await reloadForge();
+        onChange(res.id);
+        setMode("existing");
+        if (res.publicKey) setPubKey(res.publicKey);
+        setDraft(emptyGitDraft());
+      }
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div style={{ ...card, background: "rgb(var(--bg))", gap: 8 }}>
+      <span style={{ fontSize: 12, opacity: 0.8 }}>Git account</span>
+      <p style={hint}>
+        A Git account bundles the API token, transport, and (for SSH) a key. GitHub uses a Git
+        account — SSH keys attach to one here, not to the integration directly.
+      </p>
+      <div style={{ display: "flex", gap: 12 }}>
+        <label style={radio}>
+          <input type="radio" checked={mode === "existing"} onChange={() => setMode("existing")} disabled={forgeAccounts.length === 0} />
+          Reuse existing
+        </label>
+        <label style={radio}>
+          <input type="radio" checked={mode === "new"} onChange={() => setMode("new")} />
+          New Git account
+        </label>
+      </div>
+
+      {mode === "existing" ? (
+        <select value={value ?? ""} onChange={(e) => onChange(e.target.value || undefined)} style={input}>
+          <option value="">None (token-only — pick or create a Git account for git push/PR)</option>
+          {forgeAccounts.map((a) => (
+            <option key={a.id} value={a.id}>
+              {a.label} · {a.gitTransport === "ssh" ? "SSH" : "HTTPS"}
+            </option>
+          ))}
+        </select>
+      ) : (
+        <>
+          <GitAccountFields value={draft} onChange={setDraft} />
+          <button style={ghost} disabled={busy || !draft.token} onClick={() => void create()}>
+            {busy ? "Creating…" : "Create Git account"}
+          </button>
+        </>
+      )}
+
+      {pubKey && (
+        <div style={{ ...card, gap: 6 }}>
+          <span style={{ fontSize: 12, fontWeight: 600 }}>Public key — add it to the forge:</span>
+          <textarea readOnly style={{ ...input, minHeight: 60, fontFamily: "monospace" }} value={pubKey} />
+        </div>
+      )}
+    </div>
+  );
 }
 
 /** Bespoke chat config (channel + access gates). */
