@@ -11,6 +11,7 @@ import { useSecretsStore } from "../../stores/secrets-store";
 import { useAgentsStore } from "../../stores/agents-store";
 import { useProjectsStore } from "../../stores/projects-store";
 import { useSshKeysStore } from "../../stores/ssh-keys-store";
+import { Modal } from "../Modal";
 
 /**
  * Settings → Integrations. One tab that replaces the old Credentials +
@@ -60,12 +61,14 @@ export function IntegrationsTab() {
       </div>
 
       {adding && (
-        <AddIntegration
-          connectionTypes={connectionTypes}
-          credentialTypes={credentialTypes}
-          agents={agents.map((a) => ({ id: a.id, label: a.displayName }))}
-          onDone={() => setAdding(false)}
-        />
+        <Modal title="Add integration" onClose={() => setAdding(false)} maxWidth={680}>
+          <AddIntegration
+            connectionTypes={connectionTypes}
+            credentialTypes={credentialTypes}
+            agents={agents.map((a) => ({ id: a.id, label: a.displayName }))}
+            onDone={() => setAdding(false)}
+          />
+        </Modal>
       )}
 
       {/* --- Integrations (bindings) --- */}
@@ -129,7 +132,11 @@ function AccountsSection({
         integrations. Most are created inline when you add an integration; Git accounts and SSH keys
         are added here. Stored encrypted and never shown back.
       </p>
-      {adding && <AddAccount onDone={() => setAdding(false)} />}
+      {adding && (
+        <Modal title="Add account" onClose={() => setAdding(false)} maxWidth={560}>
+          <AddAccount onDone={() => setAdding(false)} />
+        </Modal>
+      )}
       {credentials.length === 0 && <p style={hint}>No accounts yet.</p>}
       {credentials.map((cred) => (
         <div key={cred.id} style={row}>
@@ -200,7 +207,7 @@ function AddAccount({ onDone }: { onDone: () => void }) {
 
   if (pubKey) {
     return (
-      <div style={card}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
         <span style={{ fontSize: 13, fontWeight: 600 }}>Public key — add it to the host/forge:</span>
         <textarea readOnly style={{ ...input, minHeight: 70, fontFamily: "monospace" }} value={pubKey} />
         <button style={primary} onClick={onDone}>
@@ -211,7 +218,7 @@ function AddAccount({ onDone }: { onDone: () => void }) {
   }
 
   return (
-    <div style={card}>
+    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
       <label style={fieldLabel}>
         Account kind
         <select style={input} value={kind} onChange={(e) => setKind(e.target.value as "git" | "ssh-key")}>
@@ -549,7 +556,7 @@ function AddIntegration({
   const onLast = clamped === steps.length - 1;
 
   return (
-    <div style={card}>
+    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
       {/* Step indicator */}
       <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
         {steps.map((s, i) => (
