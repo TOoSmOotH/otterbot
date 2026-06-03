@@ -699,23 +699,24 @@ describe("HTTP API (e2e)", () => {
     const connId = (conn.json() as { id: string }).id;
 
     // 4. An agent with the gh-auth capability, assigned the connection.
-    await app.inject({ method: "POST", url: "/api/agents", payload: { displayName: "GH Agent" } });
+    const agent = await app.inject({ method: "POST", url: "/api/agents", payload: { displayName: "GH Agent" } });
+    const agentId = (agent.json() as { id: string }).id;
     await app.inject({
       method: "POST",
-      url: "/api/agents/gh-agent/skills/install",
+      url: `/api/agents/${agentId}/skills/install`,
       payload: { catalogId: "gh-auth" },
     });
     await app.inject({
       method: "POST",
-      url: "/api/agents/gh-agent/connections",
+      url: `/api/agents/${agentId}/connections`,
       payload: { connectionId: connId },
     });
 
     // 5. The orchestrator resolves the identity for the agent.
-    const got = stack.orch.gitSshForAgentTest("gh-agent");
+    const got = stack.orch.gitSshForAgentTest(agentId);
     expect(got).not.toBeNull();
     expect(got!.keyPath).toMatch(/\/id$/);
-    const secrets = stack.orch.scopedSecretsForAgentTest("gh-agent");
+    const secrets = stack.orch.scopedSecretsForAgentTest(agentId);
     expect(secrets.get("GITHUB_TOKEN")?.value).toBe("ghp_test_token");
     expect(secrets.get("GITHUB_TOKEN")?.scope).toBe("cap:gh-auth");
   });

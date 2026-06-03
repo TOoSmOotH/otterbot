@@ -851,7 +851,11 @@ export class Orchestrator {
       // gitSshForAgent. Token-only github connections still use credentialId.
       if (conn.type === "github" && typeof conn.config.gitAccountId === "string") {
         const account = this.forge.getAccount(conn.config.gitAccountId);
-        if (account?.token) out.set("GITHUB_TOKEN", { value: account.token, scope: "cap:gh-auth" });
+        if (!account) {
+          console.warn(`[connections] agent ${agentId}: gitAccountId ${conn.config.gitAccountId} not found`);
+          continue;
+        }
+        if (account.token) out.set("GITHUB_TOKEN", { value: account.token, scope: "cap:gh-auth" });
         continue;
       }
       if (!conn.credentialId) continue;
@@ -874,17 +878,19 @@ export class Orchestrator {
       if (conn.type !== "github" || typeof conn.config.gitAccountId !== "string") continue;
       const account = this.forge.getAccount(conn.config.gitAccountId);
       if (!account || account.gitTransport !== "ssh") continue;
+      if (chosen) {
+        seen++;
+        continue;
+      }
       const gc = this.forge.gitContextFor(account);
       if (!gc.sshKeyPath) continue;
       seen++;
-      if (!chosen) {
-        chosen = {
-          keyPath: gc.sshKeyPath,
-          knownHostsPath: gc.knownHostsPath,
-          committer: gc.committer,
-          signingKeyPath: gc.signingKeyPath,
-        };
-      }
+      chosen = {
+        keyPath: gc.sshKeyPath,
+        knownHostsPath: gc.knownHostsPath,
+        committer: gc.committer,
+        signingKeyPath: gc.signingKeyPath,
+      };
     }
     if (seen > 1)
       console.warn(
@@ -893,7 +899,7 @@ export class Orchestrator {
     return chosen;
   }
 
-  /** Test-only accessors for the connection→identity resolution. */
+  /** @internal Test-only accessors for the connection→identity resolution. */
   gitSshForAgentTest(agentId: string): GitSshSetup | null {
     return this.gitSshForAgent(agentId);
   }
