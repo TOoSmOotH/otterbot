@@ -32,10 +32,19 @@ skills/        per-agent markdown skill files
 agent-to-agent `bus_messages` log, `subagent_tasks`, `scheduled_tasks`,
 `agent_secrets` (per-agent credentials), and `app_settings`.
 
-**Credentials** are never on disk in plaintext — API keys, GitHub tokens, SMTP
-creds and model endpoints live in `agent_secrets` and are managed via the Agent
-Studio. All SQLite databases are encrypted with `OTTERBOT_DB_KEY` from `.env`
-(the only secret in `.env`); unset = unencrypted (dev only).
+**Integrations** (Settings → Integrations) are the unified model for reaching
+external services. Two tiers, both in `control.db`: an **Account** (the
+`credentials` table — a reusable identity + secret; secret values live in
+`global_secrets` under `cred:<id>:<KEY>`, never on disk in plaintext) and a
+**Binding** (the `connections` + `connection_assignments` tables — one use of an
+account, targeting specific agents or every agent via `allAgents`). Chat tokens,
+SMTP, GitHub/Gitea git accounts, reusable SSH keys, Proxmox, SSH, MCP and generic
+instance secrets are all accounts/bindings here (`IntegrationStore` is the
+facade; `connection-registry.ts` is the type registry). Forge accounts and SSH
+keys are `git` / `ssh-key` accounts (migrated id-preserving from the legacy
+`forge_accounts` / `ssh_keys` tables). Per-agent `agent_secrets` still layer on
+top. All SQLite databases are encrypted with `OTTERBOT_DB_KEY` from `.env` (the
+only secret in `.env`); unset = unencrypted (dev only).
 
 Per-agent isolated databases are required because `sqlite-vec`'s `vec_memories`
 table has a fixed embedding dimension — different agents can use different
