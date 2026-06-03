@@ -23,7 +23,7 @@ export class GlobalSecretsStore {
     return new Map(rows.map((r) => [r.key, r.value]));
   }
 
-  /** All global secrets as `key -> { value, scope }`. */
+  /** All global secrets as `key -> { value, scope }` (includes `cred:<id>:…` rows). */
   getScoped(): Map<string, ScopedSecret> {
     const rows = this.control.db.select().from(controlSchema.globalSecrets).all();
     return new Map(
@@ -31,13 +31,31 @@ export class GlobalSecretsStore {
     );
   }
 
-  /** List `(key, scope)` pairs — used by the API to render the UI without leaking values. */
+  /**
+   * Instance-wide secrets only — the bare KEY=value rows, excluding the
+   * `cred:<id>:…` rows that belong to a named account (those are resolved
+   * per-binding, prefix-stripped, so they are never layered raw into the shell).
+   */
+  instanceScoped(): Map<string, ScopedSecret> {
+    const out = new Map<string, ScopedSecret>();
+    for (const [key, entry] of this.getScoped()) {
+      if (!key.startsWith("cred:")) out.set(key, entry);
+    }
+    return out;
+  }
+
+  /**
+   * List bare instance-secret `(key, scope)` pairs — used by the API to render
+   * the UI without leaking values. Excludes `cred:<id>:…` account rows.
+   */
   listScopes(): Array<{ key: string; scope: CredentialScope }> {
     const rows = this.control.db
       .select({ key: controlSchema.globalSecrets.key, scope: controlSchema.globalSecrets.scope })
       .from(controlSchema.globalSecrets)
       .all();
-    return rows.map((r) => ({ key: r.key, scope: (r.scope || DEFAULT_SCOPE) as CredentialScope }));
+    return rows
+      .filter((r) => !r.key.startsWith("cred:"))
+      .map((r) => ({ key: r.key, scope: (r.scope || DEFAULT_SCOPE) as CredentialScope }));
   }
 
   /**

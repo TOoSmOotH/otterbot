@@ -65,6 +65,7 @@ import { GlobalSecretsStore } from "../secrets/global-secrets-store.js";
 import { CredentialStore } from "../connections/credential-store.js";
 import { ConnectionStore } from "../connections/connection-store.js";
 import { IntegrationStore } from "../connections/integration-store.js";
+import { migrateLegacyCapabilities } from "../connections/legacy-migration.js";
 import {
   listConnectionTypes,
   listCredentialTypes,
@@ -591,6 +592,7 @@ export class Orchestrator {
     this.credentials = new CredentialStore(control, this.globalSecrets);
     this.connectionStore = new ConnectionStore(control);
     this.integrations = new IntegrationStore(this.credentials, this.connectionStore);
+    migrateLegacyCapabilities(this.integrations, this.globalSecrets);
     this.bus.setDeliver((agentId, msg) => {
       if (agentId === "*") {
         for (const rt of this.runtimes.values()) {
@@ -835,20 +837,23 @@ export class Orchestrator {
     }
     return layerScopedSecrets([
       providerScoped,
-      this.globalSecrets.getScoped(),
-      // Secrets from this agent's assigned non-chat connections (GitHub, SMTP,
-      // SSH, Proxmox…), at each credential's stored scope. Chat connection
-      // secrets are deliberately excluded — they're consumed only by
-      // reconcileConnectors and stay out of the shell/LLM env.
+      // Bare instance-wide secrets only; `cred:<id>:…` account rows are resolved
+      // per-binding below (prefix-stripped) so they never leak raw into the env.
+      this.globalSecrets.instanceScoped(),
+      // Secrets from this agent's non-chat bindings (GitHub, SMTP, SSH, Proxmox…):
+      // those explicitly assigned plus every instance-wide (`allAgents`) binding,
+      // at each account's stored scope. Chat binding secrets are deliberately
+      // excluded — they're consumed only by reconcileConnectors and stay out of
+      // the shell/LLM env.
       this.connectionSecretsForAgent(profile.id),
       this.secrets.getScoped(profile.id),
     ]);
   }
 
-  /** Scoped secrets contributed by an agent's assigned non-chat connections. */
+  /** Scoped secrets contributed by an agent's non-chat bindings (assigned + allAgents). */
   private connectionSecretsForAgent(agentId: string): Map<string, ScopedSecret> {
     const out = new Map<string, ScopedSecret>();
-    for (const conn of this.connectionStore.connectionsForAgent(agentId)) {
+    for (const conn of this.integrations.bindingsForAgent(agentId)) {
       if (isChatConnectionType(conn.type)) continue;
       // Git-account-backed github connections are resolved once, after the loop,
       // so the token and SSH key always come from the same account.
@@ -870,8 +875,8 @@ export class Orchestrator {
    * so we never split one agent's identity across two GitHub accounts).
    */
   private gitAccountForAgent(agentId: string): ForgeAccount | null {
-    const refs = this.connectionStore
-      .connectionsForAgent(agentId)
+    const refs = this.integrations
+      .bindingsForAgent(agentId)
       .filter((c) => c.type === "github" && typeof c.config.gitAccountId === "string")
       .map((c) => c.config.gitAccountId as string);
     if (refs.length === 0) return null;
@@ -912,7 +917,7 @@ export class Orchestrator {
   /** MCP server configs from an agent's assigned `mcp` connections. */
   private mcpConnectionsForAgent(agentId: string): McpServerConfig[] {
     const servers: McpServerConfig[] = [];
-    for (const conn of this.connectionStore.connectionsForAgent(agentId)) {
+    for (const conn of this.integrations.bindingsForAgent(agentId)) {
       if (conn.type !== "mcp") continue;
       const c = conn.config;
       servers.push({
