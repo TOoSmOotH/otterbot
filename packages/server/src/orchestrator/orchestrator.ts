@@ -1166,6 +1166,7 @@ export class Orchestrator {
         this.projects
           .reposForAgent(profile.id)
           .map((r) => ({ name: r.name, forgeRepo: r.forgeRepo, mode: r.mode })),
+      resolveGitSsh: () => this.gitSshForAgent(profile.id),
       resolveProjectRules: () => this.projects.rulesForAgent(profile.id),
       resolveProjectAccess: () => this.projects.accessForAgent(profile.id),
       browserProfileDir: paths.browser,

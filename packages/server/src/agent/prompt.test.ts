@@ -19,6 +19,7 @@ function makeCtx(opts: {
     userProfile: { renderForPrompt: () => "" },
     projectWorkspacePath: () => null,
     projectRepos: () => opts.projectRepos ?? [],
+    gitSsh: () => null,
     projectRules: () => opts.projectRules,
   } as unknown as AgentContext;
 }

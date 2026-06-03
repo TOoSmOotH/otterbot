@@ -10,6 +10,7 @@ import { UserProfileService } from "../user-profile/user-profile-service.js";
 import { buildShellSecrets } from "../secrets/shell-secrets.js";
 import type { ScopedSecret } from "../secrets/secrets-store.js";
 import { browserEnvFor, closeBrowserSession } from "../integrations/browser.js";
+import type { GitSshSetup } from "../integrations/shell.js";
 
 /**
  * Everything one agent needs at runtime: its profile, secrets, isolated
@@ -62,6 +63,12 @@ export interface AgentContext {
    * next turn without rebuilding the context.
    */
   projectRepos: () => Array<{ name: string; forgeRepo: string | null; mode: string }>;
+  /**
+   * The Git-account SSH identity to expose for in-sandbox git-over-SSH, or null.
+   * Gated on the `gh-auth` capability so the key appears only when the token
+   * does. A thunk so assignment/capability changes take effect next turn.
+   */
+  gitSsh: () => GitSshSetup | null;
   /**
    * The standing rules for this agent's project, or null when it belongs to no
    * project (or the project has none). A thunk so rule edits take effect on the
@@ -128,6 +135,8 @@ export interface BuildAgentContextInput {
   resolveProjectWorkspacePath?: () => string | null;
   /** Resolve the repos in this agent's project (subdirs of /project). Called live. */
   resolveProjectRepos?: () => Array<{ name: string; forgeRepo: string | null; mode: string }>;
+  /** Resolve the agent's Git-account SSH identity (subject to gh-auth gating). */
+  resolveGitSsh?: () => GitSshSetup | null;
   /**
    * Resolve the standing rules for this agent's project, or null. Called live
    * (rules can change between turns).
@@ -202,6 +211,13 @@ export function buildAgentContext(input: BuildAgentContextInput): AgentContext {
     workspaceDir: input.workspaceDir,
     projectWorkspacePath: input.resolveProjectWorkspacePath ?? (() => null),
     projectRepos: input.resolveProjectRepos ?? (() => []),
+    gitSsh: () => {
+      // Same gate as the GITHUB_TOKEN secret (cap:gh-auth): only expose the key
+      // when the capability is enabled, so token and key appear together.
+      const enabled = new Set(skills.listEnabled().map((s) => s.id));
+      if (!enabled.has("gh-auth")) return null;
+      return input.resolveGitSsh?.() ?? null;
+    },
     projectRules: input.resolveProjectRules ?? (() => null),
     projectAccess: input.resolveProjectAccess ?? (() => null),
     browserProfileDir: input.browserProfileDir,
