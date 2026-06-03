@@ -426,7 +426,8 @@ function buildStagePrompt(
     : "";
   return (
     `You are the **${stage}** stage of the build pipeline for this project. Work in ` +
-    `the shared /project tree. Project goal:\n\n${goal}${prior}${verdict}`
+    `the shared /project tree (each of the project's repos is a subdir — \`cd\` into ` +
+    `the one the goal concerns). Project goal:\n\n${goal}${prior}${verdict}`
   );
 }
 
@@ -1106,7 +1107,11 @@ export class Orchestrator {
       agentDbPath: paths.agentDb,
       skillsDir: paths.skillsDir,
       workspaceDir: paths.workspace,
-      resolveProjectRepoPath: () => this.projects.repoPathForAgent(profile.id),
+      resolveProjectWorkspacePath: () => this.projects.workspacePathForAgent(profile.id),
+      resolveProjectRepos: () =>
+        this.projects
+          .reposForAgent(profile.id)
+          .map((r) => ({ name: r.name, forgeRepo: r.forgeRepo, mode: r.mode })),
       resolveProjectRules: () => this.projects.rulesForAgent(profile.id),
       resolveProjectAccess: () => this.projects.accessForAgent(profile.id),
       browserProfileDir: paths.browser,
@@ -1692,8 +1697,9 @@ export class Orchestrator {
     // integration suite in the shared /project tree.
     const local =
       `\n\n## Testing\n### Unit & integration tests (always)\nRun the project's ` +
-      `unit/integration suite locally in /project with your shell (shell_exec): ` +
-      `detect and run the build/install and test commands, then report results. ` +
+      `unit/integration suite locally with your shell (shell_exec): the code lives in ` +
+      `the repo subdir(s) under /project — \`cd\` into each repo the change touched, ` +
+      `detect and run its build/install and test commands, then report results. ` +
       `Your VERDICT must be based at minimum on this local run.`;
 
     // The remote e2e phase is opt-in (per-project toggle) and needs both shared

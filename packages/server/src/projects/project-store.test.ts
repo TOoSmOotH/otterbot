@@ -165,6 +165,89 @@ describe("ProjectStore", () => {
     expect(noop.output).toMatch(/nothing to commit/);
   });
 
+  it("creates a project as a workspace holding one primary repo", () => {
+    const p = store.create("Multi");
+    expect(p.workspacePath).toBe(join(dir, "projects", p.id));
+    const repos = store.listRepos(p.id);
+    expect(repos).toHaveLength(1);
+    expect(repos[0].isPrimary).toBe(true);
+    expect(repos[0].name).toBe("repo");
+    expect(p.repoPath).toBe(repos[0].repoPath);
+    // The primary repo lives as a subdir of the workspace.
+    expect(repos[0].repoPath).toBe(join(p.workspacePath, "repo"));
+    expect(existsSync(join(repos[0].repoPath, ".git"))).toBe(true);
+  });
+
+  it("adds repos as sibling subdirs and uniquifies names", () => {
+    const p = store.create("Umbrella");
+    const a = store.addRepo(p.id, { name: "otterbot" });
+    const b = store.addRepo(p.id, { name: "otterbot-site" });
+    const dup = store.addRepo(p.id, { name: "otterbot" }); // name clash
+    expect(a.isPrimary).toBe(false);
+    expect(b.repoPath).toBe(join(p.workspacePath, "otterbot-site"));
+    expect(dup.name).toBe("otterbot-2");
+    expect(existsSync(join(a.repoPath, ".git"))).toBe(true);
+    expect(store.listRepos(p.id).map((r) => r.name)).toEqual([
+      "repo",
+      "otterbot",
+      "otterbot-site",
+      "otterbot-2",
+    ]);
+  });
+
+  it("switches the primary repo and reflects it in the Project view", () => {
+    const p = store.create("Promote");
+    const site = store.addRepo(p.id, { name: "site" });
+    store.setRepoForge(site.id, { mode: "existing", forgeAccountId: "acc", forgeRepo: "o/site" });
+    store.setPrimaryRepo(site.id);
+    expect(store.listRepos(p.id).filter((r) => r.isPrimary)).toHaveLength(1);
+    const view = store.get(p.id)!;
+    expect(view.repoPath).toBe(site.repoPath);
+    expect(view.forgeRepo).toBe("o/site");
+  });
+
+  it("removes a repo and its subdir, promoting the next when the primary goes", () => {
+    const p = store.create("Trim");
+    const second = store.addRepo(p.id, { name: "docs" });
+    const primaryPath = store.primaryRepo(p.id)!.repoPath;
+    // Remove the primary ("repo") — "docs" should be promoted.
+    const primaryId = store.primaryRepo(p.id)!.id;
+    store.removeRepo(primaryId);
+    expect(existsSync(primaryPath)).toBe(false);
+    expect(store.primaryRepo(p.id)!.id).toBe(second.id);
+    // Can't remove the last remaining repo.
+    expect(() => store.removeRepo(second.id)).toThrow(/at least one repo/i);
+  });
+
+  it("resolves an agent's workspace path via membership", () => {
+    const p = store.create("WS");
+    store.addRepo(p.id, { name: "extra" });
+    store.addMember(p.id, "coder");
+    expect(store.workspacePathForAgent("coder")).toBe(p.workspacePath);
+    expect(store.workspacePathForAgent("nobody")).toBeNull();
+  });
+
+  it("backfills a legacy single-repo project on reopen", () => {
+    const p = store.create("Legacy");
+    // Simulate a pre-multi-repo row: clear the new model, leave only legacy cols.
+    control.sqlite.prepare(`DELETE FROM project_repos WHERE project_id = ?`).run(p.id);
+    control.sqlite
+      .prepare(`UPDATE projects SET workspace_path = NULL, mode = 'existing', forge_repo = 'o/n', monitor_issues = 1 WHERE id = ?`)
+      .run(p.id);
+    control.close();
+    // Reopening runs ensureControlTables → backfillProjectRepos.
+    control = openControlDb(join(dir, "control.db"));
+    store = new ProjectStore(control, join(dir, "projects"));
+    const repos = store.listRepos(p.id);
+    expect(repos).toHaveLength(1);
+    expect(repos[0].isPrimary).toBe(true);
+    expect(repos[0].forgeRepo).toBe("o/n");
+    expect(repos[0].monitorIssues).toBe(true);
+    const view = store.get(p.id)!;
+    expect(view.workspacePath).toBe(join(dir, "projects", p.id));
+    expect(view.forgeRepo).toBe("o/n");
+  });
+
   it("SSH-signs commits when a signing key is given in the git context", () => {
     const p = store.create("Signed");
     // Generate a throwaway ssh key to sign with.

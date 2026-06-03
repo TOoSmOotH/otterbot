@@ -49,11 +49,19 @@ export interface AgentContext {
   /** Sandboxed working directory for the agent's `shell_exec` tool. */
   workspaceDir: string;
   /**
-   * The shared project working tree bound into this agent's sandbox at
-   * `/project`, or null when the agent belongs to no project. A thunk so
-   * membership changes take effect without rebuilding the context.
+   * The shared project *workspace* dir bound into this agent's sandbox at
+   * `/project` — holding each of the project's repos as a subdir — or null when
+   * the agent belongs to no project. A thunk so membership changes take effect
+   * without rebuilding the context.
    */
-  projectRepoPath: () => string | null;
+  projectWorkspacePath: () => string | null;
+  /**
+   * The repos in this agent's project, each a subdir of the workspace. Used to
+   * tell the agent which repos live under `/project`. Empty when the agent
+   * belongs to no project. A thunk so membership/repo changes take effect on the
+   * next turn without rebuilding the context.
+   */
+  projectRepos: () => Array<{ name: string; forgeRepo: string | null; mode: string }>;
   /**
    * The standing rules for this agent's project, or null when it belongs to no
    * project (or the project has none). A thunk so rule edits take effect on the
@@ -117,7 +125,9 @@ export interface BuildAgentContextInput {
    * Resolve the shared project tree bound into this agent's sandbox, or null
    * when it belongs to no project. Called live (membership can change).
    */
-  resolveProjectRepoPath?: () => string | null;
+  resolveProjectWorkspacePath?: () => string | null;
+  /** Resolve the repos in this agent's project (subdirs of /project). Called live. */
+  resolveProjectRepos?: () => Array<{ name: string; forgeRepo: string | null; mode: string }>;
   /**
    * Resolve the standing rules for this agent's project, or null. Called live
    * (rules can change between turns).
@@ -190,7 +200,8 @@ export function buildAgentContext(input: BuildAgentContextInput): AgentContext {
     },
     contextWindow: input.contextWindow,
     workspaceDir: input.workspaceDir,
-    projectRepoPath: input.resolveProjectRepoPath ?? (() => null),
+    projectWorkspacePath: input.resolveProjectWorkspacePath ?? (() => null),
+    projectRepos: input.resolveProjectRepos ?? (() => []),
     projectRules: input.resolveProjectRules ?? (() => null),
     projectAccess: input.resolveProjectAccess ?? (() => null),
     browserProfileDir: input.browserProfileDir,

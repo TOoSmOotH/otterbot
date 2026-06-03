@@ -2,6 +2,7 @@ import Database from "better-sqlite3-multiple-ciphers";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { dirname } from "node:path";
 import { mkdirSync } from "node:fs";
+import { nanoid } from "nanoid";
 import * as controlSchema from "./control-schema.js";
 import { applyDbKey } from "./crypto.js";
 
@@ -119,6 +120,7 @@ function ensureControlTables(sqlite: Database.Database) {
     `CREATE TABLE IF NOT EXISTS projects (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
+      workspace_path TEXT,
       repo_path TEXT NOT NULL,
       mode TEXT NOT NULL DEFAULT 'local',
       forge_account_id TEXT,
@@ -132,6 +134,24 @@ function ensureControlTables(sqlite: Database.Database) {
       rules TEXT,
       created_at TEXT NOT NULL
     )`,
+    `CREATE TABLE IF NOT EXISTS project_repos (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      repo_path TEXT NOT NULL,
+      mode TEXT NOT NULL DEFAULT 'local',
+      forge_account_id TEXT,
+      forge_repo TEXT,
+      fork_repo TEXT,
+      forge_ssh_url TEXT,
+      base_branch TEXT,
+      monitor_issues INTEGER NOT NULL DEFAULT 0,
+      triage_issues INTEGER NOT NULL DEFAULT 0,
+      is_primary INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_project_repos_project ON project_repos(project_id)`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS idx_project_repos_name ON project_repos(project_id, name)`,
     `CREATE TABLE IF NOT EXISTS forge_accounts (
       id TEXT PRIMARY KEY,
       provider TEXT NOT NULL,
@@ -212,6 +232,59 @@ function ensureControlTables(sqlite: Database.Database) {
   // IF NOT EXISTS never alters an existing table, so add new columns explicitly;
   // swallow the "duplicate column name" error when the column is already there.
   addColumnIfMissing(sqlite, "forge_accounts", "ssh_key_id", "TEXT");
+  addColumnIfMissing(sqlite, "projects", "workspace_path", "TEXT");
+
+  backfillProjectRepos(sqlite);
+}
+
+/**
+ * One-time, idempotent backfill of the multi-repo model onto pre-existing
+ * single-repo projects. For each project that has no `project_repos` row yet:
+ * set `workspace_path` to the parent of the legacy `repo_path` (the project's
+ * `<id>` dir) and seed one primary repo row from the legacy forge columns. The
+ * on-disk tree is untouched — the legacy `<id>/repo` dir simply becomes the
+ * workspace's first repo subdir (name "repo").
+ */
+function backfillProjectRepos(sqlite: Database.Database) {
+  const projects = sqlite
+    .prepare(`SELECT * FROM projects`)
+    .all() as Array<Record<string, unknown>>;
+  const hasRepo = sqlite.prepare(`SELECT 1 FROM project_repos WHERE project_id = ? LIMIT 1`);
+  const setWorkspace = sqlite.prepare(`UPDATE projects SET workspace_path = ? WHERE id = ?`);
+  const insertRepo = sqlite.prepare(
+    `INSERT INTO project_repos
+       (id, project_id, name, repo_path, mode, forge_account_id, forge_repo,
+        fork_repo, forge_ssh_url, base_branch, monitor_issues, triage_issues,
+        is_primary, created_at)
+     VALUES
+       (@id, @projectId, @name, @repoPath, @mode, @forgeAccountId, @forgeRepo,
+        @forkRepo, @forgeSshUrl, @baseBranch, @monitorIssues, @triageIssues,
+        1, @createdAt)`
+  );
+  const migrate = sqlite.transaction((rows: Array<Record<string, unknown>>) => {
+    for (const p of rows) {
+      const id = p.id as string;
+      const repoPath = p.repo_path as string;
+      if (!p.workspace_path) setWorkspace.run(dirname(repoPath), id);
+      if (hasRepo.get(id)) continue;
+      insertRepo.run({
+        id: nanoid(),
+        projectId: id,
+        name: "repo",
+        repoPath,
+        mode: (p.mode as string) ?? "local",
+        forgeAccountId: (p.forge_account_id as string) ?? null,
+        forgeRepo: (p.forge_repo as string) ?? null,
+        forkRepo: (p.fork_repo as string) ?? null,
+        forgeSshUrl: (p.forge_ssh_url as string) ?? null,
+        baseBranch: (p.base_branch as string) ?? null,
+        monitorIssues: (p.monitor_issues as number) ?? 0,
+        triageIssues: (p.triage_issues as number) ?? 0,
+        createdAt: (p.created_at as string) ?? new Date().toISOString(),
+      });
+    }
+  });
+  migrate(projects);
 }
 
 /** Add a column to an existing table, ignoring the error if it already exists. */

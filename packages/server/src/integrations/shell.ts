@@ -211,14 +211,15 @@ export interface SandboxOpts {
    */
   interactive?: boolean;
   /**
-   * A shared project working tree to expose, writable, alongside the agent's
-   * own workspace. Several agents that belong to the same project bind the same
-   * directory here, so they collaborate on one codebase while `HOME`
-   * (`/workspace`) — and thus each agent's per-tool CLI credentials — stays
-   * private. On bwrap it is bound at `/project`; on macOS sandbox-exec there is
-   * no remapping, so the real path is simply made writable.
+   * A shared project *workspace* dir to expose, writable, alongside the agent's
+   * own workspace. It holds each of the project's repos as a sibling subdir
+   * (`<workspace>/<repo>`), so members collaborate across one or more codebases
+   * while `HOME` (`/workspace`) — and thus each agent's per-tool CLI credentials
+   * — stays private. Several agents in the same project bind the same dir here.
+   * On bwrap it is bound at `/project`; on macOS sandbox-exec there is no
+   * remapping, so the real path is simply made writable.
    */
-  projectRepoPath?: string;
+  projectWorkspacePath?: string;
   /**
    * Bind the project tree read-only (`--ro-bind`) instead of writable. Used for
    * project members granted read-only access — they can read/grep the source
@@ -226,7 +227,7 @@ export interface SandboxOpts {
    */
   projectReadOnly?: boolean;
   /**
-   * Where the command starts. `"project"` requires `projectRepoPath` and starts
+   * Where the command starts. `"project"` requires `projectWorkspacePath` and starts
    * the command inside the shared tree; anything else starts in `/workspace`.
    */
   startIn?: "workspace" | "project";
@@ -290,10 +291,10 @@ function bwrapPlan(
   }
   // The shared project tree, when the agent belongs to a project. Bound
   // writable so collaborating agents edit one codebase; HOME stays /workspace.
-  if (opts.projectRepoPath) {
-    args.push(opts.projectReadOnly ? "--ro-bind" : "--bind", opts.projectRepoPath, PROJECT_MOUNT);
+  if (opts.projectWorkspacePath) {
+    args.push(opts.projectReadOnly ? "--ro-bind" : "--bind", opts.projectWorkspacePath, PROJECT_MOUNT);
   }
-  const startDir = opts.startIn === "project" && opts.projectRepoPath ? PROJECT_MOUNT : "/workspace";
+  const startDir = opts.startIn === "project" && opts.projectWorkspacePath ? PROJECT_MOUNT : "/workspace";
   args.push(
     "--chdir", startDir,
     "--unshare-all",
@@ -325,7 +326,7 @@ function sandboxExecPlan(
     "(allow file-write*",
     `  (subpath ${JSON.stringify(workspaceDir)})`,
     // The shared project tree, when the agent belongs to a project.
-    ...(opts.projectRepoPath ? [`  (subpath ${JSON.stringify(opts.projectRepoPath)})`] : []),
+    ...(opts.projectWorkspacePath ? [`  (subpath ${JSON.stringify(opts.projectWorkspacePath)})`] : []),
     '  (subpath "/private/tmp")',
     '  (subpath "/private/var/tmp")',
     '  (subpath "/private/var/folders")',
@@ -343,7 +344,7 @@ function sandboxExecPlan(
     env: buildEnv(workspaceDir, secrets, toolsBin),
     // sandbox-exec does not remap paths, so the project's real host path is the
     // working directory when starting in the shared tree.
-    cwd: opts.startIn === "project" && opts.projectRepoPath ? opts.projectRepoPath : workspaceDir,
+    cwd: opts.startIn === "project" && opts.projectWorkspacePath ? opts.projectWorkspacePath : workspaceDir,
   };
 }
 
@@ -435,12 +436,12 @@ export function runAgentShell(
   workspaceDir: string,
   secrets: Map<string, string>,
   command: string,
-  opts: { projectRepoPath?: string; projectReadOnly?: boolean } = {}
+  opts: { projectWorkspacePath?: string; projectReadOnly?: boolean } = {}
 ): Promise<ShellResult> {
   ensureWorkspace(workspaceDir);
 
   const built = buildSandboxPlan(workspaceDir, secrets, ["/bin/sh", "-c", command], {
-    projectRepoPath: opts.projectRepoPath,
+    projectWorkspacePath: opts.projectWorkspacePath,
     projectReadOnly: opts.projectReadOnly,
   });
   if ("error" in built) {

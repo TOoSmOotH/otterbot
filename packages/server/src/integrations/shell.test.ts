@@ -63,7 +63,7 @@ describe("buildSandboxPlan project binding", () => {
     const repo = mkdtempSync(join(tmpdir(), "otter-repo-"));
     try {
       const built = buildSandboxPlan(dir, new Map(), ["/bin/sh", "-c", "true"], {
-        projectRepoPath: repo,
+        projectWorkspacePath: repo,
         startIn: "project",
       });
       if ("error" in built) return; // no OS sandbox here
@@ -107,7 +107,7 @@ describe("buildSandboxPlan project binding", () => {
     const repo = mkdtempSync(join(tmpdir(), "otter-repo-"));
     try {
       const built = buildSandboxPlan(dir, new Map(), ["/bin/sh", "-c", "true"], {
-        projectRepoPath: repo,
+        projectWorkspacePath: repo,
         projectReadOnly: true,
       });
       if ("error" in built) return; // no OS sandbox here

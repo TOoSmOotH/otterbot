@@ -168,7 +168,7 @@ export interface CodingRunOptions {
   workspaceDir: string;
   secrets: Map<string, string>;
   /** Shared project tree to bind + run inside, when the agent has a project. */
-  projectRepoPath?: string | null;
+  projectWorkspacePath?: string | null;
 }
 
 export interface CodingRunResult {
@@ -184,11 +184,11 @@ export interface CodingRunResult {
   error?: string;
 }
 
-function sandboxOptsFor(projectRepoPath?: string | null, interactive = false): SandboxOpts {
+function sandboxOptsFor(projectWorkspacePath?: string | null, interactive = false): SandboxOpts {
   return {
     interactive,
-    projectRepoPath: projectRepoPath ?? undefined,
-    startIn: projectRepoPath ? "project" : "workspace",
+    projectWorkspacePath: projectWorkspacePath ?? undefined,
+    startIn: projectWorkspacePath ? "project" : "workspace",
   };
 }
 
@@ -200,7 +200,7 @@ export function runCodingCliHeadless(opts: CodingRunOptions): Promise<CodingRunR
     opts.workspaceDir,
     opts.secrets,
     argv,
-    sandboxOptsFor(opts.projectRepoPath)
+    sandboxOptsFor(opts.projectWorkspacePath)
   );
   if ("error" in built) {
     return Promise.resolve({
@@ -321,7 +321,7 @@ export function startCodingSession(
     opts.workspaceDir,
     opts.secrets,
     argv,
-    sandboxOptsFor(opts.projectRepoPath, true)
+    sandboxOptsFor(opts.projectWorkspacePath, true)
   );
   if ("error" in built) return { error: built.error };
 
@@ -398,8 +398,8 @@ export function startCodingSession(
  */
 const locks = new Map<string, Promise<unknown>>();
 
-export function codingLockKey(agentId: string, projectRepoPath?: string | null): string {
-  return projectRepoPath ? `project:${projectRepoPath}` : `agent:${agentId}`;
+export function codingLockKey(agentId: string, projectWorkspacePath?: string | null): string {
+  return projectWorkspacePath ? `project:${projectWorkspacePath}` : `agent:${agentId}`;
 }
 
 /** True when another run already holds the lock for this key. */

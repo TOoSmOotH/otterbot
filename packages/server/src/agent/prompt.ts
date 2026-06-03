@@ -79,6 +79,19 @@ export async function buildSystemPrompt(
   const persona = ctx.profile.persona.trim() || FALLBACK_PERSONA;
   const parts: string[] = [persona, OPERATING_GUIDE];
 
+  const projectRepos = ctx.projectRepos();
+  if (projectRepos.length > 1) {
+    const rendered = projectRepos
+      .map((r) => `- \`/project/${r.name}\` — ${r.forgeRepo ? r.forgeRepo : `${r.mode} repo`}`)
+      .join("\n");
+    parts.push(
+      `## Project workspace\n\nThe shared project tree is mounted at \`/project\` and holds ` +
+        `several repos as sibling subdirs. \`cd\` into the one you need before reading or ` +
+        `editing, and run git inside that subdir so each repo is committed and pushed ` +
+        `independently:\n\n${rendered}`
+    );
+  }
+
   const projectRules = ctx.projectRules()?.trim();
   if (projectRules) {
     parts.push(

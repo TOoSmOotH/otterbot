@@ -7,14 +7,18 @@ import { buildSystemPrompt } from "./prompt.js";
  * profile.persona, memory.searchContent, skills.{listEnabled,get,recordUse},
  * userProfile.renderForPrompt, secrets, and the new projectRules thunk.
  */
-function makeCtx(opts: { projectRules: string | null }): AgentContext {
+function makeCtx(opts: {
+  projectRules: string | null;
+  projectRepos?: Array<{ name: string; forgeRepo: string | null; mode: string }>;
+}): AgentContext {
   return {
     profile: { persona: "You are a helpful agent." },
     secrets: new Map<string, string>(),
     memory: { searchContent: async () => [] },
     skills: { listEnabled: () => [], get: () => null, recordUse: () => {} },
     userProfile: { renderForPrompt: () => "" },
-    projectRepoPath: () => null,
+    projectWorkspacePath: () => null,
+    projectRepos: () => opts.projectRepos ?? [],
     projectRules: () => opts.projectRules,
   } as unknown as AgentContext;
 }
@@ -37,5 +41,28 @@ describe("buildSystemPrompt — project rules", () => {
     const ctx = makeCtx({ projectRules: "   \n  " });
     const { system } = await buildSystemPrompt(ctx, { userMessage: "hi" });
     expect(system).not.toContain("## Project rules");
+  });
+
+  it("lists repo subdirs when a project has more than one repo", async () => {
+    const ctx = makeCtx({
+      projectRules: null,
+      projectRepos: [
+        { name: "otterbot", forgeRepo: "org/otterbot", mode: "existing" },
+        { name: "otterbot-site", forgeRepo: null, mode: "local" },
+      ],
+    });
+    const { system } = await buildSystemPrompt(ctx, { userMessage: "hi" });
+    expect(system).toContain("## Project workspace");
+    expect(system).toContain("`/project/otterbot` — org/otterbot");
+    expect(system).toContain("`/project/otterbot-site` — local repo");
+  });
+
+  it("omits the workspace section for a single-repo project", async () => {
+    const ctx = makeCtx({
+      projectRules: null,
+      projectRepos: [{ name: "repo", forgeRepo: null, mode: "local" }],
+    });
+    const { system } = await buildSystemPrompt(ctx, { userMessage: "hi" });
+    expect(system).not.toContain("## Project workspace");
   });
 });

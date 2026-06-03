@@ -582,7 +582,7 @@ export function buildAgentTools(
       }),
       execute: async ({ command }) => {
         const r = await runAgentShell(ctx.workspaceDir, ctx.shellSecrets(), command, {
-          projectRepoPath: ctx.projectRepoPath() ?? undefined,
+          projectWorkspacePath: ctx.projectWorkspacePath() ?? undefined,
           projectReadOnly: ctx.projectAccess() === "read",
         });
         if (r.error) return { ok: false, error: r.error };
@@ -689,8 +689,8 @@ export function buildAgentTools(
         if (model) {
           effectiveModel = { ...(effectiveModel ?? {}), ...rawModelFor(cliTool, model) };
         }
-        const projectRepoPath = ctx.projectRepoPath();
-        if (projectRepoPath && ctx.projectAccess() === "read") {
+        const projectWorkspacePath = ctx.projectWorkspacePath();
+        if (projectWorkspacePath && ctx.projectAccess() === "read") {
           return {
             ok: false,
             error:
@@ -698,7 +698,7 @@ export function buildAgentTools(
               "modify its source. Ask the project owner for read-write access.",
           };
         }
-        const lockKey = codingLockKey(ctx.profile.id, projectRepoPath);
+        const lockKey = codingLockKey(ctx.profile.id, projectWorkspacePath);
         if (isCodingLockBusy(lockKey)) {
           return {
             ok: false,
@@ -721,7 +721,7 @@ export function buildAgentTools(
             model: effectiveModel,
             workspaceDir: ctx.workspaceDir,
             secrets: runSecrets,
-            projectRepoPath,
+            projectWorkspacePath,
           };
           if (interactive) {
             const started = startCodingSession({ ...common, agentId: ctx.profile.id });
@@ -758,7 +758,7 @@ export function buildAgentTools(
         const session = getCodingSession(ctx.profile.id);
         return {
           ok: true,
-          inProject: ctx.projectRepoPath() !== null,
+          inProject: ctx.projectWorkspacePath() !== null,
           activeSession: session ? { tool: session.tool } : null,
           tools: checkSharedCodingClis(),
         };

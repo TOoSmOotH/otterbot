@@ -207,7 +207,7 @@ export function attachSocketServer(
         ctx.workspaceDir,
         ctx.shellSecrets(),
         { cols: payload.cols, rows: payload.rows },
-        { projectRepoPath: ctx.projectRepoPath() }
+        { projectWorkspacePath: ctx.projectWorkspacePath() }
       );
       if ("error" in opened) {
         socket.emit("term:exit", { agentId, error: opened.error });

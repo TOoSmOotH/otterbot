@@ -41,7 +41,7 @@ export function openTerminal(
   workspaceDir: string,
   secrets: Map<string, string>,
   size: Partial<TerminalSize> = {},
-  opts: { projectRepoPath?: string | null } = {}
+  opts: { projectWorkspacePath?: string | null } = {}
 ): OpenTerminalResult {
   ensureWorkspace(workspaceDir);
 
@@ -49,7 +49,7 @@ export function openTerminal(
   // a project member can `cd /project` to reach the shared tree.
   const built = buildSandboxPlan(workspaceDir, secrets, INTERACTIVE_SHELL, {
     interactive: true,
-    projectRepoPath: opts.projectRepoPath ?? undefined,
+    projectWorkspacePath: opts.projectWorkspacePath ?? undefined,
   });
   if ("error" in built) return { error: built.error };
 

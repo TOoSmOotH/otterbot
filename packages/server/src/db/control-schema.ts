@@ -213,7 +213,18 @@ export const connectionAssignments = sqliteTable("connection_assignments", {
 export const projects = sqliteTable("projects", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
-  /** Absolute path to the project's git working tree on the host. */
+  /**
+   * Absolute path to the project's *workspace* dir on the host, bound at
+   * `/project` in member sandboxes. It holds each repo as a sibling subdir
+   * (`<workspace>/<repo.name>`), so members can read/write across every repo in
+   * one session. Null only on legacy rows until the startup backfill sets it.
+   */
+  workspacePath: text("workspace_path"),
+  /**
+   * Legacy: the single-repo working tree path. Superseded by `workspacePath` +
+   * the `project_repos` table; retained so the backfill can seed the first repo
+   * row. New code reads the primary `project_repos` row, not this column.
+   */
   repoPath: text("repo_path").notNull(),
   /** Where the code lives: local-only, or a repo on a forge. */
   mode: text("mode", { enum: ["local", "existing", "new", "fork"] }).notNull().default("local"),
@@ -235,6 +246,44 @@ export const projects = sqliteTable("projects", {
   remoteE2e: integer("remote_e2e", { mode: "boolean" }).notNull().default(false),
   /** Standing rules injected into every project member's system prompt. */
   rules: text("rules"),
+  createdAt: text("created_at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+});
+
+/**
+ * A repo within a project. A project's workspace dir holds one subdir per repo
+ * (`<workspace>/<name>`); this row carries that repo's on-disk path and its own
+ * git/forge backing so each repo is branched/committed/pushed/PR'd
+ * independently. Exactly one repo per project is `isPrimary` — it backs the
+ * legacy single-repo surfaces (issue monitoring/triage, the project-level forge
+ * route) until those become per-repo. One row per (project, name).
+ */
+export const projectRepos = sqliteTable("project_repos", {
+  id: text("id").primaryKey(),
+  projectId: text("project_id").notNull(),
+  /** Subdir name under the workspace and the repo's display label. */
+  name: text("name").notNull(),
+  /** Absolute path to this repo's working tree (`<workspace>/<name>`). */
+  repoPath: text("repo_path").notNull(),
+  /** Where the code lives: local-only, or a repo on a forge. */
+  mode: text("mode", { enum: ["local", "existing", "new", "fork"] }).notNull().default("local"),
+  /** Forge account id (forge_accounts.id) when mode != local. */
+  forgeAccountId: text("forge_account_id"),
+  /** owner/name of the upstream repo on the forge when mode != local. */
+  forgeRepo: text("forge_repo"),
+  /** owner/name of the bot's fork (clone/push target) when mode == fork. */
+  forkRepo: text("fork_repo"),
+  /** SSH clone/push URL captured from the forge (handles custom Gitea ports). */
+  forgeSshUrl: text("forge_ssh_url"),
+  /** Base/integration branch PRs target (default branch when blank). */
+  baseBranch: text("base_branch"),
+  /** Poll the forge for assigned issues to feed the pipeline. */
+  monitorIssues: integer("monitor_issues", { mode: "boolean" }).notNull().default(false),
+  /** Poll the forge for new unassigned issues and have the PM post/refine a plan. */
+  triageIssues: integer("triage_issues", { mode: "boolean" }).notNull().default(false),
+  /** The project's primary repo — backs legacy single-repo surfaces. */
+  isPrimary: integer("is_primary", { mode: "boolean" }).notNull().default(false),
   createdAt: text("created_at")
     .notNull()
     .$defaultFn(() => new Date().toISOString()),
