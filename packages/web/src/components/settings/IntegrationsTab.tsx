@@ -811,9 +811,14 @@ function GitAccountFields({ value, onChange }: { value: GitDraft; onChange: (d: 
       <label style={fieldLabel}>
         Git transport
         <select style={input} value={value.gitTransport} onChange={(e) => set({ gitTransport: e.target.value as "https" | "ssh" })}>
-          <option value="https">HTTPS (token)</option>
-          <option value="ssh">SSH (key)</option>
+          <option value="https">HTTPS — token only (no SSH key)</option>
+          <option value="ssh">SSH — set up an SSH key</option>
         </select>
+        <span style={hint}>
+          {value.gitTransport === "https"
+            ? "Clones/pushes over HTTPS using the API token. Choose SSH to create or attach an SSH key."
+            : "Clones/pushes over SSH — pick or create the key below."}
+        </span>
       </label>
       <label style={fieldLabel}>
         Committer name
