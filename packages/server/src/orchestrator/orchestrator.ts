@@ -2529,25 +2529,36 @@ export class Orchestrator {
     label: string;
     config?: Record<string, unknown>;
     credentialId?: string | null;
+    allAgents?: boolean;
   }) {
-    return this.connectionStore.create(input);
+    const created = this.connectionStore.create(input);
+    if (created.allAgents) this.restartAgents();
+    return created;
   }
   updateConnection(
     id: string,
-    patch: { label?: string; config?: Record<string, unknown>; credentialId?: string | null }
+    patch: { label?: string; config?: Record<string, unknown>; credentialId?: string | null; allAgents?: boolean }
   ) {
+    const before = this.connectionStore.get(id);
     const updated = this.connectionStore.update(id, patch);
-    if (updated) this.reconcileAssignees(id);
+    if (updated) {
+      // An instance-wide binding (before or after) affects every agent; an
+      // ordinary one only its explicit assignees.
+      if (before?.allAgents || updated.allAgents) this.restartAgents();
+      else this.reconcileAssignees(id);
+    }
     return updated;
   }
   /** Delete a connection; refuses while assigned unless forced (then reconciles those agents). */
   deleteConnection(id: string, force = false): { ok: boolean; error?: string } {
+    const existing = this.connectionStore.get(id);
     const assignees = this.connectionStore.assigneesOf(id);
     if (assignees.length > 0 && !force) {
       return { ok: false, error: `Assigned to ${assignees.length} agent(s).` };
     }
     const ok = this.connectionStore.delete(id);
-    for (const agentId of assignees) this.reconcileAgentConnections(agentId);
+    if (existing?.allAgents) this.restartAgents();
+    else for (const agentId of assignees) this.reconcileAgentConnections(agentId);
     return { ok };
   }
 

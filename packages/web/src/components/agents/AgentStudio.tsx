@@ -898,8 +898,8 @@ function ChannelsTab({ profile }: TabProps) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       <p style={hint}>
-        Assign reusable connections to this agent. Create and edit them in{" "}
-        <strong>Settings → Connections</strong>.
+        Assign integrations to this agent. Create and edit them in{" "}
+        <strong>Settings → Integrations</strong>.
       </p>
 
       <section>

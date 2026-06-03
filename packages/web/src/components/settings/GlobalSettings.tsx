@@ -12,8 +12,7 @@ import type { GlobalSettings as GlobalSettingsShape, ThemeId } from "@otterbot/s
 import { THEMES, useGlobalSettingsStore, applyTheme } from "../../stores/global-settings-store";
 import { useProvidersStore } from "../../stores/providers-store";
 import { CodingModelsTab } from "./CodingModelsTab";
-import { CredentialsTab } from "./CredentialsTab";
-import { ConnectionsTab } from "./ConnectionsTab";
+import { IntegrationsTab } from "./IntegrationsTab";
 import { ModelsProvidersTab } from "./ModelsProvidersTab";
 import { CodingCliSetup } from "../agents/CodingCliSetup";
 import type { CodingTool } from "../../lib/coding-cli";
@@ -23,8 +22,7 @@ const TABS = [
   "Models & Providers",
   "Coding CLIs",
   "Coding Models",
-  "Credentials",
-  "Connections",
+  "Integrations",
   "Appearance",
   "Account",
 ] as const;
@@ -35,6 +33,7 @@ type PatchFn = (p: Partial<GlobalSettingsShape>) => void;
 /** Map a (possibly legacy) initial tab name onto a current tab. */
 function resolveInitialTab(t?: string): SettingsTab {
   if (t === "Providers" || t === "Models") return "Models & Providers";
+  if (t === "Credentials" || t === "Connections") return "Integrations";
   return TABS.includes(t as SettingsTab) ? (t as SettingsTab) : "Models & Providers";
 }
 
@@ -204,8 +203,7 @@ export function GlobalSettings({
         {tab === "Coding Models" && (
           <CodingModelsTab draft={draft} patch={patch} providers={providers} />
         )}
-        {tab === "Credentials" && <CredentialsTab />}
-        {tab === "Connections" && <ConnectionsTab />}
+        {tab === "Integrations" && <IntegrationsTab />}
         {tab === "Appearance" && <AppearanceTab draft={draft} patch={patch} />}
         {tab === "Account" && <AccountTab />}
       </div>

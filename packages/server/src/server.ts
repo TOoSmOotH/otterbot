@@ -560,7 +560,13 @@ export async function buildServer(
   });
 
   app.post<{
-    Body: { type?: string; label?: string; config?: Record<string, unknown>; credentialId?: string | null };
+    Body: {
+      type?: string;
+      label?: string;
+      config?: Record<string, unknown>;
+      credentialId?: string | null;
+      allAgents?: boolean;
+    };
   }>("/api/connections", async (req, reply) => {
     const b = req.body ?? {};
     if (!b.type || !b.label) {
@@ -573,6 +579,7 @@ export async function buildServer(
         label: b.label,
         config: b.config,
         credentialId: b.credentialId ?? null,
+        allAgents: b.allAgents,
       });
     } catch (err) {
       reply.code(400);
@@ -582,7 +589,7 @@ export async function buildServer(
 
   app.put<{
     Params: { id: string };
-    Body: { label?: string; config?: Record<string, unknown>; credentialId?: string | null };
+    Body: { label?: string; config?: Record<string, unknown>; credentialId?: string | null; allAgents?: boolean };
   }>("/api/connections/:id", async (req, reply) => {
     const updated = orch.updateConnection(req.params.id, req.body ?? {});
     if (!updated) {
