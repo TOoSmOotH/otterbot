@@ -24,6 +24,7 @@ function project(id: string, memberIds: string[]): Project {
     name: id.toUpperCase(),
     repoPath: "",
     createdAt: "",
+    repos: [],
     members: memberIds.map((agentId) => ({ agentId, access: "write" as const })),
     team: memberIds.map((agentId, i) => ({ role: `r${i}`, agentId })),
     mode: "local",

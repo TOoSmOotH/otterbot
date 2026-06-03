@@ -1,13 +1,125 @@
 import { useEffect, useState } from "react";
 import { FolderGit2, Plus, Trash2, Play, GitPullRequest } from "lucide-react";
 import { Icon } from "../ui/Icon";
-import { useProjectsStore, type Project, type PipelineRun } from "../../stores/projects-store";
+import {
+  useProjectsStore,
+  type Project,
+  type ProjectRepo,
+  type ForgeAccount,
+  type PipelineRun,
+} from "../../stores/projects-store";
 import { useAgentsStore } from "../../stores/agents-store";
 import { AgentWizard } from "./AgentWizard";
 import { ProjectTeamModels } from "./ProjectTeamModels";
 
 /** Stable empty array so the runs selector never returns a fresh reference. */
 const EMPTY_RUNS: PipelineRun[] = [];
+
+/** One repo's forge editor: configure backing, set primary, or remove it. */
+function RepoRow({
+  project,
+  repo,
+  accounts,
+}: {
+  project: Project;
+  repo: ProjectRepo;
+  accounts: ForgeAccount[];
+}) {
+  const setRepoForge = useProjectsStore((s) => s.setRepoForge);
+  const setPrimaryRepo = useProjectsStore((s) => s.setPrimaryRepo);
+  const removeRepo = useProjectsStore((s) => s.removeRepo);
+  const [form, setForm] = useState({
+    mode: repo.mode,
+    accountId: repo.forgeAccountId ?? "",
+    repo: repo.forgeRepo ?? "",
+    baseBranch: repo.baseBranch ?? "",
+    monitorIssues: repo.monitorIssues,
+    triageIssues: repo.triageIssues,
+  });
+  const [busy, setBusy] = useState(false);
+  const canRemove = project.repos.length > 1;
+
+  return (
+    <div style={{ border: "1px solid rgb(var(--border))", borderRadius: 8, padding: 8 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
+        <code style={{ fontSize: 12 }}>/project/{repo.name}</code>
+        {repo.isPrimary && <span style={chip}>primary</span>}
+        <span style={{ flex: 1 }} />
+        {!repo.isPrimary && (
+          <button style={ghostBtn} title="Make primary (backs issue monitoring)" onClick={() => void setPrimaryRepo(project.id, repo.id)}>
+            Make primary
+          </button>
+        )}
+        <button
+          style={iconBtn}
+          title={canRemove ? "Remove repo" : "A project must keep at least one repo"}
+          disabled={!canRemove}
+          onClick={() => canRemove && confirm(`Remove repo "${repo.name}" from this project?`) && void removeRepo(project.id, repo.id)}
+        >
+          <Icon icon={Trash2} size={14} />
+        </button>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+        <select value={form.mode} onChange={(e) => setForm({ ...form, mode: e.target.value as Project["mode"] })} style={input}>
+          <option value="local">Local repo</option>
+          <option value="existing">Existing forge repo</option>
+          <option value="new">New forge repo</option>
+          <option value="fork">Fork existing repo</option>
+        </select>
+        {form.mode !== "local" && (
+          <>
+            <select value={form.accountId} onChange={(e) => setForm({ ...form, accountId: e.target.value })} style={input}>
+              <option value="">Select account…</option>
+              {accounts.map((a) => (
+                <option key={a.id} value={a.id}>{a.label} ({a.provider})</option>
+              ))}
+            </select>
+            {accounts.length === 0 && (
+              <span style={{ fontSize: 11, color: "rgb(var(--muted))", gridColumn: "1 / -1" }}>
+                No git hosting accounts yet — add one in Settings → Git Creds.
+              </span>
+            )}
+            <input placeholder={form.mode === "fork" ? "upstream owner/name or repo URL" : "owner/name or repo URL"} value={form.repo} onChange={(e) => setForm({ ...form, repo: e.target.value })} style={input} />
+            <input placeholder="base branch (optional)" value={form.baseBranch} onChange={(e) => setForm({ ...form, baseBranch: e.target.value })} style={input} />
+            <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "rgb(var(--muted))" }}>
+              <input type="checkbox" checked={form.monitorIssues} onChange={(e) => setForm({ ...form, monitorIssues: e.target.checked })} />
+              Monitor issues → pipeline
+            </label>
+            <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "rgb(var(--muted))" }}>
+              <input type="checkbox" checked={form.triageIssues} onChange={(e) => setForm({ ...form, triageIssues: e.target.checked })} />
+              Triage issues → PM posts/refines a plan
+            </label>
+            {form.mode === "fork" && (
+              <span style={{ fontSize: 11, color: "rgb(var(--muted))", gridColumn: "1 / -1" }}>
+                {repo.forkRepo
+                  ? `Forked to ${repo.forkRepo} — branches push there; PRs open against ${repo.forgeRepo}.`
+                  : "Forks the upstream under the selected account, then contributes back via PRs."}
+              </span>
+            )}
+          </>
+        )}
+      </div>
+      <button
+        style={{ ...ghostBtn, marginTop: 6 }}
+        disabled={busy}
+        onClick={async () => {
+          setBusy(true);
+          await setRepoForge(project.id, repo.id, {
+            mode: form.mode,
+            accountId: form.accountId || null,
+            repo: form.repo || null,
+            baseBranch: form.baseBranch || null,
+            monitorIssues: form.monitorIssues,
+            triageIssues: form.triageIssues,
+          });
+          setBusy(false);
+        }}
+      >
+        {busy ? "Saving…" : "Save repo"}
+      </button>
+    </div>
+  );
+}
 
 /**
  * Manage collaborative projects: a shared git working tree with a dedicated
@@ -80,25 +192,18 @@ function ProjectCard({
   // don't return a fresh [] every render (which crashes useSyncExternalStore).
   const runs = useProjectsStore((s) => s.runs[project.id]) ?? EMPTY_RUNS;
   const loadRuns = useProjectsStore((s) => s.loadRuns);
-  const setForge = useProjectsStore((s) => s.setForge);
   const setRules = useProjectsStore((s) => s.setRules);
+  const setRemoteE2e = useProjectsStore((s) => s.setRemoteE2e);
+  const addRepo = useProjectsStore((s) => s.addRepo);
   const addMember = useProjectsStore((s) => s.addMember);
   const removeMember = useProjectsStore((s) => s.removeMember);
   const setMemberAccess = useProjectsStore((s) => s.setMemberAccess);
   const startPipeline = useProjectsStore((s) => s.startPipeline);
 
-  const [forge, setForgeForm] = useState({
-    mode: project.mode,
-    accountId: project.forgeAccountId ?? "",
-    repo: project.forgeRepo ?? "",
-    baseBranch: project.baseBranch ?? "",
-    monitorIssues: project.monitorIssues,
-    triageIssues: project.triageIssues,
-    remoteE2e: project.remoteE2e,
-  });
   const [pickAgent, setPickAgent] = useState("");
   const [goal, setGoal] = useState("");
-  const [busy, setBusy] = useState(false);
+  const [newRepoName, setNewRepoName] = useState("");
+  const [addingRepo, setAddingRepo] = useState(false);
   const [rulesText, setRulesText] = useState(project.rules ?? "");
   const [rulesBusy, setRulesBusy] = useState(false);
 
@@ -191,75 +296,46 @@ function ProjectCard({
         </button>
       </div>
 
-      {/* Forge config */}
+      {/* Repos */}
       <div style={{ marginTop: 12, fontSize: 12, fontWeight: 600 }}>Code location</div>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, marginTop: 6 }}>
-        <select value={forge.mode} onChange={(e) => setForgeForm({ ...forge, mode: e.target.value as Project["mode"] })} style={input}>
-          <option value="local">Local repo</option>
-          <option value="existing">Existing forge repo</option>
-          <option value="new">New forge repo</option>
-          <option value="fork">Fork existing repo</option>
-        </select>
-        {forge.mode !== "local" && (
-          <>
-            <select value={forge.accountId} onChange={(e) => setForgeForm({ ...forge, accountId: e.target.value })} style={input}>
-              <option value="">Select account…</option>
-              {accounts.map((a) => (
-                <option key={a.id} value={a.id}>{a.label} ({a.provider})</option>
-              ))}
-            </select>
-            {accounts.length === 0 && (
-              <span style={{ fontSize: 11, color: "rgb(var(--muted))", gridColumn: "1 / -1" }}>
-                No git hosting accounts yet — add one in Settings → Git Creds.
-              </span>
-            )}
-            <input placeholder={forge.mode === "fork" ? "upstream owner/name or repo URL" : "owner/name or repo URL"} value={forge.repo} onChange={(e) => setForgeForm({ ...forge, repo: e.target.value })} style={input} />
-            <input placeholder="base branch (optional)" value={forge.baseBranch} onChange={(e) => setForgeForm({ ...forge, baseBranch: e.target.value })} style={input} />
-            <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "rgb(var(--muted))" }}>
-              <input type="checkbox" checked={forge.monitorIssues} onChange={(e) => setForgeForm({ ...forge, monitorIssues: e.target.checked })} />
-              Monitor issues → pipeline
-            </label>
-            <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "rgb(var(--muted))" }}>
-              <input type="checkbox" checked={forge.triageIssues} onChange={(e) => setForgeForm({ ...forge, triageIssues: e.target.checked })} />
-              Triage issues → PM posts/refines a plan
-            </label>
-            {forge.mode === "fork" && (
-              <span style={{ fontSize: 11, color: "rgb(var(--muted))", gridColumn: "1 / -1" }}>
-                {project.forkRepo
-                  ? `Forked to ${project.forkRepo} — branches push there; PRs open against ${project.forgeRepo}.`
-                  : "Forks the upstream under the selected account, then contributes back via PRs."}
-              </span>
-            )}
-          </>
-        )}
+      <p style={{ fontSize: 11, color: "rgb(var(--muted))", margin: "2px 0 6px" }}>
+        One or more repos, each its own subdir under <code>/project</code>. The team works across
+        all of them in one workspace and commits/PRs each independently. The primary repo backs
+        issue monitoring.
+      </p>
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        {project.repos.map((repo) => (
+          <RepoRow key={repo.id} project={project} repo={repo} accounts={accounts} />
+        ))}
       </div>
-      <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "rgb(var(--muted))", marginTop: 6 }}>
+      <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
+        <input
+          placeholder="New repo name (e.g. docs-site)…"
+          value={newRepoName}
+          onChange={(e) => setNewRepoName(e.target.value)}
+          style={input}
+        />
+        <button
+          style={primaryBtn}
+          disabled={addingRepo || !newRepoName.trim()}
+          onClick={async () => {
+            setAddingRepo(true);
+            await addRepo(project.id, { name: newRepoName.trim() });
+            setNewRepoName("");
+            setAddingRepo(false);
+          }}
+        >
+          <Icon icon={Plus} size={14} /> Add repo
+        </button>
+      </div>
+      <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "rgb(var(--muted))", marginTop: 8 }}>
         <input
           type="checkbox"
-          checked={forge.remoteE2e}
-          onChange={(e) => setForgeForm({ ...forge, remoteE2e: e.target.checked })}
+          checked={project.remoteE2e}
+          onChange={(e) => void setRemoteE2e(project.id, e.target.checked)}
         />
         Remote end-to-end testing (needs the Proxmox + SSH service agents)
       </label>
-      <button
-        style={{ ...ghostBtn, marginTop: 6 }}
-        disabled={busy}
-        onClick={async () => {
-          setBusy(true);
-          await setForge(project.id, {
-            mode: forge.mode,
-            accountId: forge.accountId || null,
-            repo: forge.repo || null,
-            baseBranch: forge.baseBranch || null,
-            monitorIssues: forge.monitorIssues,
-            triageIssues: forge.triageIssues,
-            remoteE2e: forge.remoteE2e,
-          });
-          setBusy(false);
-        }}
-      >
-        {busy ? "Saving…" : "Save code location"}
-      </button>
 
       {/* Project rules */}
       <div style={{ marginTop: 12, fontSize: 12, fontWeight: 600 }}>Project rules</div>

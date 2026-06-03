@@ -743,6 +743,15 @@ export async function buildServer(
     return { ok: true, rules };
   });
 
+  // Toggle the project-wide remote-host (Proxmox/SSH VM) e2e test phase.
+  app.put<{ Params: { id: string }; Body: { remoteE2e?: boolean } }>(
+    "/api/projects/:id/remote-e2e",
+    async (req) => {
+      orch.setProjectRemoteE2e(req.params.id, Boolean(req.body?.remoteE2e));
+      return { ok: true };
+    }
+  );
+
   // Manually publish a run (push branch + open PR/MR).
   app.post<{ Params: { runId: string } }>("/api/pipeline-runs/:runId/publish", async (req, reply) => {
     const result = await orch.publishRun(req.params.runId);

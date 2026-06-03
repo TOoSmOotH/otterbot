@@ -134,6 +134,8 @@ interface ProjectsState {
     }
   ) => Promise<string | null>;
   setRules: (projectId: string, rules: string) => Promise<string | null>;
+  /** Toggle the project-wide remote-host e2e test phase. */
+  setRemoteE2e: (projectId: string, on: boolean) => Promise<void>;
 
   /** Add a repo to a project (optionally configuring its forge in one call). */
   addRepo: (
@@ -287,6 +289,15 @@ export const useProjectsStore = create<ProjectsState>((set, get) => ({
     set({ error: null });
     await get().load();
     return null;
+  },
+
+  setRemoteE2e: async (projectId, on) => {
+    const res = await apiFetch(`/api/projects/${projectId}/remote-e2e`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ remoteE2e: on }),
+    });
+    if (res.ok) await get().load();
   },
 
   addRepo: async (projectId, input) => {
