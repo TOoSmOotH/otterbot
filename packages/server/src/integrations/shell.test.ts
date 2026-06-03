@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { ensureWorkspace, buildSandboxPlan } from "./shell.js";
 
 describe("ensureWorkspace", () => {
@@ -147,7 +147,7 @@ describe("buildSandboxPlan project binding", () => {
       }
     } finally {
       rmSync(dir, { recursive: true, force: true });
-      rmSync(key, { force: true });
+      rmSync(dirname(key), { recursive: true, force: true });
     }
   });
 
@@ -168,7 +168,7 @@ describe("buildSandboxPlan project binding", () => {
       expect(flat(without)).not.toContain("commit.gpgsign");
     } finally {
       rmSync(dir, { recursive: true, force: true });
-      rmSync(key, { force: true });
+      rmSync(dirname(key), { recursive: true, force: true });
     }
   });
 });

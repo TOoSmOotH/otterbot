@@ -123,14 +123,16 @@ function buildEnv(
 
 /**
  * Env that points git at a bound SSH key for transport + (optional) signing.
- * `keyDir` is the in-sandbox HOME `.ssh` dir (`/workspace/.ssh` on bwrap, the
- * real workspace `.ssh` on macOS where paths aren't remapped).
+ * Paths are the locations git will see: the in-sandbox `/workspace/.ssh/*` on
+ * bwrap, or the real host paths on macOS (sandbox-exec doesn't remap).
  */
-function gitSshEnv(gitSsh: GitSshSetup, keyDir: string): Record<string, string> {
-  const keyPath = `${keyDir}/id_ed25519`;
-  const known = gitSsh.knownHostsPath ? ` -o UserKnownHostsFile=${keyDir}/known_hosts` : "";
+function gitSshEnv(
+  gitSsh: GitSshSetup,
+  paths: { keyPath: string; knownHostsPath?: string; signingPubPath?: string }
+): Record<string, string> {
+  const known = paths.knownHostsPath ? ` -o UserKnownHostsFile=${paths.knownHostsPath}` : "";
   const env: Record<string, string> = {
-    GIT_SSH_COMMAND: `ssh -i ${keyPath} -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new${known}`,
+    GIT_SSH_COMMAND: `ssh -i ${paths.keyPath} -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new${known}`,
   };
   if (gitSsh.committer) {
     env.GIT_AUTHOR_NAME = gitSsh.committer.name;
@@ -138,12 +140,12 @@ function gitSshEnv(gitSsh: GitSshSetup, keyDir: string): Record<string, string> 
     env.GIT_COMMITTER_NAME = gitSsh.committer.name;
     env.GIT_COMMITTER_EMAIL = gitSsh.committer.email;
   }
-  if (gitSsh.signingKeyPath) {
+  if (paths.signingPubPath) {
     env.GIT_CONFIG_COUNT = "3";
     env.GIT_CONFIG_KEY_0 = "gpg.format";
     env.GIT_CONFIG_VALUE_0 = "ssh";
     env.GIT_CONFIG_KEY_1 = "user.signingkey";
-    env.GIT_CONFIG_VALUE_1 = `${keyDir}/id_ed25519.pub`;
+    env.GIT_CONFIG_VALUE_1 = paths.signingPubPath;
     env.GIT_CONFIG_KEY_2 = "commit.gpgsign";
     env.GIT_CONFIG_VALUE_2 = "true";
   }
@@ -239,7 +241,7 @@ interface SpawnPlan {
  * only when an agent is explicitly assigned a Git-account-backed connection.
  */
 export interface GitSshSetup {
-  /** Host path to the materialized private key (0600). */
+  /** Host path to the materialized private key (0600). Must exist at plan-build time. */
   keyPath: string;
   /** Host path to a known_hosts file, if any. */
   knownHostsPath?: string;
@@ -355,7 +357,14 @@ function bwrapPlan(
     if (opts.gitSsh.signingKeyPath) {
       args.push("--ro-bind-try", opts.gitSsh.signingKeyPath, "/workspace/.ssh/id_ed25519.pub");
     }
-    Object.assign(env, gitSshEnv(opts.gitSsh, "/workspace/.ssh"));
+    Object.assign(
+      env,
+      gitSshEnv(opts.gitSsh, {
+        keyPath: "/workspace/.ssh/id_ed25519",
+        knownHostsPath: opts.gitSsh.knownHostsPath ? "/workspace/.ssh/known_hosts" : undefined,
+        signingPubPath: opts.gitSsh.signingKeyPath ? "/workspace/.ssh/id_ed25519.pub" : undefined,
+      })
+    );
   }
   const startDir = opts.startIn === "project" && opts.projectWorkspacePath ? PROJECT_MOUNT : "/workspace";
   args.push(
@@ -406,7 +415,13 @@ function sandboxExecPlan(
     args: ["-p", profile, ...innerArgv],
     env: {
       ...buildEnv(workspaceDir, secrets, toolsBin),
-      ...(opts.gitSsh ? gitSshEnv(opts.gitSsh, dirname(opts.gitSsh.keyPath)) : {}),
+      ...(opts.gitSsh
+        ? gitSshEnv(opts.gitSsh, {
+            keyPath: opts.gitSsh.keyPath,
+            knownHostsPath: opts.gitSsh.knownHostsPath,
+            signingPubPath: opts.gitSsh.signingKeyPath,
+          })
+        : {}),
     },
     // sandbox-exec does not remap paths, so the project's real host path is the
     // working directory when starting in the shared tree.
