@@ -153,6 +153,21 @@ describe("ProjectStore", () => {
     expect(store.get(p.id)!.remoteE2e).toBe(false);
   });
 
+  it("reports per-repo working-tree changes (drives multi-repo publish)", () => {
+    const p = store.create("Changes");
+    const docs = store.addRepo(p.id, { name: "docs" });
+    const primary = store.primaryRepo(p.id)!;
+    // Both repos start clean.
+    expect(store.hasChanges(primary.repoPath)).toBe(false);
+    expect(store.hasChanges(docs.repoPath)).toBe(false);
+    // Touch only the docs repo — publish should target it and skip the other.
+    writeFileSync(join(docs.repoPath, "README.md"), "# docs");
+    expect(store.hasChanges(docs.repoPath)).toBe(true);
+    expect(store.hasChanges(primary.repoPath)).toBe(false);
+    store.commitAll(docs.repoPath, "add readme");
+    expect(store.hasChanges(docs.repoPath)).toBe(false);
+  });
+
   it("creates branches and commits changes in the working tree", () => {
     const p = store.create("Git Ops");
     expect(store.ensureBranch(p.repoPath, "feature/x").ok).toBe(true);

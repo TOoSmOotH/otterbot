@@ -1814,47 +1814,84 @@ export class Orchestrator {
   }
 
   /**
-   * Commit the project tree, push a run branch, and open a PR/MR. Called when a
-   * forge-backed pipeline run completes; safe to call manually too.
+   * Publish a completed pipeline run: for every forge-backed repo in the project
+   * that the run actually changed, commit the work onto a shared run branch,
+   * push it, and open a PR/MR — so each repo is contributed independently. The
+   * primary repo's PR is recorded on the run (the forge-monitor's CI-feedback
+   * loop tracks it); additional repos' PR URLs are returned. Repos with no
+   * changes are skipped. Called when a run completes; safe to call manually.
    */
-  async publishRun(runId: string): Promise<{ ok: boolean; error?: string; prUrl?: string }> {
+  async publishRun(
+    runId: string
+  ): Promise<{ ok: boolean; error?: string; prUrl?: string; prs?: Array<{ repo: string; url: string }> }> {
     const run = this.pipeline.get(runId);
     if (!run) return { ok: false, error: "Unknown run" };
     const project = this.projects.get(run.projectId);
-    if (!project || project.mode === "local" || !project.forgeRepo) {
-      return { ok: false, error: "Project is not forge-backed" };
-    }
-    const forge = this.forge.forgeForAccount(project.forgeAccountId);
-    if (!forge) return { ok: false, error: "Forge account missing" };
-    const target = this.gitTargetFor(project);
-    if (!target) return { ok: false, error: "Could not resolve a git push target" };
+    if (!project) return { ok: false, error: "Unknown project" };
+
+    const repos = this.projects.listRepos(project.id);
+    const forgeBacked = repos.filter((r) => r.mode !== "local" && r.forgeRepo && r.forgeAccountId);
+    if (forgeBacked.length === 0) return { ok: false, error: "Project has no forge-backed repos" };
 
     const branch = run.prBranch ?? `otterbot/run-${runId.slice(0, 8)}`;
-    const ensure = this.projects.ensureBranch(project.repoPath, branch);
-    if (!ensure.ok) return { ok: false, error: `branch failed: ${ensure.output}` };
-    this.projects.commitAll(project.repoPath, `otterbot: ${run.goal}`.slice(0, 72), target.ctx);
-    const push = this.projects.push(project.repoPath, target.url, branch, target.ctx);
-    if (!push.ok) return { ok: false, error: `push failed: ${push.output}` };
+    const prs: Array<{ repo: string; url: string }> = [];
+    const errors: string[] = [];
+    let primaryRecorded = false;
 
-    this.pipeline.setPrInfo(runId, { branch });
-    try {
-      const base = project.baseBranch || (await forge.getRepo(project.forgeRepo)).defaultBranch;
-      // For a fork, the branch lives on the fork: open a cross-fork PR into the
-      // upstream with a "forkOwner:branch" head.
-      const head = project.forkRepo ? `${splitRepo(project.forkRepo).owner}:${branch}` : branch;
-      const pr = await forge.openPullRequest({
-        repo: project.forgeRepo,
-        title: `otterbot: ${run.goal}`.slice(0, 120),
-        body: `Automated by the otterbot pipeline (run ${runId}).\n\nGoal:\n${run.goal}`,
-        head,
-        base,
-      });
-      this.pipeline.setPrInfo(runId, { number: pr.number, url: pr.htmlUrl });
-      return { ok: true, prUrl: pr.htmlUrl };
-    } catch (err) {
-      // The branch is pushed even if PR creation fails (e.g. one already open).
-      return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    for (const repo of forgeBacked) {
+      // Only publish repos the run actually touched.
+      if (!this.projects.hasChanges(repo.repoPath)) continue;
+      const forge = this.forge.forgeForAccount(repo.forgeAccountId);
+      const target = this.gitTargetFor(repo);
+      if (!forge || !target) {
+        errors.push(`${repo.name}: could not resolve a git push target`);
+        continue;
+      }
+      const ensure = this.projects.ensureBranch(repo.repoPath, branch);
+      if (!ensure.ok) {
+        errors.push(`${repo.name}: branch failed (${ensure.output})`);
+        continue;
+      }
+      this.projects.commitAll(repo.repoPath, `otterbot: ${run.goal}`.slice(0, 72), target.ctx);
+      const push = this.projects.push(repo.repoPath, target.url, branch, target.ctx);
+      if (!push.ok) {
+        errors.push(`${repo.name}: push failed (${push.output})`);
+        continue;
+      }
+      if (repo.isPrimary && !primaryRecorded) {
+        this.pipeline.setPrInfo(runId, { branch });
+        primaryRecorded = true;
+      }
+      try {
+        const base = repo.baseBranch || (await forge.getRepo(repo.forgeRepo!)).defaultBranch;
+        // For a fork, the branch lives on the fork: open a cross-fork PR into the
+        // upstream with a "forkOwner:branch" head.
+        const head = repo.forkRepo ? `${splitRepo(repo.forkRepo).owner}:${branch}` : branch;
+        const pr = await forge.openPullRequest({
+          repo: repo.forgeRepo!,
+          title: `otterbot: ${run.goal}`.slice(0, 120),
+          body: `Automated by the otterbot pipeline (run ${runId}).\n\nGoal:\n${run.goal}`,
+          head,
+          base,
+        });
+        prs.push({ repo: repo.forgeRepo!, url: pr.htmlUrl });
+        if (repo.isPrimary) this.pipeline.setPrInfo(runId, { number: pr.number, url: pr.htmlUrl });
+      } catch (err) {
+        // The branch is pushed even if PR creation fails (e.g. one already open).
+        errors.push(`${repo.name}: ${err instanceof Error ? err.message : String(err)}`);
+      }
     }
+
+    if (prs.length === 0) {
+      return {
+        ok: false,
+        error: errors.length ? errors.join("; ") : "No repos changed by this run",
+      };
+    }
+    // Prefer the primary repo's PR as the headline URL.
+    const primaryRepo = forgeBacked.find((r) => r.isPrimary)?.forgeRepo;
+    const headline = prs.find((p) => p.repo === primaryRepo) ?? prs[0];
+    return { ok: true, prUrl: headline.url, prs };
   }
 
   // --- Team provisioning ---------------------------------------------------

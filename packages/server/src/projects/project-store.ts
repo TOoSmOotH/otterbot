@@ -568,6 +568,12 @@ export class ProjectStore {
     return clone;
   }
 
+  /** Whether a repo's working tree has uncommitted changes (staged or not). */
+  hasChanges(repoPath: string): boolean {
+    const status = this.git(repoPath, ["status", "--porcelain"]);
+    return status.ok && status.output.trim() !== "";
+  }
+
   /** Create (or switch to) a branch. */
   ensureBranch(repoPath: string, branch: string): GitOpResult {
     const exists = this.git(repoPath, ["rev-parse", "--verify", branch]).ok;
