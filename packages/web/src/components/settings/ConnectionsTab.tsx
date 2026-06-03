@@ -5,6 +5,7 @@ import {
   type ConnectionTypeDef,
   type CredentialTypeDef,
 } from "../../stores/connections-store";
+import { useProjectsStore } from "../../stores/projects-store";
 
 /**
  * Settings → Connections. Define a reusable connector (type + config) that
@@ -130,6 +131,9 @@ function AddConnection({
   onDone: () => void;
 }) {
   const { credentials, createCredential, createConnection, busy, error } = useConnectionsStore();
+  const forgeAccounts = useProjectsStore((s) => s.forgeAccounts);
+  const loadForgeAccounts = useProjectsStore((s) => s.loadForgeAccounts);
+  useEffect(() => { void loadForgeAccounts(); }, [loadForgeAccounts]);
   const [typeKey, setTypeKey] = useState(connectionTypes[0]?.type ?? "");
   const def = useMemo(() => connectionTypes.find((t) => t.type === typeKey), [connectionTypes, typeKey]);
   const credDef = useMemo(
@@ -246,6 +250,31 @@ function AddConnection({
             )
           )}
         </div>
+      )}
+
+      {def?.type === "github" && (
+        <>
+          <label style={fieldLabel}>
+            Git account (token + SSH key)
+            <select
+              value={(config.gitAccountId as string) ?? ""}
+              onChange={(e) => setConfig({ ...config, gitAccountId: e.target.value || undefined })}
+              style={input}
+            >
+              <option value="">Token credential only (no git-over-SSH)</option>
+              {forgeAccounts.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.label} · {a.gitTransport === "ssh" ? "SSH" : "HTTPS — no SSH key"}
+                </option>
+              ))}
+            </select>
+          </label>
+          {forgeAccounts.length === 0 && (
+            <span style={{ fontSize: 11, color: "rgb(var(--muted))" }}>
+              No Git accounts yet — add one in Settings → Credentials → Git account (Transport: SSH).
+            </span>
+          )}
+        </>
       )}
 
       {def && (def.isChat ? (
