@@ -2519,8 +2519,24 @@ export class Orchestrator {
   createNamedCredential(input: { type: string; label: string; secrets: Record<string, string> }) {
     return this.credentials.create(input);
   }
-  updateNamedCredential(id: string, patch: { label?: string; secrets?: Record<string, string> }) {
-    return this.credentials.update(id, patch);
+  updateNamedCredential(
+    id: string,
+    patch: { label?: string; secrets?: Record<string, string>; config?: Record<string, unknown> }
+  ) {
+    const updated = this.credentials.update(id, patch);
+    // Edited secrets/config must reach running agents: reconcile every agent
+    // with a binding referencing this account (allAgents bindings hit everyone).
+    if (updated && (patch.secrets || patch.config)) {
+      const agents = new Set<string>();
+      let instanceWide = false;
+      for (const b of this.integrations.bindingsUsingAccount(id)) {
+        if (b.allAgents) instanceWide = true;
+        else for (const a of b.assignedAgentIds) agents.add(a);
+      }
+      if (instanceWide) this.restartAgents();
+      else for (const a of agents) this.reconcileAgentConnections(a);
+    }
+    return updated;
   }
   /** Delete a credential; refuses (returns false) while a connection references it unless forced. */
   deleteNamedCredential(id: string, force = false): { ok: boolean; error?: string } {

@@ -524,7 +524,10 @@ export async function buildServer(
     }
   );
 
-  app.put<{ Params: { id: string }; Body: { label?: string; secrets?: Record<string, string> } }>(
+  app.put<{
+    Params: { id: string };
+    Body: { label?: string; secrets?: Record<string, string>; config?: Record<string, unknown> };
+  }>(
     "/api/credentials/:id",
     async (req, reply) => {
       const updated = orch.updateNamedCredential(req.params.id, req.body ?? {});

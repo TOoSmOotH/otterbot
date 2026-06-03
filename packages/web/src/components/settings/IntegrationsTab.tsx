@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import type { SkillConfigField, SkillConfigSchema } from "@otterbot/shared";
+import type { SkillConfigField, SkillConfigSchema, Credential, Connection } from "@otterbot/shared";
 import {
   useConnectionsStore,
   assignConnection,
@@ -34,6 +34,7 @@ export function IntegrationsTab() {
   const agents = useAgentsStore((s) => s.agents);
   const loadAgents = useAgentsStore((s) => s.load);
   const [adding, setAdding] = useState(false);
+  const [editingConn, setEditingConn] = useState<Connection | null>(null);
 
   useEffect(() => {
     void load();
@@ -87,6 +88,7 @@ export function IntegrationsTab() {
             assignedAgentIds={conn.assignedAgentIds}
             agents={agents.map((a) => ({ id: a.id, label: a.displayName }))}
             agentName={agentName}
+            onEdit={() => setEditingConn(conn)}
             onDelete={async () => {
               const res = await deleteConnection(conn.id);
               if (!res.ok && res.error && confirm(`${res.error}\n\nForce delete and unassign everywhere?`)) {
@@ -96,6 +98,17 @@ export function IntegrationsTab() {
           />
         ))}
       </section>
+
+      {editingConn && (
+        <Modal title={`Edit ${editingConn.label}`} onClose={() => setEditingConn(null)} maxWidth={620}>
+          <EditIntegration
+            conn={editingConn}
+            connectionTypes={connectionTypes}
+            credentials={credentials}
+            onDone={() => setEditingConn(null)}
+          />
+        </Modal>
+      )}
 
       {/* --- Accounts (reusable credentials) --- */}
       <AccountsSection credentials={credentials} credentialTypes={credentialTypes} onDelete={deleteCredential} />
@@ -117,6 +130,7 @@ function AccountsSection({
   onDelete: (id: string, force?: boolean) => Promise<{ ok: boolean; error?: string }>;
 }) {
   const [adding, setAdding] = useState(false);
+  const [editing, setEditing] = useState<Credential | null>(null);
   return (
     <section>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -127,6 +141,11 @@ function AccountsSection({
           </button>
         )}
       </div>
+      {editing && (
+        <Modal title={`Edit ${editing.label}`} onClose={() => setEditing(null)} maxWidth={560}>
+          <EditAccount account={editing} credentialTypes={credentialTypes} onDone={() => setEditing(null)} />
+        </Modal>
+      )}
       <p style={hint}>
         Reusable identities + secrets. One account (a Slack token, a Git account) can back several
         integrations. Most are created inline when you add an integration; Git accounts and SSH keys
@@ -150,20 +169,184 @@ function AccountsSection({
                 .join("  ") || "no secrets stored"}
             </span>
           </div>
-          <button
-            style={danger}
-            onClick={async () => {
-              const res = await onDelete(cred.id);
-              if (!res.ok && res.error && confirm(`${res.error}\n\nForce delete anyway?`)) {
-                await onDelete(cred.id, true);
-              }
-            }}
-          >
-            Delete
-          </button>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button style={ghost} onClick={() => setEditing(cred)}>
+              Edit
+            </button>
+            <button
+              style={danger}
+              onClick={async () => {
+                const res = await onDelete(cred.id);
+                if (!res.ok && res.error && confirm(`${res.error}\n\nForce delete anyway?`)) {
+                  await onDelete(cred.id, true);
+                }
+              }}
+            >
+              Delete
+            </button>
+          </div>
         </div>
       ))}
     </section>
+  );
+}
+
+/** Edit an existing account: git accounts get their fields; others re-enter secrets. */
+function EditAccount({
+  account,
+  credentialTypes,
+  onDone,
+}: {
+  account: Credential;
+  credentialTypes: CredentialTypeDef[];
+  onDone: () => void;
+}) {
+  const updateCredential = useConnectionsStore((s) => s.updateCredential);
+  const reload = useConnectionsStore((s) => s.load);
+  const keys = useSshKeysStore((s) => s.keys);
+  const loadKeys = useSshKeysStore((s) => s.load);
+  useEffect(() => void loadKeys(), [loadKeys]);
+
+  const isGit = account.type === "git";
+  const isSshKey = account.type === "ssh-key";
+  const credDef = credentialTypes.find((t) => t.type === account.type);
+  const cfg = account.config ?? {};
+
+  const [label, setLabel] = useState(account.label);
+  const [busy, setBusy] = useState(false);
+  // Git fields (seeded from config; token blank = keep).
+  const [git, setGit] = useState({
+    baseUrl: typeof cfg.baseUrl === "string" ? cfg.baseUrl : "",
+    gitTransport: cfg.gitTransport === "ssh" ? "ssh" : ("https" as "https" | "ssh"),
+    username: typeof cfg.username === "string" ? cfg.username : "",
+    committerName: typeof cfg.committerName === "string" ? cfg.committerName : "",
+    committerEmail: typeof cfg.committerEmail === "string" ? cfg.committerEmail : "",
+    signCommits: cfg.signCommits === true,
+    sshKeyId: typeof cfg.sshKeyId === "string" ? cfg.sshKeyId : "",
+    token: "",
+  });
+  // Non-git: re-enter secret fields (blank keeps the stored value).
+  const [values, setValues] = useState<Record<string, unknown>>({});
+
+  const save = async () => {
+    setBusy(true);
+    try {
+      if (isGit) {
+        await updateCredential(account.id, {
+          label,
+          config: {
+            provider: cfg.provider === "gitea" ? "gitea" : "github",
+            baseUrl: git.baseUrl,
+            username: git.username,
+            gitTransport: git.gitTransport,
+            committerName: git.committerName,
+            committerEmail: git.committerEmail,
+            signCommits: git.signCommits,
+            sshKeyId: git.gitTransport === "ssh" ? git.sshKeyId || null : null,
+          },
+          secrets: git.token ? { FORGE_TOKEN: git.token } : undefined,
+        });
+      } else if (isSshKey) {
+        await updateCredential(account.id, { label });
+      } else {
+        await updateCredential(account.id, { label, secrets: stringify(values) });
+      }
+      await reload();
+      onDone();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      <label style={fieldLabel}>
+        Label
+        <input style={input} value={label} onChange={(e) => setLabel(e.target.value)} />
+      </label>
+
+      {isGit && (
+        <>
+          {cfg.provider === "gitea" && (
+            <label style={fieldLabel}>
+              Base URL
+              <input style={input} value={git.baseUrl} onChange={(e) => setGit({ ...git, baseUrl: e.target.value })} />
+            </label>
+          )}
+          <label style={fieldLabel}>
+            API token
+            <input
+              style={input}
+              type="password"
+              placeholder="•••• (leave blank to keep)"
+              value={git.token}
+              onChange={(e) => setGit({ ...git, token: e.target.value })}
+            />
+          </label>
+          <label style={fieldLabel}>
+            Bot username
+            <input style={input} value={git.username} onChange={(e) => setGit({ ...git, username: e.target.value })} />
+          </label>
+          <label style={fieldLabel}>
+            Git transport
+            <select style={input} value={git.gitTransport} onChange={(e) => setGit({ ...git, gitTransport: e.target.value as "https" | "ssh" })}>
+              <option value="https">HTTPS — token only</option>
+              <option value="ssh">SSH — uses an SSH key</option>
+            </select>
+          </label>
+          <label style={fieldLabel}>
+            Committer name
+            <input style={input} value={git.committerName} onChange={(e) => setGit({ ...git, committerName: e.target.value })} />
+          </label>
+          <label style={fieldLabel}>
+            Committer email
+            <input style={input} value={git.committerEmail} onChange={(e) => setGit({ ...git, committerEmail: e.target.value })} />
+          </label>
+          {git.gitTransport === "ssh" && (
+            <>
+              <label style={fieldLabel}>
+                SSH key
+                <select style={input} value={git.sshKeyId} onChange={(e) => setGit({ ...git, sshKeyId: e.target.value })}>
+                  <option value="">(managed key — none linked)</option>
+                  {keys.map((k) => (
+                    <option key={k.id} value={k.id}>
+                      {k.label} · {k.fingerprint}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label style={radio}>
+                <input type="checkbox" checked={git.signCommits} onChange={(e) => setGit({ ...git, signCommits: e.target.checked })} />
+                SSH-sign commits
+              </label>
+            </>
+          )}
+        </>
+      )}
+
+      {isSshKey && (
+        <span style={hint}>
+          {typeof cfg.fingerprint === "string" ? cfg.fingerprint : ""} — the key material can't be edited; delete and
+          re-add to rotate.
+        </span>
+      )}
+
+      {!isGit && !isSshKey && credDef && (
+        <>
+          <p style={hint}>Re-enter only the fields you want to change — blanks keep the stored value.</p>
+          <SchemaFields schema={credDef.fieldSchema} values={values} onChange={setValues} />
+        </>
+      )}
+
+      <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+        <button style={ghost} onClick={onDone}>
+          Cancel
+        </button>
+        <button style={primary} disabled={busy} onClick={() => void save()}>
+          {busy ? "Saving…" : "Save"}
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -285,6 +468,7 @@ function IntegrationRow({
   assignedAgentIds,
   agents,
   agentName,
+  onEdit,
   onDelete,
 }: {
   id: string;
@@ -296,6 +480,7 @@ function IntegrationRow({
   assignedAgentIds: string[];
   agents: Array<{ id: string; label: string }>;
   agentName: (id: string) => string;
+  onEdit: () => void;
   onDelete: () => void;
 }) {
   const [editing, setEditing] = useState(false);
@@ -332,6 +517,9 @@ function IntegrationRow({
           <button style={ghost} onClick={() => setEditing((v) => !v)}>
             {editing ? "Done" : "Assign"}
           </button>
+          <button style={ghost} onClick={onEdit}>
+            Edit
+          </button>
           <button style={danger} onClick={onDelete}>
             Delete
           </button>
@@ -365,6 +553,100 @@ function IntegrationRow({
             })}
         </div>
       )}
+    </div>
+  );
+}
+
+/** Edit a binding: label, its config, and which account it uses. */
+function EditIntegration({
+  conn,
+  connectionTypes,
+  credentials,
+  onDone,
+}: {
+  conn: Connection;
+  connectionTypes: ConnectionTypeDef[];
+  credentials: Credential[];
+  onDone: () => void;
+}) {
+  const updateConnection = useConnectionsStore((s) => s.updateConnection);
+  const reload = useConnectionsStore((s) => s.load);
+  const forgeAccounts = useProjectsStore((s) => s.forgeAccounts);
+  const loadForge = useProjectsStore((s) => s.loadForgeAccounts);
+  useEffect(() => void loadForge(), [loadForge]);
+
+  const def = connectionTypes.find((t) => t.type === conn.type);
+  const [label, setLabel] = useState(conn.label);
+  const [config, setConfig] = useState<Record<string, unknown>>(conn.config ?? {});
+  const [credentialId, setCredentialId] = useState<string | null>(conn.credentialId);
+  const [busy, setBusy] = useState(false);
+  const compatible = credentials.filter((c) => c.type === def?.credentialType);
+
+  const save = async () => {
+    setBusy(true);
+    try {
+      await updateConnection(conn.id, { label, config, credentialId });
+      await reload();
+      onDone();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      <label style={fieldLabel}>
+        Name
+        <input style={input} value={label} onChange={(e) => setLabel(e.target.value)} />
+      </label>
+
+      {conn.type === "github" ? (
+        <label style={fieldLabel}>
+          Git account
+          <select
+            style={input}
+            value={(config.gitAccountId as string) ?? ""}
+            onChange={(e) => setConfig({ ...config, gitAccountId: e.target.value || undefined })}
+          >
+            <option value="">Select a Git account…</option>
+            {forgeAccounts.map((a) => (
+              <option key={a.id} value={a.id}>
+                {a.label} · {a.gitTransport === "ssh" ? "SSH" : "HTTPS"}
+              </option>
+            ))}
+          </select>
+        </label>
+      ) : (
+        def?.credentialType && (
+          <label style={fieldLabel}>
+            Account
+            <select style={input} value={credentialId ?? ""} onChange={(e) => setCredentialId(e.target.value || null)}>
+              <option value="">None</option>
+              {compatible.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        )
+      )}
+
+      {def &&
+        (def.isChat ? (
+          <ChatConfigFields config={config} onChange={setConfig} channelLabel={chatChannelLabel(def.type)} />
+        ) : def.configSchema.fields.length > 0 ? (
+          <SchemaFields schema={def.configSchema} values={config} onChange={setConfig} />
+        ) : null)}
+
+      <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+        <button style={ghost} onClick={onDone}>
+          Cancel
+        </button>
+        <button style={primary} disabled={busy} onClick={() => void save()}>
+          {busy ? "Saving…" : "Save"}
+        </button>
+      </div>
     </div>
   );
 }

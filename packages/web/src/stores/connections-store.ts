@@ -28,7 +28,7 @@ interface ConnectionsState {
   error: string;
   load: () => Promise<void>;
   createCredential: (input: { type: string; label: string; secrets: Record<string, string> }) => Promise<Credential | null>;
-  updateCredential: (id: string, patch: { label?: string; secrets?: Record<string, string> }) => Promise<boolean>;
+  updateCredential: (id: string, patch: { label?: string; secrets?: Record<string, string>; config?: Record<string, unknown> }) => Promise<boolean>;
   deleteCredential: (id: string, force?: boolean) => Promise<{ ok: boolean; error?: string }>;
   createConnection: (input: { type: string; label: string; config?: Record<string, unknown>; credentialId?: string | null; allAgents?: boolean }) => Promise<Connection | null>;
   updateConnection: (id: string, patch: { label?: string; config?: Record<string, unknown>; credentialId?: string | null; allAgents?: boolean }) => Promise<boolean>;
