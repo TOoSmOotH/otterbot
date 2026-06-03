@@ -41,7 +41,7 @@ export function openTerminal(
   workspaceDir: string,
   secrets: Map<string, string>,
   size: Partial<TerminalSize> = {},
-  opts: { projectWorkspacePath?: string | null } = {}
+  opts: { projectWorkspacePath?: string | null; gitSsh?: import("./shell.js").GitSshSetup } = {}
 ): OpenTerminalResult {
   ensureWorkspace(workspaceDir);
 
@@ -50,6 +50,7 @@ export function openTerminal(
   const built = buildSandboxPlan(workspaceDir, secrets, INTERACTIVE_SHELL, {
     interactive: true,
     projectWorkspacePath: opts.projectWorkspacePath ?? undefined,
+    gitSsh: opts.gitSsh,
   });
   if ("error" in built) return { error: built.error };
 

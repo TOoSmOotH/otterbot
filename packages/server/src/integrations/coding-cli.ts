@@ -169,6 +169,7 @@ export interface CodingRunOptions {
   secrets: Map<string, string>;
   /** Shared project tree to bind + run inside, when the agent has a project. */
   projectWorkspacePath?: string | null;
+  gitSsh?: import("./shell.js").GitSshSetup;
 }
 
 export interface CodingRunResult {
@@ -184,11 +185,16 @@ export interface CodingRunResult {
   error?: string;
 }
 
-function sandboxOptsFor(projectWorkspacePath?: string | null, interactive = false): SandboxOpts {
+function sandboxOptsFor(
+  projectWorkspacePath?: string | null,
+  interactive = false,
+  gitSsh?: import("./shell.js").GitSshSetup
+): SandboxOpts {
   return {
     interactive,
     projectWorkspacePath: projectWorkspacePath ?? undefined,
     startIn: projectWorkspacePath ? "project" : "workspace",
+    gitSsh,
   };
 }
 
@@ -200,7 +206,7 @@ export function runCodingCliHeadless(opts: CodingRunOptions): Promise<CodingRunR
     opts.workspaceDir,
     opts.secrets,
     argv,
-    sandboxOptsFor(opts.projectWorkspacePath)
+    sandboxOptsFor(opts.projectWorkspacePath, false, opts.gitSsh)
   );
   if ("error" in built) {
     return Promise.resolve({
@@ -321,7 +327,7 @@ export function startCodingSession(
     opts.workspaceDir,
     opts.secrets,
     argv,
-    sandboxOptsFor(opts.projectWorkspacePath, true)
+    sandboxOptsFor(opts.projectWorkspacePath, true, opts.gitSsh)
   );
   if ("error" in built) return { error: built.error };
 

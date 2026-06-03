@@ -517,13 +517,14 @@ export function runAgentShell(
   workspaceDir: string,
   secrets: Map<string, string>,
   command: string,
-  opts: { projectWorkspacePath?: string; projectReadOnly?: boolean } = {}
+  opts: { projectWorkspacePath?: string; projectReadOnly?: boolean; gitSsh?: GitSshSetup } = {}
 ): Promise<ShellResult> {
   ensureWorkspace(workspaceDir);
 
   const built = buildSandboxPlan(workspaceDir, secrets, ["/bin/sh", "-c", command], {
     projectWorkspacePath: opts.projectWorkspacePath,
     projectReadOnly: opts.projectReadOnly,
+    gitSsh: opts.gitSsh,
   });
   if ("error" in built) {
     return Promise.resolve({

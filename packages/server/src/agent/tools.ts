@@ -584,6 +584,7 @@ export function buildAgentTools(
         const r = await runAgentShell(ctx.workspaceDir, ctx.shellSecrets(), command, {
           projectWorkspacePath: ctx.projectWorkspacePath() ?? undefined,
           projectReadOnly: ctx.projectAccess() === "read",
+          gitSsh: ctx.gitSsh() ?? undefined,
         });
         if (r.error) return { ok: false, error: r.error };
         return {
@@ -722,6 +723,7 @@ export function buildAgentTools(
             workspaceDir: ctx.workspaceDir,
             secrets: runSecrets,
             projectWorkspacePath,
+            gitSsh: ctx.gitSsh() ?? undefined,
           };
           if (interactive) {
             const started = startCodingSession({ ...common, agentId: ctx.profile.id });
