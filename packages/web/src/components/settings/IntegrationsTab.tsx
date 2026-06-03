@@ -216,6 +216,7 @@ function EditAccount({
   const [busy, setBusy] = useState(false);
   // Git fields (seeded from config; token blank = keep).
   const [git, setGit] = useState({
+    provider: cfg.provider === "gitea" ? "gitea" : ("github" as "github" | "gitea"),
     baseUrl: typeof cfg.baseUrl === "string" ? cfg.baseUrl : "",
     gitTransport: cfg.gitTransport === "ssh" ? "ssh" : ("https" as "https" | "ssh"),
     username: typeof cfg.username === "string" ? cfg.username : "",
@@ -235,7 +236,7 @@ function EditAccount({
         await updateCredential(account.id, {
           label,
           config: {
-            provider: cfg.provider === "gitea" ? "gitea" : "github",
+            provider: git.provider,
             baseUrl: git.baseUrl,
             username: git.username,
             gitTransport: git.gitTransport,
@@ -267,10 +268,17 @@ function EditAccount({
 
       {isGit && (
         <>
-          {cfg.provider === "gitea" && (
+          <label style={fieldLabel}>
+            Provider
+            <select style={input} value={git.provider} onChange={(e) => setGit({ ...git, provider: e.target.value as "github" | "gitea" })}>
+              <option value="github">GitHub</option>
+              <option value="gitea">Gitea</option>
+            </select>
+          </label>
+          {git.provider === "gitea" && (
             <label style={fieldLabel}>
               Base URL
-              <input style={input} value={git.baseUrl} onChange={(e) => setGit({ ...git, baseUrl: e.target.value })} />
+              <input style={input} value={git.baseUrl} placeholder="https://gitea.example.com" onChange={(e) => setGit({ ...git, baseUrl: e.target.value })} />
             </label>
           )}
           <label style={fieldLabel}>
