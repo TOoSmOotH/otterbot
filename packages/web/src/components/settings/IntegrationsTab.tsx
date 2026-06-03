@@ -180,7 +180,7 @@ function AddAccount({ onDone }: { onDone: () => void }) {
     setBusy(true);
     try {
       if (kind === "git") {
-        const res = await createGitAccount(gitDraft, addForgeAccount);
+        const res = await createGitAccount(gitDraft, addForgeAccount, sshKeys.generate);
         if (res?.publicKey) {
           setPubKey(res.publicKey);
         } else {
@@ -461,8 +461,32 @@ function AddIntegration({
   const [config, setConfig] = useState<Record<string, unknown>>({});
   const [allAgents, setAllAgents] = useState(false);
   const [assignTo, setAssignTo] = useState<Set<string>>(new Set());
+  const [step, setStep] = useState(0);
 
   const compatibleCreds = credentials.filter((c) => c.type === def?.credentialType);
+
+  // The wizard shows only the steps a given service needs.
+  const needsAccount = !!def && (def.type === "github" || (!!def.credentialType && def.type !== "github"));
+  const needsConfig = !!def && (def.isChat || def.configSchema.fields.length > 0);
+  const steps: Array<"service" | "account" | "config" | "assign"> = ["service"];
+  if (needsAccount) steps.push("account");
+  if (needsConfig) steps.push("config");
+  steps.push("assign");
+  const clamped = Math.min(step, steps.length - 1);
+  const stepKey = steps[clamped];
+  const stepTitle = { service: "Service", account: "Account", config: "Configure", assign: "Assign" }[stepKey];
+
+  // Switching service resets the per-service inputs and returns to step 1.
+  const selectService = (t: string) => {
+    setTypeKey(t);
+    setStep(0);
+    setLabel("");
+    setConfig({});
+    setCredMode("new");
+    setCredId("");
+    setCredLabel("");
+    setCredValues({});
+  };
 
   const submit = async () => {
     if (!def) return;
@@ -497,26 +521,70 @@ function AddIntegration({
     }
   };
 
+  const onLast = clamped === steps.length - 1;
+
   return (
     <div style={card}>
-      <label style={fieldLabel}>
-        Service
-        <select value={typeKey} onChange={(e) => setTypeKey(e.target.value)} style={input}>
-          {connectionTypes.map((t) => (
-            <option key={t.type} value={t.type}>
-              {t.label}
-            </option>
-          ))}
-        </select>
-      </label>
+      {/* Step indicator */}
+      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+        {steps.map((s, i) => (
+          <span
+            key={s}
+            style={{
+              fontSize: 11,
+              padding: "2px 8px",
+              borderRadius: 999,
+              border: "1px solid rgb(var(--border))",
+              background: i === clamped ? "rgb(var(--accent))" : "transparent",
+              color: i === clamped ? "white" : "rgb(var(--muted))",
+            }}
+          >
+            {i + 1}. {{ service: "Service", account: "Account", config: "Configure", assign: "Assign" }[s]}
+          </span>
+        ))}
+      </div>
+      <span style={{ fontSize: 14, fontWeight: 600 }}>
+        {stepTitle}
+        {def && stepKey !== "service" ? ` — ${def.label}` : ""}
+      </span>
 
-      <label style={fieldLabel}>
-        Name
-        <input style={input} value={label} placeholder={def?.label} onChange={(e) => setLabel(e.target.value)} />
-      </label>
+      {/* --- Step: Service --- */}
+      {stepKey === "service" && (
+        <>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+            {connectionTypes.map((t) => (
+              <button
+                key={t.type}
+                onClick={() => selectService(t.type)}
+                style={{
+                  ...ghost,
+                  borderColor: typeKey === t.type ? "rgb(var(--accent))" : "rgb(var(--border))",
+                  background: typeKey === t.type ? "rgba(var(--accent), 0.12)" : "transparent",
+                }}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+          <label style={fieldLabel}>
+            Name
+            <input style={input} value={label} placeholder={def?.label} onChange={(e) => setLabel(e.target.value)} />
+          </label>
+        </>
+      )}
 
-      {def?.credentialType && def.type !== "github" && (
+      {/* --- Step: Account --- */}
+      {stepKey === "account" && def?.type === "github" && (
+        <GitAccountChooser
+          value={config.gitAccountId as string | undefined}
+          onChange={(id) => setConfig({ ...config, gitAccountId: id })}
+          forgeAccounts={forgeAccounts}
+          reloadForge={loadForgeAccounts}
+        />
+      )}
+      {stepKey === "account" && def?.type !== "github" && def?.credentialType && (
         <div style={{ ...card, background: "rgb(var(--bg))" }}>
+          <p style={hint}>The {def.label} account these credentials belong to. Reuse one or enter a new set.</p>
           <div style={{ display: "flex", gap: 12, marginBottom: 6 }}>
             <label style={radio}>
               <input type="radio" checked={credMode === "new"} onChange={() => setCredMode("new")} />
@@ -532,7 +600,6 @@ function AddIntegration({
               Reuse existing
             </label>
           </div>
-
           {credMode === "existing" ? (
             <select value={credId} onChange={(e) => setCredId(e.target.value)} style={input}>
               <option value="">Select an account…</option>
@@ -561,57 +628,66 @@ function AddIntegration({
         </div>
       )}
 
-      {def?.type === "github" && (
-        <GitAccountChooser
-          value={config.gitAccountId as string | undefined}
-          onChange={(id) => setConfig({ ...config, gitAccountId: id })}
-          forgeAccounts={forgeAccounts}
-          reloadForge={loadForgeAccounts}
-        />
-      )}
-
-      {def &&
+      {/* --- Step: Configure --- */}
+      {stepKey === "config" &&
+        def &&
         (def.isChat ? (
           <ChatConfigFields config={config} onChange={setConfig} channelLabel={chatChannelLabel(def.type)} />
         ) : (
           <SchemaFields schema={def.configSchema} values={config} onChange={setConfig} />
         ))}
 
-      {/* Who it's for */}
-      <div style={{ ...card, background: "rgb(var(--bg))", gap: 6 }}>
-        <span style={{ fontSize: 12, opacity: 0.8 }}>Assign to</span>
-        {!def?.isChat && (
-          <label style={radio}>
-            <input type="checkbox" checked={allAgents} onChange={(e) => setAllAgents(e.target.checked)} />
-            All agents (instance-wide)
-          </label>
-        )}
-        {!allAgents &&
-          agents.map((a) => (
-            <label key={a.id} style={radio}>
-              <input
-                type="checkbox"
-                checked={assignTo.has(a.id)}
-                onChange={(e) => {
-                  const next = new Set(assignTo);
-                  if (e.target.checked) next.add(a.id);
-                  else next.delete(a.id);
-                  setAssignTo(next);
-                }}
-              />
-              {a.label}
+      {/* --- Step: Assign --- */}
+      {stepKey === "assign" && (
+        <div style={{ ...card, background: "rgb(var(--bg))", gap: 6 }}>
+          <span style={{ fontSize: 12, opacity: 0.8 }}>Who can use this integration?</span>
+          {!def?.isChat && (
+            <label style={radio}>
+              <input type="checkbox" checked={allAgents} onChange={(e) => setAllAgents(e.target.checked)} />
+              All agents (instance-wide)
             </label>
-          ))}
-      </div>
+          )}
+          {!allAgents &&
+            agents.map((a) => (
+              <label key={a.id} style={radio}>
+                <input
+                  type="checkbox"
+                  checked={assignTo.has(a.id)}
+                  onChange={(e) => {
+                    const next = new Set(assignTo);
+                    if (e.target.checked) next.add(a.id);
+                    else next.delete(a.id);
+                    setAssignTo(next);
+                  }}
+                />
+                {a.label}
+              </label>
+            ))}
+          {def?.isChat && <span style={hint}>Chat integrations are answered by one agent — pick exactly one.</span>}
+        </div>
+      )}
 
       {error && <span style={{ color: "tomato", fontSize: 12 }}>{error}</span>}
-      <div style={{ display: "flex", gap: 8 }}>
-        <button style={primary} disabled={busy} onClick={() => void submit()}>
-          {busy ? "Saving…" : "Create integration"}
-        </button>
+      <div style={{ display: "flex", gap: 8, justifyContent: "space-between" }}>
         <button style={ghost} onClick={onDone}>
           Cancel
         </button>
+        <div style={{ display: "flex", gap: 8 }}>
+          {clamped > 0 && (
+            <button style={ghost} onClick={() => setStep(clamped - 1)}>
+              Back
+            </button>
+          )}
+          {onLast ? (
+            <button style={primary} disabled={busy} onClick={() => void submit()}>
+              {busy ? "Saving…" : "Create integration"}
+            </button>
+          ) : (
+            <button style={primary} disabled={!typeKey} onClick={() => setStep(clamped + 1)}>
+              Next
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -632,8 +708,11 @@ export type GitDraft = {
   committerName: string;
   committerEmail: string;
   signCommits: boolean;
-  /** For ssh transport: generate a managed key, or link a reusable SSH-key account. */
-  sshKeyMode: "generate" | "link";
+  /** For ssh transport: create a brand-new reusable SSH key, or use an existing one. */
+  sshKeyMode: "new" | "existing";
+  /** Label for the new key (sshKeyMode = "new"). */
+  newKeyLabel: string;
+  /** Existing reusable SSH-key account id (sshKeyMode = "existing"). */
   sshKeyId: string;
 };
 
@@ -647,11 +726,16 @@ export const emptyGitDraft = (): GitDraft => ({
   committerName: "",
   committerEmail: "",
   signCommits: false,
-  sshKeyMode: "generate",
+  sshKeyMode: "new",
+  newKeyLabel: "",
   sshKeyId: "",
 });
 
-/** Persist a {@link GitDraft} via the forge endpoint; returns id + public key. */
+/**
+ * Persist a {@link GitDraft} via the forge endpoint; returns id + public key.
+ * On SSH transport with `sshKeyMode = "new"` a reusable SSH-key account is
+ * generated first (via `generateKey`) and linked, so it shows up under Accounts.
+ */
 async function createGitAccount(
   d: GitDraft,
   addForgeAccount: (input: {
@@ -665,8 +749,18 @@ async function createGitAccount(
     committerEmail?: string;
     signCommits?: boolean;
     sshKeyId?: string | null;
-  }) => Promise<{ id: string; publicKey: string | null } | null>
+  }) => Promise<{ id: string; publicKey: string | null } | null>,
+  generateKey: (label: string) => Promise<{ id: string; publicKey: string } | null>
 ): Promise<{ id: string; publicKey: string | null } | null> {
+  let sshKeyId: string | null = null;
+  if (d.gitTransport === "ssh") {
+    if (d.sshKeyMode === "new") {
+      const key = await generateKey(d.newKeyLabel || `${d.label || d.provider} key`);
+      sshKeyId = key?.id ?? null;
+    } else {
+      sshKeyId = d.sshKeyId || null;
+    }
+  }
   return addForgeAccount({
     provider: d.provider,
     label: d.label || d.provider,
@@ -677,7 +771,7 @@ async function createGitAccount(
     committerName: d.committerName || undefined,
     committerEmail: d.committerEmail || undefined,
     signCommits: d.signCommits,
-    sshKeyId: d.gitTransport === "ssh" && d.sshKeyMode === "link" ? d.sshKeyId || null : null,
+    sshKeyId,
   });
 }
 
@@ -734,20 +828,20 @@ function GitAccountFields({ value, onChange }: { value: GitDraft; onChange: (d: 
           <span style={{ fontSize: 12, opacity: 0.8 }}>SSH key (for git-over-SSH)</span>
           <div style={{ display: "flex", gap: 12 }}>
             <label style={radio}>
-              <input type="radio" checked={value.sshKeyMode === "generate"} onChange={() => set({ sshKeyMode: "generate" })} />
-              Generate a managed key
+              <input type="radio" checked={value.sshKeyMode === "new"} onChange={() => set({ sshKeyMode: "new" })} />
+              Create a new SSH key
             </label>
             <label style={radio}>
               <input
                 type="radio"
-                checked={value.sshKeyMode === "link"}
-                onChange={() => set({ sshKeyMode: "link" })}
+                checked={value.sshKeyMode === "existing"}
+                onChange={() => set({ sshKeyMode: "existing" })}
                 disabled={keys.length === 0}
               />
-              Link an existing SSH key
+              Use an existing SSH key
             </label>
           </div>
-          {value.sshKeyMode === "link" ? (
+          {value.sshKeyMode === "existing" ? (
             <select style={input} value={value.sshKeyId} onChange={(e) => set({ sshKeyId: e.target.value })}>
               <option value="">Select an SSH key…</option>
               {keys.map((k) => (
@@ -757,10 +851,17 @@ function GitAccountFields({ value, onChange }: { value: GitDraft; onChange: (d: 
               ))}
             </select>
           ) : (
-            keys.length === 0 && (
-              <span style={hint}>A new key is generated on save; you’ll get its public key to add to the forge.</span>
-            )
+            <label style={fieldLabel}>
+              New key label
+              <input
+                style={input}
+                value={value.newKeyLabel}
+                placeholder={`${value.label || value.provider} key`}
+                onChange={(e) => set({ newKeyLabel: e.target.value })}
+              />
+            </label>
           )}
+          <span style={hint}>The public key is shown after saving — add it to the forge.</span>
           <label style={radio}>
             <input type="checkbox" checked={value.signCommits} onChange={(e) => set({ signCommits: e.target.checked })} />
             SSH-sign commits
@@ -788,6 +889,7 @@ function GitAccountChooser({
   reloadForge: () => Promise<void>;
 }) {
   const addForgeAccount = useProjectsStore((s) => s.addForgeAccount);
+  const generateKey = useSshKeysStore((s) => s.generate);
   const [mode, setMode] = useState<"existing" | "new">(forgeAccounts.length ? "existing" : "new");
   const [draft, setDraft] = useState<GitDraft>(emptyGitDraft());
   const [busy, setBusy] = useState(false);
@@ -796,7 +898,7 @@ function GitAccountChooser({
   const create = async () => {
     setBusy(true);
     try {
-      const res = await createGitAccount(draft, addForgeAccount);
+      const res = await createGitAccount(draft, addForgeAccount, generateKey);
       if (res) {
         await reloadForge();
         onChange(res.id);
