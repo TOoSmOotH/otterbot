@@ -720,4 +720,95 @@ describe("HTTP API (e2e)", () => {
     expect(secrets.get("GITHUB_TOKEN")?.value).toBe("ghp_test_token");
     expect(secrets.get("GITHUB_TOKEN")?.scope).toBe("cap:gh-auth");
   });
+
+  it("with two git-account github connections, token + SSH key both come from the first account (no split identity)", async () => {
+    // 1. Two reusable SSH keys.
+    const keyA = await app.inject({
+      method: "POST",
+      url: "/api/ssh-keys",
+      payload: { label: "gh-key-a", mode: "generate" },
+    });
+    const keyAId = (keyA.json() as { id: string }).id;
+
+    const keyB = await app.inject({
+      method: "POST",
+      url: "/api/ssh-keys",
+      payload: { label: "gh-key-b", mode: "generate" },
+    });
+    const keyBId = (keyB.json() as { id: string }).id;
+
+    // 2. Two GitHub Git accounts (A = first, B = second) with distinct tokens.
+    const acctA = await app.inject({
+      method: "POST",
+      url: "/api/forge-accounts",
+      payload: {
+        provider: "github",
+        label: "gh-acct-a",
+        baseUrl: "https://github.com",
+        token: "ghp_token_A",
+        username: "bot-a",
+        gitTransport: "ssh",
+        sshKeyId: keyAId,
+      },
+    });
+    const accountAId = (acctA.json() as { id: string }).id;
+
+    const acctB = await app.inject({
+      method: "POST",
+      url: "/api/forge-accounts",
+      payload: {
+        provider: "github",
+        label: "gh-acct-b",
+        baseUrl: "https://github.com",
+        token: "ghp_token_B",
+        username: "bot-b",
+        gitTransport: "ssh",
+        sshKeyId: keyBId,
+      },
+    });
+    const accountBId = (acctB.json() as { id: string }).id;
+
+    // 3. Two github connections referencing A then B.
+    const connA = await app.inject({
+      method: "POST",
+      url: "/api/connections",
+      payload: { type: "github", label: "gh-a", config: { gitAccountId: accountAId } },
+    });
+    const connAId = (connA.json() as { id: string }).id;
+
+    const connB = await app.inject({
+      method: "POST",
+      url: "/api/connections",
+      payload: { type: "github", label: "gh-b", config: { gitAccountId: accountBId } },
+    });
+    const connBId = (connB.json() as { id: string }).id;
+
+    // 4. An agent assigned both connections (A first, then B).
+    const agent = await app.inject({
+      method: "POST",
+      url: "/api/agents",
+      payload: { displayName: "Multi-GH Agent" },
+    });
+    const agentId = (agent.json() as { id: string }).id;
+    await app.inject({
+      method: "POST",
+      url: `/api/agents/${agentId}/connections`,
+      payload: { connectionId: connAId },
+    });
+    await app.inject({
+      method: "POST",
+      url: `/api/agents/${agentId}/connections`,
+      payload: { connectionId: connBId },
+    });
+
+    // 5. Both token and SSH key must come from account A (the first).
+    const gotSsh = stack.orch.gitSshForAgentTest(agentId);
+    expect(gotSsh).not.toBeNull();
+
+    const secrets = stack.orch.scopedSecretsForAgentTest(agentId);
+    expect(secrets.get("GITHUB_TOKEN")?.value).toBe("ghp_token_A");
+
+    // Verify the SSH key path belongs to account A (contains keyA's id).
+    expect(gotSsh!.keyPath).toContain(keyAId);
+  });
 });

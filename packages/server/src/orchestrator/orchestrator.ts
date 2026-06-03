@@ -52,7 +52,7 @@ import {
 } from "../pipeline/pipeline-manager.js";
 import { ForgeService } from "../forge/forge-service.js";
 import { SshKeyStore } from "../ssh-keys/ssh-key-store.js";
-import { parseRepoInput, splitRepo, type ForgeProvider, type ForgeIssue, type ForgeComment } from "../forge/forge.js";
+import { parseRepoInput, splitRepo, type ForgeAccount, type ForgeProvider, type ForgeIssue, type ForgeComment } from "../forge/forge.js";
 import { ForgeMonitor } from "../forge/forge-monitor.js";
 import {
   CodingCliUpdateChecker,
@@ -846,57 +846,55 @@ export class Orchestrator {
     const out = new Map<string, ScopedSecret>();
     for (const conn of this.connectionStore.connectionsForAgent(agentId)) {
       if (isChatConnectionType(conn.type)) continue;
-      // GitHub connection backed by a Git account → inject the account's API
-      // token as GITHUB_TOKEN (gh-auth scoped), alongside the SSH key handled by
-      // gitSshForAgent. Token-only github connections still use credentialId.
-      if (conn.type === "github" && typeof conn.config.gitAccountId === "string") {
-        const account = this.forge.getAccount(conn.config.gitAccountId);
-        if (!account) {
-          console.warn(`[connections] agent ${agentId}: gitAccountId ${conn.config.gitAccountId} not found`);
-          continue;
-        }
-        if (account.token) out.set("GITHUB_TOKEN", { value: account.token, scope: "cap:gh-auth" });
-        continue;
-      }
+      // Git-account-backed github connections are resolved once, after the loop,
+      // so the token and SSH key always come from the same account.
+      if (conn.type === "github" && typeof conn.config.gitAccountId === "string") continue;
       if (!conn.credentialId) continue;
       for (const [key, entry] of this.credentials.scopedSecretsFor(conn.credentialId)) {
         out.set(key, entry);
       }
     }
+    const account = this.gitAccountForAgent(agentId);
+    if (account?.token) out.set("GITHUB_TOKEN", { value: account.token, scope: "cap:gh-auth" });
     return out;
   }
 
   /**
-   * The SSH identity for an agent's first Git-account-backed github connection,
+   * The forge account backing an agent's GitHub identity: the account referenced
+   * by the agent's FIRST git-account-backed github connection, or null. Warns
+   * when several such connections exist (the first wins for both token and key,
+   * so we never split one agent's identity across two GitHub accounts).
+   */
+  private gitAccountForAgent(agentId: string): ForgeAccount | null {
+    const refs = this.connectionStore
+      .connectionsForAgent(agentId)
+      .filter((c) => c.type === "github" && typeof c.config.gitAccountId === "string")
+      .map((c) => c.config.gitAccountId as string);
+    if (refs.length === 0) return null;
+    if (refs.length > 1) {
+      console.warn(
+        `[connections] agent ${agentId} has ${refs.length} git-account github connections; using the first.`
+      );
+    }
+    return this.forge.getAccount(refs[0]) ?? null;
+  }
+
+  /**
+   * The SSH identity for the account backing an agent's GitHub connection,
    * materialized for in-sandbox git-over-SSH, or null. Only ssh-transport
-   * accounts with a usable key qualify; token-only connections return null.
+   * accounts with a usable key qualify; token-only/HTTPS accounts return null.
    */
   private gitSshForAgent(agentId: string): GitSshSetup | null {
-    let chosen: GitSshSetup | null = null;
-    let seen = 0;
-    for (const conn of this.connectionStore.connectionsForAgent(agentId)) {
-      if (conn.type !== "github" || typeof conn.config.gitAccountId !== "string") continue;
-      const account = this.forge.getAccount(conn.config.gitAccountId);
-      if (!account || account.gitTransport !== "ssh") continue;
-      if (chosen) {
-        seen++;
-        continue;
-      }
-      const gc = this.forge.gitContextFor(account);
-      if (!gc.sshKeyPath) continue;
-      seen++;
-      chosen = {
-        keyPath: gc.sshKeyPath,
-        knownHostsPath: gc.knownHostsPath,
-        committer: gc.committer,
-        signingKeyPath: gc.signingKeyPath,
-      };
-    }
-    if (seen > 1)
-      console.warn(
-        `[connections] agent ${agentId} has ${seen} git-account github connections; using the first.`
-      );
-    return chosen;
+    const account = this.gitAccountForAgent(agentId);
+    if (!account || account.gitTransport !== "ssh") return null;
+    const gc = this.forge.gitContextFor(account);
+    if (!gc.sshKeyPath) return null;
+    return {
+      keyPath: gc.sshKeyPath,
+      knownHostsPath: gc.knownHostsPath,
+      committer: gc.committer,
+      signingKeyPath: gc.signingKeyPath,
+    };
   }
 
   /** @internal Test-only accessors for the connection→identity resolution. */
