@@ -2,12 +2,14 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { openControlDb, type ControlDb } from "../db/control-db.js";
+import { openControlDb, controlSchema, type ControlDb } from "../db/control-db.js";
 import { GlobalSecretsStore } from "../secrets/global-secrets-store.js";
 import { CredentialStore } from "./credential-store.js";
 import { ConnectionStore } from "./connection-store.js";
 import { IntegrationStore } from "./integration-store.js";
-import { migrateLegacyCapabilities } from "./legacy-migration.js";
+import { ForgeService } from "../forge/forge-service.js";
+import { SshKeyStore } from "../ssh-keys/ssh-key-store.js";
+import { migrateLegacyCapabilities, migrateForgeAndSshKeysToAccounts } from "./legacy-migration.js";
 
 describe("legacy capability migration", () => {
   let dir: string;
@@ -62,5 +64,45 @@ describe("legacy capability migration", () => {
     const bare = globalSecrets.instanceScoped();
     expect(bare.has("MY_TOKEN")).toBe(true);
     expect(bare.has("cred:foo:SECRET")).toBe(false);
+  });
+
+  it("absorbs forge accounts + ssh keys into accounts, preserving ids", () => {
+    const now = new Date().toISOString();
+    // A reusable SSH key referenced by an ssh-transport forge account.
+    control.db
+      .insert(controlSchema.sshKeys)
+      .values({ id: "key-abc", label: "shared", publicKey: "ssh-ed25519 AAAA pub", fingerprint: "SHA256:x", privateKey: "-----BEGIN-----\nk\n-----END-----", createdAt: now })
+      .run();
+    control.db
+      .insert(controlSchema.forgeAccounts)
+      .values({ id: "acct-xyz", provider: "github", label: "acme-bot", baseUrl: "https://api.github.com", token: "ghp_tok", username: "acme-bot", gitTransport: "ssh", committerName: "Acme", committerEmail: "bot@acme.dev", signCommits: true, sshKeyId: "key-abc", createdAt: now })
+      .run();
+
+    migrateForgeAndSshKeysToAccounts(control, integrations.accounts);
+
+    const forge = new ForgeService(integrations.accounts, "/tmp/none");
+    const sshKeys = new SshKeyStore(integrations.accounts, "/tmp/none");
+
+    // Ids are preserved so project_repos.forgeAccountId / config.sshKeyId still resolve.
+    const acct = forge.getAccount("acct-xyz");
+    expect(acct).toMatchObject({
+      id: "acct-xyz",
+      provider: "github",
+      token: "ghp_tok",
+      gitTransport: "ssh",
+      signCommits: true,
+      sshKeyId: "key-abc",
+      committerEmail: "bot@acme.dev",
+    });
+    const key = sshKeys.get("key-abc");
+    expect(key).toMatchObject({ id: "key-abc", publicKey: "ssh-ed25519 AAAA pub" });
+    expect(integrations.accounts.secretsFor("key-abc").get("SSH_PRIVATE_KEY")).toContain("BEGIN");
+    // Token is masked in the account list but resolvable for the forge API.
+    expect(forge.listAccountsMasked()[0]).not.toHaveProperty("token");
+
+    // Idempotent: re-running does not duplicate.
+    migrateForgeAndSshKeysToAccounts(control, integrations.accounts);
+    expect(integrations.listAccounts().filter((a) => a.type === "git").length).toBe(1);
+    expect(integrations.listAccounts().filter((a) => a.type === "ssh-key").length).toBe(1);
   });
 });

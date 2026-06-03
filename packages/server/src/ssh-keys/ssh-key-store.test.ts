@@ -3,7 +3,9 @@ import { mkdtempSync, rmSync, readFileSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import ssh2 from "ssh2";
-import { openControlDb, controlSchema, type ControlDb } from "../db/control-db.js";
+import { openControlDb, type ControlDb } from "../db/control-db.js";
+import { GlobalSecretsStore } from "../secrets/global-secrets-store.js";
+import { CredentialStore } from "../connections/credential-store.js";
 import { SshKeyStore } from "./ssh-key-store.js";
 
 const { utils } = ssh2;
@@ -11,12 +13,14 @@ const { utils } = ssh2;
 describe("SshKeyStore", () => {
   let dir: string;
   let control: ControlDb;
+  let accounts: CredentialStore;
   let store: SshKeyStore;
 
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), "otter-sshkey-"));
     control = openControlDb(join(dir, "control.db"));
-    store = new SshKeyStore(control, join(dir, "ssh-keys"));
+    accounts = new CredentialStore(control, new GlobalSecretsStore(control));
+    store = new SshKeyStore(accounts, join(dir, "ssh-keys"));
   });
   afterEach(() => {
     control.close();
@@ -36,11 +40,7 @@ describe("SshKeyStore", () => {
   it("imports a private key and derives the same public line + fingerprint as generate", () => {
     // Round-trip: generate a key, read its stored private key, re-import it.
     const generated = store.generate("orig");
-    const priv = control.db
-      .select()
-      .from(controlSchema.sshKeys)
-      .all()
-      .find((r) => r.id === generated.id)!.privateKey;
+    const priv = accounts.secretsFor(generated.id).get("SSH_PRIVATE_KEY")!;
 
     const imported = store.import("copy", priv);
     expect(imported.publicKey).toBe(generated.publicKey);
@@ -74,20 +74,15 @@ describe("SshKeyStore", () => {
     expect(statSync(publicKeyPath).mode & 0o777).toBe(0o644);
   });
 
-  it("refuses to delete a key referenced by a forge account unless forced", () => {
+  it("refuses to delete a key referenced by a git account unless forced", () => {
     const key = store.generate("linked");
-    control.db
-      .insert(controlSchema.forgeAccounts)
-      .values({
-        id: "acc1",
-        provider: "github",
-        label: "gh",
-        baseUrl: "https://api.github.com",
-        token: "t",
-        sshKeyId: key.id,
-        createdAt: new Date().toISOString(),
-      })
-      .run();
+    // A git account that links this reusable key.
+    accounts.create({
+      type: "git",
+      label: "gh",
+      config: { provider: "github", gitTransport: "ssh", sshKeyId: key.id },
+      secrets: { FORGE_TOKEN: "t" },
+    });
 
     const blocked = store.delete(key.id);
     expect(blocked.deleted).toBe(false);

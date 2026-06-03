@@ -4,18 +4,22 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { readFileSync } from "node:fs";
 import { openControlDb, type ControlDb } from "../db/control-db.js";
+import { GlobalSecretsStore } from "../secrets/global-secrets-store.js";
+import { CredentialStore } from "../connections/credential-store.js";
 import { ForgeService } from "./forge-service.js";
 import { SshKeyStore } from "../ssh-keys/ssh-key-store.js";
 
 describe("ForgeService", () => {
   let dir: string;
   let control: ControlDb;
+  let accounts: CredentialStore;
   let svc: ForgeService;
 
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), "otter-forge-"));
     control = openControlDb(join(dir, "control.db"));
-    svc = new ForgeService(control, join(dir, "keys"));
+    accounts = new CredentialStore(control, new GlobalSecretsStore(control));
+    svc = new ForgeService(accounts, join(dir, "keys"));
   });
   afterEach(() => {
     control.close();
@@ -52,8 +56,8 @@ describe("ForgeService", () => {
   });
 
   it("links a reusable SSH key instead of generating a per-account key", () => {
-    const sshKeys = new SshKeyStore(control, join(dir, "ssh-keys"));
-    const svcLinked = new ForgeService(control, join(dir, "keys"), fetch, sshKeys);
+    const sshKeys = new SshKeyStore(accounts, join(dir, "ssh-keys"));
+    const svcLinked = new ForgeService(accounts, join(dir, "keys"), fetch, sshKeys);
     const key = sshKeys.generate("shared");
 
     const acc = svcLinked.addAccount({

@@ -123,12 +123,52 @@ function catalogSchema(capId: string): SkillConfigSchema {
   return cap.configSchema;
 }
 
+/**
+ * A git/forge account (GitHub or Gitea). Beyond the API token (also used for the
+ * gh CLI and git-over-HTTPS), the account's non-secret fields — provider,
+ * baseUrl, username, transport, committer identity, linked ssh-key — live in the
+ * account's `config`, not here. This schema describes only the secret half.
+ */
+const GIT_CREDENTIAL_SCHEMA: SkillConfigSchema = {
+  description: "A GitHub/Gitea account: API token (+ optional linked SSH key for git transport).",
+  fields: [
+    {
+      key: "FORGE_TOKEN",
+      label: "API token",
+      type: "secret",
+      secret: true,
+      required: true,
+      credentialKey: "FORGE_TOKEN",
+      // Exposed to the shell as GITHUB_TOKEN (mapped at runtime) only when gh-auth is on.
+      scope: "cap:gh-auth",
+    },
+  ],
+};
+
+/** A reusable SSH key. The public key + fingerprint are non-secret `config`. */
+const SSH_KEY_CREDENTIAL_SCHEMA: SkillConfigSchema = {
+  description: "A reusable SSH key for git-over-SSH clone/push and commit signing.",
+  fields: [
+    {
+      key: "SSH_PRIVATE_KEY",
+      label: "Private key",
+      type: "secret",
+      secret: true,
+      required: true,
+      credentialKey: "SSH_PRIVATE_KEY",
+      scope: "direct", // never the shell — materialized to a 0600 file at git time
+    },
+  ],
+};
+
 const CREDENTIAL_TYPES: CredentialTypeDef[] = [
   { type: "slack", label: "Slack", fieldSchema: chatCredentialSchema("slack") },
   { type: "discord", label: "Discord", fieldSchema: chatCredentialSchema("discord") },
   { type: "matrix", label: "Matrix", fieldSchema: chatCredentialSchema("matrix") },
   { type: "smtp", label: "SMTP / Email", fieldSchema: SMTP_CREDENTIAL_SCHEMA },
   { type: "github", label: "GitHub token", fieldSchema: GITHUB_CREDENTIAL_SCHEMA },
+  { type: "git", label: "Git account", fieldSchema: GIT_CREDENTIAL_SCHEMA },
+  { type: "ssh-key", label: "SSH key", fieldSchema: SSH_KEY_CREDENTIAL_SCHEMA },
   { type: "proxmox", label: "Proxmox", fieldSchema: catalogSchema("proxmox") },
   { type: "ssh", label: "SSH", fieldSchema: catalogSchema("ssh") },
 ];

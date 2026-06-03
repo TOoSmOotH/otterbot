@@ -1,13 +1,17 @@
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { eq } from "drizzle-orm";
-import { nanoid } from "nanoid";
-import { controlSchema, type ControlDb } from "../db/control-db.js";
+import type { Account } from "@otterbot/shared";
 import { type FetchFn, type Forge, type ForgeAccount, type ForgeProvider } from "./forge.js";
 import { GitHubForge } from "./github.js";
 import { GiteaForge } from "./gitea.js";
+import type { CredentialStore } from "../connections/credential-store.js";
 import type { SshKeyStore } from "../ssh-keys/ssh-key-store.js";
+
+/** The account type (in the unified `credentials` table) that backs a forge account. */
+const GIT_ACCOUNT_TYPE = "git";
+/** Secret key under which a git account's API token is stored. */
+const TOKEN_KEY = "FORGE_TOKEN";
 
 /** Default API base for GitHub when an account doesn't override it. */
 const GITHUB_DEFAULT_BASE = "https://api.github.com";
@@ -28,7 +32,8 @@ export interface ForgeGitContext {
  */
 export class ForgeService {
   constructor(
-    private readonly control: ControlDb,
+    /** Unified account store; forge accounts are `git`-type accounts. */
+    private readonly accounts: CredentialStore,
     private readonly keysDir: string,
     private readonly fetchFn: FetchFn = fetch,
     /** Standalone reusable SSH keys an account may reference for git transport. */
@@ -36,7 +41,11 @@ export class ForgeService {
   ) {}
 
   listAccounts(): ForgeAccount[] {
-    return this.control.db.select().from(controlSchema.forgeAccounts).all() as ForgeAccount[];
+    return this.accounts
+      .list()
+      .filter((a) => a.type === GIT_ACCOUNT_TYPE)
+      .map((a) => this.toForgeAccount(a))
+      .filter((a): a is ForgeAccount => a !== null);
   }
 
   /** Accounts with the token redacted + key presence — for the API/UI. */
@@ -49,13 +58,8 @@ export class ForgeService {
   }
 
   getAccount(id: string): ForgeAccount | null {
-    return (
-      (this.control.db
-        .select()
-        .from(controlSchema.forgeAccounts)
-        .where(eq(controlSchema.forgeAccounts.id, id))
-        .get() as ForgeAccount | undefined) ?? null
-    );
+    const cred = this.accounts.get(id);
+    return cred && cred.type === GIT_ACCOUNT_TYPE ? this.toForgeAccount(cred) : null;
   }
 
   addAccount(input: {
@@ -78,12 +82,9 @@ export class ForgeService {
     const gitTransport = input.gitTransport ?? "https";
     // A linked SSH key only applies to ssh transport.
     const sshKeyId = gitTransport === "ssh" ? input.sshKeyId ?? null : null;
-    const account: ForgeAccount = {
-      id: nanoid(),
+    const config = {
       provider: input.provider,
-      label: input.label || input.provider,
       baseUrl: input.baseUrl || (input.provider === "github" ? GITHUB_DEFAULT_BASE : ""),
-      token: input.token,
       username: input.username ?? "",
       gitTransport,
       committerName: input.committerName ?? "",
@@ -92,20 +93,38 @@ export class ForgeService {
       signCommits: gitTransport === "ssh" ? Boolean(input.signCommits) : false,
       sshKeyId,
     };
-    this.control.db
-      .insert(controlSchema.forgeAccounts)
-      .values({ ...account, createdAt: new Date().toISOString() })
-      .run();
+    const cred = this.accounts.create({
+      type: GIT_ACCOUNT_TYPE,
+      label: input.label || input.provider,
+      config,
+      secrets: { [TOKEN_KEY]: input.token },
+    });
     // Generate the legacy per-account key only when no reusable key is linked.
-    if (gitTransport === "ssh" && !sshKeyId) this.ensureKey(account.id);
-    return account;
+    if (gitTransport === "ssh" && !sshKeyId) this.ensureKey(cred.id);
+    return this.toForgeAccount(cred)!;
   }
 
   deleteAccount(id: string): void {
-    this.control.db
-      .delete(controlSchema.forgeAccounts)
-      .where(eq(controlSchema.forgeAccounts.id, id))
-      .run();
+    this.accounts.delete(id);
+  }
+
+  /** Reconstruct the in-memory {@link ForgeAccount} DTO from a `git` account. */
+  private toForgeAccount(cred: Account): ForgeAccount | null {
+    if (cred.type !== GIT_ACCOUNT_TYPE) return null;
+    const c = cred.config ?? {};
+    return {
+      id: cred.id,
+      provider: c.provider === "gitea" ? "gitea" : "github",
+      label: cred.label,
+      baseUrl: typeof c.baseUrl === "string" ? c.baseUrl : "",
+      token: this.accounts.secretsFor(cred.id).get(TOKEN_KEY) ?? "",
+      username: typeof c.username === "string" ? c.username : "",
+      gitTransport: c.gitTransport === "ssh" ? "ssh" : "https",
+      committerName: typeof c.committerName === "string" ? c.committerName : "",
+      committerEmail: typeof c.committerEmail === "string" ? c.committerEmail : "",
+      signCommits: c.signCommits === true,
+      sshKeyId: typeof c.sshKeyId === "string" ? c.sshKeyId : null,
+    };
   }
 
   forgeFor(account: ForgeAccount): Forge {

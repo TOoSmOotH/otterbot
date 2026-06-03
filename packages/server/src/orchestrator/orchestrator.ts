@@ -65,7 +65,10 @@ import { GlobalSecretsStore } from "../secrets/global-secrets-store.js";
 import { CredentialStore } from "../connections/credential-store.js";
 import { ConnectionStore } from "../connections/connection-store.js";
 import { IntegrationStore } from "../connections/integration-store.js";
-import { migrateLegacyCapabilities } from "../connections/legacy-migration.js";
+import {
+  migrateLegacyCapabilities,
+  migrateForgeAndSshKeysToAccounts,
+} from "../connections/legacy-migration.js";
 import {
   listConnectionTypes,
   listCredentialTypes,
@@ -512,8 +515,14 @@ export class Orchestrator {
     this.bus = new MessageBus(control, createTransport(cfg));
     this.scheduler = new Scheduler(control, (id) => this.runtimes.get(id));
     this.projects = new ProjectStore(control, resolve(cfg.dataDir, "projects"));
-    this.sshKeys = new SshKeyStore(control, resolve(cfg.dataDir, "ssh-keys"));
-    this.forge = new ForgeService(control, resolve(cfg.dataDir, "forge-keys"), fetch, this.sshKeys);
+    this.globalSecrets = new GlobalSecretsStore(control);
+    this.credentials = new CredentialStore(control, this.globalSecrets);
+    this.connectionStore = new ConnectionStore(control);
+    this.integrations = new IntegrationStore(this.credentials, this.connectionStore);
+    // SSH keys + forge accounts are now unified accounts, backed by the credential
+    // store (see Settings → Integrations); both read/write `credentials`.
+    this.sshKeys = new SshKeyStore(this.credentials, resolve(cfg.dataDir, "ssh-keys"));
+    this.forge = new ForgeService(this.credentials, resolve(cfg.dataDir, "forge-keys"), fetch, this.sshKeys);
     this.issueTriage = new IssueTriageStore(control);
     this.pipeline = new PipelineManager({
       control,
@@ -588,10 +597,7 @@ export class Orchestrator {
     });
     this.codingCliUpdates = new CodingCliUpdateChecker(this);
     this.secrets = new SecretsStore(control);
-    this.globalSecrets = new GlobalSecretsStore(control);
-    this.credentials = new CredentialStore(control, this.globalSecrets);
-    this.connectionStore = new ConnectionStore(control);
-    this.integrations = new IntegrationStore(this.credentials, this.connectionStore);
+    migrateForgeAndSshKeysToAccounts(control, this.credentials);
     migrateLegacyCapabilities(this.integrations, this.globalSecrets);
     this.bus.setDeliver((agentId, msg) => {
       if (agentId === "*") {
