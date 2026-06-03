@@ -108,6 +108,22 @@ export class ForgeService {
     this.accounts.delete(id);
   }
 
+  /** The bot login the token authenticates as (for assigned-issue detection), or null. */
+  async detectUsername(account: ForgeAccount): Promise<string | null> {
+    try {
+      return await this.forgeFor(account).currentUser();
+    } catch {
+      return null;
+    }
+  }
+
+  /** Set a git account's bot username (merged into its non-secret config). */
+  updateUsername(id: string, username: string): void {
+    const cred = this.accounts.get(id);
+    if (!cred) return;
+    this.accounts.update(id, { config: { ...cred.config, username } });
+  }
+
   /** Reconstruct the in-memory {@link ForgeAccount} DTO from a `git` account. */
   private toForgeAccount(cred: Account): ForgeAccount | null {
     if (cred.type !== GIT_ACCOUNT_TYPE) return null;

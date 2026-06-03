@@ -427,7 +427,7 @@ export async function buildServer(
       return { error: "provider (github|gitea) and token are required" };
     }
     try {
-      return orch.addForgeAccount({
+      return await orch.addForgeAccount({
         provider: b.provider,
         label: b.label ?? b.provider,
         baseUrl: b.baseUrl,

@@ -26,6 +26,7 @@ function fakeForge(over: Partial<Forge>): Forge {
     getPullRequest: async () => ({ number: 1, htmlUrl: "", state: "open", merged: false, headBranch: "b", headSha: "s" }),
     listReviews: async () => [],
     checkState: async () => "none" as CheckState,
+    currentUser: async () => "bot",
     listAssignedIssues: async () => [],
     listOpenIssues: async () => [],
     listIssueComments: async () => [],

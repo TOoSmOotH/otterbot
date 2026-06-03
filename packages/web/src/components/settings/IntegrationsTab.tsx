@@ -788,7 +788,6 @@ export type GitDraft = {
   label: string;
   baseUrl: string;
   token: string;
-  username: string;
   gitTransport: "https" | "ssh";
   committerName: string;
   committerEmail: string;
@@ -806,7 +805,6 @@ export const emptyGitDraft = (): GitDraft => ({
   label: "",
   baseUrl: "",
   token: "",
-  username: "",
   gitTransport: "https",
   committerName: "",
   committerEmail: "",
@@ -851,7 +849,6 @@ async function createGitAccount(
     label: d.label || d.provider,
     baseUrl: d.baseUrl || undefined,
     token: d.token,
-    username: d.username || undefined,
     gitTransport: d.gitTransport,
     committerName: d.committerName || undefined,
     committerEmail: d.committerEmail || undefined,
@@ -888,10 +885,7 @@ function GitAccountFields({ value, onChange }: { value: GitDraft; onChange: (d: 
       <label style={fieldLabel}>
         API token
         <input style={input} type="password" value={value.token} onChange={(e) => set({ token: e.target.value })} />
-      </label>
-      <label style={fieldLabel}>
-        Bot username
-        <input style={input} value={value.username} onChange={(e) => set({ username: e.target.value })} />
+        <span style={hint}>The bot username is detected from the token automatically.</span>
       </label>
       <label style={fieldLabel}>
         Git transport

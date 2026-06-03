@@ -1595,7 +1595,7 @@ export class Orchestrator {
     return this.forge.listAccountsMasked();
   }
 
-  addForgeAccount(input: {
+  async addForgeAccount(input: {
     provider: ForgeProvider;
     label: string;
     baseUrl?: string;
@@ -1608,6 +1608,15 @@ export class Orchestrator {
     sshKeyId?: string | null;
   }) {
     const account = this.forge.addAccount(input);
+    // The bot username (for assigned-issue detection) is derived from the token
+    // rather than asked for — best-effort, so a bad token still creates the account.
+    if (!input.username) {
+      const detected = await this.forge.detectUsername(account);
+      if (detected) {
+        this.forge.updateUsername(account.id, detected);
+        account.username = detected;
+      }
+    }
     const { token: _t, ...masked } = account;
     // Surface the public key (linked reusable key or legacy managed key) so the
     // user can add it to the forge.

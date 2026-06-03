@@ -40,6 +40,11 @@ export class GitHubForge implements Forge {
     return text ? JSON.parse(text) : null;
   }
 
+  async currentUser(): Promise<string | null> {
+    const d = (await this.api(`/user`)) as { login?: string } | null;
+    return d?.login ?? null;
+  }
+
   async getRepo(repo: string): Promise<ForgeRepo> {
     const { owner, name } = splitRepo(repo);
     const d = (await this.api(`/repos/${owner}/${name}`)) as {

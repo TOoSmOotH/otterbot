@@ -106,6 +106,8 @@ export interface Forge {
   /** Aggregate CI state for a commit ref. */
   checkState(repo: string, ref: string): Promise<CheckState>;
 
+  /** The authenticated user's login (from the token), or null. */
+  currentUser(): Promise<string | null>;
   /** Open issues assigned to the account's bot user. */
   listAssignedIssues(repo: string): Promise<ForgeIssue[]>;
   /** All open issues (not PRs), with assignees, for triage. */
