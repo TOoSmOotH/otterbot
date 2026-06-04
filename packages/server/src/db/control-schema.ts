@@ -373,6 +373,73 @@ export const pipelineStageResults = sqliteTable("pipeline_stage_results", {
 });
 
 /**
+ * One run of a project's build graph — the Phase-1 generalization of
+ * `pipeline_runs`. The PM decomposes a goal into `tasks` (a DAG); the
+ * `BuildGraphManager` drives them. A project may have several concurrent runs.
+ */
+export const buildRuns = sqliteTable("build_runs", {
+  id: text("id").primaryKey(),
+  projectId: text("project_id").notNull(),
+  goal: text("goal").notNull(),
+  status: text("status", {
+    enum: [
+      "planning",
+      "awaiting_approval",
+      "running",
+      "integrating",
+      "reviewing",
+      "done",
+      "failed",
+      "aborted",
+    ],
+  })
+    .notNull()
+    .default("planning"),
+  /** Branch the integrator merges task branches onto (set in Phase 2). */
+  integrationBranch: text("integration_branch"),
+  /** Max coding tasks dispatched in parallel (worker pool size; Phase 2). */
+  parallelism: integer("parallelism").notNull().default(3),
+  prNumber: integer("pr_number"),
+  prUrl: text("pr_url"),
+  createdAt: text("created_at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+  updatedAt: text("updated_at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+});
+
+/** One node of a build run's task graph. `deps`/`files_hint` are JSON arrays. */
+export const tasks = sqliteTable("tasks", {
+  id: text("id").primaryKey(),
+  runId: text("run_id").notNull(),
+  projectId: text("project_id").notNull(),
+  title: text("title").notNull(),
+  description: text("description").notNull().default(""),
+  /** coder | integrator | security-reviewer | test-writer | tester */
+  role: text("role").notNull(),
+  /** JSON array of task ids this task depends on. */
+  deps: text("deps").notNull().default("[]"),
+  /** blocked | ready | running | awaiting_merge | merging | merged | conflict | failed */
+  status: text("status").notNull().default("blocked"),
+  assignedAgentId: text("assigned_agent_id"),
+  branch: text("branch"),
+  worktreePath: text("worktree_path"),
+  attempt: integer("attempt").notNull().default(0),
+  /** JSON array of file globs this task is expected to touch, or null. */
+  filesHint: text("files_hint"),
+  report: text("report").notNull().default(""),
+  /** Pointer to the flushed worker transcript (Phase 3). */
+  transcriptRef: text("transcript_ref"),
+  createdAt: text("created_at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+  updatedAt: text("updated_at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+});
+
+/**
  * Per-issue triage state for a forge-backed project. One row per (project, issue):
  * the current candidate `plan` the PM posted, and `lastCommentId` — the highest
  * forge comment id already processed, so the poller only reacts to newer comments.
