@@ -1,6 +1,6 @@
 import type { ProviderId } from "./agent.js";
 
-export type ThemeId = "obsidian" | "light" | "forest";
+export type ThemeId = "obsidian" | "light" | "forest" | "playful";
 
 export type OpenAiAuthMethod = "api-key" | "oauth";
 

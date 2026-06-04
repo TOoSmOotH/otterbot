@@ -8,42 +8,42 @@
 @layer base {
   :root {
     /* Surfaces */
-    --bg: 20 20 24;
-    --surface: 26 26 31;
-    --surface-elevated: 32 32 38;
-    --surface-sunken: 15 15 18;
+    --bg: 18 19 39;
+    --surface: 26 28 56;
+    --surface-elevated: 36 38 74;
+    --surface-sunken: 14 15 34;
 
     /* Text */
-    --fg: 235 235 240;
-    --muted: 150 150 160;
-    --subtle: 100 100 110;
+    --fg: 238 240 255;
+    --muted: 154 160 207;
+    --subtle: 106 111 160;
 
     /* Borders & focus */
-    --border: 55 55 65;
-    --border-strong: 80 80 92;
-    --ring: 99 140 255;
+    --border: 48 51 106;
+    --border-strong: 70 74 130;
+    --ring: 61 215 196;
 
     /* Accent */
-    --accent: 99 140 255;
-    --accent-fg: 255 255 255;
-    --accent-hover: 120 158 255;
+    --accent: 61 215 196;
+    --accent-fg: 10 16 36;
+    --accent-hover: 90 226 210;
 
     /* Status */
-    --success: 74 222 128;
-    --success-bg: 20 50 30;
-    --warning: 251 191 36;
-    --warning-bg: 60 45 15;
-    --info: 107 140 255;
-    --info-bg: 25 32 55;
-    --danger: 248 113 113;
-    --danger-bg: 55 25 28;
-    --neutral: 120 120 130;
-    --neutral-bg: 40 40 46;
+    --success: 61 215 196;
+    --success-bg: 16 46 44;
+    --warning: 255 200 97;
+    --warning-bg: 58 46 18;
+    --info: 122 162 240;
+    --info-bg: 24 32 60;
+    --danger: 255 122 102;
+    --danger-bg: 52 26 24;
+    --neutral: 120 124 170;
+    --neutral-bg: 36 38 70;
 
     /* Elevation */
-    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
-    --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.35), 0 1px 2px rgba(0, 0, 0, 0.5);
-    --shadow-lg: 0 16px 48px rgba(0, 0, 0, 0.55), 0 2px 6px rgba(0, 0, 0, 0.4);
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.45);
+    --shadow-md: 0 6px 18px rgba(0, 0, 0, 0.4), 0 1px 2px rgba(0, 0, 0, 0.55);
+    --shadow-lg: 0 24px 70px rgba(0, 0, 0, 0.6), 0 2px 6px rgba(0, 0, 0, 0.45);
 
     /* Motion */
     --ease: cubic-bezier(0.2, 0.8, 0.2, 1);

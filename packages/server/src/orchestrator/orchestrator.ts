@@ -235,7 +235,7 @@ const DEFAULT_CODING_PRESETS: CodingModelPreset[] = [
 
 /** Per-provider default settings, derived from the provider catalog. */
 const DEFAULT_GLOBAL_SETTINGS: GlobalSettings = {
-  theme: "obsidian",
+  theme: "playful",
   models: DEFAULT_MODELS.map((m) => ({ ...m })),
   defaultChatModelId: DEFAULT_CHAT_MODEL_ID,
   defaultEmbeddingModelId: DEFAULT_EMBEDDING_MODEL_ID,
