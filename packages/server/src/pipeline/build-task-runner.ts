@@ -1,4 +1,4 @@
-import type { BuildRun, BuildTask, RunTaskArgs } from "./build-graph.js";
+import { GATE_ROLES, type BuildRun, type BuildTask, type RunTaskArgs } from "./build-graph.js";
 import type { MergeOutcome } from "./integrate.js";
 
 export interface CoderDispatch {
@@ -72,8 +72,15 @@ export function makeRunTask(
     }
 
     // Gate roles (security-reviewer, tester) and other roles (test-writer): run
-    // the role's agent and pass its report through.
+    // the role's agent.
     const report = await caps.runGate({ task, priorReports });
+    if (GATE_ROLES.has(task.role)) {
+      // A gate must EXPLICITLY pass. Absent a `VERDICT: PASS` line — e.g. the gate
+      // ran out of its step budget before testing — treat it as a failure (→
+      // kickback), never a default pass.
+      const pass = /VERDICT:\s*PASS/i.test(report);
+      return { report, pass };
+    }
     return { report };
   };
 }

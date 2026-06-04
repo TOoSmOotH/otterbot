@@ -130,11 +130,24 @@ describe("makeRunTask", () => {
     expect(out.report).toContain("CONFLICT base.txt");
   });
 
-  it("gate / other roles: delegate to runGate and pass the report through", async () => {
-    const caps = makeCaps();
+  it("gate role with no VERDICT fails (no default pass)", async () => {
+    const caps = makeCaps(); // default runGate returns "gated test" — no VERDICT line
     const out = await makeRunTask(caps)({ run, task: task({ id: "test", role: "tester" }), priorReports: [] });
     expect(out.report).toBe("gated test");
-    expect(out.pass).toBeUndefined();
+    expect(out.pass).toBe(false); // a gate that didn't explicitly pass = fail
     expect(caps.calls).toEqual(["gate:test"]);
+  });
+
+  it("gate role passes only with an explicit VERDICT: PASS", async () => {
+    const caps = makeCaps({ runGate: async () => "ran the suite\nVERDICT: PASS" });
+    const out = await makeRunTask(caps)({ run, task: task({ id: "test", role: "tester" }), priorReports: [] });
+    expect(out.pass).toBe(true);
+  });
+
+  it("non-gate role (test-writer) passes its report through without a verdict", async () => {
+    const caps = makeCaps();
+    const out = await makeRunTask(caps)({ run, task: task({ id: "tw", role: "test-writer" }), priorReports: [] });
+    expect(out.report).toBe("gated tw");
+    expect(out.pass).toBeUndefined();
   });
 });

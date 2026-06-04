@@ -184,6 +184,7 @@ export interface CreateAgentInput {
   canSpawnSubagents?: boolean;
   subagentLimit?: number;
   dispatchToSubagent?: boolean;
+  maxSteps?: number | null;
   parentId?: string | null;
 }
 
@@ -764,6 +765,27 @@ export class Orchestrator {
     });
     const branch = (r.stdout ?? "").trim();
     return branch || "main";
+  }
+
+  /**
+   * The repo's base/default branch — what task branches diverged from. Used for
+   * diffs instead of the live checkout, which drifts to the integration branch
+   * once a run completes (where the task is already merged → empty diff).
+   */
+  private repoBaseBranch(repoPath: string): string {
+    const head = spawnSync("git", ["-C", repoPath, "symbolic-ref", "--short", "refs/remotes/origin/HEAD"], {
+      encoding: "utf8",
+    });
+    if (head.status === 0 && head.stdout.trim()) {
+      return head.stdout.trim().replace(/^origin\//, "");
+    }
+    for (const b of ["main", "master"]) {
+      const ok = spawnSync("git", ["-C", repoPath, "rev-parse", "--verify", "--quiet", b], {
+        encoding: "utf8",
+      });
+      if (ok.status === 0) return b;
+    }
+    return this.currentBranch(repoPath);
   }
 
   /** Create or reset `branch` to `base` and check it out. */
@@ -1936,7 +1958,7 @@ export class Orchestrator {
     const repos = this.projects.listRepos(run.projectId);
     const repo = repos.find((r) => r.isPrimary) ?? repos[0];
     if (!repo) return null;
-    const base = this.currentBranch(repo.repoPath);
+    const base = this.repoBaseBranch(repo.repoPath);
     const branch = `task/${runId}/${taskId}`;
     const r = spawnSync("git", ["-C", repo.repoPath, "diff", `${base}...${branch}`], {
       encoding: "utf8",
@@ -2439,6 +2461,7 @@ export class Orchestrator {
         displayName: rc.displayName?.trim() || `${project.name} · ${spec.displayNameSuffix}`,
         persona,
         canRunShell: spec.canRunShell,
+        maxSteps: spec.maxSteps ?? null,
         allowedPeers,
         model: this.modelConfigFor(rc.modelId),
       });
@@ -2521,6 +2544,7 @@ export class Orchestrator {
       canSpawnSubagents: input.canSpawnSubagents,
       subagentLimit: input.subagentLimit,
       dispatchToSubagent: input.dispatchToSubagent,
+      maxSteps: input.maxSteps ?? null,
       parentId: input.parentId ?? null,
       createdAt: new Date().toISOString(),
     });

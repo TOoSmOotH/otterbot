@@ -41,6 +41,12 @@ export interface TeamRoleSpec {
   personaModelOnly?: string;
   capabilities: CapabilitySpec[];
   canRunShell?: boolean;
+  /**
+   * Turn budget for this role. Build coding/review/test work needs many more than
+   * the global 8-step default (a gate that runs out of steps would otherwise fail
+   * the build). `undefined` inherits the global default.
+   */
+  maxSteps?: number;
   /** Shared service agents this role may delegate to (added as allowedPeers). */
   peerServices?: string[];
   /**
@@ -119,6 +125,7 @@ the task you are given, run the build/tests to check them, then summarize what y
 changed.`,
     capabilities: [{ catalogId: "coding-cli", config: { pinnedTool: "claude" } }],
     canRunShell: true,
+    maxSteps: 40,
   },
   {
     role: "security-reviewer",
@@ -135,6 +142,7 @@ leakage, and risky dependencies, reading the files directly with your shell
 pass/fail verdict; if you fail the review, say exactly what must change.`,
     capabilities: [{ catalogId: "coding-cli", config: { pinnedTool: "gemini" } }],
     canRunShell: true,
+    maxSteps: 40,
   },
   {
     role: "test-writer",
@@ -149,6 +157,7 @@ unit/integration tests that cover the new behavior, make them runnable, and
 summarize what you added and how to run them.`,
     capabilities: [{ catalogId: "coding-cli", config: { pinnedTool: "opencode" } }],
     canRunShell: true,
+    maxSteps: 40,
   },
   {
     role: "tester",
@@ -164,6 +173,7 @@ your verdict. Use the delegate tool to reach the two service agents by id. Retur
 clear pass/fail with the relevant logs.`,
     capabilities: [],
     canRunShell: true,
+    maxSteps: 40,
     peerServices: [SVC_PROXMOX_ID, SVC_SSH_ID],
   },
 ];
