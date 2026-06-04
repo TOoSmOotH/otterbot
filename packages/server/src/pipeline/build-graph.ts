@@ -270,9 +270,11 @@ export class BuildGraphManager {
 
       const capacity = run.parallelism - inFlight.size;
       if (capacity > 0) {
-        // `readyTasks` excludes `running` tasks, so already-dispatched ones are
-        // never re-selected; take the first `capacity` of what's left.
-        for (const task of readyTasks(tasks).slice(0, capacity)) launch(run, task, tasks);
+        // Skip tasks already in flight: a concurrent kickback can reset an
+        // in-flight task's transitive dep back to `blocked` while it is still
+        // running; never launch a second concurrent run for the same id.
+        const dispatchable = readyTasks(tasks).filter((t) => !inFlight.has(t.id));
+        for (const task of dispatchable.slice(0, capacity)) launch(run, task, tasks);
       }
 
       if (inFlight.size === 0) {
@@ -283,6 +285,11 @@ export class BuildGraphManager {
 
       const settled = await Promise.race(inFlight.values());
       inFlight.delete(settled.taskId);
+
+      // If a concurrent kickback reset this task while it was running, its result
+      // is stale — drop it and let the task be re-dispatched fresh.
+      const current = this.listTasks(runId).find((t) => t.id === settled.taskId);
+      if (current && current.status !== "running") continue;
 
       if (settled.error) {
         this.setTaskReport(runId, settled.taskId, settled.error.message);

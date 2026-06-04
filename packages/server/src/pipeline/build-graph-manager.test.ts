@@ -265,4 +265,45 @@ describe("BuildGraphManager — persistence", () => {
     await waitFor(() => mgr.getRun(runId)?.status === "done");
     expect(order).toEqual(["slow", "after"]);
   });
+
+  it("never double-dispatches a shared dep when sibling gates kick back concurrently", async () => {
+    const active = new Map<string, number>();
+    const peakById = new Map<string, number>();
+    const bump = (id: string, d: number) => {
+      const n = (active.get(id) ?? 0) + d;
+      active.set(id, n);
+      if (d > 0) peakById.set(id, Math.max(peakById.get(id) ?? 0, n));
+    };
+    let gFailed = false;
+    let hFailed = false;
+    const mgr = new BuildGraphManager({
+      control,
+      runTask: async ({ task }) => {
+        bump(task.id, 1);
+        await new Promise((r) => setTimeout(r, task.role === "coder" ? 25 : 1));
+        bump(task.id, -1);
+        if (task.id === "G" && !gFailed) {
+          gFailed = true;
+          return { report: "VERDICT: FAIL" };
+        }
+        if (task.id === "H" && !hFailed) {
+          hFailed = true;
+          return { report: "VERDICT: FAIL" };
+        }
+        if (task.role === "tester") return { report: "VERDICT: PASS" };
+        return { report: `did ${task.id}` };
+      },
+    });
+    const runId = mgr.createRun("proj1", "shared dep", { parallelism: 3 });
+    mgr.seedTasks(runId, "proj1", [
+      { id: "X", title: "X", role: "coder" },
+      { id: "G", title: "G", role: "tester", deps: ["X"] },
+      { id: "H", title: "H", role: "tester", deps: ["X"] },
+    ]);
+    mgr.start(runId);
+
+    await waitFor(() => mgr.getRun(runId)?.status !== "running", 5000);
+    expect(mgr.getRun(runId)?.status).toBe("done");
+    expect(peakById.get("X")).toBe(1); // X must never run concurrently with itself
+  });
 });
