@@ -27,7 +27,7 @@ import { importSkillFromRaw, importSkillFromUrl, exportAllSkills } from "./skill
 import { initOpenAiAuth, getOpenAiAuth } from "./auth/openai-auth-store.js";
 import { builtinModelStatus, downloadBuiltinModel } from "./embedders/builtin-embedder.js";
 import { BUILTIN_CAPABILITIES, getCatalogCapability } from "./skills/builtin-catalog.js";
-import { isCodingTool } from "./integrations/coding-cli.js";
+import { isCodingTool, listCodingSessions } from "./integrations/coding-cli.js";
 import { installSharedCodingCli } from "./integrations/coding-cli-install.js";
 import { generateText } from "ai";
 import { resolveChatModel, listProviderModels } from "./providers/registry.js";
@@ -1401,6 +1401,11 @@ export async function buildServer(
     void orch.reloadAgentMcp(req.params.id);
     return updated;
   });
+
+  // Every coding-CLI session currently running (across all agents), so the
+  // Activity view can list live sessions on load / after a reconnect; live
+  // start/end deltas arrive over the socket (`coding:started` / `coding:ended`).
+  app.get("/api/coding-sessions", async () => listCodingSessions());
 
   // Which coding CLIs (claude/codex/gemini/opencode) are installed + (best-
   // effort) logged in, plus cached "update available" info. Both install and

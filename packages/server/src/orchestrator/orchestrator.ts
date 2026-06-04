@@ -480,7 +480,6 @@ export class Orchestrator {
   private readonly runtimes = new Map<string, AgentRuntime>();
   private readonly statusListeners = new Set<(id: string, status: AgentStatus) => void>();
   /** Listeners notified when an agent starts a live coding-CLI session. */
-  private readonly codingListeners = new Set<(agentId: string, tool: string) => void>();
   /** Background embedding-init promises, awaited on shutdown. */
   private readonly pendingInits: Promise<void>[] = [];
   private readonly bus: MessageBus;
@@ -642,9 +641,6 @@ export class Orchestrator {
       },
       readArtifact: (agentId, file) => this.readArtifact(agentId, file),
       readArtifactBinary: (agentId, dir, name) => this.readArtifactBinary(agentId, dir, name),
-      notifyCodingSession: (agentId, tool) => {
-        for (const listener of this.codingListeners) listener(agentId, tool);
-      },
       codingModelPresets: () => this.getGlobalSettings().codingModelPresets,
       projectIdForAgent: (agentId) => this.projects.projectsForAgent(agentId)[0]?.id ?? null,
       startPipeline: (projectId, goal) => this.startPipeline(projectId, goal),
@@ -1469,12 +1465,6 @@ export class Orchestrator {
   onStatusChange(listener: (id: string, status: AgentStatus) => void): () => void {
     this.statusListeners.add(listener);
     return () => this.statusListeners.delete(listener);
-  }
-
-  /** Subscribe to "an agent started a live coding session" events. */
-  onCodingSession(listener: (agentId: string, tool: string) => void): () => void {
-    this.codingListeners.add(listener);
-    return () => this.codingListeners.delete(listener);
   }
 
   // --- Projects ------------------------------------------------------------

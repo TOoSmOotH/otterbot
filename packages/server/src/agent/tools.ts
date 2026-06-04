@@ -724,11 +724,11 @@ export function buildAgentTools(
             secrets: runSecrets,
             projectWorkspacePath,
             gitSsh: ctx.gitSsh() ?? undefined,
+            agentId: ctx.profile.id,
           };
           if (interactive) {
             const started = startCodingSession({ ...common, agentId: ctx.profile.id });
             if ("error" in started) return { ok: false, error: started.error };
-            services?.notifyCodingSession?.(ctx.profile.id, cliTool);
             const { exitCode, summary } = await started.session.exited;
             return { ok: exitCode === 0, interactive: true, exitCode, summary };
           }

@@ -5,5 +5,6 @@ export * from "./user-profile.js";
 export * from "./agent.js";
 export * from "./connection.js";
 export * from "./agent-message.js";
+export * from "./coding-session.js";
 export * from "./spawn.js";
 export * from "./settings.js";

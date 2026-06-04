@@ -1,8 +1,11 @@
-import { useEffect, useRef } from "react";
-import type { AgentMessage, AgentMsgKind, SubagentTask } from "@otterbot/shared";
-import { ArrowRight } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import type { AgentMessage, AgentMsgKind, CodingSessionInfo, SubagentTask } from "@otterbot/shared";
+import { ArrowRight, Terminal as TerminalIcon } from "lucide-react";
 import { useActivityStore } from "../../stores/activity-store";
 import { useAgentsStore } from "../../stores/agents-store";
+import { useCodingSessionsStore } from "../../stores/coding-sessions-store";
+import { CODING_TOOL_LABELS, type CodingTool } from "../../lib/coding-cli";
+import { TerminalView } from "./TerminalView";
 import { Badge } from "../ui/Badge";
 import { Icon } from "../ui/Icon";
 import { fonts, type } from "../../lib/typography";
@@ -89,6 +92,7 @@ export function ActivityView() {
       </div>
 
       <div className="flex flex-col min-h-0">
+        <CodingSessionsPanel name={name} />
         <SectionHeader>Subagent tasks</SectionHeader>
         <div className="flex-1 overflow-y-auto p-3 flex flex-col gap-2">
           {tasks.length === 0 && (
@@ -99,6 +103,83 @@ export function ActivityView() {
           ))}
         </div>
       </div>
+    </div>
+  );
+}
+
+function CodingSessionsPanel({ name }: { name: (id: string | null) => string }) {
+  const sessions = useCodingSessionsStore((s) => s.sessions);
+  const load = useCodingSessionsStore((s) => s.load);
+  const bindSocket = useCodingSessionsStore((s) => s.bindSocket);
+  const [expanded, setExpanded] = useState<string | null>(null);
+
+  useEffect(() => {
+    bindSocket();
+    void load();
+  }, [bindSocket, load]);
+
+  return (
+    <div className="flex flex-col border-b border-border" style={{ maxHeight: "55%", minHeight: 0 }}>
+      <SectionHeader>
+        <Icon icon={TerminalIcon} size={14} />
+        Live coding sessions
+        {sessions.length > 0 && <Badge tone="success">{sessions.length}</Badge>}
+      </SectionHeader>
+      <div className="flex-1 overflow-y-auto p-3 flex flex-col gap-2 min-h-0">
+        {sessions.length === 0 && (
+          <div className="text-body text-muted">No coding sessions running.</div>
+        )}
+        {sessions.map((s) => (
+          <CodingSessionRow
+            key={s.agentId}
+            session={s}
+            agentName={name(s.agentId)}
+            open={expanded === s.agentId}
+            onToggle={() => setExpanded((cur) => (cur === s.agentId ? null : s.agentId))}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function CodingSessionRow({
+  session,
+  agentName,
+  open,
+  onToggle,
+}: {
+  session: CodingSessionInfo;
+  agentName: string;
+  open: boolean;
+  onToggle: () => void;
+}) {
+  const toolLabel = CODING_TOOL_LABELS[session.tool as CodingTool] ?? session.tool;
+  const interactive = session.mode === "interactive";
+  return (
+    <div className="rounded-md border border-border bg-surface shadow-sm overflow-hidden">
+      <button
+        onClick={onToggle}
+        className="w-full flex items-center gap-2 p-2.5 text-left hover:bg-surface/60"
+      >
+        <span
+          className="w-1.5 h-1.5 rounded-full"
+          style={{ background: "rgb(var(--success))" }}
+          aria-hidden
+        />
+        <span className="font-semibold text-fg text-body">{agentName}</span>
+        <span className="text-small text-subtle" style={{ fontFamily: fonts.mono }}>
+          {toolLabel}
+        </span>
+        <span className="flex-1" />
+        <Badge tone={interactive ? "success" : "info"}>{interactive ? "live" : "headless"}</Badge>
+        <span className="text-small text-muted">{open ? "▾" : "▸"}</span>
+      </button>
+      {open && (
+        <div style={{ height: 280, background: "#0b0b0f", borderTop: "1px solid rgb(var(--border))", padding: 6 }}>
+          <TerminalView agentId={session.agentId} kind="coding" interactive={interactive} />
+        </div>
+      )}
     </div>
   );
 }

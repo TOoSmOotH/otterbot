@@ -75,13 +75,6 @@ export interface AgentServices {
     name: string
   ): { data: Buffer; mimeType: string } | null;
   /**
-   * Announce that an agent started a live (PTY) coding-CLI session, so the UI
-   * can attach a terminal view. The session itself is tracked in
-   * `integrations/coding-cli.ts`; this is just the notification. Present only
-   * when the orchestrator wired it.
-   */
-  notifyCodingSession?(agentId: string, tool: string): void;
-  /**
    * The configured coding-CLI model presets (Settings → Coding Models), so
    * `coding_cli_run` can resolve a pinned/per-call preset id into the tool's
    * model + reasoning flags. Present only when the orchestrator wired it.

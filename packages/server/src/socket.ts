@@ -6,7 +6,7 @@ import { summarizeConversation } from "./memory/summarizer.js";
 import { extractFactsFromConversation } from "./memory/extractor.js";
 import { maybeAuthorSkill } from "./skills/skill-author.js";
 import { openTerminal } from "./integrations/shell-terminal.js";
-import { getCodingSession } from "./integrations/coding-cli.js";
+import { getCodingSession, onCodingLifecycle } from "./integrations/coding-cli.js";
 import { handleChatCommand, parseChatCommand } from "./runtime/chat-commands.js";
 import { extractToken, type AuthStore } from "./auth/api-token.js";
 import type { Artifact } from "@otterbot/shared";
@@ -71,10 +71,21 @@ export function attachSocketServer(
     io.emit("bus:message", msg);
   });
 
-  // Tell every client when an agent starts a live coding session, so the UI can
-  // offer to attach a terminal view.
-  orch.onCodingSession((agentId, tool) => {
-    io.emit("coding:started", { agentId, tool });
+  // Broadcast coding-session start/end (both headless + interactive) so the
+  // Activity view can list live sessions and the UI can attach a terminal.
+  // `coding:ended` is the global "session gone" signal that updates the list;
+  // `coding:exit` (below) is the per-attached-terminal end notice.
+  onCodingLifecycle((ev) => {
+    if (ev.type === "started") {
+      io.emit("coding:started", {
+        agentId: ev.agentId,
+        tool: ev.tool,
+        mode: ev.mode,
+        startedAt: ev.startedAt,
+      });
+    } else {
+      io.emit("coding:ended", { agentId: ev.agentId });
+    }
   });
 
   // Stream pipeline run state changes to the Projects view.

@@ -73,10 +73,14 @@ function AuthedApp() {
     void loadSettings();
   }, [connect, bindSocket, bindActivity, loadAgents, loadActivity, loadSetup, loadSettings]);
 
-  // Offer a live view whenever an agent launches an interactive coding session.
+  // Auto-pop a terminal whenever an agent launches an *interactive* coding
+  // session. Headless runs also emit `coding:started` but are discovered (and
+  // watched) via the Activity view's live-sessions list, not a popup.
   useEffect(() => {
     const socket = getSocket();
-    const onStarted = (p: { agentId: string; tool: string }) => setCodingView(p);
+    const onStarted = (p: { agentId: string; tool: string; mode?: string }) => {
+      if (p.mode === "interactive") setCodingView({ agentId: p.agentId, tool: p.tool });
+    };
     socket.on("coding:started", onStarted);
     return () => {
       socket.off("coding:started", onStarted);

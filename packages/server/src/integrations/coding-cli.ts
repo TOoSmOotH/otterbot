@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import * as pty from "@homebridge/node-pty-prebuilt-multiarch";
+import type { CodingSessionInfo, CodingSessionMode } from "@otterbot/shared";
 import { buildSandboxPlan, ensureWorkspace, type SandboxOpts } from "./shell.js";
 
 /**
@@ -170,6 +171,9 @@ export interface CodingRunOptions {
   /** Shared project tree to bind + run inside, when the agent has a project. */
   projectWorkspacePath?: string | null;
   gitSsh?: import("./shell.js").GitSshSetup;
+  /** When set, the run is registered as a live (read-only) session under this
+   *  agent so the UI can watch its output stream. */
+  agentId?: string;
 }
 
 export interface CodingRunResult {
@@ -236,9 +240,42 @@ export function runCodingCliHeadless(opts: CodingRunOptions): Promise<CodingRunR
     let timedOut = false;
     let done = false;
 
+    // When an agentId is given, expose the run as a live (read-only) session so
+    // the UI can watch its output stream. Headless tools take no stdin, so
+    // write/resize are no-ops; the model still only sees the summary on exit.
+    let ring = "";
+    const listeners = new Set<(data: string) => void>();
+    let resolveExit!: (v: { exitCode: number; summary: string }) => void;
+    const exited = new Promise<{ exitCode: number; summary: string }>((r) => (resolveExit = r));
+    let deregister: (() => void) | null = null;
+    if (opts.agentId) {
+      const session: CodingSession = {
+        agentId: opts.agentId,
+        tool: opts.tool,
+        mode: "headless",
+        startedAt: new Date().toISOString(),
+        getReplayBuffer: () => ring,
+        onData(cb) {
+          listeners.add(cb);
+          return () => listeners.delete(cb);
+        },
+        write: () => {},
+        resize: () => {},
+        kill: () => child.kill("SIGKILL"),
+        exited,
+      };
+      deregister = registerSession(session);
+    }
+
     const collect = (chunk: Buffer) => {
-      if (buffer.length < RING_BUFFER_SIZE * 4) buffer += chunk.toString("utf8");
+      const text = chunk.toString("utf8");
+      if (buffer.length < RING_BUFFER_SIZE * 4) buffer += text;
       else dropped = true;
+      if (opts.agentId) {
+        ring += text;
+        if (ring.length > RING_BUFFER_SIZE) ring = ring.slice(-RING_BUFFER_SIZE);
+        for (const cb of listeners) cb(text);
+      }
     };
     child.stdout?.on("data", collect);
     child.stderr?.on("data", collect);
@@ -252,6 +289,9 @@ export function runCodingCliHeadless(opts: CodingRunOptions): Promise<CodingRunR
       if (done) return;
       done = true;
       clearTimeout(timer);
+      deregister?.();
+      listeners.clear();
+      resolveExit({ exitCode: result.exitCode ?? 0, summary: result.summary });
       resolve(result);
     };
 
@@ -282,13 +322,18 @@ export function runCodingCliHeadless(opts: CodingRunOptions): Promise<CodingRunR
   });
 }
 
-/** A live coding-CLI PTY session, tracked per agent for socket streaming. */
+/** A live coding-CLI session, tracked per agent for socket streaming. Either an
+ *  interactive PTY (full TUI, accepts input) or a headless run (captured pipe
+ *  output, read-only — `write`/`resize` are no-ops). */
 export interface CodingSession {
   agentId: string;
   tool: CodingTool;
+  mode: CodingSessionMode;
+  /** ISO timestamp the run started — for the Activity-view list. */
+  startedAt: string;
   /** Replay buffer for late-joining viewers. */
   getReplayBuffer(): string;
-  /** Subscribe to raw PTY output; returns an unsubscribe function. */
+  /** Subscribe to raw output; returns an unsubscribe function. */
   onData(cb: (data: string) => void): () => void;
   write(data: string): void;
   resize(cols: number, rows: number): void;
@@ -301,6 +346,55 @@ const activeCodingSessions = new Map<string, CodingSession>();
 
 export function getCodingSession(agentId: string): CodingSession | undefined {
   return activeCodingSessions.get(agentId);
+}
+
+/** Snapshot of every active coding session — for the Activity view + reconnects. */
+export function listCodingSessions(): CodingSessionInfo[] {
+  return [...activeCodingSessions.values()].map((s) => ({
+    agentId: s.agentId,
+    tool: s.tool,
+    mode: s.mode,
+    startedAt: s.startedAt,
+  }));
+}
+
+/** A coding-session lifecycle event, broadcast to the UI by the socket layer. */
+export type CodingLifecycleEvent =
+  | ({ type: "started" } & CodingSessionInfo)
+  | { type: "ended"; agentId: string };
+
+const lifecycleListeners = new Set<(ev: CodingLifecycleEvent) => void>();
+
+/** Subscribe to coding-session start/end events (both headless + interactive). */
+export function onCodingLifecycle(cb: (ev: CodingLifecycleEvent) => void): () => void {
+  lifecycleListeners.add(cb);
+  return () => lifecycleListeners.delete(cb);
+}
+
+function emitLifecycle(ev: CodingLifecycleEvent): void {
+  for (const cb of lifecycleListeners) cb(ev);
+}
+
+/** Register a session, announcing it; returns a de-register fn that announces the end. */
+function registerSession(session: CodingSession): () => void {
+  // One coding session per agent: tear down any existing one first.
+  if (activeCodingSessions.get(session.agentId) !== session) {
+    activeCodingSessions.get(session.agentId)?.kill();
+  }
+  activeCodingSessions.set(session.agentId, session);
+  emitLifecycle({
+    type: "started",
+    agentId: session.agentId,
+    tool: session.tool,
+    mode: session.mode,
+    startedAt: session.startedAt,
+  });
+  return () => {
+    if (activeCodingSessions.get(session.agentId) === session) {
+      activeCodingSessions.delete(session.agentId);
+    }
+    emitLifecycle({ type: "ended", agentId: session.agentId });
+  };
 }
 
 export interface StartCodingSessionOptions extends CodingRunOptions {
@@ -319,8 +413,6 @@ export function startCodingSession(
   opts: StartCodingSessionOptions
 ): { session: CodingSession } | { error: string } {
   ensureWorkspace(opts.workspaceDir);
-  // One coding session per agent: tear down any existing one first.
-  activeCodingSessions.get(opts.agentId)?.kill();
 
   const argv = buildCodingArgv(opts.tool, opts.task, { interactive: true, model: opts.model });
   const built = buildSandboxPlan(
@@ -363,6 +455,8 @@ export function startCodingSession(
   const session: CodingSession = {
     agentId: opts.agentId,
     tool: opts.tool,
+    mode: "interactive",
+    startedAt: new Date().toISOString(),
     getReplayBuffer: () => ring,
     onData(cb) {
       listeners.add(cb);
@@ -386,15 +480,13 @@ export function startCodingSession(
     exited,
   };
 
+  const deregister = registerSession(session);
   term.onExit(({ exitCode }) => {
-    if (activeCodingSessions.get(opts.agentId) === session) {
-      activeCodingSessions.delete(opts.agentId);
-    }
+    deregister();
     listeners.clear();
     resolveExit({ exitCode, summary: summarizeOutput(ring) });
   });
 
-  activeCodingSessions.set(opts.agentId, session);
   return { session };
 }
 
