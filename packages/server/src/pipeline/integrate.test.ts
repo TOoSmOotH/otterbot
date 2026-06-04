@@ -77,4 +77,20 @@ describe("integrateSerially", () => {
     expect(git(repo, "status", "--porcelain")).toBe("");
     expect(readFileSync(join(repo, "base.txt"), "utf8")).toBe("A\n");
   });
+
+  it("rolls back a merge whose test gate fails and records test-failed", () => {
+    branchAdding("task/r/a", "bad.txt", "boom\n");
+    git(repo, "checkout", "-b", "integration", base);
+
+    const runTests = (rp: string) => ({
+      ok: !existsSync(join(rp, "bad.txt")),
+      output: existsSync(join(rp, "bad.txt")) ? "bad.txt present" : "ok",
+    });
+
+    const out = integrateSerially(repo, [{ taskId: "a", branch: "task/r/a" }], { runTests });
+
+    expect(out[0].result).toBe("test-failed");
+    expect(existsSync(join(repo, "bad.txt"))).toBe(false);
+    expect(git(repo, "status", "--porcelain")).toBe("");
+  });
 });

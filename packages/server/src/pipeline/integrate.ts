@@ -38,6 +38,14 @@ export function integrateSerially(
       outcomes.push({ taskId: item.taskId, branch: item.branch, result: "conflict", output: merge.output });
       continue;
     }
+    if (opts.runTests) {
+      const test = opts.runTests(repoPath);
+      if (!test.ok) {
+        git(repoPath, ["reset", "--hard", "HEAD~1"]);
+        outcomes.push({ taskId: item.taskId, branch: item.branch, result: "test-failed", output: test.output });
+        continue;
+      }
+    }
     outcomes.push({ taskId: item.taskId, branch: item.branch, result: "merged", output: merge.output });
   }
   return outcomes;
