@@ -27,7 +27,9 @@ export class WorktreeManager {
   add(runId: string, taskId: string, baseBranch: string): WorktreeInfo {
     const branch = this.branchName(runId, taskId);
     const path = join(this.worktreeRoot, taskId);
-    const r = this.git(this.repoPath, ["worktree", "add", "-b", branch, path, baseBranch]);
+    // `-B` creates or RESETS the branch to baseBranch, so re-adding after a
+    // remove (kickback/retry) succeeds even though the branch still exists.
+    const r = this.git(this.repoPath, ["worktree", "add", "-B", branch, path, baseBranch]);
     if (!r.ok) throw new Error(`worktree add failed for ${taskId}: ${r.output}`);
     return { taskId, path, branch };
   }

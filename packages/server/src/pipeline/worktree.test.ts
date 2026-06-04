@@ -47,4 +47,13 @@ describe("WorktreeManager", () => {
     expect(existsSync(wt.path)).toBe(false);
     expect(wm.list()).not.toContain(wt.path);
   });
+
+  it("can re-add a task worktree after removing it (retry safety)", () => {
+    const wm = new WorktreeManager(repo, join(dir, ".worktrees"));
+    wm.add("run1", "taskA", base);
+    wm.remove("taskA");
+    const wt = wm.add("run1", "taskA", base); // must not throw even though the branch still exists
+    expect(existsSync(wt.path)).toBe(true);
+    expect(wt.branch).toBe("task/run1/taskA");
+  });
 });

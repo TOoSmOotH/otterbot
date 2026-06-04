@@ -93,4 +93,33 @@ describe("integrateSerially", () => {
     expect(existsSync(join(repo, "bad.txt"))).toBe(false);
     expect(git(repo, "status", "--porcelain")).toBe("");
   });
+
+  it("rolls back only the failing merge, never a previously integrated one (no-op merge safety)", () => {
+    branchAdding("task/r/a", "a.txt", "A\n");
+    git(repo, "branch", "task/r/b", base); // b has no commits beyond base → no-op merge
+    git(repo, "checkout", "-b", "integration", base);
+    let calls = 0;
+    const runTests = () => ({ ok: ++calls !== 2, output: `call ${calls}` }); // fail only the 2nd (b)
+
+    const out = integrateSerially(
+      repo,
+      [
+        { taskId: "a", branch: "task/r/a" },
+        { taskId: "b", branch: "task/r/b" },
+      ],
+      { runTests }
+    );
+
+    expect(out[0].result).toBe("merged");
+    expect(out[1].result).toBe("test-failed");
+    expect(existsSync(join(repo, "a.txt"))).toBe(true); // a's integration must be preserved
+    expect(git(repo, "status", "--porcelain")).toBe("");
+  });
+
+  it("labels a non-conflict merge failure as error, not conflict, leaving a clean tree", () => {
+    git(repo, "checkout", "-b", "integration", base);
+    const out = integrateSerially(repo, [{ taskId: "x", branch: "does-not-exist" }]);
+    expect(out[0].result).toBe("error");
+    expect(git(repo, "status", "--porcelain")).toBe("");
+  });
 });
