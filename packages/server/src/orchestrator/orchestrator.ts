@@ -1,5 +1,6 @@
 import { basename, join, resolve } from "node:path";
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync, rmSync, cpSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { eq, desc } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import type {
@@ -32,7 +33,12 @@ import { controlSchema, type ControlDb } from "../db/control-db.js";
 import { buildAgentContext, type AgentContext } from "../runtime/agent-context.js";
 import { DEFAULT_CONTEXT_WINDOW } from "../runtime/context-manager.js";
 import { AgentRuntime, withAttachmentRefs } from "../runtime/agent-runtime.js";
-import type { AgentServices, SpawnResult } from "../runtime/agent-services.js";
+import type {
+  AgentServices,
+  SpawnResult,
+  BuildTaskSpecInput,
+  BuildTaskView,
+} from "../runtime/agent-services.js";
 import { resolveEmbedder } from "../providers/registry.js";
 import { PROVIDER_CATALOG, findProvider } from "../providers/catalog.js";
 import {
@@ -50,6 +56,13 @@ import {
   DEFAULT_STAGES,
   type PipelineRunView,
 } from "../pipeline/pipeline-manager.js";
+import {
+  BuildGraphManager,
+  type TaskRole,
+} from "../pipeline/build-graph.js";
+import { makeRunTask, type BuildTaskCaps } from "../pipeline/build-task-runner.js";
+import { WorktreeManager } from "../pipeline/worktree.js";
+import { integrateSerially } from "../pipeline/integrate.js";
 import { ForgeService } from "../forge/forge-service.js";
 import { SshKeyStore } from "../ssh-keys/ssh-key-store.js";
 import { parseRepoInput, splitRepo, type ForgeAccount, type ForgeProvider, type ForgeIssue, type ForgeComment } from "../forge/forge.js";
@@ -491,6 +504,7 @@ export class Orchestrator {
   private readonly forgeMonitor: ForgeMonitor;
   private readonly codingCliUpdates: CodingCliUpdateChecker;
   private readonly pipeline: PipelineManager;
+  private readonly buildGraph: BuildGraphManager;
   private readonly pipelineListeners = new Set<(run: PipelineRunView) => void>();
   /** Run ids already published (PR opened) — guards the publish-on-done hook. */
   private readonly publishedRuns = new Set<string>();
@@ -572,6 +586,13 @@ export class Orchestrator {
         }
         for (const listener of this.pipelineListeners) listener(run);
       },
+    });
+    this.buildGraph = new BuildGraphManager({
+      control,
+      runTask: makeRunTask(this.makeBuildTaskCaps()),
+      // onUpdate omitted: pipelineListeners is typed for PipelineRunView, not a
+      // build-run view, and we won't broaden unrelated types here.
+      // TODO(2c): publish integration branch + open PR on done
     });
     this.forgeMonitor = new ForgeMonitor({
       listMonitoredProjects: () =>
@@ -663,7 +684,191 @@ export class Orchestrator {
           })),
         };
       },
+      planBuild: ({ projectId, goal, tasks }) => {
+        const runId = this.buildGraph.createRun(projectId, goal, { status: "awaiting_approval" });
+        const specs: BuildTaskSpecInput[] =
+          tasks && tasks.length > 0 ? tasks : this.defaultBuildGraph(projectId, goal);
+        this.buildGraph.seedTasks(
+          runId,
+          projectId,
+          specs.map((t) => ({
+            id: t.id,
+            title: t.title,
+            role: t.role as TaskRole,
+            deps: t.deps,
+            description: t.description,
+            filesHint: t.filesHint,
+          }))
+        );
+        return { runId, tasks: this.buildRunTasks(runId) };
+      },
+      buildStart: (runId) => {
+        const run = this.buildGraph.getRun(runId);
+        if (!run) return { ok: false, error: "Unknown build run" };
+        if (run.status !== "awaiting_approval")
+          return { ok: false, error: `run is ${run.status}, not awaiting_approval` };
+        this.buildGraph.launch(runId);
+        return { ok: true };
+      },
+      getBuildRun: (runId) => {
+        const v = this.buildGraph.view(runId);
+        if (!v) return null;
+        return {
+          id: v.id,
+          projectId: v.projectId,
+          goal: v.goal,
+          status: v.status,
+          parallelism: v.parallelism,
+          prNumber: v.prNumber,
+          prUrl: v.prUrl,
+          tasks: v.tasks.map((t) => ({
+            id: t.id,
+            title: t.title,
+            role: t.role,
+            deps: t.deps,
+            status: t.status,
+            attempt: t.attempt,
+            report: t.report,
+          })),
+        };
+      },
     };
+  }
+
+  /** Current branch of a repo working tree; falls back to "main". */
+  private currentBranch(repoPath: string): string {
+    const r = spawnSync("git", ["-C", repoPath, "branch", "--show-current"], {
+      encoding: "utf8",
+    });
+    const branch = (r.stdout ?? "").trim();
+    return branch || "main";
+  }
+
+  /**
+   * The live adapters the build-graph task runner needs: per-task git worktrees
+   * over the project's primary repo, coder dispatch into a worktree-bound
+   * subagent, commit, serial integration, and the gate/role delegation over the
+   * bus. NOT exercised here (no bwrap/CLIs/models); wired for the live path.
+   */
+  private makeBuildTaskCaps(): BuildTaskCaps {
+    const primaryRepo = (projectId: string) => {
+      const repos = this.projects.listRepos(projectId);
+      return repos.find((r) => r.isPrimary) ?? repos[0] ?? null;
+    };
+    const wmFor = (projectId: string) => {
+      const project = this.projects.get(projectId);
+      const repo = primaryRepo(projectId);
+      if (!project || !repo) return null;
+      return new WorktreeManager(repo.repoPath, join(project.workspacePath, ".worktrees"));
+    };
+    const baseFor = (projectId: string): string => {
+      const repo = primaryRepo(projectId);
+      return repo ? this.currentBranch(repo.repoPath) : "main";
+    };
+    return {
+      baseBranch: (run) => baseFor(run.projectId),
+      addWorktree: (run, task, base) => {
+        const wm = wmFor(run.projectId);
+        if (!wm) throw new Error(`no repo for project ${run.projectId}`);
+        return wm.add(run.id, task.id, base);
+      },
+      dispatchCoder: async ({ task, worktreePath, priorReports }) => {
+        const coderId = this.projects.agentForRole(task.projectId, "coder");
+        if (!coderId) throw new Error(`no coder agent for project ${task.projectId}`);
+        const prompt = buildStagePrompt(
+          "coder",
+          `${task.title}\n\n${task.description}`,
+          priorReports.map((r) => ({ stage: r.title, report: r.report }))
+        );
+        const res = await this.spawnSubagent(coderId, prompt, {
+          projectWorkspacePathOverride: worktreePath,
+        });
+        return res.summary;
+      },
+      commitWorktree: ({ worktreePath, task }) => {
+        const repo = primaryRepo(task.projectId);
+        const target = repo ? this.gitTargetFor(repo) : null;
+        // TODO(2c): use forge GitContext; falls back to the default committer.
+        return this.projects.commitAll(
+          worktreePath,
+          `otterbot: task ${task.id}`.slice(0, 72),
+          target?.ctx ?? {}
+        );
+      },
+      removeWorktree: (task) => {
+        wmFor(task.projectId)?.remove(task.id);
+      },
+      coderBranches: (run) =>
+        this.buildGraph
+          .listTasks(run.id)
+          .filter((t) => t.role === "coder")
+          .map((t) => ({ taskId: t.id, branch: `task/${run.id}/${t.id}` })),
+      integrate: ({ run, items }) => {
+        const repo = primaryRepo(run.projectId);
+        if (!repo) return [];
+        const integrationBranch = `otterbot/build-${run.id.slice(0, 8)}`;
+        this.projects.ensureBranch(repo.repoPath, integrationBranch);
+        return integrateSerially(repo.repoPath, items);
+      },
+      runGate: async ({ task, priorReports }) => {
+        const agentId = this.projects.agentForRole(task.projectId, task.role);
+        if (!agentId) return "VERDICT: PASS"; // role not provisioned → treat as pass
+        const fromId = this.projects.agentForRole(task.projectId, "pm") ?? "coo";
+        const res = await this.bus.request(
+          {
+            id: nanoid(),
+            kind: "request",
+            from: fromId,
+            to: agentId,
+            threadId: nanoid(),
+            correlationId: null,
+            rootSpawnId: null,
+            body: buildStagePrompt(
+              task.role,
+              task.title,
+              priorReports.map((r) => ({ stage: r.title, report: r.report }))
+            ),
+            transport: "local",
+          },
+          STAGE_TIMEOUT_MS
+        );
+        return res.body;
+      },
+    };
+  }
+
+  /** Default single-coder graph (reproduces the linear pipeline through the build graph). */
+  private defaultBuildGraph(projectId: string, goal: string): BuildTaskSpecInput[] {
+    const has = (role: string) => this.projects.agentForRole(projectId, role) != null;
+    const specs: BuildTaskSpecInput[] = [
+      { id: "code", title: goal, role: "coder" },
+      { id: "integrate", title: "Integrate", role: "integrator", deps: ["code"] },
+    ];
+    let last = "integrate";
+    if (has("security-reviewer")) {
+      specs.push({ id: "review", title: "Security review", role: "security-reviewer", deps: [last] });
+      last = "review";
+    }
+    if (has("test-writer")) {
+      specs.push({ id: "write-tests", title: "Write tests", role: "test-writer", deps: [last] });
+      last = "write-tests";
+    }
+    if (has("tester")) {
+      specs.push({ id: "test", title: "Run tests", role: "tester", deps: [last] });
+    }
+    return specs;
+  }
+
+  private buildRunTasks(runId: string): BuildTaskView[] {
+    return this.buildGraph.listTasks(runId).map((t) => ({
+      id: t.id,
+      title: t.title,
+      role: t.role,
+      deps: t.deps,
+      status: t.status,
+      attempt: t.attempt,
+      report: t.report,
+    }));
   }
 
   /** Raw bytes of an agent's file or generated image, traversal-guarded. */
@@ -1156,7 +1361,10 @@ export class Orchestrator {
   }
 
   /** Build and register a runtime + context for a profile. */
-  private startAgent(profile: AgentProfile): AgentContext {
+  private startAgent(
+    profile: AgentProfile,
+    opts?: { projectWorkspacePathOverride?: string }
+  ): AgentContext {
     const paths = this.profiles.pathsFor(profile.id);
     // A subagent shares its parent's SSH key: the user installs one public key
     // per agent, and the parent's dir is persistent (the subagent's own profile
@@ -1182,7 +1390,8 @@ export class Orchestrator {
       agentDbPath: paths.agentDb,
       skillsDir: paths.skillsDir,
       workspaceDir: paths.workspace,
-      resolveProjectWorkspacePath: () => this.projects.workspacePathForAgent(profile.id),
+      resolveProjectWorkspacePath: () =>
+        opts?.projectWorkspacePathOverride ?? this.projects.workspacePathForAgent(profile.id),
       resolveProjectRepos: () =>
         this.projects
           .reposForAgent(profile.id)
@@ -2708,7 +2917,7 @@ export class Orchestrator {
   async spawnSubagent(
     parentId: string,
     goal: string,
-    opts?: { modelId?: AgentProfile["model"]["chat"] }
+    opts?: { modelId?: AgentProfile["model"]["chat"]; projectWorkspacePathOverride?: string }
   ): Promise<SpawnResult> {
     const parentCtx = this.contexts.get(parentId);
     if (!parentCtx) throw new Error(`Unknown agent: ${parentId}`);
@@ -2743,7 +2952,9 @@ export class Orchestrator {
     // Inherit the parent's secrets (scope preserved) so the subagent reaches the
     // same endpoints and cap-scoped credentials stay gated from the shell.
     this.secrets.set(subId, this.secrets.getScoped(parentId));
-    this.startAgent(subProfile);
+    this.startAgent(subProfile, {
+      projectWorkspacePathOverride: opts?.projectWorkspacePathOverride,
+    });
 
     this.control.db
       .insert(controlSchema.subagentTasks)

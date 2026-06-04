@@ -86,6 +86,43 @@ export interface AgentServices {
   startPipeline?(projectId: string, goal: string): string;
   /** A pipeline run's current state (stages, statuses, reports). */
   getPipelineRun?(runId: string): PipelineRunStatus | null;
+  /** Decompose a goal into a build-graph run created `awaiting_approval`; returns runId + tasks. */
+  planBuild?(args: { projectId: string; goal: string; tasks?: BuildTaskSpecInput[] }): {
+    runId: string;
+    tasks: BuildTaskView[];
+  };
+  /** Approve + launch a planned build run. */
+  buildStart?(runId: string): { ok: boolean; error?: string };
+  /** A build run's current state. */
+  getBuildRun?(runId: string): BuildRunStatus | null;
+}
+
+export interface BuildTaskView {
+  id: string;
+  title: string;
+  role: string;
+  deps: string[];
+  status: string;
+  attempt: number;
+  report: string;
+}
+export interface BuildRunStatus {
+  id: string;
+  projectId: string;
+  goal: string;
+  status: string;
+  parallelism: number;
+  prNumber: number | null;
+  prUrl: string | null;
+  tasks: BuildTaskView[];
+}
+export interface BuildTaskSpecInput {
+  id: string;
+  title: string;
+  role: string;
+  deps?: string[];
+  description?: string;
+  filesHint?: string[];
 }
 
 /** A pipeline run's state, surfaced to the PM via `pipeline_status`. */
