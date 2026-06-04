@@ -1,16 +1,18 @@
 import { useEffect, useState } from "react";
-import { GitBranch } from "lucide-react";
+import { GitBranch, X } from "lucide-react";
 import { useProjectsStore } from "../../stores/projects-store";
 import {
+  taskKey,
   useBuildRunsStore,
   type BuildRunStatus,
   type BuildRunSummary,
   type BuildTaskStatus,
   type BuildTaskView,
+  type BuildTranscriptMessage,
 } from "../../stores/build-runs-store";
 import { Badge } from "../ui/Badge";
 import { Icon } from "../ui/Icon";
-import { fonts } from "../../lib/typography";
+import { fonts, type } from "../../lib/typography";
 
 type Tone = "neutral" | "accent" | "success" | "warning" | "info" | "danger";
 
@@ -62,6 +64,7 @@ export function BuildRunsView() {
 
   const [projectId, setProjectId] = useState<string | null>(null);
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
 
   useEffect(() => {
     bindSocket();
@@ -82,11 +85,20 @@ export function BuildRunsView() {
 
   const selectRun = (id: string) => {
     setSelectedRunId(id);
+    setSelectedTaskId(null);
     void loadDetail(id);
   };
 
+  const selectedTask =
+    selected && selectedTaskId ? selected.tasks.find((t) => t.id === selectedTaskId) : undefined;
+
   return (
-    <div className="grid h-full min-h-0" style={{ gridTemplateColumns: "360px 1fr" }}>
+    <div
+      className="grid h-full min-h-0"
+      style={{
+        gridTemplateColumns: selectedTask ? "320px 1fr 440px" : "360px 1fr",
+      }}
+    >
       <div className="flex flex-col min-h-0 border-r border-border">
         <SectionHeader>
           <Icon icon={GitBranch} size={14} />
@@ -147,12 +159,25 @@ export function BuildRunsView() {
               style={{ gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))" }}
             >
               {sortTasks(selected.tasks).map((task) => (
-                <TaskCard key={task.id} task={task} />
+                <TaskCard
+                  key={task.id}
+                  task={task}
+                  active={task.id === selectedTaskId}
+                  onClick={() => setSelectedTaskId(task.id)}
+                />
               ))}
             </div>
           )}
         </div>
       </div>
+
+      {selectedTask && selectedRunId && (
+        <TaskDrillDown
+          runId={selectedRunId}
+          task={selectedTask}
+          onClose={() => setSelectedTaskId(null)}
+        />
+      )}
     </div>
   );
 }
@@ -210,9 +235,22 @@ function RunCard({
   );
 }
 
-function TaskCard({ task }: { task: BuildTaskView }) {
+function TaskCard({
+  task,
+  active,
+  onClick,
+}: {
+  task: BuildTaskView;
+  active: boolean;
+  onClick: () => void;
+}) {
   return (
-    <div className="rounded-md border border-border bg-surface p-3 text-body shadow-sm">
+    <button
+      onClick={onClick}
+      className={`w-full text-left rounded-md border p-3 text-body shadow-sm transition-colors ${
+        active ? "border-accent bg-surface-elevated" : "border-border bg-surface hover:bg-surface/60"
+      }`}
+    >
       <div className="flex items-start justify-between gap-2">
         <span className="font-semibold text-fg min-w-0">{task.title}</span>
         <Badge tone={TASK_TONE[task.status] ?? "neutral"}>{task.status}</Badge>
@@ -234,7 +272,160 @@ function TaskCard({ task }: { task: BuildTaskView }) {
           {truncate(task.report, 240)}
         </div>
       )}
+    </button>
+  );
+}
+
+function TaskDrillDown({
+  runId,
+  task,
+  onClose,
+}: {
+  runId: string;
+  task: BuildTaskView;
+  onClose: () => void;
+}) {
+  const diffs = useBuildRunsStore((s) => s.diffs);
+  const transcripts = useBuildRunsStore((s) => s.transcripts);
+  const loadTaskDiff = useBuildRunsStore((s) => s.loadTaskDiff);
+  const loadTaskTranscript = useBuildRunsStore((s) => s.loadTaskTranscript);
+
+  const key = taskKey(runId, task.id);
+  const diff = diffs[key];
+  const transcript = transcripts[key];
+
+  // Lazy-load diff + transcript when this task opens; cached entries are reused.
+  useEffect(() => {
+    if (diffs[key] === undefined) void loadTaskDiff(runId, task.id);
+    if (transcripts[key] === undefined) void loadTaskTranscript(runId, task.id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key]);
+
+  return (
+    <div className="flex flex-col min-h-0 border-l border-border">
+      <header className="px-4 py-2.5 border-b border-border flex items-center gap-2">
+        <span className="text-h2 min-w-0 truncate">{task.title}</span>
+        <span className="flex-1" />
+        <Badge tone={TASK_TONE[task.status] ?? "neutral"}>{task.status}</Badge>
+        <button
+          onClick={onClose}
+          aria-label="Close"
+          className="text-muted hover:text-fg"
+        >
+          <Icon icon={X} size={16} />
+        </button>
+      </header>
+
+      <div className="flex-1 overflow-y-auto p-3 flex flex-col gap-4 min-h-0">
+        <div className="flex items-center flex-wrap gap-1.5">
+          <Badge tone="info">{task.role}</Badge>
+          {task.attempt > 0 && <Badge tone="warning">attempt {task.attempt}</Badge>}
+          {task.branch && (
+            <span className="text-small text-subtle" style={{ fontFamily: fonts.mono }}>
+              {task.branch}
+            </span>
+          )}
+        </div>
+
+        <DrillSection title="Report">
+          {task.report ? (
+            <div className="text-body text-fg whitespace-pre-wrap leading-relaxed">
+              {task.report}
+            </div>
+          ) : (
+            <div className="text-body text-muted">No report yet.</div>
+          )}
+        </DrillSection>
+
+        <DrillSection title="Diff">
+          {diff === undefined ? (
+            <div className="text-body text-muted">Loading diff…</div>
+          ) : diff.trim() === "" ? (
+            <div className="text-body text-muted">No diff (task hasn&apos;t run yet).</div>
+          ) : (
+            <pre
+              className="rounded-md border border-border bg-surface-sunken p-2 overflow-auto whitespace-pre"
+              style={{ ...type.monoSm, maxHeight: 360 }}
+            >
+              {diff}
+            </pre>
+          )}
+        </DrillSection>
+
+        <DrillSection title="Transcript">
+          {transcript === undefined ? (
+            <div className="text-body text-muted">Loading transcript…</div>
+          ) : transcript.length === 0 ? (
+            <div className="text-body text-muted">No transcript captured yet.</div>
+          ) : (
+            <div className="flex flex-col gap-2">
+              {transcript.map((m, i) => (
+                <TranscriptMessage key={i} msg={m} />
+              ))}
+            </div>
+          )}
+        </DrillSection>
+      </div>
     </div>
+  );
+}
+
+function TranscriptMessage({ msg }: { msg: BuildTranscriptMessage }) {
+  const tone: Tone =
+    msg.role === "assistant"
+      ? "success"
+      : msg.role === "user"
+        ? "info"
+        : msg.role === "tool"
+          ? "warning"
+          : "neutral";
+  const tools = summarizeToolCalls(msg.toolCalls);
+  return (
+    <div className="rounded-md border border-border bg-surface p-2.5 text-body shadow-sm">
+      <Badge tone={tone}>{msg.role}</Badge>
+      {msg.content && (
+        <div
+          className="mt-1.5 text-body text-fg whitespace-pre-wrap break-words"
+          style={{ ...type.monoSm }}
+        >
+          {msg.content}
+        </div>
+      )}
+      {tools && (
+        <div
+          className="mt-1.5 text-small text-subtle whitespace-pre-wrap break-words"
+          style={{ fontFamily: fonts.mono }}
+        >
+          {tools}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Compact one-liner(s) describing tool calls, if any are present. */
+function summarizeToolCalls(toolCalls: unknown): string | null {
+  if (!toolCalls) return null;
+  const arr = Array.isArray(toolCalls) ? toolCalls : [toolCalls];
+  if (arr.length === 0) return null;
+  const parts = arr.map((c) => {
+    if (c && typeof c === "object") {
+      const obj = c as Record<string, unknown>;
+      const fn = obj.function as Record<string, unknown> | undefined;
+      const name = (fn?.name ?? obj.name ?? obj.type ?? "tool") as string;
+      return `→ ${name}`;
+    }
+    return "→ tool";
+  });
+  return parts.join("\n");
+}
+
+function DrillSection({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <section>
+      <h3 className="text-h2 mb-1.5">{title}</h3>
+      {children}
+    </section>
   );
 }
 
