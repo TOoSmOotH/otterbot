@@ -1849,6 +1849,24 @@ export class Orchestrator {
     return this.buildGraph.listForProject(projectId);
   }
 
+  /** The git diff a build task's branch introduced (vs the run base), or null. */
+  buildTaskDiff(runId: string, taskId: string): string | null {
+    const run = this.buildGraph.getRun(runId);
+    if (!run) return null;
+    const repos = this.projects.listRepos(run.projectId);
+    const repo = repos.find((r) => r.isPrimary) ?? repos[0];
+    if (!repo) return null;
+    const base = this.currentBranch(repo.repoPath);
+    const branch = `task/${runId}/${taskId}`;
+    const r = spawnSync("git", ["-C", repo.repoPath, "diff", `${base}...${branch}`], {
+      encoding: "utf8",
+      timeout: 120_000,
+      maxBuffer: 10 * 1024 * 1024,
+    });
+    if (r.status !== 0) return null;
+    return r.stdout ?? "";
+  }
+
   // --- Forge (GitHub / Gitea) ---------------------------------------------
 
   listForgeAccounts() {

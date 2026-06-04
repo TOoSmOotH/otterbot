@@ -404,6 +404,22 @@ export async function buildServer(
     return run;
   });
 
+  app.get<{ Params: { id: string } }>("/api/projects/:id/build-runs", async (req) =>
+    orch.listBuildRuns(req.params.id)
+  );
+  app.get<{ Params: { runId: string } }>("/api/build-runs/:runId", async (req, reply) => {
+    const run = orch.getBuildRunView(req.params.runId);
+    if (!run) {
+      reply.code(404);
+      return { error: "not found" };
+    }
+    return run;
+  });
+  app.get<{ Params: { runId: string; taskId: string } }>(
+    "/api/build-runs/:runId/tasks/:taskId/diff",
+    async (req) => ({ diff: orch.buildTaskDiff(req.params.runId, req.params.taskId) ?? "" })
+  );
+
   // --- Forge accounts (GitHub / Gitea) ---
   app.get("/api/forge-accounts", async () => orch.listForgeAccounts());
 
