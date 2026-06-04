@@ -156,6 +156,7 @@ function CodingSessionRow({
 }) {
   const toolLabel = CODING_TOOL_LABELS[session.tool as CodingTool] ?? session.tool;
   const interactive = session.mode === "interactive";
+  const modeLabel = interactive ? "interactive" : "autonomous";
   return (
     <div className="rounded-md border border-border bg-surface shadow-sm overflow-hidden">
       <button
@@ -172,12 +173,13 @@ function CodingSessionRow({
           {toolLabel}
         </span>
         <span className="flex-1" />
-        <Badge tone={interactive ? "success" : "info"}>{interactive ? "live" : "headless"}</Badge>
+        <Badge tone={interactive ? "success" : "info"}>{modeLabel}</Badge>
         <span className="text-small text-muted">{open ? "▾" : "▸"}</span>
       </button>
       {open && (
         <div style={{ height: 280, background: "#0b0b0f", borderTop: "1px solid rgb(var(--border))", padding: 6 }}>
-          <TerminalView agentId={session.agentId} kind="coding" interactive={interactive} />
+          {/* All coding sessions are live PTYs now — watchable and typeable. */}
+          <TerminalView agentId={session.agentId} kind="coding" interactive />
         </div>
       )}
     </div>

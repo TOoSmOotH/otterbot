@@ -724,25 +724,46 @@ export function buildAgentTools(
             secrets: runSecrets,
             projectWorkspacePath,
             gitSsh: ctx.gitSsh() ?? undefined,
-            agentId: ctx.profile.id,
           };
-          if (interactive) {
-            const started = startCodingSession({ ...common, agentId: ctx.profile.id });
-            if ("error" in started) return { ok: false, error: started.error };
-            const { exitCode, summary } = await started.session.exited;
-            return { ok: exitCode === 0, interactive: true, exitCode, summary };
+          // Run the CLI in a live PTY session (the tool's interactive/TUI
+          // invocation) so its progress streams to the user the whole time —
+          // watchable in the Activity view and, for explicit interactive runs,
+          // auto-popped as a terminal. The run still resolves with a summary
+          // when the CLI finishes. `interactive` only controls the auto-popup;
+          // autonomous runs get a timeout backstop inside startCodingSession.
+          const started = startCodingSession({
+            ...common,
+            agentId: ctx.profile.id,
+            mode: interactive ? "interactive" : "autonomous",
+          });
+          if ("error" in started) {
+            // No PTY available (e.g. missing native module) — fall back to a
+            // headless capture so the task still runs, just without live view.
+            const r = await runCodingCliHeadless(common);
+            if (r.error) return { ok: false, error: r.error };
+            if (r.transcript) recordToolDisplay(toolCallId, { transcript: r.transcript });
+            return {
+              ok: r.ok,
+              exitCode: r.exitCode,
+              summary: r.summary,
+              ...(r.timedOut ? { timedOut: true } : {}),
+              ...(r.truncated ? { truncated: true } : {}),
+            };
           }
-          const r = await runCodingCliHeadless(common);
-          if (r.error) return { ok: false, error: r.error };
-          // Stash the full terminal output for display only — the model sees
-          // just the summary so its context stays small.
-          if (r.transcript) recordToolDisplay(toolCallId, { transcript: r.transcript });
+          const { exitCode, summary, transcript, timedOut, completedByIdle } =
+            await started.session.exited;
+          // Stash the full terminal transcript for display only — the model
+          // sees just the summary so its context stays small.
+          if (transcript) recordToolDisplay(toolCallId, { transcript });
+          // An autonomous run that went idle (returned to its prompt) finished
+          // its work; a hard timeout did not. A natural exit uses its code.
+          const ok = !timedOut && (completedByIdle || exitCode === 0);
           return {
-            ok: r.ok,
-            exitCode: r.exitCode,
-            summary: r.summary,
-            ...(r.timedOut ? { timedOut: true } : {}),
-            ...(r.truncated ? { truncated: true } : {}),
+            ok,
+            ...(interactive ? { interactive: true } : {}),
+            exitCode,
+            summary,
+            ...(timedOut ? { timedOut: true } : {}),
           };
         });
       },

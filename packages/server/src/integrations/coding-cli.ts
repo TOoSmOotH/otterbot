@@ -161,6 +161,15 @@ export function summarizeOutput(buffer: string, maxChars = 6000): string {
 
 const CODING_TIMEOUT_MS = 30 * 60_000;
 const RING_BUFFER_SIZE = 100 * 1024;
+/**
+ * Autonomous runs use the tool's interactive TUI (so output streams live), which
+ * — unlike `-p` print mode — does NOT exit on its own; it returns to an idle
+ * prompt when the task is done. We treat this many ms of total silence as
+ * "finished" and gracefully terminate. Safe because every supported CLI animates
+ * a spinner (sub-second cadence) while working, so sustained silence only happens
+ * at the prompt. Overridable via OTTERBOT_CODING_IDLE_MS.
+ */
+const CODING_IDLE_DONE_MS = Number(process.env.OTTERBOT_CODING_IDLE_MS) || 30_000;
 
 export interface CodingRunOptions {
   tool: CodingTool;
@@ -171,9 +180,6 @@ export interface CodingRunOptions {
   /** Shared project tree to bind + run inside, when the agent has a project. */
   projectWorkspacePath?: string | null;
   gitSsh?: import("./shell.js").GitSshSetup;
-  /** When set, the run is registered as a live (read-only) session under this
-   *  agent so the UI can watch its output stream. */
-  agentId?: string;
 }
 
 export interface CodingRunResult {
@@ -240,42 +246,9 @@ export function runCodingCliHeadless(opts: CodingRunOptions): Promise<CodingRunR
     let timedOut = false;
     let done = false;
 
-    // When an agentId is given, expose the run as a live (read-only) session so
-    // the UI can watch its output stream. Headless tools take no stdin, so
-    // write/resize are no-ops; the model still only sees the summary on exit.
-    let ring = "";
-    const listeners = new Set<(data: string) => void>();
-    let resolveExit!: (v: { exitCode: number; summary: string }) => void;
-    const exited = new Promise<{ exitCode: number; summary: string }>((r) => (resolveExit = r));
-    let deregister: (() => void) | null = null;
-    if (opts.agentId) {
-      const session: CodingSession = {
-        agentId: opts.agentId,
-        tool: opts.tool,
-        mode: "headless",
-        startedAt: new Date().toISOString(),
-        getReplayBuffer: () => ring,
-        onData(cb) {
-          listeners.add(cb);
-          return () => listeners.delete(cb);
-        },
-        write: () => {},
-        resize: () => {},
-        kill: () => child.kill("SIGKILL"),
-        exited,
-      };
-      deregister = registerSession(session);
-    }
-
     const collect = (chunk: Buffer) => {
-      const text = chunk.toString("utf8");
-      if (buffer.length < RING_BUFFER_SIZE * 4) buffer += text;
+      if (buffer.length < RING_BUFFER_SIZE * 4) buffer += chunk.toString("utf8");
       else dropped = true;
-      if (opts.agentId) {
-        ring += text;
-        if (ring.length > RING_BUFFER_SIZE) ring = ring.slice(-RING_BUFFER_SIZE);
-        for (const cb of listeners) cb(text);
-      }
     };
     child.stdout?.on("data", collect);
     child.stderr?.on("data", collect);
@@ -289,9 +262,6 @@ export function runCodingCliHeadless(opts: CodingRunOptions): Promise<CodingRunR
       if (done) return;
       done = true;
       clearTimeout(timer);
-      deregister?.();
-      listeners.clear();
-      resolveExit({ exitCode: result.exitCode ?? 0, summary: result.summary });
       resolve(result);
     };
 
@@ -338,8 +308,16 @@ export interface CodingSession {
   write(data: string): void;
   resize(cols: number, rows: number): void;
   kill(): void;
-  /** Resolves when the process exits, with a cleaned summary of the session. */
-  exited: Promise<{ exitCode: number; summary: string }>;
+  /** Resolves when the process exits, with a cleaned summary + full transcript.
+   *  `completedByIdle` = the autonomous run went idle (returned to its prompt)
+   *  and was gracefully ended; `timedOut` = hit the hard backstop. */
+  exited: Promise<{
+    exitCode: number;
+    summary: string;
+    transcript: string;
+    timedOut: boolean;
+    completedByIdle: boolean;
+  }>;
 }
 
 const activeCodingSessions = new Map<string, CodingSession>();
@@ -401,13 +379,23 @@ export interface StartCodingSessionOptions extends CodingRunOptions {
   agentId: string;
   cols?: number;
   rows?: number;
+  /**
+   * "interactive" → the agent explicitly asked for a live session the user
+   * drives (auto-popped in the UI); "autonomous" (default) → a run-to-completion
+   * task that still streams its PTY so the user can watch/intervene, with a
+   * timeout backstop so it can't hold the per-project lock forever.
+   */
+  mode?: CodingSessionMode;
 }
 
 /**
  * Spawn a coding CLI in a PTY confined to the agent's sandbox, register it as
- * the agent's active session, and stream output to subscribers. Returns
- * `{ error }` when no sandbox is available — it never runs unconfined. Replaces
- * any session already active for the agent.
+ * the agent's active session, and stream its live output to subscribers — the
+ * same mechanism the user attaches to in the browser. The task is passed via
+ * argv (the tool's interactive/TUI invocation, NOT `-p`), so output streams as
+ * it happens and the process exits when the task completes, resolving `exited`
+ * with a summary. Returns `{ error }` when no sandbox is available — it never
+ * runs unconfined. Replaces any session already active for the agent.
  */
 export function startCodingSession(
   opts: StartCodingSessionOptions
@@ -423,13 +411,14 @@ export function startCodingSession(
   );
   if ("error" in built) return { error: built.error };
 
+  const mode: CodingSessionMode = opts.mode ?? "autonomous";
   const { plan } = built;
   let term: pty.IPty;
   try {
     term = pty.spawn(plan.file, plan.args, {
       name: "xterm-256color",
-      cols: opts.cols ?? 80,
-      rows: opts.rows ?? 24,
+      cols: opts.cols ?? 120,
+      rows: opts.rows ?? 40,
       cwd: plan.cwd,
       env: plan.env as { [key: string]: string },
     });
@@ -442,20 +431,61 @@ export function startCodingSession(
   }
 
   let ring = "";
+  let timedOut = false;
+  let completedByIdle = false;
   const listeners = new Set<(data: string) => void>();
-  let resolveExit!: (v: { exitCode: number; summary: string }) => void;
-  const exited = new Promise<{ exitCode: number; summary: string }>((r) => (resolveExit = r));
+  type ExitInfo = {
+    exitCode: number;
+    summary: string;
+    transcript: string;
+    timedOut: boolean;
+    completedByIdle: boolean;
+  };
+  let resolveExit!: (v: ExitInfo) => void;
+  const exited = new Promise<ExitInfo>((r) => (resolveExit = r));
+
+  const killTerm = () => {
+    try {
+      term.kill();
+    } catch {
+      /* already gone */
+    }
+  };
+
+  // Hard backstop for autonomous runs: never hold the per-project coding lock
+  // longer than the timeout. Interactive sessions are user-driven, not capped.
+  const hardTimer =
+    mode === "autonomous"
+      ? setTimeout(() => {
+          timedOut = true;
+          killTerm();
+        }, CODING_TIMEOUT_MS)
+      : null;
+
+  // Completion detection for autonomous runs: the TUI streams continuously while
+  // working, so sustained silence means it returned to its prompt → task done.
+  let idleTimer: NodeJS.Timeout | null = null;
+  const bumpIdle = () => {
+    if (mode !== "autonomous") return;
+    if (idleTimer) clearTimeout(idleTimer);
+    idleTimer = setTimeout(() => {
+      completedByIdle = true;
+      killTerm();
+    }, CODING_IDLE_DONE_MS);
+  };
 
   term.onData((data) => {
     ring += data;
     if (ring.length > RING_BUFFER_SIZE) ring = ring.slice(-RING_BUFFER_SIZE);
     for (const cb of listeners) cb(data);
+    bumpIdle();
   });
+  bumpIdle();
 
   const session: CodingSession = {
     agentId: opts.agentId,
     tool: opts.tool,
-    mode: "interactive",
+    mode,
     startedAt: new Date().toISOString(),
     getReplayBuffer: () => ring,
     onData(cb) {
@@ -482,9 +512,17 @@ export function startCodingSession(
 
   const deregister = registerSession(session);
   term.onExit(({ exitCode }) => {
+    if (hardTimer) clearTimeout(hardTimer);
+    if (idleTimer) clearTimeout(idleTimer);
     deregister();
     listeners.clear();
-    resolveExit({ exitCode, summary: summarizeOutput(ring) });
+    resolveExit({
+      exitCode,
+      summary: summarizeOutput(ring),
+      transcript: cleanOutput(ring),
+      timedOut,
+      completedByIdle,
+    });
   });
 
   return { session };

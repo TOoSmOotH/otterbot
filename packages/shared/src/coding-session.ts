@@ -1,6 +1,12 @@
-/** Whether a coding run streams a live TUI (interactive) or runs to completion
- *  with captured output (headless, read-only — the CLI takes no stdin). */
-export type CodingSessionMode = "headless" | "interactive";
+/**
+ * How a coding run is surfaced. Both stream a live PTY the user can watch and
+ * type into:
+ *  - "interactive" → the agent explicitly opened a session for the user to
+ *    drive; the UI auto-pops a terminal.
+ *  - "autonomous"  → a run-to-completion task; it streams to the Activity view's
+ *    live-sessions list (no auto-popup) and exits on its own when done.
+ */
+export type CodingSessionMode = "interactive" | "autonomous";
 
 /**
  * A live coding-CLI session an agent is currently running. Surfaced in the
