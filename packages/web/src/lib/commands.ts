@@ -17,6 +17,8 @@ export interface CommandContext {
   onNewAgent: () => void;
 }
 
+/** Build the flat command list. Order is agents → navigation → actions so the
+ *  most-used group surfaces first in the palette. */
 export function buildCommands(ctx: CommandContext): Command[] {
   const nav: Command[] = ctx.views.map((v) => ({
     id: `nav:${v.id}`,
@@ -57,17 +59,26 @@ export function buildCommands(ctx: CommandContext): Command[] {
   return [...agents, ...nav, ...actions];
 }
 
-/** Substring filter with prefix-first ranking. Empty query → original order. */
+/** Substring filter with prefix-first ranking. Empty query → original order;
+ *  within an equal-rank bucket, original order is preserved (stable sort). */
 export function filterCommands(commands: Command[], query: string): Command[] {
   const q = query.trim().toLowerCase();
   if (!q) return commands;
   const scored: { cmd: Command; score: number }[] = [];
   for (const cmd of commands) {
-    const hay = [cmd.title, ...cmd.keywords].map((s) => s.toLowerCase());
-    const prefix = hay.some((h) => h.startsWith(q));
-    const includes = hay.some((h) => h.includes(q));
-    if (!includes) continue;
-    scored.push({ cmd, score: prefix ? 0 : 1 });
+    let score = -1;
+    for (const field of [cmd.title, ...cmd.keywords]) {
+      const h = field.toLowerCase();
+      if (h.startsWith(q)) {
+        score = 0;
+        break;
+      }
+      if (h.includes(q)) {
+        score = 1;
+      }
+    }
+    if (score === -1) continue;
+    scored.push({ cmd, score });
   }
   return scored.sort((a, b) => a.score - b.score).map((s) => s.cmd);
 }

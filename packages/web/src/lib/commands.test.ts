@@ -34,17 +34,19 @@ describe("buildCommands", () => {
 });
 
 describe("filterCommands", () => {
-  const cmds = buildCommands(ctx());
   it("returns everything for an empty query", () => {
+    const cmds = buildCommands(ctx());
     expect(filterCommands(cmds, "")).toHaveLength(cmds.length);
   });
   it("matches on title and keywords, case-insensitively", () => {
+    const cmds = buildCommands(ctx());
     const r = filterCommands(cmds, "otto");
     expect(r[0]?.id).toBe("agent:coo");
   });
   it("ranks prefix matches above substring matches", () => {
+    const cmds = buildCommands(ctx());
     const r = filterCommands(cmds, "chat");
-    // "Chat with Otto" (prefix) ranks before "Go to Chat" (substring)
-    expect(r[0]?.title.startsWith("Chat")).toBe(true);
+    // "Chat with Otto" (prefix on title) ranks before "Go to Chat" (substring)
+    expect(r[0]?.id).toBe("agent:coo");
   });
 });
