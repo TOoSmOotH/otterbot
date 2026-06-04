@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { LayoutGroup, motion } from "motion/react";
-import { Activity, FolderGit2, MessageSquare, Network, Settings, Sliders } from "lucide-react";
+import { Activity, FolderGit2, GitBranch, MessageSquare, Network, Settings, Sliders } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { AgentRoster } from "./components/agents/AgentRoster";
 import { AgentChat } from "./components/chat/AgentChat";
@@ -9,6 +9,7 @@ import { AgentWizard } from "./components/agents/AgentWizard";
 import { AgentStudio } from "./components/agents/AgentStudio";
 import { ActivityView } from "./components/agents/ActivityView";
 import { ProjectsView } from "./components/agents/ProjectsView";
+import { BuildRunsView } from "./components/agents/BuildRunsView";
 import { TerminalModal } from "./components/agents/TerminalModal";
 import { getSocket } from "./lib/socket";
 import { NetworkView } from "./components/agents/NetworkView";
@@ -22,12 +23,13 @@ import { useChatStore } from "./stores/chat-store";
 import { useGlobalSettingsStore } from "./stores/global-settings-store";
 import { useSetupStore } from "./stores/setup-store";
 
-type MainView = "chat" | "studio" | "projects" | "activity" | "network" | "settings";
+type MainView = "chat" | "studio" | "projects" | "builds" | "activity" | "network" | "settings";
 
 const VIEWS: { id: MainView; label: string; icon: LucideIcon }[] = [
   { id: "chat", label: "Chat", icon: MessageSquare },
   { id: "studio", label: "Agent Studio", icon: Sliders },
   { id: "projects", label: "Projects", icon: FolderGit2 },
+  { id: "builds", label: "Build Runs", icon: GitBranch },
   { id: "activity", label: "Activity", icon: Activity },
   { id: "network", label: "Network", icon: Network },
   { id: "settings", label: "Settings", icon: Settings },
@@ -185,6 +187,7 @@ function AuthedApp() {
           )}
           {view === "studio" && <AgentStudio agentId={activeAgentId} onOpenSettings={openSettings} />}
           {view === "projects" && <ProjectsView onOpenSettings={openSettings} />}
+          {view === "builds" && <BuildRunsView />}
           {view === "activity" && <ActivityView />}
           {view === "network" && <NetworkView />}
           {view === "settings" && (
