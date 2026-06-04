@@ -55,4 +55,24 @@ describe("build_runs / tasks schema", () => {
     expect(task?.attempt).toBe(0);
     expect(task?.deps).toBe("[]");
   });
+
+  it("round-trips a build task transcript row", () => {
+    const now = new Date().toISOString();
+    const content = JSON.stringify([{ role: "assistant", content: "did the thing", toolCalls: null }]);
+    control.db
+      .insert(controlSchema.buildTaskTranscripts)
+      .values({ runId: "run1", taskId: "t1", attempt: 0, content, createdAt: now })
+      .run();
+
+    const row = control.db
+      .select()
+      .from(controlSchema.buildTaskTranscripts)
+      .where(eq(controlSchema.buildTaskTranscripts.taskId, "t1"))
+      .get();
+
+    expect(row?.runId).toBe("run1");
+    expect(row?.attempt).toBe(0);
+    expect(row?.content).toBe(content);
+    expect(typeof row?.id).toBe("number"); // autoincrement
+  });
 });

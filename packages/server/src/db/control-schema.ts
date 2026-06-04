@@ -440,6 +440,23 @@ export const tasks = sqliteTable("tasks", {
 });
 
 /**
+ * A captured worker transcript for one build task attempt — the full per-agent
+ * `messages` log of the coder subagent that worked the task, flushed after
+ * dispatch. Exposed read-only so the UI can inspect what a worker did. One row
+ * per (run, task, attempt).
+ */
+export const buildTaskTranscripts = sqliteTable("build_task_transcripts", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  runId: text("run_id").notNull(),
+  taskId: text("task_id").notNull(),
+  attempt: integer("attempt").notNull().default(0),
+  content: text("content").notNull(),
+  createdAt: text("created_at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+});
+
+/**
  * Per-issue triage state for a forge-backed project. One row per (project, issue):
  * the current candidate `plan` the PM posted, and `lastCommentId` — the highest
  * forge comment id already processed, so the poller only reacts to newer comments.

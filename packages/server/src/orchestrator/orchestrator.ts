@@ -1,7 +1,7 @@
 import { basename, join, resolve } from "node:path";
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync, rmSync, cpSync } from "node:fs";
 import { spawnSync } from "node:child_process";
-import { eq, desc } from "drizzle-orm";
+import { and, eq, desc } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import type {
   AgentProfile,
@@ -30,6 +30,7 @@ import {
   DEFAULT_EMBEDDING_MODEL_ID,
 } from "../profiles/profile-store.js";
 import { controlSchema, type ControlDb } from "../db/control-db.js";
+import { schema as agentSchema } from "../db/agent-db.js";
 import { buildAgentContext, type AgentContext } from "../runtime/agent-context.js";
 import { DEFAULT_CONTEXT_WINDOW } from "../runtime/context-manager.js";
 import { AgentRuntime, withAttachmentRefs } from "../runtime/agent-runtime.js";
@@ -807,6 +808,7 @@ export class Orchestrator {
         const res = await this.spawnSubagent(coderId, prompt, {
           projectWorkspacePathOverride: worktreePath,
         });
+        this.captureTaskTranscript(res.subagentId, task.runId, task.id, task.attempt);
         return res.summary;
       },
       commitWorktree: ({ worktreePath, task }) => {
@@ -861,6 +863,73 @@ export class Orchestrator {
         return res.body;
       },
     };
+  }
+
+  /**
+   * Flush a coder subagent's per-agent `messages` log to the control DB as the
+   * build task's worker transcript, and point the task row at it. Best-effort:
+   * any failure is logged and swallowed so it never breaks a build.
+   */
+  private captureTaskTranscript(
+    agentId: string,
+    runId: string,
+    taskId: string,
+    attempt: number
+  ): void {
+    try {
+      const ctx = this.contexts.get(agentId);
+      if (!ctx) return;
+      const msgs = ctx.db.select().from(agentSchema.messages).all() as Array<{
+        role: string;
+        content: string;
+        toolCalls: unknown;
+      }>;
+      const content = JSON.stringify(
+        msgs.map((m) => ({ role: m.role, content: m.content, toolCalls: m.toolCalls ?? null }))
+      );
+      this.control.db
+        .insert(controlSchema.buildTaskTranscripts)
+        .values({ runId, taskId, attempt, content, createdAt: new Date().toISOString() })
+        .run();
+      this.control.db
+        .update(controlSchema.tasks)
+        .set({ transcriptRef: `${runId}/${taskId}` })
+        .where(eq(controlSchema.tasks.id, taskId))
+        .run();
+    } catch (err) {
+      console.warn(`[build-graph] transcript capture failed for ${taskId}:`, err);
+    }
+  }
+
+  /**
+   * The captured worker transcript for a build task — the latest attempt's
+   * flushed coder `messages` log. Empty array when none was captured.
+   */
+  getBuildTaskTranscript(
+    runId: string,
+    taskId: string
+  ): Array<{ role: string; content: string; toolCalls: unknown }> {
+    const rows = this.control.db
+      .select()
+      .from(controlSchema.buildTaskTranscripts)
+      .where(
+        and(
+          eq(controlSchema.buildTaskTranscripts.runId, runId),
+          eq(controlSchema.buildTaskTranscripts.taskId, taskId)
+        )
+      )
+      .orderBy(desc(controlSchema.buildTaskTranscripts.attempt))
+      .all() as Array<{ content: string }>;
+    if (rows.length === 0) return [];
+    try {
+      return JSON.parse(rows[0].content) as Array<{
+        role: string;
+        content: string;
+        toolCalls: unknown;
+      }>;
+    } catch {
+      return [];
+    }
   }
 
   /** Default single-coder graph (reproduces the linear pipeline through the build graph). */

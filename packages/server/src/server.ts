@@ -419,6 +419,12 @@ export async function buildServer(
     "/api/build-runs/:runId/tasks/:taskId/diff",
     async (req) => ({ diff: orch.buildTaskDiff(req.params.runId, req.params.taskId) ?? "" })
   );
+  app.get<{ Params: { runId: string; taskId: string } }>(
+    "/api/build-runs/:runId/tasks/:taskId/transcript",
+    async (req) => ({
+      transcript: orch.getBuildTaskTranscript(req.params.runId, req.params.taskId),
+    })
+  );
 
   // --- Forge accounts (GitHub / Gitea) ---
   app.get("/api/forge-accounts", async () => orch.listForgeAccounts());

@@ -250,6 +250,15 @@ function ensureControlTables(sqlite: Database.Database) {
       updated_at TEXT NOT NULL
     )`,
     `CREATE INDEX IF NOT EXISTS idx_tasks_run ON tasks(run_id)`,
+    `CREATE TABLE IF NOT EXISTS build_task_transcripts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      run_id TEXT NOT NULL,
+      task_id TEXT NOT NULL,
+      attempt INTEGER NOT NULL DEFAULT 0,
+      content TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_build_task_transcripts ON build_task_transcripts(run_id, task_id)`,
     `CREATE TABLE IF NOT EXISTS issue_triage (
       id TEXT PRIMARY KEY,
       project_id TEXT NOT NULL,
