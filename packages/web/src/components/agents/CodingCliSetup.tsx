@@ -23,8 +23,10 @@ type StatusMap = Record<CodingTool, ToolStatus>;
 
 export function CodingCliSetup({
   onOpenLoginTerminal,
+  onStatusChange,
 }: {
   onOpenLoginTerminal?: (tool: CodingTool) => void;
+  onStatusChange?: (status: StatusMap) => void;
 } = {}) {
   const [status, setStatus] = useState<StatusMap | null>(null);
   const [loading, setLoading] = useState(true);
@@ -32,9 +34,16 @@ export function CodingCliSetup({
   const [checking, setChecking] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Update local status and report it up so the parent's tab "needs attention"
+  // dot stays in sync with what's shown here.
+  const applyStatus = (s: StatusMap) => {
+    setStatus(s);
+    onStatusChange?.(s);
+  };
+
   const loadStatus = async () => {
     const res = await apiFetch(`/api/coding-cli/status`);
-    if (res.ok) setStatus((await res.json()) as StatusMap);
+    if (res.ok) applyStatus((await res.json()) as StatusMap);
     setLoading(false);
   };
 
@@ -42,7 +51,7 @@ export function CodingCliSetup({
   const checkUpdates = async () => {
     setChecking(true);
     const res = await apiFetch(`/api/coding-cli/check-updates`, { method: "POST" });
-    if (res.ok) setStatus((await res.json()) as StatusMap);
+    if (res.ok) applyStatus((await res.json()) as StatusMap);
     setChecking(false);
   };
 
@@ -63,7 +72,7 @@ export function CodingCliSetup({
     const data = await res.json().catch(() => null);
     setInstalling(null);
     if (res.ok && data?.status) {
-      setStatus(data.status as StatusMap);
+      applyStatus(data.status as StatusMap);
       if (!data.ok) setError(data.error ?? `Failed to install ${tool}.`);
     } else {
       setError(data?.error ?? `Failed to install ${tool}.`);

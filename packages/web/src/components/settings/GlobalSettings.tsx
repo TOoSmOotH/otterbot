@@ -37,6 +37,11 @@ function resolveInitialTab(t?: string): SettingsTab {
   return TABS.includes(t as SettingsTab) ? (t as SettingsTab) : "Models & Providers";
 }
 
+/** Whether any coding CLI in a status map has an update available. */
+function hasCodingUpdate(status: Record<string, { updateAvailable?: boolean }>): boolean {
+  return Object.values(status).some((t) => t.updateAvailable);
+}
+
 export function GlobalSettings({
   initialTab,
   onOpenLoginTerminal,
@@ -85,7 +90,7 @@ export function GlobalSettings({
     void apiFetch("/api/coding-cli/status")
       .then((r) => (r.ok ? r.json() : null))
       .then((s) => {
-        if (s) setCodingUpdate(Object.values(s).some((t) => (t as { updateAvailable?: boolean }).updateAvailable));
+        if (s) setCodingUpdate(hasCodingUpdate(s));
       })
       .catch(() => {});
   }, []);
@@ -197,7 +202,10 @@ export function GlobalSettings({
               Install and log in to the command-line coding agents (Claude Code, Codex, Gemini
               CLI, OpenCode) once — every agent shares the same install and login.
             </p>
-            <CodingCliSetup onOpenLoginTerminal={onOpenLoginTerminal} />
+            <CodingCliSetup
+              onOpenLoginTerminal={onOpenLoginTerminal}
+              onStatusChange={(s) => setCodingUpdate(hasCodingUpdate(s))}
+            />
           </section>
         )}
         {tab === "Coding Models" && (
