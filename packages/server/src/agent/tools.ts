@@ -886,7 +886,10 @@ export function buildAgentTools(
           .describe("Explicit task graph; omit for a default single-coder graph."),
       }),
       execute: async ({ goal, projectId, tasks }) => {
-        const pid = projectId ?? services.projectIdForAgent?.(ctx.profile.id) ?? null;
+        // Prefer the agent's OWN project over a model-supplied id: a project PM
+        // sometimes mis-derives the project id from its agent id (proj-<id>-pm),
+        // which would orphan the run under a non-existent project.
+        const pid = services.projectIdForAgent?.(ctx.profile.id) ?? projectId ?? null;
         if (!pid) return { ok: false, error: "No project found for this agent; pass projectId." };
         try {
           const res = services.planBuild!({ projectId: pid, goal, tasks });

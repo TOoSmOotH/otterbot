@@ -690,6 +690,9 @@ export class Orchestrator {
         };
       },
       planBuild: ({ projectId, goal, tasks }) => {
+        if (!this.projects.get(projectId)) {
+          throw new Error(`unknown project: ${projectId}`);
+        }
         const specs: BuildTaskSpecInput[] =
           tasks && tasks.length > 0 ? tasks : this.defaultBuildGraph(projectId, goal);
         // Validate caller-supplied graphs (defaults are always valid).
