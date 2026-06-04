@@ -137,4 +137,38 @@ describe("BuildGraphManager — persistence", () => {
     const test = mgr.listTasks(runId).find((t) => t.id === "test")!;
     expect(test.attempt).toBe(2); // bumped to the cap, then exhausted
   });
+
+  it("fails the run and records the error when a task throws", async () => {
+    const mgr = new BuildGraphManager({
+      control,
+      runTask: async () => {
+        throw new Error("boom");
+      },
+    });
+    const runId = mgr.createRun("proj1", "build it");
+    mgr.seedTasks(runId, "proj1", [{ id: "code", title: "implement", role: "coder" }]);
+    mgr.start(runId);
+
+    await waitFor(() => mgr.getRun(runId)?.status !== "running");
+    expect(mgr.getRun(runId)?.status).toBe("failed");
+    const code = mgr.listTasks(runId).find((t) => t.id === "code")!;
+    expect(code.status).toBe("failed");
+    expect(code.report).toContain("boom");
+  });
+
+  it("fails gracefully on a dependency cycle instead of hanging", async () => {
+    const mgr = new BuildGraphManager({
+      control,
+      runTask: async ({ task }) => ({ report: `did ${task.id}` }),
+    });
+    const runId = mgr.createRun("proj1", "cyclic");
+    mgr.seedTasks(runId, "proj1", [
+      { id: "a", title: "A", role: "coder", deps: ["b"] },
+      { id: "b", title: "B", role: "coder", deps: ["a"] },
+    ]);
+    mgr.start(runId);
+
+    await waitFor(() => mgr.getRun(runId)?.status !== "running");
+    expect(mgr.getRun(runId)?.status).toBe("failed");
+  });
 });

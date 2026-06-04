@@ -127,7 +127,6 @@ export interface TaskSpec {
 }
 
 type TaskRow = typeof controlSchema.tasks.$inferSelect;
-type RunRow = typeof controlSchema.buildRuns.$inferSelect;
 
 export class BuildGraphManager {
   private readonly maxAttempts: number;
@@ -186,8 +185,8 @@ export class BuildGraphManager {
       .select()
       .from(controlSchema.buildRuns)
       .where(eq(controlSchema.buildRuns.id, runId))
-      .get() as RunRow | undefined;
-    return row ? (row as BuildRun) : null;
+      .get() as BuildRun | undefined;
+    return row ?? null;
   }
 
   listTasks(runId: string): BuildTask[] {
