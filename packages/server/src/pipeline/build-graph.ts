@@ -206,4 +206,114 @@ export class BuildGraphManager {
     const v = this.view(runId);
     if (v) this.deps.onUpdate(v);
   }
+
+  /** Start driving a run's graph in the background. */
+  start(runId: string): void {
+    void this.drive(runId).catch((err) => {
+      console.error(`[build-graph] run ${runId} crashed:`, err);
+      this.finishRun(runId, "failed");
+    });
+  }
+
+  private async drive(runId: string): Promise<void> {
+    // Single-worker loop: pick one ready task, run it, advance. The worker pool
+    // (run up to `parallelism` ready tasks at once) arrives in Phase 2.
+    for (;;) {
+      const run = this.getRun(runId);
+      if (!run || run.status !== "running") return; // aborted / gone
+      const tasks = this.listTasks(runId);
+
+      if (tasks.length > 0 && tasks.every((t) => t.status === "merged")) {
+        this.finishRun(runId, "done");
+        return;
+      }
+
+      const ready = readyTasks(tasks);
+      if (ready.length === 0) {
+        // Nothing runnable and not all merged → the graph is stuck.
+        this.finishRun(runId, "failed");
+        return;
+      }
+
+      const task = ready[0];
+      this.setTaskStatus(runId, task.id, "running");
+
+      const priorReports = tasks
+        .filter((t) => t.status === "merged")
+        .map((t) => ({ taskId: t.id, title: t.title, report: t.report }));
+
+      let outcome: { report: string; pass?: boolean };
+      try {
+        outcome = await this.deps.runTask({ run, task, priorReports });
+      } catch (err) {
+        this.setTaskReport(runId, task.id, err instanceof Error ? err.message : String(err));
+        this.setTaskStatus(runId, task.id, "failed");
+        this.finishRun(runId, "failed");
+        return;
+      }
+
+      const pass = outcome.pass ?? parseVerdict(outcome.report);
+      this.setTaskReport(runId, task.id, outcome.report);
+
+      if (pass) {
+        this.setTaskStatus(runId, task.id, "merged");
+        continue;
+      }
+
+      if (GATE_ROLES.has(task.role)) {
+        if (!this.handleKickback(runId, task.id)) {
+          this.finishRun(runId, "failed");
+          return;
+        }
+        continue;
+      }
+
+      // A non-gate task explicitly failed — no kickback path; fail the run.
+      this.setTaskStatus(runId, task.id, "failed");
+      this.finishRun(runId, "failed");
+      return;
+    }
+  }
+
+  // --- state mutation ------------------------------------------------------
+
+  private setTaskStatus(runId: string, taskId: string, status: TaskStatus): void {
+    this.deps.control.db
+      .update(controlSchema.tasks)
+      .set({ status, updatedAt: new Date().toISOString() })
+      .where(eq(controlSchema.tasks.id, taskId))
+      .run();
+    this.emit(runId);
+  }
+
+  private setTaskReport(runId: string, taskId: string, report: string): void {
+    this.deps.control.db
+      .update(controlSchema.tasks)
+      .set({ report, updatedAt: new Date().toISOString() })
+      .where(eq(controlSchema.tasks.id, taskId))
+      .run();
+    this.emit(runId);
+  }
+
+  private setTaskAttempt(runId: string, taskId: string, attempt: number): void {
+    this.deps.control.db
+      .update(controlSchema.tasks)
+      .set({ attempt, updatedAt: new Date().toISOString() })
+      .where(eq(controlSchema.tasks.id, taskId))
+      .run();
+    this.emit(runId);
+  }
+
+  private finishRun(runId: string, status: RunStatus): void {
+    this.deps.control.db
+      .update(controlSchema.buildRuns)
+      .set({ status, updatedAt: new Date().toISOString() })
+      .where(eq(controlSchema.buildRuns.id, runId))
+      .run();
+    this.emit(runId);
+  }
+
+  private handleKickback(_runId: string, _taskId: string): boolean {
+    return false; // replaced in Task 6
+  }
 }

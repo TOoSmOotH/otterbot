@@ -42,4 +42,26 @@ describe("BuildGraphManager — persistence", () => {
     expect(review.deps).toEqual(["code"]); // JSON parsed back to array
     expect(review.status).toBe("blocked");
   });
+
+  it("drives a linear chain in dependency order to done (degenerate pipeline)", async () => {
+    const calls: string[] = [];
+    const mgr = new BuildGraphManager({
+      control,
+      runTask: async ({ task }) => {
+        calls.push(task.id);
+        return { report: `did ${task.id}` };
+      },
+    });
+    const runId = mgr.createRun("proj1", "build it");
+    mgr.seedTasks(runId, "proj1", [
+      { id: "code", title: "implement", role: "coder" },
+      { id: "review", title: "review", role: "security-reviewer", deps: ["code"] },
+      { id: "test", title: "test", role: "tester", deps: ["review"] },
+    ]);
+    mgr.start(runId);
+
+    await waitFor(() => mgr.getRun(runId)?.status === "done");
+    expect(calls).toEqual(["code", "review", "test"]);
+    expect(mgr.listTasks(runId).every((t) => t.status === "merged")).toBe(true);
+  });
 });
