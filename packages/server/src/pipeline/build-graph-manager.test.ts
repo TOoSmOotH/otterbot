@@ -88,4 +88,33 @@ describe("BuildGraphManager — persistence", () => {
     expect(order.slice(0, 2).sort()).toEqual(["code-a", "code-b"]);
     expect(mgr.listTasks(runId).every((t) => t.status === "merged")).toBe(true);
   });
+
+  it("kicks a failed gate back to its deps, re-runs, then finishes done", async () => {
+    const order: string[] = [];
+    let reviewRuns = 0;
+    const mgr = new BuildGraphManager({
+      control,
+      runTask: async ({ task }) => {
+        order.push(task.id);
+        if (task.role === "security-reviewer") {
+          reviewRuns += 1;
+          return { report: reviewRuns === 1 ? "VERDICT: FAIL" : "VERDICT: PASS" };
+        }
+        return { report: `did ${task.id}` };
+      },
+    });
+    const runId = mgr.createRun("proj1", "build it");
+    mgr.seedTasks(runId, "proj1", [
+      { id: "code", title: "implement", role: "coder" },
+      { id: "review", title: "review", role: "security-reviewer", deps: ["code"] },
+    ]);
+    mgr.start(runId);
+
+    await waitFor(() => mgr.getRun(runId)?.status === "done");
+    // code, review(FAIL) → reset code+review → code, review(PASS)
+    expect(order).toEqual(["code", "review", "code", "review"]);
+    const review = mgr.listTasks(runId).find((t) => t.id === "review")!;
+    expect(review.attempt).toBe(1);
+    expect(mgr.listTasks(runId).every((t) => t.status === "merged")).toBe(true);
+  });
 });

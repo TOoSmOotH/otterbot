@@ -87,6 +87,20 @@ export function readyTasks(tasks: BuildTask[]): BuildTask[] {
 
 export { parseVerdict };
 
+/** All task ids reachable through `deps` from `startId` (excludes startId). */
+export function transitiveDepIds(startId: string, tasks: BuildTask[]): string[] {
+  const byId = new Map(tasks.map((t) => [t.id, t]));
+  const seen = new Set<string>();
+  const stack = [...(byId.get(startId)?.deps ?? [])];
+  while (stack.length) {
+    const id = stack.pop()!;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    for (const d of byId.get(id)?.deps ?? []) stack.push(d);
+  }
+  return [...seen];
+}
+
 export interface RunTaskArgs {
   run: BuildRun;
   task: BuildTask;
@@ -313,7 +327,21 @@ export class BuildGraphManager {
     this.emit(runId);
   }
 
-  private handleKickback(_runId: string, _taskId: string): boolean {
-    return false; // replaced in Task 6
+  /**
+   * A gate task failed: bump its attempt, and if still within budget reset the
+   * task and all its transitive dependencies to `blocked` so the work re-runs.
+   * Returns false when the attempt budget is exhausted (caller fails the run).
+   */
+  private handleKickback(runId: string, taskId: string): boolean {
+    const tasks = this.listTasks(runId);
+    const failed = tasks.find((t) => t.id === taskId);
+    if (!failed) return false;
+    const nextAttempt = failed.attempt + 1;
+    if (nextAttempt > this.maxAttempts) return false;
+
+    const reset = new Set<string>([taskId, ...transitiveDepIds(taskId, tasks)]);
+    for (const id of reset) this.setTaskStatus(runId, id, "blocked");
+    this.setTaskAttempt(runId, taskId, nextAttempt);
+    return true;
   }
 }
