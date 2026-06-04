@@ -1098,7 +1098,7 @@ export const emptyGitDraft = (): GitDraft => ({
   gitTransport: "https",
   committerName: "",
   committerEmail: "",
-  signCommits: false,
+  signCommits: true, // sign commits by default (applies on SSH transport)
   sshKeyMode: "new",
   newKeyLabel: "",
   sshKeyId: "",
