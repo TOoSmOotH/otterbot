@@ -425,6 +425,16 @@ export async function buildServer(
       transcript: orch.getBuildTaskTranscript(req.params.runId, req.params.taskId),
     })
   );
+  app.post<{ Params: { runId: string } }>("/api/build-runs/:runId/start", async (req, reply) => {
+    const res = orch.startBuildRun(req.params.runId);
+    if (!res.ok) reply.code(400);
+    return res;
+  });
+  app.post<{ Params: { runId: string } }>("/api/build-runs/:runId/abort", async (req, reply) => {
+    const res = orch.abortBuildRun(req.params.runId);
+    if (!res.ok) reply.code(400);
+    return res;
+  });
 
   // --- Forge accounts (GitHub / Gitea) ---
   app.get("/api/forge-accounts", async () => orch.listForgeAccounts());

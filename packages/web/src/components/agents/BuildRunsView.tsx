@@ -60,11 +60,26 @@ export function BuildRunsView() {
   const detail = useBuildRunsStore((s) => s.detail);
   const loadForProject = useBuildRunsStore((s) => s.loadForProject);
   const loadDetail = useBuildRunsStore((s) => s.loadDetail);
+  const startRun = useBuildRunsStore((s) => s.startRun);
+  const abortRun = useBuildRunsStore((s) => s.abortRun);
   const bindSocket = useBuildRunsStore((s) => s.bindSocket);
 
   const [projectId, setProjectId] = useState<string | null>(null);
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
+
+  const runAction = async (fn: () => Promise<{ ok: boolean; error?: string }>) => {
+    setBusy(true);
+    setActionError(null);
+    try {
+      const res = await fn();
+      if (!res.ok) setActionError(res.error ?? "Action failed");
+    } finally {
+      setBusy(false);
+    }
+  };
 
   useEffect(() => {
     bindSocket();
@@ -146,6 +161,32 @@ export function BuildRunsView() {
 
       <div className="flex flex-col min-h-0">
         <SectionHeader>Task board</SectionHeader>
+        {selected && (
+          <div className="flex items-center gap-2 px-3 py-2 border-b border-border flex-wrap">
+            <Badge tone={RUN_TONE[selected.status] ?? "neutral"}>{selected.status}</Badge>
+            {selected.status === "awaiting_approval" && (
+              <button
+                disabled={busy}
+                onClick={() => void runAction(() => startRun(selected.id))}
+                className="text-small px-2 py-1 rounded border border-success/40 text-success hover:bg-success-bg disabled:opacity-50"
+              >
+                Approve &amp; start
+              </button>
+            )}
+            {["awaiting_approval", "running", "integrating", "reviewing"].includes(
+              selected.status
+            ) && (
+              <button
+                disabled={busy}
+                onClick={() => void runAction(() => abortRun(selected.id))}
+                className="text-small px-2 py-1 rounded border border-danger/40 text-danger hover:bg-danger-bg disabled:opacity-50"
+              >
+                Abort
+              </button>
+            )}
+            {actionError && <span className="text-small text-danger">{actionError}</span>}
+          </div>
+        )}
         <div className="flex-1 overflow-y-auto p-3 min-h-0">
           {!selected && (
             <div className="text-body text-muted">Select a build run to see its tasks.</div>

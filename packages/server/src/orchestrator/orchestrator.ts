@@ -1986,6 +1986,27 @@ export class Orchestrator {
     return this.buildGraph.listForProject(projectId);
   }
 
+  /** Approve + launch a pending build run (UI/REST equivalent of the PM tool). */
+  startBuildRun(runId: string): { ok: boolean; error?: string } {
+    const run = this.buildGraph.getRun(runId);
+    if (!run) return { ok: false, error: "Unknown build run" };
+    if (run.status !== "awaiting_approval")
+      return { ok: false, error: `run is ${run.status}, not awaiting_approval` };
+    if (this.buildGraph.listTasks(runId).length === 0)
+      return { ok: false, error: "run has no tasks" };
+    this.buildGraph.launch(runId);
+    return { ok: true };
+  }
+
+  /** Abort a build run (pending or running) and clean up its integration worktree. */
+  abortBuildRun(runId: string): { ok: boolean; error?: string } {
+    const run = this.buildGraph.getRun(runId);
+    if (!run) return { ok: false, error: "Unknown build run" };
+    this.buildGraph.abort(runId);
+    this.removeIntegrationWorktree(run.projectId, runId);
+    return { ok: true };
+  }
+
   /** The git diff a build task's branch introduced (vs the run base), or null. */
   buildTaskDiff(runId: string, taskId: string): string | null {
     const run = this.buildGraph.getRun(runId);

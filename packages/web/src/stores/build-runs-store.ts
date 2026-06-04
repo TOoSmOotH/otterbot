@@ -86,6 +86,8 @@ interface BuildRunsState {
   loadDetail: (runId: string) => Promise<void>;
   loadTaskDiff: (runId: string, taskId: string) => Promise<void>;
   loadTaskTranscript: (runId: string, taskId: string) => Promise<void>;
+  startRun: (runId: string) => Promise<{ ok: boolean; error?: string }>;
+  abortRun: (runId: string) => Promise<{ ok: boolean; error?: string }>;
   bindSocket: () => void;
 }
 
@@ -124,6 +126,20 @@ export const useBuildRunsStore = create<BuildRunsState>((set, get) => ({
     set((s) => ({
       transcripts: { ...s.transcripts, [taskKey(runId, taskId)]: body.transcript },
     }));
+  },
+
+  startRun: async (runId) => {
+    const res = await apiFetch(`/api/build-runs/${runId}/start`, { method: "POST" });
+    const body = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
+    await get().loadDetail(runId);
+    return { ok: res.ok && body.ok !== false, error: body.error };
+  },
+
+  abortRun: async (runId) => {
+    const res = await apiFetch(`/api/build-runs/${runId}/abort`, { method: "POST" });
+    const body = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
+    await get().loadDetail(runId);
+    return { ok: res.ok && body.ok !== false, error: body.error };
   },
 
   bindSocket: () => {
