@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { desc, eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { controlSchema, type ControlDb } from "../db/control-db.js";
 import { parseVerdict } from "./pipeline-manager.js";
@@ -207,6 +207,16 @@ export class BuildGraphManager {
     const run = this.getRun(runId);
     if (!run) return null;
     return { ...run, tasks: this.listTasks(runId) };
+  }
+
+  /** All runs for a project, newest first. */
+  listForProject(projectId: string): BuildRun[] {
+    return this.deps.control.db
+      .select()
+      .from(controlSchema.buildRuns)
+      .where(eq(controlSchema.buildRuns.projectId, projectId))
+      .orderBy(desc(controlSchema.buildRuns.createdAt))
+      .all() as BuildRun[];
   }
 
   private toTask(r: TaskRow): BuildTask {

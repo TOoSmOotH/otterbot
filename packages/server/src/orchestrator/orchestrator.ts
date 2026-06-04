@@ -58,6 +58,8 @@ import {
 } from "../pipeline/pipeline-manager.js";
 import {
   BuildGraphManager,
+  type BuildRun,
+  type BuildRunView,
   type TaskRole,
 } from "../pipeline/build-graph.js";
 import { makeRunTask, type BuildTaskCaps } from "../pipeline/build-task-runner.js";
@@ -506,6 +508,7 @@ export class Orchestrator {
   private readonly pipeline: PipelineManager;
   private readonly buildGraph: BuildGraphManager;
   private readonly pipelineListeners = new Set<(run: PipelineRunView) => void>();
+  private readonly buildListeners = new Set<(run: BuildRunView) => void>();
   /** Run ids already published (PR opened) — guards the publish-on-done hook. */
   private readonly publishedRuns = new Set<string>();
   private readonly secrets: SecretsStore;
@@ -590,9 +593,10 @@ export class Orchestrator {
     this.buildGraph = new BuildGraphManager({
       control,
       runTask: makeRunTask(this.makeBuildTaskCaps()),
-      // onUpdate omitted: pipelineListeners is typed for PipelineRunView, not a
-      // build-run view, and we won't broaden unrelated types here.
-      // TODO(2c): publish integration branch + open PR on done
+      onUpdate: (view) => {
+        for (const listener of this.buildListeners) listener(view);
+        // TODO(2c): publish integration branch + open PR on done
+      },
     });
     this.forgeMonitor = new ForgeMonitor({
       listMonitoredProjects: () =>
@@ -1830,6 +1834,19 @@ export class Orchestrator {
   onPipelineUpdate(listener: (run: PipelineRunView) => void): () => void {
     this.pipelineListeners.add(listener);
     return () => this.pipelineListeners.delete(listener);
+  }
+
+  onBuildUpdate(listener: (run: BuildRunView) => void): () => void {
+    this.buildListeners.add(listener);
+    return () => this.buildListeners.delete(listener);
+  }
+
+  getBuildRunView(runId: string): BuildRunView | null {
+    return this.buildGraph.view(runId);
+  }
+
+  listBuildRuns(projectId: string): BuildRun[] {
+    return this.buildGraph.listForProject(projectId);
   }
 
   // --- Forge (GitHub / Gitea) ---------------------------------------------

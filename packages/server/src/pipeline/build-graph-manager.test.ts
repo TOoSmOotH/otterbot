@@ -373,4 +373,15 @@ describe("BuildGraphManager — persistence", () => {
     await waitFor(() => mgr.getRun(runId)?.status === "done");
     expect(calls).toEqual(["code"]);
   });
+
+  it("lists runs for a project, newest first", () => {
+    const mgr = new BuildGraphManager({ control, runTask: async () => ({ report: "ok" }) });
+    const a = mgr.createRun("projX", "first", { status: "awaiting_approval" });
+    const b = mgr.createRun("projX", "second", { status: "awaiting_approval" });
+    mgr.createRun("projY", "other", { status: "awaiting_approval" });
+    const runs = mgr.listForProject("projX");
+    expect(runs.length).toBe(2);
+    expect(runs.map((r) => r.id).sort()).toEqual([a, b].sort());
+    expect(mgr.listForProject("projY").length).toBe(1);
+  });
 });

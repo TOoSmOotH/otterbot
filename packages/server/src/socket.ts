@@ -93,6 +93,10 @@ export function attachSocketServer(
     io.emit("pipeline:update", run);
   });
 
+  orch.onBuildUpdate((run) => {
+    io.emit("build:update", run);
+  });
+
   io.on("connection", (socket) => {
     /** One joined conversation per agent this socket is chatting with. */
     const conversations = new Map<string, JoinedConversation>();
