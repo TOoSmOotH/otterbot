@@ -750,6 +750,7 @@ function AddIntegration({
   const forgeAccounts = useProjectsStore((s) => s.forgeAccounts);
   const loadForgeAccounts = useProjectsStore((s) => s.loadForgeAccounts);
   const addForgeAccount = useProjectsStore((s) => s.addForgeAccount);
+  const forgeError = useProjectsStore((s) => s.error);
   const generateKey = useSshKeysStore((s) => s.generate);
   useEffect(() => void loadForgeAccounts(), [loadForgeAccounts]);
 
@@ -1060,7 +1061,7 @@ function AddIntegration({
         </div>
       )}
 
-      {error && <span style={{ color: "tomato", fontSize: 12 }}>{error}</span>}
+      {(error || forgeError) && <span style={{ color: "tomato", fontSize: 12 }}>{error || forgeError}</span>}
       <div style={{ display: "flex", gap: 8, justifyContent: "space-between" }}>
         <button style={ghost} onClick={onDone}>
           Cancel
@@ -1076,7 +1077,11 @@ function AddIntegration({
               {busy ? "Saving…" : "Create integration"}
             </button>
           ) : needsGitCreate ? (
-            <button style={primary} disabled={busy || !gitDraft.token} onClick={() => void createGit()}>
+            <button
+              style={primary}
+              disabled={busy || !gitDraft.token || (gitDraft.provider === "gitea" && !gitDraft.baseUrl)}
+              onClick={() => void createGit()}
+            >
               {busy ? "Creating…" : "Create Git account"}
             </button>
           ) : (

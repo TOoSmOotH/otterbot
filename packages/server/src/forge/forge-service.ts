@@ -108,10 +108,17 @@ export class ForgeService {
     this.accounts.delete(id);
   }
 
-  /** The bot login the token authenticates as (for assigned-issue detection), or null. */
+  /**
+   * The bot login the token authenticates as (for assigned-issue detection), or
+   * null. Best-effort and time-bounded — an unreachable forge URL must not hang
+   * account creation (the account is already persisted by the time we get here).
+   */
   async detectUsername(account: ForgeAccount): Promise<string | null> {
     try {
-      return await this.forgeFor(account).currentUser();
+      return await Promise.race([
+        this.forgeFor(account).currentUser(),
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), 5000)),
+      ]);
     } catch {
       return null;
     }
