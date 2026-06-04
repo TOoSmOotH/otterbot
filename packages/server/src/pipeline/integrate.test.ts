@@ -1,0 +1,56 @@
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { mkdtempSync, rmSync, writeFileSync, existsSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { spawnSync } from "node:child_process";
+import { integrateSerially } from "./integrate.js";
+
+const git = (cwd: string, ...args: string[]): string => {
+  const r = spawnSync("git", ["-C", cwd, ...args], { encoding: "utf8" });
+  if (r.status !== 0) throw new Error(`git ${args.join(" ")} failed: ${r.stderr}`);
+  return (r.stdout ?? "").trim();
+};
+
+let dir: string;
+let repo: string;
+let base: string;
+
+beforeEach(() => {
+  dir = mkdtempSync(join(tmpdir(), "otter-int-"));
+  repo = join(dir, "repo");
+  spawnSync("git", ["init", repo], { encoding: "utf8" });
+  git(repo, "config", "user.email", "t@t");
+  git(repo, "config", "user.name", "t");
+  writeFileSync(join(repo, "base.txt"), "base\n");
+  git(repo, "add", "-A");
+  git(repo, "commit", "-m", "base");
+  base = git(repo, "branch", "--show-current");
+});
+afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+/** Create a branch off base that adds `file` with `content`, then return to base. */
+const branchAdding = (branch: string, file: string, content: string) => {
+  git(repo, "checkout", "-b", branch, base);
+  writeFileSync(join(repo, file), content);
+  git(repo, "add", "-A");
+  git(repo, "commit", "-m", `add ${file}`);
+  git(repo, "checkout", base);
+};
+
+describe("integrateSerially", () => {
+  it("merges disjoint branches onto the current branch", () => {
+    branchAdding("task/r/a", "a.txt", "A\n");
+    branchAdding("task/r/b", "b.txt", "B\n");
+    git(repo, "checkout", "-b", "integration", base);
+
+    const out = integrateSerially(repo, [
+      { taskId: "a", branch: "task/r/a" },
+      { taskId: "b", branch: "task/r/b" },
+    ]);
+
+    expect(out.map((o) => o.result)).toEqual(["merged", "merged"]);
+    expect(existsSync(join(repo, "a.txt"))).toBe(true);
+    expect(existsSync(join(repo, "b.txt"))).toBe(true);
+    expect(git(repo, "status", "--porcelain")).toBe("");
+  });
+});
