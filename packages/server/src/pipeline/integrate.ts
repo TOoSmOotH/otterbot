@@ -33,6 +33,11 @@ export function integrateSerially(
   const outcomes: MergeOutcome[] = [];
   for (const item of items) {
     const merge = git(repoPath, ["merge", "--no-ff", "-m", `integrate ${item.taskId}`, item.branch]);
+    if (!merge.ok) {
+      git(repoPath, ["merge", "--abort"]);
+      outcomes.push({ taskId: item.taskId, branch: item.branch, result: "conflict", output: merge.output });
+      continue;
+    }
     outcomes.push({ taskId: item.taskId, branch: item.branch, result: "merged", output: merge.output });
   }
   return outcomes;

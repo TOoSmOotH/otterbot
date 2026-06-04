@@ -53,4 +53,28 @@ describe("integrateSerially", () => {
     expect(existsSync(join(repo, "b.txt"))).toBe(true);
     expect(git(repo, "status", "--porcelain")).toBe("");
   });
+
+  it("aborts a conflicting merge, records it, leaves a clean tree, and continues", () => {
+    // Both branches edit base.txt differently → second merge conflicts.
+    git(repo, "checkout", "-b", "task/r/a", base);
+    writeFileSync(join(repo, "base.txt"), "A\n");
+    git(repo, "add", "-A");
+    git(repo, "commit", "-m", "a edits base");
+    git(repo, "checkout", base);
+    git(repo, "checkout", "-b", "task/r/b", base);
+    writeFileSync(join(repo, "base.txt"), "B\n");
+    git(repo, "add", "-A");
+    git(repo, "commit", "-m", "b edits base");
+    git(repo, "checkout", "-b", "integration", base);
+
+    const out = integrateSerially(repo, [
+      { taskId: "a", branch: "task/r/a" },
+      { taskId: "b", branch: "task/r/b" },
+    ]);
+
+    expect(out[0].result).toBe("merged");
+    expect(out[1].result).toBe("conflict");
+    expect(git(repo, "status", "--porcelain")).toBe("");
+    expect(readFileSync(join(repo, "base.txt"), "utf8")).toBe("A\n");
+  });
 });
