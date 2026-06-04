@@ -64,4 +64,28 @@ describe("BuildGraphManager — persistence", () => {
     expect(calls).toEqual(["code", "review", "test"]);
     expect(mgr.listTasks(runId).every((t) => t.status === "merged")).toBe(true);
   });
+
+  it("runs independent tasks then releases the fan-in task once both merged", async () => {
+    const order: string[] = [];
+    const mgr = new BuildGraphManager({
+      control,
+      runTask: async ({ task }) => {
+        order.push(task.id);
+        return { report: `did ${task.id}` };
+      },
+    });
+    const runId = mgr.createRun("proj1", "two-part feature");
+    mgr.seedTasks(runId, "proj1", [
+      { id: "code-a", title: "part A", role: "coder" },
+      { id: "code-b", title: "part B", role: "coder" },
+      { id: "integrate", title: "merge A+B", role: "integrator", deps: ["code-a", "code-b"] },
+    ]);
+    mgr.start(runId);
+
+    await waitFor(() => mgr.getRun(runId)?.status === "done");
+    // Both coders run before the integrator; integrator is last.
+    expect(order[order.length - 1]).toBe("integrate");
+    expect(order.slice(0, 2).sort()).toEqual(["code-a", "code-b"]);
+    expect(mgr.listTasks(runId).every((t) => t.status === "merged")).toBe(true);
+  });
 });
