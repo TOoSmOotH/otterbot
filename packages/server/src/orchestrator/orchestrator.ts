@@ -459,6 +459,18 @@ function buildTriagePrompt(
 }
 
 /**
+ * The builtin capability a non-chat integration needs to actually expose its
+ * token/key to the agent (those secrets are gated on the capability being on).
+ * Assigning the integration enables this so it isn't silently inert.
+ */
+function capabilityForConnectionType(type: string): string | null {
+  if (type === "github") return "gh-auth"; // Git accounts (GitHub/Gitea): token + SSH key
+  if (type === "proxmox") return "proxmox";
+  if (type === "ssh") return "ssh";
+  return null;
+}
+
+/**
  * Owns the lifecycle of every agent: builds one isolated `AgentContext` and
  * `AgentRuntime` per profile, keeps the control DB registry in sync, and
  * exposes create/update/delete. The COO is just the profile with role "coo".
@@ -2613,6 +2625,11 @@ export class Orchestrator {
       }
     }
     this.connectionStore.assign(connectionId, agentId);
+    // Enable the capability the integration needs, so the token/key it provides
+    // are actually exposed to the agent (they're gated on the capability). Without
+    // this, an assigned Git/Proxmox/SSH integration is inert.
+    const cap = capabilityForConnectionType(conn.type);
+    if (cap) this.installCapability(agentId, cap);
     this.reconcileAgentConnections(agentId);
     return { ok: true };
   }
