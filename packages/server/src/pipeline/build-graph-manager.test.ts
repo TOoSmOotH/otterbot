@@ -117,4 +117,24 @@ describe("BuildGraphManager — persistence", () => {
     expect(review.attempt).toBe(1);
     expect(mgr.listTasks(runId).every((t) => t.status === "merged")).toBe(true);
   });
+
+  it("fails the run when a gate keeps failing past the attempt budget", async () => {
+    const mgr = new BuildGraphManager({
+      control,
+      maxAttempts: 2,
+      runTask: async ({ task }) =>
+        task.role === "tester" ? { report: "VERDICT: FAIL" } : { report: `did ${task.id}` },
+    });
+    const runId = mgr.createRun("proj1", "build it");
+    mgr.seedTasks(runId, "proj1", [
+      { id: "code", title: "implement", role: "coder" },
+      { id: "test", title: "test", role: "tester", deps: ["code"] },
+    ]);
+    mgr.start(runId);
+
+    await waitFor(() => mgr.getRun(runId)?.status !== "running");
+    expect(mgr.getRun(runId)?.status).toBe("failed");
+    const test = mgr.listTasks(runId).find((t) => t.id === "test")!;
+    expect(test.attempt).toBe(2); // bumped to the cap, then exhausted
+  });
 });
