@@ -1218,6 +1218,9 @@ export class Orchestrator {
     // Backfill config schemas onto capabilities installed before the schema
     // existed, so older installs gain their Configure panel.
     ctx.skills.reconcileBuiltinConfig(BUILTIN_CAPABILITIES);
+    // Refresh builtin capability prompts from the shipped catalog so prompt
+    // improvements (e.g. PM-owns-git) reach already-installed capabilities.
+    ctx.skills.reconcileBuiltinBodies(BUILTIN_CAPABILITIES);
     // Enable the capability each assigned non-chat integration needs (Git→gh-auth,
     // proxmox, ssh) so the integration's token/key are exposed when the agent runs
     // — even if it was assigned while the agent was idle. Idempotent.

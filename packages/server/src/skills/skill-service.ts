@@ -288,6 +288,23 @@ export class SkillService {
     }
   }
 
+  /**
+   * Refresh installed builtin capabilities' body + metadata from the shipped
+   * catalog (matched by id), preserving each install's enabled state. Builtin
+   * capabilities are code-shipped prompts, so this lets prompt improvements
+   * reach existing agents on restart rather than going stale at install time.
+   * Only rewrites when the body/description actually changed.
+   */
+  reconcileBuiltinBodies(catalog: Array<{ id: string; markdown: string }>): void {
+    for (const entry of catalog) {
+      const existing = this.get(entry.id);
+      if (!existing) continue;
+      const { meta, body } = this.parseSkillFile(entry.markdown);
+      if (existing.body === body && existing.meta.description === meta.description) continue;
+      this.update(entry.id, { meta, body });
+    }
+  }
+
   private writeToDisk(id: string, raw: string): string {
     mkdirSync(this.skillsDir, { recursive: true });
     const filePath = resolve(this.skillsDir, `${id}.md`);
