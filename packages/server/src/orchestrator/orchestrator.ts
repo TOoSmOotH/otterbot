@@ -685,9 +685,21 @@ export class Orchestrator {
         };
       },
       planBuild: ({ projectId, goal, tasks }) => {
-        const runId = this.buildGraph.createRun(projectId, goal, { status: "awaiting_approval" });
         const specs: BuildTaskSpecInput[] =
           tasks && tasks.length > 0 ? tasks : this.defaultBuildGraph(projectId, goal);
+        // Validate caller-supplied graphs (defaults are always valid).
+        const ids = new Set(specs.map((s) => s.id));
+        for (const s of specs) {
+          for (const d of s.deps ?? []) {
+            if (!ids.has(d)) {
+              throw new Error(`task "${s.id}" depends on unknown task "${d}"`);
+            }
+          }
+        }
+        if (specs.some((s) => s.role === "coder") && !specs.some((s) => s.role === "integrator")) {
+          throw new Error("graph has coder tasks but no integrator to merge their branches");
+        }
+        const runId = this.buildGraph.createRun(projectId, goal, { status: "awaiting_approval" });
         this.buildGraph.seedTasks(
           runId,
           projectId,
@@ -742,6 +754,14 @@ export class Orchestrator {
     });
     const branch = (r.stdout ?? "").trim();
     return branch || "main";
+  }
+
+  /** Create or reset `branch` to `base` and check it out. */
+  private gitResetBranchTo(repoPath: string, branch: string, base: string): void {
+    spawnSync("git", ["-C", repoPath, "checkout", "-B", branch, base], {
+      encoding: "utf8",
+      timeout: 120_000,
+    });
   }
 
   /**
@@ -807,7 +827,9 @@ export class Orchestrator {
         const repo = primaryRepo(run.projectId);
         if (!repo) return [];
         const integrationBranch = `otterbot/build-${run.id.slice(0, 8)}`;
-        this.projects.ensureBranch(repo.repoPath, integrationBranch);
+        // Create/reset the integration branch off the run's base (NOT ambient HEAD
+        // of the shared checkout) so merges run on the intended history.
+        this.gitResetBranchTo(repo.repoPath, integrationBranch, baseFor(run.projectId));
         return integrateSerially(repo.repoPath, items);
       },
       runGate: async ({ task, priorReports }) => {
