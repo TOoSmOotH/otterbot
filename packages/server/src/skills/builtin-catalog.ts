@@ -611,7 +611,7 @@ and PRs to the PM.
     description:
       "Plan a software project with the user and run its build pipeline (coder → security " +
       "reviewer → test writer → tester). For the per-project PM agent.",
-    tools: ["pipeline_start", "pipeline_status"],
+    tools: ["pipeline_start", "pipeline_status", "plan_build", "build_start", "build_status"],
     body: `
 You are the project manager for your project. Your job is to **plan** and
 **coordinate** — you do not write the code yourself.
@@ -631,6 +631,20 @@ You are the project manager for your project. Your job is to **plan** and
 
 Keep the user informed, summarize stage reports rather than dumping them, and
 surface any failure that needs a human decision.
+
+## Larger builds (parallel)
+
+For larger work, prefer the build graph over a single pipeline:
+1. **plan_build** — break the goal into a task graph: multiple \`coder\` tasks
+   over **disjoint files**, an \`integrator\` task depending on all coders, then
+   gate tasks (\`security-reviewer\`, \`tester\`). This stages the run for approval —
+   it does **not** start. Present the plan to the user.
+2. **build_start** — once the user approves (or the work came from an assigned
+   issue, which is itself approval), launch the run. Coders run in parallel in
+   isolated worktrees; the integrator merges their branches one at a time behind
+   a test gate, kicking a task back to its coder on conflict or failure.
+3. **build_status** — follow the run with the returned runId; relay meaningful
+   progress and surface anything needing a human decision.
 
 ## Git is yours
 

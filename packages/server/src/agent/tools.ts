@@ -856,6 +856,75 @@ export function buildAgentTools(
     });
   }
 
+  if (granted.has("plan_build") && services?.planBuild) {
+    tools.plan_build = tool({
+      description:
+        "Plan a build as a task graph and stage it for approval (it is NOT started yet). " +
+        "Provide `tasks` to parallelize: multiple `coder` tasks (touching disjoint files), " +
+        "an `integrator` task depending on all coders, then optional gate tasks " +
+        "(`security-reviewer`, `tester`) depending on the integrator. Omit `tasks` for a " +
+        "default single-coder graph. Returns a runId + the seeded tasks. Present the plan to " +
+        "the user; once they approve, call build_start. (For an assigned issue, the assignment " +
+        "is the approval — call build_start yourself.)",
+      parameters: z.object({
+        goal: z.string().min(1).describe("What the build should achieve."),
+        projectId: z.string().optional().describe("Project to build in. Defaults to your project."),
+        tasks: z
+          .array(
+            z.object({
+              id: z.string().min(1).describe("Stable task id, unique within the run."),
+              title: z.string().min(1),
+              role: z
+                .string()
+                .describe("coder | integrator | security-reviewer | test-writer | tester"),
+              deps: z.array(z.string()).optional().describe("Ids of tasks this depends on."),
+              description: z.string().optional(),
+              filesHint: z.array(z.string()).optional(),
+            })
+          )
+          .optional()
+          .describe("Explicit task graph; omit for a default single-coder graph."),
+      }),
+      execute: async ({ goal, projectId, tasks }) => {
+        const pid = projectId ?? services.projectIdForAgent?.(ctx.profile.id) ?? null;
+        if (!pid) return { ok: false, error: "No project found for this agent; pass projectId." };
+        try {
+          const res = services.planBuild!({ projectId: pid, goal, tasks });
+          return { ok: true, runId: res.runId, projectId: pid, tasks: res.tasks };
+        } catch (err) {
+          return { ok: false, error: err instanceof Error ? err.message : String(err) };
+        }
+      },
+    });
+  }
+
+  if (granted.has("build_start") && services?.buildStart) {
+    tools.build_start = tool({
+      description:
+        "Approve and launch a build run previously created with plan_build. The task graph " +
+        "runs in the background: coders work in parallel (isolated git worktrees), the " +
+        "integrator merges their branches serially behind a test gate, kicking a task back " +
+        "to its coder on conflict or failure. Use build_status to follow progress.",
+      parameters: z.object({ runId: z.string().min(1) }),
+      execute: async ({ runId }) => {
+        const res = services.buildStart!(runId);
+        return res.ok ? { ok: true, runId } : { ok: false, error: res.error };
+      },
+    });
+  }
+
+  if (granted.has("build_status") && services?.getBuildRun) {
+    tools.build_status = tool({
+      description: "Get a build run's current state: each task's role, deps, status, and report.",
+      parameters: z.object({ runId: z.string().min(1) }),
+      execute: async ({ runId }) => {
+        const run = services.getBuildRun!(runId);
+        if (!run) return { ok: false, error: "Unknown build run." };
+        return { ok: true, run };
+      },
+    });
+  }
+
   // Web search — granted by `profile.canWebSearch` or a capability.
   if (canUse("web_search", ctx.profile.canWebSearch)) {
     tools.web_search = tool({

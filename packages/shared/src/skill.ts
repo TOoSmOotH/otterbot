@@ -118,6 +118,11 @@ export const GRANTABLE_TOOL_NAMES = [
   // Build-pipeline control — granted by the `project-management` capability.
   "pipeline_start",
   "pipeline_status",
+  // Build-graph control (parallel task graph) — granted by the
+  // `project-management` capability.
+  "plan_build",
+  "build_start",
+  "build_status",
 ] as const;
 
 export type GrantableToolName = (typeof GRANTABLE_TOOL_NAMES)[number];

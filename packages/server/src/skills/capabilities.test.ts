@@ -306,6 +306,68 @@ describe("capabilities", () => {
     expect(ctx.skills.get("proxmox")?.meta.configSchema).toEqual(schema);
   });
 
+  it("plan_build/build_start/build_status tools are present when granted + services wired", async () => {
+    ctx.skills.create({
+      meta: {
+        name: "PM cap",
+        description: "",
+        version: "1.0.0",
+        author: "t",
+        tools: ["plan_build", "build_start", "build_status"],
+        capabilities: [],
+        parameters: {},
+        tags: [],
+      },
+      body: "x",
+    });
+
+    const fakePlanResult = { runId: "run-1", tasks: [] };
+    const services = {
+      bus: {} as any,
+      listAgents: () => [],
+      spawnSubagent: async () => ({ subagentId: "s", taskId: "t", summary: "s" }),
+      scheduleTask: () => null,
+      listScheduledTasks: () => [],
+      cancelScheduledTask: () => false,
+      searchPeerMemory: async () => [],
+      readArtifact: () => ({ ok: false }),
+      readArtifactBinary: () => null,
+      projectIdForAgent: (_id: string) => "proj-1",
+      planBuild: (_args: any) => fakePlanResult,
+      buildStart: (runId: string) =>
+        runId === "run-1" ? { ok: true } : { ok: false, error: "unknown run" },
+      getBuildRun: (runId: string) =>
+        runId === "run-1"
+          ? { id: "run-1", projectId: "proj-1", goal: "g", status: "pending", parallelism: 1, prNumber: null, prUrl: null, tasks: [] }
+          : null,
+    };
+
+    const tools = buildAgentTools(ctx, services as any);
+    expect(tools.plan_build, "plan_build should be granted").toBeDefined();
+    expect(tools.build_start, "build_start should be granted").toBeDefined();
+    expect(tools.build_status, "build_status should be granted").toBeDefined();
+
+    // plan_build — happy path
+    const planResult = await (tools.plan_build as any).execute({ goal: "build X" });
+    expect(planResult).toEqual({ ok: true, runId: "run-1", projectId: "proj-1", tasks: [] });
+
+    // build_start — happy path
+    const startResult = await (tools.build_start as any).execute({ runId: "run-1" });
+    expect(startResult).toEqual({ ok: true, runId: "run-1" });
+
+    // build_start — error path
+    const startErr = await (tools.build_start as any).execute({ runId: "no-such-run" });
+    expect(startErr).toMatchObject({ ok: false });
+
+    // build_status — happy path
+    const statusResult = await (tools.build_status as any).execute({ runId: "run-1" });
+    expect(statusResult.ok).toBe(true);
+
+    // build_status — unknown run
+    const statusErr = await (tools.build_status as any).execute({ runId: "nope" });
+    expect(statusErr).toMatchObject({ ok: false, error: "Unknown build run." });
+  });
+
   it("injects a skill's configured (non-secret) settings into its prompt block", async () => {
     const cap = ctx.skills.create({
       meta: {
