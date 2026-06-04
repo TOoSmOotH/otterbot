@@ -351,4 +351,26 @@ describe("BuildGraphManager — persistence", () => {
     expect(mgr.getRun(runId)?.status).toBe("done");
     expect(peakById.get("X")).toBe(1); // X must never run concurrently with itself
   });
+
+  it("creates a run awaiting_approval that does not run until launched", async () => {
+    const calls: string[] = [];
+    const mgr = new BuildGraphManager({
+      control,
+      runTask: async ({ task }) => {
+        calls.push(task.id);
+        return { report: `did ${task.id}` };
+      },
+    });
+    const runId = mgr.createRun("proj1", "gated", { status: "awaiting_approval" });
+    mgr.seedTasks(runId, "proj1", [{ id: "code", title: "implement", role: "coder" }]);
+
+    // Give the loop a chance: it must NOT run while awaiting approval.
+    await new Promise((r) => setTimeout(r, 30));
+    expect(mgr.getRun(runId)?.status).toBe("awaiting_approval");
+    expect(calls).toEqual([]);
+
+    mgr.launch(runId);
+    await waitFor(() => mgr.getRun(runId)?.status === "done");
+    expect(calls).toEqual(["code"]);
+  });
 });

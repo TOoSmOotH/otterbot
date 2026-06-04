@@ -134,8 +134,13 @@ export class BuildGraphManager {
     this.maxAttempts = deps.maxAttempts ?? DEFAULT_MAX_ATTEMPTS;
   }
 
-  /** Create a run in the `running` state, ready to be seeded and started. */
-  createRun(projectId: string, goal: string, opts: { parallelism?: number } = {}): string {
+  /** Create a run, ready to be seeded and started. Defaults to `running`; pass
+   *  `status: "awaiting_approval"` to hold it until `launch()` is called. */
+  createRun(
+    projectId: string,
+    goal: string,
+    opts: { parallelism?: number; status?: RunStatus } = {}
+  ): string {
     const id = nanoid();
     const now = new Date().toISOString();
     this.deps.control.db
@@ -144,7 +149,7 @@ export class BuildGraphManager {
         id,
         projectId,
         goal,
-        status: "running",
+        status: opts.status ?? "running",
         parallelism: opts.parallelism ?? 3,
         createdAt: now,
         updatedAt: now,
@@ -226,6 +231,17 @@ export class BuildGraphManager {
       console.error(`[build-graph] run ${runId} crashed:`, err);
       this.finishRun(runId, "failed");
     });
+  }
+
+  /** Approve a run that was created `awaiting_approval`: mark it running + drive. */
+  launch(runId: string): void {
+    this.deps.control.db
+      .update(controlSchema.buildRuns)
+      .set({ status: "running", updatedAt: new Date().toISOString() })
+      .where(eq(controlSchema.buildRuns.id, runId))
+      .run();
+    this.emit(runId);
+    this.start(runId);
   }
 
   private async drive(runId: string): Promise<void> {
