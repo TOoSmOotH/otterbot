@@ -38,7 +38,7 @@ export interface BuildTaskCaps {
  */
 export function makeRunTask(
   caps: BuildTaskCaps
-): (args: RunTaskArgs) => Promise<{ report: string; pass?: boolean }> {
+): (args: RunTaskArgs) => Promise<{ report: string; pass?: boolean; kickback?: string[] }> {
   return async ({ run, task, priorReports }) => {
     if (task.role === "coder") {
       const wt = caps.addWorktree(run, task, caps.baseBranch(run));
@@ -63,12 +63,14 @@ export function makeRunTask(
     if (task.role === "integrator") {
       const items = caps.coderBranches(run);
       const outcomes = caps.integrate({ run, items });
-      const pass = outcomes.every((o) => o.result === "merged");
+      const failed = outcomes.filter((o) => o.result !== "merged");
+      const pass = failed.length === 0;
       const report =
         outcomes
           .map((o) => `${o.taskId}: ${o.result}${o.result === "merged" ? "" : ` — ${o.output}`}`)
           .join("\n") || "(no coder branches to integrate)";
-      return { report, pass };
+      // On failure, re-run only the offending coder task(s), not every coder.
+      return { report, pass, kickback: failed.map((o) => o.taskId) };
     }
 
     // Gate roles (security-reviewer, tester) and other roles (test-writer): run

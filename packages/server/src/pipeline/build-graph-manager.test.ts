@@ -44,6 +44,41 @@ describe("BuildGraphManager — persistence", () => {
     expect(mgr.listTasks(b)[0].status).toBe("blocked");
   });
 
+  it("kicks back only the tasks named in the outcome's kickback list", async () => {
+    let aRuns = 0;
+    let bRuns = 0;
+    let intRuns = 0;
+    const mgr = new BuildGraphManager({
+      control,
+      runTask: async ({ task }) => {
+        if (task.id === "a") {
+          aRuns += 1;
+          return { report: "a" };
+        }
+        if (task.id === "b") {
+          bRuns += 1;
+          return { report: "b" };
+        }
+        intRuns += 1; // integrator: fail once, naming ONLY b for re-run
+        return intRuns === 1
+          ? { report: "conflict on b", pass: false, kickback: ["b"] }
+          : { report: "ok" };
+      },
+    });
+    const runId = mgr.createRun("p", "g");
+    mgr.seedTasks(runId, "p", [
+      { id: "a", title: "A", role: "coder" },
+      { id: "b", title: "B", role: "coder" },
+      { id: "int", title: "I", role: "integrator", deps: ["a", "b"] },
+    ]);
+    mgr.start(runId);
+
+    await waitFor(() => mgr.getRun(runId)?.status === "done");
+    expect(aRuns).toBe(1); // a was merged and NOT named — not re-run
+    expect(bRuns).toBe(2); // b named in kickback — re-run once
+    expect(intRuns).toBe(2); // integrator re-ran after b
+  });
+
   it("creates a run and seeds tasks, parsing deps back to arrays", () => {
     const mgr = new BuildGraphManager({ control, runTask: async () => ({ report: "ok" }) });
     const runId = mgr.createRun("proj1", "build it");

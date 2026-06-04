@@ -600,6 +600,9 @@ export class Orchestrator {
       onUpdate: (view) => {
         for (const listener of this.buildListeners) listener(view);
         // TODO(2c): publish integration branch + open PR on done
+        if (view.status === "done" || view.status === "failed" || view.status === "aborted") {
+          this.removeIntegrationWorktree(view.projectId, view.id);
+        }
       },
     });
     this.forgeMonitor = new ForgeMonitor({
@@ -796,14 +799,6 @@ export class Orchestrator {
     return this.currentBranch(repoPath);
   }
 
-  /** Create or reset `branch` to `base` and check it out. */
-  private gitResetBranchTo(repoPath: string, branch: string, base: string): void {
-    spawnSync("git", ["-C", repoPath, "checkout", "-B", branch, base], {
-      encoding: "utf8",
-      timeout: 120_000,
-    });
-  }
-
   /**
    * The live adapters the build-graph task runner needs: per-task git worktrees
    * over the project's primary repo, coder dispatch into a worktree-bound
@@ -824,6 +819,11 @@ export class Orchestrator {
     const baseFor = (projectId: string): string => {
       const repo = primaryRepo(projectId);
       return repo ? this.currentBranch(repo.repoPath) : "main";
+    };
+    const integrationWorktree = (projectId: string, runId: string): string | null => {
+      const project = this.projects.get(projectId);
+      if (!project) return null;
+      return join(project.workspacePath, ".worktrees", `__integration__${runId.slice(0, 8)}`);
     };
     return {
       baseBranch: (run) => baseFor(run.projectId),
@@ -872,38 +872,62 @@ export class Orchestrator {
           .map((t) => ({ taskId: t.id, branch: `task/${run.id}/${t.id}` })),
       integrate: ({ run, items }) => {
         const repo = primaryRepo(run.projectId);
-        if (!repo) return [];
+        const wtPath = integrationWorktree(run.projectId, run.id);
+        if (!repo || !wtPath) return [];
         const integrationBranch = `otterbot/build-${run.id.slice(0, 8)}`;
-        // Create/reset the integration branch off the run's base (NOT ambient HEAD
-        // of the shared checkout) so merges run on the intended history.
-        this.gitResetBranchTo(repo.repoPath, integrationBranch, baseFor(run.projectId));
-        return integrateSerially(repo.repoPath, items);
+        // Integrate in a dedicated ISOLATED worktree off the run's base — never the
+        // shared /project checkout — so merges are immune to any WIP/dirty state
+        // there, and the gates can test exactly the integrated result.
+        spawnSync("git", ["-C", repo.repoPath, "worktree", "remove", "--force", wtPath], {
+          encoding: "utf8",
+        });
+        const add = spawnSync(
+          "git",
+          ["-C", repo.repoPath, "worktree", "add", "-B", integrationBranch, wtPath, baseFor(run.projectId)],
+          { encoding: "utf8", timeout: 120_000 }
+        );
+        if (add.status !== 0) {
+          const out = `${add.stdout ?? ""}${add.stderr ?? ""}`.trim();
+          return items.map((it) => ({
+            taskId: it.taskId,
+            branch: it.branch,
+            result: "error" as const,
+            output: `integration worktree add failed: ${out}`,
+          }));
+        }
+        return integrateSerially(wtPath, items);
       },
       runGate: async ({ task, priorReports }) => {
         const agentId = this.projects.agentForRole(task.projectId, task.role);
         if (!agentId) return "VERDICT: PASS"; // role not provisioned → treat as pass
-        const fromId = this.projects.agentForRole(task.projectId, "pm") ?? "coo";
-        const res = await this.bus.request(
-          {
-            id: nanoid(),
-            kind: "request",
-            from: fromId,
-            to: agentId,
-            threadId: nanoid(),
-            correlationId: null,
-            rootSpawnId: null,
-            body: buildStagePrompt(
-              task.role,
-              task.title,
-              priorReports.map((r) => ({ stage: r.title, report: r.report }))
-            ),
-            transport: "local",
-          },
-          STAGE_TIMEOUT_MS
+        const wtPath = integrationWorktree(task.projectId, task.runId);
+        const prompt = buildStagePrompt(
+          task.role,
+          task.title,
+          priorReports.map((r) => ({ stage: r.title, report: r.report }))
         );
-        return res.body;
+        // Run the gate in the isolated integration worktree (the merged result),
+        // so it reviews/tests exactly what was integrated — not the shared tree.
+        const res = await this.spawnSubagent(agentId, prompt, {
+          projectWorkspacePathOverride: wtPath ?? undefined,
+          maxSteps: BUILD_CODER_MAX_STEPS,
+        });
+        await this.deleteAgent(res.subagentId);
+        return res.summary;
       },
     };
+  }
+
+  /** Remove a run's integration worktree (best-effort) once it's finished. */
+  private removeIntegrationWorktree(projectId: string, runId: string): void {
+    const repos = this.projects.listRepos(projectId);
+    const repo = repos.find((r) => r.isPrimary) ?? repos[0];
+    const project = this.projects.get(projectId);
+    if (!repo || !project) return;
+    const wtPath = join(project.workspacePath, ".worktrees", `__integration__${runId.slice(0, 8)}`);
+    spawnSync("git", ["-C", repo.repoPath, "worktree", "remove", "--force", wtPath], {
+      encoding: "utf8",
+    });
   }
 
   /**

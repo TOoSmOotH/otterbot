@@ -128,6 +128,8 @@ describe("makeRunTask", () => {
     expect(out.pass).toBe(false);
     expect(out.report).toContain("b: conflict");
     expect(out.report).toContain("CONFLICT base.txt");
+    // Only the conflicting coder is named for re-run — not the cleanly-merged one.
+    expect(out.kickback).toEqual(["b"]);
   });
 
   it("gate role with no VERDICT fails (no default pass)", async () => {

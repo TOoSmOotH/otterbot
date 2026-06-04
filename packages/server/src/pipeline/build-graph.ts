@@ -110,7 +110,9 @@ export interface RunTaskArgs {
 export interface BuildGraphDeps {
   control: ControlDb;
   /** Execute one task; returns its report (+ optional explicit pass verdict). */
-  runTask: (args: RunTaskArgs) => Promise<{ report: string; pass?: boolean }>;
+  runTask: (
+    args: RunTaskArgs
+  ) => Promise<{ report: string; pass?: boolean; kickback?: string[] }>;
   /** Notified after each state change (sockets/UI). Optional. */
   onUpdate?: (view: BuildRunView) => void;
   /** Kickback bound; defaults to DEFAULT_MAX_ATTEMPTS. */
@@ -280,7 +282,7 @@ export class BuildGraphManager {
     type Settled = {
       taskId: string;
       role: TaskRole;
-      outcome: { report: string; pass?: boolean } | null;
+      outcome: { report: string; pass?: boolean; kickback?: string[] } | null;
       error: Error | null;
     };
     const inFlight = new Map<string, Promise<Settled>>();
@@ -353,8 +355,10 @@ export class BuildGraphManager {
 
       // Any failure — thrown error, explicit pass:false, or a gate VERDICT: FAIL —
       // kicks the task back (reset + bounded retry). The run fails only when the
-      // task's retry budget (maxAttempts) is exhausted.
-      if (!this.handleKickback(runId, settled.taskId)) {
+      // task's retry budget (maxAttempts) is exhausted. An explicit `kickback`
+      // list (e.g. the integrator naming only the coders whose merge failed)
+      // resets just those tasks instead of every transitive dependency.
+      if (!this.handleKickback(runId, settled.taskId, settled.outcome?.kickback)) {
         this.setTaskStatus(runId, settled.taskId, "failed");
         this.finishRun(runId, "failed");
         return;
@@ -406,14 +410,17 @@ export class BuildGraphManager {
    * task and all its transitive dependencies to `blocked` so the work re-runs.
    * Returns false when the attempt budget is exhausted (caller fails the run).
    */
-  private handleKickback(runId: string, taskId: string): boolean {
+  private handleKickback(runId: string, taskId: string, targets?: string[]): boolean {
     const tasks = this.listTasks(runId);
     const failed = tasks.find((t) => t.id === taskId);
     if (!failed) return false;
     const nextAttempt = failed.attempt + 1;
     if (nextAttempt > this.maxAttempts) return false;
 
-    const reset = new Set<string>([taskId, ...transitiveDepIds(taskId, tasks)]);
+    // Reset the failed task plus either the explicitly-named targets (e.g. only
+    // the coders whose merge conflicted) or, by default, all its dependencies.
+    const upstream = targets && targets.length ? targets : transitiveDepIds(taskId, tasks);
+    const reset = new Set<string>([taskId, ...upstream]);
     for (const id of reset) this.setTaskStatus(runId, id, "blocked");
     this.setTaskAttempt(runId, taskId, nextAttempt);
     return true;
