@@ -818,7 +818,10 @@ export class Orchestrator {
     };
     const baseFor = (projectId: string): string => {
       const repo = primaryRepo(projectId);
-      return repo ? this.currentBranch(repo.repoPath) : "main";
+      // The project's default branch (main/master), NOT the shared checkout's
+      // current branch — that can drift to a leftover integration branch and
+      // isn't what new task branches should fork from.
+      return repo ? this.repoBaseBranch(repo.repoPath) : "main";
     };
     const integrationWorktree = (projectId: string, runId: string): string | null => {
       const project = this.projects.get(projectId);
