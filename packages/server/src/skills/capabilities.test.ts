@@ -336,9 +336,10 @@ describe("capabilities", () => {
       planBuild: (_args: any) => fakePlanResult,
       buildStart: (runId: string) =>
         runId === "run-1" ? { ok: true } : { ok: false, error: "unknown run" },
+      latestPendingBuild: (pid: string) => (pid === "proj-1" ? "run-1" : null),
       getBuildRun: (runId: string) =>
         runId === "run-1"
-          ? { id: "run-1", projectId: "proj-1", goal: "g", status: "pending", parallelism: 1, prNumber: null, prUrl: null, tasks: [] }
+          ? { id: "run-1", projectId: "proj-1", goal: "g", status: "awaiting_approval", parallelism: 1, prNumber: null, prUrl: null, tasks: [{ id: "t1" }] }
           : null,
     };
 
@@ -351,13 +352,14 @@ describe("capabilities", () => {
     const planResult = await (tools.plan_build as any).execute({ goal: "build X" });
     expect(planResult).toEqual({ ok: true, runId: "run-1", projectId: "proj-1", tasks: [] });
 
-    // build_start — happy path
+    // build_start — happy path (valid pending run for this project)
     const startResult = await (tools.build_start as any).execute({ runId: "run-1" });
     expect(startResult).toEqual({ ok: true, runId: "run-1" });
 
-    // build_start — error path
-    const startErr = await (tools.build_start as any).execute({ runId: "no-such-run" });
-    expect(startErr).toMatchObject({ ok: false });
+    // build_start — a stale/unknown runId falls back to the project's current
+    // pending run (robust against the model passing an old id from memory).
+    const startStale = await (tools.build_start as any).execute({ runId: "no-such-run" });
+    expect(startStale).toEqual({ ok: true, runId: "run-1" });
 
     // build_status — happy path
     const statusResult = await (tools.build_status as any).execute({ runId: "run-1" });

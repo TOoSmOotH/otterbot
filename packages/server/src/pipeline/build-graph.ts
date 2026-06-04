@@ -254,6 +254,24 @@ export class BuildGraphManager {
     this.start(runId);
   }
 
+  /** Mark a run aborted — e.g. an older pending run superseded by a newer plan. */
+  abort(runId: string): void {
+    this.deps.control.db
+      .update(controlSchema.buildRuns)
+      .set({ status: "aborted", updatedAt: new Date().toISOString() })
+      .where(eq(controlSchema.buildRuns.id, runId))
+      .run();
+    this.emit(runId);
+  }
+
+  /** Newest run still awaiting approval for a project (with tasks), or null. */
+  latestPending(projectId: string): string | null {
+    for (const r of this.listForProject(projectId)) {
+      if (r.status === "awaiting_approval" && this.listTasks(r.id).length > 0) return r.id;
+    }
+    return null;
+  }
+
   private async drive(runId: string): Promise<void> {
     // Worker pool: dispatch up to `run.parallelism` dependency-ready tasks at
     // once, then await the next completion. A run only fails as "stuck" when

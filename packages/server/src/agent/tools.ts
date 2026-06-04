@@ -908,10 +908,34 @@ export function buildAgentTools(
         "runs in the background: coders work in parallel (isolated git worktrees), the " +
         "integrator merges their branches serially behind a test gate, kicking a task back " +
         "to its coder on conflict or failure. Use build_status to follow progress.",
-      parameters: z.object({ runId: z.string().min(1) }),
+      parameters: z.object({
+        runId: z
+          .string()
+          .optional()
+          .describe("Run to start. Defaults to your project's current pending run."),
+      }),
       execute: async ({ runId }) => {
-        const res = services.buildStart!(runId);
-        return res.ok ? { ok: true, runId } : { ok: false, error: res.error };
+        const pid = services.projectIdForAgent?.(ctx.profile.id) ?? null;
+        // Only start a run that actually belongs to THIS project and is pending —
+        // models sometimes pass a stale runId pulled from earlier context. If the
+        // supplied id isn't a valid pending run here, fall back to the project's
+        // current pending run (plan_build keeps that unambiguous by superseding
+        // older pending plans).
+        let target = runId ?? null;
+        if (pid) {
+          const supplied = runId ? services.getBuildRun?.(runId) : null;
+          const valid =
+            supplied &&
+            supplied.projectId === pid &&
+            supplied.status === "awaiting_approval" &&
+            supplied.tasks.length > 0;
+          if (!valid) target = services.latestPendingBuild?.(pid) ?? null;
+        }
+        if (!target) {
+          return { ok: false, error: "No build run awaiting approval for this project. Stage one with plan_build first." };
+        }
+        const res = services.buildStart!(target);
+        return res.ok ? { ok: true, runId: target } : { ok: false, error: res.error };
       },
     });
   }

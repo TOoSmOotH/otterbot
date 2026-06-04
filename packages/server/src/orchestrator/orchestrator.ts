@@ -696,6 +696,11 @@ export class Orchestrator {
         if (!this.projects.get(projectId)) {
           throw new Error(`unknown project: ${projectId}`);
         }
+        // Supersede any earlier still-pending plan for this project, so there's
+        // exactly one run awaiting approval and "start it" is unambiguous.
+        for (const r of this.buildGraph.listForProject(projectId)) {
+          if (r.status === "awaiting_approval") this.buildGraph.abort(r.id);
+        }
         const specs: BuildTaskSpecInput[] =
           tasks && tasks.length > 0 ? tasks : this.defaultBuildGraph(projectId, goal);
         // Validate caller-supplied graphs (defaults are always valid).
@@ -730,9 +735,12 @@ export class Orchestrator {
         if (!run) return { ok: false, error: "Unknown build run" };
         if (run.status !== "awaiting_approval")
           return { ok: false, error: `run is ${run.status}, not awaiting_approval` };
+        if (this.buildGraph.listTasks(runId).length === 0)
+          return { ok: false, error: "run has no tasks — re-plan with plan_build" };
         this.buildGraph.launch(runId);
         return { ok: true };
       },
+      latestPendingBuild: (projectId) => this.buildGraph.latestPending(projectId),
       getBuildRun: (runId) => {
         const v = this.buildGraph.view(runId);
         if (!v) return null;

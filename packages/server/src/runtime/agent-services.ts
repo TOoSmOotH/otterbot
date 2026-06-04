@@ -93,6 +93,8 @@ export interface AgentServices {
   };
   /** Approve + launch a planned build run. */
   buildStart?(runId: string): { ok: boolean; error?: string };
+  /** The newest run still awaiting approval for a project (with tasks), or null. */
+  latestPendingBuild?(projectId: string): string | null;
   /** A build run's current state. */
   getBuildRun?(runId: string): BuildRunStatus | null;
 }
