@@ -266,6 +266,51 @@ describe("BuildGraphManager — persistence", () => {
     expect(order).toEqual(["slow", "after"]);
   });
 
+  it("retries a coder task that returns pass:false, then completes", async () => {
+    let coderRuns = 0;
+    const mgr = new BuildGraphManager({
+      control,
+      runTask: async ({ task }) => {
+        if (task.id === "code") {
+          coderRuns += 1;
+          return { report: `attempt ${coderRuns}`, pass: coderRuns > 1 }; // fail first, pass second
+        }
+        return { report: `did ${task.id}` };
+      },
+    });
+    const runId = mgr.createRun("proj1", "build it");
+    mgr.seedTasks(runId, "proj1", [{ id: "code", title: "implement", role: "coder" }]);
+    mgr.start(runId);
+
+    await waitFor(() => mgr.getRun(runId)?.status === "done");
+    expect(coderRuns).toBe(2);
+    const code = mgr.listTasks(runId).find((t) => t.id === "code")!;
+    expect(code.status).toBe("merged");
+    expect(code.attempt).toBe(1);
+  });
+
+  it("retries a coder task that throws, then completes", async () => {
+    let coderRuns = 0;
+    const mgr = new BuildGraphManager({
+      control,
+      runTask: async ({ task }) => {
+        if (task.id === "code") {
+          coderRuns += 1;
+          if (coderRuns === 1) throw new Error("transient boom");
+          return { report: "recovered" };
+        }
+        return { report: `did ${task.id}` };
+      },
+    });
+    const runId = mgr.createRun("proj1", "build it");
+    mgr.seedTasks(runId, "proj1", [{ id: "code", title: "implement", role: "coder" }]);
+    mgr.start(runId);
+
+    await waitFor(() => mgr.getRun(runId)?.status === "done");
+    expect(coderRuns).toBe(2);
+    expect(mgr.listTasks(runId).find((t) => t.id === "code")!.status).toBe("merged");
+  });
+
   it("never double-dispatches a shared dep when sibling gates kick back concurrently", async () => {
     const active = new Map<string, number>();
     const peakById = new Map<string, number>();

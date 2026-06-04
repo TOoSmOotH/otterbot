@@ -291,34 +291,31 @@ export class BuildGraphManager {
       const current = this.listTasks(runId).find((t) => t.id === settled.taskId);
       if (current && current.status !== "running") continue;
 
+      // Resolve the completion to pass/fail. A thrown error counts as a failure.
+      let pass: boolean;
       if (settled.error) {
         this.setTaskReport(runId, settled.taskId, settled.error.message);
-        this.setTaskStatus(runId, settled.taskId, "failed");
-        this.finishRun(runId, "failed");
-        return;
+        pass = false;
+      } else {
+        const outcome = settled.outcome!;
+        this.setTaskReport(runId, settled.taskId, outcome.report);
+        pass = outcome.pass ?? parseVerdict(outcome.report);
       }
-
-      const outcome = settled.outcome!;
-      const pass = outcome.pass ?? parseVerdict(outcome.report);
-      this.setTaskReport(runId, settled.taskId, outcome.report);
 
       if (pass) {
         this.setTaskStatus(runId, settled.taskId, "merged");
         continue;
       }
 
-      if (GATE_ROLES.has(settled.role)) {
-        if (!this.handleKickback(runId, settled.taskId)) {
-          this.finishRun(runId, "failed");
-          return;
-        }
-        continue;
+      // Any failure — thrown error, explicit pass:false, or a gate VERDICT: FAIL —
+      // kicks the task back (reset + bounded retry). The run fails only when the
+      // task's retry budget (maxAttempts) is exhausted.
+      if (!this.handleKickback(runId, settled.taskId)) {
+        this.setTaskStatus(runId, settled.taskId, "failed");
+        this.finishRun(runId, "failed");
+        return;
       }
-
-      // A non-gate task explicitly failed — no kickback path; fail the run.
-      this.setTaskStatus(runId, settled.taskId, "failed");
-      this.finishRun(runId, "failed");
-      return;
+      continue;
     }
   }
 
