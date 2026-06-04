@@ -364,6 +364,7 @@ function EditAccount({
 function AddAccount({ onDone }: { onDone: () => void }) {
   const [kind, setKind] = useState<"git" | "ssh-key">("git");
   const addForgeAccount = useProjectsStore((s) => s.addForgeAccount);
+  const forgeError = useProjectsStore((s) => s.error);
   const sshKeys = useSshKeysStore();
   const reload = useConnectionsStore((s) => s.load);
   const [busy, setBusy] = useState(false);
@@ -376,23 +377,25 @@ function AddAccount({ onDone }: { onDone: () => void }) {
   const [keyLabel, setKeyLabel] = useState("");
   const [privateKey, setPrivateKey] = useState("");
 
+  const gitInvalid = kind === "git" && (!gitDraft.token || (gitDraft.provider === "gitea" && !gitDraft.baseUrl));
+  const sshInvalid = kind === "ssh-key" && keyMode === "import" && !privateKey.trim();
+
   const submit = async () => {
     setBusy(true);
     try {
       if (kind === "git") {
         const res = await createGitAccount(gitDraft, addForgeAccount, sshKeys.generate);
-        if (res?.publicKey) {
-          setPubKey(res.publicKey);
-        } else {
-          await reload();
-          onDone();
-        }
+        if (!res) return; // creation failed — keep the modal open; error shown below
+        await reload();
+        if (res.publicKey) setPubKey(res.publicKey);
+        else onDone();
       } else {
         const key =
           keyMode === "import" ? await sshKeys.import(keyLabel, privateKey) : await sshKeys.generate(keyLabel);
-        if (key) setPubKey(key.publicKey);
+        if (!key) return; // failed — keep open
+        await reload();
+        setPubKey(key.publicKey);
       }
-      await reload();
     } finally {
       setBusy(false);
     }
@@ -451,8 +454,11 @@ function AddAccount({ onDone }: { onDone: () => void }) {
         </>
       )}
 
+      {(forgeError || sshKeys.error) && (
+        <span style={{ color: "tomato", fontSize: 12 }}>{forgeError || sshKeys.error}</span>
+      )}
       <div style={{ display: "flex", gap: 8 }}>
-        <button style={primary} disabled={busy} onClick={() => void submit()}>
+        <button style={primary} disabled={busy || gitInvalid || sshInvalid} onClick={() => void submit()}>
           {busy ? "Saving…" : "Create account"}
         </button>
         <button style={ghost} onClick={onDone}>
