@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { LayoutGroup, motion } from "motion/react";
 import { Activity, FolderGit2, GitBranch, MessageSquare, Network, Settings, Sliders } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
@@ -22,6 +22,8 @@ import { useActivityStore } from "./stores/activity-store";
 import { useChatStore } from "./stores/chat-store";
 import { useGlobalSettingsStore } from "./stores/global-settings-store";
 import { useSetupStore } from "./stores/setup-store";
+import { CommandPalette } from "./components/CommandPalette";
+import { buildCommands } from "./lib/commands";
 
 type MainView = "chat" | "studio" | "projects" | "builds" | "activity" | "network" | "settings";
 
@@ -118,6 +120,32 @@ function AuthedApp() {
     setLoginTerminal({ agentId: host.id, tool });
   };
 
+  const [paletteOpen, setPaletteOpen] = useState(false);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setPaletteOpen((v) => !v);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  const commands = useMemo(
+    () =>
+      buildCommands({
+        views: VIEWS.map((v) => ({ id: v.id, label: v.label })),
+        agents: agents.map((a) => ({ id: a.id, displayName: a.displayName })),
+        setView: (id) => setView(id as MainView),
+        setActive,
+        openSettings: () => openSettings(),
+        onNewAgent: () => setCreateOpen(true),
+      }),
+    [agents, setActive]
+  );
+
   return (
     <div style={{ height: "100%", display: "grid", gridTemplateColumns: "260px 1fr" }}>
       <AgentRoster onNewAgent={() => setCreateOpen(true)} />
@@ -132,6 +160,25 @@ function AuthedApp() {
             background: "rgb(var(--bg))",
           }}
         >
+          <button
+            data-testid="command-trigger"
+            onClick={() => setPaletteOpen(true)}
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 8,
+              margin: "6px 8px 6px 0",
+              padding: "6px 10px",
+              background: "rgb(var(--surface))",
+              border: "1px solid rgb(var(--border))",
+              borderRadius: 10,
+              color: "rgb(var(--subtle))",
+              cursor: "pointer",
+              fontSize: 12,
+            }}
+          >
+            Jump to… <kbd style={{ fontSize: 10 }}>⌘K</kbd>
+          </button>
           <LayoutGroup id="view-tabs">
             {VIEWS.map((v) => {
               const active = view === v.id;
@@ -215,6 +262,7 @@ function AuthedApp() {
           onClose={() => setLoginTerminal(null)}
         />
       )}
+      <CommandPalette open={paletteOpen} commands={commands} onClose={() => setPaletteOpen(false)} />
       {showOnboarding && <OnboardingWizard />}
     </div>
   );
