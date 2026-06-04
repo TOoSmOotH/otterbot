@@ -139,7 +139,7 @@ function AccountsSection({
         <h4 style={sectionTitle}>Accounts</h4>
         {!adding && (
           <button style={ghost} onClick={() => setAdding(true)}>
-            + Add account
+            + Add SSH key
           </button>
         )}
       </div>
@@ -150,11 +150,11 @@ function AccountsSection({
       )}
       <p style={hint}>
         Reusable identities + secrets. One account (a Slack token, a Git account) can back several
-        integrations. Most are created inline when you add an integration; Git accounts and SSH keys
-        are added here. Stored encrypted and never shown back.
+        integrations. Accounts are created when you add an integration; the SSH keys a Git account
+        can use are added here. Stored encrypted and never shown back.
       </p>
       {adding && (
-        <Modal title="Add account" onClose={() => setAdding(false)} maxWidth={560}>
+        <Modal title="Add SSH key" onClose={() => setAdding(false)} maxWidth={560}>
           <AddAccount onDone={() => setAdding(false)} />
         </Modal>
       )}
@@ -360,42 +360,30 @@ function EditAccount({
   );
 }
 
-/** Compact create flow for the two account kinds not made via Add-integration. */
+/**
+ * Standalone SSH-key creation. Git accounts (and other service accounts) are
+ * created inline in the Add-integration wizard; the only thing made standalone
+ * here is a reusable SSH key, which a Git account can then link.
+ */
 function AddAccount({ onDone }: { onDone: () => void }) {
-  const [kind, setKind] = useState<"git" | "ssh-key">("git");
-  const addForgeAccount = useProjectsStore((s) => s.addForgeAccount);
-  const forgeError = useProjectsStore((s) => s.error);
   const sshKeys = useSshKeysStore();
   const reload = useConnectionsStore((s) => s.load);
   const [busy, setBusy] = useState(false);
   const [pubKey, setPubKey] = useState<string | null>(null);
-
-  // Git account fields
-  const [gitDraft, setGitDraft] = useState<GitDraft>(emptyGitDraft());
-  // SSH key fields
   const [keyMode, setKeyMode] = useState<"generate" | "import">("generate");
   const [keyLabel, setKeyLabel] = useState("");
   const [privateKey, setPrivateKey] = useState("");
 
-  const gitInvalid = kind === "git" && (!gitDraft.token || (gitDraft.provider === "gitea" && !gitDraft.baseUrl));
-  const sshInvalid = kind === "ssh-key" && keyMode === "import" && !privateKey.trim();
+  const invalid = !keyLabel.trim() || (keyMode === "import" && !privateKey.trim());
 
   const submit = async () => {
     setBusy(true);
     try {
-      if (kind === "git") {
-        const res = await createGitAccount(gitDraft, addForgeAccount, sshKeys.generate);
-        if (!res) return; // creation failed — keep the modal open; error shown below
-        await reload();
-        if (res.publicKey) setPubKey(res.publicKey);
-        else onDone();
-      } else {
-        const key =
-          keyMode === "import" ? await sshKeys.import(keyLabel, privateKey) : await sshKeys.generate(keyLabel);
-        if (!key) return; // failed — keep open
-        await reload();
-        setPubKey(key.publicKey);
-      }
+      const key =
+        keyMode === "import" ? await sshKeys.import(keyLabel, privateKey) : await sshKeys.generate(keyLabel);
+      if (!key) return; // failed — keep open; error shown below
+      await reload();
+      setPubKey(key.publicKey);
     } finally {
       setBusy(false);
     }
@@ -415,51 +403,36 @@ function AddAccount({ onDone }: { onDone: () => void }) {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      <p style={hint}>A reusable SSH key a Git account can use for git-over-SSH and commit signing.</p>
+      <div style={{ display: "flex", gap: 12 }}>
+        <label style={radio}>
+          <input type="radio" checked={keyMode === "generate"} onChange={() => setKeyMode("generate")} />
+          Generate
+        </label>
+        <label style={radio}>
+          <input type="radio" checked={keyMode === "import"} onChange={() => setKeyMode("import")} />
+          Import
+        </label>
+      </div>
       <label style={fieldLabel}>
-        Account kind
-        <select style={input} value={kind} onChange={(e) => setKind(e.target.value as "git" | "ssh-key")}>
-          <option value="git">Git account (GitHub / Gitea)</option>
-          <option value="ssh-key">SSH key</option>
-        </select>
+        Label
+        <input style={input} value={keyLabel} onChange={(e) => setKeyLabel(e.target.value)} />
       </label>
-
-      {kind === "git" ? (
-        <GitAccountFields value={gitDraft} onChange={setGitDraft} />
-      ) : (
-        <>
-          <div style={{ display: "flex", gap: 12 }}>
-            <label style={radio}>
-              <input type="radio" checked={keyMode === "generate"} onChange={() => setKeyMode("generate")} />
-              Generate
-            </label>
-            <label style={radio}>
-              <input type="radio" checked={keyMode === "import"} onChange={() => setKeyMode("import")} />
-              Import
-            </label>
-          </div>
-          <label style={fieldLabel}>
-            Label
-            <input style={input} value={keyLabel} onChange={(e) => setKeyLabel(e.target.value)} />
-          </label>
-          {keyMode === "import" && (
-            <label style={fieldLabel}>
-              Private key (PEM / OpenSSH)
-              <textarea
-                style={{ ...input, minHeight: 90, fontFamily: "monospace" }}
-                value={privateKey}
-                onChange={(e) => setPrivateKey(e.target.value)}
-              />
-            </label>
-          )}
-        </>
+      {keyMode === "import" && (
+        <label style={fieldLabel}>
+          Private key (PEM / OpenSSH)
+          <textarea
+            style={{ ...input, minHeight: 90, fontFamily: "monospace" }}
+            value={privateKey}
+            onChange={(e) => setPrivateKey(e.target.value)}
+          />
+        </label>
       )}
 
-      {(forgeError || sshKeys.error) && (
-        <span style={{ color: "tomato", fontSize: 12 }}>{forgeError || sshKeys.error}</span>
-      )}
+      {sshKeys.error && <span style={{ color: "tomato", fontSize: 12 }}>{sshKeys.error}</span>}
       <div style={{ display: "flex", gap: 8 }}>
-        <button style={primary} disabled={busy || gitInvalid || sshInvalid} onClick={() => void submit()}>
-          {busy ? "Saving…" : "Create account"}
+        <button style={primary} disabled={busy || invalid} onClick={() => void submit()}>
+          {busy ? "Saving…" : "Create SSH key"}
         </button>
         <button style={ghost} onClick={onDone}>
           Cancel
