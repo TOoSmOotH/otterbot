@@ -1,4 +1,4 @@
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { controlSchema, type ControlDb } from "../db/control-db.js";
 import { parseVerdict } from "./pipeline-manager.js";
@@ -351,7 +351,7 @@ export class BuildGraphManager {
     this.deps.control.db
       .update(controlSchema.tasks)
       .set({ status, updatedAt: new Date().toISOString() })
-      .where(eq(controlSchema.tasks.id, taskId))
+      .where(and(eq(controlSchema.tasks.runId, runId), eq(controlSchema.tasks.id, taskId)))
       .run();
     this.emit(runId);
   }
@@ -360,7 +360,7 @@ export class BuildGraphManager {
     this.deps.control.db
       .update(controlSchema.tasks)
       .set({ report, updatedAt: new Date().toISOString() })
-      .where(eq(controlSchema.tasks.id, taskId))
+      .where(and(eq(controlSchema.tasks.runId, runId), eq(controlSchema.tasks.id, taskId)))
       .run();
     this.emit(runId);
   }
@@ -369,7 +369,7 @@ export class BuildGraphManager {
     this.deps.control.db
       .update(controlSchema.tasks)
       .set({ attempt, updatedAt: new Date().toISOString() })
-      .where(eq(controlSchema.tasks.id, taskId))
+      .where(and(eq(controlSchema.tasks.runId, runId), eq(controlSchema.tasks.id, taskId)))
       .run();
     this.emit(runId);
   }

@@ -427,6 +427,8 @@ function slugify(name: string): string {
 
 /** Coding stages can run a CLI for a long time; give a stage a generous budget. */
 const STAGE_TIMEOUT_MS = 45 * 60_000;
+/** Turn budget for a build coder worker — coding needs many more than the 8-step default. */
+const BUILD_CODER_MAX_STEPS = 80;
 
 /** Build the prompt handed to a pipeline stage's agent. */
 function buildStagePrompt(
@@ -810,8 +812,14 @@ export class Orchestrator {
         );
         const res = await this.spawnSubagent(coderId, prompt, {
           projectWorkspacePathOverride: worktreePath,
+          // Real coding needs far more than the default 8-step turn budget — a
+          // worker must read, edit, and run the coding CLI before committing.
+          maxSteps: BUILD_CODER_MAX_STEPS,
         });
         this.captureTaskTranscript(res.subagentId, task.runId, task.id, task.attempt);
+        // Free the coder's subagent slot now rather than after the grace window,
+        // so concurrent/retried workers don't exhaust the parent's subagentLimit.
+        await this.deleteAgent(res.subagentId);
         return res.summary;
       },
       commitWorktree: ({ worktreePath, task }) => {
@@ -3046,7 +3054,11 @@ export class Orchestrator {
   async spawnSubagent(
     parentId: string,
     goal: string,
-    opts?: { modelId?: AgentProfile["model"]["chat"]; projectWorkspacePathOverride?: string }
+    opts?: {
+      modelId?: AgentProfile["model"]["chat"];
+      projectWorkspacePathOverride?: string;
+      maxSteps?: number;
+    }
   ): Promise<SpawnResult> {
     const parentCtx = this.contexts.get(parentId);
     if (!parentCtx) throw new Error(`Unknown agent: ${parentId}`);
@@ -3067,6 +3079,7 @@ export class Orchestrator {
       id: subId,
       displayName: `${parentCtx.profile.displayName} · sub ${this.subagentSeq}`,
       modelId: opts?.modelId,
+      maxSteps: opts?.maxSteps,
       createdAt: now,
     });
     this.profiles.create(subProfile);
@@ -3403,6 +3416,7 @@ export function buildSubagentProfile(
     id: string;
     displayName: string;
     modelId?: AgentProfile["model"]["chat"];
+    maxSteps?: number | null;
     createdAt: string;
   }
 ): AgentProfile {
@@ -3425,7 +3439,7 @@ export function buildSubagentProfile(
     canRunShell: parent.canRunShell,
     canWebSearch: parent.canWebSearch,
     browseTimeoutMs: parent.browseTimeoutMs,
-    maxSteps: parent.maxSteps,
+    maxSteps: args.maxSteps ?? parent.maxSteps,
     mcpServers: parent.mcpServers,
     allowedPeers: parent.allowedPeers,
     parentId: parent.id,

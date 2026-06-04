@@ -26,6 +26,24 @@ describe("BuildGraphManager — persistence", () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
+  it("allows the same task id across different runs and scopes status updates per run", async () => {
+    const mgr = new BuildGraphManager({ control, runTask: async () => ({ report: "ok" }) });
+    const a = mgr.createRun("proj1", "A", { status: "awaiting_approval" });
+    const b = mgr.createRun("proj1", "B", { status: "awaiting_approval" });
+    // The PM reuses semantic ids across runs — the same "code" id in both must
+    // not collide (composite primary key).
+    mgr.seedTasks(a, "proj1", [{ id: "code", title: "A code", role: "coder" }]);
+    mgr.seedTasks(b, "proj1", [{ id: "code", title: "B code", role: "coder" }]);
+    expect(mgr.listTasks(a).length).toBe(1);
+    expect(mgr.listTasks(b).length).toBe(1);
+
+    // Driving run A to done must not touch run B's identically-named task.
+    mgr.launch(a);
+    await waitFor(() => mgr.getRun(a)?.status === "done");
+    expect(mgr.listTasks(a)[0].status).toBe("merged");
+    expect(mgr.listTasks(b)[0].status).toBe("blocked");
+  });
+
   it("creates a run and seeds tasks, parsing deps back to arrays", () => {
     const mgr = new BuildGraphManager({ control, runTask: async () => ({ report: "ok" }) });
     const runId = mgr.createRun("proj1", "build it");

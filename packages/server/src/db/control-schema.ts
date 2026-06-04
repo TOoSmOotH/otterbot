@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer } from "drizzle-orm/sqlite-core";
+import { sqliteTable, text, integer, primaryKey } from "drizzle-orm/sqlite-core";
 
 /**
  * Control-plane schema. A single shared `control.db` holds only cross-agent
@@ -410,8 +410,13 @@ export const buildRuns = sqliteTable("build_runs", {
 });
 
 /** One node of a build run's task graph. `deps`/`files_hint` are JSON arrays. */
-export const tasks = sqliteTable("tasks", {
-  id: text("id").primaryKey(),
+export const tasks = sqliteTable(
+  "tasks",
+  {
+  // Task ids are unique only WITHIN a run — the PM reuses semantic ids (e.g.
+  // "coder-probe") across runs — so the primary key is composite (run_id, id),
+  // not id alone.
+  id: text("id").notNull(),
   runId: text("run_id").notNull(),
   projectId: text("project_id").notNull(),
   title: text("title").notNull(),
@@ -437,7 +442,9 @@ export const tasks = sqliteTable("tasks", {
   updatedAt: text("updated_at")
     .notNull()
     .$defaultFn(() => new Date().toISOString()),
-});
+  },
+  (t) => ({ pk: primaryKey({ columns: [t.runId, t.id] }) })
+);
 
 /**
  * A captured worker transcript for one build task attempt — the full per-agent

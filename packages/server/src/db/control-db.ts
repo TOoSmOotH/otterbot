@@ -231,7 +231,7 @@ function ensureControlTables(sqlite: Database.Database) {
     )`,
     `CREATE INDEX IF NOT EXISTS idx_build_runs_project ON build_runs(project_id)`,
     `CREATE TABLE IF NOT EXISTS tasks (
-      id TEXT PRIMARY KEY,
+      id TEXT NOT NULL,
       run_id TEXT NOT NULL,
       project_id TEXT NOT NULL,
       title TEXT NOT NULL,
@@ -247,7 +247,8 @@ function ensureControlTables(sqlite: Database.Database) {
       report TEXT NOT NULL DEFAULT '',
       transcript_ref TEXT,
       created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (run_id, id)
     )`,
     `CREATE INDEX IF NOT EXISTS idx_tasks_run ON tasks(run_id)`,
     `CREATE TABLE IF NOT EXISTS build_task_transcripts (
@@ -270,6 +271,11 @@ function ensureControlTables(sqlite: Database.Database) {
     )`,
     `CREATE UNIQUE INDEX IF NOT EXISTS idx_issue_triage_issue ON issue_triage(project_id, issue_number)`,
   ];
+  // The `tasks` table's primary key changed from id-only to composite (run_id,
+  // id) — task ids are unique only within a run. CREATE TABLE IF NOT EXISTS won't
+  // alter an existing table, so drop the old-schema table first; it only holds
+  // disposable build-task rows and is repopulated per run.
+  migrateTasksCompositePk(sqlite);
   for (const s of stmts) sqlite.exec(s);
 
   // Additive column migrations for tables that predate the column. CREATE TABLE
@@ -335,6 +341,22 @@ function backfillProjectRepos(sqlite: Database.Database) {
 }
 
 /** Add a column to an existing table, ignoring the error if it already exists. */
+/**
+ * Drop the `tasks` table when it still uses the old id-only primary key, so the
+ * CREATE statement can recreate it with the composite (run_id, id) key. Detected
+ * via PRAGMA: in the old schema `id` is the sole PK column (pk=1) and `run_id` is
+ * not part of the PK (pk=0). Safe — `tasks` only holds disposable build rows.
+ */
+function migrateTasksCompositePk(sqlite: Database.Database): void {
+  const cols = sqlite.prepare(`PRAGMA table_info(tasks)`).all() as Array<{ name: string; pk: number }>;
+  if (cols.length === 0) return; // table doesn't exist yet — nothing to migrate
+  const id = cols.find((c) => c.name === "id");
+  const runId = cols.find((c) => c.name === "run_id");
+  if (id?.pk === 1 && runId?.pk === 0) {
+    sqlite.exec(`DROP TABLE tasks`);
+  }
+}
+
 function addColumnIfMissing(
   sqlite: Database.Database,
   table: string,
