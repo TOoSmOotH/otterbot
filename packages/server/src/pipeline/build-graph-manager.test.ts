@@ -171,4 +171,98 @@ describe("BuildGraphManager — persistence", () => {
     await waitFor(() => mgr.getRun(runId)?.status !== "running");
     expect(mgr.getRun(runId)?.status).toBe("failed");
   });
+
+  it("runs up to `parallelism` ready tasks concurrently", async () => {
+    let active = 0;
+    let peak = 0;
+    let releaseAll = () => {};
+    const barrier = new Promise<void>((res) => {
+      releaseAll = res;
+    });
+    const mgr = new BuildGraphManager({
+      control,
+      runTask: async ({ task }) => {
+        active += 1;
+        peak = Math.max(peak, active);
+        await barrier;
+        active -= 1;
+        return { report: `did ${task.id}` };
+      },
+    });
+    const runId = mgr.createRun("proj1", "parallel", { parallelism: 3 });
+    mgr.seedTasks(runId, "proj1", [
+      { id: "a", title: "A", role: "coder" },
+      { id: "b", title: "B", role: "coder" },
+      { id: "c", title: "C", role: "coder" },
+    ]);
+    mgr.start(runId);
+
+    await waitFor(() => active === 3);
+    expect(peak).toBe(3);
+    releaseAll();
+    await waitFor(() => mgr.getRun(runId)?.status === "done");
+    expect(mgr.listTasks(runId).every((t) => t.status === "merged")).toBe(true);
+  });
+
+  it("never exceeds the parallelism cap", async () => {
+    let active = 0;
+    let peak = 0;
+    let releaseAll = () => {};
+    const barrier = new Promise<void>((res) => {
+      releaseAll = res;
+    });
+    const mgr = new BuildGraphManager({
+      control,
+      runTask: async ({ task }) => {
+        active += 1;
+        peak = Math.max(peak, active);
+        await barrier;
+        active -= 1;
+        return { report: `did ${task.id}` };
+      },
+    });
+    const runId = mgr.createRun("proj1", "cap", { parallelism: 2 });
+    mgr.seedTasks(runId, "proj1", [
+      { id: "a", title: "A", role: "coder" },
+      { id: "b", title: "B", role: "coder" },
+      { id: "c", title: "C", role: "coder" },
+    ]);
+    mgr.start(runId);
+
+    await waitFor(() => active === 2);
+    await new Promise((r) => setTimeout(r, 30)); // give the loop a chance to over-dispatch
+    expect(peak).toBe(2); // third task held back while 2 are busy
+    releaseAll();
+    await waitFor(() => mgr.getRun(runId)?.status === "done");
+    expect(peak).toBe(2); // still capped even after the third ran
+  });
+
+  it("waits for in-flight tasks instead of failing when nothing else is ready", async () => {
+    const order: string[] = [];
+    let releaseSlow = () => {};
+    const slowBarrier = new Promise<void>((res) => {
+      releaseSlow = res;
+    });
+    const mgr = new BuildGraphManager({
+      control,
+      runTask: async ({ task }) => {
+        order.push(task.id);
+        if (task.id === "slow") await slowBarrier;
+        return { report: `did ${task.id}` };
+      },
+    });
+    const runId = mgr.createRun("proj1", "wait", { parallelism: 3 });
+    mgr.seedTasks(runId, "proj1", [
+      { id: "slow", title: "slow coder", role: "coder" },
+      { id: "after", title: "depends on slow", role: "integrator", deps: ["slow"] },
+    ]);
+    mgr.start(runId);
+
+    await waitFor(() => order.includes("slow"));
+    await new Promise((r) => setTimeout(r, 30)); // 'after' is blocked; nothing else is ready
+    expect(mgr.getRun(runId)?.status).toBe("running"); // MUST NOT have failed as "stuck"
+    releaseSlow();
+    await waitFor(() => mgr.getRun(runId)?.status === "done");
+    expect(order).toEqual(["slow", "after"]);
+  });
 });

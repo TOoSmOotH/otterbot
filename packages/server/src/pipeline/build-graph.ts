@@ -229,52 +229,79 @@ export class BuildGraphManager {
   }
 
   private async drive(runId: string): Promise<void> {
-    // Single-worker loop: pick one ready task, run it, advance. The worker pool
-    // (run up to `parallelism` ready tasks at once) arrives in Phase 2.
+    // Worker pool: dispatch up to `run.parallelism` dependency-ready tasks at
+    // once, then await the next completion. A run only fails as "stuck" when
+    // nothing is ready AND nothing is in flight — an in-flight task with no
+    // other ready work means wait, not fail.
+    type Settled = {
+      taskId: string;
+      role: TaskRole;
+      outcome: { report: string; pass?: boolean } | null;
+      error: Error | null;
+    };
+    const inFlight = new Map<string, Promise<Settled>>();
+
+    const launch = (run: BuildRun, task: BuildTask, snapshot: BuildTask[]): void => {
+      this.setTaskStatus(runId, task.id, "running");
+      const priorReports = snapshot
+        .filter((t) => t.status === "merged")
+        .map((t) => ({ taskId: t.id, title: t.title, report: t.report }));
+      const p: Promise<Settled> = this.deps
+        .runTask({ run, task, priorReports })
+        .then((outcome) => ({ taskId: task.id, role: task.role, outcome, error: null }))
+        .catch((err) => ({
+          taskId: task.id,
+          role: task.role,
+          outcome: null,
+          error: err instanceof Error ? err : new Error(String(err)),
+        }));
+      inFlight.set(task.id, p);
+    };
+
     for (;;) {
       const run = this.getRun(runId);
       if (!run || run.status !== "running") return; // aborted / gone
       const tasks = this.listTasks(runId);
 
-      if (tasks.length > 0 && tasks.every((t) => t.status === "merged")) {
+      if (inFlight.size === 0 && tasks.length > 0 && tasks.every((t) => t.status === "merged")) {
         this.finishRun(runId, "done");
         return;
       }
 
-      const ready = readyTasks(tasks);
-      if (ready.length === 0) {
-        // Nothing runnable and not all merged → the graph is stuck.
+      const capacity = run.parallelism - inFlight.size;
+      if (capacity > 0) {
+        // `readyTasks` excludes `running` tasks, so already-dispatched ones are
+        // never re-selected; take the first `capacity` of what's left.
+        for (const task of readyTasks(tasks).slice(0, capacity)) launch(run, task, tasks);
+      }
+
+      if (inFlight.size === 0) {
+        // Nothing running and nothing became ready → the graph is stuck.
         this.finishRun(runId, "failed");
         return;
       }
 
-      const task = ready[0];
-      this.setTaskStatus(runId, task.id, "running");
+      const settled = await Promise.race(inFlight.values());
+      inFlight.delete(settled.taskId);
 
-      const priorReports = tasks
-        .filter((t) => t.status === "merged")
-        .map((t) => ({ taskId: t.id, title: t.title, report: t.report }));
-
-      let outcome: { report: string; pass?: boolean };
-      try {
-        outcome = await this.deps.runTask({ run, task, priorReports });
-      } catch (err) {
-        this.setTaskReport(runId, task.id, err instanceof Error ? err.message : String(err));
-        this.setTaskStatus(runId, task.id, "failed");
+      if (settled.error) {
+        this.setTaskReport(runId, settled.taskId, settled.error.message);
+        this.setTaskStatus(runId, settled.taskId, "failed");
         this.finishRun(runId, "failed");
         return;
       }
 
+      const outcome = settled.outcome!;
       const pass = outcome.pass ?? parseVerdict(outcome.report);
-      this.setTaskReport(runId, task.id, outcome.report);
+      this.setTaskReport(runId, settled.taskId, outcome.report);
 
       if (pass) {
-        this.setTaskStatus(runId, task.id, "merged");
+        this.setTaskStatus(runId, settled.taskId, "merged");
         continue;
       }
 
-      if (GATE_ROLES.has(task.role)) {
-        if (!this.handleKickback(runId, task.id)) {
+      if (GATE_ROLES.has(settled.role)) {
+        if (!this.handleKickback(runId, settled.taskId)) {
           this.finishRun(runId, "failed");
           return;
         }
@@ -282,7 +309,7 @@ export class BuildGraphManager {
       }
 
       // A non-gate task explicitly failed — no kickback path; fail the run.
-      this.setTaskStatus(runId, task.id, "failed");
+      this.setTaskStatus(runId, settled.taskId, "failed");
       this.finishRun(runId, "failed");
       return;
     }
