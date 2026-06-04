@@ -33,13 +33,15 @@ export function IntegrationsTab() {
   } = useConnectionsStore();
   const agents = useAgentsStore((s) => s.agents);
   const loadAgents = useAgentsStore((s) => s.load);
+  const loadForgeAccounts = useProjectsStore((s) => s.loadForgeAccounts);
   const [adding, setAdding] = useState(false);
   const [editingConn, setEditingConn] = useState<Connection | null>(null);
 
   useEffect(() => {
     void load();
     void loadAgents();
-  }, [load, loadAgents]);
+    void loadForgeAccounts();
+  }, [load, loadAgents, loadForgeAccounts]);
 
   const typeLabel = (type: string) => connectionTypes.find((t) => t.type === type)?.label ?? type;
   const credLabel = (id: string | null) =>
@@ -763,8 +765,16 @@ function AddIntegration({
   const [step, setStep] = useState(0);
   // GitHub Git-account sub-state (the account step for github).
   const [gitMode, setGitMode] = useState<"existing" | "new">(forgeAccounts.length ? "existing" : "new");
+  const [gitModeTouched, setGitModeTouched] = useState(false);
   const [gitDraft, setGitDraft] = useState<GitDraft>(emptyGitDraft());
   const [gitPubKey, setGitPubKey] = useState<string | null>(null);
+
+  // Git accounts load async after mount; once they arrive, default to reusing an
+  // existing one (unless the user already chose a mode), so a just-created
+  // account is selectable instead of being stuck on "New".
+  useEffect(() => {
+    if (!gitModeTouched && forgeAccounts.length > 0) setGitMode("existing");
+  }, [forgeAccounts.length, gitModeTouched]);
 
   const compatibleCreds = credentials.filter((c) => c.type === def?.credentialType);
 
@@ -790,6 +800,7 @@ function AddIntegration({
     setCredLabel("");
     setCredValues({});
     setGitMode(forgeAccounts.length ? "existing" : "new");
+    setGitModeTouched(false);
     setGitDraft(emptyGitDraft());
     setGitPubKey(null);
   };
@@ -908,7 +919,10 @@ function AddIntegration({
               <input
                 type="radio"
                 checked={gitMode === "existing"}
-                onChange={() => setGitMode("existing")}
+                onChange={() => {
+                  setGitMode("existing");
+                  setGitModeTouched(true);
+                }}
                 disabled={forgeAccounts.length === 0}
               />
               Reuse existing
@@ -919,6 +933,7 @@ function AddIntegration({
                 checked={gitMode === "new"}
                 onChange={() => {
                   setGitMode("new");
+                  setGitModeTouched(true);
                   setConfig({ ...config, gitAccountId: undefined });
                   setGitPubKey(null);
                 }}
