@@ -428,7 +428,12 @@ export function OnboardingWizard() {
         </div>
 
         {step === 0 && (
-          <>
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", textAlign: "center", gap: 14 }}>
+            <img
+              src="/logo.jpeg"
+              alt="otterbot"
+              style={{ width: 72, height: 72, borderRadius: 20, objectFit: "cover", boxShadow: "0 10px 30px rgb(var(--accent) / 0.25)", border: "1px solid rgb(var(--border))" }}
+            />
             <h2 style={h2}>Welcome to otterbot</h2>
             <p style={p}>
               otterbot runs a team of AI agents. Each agent has its own personality, memory, model,
@@ -444,7 +449,7 @@ export function OnboardingWizard() {
                 Get started
               </button>
             </Buttons>
-          </>
+          </div>
         )}
 
         {step === 1 && (
@@ -599,7 +604,7 @@ const panel: React.CSSProperties = {
   overflowY: "auto",
   background: "rgb(var(--surface))",
   border: "1px solid rgb(var(--border))",
-  borderRadius: 14,
+  borderRadius: 18,
   padding: 24,
   display: "flex",
   flexDirection: "column",
@@ -610,7 +615,7 @@ const panel: React.CSSProperties = {
 const h2: React.CSSProperties = {
   margin: 0,
   fontSize: 20,
-  fontWeight: 600,
+  fontWeight: 800,
   letterSpacing: "-0.015em",
   color: "rgb(var(--fg))",
 };
@@ -625,7 +630,7 @@ const input: React.CSSProperties = {
   background: "rgb(var(--bg))",
   color: "rgb(var(--fg))",
   border: "1px solid rgb(var(--border))",
-  borderRadius: 7,
+  borderRadius: 10,
   padding: "8px 10px",
   fontSize: 13,
   width: "100%",
@@ -636,7 +641,7 @@ const primary: React.CSSProperties = {
   color: "rgb(var(--accent-fg))",
   border: "1px solid rgb(var(--accent))",
   padding: "8px 18px",
-  borderRadius: 8,
+  borderRadius: 10,
   cursor: "pointer",
   fontSize: 13,
   fontWeight: 600,
@@ -649,7 +654,7 @@ const ghost: React.CSSProperties = {
   color: "rgb(var(--fg))",
   border: "1px solid rgb(var(--border))",
   padding: "8px 14px",
-  borderRadius: 8,
+  borderRadius: 10,
   cursor: "pointer",
   fontSize: 13,
   fontWeight: 500,
