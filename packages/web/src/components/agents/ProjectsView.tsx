@@ -122,55 +122,54 @@ function RepoRow({
 }
 
 /**
- * Manage collaborative projects: a shared git working tree with a dedicated
- * specialist team. Configure where the code lives (local / GitHub / Gitea) and
- * launch the build pipeline (coder → security → test-writer → tester).
+ * Lightweight project index: lists all projects with a clickable row that opens
+ * the per-project dashboard. The full editor lives in ProjectDashboard/ProjectCard.
  */
-export function ProjectsView({ onOpenSettings }: { onOpenSettings?: (tab?: string) => void }) {
+export function ProjectsView({ onOpenProject }: { onOpenProject: (id: string) => void }) {
   const projects = useProjectsStore((s) => s.projects);
   const error = useProjectsStore((s) => s.error);
   const load = useProjectsStore((s) => s.load);
-  const loadForgeAccounts = useProjectsStore((s) => s.loadForgeAccounts);
   const bindSocket = useProjectsStore((s) => s.bindSocket);
-  const remove = useProjectsStore((s) => s.remove);
-
   const [wizardOpen, setWizardOpen] = useState(false);
 
   useEffect(() => {
     void load();
-    void loadForgeAccounts();
     bindSocket();
-  }, [load, loadForgeAccounts, bindSocket]);
+  }, [load, bindSocket]);
 
   return (
     <div style={{ padding: 20, overflowY: "auto", height: "100%" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
         <Icon icon={FolderGit2} size={18} />
-        <h2 style={{ margin: 0, fontSize: 15, fontWeight: 600 }}>Projects</h2>
+        <h2 style={{ margin: 0, fontSize: 15, fontWeight: 700 }}>Projects</h2>
       </div>
       <p style={{ color: "rgb(var(--muted))", fontSize: 12, maxWidth: 680, marginTop: 0 }}>
-        Each project gets a dedicated team (PM, coder, security reviewer, test writer, tester) that
-        shares one code tree. Add a git host in Settings → Git Creds, then point a project at a
-        repo and launch the build pipeline.
+        Pick a project to open its dashboard, or start a new coding team.
       </p>
-
       <div style={{ margin: "16px 0" }}>
-        <button style={primaryBtn} onClick={() => setWizardOpen(true)}>
+        <button data-testid="new-coding-team" style={primaryBtn} onClick={() => setWizardOpen(true)}>
           <Icon icon={Plus} size={14} /> New coding team
         </button>
       </div>
-      {error && <div style={{ color: "rgb(220 90 90)", fontSize: 12, marginBottom: 8 }}>{error}</div>}
+      {error && <div style={{ color: "rgb(var(--danger))", fontSize: 12, marginBottom: 8 }}>{error}</div>}
       {wizardOpen && <AgentWizard initialChoice="team" onClose={() => setWizardOpen(false)} />}
-
-      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-        {projects.length === 0 && <div style={{ color: "rgb(var(--muted))", fontSize: 13 }}>No projects yet.</div>}
+      <div style={{ display: "flex", flexDirection: "column", gap: 8, maxWidth: 680 }}>
+        {projects.length === 0 && (
+          <div style={{ color: "rgb(var(--muted))", fontSize: 13 }}>No projects yet.</div>
+        )}
         {projects.map((p) => (
-          <ProjectCard
+          <button
             key={p.id}
-            project={p}
-            onDelete={() => remove(p.id)}
-            onOpenSettings={onOpenSettings}
-          />
+            data-testid={`project-index-${p.id}`}
+            onClick={() => onOpenProject(p.id)}
+            style={{ ...card, maxWidth: 680, textAlign: "left", cursor: "pointer", display: "flex", alignItems: "center", gap: 10 }}
+          >
+            <Icon icon={FolderGit2} size={16} />
+            <span style={{ fontWeight: 700, fontSize: 13 }}>{p.name}</span>
+            <span style={badge}>{p.repos.length} repo{p.repos.length === 1 ? "" : "s"}</span>
+            <span style={{ flex: 1 }} />
+            <span style={{ fontSize: 11, color: "rgb(var(--muted))" }}>{p.team.length} agents ▸</span>
+          </button>
         ))}
       </div>
     </div>

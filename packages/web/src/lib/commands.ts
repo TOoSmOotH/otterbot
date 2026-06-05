@@ -11,9 +11,11 @@ export interface Command {
 export interface CommandContext {
   views: { id: string; label: string }[];
   agents: { id: string; displayName: string }[];
+  projects: { id: string; name: string }[];
   setView: (id: string) => void;
   setActive: (id: string) => void;
   openSettings: () => void;
+  openProject: (id: string) => void;
   onNewAgent: () => void;
 }
 
@@ -39,6 +41,14 @@ export function buildCommands(ctx: CommandContext): Command[] {
     },
   }));
 
+  const projectCmds: Command[] = ctx.projects.map((p) => ({
+    id: `project:${p.id}`,
+    title: `Open project ${p.name}`,
+    group: "Navigation",
+    keywords: [p.name, "project"],
+    run: () => ctx.openProject(p.id),
+  }));
+
   const actions: Command[] = [
     {
       id: "action:new-agent",
@@ -56,7 +66,7 @@ export function buildCommands(ctx: CommandContext): Command[] {
     },
   ];
 
-  return [...agents, ...nav, ...actions];
+  return [...agents, ...projectCmds, ...nav, ...actions];
 }
 
 /** Substring filter with prefix-first ranking. Empty query → original order;

@@ -6,6 +6,7 @@ import { AgentWizard } from "./components/agents/AgentWizard";
 import { AgentStudio } from "./components/agents/AgentStudio";
 import { ActivityView } from "./components/agents/ActivityView";
 import { ProjectsView } from "./components/agents/ProjectsView";
+import { ProjectDashboard } from "./components/agents/ProjectDashboard";
 import { BuildRunsView } from "./components/agents/BuildRunsView";
 import { TerminalModal } from "./components/agents/TerminalModal";
 import { getSocket } from "./lib/socket";
@@ -14,6 +15,7 @@ import { GlobalSettings } from "./components/settings/GlobalSettings";
 import { OnboardingWizard } from "./components/agents/OnboardingWizard";
 import { AuthGate } from "./components/AuthGate";
 import { useAgentsStore } from "./stores/agents-store";
+import { useProjectsStore } from "./stores/projects-store";
 import { useActivityStore } from "./stores/activity-store";
 import { useChatStore } from "./stores/chat-store";
 import { useGlobalSettingsStore } from "./stores/global-settings-store";
@@ -22,7 +24,7 @@ import { CommandPalette } from "./components/CommandPalette";
 import { buildCommands } from "./lib/commands";
 import { OfficeFloor } from "./components/agents/OfficeFloor";
 
-type MainView = "chat" | "studio" | "projects" | "builds" | "activity" | "network" | "settings";
+type MainView = "chat" | "studio" | "projects" | "project" | "builds" | "activity" | "network" | "settings";
 
 const VIEWS: { id: MainView; label: string }[] = [
   { id: "chat", label: "Chat" },
@@ -58,7 +60,9 @@ function AuthedApp() {
   const [createOpen, setCreateOpen] = useState(false);
   const [view, setView] = useState<MainView>("chat");
   const [settingsTab, setSettingsTab] = useState<string | undefined>(undefined);
+  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const agents = useAgentsStore((s) => s.agents);
+  const projects = useProjectsStore((s) => s.projects);
   const [codingView, setCodingView] = useState<{ agentId: string; tool: string } | null>(null);
   const [loginTerminal, setLoginTerminal] = useState<{ agentId: string; tool: CodingTool } | null>(
     null
@@ -72,6 +76,7 @@ function AuthedApp() {
     void loadActivity();
     void loadSetup();
     void loadSettings();
+    void useProjectsStore.getState().load();
   }, [connect, bindSocket, bindActivity, loadAgents, loadActivity, loadSetup, loadSettings]);
 
   // Auto-pop a terminal whenever an agent launches an *interactive* coding
@@ -98,6 +103,11 @@ function AuthedApp() {
   const openSettings = (tab?: string) => {
     setSettingsTab(tab);
     setView("settings");
+  };
+
+  const openProject = (id: string) => {
+    setSelectedProjectId(id);
+    setView("project");
   };
 
   // Open a shell to log a coding CLI in. Logins are shared across agents, so any
@@ -135,17 +145,19 @@ function AuthedApp() {
       buildCommands({
         views: VIEWS.map((v) => ({ id: v.id, label: v.label })),
         agents: agents.map((a) => ({ id: a.id, displayName: a.displayName })),
+        projects: projects.map((p) => ({ id: p.id, name: p.name })),
         setView: (id) => setView(id as MainView),
         setActive,
         openSettings: () => openSettings(),
+        openProject,
         onNewAgent: () => setCreateOpen(true),
       }),
-    [agents, setActive]
+    [agents, projects, setActive]
   );
 
   return (
     <div style={{ height: "100%", display: "grid", gridTemplateColumns: "260px 1fr" }}>
-      <AgentRoster onNewAgent={() => setCreateOpen(true)} onOpenSettings={() => openSettings()} />
+      <AgentRoster onNewAgent={() => setCreateOpen(true)} onOpenSettings={() => openSettings()} onOpenProject={openProject} />
 
       <div style={{ display: "flex", flexDirection: "column", minHeight: 0 }}>
         <div
@@ -185,7 +197,15 @@ function AuthedApp() {
             />
           )}
           {view === "studio" && <AgentStudio agentId={activeAgentId} onOpenSettings={openSettings} />}
-          {view === "projects" && <ProjectsView onOpenSettings={openSettings} />}
+          {view === "projects" && <ProjectsView onOpenProject={openProject} />}
+          {view === "project" && (
+            <ProjectDashboard
+              projectId={selectedProjectId}
+              onChatPM={(id) => { setActive(id); setView("chat"); }}
+              onOpenBuilds={() => setView("builds")}
+              onOpenSettings={openSettings}
+            />
+          )}
           {view === "builds" && <BuildRunsView />}
           {view === "activity" && <ActivityView />}
           {view === "network" && <NetworkView />}

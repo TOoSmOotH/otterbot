@@ -68,9 +68,11 @@ function SectionLabel({ children, testId }: { children: React.ReactNode; testId?
 export function AgentRoster({
   onNewAgent,
   onOpenSettings,
+  onOpenProject,
 }: {
   onNewAgent: () => void;
   onOpenSettings?: () => void;
+  onOpenProject?: (projectId: string) => void;
 }) {
   const agents = useAgentsStore((s) => s.agents);
   const activeAgentId = useAgentsStore((s) => s.activeAgentId);
@@ -247,6 +249,7 @@ export function AgentRoster({
                 onToggle={() => toggle(project.id)}
                 setActive={setActive}
                 activeAgentId={activeAgentId}
+                onOpenProject={onOpenProject}
               />
               {expanded &&
                 members.map((a) => (
@@ -501,6 +504,7 @@ interface ProjectGroupHeaderProps {
   onToggle: () => void;
   setActive: (id: string) => void;
   activeAgentId: string | null;
+  onOpenProject?: (projectId: string) => void;
 }
 
 /** Collapsible header for a project's team; shows a rollup status dot + count. */
@@ -511,6 +515,7 @@ function ProjectGroupHeader({
   onToggle,
   setActive,
   activeAgentId,
+  onOpenProject,
 }: ProjectGroupHeaderProps) {
   const [hovered, setHovered] = useState(false);
   const status = rollupStatus(members);
@@ -569,7 +574,7 @@ function ProjectGroupHeader({
       </button>
       <button
         data-testid={`project-group-${project.id}`}
-        onClick={() => (pmAgentId ? setActive(pmAgentId) : onToggle())}
+        onClick={() => (onOpenProject ? onOpenProject(project.id) : onToggle())}
         style={{
           flex: 1,
           minWidth: 0,

@@ -8,9 +8,11 @@ function ctx(over: Partial<CommandContext> = {}): CommandContext {
       { id: "settings", label: "Settings" },
     ],
     agents: [{ id: "coo", displayName: "Otto" }],
+    projects: [],
     setView: vi.fn(),
     setActive: vi.fn(),
     openSettings: vi.fn(),
+    openProject: vi.fn(),
     onNewAgent: vi.fn(),
     ...over,
   };
@@ -30,6 +32,18 @@ describe("buildCommands", () => {
     buildCommands(c).find((x) => x.id === "agent:coo")!.run();
     expect(c.setActive).toHaveBeenCalledWith("coo");
     expect(c.setView).toHaveBeenCalledWith("chat");
+  });
+
+  it("project command opens the project dashboard", () => {
+    const openProject = vi.fn();
+    const cmds = buildCommands(
+      ctx({ projects: [{ id: "p1", name: "Otter" }], openProject })
+    );
+    const cmd = cmds.find((c) => c.id === "project:p1");
+    expect(cmd).toBeTruthy();
+    expect(cmd?.title).toBe("Open project Otter");
+    cmd!.run();
+    expect(openProject).toHaveBeenCalledWith("p1");
   });
 });
 
