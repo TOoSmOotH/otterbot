@@ -16,7 +16,6 @@ import { useChatStore } from "../../stores/chat-store";
 import { useAgentsStore } from "../../stores/agents-store";
 import { withToken, uploadFile } from "../../lib/api";
 import { Icon } from "../ui/Icon";
-import { type, fonts } from "../../lib/typography";
 import { ConversationList } from "./ConversationList";
 import { CodingCliIndicator } from "./CodingCliIndicator";
 import type { CodingTool } from "../../lib/coding-cli";
@@ -174,7 +173,7 @@ export function AgentChat({
                     : "rgb(var(--muted))",
                 background:
                   agent.status === "working" || agent.status === "thinking"
-                    ? "rgba(61,215,196,0.1)"
+                    ? "rgb(var(--success) / 0.1)"
                     : "rgb(var(--surface-elevated))",
               }}
             >
