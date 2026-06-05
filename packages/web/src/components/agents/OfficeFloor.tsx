@@ -65,7 +65,7 @@ export function OfficeFloor({ onOpenOffice }: { onOpenOffice?: () => void }) {
               position: "relative",
             }}
           >
-            {a.displayName.slice(0, 1).toUpperCase()}
+            {(a.displayName[0] ?? "?").toUpperCase()}
             <span
               style={{
                 position: "absolute",
@@ -88,6 +88,7 @@ export function OfficeFloor({ onOpenOffice }: { onOpenOffice?: () => void }) {
       {onOpenOffice && (
         <button
           onClick={onOpenOffice}
+          data-testid="floor-open-office"
           style={{
             marginLeft: "auto",
             fontSize: 11,
