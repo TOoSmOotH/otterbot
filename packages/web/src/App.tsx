@@ -24,6 +24,7 @@ import { useGlobalSettingsStore } from "./stores/global-settings-store";
 import { useSetupStore } from "./stores/setup-store";
 import { CommandPalette } from "./components/CommandPalette";
 import { buildCommands } from "./lib/commands";
+import { OfficeFloor } from "./components/agents/OfficeFloor";
 
 type MainView = "chat" | "studio" | "projects" | "builds" | "activity" | "network" | "settings";
 
@@ -241,6 +242,7 @@ function AuthedApp() {
             <GlobalSettings initialTab={settingsTab} onOpenLoginTerminal={openLoginTerminal} />
           )}
         </div>
+        <OfficeFloor onOpenOffice={() => setView("network")} />
       </div>
 
       {createOpen && <AgentWizard onClose={() => setCreateOpen(false)} />}

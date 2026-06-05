@@ -25,6 +25,12 @@ test.describe("shell", () => {
     await expect(page.getByTestId("global-settings")).toBeVisible();
   });
 
+  test("office floor shows the COO station", async ({ page }) => {
+    await gotoApp(page);
+    await expect(page.getByTestId("office-floor")).toBeVisible();
+    await expect(page.getByTestId("floor-station-coo")).toBeVisible();
+  });
+
   test("GET /api/agents includes the COO", async ({ request }) => {
     const res = await request.get("/api/agents");
     expect(res.ok()).toBeTruthy();
