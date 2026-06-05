@@ -5,6 +5,7 @@ import {
   CornerDownRight,
   FolderGit2,
   Plus,
+  Settings,
   Wifi,
   WifiOff,
 } from "lucide-react";
@@ -46,7 +47,30 @@ function rollupStatus(members: AgentProfileSummary[]): AgentStatus {
  * default) to keep the list scannable; standalone and service agents stay at the
  * top level alongside the COO.
  */
-export function AgentRoster({ onNewAgent }: { onNewAgent: () => void }) {
+function SectionLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <div
+      style={{
+        fontSize: 10,
+        textTransform: "uppercase",
+        letterSpacing: "0.1em",
+        color: "rgb(var(--subtle))",
+        fontWeight: 700,
+        margin: "13px 8px 6px",
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
+export function AgentRoster({
+  onNewAgent,
+  onOpenSettings,
+}: {
+  onNewAgent: () => void;
+  onOpenSettings?: () => void;
+}) {
   const agents = useAgentsStore((s) => s.agents);
   const activeAgentId = useAgentsStore((s) => s.activeAgentId);
   const setActive = useAgentsStore((s) => s.setActive);
@@ -204,10 +228,9 @@ export function AgentRoster({ onNewAgent }: { onNewAgent: () => void }) {
           gap: 2,
         }}
       >
+        {coo && <SectionLabel>Leadership</SectionLabel>}
         {coo && <AgentCard key={coo.id} agent={coo} {...cardProps} />}
-        {topLevel.map((a) => (
-          <AgentCard key={a.id} agent={a} {...cardProps} />
-        ))}
+        {groups.length > 0 && <SectionLabel>Projects</SectionLabel>}
         {groups.map(({ project, members }) => {
           // The header itself represents the PM, so selecting the PM should not
           // force the team open — only a non-PM active member does.
@@ -231,6 +254,10 @@ export function AgentRoster({ onNewAgent }: { onNewAgent: () => void }) {
             </div>
           );
         })}
+        {topLevel.length > 0 && <SectionLabel>Direct messages</SectionLabel>}
+        {topLevel.map((a) => (
+          <AgentCard key={a.id} agent={a} {...cardProps} />
+        ))}
         {ordered.length === 0 && (
           <div style={{ color: "rgb(var(--muted))", fontSize: 12, padding: 10 }}>
             Loading agents…
@@ -262,6 +289,29 @@ export function AgentRoster({ onNewAgent }: { onNewAgent: () => void }) {
         >
           <Icon icon={Plus} size={14} strokeWidth={2.25} />
           New agent
+        </button>
+        <button
+          data-testid="sidebar-gear"
+          onClick={() => onOpenSettings?.()}
+          title="Settings"
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            width: "100%",
+            marginTop: 8,
+            padding: "8px 10px",
+            background: "transparent",
+            border: "1px solid rgb(var(--border))",
+            borderRadius: 10,
+            color: "rgb(var(--muted))",
+            cursor: "pointer",
+            fontSize: 12,
+            fontWeight: 600,
+          }}
+        >
+          <Icon icon={Settings} size={15} />
+          Settings
         </button>
       </div>
     </div>

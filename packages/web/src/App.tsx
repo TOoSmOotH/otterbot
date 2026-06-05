@@ -149,7 +149,7 @@ function AuthedApp() {
 
   return (
     <div style={{ height: "100%", display: "grid", gridTemplateColumns: "260px 1fr" }}>
-      <AgentRoster onNewAgent={() => setCreateOpen(true)} />
+      <AgentRoster onNewAgent={() => setCreateOpen(true)} onOpenSettings={() => openSettings()} />
 
       <div style={{ display: "flex", flexDirection: "column", minHeight: 0 }}>
         <nav
