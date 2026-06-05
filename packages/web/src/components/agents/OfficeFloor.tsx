@@ -10,9 +10,10 @@ const STATUS_COLOR: Record<AgentStatus, string> = {
   error: "rgb(var(--danger))",
 };
 
-export function OfficeFloor({ onOpenOffice }: { onOpenOffice?: () => void }) {
+export function OfficeFloor({ onOpenOffice, onOpenAgent }: { onOpenOffice?: () => void; onOpenAgent?: (id: string) => void }) {
   const agents = useAgentsStore((s) => s.agents);
   const setActive = useAgentsStore((s) => s.setActive);
+  const selectAgent = onOpenAgent ?? setActive;
   const working = agents.filter((a) => a.status === "working" || a.status === "thinking").length;
 
   return (
@@ -36,7 +37,7 @@ export function OfficeFloor({ onOpenOffice }: { onOpenOffice?: () => void }) {
         <button
           key={a.id}
           data-testid={`floor-station-${a.id}`}
-          onClick={() => setActive(a.id)}
+          onClick={() => selectAgent(a.id)}
           title={`${a.displayName} · ${a.status}`}
           style={{
             display: "flex",

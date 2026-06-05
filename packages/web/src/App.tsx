@@ -214,7 +214,7 @@ function AuthedApp() {
             <GlobalSettings initialTab={settingsTab} onOpenLoginTerminal={openLoginTerminal} />
           )}
         </div>
-        <OfficeFloor onOpenOffice={() => setView("network")} />
+        <OfficeFloor onOpenOffice={() => setView("network")} onOpenAgent={(id) => { setActive(id); setView("chat"); }} />
       </div>
 
       {createOpen && <AgentWizard onClose={() => setCreateOpen(false)} />}
