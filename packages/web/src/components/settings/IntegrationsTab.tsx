@@ -429,7 +429,7 @@ function AddAccount({ onDone }: { onDone: () => void }) {
         </label>
       )}
 
-      {sshKeys.error && <span style={{ color: "tomato", fontSize: 12 }}>{sshKeys.error}</span>}
+      {sshKeys.error && <span style={{ color: "rgb(var(--danger))", fontSize: 12 }}>{sshKeys.error}</span>}
       <div style={{ display: "flex", gap: 8 }}>
         <button style={primary} disabled={busy || invalid} onClick={() => void submit()}>
           {busy ? "Saving…" : "Create SSH key"}
@@ -849,7 +849,7 @@ function AddIntegration({
               borderRadius: 999,
               border: "1px solid rgb(var(--border))",
               background: i === clamped ? "rgb(var(--accent))" : "transparent",
-              color: i === clamped ? "white" : "rgb(var(--muted))",
+              color: i === clamped ? "rgb(var(--accent-fg))" : "rgb(var(--muted))",
             }}
           >
             {i + 1}. {{ service: "Service", account: "Account", config: "Configure", assign: "Assign" }[s]}
@@ -1034,7 +1034,7 @@ function AddIntegration({
         </div>
       )}
 
-      {(error || forgeError) && <span style={{ color: "tomato", fontSize: 12 }}>{error || forgeError}</span>}
+      {(error || forgeError) && <span style={{ color: "rgb(var(--danger))", fontSize: 12 }}>{error || forgeError}</span>}
       <div style={{ display: "flex", gap: 8, justifyContent: "space-between" }}>
         <button style={ghost} onClick={onDone}>
           Cancel
@@ -1369,8 +1369,9 @@ const row: React.CSSProperties = {
   alignItems: "center",
   padding: "8px 10px",
   border: "1px solid rgb(var(--border))",
-  borderRadius: 8,
+  borderRadius: 12,
   marginBottom: 6,
+  background: "rgb(var(--surface))",
 };
 const card: React.CSSProperties = {
   display: "flex",
@@ -1378,39 +1379,45 @@ const card: React.CSSProperties = {
   gap: 10,
   padding: 12,
   border: "1px solid rgb(var(--border))",
-  borderRadius: 10,
+  borderRadius: 12,
+  background: "rgb(var(--surface))",
 };
 const badge: React.CSSProperties = {
   fontSize: 11,
   padding: "1px 6px",
-  borderRadius: 6,
-  background: "rgb(var(--bg))",
+  borderRadius: 8,
+  background: "rgb(var(--surface-elevated))",
   border: "1px solid rgb(var(--border))",
   color: "rgb(var(--muted))",
 };
 const fieldLabel: React.CSSProperties = { display: "flex", flexDirection: "column", gap: 4, fontSize: 13 };
 const radio: React.CSSProperties = { display: "flex", alignItems: "center", gap: 6, fontSize: 13 };
 const input: React.CSSProperties = {
-  padding: "6px 8px",
-  borderRadius: 6,
+  padding: "8px 10px",
+  borderRadius: 10,
   border: "1px solid rgb(var(--border))",
   background: "rgb(var(--bg))",
   color: "rgb(var(--fg))",
 };
 const primary: React.CSSProperties = {
   padding: "6px 12px",
-  borderRadius: 6,
+  borderRadius: 10,
   border: "none",
   background: "rgb(var(--accent))",
-  color: "white",
+  color: "rgb(var(--accent-fg))",
   cursor: "pointer",
+  fontWeight: 700,
+  fontSize: 13,
+  boxShadow: "var(--shadow-sm)",
 };
 const ghost: React.CSSProperties = {
   padding: "6px 12px",
-  borderRadius: 6,
+  borderRadius: 10,
   border: "1px solid rgb(var(--border))",
   background: "transparent",
   color: "rgb(var(--fg))",
   cursor: "pointer",
+  fontWeight: 600,
+  fontSize: 13,
 };
-const danger: React.CSSProperties = { ...ghost, color: "tomato" };
+const danger: React.CSSProperties = { ...ghost, color: "rgb(var(--danger))" };
