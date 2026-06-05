@@ -29,7 +29,7 @@ export function ContextPanel({ agentId }: { agentId: string }) {
   }
 
   const pct = Math.min(100, Math.round((status.usedTokens / status.budgetTokens) * 100));
-  const barColor = status.overBudget ? "#f87171" : "rgb(var(--accent))";
+  const barColor = status.overBudget ? "rgb(var(--danger))" : "rgb(var(--accent))";
 
   const onCompact = async () => {
     setBusy(true);

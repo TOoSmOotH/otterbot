@@ -78,7 +78,7 @@ const modal: React.CSSProperties = {
   maxWidth: 1100,
   display: "flex",
   flexDirection: "column",
-  background: "#0b0b0f",
+  background: "rgb(var(--surface-sunken))",
   border: "1px solid rgb(var(--border))",
   borderRadius: 10,
   overflow: "hidden",

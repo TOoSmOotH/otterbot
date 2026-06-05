@@ -42,7 +42,7 @@ export function ConversationList({ agentId }: { agentId: string }) {
           margin: 8,
           padding: "6px 10px",
           background: "rgb(var(--accent))",
-          color: "white",
+          color: "rgb(var(--accent-fg))",
           border: "none",
           borderRadius: 6,
           cursor: "pointer",

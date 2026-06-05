@@ -441,7 +441,7 @@ const checkRow: React.CSSProperties = {
 };
 const primaryBtn: React.CSSProperties = {
   background: "rgb(var(--accent))",
-  color: "#fff",
+  color: "rgb(var(--accent-fg))",
   border: "none",
   borderRadius: 6,
   padding: "7px 14px",
