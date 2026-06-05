@@ -19,4 +19,12 @@ test.describe("studio shell", () => {
     await expect(page.getByTestId("channel-title")).toBeVisible();
     await expect(page.getByTestId("chat-input")).toBeVisible();
   });
+
+  test("clicking a sidebar agent from settings navigates to its chat", async ({ page }) => {
+    await gotoApp(page);
+    await page.getByTestId("sidebar-gear").click();
+    await expect(page.getByTestId("global-settings")).toBeVisible();
+    await page.getByTestId("agent-card-coo").click();
+    await expect(page.getByTestId("chat-input")).toBeVisible();
+  });
 });
