@@ -177,7 +177,7 @@ export function ProjectsView({ onOpenSettings }: { onOpenSettings?: (tab?: strin
   );
 }
 
-function ProjectCard({
+export function ProjectCard({
   project,
   onDelete,
   onOpenSettings,
