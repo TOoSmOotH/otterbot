@@ -77,7 +77,7 @@ export function PixiOffice() {
         await app.init({
           resizeTo: host,
           antialias: false,
-          backgroundColor: 0x1a1c22,
+          backgroundColor: 0x121327,
           resolution: Math.min(window.devicePixelRatio || 1, 2),
           autoDensity: true,
           // Fall back to the 2D-canvas renderer when WebGL is unavailable
