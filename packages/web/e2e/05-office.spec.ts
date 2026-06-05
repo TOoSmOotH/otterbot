@@ -10,7 +10,7 @@ test("office sub-tab mounts a pixi canvas with no console errors", async ({ page
   await page.getByTestId("command-trigger").click();
   await page.getByTestId("command-input").fill("Go to Network");
   await page.getByTestId("command-input").press("Enter");
-  await page.getByRole("button", { name: "Office" }).click();
+  await page.getByTestId("network-subtabs-office").click();
 
   await expect(page.locator("canvas").first()).toBeVisible({ timeout: 10_000 });
   await expect(page.getByRole("slider", { name: "Office zoom" })).toBeVisible();

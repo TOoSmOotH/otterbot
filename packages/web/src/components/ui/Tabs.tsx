@@ -25,6 +25,7 @@ export function Tabs<T extends string>({ tabs, value, onChange, layoutId = "tabs
             <button
               key={t.id}
               type="button"
+              data-testid={`${layoutId}-${t.id}`}
               onClick={() => onChange(t.id)}
               className={`relative inline-flex items-center gap-1.5 px-3 py-2.5 cursor-pointer border-0 bg-transparent text-ui ${
                 active ? "text-fg font-semibold" : "text-muted hover:text-fg font-medium"
