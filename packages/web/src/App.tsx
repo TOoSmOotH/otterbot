@@ -1,7 +1,4 @@
 import { useEffect, useMemo, useState } from "react";
-import { LayoutGroup, motion } from "motion/react";
-import { Activity, FolderGit2, GitBranch, MessageSquare, Network, Settings, Sliders } from "lucide-react";
-import type { LucideIcon } from "lucide-react";
 import { AgentRoster } from "./components/agents/AgentRoster";
 import { AgentChat } from "./components/chat/AgentChat";
 import { CODING_LOGIN_CMDS, CODING_TOOL_LABELS, type CodingTool } from "./lib/coding-cli";
@@ -16,7 +13,6 @@ import { NetworkView } from "./components/agents/NetworkView";
 import { GlobalSettings } from "./components/settings/GlobalSettings";
 import { OnboardingWizard } from "./components/agents/OnboardingWizard";
 import { AuthGate } from "./components/AuthGate";
-import { Icon } from "./components/ui/Icon";
 import { useAgentsStore } from "./stores/agents-store";
 import { useActivityStore } from "./stores/activity-store";
 import { useChatStore } from "./stores/chat-store";
@@ -28,14 +24,14 @@ import { OfficeFloor } from "./components/agents/OfficeFloor";
 
 type MainView = "chat" | "studio" | "projects" | "builds" | "activity" | "network" | "settings";
 
-const VIEWS: { id: MainView; label: string; icon: LucideIcon }[] = [
-  { id: "chat", label: "Chat", icon: MessageSquare },
-  { id: "studio", label: "Agent Studio", icon: Sliders },
-  { id: "projects", label: "Projects", icon: FolderGit2 },
-  { id: "builds", label: "Build Runs", icon: GitBranch },
-  { id: "activity", label: "Activity", icon: Activity },
-  { id: "network", label: "Network", icon: Network },
-  { id: "settings", label: "Settings", icon: Settings },
+const VIEWS: { id: MainView; label: string }[] = [
+  { id: "chat", label: "Chat" },
+  { id: "studio", label: "Agent Studio" },
+  { id: "projects", label: "Projects" },
+  { id: "builds", label: "Build Runs" },
+  { id: "activity", label: "Activity" },
+  { id: "network", label: "Network" },
+  { id: "settings", label: "Settings" },
 ];
 
 export default function App() {
@@ -152,11 +148,11 @@ function AuthedApp() {
       <AgentRoster onNewAgent={() => setCreateOpen(true)} onOpenSettings={() => openSettings()} />
 
       <div style={{ display: "flex", flexDirection: "column", minHeight: 0 }}>
-        <nav
+        <div
           style={{
             display: "flex",
-            gap: 2,
-            padding: "0 12px",
+            alignItems: "center",
+            padding: "8px 12px",
             borderBottom: "1px solid rgb(var(--border))",
             background: "rgb(var(--bg))",
           }}
@@ -168,7 +164,6 @@ function AuthedApp() {
               display: "inline-flex",
               alignItems: "center",
               gap: 8,
-              margin: "6px 8px 6px 0",
               padding: "6px 10px",
               background: "rgb(var(--surface))",
               border: "1px solid rgb(var(--border))",
@@ -180,51 +175,7 @@ function AuthedApp() {
           >
             Jump to… <kbd style={{ fontSize: 10 }}>⌘K</kbd>
           </button>
-          <LayoutGroup id="view-tabs">
-            {VIEWS.map((v) => {
-              const active = view === v.id;
-              return (
-                <button
-                  key={v.id}
-                  data-testid={`view-${v.id}`}
-                  onClick={() => setView(v.id)}
-                  style={{
-                    position: "relative",
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: 6,
-                    background: "transparent",
-                    color: active ? "rgb(var(--fg))" : "rgb(var(--muted))",
-                    border: "none",
-                    padding: "10px 12px",
-                    cursor: "pointer",
-                    fontSize: 12,
-                    fontWeight: active ? 600 : 500,
-                    letterSpacing: "-0.005em",
-                  }}
-                >
-                  <Icon icon={v.icon} size={14} />
-                  {v.label}
-                  {active && (
-                    <motion.span
-                      layoutId="view-tab-indicator"
-                      transition={{ type: "spring", stiffness: 480, damping: 38 }}
-                      style={{
-                        position: "absolute",
-                        left: 8,
-                        right: 8,
-                        bottom: -1,
-                        height: 2,
-                        background: "rgb(var(--accent))",
-                        borderRadius: 2,
-                      }}
-                    />
-                  )}
-                </button>
-              );
-            })}
-          </LayoutGroup>
-        </nav>
+        </div>
         <div style={{ flex: 1, minHeight: 0 }}>
           {view === "chat" && (
             <AgentChat

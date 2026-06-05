@@ -9,7 +9,9 @@ test.describe("agent studio", () => {
   test("studio tabs render their sections", async ({ page }) => {
     await gotoApp(page);
     await page.getByTestId("agent-card-coo").click();
-    await page.getByTestId("view-studio").click();
+    await page.getByTestId("command-trigger").click();
+    await page.getByTestId("command-input").fill("Go to Agent Studio");
+    await page.getByTestId("command-input").press("Enter");
 
     await page.getByTestId("studio-tab-Identity").click();
     await expect(page.getByText("Display name")).toBeVisible();

@@ -15,14 +15,15 @@ test.describe("shell", () => {
   test("main views switch", async ({ page }) => {
     await gotoApp(page);
 
-    await page.getByTestId("view-activity").click();
-    await expect(page.getByText("Agent communication")).toBeVisible();
-
-    await page.getByTestId("view-chat").click();
-    await expect(page.getByTestId("chat-input")).toBeVisible();
-
-    await page.getByTestId("view-settings").click();
+    // Settings via the sidebar gear
+    await page.getByTestId("sidebar-gear").click();
     await expect(page.getByTestId("global-settings")).toBeVisible();
+
+    // Back to chat via the command palette
+    await page.getByTestId("command-trigger").click();
+    await page.getByTestId("command-input").fill("Go to Chat");
+    await page.getByTestId("command-input").press("Enter");
+    await expect(page.getByTestId("chat-input")).toBeVisible();
   });
 
   test("office floor shows the COO station", async ({ page }) => {
