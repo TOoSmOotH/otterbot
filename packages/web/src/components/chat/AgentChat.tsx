@@ -15,7 +15,6 @@ import type { Artifact } from "@otterbot/shared";
 import { useChatStore } from "../../stores/chat-store";
 import { useAgentsStore } from "../../stores/agents-store";
 import { withToken, uploadFile } from "../../lib/api";
-import { statusColor } from "../agents/agent-visual";
 import { Icon } from "../ui/Icon";
 import { type, fonts } from "../../lib/typography";
 import { ConversationList } from "./ConversationList";
@@ -25,8 +24,6 @@ import { ContextPanel } from "./ContextPanel";
 import { ChatImage } from "./ChatImage";
 import { ToolMessage } from "./ToolMessage";
 import { Markdown } from "./Markdown";
-
-const PULSING_STATUSES = new Set(["working", "thinking"]);
 
 export function AgentChat({
   onEditAgent,
@@ -133,8 +130,6 @@ export function AgentChat({
     );
   }
 
-  const statusPulse = PULSING_STATUSES.has(agent.status);
-
   return (
     <div style={{ display: "flex", height: "100%" }}>
       {showHistory && <ConversationList agentId={activeAgentId} />}
@@ -159,30 +154,34 @@ export function AgentChat({
             gap: 12,
           }}
         >
-          <h2
-            style={{
-              ...type.h2,
-              margin: 0,
-              display: "flex",
-              alignItems: "center",
-              gap: 8,
-              letterSpacing: "-0.005em",
-            }}
-          >
-            {agent.displayName}
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <h2 data-testid="channel-title" style={{ margin: 0, fontSize: 16, fontWeight: 800 }}>
+              <span style={{ color: "rgb(var(--subtle))", fontWeight: 700, marginRight: 4 }}>#</span>
+              {agent.displayName}
+            </h2>
             <span
-              title={agent.status}
               style={{
-                width: 8,
-                height: 8,
-                borderRadius: "50%",
-                background: statusColor(agent.status),
-                animation: statusPulse ? "otter-pulse 1.5s ease-in-out infinite" : undefined,
-                boxShadow: statusPulse ? `0 0 6px ${statusColor(agent.status)}` : undefined,
+                fontSize: 11,
+                fontWeight: 700,
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                padding: "3px 9px",
+                borderRadius: 20,
+                color:
+                  agent.status === "working" || agent.status === "thinking"
+                    ? "rgb(var(--success))"
+                    : "rgb(var(--muted))",
+                background:
+                  agent.status === "working" || agent.status === "thinking"
+                    ? "rgba(61,215,196,0.1)"
+                    : "rgb(var(--surface-elevated))",
               }}
-            />
+            >
+              {agent.status}
+            </span>
             {streaming && <StreamingDots />}
-          </h2>
+          </div>
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
             <CodingCliIndicator
               onOpenSettings={onOpenSettings}

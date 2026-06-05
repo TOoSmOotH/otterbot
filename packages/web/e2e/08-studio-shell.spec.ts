@@ -13,4 +13,10 @@ test.describe("studio shell", () => {
     await page.getByTestId("sidebar-gear").click();
     await expect(page.getByTestId("global-settings")).toBeVisible();
   });
+
+  test("chat shows a channel-style header for the active agent", async ({ page }) => {
+    await gotoApp(page);
+    await expect(page.getByTestId("channel-title")).toBeVisible();
+    await expect(page.getByTestId("chat-input")).toBeVisible();
+  });
 });
