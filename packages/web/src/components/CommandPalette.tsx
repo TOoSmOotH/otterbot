@@ -118,7 +118,7 @@ export function CommandPalette({
                 color: "rgb(var(--fg))",
                 background:
                   i === active
-                    ? "linear-gradient(90deg, rgba(61,215,196,0.2), rgba(61,215,196,0.05))"
+                    ? "linear-gradient(90deg, rgb(var(--accent) / 0.2), rgb(var(--accent) / 0.05))"
                     : "transparent",
               }}
             >
