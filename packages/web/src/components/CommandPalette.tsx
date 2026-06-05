@@ -66,8 +66,9 @@ export function CommandPalette({
       }}
     >
       <div
+        role="dialog"
+        aria-modal={true}
         onClick={(e) => e.stopPropagation()}
-        onKeyDown={onKey}
         style={{
           width: 560,
           maxWidth: "92%",
@@ -81,8 +82,10 @@ export function CommandPalette({
         <input
           ref={inputRef}
           data-testid="command-input"
+          aria-label="Search commands"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
+          onKeyDown={onKey}
           placeholder="Jump to anything…"
           style={{
             width: "100%",
