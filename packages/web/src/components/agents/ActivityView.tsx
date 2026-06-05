@@ -158,7 +158,7 @@ function CodingSessionRow({
   const interactive = session.mode === "interactive";
   const modeLabel = interactive ? "interactive" : "autonomous";
   return (
-    <div className="rounded-md border border-border bg-surface shadow-sm overflow-hidden">
+    <div className="rounded-lg border border-border bg-surface shadow-sm overflow-hidden">
       <button
         onClick={onToggle}
         className="w-full flex items-center gap-2 p-2.5 text-left hover:bg-surface/60"
@@ -177,7 +177,7 @@ function CodingSessionRow({
         <span className="text-small text-muted">{open ? "▾" : "▸"}</span>
       </button>
       {open && (
-        <div style={{ height: 280, background: "#0b0b0f", borderTop: "1px solid rgb(var(--border))", padding: 6 }}>
+        <div style={{ height: 280, background: "rgb(var(--surface-sunken))", borderTop: "1px solid rgb(var(--border))", padding: 6 }}>
           {/* All coding sessions are live PTYs now — watchable and typeable. */}
           <TerminalView agentId={session.agentId} kind="coding" interactive />
         </div>
@@ -234,7 +234,7 @@ function MessageRow({ msg, from, to }: { msg: AgentMessage; from: string; to: st
 function TaskCard({ task, parentName }: { task: SubagentTask; parentName: string }) {
   const tone = TASK_TONE[task.status] ?? "neutral";
   return (
-    <div className="rounded-md border border-border bg-surface p-3 text-body shadow-sm">
+    <div className="rounded-lg border border-border bg-surface p-3 text-body shadow-sm">
       <div className="flex items-center justify-between gap-2">
         <span className="font-semibold text-fg">{parentName}</span>
         <Badge tone={tone}>{task.status}</Badge>

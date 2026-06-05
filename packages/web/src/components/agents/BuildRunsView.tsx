@@ -129,7 +129,7 @@ export function BuildRunsView() {
                 setProjectId(e.target.value);
                 setSelectedRunId(null);
               }}
-              className="w-full rounded-md border border-border bg-surface px-2 py-1.5 text-body text-fg"
+              className="w-full rounded-lg border border-border bg-surface px-2 py-1.5 text-body text-fg"
             >
               {projects.map((p) => (
                 <option key={p.id} value={p.id}>
@@ -256,7 +256,7 @@ function RunCard({
   return (
     <button
       onClick={onClick}
-      className={`w-full text-left rounded-md border p-3 text-body shadow-sm transition-colors ${
+      className={`w-full text-left rounded-lg border p-3 text-body shadow-sm transition-colors ${
         active ? "border-accent bg-surface-elevated" : "border-border bg-surface hover:bg-surface/60"
       }`}
     >
@@ -288,7 +288,7 @@ function TaskCard({
   return (
     <button
       onClick={onClick}
-      className={`w-full text-left rounded-md border p-3 text-body shadow-sm transition-colors ${
+      className={`w-full text-left rounded-lg border p-3 text-body shadow-sm transition-colors ${
         active ? "border-accent bg-surface-elevated" : "border-border bg-surface hover:bg-surface/60"
       }`}
     >
@@ -385,7 +385,7 @@ function TaskDrillDown({
             <div className="text-body text-muted">No diff (task hasn&apos;t run yet).</div>
           ) : (
             <pre
-              className="rounded-md border border-border bg-surface-sunken p-2 overflow-auto whitespace-pre"
+              className="rounded-lg border border-border bg-surface-sunken p-2 overflow-auto whitespace-pre"
               style={{ ...type.monoSm, maxHeight: 360 }}
             >
               {diff}
@@ -422,7 +422,7 @@ function TranscriptMessage({ msg }: { msg: BuildTranscriptMessage }) {
           : "neutral";
   const tools = summarizeToolCalls(msg.toolCalls);
   return (
-    <div className="rounded-md border border-border bg-surface p-2.5 text-body shadow-sm">
+    <div className="rounded-lg border border-border bg-surface p-2.5 text-body shadow-sm">
       <Badge tone={tone}>{msg.role}</Badge>
       {msg.content && (
         <div
