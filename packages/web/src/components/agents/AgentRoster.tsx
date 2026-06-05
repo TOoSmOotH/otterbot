@@ -69,14 +69,17 @@ export function AgentRoster({
   onNewAgent,
   onOpenSettings,
   onOpenProject,
+  onOpenAgent,
 }: {
   onNewAgent: () => void;
   onOpenSettings?: () => void;
   onOpenProject?: (projectId: string) => void;
+  onOpenAgent?: (id: string) => void;
 }) {
   const agents = useAgentsStore((s) => s.agents);
   const activeAgentId = useAgentsStore((s) => s.activeAgentId);
   const setActive = useAgentsStore((s) => s.setActive);
+  const selectAgent = onOpenAgent ?? setActive;
   const connected = useChatStore((s) => s.connected);
   const tasks = useActivityStore((s) => s.tasks);
   const projects = useProjectsStore((s) => s.projects);
@@ -176,7 +179,7 @@ export function AgentRoster({
       return next;
     });
 
-  const cardProps = { activeAgentId, setActive, hoveredId, setHoveredId, activeTasksByAgent };
+  const cardProps = { activeAgentId, setActive: selectAgent, hoveredId, setHoveredId, activeTasksByAgent };
 
   return (
     <div
