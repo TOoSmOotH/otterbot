@@ -40,7 +40,7 @@ function RepoRow({
   const canRemove = project.repos.length > 1;
 
   return (
-    <div style={{ border: "1px solid rgb(var(--border))", borderRadius: 8, padding: 8 }}>
+    <div style={{ border: "1px solid rgb(var(--border))", borderRadius: 12, padding: 8 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
         <code style={{ fontSize: 12 }}>/project/{repo.name}</code>
         {repo.isPrimary && <span style={chip}>primary</span>}
@@ -395,7 +395,7 @@ function RunRow({ run }: { run: PipelineRun }) {
     cancelled: "rgb(150 150 150)",
   };
   return (
-    <div style={{ border: "1px solid rgb(var(--border))", borderRadius: 6, padding: 8 }}>
+    <div style={{ border: "1px solid rgb(var(--border))", borderRadius: 10, padding: 8 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12 }}>
         <span style={{ color: statusColor[run.status] ?? "rgb(var(--fg))", fontWeight: 600 }}>{run.status}</span>
         {run.currentStage && run.status === "running" && (
@@ -434,7 +434,7 @@ const input: React.CSSProperties = {
   background: "rgb(var(--bg))",
   color: "rgb(var(--fg))",
   border: "1px solid rgb(var(--border))",
-  borderRadius: 6,
+  borderRadius: 10,
   padding: "6px 10px",
   fontSize: 13,
 };
@@ -443,13 +443,14 @@ const primaryBtn: React.CSSProperties = {
   alignItems: "center",
   gap: 6,
   background: "rgb(var(--accent))",
-  color: "#fff",
+  color: "rgb(var(--accent-fg))",
   border: "none",
-  borderRadius: 6,
+  borderRadius: 10,
   padding: "6px 12px",
   cursor: "pointer",
   fontSize: 13,
   fontWeight: 600,
+  boxShadow: "var(--shadow-sm)",
 };
 const ghostBtn: React.CSSProperties = {
   display: "inline-flex",
@@ -458,16 +459,16 @@ const ghostBtn: React.CSSProperties = {
   background: "transparent",
   color: "rgb(var(--fg))",
   border: "1px solid rgb(var(--border))",
-  borderRadius: 6,
+  borderRadius: 10,
   padding: "5px 10px",
   cursor: "pointer",
   fontSize: 12,
 };
 const card: React.CSSProperties = {
   border: "1px solid rgb(var(--border))",
-  borderRadius: 8,
+  borderRadius: 12,
   padding: 12,
-  background: "rgb(var(--bg))",
+  background: "rgb(var(--surface))",
 };
 const chip: React.CSSProperties = {
   display: "inline-flex",
@@ -483,14 +484,14 @@ const badge: React.CSSProperties = {
   fontSize: 10,
   color: "rgb(var(--muted))",
   border: "1px solid rgb(var(--border))",
-  borderRadius: 4,
+  borderRadius: 6,
   padding: "1px 6px",
 };
 const iconBtn: React.CSSProperties = {
   display: "inline-flex",
   background: "transparent",
   border: "1px solid rgb(var(--border))",
-  borderRadius: 6,
+  borderRadius: 8,
   color: "rgb(var(--muted))",
   cursor: "pointer",
   padding: "3px 6px",

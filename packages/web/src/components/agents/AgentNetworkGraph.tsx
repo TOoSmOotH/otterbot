@@ -192,7 +192,7 @@ function AgentGraphNode({ data }: NodeProps<AgentNode>) {
         alignItems: "center",
         gap: 10,
         padding: "8px 12px 8px 8px",
-        borderRadius: 10,
+        borderRadius: 12,
         background: "rgb(var(--surface-elevated))",
         border: `1px solid ${isCoo ? "rgb(var(--accent) / 0.5)" : "rgb(var(--border))"}`,
         boxShadow: "var(--shadow-sm)",
@@ -204,7 +204,7 @@ function AgentGraphNode({ data }: NodeProps<AgentNode>) {
         style={{
           width: 32,
           height: 32,
-          borderRadius: 8,
+          borderRadius: 10,
           flexShrink: 0,
           display: "flex",
           alignItems: "center",
