@@ -350,7 +350,7 @@ function SessionRow({
                 marginLeft: 8,
                 fontSize: 10,
                 color: "rgb(var(--success))",
-                border: "1px solid #4ade80",
+                border: "1px solid rgb(var(--success))",
                 borderRadius: 4,
                 padding: "1px 6px",
               }}
