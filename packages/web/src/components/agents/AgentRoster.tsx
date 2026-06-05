@@ -47,9 +47,10 @@ function rollupStatus(members: AgentProfileSummary[]): AgentStatus {
  * default) to keep the list scannable; standalone and service agents stay at the
  * top level alongside the COO.
  */
-function SectionLabel({ children }: { children: React.ReactNode }) {
+function SectionLabel({ children, testId }: { children: React.ReactNode; testId?: string }) {
   return (
     <div
+      data-testid={testId}
       style={{
         fontSize: 10,
         textTransform: "uppercase",
@@ -228,9 +229,9 @@ export function AgentRoster({
           gap: 2,
         }}
       >
-        {coo && <SectionLabel>Leadership</SectionLabel>}
+        {coo && <SectionLabel testId="section-label-leadership">Leadership</SectionLabel>}
         {coo && <AgentCard key={coo.id} agent={coo} {...cardProps} />}
-        {groups.length > 0 && <SectionLabel>Projects</SectionLabel>}
+        {groups.length > 0 && <SectionLabel testId="section-label-projects">Projects</SectionLabel>}
         {groups.map(({ project, members }) => {
           // The header itself represents the PM, so selecting the PM should not
           // force the team open — only a non-PM active member does.
@@ -254,7 +255,7 @@ export function AgentRoster({
             </div>
           );
         })}
-        {topLevel.length > 0 && <SectionLabel>Direct messages</SectionLabel>}
+        {topLevel.length > 0 && <SectionLabel testId="section-label-dms">Direct messages</SectionLabel>}
         {topLevel.map((a) => (
           <AgentCard key={a.id} agent={a} {...cardProps} />
         ))}
@@ -303,7 +304,7 @@ export function AgentRoster({
             padding: "8px 10px",
             background: "transparent",
             border: "1px solid rgb(var(--border))",
-            borderRadius: 10,
+            borderRadius: 8,
             color: "rgb(var(--muted))",
             cursor: "pointer",
             fontSize: 12,

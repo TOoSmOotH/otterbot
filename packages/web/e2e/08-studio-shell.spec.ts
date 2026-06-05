@@ -4,7 +4,7 @@ import { gotoApp } from "./helpers";
 test.describe("studio shell", () => {
   test("sidebar shows company sections and the COO under Leadership", async ({ page }) => {
     await gotoApp(page);
-    await expect(page.getByText("Leadership", { exact: true })).toBeVisible();
+    await expect(page.getByTestId("section-label-leadership")).toBeVisible();
     await expect(page.getByTestId("agent-card-coo")).toBeVisible();
   });
 
