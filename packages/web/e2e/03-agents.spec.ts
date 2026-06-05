@@ -11,6 +11,8 @@ test.describe("agents", () => {
     const name = `E2E Agent ${Date.now()}`;
 
     await page.getByTestId("new-agent").click();
+    // The new-agent wizard opens on a menu — choose a single agent.
+    await page.getByRole("button", { name: /Single agent/ }).click();
     await expect(page.getByTestId("agent-editor")).toBeVisible();
 
     await page.getByTestId("agent-name").fill(name);
