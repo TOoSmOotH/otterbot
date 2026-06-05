@@ -247,7 +247,6 @@ export function AgentRoster({
                 members={members}
                 expanded={expanded}
                 onToggle={() => toggle(project.id)}
-                setActive={setActive}
                 activeAgentId={activeAgentId}
                 onOpenProject={onOpenProject}
               />
@@ -502,7 +501,6 @@ interface ProjectGroupHeaderProps {
   members: AgentProfileSummary[];
   expanded: boolean;
   onToggle: () => void;
-  setActive: (id: string) => void;
   activeAgentId: string | null;
   onOpenProject?: (projectId: string) => void;
 }
@@ -513,7 +511,6 @@ function ProjectGroupHeader({
   members,
   expanded,
   onToggle,
-  setActive,
   activeAgentId,
   onOpenProject,
 }: ProjectGroupHeaderProps) {

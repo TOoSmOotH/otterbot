@@ -52,6 +52,7 @@ function AuthedApp() {
   const connect = useChatStore((s) => s.connect);
   const bindActivity = useActivityStore((s) => s.bindSocket);
   const loadActivity = useActivityStore((s) => s.load);
+  const loadProjects = useProjectsStore((s) => s.load);
   const loadSetup = useSetupStore((s) => s.load);
   const loadSettings = useGlobalSettingsStore((s) => s.load);
   const setupChecked = useSetupStore((s) => s.checked);
@@ -76,8 +77,8 @@ function AuthedApp() {
     void loadActivity();
     void loadSetup();
     void loadSettings();
-    void useProjectsStore.getState().load();
-  }, [connect, bindSocket, bindActivity, loadAgents, loadActivity, loadSetup, loadSettings]);
+    void loadProjects();
+  }, [connect, bindSocket, bindActivity, loadAgents, loadActivity, loadSetup, loadSettings, loadProjects]);
 
   // Auto-pop a terminal whenever an agent launches an *interactive* coding
   // session. Headless runs also emit `coding:started` but are discovered (and
