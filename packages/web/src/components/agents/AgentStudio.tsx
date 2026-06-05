@@ -117,7 +117,7 @@ export function AgentStudio({
         <strong style={{ fontSize: 14 }}>{profile.displayName}</strong>
         <span style={{ fontSize: 11, color: "rgb(var(--muted))" }}>Agent Studio</span>
         <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
-          <button onClick={resetAgent} style={{ ...ghost, color: "#f87171" }}>
+          <button onClick={resetAgent} style={{ ...ghost, color: "rgb(var(--danger))" }}>
             Reset agent
           </button>
           {profile.role !== "coo" && (
@@ -127,7 +127,7 @@ export function AgentStudio({
                   await removeAgent(profile.id);
                 }
               }}
-              style={{ ...ghost, color: "#f87171" }}
+              style={{ ...ghost, color: "rgb(var(--danger))" }}
             >
               Delete agent
             </button>
@@ -135,20 +135,23 @@ export function AgentStudio({
         </div>
       </header>
 
-      <nav style={{ display: "flex", gap: 4, padding: 6, borderBottom: "1px solid rgb(var(--border))", flexWrap: "wrap" }}>
+      <nav style={{ display: "flex", gap: 2, padding: "0 12px", borderBottom: "1px solid rgb(var(--border))", flexWrap: "wrap" }}>
         {TABS.map((t) => (
           <button
             key={t}
             data-testid={`studio-tab-${t}`}
             onClick={() => setTab(t)}
             style={{
-              background: tab === t ? "rgb(var(--accent))" : "transparent",
-              color: tab === t ? "white" : "rgb(var(--fg))",
-              border: "1px solid rgb(var(--border))",
-              padding: "3px 10px",
-              borderRadius: 6,
+              background: "transparent",
+              border: "none",
+              borderBottom: "2px solid transparent",
+              borderBottomColor: tab === t ? "rgb(var(--accent))" : "transparent",
+              color: tab === t ? "rgb(var(--fg))" : "rgb(var(--muted))",
+              padding: "10px 12px",
               cursor: "pointer",
               fontSize: 12,
+              fontWeight: 700,
+              whiteSpace: "nowrap",
             }}
           >
             {t}
@@ -236,9 +239,9 @@ function parseCommand(line: string): { command: string; args: string[] } {
 }
 
 const MCP_STATE_COLOR: Record<string, string> = {
-  connected: "#4ade80",
+  connected: "rgb(var(--success))",
   connecting: "rgb(var(--muted))",
-  error: "#f87171",
+  error: "rgb(var(--danger))",
   disabled: "rgb(var(--muted))",
 };
 
@@ -395,7 +398,7 @@ function SkillsTab({
       {/* --- Installed skills --- */}
       <strong style={{ fontSize: 13 }}>Installed skills ({skills.length})</strong>
       {skills.length === 0 && <div style={hint}>No skills installed yet.</div>}
-      {skillError && <div style={{ ...hint, color: "#f87171" }}>{skillError}</div>}
+      {skillError && <div style={{ ...hint, color: "rgb(var(--danger))" }}>{skillError}</div>}
       {skills.map((s) => (
         <InstalledSkill
           key={s.id}
@@ -731,7 +734,7 @@ function InstalledSkill({
         </span>
         <button
           onClick={onRemove}
-          style={{ ...ghost, marginLeft: "auto", color: "#f87171" }}
+          style={{ ...ghost, marginLeft: "auto", color: "rgb(var(--danger))" }}
         >
           Remove
         </button>
@@ -821,10 +824,10 @@ function parseIds(raw: string): string[] {
 function ConnectorBadge({ s }: { s: ChannelConnectorStatus | undefined }) {
   if (!s || !s.enabled) return null;
   const view: Record<string, { color: string; text: string }> = {
-    connected: { color: "#4ade80", text: "Connected" },
+    connected: { color: "rgb(var(--success))", text: "Connected" },
     connecting: { color: "rgb(var(--muted))", text: "Connecting…" },
-    "missing-tokens": { color: "#fbbf24", text: s.error ?? "Tokens missing" },
-    error: { color: "#f87171", text: s.error ?? "Connection failed" },
+    "missing-tokens": { color: "rgb(var(--warning))", text: s.error ?? "Tokens missing" },
+    error: { color: "rgb(var(--danger))", text: s.error ?? "Connection failed" },
     off: { color: "rgb(var(--muted))", text: "" },
   };
   const v = view[s.state] ?? view.off;
@@ -948,7 +951,7 @@ function ChannelsTab({ profile }: TabProps) {
         })}
       </section>
 
-      {error && <span style={{ fontSize: 12, color: "#f87171" }}>{error}</span>}
+      {error && <span style={{ fontSize: 12, color: "rgb(var(--danger))" }}>{error}</span>}
     </div>
   );
 }
@@ -1214,7 +1217,7 @@ function ScheduleTab({ agentId }: { agentId: string }) {
           <div key={t.id} style={card}>
             <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
               <code style={{ fontSize: 12 }}>{t.cron}</code>
-              <button onClick={() => cancel(t.id)} style={{ ...ghost, marginLeft: "auto", color: "#f87171" }}>
+              <button onClick={() => cancel(t.id)} style={{ ...ghost, marginLeft: "auto", color: "rgb(var(--danger))" }}>
                 Cancel
               </button>
             </div>
@@ -1399,7 +1402,7 @@ function MemoryTab({ agentId }: { agentId: string }) {
             <span style={badge}>{m.category}</span>
             <span style={badge}>via {m.source}</span>
             <span>importance {m.importance}</span>
-            <button onClick={() => del(m.id)} style={{ ...ghost, marginLeft: "auto", color: "#f87171" }}>
+            <button onClick={() => del(m.id)} style={{ ...ghost, marginLeft: "auto", color: "rgb(var(--danger))" }}>
               Forget
             </button>
           </div>
@@ -1914,7 +1917,7 @@ function SaveBar({
       <button onClick={onSave} style={primary}>
         Save
       </button>
-      {saved && <span style={{ fontSize: 12, color: "#4ade80" }}>Saved ✓</span>}
+      {saved && <span style={{ fontSize: 12, color: "rgb(var(--success))" }}>Saved ✓</span>}
     </div>
   );
 }
@@ -1940,22 +1943,23 @@ const input: React.CSSProperties = {
   background: "rgb(var(--bg))",
   color: "rgb(var(--fg))",
   border: "1px solid rgb(var(--border))",
-  borderRadius: 6,
-  padding: "6px 8px",
+  borderRadius: 10,
+  padding: "8px 10px",
   fontSize: 13,
   width: "100%",
 };
 
 const primary: React.CSSProperties = {
   background: "rgb(var(--accent))",
-  color: "white",
+  color: "rgb(var(--accent-fg))",
   border: "none",
   padding: "7px 16px",
-  borderRadius: 7,
+  borderRadius: 10,
   cursor: "pointer",
   fontSize: 13,
-  fontWeight: 600,
+  fontWeight: 700,
   alignSelf: "flex-start",
+  boxShadow: "var(--shadow-sm)",
 };
 
 const ghost: React.CSSProperties = {
@@ -1963,14 +1967,14 @@ const ghost: React.CSSProperties = {
   color: "rgb(var(--fg))",
   border: "1px solid rgb(var(--border))",
   padding: "3px 10px",
-  borderRadius: 6,
+  borderRadius: 10,
   cursor: "pointer",
   fontSize: 11,
 };
 
 const card: React.CSSProperties = {
   border: "1px solid rgb(var(--border))",
-  borderRadius: 8,
+  borderRadius: 12,
   padding: 10,
 };
 
