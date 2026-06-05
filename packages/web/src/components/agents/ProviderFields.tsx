@@ -184,7 +184,7 @@ export function ProviderFields({
               style={{
                 ...chip,
                 background: provider === pr.id ? "rgb(var(--accent))" : "transparent",
-                color: provider === pr.id ? "white" : "rgb(var(--fg))",
+                color: provider === pr.id ? "rgb(var(--accent-fg))" : "rgb(var(--fg))",
               }}
             >
               {pr.label}
@@ -260,7 +260,7 @@ export function ProviderFields({
                 style={{
                   ...chip,
                   background: oauth.authMethod === m ? "rgb(var(--accent))" : "transparent",
-                  color: oauth.authMethod === m ? "white" : "rgb(var(--fg))",
+                  color: oauth.authMethod === m ? "rgb(var(--accent-fg))" : "rgb(var(--fg))",
                 }}
               >
                 {m === "api-key" ? "API key" : "ChatGPT subscription"}
@@ -280,7 +280,7 @@ export function ProviderFields({
           <strong style={{ fontSize: 12 }}>ChatGPT subscription</strong>
           {oauth.status?.connected ? (
             <>
-              <div style={{ fontSize: 12, color: "#4ade80" }}>
+              <div style={{ fontSize: 12, color: "rgb(var(--success))" }}>
                 ✓ Connected{oauth.status.accountId ? ` · account ${oauth.status.accountId}` : ""}
               </div>
               <button onClick={oauth.signOut} style={{ ...ghost, alignSelf: "flex-start" }}>
@@ -330,7 +330,7 @@ export function ProviderFields({
                 </button>
               </div>
               {test.status === "fail" && (
-                <span style={{ fontSize: 12, color: "#f87171" }}>✗ {test.message}</span>
+                <span style={{ fontSize: 12, color: "rgb(var(--danger))" }}>✗ {test.message}</span>
               )}
             </>
           )}
@@ -345,7 +345,7 @@ export function ProviderFields({
             (credMeta.secret && accountConfigured && !editCred && !isNewAccount ? (
               <Field label={credMeta.label}>
                 <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                  <span style={{ fontSize: 12, color: "#4ade80" }}>
+                  <span style={{ fontSize: 12, color: "rgb(var(--success))" }}>
                     ✓ Saved on account "{account}"
                   </span>
                   <button style={updateBtn} onClick={() => setEditCred(true)}>
@@ -397,9 +397,9 @@ export function ProviderFields({
                   ? "Get models"
                   : "Test connection"}
             </button>
-            {test.status === "ok" && <span style={{ fontSize: 12, color: "#4ade80" }}>✓ {test.message}</span>}
+            {test.status === "ok" && <span style={{ fontSize: 12, color: "rgb(var(--success))" }}>✓ {test.message}</span>}
             {test.status === "fail" && (
-              <span style={{ fontSize: 12, color: "#f87171" }}>✗ {test.message}</span>
+              <span style={{ fontSize: 12, color: "rgb(var(--danger))" }}>✗ {test.message}</span>
             )}
           </div>
         </>
@@ -485,7 +485,7 @@ const chip: React.CSSProperties = {
 
 const primary: React.CSSProperties = {
   background: "rgb(var(--accent))",
-  color: "white",
+  color: "rgb(var(--accent-fg))",
   border: "none",
   padding: "8px 16px",
   borderRadius: 7,

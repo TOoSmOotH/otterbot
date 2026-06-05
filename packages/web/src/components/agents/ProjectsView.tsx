@@ -389,10 +389,10 @@ export function ProjectCard({
 
 function RunRow({ run }: { run: PipelineRun }) {
   const statusColor: Record<string, string> = {
-    running: "rgb(90 150 220)",
-    done: "rgb(90 190 120)",
-    failed: "rgb(220 90 90)",
-    cancelled: "rgb(150 150 150)",
+    running: "rgb(var(--info))",
+    done: "rgb(var(--success))",
+    failed: "rgb(var(--danger))",
+    cancelled: "rgb(var(--muted))",
   };
   return (
     <div style={{ border: "1px solid rgb(var(--border))", borderRadius: 10, padding: 8 }}>
@@ -418,7 +418,7 @@ function RunRow({ run }: { run: PipelineRun }) {
               padding: "1px 6px",
               borderRadius: 10,
               border: "1px solid rgb(var(--border))",
-              color: s.status === "pass" ? "rgb(90 190 120)" : s.status === "fail" ? "rgb(220 150 90)" : "rgb(220 90 90)",
+              color: s.status === "pass" ? "rgb(var(--success))" : s.status === "fail" ? "rgb(var(--warning))" : "rgb(var(--danger))",
             }}
           >
             {s.stage}: {s.status}

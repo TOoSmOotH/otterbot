@@ -981,7 +981,7 @@ const connGhost: React.CSSProperties = {
   color: "rgb(var(--fg))",
   cursor: "pointer",
 };
-const connGhostDanger: React.CSSProperties = { ...connGhost, color: "tomato" };
+const connGhostDanger: React.CSSProperties = { ...connGhost, color: "rgb(var(--danger))" };
 
 /** Card wrapper shared by the Skills tab's tool/MCP sections. */
 const channelCard: React.CSSProperties = {

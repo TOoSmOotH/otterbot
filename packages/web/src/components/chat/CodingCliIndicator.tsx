@@ -75,7 +75,7 @@ export function CodingCliIndicator({
       <span style={{ display: "inline-flex", gap: 4, alignItems: "center" }}>
         {installed.map((t) =>
           status![t].loggedIn ? (
-            <span key={t} title={`${CODING_TOOL_LABELS[t]}: logged in`} style={dot("#4ade80")} />
+            <span key={t} title={`${CODING_TOOL_LABELS[t]}: logged in`} style={dot("rgb(var(--success))")} />
           ) : (
             <button
               key={t}
@@ -83,7 +83,7 @@ export function CodingCliIndicator({
               title={`${CODING_TOOL_LABELS[t]}: not logged in — click to open a login shell`}
               aria-label={`Log in to ${CODING_TOOL_LABELS[t]}`}
               onClick={() => onOpenLoginTerminal?.(t)}
-              style={{ ...iconBtn, ...dot("#fbbf24"), padding: 0 }}
+              style={{ ...iconBtn, ...dot("rgb(var(--warning))"), padding: 0 }}
             />
           )
         )}
@@ -99,7 +99,7 @@ export function CodingCliIndicator({
             padding: 0,
             font: "inherit",
             fontSize: 10,
-            color: "#fbbf24",
+            color: "rgb(var(--warning))",
             cursor: "pointer",
             whiteSpace: "nowrap",
           }}

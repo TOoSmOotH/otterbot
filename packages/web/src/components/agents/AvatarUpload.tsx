@@ -113,7 +113,7 @@ export function AvatarUpload({
           )}
         </div>
         {error ? (
-          <span style={{ fontSize: 11, color: "#f87171" }}>{error}</span>
+          <span style={{ fontSize: 11, color: "rgb(var(--danger))" }}>{error}</span>
         ) : (
           <span style={{ fontSize: 11, color: "rgb(var(--muted))" }}>
             PNG, JPG, WebP or GIF — up to 4 MB.

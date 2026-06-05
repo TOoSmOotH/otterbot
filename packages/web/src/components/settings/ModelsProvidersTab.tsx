@@ -350,7 +350,7 @@ function AccountCard({
                 : "Incomplete"}
         </span>
         {canDelete && (
-          <button onClick={onDelete} style={{ ...ghostButton, color: "#f87171" }}>
+          <button onClick={onDelete} style={{ ...ghostButton, color: "rgb(var(--danger))" }}>
             Delete
           </button>
         )}
@@ -469,7 +469,7 @@ function ModelCard({
         >
           {isDefault ? "★ default" : "☆ default"}
         </button>
-        <button onClick={onDelete} style={{ ...ghostButton, color: "#f87171" }}>
+        <button onClick={onDelete} style={{ ...ghostButton, color: "rgb(var(--danger))" }}>
           Delete
         </button>
       </div>

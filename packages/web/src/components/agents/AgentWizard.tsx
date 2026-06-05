@@ -290,7 +290,7 @@ function TeamForm({ onClose }: { onClose: () => void }) {
         <strong>Remote end-to-end testing</strong> off to skip the VM/SSH run, or turn it on (and add
         the Proxmox/SSH infrastructure agents) to also test on a clean VM.
       </p>
-      {error && <div style={{ color: "rgb(220 90 90)", fontSize: 12 }}>{error}</div>}
+      {error && <div style={{ color: "rgb(var(--danger))", fontSize: 12 }}>{error}</div>}
       <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 12 }}>
         <button style={ghostBtn} onClick={onClose}>Cancel</button>
         <button style={primaryBtn} disabled={busy || !name.trim()} onClick={() => void create()}>
@@ -362,7 +362,7 @@ function ServiceForm({ onClose }: { onClose: () => void }) {
         <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 4 }}>Model</div>
         <ModelSelect models={settings.models} kind="chat" value={modelId} onChange={setModelId} />
       </div>
-      {error && <div style={{ color: "rgb(220 90 90)", fontSize: 12, marginTop: 8 }}>{error}</div>}
+      {error && <div style={{ color: "rgb(var(--danger))", fontSize: 12, marginTop: 8 }}>{error}</div>}
       <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 12 }}>
         <button style={ghostBtn} onClick={onClose}>Cancel</button>
         <button style={primaryBtn} disabled={busy || (!kinds.proxmox && !kinds.ssh)} onClick={() => void create()}>

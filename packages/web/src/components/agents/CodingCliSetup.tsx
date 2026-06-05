@@ -155,7 +155,7 @@ export function CodingCliSetup({
         <button type="button" onClick={() => void checkUpdates()} disabled={checking} style={ghost}>
           {checking ? "Checking…" : "Check for updates"}
         </button>
-        {error && <span style={{ fontSize: 12, color: "#f87171" }}>{error}</span>}
+        {error && <span style={{ fontSize: 12, color: "rgb(var(--danger))" }}>{error}</span>}
       </div>
     </div>
   );
@@ -179,8 +179,8 @@ const badge: React.CSSProperties = {
   whiteSpace: "nowrap",
 };
 
-const okBadge: React.CSSProperties = { ...badge, color: "#4ade80", borderColor: "#4ade80" };
-const warnBadge: React.CSSProperties = { ...badge, color: "#fbbf24", borderColor: "#fbbf24" };
+const okBadge: React.CSSProperties = { ...badge, color: "rgb(var(--success))", borderColor: "rgb(var(--success))" };
+const warnBadge: React.CSSProperties = { ...badge, color: "rgb(var(--warning))", borderColor: "rgb(var(--warning))" };
 const offBadge: React.CSSProperties = { ...badge, color: "rgb(var(--muted))" };
 const updateBadge: React.CSSProperties = {
   ...badge,
@@ -208,7 +208,7 @@ const code: React.CSSProperties = {
 
 const primary: React.CSSProperties = {
   background: "rgb(var(--accent))",
-  color: "white",
+  color: "rgb(var(--accent-fg))",
   border: "none",
   padding: "6px 14px",
   borderRadius: 7,

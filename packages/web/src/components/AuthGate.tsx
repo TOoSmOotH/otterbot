@@ -114,7 +114,7 @@ function SetupForm({ onDone }: { onDone: () => void }) {
         >
           {busy ? "Setting up…" : "Create password"}
         </button>
-        {error && <span style={{ fontSize: 12, color: "#f87171" }}>{error}</span>}
+        {error && <span style={{ fontSize: 12, color: "rgb(var(--danger))" }}>{error}</span>}
       </form>
     </div>
   );
@@ -163,7 +163,7 @@ function LoginForm({ onDone }: { onDone: () => void }) {
         <button type="submit" disabled={busy || !token.trim()} style={primary}>
           {busy ? "Checking…" : "Unlock"}
         </button>
-        {error && <span style={{ fontSize: 12, color: "#f87171" }}>{error}</span>}
+        {error && <span style={{ fontSize: 12, color: "rgb(var(--danger))" }}>{error}</span>}
       </form>
     </div>
   );
@@ -199,7 +199,7 @@ const input: React.CSSProperties = {
 
 const primary: React.CSSProperties = {
   background: "rgb(var(--accent))",
-  color: "white",
+  color: "rgb(var(--accent-fg))",
   border: "none",
   padding: "8px 14px",
   borderRadius: 7,

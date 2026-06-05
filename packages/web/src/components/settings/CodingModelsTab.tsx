@@ -460,7 +460,7 @@ const input: React.CSSProperties = {
 
 const primary: React.CSSProperties = {
   background: "rgb(var(--accent))",
-  color: "white",
+  color: "rgb(var(--accent-fg))",
   border: "none",
   padding: "7px 16px",
   borderRadius: 7,

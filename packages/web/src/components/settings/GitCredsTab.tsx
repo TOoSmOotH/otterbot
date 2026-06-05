@@ -233,7 +233,7 @@ const input: React.CSSProperties = {
 const lbl: React.CSSProperties = { display: "block", fontSize: 11, fontWeight: 600, margin: "8px 0 2px" };
 const hint: React.CSSProperties = { color: "rgb(var(--muted))", fontSize: 11, marginTop: 6 };
 const h2: React.CSSProperties = { margin: "0 0 4px", fontSize: 16, fontWeight: 600 };
-const errStyle: React.CSSProperties = { color: "rgb(220 90 90)", fontSize: 12, marginTop: 8 };
+const errStyle: React.CSSProperties = { color: "rgb(var(--danger))", fontSize: 12, marginTop: 8 };
 const actions: React.CSSProperties = { display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 14 };
 const overlay: React.CSSProperties = {
   position: "fixed",
@@ -257,7 +257,7 @@ const modal: React.CSSProperties = {
 };
 const primaryBtn: React.CSSProperties = {
   background: "rgb(var(--accent))",
-  color: "#fff",
+  color: "rgb(var(--accent-fg))",
   border: "none",
   borderRadius: 6,
   padding: "7px 14px",

@@ -446,7 +446,7 @@ export function AgentEditor({ agentId, onClose }: { agentId: string | null; onCl
             Cancel
           </button>
           {isEdit && agentId !== "coo" && (
-            <button onClick={onDelete} style={{ ...ghostBtn, color: "#f87171", marginLeft: "auto" }}>
+            <button onClick={onDelete} style={{ ...ghostBtn, color: "rgb(var(--danger))", marginLeft: "auto" }}>
               Delete
             </button>
           )}
@@ -507,7 +507,7 @@ const inputStyle: React.CSSProperties = {
 
 const primaryBtn: React.CSSProperties = {
   background: "rgb(var(--accent))",
-  color: "white",
+  color: "rgb(var(--accent-fg))",
   border: "none",
   padding: "7px 14px",
   borderRadius: 7,

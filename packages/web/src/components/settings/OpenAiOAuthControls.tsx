@@ -63,7 +63,7 @@ export function OpenAiOAuthControls() {
       </div>
       {status?.connected ? (
         <>
-          <div style={{ fontSize: 12, color: "#4ade80" }}>
+          <div style={{ fontSize: 12, color: "rgb(var(--success))" }}>
             Connected{status.accountId ? ` - account ${status.accountId}` : ""}
           </div>
           <button onClick={signOut} style={{ ...ghostButton, alignSelf: "flex-start" }}>

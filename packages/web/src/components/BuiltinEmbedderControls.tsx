@@ -47,7 +47,7 @@ export function BuiltinEmbedderControls() {
 
   if (status.downloaded) {
     return (
-      <div style={{ fontSize: 12, color: "#4ade80" }}>
+      <div style={{ fontSize: 12, color: "rgb(var(--success))" }}>
         ✓ Built-in model ready — runs on your CPU, fully offline.
       </div>
     );
@@ -62,7 +62,7 @@ export function BuiltinEmbedderControls() {
       <button onClick={download} disabled={status.downloading} style={downloadBtn}>
         {status.downloading ? "Downloading… (~30 MB)" : "Download model (~30 MB)"}
       </button>
-      {status.error && <span style={{ fontSize: 12, color: "#f87171" }}>✗ {status.error}</span>}
+      {status.error && <span style={{ fontSize: 12, color: "rgb(var(--danger))" }}>✗ {status.error}</span>}
     </div>
   );
 }
@@ -70,7 +70,7 @@ export function BuiltinEmbedderControls() {
 const downloadBtn: React.CSSProperties = {
   alignSelf: "flex-start",
   background: "rgb(var(--accent))",
-  color: "white",
+  color: "rgb(var(--accent-fg))",
   border: "none",
   padding: "7px 13px",
   borderRadius: 7,
