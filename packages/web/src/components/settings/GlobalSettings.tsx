@@ -169,8 +169,8 @@ export function GlobalSettings({
             onClick={() => setTab(t)}
             style={{
               ...tabButton,
-              background: tab === t ? "rgb(var(--accent))" : "transparent",
-              color: tab === t ? "white" : "rgb(var(--fg))",
+              color: tab === t ? "rgb(var(--fg))" : "rgb(var(--muted))",
+              borderBottomColor: tab === t ? "rgb(var(--accent))" : "transparent",
             }}
           >
             {t}
@@ -182,7 +182,7 @@ export function GlobalSettings({
                   width: 7,
                   height: 7,
                   borderRadius: 999,
-                  background: tab === t ? "white" : "rgb(var(--accent))",
+                  background: "rgb(var(--accent))",
                   display: "inline-block",
                 }}
               />
@@ -222,7 +222,7 @@ export function GlobalSettings({
           {saveState === "saved" && <span style={hint}>All changes saved</span>}
           {saveState === "error" && (
             <>
-              <span style={{ fontSize: 13, color: "#f87171" }}>Save failed</span>
+              <span style={{ fontSize: 13, color: "rgb(var(--danger))" }}>Save failed</span>
               <button
                 onClick={() => void persist(draftRef.current)}
                 style={{ ...ghostButton, marginLeft: "auto" }}
@@ -310,7 +310,7 @@ function AccountTab() {
           <SessionRow key={s.id} session={s} onRevoke={() => void revoke(s.id)} />
         ))}
       </div>
-      {error && <span style={{ fontSize: 12, color: "#f87171" }}>{error}</span>}
+      {error && <span style={{ fontSize: 12, color: "rgb(var(--danger))" }}>{error}</span>}
 
       <div style={{ height: 12 }} />
       <ChangePasswordCard onChanged={() => void refresh()} />
@@ -349,7 +349,7 @@ function SessionRow({
               style={{
                 marginLeft: 8,
                 fontSize: 10,
-                color: "#4ade80",
+                color: "rgb(var(--success))",
                 border: "1px solid #4ade80",
                 borderRadius: 4,
                 padding: "1px 6px",
@@ -363,7 +363,7 @@ function SessionRow({
           last used {formatRelative(session.lastUsedAt)} · created {formatRelative(session.createdAt)}
         </span>
       </div>
-      <button onClick={onRevoke} style={{ ...ghostButton, color: "#f87171" }}>
+      <button onClick={onRevoke} style={{ ...ghostButton, color: "rgb(var(--danger))" }}>
         {session.current ? "Sign out" : "Revoke"}
       </button>
     </div>
@@ -452,8 +452,8 @@ function ChangePasswordCard({ onChanged }: { onChanged: () => void }) {
         >
           {busy ? "Saving…" : "Change password"}
         </button>
-        {ok && <span style={{ fontSize: 12, color: "#4ade80" }}>Password updated ✓</span>}
-        {error && <span style={{ fontSize: 12, color: "#f87171" }}>{error}</span>}
+        {ok && <span style={{ fontSize: 12, color: "rgb(var(--success))" }}>Password updated ✓</span>}
+        {error && <span style={{ fontSize: 12, color: "rgb(var(--danger))" }}>{error}</span>}
       </div>
     </form>
   );
@@ -525,18 +525,21 @@ const header: React.CSSProperties = {
 
 const tabBar: React.CSSProperties = {
   display: "flex",
-  gap: 4,
-  padding: "10px 18px",
+  gap: 2,
+  padding: "0 18px",
   borderBottom: "1px solid rgb(var(--border))",
   flexWrap: "wrap",
 };
 
 const tabButton: React.CSSProperties = {
-  border: "1px solid rgb(var(--border))",
-  padding: "4px 12px",
-  borderRadius: 6,
+  border: "none",
+  background: "transparent",
+  padding: "11px 13px",
+  borderBottom: "2px solid transparent",
   cursor: "pointer",
   fontSize: 12,
+  fontWeight: 700,
+  whiteSpace: "nowrap",
 };
 
 const tabBody: React.CSSProperties = {
