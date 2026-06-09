@@ -30,8 +30,11 @@ describe("presetToArgs", () => {
       "-c",
       'model_reasoning_effort="medium"',
     ]);
-    // gemini: model only
-    expect(presetToArgs("gemini", { model: "gemini-3-pro" })).toEqual(["-m", "gemini-3-pro"]);
+    // antigravity: model only, as a `--model` display name
+    expect(presetToArgs("antigravity", { model: "Gemini 3.1 Pro (High)" })).toEqual([
+      "--model",
+      "Gemini 3.1 Pro (High)",
+    ]);
     // opencode: provider/model string
     expect(presetToArgs("opencode", { providerModel: "ollama/llama3" })).toEqual([
       "-m",
@@ -59,12 +62,11 @@ describe("buildCodingArgv", () => {
       "--dangerously-bypass-approvals-and-sandbox",
       "do it",
     ]);
-    expect(buildCodingArgv("gemini", "do it")).toEqual([
-      "gemini",
-      "--skip-trust",
+    expect(buildCodingArgv("antigravity", "do it")).toEqual([
+      "agy",
       "-p",
       "do it",
-      "--yolo",
+      "--dangerously-skip-permissions",
     ]);
     expect(buildCodingArgv("opencode", "do it")).toEqual(["opencode", "run", "do it"]);
   });
@@ -86,12 +88,11 @@ describe("buildCodingArgv", () => {
     expect(
       buildCodingArgv("opencode", "do it", { model: { providerModel: "anthropic/claude-sonnet-4-6" } })
     ).toEqual(["opencode", "run", "-m", "anthropic/claude-sonnet-4-6", "do it"]);
-    expect(buildCodingArgv("gemini", "task", { interactive: true })).toEqual([
-      "gemini",
-      "--skip-trust",
+    expect(buildCodingArgv("antigravity", "task", { interactive: true })).toEqual([
+      "agy",
       "-i",
       "task",
-      "--yolo",
+      "--dangerously-skip-permissions",
     ]);
   });
 });

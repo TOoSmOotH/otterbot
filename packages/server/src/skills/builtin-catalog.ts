@@ -511,7 +511,7 @@ the public key probably isn't installed on that host yet — run
     id: "coding-cli",
     name: "Coding CLI agents",
     description:
-      "Run command-line coding agents — Claude Code, Codex, Gemini CLI, OpenCode — on a " +
+      "Run command-line coding agents — Claude Code, Codex, Antigravity CLI, OpenCode — on a " +
       "task, using your own subscription. Works on your project's shared code tree when " +
       "you belong to one. Supports a headless run that returns a summary, or a live " +
       "terminal UI streamed to the user.",
@@ -530,7 +530,7 @@ the public key probably isn't installed on that host yet — run
           type: "string",
           credentialKey: "CODING_CLI_PINNED_TOOL",
           scope: "cap:coding-cli",
-          placeholder: "claude | codex | gemini | opencode",
+          placeholder: "claude | codex | antigravity | opencode",
           description:
             "If set, coding_cli_run uses this tool when none is given. Leave blank to " +
             "choose per call.",
@@ -551,7 +551,7 @@ the public key probably isn't installed on that host yet — run
     },
     body: `
 You can run command-line coding agents — **Claude Code** (\`claude\`), **Codex**
-(\`codex\`), **Gemini CLI** (\`gemini\`), and **OpenCode** (\`opencode\`) — to write and
+(\`codex\`), **Antigravity CLI** (\`agy\`), and **OpenCode** (\`opencode\`) — to write and
 edit code. Each runs inside your sandbox, authenticated by **your own
 subscription**, and (if you belong to a project) on that project's shared code
 tree at \`/project\`, which you share live with the other agents on the project.
@@ -572,7 +572,7 @@ from a terminal:
 2. Run the tool's login flow and complete it in the browser/device prompt:
    - Claude Code: run \`claude\` and follow the login prompt.
    - Codex: run \`codex login --device-auth\` (enter the code at the shown URL).
-   - Gemini CLI: run \`gemini\` and choose Google login.
+   - Antigravity CLI: run \`agy\` and complete the Google login at the shown URL.
    - OpenCode: no login here — set the OpenCode Zen provider's key in
      Settings → Providers (its models, and any configured provider's, are
      bridged into opencode automatically).
@@ -587,7 +587,7 @@ what's installed and logged in.
 - \`coding_cli_run\` — run a coding agent on a task. \`interactive: false\` (default)
   runs it to completion and returns a summary; \`interactive: true\` launches its
   live terminal UI, streamed to the user, and returns a summary when it exits.
-- \`coding_cli_install\` — install a tool (claude | codex | gemini | opencode) into
+- \`coding_cli_install\` — install a tool (claude | codex | antigravity | opencode) into
   your workspace. Login still happens once, interactively (see above).
 - \`coding_cli_status\` — report which tools are installed and logged in, whether
   you're on a project, and whether a live session is running.

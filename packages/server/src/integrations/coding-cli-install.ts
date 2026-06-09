@@ -5,22 +5,32 @@ import { sharedCodingAuthDir, sharedCodingToolsDir } from "./shell.js";
 import { CODING_TOOLS, withCodingLock, type CodingTool } from "./coding-cli.js";
 
 /**
- * Install + detect the coding CLIs (Claude Code, Codex, Gemini CLI, OpenCode)
+ * Install + detect the coding CLIs (Claude Code, Codex, Antigravity CLI, OpenCode)
  * ONCE for all agents. Binaries install into a single shared host dir
- * (`<data>/coding-tools`, an npm prefix) that every sandbox mounts read-only via
+ * (`<data>/coding-tools` — an npm prefix for npm tools; the Antigravity Go binary
+ * is dropped into its `bin/` by the official install script) that every sandbox
+ * mounts read-only via
  * a tmp-overlay; logins live in a single shared store (`<data>/coding-cli-auth`)
  * bound into every sandbox HOME. So the user installs and logs in a single time,
  * not per agent. Install + detection run host-side (these are shared infra ops,
  * not per-agent sandboxed work); see `shell.ts` for how the mounts are wired.
  */
 
+/**
+ * How a tool is installed into the shared tools dir. Most are npm packages; the
+ * Antigravity CLI ships a Go binary installed via Google's official script.
+ */
+export type CodingCliInstall =
+  | { method: "npm"; pkg: string }
+  | { method: "script"; url: string };
+
 export interface CodingCliSpec {
   /** Human-readable name for the UI. */
   label: string;
   /** Binary name (under the shared tools `bin/`). */
   bin: string;
-  /** npm package; installed as `<pkg>@latest` so installs pull the newest. */
-  pkg: string;
+  /** How to install (or update to latest) the tool. */
+  install: CodingCliInstall;
   /** The (interactive) login the user runs once from an agent's terminal. */
   loginCmd: string;
   /** Login credential file, relative to the shared auth store (best-effort). */
@@ -31,30 +41,33 @@ export const CODING_CLI_SPECS: Record<CodingTool, CodingCliSpec> = {
   claude: {
     label: "Claude Code",
     bin: "claude",
-    pkg: "@anthropic-ai/claude-code",
+    install: { method: "npm", pkg: "@anthropic-ai/claude-code" },
     loginCmd: "claude",
     authFile: "claude/.credentials.json",
   },
   codex: {
     label: "Codex",
     bin: "codex",
-    pkg: "@openai/codex",
+    install: { method: "npm", pkg: "@openai/codex" },
     // Device-auth flow (code + URL): the browser/loopback OAuth can't complete
     // in the sandboxed terminal.
     loginCmd: "codex login --device-auth",
     authFile: "codex/auth.json",
   },
-  gemini: {
-    label: "Gemini CLI",
-    bin: "gemini",
-    pkg: "@google/gemini-cli",
-    loginCmd: "gemini",
+  antigravity: {
+    label: "Antigravity CLI",
+    bin: "agy",
+    // Go binary, not an npm package: install via Google's official script.
+    install: { method: "script", url: "https://antigravity.google/cli/install.sh" },
+    // First interactive run prints a Google-OAuth URL to open. `agy` reuses
+    // ~/.gemini, so its creds land in the shared `gemini` cred dir (see shell.ts).
+    loginCmd: "agy",
     authFile: "gemini/oauth_creds.json",
   },
   opencode: {
     label: "OpenCode",
     bin: "opencode",
-    pkg: "opencode-ai",
+    install: { method: "npm", pkg: "opencode-ai" },
     loginCmd: "opencode auth login",
     authFile: "opencode/auth.json",
   },
@@ -114,16 +127,26 @@ export interface CodingCliInstallResult {
 export function installSharedCodingCli(tool: CodingTool): Promise<CodingCliInstallResult> {
   const spec = CODING_CLI_SPECS[tool];
   const prefix = sharedCodingToolsDir();
+  const binDir = join(prefix, "bin");
   return withCodingLock("shared-coding-install", async () => {
     try {
-      mkdirSync(prefix, { recursive: true });
+      mkdirSync(binDir, { recursive: true });
     } catch {
       /* the install below will surface a real problem */
     }
     return new Promise<CodingCliInstallResult>((resolve) => {
-      const child = spawn("npm", ["install", "-g", `${spec.pkg}@latest`], {
-        env: { ...process.env, npm_config_prefix: prefix },
-      });
+      // npm tools: `npm i -g <pkg>@latest` into the shared prefix. Script tools
+      // (Antigravity): pipe the official installer to bash, targeting the shared
+      // `bin/` via `--dir`. HOME is pointed at the throwaway prefix so the
+      // installer's PATH/alias edits don't touch the server user's shell profile.
+      const child =
+        spec.install.method === "npm"
+          ? spawn("npm", ["install", "-g", `${spec.install.pkg}@latest`], {
+              env: { ...process.env, npm_config_prefix: prefix },
+            })
+          : spawn("bash", ["-c", 'curl -fsSL "$AGY_URL" | bash -s -- --dir "$AGY_DIR"'], {
+              env: { ...process.env, HOME: prefix, AGY_URL: spec.install.url, AGY_DIR: binDir },
+            });
       let out = "";
       const cap = (c: Buffer) => {
         if (out.length < 1_000_000) out += c.toString("utf8");
@@ -131,13 +154,13 @@ export function installSharedCodingCli(tool: CodingTool): Promise<CodingCliInsta
       child.stdout?.on("data", cap);
       child.stderr?.on("data", cap);
       child.on("error", (err) =>
-        resolve({ ok: false, output: out.trim(), error: `failed to run npm: ${err.message}` })
+        resolve({ ok: false, output: out.trim(), error: `failed to run installer: ${err.message}` })
       );
       child.on("close", (code) =>
         resolve(
           code === 0
             ? { ok: true, output: out.trim() }
-            : { ok: false, output: out.trim(), error: `npm install exited with code ${code ?? "?"}` }
+            : { ok: false, output: out.trim(), error: `install exited with code ${code ?? "?"}` }
         )
       );
     });
@@ -192,8 +215,12 @@ async function fetchLatestVersions(): Promise<LatestVersions> {
   const out = emptyLatest();
   await Promise.all(
     CODING_TOOLS.map(async (tool) => {
+      const spec = CODING_CLI_SPECS[tool];
+      // Only npm tools have a registry to query; script-installed tools (the
+      // Antigravity Go binary) leave `null` and never flag a phantom update.
+      if (spec.install.method !== "npm") return;
       try {
-        const res = await fetch(`https://registry.npmjs.org/${CODING_CLI_SPECS[tool].pkg}/latest`, {
+        const res = await fetch(`https://registry.npmjs.org/${spec.install.pkg}/latest`, {
           signal: AbortSignal.timeout(8000),
           headers: { accept: "application/json" },
         });

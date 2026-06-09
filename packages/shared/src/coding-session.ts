@@ -17,7 +17,7 @@ export type CodingSessionMode = "interactive" | "autonomous";
 export interface CodingSessionInfo {
   /** The agent running the session (sessions are keyed by agent). */
   agentId: string;
-  /** Which CLI is running — "claude" | "codex" | "gemini" | "opencode". */
+  /** Which CLI is running — "claude" | "codex" | "antigravity" | "opencode". */
   tool: string;
   mode: CodingSessionMode;
   /** ISO timestamp the run started. */

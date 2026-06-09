@@ -302,7 +302,7 @@ function normalizeProviderAccounts(
   return out;
 }
 
-const CODING_TOOL_IDS = ["claude", "codex", "gemini", "opencode"] as const;
+const CODING_TOOL_IDS = ["claude", "codex", "antigravity", "opencode"] as const;
 
 /** Normalize one coding-model preset; returns null if it can't be salvaged. */
 function normalizeCodingModelPreset(raw: unknown): CodingModelPreset | null {

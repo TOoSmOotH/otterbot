@@ -599,14 +599,14 @@ export function buildAgentTools(
     });
   }
 
-  // Command-line coding agents (Claude Code, Codex, Gemini CLI, OpenCode) —
+  // Command-line coding agents (Claude Code, Codex, Antigravity CLI, OpenCode) —
   // granted by the `coding-cli` capability. Each runs inside the same sandbox
   // as shell_exec, authenticated from the agent's own workspace login, and
   // operates on the shared /project tree when the agent belongs to a project.
   if (granted.has("coding_cli_run")) {
     tools.coding_cli_run = tool({
       description:
-        "Run a command-line coding agent (claude, codex, gemini, or opencode) on a " +
+        "Run a command-line coding agent (claude, codex, antigravity, or opencode) on a " +
         "task. It works in your project's shared tree if you belong to one, otherwise " +
         "in your workspace. By default it runs to completion and returns a summary of " +
         "what it did. Set interactive=true to launch its live terminal UI (streamed to " +
@@ -658,7 +658,7 @@ export function buildAgentTools(
             ok: false,
             error:
               "No coding tool specified and this agent has no pinned default. Pass `tool` " +
-              "(claude | codex | gemini | opencode) or set a default in the capability config.",
+              "(claude | codex | antigravity | opencode) or set a default in the capability config.",
           };
         }
         // Resolve the model config (highest precedence first):
@@ -792,7 +792,7 @@ export function buildAgentTools(
   if (granted.has("coding_cli_install")) {
     tools.coding_cli_install = tool({
       description:
-        "Install (or update to latest) a coding CLI (claude, codex, gemini, or opencode). " +
+        "Install (or update to latest) a coding CLI (claude, codex, antigravity, or opencode). " +
         "The install is SHARED across all agents — you only do it once, ever. Installing " +
         "only puts the binary on PATH; logging in is a separate one-time interactive step " +
         "(run the returned `loginCmd` from a terminal, also shared across agents). Returns " +

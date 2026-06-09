@@ -3,7 +3,7 @@ import type { SkillConfigSchema, SkillConfigField, SkillConfigOption } from "@ot
 import { apiFetch } from "../../lib/api";
 import { useGlobalSettingsStore } from "../../stores/global-settings-store";
 
-const CODING_TOOL_IDS = ["claude", "codex", "gemini", "opencode"];
+const CODING_TOOL_IDS = ["claude", "codex", "antigravity", "opencode"];
 
 /**
  * Resolve a `select` field's choices. Static `options` win; otherwise a

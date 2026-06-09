@@ -4,7 +4,7 @@ import type { CodingSessionInfo, CodingSessionMode } from "@otterbot/shared";
 import { buildSandboxPlan, ensureWorkspace, type SandboxOpts } from "./shell.js";
 
 /**
- * Run command-line coding agents — Claude Code, Codex, Gemini CLI, OpenCode —
+ * Run command-line coding agents — Claude Code, Codex, Antigravity CLI, OpenCode —
  * inside the very same OS sandbox as `shell_exec` (`integrations/shell.ts`),
  * confined to the agent's workspace plus, when the agent belongs to a project,
  * the shared `/project` tree. Each tool authenticates from the agent's own
@@ -22,8 +22,8 @@ import { buildSandboxPlan, ensureWorkspace, type SandboxOpts } from "./shell.js"
  * mutates a shared project tree at a time.
  */
 
-export type CodingTool = "claude" | "codex" | "gemini" | "opencode";
-export const CODING_TOOLS: CodingTool[] = ["claude", "codex", "gemini", "opencode"];
+export type CodingTool = "claude" | "codex" | "antigravity" | "opencode";
+export const CODING_TOOLS: CodingTool[] = ["claude", "codex", "antigravity", "opencode"];
 
 export function isCodingTool(v: string): v is CodingTool {
   return (CODING_TOOLS as string[]).includes(v);
@@ -35,7 +35,8 @@ export function isCodingTool(v: string): v is CodingTool {
  * selection. Each tool reads the fields that apply to it (see {@link presetToArgs}).
  */
 export interface ResolvedCodingModel {
-  /** Model alias/id — claude (`opus`/`sonnet`/…), codex, gemini. */
+  /** Model alias/id — claude (`opus`/`sonnet`/…), codex, antigravity (a display
+   *  name like `Gemini 3.1 Pro (High)`). */
   model?: string;
   /** Reasoning effort — claude (`--effort`) and codex (`model_reasoning_effort`). */
   effort?: string;
@@ -60,8 +61,9 @@ export function presetToArgs(tool: CodingTool, m: ResolvedCodingModel): string[]
         // `-c key=value` overrides config.toml; the value is parsed as TOML.
         ...(m.effort ? ["-c", `model_reasoning_effort="${m.effort}"`] : []),
       ];
-    case "gemini":
-      return m.model ? ["-m", m.model] : [];
+    case "antigravity":
+      // `agy` takes a model display name verbatim, e.g. "Gemini 3.1 Pro (High)".
+      return m.model ? ["--model", m.model] : [];
     case "opencode":
       return m.providerModel ? ["-m", m.providerModel] : [];
   }
@@ -102,12 +104,13 @@ const TOOLS: Record<CodingTool, ToolSpec> = {
     ],
     interactive: (task, m) => [...presetToArgs("codex", m), task],
   },
-  // `--skip-trust` is required: the sandboxed /project tree is not a gemini
-  // "trusted folder", so without it gemini refuses to run headless (exit 55).
-  gemini: {
-    bin: "gemini",
-    headless: (task, m) => [...presetToArgs("gemini", m), "--skip-trust", "-p", task, "--yolo"],
-    interactive: (task, m) => [...presetToArgs("gemini", m), "--skip-trust", "-i", task, "--yolo"],
+  // Antigravity CLI (`agy`): `-p` prints headless, `-i` seeds the TUI. Auto-approve
+  // like Claude Code (`--dangerously-skip-permissions`) so the run completes
+  // unattended — it is already confined by otterbot's own sandbox.
+  antigravity: {
+    bin: "agy",
+    headless: (task, m) => [...presetToArgs("antigravity", m), "-p", task, "--dangerously-skip-permissions"],
+    interactive: (task, m) => [...presetToArgs("antigravity", m), "-i", task, "--dangerously-skip-permissions"],
   },
   // OpenCode renders a TUI for `run` regardless, so both modes use it.
   opencode: {

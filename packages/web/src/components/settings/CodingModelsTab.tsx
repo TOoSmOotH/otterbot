@@ -11,10 +11,10 @@ import { uniqueModelId } from "../../lib/model-id";
 
 /**
  * Settings → Coding Models. Manage named, reusable per-tool model presets for
- * the coding CLIs (claude / codex / gemini / opencode). Each tool exposes
+ * the coding CLIs (claude / codex / antigravity / opencode). Each tool exposes
  * different knobs, so the editor is tool-aware:
  *   - claude / codex — model + reasoning effort
- *   - gemini — model
+ *   - antigravity — model (a display name like "Gemini 3.1 Pro (High)")
  *   - opencode — provider + model, sourced from the configured registry
  * Presets are assigned to agents (or project roles) and resolved into the
  * tool's flags at spawn time. Persisted within GlobalSettings via the save bar.
@@ -23,7 +23,7 @@ import { uniqueModelId } from "../../lib/model-id";
 const TOOLS: { id: CodingToolId; label: string }[] = [
   { id: "claude", label: "Claude Code" },
   { id: "codex", label: "Codex" },
-  { id: "gemini", label: "Gemini CLI" },
+  { id: "antigravity", label: "Antigravity CLI" },
   { id: "opencode", label: "OpenCode" },
 ];
 
@@ -261,7 +261,13 @@ function ToolFields({
         <input
           value={value.model ?? ""}
           onChange={(e) => onChange({ model: e.target.value })}
-          placeholder={tool === "claude" ? "opus | sonnet | haiku | id" : "model id (blank = default)"}
+          placeholder={
+            tool === "claude"
+              ? "opus | sonnet | haiku | id"
+              : tool === "antigravity"
+                ? "Gemini 3.1 Pro (High) — blank = default"
+                : "model id (blank = default)"
+          }
           style={{ ...input, minWidth: 200 }}
         />
       </Field>

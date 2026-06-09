@@ -1439,7 +1439,7 @@ export async function buildServer(
   // start/end deltas arrive over the socket (`coding:started` / `coding:ended`).
   app.get("/api/coding-sessions", async () => listCodingSessions());
 
-  // Which coding CLIs (claude/codex/gemini/opencode) are installed + (best-
+  // Which coding CLIs (claude/codex/antigravity/opencode) are installed + (best-
   // effort) logged in, plus cached "update available" info. Both install and
   // login are SHARED across all agents, so this is instance-wide, not per agent.
   app.get("/api/coding-cli/status", async () => orch.codingCliStatus());
@@ -1455,7 +1455,7 @@ export async function buildServer(
     const tool = req.body?.tool ?? "";
     if (!isCodingTool(tool)) {
       reply.code(400);
-      return { error: "tool must be one of claude, codex, gemini, opencode" };
+      return { error: "tool must be one of claude, codex, antigravity, opencode" };
     }
     const result = await installSharedCodingCli(tool);
     return { ...result, status: orch.codingCliStatus() };

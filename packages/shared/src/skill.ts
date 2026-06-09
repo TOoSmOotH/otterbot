@@ -111,7 +111,7 @@ export const GRANTABLE_TOOL_NAMES = [
   "ssh_get_public_key",
   "ssh_list_hosts",
   "ssh_exec",
-  // Command-line coding agents (Claude Code, Codex, Gemini CLI, OpenCode) —
+  // Command-line coding agents (Claude Code, Codex, Antigravity CLI, OpenCode) —
   // granted together by the `coding-cli` capability.
   "coding_cli_run",
   "coding_cli_status",

@@ -8,15 +8,20 @@ import {
 } from "./coding-cli-install.js";
 
 describe("CODING_CLI_SPECS", () => {
-  it("covers every coding tool with a package, login command, and auth file", () => {
+  it("covers every coding tool with an install method, login command, and auth file", () => {
     for (const tool of CODING_TOOLS) {
       const spec = CODING_CLI_SPECS[tool];
       expect(spec).toBeDefined();
-      expect(spec.bin).toBe(tool);
-      expect(spec.pkg.length).toBeGreaterThan(0);
+      expect(spec.bin.length).toBeGreaterThan(0);
+      // npm tools carry a package; script tools (the Antigravity Go binary) a URL.
+      if (spec.install.method === "npm") {
+        expect(spec.install.pkg.length).toBeGreaterThan(0);
+      } else {
+        expect(spec.install.url.length).toBeGreaterThan(0);
+      }
       expect(spec.loginCmd.length).toBeGreaterThan(0);
-      // Auth file lives under the tool's shared credential subdir.
-      expect(spec.authFile.startsWith(`${tool}/`)).toBe(true);
+      // Auth file lives under a shared credential subdir (`<dir>/<file>`).
+      expect(spec.authFile).toContain("/");
     }
   });
 });
@@ -52,7 +57,7 @@ describe("sharedCodingStatus", () => {
   it("merges cached latest versions in (no update flagged while not installed)", () => {
     const store = {
       getSetting: () =>
-        JSON.stringify({ checkedAt: 0, latest: { claude: "9.9.9", codex: null, gemini: null, opencode: null } }),
+        JSON.stringify({ checkedAt: 0, latest: { claude: "9.9.9", codex: null, antigravity: null, opencode: null } }),
       setSetting: () => {},
     };
     const status = sharedCodingStatus(store);

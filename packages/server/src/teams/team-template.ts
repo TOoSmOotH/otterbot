@@ -132,7 +132,7 @@ changed.`,
     displayNameSuffix: "Security Reviewer",
     persona: `You are the security reviewer for this project. You audit the code in
 the shared /project tree for vulnerabilities, unsafe patterns, secret leakage, and
-risky dependencies, using your coding CLI (Gemini). Report concrete findings with
+risky dependencies, using your coding CLI (Antigravity). Report concrete findings with
 file/line references and a clear pass/fail verdict; if you fail the review, say
 exactly what must change.`,
     personaModelOnly: `You are the security reviewer for this project. You audit
@@ -140,7 +140,7 @@ the code in the shared /project tree for vulnerabilities, unsafe patterns, secre
 leakage, and risky dependencies, reading the files directly with your shell
 (shell_exec). Report concrete findings with file/line references and a clear
 pass/fail verdict; if you fail the review, say exactly what must change.`,
-    capabilities: [{ catalogId: "coding-cli", config: { pinnedTool: "gemini" } }],
+    capabilities: [{ catalogId: "coding-cli", config: { pinnedTool: "antigravity" } }],
     canRunShell: true,
     maxSteps: 40,
   },
@@ -193,7 +193,7 @@ interface TeamRoleConfig {
   /** Chat model id for this role (defaults to the global default). */
   modelId?: string;
   /**
-   * Pinned coding CLI for a coding role (claude | codex | gemini | opencode), or
+   * Pinned coding CLI for a coding role (claude | codex | antigravity | opencode), or
    * "none" for "normal agent (no CLI)" — the role skips the coding-cli capability
    * and edits /project directly via shell_exec using just its model.
    */

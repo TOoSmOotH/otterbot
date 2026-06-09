@@ -6,7 +6,7 @@ import { useGlobalSettingsStore } from "../../stores/global-settings-store";
 import { ModelSelect } from "./ModelSelect";
 import type { Project } from "../../stores/projects-store";
 
-const CODING_TOOLS: CodingToolId[] = ["claude", "codex", "gemini", "opencode"];
+const CODING_TOOLS: CodingToolId[] = ["claude", "codex", "antigravity", "opencode"];
 
 /** The coding-cli capability config we expose here (a subset of its fields). */
 interface CodingConfig {

@@ -50,7 +50,7 @@ export interface ConfiguredModel {
  * A coding-CLI tool id. Mirrors the server's `CodingTool` union (kept here so
  * shared types can reference it without depending on the server package).
  */
-export type CodingToolId = "claude" | "codex" | "gemini" | "opencode";
+export type CodingToolId = "claude" | "codex" | "antigravity" | "opencode";
 
 /**
  * A named, reusable model configuration for one coding CLI tool. Defined once in

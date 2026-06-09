@@ -18,7 +18,7 @@ import { useProjectsStore } from "../../stores/projects-store";
 
 type Choice = "menu" | "single" | "team" | "service";
 
-const CODING_TOOLS = ["claude", "codex", "gemini", "opencode"] as const;
+const CODING_TOOLS = ["claude", "codex", "antigravity", "opencode"] as const;
 type Tool = (typeof CODING_TOOLS)[number];
 /** A coding role's tool: a CLI, or "model" for "model only" (no coding CLI). */
 type ToolChoice = Tool | "model";
@@ -36,7 +36,7 @@ interface RoleSpec {
 const ROLES: RoleSpec[] = [
   { role: "pm", label: "Project Manager", blurb: "Plans with you and runs the pipeline." },
   { role: "coder", label: "Coder", defaultTool: "claude", blurb: "Implements the feature." },
-  { role: "security-reviewer", label: "Security Reviewer", defaultTool: "gemini", blurb: "Audits the code.", optional: true },
+  { role: "security-reviewer", label: "Security Reviewer", defaultTool: "antigravity", blurb: "Audits the code.", optional: true },
   { role: "test-writer", label: "Test Writer", defaultTool: "opencode", blurb: "Writes the tests.", optional: true },
   { role: "tester", label: "Tester", blurb: "Runs local tests; remote e2e is optional.", optional: true },
 ];

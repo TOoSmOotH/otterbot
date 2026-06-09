@@ -154,7 +154,7 @@ function gitSshEnv(
 
 // --- Shared coding-CLI tools + credentials ---------------------------------
 //
-// The coding CLIs (claude/codex/gemini/opencode) are installed ONCE into a
+// The coding CLIs (claude/codex/antigravity/opencode) are installed ONCE into a
 // shared host dir and their logins live in ONE shared store, so the user
 // installs and logs in a single time for all agents — not per agent. Each
 // sandbox gets:
@@ -174,6 +174,7 @@ const CODING_TOOLS_MOUNT = "/otter-tools";
 const SHARED_AUTH_DIRS: { sub: string; home: string }[] = [
   { sub: "claude", home: ".claude" },
   { sub: "codex", home: ".codex" },
+  // The Antigravity CLI (`agy`) reuses ~/.gemini for its OAuth creds + state.
   { sub: "gemini", home: ".gemini" },
   { sub: "opencode", home: ".local/share/opencode" },
 ];
