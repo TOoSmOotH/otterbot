@@ -97,6 +97,30 @@ export type ChatConnectionConfig = ChannelBotConfig;
 export type McpConnectionConfig = McpServerConfig;
 
 /**
+ * One non-destructive probe run by a connection test (e.g. "Bot token",
+ * "Socket Mode token", "Channel"). `detail` carries a human-readable note on
+ * success (team name, whether the bot is in the channel…); `error` carries the
+ * provider's failure reason.
+ */
+export interface ConnCheck {
+  name: string;
+  ok: boolean;
+  detail?: string;
+  error?: string;
+}
+
+/**
+ * The result of testing a {@link Connection}: each individual check plus the
+ * aggregate `ok` (every check passed). `error` is set instead of `checks` when
+ * the test couldn't run at all (unknown connection, non-chat type).
+ */
+export interface ConnTestResult {
+  ok: boolean;
+  checks: ConnCheck[];
+  error?: string;
+}
+
+/**
  * Unified "Integrations" vocabulary (the user-facing model that replaces the
  * Credentials + Connections tabs). The two-tier shape is unchanged underneath:
  *

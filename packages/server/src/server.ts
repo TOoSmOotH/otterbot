@@ -646,6 +646,11 @@ export async function buildServer(
     }
   );
 
+  // Non-destructive health check for a chat connection (Integrations "Test").
+  app.post<{ Params: { id: string } }>("/api/connections/:id/test", async (req) =>
+    orch.testConnection(req.params.id)
+  );
+
   // Per-agent assignment.
   app.get<{ Params: { id: string } }>("/api/agents/:id/connections", async (req) =>
     orch.connectionsForAgent(req.params.id)

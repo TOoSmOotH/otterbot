@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import type { SkillConfigField, SkillConfigSchema, Credential, Connection } from "@otterbot/shared";
+import type { SkillConfigField, SkillConfigSchema, Credential, Connection, ConnTestResult } from "@otterbot/shared";
 import {
   useConnectionsStore,
   assignConnection,
@@ -473,7 +473,16 @@ function IntegrationRow({
   onDelete: () => void;
 }) {
   const [editing, setEditing] = useState(false);
-  const { updateConnection } = useConnectionsStore();
+  const [test, setTest] = useState<{ status: "idle" | "testing" | "ok" | "fail"; result?: ConnTestResult }>({
+    status: "idle",
+  });
+  const { updateConnection, testConnection } = useConnectionsStore();
+
+  const runTest = async () => {
+    setTest({ status: "testing" });
+    const result = await testConnection(id);
+    setTest({ status: result.ok ? "ok" : "fail", result });
+  };
 
   const summary = allAgents
     ? "all agents"
@@ -503,6 +512,11 @@ function IntegrationRow({
           </span>
         </div>
         <div style={{ display: "flex", gap: 8 }}>
+          {isChat && (
+            <button style={ghost} onClick={() => void runTest()} disabled={test.status === "testing"}>
+              {test.status === "testing" ? "Testing…" : "Test"}
+            </button>
+          )}
           <button style={ghost} onClick={() => setEditing((v) => !v)}>
             {editing ? "Done" : "Assign"}
           </button>
@@ -514,6 +528,10 @@ function IntegrationRow({
           </button>
         </div>
       </div>
+
+      {test.status !== "idle" && test.status !== "testing" && test.result && (
+        <TestResults result={test.result} />
+      )}
 
       {editing && (
         <div style={{ ...card, background: "rgb(var(--bg))", gap: 6 }}>
@@ -541,6 +559,32 @@ function IntegrationRow({
               );
             })}
         </div>
+      )}
+    </div>
+  );
+}
+
+/** Per-check results of a connection test, each line a ✓/✗ with detail or error. */
+function TestResults({ result }: { result: ConnTestResult }) {
+  return (
+    <div style={{ ...card, background: "rgb(var(--bg))", gap: 6 }}>
+      {result.error ? (
+        <span style={{ fontSize: 13, color: "rgb(var(--danger))" }}>✗ {result.error}</span>
+      ) : (
+        <>
+          <span style={{ fontSize: 13, fontWeight: 600, color: result.ok ? "rgb(var(--success, 74 222 128))" : "rgb(var(--danger))" }}>
+            {result.ok ? "✓ All checks passed" : "✗ Some checks failed"}
+          </span>
+          {result.checks.map((c) => (
+            <div key={c.name} style={{ display: "flex", gap: 8, fontSize: 12, alignItems: "flex-start" }}>
+              <span style={{ color: c.ok ? "rgb(74 222 128)" : "rgb(var(--danger))" }}>{c.ok ? "✓" : "✗"}</span>
+              <span style={{ fontWeight: 600, minWidth: 140 }}>{c.name}</span>
+              <span style={{ color: c.ok ? "rgb(var(--muted))" : "rgb(var(--danger))" }}>
+                {c.error ?? c.detail ?? ""}
+              </span>
+            </div>
+          ))}
+        </>
       )}
     </div>
   );

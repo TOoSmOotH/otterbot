@@ -13,6 +13,7 @@ import type {
   ChannelBotConfig,
   ChannelConnectorStatus,
   Connection,
+  ConnTestResult,
   ConfiguredModel,
   CodingModelPreset,
   GlobalSettings,
@@ -117,6 +118,7 @@ import {
 import type { OutboundFile } from "../integrations/chat/chat-client.js";
 import { WebClient } from "@slack/web-api";
 import { PROVIDERS, type ChatProviderId, type ChatProvider } from "../integrations/chat/providers.js";
+import { testChatConnection } from "../integrations/chat/test-connection.js";
 import { McpManager } from "../integrations/mcp.js";
 import { mimeFromName, persistArtifact } from "../integrations/artifacts.js";
 import type { Artifact } from "@otterbot/shared";
@@ -3104,6 +3106,25 @@ export class Orchestrator {
       const e = err as { data?: { error?: string }; message?: string };
       return { ok: false, error: e.data?.error ?? e.message ?? "unknown error" };
     }
+  }
+
+  /**
+   * Run non-destructive health checks for a chat connection (the Integrations
+   * "Test" button). Resolves the binding's credential tokens + configured channel
+   * exactly as {@link chatConnectorsForAgent} does, then probes the provider
+   * without sending any message. See {@link testChatConnection}.
+   */
+  async testConnection(id: string): Promise<ConnTestResult> {
+    const conn = this.connectionStore.get(id);
+    if (!conn) return { ok: false, checks: [], error: "unknown connection" };
+    if (!isChatConnectionType(conn.type)) {
+      return { ok: false, checks: [], error: "test is only available for chat connections" };
+    }
+    const secrets = conn.credentialId
+      ? this.credentials.secretsFor(conn.credentialId)
+      : new Map<string, string>();
+    const channelId = toChannelConfig(conn.config).channelId || null;
+    return testChatConnection(conn.type as ChatProviderId, secrets, channelId);
   }
 
   private restartAgents(): void {

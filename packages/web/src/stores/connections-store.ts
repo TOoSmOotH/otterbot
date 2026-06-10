@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { apiFetch } from "../lib/api";
-import type { Connection, Credential, SkillConfigSchema } from "@otterbot/shared";
+import type { Connection, ConnTestResult, Credential, SkillConfigSchema } from "@otterbot/shared";
 
 /** Registry descriptor for a connection type (from `/api/connection-types`). */
 export interface ConnectionTypeDef {
@@ -33,6 +33,7 @@ interface ConnectionsState {
   createConnection: (input: { type: string; label: string; config?: Record<string, unknown>; credentialId?: string | null; allAgents?: boolean }) => Promise<Connection | null>;
   updateConnection: (id: string, patch: { label?: string; config?: Record<string, unknown>; credentialId?: string | null; allAgents?: boolean }) => Promise<boolean>;
   deleteConnection: (id: string, force?: boolean) => Promise<{ ok: boolean; error?: string }>;
+  testConnection: (id: string) => Promise<ConnTestResult>;
 }
 
 async function json<T>(res: Response): Promise<T | null> {
@@ -159,6 +160,16 @@ export const useConnectionsStore = create<ConnectionsState>((set, get) => ({
     } finally {
       set({ busy: false });
     }
+  },
+
+  testConnection: async (id) => {
+    const res = await apiFetch(`/api/connections/${encodeURIComponent(id)}/test`, {
+      method: "POST",
+    });
+    const body = await json<ConnTestResult>(res);
+    if (body) return body;
+    const err = (await res.json().catch(() => ({}))) as { error?: string };
+    return { ok: false, checks: [], error: err.error ?? "test request failed" };
   },
 }));
 
