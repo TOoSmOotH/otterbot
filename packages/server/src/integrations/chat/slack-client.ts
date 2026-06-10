@@ -116,29 +116,12 @@ export class SlackChatClient implements ChatClient {
   }
 
   private onSlackMessage(event: SlackMessageEvent, isAppMention: boolean): void {
-    // TEMP diagnostic: confirms whether Slack is delivering events at all (the
-    // Layer-A question) and which filter, if any, drops them. textLen avoids
-    // logging message contents. Remove once the mention path is confirmed.
-    console.info(
-      `[slack] event in: appMention=${isAppMention} channel=${event.channel ?? "-"} ` +
-        `user=${event.user ?? "-"} ts=${event.ts ?? "-"} subtype=${event.subtype ?? "-"} ` +
-        `bot=${event.bot_id ?? "-"} textLen=${event.text?.length ?? 0}`
-    );
-    if (event.subtype || event.bot_id) {
-      console.info(`[slack] drop: subtype=${event.subtype ?? "-"} bot_id=${event.bot_id ?? "-"}`);
-      return;
-    }
-    if (!event.channel || !event.user || !event.text) {
-      console.info("[slack] drop: missing channel/user/text");
-      return;
-    }
+    if (event.subtype || event.bot_id) return;
+    if (!event.channel || !event.user || !event.text) return;
     // The same mention can arrive as both an app_mention and a message event;
     // process each underlying message only once.
     if (event.ts) {
-      if (this.seenTs.has(event.ts)) {
-        console.info(`[slack] drop: duplicate ts=${event.ts}`);
-        return;
-      }
+      if (this.seenTs.has(event.ts)) return;
       this.seenTs.add(event.ts);
       if (this.seenTs.size > 500) {
         this.seenTs.delete(this.seenTs.values().next().value as string);

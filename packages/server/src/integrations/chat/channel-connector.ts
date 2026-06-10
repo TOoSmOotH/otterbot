@@ -132,43 +132,16 @@ export class ChannelConnector {
   }
 
   private onInbound(m: InboundChatMessage): void {
-    // TEMP diagnostic: shows every inbound message that reaches the connector and
-    // the exact gate that drops it. Remove once the mention path is confirmed.
-    if (m.channelId !== this.channelId) {
-      console.info(
-        `[${this.platform}] drop: channel ${m.channelId} != configured ${this.channelId}`
-      );
-      return;
-    }
-    if (m.fromSelf) {
-      console.info(`[${this.platform}] drop: message is from self`);
-      return;
-    }
+    if (m.channelId !== this.channelId) return;
+    if (m.fromSelf) return;
     // Each native thread is its own conversation; a top-level message's own id
     // roots the thread the bot will reply in.
     const threadKey = m.threadId ?? m.messageId;
     // In a thread the bot already joined, follow-ups don't need a re-mention.
     const addressed = m.mentioned || (m.threadId != null && this.activeThreads.has(threadKey));
-    if (this.cfg.mentionOnly && !addressed) {
-      console.info(
-        `[${this.platform}] drop: mentionOnly is on and message not addressed ` +
-          `(mentioned=${m.mentioned}, threadActive=${m.threadId != null && this.activeThreads.has(threadKey)})`
-      );
-      return;
-    }
+    if (this.cfg.mentionOnly && !addressed) return;
     const body = m.text.trim();
-    if (!body) {
-      console.info(`[${this.platform}] drop: empty body after stripping the mention`);
-      return;
-    }
-    if (!this.passesGate(m.senderId)) {
-      console.info(
-        `[${this.platform}] drop: sender ${m.senderId} failed the access gate ` +
-          `(publicBot=${this.cfg.publicBot}, allowed=[${this.cfg.allowedUserIds.join(",")}])`
-      );
-      return;
-    }
-    console.info(`[${this.platform}] accepted message from ${m.senderId} — dispatching to the agent`);
+    if (!body || !this.passesGate(m.senderId)) return;
     const conversationId = this.conversationId(threadKey);
     const command = parseChatCommand(body);
     if (command) {
