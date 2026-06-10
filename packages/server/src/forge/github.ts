@@ -28,7 +28,9 @@ export class GitHubForge implements Forge {
     const res = await this.fetchFn(`${this.base}${path}`, {
       ...init,
       headers: {
-        Authorization: `Bearer ${this.account.token}`,
+        // Omit auth entirely when tokenless so the request is genuinely
+        // unauthenticated (public-repo reads at GitHub's 60 req/hr limit).
+        ...(this.account.token ? { Authorization: `Bearer ${this.account.token}` } : {}),
         Accept: "application/vnd.github+json",
         "User-Agent": "otterbot",
         "Content-Type": "application/json",

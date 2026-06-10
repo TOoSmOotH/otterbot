@@ -20,7 +20,7 @@ import { controlSchema, type ControlDb } from "../db/control-db.js";
 /** Git/forge backing for a single repo. Lives on each {@link ProjectRepo}. */
 export interface RepoForge {
   /** Where the code lives. */
-  mode: "local" | "existing" | "new" | "fork";
+  mode: "local" | "existing" | "new" | "fork" | "public";
   /** Forge account id (forge_accounts.id) when mode != local. */
   forgeAccountId: string | null;
   /** owner/name of the upstream repo on the forge when mode != local. */
@@ -29,6 +29,8 @@ export interface RepoForge {
   forkRepo: string | null;
   /** SSH clone/push URL captured from the forge (the fork's URL when mode == fork). */
   forgeSshUrl: string | null;
+  /** Plain (credential-free) clone URL when mode == public; null otherwise. */
+  publicUrl: string | null;
   /** Base/integration branch PRs target. */
   baseBranch: string | null;
   /** Poll the forge for assigned issues to feed the pipeline. */
@@ -64,7 +66,7 @@ export interface Project {
    */
   repoPath: string;
   /** Where the primary repo's code lives. */
-  mode: "local" | "existing" | "new" | "fork";
+  mode: "local" | "existing" | "new" | "fork" | "public";
   /** Forge account id (forge_accounts.id) when the primary repo's mode != local. */
   forgeAccountId: string | null;
   /** owner/name of the primary repo's upstream on the forge. */
@@ -73,6 +75,8 @@ export interface Project {
   forkRepo: string | null;
   /** SSH clone/push URL for the primary repo. */
   forgeSshUrl: string | null;
+  /** Plain (credential-free) clone URL when the primary repo's mode == public. */
+  publicUrl: string | null;
   /** Base/integration branch the primary repo's PRs target. */
   baseBranch: string | null;
   /** Primary repo: poll the forge for assigned issues to feed the pipeline. */
@@ -183,6 +187,15 @@ export class ProjectStore {
       );
   }
 
+  /** Every repo across all projects backed by a public clone (for the refresher). */
+  listPublicRepos(): ProjectRepo[] {
+    return this.control.db
+      .select()
+      .from(controlSchema.projectRepos)
+      .where(eq(controlSchema.projectRepos.mode, "public"))
+      .all();
+  }
+
   getRepo(repoId: string): ProjectRepo | null {
     return (
       this.control.db
@@ -287,6 +300,7 @@ export class ProjectStore {
       forgeRepo: primary?.forgeRepo ?? null,
       forkRepo: primary?.forkRepo ?? null,
       forgeSshUrl: primary?.forgeSshUrl ?? null,
+      publicUrl: primary?.publicUrl ?? null,
       baseBranch: primary?.baseBranch ?? null,
       monitorIssues: primary?.monitorIssues ?? false,
       triageIssues: primary?.triageIssues ?? false,
@@ -566,6 +580,21 @@ export class ProjectStore {
     this.git(repoPath, ["remote", "set-url", "origin", plainUrl]);
     this.configureRepo(repoPath, ctx);
     return clone;
+  }
+
+  /**
+   * Fast-forward a read-only mirror to its remote's current default branch. A
+   * public clone has no local commits to preserve, so this fetches then
+   * hard-resets to `origin/HEAD` — which avoids merge conflicts and tolerates
+   * upstream force-pushes. `ctx` is empty for public repos (no credentials).
+   */
+  pull(repoPath: string, ctx: GitContext = {}): GitOpResult {
+    if (!existsSync(join(repoPath, ".git"))) return { ok: false, output: "not a git repo" };
+    const fetched = this.git(repoPath, ["fetch", "origin", "--prune"], ctx);
+    if (!fetched.ok) return fetched;
+    const ref = this.git(repoPath, ["rev-parse", "--abbrev-ref", "origin/HEAD"], ctx);
+    const branch = ref.ok && ref.output.trim() ? ref.output.trim() : "origin/HEAD";
+    return this.git(repoPath, ["reset", "--hard", branch], ctx);
   }
 
   /** Whether a repo's working tree has uncommitted changes (staged or not). */

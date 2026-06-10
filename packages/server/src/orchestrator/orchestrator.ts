@@ -511,6 +511,8 @@ export class Orchestrator {
   private readonly issueTriage: IssueTriageStore;
   private readonly forgeMonitor: ForgeMonitor;
   private readonly codingCliUpdates: CodingCliUpdateChecker;
+  /** Periodic refresher for public read-only mirrors; cleared on shutdown. */
+  private publicRefreshTimer: ReturnType<typeof setInterval> | null = null;
   private readonly pipeline: PipelineManager;
   private readonly buildGraph: BuildGraphManager;
   private readonly pipelineListeners = new Set<(run: PipelineRunView) => void>();
@@ -768,6 +770,10 @@ export class Orchestrator {
           })),
         };
       },
+      listPublicIssues: (repo) => this.forge.publicGitHubForge().listOpenIssues(repo),
+      getPublicPullRequest: (repo, number) => this.forge.publicGitHubForge().getPullRequest(repo, number),
+      listPublicIssueComments: (repo, number) =>
+        this.forge.publicGitHubForge().listIssueComments(repo, number),
     };
   }
 
@@ -1464,6 +1470,8 @@ export class Orchestrator {
     this.scheduler.stop();
     this.forgeMonitor.stop();
     this.codingCliUpdates.stop();
+    if (this.publicRefreshTimer) clearInterval(this.publicRefreshTimer);
+    this.publicRefreshTimer = null;
     for (const timer of this.subagentTeardowns.values()) clearTimeout(timer);
     this.subagentTeardowns.clear();
     await this.bus.stop();
@@ -1523,6 +1531,9 @@ export class Orchestrator {
     this.forgeMonitor.start(5 * 60_000);
     // Refresh coding-CLI latest versions on startup, then daily.
     this.codingCliUpdates.start(24 * 60 * 60_000);
+    // Keep public read-only mirrors fresh: pull every 30 minutes.
+    this.refreshPublicRepos();
+    this.publicRefreshTimer = setInterval(() => this.refreshPublicRepos(), 30 * 60_000);
   }
 
   /** Build and register a runtime + context for a profile. */
@@ -2097,7 +2108,7 @@ export class Orchestrator {
   async setProjectForge(
     projectId: string,
     input: {
-      mode: "local" | "existing" | "new" | "fork";
+      mode: "local" | "existing" | "new" | "fork" | "public";
       accountId?: string | null;
       repo?: string | null;
       baseBranch?: string | null;
@@ -2124,7 +2135,7 @@ export class Orchestrator {
   async setProjectRepoForge(
     repoId: string,
     input: {
-      mode: "local" | "existing" | "new" | "fork";
+      mode: "local" | "existing" | "new" | "fork" | "public";
       accountId?: string | null;
       repo?: string | null;
       baseBranch?: string | null;
@@ -2142,10 +2153,52 @@ export class Orchestrator {
         forgeRepo: null,
         forkRepo: null,
         forgeSshUrl: null,
+        publicUrl: null,
         monitorIssues: false,
         triageIssues: false,
       });
       return { ok: true };
+    }
+
+    // Public, credential-free read-only mirror: clone any public git URL with no
+    // auth. For github.com URLs we additionally capture owner/name + default
+    // branch so agents can read public issues/PRs via the tokenless GitHub API.
+    if (input.mode === "public") {
+      if (!input.repo?.trim()) return { ok: false, error: "A public git URL is required" };
+      const url = input.repo.trim();
+      let host = "";
+      try {
+        host = new URL(url).host.toLowerCase();
+      } catch {
+        return { ok: false, error: "Invalid URL — paste a full https git URL." };
+      }
+      const clone = this.projects.cloneInto(repo.repoPath, url, url, {});
+      if (!clone.ok) return { ok: false, error: `clone failed: ${clone.output}` };
+
+      let forgeRepo: string | null = null;
+      let baseBranch = input.baseBranch ?? null;
+      if (host === "github.com" || host === "www.github.com") {
+        try {
+          const ref = parseRepoInput(url);
+          const meta = await this.forge.publicGitHubForge().getRepo(ref);
+          forgeRepo = `${meta.owner}/${meta.name}`;
+          baseBranch = baseBranch ?? meta.defaultBranch;
+        } catch {
+          // Non-fatal: the clone succeeded; issue/PR reads just won't be wired.
+        }
+      }
+      this.projects.setRepoForge(repoId, {
+        mode: "public",
+        forgeAccountId: null,
+        forgeRepo,
+        forkRepo: null,
+        forgeSshUrl: null,
+        publicUrl: url,
+        baseBranch,
+        monitorIssues: false,
+        triageIssues: false,
+      });
+      return { ok: true, repo: forgeRepo ?? url, defaultBranch: baseBranch ?? undefined };
     }
 
     const account = input.accountId ? this.forge.getAccount(input.accountId) : null;
@@ -2186,6 +2239,7 @@ export class Orchestrator {
         forgeRepo: fullRepo,
         forkRepo: input.mode === "fork" ? cloneFullRepo : null,
         forgeSshUrl: cloneRepo.sshUrl ?? null,
+        publicUrl: null,
         baseBranch: input.baseBranch ?? upstream.defaultBranch,
         monitorIssues: input.monitorIssues ?? false,
         triageIssues: input.triageIssues ?? false,
@@ -2193,6 +2247,26 @@ export class Orchestrator {
       return { ok: true, repo: fullRepo, defaultBranch: upstream.defaultBranch };
     } catch (err) {
       return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  }
+
+  /**
+   * Refresh a public read-only mirror by fast-forwarding its clone to the remote
+   * (credential-free). Manual API action + the periodic refresher both call this.
+   */
+  refreshRepo(repoId: string): { ok: boolean; error?: string } {
+    const repo = this.projects.getRepo(repoId);
+    if (!repo) return { ok: false, error: "Unknown repo" };
+    if (repo.mode !== "public") return { ok: false, error: "Only public repos can be refreshed." };
+    const res = this.projects.pull(repo.repoPath, {});
+    return res.ok ? { ok: true } : { ok: false, error: res.output };
+  }
+
+  /** Fast-forward every public mirror to its remote. Best-effort; logs failures. */
+  private refreshPublicRepos(): void {
+    for (const r of this.projects.listPublicRepos()) {
+      const res = this.projects.pull(r.repoPath, {});
+      if (!res.ok) console.warn(`[public-refresh] ${r.repoPath}: ${res.output}`);
     }
   }
 
@@ -2283,7 +2357,7 @@ export class Orchestrator {
     // Infra present: delegate a remote-VM run. For a forge-backed project, push
     // the run branch first so the VM can fetch it.
     let e2e: string;
-    if (project.mode === "local" || !project.forgeRepo) {
+    if (project.mode === "local" || project.mode === "public" || !project.forgeRepo) {
       e2e =
         `\n\n### End-to-end tests (remote)\nThis is a local-only project; the code ` +
         `lives at /project. Delegate to the Proxmox Service agent to prepare a clean ` +

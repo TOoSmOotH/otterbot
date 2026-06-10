@@ -156,6 +156,32 @@ export class ForgeService {
       : new GitHubForge(account, this.fetchFn);
   }
 
+  /**
+   * A credential-less GitHub forge for reading PUBLIC repos (issues/PRs at
+   * GitHub's 60 req/hr unauthenticated limit). The empty token makes
+   * {@link GitHubForge} omit the Authorization header. Only read methods
+   * (`getRepo`, `listOpenIssues`, `getPullRequest`, `listIssueComments`) work
+   * tokenless — write/identity methods will 401.
+   */
+  publicGitHubForge(baseUrl: string = GITHUB_DEFAULT_BASE): Forge {
+    return new GitHubForge(
+      {
+        id: "",
+        provider: "github",
+        label: "public",
+        baseUrl,
+        token: "",
+        username: "",
+        gitTransport: "https",
+        committerName: "",
+        committerEmail: "",
+        signCommits: false,
+        sshKeyId: null,
+      },
+      this.fetchFn
+    );
+  }
+
   forgeForAccount(id: string | null | undefined): Forge | null {
     if (!id) return null;
     const account = this.getAccount(id);

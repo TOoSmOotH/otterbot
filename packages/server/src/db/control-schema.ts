@@ -235,8 +235,8 @@ export const projects = sqliteTable("projects", {
    * row. New code reads the primary `project_repos` row, not this column.
    */
   repoPath: text("repo_path").notNull(),
-  /** Where the code lives: local-only, or a repo on a forge. */
-  mode: text("mode", { enum: ["local", "existing", "new", "fork"] }).notNull().default("local"),
+  /** Where the code lives: local-only, a forge repo, or a public read-only mirror. */
+  mode: text("mode", { enum: ["local", "existing", "new", "fork", "public"] }).notNull().default("local"),
   /** Forge account id (forge_accounts.id) when mode != local. */
   forgeAccountId: text("forge_account_id"),
   /** owner/name of the upstream repo on the forge when mode != local. */
@@ -275,8 +275,8 @@ export const projectRepos = sqliteTable("project_repos", {
   name: text("name").notNull(),
   /** Absolute path to this repo's working tree (`<workspace>/<name>`). */
   repoPath: text("repo_path").notNull(),
-  /** Where the code lives: local-only, or a repo on a forge. */
-  mode: text("mode", { enum: ["local", "existing", "new", "fork"] }).notNull().default("local"),
+  /** Where the code lives: local-only, a forge repo, or a public read-only mirror. */
+  mode: text("mode", { enum: ["local", "existing", "new", "fork", "public"] }).notNull().default("local"),
   /** Forge account id (forge_accounts.id) when mode != local. */
   forgeAccountId: text("forge_account_id"),
   /** owner/name of the upstream repo on the forge when mode != local. */
@@ -285,6 +285,8 @@ export const projectRepos = sqliteTable("project_repos", {
   forkRepo: text("fork_repo"),
   /** SSH clone/push URL captured from the forge (handles custom Gitea ports). */
   forgeSshUrl: text("forge_ssh_url"),
+  /** Plain (credential-free) clone URL when mode == public. */
+  publicUrl: text("public_url"),
   /** Base/integration branch PRs target (default branch when blank). */
   baseBranch: text("base_branch"),
   /** Poll the forge for assigned issues to feed the pipeline. */

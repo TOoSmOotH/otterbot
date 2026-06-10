@@ -263,6 +263,48 @@ describe("ProjectStore", () => {
     expect(view.forgeRepo).toBe("o/n");
   });
 
+  it("clones a public URL credential-free and refreshes it with pull()", () => {
+    // Stand up a local "remote" repo to act as the public source.
+    const remote = mkdtempSync(join(tmpdir(), "otter-remote-"));
+    const git = (args: string[], cwd = remote) =>
+      spawnSync("git", ["-C", cwd, ...args], { encoding: "utf8" });
+    git(["init"]);
+    git(["config", "user.email", "r@example.com"]);
+    git(["config", "user.name", "remote"]);
+    writeFileSync(join(remote, "a.txt"), "one");
+    git(["add", "-A"]);
+    git(["commit", "-m", "first"]);
+
+    const p = store.create("Mirror");
+    const repo = store.primaryRepo(p.id)!;
+    // No credentials: authedUrl === plainUrl, empty git context.
+    const clone = store.cloneInto(repo.repoPath, remote, remote, {});
+    expect(clone.ok).toBe(true);
+    expect(existsSync(join(repo.repoPath, "a.txt"))).toBe(true);
+
+    // Advance the remote, then refresh — the new file should appear.
+    writeFileSync(join(remote, "b.txt"), "two");
+    git(["add", "-A"]);
+    git(["commit", "-m", "second"]);
+    const pulled = store.pull(repo.repoPath, {});
+    expect(pulled.ok).toBe(true);
+    expect(existsSync(join(repo.repoPath, "b.txt"))).toBe(true);
+
+    rmSync(remote, { recursive: true, force: true });
+  });
+
+  it("lists public-mode repos for the periodic refresher", () => {
+    const p = store.create("Pub");
+    const a = store.primaryRepo(p.id)!;
+    const extra = store.addRepo(p.id, { name: "lib" });
+    expect(store.listPublicRepos()).toHaveLength(0);
+    store.setRepoForge(a.id, { mode: "public", publicUrl: "https://github.com/o/n" });
+    store.setRepoForge(extra.id, { mode: "local" });
+    const pub = store.listPublicRepos();
+    expect(pub.map((r) => r.id)).toEqual([a.id]);
+    expect(pub[0].publicUrl).toBe("https://github.com/o/n");
+  });
+
   it("SSH-signs commits when a signing key is given in the git context", () => {
     const p = store.create("Signed");
     // Generate a throwaway ssh key to sign with.

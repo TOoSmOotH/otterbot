@@ -5,6 +5,7 @@ import type {
   ScheduledTask,
 } from "@otterbot/shared";
 import type { MessageBus } from "../bus/bus.js";
+import type { ForgeComment, ForgeIssue, ForgePullRequest } from "../forge/forge.js";
 
 export interface AgentDirectoryEntry {
   id: string;
@@ -97,6 +98,14 @@ export interface AgentServices {
   latestPendingBuild?(projectId: string): string | null;
   /** A build run's current state. */
   getBuildRun?(runId: string): BuildRunStatus | null;
+  /**
+   * Read public GitHub issues/PRs via the unauthenticated GitHub API (tokenless,
+   * 60 req/hr) for a public-mode repo. `repo` is "owner/name"; callers MUST
+   * restrict it to the agent's own project repos. Present only when wired.
+   */
+  listPublicIssues?(repo: string): Promise<ForgeIssue[]>;
+  getPublicPullRequest?(repo: string, number: number): Promise<ForgePullRequest>;
+  listPublicIssueComments?(repo: string, number: number): Promise<ForgeComment[]>;
 }
 
 export interface BuildTaskView {

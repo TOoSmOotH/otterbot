@@ -136,6 +136,22 @@ describe("GitHubForge", () => {
     );
   });
 
+  it("omits the Authorization header when the token is empty (public reads)", async () => {
+    let hadAuth = true;
+    const { fn } = fakeFetch([
+      {
+        match: "/repos/o/n",
+        body: { default_branch: "main", clone_url: "https://github.com/o/n.git", html_url: "h" },
+        capture: (init) => {
+          hadAuth = "Authorization" in ((init?.headers as Record<string, string>) ?? {});
+        },
+      },
+    ]);
+    const tokenless: ForgeAccount = { ...ghAccount, token: "" };
+    await new GitHubForge(tokenless, fn).getRepo("o/n");
+    expect(hadAuth).toBe(false);
+  });
+
   it("forks a repo under the account and maps the result", async () => {
     let method = "";
     const { fn } = fakeFetch([

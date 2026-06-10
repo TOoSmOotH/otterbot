@@ -284,6 +284,72 @@ export function buildAgentTools(
     });
   }
 
+  // Read-only public GitHub issues/PRs for the agent's public-mode repos. No
+  // capability or token needed (unauthenticated, 60 req/hr) — the boundary is
+  // that `repo` is resolved ONLY against this project's own public repos, never
+  // a free-form owner/name. Available whenever the project has such a repo.
+  const publicRepos = ctx
+    .projectRepos()
+    .filter((r): r is { name: string; forgeRepo: string; mode: string } =>
+      r.mode === "public" && typeof r.forgeRepo === "string" && r.forgeRepo.length > 0
+    );
+  if (publicRepos.length && services?.listPublicIssues) {
+    const resolvePublicRepo = (repo?: string): string | null => {
+      if (!repo) return publicRepos[0].forgeRepo;
+      const hit = publicRepos.find((r) => r.name === repo || r.forgeRepo === repo);
+      return hit?.forgeRepo ?? null;
+    };
+    const repoParam = z
+      .string()
+      .optional()
+      .describe("Which public repo (its name or owner/name); defaults to the project's first public repo.");
+    const noMatch = { ok: false as const, error: "No matching public repo in this project." };
+
+    tools.public_repo_list_issues = tool({
+      description:
+        "List open issues for one of this project's public GitHub repos (read-only, unauthenticated).",
+      parameters: z.object({ repo: repoParam }),
+      execute: async ({ repo }) => {
+        const r = resolvePublicRepo(repo);
+        if (!r) return noMatch;
+        try {
+          return { ok: true, issues: await services.listPublicIssues!(r) };
+        } catch (err) {
+          return { ok: false, error: err instanceof Error ? err.message : String(err) };
+        }
+      },
+    });
+
+    tools.public_repo_get_pr = tool({
+      description: "Get a pull request by number for one of this project's public GitHub repos.",
+      parameters: z.object({ number: z.number().int().positive(), repo: repoParam }),
+      execute: async ({ number, repo }) => {
+        const r = resolvePublicRepo(repo);
+        if (!r) return noMatch;
+        try {
+          return { ok: true, pr: await services.getPublicPullRequest!(r, number) };
+        } catch (err) {
+          return { ok: false, error: err instanceof Error ? err.message : String(err) };
+        }
+      },
+    });
+
+    tools.public_repo_issue_comments = tool({
+      description:
+        "Read the comments on an issue or PR for one of this project's public GitHub repos.",
+      parameters: z.object({ number: z.number().int().positive(), repo: repoParam }),
+      execute: async ({ number, repo }) => {
+        const r = resolvePublicRepo(repo);
+        if (!r) return noMatch;
+        try {
+          return { ok: true, comments: await services.listPublicIssueComments!(r, number) };
+        } catch (err) {
+          return { ok: false, error: err instanceof Error ? err.message : String(err) };
+        }
+      },
+    });
+  }
+
   // Proxmox VE VM management — granted by the `proxmox` capability. Each tool
   // is gated by the agent's PROXMOX_ALLOWED_VMIDS allowlist inside the
   // integration, so it can only touch VMs the user explicitly granted.

@@ -4,7 +4,7 @@ import { getSocket } from "../lib/socket";
 
 /** Forge config for a single repo, as sent to /repos and /repos/:id/forge. */
 export interface RepoForgeInput {
-  mode: "local" | "existing" | "new" | "fork";
+  mode: "local" | "existing" | "new" | "fork" | "public";
   accountId?: string | null;
   repo?: string | null;
   baseBranch?: string | null;
@@ -18,11 +18,12 @@ export interface ProjectRepo {
   projectId: string;
   name: string;
   repoPath: string;
-  mode: "local" | "existing" | "new" | "fork";
+  mode: "local" | "existing" | "new" | "fork" | "public";
   forgeAccountId: string | null;
   forgeRepo: string | null;
   forkRepo: string | null;
   forgeSshUrl: string | null;
+  publicUrl: string | null;
   baseBranch: string | null;
   monitorIssues: boolean;
   triageIssues: boolean;
@@ -39,7 +40,7 @@ export interface Project {
   repos: ProjectRepo[];
   members: Array<{ agentId: string; access: "read" | "write" }>;
   team: Array<{ role: string; agentId: string }>;
-  mode: "local" | "existing" | "new" | "fork";
+  mode: "local" | "existing" | "new" | "fork" | "public";
   forgeAccountId: string | null;
   forgeRepo: string | null;
   forkRepo: string | null;
@@ -124,7 +125,7 @@ interface ProjectsState {
   setForge: (
     projectId: string,
     input: {
-      mode: "local" | "existing" | "new" | "fork";
+      mode: "local" | "existing" | "new" | "fork" | "public";
       accountId?: string | null;
       repo?: string | null;
       baseBranch?: string | null;
@@ -146,6 +147,8 @@ interface ProjectsState {
   setRepoForge: (projectId: string, repoId: string, input: RepoForgeInput) => Promise<string | null>;
   /** Make a repo its project's primary. */
   setPrimaryRepo: (projectId: string, repoId: string) => Promise<void>;
+  /** Refresh a public read-only mirror (git pull). */
+  refreshRepo: (projectId: string, repoId: string) => Promise<string | null>;
   /** Remove a repo from a project. */
   removeRepo: (projectId: string, repoId: string) => Promise<string | null>;
 
@@ -337,6 +340,20 @@ export const useProjectsStore = create<ProjectsState>((set, get) => ({
       method: "PUT",
     });
     if (res.ok) await get().load();
+  },
+
+  refreshRepo: async (projectId, repoId) => {
+    const res = await apiFetch(`/api/projects/${projectId}/repos/${repoId}/refresh`, {
+      method: "POST",
+    });
+    if (!res.ok) {
+      const err = await readError(res);
+      set({ error: err });
+      return err;
+    }
+    set({ error: null });
+    await get().load();
+    return null;
   },
 
   removeRepo: async (projectId, repoId) => {

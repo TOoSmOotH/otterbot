@@ -27,11 +27,12 @@ function RepoRow({
 }) {
   const setRepoForge = useProjectsStore((s) => s.setRepoForge);
   const setPrimaryRepo = useProjectsStore((s) => s.setPrimaryRepo);
+  const refreshRepo = useProjectsStore((s) => s.refreshRepo);
   const removeRepo = useProjectsStore((s) => s.removeRepo);
   const [form, setForm] = useState({
     mode: repo.mode,
     accountId: repo.forgeAccountId ?? "",
-    repo: repo.forgeRepo ?? "",
+    repo: (repo.mode === "public" ? repo.publicUrl : repo.forgeRepo) ?? "",
     baseBranch: repo.baseBranch ?? "",
     monitorIssues: repo.monitorIssues,
     triageIssues: repo.triageIssues,
@@ -44,7 +45,22 @@ function RepoRow({
       <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
         <code style={{ fontSize: 12 }}>/project/{repo.name}</code>
         {repo.isPrimary && <span style={chip}>primary</span>}
+        {repo.mode === "public" && <span style={chip}>public · read-only</span>}
         <span style={{ flex: 1 }} />
+        {repo.mode === "public" && (
+          <button
+            style={ghostBtn}
+            title="Pull the latest from the public remote"
+            disabled={busy}
+            onClick={async () => {
+              setBusy(true);
+              await refreshRepo(project.id, repo.id);
+              setBusy(false);
+            }}
+          >
+            {busy ? "Refreshing…" : "Refresh"}
+          </button>
+        )}
         {!repo.isPrimary && (
           <button style={ghostBtn} title="Make primary (backs issue monitoring)" onClick={() => void setPrimaryRepo(project.id, repo.id)}>
             Make primary
@@ -65,8 +81,24 @@ function RepoRow({
           <option value="existing">Existing forge repo</option>
           <option value="new">New forge repo</option>
           <option value="fork">Fork existing repo</option>
+          <option value="public">Public repo (read-only)</option>
         </select>
-        {form.mode !== "local" && (
+        {form.mode === "public" && (
+          <>
+            <input
+              placeholder="public git URL (https://github.com/owner/repo)"
+              value={form.repo}
+              onChange={(e) => setForm({ ...form, repo: e.target.value })}
+              style={{ ...input, gridColumn: "1 / -1" }}
+            />
+            <span style={{ fontSize: 11, color: "rgb(var(--muted))", gridColumn: "1 / -1" }}>
+              Cloned without credentials. Agents get read-only access to browse and
+              build; for GitHub URLs they can also read public issues/PRs. No
+              pushing, PRs, or issue posting.
+            </span>
+          </>
+        )}
+        {form.mode !== "local" && form.mode !== "public" && (
           <>
             <select value={form.accountId} onChange={(e) => setForm({ ...form, accountId: e.target.value })} style={input}>
               <option value="">Select account…</option>
@@ -104,13 +136,14 @@ function RepoRow({
         disabled={busy}
         onClick={async () => {
           setBusy(true);
+          const isPublic = form.mode === "public";
           await setRepoForge(project.id, repo.id, {
             mode: form.mode,
-            accountId: form.accountId || null,
+            accountId: isPublic ? null : form.accountId || null,
             repo: form.repo || null,
             baseBranch: form.baseBranch || null,
-            monitorIssues: form.monitorIssues,
-            triageIssues: form.triageIssues,
+            monitorIssues: isPublic ? false : form.monitorIssues,
+            triageIssues: isPublic ? false : form.triageIssues,
           });
           setBusy(false);
         }}

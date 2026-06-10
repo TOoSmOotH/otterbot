@@ -146,6 +146,7 @@ function ensureControlTables(sqlite: Database.Database) {
       forge_repo TEXT,
       fork_repo TEXT,
       forge_ssh_url TEXT,
+      public_url TEXT,
       base_branch TEXT,
       monitor_issues INTEGER NOT NULL DEFAULT 0,
       triage_issues INTEGER NOT NULL DEFAULT 0,
@@ -283,6 +284,8 @@ function ensureControlTables(sqlite: Database.Database) {
   // swallow the "duplicate column name" error when the column is already there.
   addColumnIfMissing(sqlite, "forge_accounts", "ssh_key_id", "TEXT");
   addColumnIfMissing(sqlite, "projects", "workspace_path", "TEXT");
+  // Public read-only repo mode: a credential-free clone URL on each repo row.
+  addColumnIfMissing(sqlite, "project_repos", "public_url", "TEXT");
   // Unified Integrations model: non-secret account config + instance-wide bindings.
   addColumnIfMissing(sqlite, "credentials", "config", "TEXT NOT NULL DEFAULT '{}'");
   addColumnIfMissing(sqlite, "connections", "all_agents", "INTEGER NOT NULL DEFAULT 0");

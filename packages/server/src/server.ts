@@ -682,7 +682,7 @@ export async function buildServer(
   app.put<{
     Params: { id: string };
     Body: {
-      mode?: "local" | "existing" | "new" | "fork";
+      mode?: "local" | "existing" | "new" | "fork" | "public";
       accountId?: string | null;
       repo?: string | null;
       baseBranch?: string | null;
@@ -706,7 +706,7 @@ export async function buildServer(
     Params: { id: string };
     Body: {
       name?: string;
-      mode?: "local" | "existing" | "new" | "fork";
+      mode?: "local" | "existing" | "new" | "fork" | "public";
       accountId?: string | null;
       repo?: string | null;
       baseBranch?: string | null;
@@ -715,10 +715,13 @@ export async function buildServer(
     };
   }>("/api/projects/:id/repos", async (req, reply) => {
     try {
-      // Default the subdir name to the repo's name part when adding a forge repo.
+      // Default the subdir name to the repo's name part when adding a forge/public
+      // repo (strip a trailing slash + ".git" so a pasted browser URL works).
       const name =
         req.body?.name?.trim() ||
-        (req.body?.repo ? req.body.repo.replace(/\.git$/, "").split("/").pop() : undefined);
+        (req.body?.repo
+          ? req.body.repo.replace(/\/+$/, "").replace(/\.git$/, "").split("/").pop()
+          : undefined);
       const created = orch.addProjectRepo(req.params.id, name);
       if (req.body?.mode && req.body.mode !== "local") {
         const result = await orch.setProjectRepoForge(created.id, { ...req.body, mode: req.body.mode });
@@ -740,7 +743,7 @@ export async function buildServer(
   app.put<{
     Params: { id: string; repoId: string };
     Body: {
-      mode?: "local" | "existing" | "new" | "fork";
+      mode?: "local" | "existing" | "new" | "fork" | "public";
       accountId?: string | null;
       repo?: string | null;
       baseBranch?: string | null;
@@ -763,6 +766,19 @@ export async function buildServer(
     "/api/projects/:id/repos/:repoId/primary",
     async (req) => {
       orch.setPrimaryProjectRepo(req.params.repoId);
+      return { ok: true };
+    }
+  );
+
+  // Refresh a public read-only mirror by pulling its remote (credential-free).
+  app.post<{ Params: { id: string; repoId: string } }>(
+    "/api/projects/:id/repos/:repoId/refresh",
+    async (req, reply) => {
+      const result = orch.refreshRepo(req.params.repoId);
+      if (!result.ok) {
+        reply.code(400);
+        return { error: result.error };
+      }
       return { ok: true };
     }
   );
