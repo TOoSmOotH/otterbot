@@ -1357,6 +1357,25 @@ export async function buildServer(
     return new CodeIndexService(ctx).status();
   });
 
+  // Build / refresh the agent's project code index on demand (the "Build now"
+  // button). Returns the build result, or { ok:false, error } on failure
+  // (e.g. the agent isn't a member of a project).
+  app.post<{ Params: { id: string }; Body?: { force?: boolean } }>(
+    "/api/agents/:id/code-index/build",
+    async (req, reply) => {
+      try {
+        const result = await orch.buildCodeIndex(req.params.id, !!req.body?.force);
+        if (!result) {
+          reply.code(404);
+          return { ok: false, error: "not found" };
+        }
+        return { ok: true, ...result };
+      } catch (err) {
+        return { ok: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    }
+  );
+
   app.post<{
     Params: { id: string };
     Body: { raw?: string; name?: string; description?: string; body?: string; tags?: string[] };

@@ -695,6 +695,8 @@ interface CodeIndexStatusData {
 function CodeIndexStatus({ agentId }: { agentId: string }) {
   const [status, setStatus] = useState<CodeIndexStatusData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [building, setBuilding] = useState(false);
+  const [message, setMessage] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
 
   const load = () => {
     setLoading(true);
@@ -704,6 +706,28 @@ function CodeIndexStatus({ agentId }: { agentId: string }) {
       .finally(() => setLoading(false));
   };
   useEffect(load, [agentId]);
+
+  const build = () => {
+    setBuilding(true);
+    setMessage(null);
+    void apiFetch(`/api/agents/${agentId}/code-index/build`, { method: "POST" })
+      .then((r) => r.json())
+      .then((res: { ok: boolean; error?: string; filesChanged?: number; chunks?: number }) => {
+        if (res.ok) {
+          setMessage({
+            kind: "ok",
+            text: `Indexed ${res.filesChanged ?? 0} changed file(s), ${res.chunks ?? 0} chunk(s).`,
+          });
+          load();
+        } else {
+          setMessage({ kind: "error", text: res.error ?? "Build failed." });
+        }
+      })
+      .catch((err: unknown) =>
+        setMessage({ kind: "error", text: err instanceof Error ? err.message : String(err) })
+      )
+      .finally(() => setBuilding(false));
+  };
 
   const row: React.CSSProperties = { display: "flex", justifyContent: "space-between", gap: 12 };
   const val: React.CSSProperties = { color: "rgb(var(--fg))", fontVariantNumeric: "tabular-nums" };
@@ -724,18 +748,33 @@ function CodeIndexStatus({ agentId }: { agentId: string }) {
     >
       <div style={{ ...row, alignItems: "center" }}>
         <strong style={{ color: "rgb(var(--fg))" }}>Index status</strong>
-        <button type="button" onClick={load} style={{ ...ghost, padding: "2px 8px" }}>
-          Refresh
-        </button>
+        <div style={{ display: "flex", gap: 6 }}>
+          <button
+            type="button"
+            onClick={build}
+            disabled={building}
+            style={{ ...primary, padding: "2px 8px", opacity: building ? 0.6 : 1 }}
+          >
+            {building ? "Building…" : "Build now"}
+          </button>
+          <button type="button" onClick={load} disabled={building} style={{ ...ghost, padding: "2px 8px" }}>
+            Refresh
+          </button>
+        </div>
       </div>
+      {message && (
+        <span style={{ color: message.kind === "error" ? "rgb(var(--danger))" : "rgb(var(--success))" }}>
+          {message.text}
+        </span>
+      )}
       {loading && !status ? (
         <span>Loading…</span>
       ) : !status ? (
         <span>Status unavailable — the agent may be offline.</span>
       ) : status.chunkCount === 0 ? (
         <span>
-          Not built yet — it indexes automatically the first time the agent searches, or have it
-          run <code>code_index_build</code>.
+          Not built yet — click <strong>Build now</strong>, or it indexes automatically the first
+          time the agent searches.
         </span>
       ) : (
         <>

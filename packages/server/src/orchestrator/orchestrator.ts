@@ -48,6 +48,7 @@ import {
   type OpencodeProviderEntry,
 } from "../integrations/opencode-config.js";
 import { sharedCodingAuthDir, type GitSshSetup } from "../integrations/shell.js";
+import { CodeIndexService } from "../integrations/code-index.js";
 import { setDefaultContext } from "../runtime/default-agent.js";
 import { MessageBus } from "../bus/bus.js";
 import { createTransport } from "../bus/transports/factory.js";
@@ -1815,6 +1816,18 @@ export class Orchestrator {
 
   getContext(id: string): AgentContext | undefined {
     return this.contexts.get(id);
+  }
+
+  /**
+   * Build (or incrementally refresh) an agent's project code/doc index from
+   * outside a turn — backs the "Build now" button in Agent Studio. Uses the
+   * shared services so the cron auto-refresh gets registered. Returns null if
+   * the agent is unknown; may throw (e.g. the agent isn't on a project).
+   */
+  async buildCodeIndex(id: string, force = false) {
+    const ctx = this.contexts.get(id);
+    if (!ctx) return null;
+    return new CodeIndexService(ctx, this.services).build({ force });
   }
 
   getCoo(): AgentRuntime {
