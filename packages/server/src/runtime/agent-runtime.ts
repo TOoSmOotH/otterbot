@@ -133,7 +133,8 @@ export function stepBudgetMessage(
   if (lastFinishReason !== "tool-calls") return null;
   return (
     `I reached my step budget (${maxSteps} steps) before finishing this task. ` +
-    `Try narrowing the request, or raise this agent's max steps.`
+    `Try narrowing the request, or open this agent's Studio → Model tab ` +
+    `(the ✎ button above the chat) to raise Max steps.`
   );
 }
 

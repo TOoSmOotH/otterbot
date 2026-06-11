@@ -1036,6 +1036,12 @@ function ModelTab({ profile, onSaved }: TabProps) {
 
   const [chat, setChat] = useState(profile.model.chat);
   const [emb, setEmb] = useState(profile.model.embedding);
+  const [maxSteps, setMaxSteps] = useState(
+    profile.maxSteps != null ? String(profile.maxSteps) : ""
+  );
+  const [browseTimeoutMs, setBrowseTimeoutMs] = useState(
+    profile.browseTimeoutMs != null ? String(profile.browseTimeoutMs) : ""
+  );
   const [saved, setSaved] = useState(false);
   const dirty = () => setSaved(false);
 
@@ -1068,9 +1074,40 @@ function ModelTab({ profile, onSaved }: TabProps) {
           allowNone
         />
       </Field>
+      <p style={{ ...hint, marginTop: 4, fontWeight: 600, color: "rgb(var(--fg))" }}>Turn limits</p>
+      <Field label="Max steps per turn — blank inherits the global default (8)">
+        <input
+          type="number"
+          min={1}
+          value={maxSteps}
+          onChange={(e) => {
+            setMaxSteps(e.target.value);
+            dirty();
+          }}
+          placeholder="inherit (8)"
+          style={input}
+        />
+      </Field>
+      <Field label="Browser command timeout (ms) — blank inherits the global default (60000)">
+        <input
+          type="number"
+          min={0}
+          value={browseTimeoutMs}
+          onChange={(e) => {
+            setBrowseTimeoutMs(e.target.value);
+            dirty();
+          }}
+          placeholder="inherit (60000)"
+          style={input}
+        />
+      </Field>
       <SaveBar
         onSave={async () => {
-          await update(profile.id, { model: { chat, embedding: emb } });
+          await update(profile.id, {
+            model: { chat, embedding: emb },
+            maxSteps: toLimit(maxSteps),
+            browseTimeoutMs: toLimit(browseTimeoutMs),
+          });
           setSaved(true);
           onSaved();
         }}
@@ -1079,6 +1116,13 @@ function ModelTab({ profile, onSaved }: TabProps) {
       />
     </Form>
   );
+}
+
+/** Blank or non-numeric → null (inherit the global default); else the number. */
+function toLimit(value: string): number | null {
+  if (value.trim() === "") return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
 }
 
 // --- Peers ----------------------------------------------------------------

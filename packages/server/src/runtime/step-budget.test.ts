@@ -6,6 +6,8 @@ describe("stepBudgetMessage", () => {
     const msg = stepBudgetMessage("", "tool-calls", 8);
     expect(msg).not.toBeNull();
     expect(msg).toContain("8");
+    // Points the user at where to raise the limit.
+    expect(msg).toContain("Max steps");
   });
 
   it("returns null when the model produced text", () => {
