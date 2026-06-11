@@ -48,7 +48,7 @@ import {
   type OpencodeProviderEntry,
 } from "../integrations/opencode-config.js";
 import { sharedCodingAuthDir, type GitSshSetup } from "../integrations/shell.js";
-import { CodeIndexService } from "../integrations/code-index.js";
+import { CodeIndexService, type CodeIndexProgress } from "../integrations/code-index.js";
 import { setDefaultContext } from "../runtime/default-agent.js";
 import { MessageBus } from "../bus/bus.js";
 import { createTransport } from "../bus/transports/factory.js";
@@ -517,6 +517,9 @@ export class Orchestrator {
   private readonly pipeline: PipelineManager;
   private readonly buildGraph: BuildGraphManager;
   private readonly pipelineListeners = new Set<(run: PipelineRunView) => void>();
+  private readonly codeIndexListeners = new Set<
+    (p: CodeIndexProgress & { agentId: string }) => void
+  >();
   private readonly buildListeners = new Set<(run: BuildRunView) => void>();
   /** Run ids already published (PR opened) — guards the publish-on-done hook. */
   private readonly publishedRuns = new Set<string>();
@@ -1827,7 +1830,18 @@ export class Orchestrator {
   async buildCodeIndex(id: string, force = false) {
     const ctx = this.contexts.get(id);
     if (!ctx) return null;
-    return new CodeIndexService(ctx, this.services).build({ force });
+    return new CodeIndexService(ctx, this.services).build({
+      force,
+      onProgress: (p) => {
+        for (const listener of this.codeIndexListeners) listener({ ...p, agentId: id });
+      },
+    });
+  }
+
+  /** Subscribe to code-index build progress (for sockets/UI). */
+  onCodeIndexProgress(listener: (p: CodeIndexProgress & { agentId: string }) => void): () => void {
+    this.codeIndexListeners.add(listener);
+    return () => this.codeIndexListeners.delete(listener);
   }
 
   getCoo(): AgentRuntime {

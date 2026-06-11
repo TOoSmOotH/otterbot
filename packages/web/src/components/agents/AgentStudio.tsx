@@ -13,6 +13,7 @@ import type {
   MemoryEntry,
 } from "@otterbot/shared";
 import { apiFetch } from "../../lib/api";
+import { getSocket } from "../../lib/socket";
 import { useAgentsStore } from "../../stores/agents-store";
 import { useChatStore } from "../../stores/chat-store";
 import { useGlobalSettingsStore } from "../../stores/global-settings-store";
@@ -692,10 +693,20 @@ interface CodeIndexStatusData {
 }
 
 /** Live status of the agent's project code/doc index, shown under the skill. */
+interface CodeIndexProgressData {
+  agentId: string;
+  filesScanned: number;
+  filesIndexed: number;
+  chunks: number;
+  path: string;
+  done: boolean;
+}
+
 function CodeIndexStatus({ agentId }: { agentId: string }) {
   const [status, setStatus] = useState<CodeIndexStatusData | null>(null);
   const [loading, setLoading] = useState(true);
   const [building, setBuilding] = useState(false);
+  const [progress, setProgress] = useState<CodeIndexProgressData | null>(null);
   const [message, setMessage] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
 
   const load = () => {
@@ -707,9 +718,23 @@ function CodeIndexStatus({ agentId }: { agentId: string }) {
   };
   useEffect(load, [agentId]);
 
+  // Live build progress over the socket.
+  useEffect(() => {
+    const socket = getSocket();
+    const onProgress = (p: CodeIndexProgressData) => {
+      if (p.agentId !== agentId) return;
+      setProgress(p.done ? null : p);
+    };
+    socket.on("code-index:progress", onProgress);
+    return () => {
+      socket.off("code-index:progress", onProgress);
+    };
+  }, [agentId]);
+
   const build = () => {
     setBuilding(true);
     setMessage(null);
+    setProgress(null);
     void apiFetch(`/api/agents/${agentId}/code-index/build`, { method: "POST" })
       .then((r) => r.json())
       .then((res: { ok: boolean; error?: string; filesChanged?: number; chunks?: number }) => {
@@ -726,7 +751,10 @@ function CodeIndexStatus({ agentId }: { agentId: string }) {
       .catch((err: unknown) =>
         setMessage({ kind: "error", text: err instanceof Error ? err.message : String(err) })
       )
-      .finally(() => setBuilding(false));
+      .finally(() => {
+        setBuilding(false);
+        setProgress(null);
+      });
   };
 
   const row: React.CSSProperties = { display: "flex", justifyContent: "space-between", gap: 12 };
@@ -765,6 +793,14 @@ function CodeIndexStatus({ agentId }: { agentId: string }) {
       {message && (
         <span style={{ color: message.kind === "error" ? "rgb(var(--danger))" : "rgb(var(--success))" }}>
           {message.text}
+        </span>
+      )}
+      {building && (
+        <span style={{ color: "rgb(var(--accent))" }}>
+          {progress
+            ? `Scanned ${progress.filesScanned} · indexed ${progress.filesIndexed} · ${progress.chunks} chunks` +
+              (progress.path ? ` — ${progress.path}` : "")
+            : "Starting…"}
         </span>
       )}
       {loading && !status ? (

@@ -97,6 +97,11 @@ export function attachSocketServer(
     io.emit("build:update", run);
   });
 
+  // Stream code-index build progress to the Agent Studio status panel.
+  orch.onCodeIndexProgress((p) => {
+    io.emit("code-index:progress", p);
+  });
+
   io.on("connection", (socket) => {
     /** One joined conversation per agent this socket is chatting with. */
     const conversations = new Map<string, JoinedConversation>();
