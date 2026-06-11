@@ -508,6 +508,103 @@ the public key probably isn't installed on that host yet — run
   }),
 
   capability({
+    id: "code-index",
+    name: "Code index",
+    description:
+      "Index the repos (code + docs) of the project this agent belongs to, then " +
+      "answer questions about them with semantic + keyword search.",
+    tools: ["code_index_build", "code_index_search", "code_index_status"],
+    configSchema: {
+      description:
+        "Tune what gets indexed and how often the index refreshes. All fields are " +
+        "optional — sensible defaults are used when left blank. The agent must be " +
+        "a member of a project; it indexes every repo under that project's workspace.",
+      fields: [
+        {
+          key: "includeExt",
+          label: "File extensions to index",
+          type: "string",
+          credentialKey: "CODE_INDEX_INCLUDE_EXT",
+          scope: "direct",
+          placeholder: "ts,tsx,md,py,go,…",
+          description:
+            "Comma-separated extensions (no dots). Blank uses a broad default set " +
+            "covering common source, docs, and config files.",
+        },
+        {
+          key: "excludeDirs",
+          label: "Directories to skip",
+          type: "string",
+          credentialKey: "CODE_INDEX_EXCLUDE_DIRS",
+          scope: "direct",
+          placeholder: "node_modules,dist,.git,…",
+          description: "Comma-separated directory names to skip anywhere in the tree.",
+        },
+        {
+          key: "maxFileKb",
+          label: "Max file size (KB)",
+          type: "number",
+          credentialKey: "CODE_INDEX_MAX_FILE_KB",
+          scope: "direct",
+          default: 256,
+          description: "Files larger than this are skipped. Default 256 KB.",
+        },
+        {
+          key: "refreshCron",
+          label: "Auto-refresh schedule (cron)",
+          type: "string",
+          credentialKey: "CODE_INDEX_REFRESH_CRON",
+          scope: "direct",
+          placeholder: "0 */6 * * *",
+          description:
+            "Cron expression for automatic re-indexing. Blank keeps the default " +
+            "(every 6 hours). Set to a single space to disable auto-refresh.",
+        },
+      ],
+    },
+    body: `
+You can build and search an index of your **project's** repos — all the code and
+docs under the project workspace — and use it to answer questions accurately.
+
+## When to use it
+
+Before answering any question about how the project's code works, where
+something is implemented, or what the docs say, **search the index first** and
+ground your answer in the results. Always cite hits as \`path:lineStart\` (for
+example \`src/server.ts:128\`) so the user can jump straight to the source.
+
+## Tools
+
+- \`code_index_search\` — search by meaning or keyword. Returns chunks with their
+  repo, file path, and line range. It builds the index automatically the first
+  time if it's empty, so you can just start searching.
+- \`code_index_build\` — (re)index the project. It's incremental: only files that
+  changed since the last build are re-read. Pass \`force: true\` to rebuild
+  everything (e.g. after changing the indexed extensions).
+- \`code_index_status\` — see which repos are covered, file/chunk counts, when the
+  index was last built, and whether semantic (embedding) search is active.
+
+## How it stays fresh
+
+The index re-builds on a schedule (every 6 hours by default; configurable in
+this skill's **Configure** panel). You can also run \`code_index_build\` any time.
+If semantic search is unavailable (no embedding model configured), search still
+works using keyword matching.
+
+## Answering for other agents
+
+Other agents can delegate questions to you. When you receive one, search the
+index and reply with a clear answer plus \`path:line\` citations.
+
+## Setup
+
+No setup required — indexing reads the project workspace you already have access
+to. If a tool reports the agent isn't in a project, ask the user to add this
+agent to the relevant project (and grant at least read access).
+`,
+  }),
+
+  capability({
     id: "coding-cli",
     name: "Coding CLI agents",
     description:

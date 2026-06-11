@@ -37,6 +37,7 @@ import { recordToolDisplay } from "./tool-display.js";
 import { OPENCODE_CONFIG_SANDBOX_PATH } from "../integrations/shell.js";
 import { ensureKey, parseHosts, publicKey, sshExec } from "../integrations/ssh.js";
 import { searchWeb } from "../integrations/web-search.js";
+import { CodeIndexService } from "../integrations/code-index.js";
 import { editImage, generateImage, persistImage } from "../integrations/image-gen.js";
 import { persistArtifact } from "../integrations/artifacts.js";
 import type { Artifact, CodingModelPreset } from "@otterbot/shared";
@@ -1151,6 +1152,66 @@ export function buildAgentTools(
               `Vision analysis failed (the agent's model may not accept images): ` +
               (err instanceof Error ? err.message : String(err)),
           };
+        }
+      },
+    });
+  }
+
+  if (granted.has("code_index_build")) {
+    tools.code_index_build = tool({
+      description:
+        "Index this project's repos (code + docs) into a searchable index. " +
+        "Incremental — only files changed since the last build are re-read. Run " +
+        "this if the index looks stale; otherwise code_index_search builds it on demand.",
+      parameters: z.object({
+        force: z
+          .boolean()
+          .default(false)
+          .describe("Re-read and re-embed every file, ignoring the change cache."),
+      }),
+      execute: async ({ force }) => {
+        try {
+          return { ok: true, ...(await new CodeIndexService(ctx, services).build({ force })) };
+        } catch (err) {
+          return { ok: false, error: err instanceof Error ? err.message : String(err) };
+        }
+      },
+    });
+  }
+
+  if (granted.has("code_index_search")) {
+    tools.code_index_search = tool({
+      description:
+        "Search this project's code/doc index by meaning or keyword. Returns " +
+        "matching chunks with repo, file path, and line range — cite them as " +
+        "`path:lineStart`. Builds the index first if it's empty.",
+      parameters: z.object({
+        query: z.string().min(1).describe("Natural-language question or keywords."),
+        limit: z.number().int().min(1).max(20).default(6),
+        repo: z.string().optional().describe("Restrict results to one repo by name."),
+      }),
+      execute: async ({ query, limit, repo }) => {
+        try {
+          const results = await new CodeIndexService(ctx, services).search(query, limit, repo);
+          return { ok: true, results };
+        } catch (err) {
+          return { ok: false, error: err instanceof Error ? err.message : String(err) };
+        }
+      },
+    });
+  }
+
+  if (granted.has("code_index_status")) {
+    tools.code_index_status = tool({
+      description:
+        "Report the project code index: repos covered, file/chunk counts, last " +
+        "build time, and whether semantic (embedding) search is active.",
+      parameters: z.object({}),
+      execute: async () => {
+        try {
+          return { ok: true, ...new CodeIndexService(ctx, services).status() };
+        } catch (err) {
+          return { ok: false, error: err instanceof Error ? err.message : String(err) };
         }
       },
     });

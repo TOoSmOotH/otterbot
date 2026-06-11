@@ -123,6 +123,11 @@ export const GRANTABLE_TOOL_NAMES = [
   "plan_build",
   "build_start",
   "build_status",
+  // Project code/doc indexing + semantic search — granted together by the
+  // `code-index` capability.
+  "code_index_build",
+  "code_index_search",
+  "code_index_status",
 ] as const;
 
 export type GrantableToolName = (typeof GRANTABLE_TOOL_NAMES)[number];

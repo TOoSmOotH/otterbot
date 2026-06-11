@@ -35,6 +35,7 @@ export function openAgentDb(path: string, key?: string | null): AgentDb {
   ensureAgentTables(sqlite);
   ensureFts(sqlite);
   ensureVec(sqlite);
+  ensureCodeIndex(sqlite);
   return {
     sqlite,
     db,
@@ -168,6 +169,46 @@ function ensureFts(sqlite: Database.Database) {
       title,
       body,
       tags,
+      tokenize = 'porter unicode61'
+    )
+  `);
+}
+
+/**
+ * Tables for the optional `code-index` capability: a per-agent index over the
+ * repos of the project the agent belongs to. Kept separate from `content_fts`
+ * so indexed code never leaks into the agent's memory recall / system prompt.
+ * The `vec_code` vec0 table is created lazily (it needs the embedding
+ * dimension) by `CodeIndexService`, mirroring how `vec_memories` is deferred.
+ */
+function ensureCodeIndex(sqlite: Database.Database) {
+  const stmts = [
+    `CREATE TABLE IF NOT EXISTS code_files (
+      repo TEXT NOT NULL,
+      path TEXT NOT NULL,
+      hash TEXT NOT NULL,
+      indexed_at TEXT NOT NULL,
+      PRIMARY KEY (repo, path)
+    )`,
+    `CREATE TABLE IF NOT EXISTS code_chunks (
+      id TEXT PRIMARY KEY,
+      repo TEXT NOT NULL,
+      path TEXT NOT NULL,
+      line_start INTEGER NOT NULL,
+      line_end INTEGER NOT NULL,
+      content TEXT NOT NULL,
+      indexed_at TEXT NOT NULL
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_code_chunks_file ON code_chunks(repo, path)`,
+    `CREATE TABLE IF NOT EXISTS code_index_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)`,
+  ];
+  for (const s of stmts) sqlite.exec(s);
+  sqlite.exec(`
+    CREATE VIRTUAL TABLE IF NOT EXISTS code_fts USING fts5(
+      chunk_id UNINDEXED,
+      repo UNINDEXED,
+      path,
+      body,
       tokenize = 'porter unicode61'
     )
   `);
