@@ -682,6 +682,95 @@ function SkillsTab({
   );
 }
 
+interface CodeIndexStatusData {
+  repos: string[];
+  fileCount: number;
+  chunkCount: number;
+  lastBuiltAt: string | null;
+  embeddingsAvailable: boolean;
+  refreshCron: string | null;
+}
+
+/** Live status of the agent's project code/doc index, shown under the skill. */
+function CodeIndexStatus({ agentId }: { agentId: string }) {
+  const [status, setStatus] = useState<CodeIndexStatusData | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  const load = () => {
+    setLoading(true);
+    void apiFetch(`/api/agents/${agentId}/code-index/status`)
+      .then((r) => (r.ok ? (r.json() as Promise<CodeIndexStatusData>) : null))
+      .then((s) => setStatus(s))
+      .finally(() => setLoading(false));
+  };
+  useEffect(load, [agentId]);
+
+  const row: React.CSSProperties = { display: "flex", justifyContent: "space-between", gap: 12 };
+  const val: React.CSSProperties = { color: "rgb(var(--fg))", fontVariantNumeric: "tabular-nums" };
+
+  return (
+    <div
+      style={{
+        marginTop: 8,
+        padding: 10,
+        border: "1px solid rgb(var(--border))",
+        borderRadius: 8,
+        fontSize: 12,
+        color: "rgb(var(--muted))",
+        display: "flex",
+        flexDirection: "column",
+        gap: 6,
+      }}
+    >
+      <div style={{ ...row, alignItems: "center" }}>
+        <strong style={{ color: "rgb(var(--fg))" }}>Index status</strong>
+        <button type="button" onClick={load} style={{ ...ghost, padding: "2px 8px" }}>
+          Refresh
+        </button>
+      </div>
+      {loading && !status ? (
+        <span>Loading…</span>
+      ) : !status ? (
+        <span>Status unavailable — the agent may be offline.</span>
+      ) : status.chunkCount === 0 ? (
+        <span>
+          Not built yet — it indexes automatically the first time the agent searches, or have it
+          run <code>code_index_build</code>.
+        </span>
+      ) : (
+        <>
+          <div style={row}>
+            <span>Repos indexed</span>
+            <span style={val}>{status.repos.length ? status.repos.join(", ") : "—"}</span>
+          </div>
+          <div style={row}>
+            <span>Files / chunks</span>
+            <span style={val}>
+              {status.fileCount.toLocaleString()} / {status.chunkCount.toLocaleString()}
+            </span>
+          </div>
+          <div style={row}>
+            <span>Last built</span>
+            <span style={val}>
+              {status.lastBuiltAt ? new Date(status.lastBuiltAt).toLocaleString() : "—"}
+            </span>
+          </div>
+          <div style={row}>
+            <span>Search mode</span>
+            <span style={val}>
+              {status.embeddingsAvailable ? "semantic + keyword" : "keyword only"}
+            </span>
+          </div>
+          <div style={row}>
+            <span>Auto-refresh</span>
+            <span style={val}>{status.refreshCron ? status.refreshCron : "disabled"}</span>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 /** One installed skill: enable/disable toggle, config form, editable body, badges. */
 function InstalledSkill({
   skill,
@@ -750,6 +839,7 @@ function InstalledSkill({
       <div style={{ fontSize: 12, color: "rgb(var(--muted))", marginTop: 6 }}>
         {skill.meta.description}
       </div>
+      {skill.id === "code-index" && <CodeIndexStatus agentId={agentId} />}
       {skill.id === "coding-cli" && (
         <div style={{ ...hint, marginTop: 8 }}>
           Installing and logging in are shared by all agents — set them up once in{" "}

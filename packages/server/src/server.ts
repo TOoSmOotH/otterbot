@@ -29,6 +29,7 @@ import { builtinModelStatus, downloadBuiltinModel } from "./embedders/builtin-em
 import { BUILTIN_CAPABILITIES, getCatalogCapability } from "./skills/builtin-catalog.js";
 import { isCodingTool, listCodingSessions } from "./integrations/coding-cli.js";
 import { installSharedCodingCli } from "./integrations/coding-cli-install.js";
+import { CodeIndexService } from "./integrations/code-index.js";
 import { generateText } from "ai";
 import { resolveChatModel, listProviderModels } from "./providers/registry.js";
 import { eq, asc, desc, like } from "drizzle-orm";
@@ -1343,6 +1344,17 @@ export async function buildServer(
       return { error: "not found" };
     }
     return ctx.skills.list();
+  });
+
+  // Read-only status of the agent's project code/doc index (for the
+  // `code-index` capability's panel in Agent Studio → Skills).
+  app.get<{ Params: { id: string } }>("/api/agents/:id/code-index/status", async (req, reply) => {
+    const ctx = orch.getContext(req.params.id);
+    if (!ctx) {
+      reply.code(404);
+      return { error: "not found" };
+    }
+    return new CodeIndexService(ctx).status();
   });
 
   app.post<{
