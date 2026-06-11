@@ -33,7 +33,16 @@ const BLANK: FormState = {
 };
 
 /** Modal form for creating a new agent or editing an existing profile. */
-export function AgentEditor({ agentId, onClose }: { agentId: string | null; onClose: () => void }) {
+export function AgentEditor({
+  agentId,
+  onClose,
+  onCreated,
+}: {
+  agentId: string | null;
+  onClose: () => void;
+  /** Called with the new agent's id after a successful create (not on edit). */
+  onCreated?: (agentId: string) => void | Promise<void>;
+}) {
   const create = useAgentsStore((s) => s.create);
   const update = useAgentsStore((s) => s.update);
   const remove = useAgentsStore((s) => s.remove);
@@ -162,6 +171,8 @@ export function AgentEditor({ agentId, onClose }: { agentId: string | null; onCl
             }).catch(() => {});
           }
         }
+        // Let the caller react to the new agent (e.g. add it to a project).
+        if (created) await onCreated?.(created.id);
       }
     } finally {
       setSaving(false);

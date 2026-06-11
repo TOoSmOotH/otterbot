@@ -10,6 +10,7 @@ import {
 } from "../../stores/projects-store";
 import { useAgentsStore } from "../../stores/agents-store";
 import { AgentWizard } from "./AgentWizard";
+import { ProjectAddAgentWizard } from "./ProjectAddAgentWizard";
 import { ProjectTeamModels } from "./ProjectTeamModels";
 
 /** Stable empty array so the runs selector never returns a fresh reference. */
@@ -227,12 +228,11 @@ export function ProjectCard({
   const setRules = useProjectsStore((s) => s.setRules);
   const setRemoteE2e = useProjectsStore((s) => s.setRemoteE2e);
   const addRepo = useProjectsStore((s) => s.addRepo);
-  const addMember = useProjectsStore((s) => s.addMember);
   const removeMember = useProjectsStore((s) => s.removeMember);
   const setMemberAccess = useProjectsStore((s) => s.setMemberAccess);
   const startPipeline = useProjectsStore((s) => s.startPipeline);
 
-  const [pickAgent, setPickAgent] = useState("");
+  const [addAgentOpen, setAddAgentOpen] = useState(false);
   const [goal, setGoal] = useState("");
   const [newRepoName, setNewRepoName] = useState("");
   const [addingRepo, setAddingRepo] = useState(false);
@@ -310,23 +310,17 @@ export function ProjectCard({
         ))}
       </div>
       <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
-        <select value={pickAgent} onChange={(e) => setPickAgent(e.target.value)} style={input}>
-          <option value="">Add an agent…</option>
-          {candidateAgents.map((a) => (
-            <option key={a.id} value={a.id}>{a.displayName}</option>
-          ))}
-        </select>
-        <button
-          style={primaryBtn}
-          disabled={!pickAgent}
-          onClick={async () => {
-            await addMember(project.id, pickAgent);
-            setPickAgent("");
-          }}
-        >
-          <Icon icon={Plus} size={14} /> Add
+        <button data-testid="add-agent" style={primaryBtn} onClick={() => setAddAgentOpen(true)}>
+          <Icon icon={Plus} size={14} /> Add agent
         </button>
       </div>
+      {addAgentOpen && (
+        <ProjectAddAgentWizard
+          project={project}
+          candidateAgents={candidateAgents}
+          onClose={() => setAddAgentOpen(false)}
+        />
+      )}
 
       {/* Repos */}
       <div style={{ marginTop: 12, fontSize: 12, fontWeight: 600 }}>Code location</div>
